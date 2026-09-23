@@ -86,12 +86,16 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
           let position = progress.position in
           String.equal position.trace_id trace_id && position.end_atom >= 1
           && W.atom_opening_digest messages (position.end_atom - 1) = Some position.last_atom_digest in
-        match
-          Keeper_librarian_progress.read
-            ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
-        with
+        let keepers_dir = Workspace.keepers_runtime_dir config in
+        match Keeper_librarian_progress.read ~keepers_dir ~keeper_id:keeper_name with
         | Ok (Some progress) when position_fits progress -> progress.position.end_atom
-        | Ok (Some _) | Ok None | Error _ -> range.end_atom in
+        | Ok (Some _) | Ok None -> range.end_atom
+        | Error error ->
+          Log.Keeper.warn ~keeper_name
+            "continuity catch-up target falls back to this range's end: %s unreadable: %s"
+            (Keeper_librarian_progress.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
+            (Keeper_librarian_progress.read_error_to_string error);
+          range.end_atom in
       let catch_up_target = match fitting_previous with
         | Some ((snapshot : S.t), _) ->
           Option.map (fun _ -> start_without_snapshot ()) snapshot.catch_up_end_atom

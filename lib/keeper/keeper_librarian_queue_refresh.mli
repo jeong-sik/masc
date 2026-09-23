@@ -35,6 +35,19 @@ val submit_durable : base_path:string -> keeper_name:string -> unit
     {!submit_durable_for_unlaunched} submits it at boot for the Keepers that
     did not launch. *)
 
+val with_purge_then_catch_up
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit -> 'a)
+  -> ('a, Keeper_memory_lane.purge_cancel_error) result
+(** {!Keeper_memory_lane.with_librarian_purge}, then {!submit_durable} for the
+    same Keeper once the purge's exclusion is released. The submission
+    follows every exit but cancellation: a purge that ran, one refused (for
+    example for unread atoms), a lane-level error, and a raise. The purge
+    cancelled the catch-up that was running and discarded the wakes that
+    arrived meanwhile; without this the backlog waits for the Keeper's next
+    turn, and a purge retry is refused again. *)
+
 val unlaunched_keeper_names
   :  persisted:string list
   -> launched:string list

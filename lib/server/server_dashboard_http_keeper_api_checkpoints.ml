@@ -632,10 +632,12 @@ let purge_current config ~keeper_name ~apply =
               and committed after the install would save a working state
               hashed against them, refusing every Agent-Core turn. So new
               units are kept out, and running ones cancelled and awaited, for
-              the whole read-rewrite-install. *)
+              the whole read-rewrite-install. The purge also cancels the
+              running catch-up, so the Librarian is resubmitted once the
+              exclusion is released. *)
            match
              Eio_context.run_on_owner_domain (fun () ->
-               Keeper_memory_lane.with_librarian_purge
+               Keeper_librarian_queue_refresh.with_purge_then_catch_up
                  ~base_path:config.Workspace.base_path
                  ~keeper_name
                  (fun () -> purge_current_unlocked config ~keeper_name ~apply:true))

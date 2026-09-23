@@ -242,6 +242,31 @@ let test_context_overflow_maps_to_input_rejected_recovery () =
       true
 ;;
 
+(* A Gate continuation's thread that overflowed after a tool effect cannot
+   take the continuation again, so the Gate ends; an observation-free overflow
+   keeps the same-thread shrink retry. *)
+let test_gate_resume_overflow_after_effect_is_session_full () =
+  let recovery = Map.recovery_failure_of_attempt in
+  let overflow tool_effect_attempted =
+    Codex.Context_window_exceeded { message = "full"; tool_effect_attempted } in
+  let resume = Codex.Resume { thread_id = "thread-1" } in
+  Alcotest.(check bool)
+    "Gate resume after a tool effect is session-full"
+    (recovery ~thread_mode:resume ~gate_continuation:true (overflow true)
+     = Masc.Keeper_official_client_session_store.(Vendor_session_full Activity_observed))
+    true;
+  Alcotest.(check bool)
+    "Gate resume without activity keeps the shrink retry"
+    (recovery ~thread_mode:resume ~gate_continuation:true (overflow false)
+     = Masc.Keeper_official_client_session_store.(Input_rejected Bootstrap_floor_exceeded))
+    true;
+  Alcotest.(check bool)
+    "an ordinary resume after a tool effect stays effect-fenced"
+    (recovery ~thread_mode:resume ~gate_continuation:false (overflow true)
+     = Masc.Keeper_official_client_session_store.(Input_rejected Effect_fenced))
+    true
+;;
+
 let test_transport_uncertainty_preserves_stronger_evidence () =
   let module Effect = Masc.Keeper_provider_attempt_effect in
   List.iter (fun (before, expected) ->
@@ -283,5 +308,9 @@ let () =
             "context overflow maps to input-rejected recovery"
             `Quick
             test_context_overflow_maps_to_input_rejected_recovery
+        ; Alcotest.test_case
+            "Gate resume overflow after a tool effect is session-full"
+            `Quick
+            test_gate_resume_overflow_after_effect_is_session_full
         ] )
     ]

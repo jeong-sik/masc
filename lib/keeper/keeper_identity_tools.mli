@@ -73,7 +73,7 @@ val http_transports : clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> trans
 
 val refresh :
   mcp_post:Mcp_client.post ->
-  base_path:string ->
+  config:Workspace.config ->
   keeper_name:string ->
   provider:Keeper_oauth_provider.t ->
   now:float ->
@@ -84,7 +84,8 @@ val refresh :
     The token comes from the Keeper's own projected environment -- the same
     array its runtime would be handed -- rather than from this process's
     environment, so a variable of the same name here cannot be mistaken for
-    a Keeper's credential. *)
+    a Keeper's credential. A GitHub CLI provider's token is the Keeper's gh
+    login, read through {!Keeper_github_login_lane.stored_token}. *)
 
 type offered_tool = {
   schema : Agent_core.Types.tool_schema;
@@ -147,7 +148,7 @@ val run_call :
       (** {!http_transports} in production; a test's own recorded answers
           otherwise, including the token endpoint and discovery the reactive
           refresh on a 401 reaches. *)
-  base_path:string ->
+  config:Workspace.config ->
   keeper_name:string ->
   provider:Keeper_oauth_provider.t ->
   remote_name:string ->

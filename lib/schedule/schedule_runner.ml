@@ -21,6 +21,7 @@ type tick_result =
   ; emitted : wake_signal list
   ; rescheduled : int
   ; dispatches : dispatch_result list
+  ; held : wake_signal list
   }
 
 and dispatch_status =
@@ -28,7 +29,6 @@ and dispatch_status =
   | Dispatch_failed
   | Dispatch_unsupported
   | Dispatch_start_rejected
-  | Dispatch_deferred
 
 and dispatch_result =
   { occurrence_id : Schedule_occurrence_id.t
@@ -102,7 +102,6 @@ let dispatch_status_to_string = function
   | Dispatch_failed -> "failed"
   | Dispatch_unsupported -> "unsupported"
   | Dispatch_start_rejected -> "start_rejected"
-  | Dispatch_deferred -> "deferred"
 ;;
 
 let schedules_dir config =
@@ -520,21 +519,29 @@ let tick ?consumer ?clock config ~now ~retention_days =
     in
     let candidate_signals = List.map snd active in
     let* emitted = append_new_signals config candidate_signals in
-    let deferred_dispatches =
-      List.map
-        (fun (_request, (signal : wake_signal)) ->
-           dispatch_result signal.occurrence_id signal.schedule_id Dispatch_deferred)
-        deferred
-    in
+    let held = List.map snd deferred in
     (match consumer with
      | Some consumer ->
        let dispatches = dispatch_candidates config ~now ~clock consumer active in
-       Ok { due_changed; emitted; rescheduled = 0; dispatches = deferred_dispatches @ dispatches }
+       Ok { due_changed; emitted; rescheduled = 0; dispatches; held }
      | None ->
        let schedule_ids =
          List.map (fun (signal : wake_signal) -> signal.schedule_id) candidate_signals
        in
        (match Schedule_store.reschedule_due_recurring config ~now ~schedule_ids with
         | Error err -> Error (Service_error (Schedule_service.Store_error err))
-        | Ok (_, rescheduled) -> Ok { due_changed; emitted; rescheduled; dispatches = [] }))
+        | Ok (_, rescheduled) ->
+          Ok { due_changed; emitted; rescheduled; dispatches = []; held }))
+;;
+
+let newly_held ~previous held =
+  let was_held (signal : wake_signal) =
+    List.exists
+      (fun (earlier : wake_signal) ->
+         String.equal
+           (Schedule_occurrence_id.to_string earlier.occurrence_id)
+           (Schedule_occurrence_id.to_string signal.occurrence_id))
+      previous
+  in
+  List.filter (fun signal -> not (was_held signal)) held
 ;;

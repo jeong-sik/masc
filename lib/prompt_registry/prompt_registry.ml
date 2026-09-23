@@ -683,10 +683,12 @@ let override_default_moved (meta : prompt_meta) ~file_value
    unrendered. A prior version of this function short-circuited to
    [[]] for [expected = []], which silently accepted any override
    content for such prompts, including stale placeholder syntax. *)
-let unexpected_template_variables meta template =
-  let expected = meta.template_variables in
+let undeclared_template_variables ~declared template =
   extract_variables template
-  |> List.filter (fun variable -> not (List.mem variable expected))
+  |> List.filter (fun variable -> not (List.mem variable declared))
+
+let unexpected_template_variables meta template =
+  undeclared_template_variables ~declared:meta.template_variables template
 
 (* Variant that takes a pre-computed [resolved] record.  Used by the
    batch listing paths that read files outside the mutex. *)
@@ -1141,3 +1143,92 @@ let restore_overrides base_path =
               "prompt override %s applies over a default that changed since it was written"
               entry.key)
         candidate)
+
+type file_edit_promotion =
+  | Promoted of { key : string }
+  | Override_exists of { key : string }
+  | Not_promotable of { reason : string }
+
+(* The registry reads [<key>.md] directly under the prompt directory, and a
+   file whose body carries [### marker] slots registers one key per slot, so
+   a whole-file edit maps to one override key only for a top-level file
+   without slots whose frontmatter the edit left alone -- an override
+   carries body text, never metadata. The entry is built the way
+   [validated_override] builds one, against the distribution body the file
+   is reset to, and checked the way [restore_overrides] will check it. *)
+let promote_file_edit ~base_path ~file ~embedded ~edited =
+  let key = Filename.remove_extension file in
+  if not (Filename.check_suffix file ".md")
+     || String.contains file '/'
+     || not (is_valid_prompt_key key)
+  then Not_promotable { reason = "no prompt key reads this file" }
+  else
+    let embedded_fields, embedded_body = parse_frontmatter embedded in
+    let edited_fields, edited_body = parse_frontmatter edited in
+    if not (List.mem_assoc "description" embedded_fields) then
+      Not_promotable { reason = "no prompt key reads this file" }
+    else if embedded_fields <> edited_fields then
+      Not_promotable
+        { reason = "the edit changes the frontmatter, which an override cannot carry" }
+    else if (split_body embedded_body).slots <> [] || (split_body edited_body).slots <> []
+    then
+      Not_promotable
+        { reason =
+            "the file holds ### slots, each its own prompt key; save the changed \
+             slot as that key's override"
+        }
+    else
+      let declared =
+        match List.assoc_opt "template_variables" embedded_fields with
+        | Some value -> Frontmatter.list_value value
+        | None -> []
+      in
+      let value = String.trim edited_body in
+      match undeclared_template_variables ~declared value with
+      | _ :: _ as undeclared ->
+          Not_promotable
+            { reason =
+                Printf.sprintf "the edit uses undeclared template variables: %s"
+                  (String.concat ", " undeclared)
+            }
+      | [] when String.equal value "" ->
+          Not_promotable { reason = "the edited body is empty" }
+      | [] ->
+          let path =
+            Filename.concat
+              (Workspace_utils.masc_dir_from_base_path ~base_path)
+              "prompt_overrides.json"
+          in
+          with_override_mutation_lock (fun () ->
+              let saved =
+                if Sys.file_exists path then Prompt_override_persistence.load ~path
+                else Ok []
+              in
+              match saved with
+              | Error error ->
+                  Not_promotable
+                    { reason =
+                        "prompt_overrides.json does not read: "
+                        ^ Prompt_override_persistence.error_to_string error
+                    }
+              | Ok entries
+                when List.exists
+                       (fun (entry : Prompt_override_persistence.entry) ->
+                         String.equal entry.key key)
+                       entries ->
+                  Override_exists { key }
+              | Ok entries -> (
+                  let entry =
+                    Prompt_override_persistence.
+                      {
+                        key;
+                        value;
+                        authored_against = default_revision ~body:embedded_body;
+                        template_variables = sorted_variables declared;
+                      }
+                  in
+                  match save_override_entries base_path (entry :: entries) with
+                  | Ok () -> Promoted { key }
+                  | Error message ->
+                      Not_promotable
+                        { reason = "prompt_overrides.json was not written: " ^ message }))

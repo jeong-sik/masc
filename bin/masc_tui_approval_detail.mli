@@ -25,7 +25,7 @@ val of_fields : width:int -> (string * string) list -> line list
     is present and empty is a different fact from one that is absent. *)
 
 val input_rows :
-  rows:Masc_tui_types.Tui_decode.gate_input_rows -> (string * string) list
+  rows:Tui_decode.gate_input_rows -> (string * string) list
 (** [input_rows ~rows] is the [(label, value)] pairs for the input of a Gate
     row, drawn whole rather than summarized. [Rows fields] passes the stored
     object's keys through as labels; [Flattened preview] is the server's

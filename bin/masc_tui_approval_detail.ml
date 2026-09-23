@@ -33,7 +33,7 @@ let value_rows ~width value =
    input never was an object: the pane keeps it, but under a label that says
    what it is, because a 200-byte wall that calls itself the input gets read
    as the whole request. *)
-let input_rows ~(rows : Masc_tui_types.Tui_decode.gate_input_rows) =
+let input_rows ~(rows : Tui_decode.gate_input_rows) =
   match rows with
   | Rows fields when fields <> [] -> fields
   | Rows [] -> [ ("input", "(the stored input object is empty)") ]

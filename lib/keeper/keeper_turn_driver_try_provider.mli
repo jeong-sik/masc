@@ -183,7 +183,94 @@ val continuity_for_request :
     ([Librarian_continuity_snapshot.t.catch_up_end_atom]); until then the
     request starts as it would with no snapshot, so the rewrite never moves
     the start back.
-    [lines] is read only when a snapshot is saved. *)
+    [lines] is read only when a snapshot is saved. It writes
+    {!choose_continuity}'s notes to [keeper_name]'s log. *)
+
+(** What {!choose_continuity} passed over on the way to its choice, in the
+    order it met it. *)
+type continuity_note =
+  | Snapshot_unusable of { why : string }
+      (** A saved snapshot could not be used at all: unreadable, its boundary
+          log unreadable, or its covered bytes changed. A warning. *)
+  | Progress_unreadable of { why : string; detail : string }
+      (** No snapshot fits, and the Librarian's progress file could not be
+          read. A warning. *)
+  | Started_at_read_position of { why : string; end_atom : int }
+  | Started_at_turn_boundary of { why : string }
+
+val choose_continuity :
+  trace_id:string ->
+  messages:Agent_core.Types.message list ->
+  snapshot:(Librarian_continuity_snapshot.t option, string) result ->
+  lines:
+    (unit ->
+     ((int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list,
+      string)
+     result) ->
+  progress:(unit -> (Keeper_librarian_progress.t option, string) result) ->
+  continuity * continuity_note list
+(** {!continuity_for_request}'s choice, with what it passed over returned
+    instead of logged: an empty list when a snapshot fits. *)
+
+val log_continuity_note : keeper_name:string -> continuity_note -> unit
+
+val read_keeper_continuity :
+  config:Workspace.config ->
+  keeper_name:string ->
+  trace_id:string ->
+  messages:Agent_core.Types.message list ->
+  continuity * continuity_note list
+(** {!choose_continuity} over [keeper_name]'s own snapshot, turn-boundary
+    log and Librarian progress file. The turn driver logs the notes; the
+    next-request forecast, which only looks, does not. *)
+
+(** Where a request's carried range opens (RFC keeper-context-window-in-tokens
+    §13.4, §13.6). *)
+type range_start =
+  | From_snapshot of Librarian_continuity_snapshot.t
+      (** A snapshot fits: its working state rides in place of the atoms
+          before its end. *)
+  | From_read_position of { end_atom : int }
+      (** No snapshot fits and the Librarian's read position does: the atoms
+          before [end_atom] are not sent, and nothing stands in for them. *)
+  | From_seed of Keeper_carried_front.seed
+      (** No Librarian point, and a seed this history opens with the same
+          message ({!Keeper_carried_front.for_history}). *)
+  | From_turn_boundary of Keeper_carried_front.turn_start
+      (** No Librarian point and no seed that holds: this turn's own atoms,
+          or the newest atom alone when the boundary is unknown. *)
+
+type start_choice =
+  { start : range_start
+  ; outlived_seed : (Keeper_carried_front.seed * Keeper_carried_front.dropped_front) option
+        (** A seed this history does not hold, dropped with the reason. *)
+  }
+
+val choose_range_start :
+  continuity:continuity option ->
+  front:Keeper_carried_front.seed option ->
+  history_digest_at:(int -> string option) ->
+  turn_boundary:Keeper_carried_front.turn_start ->
+  start_choice
+(** The one rule for where a request starts: a snapshot that fits, else the
+    Librarian's read position, else [front] when [history_digest_at] opens
+    its index with the same message, else [turn_boundary]. [continuity] is
+    [None] for a request with no trace or one composed from a recovery view,
+    and is then read as {!without_snapshot}. Pure: the caller reads the
+    files. The turn's composition and {!Keeper_next_request_forecast} both
+    call it, so the forecast shows the start the request will have. *)
+
+val range_start_origin : range_start -> Keeper_carried_front.origin
+
+val project_range_start :
+  measure_message_bytes:(Agent_core.Types.message -> int) ->
+  atom_count:int ->
+  range_start ->
+  Agent_core.Types.message list ->
+  Runtime_model_input_tail_window.projection * int
+(** The range [start] opens over [messages] of [atom_count] atoms and its
+    bytes as [measure_message_bytes] counts them. A snapshot's working state
+    ({!working_state_text}) rides ahead of the atoms it does not cover. *)
 
 type try_provider_ctx =
   { runtime_id : string

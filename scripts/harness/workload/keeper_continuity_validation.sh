@@ -41,6 +41,8 @@ HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-20}"
 HEARTBEAT_WAIT_SEC="${HEARTBEAT_WAIT_SEC:-15}"
 PRESSURE_BYTES="${PRESSURE_BYTES:-20000}"
 PRESSURE_PAUSE_SEC="${PRESSURE_PAUSE_SEC:-1}"
+# A turn this recent counts as the one the phase just drove.
+RECENT_TURN_MAX_AGE_SEC=120
 
 SERVER_PID=""
 SERVER_LOG="$RUN_DIR/server.log"
@@ -95,9 +97,14 @@ phase_enabled() {
 require_known_phases() {
   local phase known
   local -a requested
+  # One or more names joined by single commas. An empty list, a stray comma,
+  # a space or a newline would select no phase and still classify the run.
+  if [[ ! "$TARGET_PHASES" =~ ^[a-z]+(,[a-z]+)*$ ]]; then
+    echo "TARGET_PHASES must be phase names joined by commas: '$TARGET_PHASES' (known: ${KNOWN_PHASES[*]})" >&2
+    return 1
+  fi
   IFS=',' read -r -a requested <<<"$TARGET_PHASES"
   for phase in "${requested[@]}"; do
-    [[ -z "$phase" ]] && continue
     for known in "${KNOWN_PHASES[@]}"; do
       [[ "$phase" == "$known" ]] && continue 2
     done
@@ -294,16 +301,27 @@ tool_json() {
   printf '%s' "$text" | jq -c '.'
 }
 
+# The Keeper can take a turn: its keepalive loop runs and the registry reports
+# a running, alive fiber. These are the fields masc_keeper_status emits.
+keeper_is_live() {
+  [[ "$(printf '%s' "$1" | jq -r '(.keepalive_running == true) and (.runtime.phase == "running") and (.runtime.fiber_health == "alive")')" == "true" ]]
+}
+
+# The last turn ended within RECENT_TURN_MAX_AGE_SEC. A missing age is not
+# recent.
+last_turn_is_recent() {
+  [[ "$(printf '%s' "$1" | jq -r --argjson max "$RECENT_TURN_MAX_AGE_SEC" '(.last_turn_ago_s | type) == "number" and .last_turn_ago_s < $max')" == "true" ]]
+}
+
 refresh_latest_evidence_from_status() {
   local status_json="$1"
   [[ -z "$status_json" ]] && return 0
   LATEST_TRACE_ID="$(printf '%s' "$status_json" | jq -r '.meta.trace_id // ""')"
-  LATEST_HEALTH="$(printf '%s' "$status_json" | jq -r '.diagnostic.health_state // ""')"
-  if [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running // false')" == "true" ]] \
-    && [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists // false')" == "true" ]]; then
-    LATEST_HEARTBEAT="workspace-keepalive-active"
+  LATEST_HEALTH="$(printf '%s' "$status_json" | jq -r '"phase=\(.runtime.phase // "none") fiber=\(.runtime.fiber_health // "none")"')"
+  if keeper_is_live "$status_json"; then
+    LATEST_HEARTBEAT="keeper-live"
   else
-    LATEST_HEARTBEAT="workspace-keepalive-missing"
+    LATEST_HEARTBEAT="keeper-not-live"
   fi
 }
 
@@ -454,8 +472,7 @@ wait_for_bootstrap() {
   local status_json
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
     status_json="$(keeper_status_json)"
-    if [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running')" == "true" ]] \
-      && [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists')" == "true" ]]; then
+    if keeper_is_live "$status_json"; then
       return 0
     fi
     sleep 1
@@ -468,8 +485,7 @@ wait_for_restarted_heartbeat() {
   local status_json
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
     status_json="$(keeper_status_json)"
-    if [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running')" == "true" ]] \
-      && [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists')" == "true" ]]; then
+    if keeper_is_live "$status_json"; then
       return 0
     fi
     sleep 1
@@ -837,12 +853,11 @@ real_run() {
     heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
     status_json="$(cat "$snapshot_file")"
     refresh_latest_evidence_from_status "$status_json"
-    if [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running')" == "true" ]] \
-      && [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists')" == "true" ]]; then
+    if keeper_is_live "$status_json"; then
       BOOTSTRAP_PASS=1
-      append_phase "bootstrap" "pass" "isolated keeper started with active keepalive and workspace presence" "$snapshot_file" "$heartbeat_file"
+      append_phase "bootstrap" "pass" "isolated keeper started with a running keepalive and an alive fiber" "$snapshot_file" "$heartbeat_file"
     else
-      append_phase "bootstrap" "fail" "keeper started but workspace presence/keepalive were not observed" "$snapshot_file" "$heartbeat_file"
+      append_phase "bootstrap" "fail" "keeper started but its keepalive or fiber was not live" "$snapshot_file" "$heartbeat_file"
       return 1
     fi
   fi
@@ -876,12 +891,11 @@ real_run() {
     heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
     status_json="$(cat "$snapshot_file")"
     refresh_latest_evidence_from_status "$status_json"
-    if [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists')" == "true" ]] \
+    if keeper_is_live "$status_json" \
       && [[ "$(printf '%s' "$status_json" | jq -r "(((.meta.total_turns | tonumber?) // 0) > ($baseline_turns | tonumber))")" == "true" ]] \
-      && [[ "$(printf '%s' "$status_json" | jq -r '.last_turn_ago_s < 120')" == "true" ]] \
-      && [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running')" == "true" ]]; then
+      && last_turn_is_recent "$status_json"; then
       LIVENESS_PASS=1
-      append_phase "liveness" "pass" "live keeper turn observed with workspace presence and recent output" "$snapshot_file" "$heartbeat_file"
+      append_phase "liveness" "pass" "live keeper turn observed with a live fiber and recent output" "$snapshot_file" "$heartbeat_file"
     else
       append_phase "liveness" "fail" "keeper metadata exists but no fresh live turn was proven" "$snapshot_file" "$heartbeat_file"
       return 1
@@ -960,9 +974,7 @@ real_run() {
           heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
           status_after="$(cat "$snapshot_file")"
           refresh_latest_evidence_from_status "$status_after"
-          if [[ "$(printf '%s' "$status_after" | jq -r '.keepalive_running')" == "true" ]] \
-            && [[ "$(printf '%s' "$status_after" | jq -r '.last_turn_ago_s < 120')" == "true" ]] \
-            && [[ "$(printf '%s' "$status_after" | jq -r '.agent.exists')" == "true" ]]; then
+          if keeper_is_live "$status_after" && last_turn_is_recent "$status_after"; then
             if load_checkpoint_evidence "$status_after"; then
               append_phase "checkpoint_truth" "pass" "checkpoint contains ${CHECKPOINT_MESSAGE_COUNT} typed messages after restart" "$snapshot_file" "$heartbeat_file"
               RECOVERY_PASS=1

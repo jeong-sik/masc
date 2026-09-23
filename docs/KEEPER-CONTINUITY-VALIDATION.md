@@ -39,8 +39,13 @@ scripts/harness_keeper_continuity_validation.sh
 
 `KEEPER_RUNTIME_NAME` names the runtime the test Keeper starts on; empty uses
 the server's default. `TARGET_PHASES` picks from `bootstrap`, `liveness`,
-`continuity` and `recovery`, all four by default; any other name stops the run
-before it starts.
+`continuity` and `recovery`, joined by commas, all four by default. An unknown
+name, an empty list or a stray comma stops the run with exit 2 before it
+starts.
+
+A phase counts the Keeper as live when `masc_keeper_status` reports
+`keepalive_running`, `runtime.phase = "running"` and
+`runtime.fiber_health = "alive"`.
 
 Use an existing server:
 

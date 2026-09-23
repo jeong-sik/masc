@@ -243,6 +243,7 @@ let classify_masc_internal_error = function
          the client's transport closed. [ProviderUnavailable] answered the
          same before RFC-0454 P2 typed the second one. *)
       | Keeper_internal_error.Host_stopped_turn _
+      | Keeper_internal_error.Preempted_before_first_token _
       | Keeper_internal_error.Runtime_connection_closed _
       | Keeper_internal_error.Receipt_persistence_failed _
       | Keeper_internal_error.Gate_replay_repair_required _ )

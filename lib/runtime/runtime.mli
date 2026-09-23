@@ -940,6 +940,26 @@ val create_runtime_lane :
     output beyond an operator's reach. The Runtime surface marks which lanes a
     table declares. *)
 
+(** A place in runtime.toml that names a route (a lane name or a runtime id). *)
+type route_reference =
+  | Keeper_assignment of string  (** [\[runtime.assignments\].<keeper>] *)
+  | Default_runtime  (** [\[runtime\].default] *)
+  | Fusion_seat of
+      { preset : string
+      ; seat : Fusion_policy.seat_kind
+      }  (** a seat of [\[fusion.presets.<preset>\]] *)
+
+val route_reference_to_string : route_reference -> string
+(** The operator's name for the place, e.g. [\[fusion.presets.trio\].judge]. *)
+
+val route_references :
+  Runtime_schema.config -> Fusion_policy.t -> (route_reference * string) list
+(** Every route the config names, with where it names it. Keeper assignments,
+    then the default, then each Fusion preset's seats as
+    {!Fusion_policy.preset_seat_routes} counts them. Seat routes are trimmed,
+    as a Fusion run trims them before it resolves them. The lane rename and
+    remove writers read references from here. *)
+
 val rename_runtime_lane :
   ?runtime_config_path:string ->
   lane_id:string ->
@@ -948,8 +968,9 @@ val rename_runtime_lane :
   (config_commit_receipt, string) result
 (** Rename [\[runtime.lanes."<lane_id>"\]] to [new_lane_id] and rewrite every
     reference to it in the same validated write: the [\[runtime.assignments\]]
-    entries that name it, and [\[runtime\].default] when it does. A lane's name
-    is its routing key ({!resolve_assignment} reads a lane before a runtime of
+    entries that name it, [\[runtime\].default] when it does, and every Fusion
+    preset seat that names it (rewritten through {!Fusion_config_writer}). A
+    lane's name is its routing key ({!resolve_assignment} reads a lane before a runtime of
     the same id), so a file written with a reference missed would route those
     keepers to a lane that is no longer declared -- which is also why this is
     not a remove followed by a create.
@@ -968,9 +989,10 @@ val remove_runtime_lane :
   (config_commit_receipt, string) result
 (** Remove the [\[runtime.lanes."<lane_id>"\]] table through the runtime.toml
     SSOT writer. Refused while a keeper still routes through the lane id,
-    naming each way it does: an entry of [\[runtime.assignments\]], or
-    [\[runtime\].default], which every unassigned keeper walks. A keeper's
-    route is read as a lane before a runtime ({!resolve_assignment}), so
+    naming each way it does: an entry of [\[runtime.assignments\]],
+    [\[runtime\].default], which every unassigned keeper walks, or a Fusion
+    preset seat. Both writers refuse while [\[fusion\]] does not load, since
+    then its seats cannot be read. A keeper's route is read as a lane before a runtime ({!resolve_assignment}), so
     removing the lane would either fail the load or silently hand those
     keepers the runtime of the same id. Refused when the file does not declare
     the lane as its own table. *)

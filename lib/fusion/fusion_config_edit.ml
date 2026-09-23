@@ -183,18 +183,13 @@ let valid_name name =
   (not (String.equal name "")) && String.equal (String.trim name) name
 ;;
 
-let preset_routes (preset : Fusion_policy.preset) =
-  List.concat_map (fun (group : Fusion_policy.panel_group) -> group.models) preset.panels
-  @ [ preset.judge ]
-  @ List.map (fun (judge : Fusion_policy.judge_spec) -> judge.jmodel) preset.judges
-;;
-
 (* Every seat must resolve now, the way a run will resolve it. A route that
    does not would fail every run with Unknown_route; saving it would only move
-   the error from the settings screen to the run. *)
+   the error from the settings screen to the run. The seats are the ones
+   [Runtime.route_references] reports to the lane editor. *)
 let check_routes (preset : Fusion_policy.preset) =
   List.fold_left
-    (fun acc route ->
+    (fun acc (_seat, route) ->
        let* () = acc in
        match Runtime.resolve_assignment (String.trim route) with
        | `Lane _ -> Ok ()
@@ -207,7 +202,7 @@ let check_routes (preset : Fusion_policy.preset) =
               ; problem =
                   Route_catalog_missing (Runtime.missing_catalog_model_to_string missing)
               }))
-    (Ok ()) (preset_routes preset)
+    (Ok ()) (Fusion_policy.preset_seat_routes preset)
 ;;
 
 (* ── the edit ──────────────────────────────────────────────────────────── *)

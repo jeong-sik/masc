@@ -101,6 +101,25 @@ val valid_timeout_s : float option -> bool
 (** 모든 그룹의 모델을 평탄화 (그룹순 × 그룹내 모델순 보존). *)
 val preset_models : preset -> string list
 
+(** 경로 이름이 적히는 자리의 종류. 설정에서 자리가 있는 곳은 이 셋뿐이다. *)
+type seat_kind =
+  | Panel_member  (** [panels] 그룹의 [models] 하나 (평평한 [panel] 포함) *)
+  | Judge  (** [judge] *)
+  | First_judge  (** [judges] 항목의 [model] (JOJ 1차 심판) *)
+[@@deriving show, eq]
+
+(** 자리가 적히는 TOML 키: ["panel"], ["judge"], ["judges"]. *)
+val seat_kind_key : seat_kind -> string
+
+(** preset 의 모든 자리와 거기 적힌 경로 이름. 패널(그룹순 × 모델순), 심판, 1차
+    심판 순서다. 자리를 세는 곳은 이 함수 하나다. Fusion 설정 편집의 경로 검사와
+    [Runtime] 의 lane 참조 목록이 둘 다 이것을 읽는다. *)
+val preset_seat_routes : preset -> (seat_kind * string) list
+
+(** {!preset_seat_routes} 가 세는 자리마다 [f] 로 경로 이름을 바꾼다. 다른 값은
+    그대로다. *)
+val map_seat_routes : (string -> string) -> preset -> preset
+
 (** 그룹 전체에 패널 모델이 하나 이상 있는가.
     {!Validated_preset.of_preset}의 검증 술어. Provider별 cardinality 한계는 이
     MASC-owned preset 타입을 제한하지 않는다. *)

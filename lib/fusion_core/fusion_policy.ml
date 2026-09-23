@@ -73,6 +73,33 @@ let valid_timeout_s = function
 let preset_models (p : preset) =
   List.concat_map (fun (g : panel_group) -> g.models) p.panels
 
+type seat_kind =
+  | Panel_member
+  | Judge
+  | First_judge
+[@@deriving show, eq]
+
+let seat_kind_key = function
+  | Panel_member -> "panel"
+  | Judge -> "judge"
+  | First_judge -> "judges"
+;;
+
+let preset_seat_routes (p : preset) =
+  List.map (fun model -> Panel_member, model) (preset_models p)
+  @ [ Judge, p.judge ]
+  @ List.map (fun (j : judge_spec) -> First_judge, j.jmodel) p.judges
+;;
+
+let map_seat_routes f (p : preset) =
+  { p with
+    panels =
+      List.map (fun (g : panel_group) -> { g with models = List.map f g.models }) p.panels
+  ; judge = f p.judge
+  ; judges = List.map (fun (j : judge_spec) -> { j with jmodel = f j.jmodel }) p.judges
+  }
+;;
+
 (* 적어도 하나의 패널 모델이 있는가. Provider별 cardinality 한계는 MASC의
    preset 타입을 제한하지 않는다. 실행 시 provider가 거부하면 그 typed failure를
    관측하며, 다른 provider와 heterogeneous panel 구성은 계속 실행된다. *)

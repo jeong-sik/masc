@@ -3444,40 +3444,108 @@ let create_runtime_lane ?runtime_config_path ~lane_id ~runtime_ids () =
     else Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
 ;;
 
-(* What still reaches a lane through its id. A keeper's route is its
-   assignment or, without one, the default, and [resolve_assignment] reads a
-   lane before a runtime of the same id -- so removing the lane would hand the
-   keeper the bare runtime of that id, or nothing at all. media_failover and
-   verifier_exact slots name runtimes only and never reach a lane. *)
-type lane_reference =
+(* Every place runtime.toml names a route. A keeper's route is its assignment
+   or, without one, the default; a Fusion seat names one too, and a run
+   resolves it the way it resolves an assignment. [resolve_assignment] reads a
+   lane before a runtime of the same id, so a lane any of these names cannot
+   be removed or renamed alone. media_failover and verifier_exact slots name
+   runtimes only and never reach a lane. *)
+type route_reference =
   | Keeper_assignment of string
   | Default_runtime
+  | Fusion_seat of
+      { preset : string
+      ; seat : Fusion_policy.seat_kind
+      }
 
-let lane_reference_to_string = function
+let route_reference_to_string = function
   | Keeper_assignment keeper_name -> Printf.sprintf "[runtime.assignments].%s" keeper_name
   | Default_runtime -> "[runtime].default, which every keeper without an assignment walks"
+  | Fusion_seat { preset; seat } ->
+    Printf.sprintf "[fusion.presets.%s].%s" preset (Fusion_policy.seat_kind_key seat)
 ;;
 
-let lane_references (config : Runtime_schema.config) ~lane_id =
-  let names id = String.equal id lane_id in
-  let assignments =
-    List.filter_map
-      (fun (keeper_name, target) ->
-         if names target then Some (Keeper_assignment keeper_name) else None)
-      config.keeper_assignments
-  in
-  let default =
-    match config.default_runtime_id with
-    | Some id when names id -> [ Default_runtime ]
-    | Some _ | None -> []
-  in
-  assignments @ default
+let route_references (config : Runtime_schema.config) (fusion : Fusion_policy.t) =
+  List.map (fun (keeper_name, target) -> Keeper_assignment keeper_name, target)
+    config.keeper_assignments
+  @ (match config.default_runtime_id with
+     | Some id -> [ Default_runtime, id ]
+     | None -> [])
+  @ List.concat_map
+      (fun validated ->
+         let preset = Fusion_policy.Validated_preset.preset validated in
+         List.map
+           (fun (seat, route) ->
+              Fusion_seat { preset = preset.name; seat }, String.trim route)
+           (Fusion_policy.preset_seat_routes preset))
+      fusion.Fusion_policy.presets
 ;;
 
-(* A lane's name is its routing key: [\[runtime.assignments\]] entries and
-   [\[runtime\].default] name it as a string, and {!resolve_assignment} reads
-   those before it reads a runtime of the same id. So a rename is not a rename
-   of one table -- it is that header and every reference to it, and any file
+(* A preset naming the lane at two panel seats is one reference to report. *)
+let lane_references config fusion ~lane_id =
+  List.fold_left
+    (fun found (reference, route) ->
+       if String.equal route lane_id && not (List.mem reference found)
+       then found @ [ reference ]
+       else found)
+    []
+    (route_references config fusion)
+;;
+
+(* The seats are read from the text under the lock. A [fusion] that does not
+   load hides which seats name the lane, so a lane edit refuses rather than
+   leave them pointing at a name that is gone. *)
+let lane_fusion_policy content ~lane_id =
+  let* toml =
+    Result.map_error
+      (fun detail -> "runtime config parse failed: " ^ detail)
+      (Otoml.Parser.from_string_result content)
+  in
+  match Fusion_config.of_toml toml with
+  | Ok policy -> Ok policy
+  | Error errors ->
+    Error
+      (Printf.sprintf
+         "[fusion] does not load (%s), so the seats that may name lane %S cannot be \
+          read; fix [fusion] first"
+         (String.concat "; " (List.map Fusion_config.config_error_message errors))
+         lane_id)
+;;
+
+(* A seat is a route, so a rename rewrites every preset with a seat on the
+   lane through the Fusion writer, in the same text as the header. *)
+let rename_fusion_seats text (fusion : Fusion_policy.t) references ~lane_id ~new_lane_id =
+  List.fold_left
+    (fun acc validated ->
+       let* text = acc in
+       let preset = Fusion_policy.Validated_preset.preset validated in
+       let named = function
+         | Fusion_seat { preset = name; _ } -> String.equal name preset.name
+         | Keeper_assignment _ | Default_runtime -> false
+       in
+       if not (List.exists named references)
+       then Ok text
+       else (
+         let rename route =
+           if String.equal (String.trim route) lane_id then new_lane_id else route
+         in
+         let* renamed =
+           Fusion_policy.Validated_preset.of_preset
+             (Fusion_policy.map_seat_routes rename preset)
+           |> Result.map_error (fun invalid ->
+             Printf.sprintf "preset %s %s after the rename" preset.name
+               (Fusion_policy.Validated_preset.invalid_to_string invalid))
+         in
+         Fusion_config_writer.upsert_preset text renamed
+         |> Result.map_error Fusion_config_writer.error_message))
+    (Ok text)
+    fusion.presets
+;;
+
+(* A lane's name is its routing key: [\[runtime.assignments\]] entries,
+   [\[runtime\].default] and Fusion seats name it as a string, and
+   {!resolve_assignment} reads those before it reads a runtime of the same id.
+   So a rename is not a rename of one table -- it is that header and every reference to it, and any file
    written with some of them changed routes the keepers whose reference was
    missed to a lane that is no longer there. All of it goes in the one
    validated write {!edit_runtime_lanes} already commits, which is why this is
@@ -3518,7 +3586,11 @@ let rename_runtime_lane ?runtime_config_path ~lane_id ~new_lane_id () =
                 renamed here"
                lane_id)
         | Toml_line_editor.Table_renamed renamed ->
-          Ok
+          let* fusion = lane_fusion_policy content ~lane_id in
+          let references = lane_references config fusion ~lane_id in
+          rename_fusion_seats
+            ~lane_id
+            ~new_lane_id
             (List.fold_left
                (fun text reference ->
                   match reference with
@@ -3536,9 +3608,12 @@ let rename_runtime_lane ?runtime_config_path ~lane_id ~new_lane_id () =
                     update_runtime_scalar_text
                       text
                       ~key:"default"
-                      ~runtime_id:(Some new_lane_id))
+                      ~runtime_id:(Some new_lane_id)
+                  | Fusion_seat _ -> text)
                renamed
-               (lane_references config ~lane_id)))
+               references)
+            fusion
+            references)
 ;;
 
 let remove_runtime_lane ?runtime_config_path ~lane_id () =
@@ -3547,13 +3622,14 @@ let remove_runtime_lane ?runtime_config_path ~lane_id () =
     if not (lane_is_declared config lane_id)
     then Error (Printf.sprintf "lane %S is not declared in [runtime.lanes]" lane_id)
     else
-      match lane_references config ~lane_id with
+      let* fusion = lane_fusion_policy content ~lane_id in
+      match lane_references config fusion ~lane_id with
       | _ :: _ as references ->
         Error
           (Printf.sprintf
              "lane %S is in use by %s"
              lane_id
-             (String.concat ", " (List.map lane_reference_to_string references)))
+             (String.concat ", " (List.map route_reference_to_string references)))
       | [] ->
         (match Toml_line_editor.remove_table content ~path:(lane_table_path lane_id) with
          | Toml_line_editor.Table_removed next -> Ok next

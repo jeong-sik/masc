@@ -2945,6 +2945,31 @@ accepted_reasoning_efforts = ["low", "high"]
       error
   | Ok _ -> fail "serves_bare_rows silently accepted a string"
 
+(* #37086. The fixture above proves the mechanism; this proves the shipped
+   declarations. With the embedded catalog, the Terminal-Bench anthropic lane
+   (provider "claude", effort "high", a capabilities block) builds a Messages
+   request that carries effort "high". *)
+let test_bench_anthropic_lane_sends_high_with_the_embedded_catalog () =
+  let module Json = Yojson.Safe.Util in
+  Llm_provider.Model_catalog.clear_global ();
+  List.iter (fun model_id ->
+    let cfg, binding = bare_rows_runtime ~provider_id:"claude" ~model_id in
+    match Runtime_adapter.binding_to_provider_config cfg binding with
+    | Error error -> failf "%s: the binding was refused: %s" model_id error
+    | Ok config ->
+      check (option string) (model_id ^ ": provider") (Some "claude")
+        config.provider_id;
+      match Llm_provider.Backend_anthropic.build_request_artifact
+              ~config ~messages:[] () with
+      | Error _ -> failf "%s: the Messages request was refused" model_id
+      | Ok artifact ->
+        let body = Llm_provider.Backend_anthropic.request_payload artifact
+                   |> Yojson.Safe.from_string in
+        check string (model_id ^ ": wire effort") "high"
+          (body |> Json.member "output_config" |> Json.member "effort"
+           |> Json.to_string)
+  ) [ "claude-fable-5"; "claude-fable-5-1" ]
+
 let () =
   run "runtime_provider_auth_headers"
     [ ( "provider_config"
@@ -2958,6 +2983,8 @@ let () =
             `Quick test_parallel_policy_requires_provider_contract
         ; test_case "a declared provider reads bare rows only when it serves them"
             `Quick test_declared_provider_reads_bare_rows_only_when_it_serves_them
+        ; test_case "the bench anthropic lane sends high with the embedded catalog"
+            `Quick test_bench_anthropic_lane_sends_high_with_the_embedded_catalog
         ; test_case
             "runtime binding materialization preserves failure reason"
             `Quick

@@ -466,7 +466,7 @@ status: reference
   공식 클라이언트가 turn을 도는 경로는 **Official Client Lane**이다.
   `Keeper_memory_lane`은 Keeper 하나의 Librarian 작업을 줄 세우는 **Memory queue**다.
   `Keeper_lane.t`는 Keeper 하나가 turn을 도는 fiber다. 넷 다 이름만 같고 이 항목의
-  Lane과는 다른 개념이다. Memory queue에 쌓인 일은 나중에 `Librarian` lane에서 돈다.
+  Lane과는 다른 개념이다. Memory queue에서 기다리던 일은 나중에 `Librarian` lane에서 돈다.
   → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
 
 **Runtime Candidate Order (런타임 후보 순서)**
@@ -832,9 +832,9 @@ status: reference
   지금 일을 맡은 쪽이고, `AwaitingVerification` 에서는 제출한 쪽이다.
 
 **Producer**
-: 판정 쪽 코드가 일을 제출한 에이전트를 부르는 이름. 같은 사람이 상태 안에서는
+: 판정 쪽 코드가 일을 제출한 에이전트를 부르는 이름. 같은 에이전트가 상태 안에서는
   `AwaitingVerification.assignee`로 적히고, 반려 기록(`pending_completion_rejection`)에는
-  `producer`로 적힌다. verification 레코드의 바깥 키 `worker`도 같은 사람을 적지만,
+  `producer`로 적힌다. verification 레코드의 바깥 키 `worker`도 같은 에이전트를 적지만,
   Task를 누가 맡았는지 찾는 키로 쓰지 않는다.
   → [Types_core](../../lib/types/types_core.mli)
 
@@ -884,12 +884,16 @@ status: reference
   판정은 이 메모를 판정 사유로 덮어쓴다.
 
 **Evidence Reference (증거 참조)**
-: 관찰·검증·제출·상태 전환에 다는 근거. `evidence_refs` 같은 필드로 나른다. 형식은
-  `artifact:`, `note:`, `board:`, `fusion:` 넷뿐이다. `note:<text>`는 허용된 서술형 근거다.
-  Task 인계 요약과 완료 메모도 이 형식으로 바뀌어 붙는다. `note:` 근거는 파일이나
-  Board 글, Fusion 실행이 실제로 있다는 증명이 아니다.
+: 관찰·검증·제출·상태 전환에 다는 근거. `evidence_refs` 같은 필드로 나른다.
+  검증 저장소가 읽는 형식은 `artifact:`, `note:`, `board:`, `fusion:` 넷이다.
+  `note:<text>`는 허용된 서술형 근거다. Task 전이에 붙이는 `handoff_context.evidence_refs`는
+  이 넷만 받고, 다른 형식이 하나라도 있으면 전이를 거절한다. Task 인계 요약과 완료 메모도
+  이 형식으로 바뀌어 붙는다. `note:` 근거는 파일이나 Board 글, Fusion 실행이 실제로
+  있다는 증명이 아니다. 다른 곳의 `evidence_refs`는 각자 규칙을 따른다. 예를 들어
+  운영자 판정(`Operator_judgment`)은 앞뒤 공백을 자르고 빈 줄만 버릴 뿐 형식은 보지 않는다.
   → [Workspace_verification_store](../../lib/workspace/workspace_verification_store.ml),
-  [Workspace_task_verification](../../lib/workspace/workspace_task_verification.ml)
+  [Workspace_task_verification](../../lib/workspace/workspace_task_verification.ml),
+  [Tool_task_completion_review](../../lib/task/tool_task_completion_review.mli)
 
 **Operator Attention**
 : 운영자만 풀 수 있는 Task 의 목록(`Operator_task_attention.item`). 종류는 `Cancel_claim`,

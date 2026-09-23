@@ -93,6 +93,19 @@ type cause =
       ; detail : string
       }
   | User_row_unpersisted of { detail : string }
+  | Gate_session_full of
+      { approval_id : string
+      ; runtime_id : string
+      ; session_id : string
+      ; recovery_id : string
+      ; activity : Keeper_internal_error.vendor_session_activity
+      }
+      (** A Gate continuation resumed its original official-client session and
+          the vendor refused the resume because that session is full.
+          [activity] says whether a response or tool effect was observed first.
+          The continuation may only run in that session, so it ends for good. [recovery_id] names the durable
+          session record that says so; that record lets the next ordinary
+          turn start a new session. *)
   | Reply_contract_rejected of
       { field : reply_contract_field
       ; detail : string

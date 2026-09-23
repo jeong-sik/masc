@@ -22,6 +22,10 @@ module Task_error : sig
     | NotClaimed of string
     | InvalidState of string
     | InvalidId of string
+    | VerificationSuperseded of { task_id: string; requested: string; current: string }
+      (** A verdict named a submission that is no longer the one awaiting a
+          verdict: the producer resubmitted, or superseded it with a
+          cancellation, after the verdict's author read it. *)
   val to_string : t -> string
 end
 

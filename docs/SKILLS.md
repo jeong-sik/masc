@@ -16,7 +16,8 @@ masc 의 스킬은 파일 하나로 선언되는 능력이다. `runtime.toml`의
 Librarian이 남기는 `validated_approach`·`lesson`과 `absorbs`는 Memory OS의 Fact를
 바꾼다. SKILL.md나 composition을 발행하지 않는다. 현재 Skill은 선언된 source의
 파일을 읽어 발행하며, TUI·Dashboard의 생성·저장은 `CanAdmin` 편집기 API를 쓴다
-(`Server_skill_editor`, `Server_routes_http_routes_dashboard`).
+(`Server_skill_editor`, `Server_routes_http_routes_dashboard`). Keeper는
+`keeper_skill_publish`로 새 Skill을 직접 발행한다(아래).
 
 Keeper는 새 `SKILL.md`를 `keeper_artifact_transfer`로 export한 뒤, 반환된 정확한
 `artifact` 객체와 제안하는 package 디렉터리 이름 `package_id`를
@@ -24,11 +25,21 @@ Keeper는 새 `SKILL.md`를 `keeper_artifact_transfer`로 export한 뒤, 반환�
 편집기의 크기 제한으로 원문 bytes를 읽기 전용 검증한다. 결과의 artifact와
 package 이름은 검증한 입력을 가리키며, 발행된 Skill Reference가 아니다.
 정적 검증은 실행 성공이나 안전성을 증명하지 않고 source·snapshot도 변경하지
-않는다. 발행은 기존 관리자 편집기 경로를 따른다.
+않는다.
 
-Keeper가 직접 발행하는 `keeper_skill_publish`와 `keeper_compose_save`는 각각
-[self-authored-skills](rfc/RFC-keeper-self-authored-skills.md)와
-[writes-own-compositions](rfc/RFC-keeper-writes-own-compositions.md)의 제안이다.
+Keeper는 `keeper_skill_publish`로 새 package를 직접 발행한다
+([self-authored-skills](rfc/RFC-keeper-self-authored-skills.md)).
+`package_id`, `SKILL.md` 전체인 `source_text`, 비어 있지 않은 `evidence` 목록을 받는다.
+쓰는 곳은 `project-agents` source 하나로 정해져 있고 Keeper가 고르지 못한다.
+편집기 `create`와 같은 parser로 검증하고, 이미 있는 이름은 `package_already_exists`로
+거절하며 덮어쓰지 않는다. 쓴 뒤 catalog snapshot을 다시 발행하므로 다음 턴이
+돌려받은 Skill Reference로 찾는다. 단 meta 에 `skills` 목록을 선언한 Keeper 는
+그 목록에 이름이 있을 때만 본다(`Keeper_skill_catalog.project_turn ~names`). 발행마다 감사 원장에 `skill_write` 한 줄을
+남긴다(Keeper 이름, 참조, `evidence`). `evidence`는 기록만 하고 참인지 판정하지 않는다.
+삭제는 운영자의 편집기 DELETE 경로로 한다.
+
+Keeper가 composition을 저장하는 `keeper_compose_save`는
+[writes-own-compositions](rfc/RFC-keeper-writes-own-compositions.md)의 제안이며
 현재 도구가 아니다. 실행 기록에서 후보를 찾고 검증해 발행하는
 [Tool Librarian 제안](https://github.com/jeong-sik/masc/pull/36925)도 구현된 자동
 생산 경로로 취급하지 않는다. 발행된 Skill의 사용 기록은 그 Skill이 자동으로

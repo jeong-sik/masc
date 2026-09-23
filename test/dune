@@ -85,6 +85,8 @@
  (modules test_keeper_skill_validate)
  (libraries masc_test_deps masc.skill_snapshot_service))
 
+(include stanzas/test_keeper_skill_publish.inc)
+
 (test
  (name test_keeper_request_failure)
  (modules test_keeper_request_failure)

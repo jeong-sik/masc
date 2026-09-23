@@ -4396,6 +4396,7 @@ let test_root_inventory_reads_undecodable_meta_as_absent_and_boot_rematerializes
        in
        let baseline = latest_log_seq () in
        Eio.Switch.run @@ fun sw ->
+       Eio_context.set_switch sw;
        (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
         | Ok count -> check int "an undecodable meta installs no owner" 0 count
         | Error error -> fail (Owner_registry.install_error_to_string error));

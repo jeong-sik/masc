@@ -128,10 +128,10 @@ end
 
    The caller then learns about it at [Fiber.fork], as
    [Invalid_argument "Switch finished!"], far from the write that left it.
-   That is what [Keeper_keepalive]'s [lane_parent_sw] hits: it prefers the
-   root switch and falls back to [ctx.sw], and the fallback is right, but a
-   dead switch never reaches it. Measured 2026-09-06 in
-   test_heartbeat_integration, where six cases fail this way (#33200).
+   That is what [Keeper_lane.fork_server_owned] hits: a Keeper lane forks on
+   the root switch, and a dead one fails the fork instead of reporting that
+   there is no owner. Measured 2026-09-06 in test_heartbeat_integration, where
+   six cases fail this way (#33200).
 
    Asking the switch is the only way to know: a finished switch is not a
    failed one, so [get_error] answers [None] for it. *)

@@ -579,7 +579,10 @@ let publication_recovery_registry env sw config =
     fail
       (Fs_compat.Publication_recovery.registry_error_to_string error)
 
+(* The supervisor's context is server-owned, and a Keeper lane forks only on
+   the server root switch, so the fixture installs [sw] as that root. *)
 let keeper_runtime_context env sw config : _ Keeper_types_profile.context =
+  Eio_context.set_switch sw;
   { config
   ; agent_name = supervisor_agent_name
   ; sw
@@ -1761,11 +1764,64 @@ let test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures () =
    [Started]/[Running], and the entry's done promise must resolve through
    the crash path so the sweep observes a typed outcome. Pre-fix the fiber
    forked and Running was published despite the reject. *)
+(* #38175: the supervisor's own context is not a lane owner either. With no
+   server root switch installed the launch is refused and the lane settled;
+   before, it forked on [ctx.sw] and only logged a WARN. *)
+let test_supervised_launch_without_server_root_is_refused () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio_context.For_testing.clear_root_switch ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+      let name = "supervised-no-root" in
+      let meta = make_meta name in
+      (match Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register_offline ~base_path:config.base_path name meta in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = supervisor_agent_name
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = Some (Eio.Stdenv.net env)
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
+        }
+      in
+      with_launch_token
+        ~base_path:config.base_path
+        ~keeper_name:name
+        (fun lifecycle_token ->
+           match
+             Masc.Keeper_supervisor_launch.launch_supervised_fiber
+               ~lifecycle_token
+               ~proactive_warmup_sec:0
+               ctx
+               meta
+               reg
+           with
+           | Ok () -> fail "a supervised lane started with no server root switch"
+           | Error _ -> ());
+      check bool "the refused lane is settled" true (Reg.lane_has_exited reg))
+
 let test_supervised_stop_joins_board_attention_worker () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   ensure_test_runtime ();
   Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -1833,6 +1889,7 @@ let test_supervised_stop_does_not_wait_for_librarian () =
   ensure_fs env;
   ensure_test_runtime ();
   Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -2949,6 +3006,8 @@ let () =
         test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures;
       test_case "supervised stop joins Board worker" `Quick
         test_supervised_stop_joins_board_attention_worker;
+      test_case "supervised launch without server root is refused" `Quick
+        test_supervised_launch_without_server_root_is_refused;
       test_case "supervised stop does not wait for Librarian" `Quick
         test_supervised_stop_does_not_wait_for_librarian;
       test_case "owner launch respects spontaneous bootstrap policy" `Quick

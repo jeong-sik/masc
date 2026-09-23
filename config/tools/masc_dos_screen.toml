@@ -2,20 +2,13 @@ name = "masc_dos_screen"
 description = """
 Read the DOS screen without advancing time.
 
-Returns the text page as UTF-8 with code page 437 kept, so box drawing and \
-game glyphs survive, plus the video mode, CS:IP, timer ticks and \
-waiting_for_key. waiting_for_key means the program asked the BIOS for a key \
-and found none -- it read the keyboard, not that it is done. masc_dos_step's \
-settled is the one that means your turn.
-
-Graphics modes are read too: frame_ascii is the whole frame as a coarse \
-luminance map (8x16 pixel cells, one character each), so a VGA game's title, \
-map and menus are visible the way text programs are in screen_text; \
-frame_nonblack counts lit cells for cheap change detection. frame_ascii shows \
-where something is drawn, not what it says: a game that draws its own \
-letters (Korean or Japanese menus in a VGA mode) is only readable in the \
-picture. Keeper calls include a PNG artifact of the same frame; use \
-keeper_analyze_image to read it."""
+Returns the text page as UTF-8 (code page 437 kept), the video mode, CS:IP, \
+timer ticks and waiting_for_key -- the program found the keyboard empty, not \
+that it is done; masc_dos_step's settled means your turn. frame_ascii maps \
+the whole frame's luminance in 8x16 cells: where a graphics mode drew, not \
+what it says. frame_nonblack counts lit cells. Keeper calls include a PNG \
+artifact of the frame; read a game's own lettering (Korean menus) with \
+keeper_analyze_image."""
 additional_properties = false
 
 defer_loading = true

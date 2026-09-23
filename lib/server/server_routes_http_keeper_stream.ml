@@ -3685,8 +3685,9 @@ let handle_keeper_ask_answer ~actor state request reqd =
                  answering client write any name into the durable log. The
                  field is parsed historically and ignored; the responder
                  below carries the token's principal. *)
-              ignore
-                (List.assoc_opt "actor_id" fields : Yojson.Safe.t option);
+              let (_ : Yojson.Safe.t option) =
+                List.assoc_opt "actor_id" fields
+              in
               let session_id =
                 match List.assoc_opt "session_id" fields with
                 | Some (`String value) -> Some (String.trim value)

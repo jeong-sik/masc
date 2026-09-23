@@ -8,7 +8,6 @@
 
 ### Changed
 
-- The runtime detail's `Used by lanes` names every lane that lists the runtime, whichever door the reader opened it from. Opened from a lane's candidate row it named only the lane the reader arrived through -- the header already says that -- so `ollama_cloud.ollama-cloud-deepseek-v4-1-flash`, a fallback in 8 of the live workspace's 11 lanes, read as used by one, while the same runtime opened from the catalog listed all 8. Both doors now read the resolved projection through one function. `Lane position` names its lane (`1 of 2 in primary`), because a position in a list of several lanes did not say which list it counted (#38115).
 - The Librarian reads a new claim that repeats a current memory word for word
   as that memory instead of refusing the whole pass as
   `duplicate_selected_memory_id`: the stored fact keeps its first sighting and

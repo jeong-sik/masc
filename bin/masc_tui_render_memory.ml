@@ -147,13 +147,25 @@ let memory_context_lines (k : memory_keeper_health) =
       | Some atoms -> Printf.sprintf "continuity behind %d" atoms
       | None -> "continuity behind ?"
     in
+    (* RFC librarian-lifecycle §4.10: the atoms requests skip while the
+       Librarian stands behind the start the provider last accepted. Drawn
+       beside the lags because it is the same kind of reading: an alarm, not
+       a state anything waits on. *)
+    let stalled =
+      match librarian.mlh_stalled with
+      | Some { mls_gap_start_atom; mls_gap_end_atom } ->
+        Printf.sprintf " · stalled: atoms %d-%d are in neither the request nor memory"
+          mls_gap_start_atom (mls_gap_end_atom - 1)
+      | None -> ""
+    in
     Printf.sprintf
-      "  Librarian · %s · %s · %s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
+      "  Librarian · %s · %s · %s%s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
       (match librarian.mlh_state with
        | Some state -> librarian_pass_end_words state
        | None -> "not measured")
       unread
       continuity
+      stalled
       (memory_updated_text librarian.mlh_measured_at)
       (memory_updated_text librarian.mlh_last_success_at)
       (match librarian.mlh_last_failure_kind with

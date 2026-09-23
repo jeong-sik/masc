@@ -5,6 +5,16 @@
    The counters this used to carry were totals since the server booted, which
    answered "has anything ever gone wrong" and never "is this keeper behind
    now". *)
+(* RFC librarian-lifecycle §4.10, rule 3: the atoms the Keeper's requests
+   skip because the Librarian stands behind the start the provider last
+   accepted. They are in neither the request nor memory until the Librarian
+   reads them. An alarm, not a Gate: nothing waits on it. *)
+type librarian_stalled =
+  { gap_start_atom : int  (** The Librarian point: the first atom of the gap. *)
+  ; gap_end_atom : int
+        (** The accepted start: the gap ends just before this atom. *)
+  }
+
 type librarian_health =
   { state : Keeper_librarian_queue_refresh.pass_end option
       (** [None] until this process has observed the keeper's durable drain.
@@ -32,6 +42,9 @@ type librarian_health =
           [last_success_at], or after the journal's start when the Librarian
           never committed. A failure older than the last success is not
           shown: the pass after it committed. *)
+  ; stalled : librarian_stalled option
+      (** [None] while the Librarian point is at or past the accepted start,
+          or when either side has no file to read. *)
   }
 
 type context_cycle =
@@ -260,7 +273,39 @@ let librarian_journal_outcome ~keepers_dir ~keeper_id =
   read ~window:1
 ;;
 
-let librarian_health ~config ~keepers_dir keeper_id ~continuity_saved =
+(* The gap, from files alone, so a server that just started shows it before
+   any drain has run here. The Librarian point is where a request starts
+   when the Librarian is used: the snapshot's cut unless the snapshot is
+   being rewritten from atom 0, else the read position -- the order the turn
+   driver takes (Keeper_turn_driver_try_provider.choose_continuity), without
+   the check against the checkpoint history this handler does not read. The
+   accepted start is the newest response-observed turn record on that trace
+   (Keeper_carried_front.read_seed), whichever lane recorded it: an official
+   client's byte window cut counts the same way. A size refusal records no
+   accepted start, so a turn that ended on one never raises this alarm. *)
+let librarian_stalled ~config ~keeper_id (cycle : context_cycle) =
+  let point =
+    match cycle.saved, cycle.rewriting_through with
+    | Some frontier, None ->
+      Some (frontier.Keeper_continuity_observation.trace_id, frontier.end_atom)
+    | Some _, Some _ | None, (Some _ | None) ->
+      (match
+         Keeper_librarian_progress.read
+           ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
+       with
+       | Ok (Some { Keeper_librarian_progress.position = { trace_id; end_atom; _ }; _ }) ->
+         Some (trace_id, end_atom)
+       | Ok None | Error _ -> None)
+  in
+  Option.bind point (fun (trace_id, point) ->
+    match (Keeper_carried_front.read_seed ~config ~keeper_name:keeper_id ~trace_id).seed with
+    | Some { Keeper_carried_front.first_atom; _ } when first_atom > point ->
+      Some { gap_start_atom = point; gap_end_atom = first_atom }
+    | Some _ | None -> None)
+;;
+
+let librarian_health ~config ~keepers_dir keeper_id ~context_cycle =
+  let continuity_saved = context_cycle.saved in
   let measurement = Keeper_librarian_queue_refresh.last_measurement ~config ~keeper_name:keeper_id in
   let last_success_at, last_failure =
     librarian_journal_outcome ~keepers_dir ~keeper_id
@@ -284,6 +329,7 @@ let librarian_health ~config ~keepers_dir keeper_id ~continuity_saved =
         continuity_saved
   ; last_success_at
   ; last_failure_kind
+  ; stalled = librarian_stalled ~config ~keeper_id context_cycle
   }
 ;;
 
@@ -405,8 +451,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
   let source_health = source_health ~keepers_dir keeper_id in
   let context_cycle = context_cycle ~config ~keeper_name:keeper_id in
   let librarian =
-    librarian_health ~config ~keepers_dir keeper_id
-      ~continuity_saved:context_cycle.saved
+    librarian_health ~config ~keepers_dir keeper_id ~context_cycle
   in
   match
     Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
@@ -669,6 +714,14 @@ let keeper_health_entry_to_json (h : keeper_health) =
           ; ( "last_failure_kind"
             , match h.librarian.last_failure_kind with
               | Some kind -> `String kind
+              | None -> `Null )
+          ; ( "stalled"
+            , match h.librarian.stalled with
+              | Some { gap_start_atom; gap_end_atom } ->
+                `Assoc
+                  [ "gap_start_atom", `Int gap_start_atom
+                  ; "gap_end_atom", `Int gap_end_atom
+                  ]
               | None -> `Null )
           ] )
     ; "librarian_failures", `Int h.librarian_failures

@@ -2814,6 +2814,14 @@ type memory_librarian_failure_kind =
   | Failure_lane_cancelled
   | Failure_unhandled_exception
 
+(* RFC librarian-lifecycle §4.10: the atoms the Keeper's requests skip
+   because the Librarian stands behind the start the provider last
+   accepted. [mls_gap_end_atom] is that start; the gap ends just before it. *)
+type memory_librarian_stalled = {
+  mls_gap_start_atom : int;
+  mls_gap_end_atom : int;
+}
+
 (* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
    standing, and what its last pass and its journal say. [None] in a field is
    "not measured", which the header prints as such; it is not zero. *)
@@ -2825,6 +2833,7 @@ type memory_librarian_health = {
   mlh_continuity_unread_atoms : int option;
   mlh_last_success_at : float option;
   mlh_last_failure_kind : memory_librarian_failure_kind option;
+  mlh_stalled : memory_librarian_stalled option;
 }
 
 type memory_context_frontier = {
@@ -5409,6 +5418,7 @@ let decode_memory_librarian_health keeper_json =
       ; "continuity_unread_atoms"
       ; "last_success_at"
       ; "last_failure_kind"
+      ; "stalled"
       ]
       json
   in
@@ -5430,6 +5440,20 @@ let decode_memory_librarian_health keeper_json =
   let* mlh_last_failure_kind =
     required_nullable_string_field json "last_failure_kind"
     |> Fun.flip Result.bind decode_memory_librarian_failure_kind
+  in
+  let* mlh_stalled =
+    match member "stalled" json with
+    | `Null -> Ok None
+    | stalled ->
+      let* () =
+        require_exact_object_fields
+          "librarian stalled" [ "gap_start_atom"; "gap_end_atom" ] stalled
+      in
+      let* mls_gap_start_atom = required_int_field stalled "gap_start_atom" in
+      let* mls_gap_end_atom = required_int_field stalled "gap_end_atom" in
+      if mls_gap_start_atom >= 0 && mls_gap_end_atom > mls_gap_start_atom
+      then Ok (Some { mls_gap_start_atom; mls_gap_end_atom })
+      else Error "librarian stalled gap must end after it starts"
   in
   let* () =
     if List.for_all
@@ -5455,6 +5479,7 @@ let decode_memory_librarian_health keeper_json =
     ; mlh_continuity_unread_atoms
     ; mlh_last_success_at
     ; mlh_last_failure_kind
+    ; mlh_stalled
     }
 
 let decode_memory_alert json =

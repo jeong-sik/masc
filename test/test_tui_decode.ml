@@ -4203,6 +4203,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("continuity_unread_atoms", `Int 0)
             ; ("last_success_at", `Null)
             ; ("last_failure_kind", `Null)
+            ; ("stalled", `Null)
             ] )
       ; ("librarian_failures", `Int failures)
       ; ("vision_ingest_errors", `Int (if id = "healthy" then 3 else 0))
@@ -4506,6 +4507,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("continuity_unread_atoms", `Int 0)
             ; ("last_success_at", `Null)
             ; ("last_failure_kind", `Null)
+            ; ("stalled", `Null)
             ]))
       json
   in
@@ -4523,6 +4525,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("continuity_unread_atoms", `Int 0)
             ; ("last_success_at", `Null)
             ; ("last_failure_kind", `Null)
+            ; ("stalled", `Null)
             ]))
       json
   in
@@ -4692,6 +4695,7 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
                     ; ("continuity_unread_atoms", `Int 0)
                     ; ("last_success_at", `Null)
                     ; ("last_failure_kind", `Null)
+                    ; ("stalled", `Null)
                     ] )
               ; ("librarian_failures", `Int 4)
               ; ("vision_ingest_errors", `Int 0)
@@ -4823,6 +4827,7 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
                       ; ("continuity_unread_atoms", `Int 0)
                       ; ("last_success_at", `Null)
                       ; ("last_failure_kind", `Null)
+                      ; ("stalled", `Null)
                       ] )
                 ; ("librarian_failures", `Int 0)
                 ; ("vision_ingest_errors", `Int 0)

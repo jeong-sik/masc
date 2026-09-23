@@ -325,6 +325,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
       ; mlh_continuity_unread_atoms = Some 0
       ; mlh_last_success_at = None
       ; mlh_last_failure_kind = None
+      ; mlh_stalled = None
       }
   ; mkh_librarian_failures = 0
   ; mkh_vision_ingest_errors = 0

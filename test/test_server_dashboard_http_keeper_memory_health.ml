@@ -959,6 +959,123 @@ let test_the_continuity_lag_is_measured_or_says_it_cannot_be () =
   Alcotest.(check int) "a position level with the snapshot is caught up" 0 (lag_atoms ())
 ;;
 
+(* A turn record of [trace_id]'s turn [turn] whose request carried atoms
+   [first_atom] to [total_atoms]; [observed] says a provider response was
+   joined to that range. A size refusal writes a record without it. *)
+let stall_turn_record ~trace_id ~turn ~first_atom ~total_atoms ~observed : Turn_record.t =
+  let window : Turn_record.model_input_window =
+    { transmitted_atoms = total_atoms - first_atom
+    ; total_atoms
+    ; measurement = Turn_record.Wire_shape
+    ; front_atom_digest = String.make 64 'f'
+    }
+  in
+  { execution_ids = []
+  ; keeper = "librarian-stalled"
+  ; agent_name = "librarian-stalled"
+  ; turn_kind = Turn_record.Direct
+  ; trace_id
+  ; absolute_turn = turn
+  ; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+  ; blocks = []
+  ; input_components = None
+  ; tool_surface_ref = None
+  ; runtime_profile = "glm"
+  ; selected_model = None
+  ; finish_reason = (if observed then Some "completed" else None)
+  ; context_window = None
+  ; price_input_per_million = None
+  ; price_output_per_million = None
+  ; request_latency_ms = None
+  ; ttfrc_ms = None
+  ; request_wire_observation = None
+  ; model_input_window = Some window
+  ; response_observed_model_input =
+      (if observed then Some { runtime_profile = "glm"; window } else None)
+  ; raw_trace_run_ref = None
+  ; sampling = { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
+  ; usage =
+      { input_tokens = None
+      ; output_tokens = None
+      ; cache_creation_input_tokens = None
+      ; cache_read_input_tokens = None
+      ; scope = Runtime_usage_scope.Per_request
+      }
+  ; ts = test_now
+  }
+;;
+
+(* RFC librarian-lifecycle §4.10: the Librarian_stalled alarm, read from the
+   Librarian's position file and the turn records alone. Nothing here runs a
+   drain, so the in-memory measurement stays absent the whole time, as it is
+   on a server that just started. The alarm names the gap from the
+   Librarian point to the start the provider last accepted, clears when the
+   Librarian reaches that start, and is not raised by a turn that ended on
+   a size refusal. *)
+let test_the_librarian_stalled_alarm_is_read_from_files () =
+  let module P = Masc.Keeper_librarian_progress in
+  Eio_main.run @@ fun env ->
+  let previous_fs = Fs_compat.get_fs_opt () in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base = fresh_dir "masc-librarian-stalled" in
+  let config = Masc.Workspace.default_config base in
+  let keeper_name = "librarian-stalled" in
+  let store = Masc.Keeper_types_support.keeper_turn_record_store config keeper_name in
+  Fun.protect
+    ~finally:(fun () ->
+      Dated_jsonl.prepare_for_directory_removal store;
+      Fs_compat.remove_tree base;
+      match previous_fs with
+      | Some fs -> Fs_compat.set_fs fs
+      | None -> Fs_compat.clear_fs ())
+  @@ fun () ->
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
+  let librarian () =
+    member "librarian"
+      (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base))
+  in
+  let gap () =
+    match member "stalled" (librarian ()) with
+    | `Null -> None
+    | stalled -> Some (int_field "gap_start_atom" stalled, int_field "gap_end_atom" stalled)
+  in
+  let trace_id = "stalled-trace" in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let read_to end_atom =
+    P.write ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+      { P.position = { trace_id; end_atom; last_atom_digest = String.make 64 'a' }
+      ; boundary_lines_seen = 1
+      }
+    |> Result.map_error P.write_error_to_string
+    |> get
+  in
+  let record ~turn ~first_atom ~observed =
+    Dated_jsonl.append store
+      (Turn_record.to_json
+         (stall_turn_record ~trace_id ~turn ~first_atom ~total_atoms:16 ~observed))
+  in
+  Alcotest.(check (option (pair int int))) "no files, no alarm" None (gap ());
+  read_to 2;
+  record ~turn:1 ~first_atom:2 ~observed:true;
+  Alcotest.(check (option (pair int int))) "a request from the Librarian point is no gap" None
+    (gap ());
+  (* The pinned part and this turn alone outgrew the provider: the turn
+     ended on the refusal and recorded no accepted start. *)
+  record ~turn:2 ~first_atom:8 ~observed:false;
+  Alcotest.(check (option (pair int int))) "a refused turn raises no alarm" None (gap ());
+  record ~turn:3 ~first_atom:8 ~observed:true;
+  Alcotest.(check (option (pair int int))) "an accepted start past the point is the gap"
+    (Some (2, 8)) (gap ());
+  Alcotest.(check bool) "with no drain measured in this process" true
+    (is_null (member "measured_at" (librarian ())));
+  read_to 8;
+  Alcotest.(check (option (pair int int))) "the Librarian at the accepted start clears it" None
+    (gap ());
+  read_to 10;
+  Alcotest.(check (option (pair int int))) "and past it" None (gap ())
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_keeper_memory_health"
@@ -967,6 +1084,8 @@ let () =
             test_context_cycle_separates_saved_and_prepared
         ; Alcotest.test_case "the Librarian position is read beside the cut" `Quick
             test_context_cycle_reads_the_librarian_position_beside_the_cut
+        ; Alcotest.test_case "the Librarian_stalled alarm is read from files" `Quick
+            test_the_librarian_stalled_alarm_is_read_from_files
         ; Alcotest.test_case "continuity lag measured or unknown" `Quick
             test_the_continuity_lag_is_measured_or_says_it_cannot_be
         ; Alcotest.test_case "curator canonical owners and malformed config" `Quick

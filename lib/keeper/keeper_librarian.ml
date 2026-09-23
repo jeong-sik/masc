@@ -33,6 +33,7 @@ type goal_context =
 type input =
   { turn_ref : Ids.Turn_ref.t
   ; goal_context : goal_context
+  ; keeper_id : Keeper_identity.Keeper_id.t
   ; keeper_instructions : string
   ; current : current_selection option
   ; working_context : Keeper_librarian_context.input
@@ -276,8 +277,15 @@ let goal_context_to_json = function
     `Assoc (("task_id", `String task_id) :: fields)
 ;;
 
+(* The Keeper's identity is host data every librarian prompt shows next to
+   [keeper_instructions], so the three passes read it from one binding. *)
+let keeper_id_variable (inp : input) =
+  "keeper_id", Keeper_identity.Keeper_id.to_string inp.keeper_id
+;;
+
 let prompt_variables (inp : input) : (string * string) list =
-  [ ( "keeper_instructions"
+  [ keeper_id_variable inp
+  ; ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "continuity", "null"
   ; "working_context", Yojson.Safe.to_string (Keeper_librarian_context.prompt_json inp.working_context)
@@ -294,7 +302,8 @@ let prompt_variables (inp : input) : (string * string) list =
 ;;
 
 let continuity_prompt_variables (inp : input) ~continuity =
-  [ ( "keeper_instructions"
+  [ keeper_id_variable inp
+  ; ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
   ; "current_memory", format_current_selection_for_prompt inp.current
@@ -304,7 +313,8 @@ let continuity_prompt_variables (inp : input) ~continuity =
 ;;
 
 let working_context_prompt_variables (inp : input) =
-  [ ( "keeper_instructions"
+  [ keeper_id_variable inp
+  ; ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
   ; "current_memory", format_current_selection_for_prompt inp.current

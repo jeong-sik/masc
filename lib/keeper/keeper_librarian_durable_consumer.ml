@@ -556,12 +556,14 @@ let read_positions ~config ~keeper_name =
   Ok { runtime_keepers_dir; memory_keepers_dir; lines; progress; official_cursor }
 ;;
 
+(* The Keeper identity comes from the same read that refuses a blank name,
+   so a pass that has its metadata also has the id the Librarian is told. *)
 let read_meta ~config ~keeper_name =
   match Domain_pool_ref.submit_io_or_inline (fun () ->
-    Keeper_meta_store.read_effective_meta_presence config keeper_name) with
-  | Ok (Keeper_meta_store.Meta_present meta) -> Ok meta
-  | Ok Keeper_meta_store.Meta_absent -> Error Keeper_meta_absent
-  | Ok (Keeper_meta_store.Meta_not_current detail) -> Error (Keeper_meta_unreadable detail)
+    Keeper_meta_store.read_effective_meta_presence_named config keeper_name) with
+  | Ok (keeper_id, Keeper_meta_store.Meta_present meta) -> Ok (keeper_id, meta)
+  | Ok (_, Keeper_meta_store.Meta_absent) -> Error Keeper_meta_absent
+  | Ok (_, Keeper_meta_store.Meta_not_current detail) -> Error (Keeper_meta_unreadable detail)
   | Error detail -> Error (Keeper_meta_unreadable detail)
 ;;
 
@@ -583,7 +585,7 @@ type unread =
 let unread_turns ~config ~keeper_name =
   let ( let* ) = Result.bind in
   let* positions = read_positions ~config ~keeper_name in
-  let* meta = read_meta ~config ~keeper_name in
+  let* _keeper_id, meta = read_meta ~config ~keeper_name in
   let current_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let official =
     R.unread_official_turns ~lines:positions.lines ~cursor:positions.official_cursor
@@ -646,7 +648,7 @@ let consume_one_with_extent
   match recovered with
   | Some outcome -> Ok outcome
   | None ->
-  let* meta = read_meta ~config ~keeper_name in
+  let* keeper_id, meta = read_meta ~config ~keeper_name in
   let current_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let progress_is_current =
     match progress with
@@ -1102,6 +1104,7 @@ let consume_one_with_extent
       in
       let input : Keeper_librarian.input =
         { turn_ref
+        ; keeper_id
         (* Turn boundaries do not carry historical task identity. The current
            task can belong to a later turn, so borrowing it would attach an old
            range to an unrelated Goal. Exact historical identity must be added

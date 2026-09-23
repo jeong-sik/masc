@@ -88,5 +88,6 @@ module For_testing : sig
     -> current:Keeper_librarian.current_selection option
     -> working_context:Keeper_librarian_context.input
     -> Keeper_librarian.input
-  (** The input the queue pass hands the Librarian. *)
+  (** The input the queue pass hands the Librarian. Reads the Goal store and
+      goal-task links for [meta.current_task_id] through the IO pool. *)
 end

@@ -10089,9 +10089,17 @@ let approval_items (state : state) =
 let approvals_open_questions (state : state) =
   Option.map Masc_tui_ask_projection.open_rows state.asks_snapshot
 
+(* The questions themselves. One ask can carry several, and counting the asks
+   under the word "question" understated the work: the live surface read
+   "MASC Approvals (1 question)" and "Questions waiting on you (1)" over one
+   ask holding two, with "+2 more questions" three rows below saying so. *)
 let approvals_open_question_count (state : state) =
   match approvals_open_questions state with
-  | Some rows -> List.length rows
+  | Some rows ->
+      List.fold_left
+        (fun total (row : Tui_decode.ask_row) ->
+          total + List.length row.Tui_decode.ar_questions)
+        0 rows
   | None -> 0
 
 let approvals_surface_pending (state : state) =

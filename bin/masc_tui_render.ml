@@ -1465,7 +1465,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
       box_divider buf cols;
       box_line buf cols
         (Printf.sprintf "  %s%s[?] Questions waiting on you (%d) · a:open answers%s" Ansi.bold (Theme.warn ())
-           (List.length open_rows) Ansi.reset);
+           (Masc_tui_types.approvals_open_question_count state) Ansi.reset);
       match open_rows with
       | [] ->
           box_line buf cols
@@ -1517,10 +1517,12 @@ let draw_ask_questions buf cols (state : state) ~budget =
             question_blocks;
           if plan.Ask_layout.questions_hidden > 0 then
             box_line buf cols
-              (Printf.sprintf "    %s+%d more question%s -- j/k to reach%s"
-                 Ansi.dim plan.Ask_layout.questions_hidden
-                 (if plan.Ask_layout.questions_hidden = 1 then "" else "s")
-                 Ansi.reset);
+              (* "in this ask", because the count above names every question
+                 the fleet is waiting on and this one names the selected
+                 ask's own. Both said "questions", and a reader saw "(1)"
+                 three rows above "+2 more questions". *)
+              (Printf.sprintf "    %s+%d more in this ask -- j/k to reach%s"
+                 Ansi.dim plan.Ask_layout.questions_hidden Ansi.reset);
           if plan.Ask_layout.context_shown then Buffer.add_string buf why_text
           else if plan.Ask_layout.context_notice then
             (* The questions are the ask and the reason explains it, so the

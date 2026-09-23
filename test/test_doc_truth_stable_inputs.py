@@ -19,7 +19,8 @@ def checkout(destination):
     # belong to this fixture. No original checkout/tag is modified.
     subprocess.run(["git", "clone", "--quiet", "--shared", "--no-tags",
                     "--single-branch", str(ROOT), str(destination)], check=True)
-    for name in ("check-doc-truth.sh", "check-version-truth.sh", "bump-version.sh"):
+    for name in ("check-doc-truth.sh", "check-version-truth.sh", "bump-version.sh",
+                 "changelog-fragments.py"):
         shutil.copy2(ROOT / "scripts" / name, destination / "scripts" / name)
     return destination
 
@@ -70,9 +71,16 @@ class StableDocumentationInputs(unittest.TestCase):
             current = package_version(repo)
             major, minor, patch = current.split(".")
             candidate = f"{major}.{minor}.{int(patch) + 1}"
+            fragment = repo / "changelog.d" / "999999.md"
+            fragment.parent.mkdir(exist_ok=True)
+            fragment.write_text("### Fixed\n\n- Fixture fragment (#999999).\n")
             bumped = subprocess.run(["bash", "scripts/bump-version.sh", candidate],
                                     cwd=repo, env=self.env, text=True, capture_output=True)
             self.assertEqual(bumped.returncode, 0, bumped.stdout + bumped.stderr)
+            # The bump folds pending fragments into [Unreleased].
+            self.assertFalse(fragment.exists())
+            self.assertIn("- Fixture fragment (#999999).",
+                          (repo / "CHANGELOG.md").read_text())
 
             for name in INSTALL_DOCS:
                 pins = re.findall(r"(?m)^TAG=v(.+)$", (repo / name).read_text())

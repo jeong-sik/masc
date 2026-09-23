@@ -5,7 +5,8 @@
     judgment model (TypeSafe Jev) is asked, per statement, whether the claim
     conveys it. A memory with a statement the claim does not convey is taken
     out of the answer's [absorbed] list and stays current; the new claim is
-    still applied. The rest are absorbed as the answer said.
+    still applied. A memory whose every statement is conveyed is absorbed as
+    the answer said; only such a verdict authorizes removing a memory.
 
     The gate only ever narrows [absorbed]. When the gate is declared off, or
     the Keeper is excluded, the answer is applied as it came. When the gate is
@@ -55,7 +56,7 @@ type judged =
   ; conveyed : source_verdict list  (** memories absorbed: every statement conveyed *)
   ; unjudged : Keeper_memory_os_types.absorbed_statement list
         (** absorptions the gate could not judge because the answer names a
-            claim or a memory the pass did not carry; applied as they came *)
+            claim or a memory the pass did not carry; the memory stays current *)
   ; unjudgeable : Keeper_memory_os_types.absorbed_statement list
         (** absorptions the gate could not judge because the claim, or a
             statement of the memory, does not fit a request

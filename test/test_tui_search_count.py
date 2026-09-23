@@ -129,7 +129,7 @@ def run(executable: str) -> None:
     assert isinstance(payload, dict)
     facts = payload["ordinary"]["facts"]
     for fact, prefix in zip(facts, ("first", "second")):
-        fact.update(claim=f"{prefix} deploy", category="note",
+        fact.update(claim=f"{prefix} deploy", category="lesson",
                     origin=f"authored-{prefix}")
 
     def memory_phrase_interact(process, fd, _slave, output, _base):
@@ -138,8 +138,8 @@ def run(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"\r", b"\xe2\x96\xb8 alpha")
         h.wait_for_output(process, fd, output, b"first deploy", start=0, timeout=5)
         h.send_and_wait(process, fd, output, b"/", b"/")
-        h.send_and_wait(process, fd, output, b"  deploy note  ", b"/  deploy note   (2)")
-        h.send_and_wait(process, fd, output, b"\r", b"/  deploy note   (2) n/N")
+        h.send_and_wait(process, fd, output, b"  deploy lesson  ", b"/  deploy lesson   (2)")
+        h.send_and_wait(process, fd, output, b"\r", b"/  deploy lesson   (2) n/N")
         # Both rows survive the pre-existing Memory filter. The phrase crosses
         # claim/category and has spaces at both ends: n/N must use the same
         # text and normalization as the filter, not just report its count.

@@ -1009,6 +1009,12 @@ let attempt_runtime_candidates
        then lane_terminal (this_candidate terminal_error)
        else if retry_admitted && error_is_retryable
        then loop ~observed_overflow ~repeated_models (idx + 1) rest
+       else if Keeper_internal_error.is_preempted_before_first_token error
+       then
+         (* A person queued behind this turn (#38094). An overflow an earlier
+            candidate saw must not replace it: the turn yields, it does not
+            fail for capacity. *)
+         lane_terminal (this_candidate error)
        else if is_last
        then (
          (* Lane fully exhausted: an overflow seen anywhere in the rotation

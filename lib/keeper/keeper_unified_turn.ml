@@ -1193,7 +1193,28 @@ let run_keeper_cycle
                     Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper", meta.name; "outcome", "preempted_by_person" ]
                     ();
-                  Ok (Turn_skipped meta), turn_state
+                  (* The attempt already wrote under [keeper_turn_id] (manifest,
+                     receipt, turn record, FSM), so the turn id is spent: the
+                     next cycle must not write under the same one. Only the
+                     counter moves -- no failure, latency or proactive
+                     bookkeeping, since nothing failed. *)
+                  let updated_meta =
+                    { meta with
+                      updated_at = now_iso ()
+                    ; runtime =
+                        { meta.runtime with
+                          usage =
+                            { meta.runtime.usage with
+                              total_turns = meta.runtime.usage.total_turns + 1
+                            ; last_turn_ts = Time_compat.now ()
+                            }
+                        }
+                    }
+                  in
+                  let committed =
+                    commit_turn_runtime_or_raise ~config ~before:meta ~after:updated_meta
+                  in
+                  Ok (Turn_skipped committed), turn_state
                 | Error err ->
                   (match
                      require_last_execution_for_finalize

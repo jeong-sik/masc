@@ -121,8 +121,10 @@ let of_masc_internal_kind wire = function
   | Keeper_internal_error.Wire_resumable_cli_session
   | Keeper_internal_error.Wire_receipt_persistence_failed
   | Keeper_internal_error.Wire_gate_replay_repair_required
-  (* #38094: a preempted turn is settled as skipped and writes no terminal
-     receipt, so this wire has no trace to classify from yet. *)
+  (* #38094: a preempted turn's receipt carries outcome [`Cancelled]
+     (Keeper_agent_error.receipt_outcome_kind_of_core_error), and the
+     disposition reads the outcome before it reaches a terminal class, so no
+     class is named for this wire. *)
   | Keeper_internal_error.Wire_preempted_before_first_token -> Unknown wire
 ;;
 

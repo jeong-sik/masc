@@ -331,3 +331,6 @@ val classify_masc_internal_error_of_string :
 
 val classify_masc_internal_error :
   Agent_core.Error.t -> masc_internal_error option
+
+val is_preempted_before_first_token : Agent_core.Error.t -> bool
+(** [true] for {!Preempted_before_first_token} carried on the error (#38094). *)

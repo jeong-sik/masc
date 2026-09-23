@@ -1344,3 +1344,26 @@ let classify_masc_internal_error (err : Agent_core.Error.t) :
         { effect_disposition; detail; _ }) ->
     terminal_effect_failed ~effect_disposition ~detail
   | _ -> None
+
+let is_preempted_before_first_token (err : Agent_core.Error.t) =
+  match classify_masc_internal_error err with
+  | Some (Preempted_before_first_token _) -> true
+  | Some
+      ( Official_client_recovery_required _
+      | Runtime_exhausted _
+      | Capacity_backpressure _
+      | Resumable_cli_session _
+      | Accept_rejected _
+      | Internal_unhandled_exception _
+      | Internal_bridge_exception _
+      | Internal_contract_rejected _
+      | Incomplete_tool_transcript _
+      | Terminal_effect_failed _
+      | Provider_attempt_effect_fenced _
+      | Tool_correction_lost _
+      | Host_stopped_turn _
+      | Runtime_connection_closed _
+      | Receipt_persistence_failed _
+      | Gate_replay_repair_required _ )
+  | None -> false
+;;

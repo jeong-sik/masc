@@ -1980,9 +1980,10 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
               synthesized zero-turn run result, which the keeper could only
               read as a run that succeeded without an AfterTurn ordinal, so
               every preemption became a failed cycle (#38094). It is its own
-              typed value now: the lane walk stops on it without noting a rest
-              (Keeper_runtime_failure_route), and the unified turn settles it
-              as skipped, leaving the source pending. *)
+              typed value now: the lane walk ends on it (Keeper_turn_driver),
+              the failure route notes no rest against the candidate, and the
+              unified turn settles it as skipped, leaving the source
+              pending. *)
            Log.Keeper.info ~keeper_name:ctx.keeper_name
              "%s: autonomous turn yielded to a queued person before the \
               provider's first event runtime=%s"

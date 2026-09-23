@@ -606,28 +606,8 @@ let is_input_required_error (err : Agent_core.Error.t) : bool =
 
 (* RFC-0441 pre-first-token preemption (#38094): the turn yielded to a person
    before its provider produced anything, so it did no work and did not fail. *)
-let is_preempted_before_first_token (err : Agent_core.Error.t) : bool =
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Preempted_before_first_token _) -> true
-  | Some
-      ( Keeper_turn_driver.Official_client_recovery_required _
-      | Keeper_turn_driver.Runtime_exhausted _
-      | Keeper_turn_driver.Capacity_backpressure _
-      | Keeper_turn_driver.Resumable_cli_session _
-      | Keeper_turn_driver.Accept_rejected _
-      | Keeper_turn_driver.Internal_unhandled_exception _
-      | Keeper_turn_driver.Internal_bridge_exception _
-      | Keeper_turn_driver.Internal_contract_rejected _
-      | Keeper_turn_driver.Incomplete_tool_transcript _
-      | Keeper_turn_driver.Terminal_effect_failed _
-      | Keeper_turn_driver.Provider_attempt_effect_fenced _
-      | Keeper_turn_driver.Tool_correction_lost _
-      | Keeper_turn_driver.Host_stopped_turn _
-      | Keeper_turn_driver.Runtime_connection_closed _
-      | Keeper_turn_driver.Receipt_persistence_failed _
-      | Keeper_turn_driver.Gate_replay_repair_required _ )
-  | None -> false
-;;
+let is_preempted_before_first_token =
+  Keeper_internal_error.is_preempted_before_first_token
 
 (** [true] when an error represents terminal runtime exhaustion. Accept
     rejection is an accept-contract result; no-progress accept rejection is

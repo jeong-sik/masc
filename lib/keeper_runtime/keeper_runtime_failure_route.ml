@@ -141,11 +141,11 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      route. *)
   | Keeper_internal_error.Host_stopped_turn _ -> exhaust_failure Internal_opaque
   (* A person queued behind this autonomous turn before its provider produced
-     anything (RFC-0441). The turn yields to them; walking to the next
-     candidate would start another provider call while they wait, and the
-     abandoned candidate did not fail, so the walk ends here with no rest or
-     demotion noted (Exhausted_visible_alive notes none). The keeper then
-     settles the turn as skipped, not failed (#38094). *)
+     anything (RFC-0441). The abandoned candidate did not fail, so the route
+     notes no rest or demotion against it (Exhausted_visible_alive notes
+     none). The walk itself stops in [Keeper_turn_driver], which ends the lane
+     on this error ahead of any overflow; the keeper settles the turn as
+     skipped, not failed (#38094). *)
   | Keeper_internal_error.Preempted_before_first_token _ ->
     exhaust_failure Internal_opaque
   (* The runtime's transport closed. This used to reach agent-core as

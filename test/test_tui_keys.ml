@@ -1398,6 +1398,59 @@ let test_visible_surface_ring_declutter () =
   Alcotest.(check bool) "Approvals shown when pending items exist" true
     (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
 
+(* One ask can carry several questions, and the surface counts them under the
+   word "question": its title, the block header above the rows, and the tab
+   badge all read from [approvals_open_question_count]. It counted the asks,
+   so a fleet holding one ask of two questions said "1 question" while the
+   line three rows below it said "+2 more questions". *)
+let test_the_question_count_counts_questions () =
+  let ask id questions : Tui_decode.ask_row =
+    { Tui_decode.ar_keeper = "jazz-developer"
+    ; ar_id = id
+    ; ar_asked_at = 0.0
+    ; ar_context = None
+    ; ar_questions =
+        List.init questions (fun index ->
+            { Tui_decode.aq_id = Printf.sprintf "%s-q%d" id index
+            ; aq_header = "header"
+            ; aq_prompt = "prompt"
+            ; aq_mode = Tui_decode.Ask_single
+            ; aq_free_text = Tui_decode.Ask_choices_only
+            ; aq_choices = []
+            })
+    ; ar_resolution = Tui_decode.Ask_open
+    }
+  in
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.asks_snapshot <-
+    Some
+      { Tui_decode.asn_keeper = None
+      ; asn_open_count = 2
+      ; asn_rows = [ ask "a1" 2; ask "a2" 1 ]
+      };
+  Alcotest.(check int) "two asks holding three questions" 3
+    (approvals_open_question_count state);
+  (* The surface's own pending reading is the approvals plus these, and it
+     answers the tab badge as well as the title. *)
+  Alcotest.(check int) "and the surface counts them the same way" 3
+    (approvals_surface_pending state);
+  (* A resolved ask is not waiting on anyone, so its questions are not
+     counted either. *)
+  state.asks_snapshot <-
+    Some
+      { Tui_decode.asn_keeper = None
+      ; asn_open_count = 1
+      ; asn_rows =
+          [ ask "a1" 2
+          ; { (ask "a2" 4) with Tui_decode.ar_resolution =
+                Tui_decode.Ask_answered
+                  { aa_answered_at = 1.0; aa_question_ids = [] }
+            }
+          ]
+      };
+  Alcotest.(check int) "only the open ask's questions" 2
+    (approvals_open_question_count state)
+
 let test_visible_surface_ring_open_ask () =
   (* A keeper's question is an approval of a different kind: it waits on the
      same human, on the same surface. With zero approvals and one open ask
@@ -2957,6 +3010,8 @@ let () =
             test_visible_surface_ring_declutter
         ; Alcotest.test_case "open ask keeps approvals in the ring" `Quick
             test_visible_surface_ring_open_ask
+        ; Alcotest.test_case "the question count counts questions" `Quick
+            test_the_question_count_counts_questions
         ; Alcotest.test_case "braille sparkline renders levels" `Quick
             test_braille_sparkline
         ; Alcotest.test_case "fleet total cost sums correctly" `Quick

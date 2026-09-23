@@ -30,7 +30,7 @@ let test_rate_limit_invalid_hints_do_not_create_deadlines () =
     | Some (State.Unknown_scope_rate_limit { retry_after = None; _ }) -> ()
     | Some (State.Unknown_scope_rate_limit _) | None ->
         Alcotest.fail "invalid provider delay became usable")
-    [Float.nan; Float.infinity; Float.neg_infinity; -1.]
+    [Float.nan; Float.infinity; Float.neg_infinity; -1.; 0.]
 ;;
 
 let test_rate_limit_delayed_observation_keeps_newer_hint () =
@@ -116,6 +116,24 @@ let test_a_candidate_cell_holds_the_observation_until_success () =
        (Runtime_candidate_backpressure.candidate_backpressure ~now:1e12 ~candidate))
 ;;
 
+(* A 429 carrying [Retry-After: 0] names no wait, the same as a 429 with no
+   hint. The candidate stays demoted until it answers; the next read must not
+   put it back at the head of the walk. *)
+let test_a_zero_second_hint_holds_the_rate_limit_until_success () =
+  let candidate =
+    Runtime_candidate_backpressure.create_candidate
+      ~binding:(Runtime_candidate_backpressure.Http_binding_unavailable "fixture")
+  in
+  Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:(Some 0.);
+  Alcotest.(check bool) "a zero-second hint is held like an unstated one" true
+    (Option.is_some
+       (Runtime_candidate_backpressure.candidate_backpressure ~now:1e12 ~candidate));
+  Runtime_candidate_backpressure.note_candidate_success ~candidate;
+  Alcotest.(check bool) "a success clears it" true
+    (Option.is_none
+       (Runtime_candidate_backpressure.candidate_backpressure ~now:1e12 ~candidate))
+;;
+
 let () =
   Alcotest.run "runtime_candidate_backpressure"
     [ ( "candidate backpressure"
@@ -135,6 +153,8 @@ let () =
             test_a_rate_limit_and_a_failed_attempt_are_held_independently
         ; Alcotest.test_case "a candidate cell holds the observation until success" `Quick
             test_a_candidate_cell_holds_the_observation_until_success
+        ; Alcotest.test_case "a zero-second hint holds until success" `Quick
+            test_a_zero_second_hint_holds_the_rate_limit_until_success
         ] )
     ]
 ;;

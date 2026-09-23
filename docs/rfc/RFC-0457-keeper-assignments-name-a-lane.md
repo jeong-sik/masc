@@ -208,7 +208,7 @@ a merely declared lane is dormant until a routed root names it.
    맞는 자리다. 별도 작업.
 2. **후보가 전부 카탈로그에서 사라진 레인을 배정이 가리키면** `unavailable_assignments` 에 안 잡힌다
    (`runtime.ml:1362-1368` 이 레인 이름을 제외한다). 이 구멍은 지금도 있고 이 변경이 만들지 않는다.
-   `dropped_lanes` 로는 보인다. 별도 작업.
+   별도 작업.
 3. **카탈로그 전체 회전.** 실패 사유가 `Capacity_backpressure` / `Server_error` / `Auth_error` /
    `Runtime_exhausted` / `Runtime_candidates_filtered` / `Resumable_cli_session` 이면 회전이
    카탈로그를 선언 순서대로 걷는다. 그래서 "안 쓰는 바인딩" 이 없다 — 전부 살아있는 폴백 목적지다.

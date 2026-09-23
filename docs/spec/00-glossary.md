@@ -1297,6 +1297,24 @@ status: reference
   요약이 빠져도 turn은 거절하지 않고 WARN으로 알린다.
   → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
 
+**Extra System Context (턴별 문맥)**
+: Keeper hook이 매 turn 새로 조립해 provider 지시 표면에 얹는 `System` 메시지.
+  `Agent_core.Types.Extra_system_context_provenance`를 달고, 그 태그가 `Invalid`나
+  `Duplicate`여도 이 문맥이다(`is_extra_context`). 고정(Pinned)이라 atom으로 세지
+  않고 어떤 자르기도 지우지 않는다 — 매 turn 다시 조립되므로 살아남아야 한다. 이
+  문맥을 실은 요청은 실어 보낸 History 크기의 표본이 아니다.
+  - **Working State와 다른 것**: Librarian working state도 같은 표면의 두 번째
+    `System` 메시지지만 표식이 다르다 — `working_state_marker_key`(`working_state_metadata`)
+    하나만 달고, 요약된 범위가 조립한다. 턴별 문맥은 AGENT_CORE가 덧붙이는 carrier이고,
+    working state는 범위가 조립하는 것이다.
+  - **Composed System Context**: 이 둘을 함께 부르는 이름(`is_composed_system_context`).
+    공식 클라이언트 어댑터는 이 메시지들을 canonical history 스냅숏에서 빼고 resume 때
+    다시 보낸다.
+  - **입력 귀속 검사**: turn 기록의 입력 귀속(`input_components`)은 요청 하나에 carrier가
+    하나라고 보고 푼다. carrier가 두 번 보이면 요청은 그대로 나가고, 입력 귀속만 비운 채
+    `prompt_context_carrier_repeated`를 사유로 남긴다.
+  → [Runtime_model_input_tail_window](../../lib/runtime/runtime_model_input_tail_window.mli) · [Keeper_official_client_host.is_composed_system_context](../../lib/keeper/keeper_official_client_host.mli) · [Keeper_agent_prompt_metrics](../../lib/keeper/keeper_agent_prompt_metrics.mli)
+
 **Continuity Synthesis Observation (대화 요약 진행 관측)**
 : 이번 서버 실행에서 Librarian이 마지막으로 선택한 Atom 구간, 그때 확인한
   완료 경계, 실행·저장·중단 상태. `context_cycle.synthesis`와 TUI Memory 화면에

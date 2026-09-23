@@ -49,16 +49,22 @@ let drawn_width ~owner text =
   measure 0 0
 
 (* The vocabularies the column draws, each read from the function that
-   produces it -- one per arm of [fusion_run_state_text]
-   (masc_tui_render_prim.ml:2363).
+   produces it. [fusion_run_state_text] (masc_tui_render_prim.ml) has three
+   arms and they account for four sets: a running run draws a compact stage,
+   a completed one draws its status word, and the failed arm stands in as two
+   -- the delivery set and the judge set.
 
-   The failed arm draws [frs_failure_code], which is a string off the wire,
-   and the two failure sets below stand in for it: they are what this
-   repository's server writes there (masc_tui_render_prim.ml:2357-2362 says
-   the code is a tag from one of the two closed sets). Both ends of that wire
-   live here, so the stand-in holds today -- but it is a stand-in. A server
-   that starts sending a code from outside those sets would truncate in the
-   cell with this check silent. *)
+   That arm draws [frs_failure_code], which is a string off the wire; the two
+   failure sets are what this repository's server writes there, and the
+   comment above that function says the code is a tag from one of the two
+   closed sets. Both ends of the wire live here, so the stand-in holds today
+   -- but it is a stand-in. A server that starts sending a code from outside
+   those sets would truncate in the cell with this check silent.
+
+   Named by function, not by line: this file exists because a fact copied
+   away from where it is produced goes stale, and a line number is that kind
+   of copy. The two this comment carried were already fourteen rows off when
+   the review read them. *)
 let vocabularies =
   [ ( "the delivery failure codes"
     , "lib/fusion/fusion_sink.ml"

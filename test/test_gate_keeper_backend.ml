@@ -13,6 +13,7 @@ let stream_payload_exn
       ?(channel_user_id = "")
       ?(channel_user_name = "")
       ?(channel_workspace_id = "")
+      ?sender_keeper
       ~name
       ~message
       ()
@@ -47,6 +48,7 @@ let stream_payload_exn
   ; channel_user_id
   ; channel_user_name
   ; channel_workspace_id
+  ; sender_keeper
   ; attachments
   ; direct_message
   ; admission_intent = Server_routes_http_keeper_stream.Queue_only
@@ -3866,6 +3868,33 @@ let test_chat_speaker_of_request_connector_is_external () =
   check bool "connector speaker authority is external" true
     (speaker.speaker_authority = Keeper_chat_store.External)
 
+(* RFC-0468 §3.2: another Keeper's masc_keeper_msg arrives on the agent
+   channel with no connector speaker. The typed sender is what keeps it from
+   reading as the operator. *)
+let test_chat_speaker_of_request_sender_keeper_is_keeper () =
+  let keeper_id =
+    match Keeper_identity.Keeper_id.of_string "masc-the-leader" with
+    | Some keeper_id -> keeper_id
+    | None -> fail "keeper id fixture"
+  in
+  let payload =
+    stream_payload_exn ~name:"luna" ~message:"please review" ~channel:"agent"
+      ~sender_keeper:keeper_id ()
+  in
+  let speaker = Server_routes_http_keeper_stream.For_testing.chat_speaker_of_request payload in
+  check (option string) "keeper speaker id" (Some "masc-the-leader") speaker.speaker_id;
+  check bool "keeper speaker authority is keeper" true
+    (speaker.speaker_authority = Keeper_chat_store.Keeper)
+
+(* The same agent-channel request without a sender Keeper is the dashboard or
+   an unregistered caller: it stays the owner. *)
+let test_chat_speaker_of_request_agent_channel_without_sender_is_owner () =
+  let payload = stream_payload_exn ~name:"luna" ~message:"hello" ~channel:"agent" () in
+  let speaker = Server_routes_http_keeper_stream.For_testing.chat_speaker_of_request payload in
+  check (option string) "owner speaker id" None speaker.speaker_id;
+  check bool "agent channel without sender stays owner" true
+    (speaker.speaker_authority = Keeper_chat_store.Owner)
+
 (* ── Filesystem-safe sanitizer ──────────────────────────────────────── *)
 
 let test_filesystem_safe_normal () =
@@ -4169,6 +4198,10 @@ let () =
             test_chat_speaker_of_request_copilot_is_owner;
           test_case "connector request speaker is external" `Quick
             test_chat_speaker_of_request_connector_is_external;
+          test_case "sender Keeper request speaker is keeper" `Quick
+            test_chat_speaker_of_request_sender_keeper_is_keeper;
+          test_case "agent channel without sender Keeper stays owner" `Quick
+            test_chat_speaker_of_request_agent_channel_without_sender_is_owner;
         ] );
       ( "filesystem_safe",
         [

@@ -381,6 +381,84 @@ let test_an_empty_memory_page_uses_the_shared_notes () =
     (contains "Fleet Memory Search" (lines unread))
 ;;
 
+(* The filter bar names the filter its number is over.
+
+   [visible_memory_keepers] narrows on [memory_overview_query] -- the text
+   being typed while a search is open, the applied one otherwise. The bar
+   decided whether to draw from that value and then quoted [search_last]
+   instead, so typing the first filter drew the live count beside an empty
+   pair of quotes: a filter that matches everything, and a number that says
+   one keeper.
+
+   The noun follows the number too. Filtering by a Keeper's name usually
+   leaves exactly one, which read "1 matching keepers". *)
+let test_the_memory_filter_bar_names_the_query_it_counted () =
+  let bar ~typing query =
+    let state = make_state () in
+    state.Types.memory_health <-
+      Some
+        (let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:10
+            ~snapshot_bytes:1024 in
+         let other = make_keeper_health ~keeper_id:"beta" ~facts:4
+             ~snapshot_bytes:512 in
+         { Decode.mhs_generated_at = 1000.0
+         ; mhs_keepers = [ keeper; other ]
+         ; mhs_total_facts = 14
+         ; mhs_total_observed_facts = 14
+         ; mhs_total_derived_facts = 0
+         ; mhs_total_support_invalidations = 0
+         ; mhs_total_snapshot_bytes = 1536
+         ; mhs_total_source_facts = 0
+         ; mhs_total_source_invalidations = 0
+         ; mhs_total_source_snapshot_bytes = 0
+         ; mhs_total_librarian_failures = 0
+         ; mhs_total_librarian_unread_turns = Some 0
+         ; mhs_total_librarian_continuity_unread_atoms = 0
+         ; mhs_total_librarian_continuity_unmeasured = 0
+         ; mhs_total_read_errors = 0
+         ; mhs_total_source_read_errors = 0
+         ; mhs_warn_alerts = 0
+         ; mhs_error_alerts = 0
+         ; mhs_starving_keepers = 0
+         ; mhs_refused_keepers = []
+         ; mhs_total_vision_ingest_errors = 0
+         });
+    state.Types.search <- (if typing then Some query else None);
+    state.Types.search_last <- (if typing then "" else query);
+    let drawn = ref [] in
+    let add line = drawn := line :: !drawn in
+    Render_memory.render_memory_body ~cols:110 ~budget:24 state ~push:add
+      ~push_styled:(fun ~style:_ line -> add line)
+      ~push_selected:add
+      ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    String.concat "\n" (List.rev !drawn)
+  in
+  List.iter
+    (fun typing ->
+      let drawn = bar ~typing "alpha" in
+      check bool
+        (Printf.sprintf "typing=%b: the bar quotes the filter it counted" typing)
+        true
+        (contains "\"alpha\"" drawn);
+      check bool
+        (Printf.sprintf "typing=%b: and never an empty one" typing)
+        false
+        (contains "Filter [/]:\027[0m \"\"" drawn);
+      check bool
+        (Printf.sprintf "typing=%b: one match takes the singular" typing)
+        true
+        (contains "(1 matching keeper)" drawn))
+    [ true; false ];
+  (* Two matches keep the plural, so the case is about the number and not
+     about dropping an "s". *)
+  check bool "two matches keep the plural" true
+    (contains "(2 matching keepers)" (bar ~typing:true "a"));
+  (* A filter being typed that matches no keeper is the one the empty note
+     quotes, not the applied one (empty here). *)
+  check bool "the empty note quotes the filter being typed" true
+    (contains "(no keepers matching \"zzz\"" (bar ~typing:true "zzz"))
+
 let test_render_memory_body_with_keepers () =
   let state = make_state () in
   let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024 in
@@ -505,7 +583,13 @@ let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
     (contains "continuity behind ?" both);
   check bool "a measured lag prints its number" true (contains "continuity behind 3" both);
   check bool "the header sums the measured keepers and counts the rest" true
-    (contains "3 atoms behind in continuity (1 keepers not measured)" both)
+    (contains "3 atoms behind in continuity (1 keeper not measured)" both);
+  (* One is the count these reach on an ordinary day, and the line used to
+     spell every noun plural whatever the number in front of it was. *)
+  check bool "a count of one takes the singular" true
+    (contains "1 keeper not measured" both);
+  check bool "and a count that is not one keeps the plural" true
+    (contains "3 atoms behind" both)
 ;;
 
 (* How the last pass ended and what the journal last failed with are drawn
@@ -629,6 +713,94 @@ let test_render_memory_body_cursor_clamping () =
     ~push_divider:(fun () -> incr count)
     ~push_empty:(fun () -> incr count);
   check bool "selected row was clamped and called" true !selected_called
+;;
+
+(* The twin of [test_the_memory_filter_bar_names_the_query_it_counted], on the
+   fact browser's own bar. Its rows are narrowed by the text being typed while
+   a search is open, and the bar decided and quoted from the applied filter
+   instead: with one already applied, a second one typed over it drew the old
+   word above rows the new one had left. The empty-quotes shape the keeper
+   table showed never appeared here, because the old word was still there to
+   draw -- which is why this one needs a filter applied first. *)
+let test_the_fact_filter_bar_names_the_query_it_counted () =
+  let claim_fact claim id : Decode.memory_fact =
+    { mf_claim = claim
+    ; mf_category = Cat.Fact
+    ; mf_origin = "manual"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_memory_id = id
+    ; mf_events = Decode.no_memory_fact_events
+    }
+  in
+  let state_of ~applied ~typing =
+    let state = make_state () in
+    let store : Decode.memory_ordinary_store =
+      { mos_revision = 1
+      ; mos_updated_at = 1000.0
+      ; mos_facts =
+          [ claim_fact "alpha keeps the deploy assets" "mem-alpha"
+          ; claim_fact "beta claims the port" "mem-beta"
+          ]
+      }
+    in
+    state.memory_facts <-
+      Some
+        { Decode.mfs_keeper = "alpha"
+        ; mfs_ordinary = Decode.Memory_store_present store
+        ; mfs_source = Decode.Memory_store_absent
+        ; mfs_events_read_error = None
+        };
+    state.memory_facts_cursor <- 0;
+    state.Types.search_last <- applied;
+    state.Types.search <- typing;
+    state
+  in
+  let bar ~applied ~typing =
+    let state = state_of ~applied ~typing in
+    let drawn = ref [] in
+    let add line = drawn := line :: !drawn in
+    Render_memory.render_memory_facts_body ~cols:110 ~budget:24 state ~push:add
+      ~push_styled:(fun ~style:_ line -> add line)
+      ~push_selected:add
+      ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    String.concat "\n" (List.rev !drawn)
+  in
+  let applied_only = bar ~applied:"alpha" ~typing:None in
+  check bool "the applied filter is the one quoted" true
+    (contains "\"alpha\"" applied_only);
+  check bool "and its one match takes the singular" true
+    (contains "(1 matching fact)" applied_only);
+  let typed_over = bar ~applied:"alpha" ~typing:(Some "beta") in
+  check bool "the filter being typed is the one quoted" true
+    (contains "\"beta\"" typed_over);
+  check bool "and the filter it replaced is not" false
+    (contains "\"alpha\"" typed_over);
+  check bool "its one match takes the singular too" true
+    (contains "(1 matching fact)" typed_over);
+  (* The empty note reads the same filter the rows were counted by. With no
+     applied filter it said the store was empty; over an applied one it
+     quoted the old word. *)
+  check bool "a first filter matching nothing is quoted, not an empty store" true
+    (contains "(no facts matching \"zzz\"" (bar ~applied:"" ~typing:(Some "zzz")));
+  let typed_over_nothing = bar ~applied:"alpha" ~typing:(Some "zzz") in
+  check bool "a filter typed over an applied one is the one quoted" true
+    (contains "(no facts matching \"zzz\"" typed_over_nothing);
+  check bool "and the applied one is not" false
+    (contains "\"alpha\"" typed_over_nothing);
+  (* The list height leaves a row for the filter bar exactly when the bar is
+     drawn, whether the filter is being typed or applied. *)
+  let height ~applied ~typing =
+    Render_memory.memory_facts_content_height ~cols:110 ~budget:24 ~cursor:0
+      (state_of ~applied ~typing)
+  in
+  check int "a typed filter takes the same row as the applied one"
+    (height ~applied:"alpha" ~typing:None)
+    (height ~applied:"" ~typing:(Some "alpha"));
+  check int "an empty search box over an applied filter draws no bar and keeps no row"
+    (height ~applied:"" ~typing:None)
+    (height ~applied:"alpha" ~typing:(Some ""))
 ;;
 
 (* The first cell of a memory row. It used to answer both the word and its
@@ -1361,6 +1533,10 @@ let () =
     ; ( "render_body"
       , [ test_case "memory_body_budget" `Quick test_render_memory_body
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
+        ; test_case "the filter bar names the query it counted" `Quick
+            test_the_memory_filter_bar_names_the_query_it_counted
+        ; test_case "the fact filter bar names the query it counted" `Quick
+            test_the_fact_filter_bar_names_the_query_it_counted
         ; test_case "the librarian line says when the continuity lag is unknown" `Quick
             test_the_librarian_line_says_when_the_continuity_lag_is_unknown
         ; test_case "the librarian line speaks the pass ending and its cause" `Quick

@@ -43,9 +43,13 @@ function keeperMetrics({
       total_cost_usd: 0.2 as number | null,
       cost_reported_samples: 4,
       cost_unreported_samples: 0,
-      total_input_tokens: 2000,
-      total_output_tokens: 700,
-      total_tokens: 2700,
+      cost_unread_samples: 0,
+      total_input_tokens: 2000 as number | null,
+      total_output_tokens: 700 as number | null,
+      total_tokens: 2700 as number | null,
+      tokens_reported_samples: 4,
+      tokens_unreported_samples: 0,
+      tokens_unread_samples: 0,
       p50_latency_ms: 900,
       p95_latency_ms: 2100,
       sample_count: 4,
@@ -292,9 +296,13 @@ describe('CostDashboard route-backed focus behavior', () => {
           total_cost_usd: null,
           cost_reported_samples: 0,
           cost_unreported_samples: 3,
+          cost_unread_samples: 0,
           total_input_tokens: 24_000_000,
           total_output_tokens: 500_000,
           total_tokens: 24_500_000,
+          tokens_reported_samples: 3,
+          tokens_unreported_samples: 0,
+          tokens_unread_samples: 0,
           p50_latency_ms: 900,
           p95_latency_ms: 2100,
           sample_count: 3,
@@ -318,6 +326,48 @@ describe('CostDashboard route-backed focus behavior', () => {
     expect(row?.textContent).toContain('3/3턴')
     expect(row?.textContent).not.toContain('$0')
     expect(container.textContent).toContain('3턴 비용 미보고')
+  })
+
+  it('says a keeper token usage was not reported instead of showing 0 tokens', async () => {
+    apiMocks.fetchKeeperCostMetrics.mockResolvedValue(keeperMetrics({
+      keepers: [
+        {
+          keeper_name: 'no-usage-keeper',
+          total_cost_usd: null,
+          cost_reported_samples: 0,
+          cost_unreported_samples: 1,
+          cost_unread_samples: 1,
+          total_input_tokens: null,
+          total_output_tokens: null,
+          total_tokens: null,
+          tokens_reported_samples: 0,
+          tokens_unreported_samples: 2,
+          tokens_unread_samples: 0,
+          p50_latency_ms: 900,
+          p95_latency_ms: 2100,
+          sample_count: 2,
+        },
+      ],
+    }))
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'agent' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('no-usage-keeper') ?? false, 'keeper metrics')
+
+    const row = Array.from(container.querySelectorAll('tbody tr'))
+      .find(tr => tr.textContent?.includes('no-usage-keeper'))
+    const tokenCells = Array.from(row?.querySelectorAll('td') ?? []).slice(0, 2).map(td => td.textContent?.trim())
+    expect(tokenCells).toEqual(['미보고', '미보고'])
+    expect(row?.textContent).toContain('1/2턴 · 못 읽음 1턴')
+    expect(container.textContent).toContain('미보고 / 미보고')
+    expect(container.textContent).toContain('2턴 토큰 미보고')
+    expect(container.textContent).toContain('1턴 비용 못 읽음')
   })
 
 })

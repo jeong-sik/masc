@@ -655,8 +655,18 @@ val decode_connector_name_page :
 val connector_with_name_pages :
   connector -> pages:connector_name_page list -> error:string option -> connector
 
+(** A connector row the TUI could not read. The row is refused on its own,
+    so the rows beside it still decode and draw. *)
+type connector_refusal = {
+  cr_row : int;  (** Position in the server's [connectors] list. *)
+  cr_connector_id : string option;
+      (** The row's [connector_id], when the row carries one. *)
+  cr_reason : string;
+}
+
 type connector_snapshot = {
   cs_connectors : connector list;
+  cs_refused : connector_refusal list;
   cs_total : int;
   cs_active : int;  (** How many the server counted as available. *)
 }

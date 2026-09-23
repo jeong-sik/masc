@@ -6962,10 +6962,24 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                  else line)
               connectors
           in
+          let refused_rows =
+            List.map
+              (fun (refusal : Tui_decode.connector_refusal) ->
+                 let name =
+                   match refusal.cr_connector_id with
+                   | Some id -> Terminal_text.single_line id
+                   | None -> Printf.sprintf "connectors[%d]" refusal.cr_row
+                 in
+                 (Theme.bad ()) ^ "    " ^ name ^ "  unreadable: "
+                 ^ Terminal_text.single_line refusal.cr_reason ^ Ansi.reset)
+              snapshot.cs_refused
+          in
           let selected_lines =
-            match List.nth_opt connectors selected_index with
-            | None -> [ Ansi.dim ^ "  (no channel transports registered)" ^ Ansi.reset ]
-            | Some connector ->
+            match List.nth_opt connectors selected_index, snapshot.cs_refused with
+            | None, [] ->
+                [ Ansi.dim ^ "  (no channel transports registered)" ^ Ansi.reset ]
+            | None, _ :: _ -> []
+            | Some connector, _ ->
                 let optional_row label value =
                   match value with
                   | None -> []
@@ -7153,7 +7167,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                  [ (Theme.bad ()) ^ "  refresh failed: "
                    ^ Terminal_text.single_line detail ^ Ansi.reset
                  ])
-          @ transport_rows @ selected_lines
+          @ transport_rows @ refused_rows @ selected_lines
     in
     let automation_lines =
       (* This tab reads the Keeper's own page from the server rather than

@@ -2375,8 +2375,15 @@ type connector_name_page = {
   cnp_mappings : connector_name_mapping list;
 }
 
+type connector_refusal = {
+  cr_row : int;
+  cr_connector_id : string option;
+  cr_reason : string;
+}
+
 type connector_snapshot = {
   cs_connectors : connector list;
+  cs_refused : connector_refusal list;
   cs_total : int;
   cs_active : int;
 }
@@ -4060,8 +4067,25 @@ let connector_with_name_pages connector ~pages ~error =
 
 let decode_connector_snapshot json =
   let* connectors_json = required_list_field json "connectors" in
-  let* cs_connectors =
-    decode_list "connectors" decode_connector connectors_json
+  let row_connector_id = function
+    | `Assoc fields -> (
+        match List.assoc_opt "connector_id" fields with
+        | Some (`String id) -> nonblank_option (Some id)
+        | Some _ | None -> None)
+    | _ -> None
+  in
+  let cs_connectors, cs_refused =
+    connectors_json
+    |> List.mapi (fun row item ->
+           match decode_connector item with
+           | Ok connector -> Either.Left connector
+           | Error reason ->
+               Either.Right
+                 { cr_row = row
+                 ; cr_connector_id = row_connector_id item
+                 ; cr_reason = reason
+                 })
+    |> List.partition_map Fun.id
   in
   let cs_connectors =
     List.sort
@@ -4070,7 +4094,7 @@ let decode_connector_snapshot json =
   in
   let* cs_total = required_int_field json "total" in
   let* cs_active = required_int_field json "active_count" in
-  Ok { cs_connectors; cs_total; cs_active }
+  Ok { cs_connectors; cs_refused; cs_total; cs_active }
 
 let runtime_probe_refresh_state_to_string = function
   | Runtime_probe_fresh -> "fresh"

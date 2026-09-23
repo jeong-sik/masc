@@ -20,7 +20,6 @@
   masc.masc_process
   masc.sse_wire
   masc.agent_observation
-  masc.keeper_types_profile_sandbox
   masc.browser_lane
   masc.slack_lane
   masc.msx_lane

@@ -31,16 +31,25 @@ type review_state =
       (** GitHub reports no review decision: the base branch requires no
           review. *)
 
+type mergeable =
+  | Mergeable
+  | Conflicting
+  | Mergeable_unknown
+      (** GitHub has not computed mergeability yet (its [UNKNOWN]). *)
+
 type pull_request =
   { repo_slug : string  (** [owner/repo] *)
   ; number : int
   ; title : string
   ; head_branch : string
-  ; cross_repository : bool
-      (** GitHub's [isCrossRepository]: the head branch is in a fork. *)
   ; draft : bool
   ; checks : check_state
   ; review : review_state
+  ; mergeable : mergeable
+  ; author : string option
+      (** The git author name of the head commit. [None] when the pull
+          request reports no commit, or GitHub gives the author or its name
+          as [null]. *)
   ; updated_at : float
   }
 
@@ -109,90 +118,24 @@ type reader =
           ({!Keeper_github_login_lane.stored_token}). *)
   | Reader_ready of { keeper : string }
 
-(** {1 Keepers on a pull request's branch (RFC-0465 §0.2)} *)
-
-type keeper_checkouts_read =
-  | Checkouts_read of Keeper_sandbox_control.checkout_scan
-      (** A [scan_truncated] limit counts the Keeper as unread for every
-          repository: checkouts past it were never seen. *)
-  | Checkouts_absent
-      (** A shared-mount playground directory does not exist ([Root_missing]):
-          no checkout, so no branch and nothing unread. *)
-  | Checkouts_not_booted
-      (** An endpoint-owned playground answered [Root_missing]: its guest is
-          not running (not booted in this process, or gone). Its volume
-          outlives the guest, so its checkouts are unknown; counted apart
-          from unread so a restart does not read as a fleet of failures. *)
-  | Checkouts_unread of string
-      (** The Keeper's metadata or playground could not be read, or its
-          inspection raised: any of its checkouts may be on any branch. *)
-
-type keeper_checkouts =
-  { keeper : string
-  ; checkouts : keeper_checkouts_read
-  }
-
-type fleet_checkouts = (keeper_checkouts list, string) result
-(** Every Keeper's checkouts, or why the Keeper list could not be read. *)
-
-type keeper_on_repository =
-  { on_keeper : string
-  ; branches : string list
-      (** Branches of this Keeper's checkouts whose origin names this
-          repository. *)
-  ; unread : string list
-      (** Why a checkout that may be of this repository has no branch: the
-          Keeper's playground was not read or its discovery stopped early, a
-          checkout's origin or the catalog was not read, or the branch probe
-          failed. *)
-  ; not_booted : bool  (** See {!Checkouts_not_booted}. *)
-  }
-
-type repository_keepers =
-  | Keepers_not_inspected
-      (** The repository has no open pull request read, or no join has run
-          since this server started. *)
-  | Keepers_unlisted of
-      { observed_at : float
-      ; error : string  (** The Keeper list could not be read. *)
-      }
-  | Keepers_listed of
-      { observed_at : float
-      ; on_repository : keeper_on_repository list
-          (** Only Keepers with a branch or an unread reason for this
-              repository. *)
-      }
-
-type keeper_join =
-  | Join_not_inspected
-  | Join_keepers_unlisted of string
-  | Join_read of
-      { keepers : string list
-          (** Keepers with a checkout of the repository on the pull
-              request's head branch, compared with [String.equal]. Always
-              empty for a pull request whose head is in another repository
-              (a fork). *)
-      ; keepers_unread : int
-          (** Keepers not in [keepers] with a checkout that may be of this
-              repository but whose branch is unknown. *)
-      ; keepers_not_booted : int
-          (** Keepers whose guest is not running, so whose checkouts were not
-              seen at all. Not counted in [keepers_unread]. *)
-      }
-
 (** {1 Snapshot} *)
+
+type keeper_names =
+  | Keepers_not_listed  (** Before the first refresh. *)
+  | Keepers_listed of string list
+      (** The persisted Keeper names ({!Keeper_meta_store.keeper_names_result}),
+          read once per refresh. *)
+  | Keepers_list_failed of string
+      (** The Keeper list could not be read, or reading it raised (the
+          exception text). No pull request is then said to be a Keeper's or
+          not, and the GitHub reads of the same refresh still publish. *)
 
 type repository_entry =
   { repository_id : string
   ; url : string
   ; slug : string option  (** [owner/repo] when the remote is on github.com. *)
   ; pulls : repository_pulls
-  ; keepers : repository_keepers
   }
-
-val pull_keepers : repository_entry -> pull_request -> keeper_join
-(** The Keepers whose checkout of the entry's repository is on the pull
-    request's head branch. *)
 
 type snapshot =
   { reader : reader
@@ -202,6 +145,7 @@ type snapshot =
           sentence for the operator, not a code to match on. [None] after
           any refresh that read the list. *)
   ; repositories : repository_entry list
+  ; keepers : keeper_names
   ; rejected_token_digest : string option
       (** BLAKE256 hex of the token GitHub last refused, never the token
           itself. Not part of the JSON. *)
@@ -251,60 +195,37 @@ val read_repository :
 val refresh :
   now:(unit -> float) -> http_post:http_post -> config:Workspace.config -> previous:snapshot -> snapshot
 (** One full read: resolve the reader, load the registered repositories and
-    read each GitHub one. A repository whose previous answer was
+    read each GitHub one. The persisted Keeper names are listed once, first. A repository whose previous answer was
     [Token_rejected] for the same token, or [Rate_limited] with a reset time
     still ahead of [now], keeps that answer and is not fetched. When the
     reader is not ready, nothing is fetched and
     every GitHub repository reads [Pulls_not_read]: an earlier read is not
     shown as current. [previous] only stands in when the repository list
-    itself cannot be read. Each repository keeps its previous [keepers]
-    join, with that join's own [observed_at], until {!join_keepers}
-    replaces it. *)
+    itself cannot be read. *)
 
-type inspect_checkouts =
-  catalog:(Repo_manager_types.repository list, string) result -> fleet_checkouts
-
-val join_keepers :
-  now:(unit -> float) ->
-  inspect_checkouts:inspect_checkouts ->
-  base_path:string ->
-  snapshot ->
-  snapshot
-(** Join every repository with open pull requests to the Keepers' checkouts.
-    The catalog is loaded once and [inspect_checkouts] runs once, and neither
-    runs when no repository has an open pull request read. A repository
-    without one reads [Keepers_not_inspected]. *)
+val keeper_of_author : keepers:string list -> pull_request -> string option
+(** [Some author] when the head commit's author name is exactly one of
+    [keepers] (case counts); [None] otherwise. A Keeper leaves the branch
+    after opening a pull request, so the join is by who wrote the last
+    commit, not by which checkout has the branch. The result is for display
+    only and is not an identity for authority: any committer can set the
+    author name. *)
 
 val snapshot_to_yojson : snapshot -> Yojson.Safe.t
+(** Each pull carries ["author"] and ["keeper"] (string or [null]) and
+    ["mergeable"] ([mergeable] | [conflicting] | [unknown]). ["keeper"] is
+    [null] unless the snapshot's ["keepers"] state is [listed]. *)
 
 (** {1 Projection} *)
 
 val current : unit -> snapshot
 (** The latest refresh, or {!initial} before the first one ends. *)
 
-val checkouts_of_scan :
-  tree_location:Keeper_types_profile_sandbox.tree_location ->
-  (Keeper_sandbox_control.checkout_scan, Keeper_playground_checkouts.scan_error) result ->
-  keeper_checkouts_read
-(** [Root_missing] is {!Checkouts_absent} for a shared mount and
-    {!Checkouts_not_booted} for an endpoint-owned tree; every other scan
-    error is {!Checkouts_unread} with its text. *)
-
-val inspect_fleet_checkouts : config:Workspace.config -> inspect_checkouts
-(** {!Keeper_sandbox_control.checkout_scan} for every persisted Keeper,
-    against the one [catalog]. A shared-mount Keeper costs up to six git calls
-    per checkout (origin, branch, HEAD, status, and for a registered checkout
-    the upstream ref and ahead/behind), all within that Keeper's 5 s
-    inspection budget; an endpoint-owned Keeper costs one remote probe. *)
-
 val refresh_raised : previous:snapshot -> exn -> snapshot
 (** What {!start} publishes when {!refresh} raises: [previous] with
     [repositories_error] saying so. *)
 
 val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> config:Workspace.config -> unit
-(** Forks the refresh loop under [sw]: every 60 seconds, starting now, one
-    {!refresh} is published as soon as GitHub has answered, then
-    {!join_keepers} with {!inspect_fleet_checkouts} is published over it. A
-    slow or failing fleet inspection never delays or discards the pull
-    requests. A refresh that raises publishes {!refresh_raised}
-    and skips the join. Cancelled with [sw]. *)
+(** Forks the refresh loop under [sw]: one {!refresh} immediately, then one
+    every 60 seconds. A refresh that raises publishes {!refresh_raised}.
+    Cancelled with [sw]. *)

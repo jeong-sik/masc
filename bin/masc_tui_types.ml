@@ -1909,6 +1909,7 @@ type overview_quota_reading =
     build cannot name makes the row undecodable rather than a default. *)
 type pull_checks = Pull_checks_passing | Pull_checks_failing | Pull_checks_running | Pull_checks_none
 type pull_review = Pull_review_approved | Pull_review_changes_requested | Pull_review_waiting | Pull_review_none
+type pull_mergeable = Pull_mergeable | Pull_conflicting | Pull_mergeable_unknown
 
 type open_pull = {
   op_number: int;
@@ -1917,9 +1918,11 @@ type open_pull = {
   op_draft: bool;
   op_checks: pull_checks;
   op_review: pull_review;
-  op_keepers: string list option;
-      (** Keepers whose checkout is on this PR's head branch (RFC-0465).
-          [None] while the server has not joined checkouts, or could not. *)
+  op_mergeable: pull_mergeable;
+  op_keeper: string option;
+      (** The Keeper whose name is this PR's last commit author (RFC-0465
+          §2.1). Only meaningful while the snapshot's Keeper list was read;
+          see {!pulls_keepers}. *)
 }
 
 type repository_pulls_reading =
@@ -1937,10 +1940,18 @@ type pulls_reader =
       (** Why the server is not reading: not declared, the Keeper is missing,
           or its token cannot be read. *)
 
+(** Whether the server read the Keeper list it joined authors against. A PR
+    with no Keeper means "no Keeper wrote it" only under [Pulls_keepers_listed]. *)
+type pulls_keepers =
+  | Pulls_keepers_not_listed
+  | Pulls_keepers_listed
+  | Pulls_keepers_failed of string
+
 type overview_pulls_reading =
   | Overview_pulls_unread
   | Overview_pulls_read of {
       reader: pulls_reader;
+      keepers: pulls_keepers;
       repositories_error: string option;
           (** The server could not list the registered repositories; the rows
               are the last list it could, so they may be out of date. *)

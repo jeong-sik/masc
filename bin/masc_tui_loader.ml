@@ -1228,23 +1228,23 @@ let decode_open_pull json =
     | "none" -> Ok Pull_review_none
     | other -> Error ("unknown review " ^ other)
   in
-  let* op_keepers =
-    match Yojson.Safe.Util.member "keepers" json with
+  let* mergeable = required_string_field json "mergeable" in
+  let* op_mergeable =
+    match mergeable with
+    | "mergeable" -> Ok Pull_mergeable
+    | "conflicting" -> Ok Pull_conflicting
+    | "unknown" -> Ok Pull_mergeable_unknown
+    | other -> Error ("unknown mergeable " ^ other)
+  in
+  let* op_keeper =
+    match Yojson.Safe.Util.member "keeper" json with
     | `Null -> Ok None
-    | `List names ->
-        List.fold_right
-          (fun name acc ->
-            match (name, acc) with
-            | `String name, Ok names -> Ok (name :: names)
-            | _, (Error _ as error) -> error
-            | _, Ok _ -> Error "keepers holds a non-string")
-          names (Ok [])
-        |> Result.map Option.some
-    | _ -> Error "keepers is neither a list nor null"
+    | `String name -> Ok (Some name)
+    | _ -> Error "keeper is neither a string nor null"
   in
   Ok
     { op_number; op_title; op_head_branch; op_draft; op_checks; op_review
-    ; op_keepers
+    ; op_mergeable; op_keeper
     }
 
 let decode_repository_pulls json =
@@ -1297,7 +1297,7 @@ let decode_repository_pulls json =
   Ok { rp_repository; rp_state }
 
 let load_repository_pulls ~(host : string) ~(port : int) :
-    (pulls_reader * string option * repository_pulls_row list, string) result =
+    (overview_pulls_reading, string) result =
   match Masc_tui_http.fetch_repository_pulls ~host ~port with
   | Error err -> Error ("pull requests load failed: " ^ err)
   | Ok json ->
@@ -1322,6 +1322,17 @@ let load_repository_pulls ~(host : string) ~(port : int) :
                        [ Some reader_state; keeper; reason ])))
         | other -> Error ("unknown pull request reader state " ^ other)
       in
+      let* keepers_json = required_object_field json "keepers" in
+      let* keepers_state = required_string_field keepers_json "state" in
+      let* keepers =
+        match keepers_state with
+        | "not_listed" -> Ok Pulls_keepers_not_listed
+        | "listed" -> Ok Pulls_keepers_listed
+        | "list_failed" ->
+            let* reason = required_string_field keepers_json "reason" in
+            Ok (Pulls_keepers_failed reason)
+        | other -> Error ("unknown Keeper list state " ^ other)
+      in
       let* rows = required_list_field json "repositories" in
       (* Row by row: one repository this build cannot read says so on its own
          line instead of blanking every other repository's line. *)
@@ -1340,7 +1351,7 @@ let load_repository_pulls ~(host : string) ~(port : int) :
           rows
       in
       let* repositories_error = optional_string_field json "repositories_error" in
-      Ok (reader, repositories_error, repositories)
+      Ok (Overview_pulls_read { reader; keepers; repositories_error; repositories })
 
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :

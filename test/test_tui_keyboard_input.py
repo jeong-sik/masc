@@ -14045,6 +14045,86 @@ def unread_keeper_briefing() -> HttpResponse:
     )
 
 
+def pull_requests_briefing() -> HttpResponse:
+    return (
+        200,
+        {
+            "summary": {
+                "workspace_health": "ok",
+                "cluster": "cluster-a",
+                "project": "project-a",
+            },
+            "generated_at": "2026-09-23T00:00:00Z",
+            "incidents": [],
+            "attention_queue": [],
+            "attention_items": [],
+            "agent_briefs": [],
+            "keeper_briefs": [
+                {"name": "k-author", "phase": "running", "last_turn_ago_s": 30}
+            ],
+            "keepers_unread": [],
+        },
+    )
+
+
+def pull_request_row(number: int, keeper: str | None, mergeable: str) -> dict[str, object]:
+    return {
+        "repo_slug": "jeong-sik/masc",
+        "number": number,
+        "title": f"pull {number}",
+        "head_branch": f"fix/{number}",
+        "draft": False,
+        "checks": "passing",
+        "review": "waiting",
+        "mergeable": mergeable,
+        "author": keeper if keeper is not None else "someone-else",
+        "keeper": keeper,
+        "updated_at": "2026-09-23T00:00:00Z",
+    }
+
+
+def repository_pulls_fixture() -> HttpResponse:
+    # RFC-0465 §2.1: #11 is the Keeper's by last commit author; #12 is by
+    # nobody the Keeper list names and cannot merge.
+    return (
+        200,
+        {
+            "reader": {"state": "ready", "keeper": "pr-updater"},
+            "repositories_error": None,
+            "keepers": {"state": "listed"},
+            "repositories": [
+                {
+                    "repository_id": "masc",
+                    "pulls": {
+                        "state": "read",
+                        "undecodable": 0,
+                        "pulls": [
+                            pull_request_row(11, "k-author", "mergeable"),
+                            pull_request_row(12, None, "conflicting"),
+                        ],
+                    },
+                }
+            ],
+        },
+    )
+
+
+def pull_requests_on_overview_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        for needle in (b"1 conflicting", b"1 not by a Keeper", b"#11"):
+            wait_for_output(process, master_fd, output, needle, start=0, timeout=10.0)
+        # The harness confirms the exit that this first press arms.
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def unread_keeper_counted_interaction() -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -14650,6 +14730,15 @@ def run_keyboard_regression(executable: str) -> None:
         interact=attention_drawn_once_interaction(),
         http_fixtures={
             "/api/v1/dashboard/briefing": duplicated_attention_briefing(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Pull requests on Overview",
+        interact=pull_requests_on_overview_interaction(),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": pull_requests_briefing(),
+            "/api/v1/repositories/pulls": repository_pulls_fixture(),
         },
     )
     run_terminal_scenario(

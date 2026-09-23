@@ -382,13 +382,22 @@ let overview_pulls_lines (state : state) =
   | Overview_pulls_read { reader = Pulls_reader_not_ready reason; _ } ->
       [ dim ("\xe2\x87\x85 pull requests not read: " ^ Terminal_text.single_line reason) ]
   | Overview_pulls_read
-      { reader = Pulls_reader_ready _; repositories_error; repositories } ->
+      { reader = Pulls_reader_ready _; keepers; repositories_error; repositories } ->
       let stale =
         match repositories_error with
         | None -> []
         | Some err ->
             [ Printf.sprintf "%s\xe2\x87\x85 pull request rows may be old: %s%s"
                 (Theme.warn ()) (Terminal_text.single_line err) Ansi.reset ]
+      in
+      (* Without the Keeper list a PR with no Keeper is not "nobody's"; the
+         line says the list is missing instead of counting unmatched PRs. *)
+      let keepers_line =
+        match keepers with
+        | Pulls_keepers_failed reason ->
+            [ Printf.sprintf "%s\xe2\x87\x85 Keeper list unread, PRs not matched: %s%s"
+                (Theme.warn ()) (Terminal_text.single_line reason) Ansi.reset ]
+        | Pulls_keepers_listed | Pulls_keepers_not_listed -> []
       in
       let rows =
       List.filter_map
@@ -418,11 +427,20 @@ let overview_pulls_lines (state : state) =
                     | Pull_review_approved | Pull_review_waiting | Pull_review_none -> false)
               in
               let drafts = count (fun (pull : open_pull) -> pull.op_draft) in
-              (* A PR the server has not joined to Keepers is on no Team row;
-                 counting it here keeps "nobody holds it" from being the
-                 reading. *)
-              let not_joined =
-                count (fun (pull : open_pull) -> Option.is_none pull.op_keepers)
+              let conflicting =
+                count (fun (pull : open_pull) ->
+                    match pull.op_mergeable with
+                    | Pull_conflicting -> true
+                    | Pull_mergeable | Pull_mergeable_unknown -> false)
+              in
+              (* A PR no Keeper wrote is on no Team row; counting it here
+                 keeps it from vanishing. Counted only when the Keeper list
+                 was read, since otherwise every PR would look unmatched. *)
+              let not_by_keeper =
+                match keepers with
+                | Pulls_keepers_listed ->
+                    count (fun (pull : open_pull) -> Option.is_none pull.op_keeper)
+                | Pulls_keepers_not_listed | Pulls_keepers_failed _ -> 0
               in
               let parts =
                 List.filter_map Fun.id
@@ -433,9 +451,12 @@ let overview_pulls_lines (state : state) =
                   ; (if changes > 0 then
                        Some (Printf.sprintf "%s%d changes requested%s" (Theme.warn ()) changes Ansi.reset)
                      else None)
+                  ; (if conflicting > 0 then
+                       Some (Printf.sprintf "%s%d conflicting%s" (Theme.warn ()) conflicting Ansi.reset)
+                     else None)
                   ; (if drafts > 0 then Some (Printf.sprintf "%d draft" drafts) else None)
-                  ; (if not_joined > 0 then
-                       Some (Printf.sprintf "%s%d not matched to Keepers%s" Ansi.dim not_joined Ansi.reset)
+                  ; (if not_by_keeper > 0 then
+                       Some (Printf.sprintf "%s%d not by a Keeper%s" Ansi.dim not_by_keeper Ansi.reset)
                      else None)
                   ; (if undecodable > 0 then
                        Some (Printf.sprintf "%d unreadable" undecodable)
@@ -450,7 +471,7 @@ let overview_pulls_lines (state : state) =
       in
       (* A ready reader with nothing on GitHub to read says so; drawing no
          line would look the same as not having loaded. *)
-      match stale @ rows with
+      match stale @ keepers_line @ rows with
       | [] -> [ dim "\xe2\x87\x85 pull requests: no registered GitHub repository" ]
       | lines -> lines
 
@@ -458,26 +479,28 @@ let overview_pulls_lines (state : state) =
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the parked roll call and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
-(* Each Keeper's open pull requests, from the server's head-branch join
-   (RFC-0465). A PR the join has not placed ([op_keepers = None]) is
-   attached to nobody rather than guessed at. *)
+(* Each Keeper's open pull requests: the PRs whose last commit author is
+   that Keeper (RFC-0465 §2.1). Nothing is attached while the Keeper list
+   was not read. *)
 let overview_pulls_of_keeper (state : state) =
   let pulls =
     match state.overview_pulls with
-    | Overview_pulls_read { repositories; _ } ->
+    | Overview_pulls_read { keepers = Pulls_keepers_listed; repositories; _ } ->
         List.concat_map
           (fun (row : repository_pulls_row) ->
             match row.rp_state with
             | Repo_pulls_read { pulls; _ } -> pulls
             | Repo_pulls_failed _ | Repo_pulls_not_read | Repo_not_github -> [])
           repositories
+    | Overview_pulls_read
+        { keepers = Pulls_keepers_not_listed | Pulls_keepers_failed _; _ }
     | Overview_pulls_unread | Overview_pulls_failed _ -> []
   in
   fun name ->
     List.filter
       (fun (pull : open_pull) ->
-        match pull.op_keepers with
-        | Some keepers -> List.exists (String.equal name) keepers
+        match pull.op_keeper with
+        | Some keeper -> String.equal name keeper
         | None -> false)
       pulls
 
@@ -544,7 +567,15 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
             | Pull_checks_running -> ("\xe2\x97\x90", Theme.info ())
             | Pull_checks_none -> ("\xc2\xb7", Ansi.dim)
           in
-          Printf.sprintf "#%d%s%s%s%s " pull.op_number glyph_tone glyph Ansi.reset
+          (* A conflicting PR's number is drawn in the warning tone: green
+             checks do not make it mergeable. *)
+          let number_tone, number_reset =
+            match pull.op_mergeable with
+            | Pull_conflicting -> (Theme.warn (), Ansi.reset)
+            | Pull_mergeable | Pull_mergeable_unknown -> ("", "")
+          in
+          Printf.sprintf "%s#%d%s%s%s%s%s " number_tone pull.op_number number_reset
+            glyph_tone glyph Ansi.reset
             (match rest with
              | [] -> ""
              | _ :: _ -> Printf.sprintf "%s+%d%s" Ansi.dim (List.length rest) Ansi.reset)

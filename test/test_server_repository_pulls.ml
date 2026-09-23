@@ -33,16 +33,27 @@ let write_file path text =
 let ok_response body =
   Ok { Pulls.status = 200; body; rate_limit_remaining = Some 4990; rate_limit_reset = None; retry_after_s = None }
 
-let pull_node ~number ~branch ~draft ~review ~rollup =
+let pull_node
+      ?(author = {|{"name":"edgar"}|})
+      ?(mergeable = {|"mergeable":"MERGEABLE",|})
+      ~number
+      ~branch
+      ~draft
+      ~review
+      ~rollup
+      ()
+  =
   Printf.sprintf
-    {|{"number":%d,"title":"PR %d","headRefName":"%s","isCrossRepository":false,"isDraft":%b,
-       "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":%s,
-       "commits":{"nodes":[{"commit":{"statusCheckRollup":%s}}]}}|}
+    {|{"number":%d,"title":"PR %d","headRefName":"%s","isDraft":%b,
+       "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":%s,%s
+       "commits":{"nodes":[{"commit":{"author":%s,"statusCheckRollup":%s}}]}}|}
     number
     number
     branch
     draft
     review
+    mergeable
+    author
     rollup
 
 let page ~has_next ~cursor nodes =
@@ -88,13 +99,13 @@ let test_decodes_two_pages () =
     page
       ~has_next:true
       ~cursor:(Some "Y3Vyc29yOjE=")
-      [ pull_node ~number:38091 ~branch:"docs/rfc-0465" ~draft:true ~review:"null" ~rollup:"null"
+      [ pull_node ~number:38091 ~branch:"docs/rfc-0465" ~draft:true ~review:"null" ~rollup:"null" ()
       ; pull_node
           ~number:38054
           ~branch:"fix/schedule-actor"
           ~draft:false
           ~review:{|"APPROVED"|}
-          ~rollup:{|{"state":"SUCCESS"}|}
+          ~rollup:{|{"state":"SUCCESS"}|} ()
       ]
   in
   let second =
@@ -106,7 +117,7 @@ let test_decodes_two_pages () =
           ~branch:"fix/tui-task-body"
           ~draft:false
           ~review:{|"REVIEW_REQUIRED"|}
-          ~rollup:{|{"state":"PENDING"}|}
+          ~rollup:{|{"state":"PENDING"}|} ()
       ]
   in
   let http_post, requests = recording_stub [ ok_response first; ok_response second ] in
@@ -137,17 +148,17 @@ let test_unknown_enum_is_counted () =
     page
       ~has_next:false
       ~cursor:None
-      [ pull_node ~number:1 ~branch:"a" ~draft:false ~review:"null" ~rollup:{|{"state":"SUCCESS"}|}
+      [ pull_node ~number:1 ~branch:"a" ~draft:false ~review:"null" ~rollup:{|{"state":"SUCCESS"}|} ()
       ; pull_node
           ~number:2
           ~branch:"b"
           ~draft:false
           ~review:"null"
-          ~rollup:{|{"state":"QUEUED_FOR_SOMETHING_NEW"}|}
-      ; pull_node ~number:3 ~branch:"c" ~draft:false ~review:{|"DISMISSED_NEW"|} ~rollup:"null"
+          ~rollup:{|{"state":"QUEUED_FOR_SOMETHING_NEW"}|} ()
+      ; pull_node ~number:3 ~branch:"c" ~draft:false ~review:{|"DISMISSED_NEW"|} ~rollup:"null" ()
       ; {|{"number":4,"title":"PR 4","headRefName":"d","isDraft":false,
-          "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,
-          "commits":{"nodes":[{"commit":{}}]}}|}
+          "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"MERGEABLE",
+          "commits":{"nodes":[{"commit":{"author":null}}]}}|}
       ]
   in
   let http_post, _ = recording_stub [ ok_response body ] in
@@ -496,237 +507,310 @@ let test_rate_limit_waits_for_reset () =
   let _third = Pulls.refresh ~now:after_reset ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:second in
   Alcotest.(check int) "asked again at the reset" 2 !calls
 
-(* --- RFC-0465 §0.2: a pull request belongs to the Keepers whose checkout of
-   its repository is on its head branch. --- *)
+(* --- Author, mergeable, Keeper join (RFC-0465: join by the head commit's
+   author, because a Keeper leaves the branch once its pull request is open) --- *)
 
-module Control = Masc.Keeper_sandbox_control
+let no_commit_node ~number =
+  Printf.sprintf
+    {|{"number":%d,"title":"PR %d","headRefName":"n","isDraft":false,
+       "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"UNKNOWN",
+       "commits":{"nodes":[]}}|}
+    number
+    number
 
-let checkout_row ~path ~catalog branch : Control.freshness_row =
-  { Control.row_checkout_path = path
-  ; row_branch = branch
-  ; row_catalog = catalog
-  ; row_changed_files = None
-  ; row_freshness = Control.Freshness_unavailable "not measured in this case"
+let test_author_and_mergeable_decode () =
+  let body =
+    page
+      ~has_next:false
+      ~cursor:None
+      [ pull_node ~number:1 ~branch:"a" ~draft:false ~review:"null" ~rollup:"null" ()
+      ; pull_node
+          ~author:"null"
+          ~mergeable:{|"mergeable":"CONFLICTING",|}
+          ~number:2
+          ~branch:"b"
+          ~draft:false
+          ~review:"null"
+          ~rollup:"null"
+          ()
+      ; pull_node
+          ~author:{|{"name":null}|}
+          ~number:3
+          ~branch:"c"
+          ~draft:false
+          ~review:"null"
+          ~rollup:"null"
+          ()
+      ; no_commit_node ~number:4
+      ]
+  in
+  let http_post, _ = recording_stub [ ok_response body ] in
+  let pulls, undecodable = Pulls.read_repository ~now ~http_post ~token:"t" "o/r" |> read_or_fail in
+  Alcotest.(check int) "every row decodes" 0 undecodable;
+  let facts =
+    List.map
+      (fun (p : Pulls.pull_request) ->
+        ( p.number
+        , p.author
+        , match p.mergeable with
+          | Pulls.Mergeable -> "mergeable"
+          | Pulls.Conflicting -> "conflicting"
+          | Pulls.Mergeable_unknown -> "unknown" ))
+      pulls
+  in
+  Alcotest.(check (list (triple int (option string) string)))
+    "author name, or none where GitHub gives no node or name"
+    [ 1, Some "edgar", "mergeable"
+    ; 2, None, "conflicting"
+    ; 3, None, "mergeable"
+    ; 4, None, "unknown"
+    ]
+    facts
+
+let test_unknown_mergeable_or_missing_author_is_counted () =
+  let body =
+    page
+      ~has_next:false
+      ~cursor:None
+      [ pull_node
+          ~mergeable:{|"mergeable":"SOMETHING_NEW",|}
+          ~number:1
+          ~branch:"a"
+          ~draft:false
+          ~review:"null"
+          ~rollup:"null"
+          ()
+      ; pull_node ~mergeable:"" ~number:2 ~branch:"b" ~draft:false ~review:"null" ~rollup:"null" ()
+      ; {|{"number":3,"title":"PR 3","headRefName":"c","isDraft":false,
+          "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"MERGEABLE",
+          "commits":{"nodes":[{"commit":{"statusCheckRollup":null}}]}}|}
+      ; pull_node ~author:"{}" ~number:4 ~branch:"d" ~draft:false ~review:"null" ~rollup:"null" ()
+      ; pull_node ~number:5 ~branch:"e" ~draft:false ~review:"null" ~rollup:"null" ()
+      ]
+  in
+  let http_post, _ = recording_stub [ ok_response body ] in
+  let pulls, undecodable = Pulls.read_repository ~now ~http_post ~token:"t" "o/r" |> read_or_fail in
+  Alcotest.(check int)
+    "an unknown mergeable word, a missing mergeable, a missing author or name key are counted"
+    4
+    undecodable;
+  Alcotest.(check (list int)) "none of them is shown as a known state" [ 5 ]
+    (List.map (fun (p : Pulls.pull_request) -> p.number) pulls)
+
+let pull ~number ~author =
+  { Pulls.repo_slug = "jeong-sik/masc"
+  ; number
+  ; title = "PR"
+  ; head_branch = "feat/x"
+  ; draft = false
+  ; checks = Pulls.Checks_none
+  ; review = Pulls.Review_none
+  ; mergeable = Pulls.Mergeable
+  ; author
+  ; updated_at = now ()
   }
 
-let scanned ?truncated rows =
-  Pulls.Checkouts_read { Control.scan_rows = rows; scan_truncated = truncated }
+let test_join_is_exact () =
+  let keepers = [ "edgar"; "lucia" ] in
+  let join author = Pulls.keeper_of_author ~keepers (pull ~number:1 ~author) in
+  Alcotest.(check (option string)) "exact name" (Some "edgar") (join (Some "edgar"));
+  Alcotest.(check (option string)) "case differs" None (join (Some "Edgar"));
+  Alcotest.(check (option string)) "a person" None (join (Some "jeong-sik"));
+  Alcotest.(check (option string)) "no author" None (join None)
 
-let masc_repo =
-  Control.Registered (repository ~id:"masc" ~url:"https://github.com/jeong-sik/masc.git")
-
-let fork_node ~number ~branch =
-  Printf.sprintf
-    {|{"number":%d,"title":"PR %d","headRefName":"%s","isCrossRepository":true,"isDraft":false,
-       "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,
-       "commits":{"nodes":[{"commit":{"statusCheckRollup":null}}]}}|}
-    number
-    number
-    branch
-
-let three_pull_page =
-  ok_response
-    (page
-       ~has_next:false
-       ~cursor:None
-       [ pull_node ~number:1 ~branch:"feat/join" ~draft:false ~review:"null" ~rollup:"null"
-       ; pull_node ~number:2 ~branch:"feat/other" ~draft:true ~review:"null" ~rollup:"null"
-       ; fork_node ~number:3 ~branch:"feat/join"
-       ])
-
-let fleet : Pulls.fleet_checkouts =
-  Ok
-    [ { Pulls.keeper = "alpha"
-      ; checkouts = scanned [ checkout_row ~path:"repos/masc" ~catalog:masc_repo (Some "feat/join") ]
-      }
-    ; { Pulls.keeper = "beta"; checkouts = Checkouts_unread "playground root is unreadable" }
-    ; { Pulls.keeper = "gamma"
-      ; checkouts =
-          scanned
-            [ checkout_row ~path:"repos/masc" ~catalog:masc_repo (Some "main")
-            ; checkout_row
-                ~path:"repos/other"
-                ~catalog:(Control.Origin_unavailable "git remote get-url timed out")
-                None
-            ]
-      }
-    ; { Pulls.keeper = "delta"
-      ; checkouts =
-          scanned [ checkout_row ~path:"repos/fork" ~catalog:Control.Unregistered (Some "feat/join") ]
-      }
-    ; { Pulls.keeper = "epsilon"
-      ; checkouts = scanned [ checkout_row ~path:"repos/masc" ~catalog:masc_repo (Some "feat/Join") ]
-      }
-    ; { Pulls.keeper = "zeta"
-      ; checkouts = scanned [ checkout_row ~path:"masc" ~catalog:masc_repo (Some "feat/other") ]
-      }
-      (* A microvm guest not booted in this process has no playground. *)
-    ; { Pulls.keeper = "eta"; checkouts = Checkouts_absent }
-      (* A microvm guest not running: its volume may hold checkouts, unseen. *)
-    ; { Pulls.keeper = "iota"; checkouts = Checkouts_not_booted }
-      (* Discovery stopped after one checkout of another repository: a
-         checkout of masc may be among those never seen. *)
-    ; { Pulls.keeper = "theta"
-      ; checkouts =
-          scanned
-            ~truncated:(Masc.Keeper_playground_checkouts.Checkout_budget_exhausted { budget = 32 })
-            [ checkout_row ~path:"repos/fork" ~catalog:Control.Unregistered (Some "feat/other") ]
-      }
-    ]
-
-let json_pulls snapshot =
+let pulls_json snapshot =
   let json = Pulls.snapshot_to_yojson snapshot in
   let open Yojson.Safe.Util in
-  match json |> member "repositories" |> to_list with
-  | [ repo ] -> repo |> member "pulls" |> member "pulls" |> to_list
-  | _ -> failf "expected the one registered repository in the JSON"
+  ( member "keepers" json
+  , json |> member "repositories" |> to_list |> List.concat_map (fun entry ->
+      entry |> member "pulls" |> member "pulls" |> to_list) )
 
-let join_of json =
+let snapshot_with ~keepers pulls =
+  { Pulls.initial with
+    keepers
+  ; repositories =
+      [ { Pulls.repository_id = "masc"
+        ; url = "https://github.com/jeong-sik/masc.git"
+        ; slug = Some "jeong-sik/masc"
+        ; pulls = Pulls.Pulls_read { observed_at = now (); pulls; undecodable = 0 }
+        }
+      ]
+  }
+
+let test_json_shape () =
+  let snapshot =
+    snapshot_with
+      ~keepers:(Pulls.Keepers_listed [ "edgar" ])
+      [ pull ~number:1 ~author:(Some "edgar")
+      ; { (pull ~number:2 ~author:(Some "Edgar")) with mergeable = Pulls.Conflicting }
+      ; { (pull ~number:3 ~author:None) with mergeable = Pulls.Mergeable_unknown }
+      ]
+  in
+  let keepers, rows = pulls_json snapshot in
+  Alcotest.(check string) "keeper list state" {|{"state":"listed"}|} (Yojson.Safe.to_string keepers);
   let open Yojson.Safe.Util in
-  ( json |> member "number" |> to_int
-  , json |> member "keepers" |> to_option (fun ks -> List.map to_string (to_list ks))
-  , ( json |> member "keepers_unread" |> to_int_option
-    , json |> member "keepers_error" |> to_string_option ) )
-
-let join_testable =
-  Alcotest.(list (triple int (option (list string)) (pair (option int) (option string))))
-
-let catalog_ids = function
-  | Ok repos -> List.map (fun (r : Repo_manager_types.repository) -> r.id) repos
-  | Error message -> failf "the join must hand inspection the catalog, got %s" message
-
-let pulls_read () =
-  let base_path = ready_base_path ~token:"gho_join" in
-  let http_post, _, _ = counting_stub three_pull_page in
-  base_path, Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
-
-let test_keepers_join_by_exact_branch () =
-  let base_path, read = pulls_read () in
-  (* The pull requests are published before any Keeper is inspected. *)
-  Alcotest.check
-    join_testable
-    "before the join"
-    [ 1, None, (None, Some "Keeper checkouts were not inspected")
-    ; 2, None, (None, Some "Keeper checkouts were not inspected")
-    ; 3, Some [], (Some 0, None)
+  let fields row = row |> member "author", row |> member "keeper", row |> member "mergeable" in
+  let expected =
+    [ `String "edgar", `String "edgar", `String "mergeable"
+    ; `String "Edgar", `Null, `String "conflicting"
+    ; `Null, `Null, `String "unknown"
     ]
-    (List.map join_of (json_pulls read));
-  let inspections = ref [] in
-  let inspect_checkouts ~catalog =
-    inspections := catalog_ids catalog :: !inspections;
-    fleet
   in
-  let joined = Pulls.join_keepers ~now ~inspect_checkouts ~base_path read in
-  Alcotest.(check (list (list string)))
-    "one inspection per refresh, with the catalog loaded once"
-    [ [ "masc" ] ]
-    !inspections;
-  (* alpha and zeta are on the head branches. beta's playground, one of
-     gamma's origins and theta's stopped discovery were not read, so each may
-     be on either branch; eta has no playground. delta's checkout is another
-     repository, epsilon's branch differs in case. #3 is a fork's
-     [feat/join], which no checkout of this repository can be on. *)
-  Alcotest.check
-    join_testable
-    "keepers per pull request"
-    [ 1, Some [ "alpha" ], (Some 3, None)
-    ; 2, Some [ "zeta" ], (Some 3, None)
-    ; 3, Some [], (Some 0, None)
-    ]
-    (List.map join_of (json_pulls joined));
-  Alcotest.(check (list (option int)))
-    "guest not running is its own count, apart from unread"
-    [ Some 1; Some 1; Some 0 ]
-    (List.map
-       (fun pull -> Yojson.Safe.Util.(pull |> member "keepers_not_booted" |> to_int_option))
-       (json_pulls joined));
-  (* The next refresh keeps the join until the next join replaces it. *)
-  let http_post, _, _ = counting_stub three_pull_page in
-  let next = Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:joined in
-  Alcotest.check
-    join_testable
-    "the previous join stands between refresh and join"
-    (List.map join_of (json_pulls joined))
-    (List.map join_of (json_pulls next))
+  List.iter2
+    (fun row (author, keeper, mergeable) ->
+      let a, k, m = fields row in
+      Alcotest.(check string) "author" (Yojson.Safe.to_string author) (Yojson.Safe.to_string a);
+      Alcotest.(check string) "keeper" (Yojson.Safe.to_string keeper) (Yojson.Safe.to_string k);
+      Alcotest.(check string) "mergeable" (Yojson.Safe.to_string mergeable) (Yojson.Safe.to_string m))
+    rows
+    expected;
+  Alcotest.(check (list string))
+    "row keys"
+    [ "repo_slug"; "number"; "title"; "head_branch"; "draft"; "checks"; "review"; "mergeable"
+    ; "author"; "keeper"; "updated_at" ]
+    (keys (List.hd rows))
 
-let test_unlisted_keepers_say_so () =
-  let base_path, read = pulls_read () in
-  let joined =
-    Pulls.join_keepers
-      ~now
-      ~inspect_checkouts:(fun ~catalog:_ -> Error "keepers directory unreadable")
-      ~base_path
-      read
-  in
-  Alcotest.check
-    join_testable
-    "no pull request reads as having no Keeper"
-    [ 1, None, (None, Some "keepers directory unreadable")
-    ; 2, None, (None, Some "keepers directory unreadable")
-    ; 3, Some [], (Some 0, None)
-    ]
-    (List.map join_of (json_pulls joined))
-
-let test_no_open_pull_means_no_inspection () =
-  let refuse ~catalog:_ = failf "no open pull request was read, so no checkout is inspected" in
-  (* Reader not declared: nothing read. *)
+(* A Keeper directory that cannot be listed: the snapshot says so instead of
+   reading as an empty Keeper list. *)
+let test_unreadable_keeper_list_is_visible () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
   let base_path = temp_base_path () in
   register base_path;
-  let unread = Pulls.refresh ~now ~http_post:never_called ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial in
-  let _ = Pulls.join_keepers ~now ~inspect_checkouts:refuse ~base_path unread in
-  (* Read, but the repository has no open pull request. *)
-  let base_path = ready_base_path ~token:"gho_empty" in
-  let http_post, _, _ = counting_stub (ok_response (page ~has_next:false ~cursor:None [])) in
-  let empty = Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial in
-  let _ = Pulls.join_keepers ~now ~inspect_checkouts:refuse ~base_path empty in
-  ()
+  let config = Masc.Workspace.default_config base_path in
+  let keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+  mkdir_p keepers_dir;
+  Unix.chmod keepers_dir 0o000;
+  let snapshot =
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod keepers_dir 0o700)
+      (fun () -> Pulls.refresh ~now ~http_post:never_called ~config ~previous:Pulls.initial)
+  in
+  (match snapshot.keepers with
+   | Pulls.Keepers_list_failed _ -> ()
+   | Pulls.Keepers_listed _ -> failf "an unreadable Keeper directory must not read as an empty Keeper list"
+   | Pulls.Keepers_not_listed -> failf "a refresh must list the Keepers");
+  let open Yojson.Safe.Util in
+  let keepers = Pulls.snapshot_to_yojson snapshot |> member "keepers" in
+  Alcotest.(check string) "state" "list_failed" (keepers |> member "state" |> to_string);
+  Alcotest.(check bool) "the reason is carried" true (keepers |> member "reason" |> to_string <> "")
 
-(* Which playground scan answers mean "no checkout" and which mean "may be on
-   any branch". *)
-let test_scan_errors_map_to_absent_or_unread () =
-  let module P = Masc.Keeper_playground_checkouts in
-  let kind = function
-    | Pulls.Checkouts_read _ -> "read"
-    | Pulls.Checkouts_absent -> "absent"
-    | Pulls.Checkouts_unread _ -> "unread"
-    | Pulls.Checkouts_not_booted -> "not_booted"
+(* [.masc] is read-only and holds no [keepers] directory, so listing the
+   Keepers fails to create that directory and raises. The refresh still
+   returns and publishes the repositories it read. *)
+let test_a_raising_keeper_list_does_not_drop_the_refresh () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_base_path () in
+  register base_path;
+  let config = Masc.Workspace.default_config base_path in
+  let masc_dir = Masc.Workspace.masc_root_dir config in
+  Alcotest.(check bool) "fixture: no keepers directory yet" false
+    (Sys.file_exists (Masc.Workspace.keepers_runtime_dir config));
+  Unix.chmod masc_dir 0o500;
+  let snapshot =
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod masc_dir 0o700)
+      (fun () ->
+        (match Masc.Keeper_meta_store.keeper_names_result config with
+         | _ -> failf "the fixture must make the Keeper list read raise"
+         | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+         | exception _ -> ());
+        Pulls.refresh
+          ~now
+          ~http_post:never_called
+          ~config
+          ~previous:(snapshot_with ~keepers:(Pulls.Keepers_listed [ "edgar" ]) []))
   in
-  let scans =
-    [ Ok { Control.scan_rows = []; scan_truncated = None }
-    ; Error (P.Root_missing { root = "/w" })
-    ; Error (P.Root_not_directory { root = "/w"; kind = "file" })
-    ; Error (P.Root_unreadable { root = "/w"; detail = "EACCES" })
-    ; Error (P.Root_probe_unreachable { root = "/w"; reason = "timeout" })
-    ]
-  in
-  Alcotest.(check (list string))
-    "scan answers, shared mount then endpoint-owned"
-    [ "read"; "absent"; "unread"; "unread"; "unread"
-    ; "read"; "not_booted"; "unread"; "unread"; "unread"
-    ]
-    (List.concat_map
-       (fun tree_location ->
-         List.map (fun scan -> kind (Pulls.checkouts_of_scan ~tree_location scan)) scans)
-       Keeper_types_profile_sandbox.[ Shared_mount; Endpoint_owned ])
+  (match snapshot.keepers with
+   | Pulls.Keepers_list_failed reason ->
+     Alcotest.(check bool) "the reason names the raise" true
+       (String.starts_with ~prefix:"keeper list read raised" reason)
+   | Pulls.Keepers_listed _ -> failf "the previous Keeper list must not stand after a raise"
+   | Pulls.Keepers_not_listed -> failf "a refresh must list the Keepers");
+  Alcotest.(check bool) "the rows are this refresh's" true
+    (Option.is_none snapshot.repositories_error);
+  match pulls_by_id snapshot with
+  | [ ("masc", Pulls.Pulls_not_read); ("mirror", Pulls.Pulls_not_github) ] -> ()
+  | _ -> failf "the registered repositories must be published beside the failed Keeper list"
 
-let test_fork_pull_joins_no_keeper_in_any_join_state () =
-  let _, read = pulls_read () in
-  let fork_join snapshot =
-    List.filter_map
-      (fun ((number, _, _) as join) -> if number = 3 then Some join else None)
-      (List.map join_of (json_pulls snapshot))
+(* The repository list cannot be read: the previous rows stand, and the
+   Keeper list is still read for this refresh. *)
+let test_unread_repositories_still_list_keepers () =
+  let base_path = temp_base_path () in
+  write_file (Config_dir_resolver.repositories_toml_path ~base_path) "not = [toml";
+  let previous =
+    snapshot_with ~keepers:Pulls.Keepers_not_listed [ pull ~number:1 ~author:(Some "edgar") ]
   in
-  let expected = [ 3, Some [], (Some 0, None) ] in
-  Alcotest.check join_testable "before any join" expected (fork_join read);
-  let base_path = ready_base_path ~token:"gho_fork" in
-  let unlisted =
-    Pulls.join_keepers
+  let snapshot =
+    Pulls.refresh
       ~now
-      ~inspect_checkouts:(fun ~catalog:_ -> Error "keepers directory unreadable")
-      ~base_path
-      read
+      ~http_post:never_called
+      ~config:(Masc.Workspace.default_config base_path)
+      ~previous
   in
-  Alcotest.check join_testable "keeper list unreadable" expected (fork_join unlisted)
+  Alcotest.(check bool) "the rows are marked old" true (Option.is_some snapshot.repositories_error);
+  Alcotest.(check int) "the previous rows stand" 1 (List.length snapshot.repositories);
+  match snapshot.keepers with
+  | Pulls.Keepers_listed [] -> ()
+  | Pulls.Keepers_listed _ -> failf "this workspace persists no Keeper"
+  | Pulls.Keepers_list_failed reason -> failf "the Keeper list must be read: %s" reason
+  | Pulls.Keepers_not_listed -> failf "the previous Keeper state must not stand"
+
+(* While the list is unread, a pull whose author is a Keeper's name is not
+   called that Keeper's; the snapshot state is what says the join is off. *)
+let test_unlisted_keepers_join_nothing () =
+  let _, rows =
+    pulls_json
+      (snapshot_with
+         ~keepers:(Pulls.Keepers_list_failed "keeper directory unreadable")
+         [ pull ~number:1 ~author:(Some "edgar") ])
+  in
+  match rows with
+  | [ row ] ->
+    Alcotest.(check bool) "no keeper while unlisted" true (Yojson.Safe.Util.member "keeper" row = `Null)
+  | _ -> failf "expected one pull request"
+
+(* The authoring Keeper is not the reader: persisting the reader's meta
+   would make its token lookup read its full declaration. *)
+let authoring_keeper = "edgar"
+
+let test_persisted_keeper_is_joined () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = ready_base_path ~token:"gho_reader" in
+  let config = Masc.Workspace.default_config base_path in
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String authoring_keeper ]) with
+    | Ok fixture -> fixture
+    | Error detail -> failf "meta fixture: %s" detail
+  in
+  (match Masc.Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> failf "keeper meta persistence failed: %s" detail);
+  let author name = Printf.sprintf {|{"name":%S}|} name in
+  let node ~number name =
+    pull_node ~author:(author name) ~number ~branch:"b" ~draft:false ~review:"null" ~rollup:"null" ()
+  in
+  let body =
+    page
+      ~has_next:false
+      ~cursor:None
+      [ node ~number:1 authoring_keeper; node ~number:2 (String.capitalize_ascii authoring_keeper) ]
+  in
+  let http_post, _, _ = counting_stub (ok_response body) in
+  let snapshot = Pulls.refresh ~now ~http_post ~config ~previous:Pulls.initial in
+  (match snapshot.keepers with
+   | Pulls.Keepers_listed names ->
+     Alcotest.(check (list string)) "the persisted Keeper" [ authoring_keeper ] names
+   | _ -> failf "a persisted Keeper must be listed");
+  let _, rows = pulls_json snapshot in
+  Alcotest.(check (list string))
+    "only the exact author name is a Keeper"
+    [ Yojson.Safe.to_string (`String authoring_keeper); "null" ]
+    (List.map (fun row -> Yojson.Safe.to_string (Yojson.Safe.Util.member "keeper" row)) rows)
 
 let test_github_slug () =
   List.iter
@@ -745,6 +829,11 @@ let () =
     [ ( "graphql"
       , [ Alcotest.test_case "two pages decode in order" `Quick test_decodes_two_pages
         ; Alcotest.test_case "unknown enum is counted" `Quick test_unknown_enum_is_counted
+        ; Alcotest.test_case "author and mergeable decode" `Quick test_author_and_mergeable_decode
+        ; Alcotest.test_case
+            "unknown mergeable or missing author is counted"
+            `Quick
+            test_unknown_mergeable_or_missing_author_is_counted
         ; Alcotest.test_case
             "not visible is a failure"
             `Quick
@@ -784,23 +873,25 @@ let () =
             test_secondary_limit_waits_for_retry_after
         ; Alcotest.test_case "plain 403 is forbidden" `Quick test_plain_403_is_forbidden
         ] )
-    ; ( "keepers on branch"
-      , [ Alcotest.test_case
-            "joined by exact branch"
-            `Quick
-            test_keepers_join_by_exact_branch
-        ; Alcotest.test_case "unlisted keepers say so" `Quick test_unlisted_keepers_say_so
+    ; ( "keeper join"
+      , [ Alcotest.test_case "join is exact" `Quick test_join_is_exact
+        ; Alcotest.test_case "json shape" `Quick test_json_shape
         ; Alcotest.test_case
-            "no open pull request means no inspection"
+            "unreadable keeper list is visible"
             `Quick
-            test_no_open_pull_means_no_inspection
+            test_unreadable_keeper_list_is_visible
         ; Alcotest.test_case
-            "scan errors map to absent or unread"
+            "a raising keeper list does not drop the refresh"
             `Quick
-            test_scan_errors_map_to_absent_or_unread
+            test_a_raising_keeper_list_does_not_drop_the_refresh
         ; Alcotest.test_case
-            "a fork pull request joins no keeper in any join state"
+            "unread repositories still list keepers"
             `Quick
-            test_fork_pull_joins_no_keeper_in_any_join_state
+            test_unread_repositories_still_list_keepers
+        ; Alcotest.test_case
+            "unlisted keepers join nothing"
+            `Quick
+            test_unlisted_keepers_join_nothing
+        ; Alcotest.test_case "persisted keeper is joined" `Quick test_persisted_keeper_is_joined
         ] )
     ]

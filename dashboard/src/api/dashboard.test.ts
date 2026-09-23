@@ -4898,6 +4898,19 @@ describe('fetchKeeperCostMetrics', () => {
     expect(result.keepers[0]?.cost_unreported_samples).toBe(2)
   })
 
+  it('drops a keeper row whose total cost disagrees with its reported count', async () => {
+    stubKeeperCosts([
+      { keeper_name: 'reported-but-no-total', cost_reported_samples: 2, cost_unreported_samples: 0, sample_count: 2 },
+      { keeper_name: 'reported-but-null-total', total_cost_usd: null, cost_reported_samples: 1, cost_unreported_samples: 0, sample_count: 1 },
+      { keeper_name: 'total-but-none-reported', total_cost_usd: 0.5, cost_reported_samples: 0, cost_unreported_samples: 2, sample_count: 2 },
+      { keeper_name: 'consistent', total_cost_usd: null, cost_reported_samples: 0, cost_unreported_samples: 2, sample_count: 2 },
+    ])
+
+    const result = await fetchKeeperCostMetrics(60)
+
+    expect(result.keepers.map(k => k.keeper_name)).toEqual(['consistent'])
+  })
+
   it('drops a keeper row that does not say how many samples reported a cost', async () => {
     stubKeeperCosts([{ keeper_name: 'keeper-alpha', total_cost_usd: 0.5, sample_count: 2 }])
 

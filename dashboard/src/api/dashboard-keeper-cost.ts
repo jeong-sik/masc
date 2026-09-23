@@ -74,9 +74,14 @@ function decodeKeeperCostMetric(raw: unknown): KeeperCostMetric | null {
   const costReported = asInt(raw.cost_reported_samples)
   const costUnreported = asInt(raw.cost_unreported_samples)
   if (costReported === undefined || costUnreported === undefined) return null
+  // The total is a number exactly when some sample reported a cost; a row
+  // where the two disagree is not a state the producer can write.
+  const totalCost = raw.total_cost_usd === null ? null : asNumber(raw.total_cost_usd)
+  if (totalCost === undefined) return null
+  if ((totalCost === null) !== (costReported === 0)) return null
   return {
     keeper_name: keeperName,
-    total_cost_usd: asNumber(raw.total_cost_usd) ?? null,
+    total_cost_usd: totalCost,
     cost_reported_samples: costReported,
     cost_unreported_samples: costUnreported,
     total_input_tokens: asNumber(raw.total_input_tokens) ?? 0,

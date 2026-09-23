@@ -2989,9 +2989,14 @@ let render_planning_list (state : state) =
                  started at. The baseline is the first successful read of
                  this process and is never replaced, so on a screen left open
                  overnight "since 09:31:39" named a moment on a day the
-                 reader had no way to identify. *)
+                 reader had no way to identify.
+
+                 The sentence names where the span starts, because the span
+                 is not a window anyone chose: "over the last 1d21h" reads
+                 like a day-and-a-half report, when what it measures is how
+                 long this screen has been open. *)
               Printf.sprintf
-                "  Net change over the last %s: Goals done %+d · Tasks done %+d · Goal reviews pending %+d"
+                "  Net change since this TUI's first reading %s ago: Goals done %+d · Tasks done %+d · Goal reviews pending %+d"
                 (Masc_tui_wire_age.text ~now:now_unix first.pl_generated_at)
                 (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
                 (p.pl_backlog.pb_done - first.pl_backlog.pb_done)

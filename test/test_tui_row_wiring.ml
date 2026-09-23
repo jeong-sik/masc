@@ -861,6 +861,35 @@ let test_the_lane_slot_history_says_what_it_does_not_cover () =
        ~binding_name:"standalone_lane_detail_lines"
        ~callee:"standalone_lane_runs_naming_no_slot")
 
+(* A stamp that can be older than today is drawn as a span, not as a clock.
+
+   Both of these sit beside the screen's own clock and used to draw the hour
+   alone, on the reading that the header gives them a distance. That holds
+   only while the two are the same day: the Clients roster drew a session last
+   seen on 2026-09-21 as "11:49:28" under a 2026-09-23 header, and the
+   planning baseline is the first read of the process and is never replaced,
+   so a screen left open overnight named a moment on a day nobody could
+   identify.
+
+   Counted rather than read off a screen, because the two are days apart from
+   the clock a test would have to wait for. *)
+let test_a_stamp_that_can_outlive_today_is_drawn_as_a_span () =
+  let asks ~binding_name ~callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render ~binding_name
+      ~callee
+  in
+  List.iter
+    (fun binding_name ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s asks for the span" binding_name)
+        true
+        (asks ~binding_name ~callee:"Masc_tui_wire_age.text" > 0);
+      Alcotest.(check int)
+        (Printf.sprintf "%s draws no bare clock" binding_name)
+        0
+        (asks ~binding_name ~callee:"Terminal_text.clock_timestamp"))
+    [ "render_clients"; "render_planning_list" ]
+
 (* The runtime detail opens from two doors: a lane's candidate row and the
    catalog row. Both answer "Used by lanes", and the lane door used to answer
    it with the one lane the reader arrived through -- a runtime seven lanes
@@ -965,6 +994,8 @@ let () =
             `Quick test_the_approvals_title_counts_what_the_badge_counts
         ; Alcotest.test_case "the Board title counts through the helper" `Quick
             test_the_board_title_counts_through_the_helper_that_knows_the_board
+        ; Alcotest.test_case "a stamp that can outlive today is a span" `Quick
+            test_a_stamp_that_can_outlive_today_is_drawn_as_a_span
         ; Alcotest.test_case
             "the lane slot history says what it does not cover" `Quick
             test_the_lane_slot_history_says_what_it_does_not_cover

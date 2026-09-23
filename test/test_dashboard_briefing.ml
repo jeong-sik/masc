@@ -687,6 +687,82 @@ let row_named name rows =
     (fun row -> Yojson.Safe.Util.(row |> member "name") = `String name)
     rows
 
+(* #38090: a Keeper whose snapshot row raised was dropped from [items] with
+   one log line, and the briefing, the execution screen and the TUI Overview
+   counted a fleet that had lost it as a smaller fleet. PR #38072's first CI
+   run lost all three fixture Keepers this way: building a row asks for the
+   default runtime, and this suite initializes none. That same failure is the
+   fixture here. *)
+let test_a_keeper_whose_row_raises_is_reported_unread () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock ~sw ->
+      (* The row resolves an unassigned keeper through the default route. *)
+      (match Runtime.get_default_route () with
+       | exception Failure _ -> ()
+       | route ->
+         failf
+           "precondition: this case needs building a row to raise, but a \
+            default route %S is initialized"
+           route);
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc [ "name", `String "k-unread"; "trace_id", `String "unread-trace" ])
+        with
+        | Ok meta -> meta
+        | Error error -> fail ("meta fixture: " ^ error)
+      in
+      (match Lib.Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error error -> fail ("write meta: " ^ error));
+      Dashboard_cache.invalidate_all ();
+      Operator_control.invalidate_snapshot_cache ();
+      Dashboard_projection_cache.invalidate_snapshot_json ~config;
+      let open Yojson.Safe.Util in
+      let unread_named label json =
+        match Lib.Keeper_snapshot_unread.list_of_json (json |> member "keepers_unread") with
+        | Error error -> failf "%s keepers_unread does not decode: %s" label error
+        | Ok unread ->
+          (match
+             List.find_opt
+               (fun (u : Lib.Keeper_snapshot_unread.t) ->
+                String.equal u.Lib.Keeper_snapshot_unread.name "k-unread")
+               unread
+           with
+           | Some { Lib.Keeper_snapshot_unread.reason = Row_raised _; _ } -> ()
+           | Some { Lib.Keeper_snapshot_unread.reason = Meta_read_failed detail; _ } ->
+             failf "%s reports the keeper as a meta read failure: %s" label detail
+           | None -> failf "%s does not report k-unread as unread" label)
+      in
+      let briefing =
+        Dashboard_briefing.json
+          ~actor:"test-briefing-unread-keeper"
+          ~config
+          ~sw
+          ~clock
+          ~proc_mgr:None
+          ()
+      in
+      check bool "the keeper has no brief -- its row was never built" true
+        (Option.is_none (row_named "k-unread" (briefing |> member "keeper_briefs" |> to_list)));
+      unread_named "the briefing" briefing;
+      let execution =
+        Dashboard_execution.json
+          ~actor:"test-execution-unread-keeper"
+          ~light:true
+          ~config
+          ~sw
+          ~clock
+          ~proc_mgr:None
+          ()
+      in
+      unread_named "the execution render" execution)
+
 (* The execution render that answered 500 on 2026-09-19: the snapshot's
    declaration row for [imp] had no health, and the continuity briefs raised
    on it. *)
@@ -764,6 +840,158 @@ let test_enrich_leaves_a_declaration_row_without_runtime_fields () =
       check bool "the row stays a declaration" true
         Yojson.Safe.Util.(enriched |> member "declaration_only" |> to_bool))
 
+(* 2026-09-23 live: every keeper brief on /api/v1/dashboard/briefing had
+   [health = null], so a keeper in the Failing phase sat mid-list. The rows
+   above build their fixture with a [diagnostic] the operator snapshot never
+   wrote. This case goes through the real producer: stored metadata, a
+   registry phase, and the briefing render. *)
+(* The snapshot row reads each keeper's runtime identity, which asks for the
+   default runtime. Without one every fixture keeper's row fails and the
+   snapshot drops it, so the briefing never sees the keepers at all. *)
+let briefing_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let test_briefing_ranks_a_failing_keeper_first () =
+  let dir = test_dir () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Lib.Keeper_registry.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock ~sw ->
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+      let runtime_path = Filename.concat dir "runtime.toml" in
+      Out_channel.with_open_bin runtime_path (fun out ->
+        output_string out briefing_runtime_toml);
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error error -> failf "Runtime.init_default failed: %s" error);
+      Lib.Keeper_registry.For_testing.clear ();
+      let store fields =
+        let meta =
+          match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
+          | Ok meta -> meta
+          | Error error -> fail ("meta fixture: " ^ error)
+        in
+        (match Lib.Keeper_meta_store.replace_snapshot config meta with
+         | Ok () -> ()
+         | Error error -> fail ("write meta: " ^ error));
+        meta
+      in
+      let register name =
+        ignore
+          (Lib.Keeper_registry.For_testing.register
+             ~base_path:config.base_path
+             name
+             (store [ "name", `String name; "trace_id", `String (name ^ "-trace") ]))
+      in
+      register "k-running";
+      register "k-failing";
+      ignore
+        (store
+           [ "name", `String "k-paused"
+           ; "trace_id", `String "paused-trace"
+           ; "paused", `Bool true
+           ]);
+      (match
+         Lib.Keeper_registry.dispatch_event
+           ~base_path:config.base_path
+           "k-failing"
+           (Keeper_state_machine.Turn_failed { consecutive = 1 })
+       with
+       | Ok _ -> ()
+       | Error _ -> fail "the turn failure was not accepted");
+      Dashboard_cache.invalidate_all ();
+      Operator_control.invalidate_snapshot_cache ();
+      Dashboard_projection_cache.invalidate_snapshot_json ~config;
+      let json =
+        Dashboard_briefing.json
+          ~actor:"test-briefing-failing-keeper"
+          ~config
+          ~sw
+          ~clock
+          ~proc_mgr:None
+          ()
+      in
+      let open Yojson.Safe.Util in
+      let briefs = json |> member "keeper_briefs" |> to_list in
+      let health name =
+        match row_named name briefs with
+        | Some row -> Yojson.Safe.to_string (row |> member "health")
+        | None -> failf "%s is missing from keeper_briefs" name
+      in
+      check string "the failing keeper's brief says failing" {|"failing"|}
+        (health "k-failing");
+      check string "the running keeper's brief carries its health" {|"idle"|}
+        (health "k-running");
+      (* A paused keeper's keepalive is gone, so it reads offline. *)
+      check string "the paused keeper's brief carries its health" {|"offline"|}
+        (health "k-paused");
+      (* Offline shares the top pressure rank with failing, but a pause is
+         the operator's own decision, so the paused keeper ranks as no
+         pressure at all and sorts below the idle one. *)
+      (* Only the three fixture keepers are ordered here; another row the
+         workspace seeds must not decide this case. *)
+      let fixture_names = [ "k-failing"; "k-running"; "k-paused" ] in
+      check (list string) "failing first, then idle, then paused"
+        fixture_names
+        (briefs
+         |> List.map (fun row -> row |> member "name" |> to_string)
+         |> List.filter (fun name -> List.mem name fixture_names)))
+
+(* A paused keeper is not pressure on any axis. Its context ratio is left
+   over from before the pause and no turn will add to it, so a high ratio
+   must not lift it into the context-pressure rank above a working keeper. *)
+let test_paused_keeper_with_high_context_is_not_pressure () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
+      let config = Workspace_utils.default_config dir in
+      let updated_at = Masc_domain.now_iso () in
+      let row name ~paused ~health ~context_ratio =
+        `Assoc
+          [ ("name", `String name)
+          ; ("agent_name", `String name)
+          ; ("paused", `Bool paused)
+          ; ("context_ratio", `Float context_ratio)
+          ; ("diagnostic", `Assoc [ ("health_state", `String health) ])
+          ; ("updated_at", `String updated_at)
+          ; ("latest_tool_names", `List [])
+          ]
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check (list string))
+        "an idle keeper outranks a paused one at context 0.9"
+        [ "k-idle"; "k-paused" ]
+        (Dashboard_briefing_assembly.build_keeper_briefs config
+           [ row "k-paused" ~paused:true ~health:"offline" ~context_ratio:0.9
+           ; row "k-idle" ~paused:false ~health:"idle" ~context_ratio:0.1
+           ]
+         |> List.map (fun row -> row |> member "name" |> to_string)))
+
 let () =
   Alcotest.run "Dashboard Mission"
     [
@@ -797,10 +1025,16 @@ let () =
             `Quick test_workspace_health_reads_the_severities_present;
           Alcotest.test_case "informational severity ranks below warn" `Quick
             test_informational_severity_ranks_below_warn_and_above_nothing;
+          Alcotest.test_case "a keeper whose row raises is reported unread" `Quick
+            test_a_keeper_whose_row_raises_is_reported_unread;
           Alcotest.test_case "pressure rank orders by health" `Quick
             test_pressure_rank_orders_by_surface_status;
           Alcotest.test_case "keeper brief publishes health and phase" `Quick
             test_keeper_brief_publishes_health_and_phase;
+          Alcotest.test_case "briefing ranks a failing keeper first" `Quick
+            test_briefing_ranks_a_failing_keeper_first;
+          Alcotest.test_case "paused keeper with high context is not pressure"
+            `Quick test_paused_keeper_with_high_context_is_not_pressure;
           Alcotest.test_case "internal signals do not pair the two streams"
             `Quick test_internal_signals_do_not_pair_streams;
         ] );

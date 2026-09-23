@@ -2165,7 +2165,6 @@ let context_overflow_shrink_sequence
       ~starting_capacity
       ~same_run_retry_authorized
       ~shrink_admits_history
-      ~record_success
       ~on_shrink_retry
       ~(attempt : capacity:int -> ('ok, Agent_core.Error.t) result)
       ()
@@ -2173,9 +2172,7 @@ let context_overflow_shrink_sequence
   =
   let rec go ~capacity ~shrink_attempt =
     match attempt ~capacity with
-    | Ok _ as ok ->
-      record_success ~capacity;
-      ok
+    | Ok _ as ok -> ok
     | Error error as failed ->
       if Keeper_turn_driver_try_runtime.context_overflow_should_try_next error
          && same_run_retry_authorized ()

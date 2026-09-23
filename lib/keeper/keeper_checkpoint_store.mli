@@ -304,8 +304,8 @@ val save_agent_core_if_absent : session_dir:string -> Agent_core.Checkpoint.t ->
     [Installed] describes the retained artifact, not the latest canonical file.
     Only an installation without durability uncertainty permits a journal to
     reference it. Persist these bytes before the journal Suspend CAS; a failed
-    CAS may leave an unreferenced artifact, which this API never expires or
-    prunes. These bytes are accepted evidence, not authority to roll the shared
+    CAS may leave an unreferenced artifact; this API never removes it, and
+    [Keeper_retained_checkpoint_sweep] does at the next server startup. These bytes are accepted evidence, not authority to roll the shared
     canonical conversation back: cooperative A continuation must preserve B's
     newer shared history and use an explicit settled boundary and original
     admitted input. Exact runtime recovery remains a separate contract.
@@ -313,9 +313,13 @@ val save_agent_core_if_absent : session_dir:string -> Agent_core.Checkpoint.t ->
     Whole-session cleanup (including shutdown [remove_session_dir]) can remove
     this directory. Runtime journal lifecycle integration must settle or protect
     owned continuations before that cleanup. Owner/native callers, those cleanup
-    guards, and eventual explicit reclamation are not wired by this primitive. *)
+    guards are not wired by this primitive. *)
 val retain_exact_snapshot :
   session_dir:string -> exact_checkpoint_snapshot -> checkpoint_installation
+
+(** The session subdirectory holding retained artifacts, each named
+    [<sha256>.json] after its reference. *)
+val retained_dirname : string
 
 (** Read only the artifact addressed by the complete accepted reference, under
     the stable session lock. Validates immutable bytes, trace and turn count;

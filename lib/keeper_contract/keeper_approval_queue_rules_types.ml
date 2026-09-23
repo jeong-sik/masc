@@ -102,8 +102,15 @@ type observed_status =
   | Observed_signal of int
   | Observed_stopped of int
 
+type observed_refusal_kind =
+  | Socket_rule_not_applied
+  | Write_rule_not_applied
+  | Setup_failed
+  | Unattributed
+
 type observed_refusal =
-  { observed_status : observed_status
+  { observed_refusal_kind : observed_refusal_kind
+  ; observed_status : observed_status
   ; observed_stderr : string
   ; observed_stderr_omitted_bytes : int
   }
@@ -233,17 +240,48 @@ let authorization_source_of_string = function
 
 (* ── What the box refused (RFC-0422) ─────────────────────────────────── *)
 
-(* The tail of [stderr]: a refused write or socket is the last thing a
-   program reports, and what it printed before is context the bound can
+let observed_refusal_kind_to_string = function
+  | Socket_rule_not_applied -> "socket_rule_not_applied"
+  | Write_rule_not_applied -> "write_rule_not_applied"
+  | Setup_failed -> "setup_failed"
+  | Unattributed -> "unattributed"
+;;
+
+(* The list is walked from the first kind through this exhaustive match, so
+   a new constructor needs an arm here before it compiles. Whether it is
+   reached is pinned by the contract tests, not by the match. *)
+let next_observed_refusal_kind = function
+  | Socket_rule_not_applied -> Some Write_rule_not_applied
+  | Write_rule_not_applied -> Some Setup_failed
+  | Setup_failed -> Some Unattributed
+  | Unattributed -> None
+;;
+
+let observed_refusal_kinds =
+  let rec walk kind = kind :: Option.fold ~none:[] ~some:walk (next_observed_refusal_kind kind) in
+  walk Socket_rule_not_applied
+;;
+
+(* The wire tags are spelled once, in [observed_refusal_kind_to_string]; the
+   reader looks a tag up among them, so an unknown tag is [None]. *)
+let observed_refusal_kind_of_string tag =
+  List.find_opt
+    (fun kind -> String.equal (observed_refusal_kind_to_string kind) tag)
+    observed_refusal_kinds
+;;
+
+(* The tail of [stderr]: the reason a box could not be built is the last
+   thing the shim reports, and what came before is context the bound can
    drop. The cut lands on a UTF-8 character boundary so a multibyte
    character is never split in half; the bytes dropped are counted rather
-   than marked in-band, so the text stays the program's own. *)
-let observed_refusal ~max_stderr_bytes ~status ~stderr =
+   than marked in-band, so the text stays as the shim wrote it. *)
+let observed_refusal ~max_stderr_bytes ~refusal_kind ~status ~stderr =
   let max_stderr_bytes = max 0 max_stderr_bytes in
   let len = String.length stderr in
   if len <= max_stderr_bytes
   then
-    { observed_status = status
+    { observed_refusal_kind = refusal_kind
+    ; observed_status = status
     ; observed_stderr = stderr
     ; observed_stderr_omitted_bytes = 0
     }
@@ -254,7 +292,8 @@ let observed_refusal ~max_stderr_bytes ~status ~stderr =
       else i
     in
     let start = character_start (len - max_stderr_bytes) in
-    { observed_status = status
+    { observed_refusal_kind = refusal_kind
+    ; observed_status = status
     ; observed_stderr = String.sub stderr start (len - start)
     ; observed_stderr_omitted_bytes = start
     })
@@ -292,33 +331,52 @@ let observed_status_of_yojson = function
 
 let observed_refusal_to_yojson refusal =
   `Assoc
-    [ "status", observed_status_to_yojson refusal.observed_status
+    [ "refusal_kind", `String (observed_refusal_kind_to_string refusal.observed_refusal_kind)
+    ; "status", observed_status_to_yojson refusal.observed_status
     ; "stderr", `String refusal.observed_stderr
     ; "stderr_omitted_bytes", `Int refusal.observed_stderr_omitted_bytes
     ]
 ;;
 
+let observed_refusal_kind_of_yojson = function
+  | Some (`String tag) ->
+    (match observed_refusal_kind_of_string tag with
+     | Some kind -> Ok kind
+     | None ->
+       Error
+         (Printf.sprintf
+            "observation.refusal_kind %S is not one of %s"
+            tag
+            (String.concat ", " (List.map observed_refusal_kind_to_string observed_refusal_kinds))))
+  | Some _ | None -> Error "observation.refusal_kind must be a string"
+;;
+
 let observed_refusal_of_yojson = function
   | `Assoc fields ->
-    Result.bind
-      (match List.assoc_opt "status" fields with
-       | Some status -> observed_status_of_yojson status
-       | None -> Error "observation.status is required")
-      (fun observed_status ->
-        Result.bind
-          (match List.assoc_opt "stderr" fields with
-           | Some (`String stderr) -> Ok stderr
-           | Some _ | None -> Error "observation.stderr must be a string")
-          (fun observed_stderr ->
-            match List.assoc_opt "stderr_omitted_bytes" fields with
-            | Some (`Int omitted) when omitted >= 0 ->
-              Ok
-                { observed_status
-                ; observed_stderr
-                ; observed_stderr_omitted_bytes = omitted
-                }
-            | Some _ | None ->
-              Error "observation.stderr_omitted_bytes must be a non-negative integer"))
+    let ( let* ) = Result.bind in
+    let* observed_refusal_kind =
+      observed_refusal_kind_of_yojson (List.assoc_opt "refusal_kind" fields)
+    in
+    let* observed_status =
+      match List.assoc_opt "status" fields with
+      | Some status -> observed_status_of_yojson status
+      | None -> Error "observation.status is required"
+    in
+    let* observed_stderr =
+      match List.assoc_opt "stderr" fields with
+      | Some (`String stderr) -> Ok stderr
+      | Some _ | None -> Error "observation.stderr must be a string"
+    in
+    (match List.assoc_opt "stderr_omitted_bytes" fields with
+     | Some (`Int omitted) when omitted >= 0 ->
+       Ok
+         { observed_refusal_kind
+         ; observed_status
+         ; observed_stderr
+         ; observed_stderr_omitted_bytes = omitted
+         }
+     | Some _ | None ->
+       Error "observation.stderr_omitted_bytes must be a non-negative integer")
   | _ -> Error "observation must be an object"
 ;;
 

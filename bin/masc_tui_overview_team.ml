@@ -40,11 +40,21 @@ let holding_of ~tasks name =
 
 let held holding = List.length holding.working + holding.awaiting
 
+(* An info item names a Keeper without saying it is stuck (the connector's
+   "<name> has N external messages waiting" is one); it neither moves the row
+   to Needs_you nor stands in for the cause. *)
+let asks_for_the_operator (item : Types.attention_item) =
+  match item.ai_severity with
+  | Types.Attention_critical | Types.Attention_bad | Types.Attention_warning ->
+      true
+  | Types.Attention_info -> false
+
 let first_blocker ~attention name =
   List.find_map
     (fun (item : Types.attention_item) ->
       match item.ai_target with
-      | Types.Attention_keeper target when String.equal target name ->
+      | Types.Attention_keeper target
+        when String.equal target name && asks_for_the_operator item ->
           Some item
       | Types.Attention_keeper _ | Types.Attention_other _ -> None)
     attention
@@ -71,22 +81,26 @@ let alive holding =
 
 let classify ~attention ~holding (keeper : Types.overview_keeper) =
   let name = keeper.okp_name in
-  match keeper.okp_phase with
-  | Types.Keeper_phase phase -> (
+  match (keeper.okp_paused, keeper.okp_phase) with
+  | Some true, _ ->
+      (* The operator paused it. The status bridge still raises a "paused"
+         item for it, and after a server restart autoboot skips it so the
+         phase is null; neither is a stop the operator has not seen. *)
+      None
+  | (Some false | None), Types.Keeper_phase phase -> (
       let word = Tui_decode.keeper_phase_to_string phase in
       match Tui_decode.keeper_phase_band phase with
       | Tui_decode.Phase_stuck ->
           Some (Needs_you, stuck ~attention ~holding ~word name)
       | Tui_decode.Phase_alive -> Some (alive holding)
       | Tui_decode.Phase_parked -> None)
-  | Types.Keeper_phase_unreadable word ->
+  | (Some false | None), Types.Keeper_phase_unreadable word ->
       Some (Needs_you, stuck ~attention ~holding ~word name)
-  | Types.Keeper_phase_absent -> (
-      (* No registry entry: the Keeper is not running in this process. Whether
-         that is a stop the operator chose or one they have not seen yet is
-         what the attention list says, so the row follows it. A paused
-         Keeper stays parked even when an item names it: the item says it is
-         paused, which is the choice the parked line already reports. *)
+  | (Some false | None), Types.Keeper_phase_absent -> (
+      (* No registry entry and not paused: the Keeper is not running in this
+         process. Whether that is a stop the operator chose or one they have
+         not seen yet is what the attention list says, so the row follows
+         it. *)
       match first_blocker ~attention name with
       | Some item -> Some (Needs_you, blocker ~holding item)
       | None -> None)

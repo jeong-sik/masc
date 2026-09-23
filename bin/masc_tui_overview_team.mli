@@ -10,13 +10,17 @@ module Tui_decode = Masc.Tui_decode
     decided by the Keeper's phase and the tasks it holds -- not by a score. *)
 type group =
   | Needs_you
-      (** [Failing] or [Crashed], a phase this build cannot read, or no phase
-          at all while an attention item names the Keeper. *)
-  | Working  (** [Running] and holds a Claimed or InProgress task. *)
-  | Idle  (** Alive ([Running], [Draining], [Restarting]) with no such task. *)
+      (** Not paused, and [Failing] or [Crashed], a phase this build cannot
+          read, or no phase at all while a non-info attention item names the
+          Keeper. *)
+  | Working
+      (** Alive ([Running], [Draining], [Restarting]) and holds a Claimed or
+          InProgress task. *)
+  | Idle  (** Alive with no such task. *)
   | Parked
-      (** [Paused], [Stopped], [Offline], or no phase and nothing asking for
-          the operator. Drawn as one line of names. *)
+      (** The brief says [paused: true] (whatever the phase and the attention
+          list say), or [Paused], [Stopped], [Offline], or no phase and
+          nothing asking for the operator. Drawn as one line of names. *)
 
 type detail =
   | Blocker of {
@@ -24,7 +28,8 @@ type detail =
       item : Masc_tui_types.attention_item;
       held : int;
     }
-      (** The first attention item that names this Keeper -- its blocker
+      (** The first attention item above info severity that names this
+          Keeper -- its blocker
           sentence when the item carries one, else its summary, verbatim --
           the item itself, and how many open tasks it holds while stuck. *)
   | Phase_word of { word : string; held : int }

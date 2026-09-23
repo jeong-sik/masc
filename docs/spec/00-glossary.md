@@ -609,7 +609,9 @@ status: reference
   `Awaiting_confirmation`, `Completed`, `Dropped`다. 완료를 요청하면
   `Verifying`으로 들어가고, verifier가 증명을 통과시킨 뒤 사람이 확인해야
   `Completed`가 된다(`lib/goal/goal_phase.mli`). `Verifying` 중에도 연결된
-  Task는 계속 진행할 수 있다. 완료 verdict는 verifier가 기록하고, 사람의
+  Task는 계속 진행할 수 있다. verifier가 답하지 않으면 운영자가 `Verifying`에서
+  `drop`으로 `Dropped`로, `reopen`으로 `Executing`으로 옮길 수 있다. 그 뒤에
+  도착한 verdict는 거절된다. 완료 verdict는 verifier가 기록하고, 사람의
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
   `admits_self_directed_progress`가 이 경계를 정의한다.
 

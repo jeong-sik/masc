@@ -147,12 +147,16 @@ let read ~base_path ~id:expected =
     match kind with
     | None -> Ok None
     | Some Unix.S_REG ->
-      let bytes = Fs_compat.load_file path in
-      let decoded = try decode (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
-      (match decoded with
-       | Error detail -> Error (Unavailable (path ^ ": " ^ detail))
-       | Ok t when id t = expected -> Ok (Some t)
-       | Ok _ -> Error (Unavailable (path ^ ": content hash mismatch")))
+      (* A file removed between the kind check and the load is absent, not
+         unreadable: [discard] may run on another domain. *)
+      (match Fs_compat.load_file_opt path with
+       | None -> Ok None
+       | Some bytes ->
+         let decoded = try decode (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
+         (match decoded with
+          | Error detail -> Error (Unavailable (path ^ ": " ^ detail))
+          | Ok t when id t = expected -> Ok (Some t)
+          | Ok _ -> Error (Unavailable (path ^ ": content hash mismatch"))))
     | Some _ -> Error (Unavailable (path ^ ": not a regular file")))
 let submit ~base_path json =
   let* t = Result.map_error (fun detail -> Invalid detail) (decode json) in
@@ -164,6 +168,16 @@ let submit ~base_path json =
       |> Result.map_error (fun e -> Unavailable (Fs_compat.atomic_replace_failure_to_string e)) in
     let* saved = read ~base_path ~id:proposal_id in
     match saved with Some t -> Ok (proposal_id,t) | None -> Error (Unavailable "Proposal disappeared after persistence"))
+let collect_listed ~read names =
+  let rec go acc = function
+    | [] -> Ok (List.rev acc)
+    | name :: rest ->
+      let proposal_id = Filename.remove_extension name in
+      (match read proposal_id with
+       | Error (Invalid detail) | Error (Unavailable detail) -> Error (Unavailable detail)
+       | Ok None -> go acc rest
+       | Ok (Some t) -> go ((proposal_id, t) :: acc) rest) in
+  go [] names
 let list ~base_path = io (fun () ->
   let dir = directory ~base_path in
   let kind = try Some (Unix.lstat dir).Unix.st_kind with Unix.Unix_error (Unix.ENOENT,_,_) -> None in
@@ -171,10 +185,7 @@ let list ~base_path = io (fun () ->
   | None -> Ok []
   | Some Unix.S_DIR ->
     let names = Fs_compat.read_dir dir |> List.filter (fun name -> Filename.check_suffix name ".json") |> List.sort String.compare in
-    traverse (fun name ->
-      let proposal_id = Filename.remove_extension name in
-      let* t = read ~base_path ~id:proposal_id |> Result.map_error (function Invalid s -> Unavailable s | e -> e) in
-      match t with Some t -> Ok (proposal_id,t) | None -> Error (Unavailable (name ^ ": disappeared during listing"))) names
+    collect_listed ~read:(fun id -> read ~base_path ~id) names
   | Some _ -> Error (Unavailable (dir ^ ": not a directory")))
 let discard ~base_path ~id =
   if not (valid_id id) then Error (Invalid "Invalid proposal id") else io (fun () ->

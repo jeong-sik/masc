@@ -13,9 +13,15 @@ val id : t -> string
 val submit : base_path:string -> Yojson.Safe.t -> (string * t, error) result
 val read : base_path:string -> id:string -> (t option, error) result
 val list : base_path:string -> ((string * t) list, error) result
-(** Missing storage is empty. Corrupt or unreadable storage is an error, never
-    an empty result. Proposals remain model-proposed and do not change any
+(** Missing storage is empty. A proposal removed after the directory was read
+    (a concurrent {!discard}) is left out. Corrupt or unreadable storage is an
+    error, never an empty result. Proposals remain model-proposed and do not change any
     Keeper memory. Submission validates reference structure, not truth. *)
+val collect_listed :
+  read:(string -> (t option, error) result) -> string list -> ((string * t) list, error) result
+(** The per-file step of {!list} over directory entry names ([<id>.json]):
+    an entry [read] reports absent is left out, any read error fails the
+    listing. *)
 val discard : base_path:string -> id:string -> (unit, error) result
 (** Remove one saved proposal. An absent file is already discarded; any other
     failure is returned. The curator discards its own superseded proposals

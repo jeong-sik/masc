@@ -240,3 +240,21 @@ val elapsed_text : float -> string
 val evidence_fields : entry -> (string * string option) list
 (** Producer references from one immutable observer event. Missing IDs and
     input/output are explicit; no matching by name, time, or neighbouring row. *)
+
+type columns = private {
+  keeper_cells : int;
+  label_cells : int;
+}
+(** The Activity table's two measured columns, in display cells. Private so a
+    row lays itself out on the widths {!columns} derived from the rows it
+    draws, never on a pair of numbers assembled at the call site. *)
+
+val columns : inner_width:int -> row list -> columns
+(** How wide the keeper and event columns have to be for [rows].
+
+    Both were literals of 16. The agent_core family names its runtime lane as
+    the agent -- [agent_core-glm-coding.glm-5-turbo] is thirty cells -- so
+    those rows drew a cut name at every width, including the ones where the
+    detail column beside them was empty. Neither column goes under what it
+    drew before, and the two together take at most half of what the frame
+    leaves, because detail is the column that carries sentences. *)

@@ -275,6 +275,9 @@ let accept_connector ~delivery ~clock:_ ~config ~channel ~channel_user_id
            ~external_message_id:delivery.external_message_id
            ~workspace_id:delivery.workspace_id
            ~extra_mentions
+           (* A connector person, never a Keeper: Keeper-to-Keeper
+              messages enter through masc_keeper_msg / delegate. *)
+           ~sender_keeper:None
            ~user_row_origin:Keeper_chat_store.Needs_append
        in
        (match source with

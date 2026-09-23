@@ -52,10 +52,15 @@ No output regex or `gh auth status` prose determines authentication state.
 ## Operator surfaces
 
 ```text
-masc keeper-github login --keeper NAME [--hostname HOST] [--base-path PATH]
+masc keeper-github login --keeper NAME [--hostname HOST] [--scope SCOPE]... [--base-path PATH]
 masc keeper-github status --keeper NAME [--hostname HOST] [--base-path PATH]
 masc keeper-github logout --keeper NAME [--hostname HOST] [--base-path PATH]
 ```
+
+`--scope` asks for a scope beyond gh's minimum (`repo`, `read:org`, `gist`);
+the names are `Keeper_github_identity.all_login_scopes` (`workflow`,
+`write:packages`), the same ones the TUI GitHub tab and the dashboard panel
+tick. None is asked for unless named.
 
 The Keeper config panel (권한·샌드박스 tab) exposes status, refresh, and
 `GitHub 로그인`. The POST

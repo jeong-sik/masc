@@ -2764,25 +2764,32 @@ let keeper_github_hostname_arg =
   let doc = "GitHub hostname." in
   Arg.(value & opt string Keeper_github_identity.default_hostname & info [ "hostname" ] ~docv:"HOST" ~doc)
 
+(* Resolve the Keeper a [keeper github] subcommand names, the same way for
+   every subcommand, before handing it the config and its effective meta. *)
+let with_keeper_github_meta base_path keeper_name run =
+  let config = Workspace_utils.default_config base_path in
+  if not (Keeper_config.validate_name keeper_name)
+  then (
+    prerr_endline (Printf.sprintf "invalid keeper name: %s" keeper_name);
+    1)
+  else
+    (* Effective meta, not persisted meta: [sandbox_profile] is TOML-owned
+       and a persisted read answers with the default, which would send every
+       Keeper's login to this host. *)
+    match Keeper_meta_store.read_effective_meta config keeper_name with
+    | Error message ->
+      prerr_endline message;
+      1
+    | Ok None ->
+      prerr_endline (Printf.sprintf "keeper %S not found" keeper_name);
+      1
+    | Ok (Some meta) -> run ~config ~meta
+;;
+
 let keeper_github_action_cmd name doc run =
   let invoke base_path keeper_name hostname =
-    let config = Workspace_utils.default_config base_path in
-    if not (Keeper_config.validate_name keeper_name)
-    then (
-      prerr_endline (Printf.sprintf "invalid keeper name: %s" keeper_name);
-      1)
-    else
-      (* Effective meta, not persisted meta: [sandbox_profile] is TOML-owned
-         and a persisted read answers with the default, which would send every
-         Keeper's login to this host. *)
-      match Keeper_meta_store.read_effective_meta config keeper_name with
-      | Error message ->
-        prerr_endline message;
-        1
-      | Ok None ->
-        prerr_endline (Printf.sprintf "keeper %S not found" keeper_name);
-        1
-      | Ok (Some meta) -> run ~config ~meta ~hostname
+    with_keeper_github_meta base_path keeper_name (fun ~config ~meta ->
+      run ~config ~meta ~hostname)
   in
   Cmd.v
     (Cmd.info name ~doc)
@@ -2792,16 +2799,31 @@ let keeper_github_action_cmd name doc run =
       $ keeper_github_keeper_arg
       $ keeper_github_hostname_arg)
 
+(* The scopes the TUI and the dashboard let an operator tick, offered here by
+   the same names. Parsed by cmdliner into the closed type, so a name the
+   server does not offer is refused before any login starts. *)
+let keeper_github_login_scope_arg =
+  let choices =
+    List.map
+      (fun scope -> (Keeper_github_identity.login_scope_to_string scope, scope))
+      Keeper_github_identity.all_login_scopes
+  in
+  let doc =
+    Printf.sprintf
+      "A GitHub scope to ask for beyond gh's minimum (repo, read:org, gist). \
+       Repeat for more than one. One of: %s. Logging in again without it \
+       replaces a token that had it with one that does not."
+      (String.concat ", " (List.map fst choices))
+  in
+  Arg.(value & opt_all (enum choices) [] & info [ "scope" ] ~docv:"SCOPE" ~doc)
+
 let keeper_github_token_arg =
   let doc = "Personal access token (PAT). If omitted, read from standard input." in
   Arg.(value & opt (some string) None & info [ "token" ] ~docv:"TOKEN" ~doc)
 
 let keeper_github_cmd =
   let login =
-    keeper_github_action_cmd
-      "login"
-      "Log a Keeper into GitHub CLI."
-      (fun ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname ->
+    let run ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname ~scopes =
         (* This subcommand runs under [Cmd.eval'], outside the [Eio_main.run]
            that only the server's [start] enters, and both lanes need a runtime.
            The remote lane opens an Eio switch per remote command, which without
@@ -2819,7 +2841,20 @@ let keeper_github_cmd =
         | Error message ->
           prerr_endline message;
           1
-        | Ok lane -> Keeper_github_identity.run_cli_login ~lane ~scopes:[])
+        | Ok lane -> Keeper_github_identity.run_cli_login ~lane ~scopes
+    in
+    let invoke base_path keeper_name hostname scopes =
+      with_keeper_github_meta base_path keeper_name (fun ~config ~meta ->
+        run ~config ~meta ~hostname ~scopes)
+    in
+    Cmd.v
+      (Cmd.info "login" ~doc:"Log a Keeper into GitHub CLI.")
+      Term.(
+        const invoke
+        $ base_path
+        $ keeper_github_keeper_arg
+        $ keeper_github_hostname_arg
+        $ keeper_github_login_scope_arg)
   in
   let set_token =
     let invoke base_path keeper_name hostname token_opt =

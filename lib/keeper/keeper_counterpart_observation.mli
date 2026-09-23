@@ -10,9 +10,12 @@ type origin =
   | Connector_attention
   | Durable_chat
 
+(** Who the host says spoke. [Keeper] is another registered Keeper, matched
+    against the registry where the line was produced; its id is [user_id]. *)
 type authority =
   | Owner
   | External
+  | Keeper
 
 type t = {
   origin : origin;

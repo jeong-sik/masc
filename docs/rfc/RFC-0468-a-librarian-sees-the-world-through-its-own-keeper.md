@@ -102,23 +102,38 @@ Keeper 가 직접 본 것은 60건 중 24건에만 `counterpart_observations` �
 - `Keeper_librarian.input` 에 대상 Keeper 의 식별자(`Keeper_identity.Keeper_id.t`)를 담는 칸을
   더한다. 값은 Librarian 을 부른 레인이 이미 가진 Keeper 식별자다.
 - 프롬프트에 그 식별자를 호스트가 붙인 자료로 보인다. 문장은 프롬프트 PR 에서 정한다.
+- 값은 `Keeper_id` 라 소문자로 정규화돼 있다. 대화 속 `@Name` 과 대소문자가 다를 수 있다.
 - `keeper_instructions` 는 그대로 넘긴다. 2인칭 글을 3인칭으로 고쳐 쓰지 않는다. 그 글이 누구에게
   한 말인지는 정체 칸이 알려 준다.
 
 ### 3.2 대화 속 사람 쪽 말의 발화자
 
-- Librarian 이 받는 대화의 `role=user` 메시지마다 발화자 종류를 호스트가 붙인다.
+- Librarian 이 받는 대화의 사람 쪽 말마다 발화자를 호스트가 붙인다. 단위는 메시지가 아니라
+  **말 한 덩어리**다. 자율 턴의 user 메시지는 깨우기 문구와 답이 온 Ask 인용을 한 메시지로 붙여
+  만든다(`keeper_unified_prompt.ml:2147-2149`). 한 메시지에 발화자가 둘이다. 넣는 자리에서 덩어리마다
+  발화자를 싣거나 메시지를 나눈다. 둘 중 무엇으로 할지는 2단계 구현에서 정한다.
 
 ```ocaml
 type speaker =
   | Host_prompt of host_prompt   (* 호스트가 넣은 문구: 자율 턴 깨우기 등 *)
-  | Owner                        (* 인증된 운영자 *)
-  | Keeper of Keeper_identity.Keeper_id.t   (* 다른 Keeper *)
+  | Owner                        (* 커넥터를 거치지 않은 대시보드·로컬 요청 *)
+  | Keeper of Keeper_identity.Keeper_id.t   (* 등록된 다른 Keeper *)
   | External of { channel : string; user_id : string option; user_name : string option }
+  | Unknown                      (* 넣는 자리에서 발화자를 몰랐다 *)
 ```
 
-  `host_prompt` 는 호스트가 넣는 문구 종류를 닫힌 합타입으로 나열한다. 문구 내용으로 종류를 가르지
-  않는다.
+  - `host_prompt` 는 호스트가 넣는 문구 종류를 닫힌 합타입으로 나열한다. 깨우기 문구는 운영자가
+    바꿀 수 있으므로(`autonomous.wake_prompt`) 문구 내용으로 종류를 가르지 않는다. 넣는 자리에서
+    정한다. `keeper_unified_prompt.ml:25-33` 도 같은 규칙을 적고 있다.
+  - `Owner` 는 인증 사실이 아니다. 지금 `chat_speaker_of_request`
+    (`server_routes_http_keeper_stream.ml:235-245`)는 커넥터 발화자가 없는 요청을 모두 `Owner` 로 둔다.
+    이 RFC 는 그 뜻을 넓히지 않는다.
+  - `Keeper` 는 `Keeper_id.t` 모양만으로 증명되지 않는다. 사람과 외부 봇도 같은 `Keeper_id.t` 를
+    만들 수 있다(`keeper_identity.mli:20-24`). 넣는 자리에서 Keeper 등록부와 정확히 맞을 때만
+    `Keeper` 다(`server_bootstrap_loops.ml:391-396` 이 같은 이유로 등록부 대조로 바꿨다). 지금은
+    다른 Keeper 의 말이 `External` 로 들어온다(`server_bootstrap_loops.ml:205-208`, `384-388`).
+  - `Unknown` 은 이 RFC 이전에 저장된 대화와, 넣는 자리가 발화자를 모르는 경우다. 다른 종류로
+    채워 넣지 않는다.
 - 발화자는 메시지를 넣는 자리에서 정해진다. 깨우기 문구는 호스트가 넣으므로 넣을 때 안다. 사람의
   말은 `chat_message.speaker` 가 이미 안다.
 - 렌더러는 머리에 발화자를 적는다. 예: `[turn=3 role=user speaker=owner]`,
@@ -151,10 +166,12 @@ Librarian 이 자기 Keeper 의 관점으로 판단한다. 새 Gate 나 검사�
 
 ## 6. 열린 항목
 
-- **표준 메시지와 `chat_message` 를 잇는 값.** 3.2 의 `Owner`·`External`·`Keeper` 는
-  `chat_message.speaker` 에 있지만, Librarian 이 읽는 AGENT_CORE 메시지에는 어느 `chat_message`
-  에서 왔는지 가리키는 값이 없다. 메시지를 넣는 자리에서 발화자를 같이 싣는 길과, atom 에
-  `chat_message.id` 를 싣는 길이 있다. 구현 전에 producer → store → Librarian 경로를 확인해 고른다.
+- **발화자를 싣는 자리.** Librarian 이 읽는 AGENT_CORE 메시지에는 어느 `chat_message` 에서 왔는지
+  가리키는 값이 없다. `chat_message.id` 로 나중에 잇기보다, 메시지를 넣는 자리에서 발화자를 같이
+  싣는 쪽이 단순하다. `Agent_core.Types.message` 에는 이미 `name : string option` 과
+  `metadata`(문자열 키 목록)가 있다. 둘 다 문자열이라 그대로 쓰면 발화자를 문자열로 다시 읽게 된다.
+  쓰려면 한 곳에서 typed 로 쓰고 읽는 codec 이 있어야 한다. 이 선택은 producer → checkpoint →
+  Librarian 경로를 확인한 뒤 2단계에서 정한다. 메시지 동등성·해시가 `metadata` 를 포함하는지도 본다.
 - **공식 클라이언트 레인.** Claude Code·Codex·Antigravity 레인의 대화가 같은 경로로 오는지
   확인해야 한다.
 - **다른 Keeper 의 메시지가 `Keeper` 로 구분되는가.** 지금 `speaker_authority` 는

@@ -33,8 +33,6 @@ let summary = function
     let stated =
       match reason with
       | Workspace_verification_store.Cancellation_reason_stated reason -> reason
-      | Workspace_verification_store.Cancellation_reason_absent ->
-        "no reason on the record"
       | Workspace_verification_store.Cancellation_reason_unreadable detail ->
         "reason unreadable: " ^ detail
     in

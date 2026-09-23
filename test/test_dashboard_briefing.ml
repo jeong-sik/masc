@@ -764,6 +764,158 @@ let test_enrich_leaves_a_declaration_row_without_runtime_fields () =
       check bool "the row stays a declaration" true
         Yojson.Safe.Util.(enriched |> member "declaration_only" |> to_bool))
 
+(* 2026-09-23 live: every keeper brief on /api/v1/dashboard/briefing had
+   [health = null], so a keeper in the Failing phase sat mid-list. The rows
+   above build their fixture with a [diagnostic] the operator snapshot never
+   wrote. This case goes through the real producer: stored metadata, a
+   registry phase, and the briefing render. *)
+(* The snapshot row reads each keeper's runtime identity, which asks for the
+   default runtime. Without one every fixture keeper's row fails and the
+   snapshot drops it, so the briefing never sees the keepers at all. *)
+let briefing_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let test_briefing_ranks_a_failing_keeper_first () =
+  let dir = test_dir () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Lib.Keeper_registry.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock ~sw ->
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+      let runtime_path = Filename.concat dir "runtime.toml" in
+      Out_channel.with_open_bin runtime_path (fun out ->
+        output_string out briefing_runtime_toml);
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error error -> failf "Runtime.init_default failed: %s" error);
+      Lib.Keeper_registry.For_testing.clear ();
+      let store fields =
+        let meta =
+          match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
+          | Ok meta -> meta
+          | Error error -> fail ("meta fixture: " ^ error)
+        in
+        (match Lib.Keeper_meta_store.replace_snapshot config meta with
+         | Ok () -> ()
+         | Error error -> fail ("write meta: " ^ error));
+        meta
+      in
+      let register name =
+        ignore
+          (Lib.Keeper_registry.For_testing.register
+             ~base_path:config.base_path
+             name
+             (store [ "name", `String name; "trace_id", `String (name ^ "-trace") ]))
+      in
+      register "k-running";
+      register "k-failing";
+      ignore
+        (store
+           [ "name", `String "k-paused"
+           ; "trace_id", `String "paused-trace"
+           ; "paused", `Bool true
+           ]);
+      (match
+         Lib.Keeper_registry.dispatch_event
+           ~base_path:config.base_path
+           "k-failing"
+           (Keeper_state_machine.Turn_failed { consecutive = 1 })
+       with
+       | Ok _ -> ()
+       | Error _ -> fail "the turn failure was not accepted");
+      Dashboard_cache.invalidate_all ();
+      Operator_control.invalidate_snapshot_cache ();
+      Dashboard_projection_cache.invalidate_snapshot_json ~config;
+      let json =
+        Dashboard_briefing.json
+          ~actor:"test-briefing-failing-keeper"
+          ~config
+          ~sw
+          ~clock
+          ~proc_mgr:None
+          ()
+      in
+      let open Yojson.Safe.Util in
+      let briefs = json |> member "keeper_briefs" |> to_list in
+      let health name =
+        match row_named name briefs with
+        | Some row -> Yojson.Safe.to_string (row |> member "health")
+        | None -> failf "%s is missing from keeper_briefs" name
+      in
+      check string "the failing keeper's brief says failing" {|"failing"|}
+        (health "k-failing");
+      check string "the running keeper's brief carries its health" {|"idle"|}
+        (health "k-running");
+      (* A paused keeper's keepalive is gone, so it reads offline. *)
+      check string "the paused keeper's brief carries its health" {|"offline"|}
+        (health "k-paused");
+      (* Offline shares the top pressure rank with failing, but a pause is
+         the operator's own decision, so the paused keeper ranks as no
+         pressure at all and sorts below the idle one. *)
+      (* Only the three fixture keepers are ordered here; another row the
+         workspace seeds must not decide this case. *)
+      let fixture_names = [ "k-failing"; "k-running"; "k-paused" ] in
+      check (list string) "failing first, then idle, then paused"
+        fixture_names
+        (briefs
+         |> List.map (fun row -> row |> member "name" |> to_string)
+         |> List.filter (fun name -> List.mem name fixture_names)))
+
+(* A paused keeper is not pressure on any axis. Its context ratio is left
+   over from before the pause and no turn will add to it, so a high ratio
+   must not lift it into the context-pressure rank above a working keeper. *)
+let test_paused_keeper_with_high_context_is_not_pressure () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
+      let config = Workspace_utils.default_config dir in
+      let updated_at = Masc_domain.now_iso () in
+      let row name ~paused ~health ~context_ratio =
+        `Assoc
+          [ ("name", `String name)
+          ; ("agent_name", `String name)
+          ; ("paused", `Bool paused)
+          ; ("context_ratio", `Float context_ratio)
+          ; ("diagnostic", `Assoc [ ("health_state", `String health) ])
+          ; ("updated_at", `String updated_at)
+          ; ("latest_tool_names", `List [])
+          ]
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check (list string))
+        "an idle keeper outranks a paused one at context 0.9"
+        [ "k-idle"; "k-paused" ]
+        (Dashboard_briefing_assembly.build_keeper_briefs config
+           [ row "k-paused" ~paused:true ~health:"offline" ~context_ratio:0.9
+           ; row "k-idle" ~paused:false ~health:"idle" ~context_ratio:0.1
+           ]
+         |> List.map (fun row -> row |> member "name" |> to_string)))
+
 let () =
   Alcotest.run "Dashboard Mission"
     [
@@ -801,6 +953,10 @@ let () =
             test_pressure_rank_orders_by_surface_status;
           Alcotest.test_case "keeper brief publishes health and phase" `Quick
             test_keeper_brief_publishes_health_and_phase;
+          Alcotest.test_case "briefing ranks a failing keeper first" `Quick
+            test_briefing_ranks_a_failing_keeper_first;
+          Alcotest.test_case "paused keeper with high context is not pressure"
+            `Quick test_paused_keeper_with_high_context_is_not_pressure;
           Alcotest.test_case "internal signals do not pair the two streams"
             `Quick test_internal_signals_do_not_pair_streams;
         ] );

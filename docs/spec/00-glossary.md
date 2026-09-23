@@ -705,10 +705,28 @@ status: reference
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
   `admits_self_directed_progress`가 이 경계를 정의한다.
 
-**Schedule**
-: 정한 시각에 Keeper를 깨우라는 요청. 저장되므로 서버를 다시 켜도 남는다. 만들기,
-  조회, 수정, 취소와 기록 추가·조회 도구가 있다. Keeper를 깨울 뿐이고, 깨어난 Keeper가
-  하려는 바깥 작업을 대신 허락하지 않는다.
+**Schedule (예약)**
+: 정한 시각에 Keeper를 깨우라는 요청. 저장되므로 서버를 다시 켜도 남는다. 만들기·조회·
+  수정·취소와 기록(노트) 추가·조회 도구가 있다. Keeper를 깨울 뿐이고, 깨어난 Keeper가
+  하려는 바깥 작업을 대신 허락하지 않는다. 그 허락은 payload를 처리하는 쪽의 gate가 정한다.
+  - 두 식별자: `schedule_id`는 정의를 교체해도 살아남는 안정 id이고,
+    `schedule_instance_id`는 정의 하나의 인스턴스마다 새로 발급된다. 그래서 이전 정의의
+    wake는 교체된 정의의 증거가 되지 않는다.
+  - 두 행위자: 행은 `requested_by`(요청한 쪽)와 `scheduled_by`(예약한 쪽)를 가진다.
+    기록되는 actor는 인자가 아니라 경계가 인증한 호출자이고, 만들기(`create`)는 호출자를
+    두 칸에 똑같이 적는다. 도구 스키마에는 actor 인자가 없다. 호출이
+    `requested_by_*`·`scheduled_by_*`에 호출자와 다른 값을 적으면 `actor_mismatch`로
+    거절되고, 호출자와 같은 값은 아무것도 바꾸지 않는다. 이름 없는 호출자(`Unnamed_caller`)는
+    거절된다. 수정(`update`)은 기존 행에 저장된 두 행위자를 보존하며, named caller는
+    자신이 소유한 예약(`owner=self`: 자신이 예약했거나 자신을 깨우는 행)만 수정·취소할
+    수 있고 다른 예약은 `not_schedule_owner`로 거절된다(운영자 자격만 임의 변경 가능).
+  - `wake_record`는 scheduler가 남기는 일반 wake 시도(`Wake_running`·`Wake_succeeded`·
+    `Wake_failed`)이고, Keeper turn 결과는 Keeper 원장에 산다 — 같은 것이 아니다.
+  - 노트는 `schedule_id`에 매이고 append-only다. terminal 전이 뒤에도 남는다 —
+    상태가 아니라 이력이다.
+  - 상태는 `Scheduled`·`Due`·`Running`·`Succeeded`·`Failed`·`Cancelled`·`Expired`,
+    반복은 `One_shot`·`Interval`·`Daily`·`Cron`이다.
+  → [Schedule_domain](../../lib/schedule/schedule_domain.mli) · [Schedule_store](../../lib/schedule/schedule_store.mli)
 
 **Fusion**
 : 여러 독립 판단을 비동기로 수집하고 하나의 결론으로 합성하는 실행. 패널 구성원
@@ -844,6 +862,11 @@ status: reference
 
 **Verification ID**
 : 제출 하나의 식별자. 판정은 자기가 읽은 id 가 지금 id 와 같을 때만 적용된다.
+  운영자 판정(`POST /api/v1/verification/verdict`)은 읽은 `verification_id`를
+  필수로 요구하며, 백로그 잠금 아래에서 지금 id와 다르면
+  `Task_error.VerificationSuperseded`(HTTP 409)로 거절된다. 판정자가 증거를
+  읽는 사이에 Producer가 재제출하거나 취소 요청으로 제출을 교체한 경우, 낡은
+  판정이 새 제출에 붙는 것을 막는다.
 
 **Completion Authority**
 : 판정을 내리는 쪽. 서버 안의 판정 에이전트(`System_llm_agent`)이거나 인증된 HTTP
@@ -1292,6 +1315,24 @@ status: reference
   카운터는 그 셋을 따른다([`keeper_official_client_host.ml`](../../lib/keeper/keeper_official_client_host.ml)).
   요약이 빠져도 turn은 거절하지 않고 WARN으로 알린다.
   → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
+
+**Extra System Context (턴별 문맥)**
+: Keeper hook이 매 turn 새로 조립해 provider 지시 표면에 얹는 `System` 메시지.
+  `Agent_core.Types.Extra_system_context_provenance`를 달고, 그 태그가 `Invalid`나
+  `Duplicate`여도 이 문맥이다(`is_extra_context`). 고정(Pinned)이라 atom으로 세지
+  않고 어떤 자르기도 지우지 않는다 — 매 turn 다시 조립되므로 살아남아야 한다. 이
+  문맥을 실은 요청은 실어 보낸 History 크기의 표본이 아니다.
+  - **Working State와 다른 것**: Librarian working state도 같은 표면의 두 번째
+    `System` 메시지지만 표식이 다르다 — `working_state_marker_key`(`working_state_metadata`)
+    하나만 달고, 요약된 범위가 조립한다. 턴별 문맥은 AGENT_CORE가 덧붙이는 carrier이고,
+    working state는 범위가 조립하는 것이다.
+  - **Composed System Context**: 이 둘을 함께 부르는 이름(`is_composed_system_context`).
+    공식 클라이언트 어댑터는 이 메시지들을 canonical history 스냅숏에서 빼고 resume 때
+    다시 보낸다.
+  - **입력 귀속 검사**: turn 기록의 입력 귀속(`input_components`)은 요청 하나에 carrier가
+    하나라고 보고 푼다. carrier가 두 번 보이면 요청은 그대로 나가고, 입력 귀속만 비운 채
+    `prompt_context_carrier_repeated`를 사유로 남긴다.
+  → [Runtime_model_input_tail_window](../../lib/runtime/runtime_model_input_tail_window.mli) · [Keeper_official_client_host.is_composed_system_context](../../lib/keeper/keeper_official_client_host.mli) · [Keeper_agent_prompt_metrics](../../lib/keeper/keeper_agent_prompt_metrics.mli)
 
 **Continuity Synthesis Observation (대화 요약 진행 관측)**
 : 이번 서버 실행에서 Librarian이 마지막으로 선택한 Atom 구간, 그때 확인한

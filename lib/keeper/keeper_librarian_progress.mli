@@ -19,12 +19,14 @@
       that would make the whole history look unread.
     - {!write} replaces the file atomically, so a reader sees the old value or
       the new one. A value {!of_json} would refuse is not written.
-    - One writer: the keeper's Librarian loop. The store does not serialize
-      writers and does not take the turn-boundary log's lock. A purge removes
-      both files without that lock, so what keeps a purged position from being
-      written back is the order the purge follows, not a lock: it stops the
-      keeper's loop and sees it finished before it removes the files (RFC §8
-      step 4). *)
+    - Two writers, never at once: the server-owned Librarian lane
+      ({!Keeper_memory_lane}), after each Memory commit, and a checkpoint
+      purge, which moves the position to the rewritten history's end. The
+      store does not serialize writers and does not take the turn-boundary
+      log's lock. The purge writes only inside
+      {!Keeper_memory_lane.with_librarian_purge}: new lane units are
+      discarded there, and the running one is cancelled and seen finished
+      before the purge reads or writes this file. *)
 
 type position =
   { trace_id : string

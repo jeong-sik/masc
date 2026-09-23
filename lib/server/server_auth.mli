@@ -196,6 +196,7 @@ val ensure_same_origin_if_browser_request :
 val http_status_of_auth_error :
   Masc_domain.masc_error ->
   [> `Bad_request
+  | `Conflict
   | `Forbidden
   | `Internal_server_error
   | `Not_found
@@ -283,6 +284,7 @@ val auth_refusal_response :
   path:string ->
   Masc_domain.masc_error ->
   [> `Bad_request
+  | `Conflict
   | `Forbidden
   | `Internal_server_error
   | `Not_found

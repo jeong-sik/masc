@@ -183,6 +183,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
   - `Keeper_official_client_host` 계약(`keeper_official_client_host.mli:30-37`)과 이 레인의 계약(`keeper_claude_code_runtime.mli:84-89`)은 resume 을 `Held_by_client_session` 으로 정한다.
   - 2026-09-14 #36035 가 두 계약과 다르게 바꿨다. #36688 이 본 "turn 4484~4550 동안 똑같은 composition" 이 그 결과다.
 - 세션 저장소: code-reviewer `official-client-runtime/session.json` 에 `context_frontier.delivery = "replaced_configuration"`, `message_count = 86` 이 남았다(2026-09-15 16:33Z).
+- #38075 부터 Claude Code resume 은 `context_frontier.delivery = "held_by_vendor_session"` 을 남기고, 입력 보고는 `Held_by_client_session` 이다. 턴 컨텍스트, working state, historical task reference 는 resume 사용자 프롬프트 앞에 실리고(`Keeper_official_client_host.resume_prompt`), 대화 스냅샷은 보내지 않는다.
 - Codex 레인도 같은 구조다(`keeper_codex_runtime.ml:662-725`). `thread/resume` 에서 새 `developerInstructions` 를 쓰는지는 확인하지 않았다.
 - Antigravity 레인은 resume 을 `Held_by_client_session` 으로 보고한다(`keeper_antigravity_runtime.ml:531-535`).
 

@@ -1735,7 +1735,11 @@ let test_a_held_schedule_says_what_it_waits_for () =
     (String.length reading >= 4 && String.sub reading 0 4 = "held");
   check bool "it names when the held occurrence came due" true (has "09-23 12:34");
   check bool "it says the keeper has the previous wake" true (has "previous wake");
-  check bool "it does not print the wire field" false (has "runner_hold")
+  check bool "it does not print the wire field" false (has "runner_hold");
+  let tag = Schedule.schedule_hold_tag ~due:"09-23 12:34" in
+  check bool "the short tag leads the full reading" true
+    (String.length reading >= String.length tag
+     && String.sub reading 0 (String.length tag) = tag)
 ;;
 
 (* Slack reaches the name and the runtime before the task id, and both stop at

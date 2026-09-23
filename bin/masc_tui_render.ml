@@ -3885,13 +3885,14 @@ let schedule_delivery_summary (row : schedule_row) =
   (* A held occurrence has no wake of its own, so the queue and reaction
      readings on the next line still describe the previous one. The hold says
      so on the identity line, next to the status it would otherwise leave
-     reading as a late [due]. *)
+     reading as a late [due]. The short tag, because the line is already
+     most of a narrow screen; the detail pane carries the full sentence. *)
   let hold =
     match row.sch_runner_hold with
     | None -> ""
     | Some hold ->
         " \xc2\xb7 "
-        ^ Render_schedule.schedule_hold_reading
+        ^ Render_schedule.schedule_hold_tag
             ~due:(Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso)
   in
   ( Printf.sprintf "%s \xc2\xb7 status:%s%s" row.sch_schedule_id
@@ -4405,7 +4406,7 @@ let schedule_detail_lines ~width (row : schedule_row)
          [ field ~style:(Theme.warn ()) "Held"
              (Render_schedule.schedule_hold_reading
                 ~due:(Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso))
-         ; field "Occurrence" hold.Tui_decode.srh_occurrence_id
+         ; field "Held id" hold.Tui_decode.srh_occurrence_id
          ])
   @ schedule_turn_rows ~field row
   @ (if keeper_wake then

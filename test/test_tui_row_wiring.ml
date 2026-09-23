@@ -369,18 +369,20 @@ let test_the_schedules_screen_draws_the_runner_hold () =
        ~callee:"Tui_decode.decode_schedule_runner_hold"
      > 0);
   List.iter
-    (fun binding_name ->
+    (fun (binding_name, callee) ->
       Alcotest.(check bool)
         (Printf.sprintf "%s reads the hold" binding_name)
         true
         (reads ~binding_name ~fields:[ "sch_runner_hold" ] > 0);
       Alcotest.(check bool)
-        (Printf.sprintf "%s words it through the shared reading" binding_name)
+        (Printf.sprintf "%s words it through %s" binding_name callee)
         true
         (Ast_grep.count_calls_in_value_binding ~module_path:render ~binding_name
-           ~callee:"Render_schedule.schedule_hold_reading"
+           ~callee
          > 0))
-    [ "schedule_delivery_summary"; "schedule_detail_lines" ]
+    [ "schedule_delivery_summary", "Render_schedule.schedule_hold_tag"
+    ; "schedule_detail_lines", "Render_schedule.schedule_hold_reading"
+    ]
 
 let test_the_schedule_subject_is_measured_not_given_the_line () =
   (* Twice: once to measure the column, once to fill the cell. One call would

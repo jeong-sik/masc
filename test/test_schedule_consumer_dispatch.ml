@@ -2660,6 +2660,17 @@ let test_dashboard_row_names_the_occurrence_the_runner_holds () =
     (String.equal held_id (single_occurrence_id first));
   check (float 0.001) "the row carries the held due" 260.0
     (hold |> member "due_at" |> to_float);
+  (* The TUI reads the row through its own decoder; feed it the real row so a
+     renamed or dropped field fails here rather than on the screen. *)
+  (match Tui_decode.decode_schedule_runner_hold (`Assoc [ "runner_hold", hold ]) with
+   | Ok (Some decoded) ->
+     check string "the TUI decodes the same occurrence" held_id
+       decoded.Tui_decode.srh_occurrence_id;
+     check string "and its due as the server wrote it"
+       (hold |> member "due_at_iso" |> to_string)
+       decoded.Tui_decode.srh_due_at_iso
+   | Ok None -> fail "the TUI read a held row as not held"
+   | Error err -> fail err);
   Schedule_runner_status.reset_for_test ()
 ;;
 

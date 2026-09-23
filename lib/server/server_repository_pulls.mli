@@ -55,14 +55,17 @@ type failure =
           token; until then this failure stands with its first
           [observed_at]. *)
   | Rate_limited of { reset_at : float option }
-      (** GitHub's rate limit. With [Some t], GitHub's own reset time, no
+      (** GitHub's rate limit. With [Some t], GitHub's own time to wait
+          until ([retry-after] from the moment of the answer, else
+          [x-ratelimit-reset]), no
           request is sent before [t] and this failure stands until then. With
           [None] (GitHub sent no reset header, or curl older than 7.84 could
           not read it) there is no time to wait for that would be GitHub's
           rather than a number of ours, so the next refresh asks again at the
           normal 60 s pace. *)
   | Forbidden of { status : int }
-      (** 403 without an exhausted rate limit, e.g. organisation policy. *)
+      (** 403 with neither an exhausted rate limit nor [retry-after], e.g.
+          organisation policy. *)
   | Http_status of { status : int }
   | Graphql_errors of { messages : string list }
   | Transport_failed of string
@@ -100,7 +103,10 @@ type reader =
       { keeper : string
       ; reason : string
       }
-      (** The Keeper exists but its GitHub CLI holds no github.com token. *)
+      (** The Keeper exists but no github.com token can be read for it on
+          this host: its GitHub CLI holds none, its meta could not be read, or
+          it is a Remote_ssh Keeper whose login lives on its endpoint
+          ({!Keeper_github_login_lane.stored_token}). *)
   | Reader_ready of { keeper : string }
 
 (** {1 Keepers on a pull request's branch (RFC-0465 §0.2)} *)
@@ -212,6 +218,11 @@ type response =
   ; rate_limit_remaining : int option
   ; rate_limit_reset : float option
       (** GitHub's [x-ratelimit-remaining] and [x-ratelimit-reset] headers. *)
+  ; retry_after_s : int option
+      (** GitHub's [retry-after] header in seconds. A 403 or 429 carrying it
+          is a rate limit even while [x-ratelimit-remaining] is above 0
+          (GitHub's secondary rate limit), and its wait is taken before
+          [x-ratelimit-reset]. *)
   }
 
 type http_post =

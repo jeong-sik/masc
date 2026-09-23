@@ -974,6 +974,16 @@ status: reference
   → [Repo_manager_types](../../lib/repo_manager/repo_manager_types.mli),
   [Tui_decode](../../lib/tui_decode.mli)
 
+**PR Reader (PR 읽기 Keeper)**
+: 서버가 등록된 GitHub 저장소의 열린 PR 을 읽을 때 쓰는 GitHub 토큰의 주인 Keeper.
+  runtime.toml `[repositories] pr_reader = "<keeper>"` 로 선언한다. 토큰은 그 Keeper 의
+  `github-cli/hosts.yml` 에서 읽을 때마다 새로 읽고 복사해 두지 않는다. 선언이 없거나
+  Keeper 가 없거나 토큰이 없으면 서버는 그 이유(`Reader_not_declared`·
+  `Reader_keeper_missing`·`Reader_token_unavailable`)를 말하고, 다른 자격으로 대신
+  읽지 않는다. 결과는 메모리에만 두고 `GET /api/v1/repositories/pulls` 로 보인다
+  (RFC-0465).
+  → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli)
+
 ## Continuity
 
 **Autoboot Exclusion Reason (자동 부팅 제외 이유)**

@@ -438,6 +438,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       ~sw
       ~clock
       ~base_path:(Mcp_server.workspace_config state).base_path;
+  (* RFC-0465: open pull requests of the registered GitHub repositories, read
+     with the declared pr_reader Keeper's token and held in memory only. *)
+  Server_repository_pulls.start
+    ~sw
+    ~clock
+    ~base_path:(Mcp_server.workspace_config state).base_path;
   (* Restore retained tool metrics before installing the live observer. This
      order prevents startup hydration from overwriting a call that completed
      concurrently. A failed read leaves the current snapshot unchanged and is

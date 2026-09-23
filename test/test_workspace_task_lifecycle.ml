@@ -3,6 +3,11 @@ module D = Masc_domain
 
 let owner = "alice"
 let now = "2026-07-13T00:00:00Z"
+let producer_reason = "the premise no longer holds"
+
+let producer_stated ~verification_id:_ =
+  Workspace_verification_store.Cancellation_reason_stated producer_reason
+;;
 
 let decide
       ?(notes = "evidence at /tmp/proof")
@@ -155,7 +160,8 @@ let approve status =
     ~verification_id:"vrf-1"
     ~task_status:status
     ~now
-    ~notes:"the premise no longer holds"
+    ~notes:"operator's own note"
+    ~read_cancellation_reason:producer_stated
 ;;
 
 let test_approval_ends_the_task_the_way_it_was_asked () =
@@ -164,8 +170,7 @@ let test_approval_ends_the_task_the_way_it_was_asked () =
    | Ok _ | Error _ -> failwith "an approved completion must end as Done");
   match approve (awaiting_with D.Cancel_task) with
   | Ok { decision = { new_status = D.Cancelled { cancelled_by; reason; _ }; _ }; _ }
-    when String.equal cancelled_by owner
-         && reason = Some "the premise no longer holds" -> ()
+    when String.equal cancelled_by owner && reason = Some producer_reason -> ()
   | Ok _ | Error _ -> failwith "an approved cancellation must end as Cancelled"
 ;;
 
@@ -179,6 +184,7 @@ let test_a_rejected_cancellation_returns_to_its_producer () =
       ~task_status:(awaiting_with D.Cancel_task)
       ~now
       ~notes:""
+      ~read_cancellation_reason:producer_stated
   with
   | Ok { decision = { new_status = D.InProgress { assignee; _ }; _ }; _ }
     when String.equal assignee owner -> ()
@@ -216,6 +222,7 @@ let test_verification_preserves_original_start_time () =
       ~task_status:submitted
       ~now:"2026-07-13T00:10:00Z"
       ~notes:""
+      ~read_cancellation_reason:producer_stated
   with
   | Ok { decision = { new_status = D.InProgress { started_at; _ }; _ }; _ }
     when String.equal started_at original_started_at -> ()
@@ -280,10 +287,32 @@ let test_system_approval_of_cancel_claim_is_refused () =
       ~task_status:awaiting_cancel
       ~now
       ~notes:"the upstream schema landed instead"
+      ~read_cancellation_reason:producer_stated
   with
-  | Error L.Verdict_cancel_requires_operator -> ()
+  | Error (L.Verdict_invalid L.Verdict_cancel_requires_operator) -> ()
   | Ok _ | Error _ ->
     failwith "a system signature must not end a cancel claim as Cancelled"
+;;
+
+(* The Cancelled record carries the producer's sentence. When the record that
+   holds it cannot give one, the approval is refused instead of ending the
+   Task with no reason or with the operator's notes in its place. *)
+let test_approval_without_a_readable_reason_is_refused () =
+  match
+    L.decide_verdict
+      ~authority:(D.Human_operator { operator_id = "op-1" })
+      ~verdict:D.Verdict_approved
+      ~task_id:"task-1"
+      ~verification_id:"vrf-1"
+      ~task_status:awaiting_cancel
+      ~now
+      ~notes:"operator's own note"
+      ~read_cancellation_reason:(fun ~verification_id:_ ->
+        Workspace_verification_store.Cancellation_reason_unreadable "no record")
+  with
+  | Error (L.Verdict_cancellation_reason_unreadable _) -> ()
+  | Ok _ | Error _ ->
+    failwith "an approved stop must not end without the producer's reason"
 ;;
 
 let test_operator_approval_still_cancels_a_cancel_claim () =
@@ -296,6 +325,7 @@ let test_operator_approval_still_cancels_a_cancel_claim () =
       ~task_status:awaiting_cancel
       ~now
       ~notes:"the upstream schema landed instead"
+      ~read_cancellation_reason:producer_stated
   with
   | Ok
       { decision = { new_status = D.Cancelled { cancelled_by; _ }; _ }
@@ -328,6 +358,7 @@ let test_contract4_three_judgements_of_a_cancel_claim () =
        ~task_status:awaiting_cancel
        ~now
        ~notes:"the upstream schema landed instead"
+       ~read_cancellation_reason:producer_stated
    with
    | Ok
        { decision =
@@ -350,6 +381,7 @@ let test_contract4_three_judgements_of_a_cancel_claim () =
        ~task_status:awaiting_cancel
        ~now
        ~notes:"the operator withdrew the task"
+       ~read_cancellation_reason:producer_stated
    with
    | Ok
        { decision = { new_status = D.Cancelled { cancelled_by; _ }; _ }
@@ -372,8 +404,9 @@ let test_contract4_three_judgements_of_a_cancel_claim () =
        ~task_status:awaiting_cancel
        ~now
        ~notes:"the operator has not answered"
+       ~read_cancellation_reason:producer_stated
    with
-   | Error L.Verdict_cancel_requires_operator -> ()
+   | Error (L.Verdict_invalid L.Verdict_cancel_requires_operator) -> ()
    | Ok _ | Error _ ->
      failwith "a system signature must not pre-empt the operator re-judgment")
 ;;
@@ -392,6 +425,7 @@ let test_verdict_requires_authority_and_reason () =
        ~task_status:awaiting
        ~now
        ~notes:"evidence at /tmp/proof"
+       ~read_cancellation_reason:producer_stated
    with
    | Ok
        { decision = { new_status = D.Done { assignee; _ }; _ }
@@ -413,8 +447,9 @@ let test_verdict_requires_authority_and_reason () =
        ~task_status:awaiting
        ~now
        ~notes:""
+       ~read_cancellation_reason:producer_stated
    with
-   | Error L.Verdict_rejection_reason_required -> ()
+   | Error (L.Verdict_invalid L.Verdict_rejection_reason_required) -> ()
    | Ok _ | Error _ -> failwith "a blank rejection reason must be refused");
   (match
      L.decide_verdict
@@ -425,8 +460,9 @@ let test_verdict_requires_authority_and_reason () =
        ~task_status:awaiting
        ~now
        ~notes:""
+       ~read_cancellation_reason:producer_stated
    with
-   | Error L.Verdict_authority_identity_required -> ()
+   | Error (L.Verdict_invalid L.Verdict_authority_identity_required) -> ()
    | Ok _ | Error _ -> failwith "a blank authority identity must be refused");
   match
     L.decide_verdict
@@ -437,6 +473,7 @@ let test_verdict_requires_authority_and_reason () =
       ~task_status:awaiting
       ~now
       ~notes:""
+      ~read_cancellation_reason:producer_stated
   with
   | Ok
       { decision = { new_status = D.InProgress { assignee; _ }; _ }
@@ -461,8 +498,9 @@ let test_verdict_rejects_stale_verification_id () =
       ~task_status:awaiting
       ~now
       ~notes:""
+      ~read_cancellation_reason:producer_stated
   with
-  | Error (L.Verification_id_mismatch { expected; actual })
+  | Error (L.Verdict_invalid (L.Verification_id_mismatch { expected; actual }))
     when String.equal expected "vrf-stale" && String.equal actual "vrf-1" -> ()
   | Ok _ | Error _ -> failwith "a stale verification verdict must be refused"
 ;;
@@ -529,4 +567,5 @@ let () =
   test_contract4_three_judgements_of_a_cancel_claim ();
   test_system_approval_of_cancel_claim_is_refused ();
   test_operator_approval_still_cancels_a_cancel_claim ();
+  test_approval_without_a_readable_reason_is_refused ();
   Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

@@ -859,7 +859,7 @@ let test_git_refusal_reaches_the_judge_with_the_original_status () =
         Keeper_gate.Observed_refused
           { status = Unix.WEXITED 23
           ; stderr
-          ; refusal_kind = Keeper_gate.Unspecified
+          ; refusal_kind = Keeper_gate.Unattributed
           })
       (script_gate_request ~sandbox_profile:microvm base_path
          "git diff --output=changes.patch")
@@ -879,32 +879,63 @@ let test_git_refusal_reaches_the_judge_with_the_original_status () =
   | Keeper_gate.Allow _ | Keeper_gate.Unavailable _ -> ()
 ;;
 
-(* A write the box refused ends non-zero. That is not an effect, and it is
-   not an answer either: the request keeps the judge it would have had. *)
+(* A box that could not be built never started the program. That is not an
+   effect, and it is not an answer either: the request keeps the judge it
+   would have had. *)
+(* A request where one stage's box applied and another stage's box could not
+   be built is not a refusal in which nothing started. It keeps the judge and
+   is never allowed, and the row carries no observation, because a row's
+   observation says no command started. *)
+let test_a_partly_refused_observe_run_keeps_the_judge_without_an_observation () =
+  with_auto_judge @@ fun base_path ->
+  let decision =
+    Keeper_gate.decide
+      ~keeper_always_allow:false
+      ~observe:(fun () ->
+        Keeper_gate.Observed_partly_refused
+          { refusal_kind = Keeper_gate.Write_rule_not_applied })
+      (boxed_request base_path)
+  in
+  deferred_to_the_judge "a partly refused observe run" decision;
+  match decision with
+  | Keeper_gate.Deferred { approval_id; _ } ->
+    (match Keeper_approval_queue.get_pending_entry_for_workspace ~base_path ~id:approval_id with
+     | Ok (Some { observation = None; _ }) -> ()
+     | Ok (Some { observation = Some _; _ }) ->
+       fail "the row claims nothing started although a stage's box applied"
+     | Ok None -> fail "the deferral wrote no row"
+     | Error error -> fail (Keeper_approval_queue.storage_error_to_string error))
+  | Keeper_gate.Allow _ | Keeper_gate.Unavailable _ -> ()
+;;
+
 let test_auto_judge_defers_a_refused_observe_run () =
   with_auto_judge @@ fun base_path ->
-  let stderr = "sh: 1: cannot create w: Permission denied" in
+  let stderr = "" in
   let decision =
     Keeper_gate.decide
       ~keeper_always_allow:false
       ~observe:(fun () ->
         Keeper_gate.Observed_refused
-          { status = Unix.WEXITED 2
+          { status = Unix.WEXITED 127
           ; stderr
-          ; refusal_kind = Keeper_gate.Write_denied
+          ; refusal_kind = Keeper_gate.Write_rule_not_applied
           })
       (boxed_request base_path)
   in
   deferred_to_the_judge "a refused observe run" decision;
-  (* And the judge is shown what the box refused: the row the deferral wrote
-     carries the status and the program's own stderr (RFC-0422 §3.3). *)
+  (* And the judge is shown why the box could not be built: the row the
+     deferral wrote carries the kind, the status and the shim's stderr
+     (RFC-0422 §3.3). *)
   match decision with
   | Keeper_gate.Deferred { approval_id; _ } ->
     (match Keeper_approval_queue.get_pending_entry_for_workspace ~base_path ~id:approval_id with
      | Ok (Some { observation = Some refusal; _ }) ->
-       check bool "exit 2 on the row" true
-         (refusal.observed_status = Keeper_approval_queue_rules_types.Observed_exit 2);
-       check string "the program's stderr on the row" stderr refusal.observed_stderr;
+       check bool "the refusal kind on the row" true
+         (refusal.observed_refusal_kind
+          = Keeper_approval_queue_rules_types.Write_rule_not_applied);
+       check bool "exit 127 on the row" true
+         (refusal.observed_status = Keeper_approval_queue_rules_types.Observed_exit 127);
+       check string "the shim's stderr on the row" stderr refusal.observed_stderr;
        check int "nothing cut at this size" 0 refusal.observed_stderr_omitted_bytes
      | Ok (Some { observation = None; _ }) -> fail "the row carries no observation"
      | Ok None -> fail "the deferral wrote no row"
@@ -1117,6 +1148,10 @@ let () =
             "auto_judge defers a refused observe run"
             `Quick
             test_auto_judge_defers_a_refused_observe_run
+        ; test_case
+            "a partly refused observe run keeps the judge without an observation"
+            `Quick
+            test_a_partly_refused_observe_run_keeps_the_judge_without_an_observation
         ; test_case
             "auto_judge defers when no box can be built"
             `Quick

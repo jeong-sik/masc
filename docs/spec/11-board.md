@@ -196,7 +196,9 @@ only the current typed signal and
 `keeper_context {lane_keeper_name, board_interests}`; it stores no post/comment
 snapshot. The judge receives that signal plus
 `keeper_role {name, board_interests}`. The existing post-verdict Keeper event
-queue DTO remains unchanged. Older candidate schemas are not decoded.
+queue DTO remains unchanged. A `requeue_requested` or `requeued` quarantine
+phase carries `requested_by`, the authenticated principal that asked for the
+operator requeue. Older candidate schemas are not decoded.
 Deployment preflight requires every non-empty candidate ledger to use schema
 v7. Candidate and partition stores follow the fresh-state hard-cut contract.
 
@@ -326,6 +328,8 @@ POST 요청은 `with_tool_auth` (`tool_name: "board_sub_board_create"`)로 인�
 | `Open` | `"open"` | 누구나 게시 및 읽기 가능 |
 | `Members_only` | `"members_only"` | `members`에 열거된 멤버와 owner만 게시, 전체 읽기 가능 |
 | `Owner_only` | `"owner_only"` | 소유자만 게시, 전체 읽기 가능 |
+
+생성·수정 인자의 `access` 값이 위 셋 중 하나가 아니면 `Validation_error`로 거절하고 받는 문자열과 받는 값 목록을 함께 알린다. 인자가 빠졌거나 `null`이면 생성은 기본값 `Open`을 쓰고, 수정은 기존 정책을 그대로 유지한다. 알 수 없는 문자열을 조용히 `Open`으로 떨어뜨리지 않는다(`sub_board_access_field_of_yojson`).
 
 게시글의 `hearth`가 SubBoard slug와 일치하면 SubBoard 게시로 간주하고 위 접근 정책을 적용한다. 일치하는 SubBoard가 없는 hearth는 기존 topic hearth로 동작한다.
 

@@ -1027,15 +1027,8 @@ let test_keeper_shrinks_history_after_statusless_context_error
         (if index mod 2 = 0 then User else Assistant)
         (Printf.sprintf "%03d:%s" index (String.make 1_024 'x')))
   in
-  let reset_shrink_state () =
-    Eio_main.run (fun _ ->
-      Keeper_context_overflow_shrink_state.For_testing.reset ())
-  in
-  reset_shrink_state ();
   Fun.protect
-    ~finally:(fun () ->
-      reset_shrink_state ();
-      cleanup_tree base_path)
+    ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        let official_client_continuation = if not native_gate then None else (
          with_fixture
@@ -2234,7 +2227,7 @@ let agent_core_range ?(turn_start = 0) ~front messages =
      ~measure_message_bytes:(Keeper_context_core.message_measurer ())
      ~front
      ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
-     ~last_resort:false
+     ~current_turn_results:Keeper_turn_driver_try_provider.Current_turn_verbatim
      ~base_path:""
      ~demote_before:0
      ~turn_boundary:(Keeper_carried_front.Turn_boundary { end_atom = turn_start })

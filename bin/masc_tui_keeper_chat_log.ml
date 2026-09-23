@@ -334,7 +334,10 @@ let events_error_to_string = function
 let decode_events_error ~status ~credential_sent body =
   let rejected detail = Events_undecodable (Printf.sprintf "%d %s" status detail) in
   if status = 401 || status = 403
-  then Events_refused (Masc_tui_credential.refusal ~credential_sent)
+  then
+    Events_refused
+      (Masc_tui_credential.refusal ~credential_sent
+         (Masc_tui_credential.server_reason_of_body body))
   else
   match Yojson.Safe.from_string body with
   | `Assoc fields ->

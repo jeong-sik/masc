@@ -299,6 +299,7 @@ let refusal ~status_code ~body =
   match status_code with
   | 401 | 403 ->
       Masc_tui_credential.refusal ~credential_sent:(operator_token_present ())
+        (Masc_tui_credential.server_reason_of_body body)
   | _ -> Masc.Tui_decode.http_status_error ~status_code ~body
 
 let decode_json ~allow_empty ~status_code ~body =
@@ -1437,6 +1438,12 @@ let fetch_operator_snapshot ~(host : string) ~(port : int) :
     ~path:"/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 
 (** GET /api/v1/runtime/resolved — runtimes and keeper assignments. *)
+(** GET /api/v1/repositories/pulls -- open pull requests of the registered
+    GitHub repositories (RFC-0465). *)
+let fetch_repository_pulls ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/repositories/pulls"
+
 let fetch_runtime_resolved ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/runtime/resolved"
@@ -1813,11 +1820,11 @@ let post_operator_confirm ~(host : string) ~(port : int) ~(token : string)
     [state] and [answers] out of the body to say what was chosen. *)
 let post_keeper_ask_answer ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(ask_id : string) ~(answers : Yojson.Safe.t)
-    ~(actor_id : string option) ~(session_id : string option) :
+    ~(session_id : string option) :
     (Yojson.Safe.t, string) result =
   let payload =
     match
-      Masc_tui_ask_projection.request_body ~answers ~actor_id ~session_id
+      Masc_tui_ask_projection.request_body ~answers ~session_id
     with
     | `Assoc fields ->
         `Assoc (("name", `String keeper_name) :: ("ask_id", `String ask_id) :: fields)
@@ -2700,6 +2707,32 @@ let post_connector_unbind ~(host : string) ~(port : int) ~(connector : string)
          (percent_encode_path_segment connector))
     ~body:body_json
 
+(** The same route, conditional on the owner: the server removes the binding
+    only while it still names [target.keeper_name]. The reply is read by its
+    status, since 409 (rebound) and 404 (already gone) are answers the caller
+    reports differently from a failure. *)
+let post_connector_unbind_owned ~(host : string) ~(port : int)
+    (target : Masc_tui_connector_unbind.target) :
+    Masc_tui_connector_unbind.outcome =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [ "channel_id", `String target.channel_id
+        ; "keeper_name", `String target.keeper_name
+        ])
+  in
+  match
+    http_post ~headers:(auth_headers ()) ~host ~port
+      ~path:
+        (Printf.sprintf "/api/v1/gate/connector/unbind?name=%s"
+           (percent_encode_path_segment target.connector_id))
+      ~body
+  with
+  | Error detail -> Masc_tui_connector_unbind.Failed detail
+  | Ok (status_code, response) ->
+      Masc_tui_connector_unbind.outcome_of_status ~status:status_code
+        ~refusal:(refusal ~status_code ~body:response)
+
 (** One [resources/list] over the MCP endpoint, on an open session. *)
 let call_mcp_resources_list ~(host : string) ~(port : int)
     ~(session_id : string) ~(request_id : string) :
@@ -2741,13 +2774,25 @@ let call_mcp_resources_read ~(host : string) ~(port : int)
     final identity observation. Every chunk reaches [on_chunk] as it
     arrives; the return says only how the stream ended. *)
 let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(on_chunk : string -> unit) :
-    (unit, string) result =
+    ~(keeper_name : string)
+    ~(scopes : Masc.Keeper_github_identity.login_scope list)
+    ~(on_chunk : string -> unit) : (unit, string) result =
+  let query =
+    match scopes with
+    | [] -> ""
+    | scopes ->
+        "?scopes="
+        ^ percent_encode_query_value
+            (String.concat ","
+               (List.map Masc.Keeper_github_identity.login_scope_to_string
+                  scopes))
+  in
   let url =
     url_of ~host ~port
       ~path:
-        (Printf.sprintf "/api/v1/keepers/%s/github-login"
-           (percent_encode_path_segment keeper_name))
+        (Printf.sprintf "/api/v1/keepers/%s/github-login%s"
+           (percent_encode_path_segment keeper_name)
+           query)
   in
   let headers =
     json_headers (("Accept", "text/event-stream") :: auth_headers ())

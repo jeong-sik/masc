@@ -38,7 +38,7 @@ operator_surface: primary
 verdict를 응답 텍스트로 돌려주지 않습니다. tool 호출이 없으면 잘못된
 verdict이고, Goal은 verifying 단계에 남습니다.
 
-### lookup (vars: lookup_tools, lookup_root_layout)
+### lookup (vars: lookup_tools, lookup_root_layout, submitted_sources)
 <live_lookup>
 읽기 전용 tool을 가지고 있습니다: {{lookup_tools}}.
 
@@ -50,6 +50,10 @@ producer마다 디렉토리 하나입니다 (`docker/` 아래에는 컨테이너
 producer들의 트리가 있습니다):
 
 {{lookup_root_layout}}
+
+이번 검증에 제출된 항목:
+
+{{submitted_sources}}
 
 이 표면이 할 수 있는 것과 없는 것을 읽고 나서 사용합니다.
 
@@ -65,9 +69,8 @@ web tool은 공개 인터넷을 읽습니다. CI 실행, pull request, 대시보
 페이지에 기록된 metric은 이 tool로 확인할 수 있고, 링크는 직접 열어 보기
 전까지는 주장일 뿐입니다.
 
-루트 목록 뒤에는 이번 검증에 제출된 항목 목록이 붙습니다. 그중 `board:`·
-`fusion:` 항목은 Board·Fusion 조회 tool로 제출 시점에 고정된 본문을 읽습니다.
-도구에는 `board:`·`fusion:` 접두어를 뺀 id만 넘기세요. 제출되지 않은 글이나
+위 제출 항목 중 `board:`·`fusion:` 항목은 Board·Fusion 조회 tool로 제출
+시점에 고정된 본문을 읽습니다. 도구에는 `board:`·`fusion:` 접두어를 뺀 id만 넘기세요. 제출되지 않은 글이나
 기록은 이 도구로 읽을 수 없습니다.
 
 metric이 관측 가능한 것을 하나도 가리키지 않는다면 그것이 답입니다: 쓰인

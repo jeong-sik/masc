@@ -520,7 +520,9 @@ let recovery_failure_of_client_error = function
    stays on the attempt's evidence, and the next ordinary turn starts fresh.
    An observation-free overflow keeps [Input_rejected Bootstrap_floor_exceeded]:
    this lane resends its canonical context on resume, so the same-thread
-   shrink retry ([resolve_input_rejected_for_shrink_retry]) can still fit. *)
+   shrink retry ([resolve_input_rejected_for_shrink_retry]) can still fit.
+   When that retry has nothing smaller left, [conclude_exhausted_gate_resume]
+   re-records it as [Vendor_session_full No_activity_observed]. *)
 let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
   match thread_mode, gate_continuation, error with
   | ( Runtime_codex_app_server.Resume _
@@ -1338,6 +1340,49 @@ let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_
      | Error _ -> ())
   | Ok _ -> ()
 ;;
+(* The shrink sequence returns an error only once it will not retry, so a
+   Gate continuation's floor rejection still on record at that point is final:
+   the thread refused every smaller input, and no fresh session may carry the
+   continuation. Left as [Input_rejected], the Gate would wait on an operator
+   whose only resume is [Retry_previous] into the same full thread. It is
+   re-recorded [Vendor_session_full No_activity_observed], the same outcome as
+   an overflow after activity, so the Gate operation fails with that cause and
+   the next ordinary turn starts fresh. *)
+let conclude_exhausted_gate_resume ~gate_continuation ~base_path ~keeper_name ~runtime_id
+  ()
+  =
+  match gate_continuation, Keeper_official_client_session_store.load ~base_path ~keeper_name with
+  | false, _ | true, (Error _ | Ok None) -> ()
+  | ( true
+    , Ok
+        (Some
+           ({ Keeper_official_client_session_store.phase =
+                Recovery_required
+                  { failure = Input_rejected Bootstrap_floor_exceeded
+                  ; previous_settlement = Some _
+                  ; recovery_id
+                  ; _
+                  }
+            ; runtime_id = stored_runtime_id
+            ; _
+            } as expected)) )
+    when String.equal stored_runtime_id runtime_id ->
+    (match
+       Keeper_official_client_session_store.conclude_resume_session_full
+         ~base_path
+         ~keeper_name
+         ~expected
+         ~recovery_id
+         ~updated_at:(Time_compat.now ())
+     with
+     | Ok _ -> ()
+     | Error detail ->
+       Log.Keeper.error
+         ~keeper_name
+         "Codex Gate resume stayed an input rejection; recording the full thread failed: %s"
+         detail)
+  | true, Ok (Some _) -> ()
+;;
 (* Uncertainty cannot erase stronger evidence from an earlier attempt. The
    compare-and-set also preserves an effect observed concurrently. *)
 let note_transport_uncertainty effect_disposition =
@@ -1373,16 +1418,10 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     Atomic.set successful_tool_completion Successful_tool_completion
   in
   let observed_next_shrink_capacity_bytes = ref None in
-  let starting_capacity_bytes =
-    Keeper_context_overflow_shrink_state.starting_capacity
-      ~keeper_name
-      ~runtime_id
-      ~max_capacity:unbounded_model_input_capacity_bytes
-  in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
-      ~starting_capacity:starting_capacity_bytes
+      ~starting_capacity:unbounded_model_input_capacity_bytes
       ~same_run_retry_authorized:(fun () ->
         Keeper_provider_attempt_effect.allows_same_turn_retry
           (Atomic.get effect_disposition)
@@ -1397,13 +1436,6 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
          against that size. There is no local account that could rule the
          next size out, so the provider's own target stands. *)
       ~shrink_admits_history:(fun ~capacity:_ -> true)
-      ~record_success:(fun ~capacity ->
-        if capacity <> unbounded_model_input_capacity_bytes
-        then
-          Keeper_context_overflow_shrink_state.record_success
-            ~keeper_name
-            ~runtime_id
-            ~capacity)
       ~on_shrink_retry:
         (fun ~shrink_attempt ~previous_capacity:previous_capacity_bytes ~capacity:capacity_bytes ->
           resolve_input_rejected_for_shrink_retry ~official_client_continuation
@@ -1457,6 +1489,15 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
           ~config)
       ())
   in
+  (match result with
+   | Ok _ -> ()
+   | Error _ ->
+     conclude_exhausted_gate_resume
+       ~gate_continuation:(Option.is_some official_client_continuation)
+       ~base_path
+       ~keeper_name
+       ~runtime_id
+       ());
   { result
   ; settled_session = Atomic.get settled_session
   ; effect_disposition = Atomic.get effect_disposition
@@ -1482,4 +1523,5 @@ module For_testing = struct
   let codex_error_to_core_error = codex_error_to_core_error
   let recovery_failure_of_client_error = recovery_failure_of_client_error
   let recovery_failure_of_attempt = recovery_failure_of_attempt
+  let conclude_exhausted_gate_resume = conclude_exhausted_gate_resume
 end

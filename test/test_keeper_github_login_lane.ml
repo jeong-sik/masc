@@ -98,7 +98,13 @@ let stub_main () =
   | Ok (request, _stdin) ->
     let record tag = save (frame_path ~dir tag) frame in
     (match request.argv with
-     | argv when List.equal String.equal argv (Keeper_github_identity.login_argv ~hostname)
+     | argv
+       when List.equal
+              String.equal
+              argv
+              (Keeper_github_identity.login_argv
+                 ~hostname
+                 ~scopes:[ Keeper_github_identity.Workflow ])
        ->
        record "login";
        (* stderr, not stdout: measured 2026-09-03, [gh auth login] with no
@@ -130,7 +136,11 @@ let stub_main () =
             exit 255. *)
          write_all Unix.stderr "ssh: connect to host fixture.invalid port 22: refused\n";
          exit 255);
-       write_all Unix.stdout (probe_login ^ "\n");
+       (* What real gh prints under [--include]: status line, headers, a CRLF
+          blank line, then the login [--jq] selected. *)
+       write_all
+         Unix.stdout
+         ("HTTP/2.0 200 OK\r\nX-Oauth-Scopes: repo, workflow\r\n\r\n" ^ probe_login ^ "\n");
        write_all Unix.stderr (trailer 0)
      | [ "test"; "-d"; path ] when String.equal path endpoint_remote_root ->
        record "preflight-endpoint-root";
@@ -423,6 +433,7 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
     let streamed = Buffer.create 128 in
     let status, _stdout, _stderr =
       lane.Keeper_github_identity.run_login
+        ~scopes:[ Keeper_github_identity.Workflow ]
         ~on_stdout_chunk:(fun _chunk -> ())
         ~on_stderr_chunk:(fun chunk ->
           Buffer.add_string streamed chunk;
@@ -438,8 +449,10 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
     let login = decoded_request (frame_path ~dir "login") in
     check
       (list string)
-      "the endpoint runs masc's own login argv"
-      (Keeper_github_identity.login_argv ~hostname)
+      "the endpoint runs masc's own login argv, with the chosen scope"
+      (Keeper_github_identity.login_argv
+         ~hostname
+         ~scopes:[ Keeper_github_identity.Workflow ])
       login.argv;
     check
       bool
@@ -559,6 +572,11 @@ let test_remote_observe_reads_the_endpoint_and_writes_nothing () =
        "stored identity is the endpoint's login"
        (Some probe_login)
        observation.Keeper_github_identity.stored.Keeper_github_identity.login;
+     check
+       (option (list string))
+       "the endpoint probe reads the token's scopes"
+       (Some [ "repo"; "workflow" ])
+       observation.Keeper_github_identity.stored.Keeper_github_identity.scopes;
      check
        string
        "the probe is endpoint-scoped"

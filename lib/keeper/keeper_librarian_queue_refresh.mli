@@ -83,6 +83,12 @@ module For_testing : sig
   (** The width a later continuity pass will read at, if a refusal left one
       for this trace. *)
 
+  val last_input_capacity :
+    config:Workspace.config -> keeper_name:string
+    -> Keeper_lane_cli_oneshot.input_capacity option
+  (** The CLI limit the next continuity pass fits its range to, if one is
+      remembered for this Keeper. *)
+
   val merge_not_committed :
     Keeper_librarian_runtime.not_committed option
     -> Keeper_librarian_runtime.not_committed
@@ -103,4 +109,13 @@ module For_testing : sig
           -> bool)
     -> unit
   (** The production durable reader with a controlled Memory commit edge. *)
+
+  val queue_input
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> current:Keeper_librarian.current_selection option
+    -> working_context:Keeper_librarian_context.input
+    -> Keeper_librarian.input
+  (** The input the queue pass hands the Librarian. Reads the Goal store and
+      goal-task links for [meta.current_task_id] through the IO pool. *)
 end

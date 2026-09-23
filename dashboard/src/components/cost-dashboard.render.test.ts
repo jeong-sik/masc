@@ -36,22 +36,25 @@ function modelMetrics({
   }
 }
 
-function keeperMetrics() {
+function keeperMetrics({
+  keepers = [
+    {
+      keeper_name: 'sangsu',
+      total_cost_usd: 0.2 as number | null,
+      cost_reported_samples: 4,
+      cost_unreported_samples: 0,
+      total_input_tokens: 2000,
+      total_output_tokens: 700,
+      total_tokens: 2700,
+      p50_latency_ms: 900,
+      p95_latency_ms: 2100,
+      sample_count: 4,
+    },
+  ],
+} = {}) {
   return {
     window_minutes: 60,
-    keepers: [
-      {
-        keeper_name: 'sangsu',
-        total_cost_usd: 0.2,
-        total_input_tokens: 2000,
-        total_output_tokens: 700,
-        total_tokens: 2700,
-        p50_latency_ms: 900,
-        p95_latency_ms: 2100,
-        sample_count: 4,
-        model_breakdown: [{ model: 'runtime', cost_usd: 0.2 }],
-      },
-    ],
+    keepers,
   }
 }
 
@@ -278,6 +281,43 @@ describe('CostDashboard route-backed focus behavior', () => {
       section: 'runtime',
       view: 'audit',
     })
+  })
+
+
+  it('says a subscription keeper cost was not reported instead of showing $0', async () => {
+    apiMocks.fetchKeeperCostMetrics.mockResolvedValue(keeperMetrics({
+      keepers: [
+        {
+          keeper_name: 'subscription-keeper',
+          total_cost_usd: null,
+          cost_reported_samples: 0,
+          cost_unreported_samples: 3,
+          total_input_tokens: 24_000_000,
+          total_output_tokens: 500_000,
+          total_tokens: 24_500_000,
+          p50_latency_ms: 900,
+          p95_latency_ms: 2100,
+          sample_count: 3,
+        },
+      ],
+    }))
+    const { route } = await import('../router')
+    const { CostDashboard } = await import('./cost-dashboard')
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'runtime', view: 'cost', focus: 'agent' },
+      postId: null,
+    }
+
+    render(h(CostDashboard, { view: 'cost' }), container)
+    await waitFor(() => container.textContent?.includes('subscription-keeper') ?? false, 'keeper metrics')
+
+    const row = Array.from(container.querySelectorAll('tbody tr'))
+      .find(tr => tr.textContent?.includes('subscription-keeper'))
+    expect(row?.textContent).toContain('미보고')
+    expect(row?.textContent).toContain('3/3턴')
+    expect(row?.textContent).not.toContain('$0')
+    expect(container.textContent).toContain('3턴 비용 미보고')
   })
 
 })

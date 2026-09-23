@@ -393,11 +393,11 @@ let test_refusal_distinguishes_absent_from_rejected () =
   let has needle line = String_util.string_contains_substring ~needle line in
   let absent =
     Control.roster_failure_message ~credential_sent:false
-      Control.Roster_unauthorized
+      (Control.Roster_unauthorized Masc_tui_credential.Rejected)
   in
   let rejected =
     Control.roster_failure_message ~credential_sent:true
-      Control.Roster_unauthorized
+      (Control.Roster_unauthorized Masc_tui_credential.Rejected)
   in
   Alcotest.(check bool) "no bearer is named absent" true
     (has "holds no operator token" absent);
@@ -411,6 +411,19 @@ let test_refusal_distinguishes_absent_from_rejected () =
     (has "masc login" absent && has "masc login" rejected);
   Alcotest.(check bool) "both keep the surface's own subject" true
     (has "live keeper status" absent && has "live keeper status" rejected);
+  (* The server's typed code survives from the body to the line: an expired
+     bearer is not reported as a generic refusal. *)
+  (match
+     Control.roster_failure_of_status ~status:401
+       ~body:{|{"error":"[AuthError] Token expired","auth_error_code":"token_expired"}|}
+   with
+   | Control.Roster_unauthorized reason ->
+       Alcotest.(check bool) "an expired bearer is said to have expired" true
+         (has "has expired"
+            (Control.roster_failure_message ~credential_sent:true
+               (Control.Roster_unauthorized reason)))
+   | Control.Roster_unreachable _ | Control.Roster_malformed _ ->
+       Alcotest.fail "a 401 is a refusal");
   (* The other failures say nothing about credentials either way. *)
   List.iter
     (fun credential_sent ->

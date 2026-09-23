@@ -161,14 +161,21 @@ let redact_text (s : string) : string =
   then List.fold_left (fun acc re -> Re.replace_string re ~by:"[REDACTED]" acc) s secret_res
   else s
 
+(* A key is text too: a map keyed by URL (registry [auths], remote lists)
+   carries credentials in its keys, so the key's text is redacted like any
+   string. Whether the value is masked whole is decided on the key as it came.
+   Two keys that differ only in their secret redact to the same text; both
+   members are kept, in order, so no value is dropped here — a reader that
+   folds members by name sees the last one. *)
 let rec redact_json_strings = function
   | `String s -> `String (redact_text s)
   | `Assoc fields ->
       `Assoc
         (List.map
            (fun (key, value) ->
-             if is_sensitive_key key then (key, `String "[REDACTED]")
-             else (key, redact_json_strings value))
+             let key' = redact_text key in
+             if is_sensitive_key key then (key', `String "[REDACTED]")
+             else (key', redact_json_strings value))
            fields)
   | `List items -> `List (List.map redact_json_strings items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json

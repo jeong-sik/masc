@@ -2541,8 +2541,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
     [ "pg_id" ];
   check_fields "render_keeper_list" [ "keepers_error" ];
-  (* The Memory pane draws from its own file, which this guard never looked
-     at. Its detail handed seven wire fields straight to the terminal: the
+  (* The Memory pane draws from its own file. The guard reaches other files
+     by name -- the primitives and the chat pane each have entries -- but no
+     binding in this one was ever named, so its detail handed seven wire
+     fields straight to the terminal: the
      category, the origin, the memory id, a bound path and its file hash, and
      a dropped row's reason and path. A keeper writes those, and an escape in
      one of them reached the screen as an escape. The claim beside them was

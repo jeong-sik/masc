@@ -5367,15 +5367,20 @@ let render_lanes_overview (state : state) =
       now.Unix.tm_sec
   in
   let header =
-    let keeper_lane_count =
-      match state.runtime_surface with
-      | Some snapshot -> List.length snapshot.rss_resolved.rrs_lanes
-      | None -> 0
+    (* Both readings come from [runtime_surface], which the Runtime screen
+       loads and this one does not, so on a first visit here they were zeros
+       nobody measured. *)
+    let lane_reading =
+      Option.map
+        (fun snapshot ->
+          string_of_int (List.length snapshot.rss_resolved.rrs_lanes))
+        state.runtime_surface
     in
-    let all_count =
-      match state.runtime_surface with
-      | Some snapshot -> List.length snapshot.rss_resolved.rrs_runtimes
-      | None -> 0
+    let all_reading =
+      Option.map
+        (fun snapshot ->
+          string_of_int (List.length snapshot.rss_resolved.rrs_runtimes))
+        state.runtime_surface
     in
     let standalone_count =
       match state.standalone_lanes with
@@ -5395,10 +5400,12 @@ let render_lanes_overview (state : state) =
                (tab_strip_width ~cols
                   ~before:(screen_title " MASC Lanes \xc2\xb7 Standalone" ^ tab_strip_gap)
                   ~after:("  " ^ timestamp ^ "  " ^ connection_badge state))
-             [ ( Printf.sprintf "Lanes (%d)" keeper_lane_count, false )
-             ; ( Printf.sprintf "All runtimes (%d)" all_count, false )
-             ; ( Printf.sprintf "Standalone (%s)"
-                   (Masc_tui_message_layout.count_noun standalone_count "lane"), true )
+             [ (tab_entry_label "Lanes" lane_reading, false)
+             ; (tab_entry_label "All runtimes" all_reading, false)
+             ; ( tab_entry_label "Standalone"
+                   (Some
+                      (Masc_tui_message_layout.count_noun standalone_count "lane"))
+               , true )
              ])
           timestamp (connection_badge state)
   in
@@ -11746,10 +11753,13 @@ let render_runtime (state : state) =
         let all_count =
           List.length snapshot.rss_resolved.Masc.Tui_decode.rrs_runtimes
         in
-        let standalone_count =
-          match state.standalone_lanes with
-          | Some snapshot -> List.length snapshot.sls_lanes
-          | None -> 0
+        (* [standalone_lanes] is the Lanes screen's reading, which this one
+           does not load, so its absence is not a count of zero. *)
+        let standalone_reading =
+          Option.map
+            (fun (snapshot : Masc.Tui_decode.standalone_lanes_snapshot) ->
+              string_of_int (List.length snapshot.sls_lanes))
+            state.standalone_lanes
         in
         let lanes_active = state.runtime_mode = Masc_tui_types.Runtime_lanes in
         Printf.sprintf "%s  %s  %s%s  %s  %s"
@@ -11761,11 +11771,16 @@ let render_runtime (state : state) =
                   ~after:
                     (Printf.sprintf "  %s%s  %s  %s" probe_status probe_read
                        timestamp (connection_badge state)))
-             [ ( Printf.sprintf "Lanes (%s, %s)" (Masc_tui_message_layout.count_noun lane_count "lane")
-                   (Masc_tui_message_layout.count_noun (List.length snapshot.rss_candidates) "slot")
+             [ ( tab_entry_label "Lanes"
+                   (Some
+                      (Printf.sprintf "%s, %s"
+                         (Masc_tui_message_layout.count_noun lane_count "lane")
+                         (Masc_tui_message_layout.count_noun
+                            (List.length snapshot.rss_candidates) "slot")))
                , lanes_active )
-             ; (Printf.sprintf "All runtimes (%d)" all_count, not lanes_active)
-             ; (Printf.sprintf "Standalone (%d)" standalone_count, false)
+             ; ( tab_entry_label "All runtimes" (Some (string_of_int all_count))
+               , not lanes_active )
+             ; (tab_entry_label "Standalone" standalone_reading, false)
              ])
           probe_status probe_read timestamp (connection_badge state)
   in

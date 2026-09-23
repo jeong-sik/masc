@@ -787,6 +787,221 @@ let test_a_restated_memory_retracted_during_the_pass_stays_retracted_and_keeps_i
     | Ok lines -> failf "expected no absorbed row, read %d lines" (List.length lines))
 ;;
 
+(* One Librarian round with the keeper acting during its provider turn: seed A
+   and B, read [answer] against that snapshot, let the keeper replace the facts
+   with [keeper_facts] and record [keeper_events], then commit the answer and
+   write its Revised events the way the runtime does, from the revisions the
+   commit carried out. *)
+let librarian_round ~name ~answer ?keeper_facts ?(keeper_events = []) () =
+  let keepers_dir = Filename.temp_dir ("librarian-" ^ name ^ "-") "" in
+  Fun.protect ~finally:(fun () -> rm_rf keepers_dir) (fun () ->
+    let keeper_id = name in
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let no_append_error label errors =
+      check (list string) label [] (List.map Events.append_error_to_string errors)
+    in
+    let seeded =
+      Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:100.
+        ~source:{ kind = Current.Explicit_write; trace_id = "trace-seed" }
+        ~facts:[ current_a; current_b ] ()
+      |> require
+    in
+    let selection =
+      match parse answer with
+      | Ok selection -> selection
+      | Error error -> fail (Librarian.parse_error_to_string error)
+    in
+    Option.iter
+      (fun facts ->
+         ignore
+           (Current.replace ~keepers_dir ~keeper_id
+              ~expected_revision:(Some seeded.revision) ~now:150.
+              ~source:{ kind = Current.Explicit_write; trace_id = "trace-keeper" }
+              ~facts ()
+            |> require
+            : Current.t))
+      keeper_facts;
+    no_append_error "keeper events written"
+      (Events.append_all ~keepers_dir ~keeper_id keeper_events);
+    let disposition =
+      Current.apply_disposition ~keepers_dir ~keeper_id ~now:200.
+        ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
+        ~dropped_statements:selection.dropped ~absorbed:selection.absorbed
+        ~revisions:selection.revisions ~new_claims:selection.new_claims
+        ()
+      |> require
+    in
+    no_append_error "librarian events written"
+      (Events.append_all ~keepers_dir ~keeper_id
+         (List.map
+            (fun (revision : Memory.revision) : Events.event ->
+               { recorded_at = 200.
+               ; memory_id = revision.superseded
+               ; trace_id = "trace-selection"
+               ; kind = Events.Revised { superseded_by = revision.superseded_by }
+               })
+            disposition.revisions_applied));
+    let events =
+      match Events.read ~keepers_dir ~keeper_id with
+      | Error error -> fail (Events.file_read_error_to_string error)
+      | Ok rows ->
+        List.map
+          (function
+            | _, Ok event -> event
+            | _, Error error -> fail (Events.read_error_to_string error))
+          rows
+    in
+    let absorbed_rows =
+      match Masc.Keeper_memory_absorbed.read ~keepers_dir ~keeper_id with
+      | Error detail -> fail detail
+      | Ok lines -> List.length lines
+    in
+    selection, disposition, events, absorbed_rows)
+;;
+
+let successors_of identity (events : Events.event list) =
+  List.filter_map
+    (fun (event : Events.event) ->
+       match event.kind with
+       | Events.Revised { superseded_by } when String.equal event.memory_id identity ->
+         Some superseded_by
+       | Events.Revised _ | Events.Retrieved _ | Events.Retracted -> None)
+    events
+;;
+
+let revision_pairs (revisions : Memory.revision list) =
+  List.map
+    (fun (revision : Memory.revision) -> revision.superseded ^ "->" ^ revision.superseded_by)
+    revisions
+;;
+
+let ids facts = List.map Memory.memory_id facts
+
+let the_one_new_claim (selection : Librarian.selection) =
+  match selection.new_claims with
+  | [ claim ] -> Memory.memory_id claim
+  | claims -> failf "expected one new claim, parsed %d" (List.length claims)
+;;
+
+let superseding_b = selection_json ~new_claims:[ superseding_claim (`String "m2") () ] ()
+
+(* Control: nothing touches B during the pass, so the answer's successor of B
+   is stored and B gets that one Revised event. *)
+let test_a_supersede_of_a_memory_still_current_is_stored () =
+  let selection, disposition, events, _ =
+    librarian_round ~name:"supersede-kept" ~answer:superseding_b ()
+  in
+  let successor = the_one_new_claim selection in
+  check (list string) "A stays and B's successor is stored"
+    [ current_a_id; successor ] (ids disposition.snapshot.facts);
+  check (list string) "every claim stored" [] (ids disposition.claims_not_applied);
+  check (list string) "the revision is carried out"
+    [ current_b_id ^ "->" ^ successor ] (revision_pairs disposition.revisions_applied);
+  check (list string) "B has one successor" [ successor ] (successors_of current_b_id events)
+;;
+
+(* The keeper supersedes B with a successor of its own while the pass runs,
+   and the answer supersedes B too. The keeper's successor stands: the answer's
+   is not stored and B keeps the one Revised event the keeper wrote. *)
+let test_a_supersede_of_a_memory_the_keeper_superseded_during_the_pass_is_not_stored () =
+  let keeper_successor = fact ~claim:"B, as the keeper corrected it" in
+  let keeper_successor_id = Memory.memory_id keeper_successor in
+  let selection, disposition, events, _ =
+    librarian_round ~name:"supersede-superseded" ~answer:superseding_b
+      ~keeper_facts:[ current_a; keeper_successor ]
+      ~keeper_events:
+        [ { recorded_at = 150.
+          ; memory_id = current_b_id
+          ; trace_id = "trace-keeper"
+          ; kind = Events.Revised { superseded_by = keeper_successor_id }
+          }
+        ]
+      ()
+  in
+  let successor = the_one_new_claim selection in
+  check (list string) "the answer did supersede B"
+    [ current_b_id ^ "->" ^ successor ] (revision_pairs selection.revisions);
+  check (list string) "only the keeper's successor is current"
+    [ current_a_id; keeper_successor_id ] (ids disposition.snapshot.facts);
+  check (list string) "the answer's successor is reported as not stored"
+    [ successor ] (ids disposition.claims_not_applied);
+  check (list string) "no revision carried out" [] (revision_pairs disposition.revisions_applied);
+  check (list string) "B has one successor, the keeper's"
+    [ keeper_successor_id ] (successors_of current_b_id events)
+;;
+
+(* The keeper retracts B while the pass runs, and the answer supersedes B. The
+   retraction stands: the successor is not stored and B gets no Revised event. *)
+let test_a_supersede_of_a_memory_the_keeper_retracted_during_the_pass_is_not_stored () =
+  let selection, disposition, events, _ =
+    librarian_round ~name:"supersede-retracted" ~answer:superseding_b
+      ~keeper_facts:[ current_a ]
+      ~keeper_events:
+        [ { recorded_at = 150.
+          ; memory_id = current_b_id
+          ; trace_id = "trace-keeper"
+          ; kind = Events.Retracted
+          }
+        ]
+      ()
+  in
+  let successor = the_one_new_claim selection in
+  check (list string) "only A is current" [ current_a_id ] (ids disposition.snapshot.facts);
+  check (list string) "the successor is reported as not stored"
+    [ successor ] (ids disposition.claims_not_applied);
+  check (list string) "no revision carried out" [] (revision_pairs disposition.revisions_applied);
+  check (list string) "B has no successor" [] (successors_of current_b_id events)
+;;
+
+(* The keeper retracts B while the pass runs, and the answer merges A and B
+   into C. C would carry B's retracted content, so it is not stored; with no
+   target, A's absorption into C is not applied either and A stays. *)
+let test_a_claim_absorbing_a_memory_the_keeper_retracted_during_the_pass_is_not_stored () =
+  let selection, disposition, _, absorbed_rows =
+    librarian_round ~name:"absorb-retracted"
+      ~answer:
+        (selection_json ~dropped:[]
+           ~new_claims:[ absorbing_claim (`List [ `String "m1"; `String "m2" ]) () ]
+           ())
+      ~keeper_facts:[ current_a ]
+      ()
+  in
+  let merged = the_one_new_claim selection in
+  check (list string) "A stays and C is not stored" [ current_a_id ] (ids disposition.snapshot.facts);
+  check (list string) "C is reported as not stored" [ merged ] (ids disposition.claims_not_applied);
+  check int "no absorption applied" 0 (List.length disposition.absorbed_applied);
+  check int "both absorptions reported as not applied" 2
+    (List.length disposition.absorbed_not_applied);
+  check int "no absorbed row" 0 absorbed_rows
+;;
+
+(* The answer's C supersedes A and absorbs B, and the keeper retracts B during
+   the pass. C is not stored, so A, which left only for C, stays current. *)
+let test_a_memory_whose_only_successor_is_not_stored_stays_current () =
+  let selection, disposition, events, _ =
+    librarian_round ~name:"successor-refused"
+      ~answer:
+        (selection_json ~dropped:[ dropped_json "m1" ]
+           ~new_claims:
+             [ `Assoc
+                 [ Librarian.wire_field_claim, `String "A, restated with B"
+                 ; Librarian.wire_field_category, `String "fact"
+                 ; Librarian.wire_field_supersedes, `String "m1"
+                 ; Librarian.wire_field_absorbs, `List [ `String "m2" ]
+                 ]
+             ]
+           ())
+      ~keeper_facts:[ current_a ]
+      ()
+  in
+  let successor = the_one_new_claim selection in
+  check (list string) "the answer did supersede A"
+    [ current_a_id ^ "->" ^ successor ] (revision_pairs selection.revisions);
+  check (list string) "A stays current" [ current_a_id ] (ids disposition.snapshot.facts);
+  check (list string) "C is reported as not stored" [ successor ] (ids disposition.claims_not_applied);
+  check (list string) "A has no successor" [] (successors_of current_a_id events)
+;;
+
 (* The two arrays stay required even when both are empty: an answer missing a
    field is a malformed answer, not a decision to change nothing. *)
 let test_a_selection_without_the_dropped_field_rejects () =
@@ -1707,6 +1922,16 @@ let () =
             test_a_restated_memory_still_current_takes_its_absorptions
         ; test_case "a restated memory retracted during the pass stays retracted and keeps its sources" `Quick
             test_a_restated_memory_retracted_during_the_pass_stays_retracted_and_keeps_its_sources
+        ; test_case "a supersede of a memory still current is stored" `Quick
+            test_a_supersede_of_a_memory_still_current_is_stored
+        ; test_case "a supersede of a memory the keeper superseded during the pass is not stored" `Quick
+            test_a_supersede_of_a_memory_the_keeper_superseded_during_the_pass_is_not_stored
+        ; test_case "a supersede of a memory the keeper retracted during the pass is not stored" `Quick
+            test_a_supersede_of_a_memory_the_keeper_retracted_during_the_pass_is_not_stored
+        ; test_case "a claim absorbing a memory the keeper retracted during the pass is not stored" `Quick
+            test_a_claim_absorbing_a_memory_the_keeper_retracted_during_the_pass_is_not_stored
+        ; test_case "a memory whose only successor is not stored stays current" `Quick
+            test_a_memory_whose_only_successor_is_not_stored_stays_current
         ; test_case "selection without dropped field rejects" `Quick
             test_a_selection_without_the_dropped_field_rejects
         ; test_case "dropped statements validate" `Quick

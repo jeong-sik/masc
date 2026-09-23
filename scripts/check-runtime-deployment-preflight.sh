@@ -21,7 +21,7 @@ PREFLIGHT_HELPER_COMMIT=""
 # literal, so the gate and its test cannot drift apart.
 KEEPER_META_REJECTED='current keeper meta is invalid'
 # Keep aligned with Keeper_board_attention_candidate.schema_version.
-BOARD_ATTENTION_SCHEMA_VERSION=7
+BOARD_ATTENTION_SCHEMA_VERSION=8
 
 usage() {
   sed -n '2,/^$/p' "$0"

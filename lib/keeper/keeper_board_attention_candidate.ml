@@ -90,8 +90,17 @@ type quarantine =
 
 type quarantine_phase =
   | Quarantined
-  | Requeue_requested of { requested_at : float }
-  | Requeued of { requeued_at : float }
+  | Requeue_requested of
+      { requested_at : float
+      ; requested_by : string
+        (** The authenticated principal that asked for the requeue. *)
+      }
+  | Requeued of
+      { requeued_at : float
+      ; requested_by : string
+        (** Carried from [Requeue_requested]: finishing the requeue does not
+            change who asked for it. *)
+      }
 
 type quarantine_state =
   { quarantine : quarantine
@@ -144,12 +153,13 @@ type record_acceptance =
 
 exception Candidate_unavailable of string
 
-(* v7 is a hard cut: pending rows no longer retain Board thread snapshots,
-   [keeper_context] contains only lane identity and normalized interests, and
-   comment identity is the producer-supplied comment id. The deployment
-   preflight rejects a ledger that holds any non-v7 row, so older rows are
-   never decoded as v7. *)
-let schema_version = 7
+(* v8 is a hard cut: pending rows retain no Board thread snapshots,
+   [keeper_context] contains only lane identity and normalized interests,
+   comment identity is the producer-supplied comment id, and a requeued
+   quarantine names the principal that requested it. The deployment
+   preflight rejects a ledger that holds any non-v8 row, so older rows are
+   never decoded as v8. *)
+let schema_version = 8
 
 let quarantine_failure_category_to_string = function
   | Candidate_membership_conflict -> "candidate_membership_conflict"
@@ -507,17 +517,20 @@ let status_to_yojson = function
       [ "kind", `String "quarantined"
       ; "quarantine", quarantine_to_yojson quarantine
       ]
-  | Quarantine { quarantine; phase = Requeue_requested { requested_at } } ->
+  | Quarantine
+      { quarantine; phase = Requeue_requested { requested_at; requested_by } } ->
     `Assoc
       [ "kind", `String "requeue_requested"
       ; "quarantine", quarantine_to_yojson quarantine
       ; "requested_at", `Float requested_at
+      ; "requested_by", `String requested_by
       ]
-  | Quarantine { quarantine; phase = Requeued { requeued_at } } ->
+  | Quarantine { quarantine; phase = Requeued { requeued_at; requested_by } } ->
     `Assoc
       [ "kind", `String "requeued"
       ; "quarantine", quarantine_to_yojson quarantine
       ; "requeued_at", `Float requeued_at
+      ; "requested_by", `String requested_by
       ]
 ;;
 
@@ -799,12 +812,24 @@ let validate_candidate_state (candidate : candidate) =
     let* () = validate_quarantine quarantine in
     (match phase with
      | Quarantined -> Ok ()
-     | Requeue_requested { requested_at } ->
-       finite_time
-         ~context:"candidate.status.quarantine.requested_at"
-         requested_at
-     | Requeued { requeued_at } ->
-       finite_time ~context:"candidate.status.quarantine.requeued_at" requeued_at)
+     | Requeue_requested { requested_at; requested_by } ->
+       let* () =
+         finite_time
+           ~context:"candidate.status.quarantine.requested_at"
+           requested_at
+       in
+       nonblank_string
+         ~context:"candidate.status.quarantine.requested_by"
+         requested_by
+     | Requeued { requeued_at; requested_by } ->
+       let* () =
+         finite_time
+           ~context:"candidate.status.quarantine.requeued_at"
+           requeued_at
+       in
+       nonblank_string
+         ~context:"candidate.status.quarantine.requested_by"
+         requested_by)
 ;;
 
 let optional_json parser = function
@@ -1227,6 +1252,14 @@ let quarantine_of_yojson json =
     }
 ;;
 
+let requested_by_of_fields ~context fields =
+  let* requested_by_json = field ~context "requested_by" fields in
+  let context = context ^ ".requested_by" in
+  let* requested_by = string_json ~context requested_by_json in
+  let* () = nonblank_string ~context requested_by in
+  Ok requested_by
+;;
+
 let status_of_yojson json =
   let context = "candidate.status" in
   let* fields = assoc ~context json in
@@ -1243,7 +1276,10 @@ let status_of_yojson json =
     Ok (Quarantine { quarantine; phase = Quarantined })
   | "requeue_requested" ->
     let* () =
-      exact_fields ~context [ "kind"; "quarantine"; "requested_at" ] fields
+      exact_fields
+        ~context
+        [ "kind"; "quarantine"; "requested_at"; "requested_by" ]
+        fields
     in
     let* quarantine_json = field ~context "quarantine" fields in
     let* quarantine = quarantine_of_yojson quarantine_json in
@@ -1251,10 +1287,16 @@ let status_of_yojson json =
     let* requested_at =
       finite_float_json ~context:(context ^ ".requested_at") requested_json
     in
-    Ok (Quarantine { quarantine; phase = Requeue_requested { requested_at } })
+    let* requested_by = requested_by_of_fields ~context fields in
+    Ok
+      (Quarantine
+         { quarantine; phase = Requeue_requested { requested_at; requested_by } })
   | "requeued" ->
     let* () =
-      exact_fields ~context [ "kind"; "quarantine"; "requeued_at" ] fields
+      exact_fields
+        ~context
+        [ "kind"; "quarantine"; "requeued_at"; "requested_by" ]
+        fields
     in
     let* quarantine_json = field ~context "quarantine" fields in
     let* quarantine = quarantine_of_yojson quarantine_json in
@@ -1262,7 +1304,8 @@ let status_of_yojson json =
     let* requeued_at =
       finite_float_json ~context:(context ^ ".requeued_at") requeued_json
     in
-    Ok (Quarantine { quarantine; phase = Requeued { requeued_at } })
+    let* requested_by = requested_by_of_fields ~context fields in
+    Ok (Quarantine { quarantine; phase = Requeued { requeued_at; requested_by } })
   | value -> Error (Printf.sprintf "unknown Board attention candidate status %S" value)
 ;;
 
@@ -2108,6 +2151,7 @@ let request_quarantine_requeue
       ~partition_id
       ~expected_quarantine_id
       ~requested_at
+      ~requested_by
   =
   update_ledger ~base_path ~keeper_name:candidate.keeper_name (fun candidates ->
     match find_candidate candidates candidate.candidate_id with
@@ -2122,7 +2166,9 @@ let request_quarantine_requeue
            { current with
              status =
                Quarantine
-                 { state with phase = Requeue_requested { requested_at } }
+                 { state with
+                   phase = Requeue_requested { requested_at; requested_by }
+                 }
            }
          in
          Ok (Some updated, updated)
@@ -2152,12 +2198,15 @@ let finish_quarantine_requeue
       Error ("Board attention candidate not found: " ^ candidate.candidate_id)
     | Some current ->
       (match current.status with
-       | Quarantine ({ quarantine; phase = Requeue_requested _ } as state)
+       | Quarantine
+           ({ quarantine; phase = Requeue_requested { requested_by; _ } } as state)
          when String.equal quarantine.partition_id partition_id
               && String.equal quarantine.quarantine_id expected_quarantine_id ->
          let updated =
            { current with
-             status = Quarantine { state with phase = Requeued { requeued_at } }
+             status =
+               Quarantine
+                 { state with phase = Requeued { requeued_at; requested_by } }
            }
          in
          Ok (Some updated, updated)

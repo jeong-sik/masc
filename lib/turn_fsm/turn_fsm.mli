@@ -23,6 +23,9 @@ type cancel_reason =
       (** Process is exiting; no more turns will be dispatched. *)
   | Cancelled_input_required
       (** Agent paused to request human input (InputRequired). *)
+  | Cancelled_preempted_by_person
+      (** An autonomous turn gave up its provider attempt before the first
+          streaming event because a person queued behind it (RFC-0441). *)
 
 type failure_reason =
   | Failure_runtime_unavailable of {

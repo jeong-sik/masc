@@ -4,6 +4,9 @@
 # Every arm over the whole Terminal-Bench 4.0.0 dataset.
 #
 # env: BENCH_MODEL  <masc provider>/<model> (default anthropic/claude-fable-5-1)
+#      BENCH_FALLBACK_MODELS  comma-separated <provider>/<model> after
+#                   BENCH_MODEL in arm l's candidate order (same provider,
+#                   different models); required by arm l, read by no other arm
 #      BENCH_ENV    harbor environment: docker (default) or modal
 #      CONCURRENCY  trials at once (default 2)
 set -euo pipefail
@@ -15,9 +18,17 @@ ARMS_CSV="${1:-a,b,c,e,f,h}"
 # terminal-bench README).
 K="${2:-5}"
 MODEL="${BENCH_MODEL:-anthropic/claude-fable-5-1}"
+FALLBACK_MODELS="${BENCH_FALLBACK_MODELS:-}"
 ENVIRONMENT="${BENCH_ENV:-docker}"
 CONCURRENCY="${CONCURRENCY:-2}"
 TS="$(date +%Y%m%d-%H%M%S)"
+
+# Before the dataset download and any arm, so a missing list does not stop
+# the job after hours of earlier arms.
+if [[ ",${ARMS_CSV}," == *",l,"* && -z "${FALLBACK_MODELS}" ]]; then
+  echo "arm l needs BENCH_FALLBACK_MODELS (e.g. openrouter/deepseek/deepseek-v4-pro)" >&2
+  exit 2
+fi
 
 # Read the dataset before running it. On docker, the GPU tasks would stop the
 # whole job at trial creation, and a task asking for more CPUs or memory than
@@ -69,8 +80,15 @@ for arm in ${ARMS_CSV//,/ }; do
       --model "${BASELINE_MODEL}" \
       ${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"}
   else
+    # Arm l walks a candidate order; every other arm renders one model and
+    # refuses fallbacks (render_configs.candidate_runtime_ids).
+    FALLBACK_ARGS=()
+    if [[ "$arm" == "l" ]]; then
+      FALLBACK_ARGS=( --ak "fallback_models=${FALLBACK_MODELS}" )
+    fi
     uv run harbor run "${common[@]}" --agent agents.masc_agent:MascAgent \
-      --model "${MODEL}" --ak "arm=$arm" ${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"}
+      --model "${MODEL}" --ak "arm=$arm" ${FALLBACK_ARGS[@]+"${FALLBACK_ARGS[@]}"} \
+      ${EXCLUDE_ARGS[@]+"${EXCLUDE_ARGS[@]}"}
   fi
 done
 uv run python aggregate.py "results/jobs" > "results/summary-${TS}.csv"

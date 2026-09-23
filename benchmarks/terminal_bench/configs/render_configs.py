@@ -2,6 +2,7 @@
 
 Arm 체인 (spec §6.2): b(1 keeper, 전부 off) -> c(+skills) -> d(+composition)
 -> e(+parallel) -> f(4 keepers) -> g(8 keepers) -> h(fusion on).
+Arm L 은 arm e 에 후보 순서(Runtime Candidate Order, 모델 둘 이상)를 더한다.
 Arm A는 run_matrix.sh 가 모델 제공자의 harbor 기본 에이전트로 돌리므로 여기서 렌더하지 않는다.
 
 스키마 근거 (main checkout에서 확인):
@@ -32,23 +33,37 @@ REPO_ROOT = BENCH_ROOT.parents[1]
 OUT_ROOT = BENCH_ROOT / "configs" / "out"
 PROVIDER_CATALOG = REPO_ROOT / "packages" / "agent_core" / "models.toml"
 
-# keepers, skills, composition, parallel
+# keepers, skills, composition, parallel, fusion, failover (candidate order)
 ARMS: dict[str, dict] = {
-    "b": dict(keepers=1, skills=False, composition=False, parallel=False, fusion=False),
-    "c": dict(keepers=1, skills=True,  composition=False, parallel=False, fusion=False),
-    "d": dict(keepers=1, skills=True,  composition=True,  parallel=False, fusion=False),
-    "e": dict(keepers=1, skills=True,  composition=True,  parallel=True,  fusion=False),
-    "f": dict(keepers=4, skills=True,  composition=True,  parallel=True,  fusion=False),
-    "g": dict(keepers=8, skills=True,  composition=True,  parallel=True,  fusion=False),
-    "h": dict(keepers=8, skills=True,  composition=True,  parallel=True,  fusion=True),
+    "b": dict(keepers=1, skills=False, composition=False, parallel=False, fusion=False, failover=False),
+    "c": dict(keepers=1, skills=True,  composition=False, parallel=False, fusion=False, failover=False),
+    "d": dict(keepers=1, skills=True,  composition=True,  parallel=False, fusion=False, failover=False),
+    "e": dict(keepers=1, skills=True,  composition=True,  parallel=True,  fusion=False, failover=False),
+    "f": dict(keepers=4, skills=True,  composition=True,  parallel=True,  fusion=False, failover=False),
+    "g": dict(keepers=8, skills=True,  composition=True,  parallel=True,  fusion=False, failover=False),
+    "h": dict(keepers=8, skills=True,  composition=True,  parallel=True,  fusion=True,  failover=False),
     # Arm K renders a keeper pool for agents/keeper_tools_agent.py: the task is
     # solved by harbor's own claude-code agent and these keepers are reachable
     # to it as MCP tools. bootstrap.sh brings the pool up and sets each
     # keeper's approval stance before handing the fleet over, because that
     # stance is REST-only and 404s for a keeper that is not registered yet
     # (masc#35319), so `keepers` is how many are running when the model starts.
-    "k": dict(keepers=4, skills=True,  composition=True,  parallel=True,  fusion=False),
+    "k": dict(keepers=4, skills=True,  composition=True,  parallel=True,  fusion=False, failover=False),
+    # Arm L is arm e with a Runtime Candidate Order: the keeper is routed by
+    # the [runtime.lanes.bench] lane, whose candidates are the arm's model
+    # followed by the fallback models, so a refusal that says "the next
+    # candidate must be a different model" (repeated_reasoning_cycle, #37952)
+    # moves the turn to the next model instead of ending the trial. Every
+    # other arm renders exactly one model and refuses fallbacks, so an arm
+    # stays one treatment.
+    "l": dict(keepers=1, skills=True,  composition=True,  parallel=True,  fusion=False,
+              failover=True),
 }
+
+# The lane a failover arm's keepers are routed by: [runtime].default and the
+# keeper_up runtime_id both name it (keeper_route). A lane name is a route of
+# its own (runtime.ml: [runtime].default "names a lane or a runtime").
+BENCH_LANE = "bench"
 
 # composition skill 판정 마커: SKILL.md 안에 ```toml composition fenced block이
 # 있으면 그 skill은 keeper_compose_<name> 도구를 만든다. arm c(composition OFF)는
@@ -117,9 +132,12 @@ def instruction_skill_names() -> list[str]:
     return [name for name in _skill_names() if name not in composition]
 
 
-RUNTIME_TOML = """\
+# One HTTP runtime.toml is RUNTIME_HEADER_TOML, one RUNTIME_MODEL_TOML per
+# candidate, the lane (failover arms only) and RUNTIME_TAIL_TOML. A single-model
+# arm is the header, one model block and the tail, as it was before lanes.
+RUNTIME_HEADER_TOML = """\
 [runtime]
-default = "{runtime_id}"
+default = "{default_route}"
 
 [providers.{provider}]
 display-name = "Bench provider"
@@ -130,6 +148,9 @@ endpoint = "{endpoint}"
 type = "env"
 key = "{api_key_env}"
 
+"""
+
+RUNTIME_MODEL_TOML = """\
 [models."{binding_id}"]
 api-name = "{model_alias}"
 {max_context_line}# HTTP lanes deliver tools off the catalog capability, not this key
@@ -153,6 +174,19 @@ tools-support = true
 [{provider}."{binding_id}"]
 max-concurrent = {max_concurrent}
 disable-parallel-tool-use = {disable_parallel}
+"""
+
+# The candidate order: the keeper's turn attempts these runtimes in this order
+# until one succeeds or the lane is exhausted (config/runtime.toml
+# "Runtime candidate orders"; runtime_toml.ml parse_lane admits candidates and
+# nothing else).
+RUNTIME_LANE_TOML = """\
+
+[runtime.lanes.{lane}]
+candidates = [{candidates}]
+"""
+
+RUNTIME_TAIL_TOML = """\
 
 # Boot gate (server_runtime_bootstrap.require_explicit_mandatory_exact_output_
 # lanes): hitl_auto_judge and board_attention_exact must be declared with
@@ -374,6 +408,69 @@ def is_official_client(provider: str) -> bool:
     return bool(PROVIDERS[provider].get("official_client"))
 
 
+def candidate_runtime_ids(arm: str, runtime_id: str,
+                          fallback_runtime_ids: tuple[str, ...] = ()) -> tuple[str, ...]:
+    """The arm's models in candidate order: `runtime_id`, then the fallbacks.
+
+    A failover arm needs at least one fallback, and every other arm refuses
+    one, so an arm is one treatment whichever models it is given.
+
+    The candidates share the head's provider: one [providers.<p>] block and one
+    credential reach the container (masc_agent._container_env passes a single
+    key). They must also be different models, because the refusal this arm
+    exists for says the next candidate must be a different model.
+    """
+    if arm not in ARMS:
+        raise ValueError(f"unknown arm {arm!r}; expected one of {sorted(ARMS)}")
+    candidates = (runtime_id, *fallback_runtime_ids)
+    if not ARMS[arm]["failover"]:
+        if fallback_runtime_ids:
+            raise ValueError(
+                f"arm {arm} renders one model; fallback models "
+                f"{list(fallback_runtime_ids)} belong to a failover arm "
+                f"({sorted(a for a, spec in ARMS.items() if spec['failover'])})")
+        return candidates
+    if not fallback_runtime_ids:
+        raise ValueError(
+            f"arm {arm} measures the candidate order and needs at least one "
+            "fallback model (BENCH_FALLBACK_MODELS)")
+    providers = []
+    for candidate in candidates:
+        provider, _, model = candidate.partition(".")
+        if not provider or not model:
+            raise ValueError(f"runtime_id must be '<provider>.<model>', got {candidate!r}")
+        if provider not in PROVIDERS:
+            raise ValueError(
+                f"unknown provider {provider!r}; expected one of {sorted(PROVIDERS)}")
+        providers.append(provider)
+    if len(set(providers)) != 1:
+        raise ValueError(
+            f"arm {arm} candidates must share one provider, got {providers}")
+    if is_official_client(providers[0]):
+        raise ValueError(
+            f"arm {arm} renders HTTP candidates only; {providers[0]} is an "
+            "official client")
+    bindings = [effective_runtime_id(c) for c in candidates]
+    if len(set(bindings)) != len(bindings):
+        raise ValueError(
+            f"arm {arm} candidates must be different models, got {bindings}")
+    return candidates
+
+
+def keeper_route(arm: str, runtime_id: str,
+                 fallback_runtime_ids: tuple[str, ...] = ()) -> str:
+    """What keeper_up's runtime_id names (BENCH_RUNTIME_ID).
+
+    keeper_up writes it as the keeper's [runtime.assignments] entry, so on a
+    failover arm it must be the lane: naming the head runtime would pin the
+    keeper to that one model and the lane would never be walked.
+    """
+    candidates = candidate_runtime_ids(arm, runtime_id, fallback_runtime_ids)
+    if ARMS[arm]["failover"]:
+        return BENCH_LANE
+    return effective_runtime_id(candidates[0])
+
+
 @functools.lru_cache(maxsize=None)
 def provider_parallel_suppression_contract(provider: str) -> bool:
     """Whether the checked-in Agent Core provider declaration permits it.
@@ -535,14 +632,16 @@ def keeper_toml(arm: str, task_skills: list[str] | None = None) -> str:
 
 
 def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = None,
-               task_skills_dir: Path | None = None) -> Path:
+               task_skills_dir: Path | None = None,
+               fallback_runtime_ids: tuple[str, ...] = ()) -> Path:
     """arm config를 (out_root/<arm>/)에 렌더하고 디렉터리를 반환한다.
 
     레포 config/ 시드(도구 정의·프롬프트 등)를 복사한 뒤 runtime.toml 과
-    keepers/ 를 arm 사양으로 덮어쓴다.
+    keepers/ 를 arm 사양으로 덮어쓴다. failover arm 은 `runtime_id` 뒤에
+    `fallback_runtime_ids` 를 붙인 후보 순서를 [runtime.lanes.bench] 로 렌더한다
+    (candidate_runtime_ids).
     """
-    if arm not in ARMS:
-        raise ValueError(f"unknown arm {arm!r}; expected one of {sorted(ARMS)}")
+    candidates = candidate_runtime_ids(arm, runtime_id, tuple(fallback_runtime_ids))
     spec = ARMS[arm]
     task_skills = task_skill_names(task_skills_dir) if task_skills_dir else []
     provider, _, model_alias = runtime_id.partition(".")
@@ -572,8 +671,12 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
 
     # Before anything is written: a lookup that fails must not leave a
     # half-rendered config directory behind.
-    openrouter = (openrouter_limits(model_alias)
-                  if pcfg.get("context_from_openrouter") else None)
+    # One lookup per candidate; the aliases are wire names (the partition of
+    # each candidate after its provider).
+    aliases = [c.partition(".")[2] for c in candidates]
+    openrouter = {alias: (openrouter_limits(alias)
+                          if pcfg.get("context_from_openrouter") else None)
+                  for alias in aliases}
 
     if out_root is not None:
         root = out_root / arm
@@ -624,26 +727,40 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     # Provider-specific overrides live on the provider entry above. Read them
     # here rather than deriving capabilities from the HTTP protocol.
     thinking_control = pcfg.get("thinking_control_line", "")
-    max_output = pcfg.get("max_output_tokens")
-    if max_output is None and openrouter is not None:
-        max_output = openrouter.max_output
-    max_output_lines = (
-        f"max-output-tokens = {max_output}\n" if max_output is not None else "")
-    runtime_toml = RUNTIME_TOML.format(
-        runtime_id=runtime_id, provider=runtime_provider, model_alias=model_alias,
-        binding_id=binding_id,
-        effort=effort, fusion=str(spec["fusion"]).lower(),
-        max_concurrent=4 if spec["parallel"] else 1,
-        remote_root=REMOTE_ROOT,
-        effort_lines=(
-            f'reasoning-effort = "{effort}"\nthinking-support = true\n'
-            if pcfg.get("carries_effort") else ""),
-        max_context_line=(
-            f"max-context = {openrouter.max_context}\n" if openrouter else ""),
-        max_output_lines=max_output_lines,
-        thinking_control=thinking_control,
-        disable_parallel=str(not spec["parallel"]).lower(),
-        **pcfg)
+
+    def model_toml(alias: str) -> str:
+        limits = openrouter[alias]
+        max_output = pcfg.get("max_output_tokens")
+        if max_output is None and limits is not None:
+            max_output = limits.max_output
+        return RUNTIME_MODEL_TOML.format(
+            provider=runtime_provider, model_alias=alias,
+            binding_id=model_binding_id(alias),
+            max_concurrent=4 if spec["parallel"] else 1,
+            effort_lines=(
+                f'reasoning-effort = "{effort}"\nthinking-support = true\n'
+                if pcfg.get("carries_effort") else ""),
+            max_context_line=(
+                f"max-context = {limits.max_context}\n" if limits else ""),
+            max_output_lines=(
+                f"max-output-tokens = {max_output}\n" if max_output is not None else ""),
+            thinking_control=thinking_control,
+            disable_parallel=str(not spec["parallel"]).lower())
+
+    candidate_ids = [f"{runtime_provider}.{model_binding_id(a)}" for a in aliases]
+    runtime_toml = RUNTIME_HEADER_TOML.format(
+        default_route=keeper_route(arm, candidates[0], candidates[1:]),
+        provider=runtime_provider, **pcfg)
+    runtime_toml += "\n".join(model_toml(alias) for alias in aliases)
+    if spec["failover"]:
+        runtime_toml += RUNTIME_LANE_TOML.format(
+            lane=BENCH_LANE,
+            candidates=", ".join(_toml_string(c) for c in candidate_ids))
+    # The exact-output lanes are never walked by an episode (see the template),
+    # so they keep naming the head runtime rather than the lane.
+    runtime_toml += RUNTIME_TAIL_TOML.format(
+        runtime_id=runtime_id, fusion=str(spec["fusion"]).lower(),
+        remote_root=REMOTE_ROOT)
     if task_skills:
         runtime_toml += "\n" + skills_block_with_task_source(
             include_seed_sources=spec["skills"])
@@ -684,5 +801,8 @@ if __name__ == "__main__":
     ap.add_argument("arm", choices=sorted(ARMS))
     ap.add_argument("--runtime-id", default="anthropic.claude-fable-5-1")
     ap.add_argument("--effort", default="high")
+    # Repeat in candidate order after --runtime-id; only a failover arm takes it.
+    ap.add_argument("--fallback-runtime-id", action="append", default=[])
     ns = ap.parse_args()
-    print(render_arm(ns.arm, ns.runtime_id, ns.effort))
+    print(render_arm(ns.arm, ns.runtime_id, ns.effort,
+                     fallback_runtime_ids=tuple(ns.fallback_runtime_id)))

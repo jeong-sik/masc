@@ -249,6 +249,20 @@ let notify_goal_verification_pending (ctx : context) ~goal_id =
       (Printexc.to_string exn)
 ;;
 
+(* An operator Drop or Reopen moved the Goal. A verifier review still running
+   for it can no longer commit, so the lane cancels it and frees its slot. *)
+let notify_goal_verification_abandoned (ctx : context) ~goal_id =
+  try
+    (Atomic.get Workspace_hooks.goal_verification_abandoned_fn) ctx.config ~goal_id
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Misc.error
+      "goal verification abandon failed after the phase write goal_id=%s detail=%s"
+      goal_id
+      (Printexc.to_string exn)
+;;
+
 let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
     ( reject_retired_goal_list_status args
@@ -768,6 +782,7 @@ let finish_goal_reopen ~tool_name ~start_time (ctx : context) ~note goal =
       already_goal_response ~tool_name ~start_time ~goal_id
         ~action:Goal_phase.Reopen ~phase:goal.phase goal verification
     else (
+      if phase_changed then notify_goal_verification_abandoned ctx ~goal_id;
       emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
         ~payload:(`Assoc
           [ "phase", Goal_phase.to_yojson goal.phase; "actor", `String ctx.agent_name ]);
@@ -873,6 +888,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                  | Error error ->
                    phase_write_error_result ~tool_name ~start_time error
                  | Ok updated_goal ->
+                   notify_goal_verification_abandoned ctx ~goal_id;
                    emit_goal_event
                      ctx
                      ~goal_id

@@ -2750,8 +2750,7 @@ let attempt_failure : Runtime_candidate_backpressure.attempt_failure option Alco
           | None -> "none"
           | Some Runtime_candidate_backpressure.Server_error -> "server_error"
           | Some Runtime_candidate_backpressure.Network_transient -> "network_transient"
-          | Some Runtime_candidate_backpressure.Provider_timeout -> "provider_timeout"
-          | Some Runtime_candidate_backpressure.Access_refused -> "access_refused"))
+          | Some Runtime_candidate_backpressure.Provider_timeout -> "provider_timeout"))
     ( = )
 ;;
 
@@ -2852,55 +2851,59 @@ let test_an_empty_completion_clears_stale_unavailability_evidence () =
       Alcotest.(check bool) "the undated quota observation is cleared" false
         (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ()))))
 ;;
-(* An HTTP access denial already rotates within its Tick. Retaining the typed
-   route as candidate evidence prevents the next Tick from paying for the same
-   known refusal again. It remains ordering evidence: the path still serves,
-   and one later answer restores declared order. *)
-let test_access_refusal_demotes_until_the_candidate_answers () =
+(* RFC-0458 §3.4, §6: an access denial rotates to the next candidate within
+   the turn and leaves no evidence. The next turn tries the head first, so a
+   head whose credential works again answers without waiting for a restart. *)
+let test_access_refusal_rotates_this_turn_and_the_next_turn_tries_the_head () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
-    reset_quota_lane_rests ();
     Fun.protect ~finally:reset_quota_lane_rests (fun () ->
       let refused = "shared_a.test_model" and fallback = "shared_b.test_model" in
       let ids = [ refused; fallback ] in
-      let attempts = ref [] in
-      let access_refusal =
-        Agent_core.Provider_failure_attribution.core_error_of_http_error
-          ~provider:"candidate-access-fixture"
-          (Llm_provider.Http_client.HttpError
-             { code = 403
-             ; body = Llm_provider.Http_client.Received "arbitrary provider denial"
-             ; retry_after_header = None
-             })
-      in
-      let result =
-        walk_once
-          (fun runtime_id ->
-             attempts := runtime_id :: !attempts;
-             if String.equal runtime_id refused
-             then Error access_refusal
-             else Ok ())
-          ids
-      in
-      (match result with
-       | Ok () -> ()
-       | Error error ->
-         Alcotest.failf "access fallback failed: %s" (Agent_core.Error.to_string error));
-      Alcotest.(check (list string)) "the first Tick rotates within the declared lane"
-        ids (List.rev !attempts);
-      Alcotest.check attempt_failure "the actual HTTP 403 is retained as typed evidence"
-        (Some Runtime_candidate_backpressure.Access_refused) (failed_attempt_of refused);
-      Alcotest.(check (list string)) "the next Tick leads with the available sibling"
-        [ fallback; refused ] (backpressure_order ids);
-      (match Driver.path_rest ~now:(Unix.gettimeofday ()) refused with
-       | Driver.Path_serving -> ()
-       | Driver.Path_resting _ -> Alcotest.fail "access evidence made the path wait");
-      let (_ : (unit, Agent_core.Error.t) result) =
-        walk_once (fun _ -> Ok ()) [ refused ]
-      in
-      Alcotest.check attempt_failure "an answer clears the access refusal"
-        None (failed_attempt_of refused);
-      Alcotest.(check (list string)) "the answered candidate returns to declared order"
-        ids (backpressure_order ids)))
+      (* 401 is AuthError and 403 is AuthorizationError; both route to
+         [Auth_failed]. *)
+      List.iter
+        (fun code ->
+           reset_quota_lane_rests ();
+           let label what = Printf.sprintf "HTTP %d: %s" code what in
+           let attempts = ref [] in
+           let access_refusal =
+             Agent_core.Provider_failure_attribution.core_error_of_http_error
+               ~provider:"candidate-access-fixture"
+               (Llm_provider.Http_client.HttpError
+                  { code
+                  ; body = Llm_provider.Http_client.Received "arbitrary provider denial"
+                  ; retry_after_header = None
+                  })
+           in
+           let head_refuses = ref true in
+           let turn () =
+             walk_once
+               (fun runtime_id ->
+                  attempts := runtime_id :: !attempts;
+                  if String.equal runtime_id refused && !head_refuses
+                  then Error access_refusal
+                  else Ok ())
+               ids
+           in
+           (match turn () with
+            | Ok () -> ()
+            | Error error ->
+              Alcotest.failf "%s" (label ("access fallback failed: " ^ Agent_core.Error.to_string error)));
+           Alcotest.(check (list string)) (label "the refused turn rotates within the declared lane")
+             ids (List.rev !attempts);
+           Alcotest.(check bool) (label "the refusal leaves no candidate evidence") true
+             (Option.is_none (observed_candidate refused));
+           Alcotest.(check (list string)) (label "the next turn keeps the declared order")
+             ids (backpressure_order ids);
+           attempts := [];
+           head_refuses := false;
+           (match turn () with
+            | Ok () -> ()
+            | Error error ->
+              Alcotest.failf "%s" (label ("restored head failed: " ^ Agent_core.Error.to_string error)));
+           Alcotest.(check (list string)) (label "the next turn tries the head first and it answers")
+             [ refused ] (List.rev !attempts))
+        [ 401; 403 ]))
 ;;
 (* The evidence follows the failure route. A closed runtime connection is
    routed as a server error, so it is evidence; MASC's own capacity, a
@@ -5139,8 +5142,10 @@ let () =
             "an empty completion clears stale unavailability evidence"
             `Quick
             test_an_empty_completion_clears_stale_unavailability_evidence;
-          Alcotest.test_case "access refusal demotes until the candidate answers" `Quick
-            test_access_refusal_demotes_until_the_candidate_answers;
+          Alcotest.test_case
+            "access refusal rotates this turn and the next turn tries the head"
+            `Quick
+            test_access_refusal_rotates_this_turn_and_the_next_turn_tries_the_head;
           Alcotest.test_case "only the candidate's own failures are evidence" `Quick
             test_only_the_candidates_own_failures_are_evidence;
           Alcotest.test_case "a yield before the first token clears no evidence" `Quick

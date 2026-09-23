@@ -18111,9 +18111,13 @@ and is loaded on demand through keeper_skill.
       let quit_key =
         match key with
         | Some k ->
-            (match text_input_target state ~compact_viewport with
-             | Some Text_browser_url | Some Text_ask_answer | Some Text_fusion_launch -> false
-             | _ -> Render_schedule.Input_shortcut.is_quit ~message_mode k)
+            (* On a viewport too small to draw them, no field is taking keys:
+               the compact fallback further down owns every remaining one, so
+               yielding there would leave the operator on a terminal they
+               cannot read with no way out but Ctrl-C. *)
+            (compact_viewport
+            || quit_key_allowed_for (text_input_target state ~compact_viewport))
+            && Render_schedule.Input_shortcut.is_quit ~message_mode k
         | None -> false
       in
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
@@ -18691,13 +18695,12 @@ and is loaded on demand through keeper_skill.
                           state.fusion_scroll <- 0;
                           start_fusion_run state ~mailbox:async_messages ~request))
             | Some (Fusion_launch_started _) | None -> ())
-       | Some _
-         when quit_key
-              && (compact_viewport
-                 || (Option.is_none state.search
-                    && not
-                         (state.view = Board
-                         && state.board_mode = Board_compose))) ->
+       (* [quit_key] is already false while anything is taking typed text, the
+          row search and the Board draft among them, so this asks nothing more
+          than that. It used to restate those two by hand and let a compact
+          viewport override them, which is how a [q] typed into a narrow
+          screen's row search armed the exit. *)
+       | Some _ when quit_key ->
            if state.quit_armed then begin
              note_exit_reason Masc_tui_exit_reason.Quit_key;
              raise Break
@@ -18862,8 +18865,14 @@ and is loaded on demand through keeper_skill.
           move at all -- [a] opened whichever ask the cursor had been left on,
           and with more than one waiting there was no way to reach the rest
           without answering the first. *)
+       (* The text check is the one the Activity pane above already makes.
+          Without it these two keys were taken from the command palette while
+          it was open over this surface, so a query with a bracket in it --
+          a task title, [#31874] -- arrived with the brackets missing and the
+          ask cursor moved behind the overlay. *)
        | Some ("[" | "]" as k)
          when state.view = Approvals
+              && Option.is_none (text_input_target state ~compact_viewport)
               && (match state.ask_answer_mode with
                   | Ask_browsing -> true
                   | Ask_answering _ -> false)

@@ -287,6 +287,26 @@ status: reference
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
 
+**Failure Route (실패 경로)**
+: Keeper turn이 실패했을 때 그 실패를 타입으로 분류한 관측(`Keeper_runtime_failure_route.route`).
+  모든 turn 실패 오류가 정확히 하나의 route로 매핑되고, `None` 갈래도 catch-all도 없다.
+  세 갈래다 — `Retry_after_observed`(provider/infra 실패를 관측; provider의 `retry_after`
+  힌트를 보존하되 지연을 지어내거나 강제하지 않음)·`Rotate_now`(다른 runtime이 즉시
+  성공할 수 있음)·`Exhausted_visible_alive`(기계적 재시도·회전이 결과를 못 바꾸는 결정적
+  실패; Keeper는 계속 살아 있고 두 번째 LLM 호출을 파견하지 않음). telemetry 라벨은
+  `route_kind_label`(`retry_after_observed`·`rotate_now`·`exhausted_visible_alive`)과
+  `route_class_label`(retry/rotate/terminal class)이다. 영수증·blocker에는
+  `exhausted_visible_alive:deterministic_request`처럼 kind와 class를 붙여 적고, metric은
+  `route`·`class` 라벨로 나눠 적는다. 이 route는 관측이지 스케줄링 권위가 아니다 — Keeper를
+  멈추거나 기상 시각을 지어내지 못한다. 같은 실패를 두 곳이 다르게 읽어서는 안 된다:
+  route(영수증에 적히는 답)와 walk(`Runtime_attempt_fsm.should_try_next`가 실제로 다음
+  후보로 넘어가는지)가 같은 답을 해야 한다(#38045). `retry_after` 힌트도 한 규칙으로 읽는다 —
+  `usable_retry_after`가 없거나 0·음수·무한·NaN인 힌트는 "대기 시간을 말하지 않음"으로 답하고,
+  후보 backpressure·경로 휴식·quota 재개·드라이버가 모두 이 한 규칙에서 답한다(#38065).
+  `Exact-output route`·`Fusion Route`
+  (실행 경로 이름)와 이름이 겹치지만 다른 축이다.
+  → [keeper_runtime_failure_route](../../lib/keeper_runtime/keeper_runtime_failure_route.mli)
+
 **Demotion (강등)**
 : 어떤 항목을 제거하지 않고 우선순위·가시성·전송 여부만 낮추는 처분. 세 곳이 같은
   불변식을 지킨다 — 강등된 것은 사라지지 않는다.

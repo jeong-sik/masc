@@ -285,6 +285,12 @@ let test_boot_names_the_program_inside_a_directory () =
         [ ("program", `String "arcade"); ("boot", `String "MAIN.EXE") ]
     in
     check bool "a boot the directory does not hold is refused" false (is_completed missing);
+    write_file (Filename.concat game "SAVE.DAT") "not a program";
+    let data =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "SAVE.DAT") ]
+    in
+    check bool "a boot that is not a program is refused" false (is_completed data);
     let climbing =
       dispatch ~base_path "masc_dos_load"
         [ ("program", `String "arcade"); ("boot", `String "../LOADER.COM") ]

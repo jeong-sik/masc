@@ -112,7 +112,9 @@ let executable_in ?boot dir =
        both, because the load refuses a directory where two names fold
        together. *)
     (match List.filter (fun f -> String.equal (folded f) (folded wanted)) files with
-     | one :: _ -> Ok (one, beside one)
+     | one :: _ when is_program_name one -> Ok (one, beside one)
+     | one :: _ ->
+       Error (Printf.sprintf "%s is not a .exe or .com: boot names the program to run" one)
      | [] ->
        Error
          (Printf.sprintf "%s holds no file named %s" (Filename.basename dir) wanted))
@@ -172,10 +174,11 @@ let left_inventory ~root shown =
 let resolve_program ?boot ~base_path name =
   let root = programs_dir ~base_path in
   let trimmed = String.trim name in
-  let boot_escapes = match boot with Some b -> escapes b | None -> false in
+  match boot with
+  | Some b when escapes b ->
+    Error (Printf.sprintf "boot %S is a file name inside the directory: no paths, and no dots" b)
+  | Some _ | None ->
   if trimmed = "" then Error "name a program"
-  else if boot_escapes then
-    Error "boot is a file name inside the directory: no paths, and no dots"
   else if escapes trimmed then
     Error
       (Printf.sprintf "%S is not a name in the inventory: no paths, and no dots"

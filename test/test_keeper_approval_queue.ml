@@ -827,7 +827,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 10
+             [ "version", `Int 11
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `List []
@@ -3869,7 +3869,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 10
+            [ "version", `Int 11
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `String "malformed-pending-array"
@@ -3906,7 +3906,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 10
+               [ "version", `Int 11
                ; "generation", `Int 1
                ; "next_sequence", `Int 1
                ; "pending", `String "malformed-pending-array"
@@ -4015,7 +4015,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (AQ.Install_storage_failed
               { reason =
-                  "gate_pending.version 8 is unsupported (current 10); reset \
+                  "gate_pending.version 8 is unsupported (current 11); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -4029,6 +4029,63 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
          (Sys.file_exists store_path);
        let preserved = read_pending_snapshot_bytes ~base_path in
        Alcotest.(check string) "content preserved byte-for-byte" original preserved)
+;;
+
+(* A v10 store is refused by its version before any row is decoded. Its
+   observations carry no refusal_kind, and its log rows would otherwise be
+   decoded one by one and fail the whole load on the first such row; the
+   version check names the reset instead. *)
+let test_v10_store_requires_runtime_reset_before_rows_are_read () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let v10_observation =
+         `Assoc
+           [ "status", `Assoc [ "kind", `String "exit"; "code", `Int 127 ]
+           ; "stderr", `String ""
+           ; "stderr_omitted_bytes", `Int 0
+           ]
+       in
+       write_pending_snapshot
+         ~base_path
+         (`Assoc
+            [ "version", `Int 10
+            ; "generation", `Int 1
+            ; "next_sequence", `Int 2
+            ; "pending", `List []
+            ; "deliveries", `List []
+            ]);
+       let log_path = AQ.For_testing.pending_log_path ~base_path in
+       Out_channel.with_open_text log_path (fun channel ->
+         output_string
+           channel
+           (Yojson.Safe.to_string
+              (`Assoc
+                 [ "kind", `String "pending_upsert"
+                 ; "generation", `Int 1
+                 ; "next_sequence", `Int 2
+                 ; "entry", `Assoc [ "id", `String "v10-row"; "observation", v10_observation ]
+                 ])
+            ^ "\n"));
+       match AQ.install_persistence ~base_path with
+       | Ok _ -> Alcotest.fail "a v10 store must fail install"
+       | Error
+           (AQ.Install_storage_failed
+             { reason =
+                 "gate_pending.version 10 is unsupported (current 11); reset \
+                  runtime state before restarting MASC"
+             ; _
+             }) ->
+         Alcotest.(check bool) "the log is left for the operator reset" true
+           (Sys.file_exists log_path)
+       | Error error ->
+         Alcotest.failf
+           "a v10 store returned the wrong error: %s"
+           (AQ.install_error_to_string error))
 ;;
 
 let test_unreadable_snapshot_fails_closed_and_is_preserved () =
@@ -4278,7 +4335,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 10
+             [ "version", `Int 11
             ; "generation", `Int 1
             ; "next_sequence", `Int 2
             ; "pending", `List []
@@ -4600,7 +4657,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 10
+             [ "version", `Int 11
             ; "generation", `Int 1
             ; "next_sequence", `Int 4
             ; "pending", `List []
@@ -5764,6 +5821,10 @@ let () =
             "unsupported version requires runtime reset"
             `Quick
             test_unsupported_version_snapshot_requires_runtime_reset
+        ; Alcotest.test_case
+            "v10 store requires runtime reset before rows are read"
+            `Quick
+            test_v10_store_requires_runtime_reset_before_rows_are_read
         ; Alcotest.test_case
             "unreadable current snapshot is preserved"
             `Quick

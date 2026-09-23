@@ -216,7 +216,15 @@ type observation =
       }
       (** The shim's typed receipt reports that the box could not be built,
           so the program never started. A nonzero payload exit alone cannot
-          construct this outcome. Every kind keeps the judge. *)
+          construct this outcome. Every stage the request dispatched was
+          refused this way, so nothing started. Every kind keeps the judge. *)
+  | Observed_refused_after_a_stage_ran of { refusal_kind : refusal_kind }
+      (** A multi-stage request (sequence, pipeline, substitution) where at
+          least one stage's program ran in an applied box and at least one
+          other stage's box could not be built. [refusal_kind] is the first
+          refusing stage's. No observation is written to the row, because the
+          row's observation says nothing started; the request keeps the
+          judge. *)
   | Observation_unavailable of string
       (** No box could be built for this request — a profile with no shim, a
           shim that advertises no box, a dispatch the typed gate refused — so

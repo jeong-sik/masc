@@ -93,6 +93,7 @@ type observation =
       ; stderr : string
       ; refusal_kind : refusal_kind
       }
+  | Observed_refused_after_a_stage_ran of { refusal_kind : refusal_kind }
   | Observation_unavailable of string
 
 type authorization =
@@ -2079,6 +2080,18 @@ let decide_after_observation request ~observe =
          ~observation:(observed_refusal ~refusal_kind ~status ~stderr)
          request
          Judge_requested
+     | Observed_refused_after_a_stage_ran { refusal_kind } ->
+       (* One stage's program ran in an applied box and another stage's box
+          could not be built. The row's observation means "nothing started",
+          which is false here, so none is written; the judge weighs the
+          request itself. *)
+       Log.Keeper.info
+         ~keeper_name:request.keeper_name
+         "observe run refused after a stage ran operation=%s refusal_kind=%s; \
+          the judge decides"
+         request.operation
+         (Keeper_approval_queue_rules_types.observed_refusal_kind_to_string refusal_kind);
+       defer request Judge_requested
      | Observation_unavailable reason ->
        (* Unlike Observed_refused, no box could be built at all here — a
           missing shim, an unadvertised box, a dispatch the typed gate

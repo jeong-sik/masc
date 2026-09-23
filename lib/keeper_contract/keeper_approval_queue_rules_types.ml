@@ -247,8 +247,19 @@ let observed_refusal_kind_to_string = function
   | Unattributed -> "unattributed"
 ;;
 
+(* The list is walked from the first kind through this exhaustive match, so
+   a new constructor does not compile until it is given a place in the
+   order. *)
+let next_observed_refusal_kind = function
+  | Socket_rule_not_applied -> Some Write_rule_not_applied
+  | Write_rule_not_applied -> Some Setup_failed
+  | Setup_failed -> Some Unattributed
+  | Unattributed -> None
+;;
+
 let observed_refusal_kinds =
-  [ Socket_rule_not_applied; Write_rule_not_applied; Setup_failed; Unattributed ]
+  let rec walk kind = kind :: Option.fold ~none:[] ~some:walk (next_observed_refusal_kind kind) in
+  walk Socket_rule_not_applied
 ;;
 
 (* The wire tags are spelled once, in [observed_refusal_kind_to_string]; the

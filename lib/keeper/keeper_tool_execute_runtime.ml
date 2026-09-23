@@ -557,7 +557,10 @@ let handle_tool_execute_typed
                  , Keeper_approval_queue_rules_types.observed_refusal_to_yojson
                      (Keeper_gate.observed_refusal ~refusal_kind ~status ~stderr) )
                ]
-             | Some (Keeper_gate.Observed_result _ | Keeper_gate.Observation_unavailable _)
+             | Some
+                 ( Keeper_gate.Observed_result _
+                 | Keeper_gate.Observed_refused_after_a_stage_ran _
+                 | Keeper_gate.Observation_unavailable _ )
              | None -> []
            in
            Keeper_gate_deferred_payload.create

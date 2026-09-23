@@ -337,7 +337,10 @@ let install_error_to_string = function
    before its last rewrite are recognised as stale. A binary that knows only
    v9 must not open a v10 store and show a resolved approval as pending, so
    the version moved (RFC main-domain-scheduler-latency §8.5, P4e). *)
-let pending_store_version = 10
+(* 11: an entry's [observation] carries [refusal_kind]. A v10 row has none and
+   is not read with a guessed kind; the version check names the reset before
+   any row is decoded. *)
+let pending_store_version = 11
 let pending_store_surface = "keeper_gate_pending"
 let replay_results_store_version = 1
 let replay_results_store_surface = "keeper_gate_replay_results"

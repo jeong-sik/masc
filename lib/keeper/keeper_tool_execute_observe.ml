@@ -27,29 +27,56 @@ let unavailable_tag = function
 type box_evidence =
   | Acknowledged
   | Refused of Keeper_gate.refusal_kind
+  | Refused_after_a_stage_ran of Keeper_gate.refusal_kind
   | Unavailable
 
+(* What one stage's receipt says. A multi-stage request (sequence, pipeline,
+   substitution) leaves one receipt per stage it dispatched. *)
+type stage_receipt =
+  | Stage_applied
+  | Stage_refused of Keeper_gate.refusal_kind
+  | Stage_unacknowledged
+
+let stage_receipt ~expected_mode = function
+  | Keeper_sandbox_remote.Execution_observed ({ mode; boundary }, _) when mode = expected_mode ->
+    (match boundary with
+     | Exec_ssh_protocol.Sandbox_applied | Exec_ssh_protocol.Exec_failed -> Stage_applied
+     (* Every refusal below ends the child before it starts that stage's
+        program; the kind only says which step of building the box failed. *)
+     | Exec_ssh_protocol.Refused_socket -> Stage_refused Keeper_gate.Socket_rule_not_applied
+     | Exec_ssh_protocol.Refused_write -> Stage_refused Keeper_gate.Write_rule_not_applied
+     | Exec_ssh_protocol.Setup_failed -> Stage_refused Keeper_gate.Setup_failed
+     | Exec_ssh_protocol.Refused -> Stage_refused Keeper_gate.Unattributed
+     | Exec_ssh_protocol.Child_ack_unavailable -> Stage_unacknowledged)
+  | Keeper_sandbox_remote.Execution_observed _
+  | Keeper_sandbox_remote.Execution_unavailable _ -> Stage_unacknowledged
+;;
+
+(* The whole request is read from every stage's receipt, never from the first
+   refusal alone: in [a; b] or [a || b] one stage's program can run in an
+   applied box while another stage's box could not be built. Only a request
+   where no stage's box applied is a refusal in which nothing started. The
+   kind is the first refusing stage's. *)
 let box_evidence ~run evidence =
   let expected_mode = match run with
     | Keeper_types_profile_sandbox.Observe -> Exec_ssh_protocol.Observe
     | Keeper_types_profile_sandbox.Guest_local -> Exec_ssh_protocol.Guest_local in
-  let rec read = function
-    | [] -> Acknowledged
-    | Keeper_sandbox_remote.Execution_observed ({ mode; boundary }, _) :: rest
-      when mode = expected_mode ->
-        (match boundary with
-         | Exec_ssh_protocol.Sandbox_applied | Exec_ssh_protocol.Exec_failed -> read rest
-         (* Every refusal below ends the child before it starts the
-            program; the kind only says which step of building the box
-            failed. *)
-         | Exec_ssh_protocol.Refused_socket -> Refused Keeper_gate.Socket_rule_not_applied
-         | Exec_ssh_protocol.Refused_write -> Refused Keeper_gate.Write_rule_not_applied
-         | Exec_ssh_protocol.Setup_failed -> Refused Keeper_gate.Setup_failed
-         | Exec_ssh_protocol.Refused -> Refused Keeper_gate.Unattributed
-         | Exec_ssh_protocol.Child_ack_unavailable -> Unavailable)
-    | _ -> Unavailable
+  let receipts = List.map (stage_receipt ~expected_mode) evidence in
+  let unacknowledged =
+    List.exists (function Stage_unacknowledged -> true | Stage_applied | Stage_refused _ -> false) receipts
   in
-  match evidence with [] -> Unavailable | _ -> read evidence
+  let applied =
+    List.exists (function Stage_applied -> true | Stage_refused _ | Stage_unacknowledged -> false) receipts
+  in
+  let first_refusal =
+    List.find_map (function Stage_refused kind -> Some kind | Stage_applied | Stage_unacknowledged -> None) receipts
+  in
+  if List.is_empty receipts || unacknowledged
+  then Unavailable
+  else (
+    match first_refusal with
+    | None -> Acknowledged
+    | Some kind -> if applied then Refused_after_a_stage_ran kind else Refused kind)
 ;;
 
 let observe t () : Keeper_gate.observation =
@@ -65,6 +92,8 @@ let observe t () : Keeper_gate.observation =
           | Refused refusal_kind ->
             Keeper_gate.Observed_refused
               { status = result.status; stderr = result.stderr; refusal_kind }
+          | Refused_after_a_stage_ran refusal_kind ->
+            Keeper_gate.Observed_refused_after_a_stage_ran { refusal_kind }
           | Unavailable ->
             (* No acknowledgement: the box may or may not have applied.
                That says nothing about a refusal -- say exactly that,

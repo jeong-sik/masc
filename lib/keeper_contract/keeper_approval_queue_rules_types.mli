@@ -122,6 +122,10 @@ type observed_refusal_kind =
   | Unattributed
 
 val observed_refusal_kinds : observed_refusal_kind list
+(** Every kind once, in a fixed order. The list is walked through an
+    exhaustive successor match, so a new constructor does not compile until
+    it is given a place in that order. *)
+
 val observed_refusal_kind_to_string : observed_refusal_kind -> string
 
 val observed_refusal_kind_of_string : string -> observed_refusal_kind option

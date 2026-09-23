@@ -381,7 +381,7 @@ let () =
    with
    | () -> ()
    | exception Env_config_core.Config_error message -> error message);
-  Server_runtime_bootstrap.bootstrap_prompt_assets ();
+  Server_runtime_bootstrap.bootstrap_prompt_assets ~base_path;
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
   ignore
     (Masc.Prompt_defaults.bootstrap_runtime ~workspace_path:base_path ~base_path : string);

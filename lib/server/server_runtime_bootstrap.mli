@@ -18,10 +18,12 @@ val apply_runtime_toml : base_path:string -> unit
     the server at boot, the capability probe CLI before its call. Raises
     [Env_config_core.Config_error] when the file does not load. *)
 val startup_config_resolution : base_path:string -> Config_dir_resolver.resolution
-val bootstrap_prompt_assets : unit -> unit
+val bootstrap_prompt_assets : base_path:string -> unit
 (** Converge the runtime prompt directory onto the binary-embedded managed
-    assets. Standalone prompt consumers call this after resolving their base
-    path and before bootstrapping {!Prompt_defaults}. *)
+    assets. An operator's edit of a managed prompt file is saved as a prompt
+    override under [base_path] where it maps to one prompt key. Standalone
+    prompt consumers call this after resolving their base path and before
+    bootstrapping {!Prompt_defaults}. *)
 
 val configure_agent_core_model_catalog_env :
   ?env:(string -> string option) ->

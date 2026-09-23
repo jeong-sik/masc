@@ -15,6 +15,14 @@ let prefix = function
 (* One schema string per domain, written into the runtime manifest so a
    reader of the runtime directory can tell which domain owns it. *)
 let manifest_schema = function
+  | Prompts -> "masc.prompt-managed-assets.v2"
+  | Tools -> "masc.tool-managed-assets.v2"
+  | Mcp -> "masc.mcp-managed-assets.v2"
+;;
+
+(* A manifest under this schema lists paths and no digests. Its paths are
+   read and every digest is unknown. *)
+let digestless_schema = function
   | Prompts -> "masc.prompt-managed-assets.v1"
   | Tools -> "masc.tool-managed-assets.v1"
   | Mcp -> "masc.mcp-managed-assets.v1"
@@ -33,13 +41,33 @@ let noun = function
 let manifest_path domain = prefix domain ^ "managed-assets.json"
 
 module String_set = Set.Make (String)
+module String_map = Map.Make (String)
+
+type edit_layer =
+  | No_edit_layer
+  | Prompt_overrides of
+      (file:string -> embedded:string -> edited:string -> Prompt_registry.file_edit_promotion)
+
+type operator_edit_outcome =
+  | Promoted_to_override of { key : string }
+  | Kept_override_exists of { key : string }
+  | Kept_not_promotable of { reason : string }
+  | Discarded
+
+type operator_edit =
+  { path : string
+  ; outcome : operator_edit_outcome
+  }
 
 type sync_result =
   { copied : string list
   ; overwritten : string list
   ; removed : string list
+  ; operator_edits : operator_edit list
   ; failed : (string * string) list
   }
+
+let sha256_hex content = Digestif.SHA256.(digest_string content |> to_hex)
 
 let read_file_opt = Fs_compat.load_file_opt
 
@@ -50,14 +78,42 @@ let relative_asset_path rel =
   && List.for_all (fun part -> part <> "" && part <> "." && part <> "..") parts
 ;;
 
-let runtime_manifest_content ~domain current =
+let runtime_manifest_content ~domain current digests =
   Yojson.Safe.pretty_to_string
     (`Assoc
        [ "managed_by", `String "MASC"
        ; "schema", `String (manifest_schema domain)
        ; "paths", `List (List.map (fun rel -> `String rel) (String_set.elements current))
+       ; ( "sha256"
+         , `Assoc
+             (String_map.bindings digests
+              |> List.map (fun (rel, digest) -> rel, `String digest)) )
        ])
   ^ "\n"
+;;
+
+type manifest_record =
+  { owned : String_set.t
+  ; digests : string String_map.t
+  }
+
+let no_record = { owned = String_set.empty; digests = String_map.empty }
+
+(* [sha256] maps a listed path to the digest of the bytes the pass that
+   wrote the manifest left there. *)
+let parse_digests ~owned entries =
+  List.fold_left
+    (fun acc (rel, value) ->
+      match acc, value with
+      | Error _, _ -> acc
+      | Ok _, _ when not (String_set.mem rel owned) ->
+        Error (Printf.sprintf "runtime manifest has a digest for an unlisted path: %s" rel)
+      | Ok digests, `String _ when String_map.mem rel digests ->
+        Error (Printf.sprintf "runtime manifest lists the digest of %s twice" rel)
+      | Ok digests, `String digest -> Ok (String_map.add rel digest digests)
+      | Ok _, _ -> Error "runtime manifest digests must be strings")
+    (Ok String_map.empty)
+    entries
 ;;
 
 (* The paths the previous pass recorded as this distribution's. What a pass
@@ -78,32 +134,50 @@ let previously_owned ~domain ~dest_dir =
          operation
          argument
          (Unix.error_message error))
-  | None -> Ok String_set.empty
+  | None -> Ok no_record
   | Some content ->
     (match Yojson.Safe.from_string content with
      | exception Yojson.Json_error message ->
        Error (Printf.sprintf "runtime manifest is not JSON: %s" message)
      | `Assoc fields ->
-       (match List.assoc_opt "schema" fields, List.assoc_opt "paths" fields with
-        | Some (`String schema), _ when not (String.equal schema (manifest_schema domain)) ->
-          Error
-            (Printf.sprintf
-               "runtime manifest schema %S is not %S"
-               schema
-               (manifest_schema domain))
-        | Some (`String _), Some (`List paths) ->
-          List.fold_left
-            (fun acc entry ->
-              match acc, entry with
-              | Error _, _ -> acc
-              | Ok owned, `String rel when relative_asset_path rel ->
-                Ok (String_set.add rel owned)
-              | Ok _, `String rel ->
-                Error (Printf.sprintf "runtime manifest lists an unsafe path: %s" rel)
-              | Ok _, _ -> Error "runtime manifest paths must be strings")
-            (Ok String_set.empty)
-            paths
-        | _ -> Error "runtime manifest lacks a schema string or a paths list")
+       let schema_digests =
+         match List.assoc_opt "schema" fields with
+         | Some (`String schema) when String.equal schema (manifest_schema domain) ->
+           Ok (`Recorded (List.assoc_opt "sha256" fields))
+         | Some (`String schema) when String.equal schema (digestless_schema domain) ->
+           Ok `Digestless
+         | Some (`String schema) ->
+           Error
+             (Printf.sprintf
+                "runtime manifest schema %S is not %S"
+                schema
+                (manifest_schema domain))
+         | Some _ | None -> Error "runtime manifest lacks a schema string or a paths list"
+       in
+       let owned =
+         match List.assoc_opt "paths" fields with
+         | Some (`List paths) ->
+           List.fold_left
+             (fun acc entry ->
+               match acc, entry with
+               | Error _, _ -> acc
+               | Ok owned, `String rel when relative_asset_path rel ->
+                 Ok (String_set.add rel owned)
+               | Ok _, `String rel ->
+                 Error (Printf.sprintf "runtime manifest lists an unsafe path: %s" rel)
+               | Ok _, _ -> Error "runtime manifest paths must be strings")
+             (Ok String_set.empty)
+             paths
+         | Some _ | None -> Error "runtime manifest lacks a schema string or a paths list"
+       in
+       (match schema_digests, owned with
+        | (Error _ as error), _ -> error
+        | Ok _, (Error _ as error) -> error
+        | Ok `Digestless, Ok owned -> Ok { owned; digests = String_map.empty }
+        | Ok (`Recorded (Some (`Assoc entries))), Ok owned ->
+          Result.map (fun digests -> { owned; digests }) (parse_digests ~owned entries)
+        | Ok (`Recorded (Some _ | None)), Ok _ ->
+          Error "runtime manifest lacks a sha256 object")
      | _ -> Error "runtime manifest must be a JSON object")
 ;;
 
@@ -255,57 +329,106 @@ let runtime_asset_paths ~domain ~dest_dir =
   collect "" String_set.empty
 ;;
 
-let sync_current_asset ~domain ~read ~dest_dir acc (embedded_rel, runtime_rel) =
-  if not (relative_asset_path runtime_rel)
-  then
-    { acc with
-      failed =
-        ( embedded_rel
-        , Printf.sprintf "unsafe embedded %s asset path" (noun domain) )
-        :: acc.failed
-    }
-  else (
-    match read embedded_rel with
-    | None ->
-      { acc with failed = (embedded_rel, "embedded asset unreadable") :: acc.failed }
-    | Some content ->
-      let dest = Filename.concat dest_dir runtime_rel in
-      (try
-         match prepare_owned_parent ~domain ~dest_dir dest with
-         | Error msg -> { acc with failed = (embedded_rel, msg) :: acc.failed }
-         | Ok () ->
-           (match writable_leaf_state ~domain dest with
-            | Error msg -> { acc with failed = (embedded_rel, msg) :: acc.failed }
-            | Ok ((`Missing | `Regular | `Symlink) as leaf_state) ->
-              let existing = read_file_opt dest in
-              (match existing with
-               | Some current when String.equal current content -> acc
-               | _ ->
-                 (match Fs_compat.save_file_atomic dest content with
-                  | Error msg -> { acc with failed = (embedded_rel, msg) :: acc.failed }
-                  | Ok () ->
-                    if leaf_state = `Missing
-                    then { acc with copied = embedded_rel :: acc.copied }
-                    else { acc with overwritten = embedded_rel :: acc.overwritten })))
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | Sys_error msg -> { acc with failed = (embedded_rel, msg) :: acc.failed }
-       | Unix.Unix_error (error, operation, argument) ->
-         { acc with
-           failed =
-             ( embedded_rel
-             , Printf.sprintf
-                 "%s(%s): %s"
-                 operation
-                 argument
-                 (Unix.error_message error) )
-             :: acc.failed
-         }))
+(* A runtime file that differs from the embedded copy is one of two things.
+   If it still reads as the bytes the previous pass wrote -- its digest is
+   the recorded one -- the embedded copy moved and the file is stale. If it
+   does not, somebody edited it after that pass. With no recorded digest
+   the two cannot be told apart, and the file is treated as stale. *)
+let edited_since_recorded ~recorded ~runtime_rel current =
+  match String_map.find_opt runtime_rel recorded with
+  | Some digest -> not (String.equal digest (sha256_hex current))
+  | None -> false
 ;;
 
-let sync ~domain ~read ~files ~dest_dir () =
+(* Returns the pass so far and the digests to record: for [runtime_rel],
+   the embedded copy's when the file holds it after this pass, and the
+   previous record when an edit was kept or the write failed. *)
+let sync_current_asset
+      ~domain
+      ~edit_layer
+      ~recorded
+      ~read
+      ~dest_dir
+      (acc, digests)
+      (embedded_rel, runtime_rel)
+  =
+  let previous = String_map.find_opt runtime_rel recorded in
+  let record digest =
+    match digest with
+    | Some digest -> String_map.add runtime_rel digest digests
+    | None -> digests
+  in
+  let fail acc msg = { acc with failed = (embedded_rel, msg) :: acc.failed }, record previous in
+  if not (relative_asset_path runtime_rel)
+  then fail acc (Printf.sprintf "unsafe embedded %s asset path" (noun domain))
+  else (
+    match read embedded_rel with
+    | None -> fail acc "embedded asset unreadable"
+    | Some content ->
+      let dest = Filename.concat dest_dir runtime_rel in
+      let embedded_digest = sha256_hex content in
+      (* [written] is the pass once the file holds the embedded copy;
+         [unwritten] is what it reports when the write fails. *)
+      let install ~written ~unwritten =
+        match Fs_compat.save_file_atomic dest content with
+        | Error msg -> fail unwritten msg
+        | Ok () -> written, record (Some embedded_digest)
+      in
+      let with_edit outcome acc =
+        { acc with operator_edits = { path = embedded_rel; outcome } :: acc.operator_edits }
+      in
+      (try
+         match prepare_owned_parent ~domain ~dest_dir dest with
+         | Error msg -> fail acc msg
+         | Ok () ->
+           (match writable_leaf_state ~domain dest with
+            | Error msg -> fail acc msg
+            | Ok ((`Missing | `Regular | `Symlink) as leaf_state) ->
+              (match read_file_opt dest with
+               | Some current when String.equal current content ->
+                 acc, record (Some embedded_digest)
+               | None ->
+                 install
+                   ~written:
+                     (if leaf_state = `Missing
+                      then { acc with copied = embedded_rel :: acc.copied }
+                      else { acc with overwritten = embedded_rel :: acc.overwritten })
+                   ~unwritten:acc
+               | Some current when not (edited_since_recorded ~recorded ~runtime_rel current)
+                 ->
+                 install
+                   ~written:{ acc with overwritten = embedded_rel :: acc.overwritten }
+                   ~unwritten:acc
+               | Some current ->
+                 (match edit_layer with
+                  | No_edit_layer ->
+                    install ~written:(with_edit Discarded acc) ~unwritten:acc
+                  | Prompt_overrides promote ->
+                    (match promote ~file:runtime_rel ~embedded:content ~edited:current with
+                     | Prompt_registry.Promoted { key } ->
+                       (* The override is saved before the file is reset, so
+                          a failed reset leaves the edit in two places, never
+                          in none. *)
+                       let promoted = with_edit (Promoted_to_override { key }) acc in
+                       install ~written:promoted ~unwritten:promoted
+                     | Prompt_registry.Override_exists { key } ->
+                       with_edit (Kept_override_exists { key }) acc, record previous
+                     | Prompt_registry.Not_promotable { reason } ->
+                       with_edit (Kept_not_promotable { reason }) acc, record previous))))
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | Sys_error msg -> fail acc msg
+       | Unix.Unix_error (error, operation, argument) ->
+         fail
+           acc
+           (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+;;
+
+let sync ~domain ~edit_layer ~read ~files ~dest_dir () =
   let assets = current_assets ~domain files in
-  let initial = { copied = []; overwritten = []; removed = []; failed = [] } in
+  let initial =
+    { copied = []; overwritten = []; removed = []; operator_edits = []; failed = [] }
+  in
   let current =
     List.fold_left (fun acc (_, rel) -> String_set.add rel acc) String_set.empty assets
   in
@@ -347,10 +470,10 @@ let sync ~domain ~read ~files ~dest_dir () =
     match runtime_asset_paths ~domain ~dest_dir with
     | Error msg -> { initial with failed = [ prefix domain, msg ] }
     | Ok runtime ->
-      let owned_before, manifest_failure =
+      let { owned = owned_before; digests = recorded }, manifest_failure =
         match previously_owned ~domain ~dest_dir with
-        | Ok owned -> owned, []
-        | Error msg -> String_set.empty, [ manifest_path domain, msg ]
+        | Ok record -> record, []
+        | Error msg -> no_record, [ manifest_path domain, msg ]
       in
       (* Retired: recorded as masc's by the previous pass and no longer
          shipped. The listing only says which of those are still here. *)
@@ -361,8 +484,11 @@ let sync ~domain ~read ~files ~dest_dir () =
           removable
           { initial with failed = manifest_failure }
       in
-      let synced =
-        List.fold_left (sync_current_asset ~domain ~read ~dest_dir) purged assets
+      let synced, digests =
+        List.fold_left
+          (sync_current_asset ~domain ~edit_layer ~recorded ~read ~dest_dir)
+          (purged, String_map.empty)
+          assets
       in
       (* A manifest this pass could not read stays as it is. Rewriting it
          would make the next boot read clean, so the failure would show
@@ -376,7 +502,7 @@ let sync ~domain ~read ~files ~dest_dir () =
         write_runtime_manifest
           ~domain
           ~dest_dir
-          (runtime_manifest_content ~domain current)
+          (runtime_manifest_content ~domain current digests)
           synced)
 ;;
 
@@ -400,19 +526,12 @@ let sample paths =
   , if omitted > 0 then Printf.sprintf ", and %d more" omitted else "" )
 ;;
 
-(* Overwritten carries names, copied does not, and the asymmetry is the
-   point. A copy is a file the operator never had; a version bump makes
-   dozens and the paths say nothing they wanted to know. An overwrite is a
-   file that was already there and differed, which for these three domains
-   means one thing: somebody edited it and the edit is now gone. That is the
-   same reason [removed] was given names -- an operator's file disappearing
-   is the whole message, and a count cannot deliver it.
-
-   [prompts/keeper.md] is the case this was written for. It is 23 KB of
-   system prompt sitting in the operator's own config root beside
-   runtime.toml, at the same permissions, with nothing in the file or its
-   name to say masc converges it. An operator who edits it gets it back from
-   the binary at the next boot and, before this line, "1 overwritten". *)
+(* Overwritten carries names, copied does not. A copy is a file the
+   operator never had; a version bump makes dozens and the paths say nothing
+   they wanted to know. An overwrite replaced a file that was already there
+   and differed: the embedded copy moved, or the file was edited while no
+   digest was recorded for it. The names say which files. An edit the
+   recorded digest does reveal is an [operator_edit] and has its own line. *)
 let distribution_line ~label result =
   match result.copied, result.overwritten with
   | [], [] -> None
@@ -445,4 +564,43 @@ let removed_line ~label result =
          label
          shown
          more)
+;;
+
+let operator_edit_line ~label { path; outcome } =
+  match outcome with
+  | Promoted_to_override { key } ->
+    Printf.sprintf
+      "%s asset %s was edited after the last sync; the edited text is now the \
+       saved override for prompt %s (prompt_overrides.json) and the file is back \
+       to the distribution copy"
+      label
+      path
+      key
+  | Kept_override_exists { key } ->
+    Printf.sprintf
+      "%s asset %s was edited after the last sync, and prompt %s already has a \
+       saved override; the file is left as edited and the distribution copy is \
+       not installed until the file is deleted or matches it"
+      label
+      path
+      key
+  | Kept_not_promotable { reason } ->
+    Printf.sprintf
+      "%s asset %s was edited after the last sync and cannot become a prompt \
+       override (%s); the file is left as edited and the distribution copy is \
+       not installed until the file is deleted or matches it"
+      label
+      path
+      reason
+  | Discarded ->
+    Printf.sprintf
+      "%s asset %s was edited after the last sync; %s definitions have no \
+       runtime edit layer, so the edit was replaced with the distribution copy"
+      label
+      path
+      label
+;;
+
+let operator_edit_lines ~label result =
+  List.rev_map (operator_edit_line ~label) result.operator_edits
 ;;

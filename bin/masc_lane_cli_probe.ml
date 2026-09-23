@@ -78,7 +78,7 @@ let () =
       Filename.concat (Option.value (Sys.getenv_opt "HOME") ~default:".") "me"
   in
   Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:base_dir;
-  Server_runtime_bootstrap.bootstrap_prompt_assets ();
+  Server_runtime_bootstrap.bootstrap_prompt_assets ~base_path:base_dir;
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path:base_dir in
   ignore
     (Masc.Prompt_defaults.bootstrap_runtime

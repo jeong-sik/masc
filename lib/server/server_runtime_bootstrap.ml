@@ -1339,10 +1339,11 @@ let initialize_owner_state_blocking
    version bump copies enough to fill it, and the deleted paths never
    reached the line. A deletion is a distribution asset retiring, and its
    name is the whole message. *)
-let sync_managed_assets_from_binary ~label ~domain ~dest_dir () =
+let sync_managed_assets_from_binary ~label ~domain ~edit_layer ~dest_dir () =
   let sync =
     Managed_asset_sync.sync
       ~domain
+      ~edit_layer
       ~read:Embedded_config.read
       ~files:Embedded_config.file_list
       ~dest_dir
@@ -1354,6 +1355,9 @@ let sync_managed_assets_from_binary ~label ~domain ~dest_dir () =
   Option.iter
     (fun line -> Log.Misc.warn "%s" line)
     (Managed_asset_sync.removed_line ~label sync);
+  List.iter
+    (fun line -> Log.Misc.warn "%s" line)
+    (Managed_asset_sync.operator_edit_lines ~label sync);
   List.iter
     (fun (rel, msg) -> Log.Misc.warn "%s asset sync failed: %s: %s" label rel msg)
     sync.Managed_asset_sync.failed
@@ -1383,10 +1387,12 @@ let validate_embedded_mcp_surface () =
   | Ok () -> ()
   | Error message -> failwith (Printf.sprintf "embedded mcp surface: %s" message)
 
-let bootstrap_prompt_assets () =
+let bootstrap_prompt_assets ~base_path =
   sync_managed_assets_from_binary
     ~label:"prompt"
     ~domain:Managed_asset_sync.Prompts
+    ~edit_layer:
+      (Managed_asset_sync.Prompt_overrides (Prompt_registry.promote_file_edit ~base_path))
     ~dest_dir:(Config_dir_resolver.prompts_dir ())
     ()
 
@@ -1397,15 +1403,17 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   (* Converge the runtime prompt markdown and tool definition dirs onto the
      binary-embedded assets before anything scans them (#20929: merged
      prompt edits never reached the runtime dir otherwise). *)
-  bootstrap_prompt_assets ();
+  bootstrap_prompt_assets ~base_path:config.base_path;
   sync_managed_assets_from_binary
     ~label:"tool"
     ~domain:Managed_asset_sync.Tools
+    ~edit_layer:Managed_asset_sync.No_edit_layer
     ~dest_dir:(Config_dir_resolver.tools_dir ())
     ();
   sync_managed_assets_from_binary
     ~label:"mcp"
     ~domain:Managed_asset_sync.Mcp
+    ~edit_layer:Managed_asset_sync.No_edit_layer
     ~dest_dir:(Config_dir_resolver.mcp_dir ())
     ();
   validate_embedded_tool_definitions ();

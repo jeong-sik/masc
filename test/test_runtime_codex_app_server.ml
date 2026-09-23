@@ -2692,6 +2692,8 @@ candidates = ["projection.http", "codex.codex"]
                                            "--- Turn-specific instructions ---\n" ^ ti)
                                     })
                                 ~user_message
+                                ~input_speaker:
+                                  (Keeper_input_speaker.Person Keeper_input_speaker.Owner)
                                 ~turn_kind:Turn_record.Direct
                                 ~skill_snapshot:
                                   (Skill_catalog_snapshot.config_unreadable

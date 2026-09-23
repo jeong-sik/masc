@@ -298,6 +298,7 @@ type try_provider_ctx =
   ; name : string
   ; goal : string
   ; goal_blocks : Agent_core.Types.content_block list option
+  ; goal_metadata : Agent_core.Types.metadata
   ; session_id : string option
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list

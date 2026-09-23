@@ -1078,7 +1078,7 @@ let test_attempt_input_is_projected_per_runtime () =
           ~project_images
           ~keeper_name:"per-attempt-projection"
           ~emit_runtime_manifest:(emit_manifest_collector events)
-          ~goal_blocks:(Some [ Agent_core.Types.Text "describe"; image ])
+          ~goal_blocks:(Some [ Agent_core.Types.Text "describe"; image ]) ~goal_metadata:[]
           ~initial_messages:history
           ~agent_core_checkpoint:None
           ~runtime_id
@@ -1161,7 +1161,7 @@ let test_media_rows_keep_their_fields_in_the_public_view () =
            ~project_images
            ~keeper_name:"media-row-public-view"
            ~emit_runtime_manifest:(emit_manifest_collector events)
-           ~goal_blocks:(Some [ Agent_core.Types.Text "describe"; synthetic_image () ])
+           ~goal_blocks:(Some [ Agent_core.Types.Text "describe"; synthetic_image () ]) ~goal_metadata:[]
            ~initial_messages:[]
            ~agent_core_checkpoint:None
            ~runtime_id
@@ -1233,7 +1233,7 @@ let test_image_fallback_checkpoint_keeps_canonical_prefix () =
       Driver.For_testing.project_input_for_attempt
         ~project_images ~keeper_name:"image-checkpoint"
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-        ~goal_blocks ~initial_messages:history
+        ~goal_blocks ~goal_metadata:[] ~initial_messages:history
         ~agent_core_checkpoint:(Some checkpoint) ~runtime_id (runtime runtime_id)
     in
     let history_only = project ~goal_blocks:None "primary.text_model" in
@@ -1285,15 +1285,23 @@ let test_current_image_checkpoint_survives_text_fallback () =
             | Agent_core.Types.Image _ -> Agent_core.Types.Text "[image reading: blue circle]"
             | block -> block) blocks
       ; delegated_images = image_count_in_blocks blocks } in
+    (* RFC-0468 §3.2: AGENT_CORE stamps the input speaker on the dispatched
+       User message. The restored canonical input must carry the same entry,
+       or the replay prefix would no longer equal what was persisted. *)
+    let goal_metadata =
+      Masc.Keeper_input_speaker.metadata
+        (Masc.Keeper_input_speaker.Person Masc.Keeper_input_speaker.Owner) in
     let text_view = Driver.For_testing.project_input_for_attempt
         ~project_images ~keeper_name:"current-image-checkpoint"
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-        ~goal_blocks:(Some canonical_blocks) ~initial_messages:history
+        ~goal_blocks:(Some canonical_blocks) ~goal_metadata ~initial_messages:history
         ~agent_core_checkpoint:(Some checkpoint)
         ~runtime_id:"primary.text_model" (runtime "primary.text_model") in
-    let projected_input = Agent_core.Types.user_msg_blocks
+    let projected_input = Agent_core.Types.make_message ~metadata:goal_metadata
+        ~role:Agent_core.Types.User
         (Option.get text_view.Driver.attempt_goal_blocks) in
-    let canonical_input = Agent_core.Types.user_msg_blocks canonical_blocks in
+    let canonical_input = Agent_core.Types.make_message ~metadata:goal_metadata
+        ~role:Agent_core.Types.User canonical_blocks in
     let dispatch_prefix =
       (Option.get text_view.Driver.attempt_agent_core_checkpoint).messages in
     let suffix =
@@ -1363,7 +1371,7 @@ let test_current_image_checkpoint_survives_text_fallback () =
     let native_view = Driver.For_testing.project_input_for_attempt
         ~project_images ~keeper_name:"current-image-checkpoint"
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-        ~goal_blocks:(Some [ Agent_core.Types.Text "inspect the earlier picture again" ])
+        ~goal_blocks:(Some [ Agent_core.Types.Text "inspect the earlier picture again" ]) ~goal_metadata:[]
         ~initial_messages:reloaded.messages ~agent_core_checkpoint:(Some reloaded)
         ~runtime_id:"lanevision.vision_model" (runtime "lanevision.vision_model") in
     Alcotest.(check bool) "fresh native turn recovers the persisted canonical image blocks"

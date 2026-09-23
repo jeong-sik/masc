@@ -201,9 +201,17 @@ module For_testing : sig
       quoting. *)
 end
 
-val answered_ask_inputs : Keeper_world_observation.world_observation -> (string * string) list
-(** Ask correlation identity and the same attributed, quoted row used in the
-    ordinary user turn. Excludes all other world observations. *)
+val answered_ask_inputs :
+  Keeper_world_observation.world_observation ->
+  (string * string * Keeper_input_speaker.person) list
+(** Ask correlation identity, the same attributed, quoted row used in the
+    ordinary user turn, and who answered. Excludes all other world
+    observations. *)
+
+val autonomous_input_speaker :
+  Keeper_world_observation.world_observation -> Keeper_input_speaker.t
+(** The speaker of the autonomous turn's User message: the host's wake cue,
+    naming who answered each quoted Ask row in the order the rows appear. *)
 
 val format_workspace_memory_observation :
   Workspace_memory_publication.observation -> string option

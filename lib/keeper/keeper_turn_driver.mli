@@ -243,6 +243,7 @@ val run_named :
   base_path:string ->
   goal:string ->
   ?goal_blocks:Agent_core.Types.content_block list ->
+  ?goal_metadata:Agent_core.Types.metadata ->
   ?session_id:string ->
   system_prompt:string ->
   ?tools:Agent_core.Tool.t list ->
@@ -486,6 +487,7 @@ module For_testing : sig
       Keeper_runtime_manifest.event_kind ->
       unit) ->
     goal_blocks:Agent_core.Types.content_block list option ->
+    goal_metadata:Agent_core.Types.metadata ->
     initial_messages:Agent_core.Types.message list ->
     agent_core_checkpoint:Agent_core.Checkpoint.t option ->
     runtime_id:string ->

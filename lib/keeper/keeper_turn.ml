@@ -425,6 +425,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
    reaching this function. *)
 let run_keeper_invocation_turn_admitted_inner
       ~operation_id
+      ~(input_speaker : Keeper_input_speaker.t)
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -831,6 +832,7 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~user_message:(match official_checkpoint_resume with
                                       | Some _ -> Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id
                                       | None -> message)
+		                                ~input_speaker
 		                                ~turn_kind:Turn_record.Direct
                                 ~repetition_execution
 		                                ~skill_snapshot
@@ -1091,6 +1093,7 @@ let run_keeper_invocation_turn_admitted_inner
    autonomous lane's turn cleanup does. *)
 let run_keeper_invocation_turn_admitted
       ~operation_id
+      ~input_speaker
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -1133,6 +1136,7 @@ let run_keeper_invocation_turn_admitted
   match
     run_keeper_invocation_turn_admitted_inner
       ~operation_id
+      ~input_speaker
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -1156,6 +1160,7 @@ let run_keeper_invocation_turn_admitted
 let handle_keeper_msg_admitted
       ~operation_id
       ~admission_token:_
+      ~input_speaker
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -1171,6 +1176,7 @@ let handle_keeper_msg_admitted
   in
   run_keeper_invocation_turn_admitted
     ~operation_id
+    ~input_speaker
     ?on_text_delta
     ?on_event
     ?on_tool_stream_observation

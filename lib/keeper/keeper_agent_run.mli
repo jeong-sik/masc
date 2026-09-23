@@ -218,6 +218,10 @@ end
      @param build_turn_prompt Callback: receives the base keeper system prompt
             and checkpoint message history, returns the final turn system prompt
     @param user_message The user's message to the keeper
+    @param input_speaker Who said [user_message] (RFC-0468 §3.2). Stamped on
+           the User message this turn creates, where it is created; the
+           Librarian reads it from the checkpoint. Required so no entry point
+           can leave its input unattributed.
     @param turn_kind Producer-owned lane identity for the durable turn record
     @param user_blocks Optional structured user-authored AGENT_CORE content blocks for
            the current turn. [user_message] remains the display/history
@@ -246,6 +250,7 @@ val run_turn
   -> build_turn_prompt:
        (base_system_prompt:string -> messages:Agent_core.Types.message list -> turn_prompt)
   -> user_message:string
+  -> input_speaker:Keeper_input_speaker.t
   -> turn_kind:Turn_record.turn_kind
   -> skill_snapshot:Skill_catalog_snapshot.t
   -> task_skill_selection:
@@ -253,7 +258,7 @@ val run_turn
   -> ?user_blocks:Agent_core.Types.content_block list
   -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation
-  -> ?answered_ask_inputs:(string * string) list
+  -> ?answered_ask_inputs:(string * string * Keeper_input_speaker.person) list
   -> ?history_user_source:string
   -> ?user_turn_record:Keeper_run_prompt.user_turn_record
   -> ?history_assistant_source:string

@@ -388,6 +388,9 @@ type try_provider_ctx =
   ; (* Agent config — fields passed through the runtime candidate boundary. *)
     goal : string
   ; goal_blocks : Agent_core.Types.content_block list option
+  ; (* Metadata AGENT_CORE stamps on the User message it creates for the goal:
+       the input speaker (RFC-0468 §3.2). *)
+    goal_metadata : Agent_core.Types.metadata
   ; session_id : string option
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
@@ -2044,6 +2047,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 ~on_resume
                 ~agent_ref:attempt_agent_ref
                 ?cooperative_yield_probe:ctx.cooperative_yield_probe
+                ~input_metadata:ctx.goal_metadata
                 blocks
           | None, None ->
               Runtime_agent.run
@@ -2056,6 +2060,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 ~on_resume
                 ~agent_ref:attempt_agent_ref
                 ?cooperative_yield_probe:ctx.cooperative_yield_probe
+                ~input_metadata:ctx.goal_metadata
                 ctx.goal
         in
         run_fn ())

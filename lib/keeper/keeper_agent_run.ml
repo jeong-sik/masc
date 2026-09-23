@@ -782,6 +782,7 @@ let run_turn
       ~(build_turn_prompt :
          base_system_prompt:string -> messages:Agent_core.Types.message list -> turn_prompt)
       ~(user_message : string)
+      ~(input_speaker : Keeper_input_speaker.t)
       ~(turn_kind : Turn_record.turn_kind)
       ~(skill_snapshot : Skill_catalog_snapshot.t)
       ~(task_skill_selection :
@@ -821,6 +822,9 @@ let run_turn
   : Keeper_agent_result.turn_settlement
   =
   (* Section 1: Setup — sanitize input, build context, compose prompt. *)
+  (* RFC-0468 §3.2: the speaker of the User message this turn creates. Stamped
+     where that message is born and never changed afterwards. *)
+  let input_metadata = Keeper_input_speaker.metadata input_speaker in
   let deferred_runtime_lane_ref = ref None in
   let record_produced_checkpoint ~runtime_id ~attempt checkpoint =
     Option.iter (fun callback -> callback ~runtime_id ~attempt checkpoint) on_produced_checkpoint in
@@ -1140,12 +1144,22 @@ let run_turn
          | Ok (identity, message) ->
            let checkpoint = Keeper_context_runtime.checkpoint_of_context ctx_work in
            let checkpoint = { checkpoint with Agent_core.Checkpoint.session_id = trace_id } in
-           let co_inputs = List.fold_left (fun result (ask_id, text) ->
+           (* Each answered Ask is its own User message here, so it carries its
+              answerer as the speaker. Stamped before admission: the admission
+              digest covers the whole message. *)
+           let co_inputs = List.fold_left (fun result (ask_id, text, answered_by) ->
              Result.bind result (fun inputs ->
                let evidence_fingerprint = Digestif.SHA256.(digest_string text |> to_hex) in
+               let message =
+                 Agent_core.Types.make_message
+                   ~metadata:(Keeper_input_speaker.metadata
+                                (Keeper_input_speaker.Person answered_by))
+                   ~role:Agent_core.Types.User
+                   [ Agent_core.Types.Text text ]
+               in
                Keeper_approval_input_admission.answered_ask_identity ~ask_id ~evidence_fingerprint
                |> Result.map_error Keeper_approval_input_admission.error_to_string
-               |> Result.map (fun identity -> inputs @ [identity, Agent_core.Types.user_msg text])))
+               |> Result.map (fun identity -> inputs @ [identity, message])))
              (Ok []) answered_ask_inputs in
            Result.bind co_inputs (fun co_inputs ->
              Keeper_approval_input_checkpoint.admit ~co_inputs
@@ -1189,7 +1203,10 @@ let run_turn
         let ctx_work =
           match hitl_resolution with
           | None -> ctx_work
-          | Some _ -> Keeper_context_runtime.append ctx_work (Agent_core.Types.user_msg user_message)
+          | Some _ ->
+            Keeper_context_runtime.append ctx_work
+              (Agent_core.Types.make_message ~metadata:input_metadata
+                 ~role:Agent_core.Types.User [ Agent_core.Types.Text user_message ])
         in
         ctx_work, history_messages, resume_agent_core_checkpoint, user_message, user_blocks
     in
@@ -1612,6 +1629,7 @@ let run_turn
                       ~continue_from_checkpoint
                       ~goal:user_message
                       ?goal_blocks:user_blocks
+                      ~goal_metadata:input_metadata
                       ~session_id:
                         (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                       ?raw_trace

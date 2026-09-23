@@ -276,6 +276,7 @@ type sub_board_access =
   | Open
   | Members_only
   | Owner_only
+[@@deriving enumerate]
 
 type sub_board = {
   id: Sub_board_id.t;

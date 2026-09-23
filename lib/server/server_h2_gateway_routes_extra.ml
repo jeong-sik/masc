@@ -150,15 +150,16 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
       true
 
   | `GET, "/api/v1/board/sub-boards" ->
-      let sub_boards = Board_dispatch.list_sub_boards () in
-      let json =
-        `Assoc
-          [
-            ( "sub_boards",
-              `List (List.map Board.sub_board_to_yojson sub_boards) );
-          ]
-      in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
+      with_public_read (fun () ->
+        let sub_boards = Board_dispatch.list_sub_boards () in
+        let json =
+          `Assoc
+            [
+              ( "sub_boards",
+                `List (List.map Board.sub_board_to_yojson sub_boards) );
+            ]
+        in
+        h2_respond_json_value h2_reqd json ~extra_headers:cors);
       true
 
   | `GET, "/api/v1/board/karma/ledger" ->

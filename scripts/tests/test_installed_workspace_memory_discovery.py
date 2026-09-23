@@ -29,6 +29,7 @@ CASES = {
     'credential_echo': 'Credential echo withheld from evidence',
     'prompt_changed': 'Resolved discovery prompt changed during observation',
     'duplicate_fragment': 'exactly one complete resolved discovery fragment',
+    'system_prompt_unavailable': 'Keeper system prompt is not available',
 }
 
 
@@ -128,13 +129,24 @@ class InstalledDiscoveryProbeTests(unittest.TestCase):
                             ])
                         elif case == 'duplicate_fragment':
                             assembled += '\n' + fragment
+                        system_prompt = {
+                            'state': 'available',
+                            'effective': 'stable-system',
+                            'assembled': assembled,
+                        }
+                        if case == 'system_prompt_unavailable':
+                            system_prompt = {
+                                'state': 'unavailable',
+                                'reason': 'constitution_unreadable',
+                                'path': '/base/.masc/constitution/articles.jsonl',
+                                'detail': 'Is a directory',
+                            }
                         value = {
                             'name': self.path.split('/')[4],
                             'prompt': {
-                                'assembled_system_prompt': assembled,
+                                'system_prompt': system_prompt,
                                 'unified_user_message_preview': proposal_id
                                 if case == 'persistent_leak' else 'stable-user',
-                                'effective_system_prompt': 'stable-system',
                             },
                         }
                     else:

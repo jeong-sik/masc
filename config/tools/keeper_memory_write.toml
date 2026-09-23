@@ -43,7 +43,7 @@ description = "Exact memory_id values supporting a derived conclusion. Must be p
 [[params]]
 name = "supersedes"
 type = "string"
-description = "memory_id of your own earlier claim that this one replaces. It is removed in the same commit; nothing is written if it is not one of your current claims."
+description = "memory_id of your own earlier claim that this one replaces; take it from that write's result or from keeper_memory_search. It is removed in the same commit; nothing is written if it is not one of your current claims."
 
 [[params]]
 name = "board_post_id"

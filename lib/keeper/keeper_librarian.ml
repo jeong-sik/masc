@@ -320,7 +320,7 @@ type parse_error =
   | Missing_required_fields
   | Claim_schema_mismatch
   | Dropped_schema_mismatch
-  | Supersedes_with_same_text of string
+  | Dropped_memory_id_recreated of string
   | Unknown_dropped_memory_id of string
   | Duplicate_dropped_memory_id of string
   | Supersedes_unknown_memory_id of string
@@ -338,8 +338,8 @@ let parse_error_to_string = function
   | Missing_required_fields -> "missing_required_fields"
   | Claim_schema_mismatch -> "claim_schema_mismatch"
   | Dropped_schema_mismatch -> "dropped_schema_mismatch"
-  | Supersedes_with_same_text identity ->
-    "supersedes_with_same_text: " ^ identity
+  | Dropped_memory_id_recreated identity ->
+    "dropped_memory_id_recreated: " ^ identity
   | Unknown_dropped_memory_id identity ->
     "unknown_dropped_memory_id: " ^ identity
   | Duplicate_dropped_memory_id identity ->
@@ -507,11 +507,8 @@ let translate_dropped_ids ~by_surrogate dropped =
 (* A revision pairs the dropped memory with the claim that continues it. The
    old id has to be one the librarian saw and dropped in this same answer: a
    supersede of a retained memory would keep both versions, and one of an
-   unknown id names nothing. A claim whose text is the memory it supersedes
-   corrects nothing, and it cannot be read either way: applying the drop
-   deletes a memory the claim keeps, and keeping it ignores the drop, so the
-   answer is refused. A claim that [ignored] names (a restatement of a memory
-   the answer drops or absorbs) continues nothing. *)
+   unknown id names nothing. A claim that [ignored] names (a restatement of a
+   memory another claim absorbs) continues nothing. *)
 let translate_revisions ~by_surrogate ~(dropped : dropped_statement list) ~ignored pairs =
   let dropped_ids =
     List.fold_left
@@ -526,8 +523,6 @@ let translate_revisions ~by_surrogate ~(dropped : dropped_statement list) ~ignor
       let identity = memory_id fact in
       (match String_map.find_opt token by_surrogate with
        | None -> Error (Supersedes_unknown_memory_id token)
-       | Some superseded when String.equal superseded identity ->
-         Error (Supersedes_with_same_text identity)
        | Some _ when String_set.mem identity ignored -> loop acc rest
        | Some superseded ->
          if String_set.mem superseded dropped_ids
@@ -620,13 +615,13 @@ let merge_same_claims stated_claims =
   loop [] [] stated_claims
 ;;
 
-(* The identities of claims that restate a current memory the same answer
-   drops or another of its claims absorbs. A restatement adds nothing, so the
-   drop or the absorption wins and the claim is read as not written. That
-   includes its own [absorbs]: a memory it names there stays current, which is
-   what an absorption that is not applied always does. *)
-let ignored_restatements ~by_surrogate ~current_ids ~(dropped : dropped_statement list)
-      merged_claims =
+(* The identities of claims that restate a current memory another claim of the
+   same answer absorbs. A restatement adds nothing, so the absorption wins and
+   the claim is read as not written. That includes its own [absorbs]: a memory
+   it names there stays current, which is what an absorption that is not
+   applied always does. A restatement of a memory the answer drops is not
+   here: that says both "gone" and "kept", and {!materialize_facts} refuses it. *)
+let ignored_restatements ~by_surrogate ~current_ids merged_claims =
   let absorbed_by_another =
     List.fold_left
       (fun ids claim ->
@@ -642,16 +637,10 @@ let ignored_restatements ~by_surrogate ~current_ids ~(dropped : dropped_statemen
       String_set.empty
       merged_claims
   in
-  let leaving =
-    List.fold_left
-      (fun ids (statement : dropped_statement) -> String_set.add statement.memory_id ids)
-      absorbed_by_another
-      dropped
-  in
   List.fold_left
     (fun ids claim ->
        let identity = memory_id claim.claim_fact in
-       if String_set.mem identity current_ids && String_set.mem identity leaving
+       if String_set.mem identity current_ids && String_set.mem identity absorbed_by_another
        then String_set.add identity ids
        else ids)
     String_set.empty
@@ -706,10 +695,12 @@ type materialized =
   }
 
 (* The facts after the answer, the claims it adds to them, and the current
-   memories it wrote again. [new_claims] has no restatement of a memory the
-   answer drops or absorbs ({!ignored_restatements} took those out), so a claim
-   whose identity is current is a memory the answer keeps: it adds nothing, and
-   the stored fact keeps its first sighting and its fields. *)
+   memories it wrote again. [new_claims] has no restatement of a memory another
+   claim absorbs ({!ignored_restatements} took those out). A claim naming a
+   memory the same answer drops, directly or as the target of its own
+   [supersedes], says both "gone" and "kept", so the answer is refused. Any
+   other claim whose identity is current is a memory the answer keeps: it adds
+   nothing, and the stored fact keeps its first sighting and its fields. *)
 let materialize_facts ~current_facts ~new_claims ~dropped ~absorbed =
   let open Result.Syntax in
   let current_by_id = current_facts_by_id current_facts in
@@ -722,7 +713,7 @@ let materialize_facts ~current_facts ~new_claims ~dropped ~absorbed =
       then Error (Unknown_dropped_memory_id statement.memory_id)
       else validate_dropped (String_set.add statement.memory_id seen) rest
   in
-  let+ dropped_ids = validate_dropped String_set.empty dropped in
+  let* dropped_ids = validate_dropped String_set.empty dropped in
   let absorbed_ids =
     List.fold_left
       (fun ids (statement : Keeper_memory_os_types.absorbed_statement) ->
@@ -737,24 +728,28 @@ let materialize_facts ~current_facts ~new_claims ~dropped ~absorbed =
          not (String_set.mem identity dropped_ids || String_set.mem identity absorbed_ids))
       current_facts
   in
-  let added_rev, restated_rev, ignored_rev =
-    List.fold_left
-      (fun (added_rev, restated_rev, ignored_rev) claim ->
-         let identity = memory_id claim in
-         match String_map.find_opt identity current_by_id with
-         | None -> claim :: added_rev, restated_rev, ignored_rev
-         | Some stored ->
-           let ignored_rev =
-             match differing_fields ~kept:stored claim with
-             | [] -> ignored_rev
-             | differing ->
-               { restated_id = identity; kept_from = Current_memory; differing }
-               :: ignored_rev
-           in
-           added_rev, stored :: restated_rev, ignored_rev)
-      ([], [], [])
-      new_claims
+  let rec split (added_rev, restated_rev, ignored_rev) = function
+    | [] -> Ok (added_rev, restated_rev, ignored_rev)
+    | claim :: rest ->
+      let identity = memory_id claim in
+      if String_set.mem identity dropped_ids
+      then Error (Dropped_memory_id_recreated identity)
+      else
+        split
+          (match String_map.find_opt identity current_by_id with
+           | None -> claim :: added_rev, restated_rev, ignored_rev
+           | Some stored ->
+             let ignored_rev =
+               match differing_fields ~kept:stored claim with
+               | [] -> ignored_rev
+               | differing ->
+                 { restated_id = identity; kept_from = Current_memory; differing }
+                 :: ignored_rev
+             in
+             added_rev, stored :: restated_rev, ignored_rev)
+          rest
   in
+  let+ (added_rev, restated_rev, ignored_rev) = split ([], [], []) new_claims in
   let added = List.rev added_rev in
   { facts_after = retained @ added
   ; adds = added
@@ -837,7 +832,6 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                        ~by_surrogate
                        ~current_ids:
                          (String_set.of_list (List.map memory_id current))
-                       ~dropped
                        merged_claims
                    in
                    let applied_claims =

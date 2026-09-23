@@ -530,29 +530,18 @@ let test_two_claims_with_the_same_text_are_one () =
          selection.absorbed)
 ;;
 
-(* A restatement adds nothing, so when the same answer drops the memory it
-   restates, the drop wins: no refusal, no claim. *)
-let test_a_restated_memory_the_answer_drops_is_dropped () =
-  match
-    parse
-      (selection_json
-         ~dropped:[ dropped_json "m1"; dropped_json "m2" ]
-         ~new_claims:[ new_claim ~claim:"keep A" () ]
-         ())
-  with
-  | Error error ->
-    failf "drop plus restatement rejected: %s" (Librarian.parse_error_to_string error)
-  | Ok selection ->
-    check int "no memory left" 0 (List.length selection.facts);
-    check int "no new claim" 0 (List.length selection.new_claims);
-    check int "no restatement kept" 0 (List.length selection.restated)
-;;
-
-(* A correction whose text is the memory it supersedes corrects nothing, and
-   the two readings conflict: the drop deletes what the claim keeps. *)
-let test_a_correction_with_the_same_text_is_refused () =
+(* Dropping a memory and restating it in the same answer says both "gone" and
+   "kept" (RFC-0397 D3). A correction whose text is the memory it supersedes is
+   that shape too: the supersede requires the drop. *)
+let test_a_restated_memory_the_answer_drops_is_refused () =
+  expect_parse_error "drop and restate the same text"
+    (Librarian.Dropped_memory_id_recreated current_a_id)
+    (selection_json
+       ~dropped:[ dropped_json "m1"; dropped_json "m2" ]
+       ~new_claims:[ new_claim ~claim:"keep A" () ]
+       ());
   expect_parse_error "a correction that changes nothing"
-    (Librarian.Supersedes_with_same_text current_a_id)
+    (Librarian.Dropped_memory_id_recreated current_a_id)
     (selection_json
        ~dropped:[ dropped_json "m1" ]
        ~new_claims:[ superseding_claim ~claim:"keep A" (`String "m1") () ]
@@ -1720,10 +1709,8 @@ let () =
             test_two_claims_with_the_same_text_are_one
         ; test_case "a memory absorbed elsewhere and restated is absorbed" `Quick
             test_a_memory_absorbed_elsewhere_and_restated_is_absorbed
-        ; test_case "a restated memory the answer drops is dropped" `Quick
-            test_a_restated_memory_the_answer_drops_is_dropped
-        ; test_case "a correction with the same text is refused" `Quick
-            test_a_correction_with_the_same_text_is_refused
+        ; test_case "a restated memory the answer drops is refused" `Quick
+            test_a_restated_memory_the_answer_drops_is_refused
         ; test_case "restating every memory plus a merge applies the merge" `Quick
             test_restating_every_memory_plus_a_merge_applies_the_merge
         ; test_case "a restatement keeps the stored fields and names the rest" `Quick

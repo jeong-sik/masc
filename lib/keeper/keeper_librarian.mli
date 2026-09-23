@@ -94,9 +94,9 @@ type selection =
         same text are one. *)
   ; restated : Keeper_memory_os_types.fact list
     (** The current memories the answer wrote again word for word and keeps,
-        as stored. A restatement of a memory the same answer drops or another
-        of its claims absorbs is not here: it adds nothing, so the drop or the
-        absorption wins, and the restatement's own [absorbs] are not applied. *)
+        as stored. A restatement of a memory another claim of the answer absorbs
+        is not here: it adds nothing, so the absorption wins, and the
+        restatement's own [absorbs] are not applied. *)
   ; ignored_fields : ignored_fields list
     (** Restatements and same-text claims whose category or basis differed
         from the fields kept. Evidence only; nothing is refused for it. *)
@@ -142,10 +142,11 @@ type parse_error =
   | Missing_required_fields
   | Claim_schema_mismatch
   | Dropped_schema_mismatch
-  | Supersedes_with_same_text of string
-      (** A claim's [supersedes] names the memory whose text it repeats. It
-          corrects nothing, and the two readings conflict: the drop deletes the
-          memory the claim keeps. *)
+  | Dropped_memory_id_recreated of string
+      (** A claim's text is a memory the same answer drops, directly or as the
+          target of its own [supersedes]: the answer says both "gone" and
+          "kept". A restatement of a kept memory, or of one another claim
+          absorbs, is not this error. *)
   | Unknown_dropped_memory_id of string
   | Duplicate_dropped_memory_id of string
   | Supersedes_unknown_memory_id of string

@@ -2651,9 +2651,66 @@ esac
       | Ok bytes -> Alcotest.(check string) "binary prefix unchanged" "\255PNG" bytes
       | Error detail -> Alcotest.fail detail))
 
+(* The read window command runs as-is inside the backend. Running the same
+   argv here checks the shell text itself: the line a window starts at, the
+   byte bound, and that a missing file or a directory exits non-zero even
+   though the pipeline's own status is [head]'s. *)
+let run_read_window ~start_line ~max_bytes path =
+  let argv = Keeper_sandbox_read_backend.read_window_argv ~start_line ~max_bytes ~path in
+  let ic = Unix.open_process_args_in (List.hd argv) (Array.of_list argv) in
+  let out = In_channel.input_all ic in
+  (Unix.close_process_in ic, out)
+
+let with_numbered_lines count f =
+  let path = Filename.temp_file "read-window-" ".txt" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    Out_channel.with_open_bin path (fun oc ->
+      for i = 1 to count do Printf.fprintf oc "line-%d\n" i done);
+    f path)
+
+let test_read_window_reaches_lines_past_the_prefix () =
+  (* 30,000 lines is about 300 KB, past the 200,000-byte prefix Read used to
+     be limited to. *)
+  with_numbered_lines 30_000 (fun path ->
+    Alcotest.(check bool) "the file is larger than the old prefix" true
+      ((Unix.stat path).Unix.st_size > 200_000);
+    match run_read_window ~start_line:25_000 ~max_bytes:22 path with
+    | Unix.WEXITED 0, out ->
+      Alcotest.(check string) "starts at the requested line, bounded by bytes"
+        "line-25000\nline-25001\n" out
+    | _, out -> Alcotest.fail ("window read failed: " ^ out))
+
+let test_read_window_line_one_is_a_byte_prefix () =
+  with_numbered_lines 3 (fun path ->
+    match run_read_window ~start_line:1 ~max_bytes:9 path with
+    | Unix.WEXITED 0, out -> Alcotest.(check string) "prefix" "line-1\nli" out
+    | _, out -> Alcotest.fail ("prefix read failed: " ^ out))
+
+let test_read_window_missing_file_fails () =
+  let path = Filename.concat (Filename.get_temp_dir_name ()) "read-window-missing-file" in
+  match run_read_window ~start_line:10 ~max_bytes:64 path with
+  | Unix.WEXITED 0, _ -> Alcotest.fail "a missing file read as an empty window"
+  | _, out -> Alcotest.(check string) "no bytes" "" out
+
+let test_read_window_directory_fails () =
+  match run_read_window ~start_line:10 ~max_bytes:64 (Filename.get_temp_dir_name ()) with
+  | Unix.WEXITED 0, _ -> Alcotest.fail "a directory read as an empty window"
+  | _, out -> Alcotest.(check string) "no bytes" "" out
+
 let run_tests ~clock () =
   Alcotest.run "Keeper_sandbox_read_backend"
     [
+      ( "read_window_argv",
+        [
+          Alcotest.test_case "reaches lines past the old 200,000-byte prefix" `Quick
+            test_read_window_reaches_lines_past_the_prefix;
+          Alcotest.test_case "line 1 stays a byte prefix" `Quick
+            test_read_window_line_one_is_a_byte_prefix;
+          Alcotest.test_case "missing file exits non-zero" `Quick
+            test_read_window_missing_file_fails;
+          Alcotest.test_case "directory exits non-zero" `Quick
+            test_read_window_directory_fails;
+        ] );
       ( "raw_prefix", [Alcotest.test_case "command bounded before binary transport" `Quick
             test_raw_prefix_bounds_command_and_preserves_binary] );
       ( "should_route_read",

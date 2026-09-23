@@ -67,11 +67,6 @@ type fs_guidance = Keeper_tool_filesystem_guidance.t =
       { offset : int
       ; window_bytes : int
       }
-  | Offset_beyond_scan_budget of
-      { offset : int
-      ; file_bytes : int
-      ; budget : int
-      }
   | Capability_unavailable
   | Publication_failed
   | Directory_publication_failed
@@ -136,12 +131,14 @@ let count_returned_lines capped =
     if capped.[len - 1] = '\n' then newlines else newlines + 1)
 ;;
 
-(* [scan_complete=false] means [content] is a byte-budgeted prefix of the
-   file (sandbox fetch cut), so exhausting [content] does not prove EOF and
-   line numbers past the scan horizon cannot be mapped. *)
-let slice_read_window ~(window : read_line_window) ~max_bytes ~scan_complete content =
+(* [first_line] is the file line [content] begins at: 1 for a whole file or a
+   prefix, [window.start_line] when the backend already streamed from there.
+   [scan_complete=false] means [content] stops at a byte bound, so exhausting
+   it does not prove EOF and line numbers past that bound cannot be mapped. *)
+let slice_read_window ~(window : read_line_window) ~first_line ~max_bytes ~scan_complete
+    content =
   let len = String.length content in
-  match line_start_index content len 0 window.start_line with
+  match line_start_index content len 0 (window.start_line - first_line + 1) with
   | None ->
     if scan_complete
     then
@@ -370,8 +367,8 @@ let handle_read_file_with_outcome
   | Error window_error, _ -> Keeper_tool_execution.failure (error_json window_error)
   | Ok _, Error (Read_path_error e) -> Keeper_tool_execution.failure (error_json e)
   | Ok window, Ok target ->
-    let payload_of_slice ~via ~file_bytes ~scan_complete body =
-      match slice_read_window ~window ~max_bytes ~scan_complete body with
+    let payload_of_slice ~via ~file_bytes ~first_line ~scan_complete body =
+      match slice_read_window ~window ~first_line ~max_bytes ~scan_complete body with
       | Error `Offset_beyond_scan ->
         Read_failed_payload
           (error_json
@@ -380,10 +377,9 @@ let handle_read_file_with_outcome
                ; "offset", `Int window.start_line
                ]
              (fs_guidance_text
-                (Offset_beyond_scan_budget
+                (Offset_beyond_window
                    { offset = window.start_line
-                   ; file_bytes = String.length body
-                   ; budget = read_file_max_max_bytes
+                   ; window_bytes = String.length body
                    })))
       | Ok slice ->
         let optional_fields =
@@ -430,10 +426,13 @@ let handle_read_file_with_outcome
            let timeout_sec =
              Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()
            in
-           let fetch_bytes = read_window_fetch_bytes ~max_bytes window in
+           (* The backend streams from [window.start_line], so the byte bound
+              is the window's and every line of the file is reachable. *)
+           let fetch_bytes = max_bytes in
            match
              Keeper_sandbox_read_runner.read_file
                ?turn_sandbox_factory
+               ~start_line:window.start_line
                ~config
                ~meta
                ~host_path:target
@@ -457,6 +456,7 @@ let handle_read_file_with_outcome
                (payload_of_slice
                   ~via:(Some Keeper_sandbox_read_runner.backend_via)
                   ~file_bytes:None
+                  ~first_line:window.start_line
                   ~scan_complete
                   body))
          else (
@@ -476,6 +476,7 @@ let handle_read_file_with_outcome
                (payload_of_slice
                   ~via:None
                   ~file_bytes:(Some (String.length content))
+                  ~first_line:1
                   ~scan_complete:true
                   content))
     in
@@ -678,6 +679,7 @@ let handle_owned_read_file_with_outcome
        (match
           slice_read_window
             ~window
+            ~first_line:1
             ~max_bytes
             ~scan_complete:(not prefix.truncated)
             prefix.content

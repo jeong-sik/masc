@@ -21,9 +21,6 @@ cwd_not_directory: {{cwd}} (directory does not exist)
 ### offset_beyond_window (vars: offset, window_bytes)
 offset {{offset}} is beyond the scanned window ({{window_bytes}} bytes)
 
-### offset_beyond_scan_budget (vars: offset, file_bytes, budget)
-offset {{offset}} is beyond the scanned window ({{file_bytes}} bytes; the file continues past the scan budget). Read line ranges within the first {{budget}} bytes, or narrow the file another way (e.g. Grep).
-
 ### capability_unavailable
 filesystem capability unavailable: Eio filesystem was not installed at runtime startup
 

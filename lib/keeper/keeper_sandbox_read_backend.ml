@@ -457,8 +457,31 @@ type read_error =
 let read_error_to_string = function
   | Missing_file detail | Not_a_file detail | Read_failed detail -> detail
 
-let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
-    ~(max_bytes : int) ~(timeout_sec : float) () : (string, read_error) result =
+(* A window that starts past line 1 streams from that line, so the byte bound
+   applies to the window and not to the file's prefix. Bounding the prefix
+   left every line after the first [max_bytes] unreachable to Read.
+
+   The path and numbers are positional arguments of [sh], never spliced into
+   the script. A pipeline's status is its last command's, so the script
+   refuses a directory and opens the file with [exec <] first: a redirection
+   error on a special built-in exits the non-interactive shell non-zero, as
+   [head -c] on a missing file did. *)
+let read_window_argv ~start_line ~max_bytes ~path =
+  let bytes = string_of_int (max 0 max_bytes) in
+  if start_line <= 1
+  then [ "head"; "-c"; bytes; path ]
+  else
+    [ "sh"
+    ; "-c"
+    ; {|if [ -d "$2" ]; then echo "$2: is a directory" >&2; exit 1; fi; exec < "$2"; tail -n +"$1" | head -c "$3"|}
+    ; "sh"
+    ; string_of_int start_line
+    ; path
+    ; bytes
+    ]
+
+let read_file ?turn_sandbox_factory ?(start_line = 1) ~config ~(meta : keeper_meta)
+    ~host_path ~(max_bytes : int) ~(timeout_sec : float) () : (string, read_error) result =
   match container_path_of_host ~config ~meta ~host_path with
   | Error detail -> Error (Read_failed detail)
   | Ok backend_path ->
@@ -480,8 +503,7 @@ let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
          Same shape, and same reason, as the bounded [od -N] chunk read in
          Keeper_browser_upload. *)
       run_command ?turn_sandbox_factory ~config ~meta
-        ~command_argv:
-          [ "head"; "-c"; string_of_int (max 0 max_bytes); backend_path ]
+        ~command_argv:(read_window_argv ~start_line ~max_bytes ~path:backend_path)
         ~max_bytes ~timeout_sec ()
       |> Result.map_error (fun detail -> Read_failed detail)
     in

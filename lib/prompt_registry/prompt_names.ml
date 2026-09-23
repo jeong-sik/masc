@@ -512,8 +512,6 @@ let keeper_tool_filesystem_offset_beyond_window =
   "keeper.tool_filesystem.offset_beyond_window"
 ;;
 
-let keeper_tool_filesystem_offset_beyond_scan_budget =
-  "keeper.tool_filesystem.offset_beyond_scan_budget"
 ;;
 
 let keeper_tool_filesystem_capability_unavailable =

@@ -45,7 +45,7 @@ let first_blocker ~attention name =
     (fun (item : Types.attention_item) ->
       match item.ai_target with
       | Types.Attention_keeper target when String.equal target name ->
-          Some item.ai_summary
+          Some (Option.value ~default:item.ai_summary item.ai_blocker_summary)
       | Types.Attention_keeper _ | Types.Attention_other _ -> None)
     attention
 

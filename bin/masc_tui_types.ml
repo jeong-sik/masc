@@ -1252,6 +1252,10 @@ type attention_item = {
   ai_severity: attention_severity;
   ai_summary: string;
   ai_target: attention_target;
+  ai_blocker_summary: string option;
+      (** [evidence.runtime_blocker.runtime_blocker_summary] on a Keeper
+          runtime-blocker item: the cause alone, without the Keeper name and
+          class word [ai_summary] wraps it in. [None] on every other item. *)
   ai_evidence_ts: float option;
       (** Epoch seconds of the evidence's [log_ts], when the producer stamped
           one (tool-host failures do). The row's age is drawn from it; items

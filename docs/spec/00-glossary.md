@@ -345,6 +345,27 @@ status: reference
   단위를 분류한다.
   → [Tool_result](../../lib/tool_types/tool_result.mli)
 
+**Execution ID (실행 식별자)**
+: 이름이 같은 서로 다른 정체성이 여럿이다. 문장에 어느 것인지 함께 적는다.
+  (1) **Tool execution id** — `Ids.Execution_id.t` (RFC-0233). 도구 실행마다 dispatch
+  경계에서 정확히 한 번 발급되고, 그 실행을 기록하는 모든 store(tool_calls JSONL,
+  trajectory)에 찍혀 하나의 물리적 실행이 관측한 store 수와 무관하게 한 논리 행으로
+  그려진다. `exec-<ms>-<seq>` 타임스탬프 접두사이고, 한 프로세스 안에서 사전순이 발급
+  순서를 따른다. `turn_record.execution_ids`는 그 turn의 도구 호출들이다. TUI는 파일
+  변경을 이 id로만 도구 행에 붙인다 — provider call id·경로·시각·목록 위치는 붙일
+  근거가 아니다([TUI 안내](../TUI-GUIDE.md)).
+  (2) **Batch execution id** — `Keeper_chat_operation.batch_membership.execution_id`는
+  타입이 `Operation_id.t`이고, TUI transcript의 `execution_id`는 `batch_execution_id`가
+  있으면 그것, 없으면 `request_id`다. (1)과 다른 값을 나른다.
+  (3) **Execution scope id** — `Keeper_execution_scope_id.t`. durable queue와 repetition
+  증거가 공유하는 producer-supplied invocation 정체성. `direct_operation`(Direct의 검증된
+  request ID)과 `autonomous_admission`(Auto의 admission UUID) 둘로 만들고, prompt 텍스트나
+  시각에서 추론하지 않는다. 그 canonical JSON이 `semantic_executions.scope_key`라 다른
+  origin의 같은 scalar 텍스트가 충돌하지 않는다. (1)·(2)와 다른 단위다.
+  → [Ids.Execution_id](../../lib/types/ids.mli),
+  [Keeper_execution_scope_id](../../lib/keeper_execution_scope/keeper_execution_scope_id.mli),
+  [Keeper_chat_operation](../../lib/keeper_chat_operations/keeper_chat_operation.mli)
+
 **Provider**
 : 모델에 접속하는 protocol·transport·credential을 소유하는 설정 항목.
   → [Runtime_schema.provider](../../lib/runtime/runtime_schema.mli)

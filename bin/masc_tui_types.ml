@@ -2122,7 +2122,14 @@ let board_sort_explanation = function
 
 (** Which of a post's two times the sort put the rows in order by. Four of the
     five orders key or break ties on the moment the post appeared; only
-    [Board_updated] keys on the moment it last changed. *)
+    [Board_updated] keys on the moment it last changed.
+
+    This is a reading of what the server does, not a rule it follows: the
+    orders are applied in [Board_dispatch.sort_posts] and [Board_sort], and
+    nothing here can see them. It sits beside [board_sort_explanation] because
+    the two answer the same question -- what this order is -- and a server
+    that changed an order would leave both wrong together. Move them
+    together. *)
 type board_sort_time =
   | Board_time_posted
   | Board_time_changed

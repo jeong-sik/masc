@@ -647,10 +647,16 @@ let render_overview (state : state) =
     if List.is_empty state.tasks then Printf.sprintf " %sTasks%s\n" Ansi.bold Ansi.reset
     else
       let count = List.length state.tasks in
-      let done_c =
-        List.fold_left
-          (fun acc (t : task) -> match t.status with Done _ -> acc + 1 | _ -> acc)
-          0 state.tasks
+      (* [state.tasks] holds only open tasks, so a done count folded over it
+         was zero on every frame. Completions come from the flow snapshot the
+         same refresh built from the whole backlog; without one the segment
+         says nothing rather than a zero it never measured. *)
+      let done_segment =
+        match state.task_flow with
+        | None -> ""
+        | Some flow ->
+            Printf.sprintf " · %s%d done 24h%s" (Theme.ok ())
+              flow.Masc_tui_task_flow.recent.completed Ansi.reset
       in
       let active_c =
         List.fold_left
@@ -667,10 +673,10 @@ let render_overview (state : state) =
           (fun acc (t : task) -> match t.status with Todo -> acc + 1 | _ -> acc)
           0 state.tasks
       in
-      Printf.sprintf " %sTasks%s (%d · %s%d done%s · %s%d active%s · %s%d awaiting%s · %s%d todo%s)\n"
+      Printf.sprintf " %sTasks%s (%d open%s · %s%d active%s · %s%d awaiting%s · %s%d todo%s)\n"
         Ansi.bold Ansi.reset
         count
-        (Theme.ok ()) done_c Ansi.reset
+        done_segment
         (Theme.info ()) active_c Ansi.reset
         (Theme.warn ()) awaiting_c Ansi.reset
         Ansi.dim todo_c Ansi.reset

@@ -764,6 +764,81 @@ let test_enrich_leaves_a_declaration_row_without_runtime_fields () =
       check bool "the row stays a declaration" true
         Yojson.Safe.Util.(enriched |> member "declaration_only" |> to_bool))
 
+(* #38090: a Keeper whose snapshot row raised was dropped from [items] with
+   one log line, and the briefing, the execution screen and the TUI Overview
+   counted a fleet that had lost it as a smaller fleet. PR #38072's first CI
+   run lost all three fixture Keepers this way: building a row asks for the
+   default runtime, and this suite initializes none. That same failure is the
+   fixture here. *)
+let test_a_keeper_whose_row_raises_is_reported_unread () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock ~sw ->
+      (match Runtime.get_default_runtime_id () with
+       | exception Failure _ -> ()
+       | id ->
+         failf
+           "precondition: this case needs building a row to raise, but a \
+            default runtime %S is initialized"
+           id);
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc [ "name", `String "k-unread"; "trace_id", `String "unread-trace" ])
+        with
+        | Ok meta -> meta
+        | Error error -> fail ("meta fixture: " ^ error)
+      in
+      (match Lib.Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error error -> fail ("write meta: " ^ error));
+      Dashboard_cache.invalidate_all ();
+      Operator_control.invalidate_snapshot_cache ();
+      Dashboard_projection_cache.invalidate_snapshot_json ~config;
+      let open Yojson.Safe.Util in
+      let unread_named label json =
+        match Lib.Keeper_snapshot_unread.list_of_json (json |> member "keepers_unread") with
+        | Error error -> failf "%s keepers_unread does not decode: %s" label error
+        | Ok unread ->
+          (match
+             List.find_opt
+               (fun (u : Lib.Keeper_snapshot_unread.t) ->
+                String.equal u.Lib.Keeper_snapshot_unread.name "k-unread")
+               unread
+           with
+           | Some { Lib.Keeper_snapshot_unread.reason = Row_raised _; _ } -> ()
+           | Some { Lib.Keeper_snapshot_unread.reason = Meta_read_failed detail; _ } ->
+             failf "%s reports the keeper as a meta read failure: %s" label detail
+           | None -> failf "%s does not report k-unread as unread" label)
+      in
+      let briefing =
+        Dashboard_briefing.json
+          ~actor:"test-briefing-unread-keeper"
+          ~config
+          ~sw
+          ~clock
+          ~proc_mgr:None
+          ()
+      in
+      check bool "the keeper has no brief -- its row was never built" true
+        (Option.is_none (row_named "k-unread" (briefing |> member "keeper_briefs" |> to_list)));
+      unread_named "the briefing" briefing;
+      let execution =
+        Dashboard_execution.json
+          ~actor:"test-execution-unread-keeper"
+          ~light:true
+          ~config
+          ~sw
+          ~clock
+          ~proc_mgr:None
+          ()
+      in
+      unread_named "the execution render" execution)
+
 let () =
   Alcotest.run "Dashboard Mission"
     [
@@ -797,6 +872,8 @@ let () =
             `Quick test_workspace_health_reads_the_severities_present;
           Alcotest.test_case "informational severity ranks below warn" `Quick
             test_informational_severity_ranks_below_warn_and_above_nothing;
+          Alcotest.test_case "a keeper whose row raises is reported unread" `Quick
+            test_a_keeper_whose_row_raises_is_reported_unread;
           Alcotest.test_case "pressure rank orders by health" `Quick
             test_pressure_rank_orders_by_surface_status;
           Alcotest.test_case "keeper brief publishes health and phase" `Quick

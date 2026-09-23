@@ -1869,9 +1869,11 @@ let acting_retained_quiet = 200
     same as nine running ones.
 
     [klc_unreadable] counts rows whose word is missing or outside the
-    vocabulary. They are not folded into any state: a Keeper whose liveness
-    this build cannot name is a different fact from an idle one, and the row
-    says so rather than picking the convenient neighbour. *)
+    vocabulary, and the Keepers the briefing lists under [keepers_unread]
+    because the server could not build their row. They are not folded into
+    any state: a Keeper whose liveness this build cannot name is a different
+    fact from an idle one, and the row says so rather than picking the
+    convenient neighbour. *)
 type keeper_liveness_counts = {
   klc_active: int;
   klc_offline: int;
@@ -1884,7 +1886,7 @@ type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_cluster: string;
   ov_project: string;
-  ov_keepers: int;  (** [keeper_briefs] the briefing carried *)
+  ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
   ov_keeper_liveness: keeper_liveness_counts;
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_attention_items: attention_item list;

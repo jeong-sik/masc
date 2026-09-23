@@ -158,8 +158,11 @@ let read_directory t relative = protect (fun () ->
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
         | name :: rest when Filename.check_suffix name ".json" ->
-            let json = Fs_compat.load_file (Filename.concat path name) |> Yojson.Safe.from_string in
-            loop (json :: acc) rest
+            (* A binding removed between the listing and this read is absent,
+               the same as one never listed. *)
+            (match Fs_compat.load_file_opt (Filename.concat path name) with
+             | None -> loop acc rest
+             | Some bytes -> loop (Yojson.Safe.from_string bytes :: acc) rest)
         | _ :: rest -> loop acc rest
       in loop [] names)
 let bindings t = read_directory t "bindings"

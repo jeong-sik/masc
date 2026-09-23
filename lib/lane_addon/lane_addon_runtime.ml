@@ -91,11 +91,23 @@ let entry_json e =
     "binding", e.binding; "package", package_to_json e.package;
     "configuration", Option.fold ~none:`Null ~some:configuration_json e.configuration;
     "container_id", (match e.connection with None -> `Null | Some c -> `String c.container_id)]
+(* A detached worker that never created a container and never committed an
+   observation leaves nothing for Inspect, Slice or Evidence to read; the
+   masc:lane:resource:acquire_failed event in the agent-core event journal
+   records why it did not start. Its binding would only add a record that
+   every reconciliation reads again, and a startup that keeps failing adds
+   one per maintenance beat, so its durable form is no file. *)
+let retains_history e = e.seq > 0 || Option.is_some e.connection
 let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
   (* Capture mutable state on the owning domain after serializing writes.
-     The I/O thread sees only the immutable snapshot. *)
-  let json = entry_json e in
-  offload (fun () -> Lane_addon_store.save_binding m.store ~instance_id:e.instance_id json))
+     The I/O thread sees only the immutable snapshot. Every write, including
+     a late one after detach, derives the file from the same state under this
+     mutex, so the last write leaves the record that state calls for. *)
+  if e.phase = Detached && not (retains_history e)
+  then offload (fun () -> Lane_addon_store.remove_binding m.store ~instance_id:e.instance_id)
+  else
+    let json = entry_json e in
+    offload (fun () -> Lane_addon_store.save_binding m.store ~instance_id:e.instance_id json))
 let wake ?(request=Observe_now) e =
   let previous = e.pending in
   e.pending <- (match previous,request with
@@ -152,19 +164,9 @@ let fork_isolated ~sw f = Eio.Fiber.fork ~sw (fun () ->
   try f () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Log.Misc.error "Lane Add-on background boundary: %s" (Printexc.to_string exn))
-(* A worker that never created a container and never committed an observation
-   leaves nothing for Inspect, Slice or Evidence to read; its Acquire_failed
-   resource event already records why it did not start. Keeping the binding
-   would only add a record that every reconciliation reads again, and a
-   startup that keeps failing adds one per maintenance beat. *)
-let retains_history e = e.seq > 0 || Option.is_some e.connection
 let release_detached m e =
-  if e.phase = Detached && not e.running && not e.cleanup_running then (
-    if not (retains_history e) then
-      (match offload (fun () -> Lane_addon_store.remove_binding m.store ~instance_id:e.instance_id) with
-       | Ok () -> ()
-       | Error message -> Log.Misc.error "Lane empty binding removal: %s" message);
-    Hashtbl.remove m.entries e.instance_id; wake_dependents m e; m.configuration_nudge ())
+  if e.phase = Detached && not e.running && not e.cleanup_running
+  then (Hashtbl.remove m.entries e.instance_id; wake_dependents m e; m.configuration_nudge ())
 let publish_resource lifecycle e container_id detail =
   Lane_addon_resource_events.publish lifecycle
     { instance_id = e.instance_id; run_id = e.run_id;

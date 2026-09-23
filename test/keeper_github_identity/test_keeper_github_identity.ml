@@ -124,9 +124,12 @@ case "${1-}:${2-}" in
     printf '%s\n' "github.com:" "  user: stored-user" "  oauth_token: fixture-token" > "$GH_CONFIG_DIR/hosts.yml"
     ;;
   api:--hostname)
+    # [--include] puts the status line and headers first, as real gh does.
+    # The projected token answers like a fine-grained PAT: no scopes header.
     if [ -n "${GH_TOKEN-}" ]; then
-      printf '%s\n' "token-user"
+      printf 'HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n%s\n' "token-user"
     elif [ -f "$GH_CONFIG_DIR/stored-login" ]; then
+      printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: gist, read:org, repo, workflow\r\n\r\n'
       cat "$GH_CONFIG_DIR/stored-login"
     else
       echo "not authenticated" >&2
@@ -178,6 +181,11 @@ let test_fake_gh_login_and_effective_identity () =
            (Some "stored-user") observation.stored.login;
          Alcotest.(check (option string)) "effective identity uses projected token"
            (Some "token-user") observation.effective.login;
+         Alcotest.(check (option (list string))) "stored token scopes come from the header"
+           (Some [ "gist"; "read:org"; "repo"; "workflow" ]) observation.stored.scopes;
+         Alcotest.(check (option (list string)))
+           "a token GitHub lists no scopes for is not given an empty list"
+           None observation.effective.scopes;
          Alcotest.(check (list string)) "effective token source is observable by name"
            [ "GH_TOKEN" ] observation.projected_token_env_names;
          Alcotest.(check string) "effective probe is explicitly host-scoped"
@@ -701,7 +709,14 @@ let test_login_argv_carries_only_chosen_scopes () =
     | _ :: rest -> after rest
     | [] -> None
   in
-  Alcotest.(check (option string)) "workflow is named once" (Some "workflow") (after argv)
+  Alcotest.(check (option string)) "workflow is named once" (Some "workflow") (after argv);
+  Alcotest.(check (option string))
+    "two scopes are one argument, in the offered order"
+    (Some "workflow,write:packages")
+    (after
+       (Github.login_argv
+          ~hostname:"github.com"
+          ~scopes:[ Github.Write_packages; Github.Workflow ]))
 ;;
 
 (* The request names scopes by string. Every offered scope reads back as

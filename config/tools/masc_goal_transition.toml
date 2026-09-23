@@ -7,7 +7,10 @@ request_complete no longer completes the Goal directly: it moves executing -> \
 verifying and persists a durable proof request. Verifier verdicts are \
 application-owned typed commits and are deliberately not accepted by this MCP \
 tool. A Goal whose criterion was judged unreachable is refused on \
-request_complete."""
+request_complete. While verifying, request_complete re-arms the pending proof \
+request, drop moves the Goal to dropped, and reopen returns it to executing \
+and clears the pending request; a verdict that arrives after either is \
+refused."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name. Not

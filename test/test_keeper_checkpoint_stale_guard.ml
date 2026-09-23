@@ -666,7 +666,12 @@ let test_autonomous_turn_sends_the_run_context_base_prompt () =
         ~build_turn_prompt:(fun ~base_system_prompt:_ ~messages:_ ->
           { Keeper_agent_prompt_metrics.dynamic_context = world_state
           ; dynamic_context_for_tools = None })
-        ~user_message:"Continue." ~config ~meta
+        ~user_message:"Continue."
+        ~input_metadata:
+          (Keeper_input_speaker.metadata
+             (Keeper_input_speaker.Host_prompt
+                (Keeper_input_speaker.Autonomous_wake { answered_asks = [] })))
+        ~config ~meta
         ~turn_ref:
           (Ids.Turn_ref.make
              ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

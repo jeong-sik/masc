@@ -309,13 +309,31 @@ let recurrence_of_arg args =
 ;;
 
 (* The actor id a call records. When the boundary resolved a caller, that is
-   the actor: a client-supplied id is not trusted, because an MCP caller can
-   name any actor and the HTTP boundary already replaces it for the same
-   reason (#37149). Only an unnamed caller -- one the endpoint minted a
-   placeholder for -- falls back to the argument or the action's default. *)
-let actor_id_from_caller ctx ~prefix ~default_id args =
-  match ctx.caller with
-  | Named_caller name -> Ok name
+   the actor: a client-supplied id that names someone else is refused rather
+   than silently ignored, because an MCP caller could otherwise name any actor
+   and the HTTP boundary already replaced it for the same reason (#37149).
+   Only an unnamed caller -- one the endpoint minted a placeholder for -- has
+   to name the actor itself. *)
+let actor_id_from_caller ~caller ~prefix ~default_id args =
+  match caller with
+  | Named_caller name ->
+    (match string_opt args (prefix ^ "_id") with
+     | Some given when not (String.equal given name) ->
+       Error
+         (Typed_refusal
+            { kind = Schedule_contract_values.Refusal_actor_mismatch
+            ; message =
+                Printf.sprintf
+                  "%s_id names %s but the caller is %s; the actor is the \
+                   caller, so omit the field"
+                  prefix given name
+            ; facts =
+                [ "field", `String (prefix ^ "_id")
+                ; "caller", `String name
+                ; "given", `String given
+                ]
+            })
+     | Some _ | None -> Ok name)
   | Unnamed_caller ->
     (match string_opt args (prefix ^ "_id") with
      | Some id -> Ok id
@@ -326,7 +344,7 @@ let actor_id_from_caller ctx ~prefix ~default_id args =
    knows no caller. The kind is not forced: the caller type carries a name,
    not a kind, so it stays as the call declared or the action's default. *)
 let actor_from_args ctx args ~prefix ~default_id ~default_kind =
-  let* id = actor_id_from_caller ctx ~prefix ~default_id args in
+  let* id = actor_id_from_caller ~caller:ctx.caller ~prefix ~default_id args in
   let* kind = plain (actor_kind_of_arg args (prefix ^ "_kind") default_kind) in
   let display_name = string_opt args (prefix ^ "_display_name") in
   if String.equal (String.trim id) ""
@@ -628,7 +646,7 @@ let handle_write ~action ~tool_name ~start_time ctx args =
     let* due_at = resolve_due_at ~dispatched_at:start_time recurrence args in
     let* requested_by =
       actor_from_args ctx args ~prefix:"requested_by"
-        ~default_id:(fun () -> Ok "operator")
+        ~default_id:(fun () -> caller_name ctx ~instead:"pass requested_by_id")
         ~default_kind:Schedule_domain.Human_operator
     in
     let* scheduled_by =
@@ -1077,20 +1095,21 @@ let handle_get ~tool_name ~start_time ctx args =
    so the MCP path cannot name another actor). *)
 let handle_cancel ~tool_name ~start_time ~caller (config : Workspace.config) args =
   let parsed =
-    let* schedule_id = required_string args "schedule_id" in
+    let* schedule_id = plain (required_string args "schedule_id") in
     let* cancelled_by_id =
-      match caller with
-      | Named_caller name -> Ok name
-      | Unnamed_caller -> required_string args "cancelled_by_id"
+      actor_id_from_caller ~caller ~prefix:"cancelled_by"
+        ~default_id:(fun () -> plain (required_string args "cancelled_by_id"))
+        args
     in
     let* cancelled_by_kind =
-      actor_kind_of_arg args "cancelled_by_kind" Schedule_domain.Human_operator
+      plain
+        (actor_kind_of_arg args "cancelled_by_kind" Schedule_domain.Human_operator)
     in
-    let* reason = required_string args "reason" in
+    let* reason = plain (required_string args "reason") in
     Ok (schedule_id, cancelled_by_id, cancelled_by_kind, reason)
   in
   match parsed with
-  | Error msg -> workflow_error ~tool_name ~start_time msg
+  | Error refusal -> refusal_result ~tool_name ~start_time refusal
   | Ok (schedule_id, cancelled_by_id, cancelled_by_kind, reason) ->
     (match Schedule_service.cancel config ~schedule_id with
      | Error err ->
@@ -1118,7 +1137,7 @@ let handle_note_add ~tool_name ~start_time ctx args =
     let* schedule_id = plain (required_string args "schedule_id") in
     let* body = plain (required_string args "body") in
     let* author_id =
-      actor_id_from_caller ctx ~prefix:"author"
+      actor_id_from_caller ~caller:ctx.caller ~prefix:"author"
         ~default_id:(fun () -> caller_name ctx ~instead:"pass author_id")
         args
     in

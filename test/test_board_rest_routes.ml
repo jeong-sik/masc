@@ -161,29 +161,6 @@ let test_no_tools_route_drift () =
       expected
       registered)
 
-let test_schedule_write_actor_is_stamped_from_auth () =
-  let open Yojson.Safe.Util in
-  let stamped =
-    Server_routes_http_routes_activity.schedule_stamp_operator_actor
-      ~agent_name:"tui-operator"
-      (`Assoc
-        [ "scheduled_by_id", `String "spoofed"
-        ; "requested_by_kind", `String "system"
-        ; "message", `String "keep me"
-        ])
-  in
-  check string "scheduled actor" "tui-operator"
-    (stamped |> member "scheduled_by_id" |> to_string);
-  check string "requested actor" "tui-operator"
-    (stamped |> member "requested_by_id" |> to_string);
-  check string "scheduled kind" "human_operator"
-    (stamped |> member "scheduled_by_kind" |> to_string);
-  check string "requested kind" "human_operator"
-    (stamped |> member "requested_by_kind" |> to_string);
-  check string "form fields survive" "keep me"
-    (stamped |> member "message" |> to_string)
-;;
-
 let rec remove_tree path =
   match Unix.lstat path with
   | { Unix.st_kind = Unix.S_DIR; _ } ->
@@ -316,7 +293,40 @@ let with_authenticated_activity_router ~prefix ~agent_name f =
        f ~base_path ~config ~state ~sw ~clock ~router ~token)
 ;;
 
-let test_schedule_cancel_actor_is_stamped_from_auth () =
+(* The schedule tools record the caller auth resolved and refuse a body that
+   names someone else. The HTTP boundary no longer stamps -- the tool owns the
+   actor -- so these drive the real routes. *)
+let test_schedule_write_actor_is_the_authenticated_caller () =
+  with_authenticated_activity_router
+    ~prefix:"schedule-write-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path:_ ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  let body =
+    `Assoc
+      [ "schedule_id", `String "sched-http-write-actor"
+      ; "due_at_unix", `Float 4_102_444_800.0
+      ; "keeper_name", `String "schedule-keeper"
+      ; "message", `String "actor binding"
+      ; "requested_by_id", `String "forged-body-actor"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let status, response =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/tools/masc_schedule_create"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ] ~body ()
+  in
+  let open Yojson.Safe.Util in
+  check int "a body naming another actor is refused" 400 status;
+  check bool "the refusal names the forged actor" true
+    (let message = response |> member "message" |> to_string in
+     let needle = "forged-body-actor" in
+     let n = String.length needle and h = String.length message in
+     let rec loop i = i + n <= h && (String.sub message i n = needle || loop (i + 1)) in
+     loop 0)
+;;
+
+let test_schedule_cancel_actor_is_the_authenticated_caller () =
   with_authenticated_activity_router
     ~prefix:"schedule-cancel-http-actor-"
     ~agent_name:"credential-owner"
@@ -342,11 +352,26 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
     | Ok schedule -> schedule
     | Error error -> fail (Schedule_service.service_error_to_string error)
   in
-  let body =
+  let forged =
     `Assoc
       [ "schedule_id", `String schedule.schedule_id
       ; "cancelled_by_id", `String "forged-body-actor"
-      ; "cancelled_by_kind", `String "system"
+      ; "reason", `String "duplicate"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let status, response =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/tools/masc_schedule_cancel"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ] ~body:forged ()
+  in
+  let open Yojson.Safe.Util in
+  check int "a body naming another actor is refused" 400 status;
+  check string "the refusal is typed" "actor_mismatch"
+    (response |> member "data" |> member "error_kind" |> to_string);
+  let body =
+    `Assoc
+      [ "schedule_id", `String schedule.schedule_id
       ; "reason", `String "duplicate"
       ]
     |> Yojson.Safe.to_string
@@ -356,12 +381,11 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
       ~path:"/api/v1/tools/masc_schedule_cancel"
       ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ] ~body ()
   in
-       let open Yojson.Safe.Util in
-       check int "cancel accepted" 200 status;
-       check string "credential owner is the canceller" "credential-owner"
-         (response |> member "data" |> member "cancelled_by" |> member "id"
-          |> to_string);
-       check string "terminal bridge uses typed human operator" "human_operator"
+  check int "cancel accepted" 200 status;
+  check string "credential owner is the canceller" "credential-owner"
+    (response |> member "data" |> member "cancelled_by" |> member "id"
+     |> to_string);
+  check string "the kind is the action's default" "human_operator"
     (response |> member "data" |> member "cancelled_by" |> member "kind"
      |> to_string)
 ;;
@@ -1116,9 +1140,9 @@ let () =
             `Quick
             test_no_tools_route_drift
         ; test_case "schedule write actor comes from auth" `Quick
-            test_schedule_write_actor_is_stamped_from_auth
+            test_schedule_write_actor_is_the_authenticated_caller
         ; test_case "schedule cancel actor comes from auth" `Quick
-            test_schedule_cancel_actor_is_stamped_from_auth
+            test_schedule_cancel_actor_is_the_authenticated_caller
         ; test_case "goal transition actor comes from auth" `Quick
             test_goal_transition_uses_authenticated_actor
         ; test_case "board write actors come from auth" `Quick

@@ -665,6 +665,43 @@ let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
     (contains "3 atoms behind" both)
 ;;
 
+(* RFC librarian-lifecycle §4.10: the Librarian_stalled gap prints on the
+   Librarian line beside the lags, as the atoms it covers, and a keeper with
+   no gap prints nothing for it. *)
+let test_the_librarian_line_names_a_stalled_gap () =
+  let stalled =
+    { fleet_health with
+      Decode.mhs_keepers =
+        List.map
+          (fun (keeper : Decode.memory_keeper_health) ->
+             if String.equal keeper.mkh_keeper_id "beta"
+             then
+               { keeper with
+                 mkh_librarian =
+                   { keeper.mkh_librarian with
+                     Decode.mlh_stalled =
+                       Some { Decode.mls_gap_start_atom = 2; mls_gap_end_atom = 8 } } }
+             else keeper)
+          fleet_health.mhs_keepers }
+  in
+  let render cursor =
+    let state = make_state () in
+    state.memory_health <- Some stalled;
+    state.memory_health_cursor <- cursor;
+    let lines = ref [] in
+    Render_memory.render_memory_body ~cols:400 ~budget:20 state
+      ~push:(fun line -> lines := line :: !lines)
+      ~push_styled:(fun ~style:_ line -> lines := line :: !lines)
+      ~push_selected:(fun line -> lines := line :: !lines)
+      ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    String.concat "\n" (List.rev !lines)
+  in
+  check bool "the stalled keeper names the atoms its requests skip" true
+    (contains "stalled: atoms 2-7 are in neither the request nor memory" (render 1));
+  check bool "a keeper with no gap prints none" false (contains "stalled:" (render 0))
+;;
+
 (* #36497. The fleet header is the block above the sort row, and it used to be
    one line carrying both subjects: 176 cells with every count a single digit,
    against the 96 the frame gives at the 100 columns the PTY harness opens. It
@@ -1760,6 +1797,8 @@ let () =
             test_the_fact_filter_bar_names_the_query_it_counted
         ; test_case "the librarian line says when the continuity lag is unknown" `Quick
             test_the_librarian_line_says_when_the_continuity_lag_is_unknown
+        ; test_case "the librarian line names a stalled gap" `Quick
+            test_the_librarian_line_names_a_stalled_gap
         ; test_case "the fleet header fits the frame it is drawn in" `Quick
             test_the_fleet_header_fits_the_frame_it_is_drawn_in
         ; test_case "the header keeps each count with the phrase that dates it"

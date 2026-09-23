@@ -37,6 +37,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
         continuity_unread_atoms: 0,
         last_success_at: null,
         last_failure_kind: null,
+        stalled: null,
       },
       librarian_failures: 0,
       vision_ingest_errors: 0,
@@ -71,6 +72,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
         continuity_unread_atoms: 0,
         last_success_at: null,
         last_failure_kind: null,
+        stalled: null,
       },
       librarian_failures: 0,
       vision_ingest_errors: 0,
@@ -148,6 +150,7 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
         continuity_unread_atoms: 0,
         last_success_at: null,
         last_failure_kind: null,
+        stalled: null,
       },
       librarian_failures: 4,
       vision_ingest_errors: 0,
@@ -417,6 +420,7 @@ describe('fetchKeeperMemoryHealth', () => {
       continuity_unread_atoms: 0,
       last_success_at: null,
       last_failure_kind: null,
+      stalled: null,
     }
 
     getMock.mockResolvedValue(payload)
@@ -438,6 +442,19 @@ describe('fetchKeeperMemoryHealth', () => {
     expect(response.keepers[1]?.librarian.continuity_unread_atoms).toBe(4)
     expect(response.totals.librarian_continuity_unread_atoms).toBe(4)
     expect(response.totals.librarian_continuity_unmeasured).toBe(1)
+  })
+
+  it('decodes the Librarian_stalled gap and refuses one that does not end after it starts', async () => {
+    const payload = keeperMemoryHealthPayload()
+    payload.keepers[0]!.librarian.stalled = { gap_start_atom: 2, gap_end_atom: 8 }
+    getMock.mockResolvedValue(payload)
+    const response = await fetchKeeperMemoryHealth()
+    expect(response.keepers[0]?.librarian.stalled).toEqual({ gap_start_atom: 2, gap_end_atom: 8 })
+    expect(response.keepers[1]?.librarian.stalled).toBeNull()
+    const empty = keeperMemoryHealthPayload()
+    empty.keepers[0]!.librarian.stalled = { gap_start_atom: 8, gap_end_atom: 8 }
+    getMock.mockResolvedValue(empty)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
   })
 
   it('rejects a continuity sum or an unmeasured count that disagrees with the rows', async () => {

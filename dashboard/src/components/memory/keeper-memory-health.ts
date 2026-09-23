@@ -84,6 +84,8 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
         <div><small>${entry.librarian.state ?? '아직 측정 전'}</small></div>
         <div><small>${entry.librarian.measured_at === null ? '측정 시각 없음'
           : `마지막 측정 ${new Date(entry.librarian.measured_at * 1000).toLocaleString()}`}</small></div>
+        ${entry.librarian.stalled === null ? '' : html`<div><span class="kmh-badge kmh-badge--warn"
+          title="요청에도 기억에도 아직 없는 구간이에요">밀림 atom ${entry.librarian.stalled.gap_start_atom}–${entry.librarian.stalled.gap_end_atom - 1}</span></div>`}
       </td>
       <td>
         ${starving

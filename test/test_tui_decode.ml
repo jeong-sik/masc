@@ -4481,6 +4481,29 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   Alcotest.(check bool) "a negative continuity lag is refused" true
     (memory_health_rejects (
        (with_continuity_totals ~behind:(-1) ~unmeasured:0 (with_continuity (`Int (-1))))));
+  (* RFC librarian-lifecycle §4.10: the Librarian_stalled gap is the row's
+     own reading, from the Librarian point to the accepted start. A gap that
+     does not end after it starts is no gap and is refused. *)
+  let with_stalled value =
+    map_keeper 0 (fun keeper -> match keeper with
+      | `Assoc fields -> `Assoc (List.map (fun (key, current) -> key,
+          if key = "librarian" then replace_field "stalled" value current else current) fields)
+      | _ -> keeper) json in
+  let gap start_atom end_atom =
+    `Assoc [ "gap_start_atom", `Int start_atom; "gap_end_atom", `Int end_atom ] in
+  (match Tui_decode.decode_memory_health_snapshot (with_stalled (gap 2 8)) with
+   | Ok snapshot ->
+     Alcotest.(check (option (pair int int))) "the gap is decoded" (Some (2, 8))
+       (Option.map
+          (fun (s : Tui_decode.memory_librarian_stalled) -> s.mls_gap_start_atom, s.mls_gap_end_atom)
+          (List.hd snapshot.mhs_keepers).mkh_librarian.mlh_stalled)
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check bool) "an empty gap is refused" true
+    (memory_health_rejects (with_stalled (gap 8 8)));
+  Alcotest.(check bool) "a gap with a field this build does not know is refused" true
+    (memory_health_rejects
+       (with_stalled
+          (`Assoc [ "gap_start_atom", `Int 2; "gap_end_atom", `Int 8; "bytes", `Int 1 ])));
   let mismatched_totals =
     match json with
     | `Assoc fields ->

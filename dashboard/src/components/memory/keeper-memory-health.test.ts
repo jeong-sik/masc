@@ -35,7 +35,7 @@ function makeEntry(
     librarian: { state: 'drained', detail: null, measured_at: 1_699_999_950,
       unread_atom_turns: 0, unread_official_turns: 0,
       continuity_unread_atoms: 0,
-      last_success_at: null, last_failure_kind: null },
+      last_success_at: null, last_failure_kind: null, stalled: null },
     librarian_failures: 0,
     vision_ingest_errors: 0,
     vision_ingest_error_reasons: [],
@@ -242,7 +242,7 @@ describe('KeeperMemoryHealth', () => {
       [makeEntry({ librarian: { state: 'not_committed', detail: null,
           measured_at: 1_699_999_950, unread_atom_turns: 3, unread_official_turns: 0,
           continuity_unread_atoms: 0,
-          last_success_at: null, last_failure_kind: null }, alerts: [alert] })],
+          last_success_at: null, last_failure_kind: null, stalled: null }, alerts: [alert] })],
       { librarian_unread_turns: 3 },
       makeAlertSummary({
         total_alerts: 1,
@@ -265,7 +265,7 @@ describe('KeeperMemoryHealth', () => {
       [makeEntry({ librarian: { state: null, detail: null, measured_at: null,
         unread_atom_turns: null, unread_official_turns: null,
         continuity_unread_atoms: 0,
-        last_success_at: null, last_failure_kind: null } })],
+        last_success_at: null, last_failure_kind: null, stalled: null } })],
       { librarian_unread_turns: null },
     ))
     const { container } = render(html`<${KeeperMemoryHealth} />`)
@@ -278,11 +278,11 @@ describe('KeeperMemoryHealth', () => {
       [ makeEntry({ librarian: { state: 'drained', detail: null, measured_at: 1_699_999_950,
           unread_atom_turns: 0, unread_official_turns: 0,
           continuity_unread_atoms: null,
-          last_success_at: null, last_failure_kind: null } }),
+          last_success_at: null, last_failure_kind: null, stalled: null } }),
         makeEntry({ keeper_id: 'beta', librarian: { state: 'drained', detail: null,
           measured_at: 1_699_999_950, unread_atom_turns: 0, unread_official_turns: 0,
           continuity_unread_atoms: 3,
-          last_success_at: null, last_failure_kind: null } }) ],
+          last_success_at: null, last_failure_kind: null, stalled: null } }) ],
       { librarian_continuity_unread_atoms: 3, librarian_continuity_unmeasured: 1 },
     ))
     const { container } = render(html`<${KeeperMemoryHealth} />`)

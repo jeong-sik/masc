@@ -697,6 +697,7 @@ function bootstrapInitializingPayload(path: string): unknown | null {
           todo: 0,
           claimed: 0,
           in_progress: 0,
+          awaiting_verification: 0,
           done: 0,
           cancelled: 0,
         },

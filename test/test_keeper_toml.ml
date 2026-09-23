@@ -1193,19 +1193,55 @@ let rec ocaml_source_files path =
    Seven of the thirteen it reported were that.
 
    Quoted-string literals ({|...|}) count, and their bodies are taken
-   verbatim. Comments are not tracked: a quoted name inside one reads like a
-   fixture from here and there are none in the tree. *)
+   verbatim. Comments are skipped, and they nest: a quoted name inside one
+   is provenance, not a fixture. A string inside a comment is skipped too,
+   so a close-comment token in one does not end the comment early. *)
 let string_literals_of_ocaml source =
   let n = String.length source in
   let buf = Buffer.create 256 in
+  (* A char literal is 'X' or '\X'; a type variable 'a is not. Returns the
+     index just past the closing quote, or i when this is not a char literal.
+     Without this, a char literal holding a quote -- '"' -- opens a string
+     that runs to the next quote in the file. *)
+  let char_literal_end i =
+    if i + 2 < n && source.[i] = '\'' && source.[i + 2] = '\''
+    then i + 3
+    else if i + 3 < n && source.[i] = '\'' && source.[i + 1] = '\\' && source.[i + 3] = '\''
+    then i + 4
+    else i
+  in
   let rec scan i =
     if i >= n
     then ()
+    else if i + 1 < n && source.[i] = '(' && source.[i + 1] = '*'
+    then comment (i + 2) 1
     else if source.[i] = '"'
     then quoted (i + 1)
     else if i + 1 < n && source.[i] = '{' && source.[i + 1] = '|'
     then braced (i + 2)
+    else if char_literal_end i > i
+    then scan (char_literal_end i)
     else scan (i + 1)
+  and comment i depth =
+    if i >= n
+    then ()
+    else if i + 1 < n && source.[i] = '*' && source.[i + 1] = ')'
+    then if depth = 1 then scan (i + 2) else comment (i + 2) (depth - 1)
+    else if i + 1 < n && source.[i] = '(' && source.[i + 1] = '*'
+    then comment (i + 2) (depth + 1)
+    else if source.[i] = '"'
+    then comment_quoted (i + 1) depth
+    else if char_literal_end i > i
+    then comment (char_literal_end i) depth
+    else comment (i + 1) depth
+  and comment_quoted i depth =
+    if i >= n
+    then ()
+    else if source.[i] = '\\' && i + 1 < n
+    then comment_quoted (i + 2) depth
+    else if source.[i] = '"'
+    then comment (i + 1) depth
+    else comment_quoted (i + 1) depth
   and quoted i =
     if i >= n
     then ()
@@ -1261,6 +1297,32 @@ let test_ocaml_sources_exclude_declared_concrete_keeper_identities () =
       (List.length violations)
       (String.concat "\n  " violations)
       (concrete_keeper_inventory_path repo)
+;;
+
+(* The scanner's contract, pinned directly. discovery 17 exercises it over
+   the whole tree, but only where the tree happens to hold such a pattern;
+   this says it for the scanner itself. The token is deliberately not a
+   concrete Keeper identity: this file is part of the tree discovery 17
+   reads, so a real name here would be the very collision it forbids. *)
+let test_string_literals_of_ocaml_lexing () =
+  check string "a comment is skipped" ""
+    (string_literals_of_ocaml "(* \"example\" *)");
+  check string "a nested comment is skipped" ""
+    (string_literals_of_ocaml "(* outer (* \"example\" *) still *)");
+  check string "a string in a comment does not end it early" ""
+    (string_literals_of_ocaml "(* \"*)\" \"example\" *)");
+  check string "a literal outside a comment is read" "example\n"
+    (string_literals_of_ocaml "let x = \"example\"");
+  check string "a braced literal is read" "example\n"
+    (string_literals_of_ocaml "let x = {|example|}");
+  check string "a comment between literals is skipped" "a\nb\n"
+    (string_literals_of_ocaml "let a = \"a\" (* \"example\" *) let b = \"b\"");
+  (* A char literal holding a quote must not open a string that runs to the
+     next quote in the file. *)
+  check string "a char literal in a comment does not open a string" "example\n"
+    (string_literals_of_ocaml "(* '\"' *) \"example\"");
+  check string "a char literal outside a comment is skipped" "example\n"
+    (string_literals_of_ocaml "let c = '\"' in \"example\"")
 ;;
 
 let with_temp_dir prefix f =
@@ -2243,5 +2305,7 @@ let () =
             test_default_roster_does_not_autoboot;
           test_case "OCaml sources exclude concrete Keeper identities" `Quick
             test_ocaml_sources_exclude_declared_concrete_keeper_identities;
+          test_case "string literal scanner skips comments and char literals" `Quick
+            test_string_literals_of_ocaml_lexing;
         ] );
     ]

@@ -60,6 +60,7 @@
 ### Added
 
 - The server reads the open pull requests of every registered github.com repository every 60 seconds and serves them at `GET /api/v1/repositories/pulls`, over HTTP/1 and h2. It reads with the token of the Keeper that runtime.toml `[repositories] pr_reader` names, taken from that Keeper's `github-cli/hosts.yml` on every read and never copied. When no reader is declared, the Keeper does not exist or holds no github.com token, the endpoint says which and nothing is read with another credential. Each repository is `not_read` until the first read after a restart, then `read`, `failed` (not visible to that account, token rejected, or rate limited with GitHub's reset time) or `not_github`. A check or review state this build does not know is counted as `undecodable` instead of being shown as none. The result lives in memory only (RFC-0465, #38125).
+- Each pull request at `GET /api/v1/repositories/pulls` now names the Keepers whose checkout of that repository is on its head branch (`keepers`, exact branch match) and counts the Keepers whose checkouts could not be read and so may be on it (`keepers_unread`). When the Keeper list itself cannot be read, both are `null` and `keepers_error` says why. Each repository also carries `keeper_checkouts` with every Keeper's branches and unread reasons. Checkouts are inspected once per 60-second refresh, and not at all when no pull request was read (RFC-0465 §0.2, #38153).
 
 ## [0.36.0] - 2026-09-22
 

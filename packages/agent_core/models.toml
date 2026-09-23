@@ -2763,6 +2763,38 @@ supports_audio_input = false
 supports_video_input = false
 supports_native_streaming = true
 
+# MiMo-V2.6 (Xiaomi). Specs from the vendor release page
+# (mimo.mi.com/docs/en-US/news/latest/v2-6) and the HF model card
+# (XiaomiMiMo/MiMo-V2.6-Pro-RL), checked 2026-09-23: 1.02T total / 42B active
+# MoE, MIT, 1M context; AA Intelligence Index 46 (independently matched). It
+# rides the same openai_chat wire and thinking_object_only control as
+# mimo-v2.5-pro, so the row mirrors that sibling. No price is declared: the
+# vendor's "1/20~1/60" figure has no independent source. Multimodal stays off
+# like the sibling row -- the vendor advertises visual coding, but no probe
+# here sent an image.
+[[models]]
+id_prefix = "mimo-v2.6"
+base = "openai_chat"
+provider_name = "mimo"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_reasoning = true
+thinking_control_format = "thinking_object_only"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_response_format_json = true
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_audio_input = false
+supports_video_input = false
+supports_native_streaming = true
+
 [[models]]
 id_prefix = "mimo-v2.5"
 base = "openai_chat"

@@ -79,7 +79,7 @@ let test_pagination_requires_identity () =
   Alcotest.(check bool) "missing cursor is an error" true
     (Result.is_error (Inbox.next_sequence (`Assoc ["operations",`List [`Assoc []]])))
 let test_dashboard_sender_uses_typed_route () =
-  let source = `Assoc ["schema", `String "masc.keeper_chat_operation.source.v1";
+  let source = `Assoc ["schema", `String "masc.keeper_chat_operation.source.v2";
     "submitted_by", `String "masc-tui"; "thread_id", `String "keeper:alpha";
     "continuation_channel", `Assoc ["kind",`String "dashboard";"thread_id",`String "keeper:alpha"];
     "surface", `Assoc ["kind",`String "dashboard"]; "channel",`String "";

@@ -218,7 +218,7 @@ let test_run_next_ownership_and_started_boundary () =
       | Ok id -> id | Error e -> Alcotest.fail e in
     let submit actor raw =
       let source = `Assoc
-        ["schema",`String "masc.keeper_chat_operation.source.v1";"submitted_by",`String actor
+        ["schema",`String "masc.keeper_chat_operation.source.v2";"submitted_by",`String actor
         ;"thread_id",`String ("keeper:" ^ name)
         ;"continuation_channel",`Assoc ["kind",`String "dashboard";"thread_id",`String ("keeper:" ^ name)]
         ;"surface",`Assoc ["kind",`String "dashboard"]

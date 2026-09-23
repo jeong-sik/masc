@@ -6206,7 +6206,7 @@ class AtomicChatFixture:
             sequence = len(self.submitted)
             operation = {
                 "operation_id": request["request_id"], "sequence": str(sequence),
-                "source": {"schema": "masc.keeper_chat_operation.source.v1", "submitted_by": "masc-tui",
+                "source": {"schema": "masc.keeper_chat_operation.source.v2", "submitted_by": "masc-tui",
                     "thread_id": "keeper:alpha", "continuation_channel": {"kind": "dashboard", "thread_id": "keeper:alpha"},
                     "surface": {"kind": "dashboard"}, "channel": "", "channel_user_id": "", "channel_user_name": "",
                     "channel_workspace_id": "", "conversation_id": None, "external_message_id": None,

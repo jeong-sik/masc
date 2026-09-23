@@ -23,7 +23,7 @@ type decoded_input =
   ; attachments : Keeper_chat_store.attachment list
   }
 
-let source_schema = "masc.keeper_chat_operation.source.v1"
+let source_schema = "masc.keeper_chat_operation.source.v2"
 let input_schema = "masc.keeper_chat_operation.input.v1"
 
 let strict_fields ~context ~expected = function

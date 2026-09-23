@@ -124,7 +124,7 @@ def validate_direct_message_source(
 ) -> None:
     expected_thread = f"keeper:{keeper}"
     expected = {
-        "schema": "masc.keeper_chat_operation.source.v1",
+        "schema": "masc.keeper_chat_operation.source.v2",
         "submitted_by": submitted_by,
         "thread_id": expected_thread,
         "continuation_channel": {

@@ -32,6 +32,7 @@ let keeper_item name summary : Types.attention_item =
   ; ai_severity = Types.Attention_bad
   ; ai_summary = summary
   ; ai_target = Types.Attention_keeper name
+  ; ai_blocker_summary = None
   ; ai_evidence_ts = None
   }
 
@@ -74,6 +75,7 @@ let attention =
     ; ai_severity = Types.Attention_info
     ; ai_summary = "a board item"
     ; ai_target = Types.Attention_other { target_type = "board"; target_id = Some "tui-developer" }
+    ; ai_blocker_summary = None
     ; ai_evidence_ts = None
     }
   ]
@@ -202,6 +204,28 @@ let test_shut_windows_name_each_window_once () =
        (Team.shut_windows
           [ runtime ~exhausted:false ~scope:"provider:claude_code" "a" ]))
 
+(* The live item wraps the cause in the Keeper name and class word; on a
+   75-cell row the cause fell off the end. The blocker sentence is carried
+   on its own and is what the row shows. *)
+let test_a_stuck_row_prefers_the_blocker_sentence () =
+  let item =
+    { (keeper_item "goo-yang-bong"
+         "goo-yang-bong: runtime_blocked (Keeper turn failed 4 consecutive cycle(s))")
+      with
+      ai_blocker_summary = Some "Keeper turn failed 4 consecutive cycle(s)"
+    }
+  in
+  let team =
+    Team.project
+      ~keepers:[ keeper "goo-yang-bong" (phase "failing") ]
+      ~tasks:[] ~attention:[ item ]
+  in
+  match team.rows with
+  | [ { detail = Team.Blocker { summary; _ }; _ } ] ->
+      check string "the cause alone" "Keeper turn failed 4 consecutive cycle(s)"
+        summary
+  | _ -> fail "a failing Keeper named by an item is a Blocker row"
+
 let () =
   run "tui_overview_team"
     [ ( "team"
@@ -218,5 +242,7 @@ let () =
             test_an_unreadable_phase_stays_visible
         ; test_case "shut windows name each window once" `Quick
             test_shut_windows_name_each_window_once
+        ; test_case "stuck row prefers the blocker sentence" `Quick
+            test_a_stuck_row_prefers_the_blocker_sentence
         ] )
     ]

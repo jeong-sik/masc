@@ -20,8 +20,9 @@ type group =
 
 type detail =
   | Blocker of { summary : string; held : int }
-      (** The first attention item that names this Keeper, verbatim, and how
-          many open tasks it holds while stuck. *)
+      (** The first attention item that names this Keeper -- its blocker
+          sentence when the item carries one, else its summary, verbatim --
+          and how many open tasks it holds while stuck. *)
   | Phase_word of { word : string; held : int }
       (** A stuck Keeper no attention item explains: its own phase word. *)
   | Working_on of { task : Tui_decode.task; more : int; awaiting : int }

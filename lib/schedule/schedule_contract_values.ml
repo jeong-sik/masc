@@ -201,6 +201,7 @@ type refusal_kind =
   | Refusal_due_inputs_conflict
   | Refusal_due_input_missing
   | Refusal_caller_unidentified
+  | Refusal_actor_mismatch
   | Refusal_argument_out_of_range
   | Refusal_cursor_mismatch
 [@@deriving enumerate]
@@ -213,6 +214,7 @@ let refusal_kind_to_string = function
   | Refusal_due_inputs_conflict -> "due_inputs_conflict"
   | Refusal_due_input_missing -> "due_input_missing"
   | Refusal_caller_unidentified -> "caller_unidentified"
+  | Refusal_actor_mismatch -> "actor_mismatch"
   | Refusal_argument_out_of_range -> "argument_out_of_range"
   | Refusal_cursor_mismatch -> "cursor_mismatch"
 ;;

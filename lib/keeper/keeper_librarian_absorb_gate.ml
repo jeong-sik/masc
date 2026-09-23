@@ -277,7 +277,7 @@ let ask ~direction ~evaluate ~claim (numbered : (string * string) list) =
 ;;
 
 (* The answer's absorptions into one claim, classified before any request
-   is made: what has no claim or no source text passes through unjudged,
+   is made: what has no claim or no source text is unjudged and stays current,
    what does not fit a request ({!state_bytes_limit}, {!request_bytes_limit}) cannot be judged
    and stays current, the rest is asked. Classifying first is what lets a
    request that fails for another reason leave the unjudgeable alone. *)
@@ -357,8 +357,7 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
     | (group : group) :: rest ->
       let acc =
         { acc with
-          absorbed = acc.absorbed @ group.unjudged
-        ; unjudged = acc.unjudged @ group.unjudged
+          unjudged = acc.unjudged @ group.unjudged
         ; unjudgeable = acc.unjudgeable @ group.unjudgeable
         }
       in

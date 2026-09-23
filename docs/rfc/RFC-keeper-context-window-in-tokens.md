@@ -66,17 +66,15 @@ HTTP 경로(`runtime_model_input_tail_window.ml`, `keeper_turn_driver_try_provid
 
 ```
 C  = max-request-body-bytes
-C' = (Keeper, 런타임)이 마지막으로 성공한 용량이 C 이하면 그 값, 아니면 C
-     (성공마다 기록, 프로세스 메모리, 재기동하면 사라짐 — keeper_context_overflow_shrink_state.ml)
-R  = 도구 스키마 바이트 + 시스템 프롬프트 바이트 + C' / 10
+R  = 도구 스키마 바이트 + 시스템 프롬프트 바이트 + C / 10
 U  = 고정 메시지(System, extra-system-context — 브리핑 포함) 바이트 + 생략 안내문 바이트
-A  = C' − R − U
+A  = C − R − U
 
 d = { 0, 60, 120, … } 중 남은 atom 바이트 합 ≤ A 인 가장 작은 값
     (없으면 1 단위로 다시 찾는다)
 보내는 atom = N − d
 그다음 RFC-0363 강등이 옛 atom 을 줄이고, 줄어든 크기로 다시 자른다.
-공급자가 ContextOverflow 를 돌려주면 C' 를 절반으로 줄여 같은 런타임에 다시 보낸다.
+공급자가 ContextOverflow 를 돌려주면 C 를 절반으로 줄여 같은 런타임에 다시 보낸다.
 ```
 
 - 토큰 수와 모델 창(`max-context`)은 이 계산에 들어가지 않는다.
@@ -90,13 +88,13 @@ origin/main 기준이다. 설정 검증, 최종 전송 바이트 검사, 로그�
 
 | # | 곳 | 바이트 상한이 하는 일 | 판정 |
 |---|---|---|---|
-| 1 | HTTP 이력 창 `keeper_turn_driver_try_provider.ml:605, 822` | 이력 = `C' − R − U`, 예비분 `C'/10` | 부당 |
+| 1 | HTTP 이력 창 `keeper_turn_driver_try_provider.ml:605, 822` | 이력 = `C − R − U`, 예비분 `C/10` | 부당 |
 | 1a | 상한 없는 HTTP 바인딩 `:902-908, 1137-1146` | 창 자체가 없어진다 | 부당 |
 | 2 | 브리핑 자르기 `keeper_unified_turn.ml:812-821` | 예산 = `min(max-prompt-bytes, C) × share`(기본 50, `keeper_config.ml:165-171`). 첫 런타임 기준이라 더 작은 C 로 폴백해도 다시 맞추지 않는다 | 부당 |
-| 3 | HTTP overflow shrink `:1430-1433, 1553-1587` | `ContextOverflow` 마다 C' 절반. 성공한 용량을 기억한다 | 부당 |
+| 3 | HTTP overflow shrink `:1430-1433, 1553-1587` | `ContextOverflow` 마다 C 절반 | 부당 |
 | 4 | Claude Code 이력 창 `keeper_claude_code_runtime.ml:1207-1213` | `min(max-prompt-bytes, C)`와 §10.4 씨앗 앞머리 중 뒤의 자리에서 시작한다 | 일부 부당 |
 | 5 | Antigravity 이력 창 | §10.4 씨앗 앞머리에서 시작한 뒤 `max-prompt-bytes` 안에 들어오는 최신 atom suffix를 넘기고 실제 범위를 기록한다 | 일부 부당 |
-| 6 | Codex 이력 창 `keeper_codex_runtime.ml:1288-1311` | 평소엔 무제한, overflow 뒤 바이트로 자르고 기억한다 | 부당 |
+| 6 | Codex 이력 창 `keeper_codex_runtime.ml:1288-1311` | 평소엔 무제한, overflow 뒤 바이트로 자른다 | 부당 |
 | 7 | 현재 턴 도구 결과 강등 #28845 `:657-681` | C 기준으로 자를 수 없으면 이번 턴의 도구 결과까지 강등한다 | §7.3 참조 |
 | 8 | librarian 입력 `keeper_librarian_runtime.ml:67-72, 348-359, 421-441` | 메시지 수 상한(`librarian_max_messages × cadence`)에서 시작해, 쓸 수 있는 모든 사다리 슬롯의 타깃 상한에 맞을 때까지 이분 탐색으로 줄인다 | 부당 (일부) |
 | 9 | Vision 이미지 `keeper_vision_cap_fit.ml` | base64 로 부푼 이미지 + 질의 + 4096 이 C 를 넘으면 한 변을 줄인다 | 조건부 정당 |
@@ -109,7 +107,7 @@ origin/main 기준이다. 설정 검증, 최종 전송 바이트 검사, 로그�
 - 부당한 이유: 창 크기는 의도(토큰)인데 전송 한도(바이트)로 정해진다. 상한이 없으면 창이 사라지고, 상한을 스펙으로 올리면 창이 넓어진다.
 - 반론: 창이 C 를 넘으면 요청이 거절되므로 C 는 창의 위 한계여야 한다.
 - 재반론: 위 한계와 크기를 정하는 값은 다르다. 토큰 창을 바이트로 환산한 값이 C 를 넘으면 설정이 모순된 것이다. 이 모순은 드러내야 한다. 조용히 줄이면 숨은 결합이 다시 생긴다.
-- 예비분 `C'/10` 도 부당하다. 측정하지 못한 필드의 크기는 상한이 아니라 실제 보내는 내용에 비례한다. 상한이 512KB 에서 4MB 가 되자 예비분은 52KB 에서 419KB 가 됐다.
+- 예비분 `C/10` 도 부당하다. 측정하지 못한 필드의 크기는 상한이 아니라 실제 보내는 내용에 비례한다. 상한이 512KB 에서 4MB 가 되자 예비분은 52KB 에서 419KB 가 됐다.
 
 **2. 브리핑**
 - 1번과 **같은 결합**이다. 브리핑은 고정 메시지로 붙어 U 에 들어가고, 그만큼 A 를 줄인다(`agent_turn.ml:34-52`).
@@ -122,10 +120,9 @@ origin/main 기준이다. 설정 검증, 최종 전송 바이트 검사, 로그�
 
 **3. HTTP overflow shrink**
 - 부당한 이유:
-  - **생성자 하나(`ContextOverflow`)가 두 가지를 싣는다.** 하나는 공급자의 모델 창(토큰) 초과이고, 다른 하나는 masc 가 자르지 못해 스스로 거절한 바이트 초과다(`limit = None`, `runtime_model_input_tail_window.ml:72-86`, `try_provider.ml:838`). shrink 는 둘 다 C' 절반으로 대응한다.
+  - **생성자 하나(`ContextOverflow`)가 두 가지를 싣는다.** 하나는 공급자의 모델 창(토큰) 초과이고, 다른 하나는 masc 가 자르지 못해 스스로 거절한 바이트 초과다(`limit = None`, `runtime_model_input_tail_window.ml:72-86`, `try_provider.ml:838`). shrink 는 둘 다 C 절반으로 대응한다.
   - 공급자의 본문 크기 초과(`Request_body_too_large`)는 따로 분류돼 shrink 를 타지 않는다(`keeper_turn_driver_try_runtime.ml:98-116`).
-  - 성공마다 기록되는 기억 값은 설정 밖의 숨은 상태다. 상한을 올려도 창이 넓어지지 않고, 재기동하면 갑자기 넓어진다(§2). 운영자는 설정만 봐서는 지금 창이 어떤 크기인지 알 수 없다.
-- 반론: 모델 창이 잘못 선언된 경우를 버티는 안전장치이고, #31684 처럼 기억 값이 틀리면 `forget` 한다.
+- 반론: 모델 창이 잘못 선언된 경우를 버티는 안전장치다.
 - 결론: 안전장치는 유지할 가치가 있다. 먼저 오류 두 종류를 타입으로 나누고, 토큰 초과는 토큰 창으로 대응해야 한다.
 
 **4·5·6. 공식 클라이언트 경로**
@@ -135,7 +132,6 @@ origin/main 기준이다. 설정 검증, 최종 전송 바이트 검사, 로그�
 - 부당한 부분:
   - 그 한도를 창 크기 결정에 쓴다.
   - Claude Code 에는 HTTP 본문이 없는데 C 가 섞인다.
-  - Codex 는 overflow 뒤 바이트로 자른 값을 기억한다.
 
 **8. librarian 입력**
 - 1판의 "타깃 바이트 상한까지 채운다"는 틀렸다. 실제로는 메시지 수 상한에서 시작해 바이트로만 줄인다.
@@ -561,7 +557,7 @@ let halve ~first_atom ~atom_count =
 
 인자에 바이트가 없다. 거절은 바이트 때문인데 자르는 것은 atom 개수다. 큰 도구 결과 하나와 작은 atom 8,000개가 있으면 반으로 접어도 범인이 남고 무관한 대화만 버려진다.
 
-호출자는 `measure_message_bytes` 를 이미 받고 있고, 직전에 성공한 요청의 크기도 안다. 그리고 §4 의 3번은 HTTP 층의 "C' 절반"을 이미 **부당**으로 판정했다 — §10 은 같은 모양을 atom 축에 복제했다.
+호출자는 `measure_message_bytes` 를 이미 받고 있고, 직전에 성공한 요청의 크기도 안다. 그리고 §4 의 3번은 HTTP 층의 "C 절반"을 이미 **부당**으로 판정했다 — §10 은 같은 모양을 atom 축에 복제했다.
 
 탐색 비용도 비대칭이다. 한 번 틀릴 때마다 22.7 MB 를 올려 보내고 거절을 받는다.
 
@@ -583,7 +579,7 @@ let halve ~first_atom ~atom_count =
 
 > masc 에는 컴팩션(LLM 요약)이 없다. librarian 이 수시로 기억을 정리하고, **창은 최근 원문만 담는다.**
 
-창이 최근 원문만 담으면 8,487 atom / 22.7 MB 가 나올 수 없다. 아래 3,438줄은 그 선언이 지켜지지 않는 동안 이력을 매 턴 구겨 넣으려는 장치다.
+창이 최근 원문만 담으면 8,487 atom / 22.7 MB 가 나올 수 없다. 아래 3,342줄은 그 선언이 지켜지지 않는 동안 이력을 매 턴 구겨 넣으려는 장치다.
 
 | 모듈 | 줄 | 답하려는 질문 |
 |---|---|---|
@@ -593,8 +589,7 @@ let halve ~first_atom ~atom_count =
 | `keeper_model_input_demotion` | 399 | 무엇을 마커로 바꾸나 |
 | `keeper_carried_front` | 392 | 이번엔 어디서 시작하나 |
 | `keeper_carried_range` | 209 | 앞머리를 얼마나 미나 |
-| `keeper_context_overflow_shrink_state` | 96 | 다음엔 얼마로 줄이나 |
-| 합계 | **3,438** | 전용 테스트 8종 |
+| 합계 | **3,342** | 전용 테스트 8종 |
 
 ### 13.6 남는 설계
 

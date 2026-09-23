@@ -1250,7 +1250,7 @@ let run_best_effort
                ~new_claims:
                  (Keeper_librarian_absorb_gate.without_copies
                     absorb_gate
-                    (Keeper_librarian.claims_to_apply selection ~absorbed:applied_absorbed))
+                    selection.new_claims)
                ()
              |> Result.map_error (fun detail ->
                Memory_snapshot_write_failed { detail; selected_slot })

@@ -382,6 +382,7 @@ type exact_output_lane_decl =
   { id : string
   ; slot_ids : string list
   ; cli_slot_ids : string list
+  ; max_output_tokens : int option
   }
 [@@deriving show, eq]
 

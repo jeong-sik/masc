@@ -1359,24 +1359,20 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
   let observed_floor_capacity_bytes = ref None in
   let context_overflow_retry_safe = ref false in
   let starting_capacity_bytes =
-    (* [max_capacity] is the runtime's declared ceiling: the shrink state
-       reads it to discard a remembered capacity that now exceeds it. This lane
-       passed [max_int], so a model that declares max-prompt-bytes was sent the
-       whole history anyway and learned its ceiling only from the provider's
-       rejection -- after the turn had already run. claude-sonnet-5 declares
-       524288, and one live keeper spent 29 minutes per attempt discovering it
-       (2026-08-24). A runtime that declares nothing keeps the old behaviour.
+    (* Every turn starts at the runtime's declared ceiling. Before that
+       ceiling was read, this lane passed [max_int], so a model that declares
+       max-prompt-bytes was sent the whole history anyway and learned its
+       ceiling only from the provider's rejection -- after the turn had
+       already run. claude-sonnet-5 declares 524288, and one live keeper
+       spent 29 minutes per attempt discovering it (2026-08-24). A runtime
+       that declares nothing starts unbounded.
 
        The ceiling is the model's max-prompt-bytes. keeper_unified_turn
        already sizes the pinned briefing from the same number and says the
        projection cuts the conversation window; this is that cut. *)
-    Keeper_context_overflow_shrink_state.starting_capacity
-      ~keeper_name
-      ~runtime_id
-      ~max_capacity:
-        (Option.value
-           (Runtime.max_prompt_bytes_of_runtime_id runtime_id)
-           ~default:unbounded_model_input_capacity_bytes)
+    Option.value
+      (Runtime.max_prompt_bytes_of_runtime_id runtime_id)
+      ~default:unbounded_model_input_capacity_bytes
   in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
@@ -1397,13 +1393,6 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
            against that size. There is no local account that could rule the
            next size out, so the provider's own target stands. *)
         ~shrink_admits_history:(fun ~capacity:_ -> true)
-        ~record_success:(fun ~capacity ->
-          if capacity <> unbounded_model_input_capacity_bytes
-          then
-            Keeper_context_overflow_shrink_state.record_success
-              ~keeper_name
-              ~runtime_id
-              ~capacity)
         ~on_shrink_retry:
           (fun ~shrink_attempt ~previous_capacity:previous_capacity_bytes ~capacity:capacity_bytes ->
             resolve_input_rejected_for_shrink_retry

@@ -343,7 +343,7 @@ type confirm_decision =
 
 let confirm_json ?actor_hint (ctx : _ context) args :
     (Yojson.Safe.t, string) result =
-  let* actor = resolved_actor_for_args ?actor_hint ctx args in
+  let actor = resolved_actor ?actor_hint ctx in
   let* decision =
     match get_string_opt args "decision" with
     | None -> Ok Confirm

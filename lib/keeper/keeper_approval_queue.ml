@@ -4267,11 +4267,7 @@ let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pen
       let audit_receipts =
         if created
         then
-          [ Keeper_approval.Audit.record_rule
-              ~base_path
-              ~event_type:Keeper_approval.Audit.Rule_created
-              rule
-          ]
+          [ Keeper_approval.Audit.record_rule_created ~base_path rule ]
         else []
       in
       Ok (rule, audit_receipts)

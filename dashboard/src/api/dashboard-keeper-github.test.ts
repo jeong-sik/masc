@@ -23,8 +23,8 @@ const observation: KeeperGithubIdentityObservation = {
   hostname: 'github.com',
   config_dir: '/tmp/base/.masc/keepers/sangsu/github-cli',
   projected_token_env_names: ['GH_TOKEN'],
-  stored: { authenticated: true, login: 'masc-sangsu-bot', error: null },
-  effective: { authenticated: false, login: null, error: 'HTTP 401' },
+  stored: { authenticated: true, login: 'masc-sangsu-bot', scopes: null, error: null },
+  effective: { authenticated: false, login: null, scopes: null, error: 'HTTP 401' },
   effective_probe_scope: 'host_process_credential_only',
   checked_at_unix: 1786000000,
 }

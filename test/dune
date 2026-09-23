@@ -5838,6 +5838,8 @@
 
 (include stanzas/test_tui_tasks_title_fits_the_frame.inc)
 
+(include stanzas/test_tui_ask_context_block.inc)
+
 (include stanzas/test_tui_memory_back.inc)
 
 (include stanzas/test_tui_resources_empty_note.inc)

@@ -1526,7 +1526,17 @@ let draw_ask_questions buf cols (state : state) ~budget =
                  Ansi.dim plan.Ask_layout.questions_hidden
                  (if plan.Ask_layout.questions_hidden = 1 then "" else "s")
                  Ansi.reset);
-          if plan.Ask_layout.context_shown then Buffer.add_string buf why_text;
+          if plan.Ask_layout.context_shown then Buffer.add_string buf why_text
+          else if plan.Ask_layout.context_notice then
+            (* The questions are the ask and the reason explains it, so the
+               reason is what the plan drops first. It used to drop without a
+               word: hidden questions are counted on a line of their own and
+               folded asks are too, and only this one left no trace, so a
+               reader had nothing to tell them there was a reason to go and
+               read. The answering view draws it whole and scrolls. *)
+            box_line buf cols
+              (Printf.sprintf "    %sthe reason did not fit -- a opens it%s"
+                 Ansi.dim Ansi.reset);
           let printed = ref 0 in
           List.iteri
             (fun index row ->
@@ -1846,7 +1856,14 @@ let render_approvals (state : state) =
   let approvals_error =
     Terminal_text.optional_single_line state.approvals_error
   in
-  if count = 0 then begin
+  (* The queue's own population, not the surface's. [count] above is the
+     approval rows plus the open questions -- the right reading for the title
+     and the badge, which name the screen -- and this block is about one of
+     the three lists the screen draws. With the queue empty and a question
+     waiting, [count] was three, so the list drew its empty self: a cursor
+     mark on a blank row and nothing to say the queue was empty, where the
+     same screen with no question at all said "(no pending approvals)". *)
+  if approvals = [] then begin
     (match state.approval_snapshot, approvals_error with
      | _, Some err ->
          box_line buf cols (data_unreliable_row ~cols err);

@@ -13,6 +13,7 @@ import test_tui_keyboard_input as h
 SOURCE_MODULES = (
     "bin/masc_tui_types.ml",
     "bin/masc_tui_render_prim.ml",
+    "bin/masc_tui_render.ml",
 )
 
 CURRENT = b"\xe2\x96\xb8"
@@ -124,6 +125,38 @@ def run(executable: str) -> None:
         executable,
         description="An open ask keeps Approvals in the strip",
         interact=interact,
+        http_fixtures=fixtures,
+        refresh=2.0,
+    )
+
+    # The same fixtures, one screen further in. The queue is empty and a
+    # question is waiting, which is the state where the two populations part:
+    # the title and the badge count both lists, the queue's own empty note
+    # counts only the queue. It used to ask the wider count, so with a
+    # question waiting the list drew its empty self -- a cursor mark on a
+    # blank row and nothing to say the queue was empty -- where the same
+    # screen with no question at all said so.
+    def empty_queue_says_so(process, master_fd, _slave_fd, output, _base_path):
+        h.resize_and_wait(process, master_fd, output, rows=38, columns=150,
+                          needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+        h.drain_until_quiet(process, master_fd, output)
+        h.wait_for_fixture_state(
+            process, master_fd, output,
+            lambda: b"Approvals\xc2\xb71" in bytes(output),
+            timeout=45.0)
+        h.tab_until(process, master_fd, output, b"MASC Approvals")
+        h.wait_for_output(process, master_fd, output,
+                          b"(no pending approvals)", start=0, timeout=10)
+        # And the question it sits above is still drawn, so the note is about
+        # the queue rather than about the screen.
+        h.wait_for_output(process, master_fd, output,
+                          b"Questions waiting on you (1)", start=0, timeout=10)
+        os.write(master_fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="An empty approval queue says so beside a waiting question",
+        interact=empty_queue_says_so,
         http_fixtures=fixtures,
         refresh=2.0,
     )

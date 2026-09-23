@@ -1052,6 +1052,18 @@ status: reference
   (RFC-0465).
   → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli)
 
+**PR Attribution (PR 귀속)**
+: 열린 GitHub Pull Request를 작업한 Keeper와 잇는 표시 규칙(RFC-0465).
+  `GET /api/v1/repositories/pulls`가 PR의 `author`(머지 커밋을 건너뛴 최신 단일
+  부모 커밋의 작성자 이름, #38277)와 지속된 Keeper 이름(`keepers_listed`)을 대조해
+  일치하는 Keeper에게 귀속한다(`keeper`). 샌드박스 런타임은 실행 환경의
+  `GIT_AUTHOR_NAME`과 `GIT_COMMITTER_NAME`에 그 Keeper 이름을 넣어 커밋에
+  작성자가 남도록 보장한다(#38253). Keeper 목록 조회가 실패하면(`Keepers_list_failed`)
+  PR을 일반(비-Keeper) PR로 오인하지 않고 목록 전체를 미결정으로 둔다. 이 귀속은
+  TUI와 대시보드의 표시 전용(display only)이며, 커미터가 작성자 이름을 임의
+  지정할 수 있으므로 권한(authority)이나 실행 증명으로 삼지 않는다.
+  → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli)
+
 ## Continuity
 
 **Autoboot Exclusion Reason (자동 부팅 제외 이유)**

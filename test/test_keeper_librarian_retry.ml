@@ -1242,7 +1242,9 @@ let template_slot_names template =
 
 let test_template_slots_match_supplied_variables () =
   let supplied =
-    Librarian.prompt_variables (input ()) |> List.map fst |> List.sort_uniq String.compare
+    match Runtime.librarian_prompt_variables (input ()) with
+    | Error detail -> failf "librarian variables unavailable: %s" detail
+    | Ok variables -> variables |> List.map fst |> List.sort_uniq String.compare
   in
   check (list string) "every template slot is supplied and every supplied value has a slot"
     supplied (template_slot_names (librarian_template ()))
@@ -1293,7 +1295,11 @@ let test_repo_template_renders_keeper_instructions () =
 
 let test_rendered_prompt_is_the_template_with_every_slot_filled () =
   let template = librarian_template () in
-  let variables = Librarian.prompt_variables (input ()) in
+  let variables =
+    match Runtime.librarian_prompt_variables (input ()) with
+    | Error detail -> failf "librarian variables unavailable: %s" detail
+    | Ok variables -> variables
+  in
   let expected =
     template_pieces template
     |> List.map (function

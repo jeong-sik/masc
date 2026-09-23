@@ -6981,7 +6981,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     |> List.iter (fun line -> add_line (indent ^ failure_tone ^ line ^ Ansi.reset));
     add_empty ();
 
-    (* Board-attention partitions stopped at a restart wait here for an
+    (* Blocked Board-attention partitions wait here for an
        operator's requeue, and nothing else on the screens said they existed.
        Beside the current failure because it is one: this Keeper's Board
        judgments for those posts do not move until someone presses Q. *)

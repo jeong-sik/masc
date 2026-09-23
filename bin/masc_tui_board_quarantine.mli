@@ -1,11 +1,12 @@
 (** The Board-attention rows of a Keeper's Info tab.
 
-    A partition the judgment worker was running when the process stopped is
-    put in quarantine at the next start: its judgment call may already have
-    gone out, so it is never sent again on its own. Only an operator's
-    requeue takes it out. This module says how many of a Keeper's partitions
-    are waiting for that, why each one stopped, and which one the requeue key
-    acts on. *)
+    A partition the judgment worker cannot finish is blocked and its candidate
+    put in quarantine: a restart that cut the judgment call, every judgment
+    model refusing, a call step that could not be recorded, and the other
+    causes in {!category_words}. The worker never retries these on its own.
+    Only an operator's requeue takes one out. This module says how many of a
+    Keeper's partitions are waiting for that, grouped by what stopped them,
+    and which one the requeue key acts on. *)
 
 (** One row of a Keeper's Board-attention quarantine inventory
     ([GET /api/v1/keepers/<name>/board-attention/quarantines]). A row this
@@ -41,8 +42,9 @@ val waiting :
   t ->
   Masc.Keeper_board_attention_quarantine_command.inventory_item list
 (** The rows still waiting for an operator: quarantined, or requeue asked for
-    and not finished. A requeued row is out of the operator's hands. Oldest
-    first. *)
+    and not finished. Oldest first. A row whose candidate says requeued is
+    left out: the inventory reads only the candidate ledger, so it is counted
+    as requeued on that ledger, not as finished. *)
 
 val oldest_waiting :
   t ->
@@ -61,5 +63,6 @@ val lines :
   (string, t) Masc_tui_fetched.t ->
   keeper_name:string ->
   (tone * string) list
-(** The section body, one entry per row. Every wire string is put through
-    [Terminal_text] before it is returned. *)
+(** The section body: a summary, then one line per failure category with its
+    count and its oldest row (the first line holds the requeue key's target).
+    Every wire string is put through [Terminal_text] before it is returned. *)

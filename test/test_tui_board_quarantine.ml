@@ -8,7 +8,7 @@ module Candidate = Masc.Keeper_board_attention_candidate
 module Quarantine = Masc_tui_board_quarantine
 
 let item ?(phase = Command.Inventory_quarantined)
-    ?(category = Candidate.Exact_execution_quarantined) ?(requested_at = None)
+    ?(category = Candidate.Exact_execution_interrupted) ?(requested_at = None)
     ?(requeued_at = None) ~partition_id ~quarantined_at () : Command.inventory_item =
   { Command.keeper_name = "alpha"
   ; partition_id
@@ -175,12 +175,55 @@ let test_lines_say_how_many_are_blocked_and_why () =
   let body = String.concat "\n" (texts lines) in
   check bool "the oldest row gives its age" true (contains ~needle:"15m ago" body);
   check bool "the reason is in words" true
-    (contains ~needle:(Quarantine.category_words Candidate.Exact_execution_quarantined) body);
+    (contains ~needle:(Quarantine.category_words Candidate.Exact_execution_interrupted) body);
   check bool "the partition id is shown" true (contains ~needle:"ba-root-old" body);
   check bool "the requeued row is counted apart" true
     (contains ~needle:"1 requeued" body);
   check bool "a requeued row is not listed as blocked" false
     (contains ~needle:"ba-root-done" body)
+;;
+
+let test_lines_group_rows_by_cause () =
+  let quarantines =
+    decode_ok
+      (inventory_json
+         [ item ~category:Candidate.Exact_lane_exhausted ~partition_id:"lane-1"
+             ~quarantined_at:300.0 ()
+         ; item ~category:Candidate.Exact_execution_interrupted
+             ~partition_id:"restart-old" ~quarantined_at:100.0 ()
+         ; item ~category:Candidate.Exact_lane_exhausted ~partition_id:"lane-2"
+             ~quarantined_at:400.0 ()
+         ; item ~category:Candidate.Exact_lane_exhausted
+             ~phase:Command.Inventory_requeue_requested ~requested_at:(Some 500.0)
+             ~partition_id:"lane-3" ~quarantined_at:200.0 ()
+         ]
+         [])
+  in
+  let lines =
+    Quarantine.lines ~now:1000.0
+      (ready_fetched ~keeper_name:"alpha" (Ok quarantines))
+      ~keeper_name:"alpha"
+  in
+  match lines with
+  | [ (Quarantine.Warn, summary); (_, first); (_, second) ] ->
+    check bool "the summary counts every waiting row" true
+      (contains ~needle:"4 blocked" summary);
+    check bool "the first group holds the requeue target" true
+      (contains ~needle:"restart-old" first);
+    check bool "the first group is the restart cause" true
+      (contains
+         ~needle:(Quarantine.category_words Candidate.Exact_execution_interrupted)
+         first);
+    check bool "three lane rows are one line with their count" true
+      (String.starts_with ~prefix:"3 " second
+       && contains ~needle:(Quarantine.category_words Candidate.Exact_lane_exhausted)
+            second);
+    check bool "the group shows its oldest row" true (contains ~needle:"lane-3" second);
+    check bool "the group says how many are mid-requeue" true
+      (contains ~needle:"1 requeue asked" second);
+    check bool "the other lane rows are not listed" false
+      (contains ~needle:"lane-1" second || contains ~needle:"lane-2" second)
+  | _ -> fail "expected a summary and one line per cause"
 ;;
 
 let test_lines_for_every_read_state () =
@@ -249,6 +292,7 @@ let () =
       , [ test_case "requeue takes the oldest waiting row" `Quick
             test_the_requeue_key_takes_the_oldest_waiting_row
         ; test_case "count and reason" `Quick test_lines_say_how_many_are_blocked_and_why
+        ; test_case "one line per cause" `Quick test_lines_group_rows_by_cause
         ; test_case "every read state" `Quick test_lines_for_every_read_state
         ; test_case "wire strings are sanitized" `Quick test_wire_strings_are_sanitized
         ] )

@@ -1351,7 +1351,7 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
   | Detail_info ->
       [ b Act "Q" "requeue board"
           ~help:
-            "requeue the oldest Board-attention partition blocked at a restart; \
+            "requeue the oldest blocked Board-attention partition; \
              its judgment call may run a second time"
       ]
   | Detail_secrets | Detail_automation | Detail_runs -> []

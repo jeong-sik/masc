@@ -45,13 +45,17 @@ type tone =
   | Bad
 
 let category_words : Candidate.quarantine_failure_category -> string = function
+  | Candidate.Exact_execution_interrupted ->
+    "a restart cut the judgment call (a requeue sends it again)"
   | Candidate.Exact_execution_quarantined ->
-    "stopped mid-judgment at a restart (the call may already have gone out)"
+    "the call step could not be recorded (the call may already have gone out)"
+  | Candidate.Exact_lane_exhausted -> "every judgment model refused"
+  | Candidate.Exact_flow_bookkeeping_failed -> "judgment flow could not record its run"
+  | Candidate.Exact_completion_failed -> "judgment arrived but could not be saved"
   | Candidate.Candidate_membership_conflict -> "candidate belongs to another partition"
   | Candidate.Durable_partition_invariant -> "partition ledger contradicts itself"
   | Candidate.Exact_setup_unavailable -> "judgment lane could not be set up"
   | Candidate.Exact_flow_replayed -> "judgment was replayed"
-  | Candidate.Exact_execution_terminal -> "judgment call ended without an answer"
   | Candidate.Domain_output_invalid -> "judge answered in a shape it may not"
   | Candidate.Execution_provenance_mismatch -> "answer came from a different call"
   | Candidate.Unexpected_worker_failure -> "worker failed unexpectedly"
@@ -117,6 +121,32 @@ let unreadable_rows (quarantines : t) =
     quarantines.rows
 ;;
 
+(* Oldest-first rows grouped by what stopped them. Groups keep the order of
+   their oldest row, so the first group holds the requeue key's target. A day
+   of one failure can quarantine hundreds of partitions; one line per cause
+   keeps the Info tab readable. *)
+type category_group =
+  { oldest : Command.inventory_item
+  ; members : Command.inventory_item list
+  }
+
+let by_category (oldest_first : Command.inventory_item list) =
+  let same_cause (item : Command.inventory_item) group =
+    group.oldest.Command.failure_category = item.Command.failure_category
+  in
+  List.fold_left
+    (fun groups (item : Command.inventory_item) ->
+       if List.exists (same_cause item) groups then
+         List.map
+           (fun group ->
+              if same_cause item group then { group with members = group.members @ [ item ] }
+              else group)
+           groups
+       else groups @ [ { oldest = item; members = [ item ] } ])
+    []
+    oldest_first
+;;
+
 let lines ~now fetched ~keeper_name =
   match Masc_tui_fetched.view_for ~equal:String.equal fetched ~key:keeper_name with
   | Masc_tui_fetched.Absent -> [ Dim, "not read yet" ]
@@ -135,30 +165,41 @@ let lines ~now fetched ~keeper_name =
               (List.length waiting_items) )
         ]
     in
-    let item_lines =
+    let group_lines =
       List.map
-        (fun (item : Command.inventory_item) ->
-           let age =
-             span_words (Float.to_int (now -. item.Command.quarantined_at))
-           in
-           let asked =
-             match item.Command.phase with
-             | Command.Inventory_requeue_requested -> " \xc2\xb7 requeue asked, not finished"
-             | Command.Inventory_quarantined | Command.Inventory_requeued -> ""
-           in
-           ( Plain
-           , Printf.sprintf "%s ago \xc2\xb7 %s%s \xc2\xb7 %s" age
-               (category_words item.Command.failure_category)
-               asked
-               (Terminal_text.single_line item.Command.partition_id) ))
-        waiting_items
+        (fun { oldest; members } ->
+             let age =
+               span_words (Float.to_int (now -. oldest.Command.quarantined_at))
+             in
+             let asked =
+               List.length
+                 (List.filter
+                    (fun (item : Command.inventory_item) ->
+                       match item.Command.phase with
+                       | Command.Inventory_requeue_requested -> true
+                       | Command.Inventory_quarantined | Command.Inventory_requeued ->
+                         false)
+                    members)
+             in
+             let asked_words =
+               if asked = 0 then ""
+               else Printf.sprintf " \xc2\xb7 %d requeue asked, not finished" asked
+             in
+             ( Plain
+             , Printf.sprintf "%d \xc2\xb7 %s \xc2\xb7 oldest %s ago \xc2\xb7 %s%s"
+                 (List.length members)
+                 (category_words oldest.Command.failure_category)
+                 age
+                 (Terminal_text.single_line oldest.Command.partition_id)
+                 asked_words ))
+        (by_category waiting_items)
     in
     let requeued =
       List.length (List.filter (fun item -> not (awaits_operator item)) (items quarantines))
     in
     let requeued_lines =
       if requeued = 0 then []
-      else [ Dim, Printf.sprintf "%d requeued, back with the worker" requeued ]
+      else [ Dim, Printf.sprintf "%d requeued on the candidate ledger" requeued ]
     in
     let unreadable = unreadable_rows quarantines @ quarantines.unreadable_errors in
     let unreadable_lines =
@@ -181,5 +222,5 @@ let lines ~now fetched ~keeper_name =
                ^ Terminal_text.single_line error.Command.keeper_name ))
         quarantines.errors
     in
-    summary @ item_lines @ requeued_lines @ unreadable_lines @ ledger_lines
+    summary @ group_lines @ requeued_lines @ unreadable_lines @ ledger_lines
 ;;

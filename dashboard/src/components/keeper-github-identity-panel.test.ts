@@ -29,8 +29,8 @@ function makeObservation(
     hostname: 'github.com',
     config_dir: '/tmp/base/.masc/keepers/sangsu/github-cli',
     projected_token_env_names: [],
-    stored: { authenticated: true, login: 'masc-sangsu-bot', error: null },
-    effective: { authenticated: false, login: null, error: null },
+    stored: { authenticated: true, login: 'masc-sangsu-bot', scopes: null, error: null },
+    effective: { authenticated: false, login: null, scopes: null, error: null },
     effective_probe_scope: 'host_process_credential_only',
     checked_at_unix: 1786000000,
     ...overrides,
@@ -53,7 +53,7 @@ describe('KeeperGithubIdentityPanel', () => {
     apiRefs.fetchKeeperGithubIdentity.mockResolvedValue(
       makeObservation({
         projected_token_env_names: ['GH_TOKEN'],
-        effective: { authenticated: false, login: null, error: 'HTTP 401' },
+        effective: { authenticated: false, login: null, scopes: null, error: 'HTTP 401' },
       }),
     )
     render(html`<${KeeperGithubIdentityPanel} keeperName="sangsu" />`)
@@ -92,6 +92,30 @@ describe('KeeperGithubIdentityPanel', () => {
 
     await waitFor(() => {
       expect(apiRefs.fetchKeeperGithubIdentity).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it('shows the scopes GitHub listed for the stored token', async () => {
+    apiRefs.fetchKeeperGithubIdentity.mockResolvedValue(
+      makeObservation({
+        stored: {
+          authenticated: true,
+          login: 'masc-sangsu-bot',
+          scopes: ['gist', 'read:org', 'repo', 'workflow'],
+          error: null,
+        },
+      }),
+    )
+    render(html`<${KeeperGithubIdentityPanel} keeperName="sangsu" />`)
+    await waitFor(() => {
+      expect(screen.getByText('gist, read:org, repo, workflow')).toBeInTheDocument()
+    })
+  })
+
+  it('says a token without listed scopes is not the same as none', async () => {
+    render(html`<${KeeperGithubIdentityPanel} keeperName="sangsu" />`)
+    await waitFor(() => {
+      expect(screen.getByText(/알려주지 않는 토큰/)).toBeInTheDocument()
     })
   })
 
@@ -162,7 +186,7 @@ describe('KeeperGithubIdentityPanel', () => {
       captured.onEvent?.({
         event: 'complete',
         observation: makeObservation({
-          effective: { authenticated: true, login: 'masc-sangsu-bot', error: null },
+          effective: { authenticated: true, login: 'masc-sangsu-bot', scopes: null, error: null },
         }),
       })
     })

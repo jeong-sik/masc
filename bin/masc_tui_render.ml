@@ -7395,6 +7395,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                      match scope with
                      | Masc.Keeper_github_identity.Workflow ->
                          "may change .github/workflows, which run with repo secrets"
+                     | Masc.Keeper_github_identity.Write_packages ->
+                         "may publish GitHub Packages, ghcr.io images among them"
                    in
                    Printf.sprintf "  %d %s %s %s— %s%s" (index + 1)
                      (if ticked then "[x]" else "[ ]")

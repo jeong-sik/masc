@@ -1537,7 +1537,9 @@ let add_routes ~sw ~clock router =
              let start_time = Unix.gettimeofday () in
              let result =
                Tool_schedule.handle_cancel
-                 ~tool_name:"masc_schedule_cancel" ~start_time config args
+                 ~tool_name:"masc_schedule_cancel" ~start_time
+                 ~caller:(Tool_schedule.Named_caller agent_name)
+                 config args
              in
              let ok = Tool_result.is_success result in
              let msg = Tool_result.message result in

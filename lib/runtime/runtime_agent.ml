@@ -562,6 +562,16 @@ let merge_modality_counts a b =
     a
     b
 
+(* The encoders read [content_blocks = Some _] as the whole tool result and
+   leave [content] unsent: [Some []] reaches the OpenAI tool message and the
+   Responses function output as the string "[]", and the Anthropic tool_result
+   and the official-client context as an empty array. An empty block list is
+   no structured view, so this walk leaves none: a tool result with no blocks
+   comes out with [content_blocks = None] and every encoder sends [content],
+   the canonical string the type keeps for exactly this. The rule reads the
+   same whether the media strip emptied the list or it was already empty —
+   one shape, one answer, no second sentence for the model to read. The turn's
+   own degrade note already says media was left out ([media_degrade_note]). *)
 let rec strip_unsupported_modality_blocks
     (caps : Llm_provider.Capabilities.capabilities)
     (blocks : Agent_core.Types.content_block list) :
@@ -584,12 +594,13 @@ let rec strip_unsupported_modality_blocks
              let nested_kept, nested_dropped =
                strip_unsupported_modality_blocks caps nested
              in
+             let content_blocks =
+               match nested_kept with
+               | [] -> None
+               | _ :: _ -> Some nested_kept
+             in
              ( Agent_core.Types.ToolResult
-                 { tool_use_id
-                 ; content
-                 ; outcome
-                 ; json
-                 ; content_blocks = Some nested_kept }
+                 { tool_use_id; content; outcome; json; content_blocks }
                :: kept
              , merge_modality_counts dropped nested_dropped )
          | Agent_core.Types.ToolResult { content_blocks = None; _ }

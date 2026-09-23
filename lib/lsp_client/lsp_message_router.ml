@@ -204,7 +204,7 @@ let start_response_reader
                Log.Server.warn "LSP router: unparseable message from %s" proc.lang_id)
         done
       with
-      | exn ->
+      | exn -> (* cancel-guard-ok: the loop exits and the fiber ends here; cleanup runs and no work resumes *)
         let reason = Printexc.to_string exn in
         Log.Server.debug
           "LSP router: response reader for %s ended: %s"

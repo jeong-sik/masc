@@ -2667,6 +2667,8 @@
 
 (include stanzas/test_h2_mode_vocabulary.inc)
 
+(include stanzas/test_h2_request_body_admission.inc)
+
 (include stanzas/test_heartbeat_integration.inc)
 
 (include stanzas/test_http_pages_asset_read.inc)
@@ -6359,6 +6361,8 @@
  (libraries alcotest masc.dashboard masc.masc_types yojson digestif))
 
 (include stanzas/test_h2_json_worker.inc)
+
+(include stanzas/test_h2_response_window.inc)
 
 (rule
  (alias runtest-test_tui_keyboard_input-msx-background-poll)

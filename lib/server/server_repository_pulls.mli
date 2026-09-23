@@ -48,11 +48,17 @@ type failure =
           this repository (a private repository it has no access to, or a
           remote that no longer exists). *)
   | Token_rejected
-      (** 401: the token was refused. Not retried within this refresh; the
-          next refresh reads the token again. *)
+      (** 401: the token was refused. hosts.yml is still read on every
+          refresh, but GitHub is asked again only once it holds a different
+          token; until then this failure stands with its first
+          [observed_at]. *)
   | Rate_limited of { reset_at : float option }
-      (** GitHub's rate limit. [reset_at] is GitHub's own reset time when the
-          response carried it. *)
+      (** GitHub's rate limit. With [Some t], GitHub's own reset time, no
+          request is sent before [t] and this failure stands until then. With
+          [None] (GitHub sent no reset header, or curl older than 7.84 could
+          not read it) there is no time to wait for that would be GitHub's
+          rather than a number of ours, so the next refresh asks again at the
+          normal 60 s pace. *)
   | Forbidden of { status : int }
       (** 403 without an exhausted rate limit, e.g. organisation policy. *)
   | Http_status of { status : int }
@@ -109,6 +115,9 @@ type snapshot =
   ; repositories_error : string option
       (** The registered repository list could not be read. *)
   ; repositories : repository_entry list
+  ; rejected_token_digest : string option
+      (** BLAKE256 hex of the token GitHub last refused, never the token
+          itself. Not part of the JSON. *)
   }
 
 val initial : snapshot
@@ -150,7 +159,10 @@ val read_repository :
 val refresh :
   now:(unit -> float) -> http_post:http_post -> base_path:string -> previous:snapshot -> snapshot
 (** One full read: resolve the reader, load the registered repositories and
-    read each GitHub one. When the reader is not ready, nothing is fetched and
+    read each GitHub one. A repository whose previous answer was
+    [Token_rejected] for the same token, or [Rate_limited] with a reset time
+    still ahead of [now], keeps that answer and is not fetched. When the
+    reader is not ready, nothing is fetched and
     every GitHub repository reads [Pulls_not_read]: an earlier read is not
     shown as current. [previous] only stands in when the repository list
     itself cannot be read. *)

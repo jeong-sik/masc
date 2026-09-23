@@ -46,11 +46,9 @@ cleanup() {
     cancel_payload="$(
       jq -cn \
         --arg schedule_id "$CREATED_SCHEDULE_ID" \
-        --arg cancelled_by_id "contract-scheduler" \
         --arg reason "contract harness cleanup" \
         '{
           schedule_id: $schedule_id,
-          cancelled_by_id: $cancelled_by_id,
           reason: $reason
         }'
     )"
@@ -144,8 +142,6 @@ create_payload="$(
       due_at_unix: $due_at,
       recurrence_kind: "interval",
       recurrence_interval_sec: $interval_sec,
-      requested_by_id: "contract-operator",
-      scheduled_by_id: "contract-scheduler",
       allow_unregistered_keeper: true,
       keeper_name: $keeper_name,
       title: "Contract scheduler evidence",

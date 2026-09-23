@@ -1355,7 +1355,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                    ~status:`Bad_request
                    ~extra_headers:cors
                else
-                 match Keeper_meta_store.read_meta config keeper_name with
+                 (* Effective meta: the lane is chosen by the TOML-owned
+                    [sandbox_profile], which a persisted read answers with
+                    the default. *)
+                 match Keeper_meta_store.read_effective_meta config keeper_name with
                  | Error message ->
                    h2_respond_json_value
                      h2_reqd
@@ -1371,18 +1374,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                         ])
                      ~status:`Not_found
                      ~extra_headers:cors
-                 | Ok (Some _) ->
+                 | Ok (Some meta) ->
                    let hostname =
                      Option.value
-                       ~default:"github.com"
+                       ~default:Keeper_github_identity.default_hostname
                        (Server_utils.query_param httpun_request "hostname")
                    in
-                   (match
-                      Keeper_github_identity.observe
-                        ~config
-                        ~keeper_name
-                        ~hostname
-                    with
+                   (match Keeper_github_login_lane.observe ~config ~meta ~hostname with
                     | Ok observation ->
                       h2_respond_json_value
                         h2_reqd
@@ -1454,7 +1452,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                  | Ok (Some meta) ->
                    let hostname =
                      Option.value
-                       ~default:"github.com"
+                       ~default:Keeper_github_identity.default_hostname
                        (Server_utils.query_param httpun_request "hostname")
                    in
                    let headers =

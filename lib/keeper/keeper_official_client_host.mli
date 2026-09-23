@@ -186,6 +186,12 @@ val invoke_turn_completion_hooks :
     official-client turn. Host-stop projections use the same hook order as a
     provider-emitted terminal before their durable session is settled. *)
 
+val is_composed_system_context : Agent_core.Types.message -> bool
+(** Whether this host composed the message for the provider instruction
+    surface: the per-turn context carrier or the Librarian working state.
+    Adapters keep such messages out of the canonical history snapshot and
+    re-send them on resume. *)
+
 val measure_message_bytes : Agent_core.Types.message -> int
 (** Bytes one message occupies in the canonical MASC encoding
     ({!encode_history_message}), which is what the range this module composes
@@ -422,7 +428,10 @@ val prepare_turn :
     The hook's [extra_system_context] is appended as a raw [System] message
     carrying {!Agent_core.Types.Extra_system_context_provenance}. Official
     adapters must keep that message on their provider instruction surface; it
-    is not an Agent Core synthetic User carrier.
+    is not an Agent Core synthetic User carrier. The Librarian working state
+    is a second [System] message on the same surface, tagged
+    {!Runtime_model_input_tail_window.working_state_metadata}; adapters select
+    both with {!is_composed_system_context}.
 
     The seed carries the projected history as-is. Nothing is cut here: the
     provider owns its context window and reports exceeding it as a typed

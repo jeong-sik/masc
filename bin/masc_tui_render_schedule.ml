@@ -262,6 +262,21 @@ let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
   in
   { attention_rows; team_rows; task_error_rows; task_rows; filler_rows }
 
+(* Detail lines under the Team block (a repository's pull requests) are worth
+   drawing but not worth a backlog row: they take only rows that would
+   otherwise be blank. *)
+let spend_spare_rows_on_team (allocation : overview_allocation) ~extra =
+  let chrome =
+    if allocation.team_rows > 0 then 0 else overview_team_chrome_rows
+  in
+  let rows = min (max 0 extra) (max 0 (allocation.filler_rows - chrome)) in
+  if rows = 0 then allocation
+  else
+    { allocation with
+      team_rows = allocation.team_rows + rows
+    ; filler_rows = allocation.filler_rows - rows - chrome
+    }
+
 (* Keeper roster columns.
 
    Cell widths, not text. Every width here is a plain-text budget the renderer

@@ -1451,6 +1451,16 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_runs_without_slot = {
+  slws_vendor_system_one : int;
+  slws_server_restarted : int;
+  slws_no_slot : int;
+}
+(** The lane's finished runs that name no slot, by why: Vendor System One
+    answered a Board Attention run before any slot was bound, a restart
+    closed the run on replay, or it finished before a slot was bound. With
+    the slot counts they add up to the finished runs. *)
+
 type standalone_lane_jev_destination = {
   sljd_destination_uri : string;
   sljd_model : string;
@@ -1496,6 +1506,7 @@ type standalone_lane = {
   sl_last_outcome : string option;
   sl_p50_elapsed_s : float option;
   sl_selected_slots : standalone_lane_slot_count list;
+  sl_runs_without_slot : standalone_lane_runs_without_slot;
 }
 
 type standalone_lanes_snapshot = {

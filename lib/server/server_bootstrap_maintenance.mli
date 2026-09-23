@@ -6,6 +6,18 @@ val wake_enqueue_counts_of_dispatches :
   Schedule_runner.dispatch_result list -> Schedule_runner_status.wake_enqueue_counts
 (** Derive keeper-wake delivery counts from typed production consumer receipts. *)
 
+val run_schedule_runner_tick :
+  clock:(unit -> float) ->
+  Workspace.config ->
+  previously_held:Schedule_runner.wake_signal list ->
+  Schedule_runner.wake_signal list
+(** One tick of the schedule runner loop: record its start, run it with the
+    production consumer, record its outcome (success, error or crash), then
+    drop the cached fleet schedule list so the next read of that page carries
+    this tick's runner status and holds. [previously_held] is the held set of
+    the last successful tick, and the result is the one the next tick compares
+    against; a tick that fails returns [previously_held] unchanged. *)
+
 val recover_keeper_msg_requests_on_startup :
   base_path:string -> Keeper_msg_async.recovery_report
 (** Settle durable async request rows that cannot have a live owner after a

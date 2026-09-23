@@ -12940,9 +12940,12 @@ def runtime_surface_interaction(
 
 SCHEDULES_PATH = "/api/v1/dashboard/scheduled-automation"
 
-# The schedule list's [schedule_runner]: the object /health reports under the
-# same name. The TUI reads its status word; the schema says which object it is.
-SCHEDULE_RUNNER_OK = {"schema": "masc.schedule.runner_status.v1", "status": "ok"}
+# The schedule list's [schedule_runner]: the runner's status word, the one
+# /health reports, and nothing else of that object. The TUI reads the word.
+SCHEDULE_RUNNER_OK = {
+    "schema": "masc.dashboard.scheduled_automation.schedule_runner.v1",
+    "status": "ok",
+}
 
 
 def schedule_detail_http_fixtures() -> HttpFixtures:
@@ -12955,9 +12958,9 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
             "request_count": 1,
             "truncated": False,
             "fsm": {"next_due_at_iso": "2026-08-25T10:30:00Z"},
-            # The runner's own status rides the list once, as /health reports
-            # it. The loader requires it: a row's runner_hold is only current
-            # while this reads ok.
+            # The runner's status word rides the list once, the word /health
+            # reports. The loader requires it: a row's runner_hold is only
+            # current while this reads ok.
             "schedule_runner": SCHEDULE_RUNNER_OK,
             "requests": [
                 {

@@ -3,12 +3,14 @@
 The schedule runner re-reads which occurrences it holds only on a tick that
 succeeds. While its ticks fail, the list keeps the hold from the last good
 tick, so the Schedules screen draws that hold at the time it was checked
-instead of as the present (#38411).
+instead of as the present (#38411). A list the TUI keeps on screen after a
+failed reload is an earlier answer, so its hold is drawn the same way.
 """
 import calendar
 import copy
 import os
 import sys
+import threading
 
 import test_tui_keyboard_input as h
 
@@ -84,13 +86,50 @@ def check(executable: str, runner_status: str, shown: bytes, hidden: bytes) -> N
                             extra_env={"TZ": "UTC"})
 
 
+def check_kept_after_a_failed_reload(executable: str) -> None:
+    fixtures = fixtures_with_hold("ok")
+    answered = fixtures[h.SCHEDULES_PATH]
+    reloads_fail = threading.Event()
+    fixtures[h.SCHEDULES_PATH] = lambda: (
+        (503, {"error": "unavailable"}) if reloads_fail.is_set() else answered
+    )
+
+    def interact(process, fd, _slave, output, _base_path):
+        h.palette_go(process, fd, output, b"go schedules", b"MASC Keepers / Schedules")
+        h.resize_and_wait(process, fd, output, rows=40, columns=120,
+                          needle=CURRENT, controls=(h.FULL_REDRAW,))
+        reloads_fail.set()
+        # The list stays on screen under the source warning; its hold was read
+        # by a runner that was ok then, and is drawn as of that reading now.
+        h.send_and_wait(process, fd, output, b"r", CHECKED)
+        warning = screen_line(output, b"HTTP 503")
+        if "이전 조회 유지".encode() not in warning:
+            raise AssertionError(f"the kept list lost its source warning: {warning!r}")
+        identity = screen_line(output, IDENTITY)
+        if CHECKED not in identity or b"held since" in identity:
+            raise AssertionError(
+                f"a kept list should draw its hold as {CHECKED!r}: {identity!r}")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable,
+                            description="Schedules hold on a list kept after a failed reload",
+                            interact=interact,
+                            http_fixtures=fixtures,
+                            extra_env={"TZ": "UTC"})
+
+
 def run(executable: str) -> None:
     # A failed tick left the list as the last good tick read it.
     check(executable, "degraded", shown=CHECKED, hidden=b"held since")
     # No tick has finished within the threshold: the same.
     check(executable, "stale", shown=CHECKED, hidden=b"held since")
+    # A word this build does not know says nothing about the runner, and the
+    # list still loads over it.
+    check(executable, "warming", shown=CHECKED, hidden=b"held since")
     # The newest tick read it, so the hold is the present.
     check(executable, "ok", shown=CURRENT, hidden=b"held as of")
+    # Until a reload fails: then the list on screen is an earlier answer.
+    check_kept_after_a_failed_reload(executable)
 
 
 if __name__ == "__main__":

@@ -110,6 +110,75 @@ let wake_enqueue_counts_of_dispatches dispatches =
     dispatches
 ;;
 
+(* One tick of the schedule runner, from its start to the record of its outcome.
+   It catches its own failures so a corrupt schedule row or a transient write
+   error cannot cancel the loop. Once the outcome is on record the cached fleet
+   schedule list is dropped: the page reports the runner's status and holds,
+   and would otherwise keep the previous tick's for up to its cache lifetime
+   (#38411). *)
+let run_schedule_runner_tick ~clock config ~previously_held =
+  let started_at = clock () in
+  Schedule_runner_status.record_tick_started ~now:started_at;
+  let held_after_tick =
+    try
+      match
+        Schedule_runner.tick
+          ~consumer:Server_schedule_consumers.consumer
+          ~clock
+          config
+          ~now:started_at
+          ~retention_days:
+            (Runtime_params.get Runtime_settings.schedule_terminal_retention_days)
+      with
+      | Ok result ->
+        let finished_at = clock () in
+        let wake_enqueue_counts = wake_enqueue_counts_of_dispatches result.dispatches in
+        Schedule_runner_status.record_tick_ok
+          ~wake_enqueue_counts
+          ~started_at
+          ~finished_at
+          result;
+        record_schedule_runner_tick_outcome "ok";
+        List.iter log_schedule_dispatch result.dispatches;
+        List.iter log_schedule_hold_started
+          (Schedule_runner.newly_held ~previous:previously_held result.held);
+        if result.Schedule_runner.emitted <> []
+           || result.rescheduled > 0
+           || result.dispatches <> []
+        then
+          Log.Server.info
+            "schedule_runner: due_changed=%d emitted=%d rescheduled=%d dispatched=%d"
+            result.due_changed
+            (List.length result.emitted)
+            result.rescheduled
+            (List.length result.dispatches)
+        else
+          Log.Server.debug
+            "schedule_runner: idle due_changed=%d emitted=0 rescheduled=0 dispatched=0 held=%d"
+            result.due_changed
+            (List.length result.held);
+        result.held
+      | Error err ->
+        let finished_at = clock () in
+        let error = Schedule_runner.runner_error_to_string err in
+        Schedule_runner_status.record_tick_error ~started_at ~finished_at error;
+        record_schedule_runner_tick_outcome "error";
+        Log.Server.warn "schedule_runner: tick failed: %s" error;
+        previously_held
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      let finished_at = clock () in
+      let error = Printexc.to_string exn in
+      Schedule_runner_status.record_tick_crash ~started_at ~finished_at error;
+      record_schedule_runner_tick_outcome "crash";
+      Log.Server.warn "schedule_runner: tick crashed: %s" error;
+      previously_held
+  in
+  Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+  held_after_tick
+;;
+
 type transition_outbox_projection_source =
   | Startup_projection
   | Maintenance_projection
@@ -520,65 +589,11 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          logged when it starts, not on every tick that re-observes it
          (#37912); /health lists the current set. *)
       let rec loop previously_held =
-        let started_at = Time_compat.now () in
-        Schedule_runner_status.record_tick_started ~now:started_at;
         let held_after_tick =
-        (try
-           match
-             Schedule_runner.tick
-               ~consumer:Server_schedule_consumers.consumer
-               ~clock:Time_compat.now
-               (Mcp_server.workspace_config state)
-               ~now:started_at
-               ~retention_days:
-                 (Runtime_params.get Runtime_settings.schedule_terminal_retention_days)
-           with
-           | Ok result ->
-             let finished_at = Time_compat.now () in
-             let wake_enqueue_counts =
-               wake_enqueue_counts_of_dispatches result.dispatches
-             in
-             Schedule_runner_status.record_tick_ok
-               ~wake_enqueue_counts
-               ~started_at
-               ~finished_at
-               result;
-             record_schedule_runner_tick_outcome "ok";
-             List.iter log_schedule_dispatch result.dispatches;
-             List.iter log_schedule_hold_started
-               (Schedule_runner.newly_held ~previous:previously_held result.held);
-             if result.Schedule_runner.emitted <> []
-                || result.rescheduled > 0
-                || result.dispatches <> []
-             then
-               Log.Server.info
-                 "schedule_runner: due_changed=%d emitted=%d rescheduled=%d dispatched=%d"
-                 result.due_changed
-                 (List.length result.emitted)
-                 result.rescheduled
-                 (List.length result.dispatches)
-             else
-               Log.Server.debug
-                 "schedule_runner: idle due_changed=%d emitted=0 rescheduled=0 dispatched=0 held=%d"
-                 result.due_changed
-                 (List.length result.held);
-             result.held
-           | Error err ->
-             let finished_at = Time_compat.now () in
-             let error = Schedule_runner.runner_error_to_string err in
-             Schedule_runner_status.record_tick_error ~started_at ~finished_at error;
-             record_schedule_runner_tick_outcome "error";
-             Log.Server.warn "schedule_runner: tick failed: %s" error;
-             previously_held
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           let finished_at = Time_compat.now () in
-           let error = Printexc.to_string exn in
-           Schedule_runner_status.record_tick_crash ~started_at ~finished_at error;
-           record_schedule_runner_tick_outcome "crash";
-           Log.Server.warn "schedule_runner: tick crashed: %s" error;
-           previously_held)
+          run_schedule_runner_tick
+            ~clock:Time_compat.now
+            (Mcp_server.workspace_config state)
+            ~previously_held
         in
         Eio.Time.sleep clock schedule_runner_interval_sec;
         loop held_after_tick

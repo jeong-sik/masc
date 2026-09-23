@@ -22,6 +22,7 @@ type tick_result =
   ; rescheduled : int
   ; dispatches : dispatch_result list
   ; held : wake_signal list
+  ; held_at : float
   }
 
 and dispatch_status =
@@ -548,13 +549,17 @@ let tick ?consumer ?clock config ~now ~retention_days =
           all_candidates
       | None -> [], all_candidates
     in
+    (* Read before anything is emitted or dispatched: a dispatch can take
+       seconds, and the tick's finish time would then describe the dispatches
+       rather than when the holds were decided (#38411). *)
+    let held_at = clock () in
     let candidate_signals = List.map snd active in
     let* emitted = append_new_signals config ~state candidate_signals in
     let held = List.map snd deferred in
     (match consumer with
      | Some consumer ->
        let dispatches = dispatch_candidates config ~now ~clock consumer active in
-       Ok { due_changed; emitted; rescheduled = 0; dispatches; held }
+       Ok { due_changed; emitted; rescheduled = 0; dispatches; held; held_at }
      | None ->
        let schedule_ids =
          List.map (fun (signal : wake_signal) -> signal.schedule_id) candidate_signals
@@ -562,7 +567,7 @@ let tick ?consumer ?clock config ~now ~retention_days =
        (match Schedule_store.reschedule_due_recurring config ~now ~schedule_ids with
         | Error err -> Error (Service_error (Schedule_service.Store_error err))
         | Ok (_, rescheduled) ->
-          Ok { due_changed; emitted; rescheduled; dispatches = []; held }))
+          Ok { due_changed; emitted; rescheduled; dispatches = []; held; held_at }))
 ;;
 
 let newly_held ~previous held =

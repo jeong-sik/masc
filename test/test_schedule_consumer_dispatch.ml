@@ -471,9 +471,9 @@ let create_invalid_keeper_wake_schedule config =
     fail ("create failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
-let tick_ok config ~now =
+let tick_ok ?clock config ~now =
   match
-    Schedule_runner.tick ~consumer:Server_schedule_consumers.consumer config ~now
+    Schedule_runner.tick ~consumer:Server_schedule_consumers.consumer ?clock config ~now
       ~retention_days:Schedule_store.terminal_schedule_retention_days
   with
   | Ok result -> result
@@ -2675,10 +2675,11 @@ let test_dashboard_row_names_the_occurrence_the_runner_holds () =
 ;;
 
 (* #38411: a tick that fails does not read the held list again, so the hold a
-   row carries is the one the last successful tick read. The row says when
-   that was, the page says the runner is no longer ok, and the TUI reads the
-   two together as a hold that stood then. Clearing the hold on the failure
-   instead would have turned "not known" into "not held". *)
+   row carries is the one the last successful tick decided. The row says when
+   that tick decided it -- not when it finished, which comes after its
+   dispatches -- the page says the runner is no longer ok, and the TUI reads
+   the two together as a hold that stood then. Clearing the hold on the
+   failure instead would have turned "not known" into "not held". *)
 let test_dashboard_hold_keeps_the_time_a_failed_tick_did_not_refresh () =
   with_workspace
   @@ fun config ->
@@ -2707,18 +2708,25 @@ let test_dashboard_hold_keeps_the_time_a_failed_tick_did_not_refresh () =
     | Error err -> fail err
   in
   let reading page =
-    Tui_decode.schedule_hold_reading ~runner:(runner_status page) (hold page)
+    Tui_decode.schedule_hold_reading
+      ~freshness:Tui_decode.List_latest
+      ~runner:(runner_status page)
+      (hold page)
   in
   Schedule_runner_status.reset_for_test ();
   (* Times beside the wall clock: the page measures staleness from now, so
      ticks recorded at zero would read stale before anything failed. *)
   let first_at = Unix.gettimeofday () in
-  let held_at = first_at +. 1.0 in
-  let failed_at = held_at +. 1.0 in
+  (* The holding tick decides its holds, then spends fourteen seconds on
+     dispatch before it finishes. *)
+  let decided_at = first_at +. 1.0 in
+  let held_tick_finished_at = decided_at +. 14.0 in
+  let failed_at = held_tick_finished_at +. 1.0 in
   Schedule_runner_status.record_tick_ok ~started_at:first_at ~finished_at:first_at
     (tick_ok config ~now:201.0);
-  Schedule_runner_status.record_tick_ok ~started_at:held_at ~finished_at:held_at
-    (tick_ok config ~now:261.0);
+  Schedule_runner_status.record_tick_ok ~started_at:decided_at
+    ~finished_at:held_tick_finished_at
+    (tick_ok ~clock:(fun () -> decided_at) config ~now:261.0);
   let before = page () in
   check bool "a hold the newest tick read is drawn as the present" true
     (reading before = Tui_decode.Hold_current);
@@ -2728,13 +2736,56 @@ let test_dashboard_hold_keeps_the_time_a_failed_tick_did_not_refresh () =
   let after = page () in
   check string "the failed tick leaves the hold on the row" held_id
     (hold after).Tui_decode.srh_occurrence_id;
-  check (float 0.0) "with the time the successful tick read it" held_at
+  check (float 0.0) "with the time the successful tick decided it" decided_at
     (hold after).Tui_decode.srh_observed_at;
   check bool "the page says the runner is degraded" true
-    (runner_status after = Schedule_contract_values.Runner_degraded);
+    (runner_status after
+     = Tui_decode.Runner_status Schedule_contract_values.Runner_degraded);
   check bool "so the TUI draws the hold as of that time" true
-    (reading after = Tui_decode.Hold_as_of held_at);
+    (reading after = Tui_decode.Hold_as_of decided_at);
   Schedule_runner_status.reset_for_test ()
+;;
+
+(* #38411: the fleet schedule list is served from a cache that lives for
+   [live_cache_ttl_s], and it carries the runner's status and holds. The runner
+   loop drops that cache once each tick's outcome is on record, so the page
+   read after a tick carries that tick's hold rather than the page cached
+   before the tick ran. *)
+let test_a_runner_tick_refreshes_the_cached_schedule_list () =
+  with_workspace
+  @@ fun config ->
+  ignore (persist_keeper_meta config "schedule-keeper" : Keeper_meta_contract.keeper_meta);
+  let request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      config
+  in
+  let at = ref 201.0 in
+  let clock () = !at in
+  let cached_hold () =
+    Server_dashboard_http.dashboard_scheduled_automation_http_json ~config
+    |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+    |> Yojson.Safe.Util.member "runner_hold"
+  in
+  Schedule_runner_status.reset_for_test ();
+  Fun.protect
+    ~finally:(fun () ->
+      Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+      Schedule_runner_status.reset_for_test ())
+  @@ fun () ->
+  let held =
+    Server_bootstrap_maintenance.run_schedule_runner_tick ~clock config
+      ~previously_held:[]
+  in
+  check bool "the first tick dispatches, so the page shows no hold" true
+    (cached_hold () = `Null);
+  at := 261.0;
+  ignore
+    (Server_bootstrap_maintenance.run_schedule_runner_tick ~clock config
+       ~previously_held:held
+     : Schedule_runner.wake_signal list);
+  check bool "the page read after the next tick carries the hold it made" true
+    (cached_hold () <> `Null)
 ;;
 
 let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
@@ -3278,6 +3329,8 @@ let () =
         ; test_case "dashboard hold keeps the time a failed tick did not refresh"
             `Quick
             test_dashboard_hold_keeps_the_time_a_failed_tick_did_not_refresh
+        ; test_case "a runner tick refreshes the cached schedule list" `Quick
+            test_a_runner_tick_refreshes_the_cached_schedule_list
         ; test_case "dashboard projects quarantined and unreadable reaction evidence"
             `Quick
             test_dashboard_projects_quarantined_and_unreadable_reaction_evidence

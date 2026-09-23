@@ -26,6 +26,17 @@ val dashboard_cache_key : Workspace.config -> string -> string -> string
 val dashboard_query_cache_segment : string option -> string
 val dashboard_query_cache_key :
   Workspace.config -> string -> (string * string option) list -> string
+
+val scheduled_automation_cache_key : Workspace.config -> string
+(** The key the fleet schedule list ([GET /api/v1/dashboard/scheduled-automation]
+    without a selector) is cached under. *)
+
+val invalidate_scheduled_automation : Workspace.config -> unit
+(** Drop the cached fleet schedule list. The schedule runner loop calls it
+    after every tick it records, so the list's runner status and holds are the
+    newest tick's rather than up to {!live_cache_ttl_s} older. While no tick is
+    recorded, a hung one included, the list can still trail the runner by that
+    long. *)
 val dashboard_briefing_timeout_s : float
 
 val with_projection_diagnostics :

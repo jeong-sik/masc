@@ -32,6 +32,9 @@ type wake_enqueue_counts =
 
 type last_success =
   { finished_at : float
+  ; held_at : float
+      (** When that tick decided [held], before it dispatched anything
+          ({!Schedule_runner.tick_result.held_at}). *)
   ; held : Schedule_runner.wake_signal list
       (** The occurrences this tick held back, each waiting for its target to
           consume the previous occurrence. A current state, not a count: the
@@ -67,9 +70,9 @@ type snapshot =
 type held_occurrence =
   { signal : Schedule_runner.wake_signal
   ; observed_at : float
-      (** When the successful tick that saw this hold finished. Ticks that
-          failed after it did not look again, so this is the newest time the
-          hold is known to have stood. *)
+      (** When the successful tick that saw this hold decided it, before it
+          dispatched anything. Ticks that failed after it did not look again,
+          so this is the newest time the hold is known to have stood. *)
   }
 
 val reset_for_test : unit -> unit
@@ -95,9 +98,18 @@ val held_occurrence :
   schedule_id:string ->
   held_occurrence option
 (** The occurrence of this schedule instance that the newest successful tick
-    held back, if it held one, with the time that tick finished. The same
+    held back, if it held one, with the time that tick decided it. The same
     [held] list [/health] reports, looked up for one schedule row so a reader
     of the schedule list does not rebuild the hold from the keeper queue. *)
+
+val status :
+  ?now:float ->
+  ?stale_after_sec:float ->
+  snapshot ->
+  Schedule_contract_values.runner_status
+(** The status word {!snapshot_to_yojson} writes. A caller that reports the
+    status on its own passes the same [now] and [stale_after_sec] as the
+    caller of {!snapshot_to_yojson}, so both say the same word. *)
 
 val snapshot_to_yojson :
   ?now:float -> ?stale_after_sec:float -> snapshot -> Yojson.Safe.t

@@ -3919,7 +3919,7 @@ let schedule_delivery_word (row : schedule_row) =
   | None -> "\xe2\x80\x94"
   | Some status -> cut status
 
-let schedule_delivery_summary ~runner (row : schedule_row) =
+let schedule_delivery_summary ~freshness ~runner (row : schedule_row) =
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
     | None, None -> "queue:\xe2\x80\x94"
@@ -3938,15 +3938,16 @@ let schedule_delivery_summary ~runner (row : schedule_row) =
      so on the identity line, next to the status it would otherwise leave
      reading as a late [due]. The short tag, because the line is already
      most of a narrow screen; the detail pane carries the full sentence.
-     While the runner is not [ok] the hold is the one it read at its last
-     good tick, so the tag names that time instead of the due -- the same
-     width, and the due column above still has the due (#38411). *)
+     Unless the list is the latest answer and the runner is [ok], the hold
+     is drawn at the time the runner read it: the tag names that time instead
+     of the due -- the same width, and the due column above still has the
+     due (#38411). *)
   let hold =
     match row.sch_runner_hold with
     | None -> ""
     | Some hold ->
         " \xc2\xb7 "
-        ^ (match Tui_decode.schedule_hold_reading ~runner hold with
+        ^ (match Tui_decode.schedule_hold_reading ~freshness ~runner hold with
            | Tui_decode.Hold_current ->
                Render_schedule.schedule_hold_tag
                  ~due:(Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso)
@@ -3968,6 +3969,14 @@ let schedule_source_warning (state : state) =
          match state.schedules with
          | None -> err
          | Some _ -> "이전 조회 유지 · " ^ err)
+
+(* The list on screen is the newest answer only while its last load
+   succeeded. A failed reload keeps the previous list on screen, and a hold on
+   it is then an earlier reading whatever the runner said at the time. *)
+let schedule_list_freshness (state : state) =
+  match state.schedules_error with
+  | None -> Tui_decode.List_latest
+  | Some _ -> Tui_decode.List_kept
 
 (** Render the Schedules surface: the scheduled-automation list, with an
     armed cancel. The server sorts active rows first by due time and caps the
@@ -4163,8 +4172,9 @@ let render_schedule_list (state : state) =
                 c.push_empty ()
             | Some selected ->
                 let identity, delivery =
-                  schedule_delivery_summary ~runner:snapshot.scs_runner_status
-                    selected
+                  schedule_delivery_summary
+                    ~freshness:(schedule_list_freshness state)
+                    ~runner:snapshot.scs_runner_status selected
                 in
                 c.push_styled ~style:(Theme.recede ())
                   ("  " ^ identity);
@@ -4360,7 +4370,7 @@ let schedule_wake_lines
                 | Some err -> [ head; field ~style:(Theme.bad ()) "" err ])
              wakes
 
-let schedule_detail_lines ~width ~runner (row : schedule_row)
+let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
       ~(wake_history : schedule_wake_history option)
       ~(wake_history_error : (string * string) option) =
   let field ?(style = Ansi.reset) label value =
@@ -4466,7 +4476,7 @@ let schedule_detail_lines ~width ~runner (row : schedule_row)
      | None -> []
      | Some hold ->
          [ field ~style:(Theme.warn ()) "Held"
-             (match Tui_decode.schedule_hold_reading ~runner hold with
+             (match Tui_decode.schedule_hold_reading ~freshness ~runner hold with
               | Tui_decode.Hold_current ->
                   Render_schedule.schedule_hold_reading
                     ~due:
@@ -4506,7 +4516,7 @@ let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row
   let lines =
     schedule_detail_lines
       ~width:(max 1 (framed_inner_width cols))
-      ~runner row
+      ~freshness:(schedule_list_freshness state) ~runner row
       ~wake_history:state.schedule_wake_history
       ~wake_history_error:state.schedule_wake_history_error
   in

@@ -35,6 +35,7 @@ let empty_wake_enqueue_counts =
 
 type last_success =
   { finished_at : float
+  ; held_at : float
   ; held : Schedule_runner.wake_signal list
   }
 
@@ -180,7 +181,12 @@ let record_tick_ok
     ; success_count = current.success_count + 1
     ; last_tick_started_at = Some started_at
     ; last_tick_finished_at = Some finished_at
-    ; last_success = Some { finished_at; held = result.Schedule_runner.held }
+    ; last_success =
+        Some
+          { finished_at
+          ; held_at = result.Schedule_runner.held_at
+          ; held = result.held
+          }
     ; last_duration_sec = Some (duration ~started_at ~finished_at)
     ; last_counts = Some counts
     ; totals = add_counts current.totals counts
@@ -215,13 +221,13 @@ let snapshot () = Atomic.get state
 let held_occurrence snapshot ~schedule_instance_id ~schedule_id =
   match snapshot.last_success with
   | None -> None
-  | Some { finished_at; held } ->
+  | Some { held_at; held; _ } ->
     List.find_opt
       (fun (signal : Schedule_runner.wake_signal) ->
          String.equal signal.schedule_instance_id schedule_instance_id
          && String.equal signal.schedule_id schedule_id)
       held
-    |> Option.map (fun signal -> { signal; observed_at = finished_at })
+    |> Option.map (fun signal -> { signal; observed_at = held_at })
 ;;
 
 let last_success_at snapshot =

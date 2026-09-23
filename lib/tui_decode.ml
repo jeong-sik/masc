@@ -11265,6 +11265,12 @@ type schedule_runner_hold =
   ; srh_observed_at : float
   }
 
+(* 9999-12-31T23:59:59Z. The hold's time is drawn through [Unix.localtime],
+   which fails with EOVERFLOW far above this (from 1e17 on macOS, measured),
+   and the Schedules render has no handler for that. A time the wire can carry
+   but no clock on the screen can mean is refused here, where it is read. *)
+let latest_drawable_unix_seconds = 253_402_300_799.0
+
 (* The server writes [runner_hold] on every row, [null] when nothing is held.
    A row without the key is a server that does not say, and reading it as
    [null] would draw a held schedule as a free one (#38413). *)
@@ -11278,34 +11284,68 @@ let decode_schedule_runner_hold row =
     let* observed_at = required_nullable_float_field hold "observed_at" in
     let* srh_observed_at =
       match observed_at with
-      | Some time when Float.is_finite time && time >= 0.0 -> Ok time
+      | Some time
+        when Float.is_finite time && time >= 0.0 && time <= latest_drawable_unix_seconds
+        -> Ok time
       | Some _ | None ->
-        Error "runner_hold observed_at must be a finite, non-negative time"
+        Error "runner_hold observed_at must be a time from 1970 to the end of year 9999"
     in
     Ok (Some { srh_occurrence_id; srh_due_at_iso; srh_observed_at })
   | bad -> field_type_error "runner_hold" "an object or null" bad
 ;;
 
+type schedule_runner_status =
+  | Runner_status of Schedule_contract_values.runner_status
+  | Runner_unrecognised of string
+
+(* The object and its word are required. A word this build does not know is
+   kept as itself rather than refused: refusing it failed the whole list --
+   Schedules, a Keeper's Automation tab and the agenda -- over one word. *)
 let decode_schedule_runner_status snapshot =
   let* runner = required_object_field snapshot "schedule_runner" in
   let* word = required_string_field runner "status" in
-  Schedule_contract_values.runner_status_of_string word
-  |> Result.map_error Schedule_contract_values.decode_error_to_string
+  match Schedule_contract_values.runner_status_of_string word with
+  | Ok status -> Ok (Runner_status status)
+  | Error _ -> Ok (Runner_unrecognised word)
 ;;
+
+type schedule_list_freshness =
+  | List_latest
+  | List_kept
 
 type schedule_hold_reading =
   | Hold_current
   | Hold_as_of of float
 
-(* Only a runner whose newest tick succeeded cleanly and recently vouches for
-   its list now. Every other status means the list is the one a tick read
-   before, so the hold is drawn at the time it was read (#38411). *)
-let schedule_hold_reading ~(runner : Schedule_contract_values.runner_status) hold =
-  match runner with
-  | Schedule_contract_values.Runner_ok -> Hold_current
-  | Schedule_contract_values.Runner_not_started
-  | Schedule_contract_values.Runner_running
-  | Schedule_contract_values.Runner_stale
-  | Schedule_contract_values.Runner_degraded ->
-    Hold_as_of hold.srh_observed_at
+(* Only the latest answer from a runner whose status is [ok] -- its newest
+   tick succeeded, recently and without failures -- vouches for a hold now.
+   [stale] and a failed tick mean the list is from an earlier tick. [degraded]
+   can also mean the newest tick read the list and then dispatched with
+   failures, so the list is the newest one while the runner says it is not
+   healthy. [running] has not finished a new read; [not_started] has made none;
+   a word this build does not know says nothing. A list kept after a failed
+   reload is an earlier answer whatever its runner said then. In all of these
+   the hold is drawn at the time it was read (#38411). *)
+let schedule_hold_reading
+      ~(freshness : schedule_list_freshness)
+      ~(runner : schedule_runner_status)
+      hold
+  =
+  match freshness, runner with
+  | List_latest, Runner_status Schedule_contract_values.Runner_ok -> Hold_current
+  | ( List_latest
+    , Runner_status
+        ( Schedule_contract_values.Runner_not_started
+        | Schedule_contract_values.Runner_running
+        | Schedule_contract_values.Runner_stale
+        | Schedule_contract_values.Runner_degraded ) )
+  | List_latest, Runner_unrecognised _
+  | ( List_kept
+    , Runner_status
+        ( Schedule_contract_values.Runner_ok
+        | Schedule_contract_values.Runner_not_started
+        | Schedule_contract_values.Runner_running
+        | Schedule_contract_values.Runner_stale
+        | Schedule_contract_values.Runner_degraded ) )
+  | List_kept, Runner_unrecognised _ -> Hold_as_of hold.srh_observed_at
 ;;

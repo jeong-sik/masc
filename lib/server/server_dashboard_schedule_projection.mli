@@ -35,10 +35,12 @@ val scheduled_automation_dashboard_json :
     runner's newest successful tick held back for that schedule, read from
     [Schedule_runner_status] (the list [/health] reports as
     [schedule_runner.held]), or [null] when it holds none. Its [observed_at]
-    is when that tick finished. The response carries the runner's own status
-    once, as [schedule_runner] -- the same object [/health] reports, not
-    narrowed by [payload_target] -- because a tick that fails does not
-    re-read the list, and only that status says whether a hold is current.
+    is when that tick decided the hold. The response carries the runner's
+    status word once, as [schedule_runner.status] -- the word [/health]
+    reports, with the same threshold -- because a tick that fails does not
+    re-read the list, and only that word says whether a hold is current. The
+    object carries nothing else, so a page scoped to one target does not carry
+    the fleet's holds or counts.
 
     A ledger read failure is reported, not hidden: [status] is ["unknown"],
     [counts] / [request_count] / [fsm.active_count] are [null], and

@@ -1907,6 +1907,12 @@ let test_schedule_page_can_be_scoped_to_one_target () =
   check int "the scoped limit is its own number"
     Server_dashboard_schedule_projection.schedule_projection_target_request_limit
     (scoped |> member "request_limit" |> to_int);
+  (* #38411: the runner's status rides the scoped page too, but only the word.
+     The rest of /health's runner object is every target's holds and every
+     tick's totals, which this page would carry as this Keeper's. *)
+  check (list string) "the scoped page carries the runner's status and nothing of the fleet's"
+    [ "schema"; "status" ]
+    (scoped |> member "schedule_runner" |> keys |> List.sort String.compare);
   let fleet =
     Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in

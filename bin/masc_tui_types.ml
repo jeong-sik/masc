@@ -1549,10 +1549,12 @@ type schedule_snapshot = {
       [scs_request_count = None] carries. *)
   scs_counts: (Schedule_domain.schedule_status * int) list option;
   scs_rows: schedule_row list;
-  scs_runner_status: Schedule_contract_values.runner_status;
-  (** The schedule runner's own status, sent once beside the rows. A row's
-      [sch_runner_hold] is the runner's reading at its [srh_observed_at], and
-      only [Runner_ok] says the runner has read it again since (#38411). *)
+  scs_runner_status: Tui_decode.schedule_runner_status;
+  (** The schedule runner's status word, sent once beside the rows. A row's
+      [sch_runner_hold] is what the runner's newest successful tick decided,
+      at its [srh_observed_at]; only [Runner_ok] says that tick is recent and
+      the runner is healthy, so only then is the hold drawn as the present
+      (#38411). *)
 }
 
 (** One recorded wake attempt of a schedule instance. The list surface carries

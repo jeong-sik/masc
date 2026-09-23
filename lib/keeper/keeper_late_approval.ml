@@ -185,7 +185,7 @@ let take t ?(now = Unix.gettimeofday ()) ~keeper_name ~tool_name ~args () =
             "keeper_late_approval: consumed remembered decision keeper=%s tool=%s decision=%s actor=%s"
             keeper_name entry.remembered_tool_name
             (Registry.decision_to_string entry.remembered_decision)
-            (Option.value entry.remembered_decision_actor ~default:"unattributed");
+            (Option.value entry.remembered_decision_actor ~default:"unattributed"); (* NDT-OK: the actor is a stored record field, not parsed input; the default only labels a log line *)
           t.remembered <-
             List.filter
               (fun existing ->

@@ -24,12 +24,14 @@ type librarian_health =
           traces, or when the snapshot is ahead: none of those is a caught-up
           keeper, and a zero would say it was. *)
   ; last_success_at : float option
-      (** [updated_at] of the current snapshot when the Librarian is what
-          wrote it. An explicit write is not a Librarian success. *)
+      (** [recorded_at] of the newest journal line the Librarian committed.
+          An explicit write or retraction commits its own line and is not a
+          Librarian success, so it neither sets nor clears this. *)
   ; last_failure_kind : string option
-      (** The kind on the journal's last line when that line is a failure. A
-          failure older than the last success is not shown: the pass after it
-          committed. *)
+      (** The kind of the newest Librarian failure journaled after
+          [last_success_at], or after the journal's start when the Librarian
+          never committed. A failure older than the last success is not
+          shown: the pass after it committed. *)
   }
 
 type context_cycle =
@@ -182,11 +184,10 @@ let rendered_source_bytes ~facts ~invalidations =
    continuity round publishes nothing this process can read, and a health
    request that waited for one would show nothing for a keeper whose round
    has not run since boot. *)
-(* The read position lives under the runtime keepers dir, one folder per
-   keeper, while the journal and the snapshots this handler otherwise reads
-   are flat files under the config keepers dir. Both parameters were called
-   [keepers_dir], so passing the wrong one read nothing and every lag came
-   back as "cannot say". The name here says which root it is. *)
+(* [runtime_keepers_dir] is the root the read position lives under, one
+   folder per keeper. The journal and the snapshots this handler otherwise
+   reads are flat files under the config keepers dir, which the caller passes
+   as [keepers_dir]. *)
 let continuity_unread_atoms ~runtime_keepers_dir ~keeper_id saved =
   match (saved : Keeper_continuity_observation.frontier option) with
   | None -> None
@@ -199,22 +200,73 @@ let continuity_unread_atoms ~runtime_keepers_dir ~keeper_id saved =
      | Ok (Some _) | Ok None | Error _ -> None)
 ;;
 
-let librarian_health ~config ~keepers_dir keeper_id ~snapshot ~continuity_saved =
+(* What a newest-first walk over journal lines found before it ran out of
+   lines: the newest Librarian commit, if it reached one, and the newest
+   Librarian failure it passed on the way there. *)
+type librarian_journal_walk =
+  | Reached_librarian_commit of
+      { committed_at : float
+      ; failure_after : Keeper_memory_os_current.librarian_failure_kind option
+      }
+  | No_librarian_commit of
+      { newest_failure : Keeper_memory_os_current.librarian_failure_kind option }
+
+let rec walk_newest_first ~newest_failure = function
+  | [] -> No_librarian_commit { newest_failure }
+  | Ok
+      (Keeper_memory_os_current.Journal_committed
+         { recorded_at; source = { kind = Keeper_memory_os_current.Librarian; _ }; _ })
+    :: _ -> Reached_librarian_commit { committed_at = recorded_at; failure_after = newest_failure }
+  | Ok (Keeper_memory_os_current.Journal_failed { kind; _ }) :: older ->
+    let newest_failure =
+      match newest_failure with
+      | Some _ -> newest_failure
+      | None -> Some kind
+    in
+    walk_newest_first ~newest_failure older
+  | Ok
+      (Keeper_memory_os_current.Journal_committed
+         { source =
+             { kind = Keeper_memory_os_current.(Explicit_write | Explicit_retract); _ }; _ })
+    :: older
+  | Ok (Keeper_memory_os_current.Journal_quarantined _) :: older
+  | Error _ :: older -> walk_newest_first ~newest_failure older
+;;
+
+(* Every [keeper_memory_write] and retraction journals a committed line of
+   its own, so the last line says nothing about the Librarian: one write after
+   a failed pass hid the failure, and one write after a good pass hid the
+   success. The answer is the newest Librarian commit and whatever Librarian
+   failure came after it, wherever in the journal that commit sits.
+
+   The journal is append-only and one keeper's runs to a few MB, and the tail
+   reader takes a line count, so the read starts at the last line and doubles
+   the window until the walk reaches a Librarian commit or the reader returns
+   fewer lines than asked -- the start of the file. The starting window is not
+   a cap: it bounds nothing, and a request reads back only as far as its
+   answer. *)
+let librarian_journal_outcome ~keepers_dir ~keeper_id =
+  let rec read ~window =
+    let lines =
+      Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id ~limit:window
+    in
+    match walk_newest_first ~newest_failure:None (List.rev lines) with
+    | Reached_librarian_commit { committed_at; failure_after } ->
+      Some committed_at, failure_after
+    | No_librarian_commit { newest_failure } when List.length lines < window ->
+      None, newest_failure
+    | No_librarian_commit _ -> read ~window:(window * 2)
+  in
+  read ~window:1
+;;
+
+let librarian_health ~config ~keepers_dir keeper_id ~continuity_saved =
   let measurement = Keeper_librarian_queue_refresh.last_measurement ~config ~keeper_name:keeper_id in
-  let last_success_at =
-    match (snapshot : Keeper_memory_os_current.t option) with
-    | Some { updated_at; source = { kind = Keeper_memory_os_current.Librarian; _ }; _ } ->
-      Some updated_at
-    | Some { source = { kind = Explicit_write | Explicit_retract; _ }; _ } | None -> None
+  let last_success_at, last_failure =
+    librarian_journal_outcome ~keepers_dir ~keeper_id
   in
   let last_failure_kind =
-    match
-      Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1
-    with
-    | [ Ok (Keeper_memory_os_current.Journal_failed { recorded_at; kind; _ }) ]
-      when Option.fold ~none:true ~some:(fun success -> recorded_at > success) last_success_at
-      -> Some (Keeper_memory_os_current.librarian_failure_kind_to_string kind)
-    | [] | [ Ok _ ] | [ Error _ ] | _ :: _ :: _ -> None
+    Option.map Keeper_memory_os_current.librarian_failure_kind_to_string last_failure
   in
   { state = Option.map (fun (m : Keeper_librarian_queue_refresh.measurement) -> m.last_pass) measurement
   ; measured_at =
@@ -352,8 +404,8 @@ let source_health ~keepers_dir keeper_id =
 let keeper_health ~config ~keepers_dir keeper_id =
   let source_health = source_health ~keepers_dir keeper_id in
   let context_cycle = context_cycle ~config ~keeper_name:keeper_id in
-  let librarian ~snapshot =
-    librarian_health ~config ~keepers_dir keeper_id ~snapshot
+  let librarian =
+    librarian_health ~config ~keepers_dir keeper_id
       ~continuity_saved:context_cycle.saved
   in
   match
@@ -372,7 +424,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
     ; removed = 0
     ; snapshot_present = false
     ; context_cycle
-    ; librarian = librarian ~snapshot:None
+    ; librarian
     ; librarian_failures = librarian_failures_for_keeper keeper_id
     ; vision_ingest_errors =
         vision_ingest_error_count_for_keeper keeper_id
@@ -407,7 +459,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
     ; removed = List.length snapshot.change.removed
     ; snapshot_present = true
     ; context_cycle
-    ; librarian = librarian ~snapshot:(Some snapshot)
+    ; librarian
     ; librarian_failures = librarian_failures_for_keeper keeper_id
     ; vision_ingest_errors =
         vision_ingest_error_count_for_keeper keeper_id
@@ -433,7 +485,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
     ; removed = 0
     ; snapshot_present = false
     ; context_cycle
-    ; librarian = librarian ~snapshot:None
+    ; librarian
     ; librarian_failures = librarian_failures_for_keeper keeper_id
     ; vision_ingest_errors =
         vision_ingest_error_count_for_keeper keeper_id

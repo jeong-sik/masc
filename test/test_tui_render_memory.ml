@@ -383,6 +383,68 @@ let test_an_empty_memory_page_uses_the_shared_notes () =
   check bool "the body leaves the fleet key to the footer" false
     (contains "Fleet Memory Search" (lines unread))
 ;;
+let make_fleet_health keeper : Decode.memory_health_snapshot =
+  { mhs_generated_at = 1000.0
+  ; mhs_keepers = [ keeper ]
+  ; mhs_refused_keepers = []
+  ; mhs_total_facts = 10
+  ; mhs_total_observed_facts = 10
+  ; mhs_total_derived_facts = 0
+  ; mhs_total_support_invalidations = 0
+  ; mhs_total_snapshot_bytes = 1024
+  ; mhs_total_source_facts = 0
+  ; mhs_total_source_invalidations = 0
+  ; mhs_total_source_snapshot_bytes = 0
+  ; mhs_total_librarian_failures = 0
+  ; mhs_total_librarian_unread_turns = Some 0
+  ; mhs_total_librarian_continuity_unread_atoms = 0
+  ; mhs_total_librarian_continuity_unmeasured = 0
+  ; mhs_total_vision_ingest_errors = 0
+  ; mhs_total_read_errors = 0
+  ; mhs_total_source_read_errors = 0
+  ; mhs_warn_alerts = 0
+  ; mhs_error_alerts = 0
+  ; mhs_starving_keepers = 0
+  }
+
+let rows_drawn ~cols ~budget state =
+  let count = ref 0 in
+  Render_memory.render_memory_body ~cols ~budget state
+    ~push:(fun _ -> incr count)
+    ~push_styled:(fun ~style:_ _ -> incr count)
+    ~push_selected:(fun _ -> incr count)
+    ~push_divider:(fun () -> incr count)
+    ~push_empty:(fun () -> incr count);
+  !count
+
+(* The fleet readings wrap, so the header takes more rows at a narrow width
+   than a fixed count could assume; the scroll bound now receives the real
+   length ([~header_rows]) instead of a guess, and the body has to draw inside
+   the budget that pays for them. A header that grows without the bound
+   following draws the list past the rows it was handed, and the keypress
+   bound then names rows the frame never drew -- the failure this file caught
+   when the wrapping landed without the counting (#36497). *)
+let test_memory_header_rows_come_out_of_the_budget () =
+  let state = make_state () in
+  let keeper =
+    make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024
+  in
+  state.memory_health <- Some (make_fleet_health keeper);
+  state.memory_health_cursor <- 0;
+  (* Without this the budget assertions below are vacuous: a header that never
+     wrapped would satisfy them while proving nothing. *)
+  check bool "the header takes more rows at 80 columns than at 140" true
+    (List.length (Render_memory.memory_fleet_header_rows ~cols:80 state)
+     > List.length (Render_memory.memory_fleet_header_rows ~cols:140 state));
+  List.iter
+    (fun cols ->
+      check bool
+        (Printf.sprintf "%d columns draws inside its budget" cols)
+        true
+        (rows_drawn ~cols ~budget:20 state <= 20))
+    [ 80; 100; 140 ]
+;;
+
 
 (* The filter bar names the filter its number is over.
 
@@ -1606,6 +1668,8 @@ let () =
         ] )
     ; ( "render_body"
       , [ test_case "memory_body_budget" `Quick test_render_memory_body
+        ; test_case "header rows come out of the budget" `Quick
+            test_memory_header_rows_come_out_of_the_budget
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
         ; test_case "the filter bar names the query it counted" `Quick
             test_the_memory_filter_bar_names_the_query_it_counted

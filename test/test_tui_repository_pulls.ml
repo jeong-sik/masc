@@ -33,7 +33,7 @@ let every_state : Server.snapshot =
   { reader = Server.Reader_ready { keeper = "pr-updater" }
   ; repositories_error = None
   ; rejected_token_digest = None
-  ; keepers = Server.Keepers_listed [ "k-author" ]
+  ; keepers = Server.Keepers_listed [ "k-author"; "k-idle" ]
   ; repositories =
       [ entry "masc"
           (Server.Pulls_read
@@ -47,6 +47,7 @@ let every_state : Server.snapshot =
                  ; pull ~checks:Server.Checks_none ~review:Server.Review_none ~draft:true 5
                  ; pull ~author:(Some "k-author") ~mergeable:Server.Conflicting 6
                  ; pull ~author:None ~mergeable:Server.Mergeable_unknown 7
+                 ; pull ~author:(Some "k-author") ~checks:Server.Checks_failing 8
                  ]
              })
       ; entry "mirror" Server.Pulls_not_github
@@ -92,7 +93,7 @@ let test_every_server_state_decodes () =
       in
       (match state_of "masc" with
        | Repo_pulls_read { pulls; undecodable } ->
-           check int "every pull decodes" 7 (List.length pulls);
+           check int "every pull decodes" 8 (List.length pulls);
            let six = List.find (fun (p : open_pull) -> p.op_number = 6) pulls in
            check (option string) "the author join reaches the TUI" (Some "k-author")
              six.op_keeper;
@@ -134,7 +135,7 @@ let contains needle line =
 let test_lines_say_what_needs_a_person () =
   let lines = lines_of every_state in
   let has needle = List.exists (contains needle) lines in
-  check bool "failing checks are counted" true (has "1 checks failing");
+  check bool "failing checks are counted" true (has "2 checks failing");
   check bool "changes requested are counted" true (has "1 changes requested");
   check bool "drafts are counted" true (has "1 draft");
   check bool "conflicts are counted" true (has "1 conflicting");
@@ -158,6 +159,23 @@ let test_keeper_list_states () =
   check bool "an unread Keeper list is said, not counted as unmatched" true
     (List.exists (contains "Keeper list unread") lines)
 
+(* The Team row tag: a Keeper with PRs gets its first PR's number and a
+   "+N" for the rest; a Keeper with none, and every Keeper while the list
+   was not read, gets nothing. *)
+let test_keeper_tag () =
+  let tag = Pulls.keeper_tag (decode every_state) in
+  let author = strip (tag "k-author") in
+  check bool "the Keeper's first PR is tagged" true (contains "#6" author);
+  check bool "its second PR is counted" true (contains "+1" author);
+  check string "a Keeper with no PR gets no tag" "" (tag "k-idle");
+  check string "a PR author who is no Keeper is on no row" "" (tag "someone");
+  let unread =
+    Pulls.keeper_tag (decode { every_state with keepers = Server.Keepers_list_failed "x" })
+  in
+  (* The server nulls every PR's keeper while its list is unread; this
+     checks the two sides together. *)
+  check string "an unread Keeper list attaches nothing" "" (unread "k-author")
+
 let () =
   run "tui_repository_pulls"
     [ ( "server JSON"
@@ -165,5 +183,6 @@ let () =
         ; test_case "every reader state decodes" `Quick test_every_reader_state_decodes
         ; test_case "lines say what needs a person" `Quick test_lines_say_what_needs_a_person
         ; test_case "keeper list states" `Quick test_keeper_list_states
+        ; test_case "keeper tag" `Quick test_keeper_tag
         ] )
     ]

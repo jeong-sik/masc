@@ -265,3 +265,55 @@ let lines (reading : overview_pulls_reading) =
       | [] -> [ dim "\xe2\x87\x85 pull requests: no registered GitHub repository" ]
       | lines -> lines
 
+
+(* A Keeper's open pull requests: those the server joined to that Keeper by
+   last commit author (RFC-0465 §2.1). The server leaves [keeper] null on
+   every PR while its Keeper list is unread, so nothing is attached then. *)
+let pulls_of_keeper (reading : overview_pulls_reading) =
+  let pulls =
+    match reading with
+    | Overview_pulls_read { repositories; _ } ->
+        List.concat_map
+          (fun (row : repository_pulls_row) ->
+            match row.rp_state with
+            | Repo_pulls_read { pulls; _ } -> pulls
+            | Repo_pulls_failed _ | Repo_pulls_not_read | Repo_not_github -> [])
+          repositories
+    | Overview_pulls_unread | Overview_pulls_failed _ -> []
+  in
+  fun name ->
+    List.filter
+      (fun (pull : open_pull) ->
+        match pull.op_keeper with
+        | Some keeper -> String.equal name keeper
+        | None -> false)
+      pulls
+
+(* The tag a Team row carries ahead of its detail: the first PR's number and
+   one glyph for its checks ("#38078✓"; ✓ passing, ✗ failing, ◐ running,
+   · none), "+N" for more. Empty for a Keeper with none. *)
+let keeper_tag (reading : overview_pulls_reading) =
+  let of_keeper = pulls_of_keeper reading in
+  fun name ->
+    match of_keeper name with
+    | [] -> ""
+    | (pull : open_pull) :: rest ->
+        let glyph, glyph_tone =
+          match pull.op_checks with
+          | Pull_checks_passing -> ("\xe2\x9c\x93", Theme.ok ())
+          | Pull_checks_failing -> ("\xe2\x9c\x97", Theme.bad ())
+          | Pull_checks_running -> ("\xe2\x97\x90", Theme.info ())
+          | Pull_checks_none -> ("\xc2\xb7", Ansi.dim)
+        in
+        (* A conflicting PR's number is drawn in the warning tone: green
+           checks do not make it mergeable. *)
+        let number_tone, number_reset =
+          match pull.op_mergeable with
+          | Pull_conflicting -> (Theme.warn (), Ansi.reset)
+          | Pull_mergeable | Pull_mergeable_unknown -> ("", "")
+        in
+        Printf.sprintf "%s#%d%s%s%s%s%s " number_tone pull.op_number number_reset
+          glyph_tone glyph Ansi.reset
+          (match rest with
+           | [] -> ""
+           | _ :: _ -> Printf.sprintf "%s+%d%s" Ansi.dim (List.length rest) Ansi.reset)

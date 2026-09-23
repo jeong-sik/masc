@@ -2480,8 +2480,8 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ];
   check_fields "overview_layout" [ "tasks_error" ];
   (* The Team block prints Keeper names and task text that producers wrote. *)
-  (* pulls_of_keeper looks the name up; it does not draw it. *)
-  check_fields ~non_rendering_calls:[ "pulls_of_keeper" ] "overview_team_lines"
+  (* pr_tag_of_keeper looks the name up; it does not draw it. *)
+  check_fields ~non_rendering_calls:[ "pr_tag_of_keeper" ] "overview_team_lines"
     [ "okp_name"; "id"; "title" ];
   (* The pull request lines print repository ids and failure text the server
      relayed from GitHub. *)

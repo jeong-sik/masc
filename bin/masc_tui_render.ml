@@ -385,33 +385,8 @@ let overview_team_detail_lines (state : state) =
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the parked roll call and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
-(* Each Keeper's open pull requests: the PRs whose last commit author is
-   that Keeper (RFC-0465 §2.1). Nothing is attached while the Keeper list
-   was not read. *)
-let overview_pulls_of_keeper (state : state) =
-  let pulls =
-    match state.overview_pulls with
-    | Overview_pulls_read { keepers = Pulls_keepers_listed; repositories; _ } ->
-        List.concat_map
-          (fun (row : repository_pulls_row) ->
-            match row.rp_state with
-            | Repo_pulls_read { pulls; _ } -> pulls
-            | Repo_pulls_failed _ | Repo_pulls_not_read | Repo_not_github -> [])
-          repositories
-    | Overview_pulls_read
-        { keepers = Pulls_keepers_not_listed | Pulls_keepers_failed _; _ }
-    | Overview_pulls_unread | Overview_pulls_failed _ -> []
-  in
-  fun name ->
-    List.filter
-      (fun (pull : open_pull) ->
-        match pull.op_keeper with
-        | Some keeper -> String.equal name keeper
-        | None -> false)
-      pulls
-
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~quota_line ~detail_lines ~pulls_of_keeper =
+    ~quota_line ~detail_lines ~pr_tag_of_keeper =
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -462,30 +437,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
     in
     (* The Keeper's PR, ahead of the detail so a narrow row keeps it: its
        number and one glyph for its checks, "+N" for more. *)
-    let pr_tag =
-      match pulls_of_keeper row.keeper.okp_name with
-      | [] -> ""
-      | (pull : open_pull) :: rest ->
-          let glyph, glyph_tone =
-            match pull.op_checks with
-            | Pull_checks_passing -> ("\xe2\x9c\x93", Theme.ok ())
-            | Pull_checks_failing -> ("\xe2\x9c\x97", Theme.bad ())
-            | Pull_checks_running -> ("\xe2\x97\x90", Theme.info ())
-            | Pull_checks_none -> ("\xc2\xb7", Ansi.dim)
-          in
-          (* A conflicting PR's number is drawn in the warning tone: green
-             checks do not make it mergeable. *)
-          let number_tone, number_reset =
-            match pull.op_mergeable with
-            | Pull_conflicting -> (Theme.warn (), Ansi.reset)
-            | Pull_mergeable | Pull_mergeable_unknown -> ("", "")
-          in
-          Printf.sprintf "%s#%d%s%s%s%s%s " number_tone pull.op_number number_reset
-            glyph_tone glyph Ansi.reset
-            (match rest with
-             | [] -> ""
-             | _ :: _ -> Printf.sprintf "%s+%d%s" Ansi.dim (List.length rest) Ansi.reset)
-    in
+    let pr_tag = pr_tag_of_keeper row.keeper.okp_name in
     Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s" tone mark Ansi.reset
       (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
       tone
@@ -988,7 +940,7 @@ let render_overview (state : state) =
            ~flow:state.task_flow ~cols
            ~quota_line:(overview_quota_line state ~now:(Unix.gettimeofday ()))
            ~detail_lines:(overview_team_detail_lines state)
-           ~pulls_of_keeper:(overview_pulls_of_keeper state)
+           ~pr_tag_of_keeper:(Repository_pulls.keeper_tag state.overview_pulls)
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;

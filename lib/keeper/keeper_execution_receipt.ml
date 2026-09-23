@@ -592,6 +592,57 @@ let latest_json (config : Workspace.config) keeper_name =
   | _ -> None
 ;;
 
+type latest_receipt_summary =
+  { latest_outcome : outcome_kind
+  ; latest_terminal_reason_code : string
+  ; latest_error_message : string option
+  ; latest_ended_at : string
+  }
+
+type latest_receipt_reading =
+  | No_receipt
+  | Latest_receipt of latest_receipt_summary
+  | Latest_receipt_undecodable of { field : string }
+  | Receipt_store_unreadable of Dated_jsonl.read_error
+
+let latest_receipt_reading_of_json json =
+  match
+    Option.bind
+      (Json_util.assoc_string_opt "outcome" json)
+      Keeper_execution_receipt_outcome_kind.outcome_kind_of_tla_receipt
+  with
+  | None -> Latest_receipt_undecodable { field = "outcome" }
+  | Some latest_outcome ->
+    (match
+       ( Json_util.assoc_string_opt "terminal_reason_code" json
+       , Json_util.assoc_string_opt "ended_at" json )
+     with
+     | None, _ -> Latest_receipt_undecodable { field = "terminal_reason_code" }
+     | _, None -> Latest_receipt_undecodable { field = "ended_at" }
+     | Some latest_terminal_reason_code, Some latest_ended_at ->
+       Latest_receipt
+         { latest_outcome
+         ; latest_terminal_reason_code
+         ; latest_error_message =
+             Option.bind
+               (Json_util.assoc_member_opt "error" json)
+               (Json_util.assoc_string_opt "message")
+         ; latest_ended_at
+         })
+;;
+
+let read_latest_receipt (config : Workspace.config) keeper_name =
+  let store = Keeper_types_support.keeper_execution_receipt_store config keeper_name in
+  match
+    Dated_jsonl.find_latest_entry_result store (function
+      | Dated_jsonl.Parsed json -> Some json
+      | Dated_jsonl.Malformed_json _ -> None)
+  with
+  | Error err -> Receipt_store_unreadable err
+  | Ok None -> No_receipt
+  | Ok (Some json) -> latest_receipt_reading_of_json json
+;;
+
 let latest_json_by_keeper (config : Workspace.config) keeper_names =
   keeper_names
   |> List.filter_map (fun keeper_name ->

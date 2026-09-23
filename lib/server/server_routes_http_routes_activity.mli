@@ -54,8 +54,3 @@ val mutate_runtime_param_with_effects :
     serialized operation for the Keeper cadence key. Other keys remain
     independent and do not contend on the cadence side-effect lock. *)
 
-val schedule_stamp_operator_actor :
-  agent_name:string -> Yojson.Safe.t -> Yojson.Safe.t
-(** Overwrite the actor fields of a schedule-write argument object with the
-    authenticated operator identity, so a client-supplied actor claim cannot
-    spoof the audit trail. Non-object arguments pass through unchanged. *)

@@ -15,6 +15,14 @@ let class_of (err : Agent_core.Error.t) =
     "api:context_overflow"
   | Agent_core.Error.Api (Agent_core.Retry.Timeout _) -> "api:timeout"
   | Agent_core.Error.Provider (Llm_provider.Error.AuthError _) -> "provider:auth"
+  | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) -> "provider:hard_quota"
+  | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _) -> "provider:rate_limit"
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.NetworkError { kind = Llm_provider.Http_client.End_of_file; _ }) ->
+    "provider:network:end_of_file"
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.NetworkError { kind = Llm_provider.Http_client.Unknown; _ }) ->
+    "provider:network:unknown"
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) ->
     "provider:unavailable"
   | Agent_core.Error.Provider (Llm_provider.Error.ParseError _) ->
@@ -77,7 +85,8 @@ let test_every_variant_lands_in_its_class () =
   check "turn input write failure"
     (Codex.Turn_input_write_failed "pipe closed") "provider:unavailable";
   check "turn_failed"
-    (Codex.Turn_failed "stream disconnected before completion")
+    (Codex.Turn_failed
+       { detail = "stream disconnected before completion"; codex_error_info = None })
     "provider:reported:turn_failed";
   check "idle timeout before turn/start rotates"
     (Codex.Timeout { seconds = 300.0; turn_accepted = false })
@@ -96,6 +105,74 @@ let test_every_variant_lands_in_its_class () =
   check "runtime shutdown is a typed host stop"
     Codex.Runtime_shutting_down
     "masc:host_stopped_turn"
+;;
+
+(* The provider's [codexErrorInfo] picks the class. Every constructor is
+   listed so a new one shows up here as well as in the mapping. *)
+let test_codex_error_info_lands_in_its_class () =
+  let failed info =
+    Codex.Turn_failed { detail = "fixture"; codex_error_info = Some info }
+  in
+  List.iter
+    (fun (label, info, expected) -> check label (failed info) expected)
+    Codex.Codex_error_info.
+      [ "usage limit", Usage_limit_exceeded, "provider:hard_quota"
+      ; "session budget", Session_budget_exceeded, "provider:hard_quota"
+      ; "rate limit", Rate_limit_exceeded, "provider:rate_limit"
+      ; "server overloaded", Server_overloaded, "provider:unavailable"
+      ; "internal server error", Internal_server_error, "provider:unavailable"
+      ; ( "too many failed attempts"
+        , Response_too_many_failed_attempts { http_status_code = None }
+        , "provider:unavailable" )
+      ; ( "http connection failed"
+        , Http_connection_failed { http_status_code = Some 502 }
+        , "provider:network:unknown" )
+      ; ( "stream connection failed"
+        , Response_stream_connection_failed { http_status_code = None }
+        , "provider:network:unknown" )
+      ; ( "stream disconnected"
+        , Response_stream_disconnected { http_status_code = None }
+        , "provider:network:end_of_file" )
+      ; "unauthorized", Unauthorized, "provider:auth"
+      ; "bad request", Bad_request, "provider:reported:turn_failed"
+      ; "cyber policy", Cyber_policy, "provider:reported:turn_failed"
+      ; ( "misalignment"
+        , Misalignment_policy_violation
+        , "provider:reported:turn_failed" )
+      ; "rollback", Thread_rollback_failed, "provider:reported:turn_failed"
+      ; "sandbox", Sandbox_error, "provider:reported:turn_failed"
+      ; "other", Other, "provider:reported:turn_failed"
+      ; ( "not steerable"
+        , Active_turn_not_steerable { turn_kind = Review }
+        , "provider:reported:turn_failed" )
+      ; ( "unrecognized"
+        , Unrecognized (`String "newVendorCode")
+        , "provider:reported:turn_failed" )
+      ]
+;;
+
+(* A Codex head out of weekly usage must reach the quota route the turn
+   driver records as candidate evidence, the same route Claude Code's
+   [Quota_blocked] takes, not the rotation that records nothing. *)
+let test_usage_limit_routes_to_hard_quota () =
+  let error =
+    Map.codex_error_to_core_error
+      (Codex.Turn_failed
+         { detail = "You've hit your usage limit."
+         ; codex_error_info = Some Codex.Codex_error_info.Usage_limit_exceeded
+         })
+  in
+  match
+    Keeper_runtime_failure_route.route_of_error
+      ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+      error
+  with
+  | Keeper_runtime_failure_route.Retry_after_observed
+      { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after = None } -> ()
+  | Keeper_runtime_failure_route.Retry_after_observed _
+  | Keeper_runtime_failure_route.Rotate_now _
+  | Keeper_runtime_failure_route.Exhausted_visible_alive _ ->
+    Alcotest.fail "usage limit did not route to hard quota"
 ;;
 
 (* The class above says which constructor; this says the fields survive, which
@@ -154,7 +231,8 @@ let test_context_overflow_maps_to_input_rejected_recovery () =
     true;
   Alcotest.(check bool)
     "turn failures stay generic provider rejections"
-    (recovery (Codex.Turn_failed "stream disconnected")
+    (recovery
+       (Codex.Turn_failed { detail = "stream disconnected"; codex_error_info = None })
      = Masc.Keeper_official_client_session_store.Provider_rejected)
     true
   ; Alcotest.(check bool)
@@ -162,6 +240,116 @@ let test_context_overflow_maps_to_input_rejected_recovery () =
       (recovery Codex.Runtime_shutting_down
        = Masc.Keeper_official_client_session_store.Transport_interrupted)
       true
+;;
+
+(* A Gate continuation's thread that overflowed after a tool effect cannot
+   take the continuation again, so the Gate ends; an observation-free overflow
+   keeps the same-thread shrink retry. *)
+let test_gate_resume_overflow_after_effect_is_session_full () =
+  let recovery = Map.recovery_failure_of_attempt in
+  let overflow tool_effect_attempted =
+    Codex.Context_window_exceeded { message = "full"; tool_effect_attempted } in
+  let resume = Codex.Resume { thread_id = "thread-1" } in
+  Alcotest.(check bool)
+    "Gate resume after a tool effect is session-full"
+    (recovery ~thread_mode:resume ~gate_continuation:true (overflow true)
+     = Masc.Keeper_official_client_session_store.(Vendor_session_full Activity_observed))
+    true;
+  Alcotest.(check bool)
+    "Gate resume without activity keeps the shrink retry"
+    (recovery ~thread_mode:resume ~gate_continuation:true (overflow false)
+     = Masc.Keeper_official_client_session_store.(Input_rejected Bootstrap_floor_exceeded))
+    true;
+  Alcotest.(check bool)
+    "an ordinary resume after a tool effect stays effect-fenced"
+    (recovery ~thread_mode:resume ~gate_continuation:false (overflow true)
+     = Masc.Keeper_official_client_session_store.(Input_rejected Effect_fenced))
+    true
+;;
+
+(* A Gate resume that overflowed with no tool effect is retried smaller in
+   the same thread. Once nothing smaller is left, the floor rejection on record
+   is final: the Gate fails as a full session and cannot resend into the same
+   thread. An ordinary turn's rejection stays for the operator. *)
+let test_exhausted_gate_resume_is_session_full () =
+  let module Store = Masc.Keeper_official_client_session_store in
+  let base_path = Filename.temp_dir "masc-codex-gate-full-" "" in
+  let runtime_id = "codex.default" in
+  let owner_epoch = "11111111-1111-4111-8111-111111111111" in
+  let tool_surface_sha256 =
+    Store.tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [] in
+  let floor_rejected keeper_name =
+    let ok = Result.get_ok in
+    let claim expected at =
+      Store.claim ~base_path ~keeper_name ~expected ~client_kind:Store.Codex
+        ~owner_epoch ~runtime_id ~tool_surface_sha256 ~updated_at:at |> ok in
+    let claimed = claim None 1.0 in
+    let active =
+      Store.mark_active ~base_path ~keeper_name ~expected:claimed
+        ~session_id:"thread-1" ~updated_at:2.0 |> ok in
+    let starting =
+      Store.mark_turn_starting ~base_path ~keeper_name ~expected:active
+        ~session_id:"thread-1" ~updated_at:3.0 |> ok in
+    let inflight =
+      Store.mark_turn_started ~base_path ~keeper_name ~expected:starting
+        ~session_id:"thread-1" ~turn_id:"turn-1" ~turn_count:starting.turn_count
+        ~updated_at:4.0 |> ok in
+    let settled =
+      Store.settle ~base_path ~keeper_name ~expected:inflight ~session_id:"thread-1"
+        ~turn_id:"turn-1" ~updated_at:5.0 |> ok in
+    let resumed = claim (Some settled) 6.0 in
+    Store.require_recovery ~base_path ~keeper_name ~expected:resumed
+      ~failure:(Store.Input_rejected Store.Bootstrap_floor_exceeded)
+      ~detail:"the resumed thread refused the smallest input" ~required_at:7.0
+    |> ok
+  in
+  let recovery_of keeper_name =
+    match Store.load ~base_path ~keeper_name with
+    | Ok (Some ({ Store.phase = Store.Recovery_required recovery; _ } as state)) ->
+      state, recovery
+    | Ok _ | Error _ -> Alcotest.fail "the recovery record did not load back"
+  in
+  let rejected = floor_rejected "gate" in
+  let rejected_id =
+    match rejected.phase with
+    | Store.Recovery_required { recovery_id; _ } -> recovery_id
+    | _ -> Alcotest.fail "the floor rejection was not recorded"
+  in
+  Map.conclude_exhausted_gate_resume ~gate_continuation:true ~base_path
+    ~keeper_name:"gate" ~runtime_id ();
+  let concluded, recovery = recovery_of "gate" in
+  Alcotest.(check bool)
+    "the exhausted Gate resume is recorded as a full thread"
+    true
+    (recovery.failure = Store.Vendor_session_full Store.No_activity_observed);
+  Alcotest.(check string)
+    "the same recovery is re-recorded" rejected_id recovery.recovery_id;
+  let checkpoint : Keeper_semantic_execution.official_client_checkpoint =
+    { client_kind = Store.Codex; runtime_id; session_id = "thread-1"
+    ; turn_id = "turn-1"; tool_surface_sha256
+    ; frame = Keeper_repetition_snapshot.empty }
+  in
+  Alcotest.(check bool)
+    "the Gate operation fails with the session-full cause"
+    true
+    (Option.is_some
+       (Masc.Keeper_direct_gate_continuation.session_full_cause ~checkpoint
+          ~approval_id:"approval-1" (Some concluded)));
+  (match
+     Store.resolve_recovery ~base_path ~keeper_name:"gate" ~expected:concluded
+       ~recovery_id:recovery.recovery_id ~resolution:Store.Retry_previous
+       ~resolved_by:"operator" ~resolved_at:8.0
+   with
+   | Error Store.Retry_previous_unavailable -> ()
+   | Error _ | Ok _ -> Alcotest.fail "the full thread still offered Retry_previous");
+  ignore (floor_rejected "ordinary" : Store.t);
+  Map.conclude_exhausted_gate_resume ~gate_continuation:false ~base_path
+    ~keeper_name:"ordinary" ~runtime_id ();
+  let _, ordinary = recovery_of "ordinary" in
+  Alcotest.(check bool)
+    "an ordinary turn's floor rejection stays an input rejection"
+    true
+    (ordinary.failure = Store.Input_rejected Store.Bootstrap_floor_exceeded)
 ;;
 
 let test_transport_uncertainty_preserves_stronger_evidence () =
@@ -190,6 +378,14 @@ let () =
             `Quick
             test_every_variant_lands_in_its_class
         ; Alcotest.test_case
+            "codex error info lands in its class"
+            `Quick
+            test_codex_error_info_lands_in_its_class
+        ; Alcotest.test_case
+            "usage limit routes to hard quota"
+            `Quick
+            test_usage_limit_routes_to_hard_quota
+        ; Alcotest.test_case
             "a host stop and a closed connection carry their fields"
             `Quick
             test_host_stop_and_closed_connection_carry_their_fields
@@ -197,5 +393,13 @@ let () =
             "context overflow maps to input-rejected recovery"
             `Quick
             test_context_overflow_maps_to_input_rejected_recovery
+        ; Alcotest.test_case
+            "Gate resume overflow after a tool effect is session-full"
+            `Quick
+            test_gate_resume_overflow_after_effect_is_session_full
+        ; Alcotest.test_case
+            "an exhausted Gate resume ends as a full session"
+            `Quick
+            test_exhausted_gate_resume_is_session_full
         ] )
     ]

@@ -13,6 +13,7 @@
   workspace_bootstrap
   workspace_broadcast
   workspace_hooks
+  workspace_skill_publish
   workspace_telemetry_drop_event
   workspace_identity
   workspace_task_id

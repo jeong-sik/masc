@@ -692,8 +692,13 @@ export interface VerificationRequestsResponse {
   requests: VerificationRequest[]
 }
 
+/** Which list the server answers: the requests Tasks are waiting on now, or
+ * every submission ever stored. */
+export type VerificationRequestsView = 'awaiting' | 'all'
+
 interface FetchVerificationRequestsOptions {
   taskId?: string
+  view?: VerificationRequestsView
   limit?: number
   signal?: AbortSignal
 }
@@ -704,6 +709,9 @@ export function fetchVerificationRequests(
   const params = new URLSearchParams()
   if (opts?.taskId && opts.taskId.trim() !== '') {
     params.set('task_id', opts.taskId.trim())
+  }
+  if (opts?.view != null) {
+    params.set('view', opts.view)
   }
   if (opts?.limit != null) {
     params.set('limit', String(opts.limit))

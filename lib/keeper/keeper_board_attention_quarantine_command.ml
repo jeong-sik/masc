@@ -17,6 +17,7 @@ type t =
   { keeper_name : string
   ; partition_id : string
   ; request : request
+  ; requested_by : string
   }
 
 type input_error =
@@ -28,6 +29,7 @@ type input_error =
   | Unsupported_schema of string
   | Unsupported_decision of string
   | Invalid_keeper_name of string
+  | Invalid_requester
 
 type execution_error =
   | Candidate_state_conflict of string
@@ -120,15 +122,17 @@ let parse_request json =
   request_of_fields fields
 ;;
 
-let make ~keeper_name ~raw_partition_id request =
+let make ~keeper_name ~raw_partition_id ~requested_by request =
   if not (Keeper_config.validate_name keeper_name)
   then Error (Invalid_keeper_name keeper_name)
   else if String.equal (String.trim raw_partition_id) ""
   then Error (Invalid_field "partition_id")
-  else Ok { keeper_name; partition_id = raw_partition_id; request }
+  else if String.equal (String.trim requested_by) ""
+  then Error Invalid_requester
+  else Ok { keeper_name; partition_id = raw_partition_id; request; requested_by }
 ;;
 
-let parse_tool_command json =
+let parse_tool_command ~requested_by json =
   let* fields =
     validate_exact_object
       ~expected:
@@ -143,7 +147,7 @@ let parse_tool_command json =
   let* keeper_name = nonblank "keeper_name" (List.assoc "keeper_name" fields) in
   let* partition_id = nonblank "partition_id" (List.assoc "partition_id" fields) in
   let* request = request_of_fields fields in
-  make ~keeper_name ~raw_partition_id:partition_id request
+  make ~keeper_name ~raw_partition_id:partition_id ~requested_by request
 ;;
 
 let input_error_to_string = function
@@ -158,6 +162,7 @@ let input_error_to_string = function
   | Unsupported_schema schema -> "unsupported schema: " ^ schema
   | Unsupported_decision decision -> "unsupported decision: " ^ decision
   | Invalid_keeper_name name -> "invalid keeper name: " ^ name
+  | Invalid_requester -> "the authenticated requester is empty"
 ;;
 
 let input_error_to_json error =
@@ -344,7 +349,8 @@ let rec reload_same_generation_ready
      | Partition.Blocked _
      | Partition.Running _
      | Partition.Completed _
-     | Partition.Settled _ ->
+     | Partition.Settled _
+     | Partition.Abandoned _ ->
        Error
          (Partition_state_conflict
             "the partition did not converge to Ready for this quarantine generation"))
@@ -376,7 +382,8 @@ let commit_partition_ready ~base_path command partition =
      | Ok (Partition.Requeued transition) ->
        confirm_requeue ~base_path transition)
   | Partition.Ready -> confirm_ready_partition ~base_path partition
-  | Partition.Running _ | Partition.Completed _ | Partition.Settled _ ->
+  | Partition.Running _ | Partition.Completed _ | Partition.Settled _
+  | Partition.Abandoned _ ->
     Error
       (Partition_state_conflict
          "partition advanced before candidate requeue authorization")
@@ -429,7 +436,8 @@ let execute_with_before_partition_commit
       (Partition_state_conflict
          "Ready partition is not the authorized generation successor")
   | Candidate.Requeued _,
-    (Partition.Running _ | Partition.Completed _ | Partition.Settled _) ->
+    (Partition.Running _ | Partition.Completed _ | Partition.Settled _
+    | Partition.Abandoned _) ->
     Error
       (Partition_state_conflict
          "partition advanced beyond the authorized Ready boundary")
@@ -444,6 +452,7 @@ let execute_with_before_partition_commit
           ~partition_id:command.partition_id
           ~expected_quarantine_id:command.request.expected_quarantine_id
           ~requested_at:now
+          ~requested_by:command.requested_by
       with
       | Ok candidate -> Ok candidate
       | Error detail -> Error (Candidate_state_conflict detail)
@@ -475,7 +484,7 @@ let execute_with_before_partition_commit
          "candidate quarantine targets a different Blocked generation")
   | (Candidate.Quarantined | Candidate.Requeue_requested _),
     (Partition.Ready | Partition.Running _ | Partition.Completed _
-    | Partition.Settled _) ->
+    | Partition.Settled _ | Partition.Abandoned _) ->
     Error
       (Partition_state_conflict
          "partition became claimable before candidate requeue authorization")
@@ -492,11 +501,11 @@ module For_testing = struct
   ;;
 end
 
-let audit config ~actor command ~outcome =
+let audit config command ~outcome =
   try
     Audit_log.log_action
       config
-      ~agent_id:actor
+      ~agent_id:command.requested_by
       ~action:(Audit_log.Custom "keeper_board_attention_quarantine_requeue")
       ~details:
         (`Assoc
@@ -568,6 +577,7 @@ type inventory_item =
   ; quarantined_at : float
   ; requested_at : float option
   ; requeued_at : float option
+  ; requested_by : string option
   }
 
 type inventory_error_kind =
@@ -584,18 +594,20 @@ type inventory =
   }
 
 let inventory_phase_projection = function
-  | Candidate.Quarantined -> Inventory_quarantined, None, None
-  | Candidate.Requeue_requested { requested_at } ->
-    Inventory_requeue_requested, Some requested_at, None
-  | Candidate.Requeued { requeued_at } ->
-    Inventory_requeued, None, Some requeued_at
+  | Candidate.Quarantined -> Inventory_quarantined, None, None, None
+  | Candidate.Requeue_requested { requested_at; requested_by } ->
+    Inventory_requeue_requested, Some requested_at, None, Some requested_by
+  | Candidate.Requeued { requeued_at; requested_by } ->
+    Inventory_requeued, None, Some requeued_at, Some requested_by
 ;;
 
 let inventory_item_of_candidate ~keeper_name (candidate : Candidate.candidate) =
   match candidate.status with
   | Candidate.Pending _ | Candidate.Judged _ | Candidate.Consumed _ -> None
   | Candidate.Quarantine { quarantine; phase } ->
-    let phase, requested_at, requeued_at = inventory_phase_projection phase in
+    let phase, requested_at, requeued_at, requested_by =
+      inventory_phase_projection phase
+    in
     Some
       { keeper_name
       ; partition_id = quarantine.partition_id
@@ -607,6 +619,7 @@ let inventory_item_of_candidate ~keeper_name (candidate : Candidate.candidate) =
       ; quarantined_at = quarantine.quarantined_at
       ; requested_at
       ; requeued_at
+      ; requested_by
       }
 ;;
 
@@ -676,6 +689,7 @@ let inventory_item_to_json (item : inventory_item) =
     ; "quarantined_at", `Float item.quarantined_at
     ; "requested_at", Json_util.float_opt_to_json item.requested_at
     ; "requeued_at", Json_util.float_opt_to_json item.requeued_at
+    ; "requested_by", Json_util.string_opt_to_json item.requested_by
     ]
 ;;
 

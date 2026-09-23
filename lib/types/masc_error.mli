@@ -22,6 +22,10 @@ module Task_error : sig
     | NotClaimed of string
     | InvalidState of string
     | InvalidId of string
+    | VerificationSuperseded of { task_id: string; requested: string; current: string }
+      (** A verdict named a submission that is no longer the one awaiting a
+          verdict: the producer resubmitted, or superseded it with a
+          cancellation, after the verdict's author read it. *)
   val to_string : t -> string
 end
 
@@ -75,6 +79,29 @@ val to_string : t -> string
 val show : t -> string
 val to_yojson : t -> Yojson.Safe.t
 val code : t -> int
+
+(** The [auth_error_code] a 401/403 body carries, as a closed type. The server
+    writes it with [to_string]; a client reads it back with [of_string] and
+    matches every constructor, so a new code is a compile error on the reader
+    rather than a string it never compares. The dashboard keeps its own copy of
+    the strings as a TS enum ([dashboard/src/types/dashboard-execution.ts]). *)
+module Auth_error_code : sig
+  type t =
+    | Invalid_token
+    | Token_expired
+    | Same_origin_blocked
+    | Insufficient_role
+    | Actor_mismatch
+    | Missing_token
+    | Unknown
+
+  val to_string : t -> string
+
+  val of_string : string -> t option
+  (** [None] for a string the server never writes. *)
+end
+
+val auth_error_code_of_error : t -> Auth_error_code.t
 
 val dashboard_auth_error_code : t -> string option
 (** [dashboard_auth_error_code err] maps a typed error to the stable

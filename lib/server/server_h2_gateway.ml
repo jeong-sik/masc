@@ -1229,6 +1229,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               h2_respond_json_value h2_reqd json
                 ~extra_headers:cors)
 
+      | `GET, "/api/v1/repositories/pulls" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            h2_respond_json_value h2_reqd
+              (Server_repository_pulls.snapshot_to_yojson
+                 (Server_repository_pulls.current ()))
+              ~extra_headers:cors)
+
       | `GET, "/api/v1/dashboard/briefing" ->
           with_h2_public_read h2_reqd (fun state ->
             let json = dashboard_briefing_http_json ~state ~sw ~clock httpun_request in
@@ -1348,7 +1355,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                    ~status:`Bad_request
                    ~extra_headers:cors
                else
-                 match Keeper_meta_store.read_meta config keeper_name with
+                 (* Effective meta: the lane is chosen by the TOML-owned
+                    [sandbox_profile], which a persisted read answers with
+                    the default. *)
+                 match Keeper_meta_store.read_effective_meta config keeper_name with
                  | Error message ->
                    h2_respond_json_value
                      h2_reqd
@@ -1364,18 +1374,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                         ])
                      ~status:`Not_found
                      ~extra_headers:cors
-                 | Ok (Some _) ->
+                 | Ok (Some meta) ->
                    let hostname =
                      Option.value
-                       ~default:"github.com"
+                       ~default:Keeper_github_identity.default_hostname
                        (Server_utils.query_param httpun_request "hostname")
                    in
-                   (match
-                      Keeper_github_identity.observe
-                        ~config
-                        ~keeper_name
-                        ~hostname
-                    with
+                   (match Keeper_github_login_lane.observe ~config ~meta ~hostname with
                     | Ok observation ->
                       h2_respond_json_value
                         h2_reqd
@@ -1447,9 +1452,20 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                  | Ok (Some meta) ->
                    let hostname =
                      Option.value
-                       ~default:"github.com"
+                       ~default:Keeper_github_identity.default_hostname
                        (Server_utils.query_param httpun_request "hostname")
                    in
+                   match
+                     Keeper_github_identity.login_scopes_of_query
+                       (Server_utils.query_param httpun_request "scopes")
+                   with
+                   | Error message ->
+                     h2_respond_json_value
+                       h2_reqd
+                       (`Assoc [ "error", `String message ])
+                       ~status:`Bad_request
+                       ~extra_headers:cors
+                   | Ok scopes ->
                    let headers =
                      H2.Headers.of_list
                        ([ "content-type", "text/event-stream"
@@ -1481,6 +1497,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                           Keeper_github_identity.stream_login
                             ~config
                             ~keeper_name
+                            ~scopes
                             (* Shaping a Remote_ssh lane runs commands on the
                                endpoint. Doing that before this response existed
                                left the browser waiting on a request that had not

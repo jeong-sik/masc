@@ -106,17 +106,26 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # skill_applicability = false  # current request + authorized Skill body advice
 # excluded_keepers = []
 
+# max_output_tokens is the output budget a lane's requests send as max_tokens.
+# It is optional: a lane without it sends no max_tokens of its own and the
+# provider's default applies. The model's catalog max_output_tokens is what
+# the model can emit, not a request budget, and is never sent in its place.
+# 8192 tokens bounds a large structured judgment.
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
+max_output_tokens = 8192
 
 [runtime.exact_output_lanes.hitl_auto_judge]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
+max_output_tokens = 8192
 
 [runtime.exact_output_lanes.board_attention_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
+max_output_tokens = 8192
 
 [runtime.exact_output_lanes.verifier_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-flash"]
+max_output_tokens = 8192
 
 # SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in
 # docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md).
@@ -486,8 +495,8 @@ turn-timeout-s = 600.0
 
 [claude_code.claude-code-opus-high]
 
-# The rest of the Claude Code ladder: Fable 5.1, Opus 5 and Sonnet 5 at every
-# level the CLI takes (low..max), and Haiku 4.5.
+# The rest of the Claude Code ladder: Fable 5.1, Opus 5, Opus 5.5 and Sonnet 5
+# at every level the CLI takes (low..max), and Haiku 4.5.
 # Haiku 4.5 carries no level, so the CLI picks; its window is 200K
 # (OpenRouter /models anthropic/claude-haiku-4.5, 2026-09-22), and it
 # answered `claude -p --model claude-haiku-4-5` the same day.
@@ -608,6 +617,76 @@ supports-image-input = true
 
 [claude_code.claude-code-opus-max]
 
+# Opus 5.5 (released 2026-09-22) serves on the subscription already: it
+# answered `claude-subscription -p --model claude-opus-5-5` on 2026-09-23.
+# Ladder low..max and window 1M as opus-5 (platform model page, checked
+# 2026-09-23). The API refuses forced tool use on this model; MASC never
+# sends it from the Claude Code lane.
+[models.claude-code-opus-5-5-low]
+api-name = "claude-opus-5-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.claude-code-opus-5-5-low.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-opus-5-5-low]
+
+[models.claude-code-opus-5-5-medium]
+api-name = "claude-opus-5-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.claude-code-opus-5-5-medium.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-opus-5-5-medium]
+
+[models.claude-code-opus-5-5-high]
+api-name = "claude-opus-5-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.claude-code-opus-5-5-high.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-opus-5-5-high]
+
+[models.claude-code-opus-5-5-xhigh]
+api-name = "claude-opus-5-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.claude-code-opus-5-5-xhigh.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-opus-5-5-xhigh]
+
+[models.claude-code-opus-5-5-max]
+api-name = "claude-opus-5-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.claude-code-opus-5-5-max.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-opus-5-5-max]
+
 [models.claude-code-fable-low]
 api-name = "claude-fable-5-1"
 max-context = 1000000
@@ -706,10 +785,14 @@ wizard-default = true
 
 # Every model the Codex subscription lists, at every level MASC can name.
 # Models, window, levels and input kinds are what the CLI itself caches in
-# ~/.codex/models_cache.json (codex-cli 0.155.1, fetched 2026-09-22): a 272000
-# window and text+image input on all five; low..max on sol, terra, astra and
-# luna, low..xhigh on gpt-5.5. The CLI's "ultra" has no MASC effort value.
-# Not called that day: the plan's usage limit was spent until 2026-09-28.
+# ~/.codex/models_cache.json (codex-cli 0.155.1, fetched 2026-09-23): a 272000
+# window and text+image input on all seven; low..max on gpt-6-sol, gpt-6-luna,
+# gpt-5.6-sol, gpt-5.6-terra and gpt-5.6-luna, low..max+ultra on gpt-6-astra,
+# low..xhigh on gpt-5.5. The CLI's "ultra" has no MASC effort value.
+# gpt-6-sol and gpt-6-luna first appeared in the 2026-09-23 fetch; neither has
+# completed a call yet (the plan's usage limit is spent until 2026-09-28). A
+# /v1/responses parameter probe the same day answered the effort ladder for
+# both: none and low..max, no minimal.
 [models.codex-gpt-5-6-sol-medium]
 api-name = "gpt-5.6-sol"
 max-context = 272000
@@ -877,6 +960,126 @@ reasoning-effort = "max"
 supports-image-input = true
 
 [codex_subscription.codex-gpt-6-astra-max]
+
+[models.codex-gpt-6-sol-low]
+api-name = "gpt-6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.codex-gpt-6-sol-low.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-sol-low]
+
+[models.codex-gpt-6-sol-medium]
+api-name = "gpt-6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.codex-gpt-6-sol-medium.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-sol-medium]
+
+[models.codex-gpt-6-sol-high]
+api-name = "gpt-6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.codex-gpt-6-sol-high.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-sol-high]
+
+[models.codex-gpt-6-sol-xhigh]
+api-name = "gpt-6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.codex-gpt-6-sol-xhigh.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-sol-xhigh]
+
+[models.codex-gpt-6-sol-max]
+api-name = "gpt-6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.codex-gpt-6-sol-max.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-sol-max]
+
+[models.codex-gpt-6-luna-low]
+api-name = "gpt-6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.codex-gpt-6-luna-low.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-luna-low]
+
+[models.codex-gpt-6-luna-medium]
+api-name = "gpt-6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.codex-gpt-6-luna-medium.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-luna-medium]
+
+[models.codex-gpt-6-luna-high]
+api-name = "gpt-6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.codex-gpt-6-luna-high.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-luna-high]
+
+[models.codex-gpt-6-luna-xhigh]
+api-name = "gpt-6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.codex-gpt-6-luna-xhigh.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-luna-xhigh]
+
+[models.codex-gpt-6-luna-max]
+api-name = "gpt-6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.codex-gpt-6-luna-max.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-luna-max]
 
 [models.codex-gpt-5-6-luna-low]
 api-name = "gpt-5.6-luna"
@@ -1883,6 +2086,15 @@ candidates = [
 [runtime.assignments]
 # example: pin a test keeper to an explicit runtime
 # canary = "deepseek.deepseek-v4-pro"
+
+# ═══ Repositories ═══════════════════════════════════════════════════
+# 서버가 등록된 GitHub 저장소의 열린 PR 을 60초마다 읽을 때 쓸 토큰의 주인
+# Keeper 다(RFC-0465). 그 Keeper 의 github-cli/hosts.yml 토큰을 읽을 때마다 새로
+# 읽는다. 적지 않으면 PR 을 읽지 않고, /api/v1/repositories/pulls 가 그 이유를
+# 말한다. 이 표에는 pr_reader 말고 다른 키를 쓸 수 없다.
+#
+# [repositories]
+# pr_reader = "<keeper>"
 
 # ═══ Connectors ══════════════════════════════════════════════════════
 # 어떤 인바운드 메시지가 턴을 시작하는지를 커넥터별로 정한다. 운영자가 적어두는

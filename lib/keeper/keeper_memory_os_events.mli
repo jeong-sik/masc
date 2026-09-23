@@ -21,8 +21,10 @@ type event_kind =
   (** [keeper_memory_retract] successfully removed the fact identified by its
       [memory_id]. This records removal, not a judgment of the fact's quality. *)
   | Revised of { superseded_by : string }
-  (** The librarian wrote a new claim that continues this fact and dropped this
-      one; [superseded_by] is the new fact's [memory_id]. The producer is
+  (** A new claim continues this fact and this one was dropped: the librarian
+      wrote it, or the keeper passed this fact's id as [supersedes] to
+      [keeper_memory_write]. [superseded_by] is the new fact's [memory_id]. The
+      producer is
       responsible for pairing this with the drop and for never letting a fact
       supersede itself. *)
 

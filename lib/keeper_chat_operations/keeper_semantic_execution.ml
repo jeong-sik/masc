@@ -235,6 +235,26 @@ let is_terminal execution = match execution.phase with
   | Settled _ -> true
   | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Recovering _ | Suspended _ -> false
 let scope execution = execution.id
+let gate_checkpoint_references = function Agent_core reference -> [reference] | Official_client _ -> []
+let gate_wait_references (waiting : gate_wait) =
+  gate_checkpoint_references waiting.checkpoint
+  @ (match waiting.runtime_retry with Some retry -> [retry.checkpoint] | None -> [])
+let gate_binding_references (binding : gate_binding) =
+  (match binding.preparation.source with
+   | Prepared_agent_core {reference; _} -> [reference] | Prepared_official_client _ -> [])
+  @ (match binding.unconfirmed_wait with Some waiting -> gate_wait_references waiting | None -> [])
+let checkpoint_references execution = match execution.phase with
+  | Preparing | Ready | Running | Settled _ -> []
+  | Resuming_runtime_retry retry -> [retry.checkpoint]
+  | Resuming_gate (waiting, _) -> gate_wait_references waiting
+  | Suspended reference -> [reference]
+  | Recovering {origin; _} ->
+    (match origin with
+     | Unconfirmed_sources | Confirmed_undispatched | Official_checkpointed _ | Interrupted_execution -> []
+     | Checkpointed reference -> [reference]
+     | Runtime_retry retry -> [retry.checkpoint]
+     | Gate_wait {waiting; _} -> gate_wait_references waiting
+     | Gate_binding binding -> gate_binding_references binding)
 let valid_terminal = function Failed detail -> String.trim detail <> "" | Completed | Cancelled -> true
 
 let validate_sources sources =

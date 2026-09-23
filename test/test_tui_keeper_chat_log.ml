@@ -402,10 +402,19 @@ let test_decode_events_error_by_code () =
     (decode ~status:500 "{\"oops\":true}");
   (* A 401/403 is about the credential, whatever the body says. *)
   check events_error "401 is a refusal"
-    (Log.Events_refused (Masc_tui_credential.refusal ~credential_sent:true))
+    (Log.Events_refused
+       (Masc_tui_credential.refusal ~credential_sent:true
+          Masc_tui_credential.Rejected))
     (decode ~status:401 (envelope "unauthorized" "bad token"));
+  check events_error "401 with an expired code says so"
+    (Log.Events_refused
+       (Masc_tui_credential.refusal ~credential_sent:true
+          Masc_tui_credential.Expired))
+    (decode ~status:401 {|{"error":"expired","auth_error_code":"token_expired"}|});
   check events_error "403 without a bearer names the missing credential"
-    (Log.Events_refused (Masc_tui_credential.refusal ~credential_sent:false))
+    (Log.Events_refused
+       (Masc_tui_credential.refusal ~credential_sent:false
+          Masc_tui_credential.Rejected))
     (Log.decode_events_error ~status:403 ~credential_sent:false "forbidden")
 ;;
 

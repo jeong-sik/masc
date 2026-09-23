@@ -78,13 +78,8 @@ let () =
       Filename.concat (Option.value (Sys.getenv_opt "HOME") ~default:".") "me"
   in
   Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:base_dir;
-  Server_runtime_bootstrap.bootstrap_prompt_assets ();
+  Server_runtime_bootstrap.bootstrap_prompt_registry_from_binary ~base_path:base_dir;
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path:base_dir in
-  ignore
-    (Masc.Prompt_defaults.bootstrap_runtime
-       ~workspace_path:base_dir
-       ~base_path:base_dir
-     : string);
   let case =
     match List.assoc_opt !lane cases with
     | Some build -> build ()

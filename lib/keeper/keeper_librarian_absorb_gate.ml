@@ -251,7 +251,7 @@ let ask ~evaluate ~claim (numbered : (string * string) list) =
 ;;
 
 (* The answer's absorptions into one claim, classified before any request
-   is made: what has no claim or no source text passes through unjudged,
+   is made: what has no claim or no source text is unjudged and stays current,
    what does not fit a request ({!state_bytes_limit}, {!request_bytes_limit}) cannot be judged
    and stays current, the rest is asked. Classifying first is what lets a
    request that fails for another reason leave the unjudgeable alone. *)
@@ -282,9 +282,17 @@ let classify ~facts ~new_claims ~absorbed =
       absorbed
     |> List.rev_map (fun (into, members) -> into, List.rev members)
   in
+  (* An absorbing claim is a new one, or a current memory the answer wrote
+     again as it stands: that memory is the claim, so its text is the one
+     the absorbed memories are judged against. *)
+  let claim_of_into into =
+    match claim_of into new_claims with
+    | Some _ as claim -> claim
+    | None -> claim_of into facts
+  in
   List.map
     (fun (into, members) ->
-       match claim_of into new_claims with
+       match claim_of_into into with
        | None -> { into; claim = None; unjudged = members; unjudgeable = []; judgeable = [] }
        | Some claim when String.length claim > state_bytes_limit ->
          (* The claim does not fit the state: nothing it absorbs can be judged
@@ -322,8 +330,7 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
     | (group : group) :: rest ->
       let acc =
         { acc with
-          absorbed = acc.absorbed @ group.unjudged
-        ; unjudged = acc.unjudged @ group.unjudged
+          unjudged = acc.unjudged @ group.unjudged
         ; unjudgeable = acc.unjudgeable @ group.unjudgeable
         }
       in

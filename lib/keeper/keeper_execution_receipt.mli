@@ -257,4 +257,27 @@ val needs_operator_broadcast : operator_disposition_kind -> bool
 
 val append : Workspace.config -> t -> unit
 val latest_json : Workspace.config -> string -> Yojson.Safe.t option
+
+(** The newest receipt's terminal fields, read back from the store. Labels are
+    prefixed so they do not collide with {!t}'s. *)
+type latest_receipt_summary =
+  { latest_outcome : outcome_kind
+  ; latest_terminal_reason_code : string
+  ; latest_error_message : string option
+    (** [error.message]; [to_json] writes the error as a nested object. *)
+  ; latest_ended_at : string
+  }
+
+(** What the receipt store says about a Keeper's newest turn. The store being
+    empty, its newest row lacking a terminal field, and the store failing to
+    read are separate answers, so a reader never presents one as another. *)
+type latest_receipt_reading =
+  | No_receipt
+  | Latest_receipt of latest_receipt_summary
+  | Latest_receipt_undecodable of { field : string }
+  | Receipt_store_unreadable of Dated_jsonl.read_error
+
+(** Newest parsed receipt row of [keeper_name]. Malformed JSON rows are
+    skipped, as {!latest_json} skips them. *)
+val read_latest_receipt : Workspace.config -> string -> latest_receipt_reading
 val latest_json_by_keeper : Workspace.config -> string list -> (string * Yojson.Safe.t) list

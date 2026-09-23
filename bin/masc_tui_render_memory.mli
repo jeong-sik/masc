@@ -45,6 +45,14 @@ val memory_fact_age_label : float -> string
 val memory_fact_row_line : ?is_fleet:bool -> cols:int -> memory_fact_row -> string
 val memory_fact_detail_lines : cols:int -> memory_fact_row -> string list
 
+val memory_fleet_header_rows : cols:int -> state -> string list
+(** The Total, Ordinary and Librarian rows above the sort row, each wrapped to
+    the frame [cols] gives. *)
+
+val memory_overview_scrolled : cols:int -> ?cursor:int -> state -> scrolled
+(** The overview's scroll layout, its chrome counted from
+    [memory_fleet_header_rows] at [cols]. *)
+
 val render_memory_body :
   cols:int ->
   budget:int ->

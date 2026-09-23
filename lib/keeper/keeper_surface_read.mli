@@ -30,7 +30,9 @@ val default_limit : int
     silent zero-row page: "slack"/"discord" when the keeper has no
     bound channels there (post's doctrine, mirrored on the read side),
     and any other non-core label absent from the loaded page's lane
-    labels — the refusal names the labels the page does carry. Core
+    labels when that page is the whole history (no [before] cursor and
+    no [has_more]) — the refusal names the labels the page does carry.
+    On any other page such a label reads as an empty page. Core
     lanes (dashboard/agent/broadcast/webhook) always pass; absent
     bindings keep the projection pure and unverified. *)
 type connector_bindings = { slack : string list; discord : string list }
@@ -52,6 +54,8 @@ type connector_bindings = { slack : string list; discord : string list }
       page carries no stamped rows.
     - Rows without a [source] label (written before source labelling)
       never match; the description of the tool says so.
+    - [before]: the cursor the page was loaded with; [None] for the
+      newest page.
     - Blank [surface] is an error JSON, not a default lane.
     - With [~bindings] (task-1596) a provably wrong label is refused
       with [{"error": …}] — see [connector_bindings]. *)
@@ -59,6 +63,7 @@ val respond :
   ?bindings:connector_bindings ->
   surface:string ->
   limit:int ->
+  before:float option ->
   has_more:bool ->
   notes:(string * string) list ->
   Keeper_chat_store.chat_message list ->

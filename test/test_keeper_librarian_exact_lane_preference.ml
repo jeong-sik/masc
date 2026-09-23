@@ -118,6 +118,7 @@ let test_keeper_preference_reorders_the_librarian_lane () =
          [ { Runtime_schema.id = "librarian_exact"
            ; slot_ids = [ "librarian-default"; "librarian-preferred" ]
            ; cli_slot_ids = []
+           ; max_output_tokens = Some 4_096
            }
          ]
        snapshot
@@ -234,6 +235,7 @@ let test_context_commits_when_memory_store_fails () =
          [ { Runtime_schema.id = "librarian_exact"
            ; slot_ids = [ "librarian-context" ]
            ; cli_slot_ids = []
+           ; max_output_tokens = Some 4_096
            } ]
        snapshot
    with
@@ -335,6 +337,7 @@ let test_excluded_last_slot_preserves_domain_failure () =
            [ { Runtime_schema.id = "librarian_exact"
              ; slot_ids = slots
              ; cli_slot_ids = []
+             ; max_output_tokens = Some 4_096
              } ]
          snapshot
      with
@@ -402,7 +405,8 @@ let test_excluded_last_slot_preserves_domain_failure () =
        ()
    with
    | Ok ((_selection, _output), selected_slot) ->
-     failf "contract-invalid only usable slot unexpectedly answered as %s" selected_slot
+     failf "contract-invalid only usable slot unexpectedly answered as %s"
+       (Runtime.served_slot_id selected_slot)
    | Error error ->
      check bool "filtered flow reports domain rejection" true
        (Runtime.For_testing.classified_error_kind error

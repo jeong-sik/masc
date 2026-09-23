@@ -325,11 +325,15 @@ type inventory_freshness =
       (** The server answered from a built inventory. An empty list here does
           mean no tools. *)
 
+(** One tool the keeper's effective surface carries. [et_skill_source_id]
+    names the configured skill source a composition skill came from, read
+    from [origin.skill_provenance.identity.source_id]; it is [None] for any
+    tool with no skill behind it, and for a composition skill whose
+    provenance the producer could not resolve. *)
 type effective_tool = {
   et_name : string;
   et_origin : string;
-  et_group : string option;
-  et_skill_source : string option;
+  et_skill_source_id : string option;
 }
 
 type effective_tool_delivery =
@@ -566,6 +570,24 @@ type connector_directory_state =
   | Connector_directory_complete
   | Connector_directory_partial
 
+(** Where a websocket transport's gateway stands, as the Slack and Discord
+    gateway state machines report it on the wire ([gateway_state]). *)
+type connector_gateway_state =
+  | Connector_gateway_disconnected
+  | Connector_gateway_awaiting_hello
+  | Connector_gateway_identifying
+  | Connector_gateway_resuming
+  | Connector_gateway_connected
+  | Connector_gateway_reconnect_pending
+  | Connector_gateway_failed
+
+(** Where a polling transport stands, as the iMessage poller reports it on
+    the wire ([poll_state]). *)
+type connector_poll_state =
+  | Connector_poll_not_started
+  | Connector_poll_polling
+  | Connector_poll_degraded
+
 (** A connector the gate can deliver through, including the server-owned
     configuration and route evidence an operator needs to act on it. *)
 type connector = {
@@ -581,8 +603,8 @@ type connector = {
   cn_channel : string option;
   cn_error : string option;
   cn_status_source : string option;
-  cn_gateway_state : string option;
-  cn_poll_state : string option;
+  cn_gateway_state : connector_gateway_state option;
+  cn_poll_state : connector_poll_state option;
   cn_endpoint : string option;
   cn_status_path : string option;
   cn_binding_store_path : string option;
@@ -637,8 +659,18 @@ val decode_connector_name_page :
 val connector_with_name_pages :
   connector -> pages:connector_name_page list -> error:string option -> connector
 
+(** A connector row the TUI could not read. The row is refused on its own,
+    so the rows beside it still decode and draw. *)
+type connector_refusal = {
+  cr_row : int;  (** Position in the server's [connectors] list. *)
+  cr_connector_id : string option;
+      (** The row's [connector_id], when the row carries one. *)
+  cr_reason : string;
+}
+
 type connector_snapshot = {
   cs_connectors : connector list;
+  cs_refused : connector_refusal list;
   cs_total : int;
   cs_active : int;  (** How many the server counted as available. *)
 }
@@ -896,12 +928,41 @@ type memory_alert = {
   ma_message : string;
 }
 
+(** How the keeper's last durable Librarian pass ended, one constructor per
+    server [pass_end]. [Pass_stopped] and [Pass_raised] carry the server's
+    account of why; the other endings have none. An ending this build does not
+    know fails the decode. *)
+type memory_librarian_pass_end =
+  | Pass_off
+  | Pass_lane_unconfigured
+  | Pass_drained
+  | Pass_not_committed
+  | Pass_stopped of string
+  | Pass_raised of string
+
+(** Why a Librarian pass journaled a failure, one constructor per server
+    [librarian_failure_kind]. A kind this build does not know fails the
+    decode. *)
+type memory_librarian_failure_kind =
+  | Failure_prompt_render
+  | Failure_execution_clock_unavailable
+  | Failure_exact_setup
+  | Failure_exact_execution
+  | Failure_domain_output_invalid
+  | Failure_memory_snapshot_write
+  | Failure_runtime_context_unavailable
+  | Failure_lane_cancelled
+  | Failure_unhandled_exception
+
+(** The server's account of why a pass stopped or crashed; [None] for the
+    endings that carry none. *)
+val memory_librarian_pass_end_cause : memory_librarian_pass_end -> string option
+
 (* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
    standing, and what its last pass and its journal say. [None] in a field is
    "not measured", which the header prints as such; it is not zero. *)
 type memory_librarian_health = {
-  mlh_state : string option;
-  mlh_detail : string option;
+  mlh_state : memory_librarian_pass_end option;
   mlh_measured_at : float option;
   mlh_unread_atom_turns : int option;
   mlh_unread_official_turns : int option;
@@ -912,7 +973,7 @@ type memory_librarian_health = {
           "cannot say" -- no snapshot, an unreadable one, or one from
           another trace -- and is not the same as caught up. *)
   mlh_last_success_at : float option;
-  mlh_last_failure_kind : string option;
+  mlh_last_failure_kind : memory_librarian_failure_kind option;
 }
 
 type memory_context_frontier = {
@@ -984,9 +1045,19 @@ type memory_keeper_health = {
   mkh_alerts : memory_alert list;
 }
 
+(** A keeper row this build could not read, and why. The other rows still
+    decode, so one row from a newer server does not blank the pane.
+    [mkr_keeper_id] is [None] when the row's own [keeper_id] could not be read
+    either. *)
+type memory_keeper_refusal = {
+  mkr_keeper_id : string option;
+  mkr_reason : string;
+}
+
 type memory_health_snapshot = {
   mhs_generated_at : float;
   mhs_keepers : memory_keeper_health list;
+  mhs_refused_keepers : memory_keeper_refusal list;
   mhs_total_facts : int;
   mhs_total_observed_facts : int;
   mhs_total_derived_facts : int;
@@ -1033,7 +1104,7 @@ val no_memory_fact_events : memory_fact_events
     equality and never classifies on its own. *)
 type memory_fact = {
   mf_claim : string;
-  mf_category : string;
+  mf_category : Keeper_memory_os_types.category;
   mf_origin : string;
   mf_first_seen : float;
   mf_last_seen : float;
@@ -1191,7 +1262,10 @@ type verification_snapshot = {
   vs_truncated : bool;  (** A further page exists. *)
   vs_awaiting_unresolved : string list;
       (** Request ids the backlog waits on that name no record. A task holding
-          one of these is waiting on something that is not there. *)
+          one of these is waiting on something that is not there. One page of
+          them: the server cuts the list at the request's limit. *)
+  vs_awaiting_unresolved_total : int;
+      (** How many such ids there are in all, which the page may not hold. *)
   vs_backlog_error : string option;
       (** Why the queue could not be resolved. An empty list carrying this is
           not an empty queue. *)
@@ -1213,6 +1287,14 @@ val keeper_phase_is_running : keeper_phase -> bool
 (** Whether the phase is the normal running lifecycle. The Keepers table
     silences the word for it and spells out every other phase; exhaustive in
     the implementation so a new phase cannot silently count as not-running. *)
+
+(** Which Overview Team band a phase puts a Keeper in (RFC-0464). A stuck
+    Keeper's turns are failing or its fiber crashed; an alive one can take a
+    turn now or is between runs; a parked one was stopped or never started.
+    Exhaustive in the implementation, so a new phase has to choose a band. *)
+type keeper_phase_band = Phase_stuck | Phase_alive | Phase_parked
+
+val keeper_phase_band : keeper_phase -> keeper_phase_band
 
 type keeper_health
 (** A validated keeper health reading — whether the keeper's keepalive is
@@ -1369,6 +1451,16 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_runs_without_slot = {
+  slws_vendor_system_one : int;
+  slws_server_restarted : int;
+  slws_no_slot : int;
+}
+(** The lane's finished runs that name no slot, by why: Vendor System One
+    answered a Board Attention run before any slot was bound, a restart
+    closed the run on replay, or it finished before a slot was bound. With
+    the slot counts they add up to the finished runs. *)
+
 type standalone_lane_jev_destination = {
   sljd_destination_uri : string;
   sljd_model : string;
@@ -1414,6 +1506,7 @@ type standalone_lane = {
   sl_last_outcome : string option;
   sl_p50_elapsed_s : float option;
   sl_selected_slots : standalone_lane_slot_count list;
+  sl_runs_without_slot : standalone_lane_runs_without_slot;
 }
 
 type standalone_lanes_snapshot = {
@@ -1426,7 +1519,9 @@ type standalone_lanes_snapshot = {
 
 val standalone_lane_status_to_string : standalone_lane_status -> string
 
-val standalone_lane_configuration_to_string :
+(** The configuration clause of the lane detail line, subject included where
+    the state needs one. The caller writes no noun of its own. *)
+val standalone_lane_configuration_phrase :
   standalone_lane_configuration -> string
 val decode_standalone_lanes_snapshot :
   Yojson.Safe.t -> (standalone_lanes_snapshot, string) result

@@ -83,13 +83,13 @@ RERAISE = r"\braise\s+{b}\b|raise_with_backtrace\s+{b}\b"
 # Cancelled and we accept it anyway. It was 37 while the scan only saw arms
 # whose `with`/`exception` sat on the arm's own line. Widening the scan to
 # arms on a later line surfaced markers that were already in the tree but
-# invisible to the old scan. Counting only arms whose own body names an Eio
-# operation -- the arms that can actually suspend -- and reading that body
-# correctly (the marker's own line excluded, the body bounded at the arm's
-# indent) leaves 2. The old 37 was the contaminated definition's number: its
-# counter counted the marker line itself, and let the last arm's body run
-# into the next function's code.
-EXEMPTION_BUDGET = 2
+# invisible to the old scan. An earlier revision attempted to filter exemptions
+# by checking if the arm body named an Eio operation, but that looked at the
+# wrong place (Cancelled arises in the try body, not the handler arm) and let
+# real swallows pass for free. Per the owner's review, every explained marker
+# on a scanned handler arm is counted as an exemption without redefining what
+# counts. EXEMPTION_BUDGET is set to the actual count across lib/.
+EXEMPTION_BUDGET = 120
 
 
 def repo_root() -> Path:
@@ -252,40 +252,6 @@ def reraise_scope(lines: list[str], index: int) -> list[str]:
     return lines[index: max(end, min(len(lines), index + 9))]
 
 
-def arm_body(lines: list[str], index: int) -> list[str]:
-    """The lines of the arm at [index], up to the next sibling arm.
-
-    Used to decide whether the arm's own body can suspend. A helper it calls
-    may suspend without naming Eio here, so this is a lower bound on risk,
-    not a proof; the marker's reason carries the human judgement.
-
-    The body ends at the first line that dedents to the arm's own indent or
-    less: a sibling arm, or the enclosing construct's close. Stopping only
-    at a sibling `|` let the last arm of a handler run into whatever followed
-    it -- [atomic_write.ml]'s last arm swallowed a different function's
-    [Eio.] twelve lines down.
-    """
-    arm_indent = indent_of(lines[index])
-    body = [lines[index]]
-    for j in range(index + 1, min(len(lines), index + ARM_SCAN_LIMIT)):
-        stripped = lines[j].strip()
-        if stripped and indent_of(lines[j]) <= arm_indent:
-            break
-        body.append(lines[j])
-    return body
-
-
-def body_mentions_eio(lines: list[str], index: int) -> bool:
-    """Whether the arm's own body names an Eio operation.
-
-    The arm's own line is skipped: a marker's reason usually names the Eio
-    operation it is exempt from ("the body is Eio.Cancel.protect"), and
-    counting that line made the justification spend the budget it was
-    justifying.
-    """
-    return any(re.search(r"\bEio\.", l) for l in arm_body(lines, index)[1:])
-
-
 def scan(path: Path) -> tuple[list[str], int]:
     """Violations and exemption count for one file."""
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -318,11 +284,16 @@ def scan_lines(lines: list[str], path: str) -> tuple[list[str], int]:
         if MARKER in line:
             if not EXPLAINED.search(line):
                 violations.append(f"UNEXPLAINED EXEMPTION: {path}:{lineno}: {line.strip()}")
-            elif body_mentions_eio(lines, i):
-                # An exemption is a place where a wildcard catch could absorb
-                # Cancelled and we accept it anyway. A marker on an arm whose
-                # body names no Eio operation is a proof that Cancelled cannot
-                # arise there, not an exemption, so it does not spend budget.
+            else:
+                # Every explained marker spends budget. An earlier rule
+                # counted only arms whose own body named an Eio operation, on
+                # the theory that the rest were proofs Cancelled cannot arise.
+                # That predicate looked at the wrong place -- Cancelled comes
+                # out of the try body, not the handler arm -- and it skipped
+                # the arm's own line, so a marker on
+                # `try Eio.Time.sleep clock 1.0 with _ -> ()` was free. The
+                # budget bounds exemptions; it does not decide which markers
+                # are exemptions.
                 exemptions += 1
             continue
         # Guarded when any arm of the same handler names the exception, or
@@ -437,6 +408,52 @@ FIXTURES: list[tuple[str, bool, str]] = [
 """),
 ]
 
+# Each fixture is (name, expected_exemption_count, source). Every explained
+# marker on a candidate handler arm spends budget. Unexplained markers are
+# violations instead, and markers on re-raising arms are not exemptions because
+# the binder re-raise check skips them before the marker check.
+EXEMPTION_FIXTURES: list[tuple[str, int, str]] = [
+    (
+        "a marker on a same-line protected expression spends budget",
+        1,
+        """
+  try Eio.Time.sleep clock 1.0 with _ -> () (* cancel-guard-ok: probe *)
+""",
+    ),
+    (
+        "a marker on a next-line arm spends budget",
+        1,
+        """
+  try f () with
+  | _ -> () (* cancel-guard-ok: probe *)
+""",
+    ),
+    (
+        "a marker whose reason names Eio spends budget",
+        1,
+        """
+  try f () with
+  | _ -> () (* cancel-guard-ok: the body is Eio.Cancel.protect *)
+""",
+    ),
+    (
+        "a marker on a re-raising arm does not spend budget",
+        0,
+        """
+  try f () with
+  | exn -> (* cancel-guard-ok: re-raised *) raise exn
+""",
+    ),
+    (
+        "an unexplained marker is a violation and does not spend budget",
+        0,
+        """
+  try f () with
+  | _ -> () (* cancel-guard-ok *)
+""",
+    ),
+]
+
 
 def self_test() -> int:
     failures = 0
@@ -449,10 +466,20 @@ def self_test() -> int:
             print(f"FAIL {name}: expected {want}, got {violations or 'none'}")
         else:
             print(f"ok   {name}")
+    for name, expect_exemptions, source in EXEMPTION_FIXTURES:
+        _, exemptions = scan_lines(source.splitlines(), f"<{name}>")
+        if exemptions != expect_exemptions:
+            failures += 1
+            print(
+                f"FAIL {name}: expected {expect_exemptions} exemption(s), "
+                f"got {exemptions}"
+            )
+        else:
+            print(f"ok   {name}")
     if failures:
         print(f"{failures} fixture(s) failed.")
         return 1
-    print(f"{len(FIXTURES)} fixtures passed.")
+    print(f"{len(FIXTURES) + len(EXEMPTION_FIXTURES)} fixtures passed.")
     return 0
 
 

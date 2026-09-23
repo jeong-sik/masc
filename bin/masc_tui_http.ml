@@ -115,7 +115,8 @@ let operator_token_cell = ref None
 
 (* Carry out [Masc_tui_credential.plan]. The environment wins so a single run
    can be pointed at a different credential; otherwise the bearer comes from the
-   workspace, and a workspace that demands one but holds none gets one minted.
+   workspace, and a workspace that demands one but holds none it can use --
+   nothing stored, or a stored one that has expired -- gets one minted.
 
    Minting grants nothing this process did not already have: the credential
    store is a directory under the workspace, so anything that can read the
@@ -127,6 +128,31 @@ let operator_token_cell = ref None
    Admin because that is the role [masc login] issues for this agent, and the
    keeper lifecycle routes the TUI already offers require it -- minting a
    narrower role would leave working surfaces failing. *)
+(* The persisted bearer, checked against its credential record the way the
+   server checks it, so an expired one is replaced here rather than refused on
+   every read. Only expiry is acted on: it is the one verdict this client can
+   answer by itself, with the mint below. Any other objection -- a record that
+   no longer matches the file, say -- is left for the server to make, whose
+   refusal names [masc login]. *)
+let stored_operator_token ~base_path : Masc_tui_credential.stored_token =
+  match
+    Auth_login.read_persisted_token ~base_path ~agent_name:default_agent_name
+  with
+  | None -> Masc_tui_credential.Not_stored
+  | Some token -> (
+      match
+        Auth.verify_token base_path ~agent_name:default_agent_name ~token
+      with
+      | Ok _ -> Masc_tui_credential.Stored token
+      | Error err -> (
+          match Auth_error_kind.classify err with
+          | Auth_error_kind.Token_expired -> Masc_tui_credential.Stored_expired
+          | Auth_error_kind.Token_mismatch | Auth_error_kind.Unauthorized
+          | Auth_error_kind.Forbidden | Auth_error_kind.Agent_not_found
+          | Auth_error_kind.Io_error | Auth_error_kind.Invalid_json
+          | Auth_error_kind.Other ->
+              Masc_tui_credential.Stored token))
+
 let install_operator_token ~base_path ~host ~port =
   let cfg = Auth.load_auth_config base_path in
   (* The auth directory, not the config file: a missing config reads as the
@@ -144,9 +170,7 @@ let install_operator_token ~base_path ~host ~port =
     match
       Masc_tui_credential.plan
         ~env_token:(first_nonempty_env [ Masc_tui_credential.token_env_var ])
-        ~workspace_token:
-          (Auth_login.read_persisted_token ~base_path
-             ~agent_name:default_agent_name)
+        ~workspace_token:(stored_operator_token ~base_path)
         ~workspace_requires_token:(cfg.enabled && cfg.require_token)
         ~workspace_initialized
     with
@@ -159,7 +183,7 @@ let install_operator_token ~base_path ~host ~port =
     | Masc_tui_credential.No_workspace ->
         operator_token_cell := None;
         Masc_tui_credential.Workspace_pending
-    | Masc_tui_credential.Mint -> (
+    | Masc_tui_credential.Mint reason -> (
         match
           Auth_login.mint ~base_path ~host ~port
             ~agent_name:default_agent_name ~role:Masc_domain.Admin
@@ -171,7 +195,7 @@ let install_operator_token ~base_path ~host ~port =
         with
         | Ok report ->
             operator_token_cell := Some report.bearer_token;
-            Masc_tui_credential.Minted
+            Masc_tui_credential.Minted reason
         | Error err ->
             operator_token_cell := None;
             Masc_tui_credential.Mint_failed
@@ -275,6 +299,7 @@ let refusal ~status_code ~body =
   match status_code with
   | 401 | 403 ->
       Masc_tui_credential.refusal ~credential_sent:(operator_token_present ())
+        (Masc_tui_credential.server_reason_of_body body)
   | _ -> Masc.Tui_decode.http_status_error ~status_code ~body
 
 let decode_json ~allow_empty ~status_code ~body =
@@ -1413,6 +1438,12 @@ let fetch_operator_snapshot ~(host : string) ~(port : int) :
     ~path:"/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 
 (** GET /api/v1/runtime/resolved — runtimes and keeper assignments. *)
+(** GET /api/v1/repositories/pulls -- open pull requests of the registered
+    GitHub repositories (RFC-0465). *)
+let fetch_repository_pulls ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/repositories/pulls"
+
 let fetch_runtime_resolved ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/runtime/resolved"
@@ -1789,11 +1820,11 @@ let post_operator_confirm ~(host : string) ~(port : int) ~(token : string)
     [state] and [answers] out of the body to say what was chosen. *)
 let post_keeper_ask_answer ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(ask_id : string) ~(answers : Yojson.Safe.t)
-    ~(actor_id : string option) ~(session_id : string option) :
+    ~(session_id : string option) :
     (Yojson.Safe.t, string) result =
   let payload =
     match
-      Masc_tui_ask_projection.request_body ~answers ~actor_id ~session_id
+      Masc_tui_ask_projection.request_body ~answers ~session_id
     with
     | `Assoc fields ->
         `Assoc (("name", `String keeper_name) :: ("ask_id", `String ask_id) :: fields)
@@ -1944,9 +1975,8 @@ let post_schedule_update ~(host : string) ~(port : int) ~(body_json : string) =
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_update"
     ~body:body_json
 
-(** POST /api/v1/tools/masc_schedule_cancel. The authenticated HTTP boundary
-    supplies the canceller identity before the tool validates its argument
-    contract. The reason is a fixed audit phrase -- the arm display already
+(** POST /api/v1/tools/masc_schedule_cancel. The server records the
+    credential's actor as the canceller. The reason is a fixed audit phrase -- the arm display already
     named which schedule the second press cancels. *)
 let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
     : (Yojson.Safe.t, string) result =
@@ -1963,7 +1993,7 @@ let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
     argument contract; the kind-specific timing fields arrive already
     assembled by the caller (the form's typed spec builds them), and time
     syntax, cron text, and timezone spellings stay the tool's to validate.
-    The requester rides as this process, a human operator's terminal. *)
+    The server records the credential's actor as requester and scheduler. *)
 let post_schedule_create ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(message : string)
     ~(timing_fields : (string * Yojson.Safe.t) list) :
@@ -1972,10 +2002,6 @@ let post_schedule_create ~(host : string) ~(port : int)
     `Assoc
       ([ ("keeper_name", `String keeper_name)
        ; ("message", `String message)
-       ; ("requested_by_id", `String default_agent_name)
-       ; ("requested_by_kind", `String "human_operator")
-       ; ("scheduled_by_id", `String default_agent_name)
-       ; ("scheduled_by_kind", `String "human_operator")
        ; ("source", `String "operator_request")
        ]
       @ timing_fields)
@@ -1985,21 +2011,23 @@ let post_schedule_create ~(host : string) ~(port : int)
 
 (** POST /api/v1/verification/verdict — the operator's verdict on a task
     awaiting verification. The route demands a reason with a reject and takes
-    none with an approve, so the variant carries it only where it rides. The
-    route wants a token-bound admin credential — the one this process mints
-    at startup. *)
+    none with an approve, so the variant carries it only where it rides.
+    [verification_id] names the submission the operator was shown; the route
+    refuses the verdict when the Task has moved on to another one. The route
+    wants a token-bound admin credential — the one this process mints at
+    startup. *)
 let post_verification_verdict ~(host : string) ~(port : int)
-    ~(task_id : string) ~(verdict : [ `Approve | `Reject of string ]) :
+    ~(task_id : string) ~(verification_id : string)
+    ~(verdict : [ `Approve | `Reject of string ]) :
     (Yojson.Safe.t, string) result =
+  let binding =
+    [ ("task_id", `String task_id); ("verification_id", `String verification_id) ]
+  in
   let fields =
     match verdict with
-    | `Approve ->
-        [ ("task_id", `String task_id); ("verdict", `String "approve") ]
+    | `Approve -> binding @ [ ("verdict", `String "approve") ]
     | `Reject reason ->
-        [ ("task_id", `String task_id)
-        ; ("verdict", `String "reject")
-        ; ("reason", `String reason)
-        ]
+        binding @ [ ("verdict", `String "reject"); ("reason", `String reason) ]
   in
   post_json ~host ~port ~path:"/api/v1/verification/verdict"
     ~body:(Yojson.Safe.to_string (`Assoc fields))
@@ -2679,6 +2707,32 @@ let post_connector_unbind ~(host : string) ~(port : int) ~(connector : string)
          (percent_encode_path_segment connector))
     ~body:body_json
 
+(** The same route, conditional on the owner: the server removes the binding
+    only while it still names [target.keeper_name]. The reply is read by its
+    status, since 409 (rebound) and 404 (already gone) are answers the caller
+    reports differently from a failure. *)
+let post_connector_unbind_owned ~(host : string) ~(port : int)
+    (target : Masc_tui_connector_unbind.target) :
+    Masc_tui_connector_unbind.outcome =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [ "channel_id", `String target.channel_id
+        ; "keeper_name", `String target.keeper_name
+        ])
+  in
+  match
+    http_post ~headers:(auth_headers ()) ~host ~port
+      ~path:
+        (Printf.sprintf "/api/v1/gate/connector/unbind?name=%s"
+           (percent_encode_path_segment target.connector_id))
+      ~body
+  with
+  | Error detail -> Masc_tui_connector_unbind.Failed detail
+  | Ok (status_code, response) ->
+      Masc_tui_connector_unbind.outcome_of_status ~status:status_code
+        ~refusal:(refusal ~status_code ~body:response)
+
 (** One [resources/list] over the MCP endpoint, on an open session. *)
 let call_mcp_resources_list ~(host : string) ~(port : int)
     ~(session_id : string) ~(request_id : string) :
@@ -2720,13 +2774,25 @@ let call_mcp_resources_read ~(host : string) ~(port : int)
     final identity observation. Every chunk reaches [on_chunk] as it
     arrives; the return says only how the stream ended. *)
 let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(on_chunk : string -> unit) :
-    (unit, string) result =
+    ~(keeper_name : string)
+    ~(scopes : Masc.Keeper_github_identity.login_scope list)
+    ~(on_chunk : string -> unit) : (unit, string) result =
+  let query =
+    match scopes with
+    | [] -> ""
+    | scopes ->
+        "?scopes="
+        ^ percent_encode_query_value
+            (String.concat ","
+               (List.map Masc.Keeper_github_identity.login_scope_to_string
+                  scopes))
+  in
   let url =
     url_of ~host ~port
       ~path:
-        (Printf.sprintf "/api/v1/keepers/%s/github-login"
-           (percent_encode_path_segment keeper_name))
+        (Printf.sprintf "/api/v1/keepers/%s/github-login%s"
+           (percent_encode_path_segment keeper_name)
+           query)
   in
   let headers =
     json_headers (("Accept", "text/event-stream") :: auth_headers ())

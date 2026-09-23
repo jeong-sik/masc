@@ -37,6 +37,18 @@ val preflight_slots
     accepted. *)
 
 
+type served_slot =
+  | Api_slot of string
+      (** An API slot, named by its exact-output flow candidate id. *)
+  | Cli_slot of string
+      (** A CLI slot, named by its lane runtime id -- the id a CLI's
+          {!Keeper_lane_cli_oneshot.input_capacity} carries. *)
+(** The slot whose answer a pass accepted. The two transports name slots from
+    separate spaces, so a caller asks which transport answered by
+    constructor, not by comparing ids. *)
+
+val served_slot_id : served_slot -> string
+
 type write_scope = Context_only | Context_and_memory
 (** The caller names the evidence's purpose. A queue-source organization pass
     writes only working Context; a durable range retains Memory processing. *)
@@ -58,8 +70,14 @@ type not_committed =
             absent model), and every failure that never reached a provider all
             answer false, as does a pass that recorded no typed cause at all.
             A provider error that is not an HTTP refusal arrives as
-            [Completion_failed], which answers true whatever it held,
-            a dropped connection or a hard quota included (#37899).
+            [Completion_failed] with its typed transport error and whether
+            the request was sent. A request never sent answers false. A sent
+            one answers true only for a named context overflow, an oversized
+            response, a deadline on the request's own processing, or an empty
+            completion stopped by the context window or the output budget. A
+            dropped connection, a DNS failure, a hard quota, an idle stream,
+            any other empty completion and every unclassified failure answer
+            false.
 
             The verdict covers every failed visit of the walk, not the last
             one, so the same set of causes answers the same way whatever order
@@ -84,7 +102,8 @@ val run_best_effort
        (** The character limit a CLI slot reported while refusing, for
            {!fit_continuity}. An API slot's refusal reports none. *)
   -> ?on_not_committed:(not_committed -> unit)
-  -> ?on_continuity_committed:(Librarian_continuity_snapshot.t -> unit)
+  -> ?on_continuity_committed:(served_by:served_slot -> Librarian_continuity_snapshot.t -> unit)
+       (** [served_by] is the slot whose answer committed. *)
   -> ?durable_range_id:Keeper_memory_os_current.durable_range_id
   -> ?official_range_id:Keeper_memory_os_current.official_range_id
   -> ?cli_runner:Keeper_lane_cli_oneshot.runner
@@ -151,7 +170,7 @@ module For_testing : sig
     -> selected_input:Keeper_librarian.input
     -> messages:Agent_core.Types.message list
     -> unit
-    -> ( (accepted * Yojson.Safe.t) * string
+    -> ( (accepted * Yojson.Safe.t) * served_slot
        , classified_error )
        result
 

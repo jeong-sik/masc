@@ -927,12 +927,11 @@ let call_detail_line ~cols ~now (tool : Acting.chunk_tool) part =
 (* The pane names a turn by the number its settle confirmed; the header
    then shows that number in place of the state word. An open turn spells
    its state instead, whatever number an observation gave it. A settle that
-   carried no number settles the chunk without naming it: [turn_text] would
-   draw that as [turn ?], a question the row cannot answer and the reader
-   cannot act on. *)
+   carried no number settles the chunk without naming it, and the pane draws
+   no name at all rather than one standing for a number it does not have. *)
 let turn_name (chunk : Acting.chunk) =
   match (chunk.Acting.ck_turn, chunk.Acting.ck_settled) with
-  | (Some _ as turn), true -> Some (Acting.turn_text turn)
+  | Some turn, true -> Some (Acting.turn_number_text turn)
   | Some _, false | None, (true | false) -> None
 
 let turn_summary_line ~cols ~health (chunk : Acting.chunk) =

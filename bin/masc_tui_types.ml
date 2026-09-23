@@ -5105,6 +5105,16 @@ let slot_editor_target_name = function
   | Media_failover_slots -> "[runtime].media_failover"
 ;;
 
+(* The slot editor's half of the same question the pick list asks. The media
+   failover route has no per-entry write, so a drop or a move sends the whole
+   order it read; an exact lane names the one slot and lets the writer read
+   the declared order under its lock. Exhaustive, so a target added later
+   says which side it is on. *)
+let slot_editor_target_sends_whole_order = function
+  | Media_failover_slots -> true
+  | Exact_lane_slots _ -> false
+;;
+
 (* A name being typed on the Runtime reading. [Renaming_lane] carries the name
    the lane has now, because the write names both and the prompt shows the
    one being replaced. *)
@@ -9278,6 +9288,21 @@ let runtime_lane_write_busy (state : state) =
    the last write; sending it again could restore a candidate another writer
    removed. Keep the refusal typed by the list state rather than guessing
    freshness from elapsed time or the notice text. *)
+(* Whether the write this pick sends replaces the order the list last read,
+   in full. Those are the writes a stale list can undo: the server takes what
+   we send as the whole order, so an entry another writer removed comes back.
+   Appending one slot, or creating a lane out of the pick alone, cannot do
+   that -- the server joins those to the order it holds.
+
+   Exhaustive on purpose. The rule used to live in the dispatch as a list of
+   constructors beside a comment reading "only the conversation-lane arm
+   sends [existing] in full", and [Pick_media_failover] -- which sends
+   [existing @ [ pick ]] -- sat on the unguarded side of it. A pick added
+   later has to say which side it is on. *)
+let runtime_lane_pick_sends_whole_order = function
+  | Pick_conversation_lane _ | Pick_media_failover -> true
+  | Pick_exact_lane _ | Pick_new_lane _ | Pick_route_default -> false
+
 let runtime_lane_candidate_write_refusal (state : state) =
   if runtime_lane_write_busy state
   then Some Lane_write_pending
@@ -9523,6 +9548,17 @@ let plan_slot_edit (state : state) edit =
        if runtime_lane_write_busy state
        then Refuse_slot_edit Lane_write_pending
        else (
+         match
+           ( slot_editor_target_sends_whole_order target
+           , runtime_lane_candidate_write_refusal state )
+         with
+         | true, Some notice ->
+           (* The order under the cursor is the one the list last read, and
+              after a failed read-back that is evidence of the state before
+              the last write. The pick list refuses the same write for the
+              same reason. *)
+           Refuse_slot_edit notice
+         | true, None | false, (Some _ | None) ->
          match target, edit with
          | Exact_lane_slots _, Drop_slot when count <= 1 ->
            (* The writer refuses it too. Saying so here keeps the round trip

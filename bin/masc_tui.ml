@@ -7736,21 +7736,23 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
        previous write is read back would undo that write. *)
     state.runtime_lane_notice <- Some Masc_tui_types.Lane_write_pending
   else
-    match pick, Masc_tui_types.runtime_lane_candidate_write_refusal state with
-    | Masc_tui_types.Pick_conversation_lane _, Some notice ->
-        state.runtime_lane_notice <- Some notice
-    | Masc_tui_types.Pick_route_default, _ ->
+    match
+      ( Masc_tui_types.runtime_lane_pick_sends_whole_order pick
+      , Masc_tui_types.runtime_lane_candidate_write_refusal state )
+    with
+    | true, Some notice -> state.runtime_lane_notice <- Some notice
+    | true, None | false, (Some _ | None) ->
+    match pick with
+    | Masc_tui_types.Pick_route_default ->
         (* One entry, replaced rather than joined, so [existing] is not a list
            this write extends and a stale reading of it cannot be undone. *)
         launch_runtime_lane_write state ~mailbox ~written (fun ~host ~port ->
           Masc_tui_http.set_runtime_default ~host ~port ~runtime_id:(Some runtime_id))
-    | Masc_tui_types.Pick_conversation_lane _, None
-    | ( ( Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_new_lane _
-        | Masc_tui_types.Pick_media_failover )
-      , (None | Some _) ) ->
-        (* Exact lanes append one slot to the server's current order. A new
-           lane sends only the pick. Neither operation rewrites a stale list;
-           only the conversation-lane arm above sends [existing] in full. *)
+    | Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_exact_lane _
+    | Masc_tui_types.Pick_new_lane _ | Masc_tui_types.Pick_media_failover ->
+        (* Which of these a stale list can undo is
+           [runtime_lane_pick_sends_whole_order]'s to say, above, rather than
+           a second list of constructors here. *)
         if List.exists (String.equal runtime_id) existing then
           state.runtime_lane_notice <-
             Some

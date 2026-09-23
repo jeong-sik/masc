@@ -171,7 +171,7 @@ let listing_deferred_names bundle =
 let declared_deferrable bundle =
   List.filter
     (fun name ->
-       match Tool_loading_declarations.loading_of_tool name with
+       match Keeper_tool_descriptor.declared_loading_of_model_name name with
        | Tool_definition_toml.Deferrable -> true
        | Tool_definition_toml.Always_loaded -> false)
     (tool_names bundle.Keeper_tools_agent_core.tools)
@@ -222,7 +222,7 @@ let test_the_agent_core_lane_gets_the_listing_instead () =
          (fun n ->
             (not (List.mem n [ "atlassian_confluence_search"; "atlassian_jira_search" ]))
             &&
-            match Tool_loading_declarations.loading_of_tool n with
+            match Keeper_tool_descriptor.declared_loading_of_model_name n with
             | Tool_definition_toml.Deferrable -> false
             | Tool_definition_toml.Always_loaded -> true)
          dropped);
@@ -249,6 +249,16 @@ let test_a_builtin_that_declares_deferral_leaves_the_request () =
       "no tool that declared deferral is sent as a schema on this lane"
       []
       (List.filter (fun n -> List.mem n listed) declared_deferrable);
+    (* The model knows masc_browser_read as BrowserRead. Its declaration is in
+       the file named for the internal name, and a lookup by the model name
+       once missed it and kept the schema on every request. *)
+    if List.mem "BrowserRead" sent
+    then
+      check
+        bool
+        "a tool the model knows by a public name follows its own file"
+        false
+        (List.mem "BrowserRead" listed);
     (* And the lanes that cannot widen a turn still get every one of them:
        a name they cannot load is a name they cannot reach. *)
     check

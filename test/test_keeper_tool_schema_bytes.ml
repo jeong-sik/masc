@@ -286,14 +286,14 @@ open Alcotest
    keeper_skill_publish tool lets a Keeper publish a Skill package it wrote
    (RFC keeper-self-authored-skills); main's surface had shrunk below the
    entry above, so the total still falls. No headroom. *)
-(* 2026-09-24: +48 rendered bytes, computed from the five description edits
-   (not a CI reading). BrowserAct, BrowserInteract, BrowserRead,
-   keeper_skill_publish and keeper_skill_validate become deferred, and a
-   deferred tool is chosen from the first line of its description, cut at 80
-   bytes; each now opens with a whole sentence that fits. What it bought: those
-   five schemas, 9,406 bytes, leave every Agent Core request that has not used
-   them (5,047 requests on 2026-09-23). No headroom. *)
-let ceiling_bytes = 122_276
+(* 2026-09-24: +47 rendered bytes, computed from the four description edits
+   (not a CI reading). BrowserAct, BrowserInteract, BrowserRead and
+   keeper_skill_validate become deferred, and a deferred tool is chosen from
+   the first line of its description, cut at 80 bytes; each now opens with a
+   whole sentence that fits. What it bought: those four schemas, 8,370 bytes,
+   leave every Agent Core request that has not used them (5,047 requests on
+   2026-09-23). No headroom. *)
+let ceiling_bytes = 122_275
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

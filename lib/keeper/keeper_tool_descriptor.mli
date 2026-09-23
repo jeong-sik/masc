@@ -257,6 +257,14 @@ val model_visible_schemas : unit -> Masc_domain.tool_schema list
     schema. *)
 val keeper_model_names : t -> string list
 
+(** The [defer_loading] declared for this descriptor, read from the tool file
+    named for its internal name whatever name the model knows it by. *)
+val declared_loading : t -> Tool_definition_toml.loading
+
+(** [declared_loading] of the descriptor the model knows as [name]; a name no
+    descriptor offers is looked up as its own tool file. *)
+val declared_loading_of_model_name : string -> Tool_definition_toml.loading
+
 (** Every name owned by a descriptor, including transport-alias names. This is
     for name-integrity checks, never Keeper execution admission. *)
 val registered_names : t -> string list

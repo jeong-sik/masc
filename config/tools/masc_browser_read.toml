@@ -6,8 +6,8 @@ additional_properties = false
 # 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
 # 2,388 B 를 매번 실었고, 09-17~23 7일간 이 도구를 부른 서로 다른
 # Keeper 턴은 70개다. 지연의 손익은 호출 수가 아니라 필요했던 턴 수로
-# 가른다(masc #32062). 지연돼도 keeper_tool_search 목록에 이름과 한 줄
-# 요약이 남고, 부르면 그 턴에 붙는다.
+# 가른다(masc #32062). 지연돼도 keeper_tool_search 목록에 이름이 남고,
+# 부르면 그 턴에 스키마가 붙는다. 한 줄 요약은 그 답에 한 번 나온다.
 defer_loading = true
 
 [[params]]

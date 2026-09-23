@@ -550,19 +550,47 @@ let make_tool_bundle_for_descriptors_with_policy
 
      The listing does not record which source a tool came from, and the model
      is not told. Holding a tool back is a property of the tool. *)
+  (* A descriptor's declaration sits in the TOML named for its internal name,
+     while the model may know the tool by a public name ([BrowserRead] for
+     [masc_browser_read]). Asked by the model name, the declaration table
+     missed every such tool and answered Always_loaded. *)
+  let descriptor_loading =
+    List.concat_map
+      (fun (descriptor : Keeper_tool_descriptor.t) ->
+         let loading = Keeper_tool_descriptor.declared_loading descriptor in
+         List.map
+           (fun model_name -> model_name, loading)
+           (Keeper_tool_descriptor.keeper_model_names descriptor))
+      descriptors
+  in
+  let deferrable = function
+    | Tool_definition_toml.Deferrable -> true
+    | Tool_definition_toml.Always_loaded -> false
+  in
   let deferred_builtin_tools, always_loaded_builtin_tools =
     (* Both families, because both are declared the same way. Splitting only
        the descriptors would leave a [defer_loading = true] in a composition
        tool's file that nothing honours and nothing reports -- a declaration
-       is either read wherever it can be written or it is a trap. *)
-    List.partition
-      (fun (tool : Agent_core.Tool.t) ->
-         match
-           Tool_loading_declarations.loading_of_tool tool.Agent_core.Tool.schema.name
-         with
-         | Tool_definition_toml.Deferrable -> true
-         | Tool_definition_toml.Always_loaded -> false)
-      (descriptor_tools @ composition_tools)
+       is either read wherever it can be written or it is a trap. A
+       composition tool is declared under its own model-visible name. *)
+    let deferred_descriptors, loaded_descriptors =
+      List.partition
+        (fun (tool : Agent_core.Tool.t) ->
+           match List.assoc_opt tool.Agent_core.Tool.schema.name descriptor_loading with
+           | Some loading -> deferrable loading
+           | None ->
+             deferrable
+               (Tool_loading_declarations.loading_of_tool tool.Agent_core.Tool.schema.name))
+        descriptor_tools
+    in
+    let deferred_compositions, loaded_compositions =
+      List.partition
+        (fun (tool : Agent_core.Tool.t) ->
+           deferrable
+             (Tool_loading_declarations.loading_of_tool tool.Agent_core.Tool.schema.name))
+        composition_tools
+    in
+    deferred_descriptors @ deferred_compositions, loaded_descriptors @ loaded_compositions
   in
   let deferred_of source tool =
     ( { Keeper_identity_tool_search.tool

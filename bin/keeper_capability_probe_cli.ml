@@ -291,7 +291,7 @@ let run_invocation_pass ~sw ~net ~secure_random ~clock ~mgr ~fs ~base_path ~cfg
 ;;
 
 let loading_label name =
-  match Tool_loading_declarations.loading_of_tool name with
+  match Masc.Keeper_tool_descriptor.declared_loading_of_model_name name with
   | Tool_definition_toml.Deferrable -> "deferred"
   | Tool_definition_toml.Always_loaded -> "always"
 ;;
@@ -333,7 +333,7 @@ let run_doctor () =
     List.filter
       (fun (name, verdict) ->
         (match verdict with Probe.Projected _ -> true | _ -> false)
-        && (match Tool_loading_declarations.loading_of_tool name with
+        && (match Masc.Keeper_tool_descriptor.declared_loading_of_model_name name with
             | Tool_definition_toml.Always_loaded -> true
             | Tool_definition_toml.Deferrable -> false))
       verdict_of

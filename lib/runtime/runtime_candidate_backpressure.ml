@@ -19,7 +19,6 @@ type attempt_failure = State.attempt_failure =
   | Server_error
   | Network_transient
   | Provider_timeout
-  | Access_refused
 
 type failed_attempt = State.failed_attempt =
   | Failed_attempt of { noted_at : float; failure : attempt_failure }
@@ -45,9 +44,11 @@ let same_candidate_binding left right =
   match left.binding, right.binding with
   | Resolved_http_binding left, Resolved_http_binding right ->
       Agent_core.Binding_identity.equal left right
+  | Official_client_binding, Official_client_binding -> true
   | Resolved_http_binding _, (Http_binding_unavailable _ | Official_client_binding)
-  | (Http_binding_unavailable _ | Official_client_binding),
-      (Resolved_http_binding _ | Http_binding_unavailable _ | Official_client_binding) -> false
+  | Http_binding_unavailable _,
+      (Resolved_http_binding _ | Http_binding_unavailable _ | Official_client_binding)
+  | Official_client_binding, (Resolved_http_binding _ | Http_binding_unavailable _) -> false
 
 let rec update_candidate candidate transition =
   let current = Atomic.get candidate.backpressure in

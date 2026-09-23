@@ -444,9 +444,9 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         screens = iter(
             [
-                "MASC Tools  ▸surface | async | activations | usage | catalog",
-                "MASC Tools   surface |▸async | activations | usage | catalog",
-                "MASC Tools   surface | async |▸activations | usage | catalog",
+                "MASC Config / Tools  ▸surface | async | activations | usage | catalog",
+                "MASC Config / Tools   surface |▸async | activations | usage | catalog",
+                "MASC Config / Tools   surface | async |▸activations | usage | catalog",
             ]
         )
         with (
@@ -465,9 +465,9 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         screens = iter(
             [
-                "MASC Tools  ▸surface | async | activations | usage | catalog",
-                "MASC Tools   surface |▸async | activations | usage | catalog",
-                "MASC Tools  ▸surface | async | activations | usage | catalog",
+                "MASC Config / Tools  ▸surface | async | activations | usage | catalog",
+                "MASC Config / Tools   surface |▸async | activations | usage | catalog",
+                "MASC Config / Tools  ▸surface | async | activations | usage | catalog",
             ]
         )
         with (
@@ -480,7 +480,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
     def test_tools_pane_parser_keeps_an_unfamiliar_observed_pane(self):
         self.assertEqual(
             capture.selected_tools_pane_from_screen(
-                "MASC Tools   surface |▸future | activations"
+                "MASC Config / Tools   surface |▸future | activations"
             ),
             "future",
         )
@@ -525,13 +525,13 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         top = "\n".join(
             [
-                "MASC Tools 14:10:47 [connected]",
+                "MASC Config / Tools 14:10:47 [connected]",
                 "Skill Use — keeper-one (8 receipts)",
                 "session=trace-one  ledger=abcdef0123456789",
                 "invoked=8 actions=8 invalid=0",
             ]
         )
-        middle = "MASC Tools 14:10:47 [connected]\nolder receipts"
+        middle = "MASC Config / Tools 14:10:47 [connected]\nolder receipts"
         activation = {
             "identity": {
                 "source_id": "source",
@@ -574,7 +574,7 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         )
         receipt = "\n".join(
             [
-                "MASC Tools 14:10:47 [connected]",
+                "MASC Config / Tools 14:10:47 [connected]",
                 f"receipt_sha256={receipt_sha256}",
             ]
         )
@@ -616,13 +616,13 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         )
         receipt = "\n".join(
             [
-                "MASC Tools 14:10:47 [connected]",
+                "MASC Config / Tools 14:10:47 [connected]",
                 f"receipt_sha256={receipt_sha256}",
             ]
         )
         top = "\n".join(
             [
-                "MASC Tools 14:10:48 [connected]",
+                "MASC Config / Tools 14:10:48 [connected]",
                 "Skill Use — keeper-one (8 receipts)",
                 f"session=trace-one  ledger={revision}",
             ]
@@ -662,10 +662,10 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
     def test_tools_surface_connection_rejects_disconnected(self):
         self.assertTrue(
-            capture.tools_surface_is_connected("MASC Tools 14:10:47 [connected]")
+            capture.tools_surface_is_connected("MASC Config / Tools 14:10:47 [connected]")
         )
         self.assertFalse(
-            capture.tools_surface_is_connected("MASC Tools 14:10:48 [disconnected]")
+            capture.tools_surface_is_connected("MASC Config / Tools 14:10:48 [disconnected]")
         )
 
     def test_tools_surface_waits_through_reconnecting(self):
@@ -675,8 +675,8 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
 
         screens = iter(
             [
-                "MASC Tools 14:10:47 [reconnecting]",
-                "MASC Tools 14:10:48 [connected]",
+                "MASC Config / Tools 14:10:47 [reconnecting]",
+                "MASC Config / Tools 14:10:48 [connected]",
             ]
         )
         with mock.patch.object(capture, "screen_text", side_effect=screens):

@@ -4,7 +4,10 @@
    Keeper detail tab that has no keys of its own and no route to this screen
    -- while its title bar said "MASC Schedules" and the palette said "go
    Schedules". A reader who typed the name and pressed [?] found this
-   screen's keys under the name of a screen they were not on.
+   screen's keys under the name of a screen they were not on. (That title
+   has since become "MASC Keepers / Schedules", so that the screen names the
+   parent its tab strip highlights -- #36421. The drift described here is
+   what this test guards, and it is quoted as it stood.)
 
    A label may carry the path: "Planning / Goals" is the Planning surface on
    its first tab, and "Config / Runtime / Clients" is three deep. So the name

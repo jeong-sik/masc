@@ -35,7 +35,7 @@ let test_age_label () =
 let test_fact_row_line () =
   let fact : Decode.memory_fact =
     { mf_claim = "System uses Roger voice for Tester"
-    ; mf_category = "persona"
+    ; mf_category = "preference"
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
@@ -548,6 +548,104 @@ let test_render_memory_body_cursor_clamping () =
   check bool "selected row was clamped and called" true !selected_called
 ;;
 
+(* The first cell of a memory row. It used to answer both the word and its
+   colour from the word itself, through a hand-written table of eleven
+   spellings. Nine of them matched nothing any keeper writes, and across the
+   fleet's 1768 facts 1019 fell through the catch-all -- [blocker] among them,
+   receded like every word the table did not know, while [lesson] drew in the
+   colour of something going right. These pin that the cell now says what the
+   store says. *)
+let test_the_row_badge_says_what_the_store_says () =
+  let fact_row category : Types.memory_fact_row =
+    Types.Memory_row_fact
+      { Decode.mf_claim = "a claim of a fixed length"
+      ; mf_category = category
+      ; mf_origin = "authored"
+      ; mf_first_seen = 100.0
+      ; mf_last_seen = 200.0
+      ; mf_memory_id = "mem-1"
+      ; mf_events = Decode.no_memory_fact_events
+      }
+  in
+  let line row = Render_memory.memory_fact_row_line ~cols:120 row in
+  check bool "a category the old table never named is spelled whole" true
+    (contains "[BLOCKER   ]" (line (fact_row "blocker")));
+  (* The one value the table renamed: the row read PREF while the detail under
+     it and the category strip above it both read "preference". *)
+  check bool "the renamed one is spelled as it is stored" true
+    (contains "[PREFERENCE]" (line (fact_row "preference")));
+  check bool "and not by the old short name" false
+    (contains "[PREF " (line (fact_row "preference")));
+  (* A word wider than the cell keeps the cell's width and says it was cut. *)
+  check bool "a long one is cut with its mark" true
+    (contains "[VALIDATED\xe2\x80\xa6]" (line (fact_row "validated_approach")))
+;;
+
+(* No category is dressed differently from another, because the dress had to
+   guess which words matter and the producer picks the words. Two rows that
+   differ only in their category differ only in that word. *)
+let test_no_category_is_dressed_better_than_another () =
+  let fact_row category : Types.memory_fact_row =
+    Types.Memory_row_fact
+      { Decode.mf_claim = "a claim of a fixed length"
+      ; mf_category = category
+      ; mf_origin = "authored"
+      ; mf_first_seen = 100.0
+      ; mf_last_seen = 200.0
+      ; mf_memory_id = "mem-1"
+      ; mf_events = Decode.no_memory_fact_events
+      }
+  in
+  (* Both are ten cells, so neither is padded and only the letters differ.
+     Blanking them leaves the whole dress of the row. The old table named one
+     of these two and drew it in the colour of something going right; the
+     other it did not know. *)
+  let blank word line =
+    let n = String.length word and h = String.length line in
+    let rec go i =
+      if i + n > h then line
+      else if String.equal (String.sub line i n) word then
+        String.sub line 0 i ^ String.make n '.'
+        ^ String.sub line (i + n) (h - i - n)
+      else go (i + 1)
+    in
+    go 0
+  in
+  let dress category word =
+    blank word (Render_memory.memory_fact_row_line ~cols:120 (fact_row category))
+  in
+  check string "preference wears what constraint wears"
+    (dress "constraint" "CONSTRAINT")
+    (dress "preference" "PREFERENCE")
+;;
+
+(* The two words that are this pane's own, not the producer's: a row from the
+   source-bound store and a row the store dropped. They keep their colour,
+   because the pane knows which kind of row it is drawing. *)
+let test_the_panes_own_two_words_survive () =
+  let source_row : Types.memory_fact_row =
+    Types.Memory_row_source_fact
+      { Decode.msf_claim = "the config floor is masc.core"
+      ; msf_first_seen = 100.0
+      ; msf_path = "docs/config.md"
+      ; msf_sha256 = "cafe0123beef4567cafe0123beef4567"
+      }
+  in
+  let dropped_row : Types.memory_fact_row =
+    Types.Memory_row_invalidation
+      { Decode.mi_source_path = "docs/config.md"
+      ; mi_invalidated_at = 200.0
+      ; mi_reason = "the file moved"
+      }
+  in
+  check bool "the source-bound row" true
+    (contains "[SOURCE    ]"
+       (Render_memory.memory_fact_row_line ~cols:120 source_row));
+  check bool "the dropped row" true
+    (contains "[DROPPED   ]"
+       (Render_memory.memory_fact_row_line ~cols:120 dropped_row))
+;;
+
 let test_render_memory_facts_body () =
   let state = make_state () in
   let fact : Decode.memory_fact =
@@ -600,7 +698,7 @@ let test_rows_and_header_share_one_grid () =
   let cols = 120 in
   let fact : Decode.memory_fact =
     { mf_claim = "System uses Roger voice for Tester"
-    ; mf_category = "persona"
+    ; mf_category = "preference"
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
@@ -695,7 +793,7 @@ let three_kinds_state ?(keeper = "alpha") () =
     ; mos_updated_at = 1000.0
     ; mos_facts =
         [ fact "architecture" "The renderer draws the board"
-        ; fact "persona" "Roger reads for the tester"
+        ; fact "preference" "Roger reads for the tester"
         ]
     }
   in
@@ -897,7 +995,7 @@ let test_the_narrowest_body_spends_its_row_on_the_sort () =
 let test_fleet_fact_row_line () =
   let fact : Decode.memory_fact =
     { mf_claim = "System uses Roger voice for Tester"
-    ; mf_category = "persona"
+    ; mf_category = "preference"
     ; mf_origin = "tester · manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
@@ -910,7 +1008,11 @@ let test_fleet_fact_row_line () =
   check bool "fleet fact row line bounded" true (Layout.display_width line <= 120);
   let stripped = Masc_tui_theme.strip_sgr line in
   check bool "fleet fact row has tester tag" true (contains "tester" stripped);
-  check bool "fleet fact row has IDENTITY badge" true (contains "IDENTITY" stripped)
+  (* The badge spells the category the store holds. It used to answer
+     "IDENTITY" here, from a table that renamed four words and recognised
+     none of the eight the fleet writes except "lesson" and this one. *)
+  check bool "fleet fact row spells its category" true
+    (contains "PREFERENCE" stripped)
 ;;
 
 let test_render_memory_body_sorting () =
@@ -1195,6 +1297,12 @@ let () =
             test_the_category_row_is_the_shared_strip
         ; test_case "the narrowest body spends its row on the sort" `Quick
             test_the_narrowest_body_spends_its_row_on_the_sort
+        ; test_case "the row badge says what the store says" `Quick
+            test_the_row_badge_says_what_the_store_says
+        ; test_case "no category is dressed better than another" `Quick
+            test_no_category_is_dressed_better_than_another
+        ; test_case "the pane's own two words survive" `Quick
+            test_the_panes_own_two_words_survive
         ] )
     ]
 ;;

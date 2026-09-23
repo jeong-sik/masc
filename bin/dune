@@ -637,6 +637,15 @@
  (wrapped false)
  (modules masc_tui_file_icon))
 
+;; How long ago a row was last seen. Own library so the span and its three
+;; refusals (empty, unparseable, ahead of the clock) have a test that does not
+;; go through a screen.
+(library
+ (name masc_tui_last_seen)
+ (wrapped false)
+ (modules masc_tui_last_seen)
+ (libraries masc masc.time_codec masc_tui_message_layout))
+
 (library
  (name masc_tui_config)
  (wrapped false)
@@ -1614,6 +1623,7 @@
   masc_tui_acting
   masc_tui_command
   masc_tui_gate_text
+   masc_tui_last_seen
   masc_tui_preset_text
   masc_tui_mcp
   masc_tui_keeper_chat_transcript

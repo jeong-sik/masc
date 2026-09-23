@@ -23,6 +23,12 @@
 
 ### Fixed
 
+- Clients 의 `LAST SEEN` 이 시각 대신 **얼마나 지났는지**를 말해요. 날짜 없이 `11:49:28` 만
+  그리다 보니, 헤더 시계가 `09:31:39`(2026-09-23)인 화면에서 2026-09-21 에 마지막으로 보인
+  대시보드 세션이 "오늘 오후"처럼 읽혔어요 — 하루 반을 안 보인 줄인데 두 시간 뒤를 가리킨
+  셈입니다. 이제 `1d21h`·`7h48m`·`1s` 로 그려서 줄마다 헤더를 보지 않아도 됩니다. 읽을 수 없는
+  값이나 시계보다 앞선 값은 재지 않고 온 그대로 보여줘요.
+
 - The chat status area no longer reserves a row it does not draw. The pane skips the in-flight row for the request the live transcript is already drawing — that transcript says the phase, the age and the tools, and a second row put a second age and an opaque request id above the `ACTIVE TURN` line — but the row budget counted every in-flight request. With one message in flight, which is the ordinary case, the area held a row nobody drew: a blank line under the status rows and the footer one row off from what was on screen. The pane and the budget now read the same list (#37741).
 - The Keepers fleet row says when its task-owner scan came up short. The scan reports what it could not read, and only a backlog failure moves the fleet status off `ok`, so a Keeper whose profile did not load left its tasks out of the count with nothing on the row saying so. The count now carries its own shortfall: `task owner without fiber 0 (2 sources unread)` (#38012).
 - The Identity tab no longer repeats the keys its footer draws. The sentence above the service list spelled them because the title row carried the hint and cut it (#35539); the keys have since moved to the footer, which draws all six at 120 columns and gives up `/:filter` and `R:refresh` at 80 with `?` naming what it dropped (#38011).

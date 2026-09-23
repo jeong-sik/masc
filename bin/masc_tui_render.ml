@@ -6172,7 +6172,11 @@ let render_clients (state : state) =
     | Some snapshot -> snapshot.Masc.Tui_decode.cls_clients
   in
   let shown = List.length clients in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
+  (* One reading of the clock for the frame: the header and every row's span
+     are distances from the same instant, and two readings would put them a
+     render apart. *)
+  let now_s = Unix.gettimeofday () in
+  let now = Unix.localtime now_s in
   let timestamp =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
       now.Unix.tm_sec
@@ -6256,12 +6260,14 @@ let render_clients (state : state) =
               (fit_width (Terminal_text.single_line row.cr_agent_type) 10)
               (fit_width keeper 16)
               (fit_width task 9)
-              (* The clock alone, which the header's own clock gives a
-                 distance to -- so in the header's zone. The clock was cut
-                 out of the RFC3339 text, which is UTC, and printed unread:
-                 a client seen at 10:20 in Seoul read 01:20 under a 19:18
-                 header. *)
-              (Terminal_text.clock_timestamp row.cr_last_seen)
+              (* How long ago, not when. The cell drew the clock alone on
+                 the reading that the header's clock gives it a distance,
+                 which holds only while the two are the same day: a dashboard
+                 session last seen on 2026-09-21 drew "11:49:28" under a
+                 header reading 09:31:39 on 2026-09-23, and the distance a
+                 reader could take from that pointed two hours ahead. A span
+                 carries its own day. *)
+              (Masc_tui_last_seen.text ~now:now_s row.cr_last_seen)
           in
           (* Inactive rows stay in the roster -- "who left" is part of the
              reading -- but they recede, the way the empty-state rows do. *)

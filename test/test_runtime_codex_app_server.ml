@@ -1415,9 +1415,65 @@ let test_error_notification_reads_usage_limit () =
       | Error
           (Runtime_codex_app_server.Turn_failed
              { codex_error_info =
-                 Some Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+                 Some
+                   (Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+                      { resets_at = None })
              ; detail = _
              }) -> ()
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> fail "usage limit notification did not fail the turn")
+;;
+
+(* The usage-limit error names no reset; the account's rate-limit updates do.
+   The frames follow what a live session sent before its weekly refusal: the
+   exhausted [codex] window with its reset, then a [premium] limit with no
+   windows, then the error. The second update must not erase the first
+   limit's window, and a window with usage left dates nothing. *)
+let test_usage_limit_carries_the_exhausted_windows_reset () =
+  let resets_at = 1789371630 in
+  let rate_limits ~limit_id ~primary ~secondary =
+    Printf.sprintf
+      {|{"method":"account/rateLimits/updated","params":{"rateLimits":{"limitId":%S,"limitName":null,"primary":%s,"secondary":%s,"credits":null,"planType":"pro","rateLimitReachedType":null}}}|}
+      limit_id
+      primary
+      secondary
+  in
+  let exhausted =
+    rate_limits
+      ~limit_id:"codex"
+      ~primary:
+        (Printf.sprintf
+           {|{"usedPercent":100,"windowDurationMins":10080,"resetsAt":%d}|}
+           resets_at)
+      ~secondary:{|{"usedPercent":40,"windowDurationMins":300,"resetsAt":1789000000}|}
+  in
+  let premium = rate_limits ~limit_id:"premium" ~primary:"null" ~secondary:"null" in
+  let malformed =
+    {|{"method":"account/rateLimits/updated","params":{"rateLimits":{"limitId":"codex","primary":{"resetsAt":1}}}}|}
+  in
+  let refusal =
+    {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"You've hit your usage limit.","codexErrorInfo":"usageLimitExceeded"}}}|}
+  in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; exhausted
+    ; premium
+    ; malformed
+    ; refusal
+    ]
+    (fun path ->
+      match run_fixture path with
+      | Error
+          (Runtime_codex_app_server.Turn_failed
+             { codex_error_info =
+                 Some
+                   (Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+                      { resets_at = Some observed })
+             ; detail = _
+             }) -> check int "reset of the exhausted window" resets_at observed
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok _ -> fail "usage limit notification did not fail the turn")
 ;;
@@ -5213,6 +5269,8 @@ let () =
             test_failed_turn_uses_official_context_error_enum
         ; test_case "error notification reads usage limit" `Quick
             test_error_notification_reads_usage_limit
+        ; test_case "usage limit carries the exhausted window's reset" `Quick
+            test_usage_limit_carries_the_exhausted_windows_reset
         ; test_case "failed turn reads object and unknown error info" `Quick
             test_failed_turn_reads_object_and_unknown_error_info
         ; test_case "failed turn keeps unnamed error scalars" `Quick

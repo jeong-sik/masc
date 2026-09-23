@@ -116,7 +116,7 @@ let test_codex_error_info_lands_in_its_class () =
   List.iter
     (fun (label, info, expected) -> check label (failed info) expected)
     Codex.Codex_error_info.
-      [ "usage limit", Usage_limit_exceeded, "provider:hard_quota"
+      [ "usage limit", Usage_limit_exceeded { resets_at = None }, "provider:hard_quota"
       ; "session budget", Session_budget_exceeded, "provider:hard_quota"
       ; "rate limit", Rate_limit_exceeded, "provider:rate_limit"
       ; "server overloaded", Server_overloaded, "provider:unavailable"
@@ -159,7 +159,8 @@ let test_usage_limit_routes_to_hard_quota () =
     Map.codex_error_to_core_error
       (Codex.Turn_failed
          { detail = "You've hit your usage limit."
-         ; codex_error_info = Some Codex.Codex_error_info.Usage_limit_exceeded
+         ; codex_error_info =
+             Some (Codex.Codex_error_info.Usage_limit_exceeded { resets_at = None })
          })
   in
   match
@@ -169,6 +170,59 @@ let test_usage_limit_routes_to_hard_quota () =
   with
   | Keeper_runtime_failure_route.Retry_after_observed
       { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after = None } -> ()
+  | Keeper_runtime_failure_route.Retry_after_observed _
+  | Keeper_runtime_failure_route.Rotate_now _
+  | Keeper_runtime_failure_route.Exhausted_visible_alive _ ->
+    Alcotest.fail "usage limit did not route to hard quota"
+;;
+
+(* A usage limit whose rate-limit updates named a reset reaches the quota
+   route with that reset, and the window the turn driver's [note_quota]
+   records from it ([now + retry_after]) opens at the reset rather than
+   standing until a success on the scope. *)
+let test_usage_limit_with_reset_opens_its_quota_window_then () =
+  let window_s = 3600 in
+  let resets_at = int_of_float (Time_compat.now ()) + window_s in
+  let error =
+    Map.codex_error_to_core_error
+      (Codex.Turn_failed
+         { detail = "You've hit your usage limit."
+         ; codex_error_info =
+             Some (Codex.Codex_error_info.Usage_limit_exceeded { resets_at = Some resets_at })
+         })
+  in
+  match
+    Keeper_runtime_failure_route.route_of_error
+      ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+      error
+  with
+  | Keeper_runtime_failure_route.Retry_after_observed
+      { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after } ->
+    (match Keeper_runtime_failure_route.usable_retry_after retry_after with
+     | None -> Alcotest.fail "the stated reset did not reach the route"
+     | Some retry_after_s ->
+       Runtime_quota_window.reset_for_testing ();
+       let scope =
+         Runtime_quota_window.scope_of_credential ~provider_id:"codex_app_server" None
+       in
+       Runtime_quota_window.note_exhausted
+         ~scope
+         ~resets_at:(Time_compat.now () +. retry_after_s);
+       let reset = Float.of_int resets_at in
+       (* The reset crosses two clock reads, one per conversion. *)
+       let clock_skew_s = 1.0 in
+       (match Runtime_quota_window.active_until ~scope ~now:(reset -. 60.0) with
+        | Some until ->
+          Alcotest.(check bool)
+            "window ends at the stated reset"
+            true
+            (Float.abs (until -. reset) <= clock_skew_s)
+        | None -> Alcotest.fail "no quota window before the reset");
+       Alcotest.(check bool)
+         "window is open after the reset"
+         false
+         (Runtime_quota_window.is_exhausted ~scope ~now:(reset +. clock_skew_s +. 1.0));
+       Runtime_quota_window.reset_for_testing ())
   | Keeper_runtime_failure_route.Retry_after_observed _
   | Keeper_runtime_failure_route.Rotate_now _
   | Keeper_runtime_failure_route.Exhausted_visible_alive _ ->
@@ -275,6 +329,10 @@ let () =
             "usage limit routes to hard quota"
             `Quick
             test_usage_limit_routes_to_hard_quota
+        ; Alcotest.test_case
+            "a usage limit with a reset opens its quota window then"
+            `Quick
+            test_usage_limit_with_reset_opens_its_quota_window_then
         ; Alcotest.test_case
             "a host stop and a closed connection carry their fields"
             `Quick

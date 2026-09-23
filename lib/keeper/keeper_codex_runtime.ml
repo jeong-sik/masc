@@ -327,9 +327,10 @@ let codex_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_act
 (* The failed turn's [codexErrorInfo] is the provider's own classification,
    so it picks the provider error the failure route reads. A usage or session
    budget refusal is the hard quota the Claude Code runtime reports as
-   [Quota_blocked]; without this, a Codex head out of weekly usage rotated as
-   a generic provider failure every cycle and left no quota evidence.
-   [retry_after] stays [None]: the turn error carries no reset time. *)
+   [Quota_blocked], which the turn driver records as quota evidence. A usage
+   limit carries the reset the app-server's rate-limit updates named, turned
+   into seconds from now as the Claude Code reset is, so the recorded quota
+   window opens at that reset. A session budget names no reset. *)
 let turn_failure_to_provider_error ~detail codex_error_info =
   let provider = "codex_app_server" in
   let network kind =
@@ -337,9 +338,14 @@ let turn_failure_to_provider_error ~detail codex_error_info =
       { provider; kind; timeout_phase = None; detail }
   in
   match codex_error_info with
-  | Some
-      ( Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
-      | Runtime_codex_app_server.Codex_error_info.Session_budget_exceeded ) ->
+  | Some (Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded { resets_at }) ->
+    let retry_after =
+      Option.map
+        (fun resets_at -> Float.max 0.0 (Float.of_int resets_at -. Time_compat.now ()))
+        resets_at
+    in
+    Llm_provider.Error.HardQuota { provider; retry_after; detail }
+  | Some Runtime_codex_app_server.Codex_error_info.Session_budget_exceeded ->
     Llm_provider.Error.HardQuota { provider; retry_after = None; detail }
   | Some Runtime_codex_app_server.Codex_error_info.Rate_limit_exceeded ->
     Llm_provider.Error.RateLimit { provider; retry_after = None; detail }

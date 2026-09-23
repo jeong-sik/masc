@@ -235,6 +235,27 @@ status: reference
     `Quarantined`)와 다른 층위다.
   → [Keeper_board_attention_partition](../../lib/keeper/keeper_board_attention_partition.mli)
 
+**Board Attention Quarantine (Board 판정 격리)**
+: Board attention 판정 워커가 정상적으로 완료할 수 없는 후보(`candidate`)와 파티션을
+  격리 보관하는 상태 및 그 인벤토리. 워커는 격리된 항목을 스스로 재시도하지 않으며,
+  오직 운영자의 재투입(`requeue`) 요청으로만 풀려난다(#38260·#38262).
+  - 격리 원인 카테고리(`quarantine_failure_category`): 닫힌 12개 값이다.
+    `Candidate_membership_conflict`·`Durable_partition_invariant`·`Exact_setup_unavailable`·`Exact_flow_replayed`·`Exact_lane_exhausted`(모든
+    HTTP 슬롯 및 CLI tail 거부로 모델 슬롯 소진)·`Exact_flow_bookkeeping_failed`(장부
+    기록 실패)·`Exact_completion_failed`(완료 단계 실패)·`Domain_output_invalid`·`Execution_provenance_mismatch`·`Unexpected_worker_failure`·`Exact_execution_quarantined`(호출
+    단계 미기록)·`Exact_execution_interrupted`(프로세스 재시작으로 바인딩된 실행이
+    끊김. 읽기 전용 모델 호출이라 토큰 외 부작용 없이 재투입 가능).
+  - TUI 표시 및 복구:
+    - Keeper Info 탭에 원인 카테고리별로 집계(건수, 최장 경과 시간, 파티션 ID, 재투입
+      대기 수)되어 표시된다. 수백 건의 슬롯 소진 행이 화면을 덮지 않도록 카테고리당 한 줄로 묶는다.
+    - `Q` 키를 누르면 가장 오래 대기 중인 항목(`oldest_waiting`)부터 원장의
+      `Requeue_requested`로 전이시키며 재투입을 요청한다.
+    - 재투입 요청은 읽을 때의 `quarantine_id`로 펜싱되어, 같은 파티션의 더 새로운 격리 상태를
+      낡은 식별자로 덮어쓰지 않는다.
+    - 서버가 새로 추가한 알 수 없는 카테고리는 떨어뜨리지 않고 `Unreadable_row`로 보존·계수하여
+      격리 수가 화면에서 축소 왜곡되지 않게 한다.
+  → [Keeper_board_attention_candidate](../../lib/keeper/keeper_board_attention_candidate.mli) · [Keeper_board_attention_quarantine_command](../../lib/keeper/keeper_board_attention_quarantine_command.mli) · [Masc_tui_board_quarantine](../../bin/masc_tui_board_quarantine.mli)
+
 **Keeper Cycle**
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.

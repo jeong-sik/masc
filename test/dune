@@ -3482,6 +3482,15 @@
  (modules test_tui_connection_status)
  (libraries alcotest masc masc_tui_types))
 
+; Its own anchor, under the suite that links the same two libraries, so two
+; pull requests adding a suite do not both land on the head of this file.
+; [masc.masc_schedule] is here for [Schedule_domain], whose status list and
+; terminal rule the line under test walks rather than restating.
+(test
+ (name test_tui_schedule_counts_line)
+ (modules test_tui_schedule_counts_line)
+ (libraries alcotest masc.masc_schedule masc_tui_types))
+
 ; Its own anchor, under the other suite that links only the state vocabulary,
 ; so two pull requests adding a suite do not both land on the head of this
 ; file.

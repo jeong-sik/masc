@@ -922,6 +922,35 @@ let decode_schedule_snapshot json =
           (Printf.sprintf "schedules fsm must be an object: %s"
              (Yojson.Safe.to_string other))
   in
+  (* Walked from [Schedule_domain.all_schedule_statuses], the same list the
+     server builds this object from, so a status added to the shared contract
+     is asked for here without a second spelling of the vocabulary. The server
+     sends [null] exactly when the store read failed, which is the reading
+     [request_count] already carries. *)
+  let* scs_counts =
+    match Yojson.Safe.Util.member "counts" json with
+    | `Null -> Ok None
+    | `Assoc fields ->
+        let rec read acc = function
+          | [] -> Ok (Some (List.rev acc))
+          | status :: rest -> (
+              let name = Schedule_domain.schedule_status_to_string status in
+              match List.assoc_opt name fields with
+              | Some (`Int count) -> read ((status, count) :: acc) rest
+              | Some other ->
+                  Error
+                    (Printf.sprintf "schedules counts %s must be an integer: %s"
+                       name
+                       (Yojson.Safe.to_string other))
+              | None ->
+                  Error (Printf.sprintf "schedules counts is missing %s" name))
+        in
+        read [] Schedule_domain.all_schedule_statuses
+    | other ->
+        Error
+          (Printf.sprintf "schedules counts must be an object or null: %s"
+             (Yojson.Safe.to_string other))
+  in
   let* rows = required_list_field json "requests" in
   let* scs_rows = decode_schedule_rows rows in
   Ok
@@ -930,6 +959,7 @@ let decode_schedule_snapshot json =
     ; scs_request_count
     ; scs_truncated
     ; scs_next_due_iso
+    ; scs_counts
     ; scs_rows
     }
 

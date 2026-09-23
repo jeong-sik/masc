@@ -112,7 +112,7 @@ type provider_error =
       }
   | ProviderTerminal of
       { provider : string
-      ; reason : string
+      ; kind : Http_client.provider_terminal_kind
       ; detail : string
       }
 
@@ -122,6 +122,10 @@ and capacity_scope =
   | CapacityRegion
   | CapacityProvider
   | CapacityUnknown
+
+val provider_terminal_reason : Http_client.provider_terminal_kind -> string
+(** Display and wire label of a provider terminal kind: ["session_conflict"],
+    or the provider's own subtype for [Other]. *)
 
 val to_string : provider_error -> string
 val is_retryable : provider_error -> bool

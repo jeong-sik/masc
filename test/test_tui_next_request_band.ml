@@ -268,7 +268,33 @@ let test_the_turn_start_and_refusal_fronts_say_why () =
        (with_origin (Inspector.Carried_halved_after_refusal { retry = 2 })));
   Alcotest.(check bool) "an evicted front" true
     (says "front evicted after a refusal (retry 3)"
-       (with_origin (Inspector.Carried_evicted_after_refusal { retry = 3 })))
+       (with_origin (Inspector.Carried_evicted_after_refusal { retry = 3 })));
+  Alcotest.(check bool) "a refused seed range" true
+    (says "the seed range was refused: front moved to where this turn began"
+       (with_origin Inspector.Carried_turn_start_after_seed_refusal))
+
+let test_a_refused_seed_origin_decodes () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"schema":"masc.keeper.next-request-forecast.v5","checkpoint_messages":1,"wake_line_bytes":1,
+         "walk":{"lane_id":"r","declared":["r"]},
+         "candidates":[{"runtime_id":"r","lane":{"agent_core":true},"marks":null,
+           "parts":{"error":"not measured"},"history_atoms":4,
+           "carried":{"first_atom":2,"kept_atoms":2,"transmitted_bytes":300,"preamble_bytes":null,
+                      "origin":{"kind":"turn_start_after_seed_refusal"},"counted_tokens":null},
+           "assembly":null,"place":{"walks_at":0,"declared_at":0,"rest":{"kind":"serving"}}}]}|}
+  in
+  match Inspector.decode_forecast json with
+  | Ok
+      { candidates =
+          [ { carried = Some { origin = Inspector.Carried_turn_start_after_seed_refusal; _ }
+            ; _
+            }
+          ]
+      ; _
+      } -> ()
+  | Ok _ -> Alcotest.fail "the refused seed origin decoded as another origin"
+  | Error detail -> Alcotest.fail ("the refused seed origin decodes: " ^ detail)
 
 let test_an_evicted_refusal_origin_decodes () =
   let json =
@@ -680,6 +706,8 @@ let () =
             test_null_marks_count_a_record_origin_and_a_layout_decode
         ; Alcotest.test_case "an evicted refusal origin decodes" `Quick
             test_an_evicted_refusal_origin_decodes
+        ; Alcotest.test_case "a refused seed origin decodes" `Quick
+            test_a_refused_seed_origin_decodes
         ; Alcotest.test_case "a not-applicable lane decodes as such" `Quick
             test_a_not_applicable_lane_decodes_as_such
         ; Alcotest.test_case "a malformed forecast fails the reading" `Quick

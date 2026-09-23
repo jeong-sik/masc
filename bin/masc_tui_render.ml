@@ -28,6 +28,7 @@ module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Overview_team = Masc_tui_overview_team
+module Repository_pulls = Masc_tui_repository_pulls
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
 module Markdown = Masc_tui_markdown
@@ -373,9 +374,12 @@ let overview_quota_line (state : state) ~now =
                Ansi.reset
                (String.concat " \xc2\xb7 " (List.map window_text windows))))
 
-(* Lines under the Team block that explain no Keeper row. *)
+let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
+
+(* Lines under the Team block that explain no Keeper row: an unread quota
+   and the pull request summary. *)
 let overview_team_detail_lines (state : state) =
-  Option.to_list (overview_quota_unread_line state)
+  Option.to_list (overview_quota_unread_line state) @ overview_pulls_lines state
 
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so

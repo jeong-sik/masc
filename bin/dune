@@ -1528,6 +1528,14 @@
  (modules masc_tui_overview_team)
  (libraries masc masc_types masc_tui_types))
 
+;; RFC-0465: the Overview's pull request reading, decoder and lines. A
+;; library so a test can decode the server's own encoder output.
+(library
+ (name masc_tui_repository_pulls)
+ (wrapped false)
+ (modules masc_tui_repository_pulls)
+ (libraries unix masc masc_tui_types masc_tui_ansi yojson))
+
 (executable
  (name masc_tui)
  (modules
@@ -1538,6 +1546,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_repository_pulls
   digestif
   masc.string_util
   masc.keeper_runtime

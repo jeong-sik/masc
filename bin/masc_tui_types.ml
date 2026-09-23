@@ -1933,6 +1933,47 @@ type overview_quota_reading =
   | Quota_read of Tui_decode.runtime_option list
   | Quota_failed of string
 
+(** One open pull request as [GET /api/v1/repositories/pulls] reports it
+    (RFC-0465). The check and review words are parsed at decode; a word this
+    build cannot name makes the row undecodable rather than a default. *)
+type pull_checks = Pull_checks_passing | Pull_checks_failing | Pull_checks_running | Pull_checks_none
+type pull_review = Pull_review_approved | Pull_review_changes_requested | Pull_review_waiting | Pull_review_none
+
+type open_pull = {
+  op_number: int;
+  op_title: string;
+  op_head_branch: string;
+  op_draft: bool;
+  op_checks: pull_checks;
+  op_review: pull_review;
+}
+
+type repository_pulls_reading =
+  | Repo_pulls_read of { pulls: open_pull list; undecodable: int }
+  | Repo_pulls_failed of string
+      (** The server's failure kind, with its detail when it carried one. *)
+  | Repo_pulls_not_read
+  | Repo_not_github
+
+type repository_pulls_row = { rp_repository: string; rp_state: repository_pulls_reading }
+
+type pulls_reader =
+  | Pulls_reader_ready of string
+  | Pulls_reader_not_ready of string
+      (** Why the server is not reading: not declared, the Keeper is missing,
+          or its token cannot be read. *)
+
+type overview_pulls_reading =
+  | Overview_pulls_unread
+  | Overview_pulls_read of {
+      reader: pulls_reader;
+      repositories_error: string option;
+          (** The server could not list the registered repositories; the rows
+              are the last list it could, so they may be out of date. *)
+      repositories: repository_pulls_row list;
+    }
+  | Overview_pulls_failed of string
+
 (** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
     briefing writes [null] for a Keeper with no registry entry (an offline
     Keeper that never booted this process), which is a different fact from a
@@ -2775,6 +2816,7 @@ type surface_needs = {
   needs_operator_approvals : bool;
   needs_asks : bool;
   needs_runtime_quota : bool;
+  needs_repository_pulls : bool;
 }
 
 let nothing =
@@ -2788,6 +2830,7 @@ let nothing =
     needs_operator_approvals = false;
     needs_asks = false;
     needs_runtime_quota = false;
+    needs_repository_pulls = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -2812,7 +2855,11 @@ and surface_needs_of_surface : surface -> surface_needs = function
      43 KB and answers in under two milliseconds on the live runtime, and
      only this surface draws the windows beside the Keepers they stop. *)
   | Overview ->
-      { nothing with needs_transport = true; needs_runtime_quota = true }
+      { nothing with
+        needs_transport = true
+      ; needs_runtime_quota = true
+      ; needs_repository_pulls = true
+      }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing
@@ -2866,6 +2913,8 @@ let surface_needs_delta ~previous ~next =
   ; needs_asks = next.needs_asks && not previous.needs_asks
   ; needs_runtime_quota =
       next.needs_runtime_quota && not previous.needs_runtime_quota
+  ; needs_repository_pulls =
+      next.needs_repository_pulls && not previous.needs_repository_pulls
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -5491,6 +5540,7 @@ type state = {
      picker's [runtime_catalog] so a refresh behind the Overview never moves
      the rows under an open picker's cursor. *)
   mutable overview_quota: overview_quota_reading;
+  mutable overview_pulls: overview_pulls_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
@@ -7613,6 +7663,7 @@ let create_state
   runtime_pick_cursor = 0;
   runtime_catalog = [];
   overview_quota = Quota_unread;
+  overview_pulls = Overview_pulls_unread;
   runtime_lanes = [];
   runtime_assignments = [];
   runtime_catalog_error = None;

@@ -1474,6 +1474,7 @@ status: reference
   다시 쓰인 Fact는 최초의 `first_seen`을 보존하고 `last_seen`만 전진한다(#38056).
   움직이는 상태(moving state)의 스냅샷들은 본문이 직접 밝히는 시각(날짜·서수·
   프레임 번호), 그다음 `last_seen` 순으로 선후를 판정한다.
+  → [Keeper_memory_os_current.insert_or_reobserve](../../lib/keeper/keeper_memory_os_current.ml) · [librarian.md](../../config/prompts/librarian.md)
 
 **Origin**
 : Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,
@@ -1511,6 +1512,7 @@ status: reference
     보고된다. 알 수 없는 id, 이미 지난(non-current) id, `injected` id, 다른 Keeper의
     id, 자기 자신 id, `source_path`와의 동시 지정, 그리고 대체될 Fact를 전제로
     삼는 유도 claim(`supersedes_premise_of_successor`)은 모두 거절되며 아무것도 적지 않는다.
+  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.ml) · [Keeper_memory_os_types](../../lib/keeper/keeper_memory_os_types.mli)
 
 **Memory Event**
 : Fact에 일어난 일의 기록(`<keeper>.memory-events.jsonl`). `retrieved`는

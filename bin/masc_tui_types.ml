@@ -2088,6 +2088,20 @@ let planning_visible_goals ~filter ~sort (goals : planning_goal list)
   in
   List.stable_sort compare (List.filter (planning_passes_filter filter) goals)
 
+(* How many of a standalone lane's finished runs its slot selection history
+   does not account for. A run that finished without naming a slot is in none
+   of the per-slot counts, and the detail draws a run total right above them,
+   so the reader is otherwise left to subtract two numbers and guess whether
+   the difference means anything. Running rows are excluded: a run that has
+   not finished has not chosen. *)
+let standalone_lane_runs_naming_no_slot ~succeeded ~failed ~cancelled slots =
+  let named =
+    List.fold_left
+      (fun n (sc : Tui_decode.standalone_lane_slot_count) -> n + sc.slsc_count)
+      0 slots
+  in
+  max 0 (succeeded + failed + cancelled - named)
+
 type board_sort =
   | Board_hot
   | Board_trending

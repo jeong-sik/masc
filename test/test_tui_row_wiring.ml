@@ -850,6 +850,17 @@ let test_the_board_title_counts_through_the_helper_that_knows_the_board () =
   Alcotest.(check int) "the title asks what the board holds" 1
     (asks "board_list_count_text")
 
+(* The slot history and the run total sit one line apart in the lane detail,
+   and the history covers only the runs that named a slot -- on the live Board
+   Attention lane, 357 of 489. The shortfall is arithmetic over three counts
+   this binding already reads, so it is asked of the one function that does
+   it rather than spelled again beside the line. *)
+let test_the_lane_slot_history_says_what_it_does_not_cover () =
+  Alcotest.(check int) "the detail asks how many runs named no slot" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~callee:"standalone_lane_runs_naming_no_slot")
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -922,5 +933,8 @@ let () =
             `Quick test_the_approvals_title_counts_what_the_badge_counts
         ; Alcotest.test_case "the Board title counts through the helper" `Quick
             test_the_board_title_counts_through_the_helper_that_knows_the_board
+        ; Alcotest.test_case
+            "the lane slot history says what it does not cover" `Quick
+            test_the_lane_slot_history_says_what_it_does_not_cover
         ] )
     ]

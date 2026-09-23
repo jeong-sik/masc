@@ -4966,7 +4966,27 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
                     (Terminal_text.single_line sc.slsc_slot_id) sc.slsc_count)
                scs)
         in
-        wrap Ansi.reset ("Slot selection history: " ^ dist)
+        (* How many of the lane's finished runs this history does not
+           account for. A run that finished without naming a slot appears in
+           none of the counts above, and the line before this one gives the
+           reader a total to compare them against: on the live Board
+           Attention lane the slots add up to 357 of 489 finished runs, and
+           132 of them -- most of which succeeded -- named nothing. Without
+           this the reader is left to subtract, and cannot tell a lane that
+           ran on slots it did not record from a history that is simply
+           complete. *)
+        let unnamed =
+          standalone_lane_runs_naming_no_slot
+            ~succeeded:lane.sl_succeeded_count ~failed:lane.sl_failed_count
+            ~cancelled:lane.sl_cancelled_count scs
+        in
+        let reach =
+          if unnamed = 0 then ""
+          else
+            Printf.sprintf " \xc2\xb7 %s named no slot"
+              (Masc_tui_message_layout.count_noun unnamed "run")
+        in
+        wrap Ansi.reset ("Slot selection history: " ^ dist ^ reach)
   in
   wrap Ansi.bold
     (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)

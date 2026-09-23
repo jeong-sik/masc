@@ -225,4 +225,6 @@ val librarian_gap
     newest response-observed turn record's start. The checkpoint is not
     read. [Ok None] when there is no gap, no accepted start, or no meta yet;
     [Error] when the meta cannot be read. Reads no ledger and no measurement
-    held in memory. *)
+    held in memory. A snapshot that no longer fits the history is not
+    marked on disk, so its cut still counts as covered and the gap is
+    counted short while it remains ({!Keeper_carried_front.librarian_gap}). *)

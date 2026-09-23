@@ -7022,12 +7022,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                     state.keepers
                 in
                 let binding_reference (binding : Tui_decode.connector_binding) =
-                  match binding.cb_channel_name with
-                  | None -> Terminal_text.single_line binding.cb_channel_id
-                  | Some name ->
-                      Printf.sprintf "%s (%s)"
-                        (Terminal_text.single_line name)
-                        (Terminal_text.single_line binding.cb_channel_id)
+                  Masc_tui_connector_unbind.channel_label
+                    ~channel_id:binding.cb_channel_id
+                    ~channel_name:binding.cb_channel_name
                 in
                 let store_state =
                   match connector.cn_binding_store_read_ok with

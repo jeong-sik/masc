@@ -5288,6 +5288,11 @@
  (libraries alcotest masc masc_tui_connector_state))
 
 (test
+ (name test_tui_connector_unbind)
+ (modules test_tui_connector_unbind)
+ (libraries alcotest masc masc_tui_connector_unbind))
+
+(test
  (name test_tui_fleet_line)
  (modules test_tui_fleet_line)
  (libraries alcotest masc masc_tui_fleet_line))

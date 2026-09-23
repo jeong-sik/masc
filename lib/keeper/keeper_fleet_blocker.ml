@@ -29,3 +29,5 @@ let wire_name = function
 
 let of_wire_name name =
   List.find_opt (fun blocker -> String.equal (wire_name blocker) name) all
+
+let reading_schema = "masc.keeper_fleet_operator.v1"

@@ -10,10 +10,10 @@ val failing_text : Masc.Tui_decode.fleet_safety -> string option
 (** [failing N] with the classes that hold a failing Keeper, each class only
     when it holds one. [None] when nothing is failing. *)
 
-val not_measured_text : Masc.Tui_decode.fleet_not_measured -> string
-(** [not measured (<status>)], then [refresh timed out] when it did, then the
-    server's reason when it gave one. Drawn where a reading would be, so an
-    unmeasured fleet is not drawn as an idle one. *)
+val not_measured_text : status:string -> string
+(** [not measured yet (<status>)], drawn where a reading would be while the
+    health snapshot is rebuilt, so an unmeasured fleet is not drawn as an idle
+    one. *)
 
 val owner_scan_text : Masc.Tui_decode.fleet_safety -> string option
 (** [task owner without fiber N], and how many sources the scan could not read

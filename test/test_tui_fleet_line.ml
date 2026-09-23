@@ -164,18 +164,12 @@ let test_a_complete_scan_says_only_the_count () =
 let test_nothing_found_and_nothing_missed_draws_nothing () =
   check (option string) "no row" None (owner_scan_text (fleet ()))
 
-(* The server's placeholder carries no counts, so the line says the fleet was
-   not measured and why, instead of drawing an idle fleet from zeros. *)
+(* While the health snapshot is rebuilt the server sends no counts, so the
+   line says the fleet was not measured yet and names the placeholder's word,
+   instead of drawing an idle fleet from zeros. *)
 let test_an_unmeasured_fleet_says_why () =
-  let text status timed_out error =
-    Masc_tui_fleet_line.not_measured_text
-      { Tui_decode.fnm_status = status; fnm_timed_out = timed_out; fnm_error = error }
-  in
-  check string "a warming snapshot" "not measured (warming)" (text "warming" false None);
-  check string "a scan that raised names the server's reason"
-    "not measured (error) \xc2\xb7 Not_found" (text "error" false (Some "Not_found"));
-  check string "a refresh that ran out of time says so"
-    "not measured (warming) \xc2\xb7 refresh timed out" (text "warming" true None)
+  check string "a warming snapshot" "not measured yet (warming)"
+    (Masc_tui_fleet_line.not_measured_text ~status:"warming")
 
 let () =
   run "tui fleet line"

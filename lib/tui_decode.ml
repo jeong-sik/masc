@@ -620,15 +620,9 @@ type fleet_safety = {
   fs_active_task_owner_scan_error_count : int;
 }
 
-type fleet_not_measured = {
-  fnm_status : string;
-  fnm_timed_out : bool;
-  fnm_error : string option;
-}
-
 type fleet_safety_reading =
   | Fleet_measured of fleet_safety
-  | Fleet_not_measured of fleet_not_measured
+  | Fleet_not_measured of { status : string }
 
 type log_kind =
   | Log_turn
@@ -9514,10 +9508,6 @@ let decode_lane_run_detail json =
     }
 ;;
 
-(* The schema the full fleet reading carries
-   (Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json). *)
-let fleet_safety_schema = "masc.keeper_fleet_operator.v1"
-
 (* Every field is read as required: the full reading writes all of them, so a
    missing count is a broken payload, not an idle fleet. *)
 let decode_fleet_safety_reading section =
@@ -9609,29 +9599,40 @@ let decode_fleet_safety_reading section =
     }
 
 (* Server_routes_http_runtime.full_health_component_placeholder: what the
-   section holds when the server has no fleet reading to give -- the health
-   snapshot is still warming, its refresh timed out, or the scan raised
-   (compute_section). It carries no counts; [error] is written only when
-   there is one. *)
-let decode_fleet_not_measured section =
-  let* fnm_status = required_string_field section "status" in
-  let* fnm_timed_out = required_bool_field section "component_timed_out" in
-  let* fnm_error = optional_string_field section "error" in
-  Ok { fnm_status; fnm_timed_out; fnm_error }
+   section holds when the health snapshot has no fleet reading. It carries no
+   counts, and [error] only when something failed. Without [error] the
+   snapshot is being rebuilt -- "warming" at boot and again after a change
+   invalidates it -- and nothing failed. With [error] the refresh timed out or
+   the scan raised, which is a failure the operator should see as one, with
+   the server's reason. *)
+let decode_fleet_placeholder section =
+  let* status = required_string_field section "status" in
+  let* timed_out = required_bool_field section "component_timed_out" in
+  let* error = optional_string_field section "error" in
+  match error with
+  | None -> Ok (Fleet_not_measured { status })
+  | Some error ->
+    Error
+      (Printf.sprintf "the server could not measure the fleet (%s%s): %s" status
+         (if timed_out then ", refresh timed out" else "")
+         error)
 
 let decode_fleet_safety json =
   let* section = required_object_field json "keeper_fleet_safety" in
   match Json_util.assoc_member_opt "schema" section with
-  | Some (`String schema) when String.equal schema fleet_safety_schema ->
+  | Some (`String schema) when String.equal schema Keeper_fleet_blocker.reading_schema ->
     Result.map (fun fleet -> Fleet_measured fleet) (decode_fleet_safety_reading section)
-  | Some other ->
-    field_type_error "keeper_fleet_safety.schema"
-      (Printf.sprintf "%S" fleet_safety_schema)
-      other
+  | Some (`String schema) ->
+    Error
+      (Printf.sprintf "keeper_fleet_safety schema %S is not %S" schema
+         Keeper_fleet_blocker.reading_schema)
+  | Some other -> field_type_error "keeper_fleet_safety.schema" "a string" other
   | None ->
-    Result.map
-      (fun not_measured -> Fleet_not_measured not_measured)
-      (decode_fleet_not_measured section)
+    Result.map_error
+      (fun detail ->
+         "keeper_fleet_safety has no schema and is not the health placeholder: "
+         ^ detail)
+      (decode_fleet_placeholder section)
 
 let bounded_parent_depth ?(max_depth = 64) ~(id_of : 'a -> string)
     ~(parent_id_of : 'a -> string option) (items : 'a list) (item : 'a) : int =

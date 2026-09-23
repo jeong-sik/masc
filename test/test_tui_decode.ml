@@ -1210,11 +1210,18 @@ let test_decode_fleet_safety_requires_every_field () =
   | _ -> Alcotest.fail "fleet fixture must be an object"
 
 (* Server_routes_http_runtime.full_health_component_placeholder is what the
-   section holds before the first health snapshot and when the scan raised.
-   It carries no counts, and it reads as "not measured", never as a fleet of
-   zeros. *)
+   section holds while the health snapshot is rebuilt, and when its refresh
+   timed out or the scan raised. It carries no counts. A rebuild reads as "not
+   measured"; a failure carries [error], and stays an error with the server's
+   reason in it, never a fleet of zeros. *)
 let test_decode_fleet_safety_reads_the_placeholder_as_not_measured () =
   let placeholder fields = `Assoc [ "keeper_fleet_safety", `Assoc fields ] in
+  let says what ~needle = function
+    | Ok _ -> Alcotest.failf "%s decoded" what
+    | Error err ->
+        Alcotest.(check bool) (what ^ ": " ^ needle) true
+          (String_util.contains_substring err needle)
+  in
   (match
      Tui_decode.decode_fleet_safety
        (placeholder
@@ -1223,32 +1230,32 @@ let test_decode_fleet_safety_reads_the_placeholder_as_not_measured () =
           ; "component_timed_out", `Bool false
           ])
    with
-   | Ok (Tui_decode.Fleet_not_measured { fnm_status; fnm_timed_out; fnm_error }) ->
-       Alcotest.(check string) "warming" "warming" fnm_status;
-       Alcotest.(check bool) "not timed out" false fnm_timed_out;
-       Alcotest.(check (option string)) "no reason" None fnm_error
+   | Ok (Tui_decode.Fleet_not_measured { status }) ->
+       Alcotest.(check string) "the placeholder's word" "warming" status
    | Ok (Tui_decode.Fleet_measured _) ->
        Alcotest.fail "a warming placeholder decoded as a reading"
    | Error err -> Alcotest.fail err);
-  (match
-     Tui_decode.decode_fleet_safety
+  says "a scan that raised" ~needle:"Not_found"
+    (Tui_decode.decode_fleet_safety
        (placeholder
           [ "component", `String "keeper_fleet_safety"
           ; "status", `String "error"
           ; "component_timed_out", `Bool false
           ; "error", `String "Not_found"
-          ])
-   with
-   | Ok (Tui_decode.Fleet_not_measured { fnm_error; _ }) ->
-       Alcotest.(check (option string)) "the server's reason" (Some "Not_found")
-         fnm_error
-   | Ok (Tui_decode.Fleet_measured _) ->
-       Alcotest.fail "a failed scan decoded as a reading"
-   | Error err -> Alcotest.fail err);
-  Alcotest.(check bool) "a schema this build does not know is refused" true
-    (Result.is_error
-       (Tui_decode.decode_fleet_safety
-          (placeholder [ "schema", `String "masc.keeper_fleet_operator.v2" ])))
+          ]));
+  says "a refresh that ran out of time" ~needle:"(timeout, refresh timed out)"
+    (Tui_decode.decode_fleet_safety
+       (placeholder
+          [ "component", `String "keeper_fleet_safety"
+          ; "status", `String "timeout"
+          ; "component_timed_out", `Bool true
+          ; "error", `String "full health refresh timed out"
+          ]));
+  says "a schema this build does not know" ~needle:"masc.keeper_fleet_operator.v2"
+    (Tui_decode.decode_fleet_safety
+       (placeholder [ "schema", `String "masc.keeper_fleet_operator.v2" ]));
+  says "a section that is neither shape" ~needle:"no schema"
+    (Tui_decode.decode_fleet_safety (placeholder [ "status", `String "ok" ]))
 
 (* A newer server can name a reason this build has no constructor for. The
    header still has something to say, so the name is kept rather than read as

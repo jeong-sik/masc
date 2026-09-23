@@ -1180,9 +1180,9 @@ def fleet_safety_fixture() -> HttpResponse:
 
     Without it the poll fails and the TUI records a "fleet safety data
     unreliable" event, which is correct behaviour but adds a row to scenarios
-    that are counting the event list. Every field the reading carries is
-    here: the TUI requires each one, because a missing observation must not
-    become a zero count.
+    that are counting the event list. Every field the TUI reads is here,
+    with the schema that marks a reading: the TUI requires each one, because
+    a missing observation must not become a zero count.
     """
     return (200, {"keeper_fleet_safety": {
         "schema": "masc.keeper_fleet_operator.v1",

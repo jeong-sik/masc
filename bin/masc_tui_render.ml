@@ -4990,10 +4990,10 @@ let render_keeper_list (state : state) =
        box_line buf cols
          ((Theme.bad ()) ^ "  fleet: " ^ Terminal_text.single_line err ^ Ansi.reset)
    | None, None -> ()
-   | Some (Fleet_not_measured placeholder), None ->
+   | Some (Fleet_not_measured { status }), None ->
        box_line buf cols
          ((Theme.warn ()) ^ "  fleet "
-          ^ Masc_tui_fleet_line.not_measured_text placeholder
+          ^ Masc_tui_fleet_line.not_measured_text ~status
           ^ Ansi.reset)
    | Some (Fleet_measured fleet), None ->
        let tone =

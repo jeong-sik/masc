@@ -459,8 +459,8 @@ let render_section_resources ~cols (state : state) =
   in
   let safety_lines = match state.fleet_safety with
     | None -> [ "    Execution readiness not observed" ]
-    | Some (Decode.Fleet_not_measured placeholder) ->
-      [ "    Execution readiness " ^ Masc_tui_fleet_line.not_measured_text placeholder ]
+    | Some (Decode.Fleet_not_measured { status }) ->
+      [ "    Execution readiness " ^ Masc_tui_fleet_line.not_measured_text ~status ]
     | Some (Decode.Fleet_measured safety) ->
       [ Printf.sprintf "    Executable %d / target %d · shortfall %d · failing %d · paused %d"
           safety.fs_executable_count safety.fs_target_reaction_capacity

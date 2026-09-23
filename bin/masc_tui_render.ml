@@ -449,8 +449,31 @@ let overview_pulls_lines (state : state) =
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the parked roll call and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
+(* Each Keeper's open pull requests, from the server's head-branch join
+   (RFC-0465). A PR the join has not placed ([op_keepers = None]) is
+   attached to nobody rather than guessed at. *)
+let overview_pulls_of_keeper (state : state) =
+  let pulls =
+    match state.overview_pulls with
+    | Overview_pulls_read { repositories; _ } ->
+        List.concat_map
+          (fun (row : repository_pulls_row) ->
+            match row.rp_state with
+            | Repo_pulls_read { pulls; _ } -> pulls
+            | Repo_pulls_failed _ | Repo_pulls_not_read | Repo_not_github -> [])
+          repositories
+    | Overview_pulls_unread | Overview_pulls_failed _ -> []
+  in
+  fun name ->
+    List.filter
+      (fun (pull : open_pull) ->
+        match pull.op_keepers with
+        | Some keepers -> List.exists (String.equal name) keepers
+        | None -> false)
+      pulls
+
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~quota_line ~pulls_lines =
+    ~quota_line ~pulls_lines ~pulls_of_keeper =
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -499,11 +522,29 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
           Printf.sprintf "%sno open task%s%s" Ansi.dim Ansi.reset
             (awaiting_tail awaiting)
     in
-    Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s" tone mark Ansi.reset
+    (* The Keeper's PR, ahead of the detail so a narrow row keeps it: its
+       number and one glyph for its checks, "+N" for more. *)
+    let pr_tag =
+      match pulls_of_keeper row.keeper.okp_name with
+      | [] -> ""
+      | (pull : open_pull) :: rest ->
+          let glyph, glyph_tone =
+            match pull.op_checks with
+            | Pull_checks_passing -> ("\xe2\x9c\x93", Theme.ok ())
+            | Pull_checks_failing -> ("\xe2\x9c\x97", Theme.bad ())
+            | Pull_checks_running -> ("\xe2\x97\x90", Theme.info ())
+            | Pull_checks_none -> ("\xc2\xb7", Ansi.dim)
+          in
+          Printf.sprintf "#%d%s%s%s%s " pull.op_number glyph_tone glyph Ansi.reset
+            (match rest with
+             | [] -> ""
+             | _ :: _ -> Printf.sprintf "%s+%d%s" Ansi.dim (List.length rest) Ansi.reset)
+    in
+    Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s" tone mark Ansi.reset
       (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
       tone
       (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
-      Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset detail
+      Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset pr_tag detail
   in
   let parked_line =
     match team.parked with
@@ -995,6 +1036,7 @@ let render_overview (state : state) =
            ~flow:state.task_flow ~cols
            ~quota_line:(overview_quota_line state ~now:(Unix.gettimeofday ()))
            ~pulls_lines:(overview_pulls_lines state)
+           ~pulls_of_keeper:(overview_pulls_of_keeper state)
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;

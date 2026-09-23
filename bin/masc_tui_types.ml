@@ -1912,6 +1912,9 @@ type open_pull = {
   op_draft: bool;
   op_checks: pull_checks;
   op_review: pull_review;
+  op_keepers: string list option;
+      (** Keepers whose checkout is on this PR's head branch (RFC-0465).
+          [None] while the server has not joined checkouts, or could not. *)
 }
 
 type repository_pulls_reading =

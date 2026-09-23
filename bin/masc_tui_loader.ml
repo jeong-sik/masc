@@ -1221,7 +1221,24 @@ let decode_open_pull json =
     | "none" -> Ok Pull_review_none
     | other -> Error ("unknown review " ^ other)
   in
-  Ok { op_number; op_title; op_head_branch; op_draft; op_checks; op_review }
+  let* op_keepers =
+    match Yojson.Safe.Util.member "keepers" json with
+    | `Null -> Ok None
+    | `List names ->
+        List.fold_right
+          (fun name acc ->
+            match (name, acc) with
+            | `String name, Ok names -> Ok (name :: names)
+            | _, (Error _ as error) -> error
+            | _, Ok _ -> Error "keepers holds a non-string")
+          names (Ok [])
+        |> Result.map Option.some
+    | _ -> Error "keepers is neither a list nor null"
+  in
+  Ok
+    { op_number; op_title; op_head_branch; op_draft; op_checks; op_review
+    ; op_keepers
+    }
 
 let decode_repository_pulls json =
   let* rp_repository = required_string_field json "repository_id" in

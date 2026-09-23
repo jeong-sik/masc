@@ -112,15 +112,16 @@ let check_preserved ~base_path ~keeper_name ~expected error =
        | Some { last_failure_reason = Some (R.Official_client_recovery_required payload as observed); _ } ->
          Alcotest.(check bool) "heartbeat retains typed claim refusal" true (payload = expected);
          let public =
-           match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason observed with
+           match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+               ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) observed with
            | Some surface ->
              Alcotest.(check string) "public local recovery class"
                "official_client_recovery_required" surface.blocker_class;
              Alcotest.(check string) "public recovery identity"
-               (I.official_client_recovery_summary expected) surface.summary;
+               (I.official_client_recovery_summary expected) (Lazy.force surface.summary);
              `Assoc
                [ "runtime_blocker_class", `String surface.blocker_class
-               ; "runtime_blocker_summary", `String surface.summary ]
+               ; "runtime_blocker_summary", `String (Lazy.force surface.summary) ]
            | None -> Alcotest.fail "registry failure has no public blocker"
          in
          Printf.printf "CLAIM_CAUSE_PROJECTION %s\n%!"

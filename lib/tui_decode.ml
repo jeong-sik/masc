@@ -2738,7 +2738,7 @@ let no_memory_fact_events =
 
 type memory_fact = {
   mf_claim : string;
-  mf_category : string;
+  mf_category : Keeper_memory_os_types.category;
   mf_origin : string;
   mf_first_seen : float;
   mf_last_seen : float;
@@ -5652,7 +5652,16 @@ let decode_memory_fact_events json =
 
 let decode_memory_fact json =
   let* mf_claim = required_string_field json "claim" in
-  let* mf_category = required_string_field json "category" in
+  let* raw_category = required_string_field json "category" in
+  let* mf_category =
+    (* The librarian taxonomy is a closed sum on the side that writes it
+       ([Keeper_memory_os_types.category]; the model's schema enum is built
+       from it and anything outside is rejected), so a word this build does
+       not know is a store written by something newer, not a category. *)
+    match Keeper_memory_os_types.category_of_string raw_category with
+    | Some category -> Ok category
+    | None -> Error (Printf.sprintf "unknown memory category %S" raw_category)
+  in
   let* mf_origin = required_string_field json "origin" in
   let* mf_first_seen = require_float_field json "first_seen" in
   let* mf_last_seen = require_float_field json "last_seen" in

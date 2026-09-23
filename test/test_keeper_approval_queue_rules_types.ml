@@ -25,36 +25,79 @@ let refusal_testable =
     ( = )
 ;;
 
+(* Every refusal kind the shim can name comes back as itself after the row
+   is written and read, so the judge reads the kind the gate saw. *)
 let test_observed_refusal_json_round_trips () =
   List.iter
-    (fun status ->
-      let refusal =
-        Q.observed_refusal ~max_stderr_bytes:4096 ~status ~stderr:"sh: cannot create w: Permission denied"
-      in
-      check (result refusal_testable string) "round trip" (Ok refusal)
-        (Q.observed_refusal_of_yojson (Q.observed_refusal_to_yojson refusal)))
-    [ Q.Observed_exit 2; Q.Observed_signal 15; Q.Observed_stopped 19 ]
+    (fun refusal_kind ->
+      List.iter
+        (fun status ->
+          let refusal =
+            Q.observed_refusal
+              ~max_stderr_bytes:4096
+              ~refusal_kind
+              ~status
+              ~stderr:"masc-exec-shim: Failure(\"box setup refused by unknown rule: \")"
+          in
+          check (result refusal_testable string) "round trip" (Ok refusal)
+            (Q.observed_refusal_of_yojson (Q.observed_refusal_to_yojson refusal)))
+        [ Q.Observed_exit 127; Q.Observed_signal 15; Q.Observed_stopped 19 ])
+    Q.observed_refusal_kinds;
+  List.iter
+    (fun kind ->
+      check bool (Q.observed_refusal_kind_to_string kind) true
+        (Q.observed_refusal_kind_of_string (Q.observed_refusal_kind_to_string kind)
+         = Some kind))
+    Q.observed_refusal_kinds
 ;;
 
 (* The tail is kept, the cut lands on a character boundary, and the bytes
    dropped are counted rather than marked inside the text. *)
 let test_observed_stderr_is_bounded_to_its_tail () =
-  let whole = Q.observed_refusal ~max_stderr_bytes:64 ~status:(Q.Observed_exit 1) ~stderr:"short" in
+  let whole = Q.observed_refusal ~max_stderr_bytes:64 ~refusal_kind:Q.Unattributed ~status:(Q.Observed_exit 1) ~stderr:"short" in
   check string "under the bound, untouched" "short" whole.observed_stderr;
   check int "nothing dropped" 0 whole.observed_stderr_omitted_bytes;
   let long = String.make 100 'a' ^ "tail" in
-  let cut = Q.observed_refusal ~max_stderr_bytes:8 ~status:(Q.Observed_exit 1) ~stderr:long in
+  let cut = Q.observed_refusal ~max_stderr_bytes:8 ~refusal_kind:Q.Unattributed ~status:(Q.Observed_exit 1) ~stderr:long in
   check string "the last bytes survive" "aaaatail" cut.observed_stderr;
   check int "the dropped count is the prefix length" 96 cut.observed_stderr_omitted_bytes;
   (* "가" is three bytes; a bound landing inside it moves forward to the
      next character rather than splitting it. *)
   let korean = "x가나" in
-  let boundary = Q.observed_refusal ~max_stderr_bytes:4 ~status:(Q.Observed_exit 1) ~stderr:korean in
+  let boundary = Q.observed_refusal ~max_stderr_bytes:4 ~refusal_kind:Q.Unattributed ~status:(Q.Observed_exit 1) ~stderr:korean in
   check string "no split character" "나" boundary.observed_stderr;
   check int "the partial character counts as dropped" 4 boundary.observed_stderr_omitted_bytes;
-  let none = Q.observed_refusal ~max_stderr_bytes:0 ~status:(Q.Observed_exit 1) ~stderr:"abc" in
+  let none = Q.observed_refusal ~max_stderr_bytes:0 ~refusal_kind:Q.Unattributed ~status:(Q.Observed_exit 1) ~stderr:"abc" in
   check string "a zero bound keeps nothing" "" none.observed_stderr;
   check int "and drops everything" 3 none.observed_stderr_omitted_bytes
+;;
+
+(* The list is walked through a successor match, which compiles even when an
+   arm ends the walk early. Every constructor is named here so the list is
+   checked against the type, not against itself. *)
+let test_observed_refusal_kinds_list_every_constructor () =
+  let every_constructor =
+    [ Q.Socket_rule_not_applied; Q.Write_rule_not_applied; Q.Setup_failed; Q.Unattributed ]
+  in
+  (* Adding a constructor makes this match non-exhaustive, which points here. *)
+  List.iter
+    (fun (kind : Q.observed_refusal_kind) ->
+      match kind with
+      | Q.Socket_rule_not_applied | Q.Write_rule_not_applied | Q.Setup_failed | Q.Unattributed ->
+        check bool (Q.observed_refusal_kind_to_string kind ^ " is listed") true
+          (List.mem kind Q.observed_refusal_kinds);
+        check bool (Q.observed_refusal_kind_to_string kind ^ " round-trips") true
+          (Q.observed_refusal_kind_of_string (Q.observed_refusal_kind_to_string kind)
+           = Some kind))
+    every_constructor;
+  check int "one entry per constructor" (List.length every_constructor)
+    (List.length Q.observed_refusal_kinds);
+  check int "no kind listed twice" (List.length Q.observed_refusal_kinds)
+    (List.length (List.sort_uniq compare Q.observed_refusal_kinds));
+  check int "no two kinds share a tag" (List.length Q.observed_refusal_kinds)
+    (List.length
+       (List.sort_uniq String.compare
+          (List.map Q.observed_refusal_kind_to_string Q.observed_refusal_kinds)))
 ;;
 
 let test_observed_refusal_decoder_is_closed () =
@@ -63,19 +106,43 @@ let test_observed_refusal_decoder_is_closed () =
     | Ok _ -> failf "%s decoded" label
     | Error _ -> ()
   in
-  rejects "unknown kind"
+  let exit_1 = `Assoc [ "kind", `String "exit"; "code", `Int 1 ] in
+  rejects "unknown status kind"
     (`Assoc
-       [ "status", `Assoc [ "kind", `String "crashed"; "code", `Int 1 ]
+       [ "refusal_kind", `String "setup_failed"
+       ; "status", `Assoc [ "kind", `String "crashed"; "code", `Int 1 ]
        ; "stderr", `String ""
        ; "stderr_omitted_bytes", `Int 0
        ]);
   rejects "missing stderr"
-    (`Assoc [ "status", `Assoc [ "kind", `String "exit"; "code", `Int 1 ]; "stderr_omitted_bytes", `Int 0 ]);
+    (`Assoc
+       [ "refusal_kind", `String "setup_failed"
+       ; "status", exit_1
+       ; "stderr_omitted_bytes", `Int 0
+       ]);
   rejects "negative omitted"
     (`Assoc
-       [ "status", `Assoc [ "kind", `String "exit"; "code", `Int 1 ]
+       [ "refusal_kind", `String "setup_failed"
+       ; "status", exit_1
        ; "stderr", `String ""
        ; "stderr_omitted_bytes", `Int (-1)
+       ]);
+  (* An unknown refusal kind is an error, never read as some default kind. *)
+  rejects "unknown refusal kind"
+    (`Assoc
+       [ "refusal_kind", `String "socket_denied"
+       ; "status", exit_1
+       ; "stderr", `String ""
+       ; "stderr_omitted_bytes", `Int 0
+       ]);
+  rejects "missing refusal kind"
+    (`Assoc [ "status", exit_1; "stderr", `String ""; "stderr_omitted_bytes", `Int 0 ]);
+  rejects "refusal kind not a string"
+    (`Assoc
+       [ "refusal_kind", `Null
+       ; "status", exit_1
+       ; "stderr", `String ""
+       ; "stderr_omitted_bytes", `Int 0
        ]);
   rejects "not an object" (`String "exit 1")
 ;;
@@ -282,6 +349,8 @@ let () =
     ; ( "observed refusal"
       , [ test_case "JSON round trip" `Quick test_observed_refusal_json_round_trips
         ; test_case "stderr is bounded to its tail" `Quick test_observed_stderr_is_bounded_to_its_tail
+        ; test_case "refusal kinds list every constructor" `Quick
+            test_observed_refusal_kinds_list_every_constructor
         ; test_case "decoder is closed" `Quick test_observed_refusal_decoder_is_closed
         ] )
     ]

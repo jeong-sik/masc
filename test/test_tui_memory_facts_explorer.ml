@@ -1,8 +1,9 @@
 open Alcotest
+module Cat = Masc.Keeper_memory_os_types
 module Types = Masc_tui_types
 module Decode = Masc.Tui_decode
 
-let make_fact ?(category = "general") ?(origin = "chat") ?(first = 100.0)
+let make_fact ?(category = Cat.Fact) ?(origin = "chat") ?(first = 100.0)
     ?(last = 200.0) ?(events = Decode.no_memory_fact_events) ~claim id : Decode.memory_fact =
   { mf_claim = claim
   ; mf_category = category
@@ -56,7 +57,9 @@ let make_snapshot ~ordinary_facts ~source_facts ~invalidations =
 let category_filter_testable =
   let pp fmt = function
     | Types.Category_all -> Format.pp_print_string fmt "Category_all"
-    | Types.Category_ordinary s -> Format.fprintf fmt "Category_ordinary %S" s
+    | Types.Category_ordinary c ->
+        Format.fprintf fmt "Category_ordinary %S"
+          (Cat.category_to_string c)
     | Types.Category_source -> Format.pp_print_string fmt "Category_source"
     | Types.Category_dropped -> Format.pp_print_string fmt "Category_dropped"
   in
@@ -69,9 +72,9 @@ let make_state () =
 
 let test_category_navigation () =
   let state = make_state () in
-  let f1 = make_fact ~category:"rule" ~claim:"No local dune" "1" in
-  let f2 = make_fact ~category:"persona" ~claim:"Voice is Roger" "2" in
-  let f3 = make_fact ~category:"rule" ~claim:"Always test" "3" in
+  let f1 = make_fact ~category:Cat.Constraint ~claim:"No local dune" "1" in
+  let f2 = make_fact ~category:Cat.Preference ~claim:"Voice is Roger" "2" in
+  let f3 = make_fact ~category:Cat.Constraint ~claim:"Always test" "3" in
   let sf = make_source_fact ~path:"config.toml" ~claim:"Config bound" "sha1" in
   let inv = make_invalidation ~path:"docs.md" ~reason:"File removed" 250.0 in
   let snap =
@@ -83,16 +86,16 @@ let test_category_navigation () =
   state.memory_facts <- Some snap;
   let cats = Types.memory_fact_categories state in
   check (list category_filter_testable) "categories list contains ordinary, source, and dropped"
-    [ Types.Category_ordinary "persona"
-    ; Types.Category_ordinary "rule"
+    [ Types.Category_ordinary Cat.Preference
+    ; Types.Category_ordinary Cat.Constraint
     ; Types.Category_source
     ; Types.Category_dropped
     ] cats;
   (* Test cycling forward *)
   let c1 = Types.next_memory_category Types.Category_all cats in
-  check category_filter_testable "first category" (Types.Category_ordinary "persona") c1;
+  check category_filter_testable "first category" (Types.Category_ordinary Cat.Preference) c1;
   let c2 = Types.next_memory_category c1 cats in
-  check category_filter_testable "second category" (Types.Category_ordinary "rule") c2;
+  check category_filter_testable "second category" (Types.Category_ordinary Cat.Constraint) c2;
   let c3 = Types.next_memory_category c2 cats in
   check category_filter_testable "third category" Types.Category_source c3;
   let c4 = Types.next_memory_category c3 cats in
@@ -104,14 +107,19 @@ let test_category_navigation () =
   check category_filter_testable "last category from All" Types.Category_dropped p1;
   let p2 = Types.prev_memory_category p1 cats in
   check category_filter_testable "backward from dropped" Types.Category_source p2;
-  let p3 = Types.prev_memory_category (Types.Category_ordinary "persona") cats in
+  let p3 = Types.prev_memory_category (Types.Category_ordinary Cat.Preference) cats in
   check category_filter_testable "backward from first wraps to All" Types.Category_all p3
 ;;
 
+(* The three kinds of row keep to their own filter. This used to also guard a
+   collision that is now unrepresentable: an ordinary fact whose category was
+   the word "source" had to stay out of [Category_source]. The category is the
+   librarian taxonomy's closed sum now, and "source" is not one of its eight,
+   so no fact can carry it. *)
 let test_category_filtering_isolation () =
   let state = make_state () in
-  let f_ord_source = make_fact ~category:"source" ~claim:"Ordinary fact named source" "1" in
-  let f_ord_other = make_fact ~category:"rule" ~claim:"Ordinary rule" "2" in
+  let f_ord_source = make_fact ~category:Cat.Goal ~claim:"Ordinary goal" "1" in
+  let f_ord_other = make_fact ~category:Cat.Constraint ~claim:"Ordinary rule" "2" in
   let sf = make_source_fact ~path:"src.ml" ~claim:"Source file fact" "sha" in
   let inv = make_invalidation ~path:"inv.ml" ~reason:"File gone" 100.0 in
   state.memory_facts <-
@@ -122,12 +130,11 @@ let test_category_filtering_isolation () =
   (* Category_all -> 4 rows *)
   state.memory_facts_category <- Types.Category_all;
   check int "all rows" 4 (List.length (Types.memory_fact_rows state));
-  (* Category_ordinary "source" -> only f_ord_source *)
-  state.memory_facts_category <- Types.Category_ordinary "source";
+  state.memory_facts_category <- Types.Category_ordinary Cat.Goal;
   let rows_ord_src = Types.memory_fact_rows state in
-  check int "only ordinary fact named source" 1 (List.length rows_ord_src);
+  check int "only the ordinary goal" 1 (List.length rows_ord_src);
   (match rows_ord_src with
-   | [ Types.Memory_row_fact f ] -> check string "claim matches" "Ordinary fact named source" f.mf_claim
+   | [ Types.Memory_row_fact f ] -> check string "claim matches" "Ordinary goal" f.mf_claim
    | _ -> fail "expected ordinary fact");
   (* Category_source -> only source file fact sf *)
   state.memory_facts_category <- Types.Category_source;
@@ -147,9 +154,9 @@ let test_category_filtering_isolation () =
 
 let test_sorting_orders () =
   let state = make_state () in
-  let f_low = make_fact ~category:"rule" ~last:100.0 ~claim:"C_low" "1" in
-  let f_high = make_fact ~category:"persona" ~last:50.0 ~claim:"A_high" "2" in
-  let f_newest = make_fact ~category:"config" ~last:500.0 ~claim:"B_newest" "3" in
+  let f_low = make_fact ~category:Cat.Constraint ~last:100.0 ~claim:"C_low" "1" in
+  let f_high = make_fact ~category:Cat.Preference ~last:50.0 ~claim:"A_high" "2" in
+  let f_newest = make_fact ~category:Cat.Code_change ~last:500.0 ~claim:"B_newest" "3" in
   state.memory_facts <-
     Some (make_snapshot ~ordinary_facts:[ f_low; f_high; f_newest ] ~source_facts:[] ~invalidations:[]);
   (* 1. Sort by Recency (newest last_seen first) *)
@@ -163,9 +170,14 @@ let test_sorting_orders () =
   state.memory_facts_sort <- Types.Sort_category;
   let rows_cat = Types.memory_fact_rows state in
   let cats_sorted =
-    List.map (function Types.Memory_row_fact f -> f.mf_category | _ -> "") rows_cat
+    List.map
+      (function
+        | Types.Memory_row_fact f -> Cat.category_to_string f.mf_category
+        | _ -> "")
+      rows_cat
   in
-  check (list string) "category sort" [ "config"; "persona"; "rule" ] cats_sorted;
+  check (list string) "category sort"
+    [ "code_change"; "constraint"; "preference" ] cats_sorted;
   (* 3. Sort by Claim (A-Z) *)
   state.memory_facts_sort <- Types.Sort_claim;
   let rows_claim = Types.memory_fact_rows state in
@@ -224,9 +236,9 @@ let test_use_based_sorting () =
 
 let test_search_filtering () =
   let state = make_state () in
-  let f1 = make_fact ~category:"rule" ~claim:"Dune 로컬 빌드 금지" "1" in
-  let f2 = make_fact ~category:"persona" ~claim:"Roger 음성 모델" "2" in
-  let f3 = make_fact ~category:"config" ~claim:"CI Dune 검사 필수" "3" in
+  let f1 = make_fact ~category:Cat.Constraint ~claim:"Dune 로컬 빌드 금지" "1" in
+  let f2 = make_fact ~category:Cat.Preference ~claim:"Roger 음성 모델" "2" in
+  let f3 = make_fact ~category:Cat.Code_change ~claim:"CI Dune 검사 필수" "3" in
   state.memory_facts <-
     Some (make_snapshot ~ordinary_facts:[ f1; f2; f3 ] ~source_facts:[] ~invalidations:[]);
   (* No query -> returns all 3 *)

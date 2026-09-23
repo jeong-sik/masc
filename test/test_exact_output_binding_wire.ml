@@ -55,7 +55,7 @@ thinking-support = true
        (List.map
           (fun lane ->
              Printf.sprintf
-               "[runtime.exact_output_lanes.%s]\nslots = [\"ollama_cloud.deepseek-flash\"]"
+               "[runtime.exact_output_lanes.%s]\nslots = [\"ollama_cloud.deepseek-flash\"]\nmax_output_tokens = 4096"
                lane)
           (List.sort_uniq
              String.compare

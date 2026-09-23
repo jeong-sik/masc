@@ -921,6 +921,8 @@ status: reference
   생성되지는 않는다. 현재 발행·사용 경로는 [Skills](../SKILLS.md)를 따른다.
   `keeper_skill_validate`는 export한 문서를 정적 검증하며, 실행 성공·안전성·발행을
   뜻하지 않는다. 입력과 발행 경계도 위 [Skills](../SKILLS.md) 문서를 따른다.
+  `keeper_skill_publish`는 Keeper가 `project-agents` source에 새 Skill을 만들고
+  바로 발행하는 도구다. 이미 있는 이름은 덮어쓰지 않고, 지우는 건 운영자가 한다.
   → [Keeper_skill_catalog](../../lib/keeper/keeper_skill_catalog.mli),
   [Skill_reference](../../lib/skill_reference/skill_reference.mli)
 
@@ -1439,7 +1441,9 @@ status: reference
 
 **Origin**
 : Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,
-  `injected`는 Librarian이 대화에서 뽑아 넣은 것이다.
+  `injected`는 Librarian이 대화에서 뽑아 넣은 것이다. Keeper는 자신이 직접 적은
+  현재 Fact만 `supersedes`로 대체할 수 있고, Librarian이 넣은 `injected` Fact나
+  다른 Keeper의 Fact는 대체할 수 없다(#38122).
 
 **Basis**
 : Fact가 무엇에 근거하나. `observed`는 읽은 곳(자기 대화 또는 Board 글)을 갖고,
@@ -1448,20 +1452,29 @@ status: reference
   Fact는 유지되고, 그런 유도가 하나도 없으면 무효가 된다.
 
 **Dropped / Supersedes / Absorbs**
-: Librarian이 기억을 바꾸는 세 가지 말. `dropped`는 이유를 적고 버린다.
-  `supersedes`는 옛 Fact 하나를 새 claim 하나로 고쳐 쓰며(1:1) 옛 id는 `dropped`
-  에도 있어야 한다. `absorbs`는 Fact 여러 개를 새 claim 하나가 대신 말하며(N:1)
-  그 id들은 `dropped`에 없어야 한다. 흡수된 원문은
-  `<keeper>.memory-absorbed.jsonl`에 남는다. Librarian이 말하지 않은 Fact는
-  그대로 남고, 규칙을 어긴 답은 통째로 거절된다. 이미 있는 Fact와 같은 글자를
-  다시 쓰는 것은 새 Fact가 아니라 그 Fact다 — 아무것도 더하지 않고 저장된 Fact를
-  유지하며, 거절이 아니다. 같은 답이 그 Fact를 `dropped`로도 적으면 "사라졌다"와
-  "남는다"를 함께 말한 모순이라 거절한다(`Dropped_memory_id_recreated`).
+: 기억을 정리하거나 갱신하는 말.
+  - Librarian 회차: `dropped`는 이유를 적고 버린다. `supersedes`는 옛 Fact 하나를
+    새 claim 하나로 고쳐 쓰며(1:1) 옛 id는 `dropped`에도 있어야 한다. `absorbs`는
+    Fact 여러 개를 새 claim 하나가 대신 말하며(N:1) 그 id들은 `dropped`에 없어야
+    한다. 흡수된 원문은 `<keeper>.memory-absorbed.jsonl`에 남는다. Librarian이
+    말하지 않은 Fact는 그대로 남고, 규칙을 어긴 답은 통째로 거절된다. 이미 있는
+    Fact와 같은 글자를 다시 쓰는 것은 새 Fact가 아니라 그 Fact다 — 아무것도 더하지
+    않고 저장된 Fact를 유지하며, 거절이 아니다. 같은 답이 그 Fact를 `dropped`로도
+    적으면 "사라졌다"와 "남는다"를 함께 말한 모순이라 거절한다(`Dropped_memory_id_recreated`).
+  - Keeper 직접 갱신: `keeper_memory_write`는 선택 인자 `supersedes`로 자신이 직접
+    적은 이전 Fact 하나를 새 claim으로 대체할 수 있다(#38122). 원자적(locked) 한 번의
+    커밋으로 이전 Fact를 지우고 새 Fact를 적으며, 저널에 `superseded_by` 사유를 남기고
+    원장에 `Revised` 이벤트를 기록한다. 철회와 마찬가지로 대체된 Fact를 전제로 삼던 유도
+    Fact들도 함께 무효화되며 영수증의 `removed_memory_ids`와 `support_invalidations`로
+    보고된다. 알 수 없는 id, 이미 지난(non-current) id, `injected` id, 다른 Keeper의
+    id, 자기 자신 id, `source_path`와의 동시 지정, 그리고 대체될 Fact를 전제로
+    삼는 유도 claim(`supersedes_premise_of_successor`)은 모두 거절되며 아무것도 적지 않는다.
 
 **Memory Event**
 : Fact에 일어난 일의 기록(`<keeper>.memory-events.jsonl`). `retrieved`는
-  `keeper_memory_search` 결과에 나온 것, `revised`는 `supersedes`로 고쳐 써진
-  것이다. `retracted`는 Keeper가 `keeper_memory_retract`로 그 Fact를 id로 지목해
+  `keeper_memory_search` 결과에 나온 것, `revised`는 Librarian의 `supersedes` 또는
+  Keeper의 `keeper_memory_write ?supersedes`로 고쳐 써진 것이다(#38122).
+  `retracted`는 Keeper가 `keeper_memory_retract`로 그 Fact를 id로 지목해
   철회한 것이다. 철회 뒤 같은 claim을 다시 저장하면 같은 Memory ID에 과거 기록이
   붙는다. TUI의 `History: Retracted`는 그 철회 횟수이며, 현재 Fact의 신뢰도나
   강화 정도를 뜻하지 않는다.
@@ -1508,6 +1521,35 @@ status: reference
   낸다. 아무것도 쓰지 않는다 — progress 파일·boundary line·checkpoint 모두 없다.
   서버의 Librarian 실행이 아니라 그 읽기 규칙의 측정 하네스다.
   → [masc_librarian_replay](../../bin/masc_librarian_replay.ml)
+
+**Librarian Pass End (Librarian 회차 종결 상태)**
+: Memory health HTTP API와 TUI Memory 화면이 그리는 Librarian durable 회차의 종결 상태.
+  Memory health의 Librarian 행은 스냅숏의 source가 아니라 저널 최신 줄들을 역순으로 걸어
+  (`server_dashboard_http_keeper_memory_health.ml`), Librarian이 마지막으로 커밋한
+  성공과 그 뒤의 최신 실패를 독립적으로 읽는다. 따라서 키퍼가 `keeper_memory_write`나
+  철회(`retraction`)로 Fact를 직접 기록해도 Librarian의 성공을 지우거나 직전 실패를
+  가리지 않는다(#38049).
+  TUI(`lib/tui_decode.mli`, `bin/masc_tui_render_memory.ml`)는 회차 종결 상태와 실패
+  종류를 닫힌 타입으로 디코드하고 wire 단어 대신 일상 단어로 그린다:
+  - 닫힌 여섯 종결 상태(`memory_librarian_pass_end`):
+    `Pass_off`(\"switched off\"), `Pass_lane_unconfigured`(\"no model lane set up\"),
+    `Pass_drained`(\"caught up\"), `Pass_not_committed`(\"last pass saved nothing\"),
+    `Pass_stopped`(\"stopped on an error\"), `Pass_raised`(\"crashed\").
+  - 닫힌 아홉 실패 종류(`memory_librarian_failure_kind`):
+    `Failure_prompt_render`(\"prompt could not be built\"),
+    `Failure_execution_clock_unavailable`(\"no clock to run on\"),
+    `Failure_exact_setup`(\"model call could not be set up\"),
+    `Failure_exact_execution`(\"model call failed\"),
+    `Failure_domain_output_invalid`(\"model answer was not usable\"),
+    `Failure_memory_snapshot_write`(\"Memory could not be saved\"),
+    `Failure_runtime_context_unavailable`(\"no runtime context\"),
+    `Failure_lane_cancelled`(\"cancelled before saving\"),
+    `Failure_unhandled_exception`(\"unexpected crash\").
+  - `Librarian cause`: `Pass_stopped` 또는 `Pass_raised`일 때 서버가 기록한 구체적 원인을
+    별도 행에 그린다.
+  - 행 격리: 서버가 보낸 값을 TUI가 알지 못하면 전체 Memory 화면을 깨뜨리지 않고 해당
+    키퍼 행만 이름과 거절 사유 한 줄(`refusal`)로 격리하며 다른 행들은 정상 표시한다.
+  → [server_dashboard_http_keeper_memory_health](../../lib/server/server_dashboard_http_keeper_memory_health.ml) · [tui_decode](../../lib/tui_decode.mli) · [masc_tui_render_memory](../../bin/masc_tui_render_memory.ml)
 
 **JEV / Noul**
 : JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이

@@ -2667,6 +2667,8 @@
 
 (include stanzas/test_h2_mode_vocabulary.inc)
 
+(include stanzas/test_h2_request_body_admission.inc)
+
 (include stanzas/test_heartbeat_integration.inc)
 
 (include stanzas/test_http_pages_asset_read.inc)
@@ -2853,6 +2855,8 @@
 (include stanzas/test_keeper_approval_resolved_history.inc)
 
 (include stanzas/test_keeper_tool_approval_mode_actor_log.inc)
+
+(include stanzas/test_keeper_decision_actor_log.inc)
 
 (include stanzas/test_keeper_toml_parser.inc)
 
@@ -5289,6 +5293,11 @@
  (libraries alcotest masc masc_tui_fleet_line))
 
 (test
+ (name test_tui_client_rows)
+ (modules test_tui_client_rows)
+ (libraries alcotest masc masc_tui_types))
+
+(test
  (name test_tui_table)
  (modules test_tui_table)
  (libraries alcotest masc_tui_message_layout masc_tui_table))
@@ -5297,6 +5306,11 @@
  (name test_tui_wire_age)
  (modules test_tui_wire_age)
  (libraries alcotest masc_tui_wire_age))
+
+(test
+ (name test_tui_text_block)
+ (modules test_tui_text_block)
+ (libraries alcotest astring masc_tui_text_block))
 
 (test
  (name test_operator_attention_summary)
@@ -6364,6 +6378,8 @@
  (libraries alcotest masc.dashboard masc.masc_types yojson digestif))
 
 (include stanzas/test_h2_json_worker.inc)
+
+(include stanzas/test_h2_response_window.inc)
 
 (rule
  (alias runtest-test_tui_keyboard_input-msx-background-poll)

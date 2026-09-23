@@ -348,7 +348,7 @@ let test_work_and_speech_split_the_same_way_for_every_style () =
        [ Layout.Tool
        ; Layout.Thinking
        ; Layout.Skill Layout.Skill_live
-       ; Layout.Skill Layout.Skill_used
+       ; Layout.Skill Layout.Skill_settled
        ; Layout.Skill Layout.Skill_attention
        ; Layout.Skill Layout.Skill_failure
        ]);

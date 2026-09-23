@@ -774,7 +774,7 @@ let capture_cleanup ~before_stage stage f =
     []
   with
   | Capability_write_failed (failure, additional) -> failure :: additional
-  | exception_ ->
+  | exception_ -> (* cancel-guard-ok: reraise_fatal_or_cancelled re-raises Cancelled before this arm returns *)
     let backtrace = Printexc.get_raw_backtrace () in
     reraise_fatal_or_cancelled exception_ backtrace;
     [ operation_failure stage exception_ backtrace ]
@@ -895,7 +895,7 @@ let sync_parent_capability ~before_stage ~stage ~sw parent =
           Eio.Resource.close file;
           []
         with
-        | exception_ ->
+        | exception_ -> (* cancel-guard-ok: reraise_fatal_or_cancelled re-raises Cancelled before this arm returns *)
           let backtrace = Printexc.get_raw_backtrace () in
           reraise_fatal_or_cancelled exception_ backtrace;
           [ operation_failure stage exception_ backtrace ]
@@ -2881,7 +2881,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
   let lstat report ~operation path =
     try Some (Unix.lstat path), report with
     | Unix.Unix_error (Unix.ENOENT, _, _) -> None, report
-    | exn -> None, record_exn report ~operation ~path exn
+    | exn -> None, record_exn report ~operation ~path exn (* cancel-guard-ok: Unix.lstat performs no Eio operation *)
   in
   let identity_is_current report ~operation ~path ~expected ~kind =
     match lstat report ~operation path with
@@ -3022,7 +3022,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
                 ~operation:Create_recovery_directory
                 ~path
                 Identity_changed ))
-       | exn ->
+       | exn -> (* cancel-guard-ok: Unix.mkdir performs no Eio operation *)
          None, record_exn report ~operation:Create_recovery_directory ~path exn)
   in
   let ensure_recovery_directory report ~base_stat source =
@@ -3110,7 +3110,7 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) ~scope () =
              when stat.Unix.st_kind = Unix.S_REG && same_inode source_stat stat ->
              Some candidate, report
            | _, report -> loop report (collision + 1))
-        | exn ->
+        | exn -> (* cancel-guard-ok: Unix.link performs no Eio operation *)
           ( None
           , record_exn report ~operation:Link_preserved_orphan ~path:candidate exn )
     in

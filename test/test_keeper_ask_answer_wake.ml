@@ -252,7 +252,7 @@ let test_the_answer_route_emits_the_wake () =
 let test_an_undelivered_answer_is_not_reported_as_success () =
   let status, body =
     Server_routes_http_keeper_stream.ask_answer_response ~ask_id:"ask-1"
-      ~answer_count:1 ~open_remaining:0 ~delivered:false
+      ~actor:"test-operator" ~answer_count:1 ~open_remaining:0 ~delivered:false
   in
   check bool "not a success" true (status = `Internal_server_error);
   (match body with
@@ -266,7 +266,7 @@ let test_an_undelivered_answer_is_not_reported_as_success () =
 let test_a_delivered_answer_is_a_success () =
   let status, body =
     Server_routes_http_keeper_stream.ask_answer_response ~ask_id:"ask-1"
-      ~answer_count:1 ~open_remaining:0 ~delivered:true
+      ~actor:"test-operator" ~answer_count:1 ~open_remaining:0 ~delivered:true
   in
   check bool "success" true (status = `OK);
   (match body with

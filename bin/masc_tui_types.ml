@@ -1501,11 +1501,11 @@ type pane_focus =
   | Right_pane
 
 (** Runtime surface sub-mode. [Runtime_lanes] answers "what is each lane
-    going to call, in what order" — the failover view. [Runtime_all] answers
+    going to call, in what order" — the candidate-order view. [Runtime_all] answers
     "what can this workspace call at all", which the lane view cannot: a
     runtime no lane names is absent from it entirely, and the roster is where
     an operator finds one to assign. Same snapshot, two questions. *)
-(* The order a failover picker should offer runtimes in. What the lane needs
+(* The order the candidate picker should offer runtimes in. What the lane needs
    is a candidate that fails independently of the ones it already has, so a
    different provider outranks a faster model from the same one: two slots on
    one provider go down together, which is the state this picker exists to
@@ -1535,7 +1535,7 @@ type runtime_mode =
   | Runtime_lanes
   | Runtime_all
 
-(* What the failover picker adds the chosen runtime to. A conversation lane
+(* What the candidate picker adds the chosen runtime to. A conversation lane
    and a standalone lane's walk order both take it at the end; a new lane
    takes it as its first candidate, which is how the lane comes to exist. *)
 type runtime_lane_pick =
@@ -9199,7 +9199,7 @@ type runtime_lane_fact =
       (* No [runtime.lanes.<id>] table declares this lane: it is the single
          candidate an assignment naming a runtime rests on. It reads exactly
          like [Lane_single_candidate] on the wire -- one candidate, first
-         position. A declared lane of one candidate walks no failover either;
+         position. A declared lane of one candidate has no next candidate either;
          what separates this one is that [D] has no table to remove. *)
   | Lane_single_candidate
   | Lane_head

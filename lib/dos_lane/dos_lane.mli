@@ -163,6 +163,16 @@ val eject : who:string -> announce:(unit -> unit) -> unit -> (unit, error) resul
     {!load}'s, with the same restriction. *)
 val screen : unit -> (observation, error) result
 
+type frame = { width : int; height : int; rgb : string }
+(** The frame as the display would show it: [width * height] pixels, three
+    bytes each, rows top to bottom. *)
+
+val capture : unit -> (observation * frame, error) result
+(** {!screen} and the frame it describes, read under one lock, so the two
+    cannot come from different moments. The frame is what a Keeper with
+    vision reads: a VGA game's Korean menus are glyphs in pixels, which
+    [frame_ascii]'s luminance cells cannot spell. *)
+
 (** {1 The controller}
 
     One machine, several players: a hotseat game such as 삼국지3 asks each

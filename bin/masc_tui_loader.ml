@@ -1828,7 +1828,7 @@ let load_keeper_config_editor ~(host : string) ~(port : int)
 (* The github-identity payload is the fixed record built by
    Keeper_github_identity.observation_to_yojson: hostname, config_dir,
    projected_token_env_names, stored + effective (each
-   authenticated/login/error), effective_probe_scope. Read those fields into a
+   authenticated/login/scopes/error), effective_probe_scope. Read those fields into a
    short human view rather than pretty-printing the raw JSON. Any shape surprise
    (hostname absent, an error envelope, a field of the wrong type) falls back to
    the raw block, so the tab never shows less than the payload carried. *)
@@ -1858,10 +1858,30 @@ let github_identity_lines (json : Yojson.Safe.t) : string list =
           | Some (`String value) -> Some value
           | Some _ | None -> None
         in
+        (* What the token may do, as GitHub listed it. A token GitHub lists
+           no scopes for (a fine-grained PAT, an App token) says so rather
+           than showing an empty list, which would read as "none". *)
+        let scopes =
+          match List.assoc_opt "scopes" af with
+          | Some (`List items) ->
+            " \xc2\xb7 scopes: "
+            ^ (match
+                 List.filter_map
+                   (function `String scope -> Some scope | _ -> None)
+                   items
+               with
+               | [] -> "(none)"
+               | scopes -> String.concat ", " scopes)
+          | Some `Null -> " \xc2\xb7 scopes: not listed by GitHub"
+          (* No key at all is a server that does not report scopes, not a
+             token GitHub lists none for; say nothing rather than the wrong
+             one of the two. *)
+          | Some _ | None -> ""
+        in
         Some
           (match authenticated, login, error with
-           | true, Some who, _ -> "signed in as " ^ who
-           | true, None, _ -> "signed in"
+           | true, Some who, _ -> "signed in as " ^ who ^ scopes
+           | true, None, _ -> "signed in" ^ scopes
            | false, _, Some message -> "not signed in (" ^ message ^ ")"
            | false, _, None -> "not signed in")
       | Some _ | None -> None

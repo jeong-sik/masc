@@ -3,6 +3,7 @@ let ( let* ) = Result.bind
 type auth_result =
   { authenticated : bool
   ; login : string option
+  ; scopes : string list option
   ; error : string option
   }
 
@@ -27,18 +28,22 @@ type observation =
    here: each one widens what a Keeper can do with the token. [Workflow] is
    what GitHub asks for before a push that touches [.github/workflows]; a
    workflow runs with the repository's secrets, so it is never on by default. *)
-type login_scope = Workflow
+type login_scope =
+  | Workflow
+  | Write_packages
 
 let login_scope_to_string = function
   | Workflow -> "workflow"
+  | Write_packages -> "write:packages"
 ;;
 
 let login_scope_of_string = function
   | "workflow" -> Some Workflow
+  | "write:packages" -> Some Write_packages
   | _ -> None
 ;;
 
-let all_login_scopes = [ Workflow ]
+let all_login_scopes = [ Workflow; Write_packages ]
 
 (* The login request carries its scopes as [?scopes=workflow,...], beside the
    [hostname] it already takes as a query parameter. An empty or absent value
@@ -933,19 +938,64 @@ let run_capture ~env = function
       argv
 ;;
 
+(* [--include] puts the response's status line and headers before the body,
+   and GitHub names an OAuth token's scopes in [X-OAuth-Scopes]. One request
+   answers both who the token is and what it may do. *)
 let auth_probe_argv ~hostname =
-  [ "gh"; "api"; "--hostname"; hostname; "user"; "--jq"; ".login" ]
+  [ "gh"; "api"; "--hostname"; hostname; "--include"; "user"; "--jq"; ".login" ]
+;;
+
+let scopes_header = "x-oauth-scopes:"
+
+(* The probe's stdout: a status line and headers, a blank line, then the
+   login [--jq] selected. The scopes are [None] when the header is absent,
+   which is what a fine-grained PAT or an App token answers: they carry
+   permissions GitHub does not list here, so no list is invented for them. *)
+let split_probe_output stdout =
+  let lines =
+    String.split_on_char '\n' stdout
+    |> List.map (fun line ->
+      let n = String.length line in
+      if n > 0 && line.[n - 1] = '\r' then String.sub line 0 (n - 1) else line)
+  in
+  match lines with
+  | first :: _ when String.starts_with ~prefix:"HTTP/" first ->
+    let rec headers acc = function
+      | [] -> List.rev acc, []
+      | "" :: body -> List.rev acc, body
+      | line :: rest -> headers (line :: acc) rest
+    in
+    let header_lines, body = headers [] lines in
+    let scopes =
+      List.find_map
+        (fun line ->
+          let lower = String.lowercase_ascii line in
+          if String.starts_with ~prefix:scopes_header lower
+          then (
+            let value =
+              String.sub line (String.length scopes_header)
+                (String.length line - String.length scopes_header)
+            in
+            Some
+              (String.split_on_char ',' value
+               |> List.map String.trim
+               |> List.filter (fun scope -> not (String.equal scope ""))))
+          else None)
+        header_lines
+    in
+    String.trim (String.concat "\n" body), scopes
+  | _ -> String.trim stdout, None
 ;;
 
 let auth_result_of_run ~redact (status, stdout, stderr) =
-  let login = String.trim stdout in
+  let login, scopes = split_probe_output stdout in
   match status with
   | Unix.WEXITED 0 when not (String.equal login "") ->
-    { authenticated = true; login = Some login; error = None }
+    { authenticated = true; login = Some login; scopes; error = None }
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
     let detail = String.trim (redact stderr) in
     let detail = if String.equal detail "" then process_exit_text status else detail in
-    { authenticated = false; login = None; error = Some detail }
+    { authenticated = false; login = None; scopes = None; error = Some detail }
 ;;
 
 let auth_result_of_command ~redact ~env ~hostname =
@@ -977,6 +1027,7 @@ let observe ~config ~keeper_name ~hostname =
          let unconfigured =
            { authenticated = false
            ; login = None
+           ; scopes = None
            ; error = Some "Keeper GitHub CLI identity is not configured"
            }
          in
@@ -1027,6 +1078,10 @@ let auth_result_to_yojson result =
   `Assoc
     [ "authenticated", `Bool result.authenticated
     ; "login", (match result.login with Some value -> `String value | None -> `Null)
+    ; ( "scopes"
+      , match result.scopes with
+        | Some scopes -> `List (List.map (fun scope -> `String scope) scopes)
+        | None -> `Null )
     ; "error", (match result.error with Some value -> `String value | None -> `Null)
     ]
 ;;

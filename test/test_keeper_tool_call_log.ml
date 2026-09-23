@@ -2007,6 +2007,76 @@ let test_output_inline_string_preserved () =
         "small inline result" s
     | _ -> Alcotest.fail "expected exactly one entry")
 
+(* A tool result that carries a URL and, in a later member, an e-mail address
+   (a GitHub PR, a git log, a Slack message) must be stored as JSON the TUI
+   can parse (#37804). Scanning the serialized text for URL credentials matched
+   from the URL's [://] to the address's [@] and replaced the quotes and commas
+   between them. The credential inside a single string is still redacted. *)
+let test_output_json_with_url_and_address_stays_json () =
+  let doc ~padding =
+    `Assoc
+      [ ("html_url", `String "https://github.com/jeong-sik/masc/pull/1")
+      ; ("authors", `List [ `String "dev@example.com" ])
+      ; ("remote", `String "https://bot:hunter2@example.com/repo.git")
+      ; ("body", `String padding)
+      ]
+    |> Yojson.Safe.to_string
+  in
+  List.iter
+    (fun (label, padding) ->
+      with_tmp_log (fun () ->
+        Keeper_tool_call_log.log_call
+          ~keeper_name:"k" ~tool_name:"tool_github"
+          ~input:(`Assoc []) ~output_text:(doc ~padding)
+          ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+        match read_recent ~n:1 () with
+        | [ row ] ->
+          let stored = Safe_ops.json_string ~default:"" "output" row in
+          (match Yojson.Safe.from_string stored with
+           | `Assoc fields ->
+             Alcotest.(check (option string)) (label ^ ": url member kept")
+               (Some "https://github.com/jeong-sik/masc/pull/1")
+               (match List.assoc_opt "html_url" fields with
+                | Some (`String s) -> Some s
+                | _ -> None);
+             Alcotest.(check bool) (label ^ ": address member kept") true
+               (List.mem_assoc "authors" fields)
+           | _ -> Alcotest.fail (label ^ ": stored output is not an object")
+           | exception Yojson.Json_error e ->
+             Alcotest.fail (label ^ ": stored output is not JSON: " ^ e));
+          Alcotest.(check bool) (label ^ ": credential redacted") false
+            (String_util.contains_substring stored "hunter2")
+        | _ -> Alcotest.fail "expected exactly one entry"))
+    [ ("within the budget", "short"); ("over the budget", String.make 5000 'x') ]
+
+(* A credential outside the string values of a JSON output is still
+   redacted: in an object key (a map keyed by URL), and in a comment, which
+   the JSON parser accepts and drops, so it never reaches the tree. The stored
+   value is the redacted document serialized again, not the input text. *)
+let test_output_json_credential_in_key_or_comment_redacted () =
+  List.iter
+    (fun (label, output_text) ->
+      with_tmp_log (fun () ->
+        Keeper_tool_call_log.log_call
+          ~keeper_name:"k" ~tool_name:"tool_config"
+          ~input:(`Assoc []) ~output_text
+          ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+        match read_recent ~n:1 () with
+        | [ row ] ->
+          let stored = Safe_ops.json_string ~default:"" "output" row in
+          Alcotest.(check bool) (label ^ ": credential redacted") false
+            (String_util.contains_substring stored "bot:pw")
+        | _ -> Alcotest.fail "expected exactly one entry"))
+    [ ("comment", "// see https://bot:pw@git.example.com\n{\"a\":1}")
+    ; ("key within the budget", {|{"https://bot:pw@x":1}|})
+    ; ( "key over the budget"
+      , Yojson.Safe.to_string
+          (`Assoc
+            [ ("https://bot:pw@x", `Int 1)
+            ; ("body", `String (String.make 5000 'x'))
+            ]) )
+    ]
+
 let test_output_preview_derives_truncation_metadata () =
   with_tmp_log (fun () ->
     let output_text = String.make 5000 'x' in
@@ -2746,6 +2816,10 @@ let () =
             test_output_inline_string_preserved
         ; eio_test "large output records preview truncation"
             test_output_preview_derives_truncation_metadata
+        ; eio_test "JSON output with a URL and an address stays JSON"
+            test_output_json_with_url_and_address_stays_json
+        ; eio_test "JSON output credential in a key or comment is redacted"
+            test_output_json_credential_in_key_or_comment_redacted
         ] )
     ; ( "action_radius",
         [ eio_test "string input does not break action radius"

@@ -13,11 +13,22 @@ let prefix = function
 ;;
 
 (* One schema string per domain, written into the runtime manifest so a
-   reader of the runtime directory can tell which domain owns it. *)
+   reader of the runtime directory can tell which domain owns it.
+
+   [sha256] was added to this schema without changing the string, and it
+   must stay that way. The binaries released before it read exactly this
+   string, and a binary that reads the manifest also rewrites it after its
+   pass. A binary that records no digests therefore rewrites the file
+   without [sha256], and the next pass has no digest that could make that
+   binary's copies look like operator edits. Under any other string those
+   binaries refuse the manifest and leave it as it is. They still overwrite
+   the files, so after a rollback and a return, the manifest would hold
+   digests of copies that are no longer there, and every prompt that
+   differs between the two releases would read as an operator edit. *)
 let manifest_schema = function
-  | Prompts -> "masc.prompt-managed-assets.v2"
-  | Tools -> "masc.tool-managed-assets.v2"
-  | Mcp -> "masc.mcp-managed-assets.v2"
+  | Prompts -> "masc.prompt-managed-assets.v1"
+  | Tools -> "masc.tool-managed-assets.v1"
+  | Mcp -> "masc.mcp-managed-assets.v1"
 ;;
 
 let all_domains = [ Prompts; Tools; Mcp ]
@@ -116,7 +127,9 @@ type manifest_record =
 let no_record = { owned = String_set.empty; digests = String_map.empty }
 
 (* [sha256] maps a listed path to the digest of the bytes the pass that
-   wrote the manifest left there. *)
+   wrote the manifest left there. A manifest without it records no digest:
+   the binary that wrote it last did not record any, so no file can be
+   judged edited against it. *)
 let parse_digests ~owned entries =
   List.fold_left
     (fun acc (rel, value) ->
@@ -186,7 +199,10 @@ let previously_owned ~domain ~dest_dir =
            | Some (`List paths), Some (`Assoc entries) ->
              Result.bind (owned paths) (fun owned ->
                Result.map (fun digests -> { owned; digests }) (parse_digests ~owned entries))
-           | _, _ -> Error "runtime manifest lacks a paths list or a sha256 object")
+           | Some (`List paths), None ->
+             Result.map (fun owned -> { owned; digests = String_map.empty }) (owned paths)
+           | Some (`List _), Some _ -> Error "runtime manifest sha256 must be an object"
+           | (Some _ | None), _ -> Error "runtime manifest lacks a paths list")
         | Some (`String schema), _, _ when foreign schema ->
           Error
             (Printf.sprintf

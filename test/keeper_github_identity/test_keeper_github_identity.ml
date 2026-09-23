@@ -124,9 +124,12 @@ case "${1-}:${2-}" in
     printf '%s\n' "github.com:" "  user: stored-user" "  oauth_token: fixture-token" > "$GH_CONFIG_DIR/hosts.yml"
     ;;
   api:--hostname)
+    # [--include] puts the status line and headers first, as real gh does.
+    # The projected token answers like a fine-grained PAT: no scopes header.
     if [ -n "${GH_TOKEN-}" ]; then
-      printf '%s\n' "token-user"
+      printf 'HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n%s\n' "token-user"
     elif [ -f "$GH_CONFIG_DIR/stored-login" ]; then
+      printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: gist, read:org, repo, workflow\r\n\r\n'
       cat "$GH_CONFIG_DIR/stored-login"
     else
       echo "not authenticated" >&2
@@ -178,6 +181,11 @@ let test_fake_gh_login_and_effective_identity () =
            (Some "stored-user") observation.stored.login;
          Alcotest.(check (option string)) "effective identity uses projected token"
            (Some "token-user") observation.effective.login;
+         Alcotest.(check (option (list string))) "stored token scopes come from the header"
+           (Some [ "gist"; "read:org"; "repo"; "workflow" ]) observation.stored.scopes;
+         Alcotest.(check (option (list string)))
+           "a token GitHub lists no scopes for is not given an empty list"
+           None observation.effective.scopes;
          Alcotest.(check (list string)) "effective token source is observable by name"
            [ "GH_TOKEN" ] observation.projected_token_env_names;
          Alcotest.(check string) "effective probe is explicitly host-scoped"
@@ -701,7 +709,14 @@ let test_login_argv_carries_only_chosen_scopes () =
     | _ :: rest -> after rest
     | [] -> None
   in
-  Alcotest.(check (option string)) "workflow is named once" (Some "workflow") (after argv)
+  Alcotest.(check (option string)) "workflow is named once" (Some "workflow") (after argv);
+  Alcotest.(check (option string))
+    "two scopes are one argument, in the offered order"
+    (Some "workflow,write:packages")
+    (after
+       (Github.login_argv
+          ~hostname:"github.com"
+          ~scopes:[ Github.Write_packages; Github.Workflow ]))
 ;;
 
 (* The request names scopes by string. Every offered scope reads back as
@@ -742,6 +757,35 @@ let test_login_scopes_of_query () =
        go 0)
 ;;
 
+(* The probe's stdout read on its own, over the shapes gh can hand back. Only
+   the login and the scopes header leave the parser, and header text never
+   becomes a login. *)
+let test_probe_output_shapes () =
+  let dir = Filename.temp_dir "masc-gh-probe-" "" in
+  let read stdout =
+    Github.auth_result_of_probe ~base_path:dir ~keeper_name:"probe"
+      (Unix.WEXITED 0, stdout, "")
+  in
+  let scopes = Alcotest.(option (list string)) in
+  let crlf = read "HTTP/2.0 200 OK\r\nX-Oauth-Scopes: repo, workflow\r\n\r\noctocat\n" in
+  Alcotest.(check (option string)) "CRLF login" (Some "octocat") crlf.login;
+  Alcotest.check scopes "CRLF scopes" (Some [ "repo"; "workflow" ]) crlf.scopes;
+  let lf = read "HTTP/2.0 200 OK\nx-oauth-scopes: gist\n\noctocat\n" in
+  Alcotest.(check (option string)) "LF login" (Some "octocat") lf.login;
+  Alcotest.check scopes "header name in any case" (Some [ "gist" ]) lf.scopes;
+  let empty = read "HTTP/2.0 200 OK\r\nX-Oauth-Scopes: \r\n\r\noctocat\n" in
+  Alcotest.check scopes "an empty header is an empty list, not an absent one" (Some []) empty.scopes;
+  let accepted =
+    read "HTTP/2.0 200 OK\r\nX-Accepted-Oauth-Scopes: admin:org\r\n\r\noctocat\n"
+  in
+  Alcotest.check scopes "the accepted-scopes header is not the token's" None accepted.scopes;
+  let headers_only = read "HTTP/2.0 200 OK\r\nX-Oauth-Scopes: repo\r\n" in
+  Alcotest.(check bool) "headers with no body are not a login" false headers_only.authenticated;
+  let plain = read "octocat\n" in
+  Alcotest.(check (option string)) "output without headers is the login" (Some "octocat") plain.login;
+  Alcotest.check scopes "and names no scopes" None plain.scopes
+;;
+
 let () =
   Alcotest.run
     "keeper GitHub identity"
@@ -752,6 +796,7 @@ let () =
             `Quick
             test_login_argv_carries_only_chosen_scopes
         ; Alcotest.test_case "login scopes from the query" `Quick test_login_scopes_of_query
+        ; Alcotest.test_case "probe output shapes" `Quick test_probe_output_shapes
         ; Alcotest.test_case
             "fake gh login and effective identity"
             `Quick

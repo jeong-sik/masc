@@ -1144,7 +1144,7 @@ status: reference
   때문인 실패에서만 좁히며, 좁힌 폭(Continuity Width)을 다음 회차로 넘긴다.
   → [keeper_librarian_durable_consumer](../../lib/keeper/keeper_librarian_durable_consumer.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
 
-**Continuity Lag (요약이 밀린 정도)**
+**Continuity Lag (연속성 밀림)**
 : 연속성 회차가 얼마나 뒤처졌나 — Librarian의 읽은 위치(Read Position)의 `end_atom`에서
   연속성 스냅숏이 덮은 끝(`Keeper_continuity_observation.frontier.end_atom`)을 뺀 atom 수.
   같은 trace를 가리킬 때만 세고, 스냅숏이 앞서면 세지 않는다. health JSON의

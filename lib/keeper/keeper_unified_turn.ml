@@ -439,6 +439,15 @@ let continuation_channel_of_wake = function
 ;;
 
 
+(* The walk dispatches a deferred suffix verbatim and otherwise the lane of
+   the keeper's assignment ([Keeper_turn_driver.run_named]); the
+   briefing is sized over the same list, read through the same function. *)
+let briefing_candidates_for_turn ~deferred_runtime_lane ~assigned_route =
+  match deferred_runtime_lane with
+  | Some hint ->
+    Deferred_candidates (Keeper_turn_driver.deferred_runtime_ids hint)
+  | None -> Lane_of_route assigned_route
+
 let run_keeper_cycle
       ~(before_dispatch_authority : unit -> (unit, string) result)
       ~(execution_path : Keeper_unified_metrics_decision.execution_path)
@@ -801,7 +810,10 @@ let run_keeper_cycle
                    []
                in
                let context_budget_bytes =
-                 world_state_briefing_budget_bytes ~route:effective_runtime_id
+                 world_state_briefing_budget_bytes
+                   (briefing_candidates_for_turn
+                      ~deferred_runtime_lane
+                      ~assigned_route:(Keeper_meta_contract.runtime_id_of_meta meta))
                in
                let render_prompt observation =
                  Keeper_unified_prompt.build_prompt

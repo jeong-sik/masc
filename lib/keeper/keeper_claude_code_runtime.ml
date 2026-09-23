@@ -1367,9 +1367,12 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
        spent 29 minutes per attempt discovering it (2026-08-24). A runtime
        that declares nothing starts unbounded.
 
-       The ceiling is the model's max-prompt-bytes. keeper_unified_turn
-       already sizes the pinned briefing from the same number and says the
-       projection cuts the conversation window; this is that cut. *)
+       The ceiling is this runtime's own max-prompt-bytes. The pinned
+       briefing was sized earlier from the smallest max-prompt-bytes among
+       the candidates the turn's walk holds
+       ([Keeper_turn_runtime_budget.world_state_briefing_budget_bytes]), so
+       it fits under this ceiling; the shrink below cuts only the
+       conversation window. *)
     Option.value
       (Runtime.max_prompt_bytes_of_runtime_id runtime_id)
       ~default:unbounded_model_input_capacity_bytes

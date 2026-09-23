@@ -618,6 +618,13 @@ val smallest_max_prompt_bytes_of_route : string -> int option
     not erase one a sibling declares. [None] when no candidate declares a
     ceiling, or when the route names neither a lane nor a runtime. *)
 
+val smallest_max_prompt_bytes_of_runtime_ids : string list -> int option
+(** The smallest [max-prompt-bytes] declared by the named runtimes, for a
+    walk whose candidate list is already fixed (a deferred lane suffix). An id
+    that declares none, or that the loaded catalog does not hold, adds no
+    ceiling and does not erase one another id declares. [None] when no named
+    runtime declares a ceiling. *)
+
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id
     ["provider.model"] equals [id], or [None] if that runtime is not active.

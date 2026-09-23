@@ -201,6 +201,9 @@ candidates = [ "open.open_model", "fallback.tight_model" ]
 [runtime.lanes.undeclared_only]
 candidates = [ "open.open_model" ]
 
+[runtime.lanes.three_deep]
+candidates = [ "open.open_model", "primary.roomy_model", "fallback.tight_model" ]
+
 [providers.primary]
 display-name = "Primary Provider"
 protocol = "openai-compatible-http"
@@ -694,16 +697,18 @@ let test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens () =
 let briefing_share_of cap =
   cap * Masc.Keeper_config.keeper_context_briefing_share_percent () / 100
 
+module Budget = Masc.Keeper_turn_runtime_budget
+
+let briefing_budget_of_route route =
+  Budget.world_state_briefing_budget_bytes (Budget.Lane_of_route route)
+
 let test_briefing_budget_fits_the_smallest_lane_ceiling () =
   with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
     Alcotest.(check (option int))
       "the lane's smallest declared ceiling"
       (Some tight_max_prompt_bytes)
       (Runtime.smallest_max_prompt_bytes_of_route "uneven");
-    match
-      Masc.Keeper_turn_runtime_budget.world_state_briefing_budget_bytes
-        ~route:"uneven"
-    with
+    match briefing_budget_of_route "uneven" with
     | None -> Alcotest.fail "a lane whose candidates declare ceilings is bounded"
     | Some budget ->
       Alcotest.(check int)
@@ -722,23 +727,49 @@ let test_briefing_budget_an_undeclared_candidate_adds_no_bound () =
     Alcotest.(check (option int))
       "an undeclared head does not erase the fallback's ceiling"
       (Some (briefing_share_of tight_max_prompt_bytes))
-      (Masc.Keeper_turn_runtime_budget.world_state_briefing_budget_bytes
-         ~route:"undeclared_head");
+      (briefing_budget_of_route "undeclared_head");
     Alcotest.(check (option int))
       "a lane whose candidates declare none gets no bound"
       None
-      (Masc.Keeper_turn_runtime_budget.world_state_briefing_budget_bytes
-         ~route:"undeclared_only");
+      (briefing_budget_of_route "undeclared_only");
     Alcotest.(check (option int))
       "a bare runtime route is bounded by its own ceiling"
       (Some (briefing_share_of roomy_max_prompt_bytes))
-      (Masc.Keeper_turn_runtime_budget.world_state_briefing_budget_bytes
-         ~route:"primary.roomy_model");
+      (briefing_budget_of_route "primary.roomy_model");
     Alcotest.(check (option int))
       "a route that names nothing gets no bound"
       None
-      (Masc.Keeper_turn_runtime_budget.world_state_briefing_budget_bytes
-         ~route:"no-such-route"))
+      (briefing_budget_of_route "no-such-route"))
+
+(* Lane [open (none); roomy; tight]. The undeclared head failed and the
+   deferred hint names roomy next with tight after it. The walk dispatches
+   both, so the briefing must fit tight, not only the next candidate. *)
+let test_briefing_budget_spans_the_whole_deferred_suffix () =
+  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
+    let hint =
+      Driver.restore_deferred_runtime_lane
+        ~assignment_id:"three_deep"
+        ~failed_runtime_id:"open.open_model"
+        ~next_runtime_id:"primary.roomy_model"
+        ~later_runtime_ids:[ "fallback.tight_model" ]
+        ~failure:(Agent_core.Error.Internal "head refused")
+    in
+    let candidates =
+      Masc.Keeper_unified_turn.briefing_candidates_for_turn
+        ~deferred_runtime_lane:(Some hint)
+        ~assigned_route:"three_deep"
+    in
+    Alcotest.(check (option int))
+      "the briefing fits the last candidate of the deferred walk"
+      (Some (briefing_share_of tight_max_prompt_bytes))
+      (Budget.world_state_briefing_budget_bytes candidates);
+    Alcotest.(check (option int))
+      "without a hint the whole lane of the assignment bounds it"
+      (Some (briefing_share_of tight_max_prompt_bytes))
+      (Budget.world_state_briefing_budget_bytes
+         (Masc.Keeper_unified_turn.briefing_candidates_for_turn
+            ~deferred_runtime_lane:None
+            ~assigned_route:"three_deep")))
 
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
@@ -5121,6 +5152,10 @@ let () =
             "an undeclared candidate adds no bound and erases none"
             `Quick
             test_briefing_budget_an_undeclared_candidate_adds_no_bound;
+          Alcotest.test_case
+            "the briefing budget spans the whole deferred suffix"
+            `Quick
+            test_briefing_budget_spans_the_whole_deferred_suffix;
           Alcotest.test_case
             "a bare runtime assignment walks only itself"
             `Quick

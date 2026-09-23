@@ -980,7 +980,20 @@ val rename_runtime_lane :
     the lane is not written as its own table.
 
     [\[runtime\].default] takes the new name like an assignment does, because
-    it holds a route ({!get_default_route}). *)
+    it holds a route ({!get_default_route}).
+
+    Refused while [\[fusion\]] does not load, and when the Fusion writer cannot
+    address a preset with a seat on the lane (inline [judges] tables, dotted
+    [presets.<name>.judge] keys); the raw runtime.toml endpoint still edits
+    such a file.
+
+    What the rename does not reach:
+    - A Fusion run already in progress resolves each seat when it reaches it,
+      so a rename during the run can fail that run's judge.
+    - Routes passed as Fusion tool arguments are not in runtime.toml and are
+      not rewritten.
+    - A rewritten seat line loses its trailing comment, as any value
+      {!Fusion_config_writer} rewrites does. *)
 
 val remove_runtime_lane :
   ?runtime_config_path:string ->

@@ -3506,14 +3506,17 @@ let lane_fusion_policy content ~lane_id =
   | Error errors ->
     Error
       (Printf.sprintf
-         "[fusion] does not load (%s), so the seats that may name lane %S cannot be \
-          read; fix [fusion] first"
-         (String.concat "; " (List.map Fusion_config.config_error_message errors))
-         lane_id)
+         "lane %S cannot be edited here while [fusion] does not load (%s): its \
+          seats may name the lane and cannot be read. Fix [fusion], or edit \
+          runtime.toml through POST /api/v1/runtime/config/raw"
+         lane_id
+         (String.concat "; " (List.map Fusion_config.config_error_message errors)))
 ;;
 
 (* A seat is a route, so a rename rewrites every preset with a seat on the
-   lane through the Fusion writer, in the same text as the header. *)
+   lane through the Fusion writer, in the same text as the header. A preset
+   the writer cannot address refuses the rename, and the refusal says the
+   lane rename is what reached it. *)
 let rename_fusion_seats text (fusion : Fusion_policy.t) references ~lane_id ~new_lane_id =
   List.fold_left
     (fun acc validated ->
@@ -3537,7 +3540,9 @@ let rename_fusion_seats text (fusion : Fusion_policy.t) references ~lane_id ~new
                (Fusion_policy.Validated_preset.invalid_to_string invalid))
          in
          Fusion_config_writer.upsert_preset text renamed
-         |> Result.map_error Fusion_config_writer.error_message))
+         |> Result.map_error (fun error ->
+           Printf.sprintf "renaming lane %S rewrites a seat of preset %s, and %s"
+             lane_id preset.name (Fusion_config_writer.error_message error))))
     (Ok text)
     fusion.presets
 ;;

@@ -342,12 +342,87 @@ let test_lane_edits_refuse_while_fusion_does_not_load () =
         check bool (label ^ " names the cause") true
           (contains detail "[fusion] does not load")
     in
+    let cause =
+      Fusion_config.config_error_message (Fusion_config.Invalid_min_answered ("spare", 9))
+    in
+    let refused label result =
+      refused label result;
+      match result with
+      | Ok _ -> ()
+      | Error detail ->
+        check bool (label ^ " names the load error") true (contains detail cause);
+        check bool (label ^ " names the raw endpoint") true
+          (contains detail "POST /api/v1/runtime/config/raw")
+    in
     refused "remove"
       (Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge" ());
     refused "rename"
       (Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge"
          ~new_lane_id:"arbiter" ());
     check string "file untouched" broken (read path))
+;;
+
+(* A run trims a seat before it resolves it, so a padded seat names the lane
+   too: the rename rewrites it and the remove refuses on it. The refusal is
+   the server's own sentence, pinned here word for word. *)
+let test_a_padded_seat_names_the_lane () =
+  with_config (fun path ->
+    let trio = { (preset_named path "trio") with Fusion_policy.judge = " fusion-judge " } in
+    (match apply path (Masc.Fusion_config_edit.Upsert_preset trio) with
+     | Ok _ -> ()
+     | Error error -> failf "seating trio: %s" (Masc.Fusion_config_edit.error_message error));
+    check string "the padded seat is on disk" " fusion-judge " (preset_named path "trio").judge;
+    (match Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge" () with
+     | Ok _ -> fail "a lane a padded seat names was removed"
+     | Error detail ->
+       check string "the server's refusal"
+         "lane \"fusion-judge\" is in use by [fusion.presets.trio].judge" detail);
+    (match
+       Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge"
+         ~new_lane_id:"arbiter" ()
+     with
+     | Ok _ -> ()
+     | Error detail -> failf "rename refused: %s" detail);
+    check string "the padded seat took the new name" "arbiter" (preset_named path "trio").judge)
+;;
+
+(* A preset the Fusion writer cannot address -- here, inline [judges] --
+   refuses the rename, and the refusal says a lane rename reached it. *)
+let test_an_unaddressable_seat_refuses_the_rename () =
+  with_config (fun path ->
+    let marker = "judge = \"stub-http.stub-model\"\n" in
+    let text = read path in
+    (* The first such line is trio's: the fixture writes trio before spare. *)
+    let at =
+      let n = String.length marker in
+      let rec find i =
+        if i + n > String.length text then fail "fixture has no trio judge line"
+        else if String.equal (String.sub text i n) marker then i
+        else find (i + 1)
+      in
+      find 0
+    in
+    let seated =
+      String.sub text 0 at
+      ^ marker
+      ^ "judges = [ { model = \"fusion-judge\", system_prompt = \"First.\" } ]\n"
+      ^ String.sub text (at + String.length marker)
+          (String.length text - at - String.length marker)
+    in
+    write_file path seated;
+    check string "the inline seat loads" "fusion-judge"
+      (match (preset_named path "trio").judges with
+       | [ judge ] -> judge.jmodel
+       | _ -> fail "trio must read one inline first judge");
+    (match
+       Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge"
+         ~new_lane_id:"arbiter" ()
+     with
+     | Ok _ -> fail "a rename rewrote a preset the writer cannot address"
+     | Error detail ->
+       check bool "the refusal says the lane rename reached the preset" true
+         (contains detail "renaming lane \"fusion-judge\" rewrites a seat of preset trio"));
+    check string "file untouched" seated (read path))
 ;;
 
 (* For each kind of seat alone, the lane references and the Fusion route check
@@ -439,6 +514,9 @@ let () =
             test_lane_rename_rewrites_fusion_seats
         ; test_case "a lane remove is refused while a seat names it" `Quick
             test_lane_remove_is_refused_while_a_seat_names_it
+        ; test_case "a padded seat names the lane" `Quick test_a_padded_seat_names_the_lane
+        ; test_case "an unaddressable seat refuses the rename" `Quick
+            test_an_unaddressable_seat_refuses_the_rename
         ; test_case "lane edits refuse while [fusion] does not load" `Quick
             test_lane_edits_refuse_while_fusion_does_not_load
         ; test_case "the Fusion and lane checks see the same seats" `Quick

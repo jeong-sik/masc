@@ -41,9 +41,10 @@ type outcome =
       ; snapshot_revision : string
       ; winner : Skill_reference.identity
       }
-      (** Written and published, but [winner], in an earlier source,
-          declares the same name. Keeper turns list Skills by name and see
-          [winner]; [reference] stays in the catalog as its shadow. *)
+      (** Written and published, but [winner] declares the same name earlier
+          in catalog order. Turns that list Skills by name see [winner];
+          [reference] stays in the catalog as its shadow, and only a Task
+          that pins it gets it. *)
   | Created_but_unpublished of
       { reference : Skill_reference.t
       ; reason : string

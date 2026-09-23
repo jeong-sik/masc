@@ -364,18 +364,26 @@ let test_create_publishes_without_host_path_input () =
 let test_create_behind_an_earlier_source_names_the_winner () =
   with_workspace @@ fun base_path ->
   let operator_root = Filename.concat base_path "operator-skills" in
+  let late_root = Filename.concat base_path "late-skills" in
   Unix.mkdir operator_root 0o700;
+  Unix.mkdir late_root 0o700;
   Unix.mkdir (Filename.concat base_path "skills") 0o700;
   Unix.mkdir (Filename.concat operator_root "shared") 0o700;
   write_file
     (Filename.concat operator_root "shared/SKILL.md")
     (named_skill_text "shared" "The operator's procedure." "# Operator");
+  Unix.mkdir (Filename.concat late_root "trailing") 0o700;
+  write_file
+    (Filename.concat late_root "trailing/SKILL.md")
+    (named_skill_text "trailing" "A later source's procedure." "# Late");
   let config_text =
     "[skills]\nresource-read-max-bytes = 65536\n\n\
      [[skills.sources]]\nid = \"operator\"\nanchor = \"base-path\"\n\
      path = \"operator-skills\"\naccess = \"read-only\"\n\n\
      [[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\n\
-     path = \"skills\"\naccess = \"read-write\"\n"
+     path = \"skills\"\naccess = \"read-write\"\n\n\
+     [[skills.sources]]\nid = \"late\"\nanchor = \"base-path\"\n\
+     path = \"late-skills\"\naccess = \"read-only\"\n"
   in
   let workspace =
     match Service.workspace_of_base_path ~base_path with
@@ -425,6 +433,31 @@ let test_create_behind_an_earlier_source_names_the_winner () =
    | Error error -> fail (Editor.error_to_string error));
   check bool "the shadowed package is still written" true
     (Sys.file_exists (Filename.concat base_path "skills/shared/SKILL.md"));
+  (* The other side of a shadow: a later source already declares the name,
+     so the created package is the winner and must not be reported as
+     shadowed by itself. *)
+  (match create "trailing" with
+   | Ok (Editor.Created_and_published { preview; snapshot_revision = _ }) ->
+     let created = preview.profile.reference.identity in
+     let published =
+       match Service.current ~workspace with
+       | Some snapshot -> snapshot
+       | None -> fail "no snapshot after the create"
+     in
+     check bool "the created package shadows the later source's" true
+       (List.exists
+          (fun (shadow : Snapshot.shadow) ->
+             Skill_reference.equal_identity shadow.winner created
+             && String.equal
+                  "late"
+                  (Skill_reference.identity_source_id_to_string shadow.shadowed))
+          (Snapshot.shadows published))
+   | Ok (Created_but_shadowed { winner; _ }) ->
+     fail
+       ("the winner of a shadow was reported shadowed by "
+        ^ Skill_reference.identity_source_id_to_string winner)
+   | Ok (Created_but_unpublished { reason; _ }) -> fail ("not published: " ^ reason)
+   | Error error -> fail (Editor.error_to_string error));
   (* Control: the same sources, a name no earlier source declares. *)
   match create "fresh" with
   | Ok (Editor.Created_and_published _) -> ()

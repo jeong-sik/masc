@@ -166,13 +166,6 @@ let delete_unpublished_reason_to_string = function
   | Publication_cancelled -> "snapshot refresh cancelled"
 ;;
 
-let shadowed_reason winner =
-  Printf.sprintf
-    "shadowed by %s/%s, which declares the same name in an earlier source"
-    (Skill_reference.identity_source_id_to_string winner)
-    (Skill_reference.identity_package_id_to_string winner)
-;;
-
 let recovery_cause_to_yojson = function
   | Recovery_operation_failed detail ->
     `Assoc [ "kind", `String "operation_failed"; "detail", `String detail ]
@@ -398,10 +391,12 @@ let published_snapshot = function
   | Workspace_retired -> Error "workspace retired during Skill publication"
 ;;
 
-(* The earlier source's entry that holds [identity]'s name, when there is
-   one. [resolve_reference] finds shadowed entries too, so a reference that
-   resolves is not yet one that Keeper turns see: they list effective entries
-   by name (RFC keeper-self-authored-skills). *)
+(* The entry that holds [identity]'s name ahead of it in catalog order, when
+   there is one: usually an earlier source's, or in the same source a
+   directory that sorts first and normalizes to the same name.
+   [resolve_reference] finds shadowed entries too, so a reference that
+   resolves is not yet one that turns listing Skills by name see
+   (RFC keeper-self-authored-skills). *)
 let shadow_winner snapshot identity =
   List.find_map
     (fun (shadow : Skill_catalog_snapshot.shadow) ->

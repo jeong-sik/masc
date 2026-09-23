@@ -96,9 +96,12 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
                    Skill_catalog_snapshot.snapshot_revision_to_string snapshot_revision
                } )
          | Created_but_shadowed { preview; snapshot_revision; winner } ->
+           (* The write and the republish succeeded; which package the name
+              resolves to is catalog state that changes when either package
+              goes, so the row records the status, not a failure. *)
            ( preview
            , "created_but_shadowed"
-           , Audit_log.Failure (Server_skill_editor.shadowed_reason winner)
+           , Audit_log.Success
            , Publish.Created_but_shadowed
                { reference = preview.profile.reference
                ; snapshot_revision =

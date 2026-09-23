@@ -226,13 +226,11 @@ let test_outcomes_project_typed () =
          (Publish.Created_but_shadowed
             { reference; snapshot_revision = "rev-2"; winner })));
   let shadowed = call config (args source_text) in
-  (* The write committed, so the effect is proven; what failed is the
-     Keeper's aim, a Skill other Keepers see under that name. *)
-  failed_with
-    ~code:"created_but_shadowed"
-    ~class_:Tool_result.Workflow_rejection
-    ~effect_disposition:Tool_result.Proven_post_effect
-    shadowed;
+  (* The write and the republish committed, so the call completes and the
+     status says the rest. Every failure class carries a next move the model
+     reads, and none of them is true of a package that was written. *)
+  check bool "shadowed publish completes" true
+    ((fst shadowed).disposition = Tool_result.Completed ());
   check string "shadowed status" "created_but_shadowed" (string_field "status" (snd shadowed));
   check bool "names the winner" true
     (Yojson.Safe.Util.member "winner" (snd shadowed) = Skill_reference.identity_to_yojson winner);
@@ -386,13 +384,10 @@ let test_publish_behind_an_earlier_source_names_the_winner () =
   Atomic.set Workspace_hooks.keeper_skill_publish_fn
     (Server_keeper_skill_publish.publish ~refresh);
   let original = instruction "shared" in
-  let shadowed = call config (args ~package_id:"shared" original) in
-  failed_with
-    ~code:"created_but_shadowed"
-    ~class_:Tool_result.Workflow_rejection
-    ~effect_disposition:Tool_result.Proven_post_effect
-    shadowed;
-  let data = snd shadowed in
+  let result, data = call config (args ~package_id:"shared" original) in
+  if result.Keeper_tool_execution.disposition <> Tool_result.Completed ()
+  then fail ("shadowed publish did not complete: " ^ Yojson.Safe.to_string data);
+  check string "shadowed status" "created_but_shadowed" (string_field "status" data);
   let winner = Yojson.Safe.Util.member "winner" data in
   check string "winner source" earlier_source_id (string_field "source_id" winner);
   check string "winner package" "shared" (string_field "package_id" winner);
@@ -407,11 +402,7 @@ let test_publish_behind_an_earlier_source_names_the_winner () =
        entry.action = Audit_log.Custom "skill_write")
    with
    | [ entry ] ->
-     check string "audit status" "created_but_shadowed" (string_field "status" entry.details);
-     check bool "audit records a failure" true
-       (match entry.outcome with
-        | Audit_log.Failure _ -> true
-        | Audit_log.Success -> false)
+     check string "audit status" "created_but_shadowed" (string_field "status" entry.details)
    | entries -> fail (Printf.sprintf "expected one skill_write row, got %d" (List.length entries)));
   (* Control: the same two sources, a name project-masc does not declare. *)
   let fresh = instruction "fresh" in

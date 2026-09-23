@@ -5,9 +5,9 @@
     the [project-agents] source. The Keeper cannot pick the source. The
     editor's typed outcome is projected to JSON as is:
     [Created_and_published] carries the reference and snapshot revision,
-    [Created_but_shadowed] also the [winner] identity that Keeper turns see
-    under the name, [Created_but_unpublished] the reason, and a refusal its
-    [error] code and message. *)
+    [Created_but_shadowed] completes too and adds the [winner] identity that
+    turns listing Skills by name see instead, [Created_but_unpublished] the
+    reason, and a refusal its [error] code and message. *)
 val handle :
   config:Workspace.config ->
   keeper_name:string ->

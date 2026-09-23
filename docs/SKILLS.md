@@ -35,9 +35,11 @@ Keeper는 `keeper_skill_publish`로 새 package를 직접 발행한다
 `package_already_exists`로 거절하며 덮어쓰지 않는다. 쓴 뒤 catalog snapshot을 다시
 발행하므로 다음 턴이 돌려받은 Skill Reference로 찾는다. 단 meta 에 `skills` 목록을
 선언한 Keeper 는 그 목록에 이름이 있을 때만 본다(`Keeper_skill_catalog.project_turn ~names`).
-먼저 선언된 source 에 같은 이름이 있으면 그 Skill 이 이기고 새 package 는 가려진다(shadow).
-이때 결과는 `created_but_shadowed` 이고, `winner` 가 Keeper 턴이 그 이름으로 보는
-package 를 가리킨다. 새 package 는 파일과 catalog 에 남지만 Keeper 턴 목록에는 뜨지 않는다.
+catalog 순서에서 앞선 package(보통 먼저 선언된 source 의 것)가 같은 이름을 선언하면
+그 Skill 이 이기고 새 package 는 가려진다(shadow). 이때 결과는 `created_but_shadowed`
+이고 `winner` 가 이긴 package 를 가리킨다. Keeper 턴은 이름으로 Skill 목록을 만들어서
+`winner` 를 본다. 새 package 는 파일과 catalog 에 남고, Task 가 그 정확한 reference 를
+지명할 때만 턴에 들어간다.
 발행마다 감사 원장에 `skill_write` 한 줄을
 남긴다(Keeper 이름, 참조, `evidence`). `evidence`는 기록만 하고 참인지 판정하지 않는다.
 삭제는 운영자의 편집기 DELETE 경로로 한다.

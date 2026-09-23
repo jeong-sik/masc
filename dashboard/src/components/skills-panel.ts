@@ -160,14 +160,15 @@ export function resourceReadBoundLabel(config: SkillSnapshotConfig): string {
   return `resource read max ${formatBytes(config.resource_read_max_bytes)}`
 }
 
-/** A shadowed create is written and published, but an earlier source holds
- * the name, so Keepers see the winner; the line names it. */
+/** A shadowed create is written and published, but a package earlier in
+ * the catalog holds the name, so Keepers listing by name see that one; the
+ * line names it. */
 export function createReceiptMessage(receipt: SkillCreateReceipt): string {
   switch (receipt.status) {
     case 'created_and_published':
       return 'created and published'
     case 'created_but_shadowed':
-      return `created and published, but shadowed by ${receipt.winner.source_id}/${receipt.winner.package_id}: Keepers see that one`
+      return `created and published, but shadowed by ${receipt.winner.source_id}/${receipt.winner.package_id}: Keepers see that one by name`
     case 'created_but_unpublished':
       return `created but NOT published: ${receipt.reason}`
   }

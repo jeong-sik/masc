@@ -188,3 +188,29 @@ Librarian 이 자기 Keeper 의 관점으로 판단한다. 새 Gate 나 검사�
 라이브:
 - exact-lane 입력 payload 에서 정체 칸과 `role=user` 머리의 발화자를 센다.
   이 RFC 의 60건 표본과 같은 방법으로 잰다.
+
+## 8. 단계와 조사 결과 (2026-09-23)
+
+| 단계 | 내용 | 상태 |
+|---|---|---|
+| 1 | §3.1 자기 Keeper 의 정체를 Librarian 입력에 넣는다 | 구현 중 |
+| 2a | 다른 Keeper 가 보낸 말의 발화자를 등록부로 가린다 | 구현 중 |
+| 2b | 사람 쪽 말마다 typed metadata 로 발화자를 싣는다 | 1·2a 배포 뒤 |
+
+2a 를 따로 뺀 이유: `masc_keeper_msg`·delegate 로 다른 Keeper 가 보낸 말은 지금 `Owner` 로
+저장된다. 요청 출처가 `channel="agent"` 이고 workspace·user id 가 비어서
+`chat_speaker_of_request`(`server_routes_http_keeper_stream.ml:203-245`)가 커넥터 발화자가 없다고
+보고 `Owner` 를 준다. Librarian 은 `counterpart_observations` 에서 다른 Keeper 의 부탁을 운영자의
+말로 읽는다. broadcast 멘션은 `External` 로 저장된다(`server_bootstrap_loops.ml:205-209`).
+
+2b 를 위해 확인한 것:
+- 발화자를 실을 자리는 `Agent_core.Types.message.metadata` 의 typed 키다. 키마다 모듈이
+  `entry`·`add`·`classify`(Absent·Present·Invalid·Duplicate)를 갖는 선례가 있다
+  (`Extra_system_context_provenance`, `Reasoning_source`, keeper 쪽 `masc.approval_input_admission`).
+- 네이티브 레인의 user 메시지는 `agent_input.ml:63-74` 에서 `metadata = []` 로 만들어진다.
+  Librarian 은 checkpoint 를 읽으므로 여기서 실으면 그대로 도착한다.
+- 공식 클라이언트 레인은 checkpoint 를 저장하지 않고 history.jsonl 을 읽는데, 읽을 때
+  metadata 를 버린다(`keeper_context_core_message_json.ml:173`).
+- 영향: atom 위치 digest 가 metadata 를 포함하므로 만든 뒤에 붙이거나 떼면 안 된다.
+  `api_common.ml:659-677` 은 metadata 가 빈 user 메시지만 앞 Tool 메시지에 합치므로 요청 모양과
+  캐시 앞부분이 바뀐다. `keeper_turn_driver.ml:1402-1418` 의 재생 prefix 도 같은 metadata 를 실어야 한다.

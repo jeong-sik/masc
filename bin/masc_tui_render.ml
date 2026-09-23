@@ -7744,12 +7744,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           "  Fusion runs · j/k:select · Enter:open · same IDs as Fusion" ::
           (if runs = [] then ["  No retained Fusion runs for this Keeper"]
            else List.mapi (fun index (run : Tui_decode.fusion_run) ->
-             let tm = Unix.localtime run.fur_started_at in
-             Printf.sprintf "%s %04d-%02d-%02d %02d:%02d · %s · %s · %s"
+             (* The clock the Fusion list and the run detail already draw for
+                this field, rather than a second copy of its format: three
+                lists show a run's start, and a copy is one that stops
+                following when the other two change. *)
+             Printf.sprintf "%s %s · %s · %s · %s"
                (if Option.fold ~none:false ~some:(fun (cursor, _) -> index = cursor)
                      (selected_keeper_run state) then ">" else " ")
-               (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-               tm.Unix.tm_hour tm.Unix.tm_min
+               (fusion_run_clock run)
                (Tui_decode.fusion_run_status_to_string run.fur_status)
                (Terminal_text.single_line run.fur_preset)
                (Terminal_text.single_line run.fur_run_id)) runs)

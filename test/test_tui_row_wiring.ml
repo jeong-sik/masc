@@ -1048,6 +1048,19 @@ let test_the_loader_stops_opening_keys_no_screen_draws () =
     still_read
 ;;
 
+(* Three lists draw a Fusion run's start: the Fusion list, the run detail and
+   the Keeper detail's Runs tab. The first two read [fusion_run_clock]; the
+   third held a copy of its Printf, so a change to the clock would have moved
+   two of the three. *)
+let test_every_fusion_run_list_reads_one_clock () =
+  Alcotest.(check int) "the Keeper tab reads the shared clock" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"keeper_detail_pane" ~callee:"fusion_run_clock");
+  Alcotest.(check int) "and keeps no localtime of its own" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"keeper_detail_pane" ~callee:"Unix.localtime")
+;;
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -1140,5 +1153,7 @@ let () =
             test_both_doors_into_the_runtime_detail_ask_the_same_lane_list
         ; Alcotest.test_case "the Board age column reads the sort once" `Quick
             test_the_board_age_column_reads_the_sort_once
+        ; Alcotest.test_case "every Fusion run list reads one clock" `Quick
+            test_every_fusion_run_list_reads_one_clock
         ] )
     ]

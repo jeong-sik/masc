@@ -5633,6 +5633,10 @@ type state = {
   mutable connector_unbind_all_armed:
     (string * Masc_tui_connector_unbind.target list) option;
   mutable connector_unbind_all_inflight: bool;
+  (* A Keeper the operator just paused or shut down, waiting for a fresh
+     connector read to learn whether it still holds bindings to offer to
+     remove. *)
+  mutable connector_unbind_offer_pending: string option;
   (* Two server-owned documents joined by exact runtime id: resolved owns
      lanes/provider/model identity, probe owns cached reachability. *)
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
@@ -7592,6 +7596,7 @@ let create_state
   connector_unbind_armed = None;
   connector_unbind_all_armed = None;
   connector_unbind_all_inflight = false;
+  connector_unbind_offer_pending = None;
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;

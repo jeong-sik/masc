@@ -98,3 +98,12 @@ let arm_prompt ~keeper_name ~confirm_key targets =
     (if List.length targets = 1 then "" else "s")
     keeper_name
     (String.concat ", " (List.map target_label targets))
+
+(* The key leads: a footer cuts from the right, and the channel list is the
+   part that can be long. *)
+let offer_prompt ~keeper_name ~confirm_key targets =
+  Printf.sprintf
+    "%s: also unbind %s's %d channel%s, or any other key to keep them -- %s"
+    confirm_key keeper_name (List.length targets)
+    (if List.length targets = 1 then "" else "s")
+    (String.concat ", " (List.map target_label targets))

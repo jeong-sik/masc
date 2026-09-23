@@ -13485,6 +13485,25 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             | Some i -> i | None -> 0))
   | Keeper_action_done (keeper_name, action, result) ->
       apply_keeper_action_result state ~base_path keeper_name action result;
+      (* A paused or shut-down Keeper still routes its channels to itself, and
+         answers on them the moment it runs again. Read the bindings fresh
+         and, if it holds any, offer to remove them; doing nothing is the
+         default. *)
+      (match action, result with
+       | (Keeper_control.Pause | Keeper_control.Shutdown),
+         Ok (Keeper_control.Accepted _) ->
+           state.connector_unbind_offer_pending <- Some keeper_name;
+           launch_connectors_load state ~mailbox
+       | (Keeper_control.Pause | Keeper_control.Shutdown),
+         (Ok
+            ( Keeper_control.Purge_accepted _
+            | Keeper_control.Paused_owner_conflict _
+            | Keeper_control.Rejected _ )
+         | Error _)
+       | ( ( Keeper_control.Resume | Keeper_control.Boot
+           | Keeper_control.Wakeup | Keeper_control.Delete ),
+           _ ) ->
+           ());
       (* The roster is the half of the row this refresh cannot read from disk,
          and it is what decides which action the row offers next. Asking for it
          now means the row stops offering the action that just ran without
@@ -15263,8 +15282,46 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  in
                  find 0 snapshot.cs_connectors);
           state.connectors_binding_cursor <- 0;
-          state.connector_unbind_armed <- None
-      | Error detail -> state.connectors_error <- Some detail)
+          state.connector_unbind_armed <- None;
+          (match state.connector_unbind_offer_pending with
+           | None -> ()
+           | Some keeper_name ->
+               state.connector_unbind_offer_pending <- None;
+               (match
+                  Masc_tui_connector_unbind.targets ~keeper_name
+                    snapshot.cs_connectors
+                with
+                | [] -> ()
+                | targets -> (
+                    match state.view with
+                    | Keepers (Keeper_list | Keeper_detail) ->
+                        (* Armed exactly as a first [U] would be, so the one
+                           key that answers it goes through the same
+                           confirmation, and any other key drops it. *)
+                        state.connector_unbind_all_armed <-
+                          Some (keeper_name, targets);
+                        report_action state "system"
+                          (Masc_tui_connector_unbind.offer_prompt ~keeper_name
+                             ~confirm_key:"U" targets)
+                    | _ ->
+                        report_action state "system"
+                          (Printf.sprintf
+                             "%s still holds %d channel binding%s; U U on its \
+                              Channels tab removes them"
+                             keeper_name (List.length targets)
+                             (if List.length targets = 1 then "" else "s")))))
+      | Error detail ->
+          state.connectors_error <- Some detail;
+          (match state.connector_unbind_offer_pending with
+           | None -> ()
+           | Some keeper_name ->
+               state.connector_unbind_offer_pending <- None;
+               report_action state "error"
+                 (Printf.sprintf
+                    "could not read %s's channel bindings to offer removing \
+                     them: %s"
+                    keeper_name
+                    (Masc_tui_ansi.Terminal_text.single_line detail))))
   | Runtime_surface_loaded (generation, result) ->
       let is_current = generation = state.runtime_surface_generation in
       (match state.runtime_surface_inflight with
@@ -16654,7 +16711,16 @@ let main
      never read. *)
   let handle_connector_unbind_all () =
     state.connector_unbind_armed <- None;
-    match selected_keeper state, state.connectors with
+    (* An arm names its Keeper: the one the first [U] was pressed for, or the
+       one just paused whose offer is on screen. Only with nothing armed does
+       the cursor decide. *)
+    let keeper_name =
+      match state.connector_unbind_all_armed, selected_keeper state with
+      | Some (armed_keeper, _), _ -> Some armed_keeper
+      | None, Some keeper -> Some keeper.k_name
+      | None, None -> None
+    in
+    match keeper_name, state.connectors with
     | None, _ ->
         state.connector_unbind_all_armed <- None;
         report_action state "error" "unbind all: select a Keeper first"
@@ -16662,8 +16728,7 @@ let main
         state.connector_unbind_all_armed <- None;
         report_action state "error"
           "unbind all: channel transports have not been read yet"
-    | Some keeper, Some snapshot -> (
-        let keeper_name = keeper.k_name in
+    | Some keeper_name, Some snapshot -> (
         let targets =
           Masc_tui_connector_unbind.targets ~keeper_name snapshot.cs_connectors
         in
@@ -23742,6 +23807,16 @@ and is loaded on demand through keeper_skill.
            in
            launch_keeper_tool_mode_set state ~mailbox:async_messages
              ~keeper_name:keeper.k_name ~mode
+       | Some "U"
+         when (match state.view with
+               | Keepers (Keeper_list | Keeper_detail) -> true
+               | _ -> false)
+              && Option.is_some state.connector_unbind_all_armed ->
+           (* An armed unbind-all -- a first [U] on Channels, or the offer
+              after a pause -- takes the next [U] before the runtime picker
+              does. The arm lives for one key, so this cannot be a stale
+              one. *)
+           handle_connector_unbind_all ()
        | Some "u" | Some "U"
          when (match state.view with
                | Keepers Keeper_list -> true

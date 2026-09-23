@@ -11528,6 +11528,81 @@ def run_keeper_unbind_all_channels_regression(executable: str) -> None:
     )
 
 
+def run_pause_offers_channel_unbind_regression(executable: str) -> None:
+    """Pausing a Keeper that holds bindings offers to remove them, once.
+
+    #38167: a paused Keeper still routes its Discord channels to itself and
+    answers on them as soon as it runs again. After the pause is accepted the
+    footer names the channels and the one key that removes them. U takes the
+    offer; any other key leaves the bindings, and the next U is the runtime
+    picker again.
+    """
+
+    def pause_alpha(process: subprocess.Popen[bytes], master_fd: int,
+                    output: bytearray) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        # Pause is not a two-press action; one p sends it.
+        send_and_wait(process, master_fd, output, b"p",
+                      b"U: also unbind alpha's 2 channels")
+
+    def unbinds(requests: HttpRequests) -> list[tuple[str, str]]:
+        return sorted(
+            (json.loads(body)["channel_id"], json.loads(body)["keeper_name"])
+            for path, body in requests
+            if path.startswith(CONNECTOR_UNBIND_PATH)
+        )
+
+    def fixtures() -> HttpFixtures:
+        served = connector_unbind_all_fixtures()
+        served["/api/v1/keepers/alpha/directive"] = (200, {"ok": True})
+        return served
+
+    taken: HttpRequests = []
+
+    def take_offer(process: subprocess.Popen[bytes], master_fd: int,
+                   _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        pause_alpha(process, master_fd, output)
+        send_and_wait(process, master_fd, output, b"U",
+                      b"unbind all of alpha: 1 removed, 1 skipped, 0 failed")
+        if unbinds(taken) != [("111", "alpha"), ("333", "alpha")]:
+            raise AssertionError(
+                f"the offer did not send exactly alpha's two bindings: {unbinds(taken)!r}"
+            )
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="U after a pause removes the paused Keeper's channel bindings",
+        interact=take_offer,
+        http_fixtures=fixtures(),
+        http_requests=taken,
+    )
+
+    declined: HttpRequests = []
+
+    def decline_offer(process: subprocess.Popen[bytes], master_fd: int,
+                      _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        pause_alpha(process, master_fd, output)
+        send_and_wait(process, master_fd, output, b"\x1b[B",
+                      keeper_row_selected(b"beta"))
+        send_and_wait(process, master_fd, output, b"U", b"\xe2\x96\xb8 runtime")
+        if unbinds(declined):
+            raise AssertionError(
+                f"a declined offer still sent unbinds: {unbinds(declined)!r}"
+            )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="Any other key after a pause keeps the Keeper's channel bindings",
+        interact=decline_offer,
+        http_fixtures=fixtures(),
+        http_requests=declined,
+    )
+
+
 def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
     """Beside the acting pane the row is 92 cells; a strip wider than that
     used to be cut from the right, so the Keeper detail's Runs tab and
@@ -14509,6 +14584,7 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_tab_strip_keeps_current_entry_regression(executable)
     run_keeper_unbind_all_channels_regression(executable)
+    run_pause_offers_channel_unbind_regression(executable)
     run_activity_logs_tab_pane_regression(executable)
     changes_navigation_fixtures = keeper_runtime_http_fixtures()
     changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()

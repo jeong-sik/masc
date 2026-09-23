@@ -47,3 +47,8 @@ val any_failed : (target * outcome) list -> bool
 
 (** The line shown after the first press, naming each channel it will remove. *)
 val arm_prompt : keeper_name:string -> confirm_key:string -> target list -> string
+
+(** The line shown after the operator paused or shut down a Keeper that still
+    holds bindings: the channels it would answer on again once it runs, and
+    the one key that removes them. Doing nothing is the default. *)
+val offer_prompt : keeper_name:string -> confirm_key:string -> target list -> string

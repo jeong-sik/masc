@@ -39,27 +39,36 @@ module For_testing : sig
     | Superseded
     | Deferred of string
 
-  (** Why a scan produced no work. [Scan_skipped] is the goal store this
-      build cannot read; [Ledger_reconcile_failed] names the one goal whose
-      ledger the scan could read but not reconcile. Only the first is
-      recorded as a durable row and a WARN line. *)
-  type scan_failure =
-    | Scan_skipped of Goal_store.unavailable
-    | Ledger_reconcile_failed of
-        { goal_id : string
-        ; detail : string
-        }
+  (** Why a scan produced no work: the goal store this build cannot read.
+      It is recorded as a durable row and a WARN line. *)
+  type scan_failure = Scan_skipped of Goal_store.unavailable
+
+  (** One Verifying goal whose ledger the scan could read but not reconcile
+      or re-arm. The scan skips it and keeps collecting the other goals; the
+      scan that calls {!collect_pending} logs it at ERROR, and its pending
+      row stays durable. *)
+  type reconcile_failure =
+    { failed_goal_id : string
+    ; failure : string
+    }
+
+  type scan =
+    { collected : pending_work list
+    ; unreconciled : reconcile_failure list
+    }
 
   val scan_failure_to_string : scan_failure -> string
   (** For a test's failure message; nothing branches on it. *)
 
   val collect_pending :
     Workspace_utils_backend_setup.config ->
-    (pending_work list, scan_failure) result
+    (scan, scan_failure) result
   (** Reconciles or re-arms only currently-Verifying Goals through
-      authoritative, locked reads. Pure read: the row and the WARN line for
-      a skipped scan are written by the scan that calls it ({!drain_once},
-      the daemon). *)
+      authoritative, locked reads. A goal that fails reconciliation lands in
+      [unreconciled] and does not stop the other goals from being collected.
+      Pure read: the row and the WARN line for a skipped scan, and the ERROR
+      line for each unreconciled goal, are written by the scan that calls it
+      ({!drain_once}, the daemon). *)
 
   val process_pending_work :
     ?sw:Eio.Switch.t option ->

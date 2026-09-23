@@ -59,42 +59,62 @@ let group_pending_by_goal work =
    review or reconciliation. Recovery re-arms only still-Verifying Goals; an
    ordinary criterion edit must not become an implicit completion request. *)
 
-(* Why a scan produced no work. The two arms have different consequences:
-   a store this build cannot read is recorded as a durable row and one WARN
-   line (RFC-0444 §2.3 row 7), a ledger the scan could read but not
-   reconcile for one goal is an ERROR naming that goal. *)
-type scan_failure =
-  | Scan_skipped of Goal_store.unavailable
-  | Ledger_reconcile_failed of
-      { goal_id : string
-      ; detail : string
-      }
+(* Why a scan produced no work: a store this build cannot read. It is
+   recorded as a durable row and one WARN line (RFC-0444 §2.3 row 7). *)
+type scan_failure = Scan_skipped of Goal_store.unavailable
 
 let scan_failure_to_string = function
   | Scan_skipped unavailable -> Goal_store.unavailable_to_string unavailable
-  | Ledger_reconcile_failed { goal_id; detail } ->
-    Printf.sprintf "goal_id=%s: %s" goal_id detail
 ;;
 
-let collect_pending config : (pending_work list, scan_failure) result =
+(* One Verifying goal whose ledger the scan could read but not reconcile or
+   re-arm. The scan skips that goal and keeps collecting the others; the
+   caller logs each one at ERROR, and its pending row stays durable. *)
+type reconcile_failure =
+  { failed_goal_id : string
+  ; failure : string
+  }
+
+type scan =
+  { collected : pending_work list
+  ; unreconciled : reconcile_failure list
+  }
+
+let collect_pending config : (scan, scan_failure) result =
   match Goal_store.list_goals_result config ~phase:Goal_phase.Verifying () with
   | Error unavailable -> Error (Scan_skipped unavailable)
   | Ok goals ->
-  let failed goal_id detail = Error (Ledger_reconcile_failed { goal_id; detail }) in
-  let rec collect acc = function
-    | [] -> Ok (List.rev acc)
-    | (goal : Goal_store.goal) :: rest ->
-      (match Workspace_goals.reconcile_committed_proof config ~goal_id:goal.id with
-       | Error detail -> failed goal.id detail
-       | Ok (Workspace_goals.Reconciled _ | Workspace_goals.Reconciliation_not_needed _) ->
-         collect acc rest
-       | Ok Workspace_goals.No_committed_proof ->
-         (match Workspace_goals.recover_current_proof config ~goal_id:goal.id with
-          | Error detail -> failed goal.id detail
-          | Ok true -> collect ({ goal_id = goal.id } :: acc) rest
-          | Ok false -> collect acc rest))
-  in
-  collect [] goals
+    let collect_goal (goal : Goal_store.goal) =
+      match Workspace_goals.reconcile_committed_proof config ~goal_id:goal.id with
+      | Error failure -> Error failure
+      | Ok (Workspace_goals.Reconciled _ | Workspace_goals.Reconciliation_not_needed _) ->
+        Ok None
+      | Ok Workspace_goals.No_committed_proof ->
+        Workspace_goals.recover_current_proof config ~goal_id:goal.id
+        |> Result.map (fun rearmed -> if rearmed then Some { goal_id = goal.id } else None)
+    in
+    let collected, unreconciled =
+      List.fold_left
+        (fun (collected, unreconciled) (goal : Goal_store.goal) ->
+           match collect_goal goal with
+           | Ok None -> collected, unreconciled
+           | Ok (Some work) -> work :: collected, unreconciled
+           | Error failure ->
+             collected, { failed_goal_id = goal.id; failure } :: unreconciled)
+        ([], [])
+        goals
+    in
+    Ok { collected = List.rev collected; unreconciled = List.rev unreconciled }
+;;
+
+let log_unreconciled failures =
+  List.iter
+    (fun { failed_goal_id; failure } ->
+       Log.Misc.error
+         "goal verifier ledger reconcile failed goal_id=%s; its pending row stays undrained: %s"
+         failed_goal_id
+         failure)
+    failures
 ;;
 
 (* RFC-0444 §2.3 row 7 and criterion 3: one WARN line per skipped scan, and
@@ -456,15 +476,15 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, scan_failure) 
   | Error (Scan_skipped unavailable) as error ->
     skip_scan unavailable;
     error
-  | Error (Ledger_reconcile_failed _) as error -> error
-  | Ok work ->
+  | Ok { collected; unreconciled } ->
+    log_unreconciled unreconciled;
     List.iter
       (fun item ->
          (* RFC-0387: per-row outcomes are logged at the point of decision
             (commit/defer); the synchronous drain discards them. *)
          (* fire-and-forget: per-row results are durable in the ledger. *)
          ignore (process_pending_work ~sw config item))
-      work;
+      collected;
     Ok ()
 ;;
 
@@ -619,12 +639,8 @@ let take_items limit items =
 let process_pending (runtime : runtime) =
   match collect_pending runtime.config with
   | Error (Scan_skipped unavailable) -> skip_scan unavailable
-  | Error (Ledger_reconcile_failed { goal_id; detail }) ->
-    Log.Misc.error
-      "goal verifier ledger reconcile failed goal_id=%s; pending rows remain undrained: %s"
-      goal_id
-      detail
-  | Ok work ->
+  | Ok { collected = work; unreconciled } ->
+    log_unreconciled unreconciled;
     let active = Atomic.get runtime.in_flight in
     let available = max 0 (max_concurrent_reviews - List.length active) in
     let eligible =
@@ -753,12 +769,17 @@ module For_testing = struct
     | Superseded
     | Deferred of string
 
-  type nonrec scan_failure = scan_failure =
-    | Scan_skipped of Goal_store.unavailable
-    | Ledger_reconcile_failed of
-        { goal_id : string
-        ; detail : string
-        }
+  type nonrec scan_failure = scan_failure = Scan_skipped of Goal_store.unavailable
+
+  type nonrec reconcile_failure = reconcile_failure =
+    { failed_goal_id : string
+    ; failure : string
+    }
+
+  type nonrec scan = scan =
+    { collected : pending_work list
+    ; unreconciled : reconcile_failure list
+    }
 
   let scan_failure_to_string = scan_failure_to_string
 end

@@ -71,7 +71,7 @@ val commit_verifier_decision
 val reconcile_committed_proof :
   Workspace_utils_backend_setup.config ->
   goal_id:string ->
-  (proof_reconciliation, string) result
+  (proof_reconciliation, Goal_store.write_error) result
 (** Converges the Goal phase after a crash between the durable proof verdict
     write and the phase/event write. The existing verdict is reused without a
     model call or ledger rewrite. *)
@@ -83,7 +83,7 @@ val request_current_proof : ?evidence_refs:string list -> Workspace_utils_backen
     answer the RFC-0444 envelope; a callback refusal is [Rejected]. *)
 
 val recover_current_proof : Workspace_utils_backend_setup.config -> goal_id:string ->
-  (bool, string) result
+  (bool, Goal_store.write_error) result
 (** Recover a missing/stale request only while the current Goal remains Verifying.
     [Ok false] means a concurrent phase change needs no recovery; no request is
     created and no other Goal in the scan is blocked. *)

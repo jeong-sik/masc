@@ -646,6 +646,7 @@ let planning_goal_json id phase priority =
     ; "title", `String ("Goal " ^ id)
     ; "phase", `String phase
     ; "priority", `Int priority
+    ; "verifier_unreconciled", `Null
     ]
 
 (* The ledger rows as the server actually joins them, taken from a live
@@ -689,6 +690,9 @@ let decoded_proof ?verification ?last_review_note ?(extra = []) () =
     ; "phase", `String "executing"
     ; "priority", `Int 1
     ]
+    @ (if List.mem_assoc "verifier_unreconciled" extra
+       then []
+       else [ "verifier_unreconciled", `Null ])
     @ (match verification with None -> [] | Some v -> [ "verification", v ])
     @ (match last_review_note with
        | None -> []
@@ -818,6 +822,55 @@ let test_planning_goal_separates_unreadable_from_unreviewed () =
      with
      | Tui_decode.Proof_unreadable _ -> true
      | _ -> false)
+;;
+
+(* A Verifying goal the verifier skips on every scan: the row carries which
+   step failed and why, so the operator can see it is stuck rather than
+   waiting. *)
+let test_planning_goal_carries_the_verifier_unreconciled_reason () =
+  let goal =
+    decoded_proof
+      ~extra:
+        [ ( "verifier_unreconciled"
+          , `Assoc
+              [ "step", `String "rearm_proof"
+              ; "detail", `String "criterion already proven"
+              ] )
+        ]
+      ()
+  in
+  match goal.Tui_decode.pg_verifier_unreconciled with
+  | Some { Tui_decode.vu_step = Goal_verification_agent.Rearm_proof; vu_detail } ->
+    Alcotest.(check string) "the reason is decoded" "criterion already proven" vu_detail
+  | Some { Tui_decode.vu_step = Goal_verification_agent.Reconcile_proof; _ } ->
+    Alcotest.fail "the step was decoded as the wrong one"
+  | None -> Alcotest.fail "the unreconciled reason was dropped"
+;;
+
+let test_planning_goal_without_the_verifier_field_is_refused () =
+  let goal_json =
+    `Assoc
+      [ "id", `String "goal-x"; "title", `String "Goal x"
+      ; "phase", `String "verifying"; "priority", `Int 1 ]
+  in
+  let snapshot =
+    `Assoc
+      [ "goals", `List [ goal_json ]
+      ; ( "rollup"
+        , `Assoc
+            [ "active_count", `Int 0; "verifying_count", `Int 1
+            ; "awaiting_confirmation_count", `Int 0; "done_count", `Int 0
+            ; "dropped_count", `Int 0 ] )
+      ; ( "task_backlog"
+        , `Assoc
+            [ "todo", `Int 0; "claimed", `Int 0; "in_progress", `Int 0
+            ; "awaiting_verification", `Int 0; "done", `Int 0; "cancelled", `Int 0 ] )
+      ; "goal_history", `Assoc [ "unlisted", `List [] ]
+      ; "generated_at", `String "2026-09-24T00:00:00Z"
+      ]
+  in
+  Alcotest.(check bool) "a missing key is a wire mismatch, not a settled goal" true
+    (Result.is_error (Tui_decode.decode_planning_snapshot snapshot))
 ;;
 
 (* With no verdict the keeper's own note is what the row has to say. *)
@@ -11165,6 +11218,10 @@ let () =
           test_planning_goal_carries_the_judge_verdict;
         Alcotest.test_case "unreadable is not unreviewed" `Quick
           test_planning_goal_separates_unreadable_from_unreviewed;
+        Alcotest.test_case "carries the verifier unreconciled reason" `Quick
+          test_planning_goal_carries_the_verifier_unreconciled_reason;
+        Alcotest.test_case "refuses a goal without the verifier field" `Quick
+          test_planning_goal_without_the_verifier_field_is_refused;
         Alcotest.test_case "keeps the last review note" `Quick
           test_planning_goal_keeps_the_last_review_note;
         Alcotest.test_case "keeps the server timestamps" `Quick

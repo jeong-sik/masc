@@ -54,6 +54,14 @@ val body :
     goal nobody has looked at, which is the same picture a goal whose verdict
     failed to decode would draw. *)
 
+val unreconciled_heading : Masc.Goal_verification_agent.reconcile_step -> string
+(** Which verifier step could not settle the goal, as the row's headline. *)
+
+val unreconciled_lines :
+  width:int -> Tui_decode.verifier_unreconciled -> line list
+(** The headline and the store's reason, wrapped and sanitized like a
+    verdict, for a Verifying goal the verifier skips on every scan. *)
+
 val short_ts : string -> string
 (** "2026-07-28T03:57:38Z" -> "07-28 03:57"; anything shorter is shown as-is
     rather than guessed at. Shared with the task-history rows. *)

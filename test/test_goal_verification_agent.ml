@@ -1055,6 +1055,12 @@ let test_one_unreconcilable_goal_does_not_stop_the_scan () =
      check (list string) "the scan names the one goal it could not reconcile"
        [ bad_goal_id ]
        (List.map (fun (failure : Agent.reconcile_failure) -> failure.failed_goal_id)
+          unreconciled);
+     check (list string) "it names the re-arm step as the one that failed"
+       [ "rearm_proof" ]
+       (List.map
+          (fun (failure : Agent.reconcile_failure) ->
+             Goal_verification_agent.reconcile_step_to_string failure.step)
           unreconciled)
    | Error failure -> fail (Agent.scan_failure_to_string failure));
   with_lane_and_reviewer
@@ -1065,9 +1071,30 @@ let test_one_unreconcilable_goal_does_not_stop_the_scan () =
   check string "the healthy goal is drained past the bad one" "awaiting_confirmation"
     (stored_phase config good_goal_id);
   check string "the bad goal stays verifying" "verifying" (stored_phase config bad_goal_id);
-  match (ledger_record config bad_goal_id).completion with
-  | Goal_verification.Human_confirmed _ -> ()
-  | _ -> fail "the scan rewrote the unreconcilable goal's ledger row"
+  (match (ledger_record config bad_goal_id).completion with
+   | Goal_verification.Human_confirmed _ -> ()
+   | _ -> fail "the scan rewrote the unreconcilable goal's ledger row");
+  (* The drain above is the scan the operator's Goal row is derived from. *)
+  let projection goal_id =
+    match Goal_store.find_goal config ~goal_id with
+    | Goal_store.Goal_found goal -> Goal_verification_agent.unreconciled_to_yojson goal
+    | Goal_store.Goal_absent -> fail ("goal not found: " ^ goal_id)
+    | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u)
+  in
+  (match projection bad_goal_id with
+   | `Assoc fields ->
+     check (option string) "the Goal row names the failed step" (Some "rearm_proof")
+       (match List.assoc_opt "step" fields with Some (`String s) -> Some s | _ -> None);
+     check bool "the Goal row carries the store's reason" true
+       (match List.assoc_opt "detail" fields with
+        | Some (`String detail) -> String.trim detail <> ""
+        | _ -> false)
+   | _ -> fail "the unreconcilable goal is missing from the Goal row projection");
+  check bool "the drained goal carries no unreconciled reason" true
+    (projection good_goal_id = `Null);
+  ignore (must_succeed "drop" (transition ctx bad_goal_id "drop"));
+  check bool "a goal the operator dropped no longer reads as stuck" true
+    (projection bad_goal_id = `Null)
 ;;
 
 let test_superseded_review_keeps_the_evaluated_original_criterion () =

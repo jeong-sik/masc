@@ -112,6 +112,17 @@ let verdict ~width tone headline reason =
       | None -> []
       | Some reason -> wrapped ~width tone reason)
 
+(* The verifier skips this goal on every scan, so the judge's last word is not
+   what holds it. The heading says which step failed; the store's reason
+   wraps under it like a verdict's. *)
+let unreconciled_heading = function
+  | Masc.Goal_verification_agent.Reconcile_proof -> "judge stuck replaying its committed proof"
+  | Masc.Goal_verification_agent.Rearm_proof -> "judge stuck re-arming its request"
+
+let unreconciled_lines ~width (blocked : Tui_decode.verifier_unreconciled) =
+  verdict ~width:(max 1 width) Refused (unreconciled_heading blocked.vu_step)
+    (Some (Tui_decode.sanitize_terminal_text blocked.vu_detail))
+
 let note ~width = function
   | None -> []
   | Some note -> { tone = Note; text = "note" } :: wrapped ~width Note note

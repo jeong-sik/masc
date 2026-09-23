@@ -68,11 +68,28 @@ let scan_failure_to_string = function
 ;;
 
 (* One Verifying goal whose ledger the scan could read but not reconcile or
-   re-arm. The scan skips that goal and keeps collecting the others; the
-   caller logs each one at ERROR, and its pending row stays durable. *)
+   re-arm. The scan skips that goal and keeps collecting the others; its
+   pending row stays durable, and the Goal rows the operator reads carry the
+   failure until a scan no longer finds it. *)
+type reconcile_step =
+  | Reconcile_proof
+  | Rearm_proof
+
+let reconcile_step_to_string = function
+  | Reconcile_proof -> "reconcile_proof"
+  | Rearm_proof -> "rearm_proof"
+;;
+
+let reconcile_step_of_string = function
+  | "reconcile_proof" -> Some Reconcile_proof
+  | "rearm_proof" -> Some Rearm_proof
+  | _ -> None
+;;
+
 type reconcile_failure =
   { failed_goal_id : string
-  ; failure : string
+  ; step : reconcile_step
+  ; failure : Goal_store.write_error
   }
 
 type scan =
@@ -86,12 +103,13 @@ let collect_pending config : (scan, scan_failure) result =
   | Ok goals ->
     let collect_goal (goal : Goal_store.goal) =
       match Workspace_goals.reconcile_committed_proof config ~goal_id:goal.id with
-      | Error failure -> Error failure
+      | Error failure -> Error (Reconcile_proof, failure)
       | Ok (Workspace_goals.Reconciled _ | Workspace_goals.Reconciliation_not_needed _) ->
         Ok None
       | Ok Workspace_goals.No_committed_proof ->
         Workspace_goals.recover_current_proof config ~goal_id:goal.id
         |> Result.map (fun rearmed -> if rearmed then Some { goal_id = goal.id } else None)
+        |> Result.map_error (fun failure -> Rearm_proof, failure)
     in
     let collected, unreconciled =
       List.fold_left
@@ -99,22 +117,46 @@ let collect_pending config : (scan, scan_failure) result =
            match collect_goal goal with
            | Ok None -> collected, unreconciled
            | Ok (Some work) -> work :: collected, unreconciled
-           | Error failure ->
-             collected, { failed_goal_id = goal.id; failure } :: unreconciled)
+           | Error (step, failure) ->
+             collected, { failed_goal_id = goal.id; step; failure } :: unreconciled)
         ([], [])
         goals
     in
     Ok { collected = List.rev collected; unreconciled = List.rev unreconciled }
 ;;
 
-let log_unreconciled failures =
+(* Derived from the latest completed scan and replaced by the next one; never
+   written to a store. A scan the goal store refused leaves it as it was,
+   because that scan saw no goal to judge either way. *)
+let last_unreconciled : reconcile_failure list Atomic.t = Atomic.make []
+
+let publish_unreconciled failures =
+  Atomic.set last_unreconciled failures;
   List.iter
-    (fun { failed_goal_id; failure } ->
+    (fun { failed_goal_id; step; failure } ->
        Log.Misc.error
-         "goal verifier ledger reconcile failed goal_id=%s; its pending row stays undrained: %s"
+         "goal verifier ledger %s failed goal_id=%s; its pending row stays undrained: %s"
+         (reconcile_step_to_string step)
          failed_goal_id
-         failure)
+         (Goal_store.write_error_to_string failure))
     failures
+;;
+
+let unreconciled_to_yojson (goal : Goal_store.goal) =
+  match
+    List.find_opt
+      (fun { failed_goal_id; _ } -> String.equal failed_goal_id goal.id)
+      (Atomic.get last_unreconciled)
+  with
+  | None -> `Null
+  (* The operator dropped or reopened it after that scan; the next scan will
+     not list it, and until then the old failure is not this goal's state. *)
+  | Some _ when goal.phase <> Goal_phase.Verifying -> `Null
+  | Some { step; failure; _ } ->
+    `Assoc
+      [ "step", `String (reconcile_step_to_string step)
+      ; "detail", `String (Goal_store.write_error_to_string failure)
+      ]
 ;;
 
 (* RFC-0444 §2.3 row 7 and criterion 3: one WARN line per skipped scan, and
@@ -484,7 +526,7 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, scan_failure) 
     skip_scan unavailable;
     error
   | Ok { collected; unreconciled } ->
-    log_unreconciled unreconciled;
+    publish_unreconciled unreconciled;
     List.iter
       (fun item ->
          (* RFC-0387: per-row outcomes are logged at the point of decision
@@ -647,7 +689,7 @@ let process_pending (runtime : runtime) =
   match collect_pending runtime.config with
   | Error (Scan_skipped unavailable) -> skip_scan unavailable
   | Ok { collected = work; unreconciled } ->
-    log_unreconciled unreconciled;
+    publish_unreconciled unreconciled;
     let active = Atomic.get runtime.in_flight in
     let available = max 0 (max_concurrent_reviews - List.length active) in
     let eligible =
@@ -780,7 +822,8 @@ module For_testing = struct
 
   type nonrec reconcile_failure = reconcile_failure =
     { failed_goal_id : string
-    ; failure : string
+    ; step : reconcile_step
+    ; failure : Goal_store.write_error
     }
 
   type nonrec scan = scan =

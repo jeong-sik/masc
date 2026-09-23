@@ -81,6 +81,30 @@ let test_tone_separates_a_refusal_from_a_proof () =
   check_bool "historical evidence remains readable" true
     (List.mem "old target reached" (texts stale))
 
+(* A Verifying goal the verifier skips on every scan heads the detail with
+   which step failed and the store's reason, in the refusal tone, and the
+   reason reaches the terminal escaped. *)
+let test_a_stuck_goal_says_which_step_and_why () =
+  let rows =
+    Detail.unreconciled_lines ~width:60
+      { Proof.vu_step = Masc.Goal_verification_agent.Rearm_proof
+      ; vu_detail = "criterion already proven\x1b[2J"
+      }
+  in
+  check_string "the headline names the step" "judge stuck re-arming its request"
+    (List.hd (texts rows));
+  check_bool "the block reads as refused" true
+    (List.for_all (fun tone -> tone = Detail.Refused) (tones rows));
+  check_bool "the reason follows" true
+    (List.exists
+       (fun text -> String.length text >= 24 && String.sub text 0 24 = "criterion already proven")
+       (texts rows));
+  check_bool "no raw escape byte reaches the pane" true
+    (List.for_all (fun text -> not (String.contains text '\x1b')) (texts rows));
+  check_string "the other step has its own headline"
+    "judge stuck replaying its committed proof"
+    (Detail.unreconciled_heading Masc.Goal_verification_agent.Reconcile_proof)
+
 let test_a_narrow_pane_still_produces_rows () =
   let rows = Detail.body ~width:0 (Proof.Proof_refuted (Some "why")) None in
   check_bool "width 0 does not loop or vanish" true (rows <> [])
@@ -261,6 +285,8 @@ let () =
             test_the_note_reads_after_the_verdict
         ; Alcotest.test_case "tone separates a refusal from a proof" `Quick
             test_tone_separates_a_refusal_from_a_proof
+        ; Alcotest.test_case "a stuck goal says which step and why" `Quick
+            test_a_stuck_goal_says_which_step_and_why
         ; Alcotest.test_case "a narrow pane still produces rows" `Quick
             test_a_narrow_pane_still_produces_rows
         ; Alcotest.test_case "a timestamp value never starts at the colon" `Quick

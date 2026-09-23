@@ -2230,6 +2230,7 @@ let planning_goal_row id title =
   ; pg_metric = None
   ; pg_target_value = None
   ; pg_proof = Tui_decode.Proof_idle
+  ; pg_verifier_unreconciled = None
   ; pg_last_review_note = None
   ; pg_last_review_at = None
   ; pg_created_at = None

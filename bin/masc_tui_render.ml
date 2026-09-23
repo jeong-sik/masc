@@ -3128,8 +3128,13 @@ let planning_next_step (goal : planning_goal) =
     ( Ansi.dim
     , "work the linked tasks, then [c] to submit it for verification" )
   | Goal_phase.Verifying, _ ->
-    ( (Theme.warn ())
-    , "with the completion judge - [c] re-arms the request; [o] takes it back, [x] drops it" )
+    (match goal.pg_verifier_unreconciled with
+     | Some _ ->
+       ( (Theme.bad ())
+       , "the completion judge cannot settle it - [o] takes it back, [x] drops it" )
+     | None ->
+       ( (Theme.warn ())
+       , "with the completion judge - [c] re-arms the request; [o] takes it back, [x] drops it" ))
   | Goal_phase.Awaiting_confirmation, _ ->
     (Theme.warn (), "proof passed - [a] reads the proof for your final confirmation")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
@@ -3140,6 +3145,16 @@ let planning_next_step (goal : planning_goal) =
    reason is a colour and nothing else; the reason is what the judge produced
    and the only thing that says what to do next. *)
 let planning_proof_detail (goal : planning_goal) =
+  match goal.pg_verifier_unreconciled with
+  | Some blocked ->
+    (* The judge's last word is not what holds this goal: the verifier skips
+       it on every scan, and only this line says why. *)
+    Some
+      ( Theme.bad ()
+      , Printf.sprintf "%s: %s"
+          (Planning_detail.unreconciled_heading blocked.vu_step)
+          (Terminal_text.single_line blocked.vu_detail) )
+  | None ->
   match goal.pg_proof with
   | Tui_decode.Proof_proven None -> Some ((Theme.ok ()), "proven")
   | Tui_decode.Proof_proven (Some evidence) -> Some ((Theme.ok ()), "proven: " ^ evidence)
@@ -3702,7 +3717,11 @@ let planning_detail_pane (state : state)
          Masc_tui_message_layout.wrap_words ~max_cells:(cols - 6)
            (Terminal_text.single_line detail)
          |> List.map (fun text -> { Planning_detail.tone = Unreadable; text })
-     | `Inspect Absent -> Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note)
+     | `Inspect Absent ->
+         (match goal.pg_verifier_unreconciled with
+          | Some blocked -> Planning_detail.unreconciled_lines ~width:(cols - 6) blocked
+          | None -> [])
+         @ Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note)
     @ Planning_detail.timeline ~width:(cols - 6) ~goal_id:goal.pg_id
         state.goal_timeline
   in

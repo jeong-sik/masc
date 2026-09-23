@@ -601,7 +601,11 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
     in
     match Goal_store.goal_to_yojson goal with
     | `Assoc fields ->
-      `Assoc (fields @ [ "verification", verification ])
+      `Assoc
+        (fields
+         @ [ "verification", verification
+           ; "verifier_unreconciled", Goal_verification_agent.unreconciled_to_yojson goal
+           ])
     | json -> json
   in
   (* A Task awaiting verification is finished work waiting on a verifier, and

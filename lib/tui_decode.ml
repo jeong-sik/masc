@@ -493,6 +493,11 @@ type goal_proof =
   | Proof_stale of string option
   | Proof_unreadable of string option
 
+type verifier_unreconciled = {
+  vu_step : Goal_verification_agent.reconcile_step;
+  vu_detail : string;
+}
+
 type planning_goal = {
   pg_id : string;
   pg_title : string;
@@ -502,6 +507,7 @@ type planning_goal = {
   pg_metric : string option;
   pg_target_value : string option;
   pg_proof : goal_proof;
+  pg_verifier_unreconciled : verifier_unreconciled option;
   pg_last_review_note : string option;
   (* RFC 3339 server timestamps. Optional because an older server build may
      not emit them; the TUI renders what is there rather than refusing the
@@ -1897,6 +1903,24 @@ let decode_goal_proof json =
     Proof_unreadable (Some "no verification block on the goal")
 ;;
 
+(* Required and nullable: the server writes [null] for every goal the latest
+   verifier scan settled, so a missing key is a wire mismatch, not a goal the
+   verifier is fine with. *)
+let decode_verifier_unreconciled json =
+  match Json_util.assoc_member_opt "verifier_unreconciled" json with
+  | None -> Error "missing required field 'verifier_unreconciled'"
+  | Some `Null -> Ok None
+  | Some (`Assoc _ as blocked) ->
+    let* raw_step = required_string_field blocked "step" in
+    let* vu_detail = required_string_field blocked "detail" in
+    (match Goal_verification_agent.reconcile_step_of_string raw_step with
+     | Some vu_step -> Ok (Some { vu_step; vu_detail })
+     | None -> Error (Printf.sprintf "unknown verifier reconcile step %S" raw_step))
+  | Some other ->
+    Error
+      (Printf.sprintf "field 'verifier_unreconciled' must be an object or null (received %s)"
+         (Json_util.kind_name other))
+
 let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_title = required_string_field json "title" in
@@ -1915,6 +1939,7 @@ let decode_planning_goal json =
   let* pg_created_at = optional_string_field json "created_at" in
   let* pg_updated_at = optional_string_field json "updated_at" in
   let pg_proof = decode_goal_proof (member "verification" json) in
+  let* pg_verifier_unreconciled = decode_verifier_unreconciled json in
   Ok
     {
       pg_id;
@@ -1925,6 +1950,7 @@ let decode_planning_goal json =
       pg_metric;
       pg_target_value;
       pg_proof;
+      pg_verifier_unreconciled;
       pg_last_review_note;
       pg_last_review_at;
       pg_created_at;

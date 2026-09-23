@@ -1,6 +1,7 @@
 (** Tool_input_validation — Pre-dispatch validation of one tool argument object.
 
-    Root-property type/enum/const/required go to
+    Property type/enum/const/required, including nested objects and array
+    items, go to
     [Agent_core.Tool_input_validation.validate] with the tool's full input
     schema, so a node inside a composition and a top-level Agent-Core call are
     held to the same rule. A mistyped scalar (e.g. string for integer) is a

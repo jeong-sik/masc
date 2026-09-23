@@ -578,6 +578,95 @@ let test_non_string_enum_renders_literals () =
     (Tool_input_validation.describe_expected error.expected)
 ;;
 
+(* ── Nested objects and array items (authoritative input_schema path) ── *)
+
+(* The shape of masc_ask: questions[] each carry required fields and an enum,
+   and choices[] nest one level deeper. *)
+let questions_schema () =
+  let obj ?(required = []) properties =
+    `Assoc
+      ([ "type", `String "object"; "properties", `Assoc properties ]
+       @ (if required = []
+          then []
+          else [ "required", `List (List.map (fun name -> `String name) required) ]))
+  in
+  let choice = obj ~required:[ "label" ] [ "label", `Assoc [ "type", `String "string" ] ] in
+  let question =
+    obj
+      ~required:[ "question_id"; "prompt"; "mode" ]
+      [ "question_id", `Assoc [ "type", `String "string" ]
+      ; "prompt", `Assoc [ "type", `String "string" ]
+      ; ( "mode"
+        , `Assoc
+            [ "type", `String "string"; "enum", `List [ `String "single"; `String "multi" ] ]
+        )
+      ; "choices", `Assoc [ "type", `String "array"; "items", choice ]
+      ]
+  in
+  match
+    Types.tool_schema_of_input_schema
+      ~name:"test_tool"
+      ~description:"test"
+      ~input_schema:
+        (obj
+           ~required:[ "questions" ]
+           [ "questions", `Assoc [ "type", `String "array"; "items", question ] ])
+      ()
+  with
+  | Ok schema -> schema
+  | Error message -> fail message
+;;
+
+let test_nested_violations_reported_together () =
+  let input =
+    `Assoc
+      [ ( "questions"
+        , `List
+            [ `Assoc [ "question_id", `String "q1" ]
+            ; `Assoc
+                [ "question_id", `String "q2"
+                ; "prompt", `String "Pick one"
+                ; "mode", `String "one"
+                ; "choices", `List [ `Assoc [ "label", `String "A" ]; `Assoc [] ]
+                ]
+            ] )
+      ]
+  in
+  match Tool_input_validation.validate (questions_schema ()) input with
+  | Tool_input_validation.Invalid errors ->
+    check
+      (list string)
+      "every nested violation, in one result"
+      [ "/questions/0/prompt"
+      ; "/questions/0/mode"
+      ; "/questions/1/mode"
+      ; "/questions/1/choices/1/label"
+      ]
+      (List.map (fun (e : Tool_input_validation.field_error) -> e.path) errors)
+  | Tool_input_validation.Valid _ -> fail "expected nested violations"
+;;
+
+let test_nested_valid_input_passes_unchanged () =
+  let input =
+    `Assoc
+      [ ( "questions"
+        , `List
+            [ `Assoc
+                [ "question_id", `String "q1"
+                ; "prompt", `String "Pick one"
+                ; "mode", `String "single"
+                ; "choices", `List [ `Assoc [ "label", `String "A" ] ]
+                ]
+            ] )
+      ]
+  in
+  match Tool_input_validation.validate (questions_schema ()) input with
+  | Tool_input_validation.Valid value ->
+    check bool "same value" true (value == input)
+  | Tool_input_validation.Invalid errors ->
+    fail (Tool_input_validation.format_errors ~tool_name:"test_tool" errors)
+;;
+
 (* ── Test runner ──────────────────────────────────────── *)
 
 let () =
@@ -644,6 +733,16 @@ let () =
             "non-string enum renders literals"
             `Quick
             test_non_string_enum_renders_literals
+        ] )
+    ; ( "nested"
+      , [ test_case
+            "violations in objects and array items are reported together"
+            `Quick
+            test_nested_violations_reported_together
+        ; test_case
+            "valid nested input passes unchanged"
+            `Quick
+            test_nested_valid_input_passes_unchanged
         ] )
     ; ( "format"
       , [ test_case "format_errors output" `Quick test_format_errors

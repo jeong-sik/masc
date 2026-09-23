@@ -632,6 +632,15 @@
  (modules masc_tui_terminal_restore)
  (libraries unix))
 
+;; A block of text that was written with line breaks. Own library so the
+;; splitting has a test of its own: the single-line reader spells a break as
+;; "\x0A", which is right for a one-row field and wrong for a block.
+(library
+ (name masc_tui_text_block)
+ (wrapped false)
+ (modules masc_tui_text_block)
+ (libraries masc masc_tui_message_layout))
+
 (library
  (name masc_tui_file_icon)
  (wrapped false)
@@ -1623,6 +1632,7 @@
   masc_tui_acting
   masc_tui_command
   masc_tui_gate_text
+  masc_tui_text_block
   masc_tui_preset_text
   masc_tui_mcp
   masc_tui_keeper_chat_transcript

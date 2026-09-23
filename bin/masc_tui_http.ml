@@ -1944,9 +1944,8 @@ let post_schedule_update ~(host : string) ~(port : int) ~(body_json : string) =
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_update"
     ~body:body_json
 
-(** POST /api/v1/tools/masc_schedule_cancel. The authenticated HTTP boundary
-    supplies the canceller identity before the tool validates its argument
-    contract. The reason is a fixed audit phrase -- the arm display already
+(** POST /api/v1/tools/masc_schedule_cancel. The server records the
+    credential's actor as the canceller. The reason is a fixed audit phrase -- the arm display already
     named which schedule the second press cancels. *)
 let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
     : (Yojson.Safe.t, string) result =
@@ -1963,7 +1962,7 @@ let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
     argument contract; the kind-specific timing fields arrive already
     assembled by the caller (the form's typed spec builds them), and time
     syntax, cron text, and timezone spellings stay the tool's to validate.
-    The requester rides as this process, a human operator's terminal. *)
+    The server records the credential's actor as requester and scheduler. *)
 let post_schedule_create ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(message : string)
     ~(timing_fields : (string * Yojson.Safe.t) list) :
@@ -1972,10 +1971,6 @@ let post_schedule_create ~(host : string) ~(port : int)
     `Assoc
       ([ ("keeper_name", `String keeper_name)
        ; ("message", `String message)
-       ; ("requested_by_id", `String default_agent_name)
-       ; ("requested_by_kind", `String "human_operator")
-       ; ("scheduled_by_id", `String default_agent_name)
-       ; ("scheduled_by_kind", `String "human_operator")
        ; ("source", `String "operator_request")
        ]
       @ timing_fields)
@@ -1985,21 +1980,23 @@ let post_schedule_create ~(host : string) ~(port : int)
 
 (** POST /api/v1/verification/verdict — the operator's verdict on a task
     awaiting verification. The route demands a reason with a reject and takes
-    none with an approve, so the variant carries it only where it rides. The
-    route wants a token-bound admin credential — the one this process mints
-    at startup. *)
+    none with an approve, so the variant carries it only where it rides.
+    [verification_id] names the submission the operator was shown; the route
+    refuses the verdict when the Task has moved on to another one. The route
+    wants a token-bound admin credential — the one this process mints at
+    startup. *)
 let post_verification_verdict ~(host : string) ~(port : int)
-    ~(task_id : string) ~(verdict : [ `Approve | `Reject of string ]) :
+    ~(task_id : string) ~(verification_id : string)
+    ~(verdict : [ `Approve | `Reject of string ]) :
     (Yojson.Safe.t, string) result =
+  let binding =
+    [ ("task_id", `String task_id); ("verification_id", `String verification_id) ]
+  in
   let fields =
     match verdict with
-    | `Approve ->
-        [ ("task_id", `String task_id); ("verdict", `String "approve") ]
+    | `Approve -> binding @ [ ("verdict", `String "approve") ]
     | `Reject reason ->
-        [ ("task_id", `String task_id)
-        ; ("verdict", `String "reject")
-        ; ("reason", `String reason)
-        ]
+        binding @ [ ("verdict", `String "reject"); ("reason", `String reason) ]
   in
   post_json ~host ~port ~path:"/api/v1/verification/verdict"
     ~body:(Yojson.Safe.to_string (`Assoc fields))

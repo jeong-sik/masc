@@ -22,6 +22,7 @@ type t =
 type error =
   | Invalid_snapshot of string
   | Uncovered_history
+  | Unmatched_history
   | Range_stopped of R.stop
   | Trace_mismatch
   | History_changed
@@ -37,6 +38,7 @@ type restored =
 let error_to_string = function
   | Invalid_snapshot detail -> "invalid continuity snapshot: " ^ detail
   | Uncovered_history -> "no completed history range from a witnessed restart"
+  | Unmatched_history -> "no completed turn boundary matches the history"
   | Range_stopped (R.Unreadable_line { line; _ }) ->
     Printf.sprintf "continuity source boundary is unreadable at line %d" line
   | Range_stopped (R.Position_mismatch _) -> "continuity source position does not match history"
@@ -138,6 +140,8 @@ let source_range ~trace_id ~lines ~messages =
   | R.Read { range; _ } when range.start_atom = 0 -> Ok range
   | R.Stop error -> Error (Range_stopped error)
   | R.Position_in_other_trace _ -> Error Trace_mismatch
+  | R.Nothing_to_read when R.has_completed_atom_boundary ~trace_id ~lines ->
+    Error Unmatched_history
   | R.Read _ | R.Baseline _ | R.Nothing_to_read -> Error Uncovered_history
 ;;
 

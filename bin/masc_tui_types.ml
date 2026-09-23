@@ -1929,7 +1929,6 @@ type overview_snapshot = {
       (** Every [keeper_briefs] row with a name, in the briefing's order. *)
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_attention_items: attention_item list;
-  ov_top_attention: attention_item option;
   ov_generated_at: string;
 }
 

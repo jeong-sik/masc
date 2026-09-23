@@ -1205,7 +1205,6 @@ let load_overview ~(host : string) ~(port : int) :
   | Error err -> Error ("overview load failed: " ^ err)
   | Ok json ->
       let* summary = required_object_field json "summary" in
-      let* command_focus = optional_object_field json "command_focus" in
       let* incidents =
         let* items = optional_list_field json "incidents" in
         decode_attention_items items
@@ -1222,20 +1221,6 @@ let load_overview ~(host : string) ~(port : int) :
       let* keepers_unread =
         let* items = required_list_field json "keepers_unread" in
         Keeper_snapshot_unread.list_of_json (`List items)
-      in
-      let* top_attention =
-        let fallback =
-          match incidents with
-          | first :: _ -> Some first
-          | [] -> None
-        in
-        match command_focus with
-        | None -> Ok fallback
-        | Some command_focus -> (
-            match Yojson.Safe.Util.member "top_attention" command_focus with
-            | `Null -> Ok fallback
-            | value ->
-                Result.map (fun item -> Some item) (decode_attention_item value))
       in
       let* ov_workspace_health =
         let* workspace_health = required_string_field summary "workspace_health" in
@@ -1301,7 +1286,6 @@ let load_overview ~(host : string) ~(port : int) :
                    if List.mem item kept then kept else item :: kept)
                  []
             |> List.rev);
-          ov_top_attention = top_attention;
           ov_generated_at;
         }
 

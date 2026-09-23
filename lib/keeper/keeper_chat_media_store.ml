@@ -232,7 +232,7 @@ let persist_result ~base_dir ~media_type ~data =
              | Ok () -> Ok (token, url)
              | Error msg -> Error msg)
       with
-      | exn ->
+      | exn -> (* cancel-guard-ok: Fs_compat mkdir and save are Unix calls, no Eio operation *)
           Error
             (Printf.sprintf "persist generated media: %s" (Printexc.to_string exn))
 

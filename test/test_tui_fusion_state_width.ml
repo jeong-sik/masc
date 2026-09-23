@@ -3,13 +3,13 @@
    [Table.cell ~width] fits what it is given without a word, so a string that
    outgrows the column loses its tail on screen and nowhere else. The column is
    twenty cells and the widest thing drawn in it is twenty cells: one more
-   character anywhere in three separate vocabularies and the operator reads a
-   failure code with its ending cut off. None of the three lives near the
+   character anywhere in four separate vocabularies and the operator reads a
+   failure code with its ending cut off. None of the four lives near the
    width, and nobody adding an arm to them goes looking for a column.
 
    So the width is read from the module that owns it and the vocabularies are
-   read from the functions that produce them, all four out of the source. A
-   list written here instead would be a fourth copy of the same fact, and the
+   read from the functions that produce them, all of it out of the source. A
+   list written here instead would be one more copy of the same fact, and the
    copy is what goes stale. *)
 
 let check = Alcotest.check
@@ -48,10 +48,23 @@ let drawn_width ~owner text =
   in
   measure 0 0
 
-(* The three vocabularies the column draws, each read from the function that
-   produces it. A failed run draws a code from the delivery set or the judge
-   set (masc_tui_render_prim.ml:2357-2362 says so); a running one draws a
-   compact stage. *)
+(* The vocabularies the column draws, each read from the function that
+   produces it. [fusion_run_state_text] (masc_tui_render_prim.ml) has three
+   arms and they account for four sets: a running run draws a compact stage,
+   a completed one draws its status word, and the failed arm stands in as two
+   -- the delivery set and the judge set.
+
+   That arm draws [frs_failure_code], which is a string off the wire; the two
+   failure sets are what this repository's server writes there, and the
+   comment above that function says the code is a tag from one of the two
+   closed sets. Both ends of the wire live here, so the stand-in holds today
+   -- but it is a stand-in. A server that starts sending a code from outside
+   those sets would truncate in the cell with this check silent.
+
+   Named by function, not by line: this file exists because a fact copied
+   away from where it is produced goes stale, and a line number is that kind
+   of copy. The two this comment carried were already fourteen rows off when
+   the review read them. *)
 let vocabularies =
   [ ( "the delivery failure codes"
     , "lib/fusion/fusion_sink.ml"
@@ -62,6 +75,14 @@ let vocabularies =
   ; ( "the running stages"
     , "bin/masc_tui_render_prim.ml"
     , "fusion_run_stage_compact" )
+    (* The fourth arm of [fusion_run_state_text]. Only [Fusion_completed]
+       reaches it, so the cell only ever shows "completed" -- but the whole
+       function is measured, because what this check promises is that every
+       vocabulary the column draws is read from its source, and a promise with
+       an arm left out is not that. *)
+  ; ( "the settled statuses"
+    , "lib/tui_decode.ml"
+    , "fusion_run_status_to_string" )
   ]
 
 let state_width () =
@@ -125,7 +146,8 @@ let test_the_column_has_no_slack () =
    this check named the fixed one; the formatted one fills the column only
    once a run answers in four digits, which is why it was not seen by reading
    the strings. Both are recorded so that raising the width for one does not
-   look like it bought slack for the other. *)
+   look like it bought slack for the other -- and so the two that do not reach
+   it are on record as not reaching it, which is what the exact list says. *)
 let test_two_vocabularies_reach_the_edge () =
   let width = state_width () in
   let at_edge =

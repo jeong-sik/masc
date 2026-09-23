@@ -22,7 +22,7 @@ Keeper 채팅 화면을 운영자가 2026-09-12 에 판정했다. 지적 12건�
 화면에는 성격이 다른 세 가지가 있다. ① 이미 일어난 대화 ② 지금 이 순간의 계기판
 ③ 내가 입력하는 자리. 지금은 셋이 한 박스 안에서 같은 밀도로 그려지고, 그 결과
 둘이 서로 자리를 바꿨다. 진행 중인 내 말은 transcript 밖 고정 슬롯에 그려져
-시간순이 깨지고(§2-3), `FAILOVER IN PROGRESS` 는 대화가 아닌데 대화 자리를 지나
+시간순이 깨지고(§2-3), `IN PROGRESS ON NEXT CANDIDATE` 는 대화가 아닌데 대화 자리를 지나
 입력줄에 붙는다(§2-1).
 
 운영자가 "내 입력이 아직 런타임에 도달 못한 것 같다" 고 읽은 것은 오해가 아니라
@@ -76,7 +76,7 @@ Keeper 채팅 화면을 운영자가 2026-09-12 에 판정했다. 지적 12건�
 화면에서는 다음처럼 끝났다.
 
 ```
-⠻ FAILOVER IN PROGRESS · failover [glm-coding.glm-5.3-flash] (attempt 1) · 3 tools · still running: keeper_analyze~
+⠻ IN PROGRESS ON NEXT CANDIDATE · failover [glm-coding.glm-5.3-flash] (attempt 1) · 3 tools · still running: keeper_analyze~
 ```
 
 경과 시간(`in this call`)과 tool mix 가 잘렸다. "느린가 멈췄나" 를 답하려고 붙인
@@ -214,7 +214,7 @@ Progress · Attention · Gate · 미등록 경고를 **한 행으로 접는다**
 두 번 말한다.
 
 ```
-⠻ FAILOVER IN PROGRESS · failover [glm-coding.glm-5.3-flash] (attempt 1) · 3 tools · …
+⠻ IN PROGRESS ON NEXT CANDIDATE · failover [glm-coding.glm-5.3-flash] (attempt 1) · 3 tools · …
   └ progress_heading (render.ml)   └ runtime_tag (transcript.ml)
 ```
 

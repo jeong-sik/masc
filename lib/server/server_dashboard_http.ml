@@ -601,20 +601,35 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
       `Assoc (fields @ [ "verification", verification ])
     | json -> json
   in
+  (* A Task awaiting verification is finished work waiting on a verifier, and
+     the same surface draws that queue's length on its own tab. Counting it as
+     in_progress made one screen give the seven Tasks two numbers under two
+     words, and the word that named the wait was the one the count hid. *)
   let task_rollup =
     dashboard_tasks_safe config
     |> List.fold_left
-         (fun (todo, claimed, running, done_count, cancelled) (task : Masc_domain.task) ->
+         (fun (todo, claimed, running, awaiting, done_count, cancelled)
+              (task : Masc_domain.task) ->
             match task.task_status with
-            | Todo -> todo + 1, claimed, running, done_count, cancelled
-            | Claimed _ -> todo, claimed + 1, running, done_count, cancelled
-            | InProgress _ | AwaitingVerification _ ->
-              todo, claimed, running + 1, done_count, cancelled
-            | Done _ -> todo, claimed, running, done_count + 1, cancelled
-            | Cancelled _ -> todo, claimed, running, done_count, cancelled + 1)
-         (0, 0, 0, 0, 0)
+            | Todo -> todo + 1, claimed, running, awaiting, done_count, cancelled
+            | Claimed _ -> todo, claimed + 1, running, awaiting, done_count, cancelled
+            | InProgress _ ->
+              todo, claimed, running + 1, awaiting, done_count, cancelled
+            | AwaitingVerification _ ->
+              todo, claimed, running, awaiting + 1, done_count, cancelled
+            | Done _ ->
+              todo, claimed, running, awaiting, done_count + 1, cancelled
+            | Cancelled _ ->
+              todo, claimed, running, awaiting, done_count, cancelled + 1)
+         (0, 0, 0, 0, 0, 0)
   in
-  let todo_count, claimed_count, running_count, done_count, cancelled_count =
+  let ( todo_count
+      , claimed_count
+      , running_count
+      , awaiting_verification_count
+      , done_count
+      , cancelled_count )
+    =
     task_rollup
   in
   `Assoc
@@ -629,6 +644,7 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
           [ "todo", `Int todo_count
           ; "claimed", `Int claimed_count
           ; "in_progress", `Int running_count
+          ; "awaiting_verification", `Int awaiting_verification_count
           ; "done", `Int done_count
           ; "cancelled", `Int cancelled_count
           ] )

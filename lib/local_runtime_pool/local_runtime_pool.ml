@@ -148,12 +148,18 @@ let runtime_of_endpoint_url base_url =
   }
 
 let safe_discovery_statuses () =
-  try Discovery_cache.get_cached_or_refresh ()
-  with
-  | Stdlib.Effect.Unhandled _ -> []
-  | exn ->
-      debug_log "discovery_cache unavailable: %s" (Printexc.to_string exn);
-      []
+  (* [Safe_ops.handle] re-raises [Eio.Cancel.Cancelled] with its backtrace
+     before the handler runs. This module links no eio, so it cannot name the
+     constructor itself; [Discovery_cache.get_cached_or_refresh] can suspend
+     on a refresh, and a bare catch-all here would swallow that cancellation. *)
+  Safe_ops.handle
+    (fun () -> Discovery_cache.get_cached_or_refresh ())
+    (fun exn ->
+       match exn with
+       | Stdlib.Effect.Unhandled _ -> []
+       | exn ->
+         debug_log "discovery_cache unavailable: %s" (Printexc.to_string exn);
+         [])
 
 let runtime_to_snapshot (runtime : runtime) =
   {

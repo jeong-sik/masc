@@ -439,7 +439,77 @@ let test_strip_messages_descends_into_tool_result () =
   check int "nested history image dropped" 1 (dropped_count "image" dropped);
   let msg : Agent_core.Types.message = List.hd kept in
   check int "the tool result is retained" 1 (List.length msg.content);
-  check int "its image is gone" 0 (List.length (tool_result_blocks (List.hd msg.content)))
+  check (list string) "its image is gone"
+    []
+    (Runtime_agent.For_testing.required_modalities_of_content_blocks msg.content)
+
+let tool_result_fields = function
+  | Agent_core.Types.ToolResult { content; content_blocks; _ } ->
+      (content, content_blocks)
+  | Agent_core.Types.Text _
+  | Agent_core.Types.Thinking _
+  | Agent_core.Types.ReasoningDetails _
+  | Agent_core.Types.RedactedThinking _
+  | Agent_core.Types.ToolUse _
+  | Agent_core.Types.Image _
+  | Agent_core.Types.Document _
+  | Agent_core.Types.Audio _ -> fail "expected a ToolResult"
+
+let only_tool_result_fields = function
+  | [ block ] -> tool_result_fields block
+  | blocks -> failf "expected the tool result alone, got %d blocks" (List.length blocks)
+
+(* Every provider wire reads [content_blocks = Some _] as the whole tool
+   result. A result whose only block was refused media used to leave [Some []],
+   so the OpenAI tool message and the Responses function output carried the
+   string "[]" where the tool's output belongs. *)
+let test_emptied_tool_result_sends_its_content () =
+  let kept, dropped =
+    Runtime_agent.strip_unsupported_modality_blocks (caps ())
+      [ tool_result_with_blocks
+          [ Agent_core.Types.document_block
+              ~media_type:"application/pdf" ~data:"pdf" () ] ]
+  in
+  check int "the document is dropped" 1 (dropped_count "document" dropped);
+  let content, content_blocks = only_tool_result_fields kept in
+  check bool "no empty structured view is left" true (content_blocks = None);
+  check string "the tool's own content string goes out" "tool output" content
+
+let tool_result_with_content ~content blocks =
+  Agent_core.Types.ToolResult
+    { tool_use_id = "call_audio"
+    ; content
+    ; outcome = Agent_core.Types.Tool_succeeded
+    ; json = None
+    ; content_blocks = Some blocks
+    }
+
+(* A blank [content] is what the tool itself returned, and the strip does not
+   write over it: the turn's degrade note already tells the model that media
+   was left out. What must not happen is the empty block list going out as the
+   result. *)
+let test_emptied_blank_tool_result_sends_no_block_list () =
+  let kept, _dropped =
+    Runtime_agent.strip_unsupported_modality_blocks (caps ())
+      [ tool_result_with_content ~content:""
+          [ Agent_core.Types.audio_block ~media_type:"audio/wav" ~data:"wav" () ] ]
+  in
+  let content, content_blocks = only_tool_result_fields kept in
+  check bool "no empty structured view is left" true (content_blocks = None);
+  check string "the tool's own blank content is untouched" "" content
+
+(* Same answer for a list that was already empty when it arrived. The shape a
+   wire cannot read is the same shape whoever emptied it, and a walk that
+   normalizes it only for its own drops leaves the other half on the wire. *)
+let test_arrived_empty_tool_result_sends_no_block_list () =
+  let kept, dropped =
+    Runtime_agent.strip_unsupported_modality_blocks (caps ())
+      [ tool_result_with_content ~content:"tool output" [] ]
+  in
+  check int "nothing was dropped" 0 (List.length dropped);
+  let content, content_blocks = only_tool_result_fields kept in
+  check bool "no empty structured view is left" true (content_blocks = None);
+  check string "the tool's own content string goes out" "tool output" content
 
 (* A reroute names a runtime that satisfies the required modality. When the only
    entry offered is the assigned runtime's own binding — which by definition does
@@ -821,6 +891,12 @@ let () =
             test_stripped_blocks_pass_the_capability_floor
         ; test_case "strip messages descends into tool result" `Quick
             test_strip_messages_descends_into_tool_result
+        ; test_case "an emptied tool result sends its content" `Quick
+            test_emptied_tool_result_sends_its_content
+        ; test_case "an emptied blank tool result sends no block list" `Quick
+            test_emptied_blank_tool_result_sends_no_block_list
+        ; test_case "an arrived empty tool result sends no block list" `Quick
+            test_arrived_empty_tool_result_sends_no_block_list
         ; test_case "degrade note when dropped" `Quick
             test_degrade_note_some_when_dropped
         ; test_case "degrade note none when empty" `Quick

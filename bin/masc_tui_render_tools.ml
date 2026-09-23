@@ -437,10 +437,16 @@ let tools_display_lines (state : state) =
                   work-intake), while the id answers the question this
                   column asks -- which configured source this came from. It
                   is also short, so the column does not have to cut it. *)
+               let kind = Masc.Tui_decode.effective_tool_origin_kind tool.et_origin in
                let source =
-                 match tool.et_skill_source_id with
-                 | Some source_id -> tool.et_origin ^ ":" ^ source_id
-                 | None -> tool.et_origin
+                 match tool.et_origin with
+                 | Masc.Tui_decode.Composition_skill_origin
+                     { skill_source_id = Some source_id } ->
+                   kind ^ ":" ^ source_id
+                 | Masc.Tui_decode.Composition_skill_origin { skill_source_id = None }
+                 | Masc.Tui_decode.Descriptor_origin
+                 | Masc.Tui_decode.Instruction_skill_origin
+                 | Masc.Tui_decode.Composition_control_origin -> kind
                in
                Ansi.dim,
                Tool_table.effective_tool_line
@@ -809,10 +815,8 @@ let tools_display_lines (state : state) =
                     (Theme.warn ()),
                     "     "
                     ^ Terminal_text.single_line csn_name
-                    ^ (match csn_reason with
-                       | None -> ""
-                       | Some reason ->
-                         " \xc2\xb7 " ^ Terminal_text.single_line reason))
+                    ^ " \xc2\xb7 "
+                    ^ Terminal_text.single_line csn_reason)
                   unavailable)
         @ [ Ansi.bold, Tool_table.effective_tool_header ]
         @ tool_lines

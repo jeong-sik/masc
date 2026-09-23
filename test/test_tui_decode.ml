@@ -2100,59 +2100,58 @@ let system_log_snapshot_json entries =
    -- fields are asserted against what that writer emits, not against a shape
    invented here. *)
 (* The queue's shape. The writer puts both [intent] and [cancellation_reason]
-   on every row and spells an absent one [`Null], so both keys are here; a
-   caller that wants the key gone passes [~omit_cancellation_reason:true],
-   which is the shape a build older than the reason copy wrote. *)
+   on every row and spells an absent one [`Null], so both keys are here. *)
 let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
     ?(evidence_error = `Null) ?(intent = `String "complete")
-    ?(cancellation_reason = `Null) ?(omit_cancellation_reason = false) () =
+    ?(cancellation_reason = `Null) () =
   `Assoc
-    ([ ("request_id", `String "vr-1")
-     ; ("task_id", `String "task-470")
-     ; ("task_title", `String "wire the approval gate")
-     ; ("created_at", `String "2026-08-23T09:00:00Z")
-     ; ("submitted_by", `String "keeper.one")
-     ; ("intent", intent)
-     ; ("completion_contract", `List [ `String "tests pass" ])
-     ; ("required_artifacts", `List [ `String "artifact:reports/proof.json" ])
-     ; ("submitted_evidence", `List (List.map (fun s -> `String s) evidence))
-     ; ("evidence_projection_error", evidence_error)
-     ]
-    @
-    if omit_cancellation_reason then []
-    else [ ("cancellation_reason", cancellation_reason) ])
+    [ ("request_id", `String "vr-1")
+    ; ("task_id", `String "task-470")
+    ; ("task_title", `String "wire the approval gate")
+    ; ("created_at", `String "2026-08-23T09:00:00Z")
+    ; ("submitted_by", `String "keeper.one")
+    ; ("intent", intent)
+    ; ("completion_contract", `List [ `String "tests pass" ])
+    ; ("required_artifacts", `List [ `String "artifact:reports/proof.json" ])
+    ; ("submitted_evidence", `List (List.map (fun s -> `String s) evidence))
+    ; ("evidence_projection_error", evidence_error)
+    ; ("cancellation_reason", cancellation_reason)
+    ]
+
+let drop_field key = function
+  | `Assoc fields -> `Assoc (List.remove_assoc key fields)
+  | other -> other
 
 let verification_snapshot_json ?(total = 3) ?(view = "awaiting") ?(offset = 0)
     ?(truncated = false) ?(unresolved = []) ?unresolved_total ?backlog_error
     ?backlog_recovery requests =
-  (* Only the awaiting view joins the backlog, so only it counts what it could
-     not resolve; the list beside it is one page. *)
-  let unresolved_total_field =
-    match view, unresolved_total with
-    | "awaiting", None ->
-        [ ("awaiting_unresolved_total", `Int (List.length unresolved)) ]
-    | "awaiting", Some total -> [ ("awaiting_unresolved_total", `Int total) ]
-    | _, _ -> []
+  (* Only the awaiting view joins the backlog, and it sends all four backlog
+     fields on every arm (Dashboard_verification.awaiting_fields): the count
+     of what it could not resolve, one page of those ids, and the error and
+     recovery notes, null when there is none. The history view sends none of
+     them. *)
+  let backlog_fields =
+    match view with
+    | "awaiting" ->
+        [ ( "awaiting_unresolved_total"
+          , `Int (Option.value unresolved_total ~default:(List.length unresolved)) )
+        ; ( "awaiting_unresolved"
+          , `List (List.map (fun id -> `String id) unresolved) )
+        ; ("backlog_error", Json_util.string_opt_to_json backlog_error)
+        ; ("backlog_recovery", Json_util.string_opt_to_json backlog_recovery)
+        ]
+    | _ -> []
   in
   `Assoc
-    (unresolved_total_field
+    (backlog_fields
      @ [ ("updated_at", `String "2026-08-23T09:00:01Z")
-     ; ("total", `Int total)
-     ; ("view", `String view)
-     ; ("offset", `Int offset)
-     ; ("returned", `Int (List.length requests))
-     ; ("truncated", `Bool truncated)
-     ; ( "awaiting_unresolved"
-       , `List (List.map (fun id -> `String id) unresolved) )
-     ; ("requests", `List requests)
-     ]
-     @ (match backlog_error with
-        | None -> []
-        | Some detail -> [ ("backlog_error", `String detail) ])
-     @
-     match backlog_recovery with
-     | None -> []
-     | Some detail -> [ ("backlog_recovery", `String detail) ])
+       ; ("total", `Int total)
+       ; ("view", `String view)
+       ; ("offset", `Int offset)
+       ; ("returned", `Int (List.length requests))
+       ; ("truncated", `Bool truncated)
+       ; ("requests", `List requests)
+       ])
 
 (* Tool inventory. The envelope is /dashboard/tools; the rows are
    [tool_inventory_json]. *)
@@ -2787,6 +2786,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "skill_eager_body_bytes", `Int 0
       ; "skill_body_bytes", `Int 4981
       ; "skills_left_out", `List []
+      ; "unavailable_skill_names", `List []
       ; "skill_resource_read_max_bytes", `Int 65536
       ; "count", `Int 2
         (* The origin shape here mirrors what
@@ -2856,18 +2856,16 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
         (Yojson.Safe.to_string (`List [ exact_reference "ocaml-coding" 'a' ]))
         (Skill_reference.list_to_yojson ets_instruction_skills
          |> Yojson.Safe.to_string);
-      Alcotest.(check string) "tool origin" "composition_skill" tool.et_origin;
-      (* Without this the Tools screen prints a bare "composition_skill" for
-         every skill tool: the decoder used to read origin.skill_source,
-         which no producer has emitted since the surface moved to
-         skill_provenance. *)
-      Alcotest.(check (option string))
-        "composition tool names its configured skill source"
-        (Some "shared-catalog") tool.et_skill_source_id;
-      Alcotest.(check string) "plain tool origin" "descriptor" bare_tool.et_origin;
-      Alcotest.(check (option string))
-        "a tool with no skill behind it names no source"
-        None bare_tool.et_skill_source_id;
+      (* The Tools screen draws "composition_skill:<source_id>" from this, so
+         a skill tool says which configured source it came from. *)
+      Alcotest.(check bool)
+        "composition tool names its configured skill source" true
+        (tool.et_origin
+         = Tui_decode.Composition_skill_origin
+             { skill_source_id = Some "shared-catalog" });
+      Alcotest.(check bool)
+        "a tool with no skill behind it is a descriptor" true
+        (bare_tool.et_origin = Tui_decode.Descriptor_origin);
       Alcotest.(check string) "profile name" "work-intake" profile.esp_name;
       Alcotest.(check string)
         "profile keeps the exact editable reference"
@@ -2914,6 +2912,7 @@ let test_decode_effective_keeper_surface_rejects_legacy_skill_names () =
       ; "skill_discovery_bytes", `Int 0
       ; "skill_eager_body_bytes", `Int 0
       ; "skills_left_out", `List []
+      ; "unavailable_skill_names", `List []
       ; "count", `Int 0
       ; "tools", `List []
       ; "tool_surface_sha256", `Null
@@ -2922,6 +2921,105 @@ let test_decode_effective_keeper_surface_rejects_legacy_skill_names () =
   match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~effective []) with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "legacy Skill name list was accepted"
+
+(* The keys Keeper_effective_tool_surface.to_yojson sends on every available
+   surface, with the parts under test passed in. *)
+let minimal_available_surface ?(unavailable_skill_names = Some (`List [])) tools =
+  `Assoc
+    ([ "status", `String "available"
+     ; "keeper_name", `String "fixture"
+     ; "runtime_id", `String "agent-core.fixture"
+     ; "official_client_kind", `String "agent_core"
+     ; "tool_delivery", `Assoc [ "status", `String "delivered" ]
+     ; "native_posture", `Null
+     ; "skill_snapshot_revision", `String (String.make 64 'c')
+     ; "instruction_skills", `List []
+     ; "composition_skills", `List []
+     ; "skill_discovery_bytes", `Int 0
+     ; "skill_eager_body_bytes", `Int 0
+     ; "skills_left_out", `List []
+     ; "count", `Int (List.length tools)
+     ; "tools", `List tools
+     ; "tool_surface_sha256", `Null
+     ]
+     @
+     match unavailable_skill_names with
+     | Some names -> [ "unavailable_skill_names", names ]
+     | None -> [])
+
+let decode_surface_tools surface =
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~effective:surface []) with
+  | Ok
+      { Tui_decode.ts_effective =
+          Some (Tui_decode.Effective_surface_available { ets_tools; _ });
+        _ } -> Ok ets_tools
+  | Ok _ -> Error "expected an available effective Keeper surface"
+  | Error err -> Error err
+
+(* origin_to_yojson sends [skill_provenance] for a composition skill and for
+   no other kind, and inside the object [identity.source_id] is always there.
+   So each step is required where the producer always writes it, and a
+   composition tool missing any of them is refused rather than drawn as a
+   bare "composition_skill". *)
+let test_decode_effective_tool_reads_provenance_by_kind () =
+  let tool origin = `Assoc [ "name", `String "keeper_compose_x"; "origin", `Assoc origin ] in
+  let composition provenance =
+    tool
+      ([ "kind", `String "composition_skill" ]
+       @ match provenance with
+         | Some value -> [ "skill_provenance", value ]
+         | None -> [])
+  in
+  let origins tools =
+    match decode_surface_tools (minimal_available_surface tools) with
+    | Ok decoded -> List.map (fun (t : Tui_decode.effective_tool) -> t.et_origin) decoded
+    | Error err -> Alcotest.failf "decode failed: %s" err
+  in
+  let refused what tools =
+    match decode_surface_tools (minimal_available_surface tools) with
+    | Ok _ -> Alcotest.failf "%s decoded" what
+    | Error _ -> ()
+  in
+  Alcotest.(check bool) "an unresolved provenance is null, and reads as no source" true
+    (origins [ composition (Some `Null) ]
+     = [ Tui_decode.Composition_skill_origin { skill_source_id = None } ]);
+  Alcotest.(check bool) "the other kinds carry no provenance" true
+    (origins
+       [ tool [ "kind", `String "descriptor" ]
+       ; tool [ "kind", `String "instruction_skill" ]
+       ; tool [ "kind", `String "composition_control" ]
+       ]
+     = [ Tui_decode.Descriptor_origin
+       ; Tui_decode.Instruction_skill_origin
+       ; Tui_decode.Composition_control_origin
+       ]);
+  refused "a composition tool without skill_provenance" [ composition None ];
+  refused "a provenance without identity"
+    [ composition (Some (`Assoc [ "directory", `String "/srv/skills/x" ])) ];
+  refused "an identity without source_id"
+    [ composition
+        (Some (`Assoc [ "identity", `Assoc [ "name", `String "x" ] ]))
+    ];
+  refused "an origin kind this build does not know"
+    [ tool [ "kind", `String "plugin" ] ]
+
+(* Every available surface carries the list, and every entry its reason
+   (Keeper_skill_catalog.configured_name_unavailable_to_yojson). Without the
+   list the Tools screen would stay silent about a selected Skill that is not
+   in the turn catalog. *)
+let test_decode_effective_surface_requires_the_unavailable_skill_names () =
+  (match decode_surface_tools (minimal_available_surface ~unavailable_skill_names:None []) with
+   | Ok _ -> Alcotest.fail "a surface without unavailable_skill_names decoded"
+   | Error _ -> ());
+  match
+    decode_surface_tools
+      (minimal_available_surface
+         ~unavailable_skill_names:
+           (Some (`List [ `Assoc [ "name", `String "solo-name" ] ]))
+         [])
+  with
+  | Ok _ -> Alcotest.fail "an unavailable name without its reason decoded"
+  | Error _ -> ()
 
 let test_decode_effective_keeper_surface_does_not_hide_unavailable () =
   let effective =
@@ -2964,6 +3062,7 @@ let test_decode_effective_keeper_surface_keeps_tool_suppression () =
       ; "skill_discovery_bytes", `Int 0
       ; "skill_eager_body_bytes", `Int 0
       ; "skills_left_out", `List []
+      ; "unavailable_skill_names", `List []
       ; "count", `Int 0
       ; "tools", `List []
       ; "tool_surface_sha256", `Null
@@ -6370,6 +6469,17 @@ let test_decode_fusion_seat_route_refusals () =
            ; "answered_by", `Null
            ; "failed_attempts", `List []
            ] ]);
+  (* The sink writes [answered_by] on every route, null when no candidate
+     answered. Without the key the detail would say "no candidate answered"
+     about a route whose answer it never saw. *)
+  says "missing required field 'answered_by'"
+    (refusal
+       [ `Assoc
+           [ "phase", `String "panel"
+           ; "seat", `String "first"
+           ; "route", `String "panel-lane"
+           ; "failed_attempts", `List []
+           ] ]);
   (* The key is the sink's whole array; an object in its place is a shape
      this reader does not know, not an array of one. *)
   match
@@ -6702,14 +6812,39 @@ let test_decode_verification_counts_unresolved_beyond_the_page () =
        Alcotest.(check int) "the count outlives the page" 5
          snapshot.Tui_decode.vs_awaiting_unresolved_total);
   let without_count =
-    match verification_snapshot_json ~total:0 [] with
-    | `Assoc fields ->
-        `Assoc (List.remove_assoc "awaiting_unresolved_total" fields)
-    | other -> other
+    drop_field "awaiting_unresolved_total" (verification_snapshot_json ~total:0 [])
   in
   match Tui_decode.decode_verification_snapshot without_count with
   | Ok _ -> Alcotest.fail "an awaiting view without its count decoded"
   | Error _ -> ()
+
+(* The awaiting view sends its four backlog fields on every arm, the
+   unreadable backlog included. Without one of them the queue cannot say
+   whether an empty list means nothing is waiting or the backlog could not be
+   read, so a missing field is refused rather than read as "none". The
+   history view joins no backlog and sends none of them. *)
+let test_decode_verification_requires_the_awaiting_backlog_fields () =
+  List.iter
+    (fun field ->
+       match
+         Tui_decode.decode_verification_snapshot
+           (drop_field field (verification_snapshot_json ~total:0 []))
+       with
+       | Ok _ -> Alcotest.failf "an awaiting view without %s decoded" field
+       | Error _ -> ())
+    [ "awaiting_unresolved"; "backlog_error"; "backlog_recovery" ];
+  match
+    Tui_decode.decode_verification_snapshot
+      (verification_snapshot_json ~view:"all" ~total:0 [])
+  with
+  | Error err -> Alcotest.failf "the history view needs none of them: %s" err
+  | Ok snapshot ->
+      Alcotest.(check (list string)) "no unresolved ids" []
+        snapshot.Tui_decode.vs_awaiting_unresolved;
+      Alcotest.(check (option string)) "no backlog error" None
+        snapshot.Tui_decode.vs_backlog_error;
+      Alcotest.(check (option string)) "no recovery note" None
+        snapshot.Tui_decode.vs_backlog_recovery
 
 (* A queue built from a recovery snapshot holds real rows and is older than
    the workspace. Read as an ordinary queue it would be acted on as current,
@@ -6762,12 +6897,17 @@ let test_decode_verification_reads_which_verdict_the_row_waits_on () =
   Alcotest.(check bool) "a stop whose reason the record did not keep" true
     (ask (one (verification_request_json ~intent:(`String "cancel") ()))
      = Tui_decode.Asks_cancellation None);
-  Alcotest.(check bool) "and the same with the key gone" true
-    (ask
-       (one
-          (verification_request_json ~intent:(`String "cancel")
-             ~omit_cancellation_reason:true ()))
-     = Tui_decode.Asks_cancellation None)
+  (* The writer puts the key on every row, null or not. A row without it is
+     a broken payload, and reading it as "no reason kept" would say something
+     about the record that nobody observed. *)
+  match
+    Tui_decode.decode_verification_snapshot
+      (one
+         (drop_field "cancellation_reason"
+            (verification_request_json ~intent:(`String "cancel") ())))
+  with
+  | Ok _ -> Alcotest.fail "a row without cancellation_reason decoded"
+  | Error _ -> ()
 
 (* A row the backlog join found nothing for says so. Folding it into either
    verdict is the queue inventing an answer the record does not hold, and on a
@@ -6782,15 +6922,15 @@ let test_decode_verification_leaves_an_unjoined_row_unstated () =
   Alcotest.(check bool) "a null intent states nothing" true
     (ask (verification_snapshot_json [ verification_request_json ~intent:`Null () ])
      = Tui_decode.Ask_unstated);
-  Alcotest.(check bool) "and neither does a missing key" true
-    (ask
+  (* Null is the join's answer; a missing key is no answer at all, so it is
+     refused rather than drawn as an unjoined row. *)
+  (match
+     Tui_decode.decode_verification_snapshot
        (verification_snapshot_json
-          [ (match verification_request_json ~intent:`Null () with
-             | `Assoc fields ->
-                 `Assoc (List.filter (fun (k, _) -> k <> "intent") fields)
-             | other -> other)
-          ])
-     = Tui_decode.Ask_unstated);
+          [ drop_field "intent" (verification_request_json ~intent:`Null ()) ])
+   with
+   | Ok _ -> Alcotest.fail "a row without intent decoded"
+   | Error _ -> ());
   (* A null intent beside a reason is still not a stop this build can claim:
      the field that names the verdict is the one that was empty. *)
   Alcotest.(check bool) "a reason does not supply the missing verdict" true
@@ -10868,6 +11008,10 @@ let () =
           test_decode_effective_keeper_surface_keeps_provenance;
         Alcotest.test_case "effective surface rejects legacy Skill names" `Quick
           test_decode_effective_keeper_surface_rejects_legacy_skill_names;
+        Alcotest.test_case "a tool origin reads its provenance by kind" `Quick
+          test_decode_effective_tool_reads_provenance_by_kind;
+        Alcotest.test_case "the unavailable skill names are required" `Quick
+          test_decode_effective_surface_requires_the_unavailable_skill_names;
         Alcotest.test_case "effective unavailable stays explicit" `Quick
           test_decode_effective_keeper_surface_does_not_hide_unavailable;
         Alcotest.test_case "effective surface keeps tool suppression" `Quick
@@ -11079,6 +11223,8 @@ let () =
           test_decode_verification_separates_an_empty_queue_from_an_unreadable_one;
         Alcotest.test_case "unresolved ids are counted beyond the page" `Quick
           test_decode_verification_counts_unresolved_beyond_the_page;
+        Alcotest.test_case "the awaiting view requires its backlog fields" `Quick
+          test_decode_verification_requires_the_awaiting_backlog_fields;
         Alcotest.test_case "a stale queue is not a failed one" `Quick
           test_decode_verification_separates_a_stale_queue_from_a_failed_one;
         Alcotest.test_case "no evidence is not unreadable evidence" `Quick

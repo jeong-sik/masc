@@ -126,17 +126,6 @@ let test_the_screen_names_a_configured_skill_that_is_not_there () =
     (contains "browser-lanes" shown);
   Alcotest.(check bool) "with the producer's reason beside it" true
     (contains "not_in_turn_skill_catalog" shown);
-  (* A reader that fills in a reason speaks for a producer that said nothing,
-     so an entry without one draws the name alone rather than a guess. *)
-  let reasonless =
-    surface_text
-      (state_showing
-         ~unavailable_skill_names:[ `Assoc [ "name", `String "solo-name" ] ])
-  in
-  Alcotest.(check bool) "a reasonless entry still names the skill" true
-    (contains "solo-name" reasonless);
-  Alcotest.(check bool) "and invents no reason for it" false
-    (contains "not_in_turn_skill_catalog" reasonless);
   (* Without this the block could be drawn unconditionally and both checks
      above would still pass, so a healthy surface would gain a heading that
      claims something it has no entry for. *)

@@ -32,6 +32,7 @@ def inventory(marker):
             "skill_snapshot_revision": "c" * 64,
             "instruction_skills": [], "composition_skills": [], "skill_profiles": [],
             "skill_discovery_bytes": 0, "skill_eager_body_bytes": 0, "skills_left_out": [],
+            "unavailable_skill_names": [],
             "count": 1, "tools": [{"name": marker, "origin": {"kind": "descriptor"}}],
             "tool_surface_sha256": None,
         },

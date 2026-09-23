@@ -322,15 +322,23 @@ type inventory_freshness =
       (** The server answered from a built inventory. An empty list here does
           mean no tools. *)
 
-(** One tool the keeper's effective surface carries. [et_skill_source_id]
-    names the configured skill source a composition skill came from, read
-    from [origin.skill_provenance.identity.source_id]; it is [None] for any
-    tool with no skill behind it, and for a composition skill whose
-    provenance the producer could not resolve. *)
+(** Where one tool on the keeper's effective surface came from, as
+    [origin.kind] names it. Only a composition skill carries
+    [origin.skill_provenance], and it always carries the key: [skill_source_id]
+    is read from [skill_provenance.identity.source_id], and is [None] when the
+    producer sent [null] because it could not resolve the provenance. *)
+type effective_tool_origin =
+  | Descriptor_origin
+  | Instruction_skill_origin
+  | Composition_skill_origin of { skill_source_id : string option }
+  | Composition_control_origin
+
+val effective_tool_origin_kind : effective_tool_origin -> string
+(** The [origin.kind] word the server sent. *)
+
 type effective_tool = {
   et_name : string;
-  et_origin : string;
-  et_skill_source_id : string option;
+  et_origin : effective_tool_origin;
 }
 
 type effective_tool_delivery =
@@ -486,13 +494,11 @@ type effective_skill_profile = {
 
 type configured_skill_name_unavailable = {
   csn_name : string;
-  csn_reason : string option;
+  csn_reason : string;
 }
 (** A Skill name the Keeper profile selected that the turn's catalog does not
     hold. Not a read failure, so it is a different fact from
-    [ets_skills_left_out]. [csn_reason] is the producer's word for why, and it
-    is [None] when the producer sent none rather than a word this reader made
-    up. *)
+    [ets_skills_left_out]. [csn_reason] is the producer's word for why. *)
 
 type effective_tool_surface =
   | Effective_surface_available of {
@@ -1284,6 +1290,9 @@ type verification_snapshot = {
           live backlog: the rows are real and as old as that snapshot, so
           anything submitted after it is absent. *)
 }
+(** The four backlog fields are required in {!Awaiting_queue}, where the
+    server joins the backlog and always sends them. {!Full_history} does not
+    join the backlog and sends none of them, so they read as empty there. *)
 
 type keeper_phase
 (** A validated Keeper lifecycle phase from the live roster. The underlying
@@ -2818,7 +2827,15 @@ val decode_fleet_safety : Yojson.Safe.t -> (fleet_safety, string) result
 (** Reads the [keeper_fleet_safety] section out of a [/health?full=1] body.
     A body without the section is an error rather than an empty reading: an
     absent section and a healthy fleet are different facts, and rendering the
-    second for the first is how a blocked keeper stays invisible. *)
+    second for the first is how a blocked keeper stays invisible.
+
+    The server sends the section in one of two shapes. A fleet reading carries
+    [schema = "masc.keeper_fleet_operator.v1"] and every field of
+    {!fleet_safety}; a missing count is an error, not zero. When the server's
+    scan raised, the section is its failure placeholder ([component], [status],
+    [component_timed_out], [error]), which carries no counts at all; that is
+    an error naming the server's reason, because zero counts would read as an
+    idle fleet. *)
 val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :

@@ -1106,6 +1106,8 @@ let save_agent_core_if_source_with
             | Ok (Keeper_fs.Committed_but_observer_failed failure) ->
               publish ~canonical_path [ Commit_observer_failed failure ])))
       with
+      | Eio.Cancel.Cancelled _ as cancelled ->
+        Printexc.raise_with_backtrace cancelled (Printexc.get_raw_backtrace ())
       | exn -> `Raised (exn, Printexc.get_raw_backtrace ())
     in
     let observed_installation installed_ref =

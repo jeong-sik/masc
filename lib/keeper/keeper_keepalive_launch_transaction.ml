@@ -175,5 +175,5 @@ let finish_lifecycle ~terminalize =
      reinterpret a graceful stop as an unexpected abort. *)
   Eio.Cancel.protect (fun () ->
     try terminalize_safely terminalize with
-    | exn -> Error (Printexc.to_string exn))
+    | exn -> Error (Printexc.to_string exn)) (* cancel-guard-ok: the body is Eio.Cancel.protect *)
 ;;

@@ -341,8 +341,8 @@ let test_corrupt_source_snapshot_is_visible () =
 (* RFC librarian-lifecycle §4.9. No loop runs in this test process, so the
    keeper has no measurement: the row says "not measured" rather than zero,
    and the counts are absent rather than a number nothing took. The journal
-   and the snapshot's own source still say when the Librarian last succeeded
-   and what it last failed with. *)
+   still says when the Librarian last succeeded and what it last failed
+   with. *)
 let test_reports_the_librarian_position_without_a_loop () =
   let base = fresh_dir "masc-memory-health-librarian" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
@@ -361,7 +361,7 @@ let test_reports_the_librarian_position_without_a_loop () =
     true
     (is_null (member "unread_official_turns" librarian));
   Alcotest.(check (option (float 0.)))
-    "the snapshot the Librarian wrote is its last success"
+    "the Librarian commit is its last success"
     (Some test_now)
     (float_option_field "last_success_at" librarian);
   Alcotest.(check bool)
@@ -385,9 +385,54 @@ let test_reports_the_librarian_position_without_a_loop () =
     ~snapshot_present:true;
   let after_failure = Health.keeper_memory_health_http_json ~base_path:base in
   Alcotest.(check string)
-    "the journal's last line names the failure"
+    "a failure after the last Librarian commit is shown"
     "exact_execution_failure"
     (string_field "last_failure_kind" (member "librarian" (keeper_obj keeper_id after_failure)))
+;;
+
+(* A keeper's own [keeper_memory_write] journals a committed line too. It is
+   not a Librarian pass, so it must neither hide the Librarian failure before
+   it nor wipe the Librarian success before that. *)
+let test_librarian_failure_then_explicit_write_keeps_both () =
+  let base = fresh_dir "masc-memory-health-librarian-write" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_id = "librarian-write-" ^ Filename.basename base in
+  ignore (write_snapshot ~keepers_dir ~keeper_id [ fact "librarian fact" ]);
+  Current.append_librarian_failure
+    ~keepers_dir
+    ~keeper_id
+    ~now:(test_now +. 60.)
+    ~trace_id:"health-test"
+    ~kind:Current.Exact_execution_failure
+    ~detail:"the lane refused"
+    ~snapshot_present:true;
+  let expected_revision =
+    match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+    | Ok (Some snapshot) -> Some snapshot.revision
+    | Ok None -> Alcotest.fail "the Librarian snapshot is missing"
+    | Error detail -> Alcotest.fail detail
+  in
+  Current.replace
+    ~keepers_dir
+    ~keeper_id
+    ~expected_revision
+    ~now:(test_now +. 120.)
+    ~source:{ Current.kind = Current.Explicit_write; trace_id = "keeper-write" }
+    ~facts:[ fact "librarian fact"; fact "keeper wrote this" ]
+    ()
+  |> require_ok
+  |> ignore;
+  let librarian =
+    member "librarian" (keeper_obj keeper_id (Health.keeper_memory_health_http_json ~base_path:base))
+  in
+  Alcotest.(check string)
+    "the failure before the keeper's write is still shown"
+    "exact_execution_failure"
+    (string_field "last_failure_kind" librarian);
+  Alcotest.(check (option (float 0.)))
+    "the last success is the Librarian's commit, not the keeper's write"
+    (Some test_now)
+    (float_option_field "last_success_at" librarian)
 ;;
 
 let test_corrupt_snapshot_is_visible_as_read_error () =
@@ -942,6 +987,8 @@ let () =
             test_reports_derived_facts_and_support_invalidations
         ; Alcotest.test_case "librarian position without a loop" `Quick
             test_reports_the_librarian_position_without_a_loop
+        ; Alcotest.test_case "librarian failure then explicit write" `Quick
+            test_librarian_failure_then_explicit_write_keeps_both
         ; Alcotest.test_case "corrupt snapshot visible" `Quick
             test_corrupt_snapshot_is_visible_as_read_error
         ; Alcotest.test_case "sort and empty store" `Quick

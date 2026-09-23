@@ -54,8 +54,14 @@ let handle_keeper_github_login_post state req reqd =
       let hostname =
         match Server_utils.query_param req "hostname" with
         | Some hostname -> hostname
-        | None -> "github.com"
+        | None -> Keeper_github_identity.default_hostname
       in
+      match
+        Keeper_github_identity.login_scopes_of_query
+          (Server_utils.query_param req "scopes")
+      with
+      | Error message -> respond_error ~status:`Bad_request reqd message
+      | Ok scopes ->
       let headers = github_login_stream_headers (Server_auth.get_origin req) in
       let response = Httpun.Response.create ~headers `OK in
       let writer = Httpun.Reqd.respond_with_streaming reqd response in
@@ -66,6 +72,7 @@ let handle_keeper_github_login_post state req reqd =
              Keeper_github_identity.stream_login
                ~config
                ~keeper_name:name
+               ~scopes
                (* Shaping a Remote_ssh lane runs commands on the endpoint. Doing
                   that before this response existed left the browser waiting on
                   a request that had not answered at all. *)
@@ -105,7 +112,7 @@ let handle_keeper_github_token_post state req reqd body_str =
           | _ ->
             (match Server_utils.query_param req "hostname" with
              | Some h -> h
-             | None -> "github.com")
+             | None -> Keeper_github_identity.default_hostname)
         in
         match token with
         | Ok tok -> Ok (tok, hostname)
@@ -175,7 +182,7 @@ let handle_keeper_oauth_login_post ~clock state req reqd body_str =
             (match
                Server_keeper_oauth.start
                  ~clock
-                 ~base_path:config.Workspace.base_path
+                 ~config
                  ~keeper:name
                  ~provider_id
                  ~now:(Unix.gettimeofday ())
@@ -212,7 +219,7 @@ let handle_keeper_identity_refresh_post ~clock state req reqd body_str =
             (match
                Server_keeper_oauth.refresh_tools
                  ~clock
-                 ~base_path:config.Workspace.base_path
+                 ~config
                  ~keeper:name
                  ~provider_id
                  ~now:(Unix.gettimeofday ())
@@ -773,6 +780,7 @@ let handle_keeper_board_attention_quarantine_recovery_post
        Command.make
          ~keeper_name
          ~raw_partition_id
+         ~requested_by:agent_name
          recovery_request
      with
      | Error error ->
@@ -794,7 +802,6 @@ let handle_keeper_board_attention_quarantine_recovery_post
        let audit =
          Command.audit
            config
-           ~actor:agent_name
            command
            ~outcome:
              (match result with

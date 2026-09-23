@@ -39,6 +39,9 @@ val prepare : ?end_atom:int -> config:Workspace.config -> keeper_name:string -> 
     [None] means no new complete coverage, whatever the reason. *)
 
 val prompt_json : prepared -> Yojson.Safe.t
+(** The prior working state alone. The range's conversation reaches the
+    prompt once, as the folded [conversation_history] rendered from
+    {!messages}; tool payloads and reasoning blocks are not part of it. *)
 val commit : config:Workspace.config -> keeper_name:string -> prepared:prepared ->
   working_state:string -> (Librarian_continuity_snapshot.t, string) result
 (** Publication requires an exact continuity-owned Memory receipt, or coverage
@@ -46,8 +49,8 @@ val commit : config:Workspace.config -> keeper_name:string -> prepared:prepared 
     snapshot CAS. It never changes the durable consumer cursor. *)
 
 val messages : prepared -> Agent_core.Types.message list
-(** Exact new source atoms, including tool results, supplied to both Memory
-    disposition and working-state inference. *)
+(** Exact new source atoms of the range. The pass renders them once, folded,
+    for both Memory disposition and working-state inference. *)
 val turn_ref : prepared -> Ids.Turn_ref.t
 val start_atom : prepared -> int
 val completed_end_atom : prepared -> int

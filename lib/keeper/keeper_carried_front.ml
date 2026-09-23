@@ -5,6 +5,7 @@ type source =
   | Turn_record of { turn : int }
   | Halved_after_refusal of { retry : int }
   | Evicted_after_refusal of { retry : int }
+  | Turn_start_after_seed_refusal
 
 type seed =
   { first_atom : int
@@ -65,7 +66,7 @@ let composer_to_string = function
    official-client records resent 13 MB per candidate on Agent Core turn 4059,
    after 20 claude_code turns. Preserve that response evidence, subject to the
    same history-position check. *)
-(* A turn that carried its whole history names no front. Its opening atom is
+(* A turn that skipped no atom names no front. Its opening atom is
    the oldest one because nothing was skipped, not because a later turn may
    start there, so reading it as a seed sends the next start back to the
    beginning. [Runtime_execution.Codex_app_server] hands its list over whole
@@ -281,6 +282,7 @@ let source_to_string = function
   | Turn_record { turn } -> Printf.sprintf "turn_record#%d" turn
   | Halved_after_refusal { retry } -> Printf.sprintf "halved_after_refusal#%d" retry
   | Evicted_after_refusal { retry } -> Printf.sprintf "evicted_after_refusal#%d" retry
+  | Turn_start_after_seed_refusal -> "turn_start_after_seed_refusal"
 ;;
 
 let seed_to_json (seed : seed) =
@@ -310,6 +312,8 @@ let origin_to_json = function
     `Assoc [ "kind", `String "halved_after_refusal"; "retry", `Int retry ]
   | Carried (Evicted_after_refusal { retry }) ->
     `Assoc [ "kind", `String "evicted_after_refusal"; "retry", `Int retry ]
+  | Carried Turn_start_after_seed_refusal ->
+    `Assoc [ "kind", `String "turn_start_after_seed_refusal" ]
   | Librarian_progress { end_atom } ->
     `Assoc [ "kind", `String "librarian_progress"; "end_atom", `Int end_atom ]
   | Turn_start { end_atom } ->

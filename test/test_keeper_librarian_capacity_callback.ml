@@ -3,6 +3,13 @@ module Runtime = Keeper_librarian_runtime
 module Fixture = Exact_output_fixture
 module Runs = Exact_lane_run_registry
 
+let served_slot =
+  Alcotest.testable
+    (fun fmt -> function
+       | Runtime.Api_slot id -> Format.fprintf fmt "Api_slot %s" id
+       | Runtime.Cli_slot id -> Format.fprintf fmt "Cli_slot %s" id)
+    ( = )
+
 let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -21,6 +28,9 @@ let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id
     let body = match status with
       | `Request_entity_too_large -> {|{"error":{"message":"fixture body limit","type":"invalid_request_error"}}|}
       | `Too_many_requests -> {|{"error":{"message":"fixture quota","type":"rate_limit_error"}}|}
+      (* A 200 whose one choice carries nothing: the provider answered empty. *)
+      | `OK ->
+        {|{"id":"fixture","object":"chat.completion","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}|}
       | _ -> {|{"error":{"message":"fixture authorization","type":"authentication_error"}}|} in
     Cohttp_eio.Server.respond_string ~status ~body () in
   let server = Cohttp_eio.Server.make ~callback:handler () in
@@ -37,7 +47,8 @@ let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id
   (match Runtime_exact_output_registry.publish
       ~lanes:[{Runtime_schema.id = "librarian_exact";
         slot_ids = List.map (fun (target : Fixture.target_fixture) -> target.id) targets;
-        cli_slot_ids = List.map fst cli_errors}] resolver with
+        cli_slot_ids = List.map fst cli_errors;
+        max_output_tokens = Some 4_096}] resolver with
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
   let input : Keeper_librarian.input =
@@ -157,9 +168,8 @@ let test_prefit_real_continuity ~base_path () =
   (* Independently measure the exact prompt contract to derive the fixture's
      server limit, including template, current facts, continuity and schema. *)
   let rendered prepared input =
-    let input = {input with Keeper_librarian.working_context=Context.empty} in
-    let variables = ("continuity", Yojson.Safe.to_string (P.prompt_json prepared))
-      :: List.remove_assoc "continuity" (Keeper_librarian.prompt_variables input) in
+    let variables =
+      Keeper_librarian_runtime.librarian_prompt_variables ~continuity:prepared input |> get in
     let _, prompt = Prompt_registry.resolve_and_render_prompt_template
       Prompt_names.librarian variables |> get in
     let requirement = Agent_core.Exact_output.make_output_requirement
@@ -235,7 +245,8 @@ let test_prefit_real_continuity ~base_path () =
      ~clock:env#clock ~net:env#net ~base_path ~keeper_id ~selected_input:{(input half) with working_context=Context.empty}
      ~messages:[Agent_core.Types.user_msg "synthesize completed source"] () with
    | Ok (({ Runtime.continuity_answer; _ }, _), slot) ->
-     Alcotest.(check string) "API validation advances to declared successor" "valid-state" slot;
+     Alcotest.check served_slot "API validation advances to declared successor"
+       (Runtime.Api_slot "valid-state") slot;
      Alcotest.(check (option string)) "API successor supplies working state"
        (Some "API saved state.")
        (match continuity_answer with
@@ -250,9 +261,11 @@ let test_prefit_real_continuity ~base_path () =
   let execute prepared state =
     let input = input prepared in
     let expected = rendered prepared input in
+    let answered_by = ref None in
     let runner ~runtime_id ~system_prompt:_ ~output_schema ~prompt =
       check_working_state_schema ~continuity:true output_schema;
       calls := prompt :: !calls;
+      answered_by := Some runtime_id;
       Alcotest.(check string) "prefit and dispatch use identical full text" expected prompt;
       Alcotest.(check bool) "no oversized CLI probe after learning the bound" true
         (chars prompt <= max_chars);
@@ -268,15 +281,20 @@ let test_prefit_real_continuity ~base_path () =
         "new_claims", `List []; "dropped", `List []; "working_contexts", `List [];
         "working_state", `String state]))) in
     let committed = ref false and memory_committed = ref false in
+    let served_by = ref None in
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
     Runtime.run_best_effort ~continuity:prepared
       ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id prepared |> get)
-      ~cli_runner:runner ~on_continuity_committed:(fun _ -> committed:=true)
+      ~cli_runner:runner
+      ~on_continuity_committed:(fun ~served_by:slot _ ->
+        served_by := Some slot; committed:=true)
       ~on_memory_committed:(fun () -> memory_committed:=true)
       ~base_path ~keepers_dir ~keeper_id
       ~expected_revision:(Option.map (fun (s : Current.t) -> s.revision) current) input;
     Alcotest.(check bool) "actual Memory publication completed" true !memory_committed;
     Alcotest.(check bool) "actual continuity publication completed" true !committed;
+    Alcotest.(check (option served_slot)) "the commit names the CLI runtime that answered"
+      (Option.map (fun id -> Runtime.Cli_slot id) !answered_by) !served_by;
     let saved = P.read ~config ~keeper_name:keeper_id |> get |> some in
     Alcotest.(check int) "stored frontier advances to the selected atom group"
       (P.end_atom prepared) saved.end_atom;
@@ -292,7 +310,7 @@ let test_prefit_real_continuity ~base_path () =
   let fact = Keeper_memory_os_types.observed ~claim:("New fact " ^ String.make 200 'f')
     ~category:Keeper_memory_os_types.Fact ~now:1001.
     ~origin:{kind=Keeper_memory_os_types.Authored;trace_id} in
-  ignore (Current.apply_disposition ~keepers_dir ~keeper_id ~now:1001.
+  ignore (Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id ~now:1001.
     ~source:{kind=Current.Librarian;trace_id} ~absorbed:[] ~new_claims:[fact] () |> get);
   let next = prepare () in
   Alcotest.(check bool) "new state and Memory overhead make former atom count exceed limit"
@@ -322,7 +340,7 @@ let test_prefit_real_continuity ~base_path () =
     ~measure_message_bytes:(fun message -> String.length
       (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
     ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
-    ~last_resort:false ~base_path
+    ~current_turn_results:Driver.Current_turn_verbatim ~base_path
     ~demote_before:completed_end ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = completed_end })
     ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical in
   let wire = view.wire
@@ -346,6 +364,14 @@ let test_size_verdict_table () =
   (* The verdict reads the refusal and never the status it arrived with. *)
   let any_status = 400 in
   let refused refusal = E.Provider_response_refused { http_status = any_status; refusal } in
+  let module Http = Agent_core.Llm_provider.Http_client in
+  let module Types = Agent_core.Llm_provider.Types in
+  let sent error = E.Completion_failed { error; dispatch = E.Generation_dispatch_started } in
+  let unsent error = E.Completion_failed { error; dispatch = E.No_generation_dispatch } in
+  let failed kind = sent (Http.ProviderFailure { kind; message = "" }) in
+  let network kind = sent (Http.NetworkError { message = ""; kind }) in
+  let timed_out phase = sent (Http.TimeoutError { message = ""; phase }) in
+  let empty stop_reason = failed (Http.Empty_completion { stop_reason }) in
   List.iter
     (fun (name, cause, expected) ->
        Alcotest.(check bool) name expected (Runtime.For_testing.cause_shows_size cause))
@@ -363,7 +389,55 @@ let test_size_verdict_table () =
     ; "authorization refused", refused E.Authorization_refused, false
     ; "payment required", refused E.Payment_required, false
     ; "model not found", refused E.Not_found, false
-    ; "completion failed, response unknown", E.Completion_failed, true
+    (* A provider error that is not an HTTP refusal, read by its typed kind
+       (#37899). On 2026-09-22 msx-retro-mania's walk narrowed from 130 to 16
+       atoms on quota and empty-response failures while its keeper's request
+       kept growing. *)
+    ; "completion failed, context overflow", failed (Http.Context_overflow { limit = None }), true
+    ; ( "completion failed, response too large"
+      , failed (Http.Response_body_too_large { limit_bytes = 1 })
+      , true )
+    ; "completion failed, empty at the context window", empty Types.ContextWindowExceeded, true
+    ; "completion failed, empty at the output budget", empty Types.MaxTokens, true
+    ; "completion failed, empty at end of turn", empty Types.EndTurn, false
+    ; "completion failed, empty for a reason not named", empty (Types.Unknown "x"), false
+    ; "completion failed, hard quota", failed (Http.Hard_quota { retry_after = None }), false
+    ; ( "completion failed, capacity exhausted"
+      , failed
+          (Http.Capacity_exhausted
+             { scope = Http.Failure_scope_account; retry_after = None; model = None })
+      , false )
+    ; ( "completion failed, unclassified provider failure"
+      , failed (Http.Unknown_provider_failure { reason = None })
+      , false )
+    ; "completion failed, dns failure", network Http.Dns_failure, false
+    ; "completion failed, connection refused", network Http.Connection_refused, false
+    ; "completion failed, tls failure", network Http.Tls_error, false
+    ; "completion failed, peer closed", network Http.End_of_file, false
+    ; "completion failed, unclassified network failure", network Http.Unknown, false
+    (* Deadlines on a sent request: those on the provider's handling of the
+       whole request count, those that say nothing about its size do not. *)
+    ; "completion failed, sent, whole-call deadline", timed_out Http.Wall_clock, true
+    ; "completion failed, sent, awaiting headers", timed_out Http.Http_operation, true
+    ; "completion failed, sent, awaiting first token", timed_out Http.First_token, true
+    ; ( "completion failed, sent, idle stream"
+      , timed_out (Http.Stream_idle Http.Streaming_answer)
+      , false )
+    ; "completion failed, sent, deadline not named", timed_out Http.Unknown_timeout, false
+    ; "completion failed, queued past its deadline", timed_out Http.Queue, false
+    ; "completion failed, capacity backpressure", timed_out Http.Capacity_backpressure, false
+    (* The transport reports a connect deadline as [Http_operation]. A request
+       that was never sent was judged by no provider. *)
+    ; ( "completion failed, connect deadline, not sent"
+      , unsent (Http.TimeoutError { message = ""; phase = Http.Http_operation })
+      , false )
+    ; ( "completion failed, context overflow, not sent"
+      , unsent (Http.ProviderFailure { kind = Http.Context_overflow { limit = None }; message = "" })
+      , false )
+    ; ( "completion failed, provider terminal"
+      , sent (Http.ProviderTerminal { kind = Http.Session_conflict; message = "" })
+      , false )
+    ; "completion failed, wiring rejected", sent (Http.AcceptRejected { reason = "" }), false
     ; "incomplete output", E.Incomplete_output, true
     ; "missing output", E.Missing_output, true
     ; "ambiguous output", E.Ambiguous_output 2, true
@@ -464,7 +538,10 @@ let () =
       case "capacity-final" false `Request_entity_too_large 0 true;
       case "quota-final" false `Too_many_requests 0 false;
       case "capacity-then-quota" true `Too_many_requests 0 true;
-      case "capacity-then-auth" true `Unauthorized 0 true];
+      case "capacity-then-auth" true `Unauthorized 0 true;
+      (* An empty answer that ended its turn says nothing about size: a
+         smaller range meets the same provider (#37899). *)
+      case "empty-completion-final" false `OK 0 false];
     "HTTP to CLI outcomes", [
       (* An official client's failure arrives untyped, so it is no evidence
          either way (#37877). A measured limit is handed over separately. *)

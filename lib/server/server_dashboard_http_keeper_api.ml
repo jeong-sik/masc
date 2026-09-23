@@ -876,31 +876,46 @@ let handle_keeper_get_subroutes state req request reqd =
         (error_json (Printf.sprintf "invalid keeper name: %s" name))
     else
       let config = Mcp_server.workspace_config state in
-      match Keeper_meta_store.read_meta config name with
+      (* Effective meta: the lane is chosen by the TOML-owned
+         [sandbox_profile], which a persisted read answers with the default. *)
+      match Keeper_meta_store.read_effective_meta config name with
       | Error message ->
         Server_auth.respond_json_value_with_cors ~status:`Internal_server_error request reqd
           (error_json message)
       | Ok None ->
         Server_auth.respond_json_value_with_cors ~status:`Not_found request reqd
           (error_json (Printf.sprintf "keeper %S not found" name))
-      | Ok (Some _) ->
+      | Ok (Some meta) ->
         let hostname =
           match Server_utils.query_param req "hostname" with
           | Some hostname -> hostname
-          | None -> "github.com"
+          | None -> Keeper_github_identity.default_hostname
         in
-        (match
-           Keeper_github_identity.observe
-             ~config
-             ~keeper_name:name
-             ~hostname
-         with
+        (match Keeper_github_login_lane.observe ~config ~meta ~hostname with
          | Error message ->
            Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
              (error_json message)
          | Ok observation ->
            Server_auth.respond_json_value_with_cors ~status:`OK request reqd
              (Keeper_github_identity.observation_to_yojson observation)))
+  else if ends_with keeper_suffix_board_attention_quarantines then (
+    (* One Keeper's rows of the inventory the operator snapshot already serves
+       for the fleet, under the same public-read policy: same rows, same
+       gate. The snapshot only builds them with [include_keepers], which the
+       TUI's summary read turns off, so a Keeper detail asks here instead. *)
+    let name = extract_name keeper_suffix_board_attention_quarantines in
+    if name = "" then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json "missing keeper name")
+    else if not (Keeper_config.validate_name name) then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json (Printf.sprintf "invalid keeper name: %s" name))
+    else
+      let config = Mcp_server.workspace_config state in
+      Server_auth.respond_json_value_with_cors ~status:`OK request reqd
+        (Keeper_board_attention_quarantine_command.inventory_json
+           ~base_path:config.Workspace.base_path
+           ~keeper_names:[ name ]))
   else if ends_with "/chat/history/page" then
     (* Checked before "/chat/history": [ends_with] would not confuse the two,
        but keeping the longer suffix first means adding a third sub-route later

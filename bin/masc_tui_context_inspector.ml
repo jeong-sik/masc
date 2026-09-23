@@ -78,8 +78,11 @@ type forecast_carried_origin =
   | Carried_from_turn_record of { turn : int }
   | Carried_halved_after_refusal of { retry : int }
   | Carried_evicted_after_refusal of { retry : int }
+  | Carried_turn_start_after_seed_refusal
   | Carried_turn_start of { end_atom : int }
   | Carried_turn_start_unknown of { reason : string }
+  | Carried_librarian_snapshot of { end_atom : int; boundary_line : int }
+  | Carried_librarian_progress of { end_atom : int }
 
 type forecast_carried =
   { first_atom : int
@@ -724,6 +727,8 @@ let decode_forecast_origin = function
       let* retry_json = field "retry" fields in
       let* retry = nonnegative_int "origin.retry" retry_json in
       Ok (Carried_evicted_after_refusal { retry })
+    else if String.equal kind "turn_start_after_seed_refusal" then
+      Ok Carried_turn_start_after_seed_refusal
     else if String.equal kind "turn_start" then
       let* end_atom_json = field "end_atom" fields in
       let* end_atom = nonnegative_int "origin.end_atom" end_atom_json in
@@ -732,6 +737,16 @@ let decode_forecast_origin = function
       let* reason_json = field "reason" fields in
       let* reason = nonempty_string "origin.reason" reason_json in
       Ok (Carried_turn_start_unknown { reason })
+    else if String.equal kind "librarian_snapshot" then
+      let* end_atom_json = field "end_atom" fields in
+      let* end_atom = nonnegative_int "origin.end_atom" end_atom_json in
+      let* boundary_line_json = field "boundary_line" fields in
+      let* boundary_line = nonnegative_int "origin.boundary_line" boundary_line_json in
+      Ok (Carried_librarian_snapshot { end_atom; boundary_line })
+    else if String.equal kind "librarian_progress" then
+      let* end_atom_json = field "end_atom" fields in
+      let* end_atom = nonnegative_int "origin.end_atom" end_atom_json in
+      Ok (Carried_librarian_progress { end_atom })
     else Error ("origin.kind is not a known kind: " ^ kind)
   | _ -> Error "origin is not an object"
 

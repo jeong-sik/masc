@@ -2,8 +2,10 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   fetchKeeperGithubIdentity,
+  KEEPER_GITHUB_LOGIN_SCOPES,
   streamKeeperGithubLogin,
   type KeeperGithubIdentityObservation,
+  type KeeperGithubLoginScope,
 } from '../api/dashboard-keeper-github'
 
 interface KeeperGithubIdentityPanelProps {
@@ -13,6 +15,13 @@ interface KeeperGithubIdentityPanelProps {
 function authLabel(authenticated: boolean, login: string | null): string {
   if (!authenticated) return '연결 안 됨'
   return login ? `@${login}` : '연결됨'
+}
+
+// What the token may do, as GitHub listed it. null means GitHub listed no
+// scopes (a fine-grained PAT or an App token), which is not the same as "none".
+function scopesLabel(scopes: string[] | null): string {
+  if (scopes === null) return 'GitHub 이 권한 목록을 알려주지 않는 토큰이에요 (fine-grained PAT 등)'
+  return scopes.length === 0 ? '(없음)' : scopes.join(', ')
 }
 
 function extractUrls(text: string): string[] {
@@ -28,6 +37,13 @@ export function KeeperGithubIdentityPanel({
   const [loginOpen, setLoginOpen] = useState(false)
   const [loginRunning, setLoginRunning] = useState(false)
   const [output, setOutput] = useState('')
+  // Nothing ticked by default: workflow lets the token change CI, which runs
+  // with the repository's secrets.
+  const [scopes, setScopes] = useState<readonly KeeperGithubLoginScope[]>([])
+  const toggleScope = (scope: KeeperGithubLoginScope) =>
+    setScopes(current =>
+      current.includes(scope) ? current.filter(s => s !== scope) : [...current, scope],
+    )
   const abortRef = useRef<AbortController | null>(null)
   const refreshAbortRef = useRef<AbortController | null>(null)
 
@@ -74,6 +90,7 @@ export function KeeperGithubIdentityPanel({
       await streamKeeperGithubLogin(
         keeperName,
         observation?.hostname ?? 'github.com',
+        scopes,
         event => {
           if (event.event === 'output') {
             setOutput(current => current + event.text)
@@ -114,12 +131,28 @@ export function KeeperGithubIdentityPanel({
       </div>
       <p class="kcf-sec-desc">Keeper 전용으로 저장된 GitHub CLI 계정과 호스트에 투영된 자격 증명을 GitHub API로 각각 확인합니다.</p>
       <div class="kcf-sec-body">
+        <fieldset class="flex flex-col gap-1" aria-label="GitHub 로그인 권한">
+          <legend class="text-3xs text-[var(--color-fg-muted)]">로그인할 때 추가로 받을 권한 (기본 repo, read:org, gist)</legend>
+          ${KEEPER_GITHUB_LOGIN_SCOPES.map(({ scope, note }) => html`
+            <label key=${scope} class="flex items-center gap-2 text-2xs">
+              <input
+                type="checkbox"
+                checked=${scopes.includes(scope)}
+                disabled=${loginRunning}
+                onChange=${() => toggleScope(scope)}
+              />
+              <span class="mono">${scope}</span>
+              <span class="text-3xs text-[var(--color-fg-muted)]">${note}</span>
+            </label>
+          `)}
+        </fieldset>
         ${loadError && html`<p class="text-2xs text-[var(--color-status-err)]">${loadError}</p>`}
         ${observation && html`
           <div class="kcf-facts">
             <div class="kcf-fact">
               <span class="kcf-fact-k">Keeper 저장소</span>
               <span class="kcf-fact-v mono">${authLabel(observation.stored.authenticated, observation.stored.login)}</span>
+              ${observation.stored.authenticated && html`<span class="text-3xs text-[var(--color-fg-muted)]">권한: <span class="mono">${scopesLabel(observation.stored.scopes)}</span></span>`}
               ${observation.stored.error && html`<span class="text-3xs text-[var(--color-status-err)]">확인 실패: ${observation.stored.error}</span>`}
             </div>
             <div class="kcf-fact">

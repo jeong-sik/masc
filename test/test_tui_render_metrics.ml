@@ -40,8 +40,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
         mcc_read_position_unreadable = false; mcc_rewriting_through = None;
         mcc_prepared = None; mcc_synthesis = None }
   ; mkh_librarian =
-      { Decode.mlh_state = Some "drained"
-      ; mlh_detail = None
+      { Decode.mlh_state = Some Decode.Pass_drained
       ; mlh_measured_at = Some 1_775_000_000.0
       ; mlh_unread_atom_turns = Some 0
       ; mlh_unread_official_turns = Some 0
@@ -66,6 +65,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
 let make_memory_health ~total_facts ~source_facts ~keepers : Decode.memory_health_snapshot =
   { mhs_generated_at = 1000.0
   ; mhs_keepers = keepers
+  ; mhs_refused_keepers = []
   ; mhs_total_facts = total_facts
   ; mhs_total_observed_facts = total_facts - source_facts
   ; mhs_total_derived_facts = 0

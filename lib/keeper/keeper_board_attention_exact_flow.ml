@@ -653,6 +653,36 @@ let observe_terminal prepared ~jev_first result =
        (jev_answer_label jev_first))
 ;;
 
+(* The one place a lane terminal becomes a sentence for a durable record.
+   [terminal_of_flow_error] maps to the typed error; this string is what the
+   run record and the Blocked partition reason both quote, so the operator
+   reads the same words in both places. *)
+let error_detail : 'callback_error execution_error -> string = fun error ->
+  match error with
+  | Providers_exhausted { detail; _ }
+  | Flow_bookkeeping_failed { detail; _ } ->
+    detail
+  | Cli_slots_exhausted { prior_error; failures } ->
+    let tail =
+      String.concat
+        "; "
+        (List.map Keeper_lane_cli_oneshot.failure_to_string failures)
+    in
+    (match prior_error with
+     | Some (Providers_exhausted { detail; _ }) -> detail ^ "; cli tail: " ^ tail
+     | Some (Domain_output_invalid detail) ->
+       "invalid_domain_output: " ^ detail ^ "; cli tail: " ^ tail
+     | Some (Provenance_mismatch detail) ->
+       "execution_provenance_mismatch: " ^ detail ^ "; cli tail: " ^ tail
+     | Some _ | None -> "cli tail: " ^ tail)
+  | Flow_already_started _
+  | Before_dispatch_persistence_failed _
+  | Before_advance_persistence_failed _
+  | Provenance_mismatch _
+  | Domain_output_invalid _ ->
+    terminal_outcome_to_string (terminal_outcome (Error error))
+;;
+
 let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared =
   let registry = Exact_lane_run_registry.global () in
   let run_id = Random_id.prefixed ~prefix:"exact-board-attention-" ~bytes:16 in
@@ -816,33 +846,7 @@ let execute_current ?cli_runner ~clock ~before_dispatch ~before_advance prepared
        (Keeper_board_attention_candidate.judgment_to_yojson judgment)
    | Error error ->
      let code = result |> terminal_outcome |> terminal_outcome_to_string in
-     let detail =
-       match error with
-       | Providers_exhausted { detail; _ }
-       | Flow_bookkeeping_failed { detail; _ } ->
-         detail
-       (* The one place the CLI failures become a sentence: the durable
-          record needs a string, and until here they are the walker's own
-          type, countable by kind. *)
-       | Cli_slots_exhausted { prior_error; failures } ->
-         let tail =
-           String.concat
-             "; "
-             (List.map Keeper_lane_cli_oneshot.failure_to_string failures)
-         in
-         (match prior_error with
-          | Some (Providers_exhausted { detail; _ }) -> detail ^ "; cli tail: " ^ tail
-          | Some (Domain_output_invalid detail) ->
-            "invalid_domain_output: " ^ detail ^ "; cli tail: " ^ tail
-          | Some (Provenance_mismatch detail) ->
-            "execution_provenance_mismatch: " ^ detail ^ "; cli tail: " ^ tail
-          | Some _ | None -> "cli tail: " ^ tail)
-       | Flow_already_started _
-       | Before_dispatch_persistence_failed _
-       | Before_advance_persistence_failed _
-       | Provenance_mismatch _
-       | Domain_output_invalid _ -> code
-     in
+     let detail = error_detail error in
      complete
        (Exact_lane_run_registry.Failed { code; detail })
        (`Assoc [ "terminal_outcome", `String code ]));

@@ -700,6 +700,27 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
   Fs_compat.mkdir_p log_dir;
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
+  (* The BasePath writer lease is held and no keeper has started, so no
+     retention is between writing its file and committing the execution that
+     names it. *)
+  (let runtime_root =
+     (Workspace.backend_config_for canonical_base_path).Backend_types.base_path
+   in
+   (* Optional cleanup: an exception from it is logged, never a failed boot. *)
+   match Masc.Keeper_retained_checkpoint_sweep.run ~runtime_root with
+   | exception exn ->
+     Log.Server.warn "[Startup] retained checkpoint sweep raised: %s"
+       (Printexc.to_string exn)
+   | Error error ->
+     Log.Server.warn "[Startup] retained checkpoint sweep skipped: %s"
+       (Masc.Keeper_retained_checkpoint_sweep.error_to_string error)
+   | Ok { live_references; removed; removed_bytes; failures } ->
+     Log.Server.info
+       "[Startup] retained checkpoint sweep: removed=%d bytes=%d live_references=%d failures=%d"
+       removed removed_bytes live_references (List.length failures);
+     List.iter
+       (fun failure -> Log.Server.warn "[Startup] retained checkpoint sweep: %s" failure)
+       failures);
   (* Only the server samples. Sampling starts before [Eio_main.run] so the
      executor pool, which the main domain spawns while sampling, shares the
      profile and the boot-time loads are in the tables. The rate is a tenth
@@ -2741,7 +2762,7 @@ let keeper_github_keeper_arg =
 
 let keeper_github_hostname_arg =
   let doc = "GitHub hostname." in
-  Arg.(value & opt string "github.com" & info [ "hostname" ] ~docv:"HOST" ~doc)
+  Arg.(value & opt string Keeper_github_identity.default_hostname & info [ "hostname" ] ~docv:"HOST" ~doc)
 
 let keeper_github_action_cmd name doc run =
   let invoke base_path keeper_name hostname =
@@ -2798,7 +2819,7 @@ let keeper_github_cmd =
         | Error message ->
           prerr_endline message;
           1
-        | Ok lane -> Keeper_github_identity.run_cli_login ~lane)
+        | Ok lane -> Keeper_github_identity.run_cli_login ~lane ~scopes:[])
   in
   let set_token =
     let invoke base_path keeper_name hostname token_opt =
@@ -2858,19 +2879,22 @@ let keeper_github_cmd =
         $ keeper_github_hostname_arg
         $ keeper_github_token_arg)
   in
-  (* Status and logout still read and write this host's directory. For a
-     Remote_ssh Keeper they therefore answer about the host, which is what
-     they did before this command learned about lanes; closing that is
-     RFC-sized work on [observe] and [logout_argv], not a lane switch. *)
+  (* Status reads the machine the login was written to, so a Remote_ssh
+     Keeper answers from its endpoint and needs the same runtime [login] opens.
+     Logout still runs [gh auth logout] against this host's directory. *)
   let status =
     keeper_github_action_cmd
       "status"
       "Observe stored and effective Keeper GitHub identities."
       (fun ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname ->
-        Keeper_github_identity.run_cli_status
-          ~config
-          ~keeper_name:meta.Keeper_meta_contract.name
-          ~hostname)
+        Eio_main.run
+        @@ fun env ->
+        Process_eio.init
+          ~cwd_default:(Eio.Stdenv.cwd env)
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env);
+        Keeper_github_identity.run_cli_status ~observe:(fun () ->
+          Keeper_github_login_lane.observe ~config ~meta ~hostname))
   in
   let logout =
     keeper_github_action_cmd

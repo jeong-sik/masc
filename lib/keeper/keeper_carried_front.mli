@@ -1,27 +1,29 @@
-(** Keeper_carried_front — where the next request's carried range starts
-    (RFC keeper-context-window-in-tokens §10.4).
+(** Keeper_carried_front — a position in the keeper's checkpoint history
+    where a request's carried range can open (RFC
+    keeper-context-window-in-tokens §10.4, §13.4, §13.6).
 
-    The front is the oldest atom the request carries; everything from it to
-    the newest atom goes out, and it only ever moves toward the newest atom.
-    It is a position in the keeper's checkpoint history — the trace — and
-    every runtime cuts its request from that one history, so a position
-    measured on one names the same atom on the next.
-    While the process holds a ledger for the (keeper, runtime) pair, the
-    front is the ledger's: the last request's front as every eviction since
-    moved it. Without one, the first turn after a boot or the first on this
-    runtime, the seed is the range the newest turn record joined to an actual
-    provider response, whichever runtime observed it — an official client's
-    record counts the same history as an Agent Core one — read as
-    [total_atoms - transmitted_atoms]; a lane walking to its next candidate
-    starts from the range the last answered request carried rather than from
-    the oldest atom.
-    With neither, the range starts where the last completed turn on this
-    history ended ({!Turn_start}, RFC keeper-context-window-in-tokens §13.4):
-    this turn's own atoms go out and the atoms before them wait for the
-    Librarian. The turn driver owns the one move a refusal forces, which
-    {!Halved_after_refusal} and {!Evicted_after_refusal} name. These
-    positions belong to the turn and take precedence over an older front in
-    a later candidate's ledger.
+    Where a request starts is chosen in one place,
+    {!Keeper_turn_driver_try_provider.choose_range_start}: a Librarian
+    continuity snapshot that fits the history, else the Librarian's read
+    position in it, else a seed this history still holds, else where the
+    last completed turn on this history ended ({!Turn_start}). The turn's
+    composition and the next-request forecast both ask it. This module holds
+    the vocabulary of that choice -- the seed, the turn start, and the
+    {!origin} a request reports -- and the reads that produce a seed.
+
+    A seed is the front of a range already carried: the oldest atom that
+    request carried. It is a position in the keeper's checkpoint history --
+    the trace -- and every runtime cuts its request from that one history,
+    so a position measured on one names the same atom on the next. While the
+    process holds a ledger for the (keeper, runtime) pair, the seed is the
+    ledger's: the last request's front as every eviction since moved it.
+    Without one, it is the range the newest turn record joined to an actual
+    provider response, whichever runtime observed it -- an official client's
+    record counts the same history as an Agent Core one -- read as
+    [total_atoms - transmitted_atoms]. A front a refusal moved in this turn
+    ({!Halved_after_refusal}, {!Evicted_after_refusal},
+    {!Turn_start_after_seed_refusal}) belongs to the turn and takes
+    precedence over an older front in a later candidate's ledger.
 
     A front is a position: the atom index and the digest of the message that
     opens that atom
@@ -43,6 +45,10 @@ type source =
   | Evicted_after_refusal of { retry : int }
       (** A provider or wire refusal moved the front past measured blocks.
           The turn shares this position with its later candidates. *)
+  | Turn_start_after_seed_refusal
+      (** With no Librarian point, the provider refused the range a seed
+          opened as too large: the front moved to the turn boundary, and the
+          turn shares that position with its later candidates and lanes. *)
 
 type seed =
   { first_atom : int
@@ -239,7 +245,9 @@ val seed_to_json : seed -> Yojson.Safe.t
 val origin_to_string : origin -> string
 
 val origin_to_json : origin -> Yojson.Safe.t
-(** One object with a [kind]: [ledger], [turn_record] with [turn],
-    [halved_after_refusal] or [evicted_after_refusal] with [retry],
-    [librarian_snapshot] with [end_atom] and [boundary_line], or
-    [turn_start] with [end_atom]. *)
+(** One object with a [kind], one per constructor: [ledger];
+    [turn_record] with [turn]; [halved_after_refusal] or
+    [evicted_after_refusal] with [retry]; [turn_start_after_seed_refusal];
+    [librarian_snapshot] with [end_atom] and [boundary_line];
+    [librarian_progress] with [end_atom]; [turn_start] with [end_atom]; or
+    [turn_start_unknown] with [reason]. *)

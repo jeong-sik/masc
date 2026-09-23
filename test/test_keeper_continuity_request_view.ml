@@ -31,14 +31,15 @@ let provider_config = Agent_core.Llm_provider.Provider_config.make
 let measure m = String.length (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json m))
 let encode messages = Yojson.Safe.to_string (`List (List.map Agent_core.Checkpoint.message_to_json messages))
 
-let view ?front ?(last_resort = false) snapshot messages =
+let view ?front snapshot messages =
   let _, lines = capture_source source in
   let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
   Driver.For_testing.request_view ~continuity ~provider_config
     ~measure_message_bytes:measure ~front
     ~history_digest_at:(Window.atom_opening_digest messages)
-    ~last_resort ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int
+    ~current_turn_results:Driver.Current_turn_verbatim
+    ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int
     ~turn_boundary:(Front.Turn_boundary { end_atom = snapshot.Snapshot.end_atom })
     ~materialize:(fun ~pending:_ _ -> fail "unsummarized history entered tool demotion") messages
 ;;
@@ -78,6 +79,42 @@ let tool_pair () =
        outcome = T.Tool_succeeded; json = None; content_blocks = None}]) with tool_call_id = Some "read-1" }]
 ;;
 
+(* A seed range reaches behind this turn, so an earlier turn's tool body in
+   it goes out as a marker at the turn boundary, as it does with no
+   continuity. Before, a turn with no Librarian point sent those bodies raw
+   every time its range grew back over them. *)
+let test_without_snapshot_seed_demotes_earlier_tool_bodies () =
+  let earlier_body = String.make 4_000 'o' in
+  let earlier =
+    [ pinned; text T.User "Read the old log.";
+      message T.Assistant [T.ToolUse {id = "old-1"; name = "read_file"; input = `Assoc []}];
+      { (message T.Tool [T.ToolResult {tool_use_id = "old-1"; content = earlier_body;
+          outcome = T.Tool_succeeded; json = None; content_blocks = None}])
+        with tool_call_id = Some "old-1" };
+      text T.Assistant "Read the log." ] in
+  let this_turn = [text T.User "Continue from the log."] in
+  let messages = earlier @ this_turn in
+  let completed_end = snd (Window.annotate earlier) in
+  let history_digest_at = Window.atom_opening_digest messages in
+  let front_digest = history_digest_at 0 |> Option.get in
+  let front : Front.seed = {first_atom = 0; front_digest; source = Front.Ledger} in
+  let planned = ref 0 in
+  let seeded =
+    Driver.For_testing.request_view ~continuity:Driver.without_snapshot
+      ~provider_config ~measure_message_bytes:measure ~front:(Some front)
+      ~history_digest_at ~current_turn_results:Driver.Current_turn_verbatim
+      ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:completed_end
+      ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
+      ~materialize:(fun ~pending messages -> planned := List.length pending; messages)
+      messages in
+  (match seeded.composed.origin with
+   | Front.Carried Front.Ledger -> ()
+   | _ -> fail "the range did not open on the seed");
+  check int "the seed range demotes at the turn boundary" completed_end
+    seeded.composed.demote_before;
+  check int "the earlier turn's tool body is planned as a marker" 1 !planned
+;;
+
 let test_actual_wire_and_tool_append () =
   let snapshot = snapshot () in
   let current = text T.User "Inspect the unpublished patch." in
@@ -97,17 +134,17 @@ let test_actual_wire_and_tool_append () =
     second.composed.transmitted_bytes
 ;;
 
-let test_old_front_and_last_resort_do_not_drop_unread () =
+let test_an_old_front_does_not_drop_unread () =
   let snapshot = snapshot () in
   let suffix = [text T.User "First pending request"] @ tool_pair ()
     @ [text T.User "Second pending request"] in
   let messages = source @ suffix in
   let front_digest = Window.atom_opening_digest messages 4 |> Option.get in
   let front : Front.seed = {first_atom = 4; front_digest; source = Front.Ledger} in
-  let projected = view ~front ~last_resort:true snapshot messages in
+  let projected = view ~front snapshot messages in
   check string "old advanced ledger cannot discard pending work" (encode (pinned :: suffix))
     (encode (without_working_state (wire projected)));
-  check int "last resort cannot demote uncovered tools" 0 projected.composed.demote_before;
+  check int "a snapshot range demotes nothing" 0 projected.composed.demote_before;
   (match projected.composed.origin with
    | Front.Librarian_snapshot {end_atom = 2; boundary_line = 1} -> ()
    | _ -> fail "request attribution lost exact snapshot frontier")
@@ -145,28 +182,62 @@ let test_each_request_validates_frozen_covered_messages () =
    | Error Snapshot.Trace_mismatch -> () | _ -> fail "dispatch accepted another trace's snapshot")
 ;;
 
-(* Without a snapshot the range starts at the end of the last completed turn
-   (RFC keeper-context-window-in-tokens §13.4). An older eviction front does
-   not move it either way: on a fresh history everything goes, and on a
-   history with completed turns only this turn's own atoms go. *)
+(* Without a snapshot the range starts at the seed when one is valid for
+   this history, and only with none at the end of the last completed turn
+   (RFC keeper-context-window-in-tokens §13.4). A keeper whose Librarian has
+   no point yet keeps carrying the earlier turns its ledger front holds. *)
 let test_without_snapshot_starts_at_the_turn_start () =
   let this_turn = [text T.User "Fresh unsummarized work"] @ tool_pair () in
   let messages = source @ this_turn in
-  let front_digest = Window.atom_opening_digest messages 3 |> Option.get in
-  let front : Front.seed = {first_atom = 3; front_digest; source = Front.Ledger} in
-  let project ~turn_boundary = Driver.For_testing.request_view ~continuity:Driver.without_snapshot
-    ~provider_config ~measure_message_bytes:measure ~front:(Some front)
-    ~history_digest_at:(Window.atom_opening_digest messages) ~last_resort:true
-    ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int ~turn_boundary
-    ~materialize:(fun ~pending:_ _ -> fail "fresh history entered demotion") messages in
+  let completed_end = snd (Window.annotate source) in
+  let project ?front ~turn_boundary () =
+    Driver.For_testing.request_view ~continuity:Driver.without_snapshot
+      ~provider_config ~measure_message_bytes:measure ~front
+      ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
+      ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:completed_end ~turn_boundary
+      ~materialize:(fun ~pending:_ _ -> fail "unsummarized history entered demotion") messages in
+  (* A seed older than the turn boundary: the earlier turn's assistant atom
+     goes out with this turn, and the origin names the seed's source. *)
+  let seed_atom = 1 in
+  let front_digest = Window.atom_opening_digest messages seed_atom |> Option.get in
+  let front : Front.seed = {first_atom = seed_atom; front_digest; source = Front.Ledger} in
+  let seeded =
+    project ~front ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end }) () in
+  check int "the seed, not the turn boundary, opens the range" seed_atom
+    seeded.composed.projection.dropped_atoms;
+  check string "the earlier turn's atom reaches the wire with this turn"
+    (encode (pinned :: text T.Assistant "The build passed." :: this_turn))
+    (encode (without_preamble (wire seeded)));
+  check int "a seed range demotes at the turn boundary, not past it" completed_end
+    seeded.composed.demote_before;
+  (match seeded.composed.origin with
+   | Front.Carried Front.Ledger -> ()
+   | _ -> fail "the origin does not name the seed's source");
+  check bool "a valid seed is not reported as outlived" true
+    (Option.is_none seeded.composed.outlived_seed);
+  (* A seed whose atom this history opens with another message is dropped
+     and the range falls back to the turn boundary. *)
+  let other_digest = Window.atom_opening_digest messages 0 |> Option.get in
+  let stale : Front.seed = {first_atom = seed_atom; front_digest = other_digest; source = Front.Ledger} in
+  let dropped =
+    project ~front:stale ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end }) () in
+  check int "a seed this history does not hold falls back to the turn boundary" completed_end
+    dropped.composed.projection.dropped_atoms;
+  (match dropped.composed.origin with
+   | Front.Turn_start {end_atom} when end_atom = completed_end -> ()
+   | _ -> fail "a dropped seed still named the origin");
+  (match dropped.composed.outlived_seed with
+   | Some (_, Front.Front_message_differs) -> ()
+   | _ -> fail "the dropped seed and its reason were not reported");
+  (* No seed: the turn boundary opens the range. *)
+  let project ~turn_boundary = project ?front:None ~turn_boundary () in
   let fresh = project ~turn_boundary:(Front.Turn_boundary { end_atom = 0 }) in
   check string "on a fresh history every message reaches the wire" (encode messages)
     (encode (wire fresh));
-  check int "an older front cannot discard unsummarized history" 0 fresh.composed.projection.dropped_atoms;
+  check int "a fresh history with no seed drops nothing" 0 fresh.composed.projection.dropped_atoms;
   check int "last resort cannot demote fresh history" 0 fresh.composed.demote_before;
   (match fresh.composed.origin with
-   | Front.Turn_start {end_atom = 0} -> () | _ -> fail "a fresh history attributed to an old front");
-  let completed_end = snd (Window.annotate source) in
+   | Front.Turn_start {end_atom = 0} -> () | _ -> fail "a fresh history not attributed to its turn start");
   let continued = project ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end }) in
   check int "with completed turns the range starts where the last one ended" completed_end
     continued.composed.projection.dropped_atoms;
@@ -215,13 +286,44 @@ let test_turn_start_reader_says_unknown_when_the_store_is_unreadable () =
      fail (Printf.sprintf "an unreadable boundary store answered atom %d" end_atom))
 ;;
 
+(* A boundary log whose end lines no longer match the history -- the history
+   was rewritten or renumbered after they were written -- is an unknown start,
+   not the start: 0 would send the whole history, the provider would refuse
+   it, and the failed turn would write no end line to fix the next one. A log
+   with no end line of this trace is a first turn, and that one is 0. *)
+let test_turn_start_is_unknown_when_no_end_line_matches_the_history () =
+  let base_path = Filename.temp_dir "turn-start-unmatched-" "" in
+  let config = Masc.Workspace.default_config base_path in
+  let keeper_name = "renumbered" in
+  let keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+  (match Driver.turn_start ~config ~keeper_name ~trace_id ~messages:source with
+   | Front.Turn_boundary { end_atom = 0 } -> ()
+   | Front.Turn_boundary { end_atom } ->
+     fail (Printf.sprintf "a log with no end line answered atom %d" end_atom)
+   | Front.Turn_boundary_unknown { reason } ->
+     fail ("a log with no end line answered unknown: " ^ reason));
+  let position = match Boundary.position_of_messages source with
+    | Ok position -> position | Error detail -> fail detail in
+  mkdir_p (Filename.concat keepers_dir keeper_name);
+  (match Boundary.append ~keepers_dir ~keeper_id:keeper_name
+     { Boundary.recorded_at = 1.; event = Boundary.Turn_ended
+         { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+           history_at_start = Boundary.Fresh_history; position } } with
+   | Ok () -> () | Error error -> fail (Boundary.append_error_to_string error));
+  let rewritten = [pinned; text T.User "Rebuild the patch."; text T.Assistant "The rebuild passed."] in
+  (match Driver.turn_start ~config ~keeper_name ~trace_id ~messages:rewritten with
+   | Front.Turn_boundary_unknown _ -> ()
+   | Front.Turn_boundary { end_atom } ->
+     fail (Printf.sprintf "an end line that matches nothing answered atom %d" end_atom))
+;;
+
 let progress ~trace_id ~end_atom ~last_atom_digest : Progress.t =
   { position = { Progress.trace_id; end_atom; last_atom_digest }; boundary_lines_seen = 1 }
 ;;
 
 let absorbed_view continuity messages =
   Driver.For_testing.request_view ~continuity ~provider_config ~measure_message_bytes:measure
-    ~front:None ~history_digest_at:(Window.atom_opening_digest messages) ~last_resort:false
+    ~front:None ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
     ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int
     (* Unread under a position: the range starts at the position itself. *)
     ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
@@ -278,6 +380,65 @@ let test_absorbed_history_starts_at_the_librarians_position () =
    | Error _ -> () | Ok () -> fail "a history that changed under the position passed its check")
 ;;
 
+(* The forecast asks the driver's own chooser, so every start the driver
+   can take shows up in the forecast unchanged: the origin, the atom the
+   range opens on and its bytes. The first three cases hold a seed this
+   history still opens with the same message, so a forecast that tried the
+   seed before the Librarian point would name the seed where the driver
+   names the snapshot or the read position. *)
+let test_the_forecast_takes_the_drivers_start () =
+  let fresh = text T.User "Fresh unsummarized work" in
+  let messages = source @ [fresh] in
+  let digest_at = Window.atom_opening_digest messages in
+  let held_seed : Front.seed =
+    {first_atom = 0; front_digest = Option.get (digest_at 0); source = Front.Ledger} in
+  let outlived_seed : Front.seed =
+    {first_atom = 0; front_digest = "not-the-opening-message"; source = Front.Ledger} in
+  let snapshot, lines = capture_source source in
+  let summarized = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
+    | Ok continuity -> continuity | Error error -> fail (Snapshot.error_to_string error) in
+  let absorbed =
+    match Driver.absorbed_history ~trace_id ~messages
+            (progress ~trace_id ~end_atom:1 ~last_atom_digest:(Option.get (digest_at 0))) with
+    | Some (_, continuity) -> continuity
+    | None -> fail "a position that matches this history was refused" in
+  let boundary = Front.Turn_boundary { end_atom = 2 } in
+  let unknown = Front.Turn_boundary_unknown { reason = "boundary read failed: fixture" } in
+  let cases =
+    [ "a fitting snapshot", summarized, Some held_seed, boundary,
+      (function Front.Librarian_snapshot _ -> true | _ -> false);
+      "the read position", absorbed, Some held_seed, boundary,
+      (function Front.Librarian_progress { end_atom = 1 } -> true | _ -> false);
+      "a held seed", Driver.without_snapshot, Some held_seed, boundary,
+      (function Front.Carried Front.Ledger -> true | _ -> false);
+      "an outlived seed", Driver.without_snapshot, Some outlived_seed, boundary,
+      (function Front.Turn_start { end_atom = 2 } -> true | _ -> false);
+      "the turn boundary", Driver.without_snapshot, None, boundary,
+      (function Front.Turn_start { end_atom = 2 } -> true | _ -> false);
+      "an unknown boundary", Driver.without_snapshot, None, unknown,
+      (function Front.Turn_start_unknown _ -> true | _ -> false) ]
+  in
+  List.iter (fun (name, continuity, front, turn_boundary, expected) ->
+    let driver =
+      Driver.For_testing.request_view ~continuity ~provider_config
+        ~measure_message_bytes:measure ~front ~history_digest_at:digest_at
+        ~current_turn_results:Driver.Current_turn_verbatim
+        ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:0 ~turn_boundary
+        ~materialize:(fun ~pending:_ messages -> messages) messages in
+    let forecast =
+      Masc.Keeper_next_request_forecast.carry ~measure ~continuity:(Some continuity) ~front
+        ~turn_start:turn_boundary ~counted_tokens:None messages in
+    check bool (name ^ ": the driver takes the start this case names") true
+      (expected driver.composed.origin);
+    check bool (name ^ ": the forecast names the driver's origin") true
+      (forecast.origin = driver.composed.origin);
+    check int (name ^ ": from the same atom")
+      driver.composed.projection.dropped_atoms forecast.first_atom;
+    check int (name ^ ": with the same bytes")
+      driver.composed.transmitted_bytes forecast.transmitted_bytes)
+    cases
+;;
+
 let exchange id body =
   [message T.Assistant [T.ToolUse {id; name = "read_file"; input = `Assoc []}];
    { (message T.Tool [T.ToolResult {tool_use_id = id; content = body;
@@ -314,7 +475,7 @@ let test_small_externalizes_only_completed_bodies () =
   let project ?(base_path = base_path) ?(continuity = Some behind) policy =
     Driver.For_testing.request_view ~input_policy:policy ?continuity
       ~provider_config ~measure_message_bytes:measure ~front:None
-      ~history_digest_at:(Window.atom_opening_digest messages) ~last_resort:true
+      ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
       ~base_path ~demote_before:completed_end ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
       ~materialize:(fun ~pending messages ->
         (Masc.Keeper_model_input_demotion.materialize ~store
@@ -327,7 +488,7 @@ let test_small_externalizes_only_completed_bodies () =
   check string "Small without continuity also protects unfinished work" current_body
     (body_for "unfinished" (project ~continuity:None Small));
   check int "externalization does not omit messages" (List.length carried) (List.length small);
-  check string "unfinished tool body remains raw even after refusal" current_body
+  check string "unfinished tool body remains raw" current_body
     (body_for "unfinished" small);
   check bool "non-tool obligations are unchanged" true
     (List.mem (List.hd current) small);
@@ -341,8 +502,8 @@ let test_small_externalizes_only_completed_bodies () =
     (encode (project Wide |> without_working_state |> without_preamble));
   check string "disabled store/reader path keeps exact raw source" (encode carried)
     (encode (project ~base_path:"" Small |> without_working_state |> without_preamble));
-  (* No snapshot at all: the range starts at the completed boundary, so this
-     turn goes raw and there is no completed body left to demote. *)
+  (* No snapshot and no seed: the range starts at the completed boundary, so
+     this turn goes raw and there is no completed body left to demote. *)
   check string "without a snapshot only this turn goes, raw" (encode (pinned :: current))
     (encode (project ~continuity:(Some Driver.without_snapshot) Small));
   let snapshot, lines = capture_source completed in
@@ -373,7 +534,7 @@ let test_failed_externalization_keeps_raw_body () =
   let projected = Driver.For_testing.request_view ~input_policy:Small
     ~continuity:behind ~provider_config ~measure_message_bytes:measure
     ~front:None ~history_digest_at:(Window.atom_opening_digest messages)
-    ~last_resort:false ~base_path ~demote_before:completed_end ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
+    ~current_turn_results:Driver.Current_turn_verbatim ~base_path ~demote_before:completed_end ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
     ~materialize:(fun ~pending messages ->
       let outcome = Masc.Keeper_model_input_demotion.materialize
         ~store:(Tool_blob_store.create ~base_path)
@@ -406,8 +567,8 @@ let test_completed_boundary_protects_resumed_work () =
     | [T.ToolUse fields] when fields.id = "completed" ->
       {m with content = [T.ToolUse {fields with id = "changed"}]}
     | _ -> m) resumed in
-  check bool "mismatching completed atom never authorizes demotion" true
-    (Result.is_error (completed_end lines mismatched));
+  check bool "mismatching completed atom is an unmatched history, not the start" true
+    (completed_end lines mismatched = Error Snapshot.Unmatched_history);
   let baseline = List.map (fun (line, record) -> line,
     Result.map (fun (record : Boundary.record) ->
       match record.event with
@@ -483,7 +644,8 @@ let test_an_unusable_snapshot_starts_without_it () =
   let moved = [pinned; text T.User "Start over on the docs"; text T.Assistant "Docs drafted."; fresh] in
   let moved_digest = Window.atom_opening_digest moved in
   (match Driver.prepare_continuity ~trace_id ~lines ~messages:moved snapshot with
-   | Error (Snapshot.Trace_mismatch | Snapshot.History_changed | Snapshot.Uncovered_history) -> ()
+   | Error (Snapshot.Trace_mismatch | Snapshot.History_changed | Snapshot.Uncovered_history
+           | Snapshot.Unmatched_history) -> ()
    | Ok _ | Error _ -> fail "the fixture's moved history still fits the snapshot");
   (match
      (absorbed_view
@@ -652,13 +814,17 @@ let () = run "continuity request projection"
                test_case "small and wide actual body projection" `Quick test_small_externalizes_only_completed_bodies;
                test_case "failed blob write retains raw body" `Quick test_failed_externalization_keeps_raw_body;
                test_case "actual wire and tool append" `Quick test_actual_wire_and_tool_append;
-               test_case "old front and last resort" `Quick test_old_front_and_last_resort_do_not_drop_unread;
+               test_case "old front" `Quick test_an_old_front_does_not_drop_unread;
                test_case "all covered" `Quick test_all_covered_keeps_only_working_and_pinned;
                test_case "covered prefix validation per request" `Quick test_each_request_validates_frozen_covered_messages;
-               test_case "without a snapshot the range starts at the turn start" `Quick test_without_snapshot_starts_at_the_turn_start;
+               test_case "without a snapshot the range starts at the seed, else the turn start" `Quick test_without_snapshot_starts_at_the_turn_start;
+               test_case "without a snapshot a seed range demotes earlier tool bodies" `Quick test_without_snapshot_seed_demotes_earlier_tool_bodies;
                test_case "the reader says unknown when the boundary store is unreadable" `Quick test_turn_start_reader_says_unknown_when_the_store_is_unreadable;
+               test_case "the reader says unknown when no end line matches the history" `Quick test_turn_start_is_unknown_when_no_end_line_matches_the_history;
                test_case "absorbed history starts at the Librarian's position" `Quick
                  test_absorbed_history_starts_at_the_librarians_position;
+               test_case "the forecast takes the driver's start" `Quick
+                 test_the_forecast_takes_the_drivers_start;
                test_case "an unusable snapshot starts without it" `Quick
                  test_an_unusable_snapshot_starts_without_it;
                test_case "official lanes take the same choice" `Quick

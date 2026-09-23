@@ -268,6 +268,95 @@ let test_tolerates_invalid_pid_file () =
       | Server_startup_takeover.Already_running _ ->
           Alcotest.fail "invalid pid file should be overwritten")
 
+let process_state_testable =
+  Alcotest.testable
+    (fun fmt state ->
+       Format.pp_print_string
+         fmt
+         (match state with
+          | Server_startup_takeover.Running -> "Running"
+          | Server_startup_takeover.Zombie -> "Zombie"
+          | Server_startup_takeover.Gone -> "Gone"))
+    ( = )
+
+let test_process_state_of_observation () =
+  let state ~signal_reachable ps_stat =
+    Server_startup_takeover.process_state_of_observation ~signal_reachable ~ps_stat
+  in
+  Alcotest.check process_state_testable "zombie stat" Server_startup_takeover.Zombie
+    (state ~signal_reachable:true (Some "Z\n"));
+  Alcotest.check process_state_testable "zombie with flags"
+    Server_startup_takeover.Zombie (state ~signal_reachable:true (Some " Z+ "));
+  Alcotest.check process_state_testable "sleeping is running"
+    Server_startup_takeover.Running (state ~signal_reachable:true (Some "Ss\n"));
+  Alcotest.check process_state_testable "ps silent keeps kill answer"
+    Server_startup_takeover.Running (state ~signal_reachable:true None);
+  Alcotest.check process_state_testable "empty stat keeps kill answer"
+    Server_startup_takeover.Running (state ~signal_reachable:true (Some ""));
+  Alcotest.check process_state_testable "unreachable is gone"
+    Server_startup_takeover.Gone (state ~signal_reachable:false (Some "Z"))
+
+(* The refusal an operator met (2026-09-23): the lock named PID 99440, ps
+   showed it as <defunct> with STAT Z, nothing listened on 8935, and every
+   start answered "alive but does not look like a masc server". An unreaped
+   child of this test process is the same shape: kill(pid, 0) succeeds and
+   ps reports Z. *)
+let test_reclaims_zombie_pid_file () =
+  with_temp_dir "startup-takeover-zombie" (fun dir ->
+      let pid =
+        match Unix.fork () with
+        | 0 -> Unix._exit 0
+        | pid -> pid
+      in
+      Fun.protect ~finally:(fun () -> ignore (waitpid_nointr pid)) (fun () ->
+          let is_zombie () =
+            let ic =
+              Unix.open_process_in
+                (Printf.sprintf "ps -p %d -o stat= 2>/dev/null" pid)
+            in
+            let stat = try input_line ic with End_of_file -> "" in
+            ignore (Unix.close_process_in ic);
+            String.length (String.trim stat) > 0
+            && Char.equal (String.trim stat).[0] 'Z'
+          in
+          if not (wait_until ~timeout_sec:2.0 is_zombie) then
+            Alcotest.fail "forked child did not become a zombie";
+          Alcotest.(check bool) "kill 0 still reaches the zombie" false
+            (pid_is_absent pid);
+          let path = lock_path dir in
+          write_file path (Printf.sprintf "%d\n" pid);
+          let port = find_free_port () in
+          match
+            Server_startup_takeover.acquire_pid_lock ~lock_path:path
+              ~probe_timeout_sec:0.1 port
+          with
+          | Server_startup_takeover.Acquired ->
+              Alcotest.(check int) "current pid written" (Unix.getpid ())
+                (pid_from_file path);
+              Alcotest.(check bool) "no takeover signal was needed" false
+                (Sys.file_exists
+                   (Server_startup_takeover.takeover_breadcrumb_path
+                      ~lock_path:path))
+          | Server_startup_takeover.Already_running _ ->
+              Alcotest.fail "a zombie holder must not block the lock"))
+
+let test_refuses_live_unrelated_holder () =
+  with_temp_dir "startup-takeover-unrelated" (fun dir ->
+      with_forever_process ~argv0:"unrelated-holder" ~ignore_sigterm:false
+        (fun pid ->
+          let path = lock_path dir in
+          write_file path (Printf.sprintf "%d\n" pid);
+          let port = find_free_port () in
+          match
+            Server_startup_takeover.acquire_pid_lock ~lock_path:path
+              ~probe_timeout_sec:0.1 port
+          with
+          | Server_startup_takeover.Already_running { pid = running_pid } ->
+              Alcotest.(check int) "pid preserved" pid running_pid;
+              Alcotest.(check bool) "holder left alive" true (process_alive pid)
+          | Server_startup_takeover.Acquired ->
+              Alcotest.fail "a live non-masc holder must block takeover"))
+
 let test_escalates_sigkill_for_unresponsive_holder () =
   with_temp_dir "startup-takeover-unresponsive" (fun dir ->
       with_forever_process ~argv0:"main_eio.exe" ~ignore_sigterm:true (fun pid ->
@@ -1262,6 +1351,12 @@ let () =
             test_reclaims_stale_pid_file;
           Alcotest.test_case "invalid pid file is overwritten" `Quick
             test_tolerates_invalid_pid_file;
+          Alcotest.test_case "process state reads zombie from ps stat" `Quick
+            test_process_state_of_observation;
+          Alcotest.test_case "zombie pid file is reclaimed" `Quick
+            test_reclaims_zombie_pid_file;
+          Alcotest.test_case "live unrelated holder blocks takeover" `Quick
+            test_refuses_live_unrelated_holder;
           Alcotest.test_case "unresponsive holder escalates to sigkill" `Quick
             test_escalates_sigkill_for_unresponsive_holder;
           Alcotest.test_case "breadcrumb round-trips and ages out" `Quick

@@ -573,15 +573,35 @@ let test_reopened_goal_enters_a_new_verification_cycle () =
   ignore (must_succeed "new completion request" (transition ctx goal_id "request_complete"));
   check string "new request reaches verifying" "verifying" (stored_phase config goal_id);
   (match Goal_verification_agent.For_testing.collect_pending config with
-   | Ok work -> check bool "the verifier can collect the new proof request" true
+   | Ok { Goal_verification_agent.For_testing.collected = work; _ } -> check bool "the verifier can collect the new proof request" true
        (List.exists (fun (work : Goal_verification_agent.For_testing.pending_work) -> work.goal_id = goal_id) work)
    | Error failure -> fail (Goal_verification_agent.For_testing.scan_failure_to_string failure));
-  let pending = ledger_record config goal_id in
-  (match Goal_verification.reopen_goal config ~goal_id ~note:None ~actor:"delayed-reopen" with
-   | Error _ -> ()
-   | Ok _ -> fail "Reopen cannot interrupt a newly pending review");
-  check bool "new pending proof remains byte-for-byte unchanged" true
-    (pending = ledger_record config goal_id);
+  (* Reopen from the new Verifying goes back to Executing and archives the
+     pending request; the stale request cannot be answered afterwards. *)
+  let stale_request, stale_criterion = proof_identity config goal_id in
+  ignore (must_succeed "reopen from verifying" (transition ctx goal_id "reopen"));
+  check string "reopen from verifying returns to execution" "executing" (stored_phase config goal_id);
+  check bool "the pending request is no longer active" true
+    ((ledger_record config goal_id).completion = Goal_verification.Completion_idle);
+  let archived_pending =
+    String.split_on_char '\n' (goal_events_text config)
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.map Yojson.Safe.from_string
+    |> List.filter (fun event ->
+      json_state event [ "event_type" ] = "goal_proof_reopened"
+      && (match Yojson.Safe.Util.(event |> member "payload" |> member "previous_completion"
+                                   |> member "request_id") with
+          | `String request_id -> String.equal request_id stale_request
+          | _ -> false))
+  in
+  check int "the pending request is archived once" 1 (List.length archived_pending);
+  ignore (must_fail "stale answer after reopen"
+    (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
+       ~start_time:0. config ~goal_id ~request_id:stale_request ~criterion:stale_criterion
+       ~verification_run_id:"stale-verifier-run"
+       ~decision:Workspace_goals.Proof_proven ~evidence:"stale proof"));
+  check string "stale answer leaves the goal executing" "executing" (stored_phase config goal_id);
+  ignore (must_succeed "third completion request" (transition ctx goal_id "request_complete"));
   let request_id, criterion = proof_identity config goal_id in
   ignore (must_succeed "second proof"
     (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
@@ -625,6 +645,54 @@ let test_dropped_pending_proof_gets_a_new_request_after_reopen () =
   check string "new execution remains verifying" "verifying" (stored_phase config goal_id);
   let still_pending, _ = proof_identity config goal_id in
   check string "old answer did not consume the new request" new_request still_pending
+;;
+
+(* The operator can leave [Verifying] without a verdict. A verdict the verifier
+   delivers afterwards names a phase the goal is no longer in: it is refused,
+   the goal stays where the operator put it, and the ledger does not take it. *)
+let test_verdict_after_drop_from_verifying_is_refused () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Drop while the verifier is silent" in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  check string "verifying before drop" "verifying" (stored_phase config goal_id);
+  let request_id, criterion = proof_identity config goal_id in
+  let dropped = must_succeed "drop from verifying" (transition ctx goal_id "drop") in
+  check string "drop moves verifying to dropped" "dropped"
+    (json_state dropped [ "goal"; "phase" ]);
+  ignore (must_fail "late verdict after drop"
+    (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
+       ~start_time:0. config ~goal_id ~verification_run_id:"late-run"
+       ~request_id ~criterion
+       ~decision:Workspace_goals.Proof_proven ~evidence:"late proof"));
+  check string "late verdict does not resurrect the goal" "dropped"
+    (stored_phase config goal_id);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_proven _ | Goal_verification.Proof_refuted _
+   | Goal_verification.Human_confirmed _ -> fail "late verdict was recorded"
+   | Goal_verification.Proof_pending _ | Goal_verification.Completion_idle -> ())
+;;
+
+let test_reopen_from_verifying_clears_the_pending_request () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Reopen while the verifier is silent" in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let request_id, criterion = proof_identity config goal_id in
+  let reopened = must_succeed "reopen from verifying" (transition ctx goal_id "reopen") in
+  check string "reopen moves verifying to executing" "executing"
+    (json_state reopened [ "goal"; "phase" ]);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Completion_idle -> ()
+   | _ -> fail "reopen from verifying retained the pending request");
+  ignore (must_fail "late refutation after reopen"
+    (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
+       ~start_time:0. config ~goal_id ~verification_run_id:"late-run"
+       ~request_id ~criterion
+       ~decision:(Workspace_goals.Proof_refuted { reason = "late" })
+       ~evidence:"late refutation"));
+  check string "late verdict leaves the goal executing" "executing"
+    (stored_phase config goal_id)
 ;;
 
 let test_repeated_reopen_preserves_a_new_refuted_proof () =
@@ -1194,6 +1262,10 @@ let () =
             test_reopened_goal_enters_a_new_verification_cycle
         ; test_case "dropped pending proof gets a new request after reopen" `Quick
             test_dropped_pending_proof_gets_a_new_request_after_reopen
+        ; test_case "verdict after drop from verifying is refused" `Quick
+            test_verdict_after_drop_from_verifying_is_refused
+        ; test_case "reopen from verifying clears the pending request" `Quick
+            test_reopen_from_verifying_clears_the_pending_request
         ; test_case "repeated reopen preserves a newer refuted proof" `Quick
             test_repeated_reopen_preserves_a_new_refuted_proof
         ; test_case "failed reopen archive can be retried without losing proof" `Quick

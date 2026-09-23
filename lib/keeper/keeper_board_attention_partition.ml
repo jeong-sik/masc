@@ -72,8 +72,19 @@ type blocked_reason =
   | Candidate_membership_conflict of string
   | Durable_partition_invariant of string
   | Exact_setup_unavailable of string
-  | Exact_flow_replayed
-  | Exact_execution_terminal
+  | Exact_flow_replayed of running_progress option
+  | Exact_lane_exhausted of
+      { detail : string
+      ; progress : running_progress option
+      }
+  | Exact_flow_bookkeeping_failed of
+      { detail : string
+      ; progress : running_progress option
+      }
+  | Exact_completion_failed of
+      { detail : string
+      ; progress : running_progress option
+      }
   | Domain_output_invalid of
       { detail : string
       ; progress : running_progress option
@@ -82,8 +93,12 @@ type blocked_reason =
       { detail : string
       ; progress : running_progress option
       }
-  | Unexpected_worker_failure of string
+  | Unexpected_worker_failure of
+      { detail : string
+      ; progress : running_progress option
+      }
   | Exact_execution_quarantined of running_progress
+  | Exact_execution_interrupted of running_progress
 
 type running_state =
   { worker_epoch : Worker_epoch.t
@@ -99,6 +114,7 @@ type state =
       ; completed_at : float
       }
   | Settled of { settled_at : float }
+  | Abandoned of { abandoned_at : float }
   | Blocked of
       { reason : blocked_reason
       ; blocked_at : float
@@ -130,13 +146,14 @@ type requeue_blocked_outcome =
   | Generation_conflict of string
 
 let ( let* ) = Result.bind
-let schema_version = 6
+let schema_version = 7
 
 let state_to_string = function
   | Ready -> "ready"
   | Running _ -> "running"
   | Completed _ -> "completed"
   | Settled _ -> "settled"
+  | Abandoned _ -> "abandoned"
   | Blocked _ -> "blocked"
 ;;
 
@@ -183,6 +200,19 @@ let running_progress_to_yojson = function
       ]
 ;;
 
+let optional_progress_to_yojson = function
+  | Some progress -> running_progress_to_yojson progress
+  | None -> `Null
+;;
+
+let classified_failure_to_yojson ~kind detail progress =
+  `Assoc
+    [ "kind", `String kind
+    ; "detail", `String detail
+    ; "progress", optional_progress_to_yojson progress
+    ]
+;;
+
 let blocked_reason_to_yojson = function
   | Candidate_membership_conflict detail ->
     `Assoc [ "kind", `String "candidate_membership_conflict"; "detail", `String detail ]
@@ -190,32 +220,31 @@ let blocked_reason_to_yojson = function
     `Assoc [ "kind", `String "durable_partition_invariant"; "detail", `String detail ]
   | Exact_setup_unavailable detail ->
     `Assoc [ "kind", `String "exact_setup_unavailable"; "detail", `String detail ]
-  | Exact_flow_replayed -> `Assoc [ "kind", `String "exact_flow_replayed" ]
-  | Exact_execution_terminal ->
-    `Assoc [ "kind", `String "exact_execution_terminal" ]
+  | Exact_flow_replayed progress ->
+    `Assoc
+      [ "kind", `String "exact_flow_replayed"
+      ; "progress", optional_progress_to_yojson progress
+      ]
+  | Exact_lane_exhausted { detail; progress } ->
+    classified_failure_to_yojson ~kind:"exact_lane_exhausted" detail progress
+  | Exact_flow_bookkeeping_failed { detail; progress } ->
+    classified_failure_to_yojson ~kind:"exact_flow_bookkeeping_failed" detail progress
+  | Exact_completion_failed { detail; progress } ->
+    classified_failure_to_yojson ~kind:"exact_completion_failed" detail progress
   | Domain_output_invalid { detail; progress } ->
-    `Assoc
-      [ "kind", `String "domain_output_invalid"
-      ; "detail", `String detail
-      ; ( "progress"
-        , match progress with
-          | Some progress -> running_progress_to_yojson progress
-          | None -> `Null )
-      ]
+    classified_failure_to_yojson ~kind:"domain_output_invalid" detail progress
   | Execution_provenance_mismatch { detail; progress } ->
-    `Assoc
-      [ "kind", `String "execution_provenance_mismatch"
-      ; "detail", `String detail
-      ; ( "progress"
-        , match progress with
-          | Some progress -> running_progress_to_yojson progress
-          | None -> `Null )
-      ]
-  | Unexpected_worker_failure detail ->
-    `Assoc [ "kind", `String "unexpected_worker_failure"; "detail", `String detail ]
+    classified_failure_to_yojson ~kind:"execution_provenance_mismatch" detail progress
+  | Unexpected_worker_failure { detail; progress } ->
+    classified_failure_to_yojson ~kind:"unexpected_worker_failure" detail progress
   | Exact_execution_quarantined progress ->
     `Assoc
       [ "kind", `String "exact_execution_quarantined"
+      ; "progress", running_progress_to_yojson progress
+      ]
+  | Exact_execution_interrupted progress ->
+    `Assoc
+      [ "kind", `String "exact_execution_interrupted"
       ; "progress", running_progress_to_yojson progress
       ]
 ;;
@@ -244,6 +273,8 @@ let state_to_yojson = function
       ]
   | Settled { settled_at } ->
     `Assoc [ "kind", `String "settled"; "settled_at", `Float settled_at ]
+  | Abandoned { abandoned_at } ->
+    `Assoc [ "kind", `String "abandoned"; "abandoned_at", `Float abandoned_at ]
   | Blocked { reason; blocked_at } ->
     `Assoc
       [ "kind", `String "blocked"
@@ -409,6 +440,27 @@ let running_progress_of_yojson json =
   | value -> Error (Printf.sprintf "unknown Board attention exact progress %S" value)
 ;;
 
+(* A classified failure never retains [Unbound]: an execution that bound no
+   provider call has no progress worth keeping, so it is written as [None]. *)
+let optional_progress_field ~context fields =
+  let* progress_json = field ~context "progress" fields in
+  match progress_json with
+  | `Null -> Ok None
+  | json ->
+    let* progress = running_progress_of_yojson json in
+    (match progress with
+     | Unbound -> Error "classified execution failure cannot retain unbound progress"
+     | Bound _ | Advancing _ -> Ok (Some progress))
+;;
+
+let classified_failure_fields ~context fields =
+  let* () = exact_fields ~context [ "kind"; "detail"; "progress" ] fields in
+  let* detail_json = field ~context "detail" fields in
+  let* detail = string_json ~context:(context ^ ".detail") detail_json in
+  let* progress = optional_progress_field ~context fields in
+  Ok (detail, progress)
+;;
+
 let blocked_reason_of_yojson json =
   let context = "Board attention blocked reason" in
   let* fields = assoc ~context json in
@@ -431,44 +483,27 @@ let blocked_reason_of_yojson json =
     let* detail = string_json ~context:(context ^ ".detail") detail_json in
     Ok (Exact_setup_unavailable detail)
   | "exact_flow_replayed" ->
-    let* () = exact_fields ~context [ "kind" ] fields in
-    Ok Exact_flow_replayed
-  | "exact_execution_terminal" ->
-    let* () = exact_fields ~context [ "kind" ] fields in
-    Ok Exact_execution_terminal
+    let* () = exact_fields ~context [ "kind"; "progress" ] fields in
+    let* progress = optional_progress_field ~context fields in
+    Ok (Exact_flow_replayed progress)
+  | "exact_lane_exhausted" ->
+    let* detail, progress = classified_failure_fields ~context fields in
+    Ok (Exact_lane_exhausted { detail; progress })
+  | "exact_flow_bookkeeping_failed" ->
+    let* detail, progress = classified_failure_fields ~context fields in
+    Ok (Exact_flow_bookkeeping_failed { detail; progress })
+  | "exact_completion_failed" ->
+    let* detail, progress = classified_failure_fields ~context fields in
+    Ok (Exact_completion_failed { detail; progress })
   | "domain_output_invalid" ->
-    let* () = exact_fields ~context [ "kind"; "detail"; "progress" ] fields in
-    let* detail_json = field ~context "detail" fields in
-    let* detail = string_json ~context:(context ^ ".detail") detail_json in
-    let* progress_json = field ~context "progress" fields in
-    let* progress =
-      match progress_json with
-      | `Null -> Ok None
-      | json -> running_progress_of_yojson json |> Result.map Option.some
-    in
-    (match progress with
-     | Some Unbound -> Error "classified execution failure cannot retain unbound progress"
-     | Some (Bound _ | Advancing _) | None ->
-       Ok (Domain_output_invalid { detail; progress }))
+    let* detail, progress = classified_failure_fields ~context fields in
+    Ok (Domain_output_invalid { detail; progress })
   | "execution_provenance_mismatch" ->
-    let* () = exact_fields ~context [ "kind"; "detail"; "progress" ] fields in
-    let* detail_json = field ~context "detail" fields in
-    let* detail = string_json ~context:(context ^ ".detail") detail_json in
-    let* progress_json = field ~context "progress" fields in
-    let* progress =
-      match progress_json with
-      | `Null -> Ok None
-      | json -> running_progress_of_yojson json |> Result.map Option.some
-    in
-    (match progress with
-     | Some Unbound -> Error "classified execution failure cannot retain unbound progress"
-     | Some (Bound _ | Advancing _) | None ->
-       Ok (Execution_provenance_mismatch { detail; progress }))
+    let* detail, progress = classified_failure_fields ~context fields in
+    Ok (Execution_provenance_mismatch { detail; progress })
   | "unexpected_worker_failure" ->
-    let* () = exact_fields ~context [ "kind"; "detail" ] fields in
-    let* detail_json = field ~context "detail" fields in
-    let* detail = string_json ~context:(context ^ ".detail") detail_json in
-    Ok (Unexpected_worker_failure detail)
+    let* detail, progress = classified_failure_fields ~context fields in
+    Ok (Unexpected_worker_failure { detail; progress })
   | "exact_execution_quarantined" ->
     let* () = exact_fields ~context [ "kind"; "progress" ] fields in
     let* progress_json = field ~context "progress" fields in
@@ -476,6 +511,13 @@ let blocked_reason_of_yojson json =
     (match progress with
      | Bound _ | Advancing _ -> Ok (Exact_execution_quarantined progress)
      | Unbound -> Error "unbound execution cannot be quarantined")
+  | "exact_execution_interrupted" ->
+    let* () = exact_fields ~context [ "kind"; "progress" ] fields in
+    let* progress_json = field ~context "progress" fields in
+    let* progress = running_progress_of_yojson progress_json in
+    (match progress with
+     | Bound _ | Advancing _ -> Ok (Exact_execution_interrupted progress)
+     | Unbound -> Error "unbound execution cannot be interrupted")
   | value -> Error (Printf.sprintf "unknown Board attention blocked reason %S" value)
 ;;
 
@@ -523,6 +565,13 @@ let state_of_yojson json =
     let* settled_json = field ~context "settled_at" fields in
     let* settled_at = float_json ~context:(context ^ ".settled_at") settled_json in
     Ok (Settled { settled_at })
+  | "abandoned" ->
+    let* () = exact_fields ~context [ "kind"; "abandoned_at" ] fields in
+    let* abandoned_json = field ~context "abandoned_at" fields in
+    let* abandoned_at =
+      float_json ~context:(context ^ ".abandoned_at") abandoned_json
+    in
+    Ok (Abandoned { abandoned_at })
   | "blocked" ->
     let* () = exact_fields ~context [ "kind"; "reason"; "blocked_at" ] fields in
     let* reason_json = field ~context "reason" fields in
@@ -579,7 +628,7 @@ let of_yojson json =
     match state with
     | Completed { item; _ } when String.equal item.candidate_id candidate_id -> Ok ()
     | Completed _ -> Error "completed item identity differs from partition candidate"
-    | Ready | Running _ | Settled _ | Blocked _ -> Ok ()
+    | Ready | Running _ | Settled _ | Abandoned _ | Blocked _ -> Ok ()
   in
   Ok
     { partition_id
@@ -678,7 +727,7 @@ let empty_view cursor =
 
 let is_live = function
   | Ready | Running _ | Completed _ | Blocked _ -> true
-  | Settled _ -> false
+  | Settled _ | Abandoned _ -> false
 ;;
 
 let compare_partition left right =
@@ -695,12 +744,12 @@ let remove_partition_indexes view partition =
   let ready =
     match partition.state with
     | Ready -> Ready_set.remove (ready_order partition) view.ready
-    | Running _ | Completed _ | Settled _ | Blocked _ -> view.ready
+    | Running _ | Completed _ | Settled _ | Abandoned _ | Blocked _ -> view.ready
   in
   let completed =
     match partition.state with
     | Completed _ -> Id_set.remove partition.partition_id view.completed
-    | Ready | Running _ | Settled _ | Blocked _ -> view.completed
+    | Ready | Running _ | Settled _ | Abandoned _ | Blocked _ -> view.completed
   in
   let live_candidate_owner =
     if is_live partition.state
@@ -733,12 +782,12 @@ let add_partition_indexes view partition =
   let ready =
     match partition.state with
     | Ready -> Ready_set.add (ready_order partition) view.ready
-    | Running _ | Completed _ | Settled _ | Blocked _ -> view.ready
+    | Running _ | Completed _ | Settled _ | Abandoned _ | Blocked _ -> view.ready
   in
   let completed =
     match partition.state with
     | Completed _ -> Id_set.add partition.partition_id view.completed
-    | Ready | Running _ | Settled _ | Blocked _ -> view.completed
+    | Ready | Running _ | Settled _ | Abandoned _ | Blocked _ -> view.completed
   in
   Ok
     { view with
@@ -772,11 +821,13 @@ let legal_transition previous next =
   | Running _, Blocked _ -> true
   | Blocked _, Ready -> true
   | (Completed _ | Blocked _), Settled _ -> true
-  | Settled _, Ready -> true
+  | Blocked _, Abandoned _ -> true
+  | Abandoned _, Ready -> true
   | Ready, _
   | Running _, _
   | Completed _, _
   | Settled _, _
+  | Abandoned _, _
   | Blocked _, _ -> false
 ;;
 
@@ -1189,15 +1240,17 @@ let validate_blocked_reason = function
     nonempty "durable partition invariant detail" detail
   | Exact_setup_unavailable detail ->
     nonempty "exact setup unavailable detail" detail
-  | Exact_flow_replayed -> Ok ()
-  | Exact_execution_terminal -> Ok ()
-  | Domain_output_invalid { detail; progress } ->
+  | Exact_flow_replayed (Some progress) -> validate_durable_progress progress
+  | Exact_flow_replayed None -> Ok ()
+  | Exact_lane_exhausted { detail; progress }
+  | Exact_flow_bookkeeping_failed { detail; progress }
+  | Exact_completion_failed { detail; progress }
+  | Domain_output_invalid { detail; progress }
+  | Execution_provenance_mismatch { detail; progress }
+  | Unexpected_worker_failure { detail; progress } ->
     validate_classified_failure detail progress
-  | Execution_provenance_mismatch { detail; progress } ->
-    validate_classified_failure detail progress
-  | Unexpected_worker_failure detail ->
-    nonempty "unexpected worker failure detail" detail
   | Exact_execution_quarantined progress -> validate_durable_progress progress
+  | Exact_execution_interrupted progress -> validate_durable_progress progress
 ;;
 
 let advance_state partition state =
@@ -1220,7 +1273,7 @@ let ensure_roots ~base_path ~keeper_name candidates =
               then Error "candidate Keeper differs from partition ledger Keeper"
               else
                 let* () = valid_time "candidate recorded_at" candidate.recorded_at in
-                let resolve_root ~reopen_settled () =
+                let resolve_root ~reopen_abandoned () =
                   let* context_key = Candidate.Context_key.of_candidate candidate in
                   match Id_map.find_opt candidate.candidate_id view.live_candidate_owner with
                   | Some owner_id ->
@@ -1263,24 +1316,30 @@ let ensure_roots ~base_path ~keeper_name candidates =
                           the deterministic root into a collision with itself and
                           stopped the whole Keeper's attention worker. *)
                        (match historical.state with
-                        | Settled _ when reopen_settled ->
-                          (* [Settled] is otherwise terminal ([legal_transition]
-                             refuses every other exit). [reopen_settled] is true only
-                             for a candidate still [Resumable_pending]: the Candidate
-                             ledger never recorded any judgment for it, so its root
-                             settling can only be the desync task-1660 measured (21
-                             live candidates, 360-378h) — e.g. the "candidate
-                             permanently absent" Blocked->Settled path in
-                             [reconcile_quarantines], which settles the root without
-                             ever writing a judgment. A [Resumable_judged] or
-                             [Requeued_resumable] historical match keeps the old
-                             no-op: those already carry (or are mid-quarantine
-                             toward) a judgment, and reopening them here would race
-                             the dedicated quarantine-generation bookkeeping in
-                             [reconcile_quarantines] instead of going through it. *)
+                        | Abandoned _ when reopen_abandoned ->
+                          (* [reopen_abandoned] is true only for a candidate
+                             still [Resumable_pending]: the Candidate ledger
+                             never recorded any judgment for it, so an
+                             [Abandoned] root can only be the "candidate
+                             permanently absent" give-up in
+                             [reconcile_quarantines], which never writes a
+                             judgment. A [Resumable_judged] or
+                             [Requeued_resumable] historical match keeps the
+                             no-op: those already carry (or are
+                             mid-quarantine toward) a judgment, and reopening
+                             them here would race the dedicated
+                             quarantine-generation bookkeeping in
+                             [reconcile_quarantines] instead of going through
+                             it. [Settled] never reopens: it records a
+                             judgment. *)
                           let* reopened = advance_state historical Ready in
                           Ok (reopened :: roots)
-                        | Ready | Running _ | Completed _ | Blocked _ | Settled _ -> Ok roots)
+                        | Ready
+                        | Running _
+                        | Completed _
+                        | Blocked _
+                        | Settled _
+                        | Abandoned _ -> Ok roots)
                      | Some _ -> Error ("partition identity collision: " ^ partition_id))
                 in
                 match Candidate.status_view candidate.status with
@@ -1289,13 +1348,13 @@ let ensure_roots ~base_path ~keeper_name candidates =
                 | Candidate.Requeued_resumable
                     { resumable = Candidate.Resumable_consumed _; _ } -> Ok roots
                 | Candidate.Direct_resumable (Candidate.Resumable_pending _) ->
-                  resolve_root ~reopen_settled:true ()
+                  resolve_root ~reopen_abandoned:true ()
                 | Candidate.Direct_resumable (Candidate.Resumable_judged _)
                 | Candidate.Requeued_resumable
                     { resumable =
                         (Candidate.Resumable_pending _ | Candidate.Resumable_judged _)
                     ; _
-                    } -> resolve_root ~reopen_settled:false ())
+                    } -> resolve_root ~reopen_abandoned:false ())
            (Ok [])
       |> Result.map List.rev
     in
@@ -1329,16 +1388,25 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
                     let* released = advance_state partition Ready in
                     Ok (recovered + 1, released :: latest)
                   | Running ({ progress = (Bound _ | Advancing _) as progress; _ }) ->
-                    let* quarantined =
+                    (* A restart interrupting a bound execution is not a
+                       judgment about this candidate: the judgment lane is a
+                       read-only model call, so re-running it after recovery
+                       spends tokens and nothing else. Blocking as
+                       [Exact_execution_interrupted] keeps the provenance as
+                       evidence while staying requeueable: [Blocked -> Ready]
+                       is a legal transition that the operator requeue
+                       reaches. Nothing reopens it automatically —
+                       [ensure_roots] leaves a Blocked root as it is. *)
+                    let* blocked =
                       advance_state
                         partition
                         (Blocked
-                           { reason = Exact_execution_quarantined progress
+                           { reason = Exact_execution_interrupted progress
                            ; blocked_at = now
                            })
                     in
-                    Ok (recovered + 1, quarantined :: latest)
-                  | Ready | Completed _ | Settled _ | Blocked _ ->
+                    Ok (recovered + 1, blocked :: latest)
+                  | Ready | Completed _ | Settled _ | Abandoned _ | Blocked _ ->
                     Ok (recovered, partition :: latest))
                (Ok (0, []))
         in
@@ -1404,7 +1472,7 @@ let claim_ready_exact
               let* cursor = cursor_result ~ledger_path append_result in
               Atomic.set entry.cached (Some { updated with cursor });
               Ok (Some claimed))
-         | Running _ | Completed _ | Settled _ | Blocked _ -> Ok None)
+         | Running _ | Completed _ | Settled _ | Abandoned _ | Blocked _ -> Ok None)
       | Some _ -> Ok None))
 ;;
 
@@ -1425,7 +1493,7 @@ let transition_running_exact ~base_path ~partition ~worker_epoch decide =
                 "partition %s is owned by worker %s"
                 partition.partition_id
                 (Worker_epoch.to_string running.worker_epoch))
-         | Ready | Completed _ | Settled _ | Blocked _ ->
+         | Ready | Completed _ | Settled _ | Abandoned _ | Blocked _ ->
            Error ("partition is not Running: " ^ partition.partition_id)))
   in
   Ok { partition; changed; write_outcome }
@@ -1596,7 +1664,7 @@ let confirm_completed ~base_path ~(partition : t) =
           Error ("partition is not Completed: " ^ partition.partition_id))
     in
     Ok { partition = confirmed; changed; write_outcome }
-  | Ready | Running _ | Settled _ | Blocked _ ->
+  | Ready | Running _ | Settled _ | Abandoned _ | Blocked _ ->
     Error ("partition is not Completed: " ^ partition.partition_id)
 ;;
 
@@ -1631,7 +1699,7 @@ let confirm_blocked ~base_path ~(partition : t) =
           Error ("partition is not Blocked: " ^ partition.partition_id))
     in
     Ok { partition = confirmed; changed; write_outcome }
-  | Ready | Running _ | Completed _ | Settled _ ->
+  | Ready | Running _ | Completed _ | Settled _ | Abandoned _ ->
     Error ("partition is not Blocked: " ^ partition.partition_id)
 ;;
 
@@ -1696,7 +1764,8 @@ let requeue_blocked ~base_path ~(partition : t) =
                (Observe_generation_conflict
                   ("blocked partition generation changed before manual requeue: "
                    ^ partition.partition_id)))
-        | Some { state = Ready | Running _ | Completed _ | Settled _; _ } ->
+        | Some { state = Ready | Running _ | Completed _ | Settled _
+               | Abandoned _; _ } ->
           Ok
             (`Observe
                (Observe_generation_conflict
@@ -1718,7 +1787,7 @@ let requeue_blocked ~base_path ~(partition : t) =
      | `Written ((Observe_cursor_conflict _ | Observe_generation_conflict _), _)
      | `Observed (Append_ready _) ->
        Error "invalid exact requeue decision")
-  | Ready | Running _ | Completed _ | Settled _ ->
+  | Ready | Running _ | Completed _ | Settled _ | Abandoned _ ->
     Error ("partition is not Blocked: " ^ partition.partition_id)
 ;;
 
@@ -1736,13 +1805,14 @@ let confirm_ready ~base_path ~(partition : t) =
           Error
             ("ready partition identity changed before fsync confirmation: "
              ^ partition.partition_id)
-        | Some { state = Blocked _ | Running _ | Completed _ | Settled _; _ } ->
+        | Some { state = Blocked _ | Running _ | Completed _ | Settled _
+               | Abandoned _; _ } ->
           Error
             ("partition advanced before Ready fsync confirmation: "
              ^ partition.partition_id))
     in
     Ok { partition = confirmed; changed; write_outcome }
-  | Blocked _ | Running _ | Completed _ | Settled _ ->
+  | Blocked _ | Running _ | Completed _ | Settled _ | Abandoned _ ->
     Error ("partition is not Ready: " ^ partition.partition_id)
 ;;
 
@@ -1771,6 +1841,19 @@ let settle ~now ~base_path ~partition =
       Ok ([ settled ], settled)
     | Some current ->
       Error ("only Completed or Blocked partition can settle: " ^ current.partition_id))
+;;
+
+let abandon ~now ~base_path ~partition =
+  let* () = valid_time "partition abandonment time" now in
+  update ~base_path ~keeper_name:partition.keeper_name (fun view ->
+    match Id_map.find_opt partition.partition_id view.by_id with
+    | None -> Error ("partition abandonment target not found: " ^ partition.partition_id)
+    | Some ({ state = Abandoned _; _ } as current) -> Ok ([], current)
+    | Some ({ state = Blocked _; _ } as current) ->
+      let* abandoned = advance_state current (Abandoned { abandoned_at = now }) in
+      Ok ([ abandoned ], abandoned)
+    | Some current ->
+      Error ("only a Blocked partition can be abandoned: " ^ current.partition_id))
 ;;
 
 module For_testing = struct

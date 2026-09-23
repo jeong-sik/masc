@@ -162,7 +162,7 @@ val resolve_and_render_prompt_template :
 
 val set_override : string -> string -> (unit, string) result
 (** Validates and installs an override.  Rejects invalid
-    keys, empty / oversized (>10000 chars) values, and
+    keys, empty values, and
     unexpected template variables (a variable in the
     template that the registered [meta_tbl] entry does
     not declare). *)
@@ -232,6 +232,34 @@ val restore_overrides : string -> unit
     malformed entries, and entries naming template variables the prompt no
     longer declares are refused with an observable error and fall back to
     file content. *)
+
+type file_edit_promotion =
+  | Promoted of { key : string }
+      (** The edited body is saved as [key]'s override. *)
+  | Override_exists of { key : string }
+      (** [key] already has a saved override; nothing was written. *)
+  | Not_promotable of { reason : string }
+      (** The edit maps to no single override, or the override file could not
+          be read or written; nothing was written. *)
+
+val promote_file_edit :
+  base_path:string ->
+  file:string ->
+  embedded:string ->
+  edited:string ->
+  file_edit_promotion
+(** Save an operator's edit of the runtime prompt file [file] (relative to
+    the prompt directory) as a prompt override in
+    [<base_path>/.masc/prompt_overrides.json], so the file can be reset to
+    the distribution copy [embedded] without losing the edit. The file maps
+    to one key only when [embedded] and [edited] each yield exactly that
+    key's registration and no slot — the registrations the directory scan
+    makes — and the edit left the frontmatter unchanged; the override is
+    bound to [embedded]'s body and must use only the variables it declares.
+    A key whose saved override already holds this text is [Promoted]; a key
+    with a different saved override is left alone. Reads
+    and writes the file, not the live table: it runs at boot before
+    {!restore_overrides}. *)
 
 val set_restore_failure_observer : (unit -> unit) -> unit
 (** Installs the process-local observer called whenever override

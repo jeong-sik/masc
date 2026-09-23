@@ -1808,10 +1808,41 @@ let is_toml_table : Otoml.t -> bool = function
   | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
   | Otoml.TomlTableArray _ -> false
 
+let unknown_binding_keys ~path ~binding_keys entries =
+  List.concat_map
+    (fun (key, _) ->
+       if List.mem key binding_keys
+       then []
+       else
+         error
+           (path ^ "." ^ key)
+           (Printf.sprintf
+              "unknown binding key %S; a model binding declares only %s"
+              key
+              (String.concat ", " binding_keys)))
+    entries
+;;
+
 let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml.t)
   : (Runtime_schema.binding, parse_error list) result
   =
   let path = Printf.sprintf "%s.%s" provider_id model_id in
+  (* The keys a binding declares are the keys this function reads: every read
+     below goes through these two readers, which note the key. Anything else
+     under [<provider>.<model>] is refused, a nested table included -- a
+     misspelled [context-high-water-token] would otherwise load as a binding
+     without marks, and the provider's overflow refusal would then have
+     nothing declared to evict against. So every read below stays
+     unconditional and bound before the check at the top of the [let*] chain:
+     a read placed after it, or only in one branch, would refuse its own key. *)
+  let read_keys = ref [] in
+  let typed_find kind path tbl key getter =
+    read_keys := key :: !read_keys;
+    typed_find kind path tbl key getter
+  in
+  let typed_find_or kind path tbl key getter ~default =
+    Result.map (Option.value ~default) (typed_find kind path tbl key getter)
+  in
   (* [max-concurrent] is an explicit operator override, not a required binding
      property. Absence means "no static client-side cap"; provider pressure is
      handled by the global provider HTTP gate, live health/backoff, and any
@@ -1930,6 +1961,16 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     typed_find "a boolean" path tbl "return-progress" Otoml.get_boolean
   in
   let ( let* ) = Result.bind in
+  let* () =
+    match
+      unknown_binding_keys
+        ~path
+        ~binding_keys:(List.rev !read_keys)
+        (Otoml.get_table tbl)
+    with
+    | [] -> Ok ()
+    | errors -> Error errors
+  in
   let* enabled_opt = enabled_result in
   let enabled = match enabled_opt with Some value -> value | None -> true in
   let* is_default_opt = is_default_result in
@@ -1970,45 +2011,6 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     }
 ;;
 
-(* The keys a model binding declares, as [parse_binding_fields] reads them.
-   Anything else under [<provider>.<model>] is refused, a nested table
-   included: a misspelled [context-high-water-token] would otherwise load as a
-   binding without marks, and the provider's overflow refusal would then have
-   nothing declared to evict against. *)
-let binding_keys =
-  [ "enabled"
-  ; "is-default"
-  ; "wizard-default"
-  ; "max-concurrent"
-  ; "disable-parallel-tool-use"
-  ; "context-high-water-tokens"
-  ; "context-low-water-tokens"
-  ; "max-tokens"
-  ; "price-input"
-  ; "price-output"
-  ; "keep-alive"
-  ; "num-ctx"
-  ; "repeat-penalty"
-  ; "repeat-last-n"
-  ; "return-progress"
-  ]
-;;
-
-let unknown_binding_keys ~path entries =
-  List.concat_map
-    (fun (key, _) ->
-       if List.mem key binding_keys
-       then []
-       else
-         error
-           (path ^ "." ^ key)
-           (Printf.sprintf
-              "unknown binding key %S; a model binding declares only %s"
-              key
-              (String.concat ", " binding_keys)))
-    entries
-;;
-
 (* Parse one provider table ([<provider>.*]) into its bindings. Each direct
    sub-key is a model binding table. *)
 let parse_provider_table (provider_id : string) (tbl : Otoml.t)
@@ -2020,10 +2022,7 @@ let parse_provider_table (provider_id : string) (tbl : Otoml.t)
        (fun (model_id, sub) ->
           let path = Printf.sprintf "%s.%s" provider_id model_id in
           if is_toml_table sub
-          then (
-            match unknown_binding_keys ~path (Otoml.get_table sub) with
-            | [] -> parse_binding_fields provider_id model_id sub
-            | errors -> Error errors)
+          then parse_binding_fields provider_id model_id sub
           else
             Error
               (error
@@ -2293,13 +2292,17 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
     | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
       List.concat_map
         (fun (key, _) ->
-           if String.equal key "slots" || String.equal key "cli_slots"
+           if
+             String.equal key "slots"
+             || String.equal key "cli_slots"
+             || String.equal key "max_output_tokens"
            then []
            else
              error
                (path ^ "." ^ key)
                (Printf.sprintf
-                  "unknown exact-output lane key %S; expected slots or cli_slots"
+                  "unknown exact-output lane key %S; expected slots, cli_slots or \
+                   max_output_tokens"
                   key))
         entries
     | _ -> []
@@ -2333,20 +2336,47 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
                  "exact-output lane cli_slots must be an array of runtime ids; got %s"
                  msg)))
   in
+  let max_output_tokens_result =
+    match Otoml.find_opt tbl Fun.id [ "max_output_tokens" ] with
+    | None -> Ok None
+    | Some value ->
+      (try
+         let n = Otoml.get_integer value in
+         if n <= 0
+         then
+           Error
+             (error
+                (path ^ ".max_output_tokens")
+                (Printf.sprintf
+                   "exact-output lane max_output_tokens must be a positive \
+                    integer; got %d"
+                   n))
+         else Ok (Some n)
+       with Otoml.Type_error msg ->
+         Error
+           (error
+              (path ^ ".max_output_tokens")
+              (Printf.sprintf
+                 "exact-output lane max_output_tokens must be an integer; got %s"
+                 msg)))
+  in
   let slots_result =
-    match slots_result, cli_slots_result with
-    | Error slot_errors, Error cli_errors -> Error (slot_errors @ cli_errors)
-    | Error slot_errors, Ok _ -> Error slot_errors
-    | Ok _, Error cli_errors -> Error cli_errors
-    | Ok slots, Ok cli_slots -> Ok (slots, cli_slots)
+    match slots_result, cli_slots_result, max_output_tokens_result with
+    | Error slot_errors, Error cli_errors, _ ->
+      Error (slot_errors @ cli_errors)
+    | Error slot_errors, Ok _, _ -> Error slot_errors
+    | Ok _, Error cli_errors, _ -> Error cli_errors
+    | Ok _, Ok _, Error budget_errors -> Error budget_errors
+    | Ok slots, Ok cli_slots, Ok max_output_tokens ->
+      Ok (slots, cli_slots, max_output_tokens)
   in
   match unknown_key_errors, slots_result with
   | _ :: _, Error slot_errors -> Error (slot_errors @ unknown_key_errors)
   | _ :: _, Ok _ -> Error unknown_key_errors
   | [], (Error _ as error) -> error
-  | [], Ok ([], []) ->
+  | [], Ok ([], [], _) ->
     Error (error path "exact-output lane must have at least one slot")
-  | [], Ok (slot_ids, cli_slot_ids) ->
+  | [], Ok (slot_ids, cli_slot_ids, max_output_tokens) ->
     let rec validate_cli position seen = function
       | [] -> Ok ()
       | cli_id :: rest ->
@@ -2368,7 +2398,8 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
       | [] ->
         (match validate_cli 1 [] cli_slot_ids with
          | Error _ as error -> error
-         | Ok () -> Ok { Runtime_schema.id; slot_ids; cli_slot_ids })
+         | Ok () ->
+           Ok { Runtime_schema.id; slot_ids; cli_slot_ids; max_output_tokens })
       | slot_id :: rest ->
         if String.equal (String.trim slot_id) ""
         then

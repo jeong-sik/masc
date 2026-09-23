@@ -5,6 +5,7 @@ type condition = Satisfied | Needs_setup | Needs_verification | Invalid
 
 type check_id =
   | Workspace
+  | Runtime_configuration
   | Model_connection
   | Keeper_declaration
   | Sandbox
@@ -45,21 +46,26 @@ let condition_name = function
 
 let check_id_name = function
   | Workspace -> "workspace"
+  | Runtime_configuration -> "runtime_configuration"
   | Model_connection -> "model_connection"
   | Keeper_declaration -> "keeper_declaration"
   | Sandbox -> "sandbox"
   | Keeper_persistence -> "keeper_persistence"
   | Browser_lane -> "browser_lane"
 
-(* imp's history opens on what imp itself needs: a readable workspace, model
-   binding, declaration and persisted record. A browser lane is a separate
-   surface; a launcher aimed at an old port says nothing about whether imp's
-   conversation can be read, so its drift is reported beside the conversation
-   instead of sending the operator back to "choose a workspace". *)
+(* Existing history opens on what every Keeper in the workspace shares: the
+   workspace, a runtime.toml the server can load, and Keeper metadata its boot
+   admits. The server boots on a runtime.toml it cannot load or cannot find,
+   but in setup-required mode with no runtime (the embedded file is written
+   only when [.masc/config] is first created), so no Keeper can take a turn
+   and the journey's model step is the repair. imp's model binding, declaration and
+   sandbox concern the Keeper the journey creates: the server skips an imp it
+   cannot load and boots every other Keeper, so a workspace whose history
+   belongs to other Keepers opens and reports them beside it. A browser lane
+   is a separate surface; its drift is reported the same way. *)
 let role = function
-  | Workspace | Model_connection | Keeper_declaration | Sandbox | Keeper_persistence ->
-    Required_to_open
-  | Browser_lane -> Advisory
+  | Workspace | Runtime_configuration | Keeper_persistence -> Required_to_open
+  | Model_connection | Keeper_declaration | Sandbox | Browser_lane -> Advisory
 
 let role_name = function
   | Required_to_open -> "required_to_open"
@@ -77,7 +83,7 @@ let directory_exists path =
 let model_checks config_path =
   if not (Sys.file_exists config_path) then
     None, None,
-    [check Model_connection Needs_setup "Choose a model connection for imp."
+    [check Runtime_configuration Needs_setup "Choose a model connection."
        [Configure_models]]
   else match Runtime.load_list ~config_path with
   | Error failure ->
@@ -89,40 +95,70 @@ let model_checks config_path =
        Invalid from Needs_setup needs that measured per situation, not inferred
        from the constructor. *)
     None, None,
-    [check Model_connection Invalid
+    [check Runtime_configuration Invalid
        (Runtime.to_operator_text ~config_path failure)
        [Inspect_configuration; Configure_models]]
   | Ok (runtimes, default, assignments, _, lanes) ->
+    let loaded = check Runtime_configuration Satisfied "runtime.toml loads." [Configure_models] in
     let selected = Runtime_verification.initial_runtime_id
       ~default_runtime_id:default.id ~assignments ~lanes ~keeper_name:"imp" in
     let runtime = Option.bind selected (fun id ->
       List.find_opt (fun (runtime : Runtime.t) -> String.equal runtime.id id) runtimes) in
     match runtime with
-    | None -> selected, None,
-      [check Model_connection Invalid "imp's assigned runtime cannot be resolved."
+    | None ->
+      (* A loaded list has validated every assignment, lane candidate and the
+         default against its runtimes, so imp always resolves here. Reaching
+         this means the list and its validation disagree, which is a runtime.toml
+         fault the server shares, not a fact about imp. *)
+      selected, None,
+      [check Runtime_configuration Invalid
+         "runtime.toml loaded, but imp's runtime does not resolve against it."
          [Inspect_configuration; Configure_models]]
     | Some runtime when not runtime.model.tools_support -> selected, Some runtime.model.api_name,
-      [check Model_connection Needs_setup "The selected model has tool calling disabled."
+      [loaded; check Model_connection Needs_setup "The selected model has tool calling disabled."
          [Configure_models]]
     | Some runtime -> selected, Some runtime.model.api_name,
-      [check Model_connection Needs_verification
+      [loaded; check Model_connection Needs_verification
          "A model is configured. Check its current sign-in, response and tool access."
          [Configure_models; Start_imp]]
 
+(* The workspace's Keeper history is readable exactly when the server's boot
+   reconcile admits it: every metadata file passes the same
+   [validate_current_meta_file_result] (Keeper_store_boot_reconcile), and one
+   that does not refuses the whole boot unless the operator accepts the
+   quarantine. Judging it any other way opens a TUI on a server that will not
+   start. imp is only the Keeper the setup journey creates; a workspace whose
+   Keepers were declared by hand never has it, and judging history by imp alone
+   sent that workspace back into setup on every bare `masc`. *)
 let persistence_check base_path =
   let root = Workspace_utils.masc_root_dir_from ~base_path
     ~cluster_name:(Env_config_core.cluster_name ()) in
-  let path = Filename.concat (Filename.concat root Common.keepers_runtime_dirname)
-    (Keeper_runtime_root_entry.keeper_basename ~keeper_name:"imp" Keeper_runtime_root_entry.Metadata) in
-  match Keeper_meta_store.read_meta_file_path_read_only ~ownership_root:base_path path with
-  | Ok None -> check Keeper_persistence Needs_setup
-      "imp has no persisted history yet. Prepare imp before opening its conversation." [Start_imp]
-  | Ok (Some meta) when String.equal meta.name "imp" ->
-    check Keeper_persistence Satisfied
-      "imp has persisted history. This does not verify that it is running or that its model and sandbox are ready." [Start_imp]
-  | Ok (Some _) | Error _ -> check Keeper_persistence Invalid
-      "imp's persisted history cannot be read as its current metadata. Inspect configuration before proceeding."
-      [Inspect_configuration]
+  let dir = Filename.concat root Common.keepers_runtime_dirname in
+  let listed = if directory_exists dir then Safe_ops.list_dir_safe dir else Ok [] in
+  match listed with
+  | Error detail -> check Keeper_persistence Invalid
+      (detail ^ ". Inspect configuration before proceeding.") [Inspect_configuration]
+  | Ok entries ->
+    let names =
+      entries
+      |> List.filter_map Keeper_runtime_root_entry.metadata_keeper_name
+      |> List.filter Keeper_config.validate_name
+      |> List.sort String.compare in
+    let refused = List.filter (fun name ->
+        Result.is_error (Keeper_meta_store.validate_current_meta_file_result
+          (Filename.concat dir (Keeper_runtime_root_entry.keeper_basename ~keeper_name:name
+             Keeper_runtime_root_entry.Metadata)))) names in
+    match names, refused with
+    | [], _ -> check Keeper_persistence Needs_setup
+        "No Keeper has persisted history yet. Prepare imp before opening its conversation." [Start_imp]
+    | _ :: _, _ :: _ -> check Keeper_persistence Invalid
+        ("Keeper metadata this build cannot read: " ^ String.concat ", " refused
+         ^ ". The server refuses to boot until it is repaired or started with --accept-store-quarantine.")
+        [Inspect_configuration]
+    | _ :: _, [] -> check Keeper_persistence Satisfied
+        ("Persisted Keeper history: " ^ String.concat ", " names
+         ^ ". This does not verify that any of them is running or that its model and sandbox are ready.")
+        []
 
 let keeper_checks base_path =
   let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
@@ -198,7 +234,7 @@ let opening t =
   match t.base_path with
   | None -> Needs_journey
   | Some _ ->
-    if satisfied Workspace && satisfied Keeper_persistence
+    if satisfied Workspace && satisfied Runtime_configuration && satisfied Keeper_persistence
        && not (List.exists holds_closed t.checks)
     then Open_existing_history
     else Needs_journey

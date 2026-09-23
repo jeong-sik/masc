@@ -3,6 +3,7 @@ let ( let* ) = Result.bind
 type auth_result =
   { authenticated : bool
   ; login : string option
+  ; scopes : string list option
   ; error : string option
   }
 
@@ -22,9 +23,61 @@ type observation =
   ; checked_at_unix : float
   }
 
+(* The scopes a login may ask for beyond gh's own minimum ([repo], [read:org],
+   [gist]). Closed, so a scope reaches [gh] only once someone has named it
+   here: each one widens what a Keeper can do with the token. [Workflow] is
+   what GitHub asks for before a push that touches [.github/workflows]; a
+   workflow runs with the repository's secrets, so it is never on by default. *)
+type login_scope =
+  | Workflow
+  | Write_packages
+
+let login_scope_to_string = function
+  | Workflow -> "workflow"
+  | Write_packages -> "write:packages"
+;;
+
+let login_scope_of_string = function
+  | "workflow" -> Some Workflow
+  | "write:packages" -> Some Write_packages
+  | _ -> None
+;;
+
+let all_login_scopes = [ Workflow; Write_packages ]
+
+(* The login request carries its scopes as [?scopes=workflow,...], beside the
+   [hostname] it already takes as a query parameter. An empty or absent value
+   is no extra scope; a name this module does not offer is refused rather than
+   dropped, so a surface that asked for a scope never gets a token without it
+   and a note saying nothing. *)
+let login_scopes_of_query = function
+  | None -> Ok []
+  | Some raw ->
+    let names =
+      String.split_on_char ',' raw
+      |> List.map String.trim
+      |> List.filter (fun name -> not (String.equal name ""))
+    in
+    List.fold_left
+      (fun acc name ->
+        match acc, login_scope_of_string name with
+        | Error _, _ -> acc
+        | Ok scopes, Some scope -> Ok (scope :: scopes)
+        | Ok _, None ->
+          Error
+            (Printf.sprintf
+               "unknown GitHub login scope %S; offered: %s"
+               name
+               (String.concat ", " (List.map login_scope_to_string all_login_scopes))))
+      (Ok [])
+      names
+    |> Result.map List.rev
+;;
+
 type login_lane =
   { run_login :
-      on_stdout_chunk:(string -> unit)
+      scopes:login_scope list
+      -> on_stdout_chunk:(string -> unit)
       -> on_stderr_chunk:(string -> unit)
       -> Unix.process_status * string * string
   ; run_login_with_token :
@@ -35,6 +88,7 @@ type login_lane =
   }
 
 let config_dir_name = "github-cli"
+let default_hostname = "github.com"
 
 let config_dir ~config ~keeper_name =
   Filename.concat
@@ -42,14 +96,15 @@ let config_dir ~config ~keeper_name =
     config_dir_name
 ;;
 
-(* Base-path variant for callers that hold only [base_path] (e.g. the chat
-   store's redaction snapshot). Default-cluster on purpose, matching
-   [Common.keepers_runtime_dir_of_base]: the chat store's secret projection
-   roots are already base-path scoped, so this keeps both snapshot sources
-   on the same cluster resolution. *)
+(* Base-path form of [config_dir] for callers that hold only [base_path] (the
+   chat store's redaction snapshot). [hosts.yml] is read where the login wrote
+   it, and the login writes through the cluster-aware [config_dir]; a
+   default-cluster path here would leave a non-default cluster's token out of
+   the redaction snapshot. [Workspace.keepers_runtime_dir_for_base_path]
+   resolves the cluster the same way the process's [Workspace.config] does. *)
 let config_dir_of_base_path ~base_path ~keeper_name =
   Filename.concat
-    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    (Filename.concat (Workspace.keepers_runtime_dir_for_base_path base_path) keeper_name)
     config_dir_name
 ;;
 
@@ -414,8 +469,8 @@ let hosts_file_has_stored_token ~config_dir hosts_path =
    which one was current. Absence is an error naming the fix rather than an
    empty token, because a caller that got "" would send it and read GitHub's
    401 as the provider being down. *)
-let stored_token ~base_path ~keeper_name ~hostname =
-  let config_dir = config_dir_of_base_path ~base_path ~keeper_name in
+let stored_token ~config ~keeper_name ~hostname =
+  let config_dir = config_dir ~config ~keeper_name in
   let hosts_path = Filename.concat config_dir "hosts.yml" in
   match Fs_compat.load_owned_regular_file ~ownership_root:config_dir hosts_path with
   | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
@@ -648,7 +703,7 @@ let write_git_credential_config ~dir_mode_after ~snapshot =
        in
        (* gh's own setup-git pairs github.com with its gist host. *)
        let hosts =
-         if List.exists (String.equal "github.com") hosts
+         if List.exists (String.equal default_hostname) hosts
             && not (List.exists (String.equal "gist.github.com") hosts)
          then hosts @ [ "gist.github.com" ]
          else hosts
@@ -667,17 +722,11 @@ let write_git_credential_config ~dir_mode_after ~snapshot =
        result)
 ;;
 
-let runtime_env_for_tool ~config ~keeper_name env =
-  match existing_config_dir ~config ~keeper_name with
-  | Error _ as error -> error
-  | Ok None ->
-    let snapshot, cleanup = empty_local_tool_config_snapshot () in
-    Ok (overlay_config_env ~config_dir:snapshot env, Unconfigured, cleanup)
-  | Ok (Some path) ->
-    (match copy_local_tool_config_snapshot path with
-     | Error _ as error -> error
-     | Ok (snapshot, cleanup) ->
-       Ok (overlay_config_env ~config_dir:snapshot env, Configured path, cleanup))
+(* The commit names are not part of the GitHub login: every container a
+   Keeper's commands run in gets them, logged in or not. *)
+let git_author_docker_args ~keeper_name =
+  Exec_ssh_protocol.keeper_git_author_env ~keeper_name
+  |> List.concat_map (fun (name, value) -> [ "--env"; name ^ "=" ^ value ])
 ;;
 
 (* Keeper-lifetime containers cannot mount a per-turn snapshot: turn cleanup
@@ -697,23 +746,25 @@ let runtime_env_for_tool ~config ~keeper_name env =
    The cost is explicit — a container created before the first login stays
    without the mount until the keeper's teardown recreates it. *)
 let docker_args_persistent ~config ~keeper_name ~container_masc_dir =
+  let author_args = git_author_docker_args ~keeper_name in
   match existing_config_dir ~config ~keeper_name with
   | Error _ as error -> error
-  | Ok None -> Ok []
+  | Ok None -> Ok author_args
   | Ok (Some host_dir) ->
     (match write_git_credential_config ~dir_mode_after:0o700 ~snapshot:host_dir with
      | Error _ as error -> error
      | Ok _has_git_wiring ->
        let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
        Ok
-         [ "--env"
-         ; "GH_CONFIG_DIR=" ^ container_dir
-         ; "-v"
-         ; host_dir ^ ":" ^ container_dir ^ ":ro"
-         ; "--env"
-         ; "GIT_CONFIG_GLOBAL="
-           ^ Filename.concat container_dir git_credential_config_file_name
-         ])
+         (author_args
+          @ [ "--env"
+            ; "GH_CONFIG_DIR=" ^ container_dir
+            ; "-v"
+            ; host_dir ^ ":" ^ container_dir ^ ":ro"
+            ; "--env"
+            ; "GIT_CONFIG_GLOBAL="
+              ^ Filename.concat container_dir git_credential_config_file_name
+            ]))
 ;;
 
 (* Refresh of the derived gitconfig for the persistent mount, called when a
@@ -727,6 +778,7 @@ let refresh_git_credential_config ~config ~keeper_name =
 ;;
 
 let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
+  let author_args = git_author_docker_args ~keeper_name in
   match existing_config_dir ~config ~keeper_name with
   | Error _ as error -> error
   | Ok None ->
@@ -734,11 +786,12 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
     let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
     Ok
       { args =
-          [ "--env"
-          ; "GH_CONFIG_DIR=" ^ container_dir
-          ; "-v"
-          ; snapshot ^ ":" ^ container_dir ^ ":ro"
-          ]
+          author_args
+          @ [ "--env"
+            ; "GH_CONFIG_DIR=" ^ container_dir
+            ; "-v"
+            ; snapshot ^ ":" ^ container_dir ^ ":ro"
+            ]
       ; identity_state = Unconfigured
       ; host_snapshot_dir = snapshot
       ; revision = unconfigured_tool_identity_revision
@@ -772,11 +825,12 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
              in
              Ok
                { args =
-                   [ "--env"
-                   ; "GH_CONFIG_DIR=" ^ container_dir
-                   ; "-v"
-                   ; snapshot ^ ":" ^ container_dir ^ ":ro"
-                   ]
+                   author_args
+                   @ [ "--env"
+                     ; "GH_CONFIG_DIR=" ^ container_dir
+                     ; "-v"
+                     ; snapshot ^ ":" ^ container_dir ^ ":ro"
+                     ]
                    @ git_wiring_args
                ; identity_state = Configured host_dir
                ; host_snapshot_dir = snapshot
@@ -787,7 +841,13 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
 
 let login_timeout_sec = 600.0
 
-let login_argv ~hostname =
+let login_argv ~hostname ~scopes =
+  let scope_args =
+    match List.filter (fun scope -> List.mem scope scopes) all_login_scopes with
+    | [] -> []
+    | scopes ->
+      [ "--scopes"; String.concat "," (List.map login_scope_to_string scopes) ]
+  in
   [ "gh"
   ; "auth"
   ; "login"
@@ -799,6 +859,7 @@ let login_argv ~hostname =
   ; "--web"
   ; "--insecure-storage"
   ]
+  @ scope_args
 ;;
 
 let login_with_token_argv ~hostname =
@@ -889,19 +950,64 @@ let run_capture ~env = function
       argv
 ;;
 
+(* [--include] puts the response's status line and headers before the body,
+   and GitHub names an OAuth token's scopes in [X-OAuth-Scopes]. One request
+   answers both who the token is and what it may do. *)
 let auth_probe_argv ~hostname =
-  [ "gh"; "api"; "--hostname"; hostname; "user"; "--jq"; ".login" ]
+  [ "gh"; "api"; "--hostname"; hostname; "--include"; "user"; "--jq"; ".login" ]
+;;
+
+let scopes_header = "x-oauth-scopes:"
+
+(* The probe's stdout: a status line and headers, a blank line, then the
+   login [--jq] selected. The scopes are [None] when the header is absent,
+   which is what a fine-grained PAT or an App token answers: they carry
+   permissions GitHub does not list here, so no list is invented for them. *)
+let split_probe_output stdout =
+  let lines =
+    String.split_on_char '\n' stdout
+    |> List.map (fun line ->
+      let n = String.length line in
+      if n > 0 && line.[n - 1] = '\r' then String.sub line 0 (n - 1) else line)
+  in
+  match lines with
+  | first :: _ when String.starts_with ~prefix:"HTTP/" first ->
+    let rec headers acc = function
+      | [] -> List.rev acc, []
+      | "" :: body -> List.rev acc, body
+      | line :: rest -> headers (line :: acc) rest
+    in
+    let header_lines, body = headers [] lines in
+    let scopes =
+      List.find_map
+        (fun line ->
+          let lower = String.lowercase_ascii line in
+          if String.starts_with ~prefix:scopes_header lower
+          then (
+            let value =
+              String.sub line (String.length scopes_header)
+                (String.length line - String.length scopes_header)
+            in
+            Some
+              (String.split_on_char ',' value
+               |> List.map String.trim
+               |> List.filter (fun scope -> not (String.equal scope ""))))
+          else None)
+        header_lines
+    in
+    String.trim (String.concat "\n" body), scopes
+  | _ -> String.trim stdout, None
 ;;
 
 let auth_result_of_run ~redact (status, stdout, stderr) =
-  let login = String.trim stdout in
+  let login, scopes = split_probe_output stdout in
   match status with
   | Unix.WEXITED 0 when not (String.equal login "") ->
-    { authenticated = true; login = Some login; error = None }
+    { authenticated = true; login = Some login; scopes; error = None }
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
     let detail = String.trim (redact stderr) in
     let detail = if String.equal detail "" then process_exit_text status else detail in
-    { authenticated = false; login = None; error = Some detail }
+    { authenticated = false; login = None; scopes = None; error = Some detail }
 ;;
 
 let auth_result_of_command ~redact ~env ~hostname =
@@ -933,6 +1039,7 @@ let observe ~config ~keeper_name ~hostname =
          let unconfigured =
            { authenticated = false
            ; login = None
+           ; scopes = None
            ; error = Some "Keeper GitHub CLI identity is not configured"
            }
          in
@@ -983,6 +1090,10 @@ let auth_result_to_yojson result =
   `Assoc
     [ "authenticated", `Bool result.authenticated
     ; "login", (match result.login with Some value -> `String value | None -> `Null)
+    ; ( "scopes"
+      , match result.scopes with
+        | Some scopes -> `List (List.map (fun scope -> `String scope) scopes)
+        | None -> `Null )
     ; "error", (match result.error with Some value -> `String value | None -> `Null)
     ]
 ;;
@@ -1031,13 +1142,13 @@ let local_lane ~config ~keeper_name ~hostname =
   | Ok env ->
     let lane : login_lane =
       { run_login =
-          (fun ~on_stdout_chunk ~on_stderr_chunk ->
+          (fun ~scopes ~on_stdout_chunk ~on_stderr_chunk ->
             Process_eio.run_argv_with_status_split_streaming
               ~timeout_sec:login_timeout_sec
               ~env
               ~on_stdout_chunk
               ~on_stderr_chunk
-              (login_argv ~hostname))
+              (login_argv ~hostname ~scopes))
       ; run_login_with_token =
           (fun ~token ->
             Process_eio.run_argv_with_stdin_and_status_split
@@ -1052,7 +1163,7 @@ let local_lane ~config ~keeper_name ~hostname =
     Ok lane
 ;;
 
-let stream_login ~config ~keeper_name ~make_lane ~is_closed ~send_event =
+let stream_login ~config ~keeper_name ~scopes ~make_lane ~is_closed ~send_event =
   let base_path = config.Workspace.base_path in
   let send event json =
     if is_closed ()
@@ -1090,6 +1201,7 @@ let stream_login ~config ~keeper_name ~make_lane ~is_closed ~send_event =
                   process_result :=
                     Some
                       (lane.run_login
+                         ~scopes
                          ~on_stdout_chunk:
                            (send_redacted_output "stdout" stdout_redaction)
                          ~on_stderr_chunk:
@@ -1148,14 +1260,17 @@ let stream_login ~config ~keeper_name ~make_lane ~is_closed ~send_event =
      | exn -> Error (Printexc.to_string exn))
 ;;
 
-let print_observation ~config ~keeper_name ~hostname =
-  match observe ~config ~keeper_name ~hostname with
+let print_observation_result = function
   | Error message ->
     prerr_endline message;
     false
   | Ok observation ->
     observation_to_yojson observation |> Yojson.Safe.pretty_to_string |> print_endline;
     true
+;;
+
+let print_observation ~config ~keeper_name ~hostname =
+  print_observation_result (observe ~config ~keeper_name ~hostname)
 ;;
 
 let run_inherited ~timeout_sec ~env = function
@@ -1217,9 +1332,10 @@ let run_inherited ~timeout_sec ~env = function
    Measured 2026-09-03 against [login_argv] with no terminal attached: [gh]
    writes nothing to stdout and puts the one-time code and the verification URL
    on stderr, so the stderr callback is the one an operator reads. *)
-let run_cli_login ~(lane : login_lane) =
+let run_cli_login ~(lane : login_lane) ~scopes =
   let status, _stdout, _stderr =
     lane.run_login
+      ~scopes
       ~on_stdout_chunk:(fun chunk ->
         print_string chunk;
         flush stdout)
@@ -1280,8 +1396,8 @@ let run_cli_set_token ~(lane : login_lane) ~base_path ~keeper_name ~token =
     0
 ;;
 
-let run_cli_status ~config ~keeper_name ~hostname =
-  if print_observation ~config ~keeper_name ~hostname then 0 else 1
+let run_cli_status ~observe =
+  if print_observation_result (observe ()) then 0 else 1
 ;;
 
 let run_cli_logout ~config ~keeper_name ~hostname =

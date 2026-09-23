@@ -46,6 +46,15 @@ val runtime_agents_fn :
 val keeper_registered_fn :
   (base_path:string -> agent_name:string -> bool) Atomic.t
 
+(** Publishes one new Skill package for a Keeper through the Skill editor.
+    The server installs it at boot; the default refuses with
+    [Workspace_skill_publish.Not_installed]. *)
+val keeper_skill_publish_fn :
+  (Workspace_utils_backend_setup.config ->
+   Workspace_skill_publish.request ->
+   (Workspace_skill_publish.outcome, Workspace_skill_publish.error) result)
+    Atomic.t
+
 (** Whether a schedule keeper_wake target has durable keeper metadata.
     [Ok true] = registered, [Ok false] = absent, [Error] = read failure.
     Default allows every target; the runtime installs the
@@ -200,6 +209,14 @@ val verification_submitted_fn :
     goal-side analogue of {!verification_submitted_fn}: the callback only
     schedules the out-of-band review; it is never a Keeper wake-up. *)
 val goal_verification_pending_fn :
+  (Workspace_utils_backend_setup.config -> goal_id:string -> unit) Atomic.t
+
+(** Tell the goal verifier lane that an operator Drop or Reopen moved a Goal,
+    so a review still running for it is cancelled and its claim released. A
+    verdict such a review would deliver is refused anyway, because the Goal is
+    no longer in [Verifying]. With no lane installed there is no review to
+    cancel, and the default does nothing. *)
+val goal_verification_abandoned_fn :
   (Workspace_utils_backend_setup.config -> goal_id:string -> unit) Atomic.t
 
 (** Publishes the completion-verdict notification after the task status

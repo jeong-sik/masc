@@ -75,6 +75,17 @@ let keeper_phase_is_running : keeper_phase -> bool = function
   | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting ->
       false
 
+type keeper_phase_band = Phase_stuck | Phase_alive | Phase_parked
+
+let keeper_phase_band : keeper_phase -> keeper_phase_band = function
+  | Keeper_state_machine.Failing | Keeper_state_machine.Crashed -> Phase_stuck
+  | Keeper_state_machine.Running | Keeper_state_machine.Draining
+  | Keeper_state_machine.Restarting ->
+      Phase_alive
+  | Keeper_state_machine.Paused | Keeper_state_machine.Stopped
+  | Keeper_state_machine.Offline ->
+      Phase_parked
+
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
 
 type keeper_runtime = {
@@ -158,6 +169,12 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_runs_without_slot = {
+  slws_vendor_system_one : int;
+  slws_server_restarted : int;
+  slws_no_slot : int;
+}
+
 type standalone_lane_jev_destination = {
   sljd_destination_uri : string;
   sljd_model : string;
@@ -192,6 +209,7 @@ type standalone_lane = {
   sl_last_outcome : string option;
   sl_p50_elapsed_s : float option;
   sl_selected_slots : standalone_lane_slot_count list;
+  sl_runs_without_slot : standalone_lane_runs_without_slot;
 }
 
 type standalone_lanes_snapshot = {
@@ -2003,8 +2021,6 @@ type keeper_call = {
   kc_outcome : Tool_result.recorded_call_outcome;
   kc_duration_ms : float option;
   kc_turn : int option;
-  kc_task_id : string option;
-  kc_model : string option;
   kc_execution_id : string option;
   kc_tool_use_id : string option;
   kc_schedule : keeper_call_schedule option;
@@ -2016,7 +2032,6 @@ type keeper_call = {
 type keeper_calls_snapshot = {
   kcs_keeper : string;
   kcs_entries : keeper_call list;
-  kcs_count : int;
   kcs_health : string;
   kcs_latest_age_s : float option;
   kcs_stale_reason : string option;
@@ -2168,8 +2183,7 @@ type inventory_freshness =
 type effective_tool = {
   et_name : string;
   et_origin : string;
-  et_group : string option;
-  et_skill_source : string option;
+  et_skill_source_id : string option;
 }
 
 type effective_tool_delivery =
@@ -2219,6 +2233,17 @@ type effective_skill_profile = {
   esp_flow : skill_flow option;
 }
 
+(* A Skill name the Keeper profile selected that the turn's catalog does not
+   hold. It is not a read failure -- the document may not exist at all -- so it
+   is a different fact from [ets_skills_left_out] and the producer sends it as
+   its own list. [csn_reason] is the producer's word for why
+   (`not_in_turn_skill_catalog`), kept optional because a reader that invents
+   one would be speaking for a producer that said nothing. *)
+type configured_skill_name_unavailable = {
+  csn_name : string;
+  csn_reason : string option;
+}
+
 type effective_tool_surface =
   | Effective_surface_available of {
       ets_keeper_name : string;
@@ -2234,6 +2259,10 @@ type effective_tool_surface =
          can call, and absence with no reason reads as a skill nobody
          wrote. *)
       ets_skills_left_out : string list;
+      (* Names the profile selected and the turn catalog does not carry. The
+         dashboard draws these under "Unavailable Skills"; this reader exists
+         so the other renderer of the same surface says it too. *)
+      ets_unavailable_skill_names : configured_skill_name_unavailable list;
       ets_composition_skills : Skill_reference.t list;
       ets_skill_profiles : effective_skill_profile list;
       ets_tool_surface_bytes : int;
@@ -2301,6 +2330,20 @@ type connector_directory_state =
   | Connector_directory_complete
   | Connector_directory_partial
 
+type connector_gateway_state =
+  | Connector_gateway_disconnected
+  | Connector_gateway_awaiting_hello
+  | Connector_gateway_identifying
+  | Connector_gateway_resuming
+  | Connector_gateway_connected
+  | Connector_gateway_reconnect_pending
+  | Connector_gateway_failed
+
+type connector_poll_state =
+  | Connector_poll_not_started
+  | Connector_poll_polling
+  | Connector_poll_degraded
+
 type connector = {
   cn_id : string;
   cn_display_name : string;
@@ -2311,8 +2354,8 @@ type connector = {
   cn_channel : string option;
   cn_error : string option;
   cn_status_source : string option;
-  cn_gateway_state : string option;
-  cn_poll_state : string option;
+  cn_gateway_state : connector_gateway_state option;
+  cn_poll_state : connector_poll_state option;
   cn_endpoint : string option;
   cn_status_path : string option;
   cn_binding_store_path : string option;
@@ -2361,8 +2404,15 @@ type connector_name_page = {
   cnp_mappings : connector_name_mapping list;
 }
 
+type connector_refusal = {
+  cr_row : int;
+  cr_connector_id : string option;
+  cr_reason : string;
+}
+
 type connector_snapshot = {
   cs_connectors : connector list;
+  cs_refused : connector_refusal list;
   cs_total : int;
   cs_active : int;
 }
@@ -2553,18 +2603,42 @@ type memory_alert = {
   ma_message : string;
 }
 
+(* How the keeper's last durable Librarian pass ended, one constructor per
+   [Keeper_librarian_queue_refresh.pass_end]. A pass that stopped on an error
+   or raised carries the server's account of why; the other endings have
+   none, so the detail lives on the constructor instead of beside it. *)
+type memory_librarian_pass_end =
+  | Pass_off
+  | Pass_lane_unconfigured
+  | Pass_drained
+  | Pass_not_committed
+  | Pass_stopped of string
+  | Pass_raised of string
+
+(* Why a Librarian pass journaled a failure, one constructor per
+   [Keeper_memory_os_current.librarian_failure_kind]. *)
+type memory_librarian_failure_kind =
+  | Failure_prompt_render
+  | Failure_execution_clock_unavailable
+  | Failure_exact_setup
+  | Failure_exact_execution
+  | Failure_domain_output_invalid
+  | Failure_memory_snapshot_write
+  | Failure_runtime_context_unavailable
+  | Failure_lane_cancelled
+  | Failure_unhandled_exception
+
 (* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
    standing, and what its last pass and its journal say. [None] in a field is
    "not measured", which the header prints as such; it is not zero. *)
 type memory_librarian_health = {
-  mlh_state : string option;
-  mlh_detail : string option;
+  mlh_state : memory_librarian_pass_end option;
   mlh_measured_at : float option;
   mlh_unread_atom_turns : int option;
   mlh_unread_official_turns : int option;
   mlh_continuity_unread_atoms : int option;
   mlh_last_success_at : float option;
-  mlh_last_failure_kind : string option;
+  mlh_last_failure_kind : memory_librarian_failure_kind option;
 }
 
 type memory_context_frontier = {
@@ -2633,9 +2707,18 @@ type memory_keeper_health = {
   mkh_alerts : memory_alert list;
 }
 
+(* A keeper row this build could not read. The rest of the fleet still
+   decodes: one row from a newer server must not blank the pane. [None] when
+   the row's own [keeper_id] could not be read either. *)
+type memory_keeper_refusal = {
+  mkr_keeper_id : string option;
+  mkr_reason : string;
+}
+
 type memory_health_snapshot = {
   mhs_generated_at : float;
   mhs_keepers : memory_keeper_health list;
+  mhs_refused_keepers : memory_keeper_refusal list;
   mhs_total_facts : int;
   mhs_total_observed_facts : int;
   mhs_total_derived_facts : int;
@@ -2674,7 +2757,7 @@ let no_memory_fact_events =
 
 type memory_fact = {
   mf_claim : string;
-  mf_category : string;
+  mf_category : Keeper_memory_os_types.category;
   mf_origin : string;
   mf_first_seen : float;
   mf_last_seen : float;
@@ -2742,7 +2825,6 @@ type harness_calibration = {
 
 type harness_overview = {
   hov_evaluator_status : string;
-  hov_last_signal_at : float option;
 }
 
 type harness_snapshot = {
@@ -2799,6 +2881,7 @@ type verification_snapshot = {
   vs_awaiting_unresolved : string list;
       (** Request ids the backlog waits on that name no record. A task holding
           one of these is waiting on something that is not there. *)
+  vs_awaiting_unresolved_total : int;  (** all such ids; the list is one page *)
   vs_backlog_error : string option;
       (** Why the queue could not be resolved. An empty list carrying this is
           not an empty queue. *)
@@ -2838,9 +2921,28 @@ let decode_effective_tool json =
   let* et_name = required_string_field json "name" in
   let* origin = required_object_field json "origin" in
   let* et_origin = required_string_field origin "kind" in
-  let* et_group = optional_string_field origin "group" in
-  let* et_skill_source = optional_string_field origin "skill_source" in
-  Ok { et_name; et_origin; et_group; et_skill_source }
+  (* Which configured skill source supplied this tool.
+     Keeper_effective_tool_surface.origin_to_yojson carries it as
+     origin.skill_provenance.identity.source_id, and only for composition
+     skills: for every other origin the key is absent, and for a composition
+     skill whose provenance is unknown it is null. Both mean "no source to
+     name", not a malformed payload, so each step is optional.
+
+     This used to read origin.group and origin.skill_source. No producer has
+     emitted either since the surface moved to skill_provenance, so the
+     Tools screen printed a bare "composition_skill" for every skill tool
+     and never said which skill it came from. *)
+  let* provenance = optional_object_field origin "skill_provenance" in
+  let* et_skill_source_id =
+    match provenance with
+    | None -> Ok None
+    | Some provenance ->
+      let* identity = optional_object_field provenance "identity" in
+      (match identity with
+       | None -> Ok None
+       | Some identity -> optional_string_field identity "source_id")
+  in
+  Ok { et_name; et_origin; et_skill_source_id }
 
 let decode_skill_reference_list json field =
   let* values = required_list_field json field in
@@ -2989,6 +3091,17 @@ let decode_effective_tool_surface json =
       let* ets_skills_left_out =
         decode_string_name_list json "skills_left_out"
       in
+      let* unavailable_skill_names_json =
+        optional_list_field json "unavailable_skill_names"
+      in
+      let* ets_unavailable_skill_names =
+        decode_list "effective_keeper_surface.unavailable_skill_names"
+          (fun entry ->
+            let* csn_name = required_string_field entry "name" in
+            let* csn_reason = optional_string_field entry "reason" in
+            Ok { csn_name; csn_reason })
+          unavailable_skill_names_json
+      in
       let* ets_instruction_skills =
         decode_skill_reference_list json "instruction_skills"
       in
@@ -3037,6 +3150,7 @@ let decode_effective_tool_surface json =
              ets_skill_resource_read_max_bytes;
              ets_instruction_skills;
              ets_skills_left_out;
+             ets_unavailable_skill_names;
              ets_composition_skills;
              ets_skill_profiles;
              ets_tool_surface_bytes;
@@ -3777,19 +3891,6 @@ let decode_connector_binding json =
   let* cb_keeper_name = required_string_field json "keeper_name" in
   Ok { cb_channel_id; cb_channel_name = nonblank_option cb_channel_name; cb_keeper_name }
 
-let decode_connector_name_mapping json =
-  let* raw_kind = required_string_field json "kind" in
-  let* cnm_kind =
-    match raw_kind with
-    | "channel" -> Ok Connector_channel_name
-    | "person" -> Ok Connector_person_name
-    | "server" -> Ok Connector_server_name
-    | unknown -> Error (Printf.sprintf "unknown connector name kind %S" unknown)
-  in
-  let* cnm_id = required_string_field json "id" in
-  let* cnm_name = required_string_field json "name" in
-  Ok { cnm_kind; cnm_id; cnm_name }
-
 let decode_connector_connection ~status ~available ~connected =
   match status, available, connected with
   | "connected", true, true -> Ok Connector_connected
@@ -3819,8 +3920,30 @@ let decode_connector json =
   let* cn_channel = optional_string_field json "channel" in
   let* cn_error = optional_string_field json "error" in
   let* cn_status_source = optional_string_field json "status_source" in
-  let* cn_gateway_state = optional_string_field json "gateway_state" in
-  let* cn_poll_state = optional_string_field json "poll_state" in
+  let* raw_gateway_state = optional_string_field json "gateway_state" in
+  let* cn_gateway_state =
+    match nonblank_option raw_gateway_state with
+    | None -> Ok None
+    | Some "disconnected" -> Ok (Some Connector_gateway_disconnected)
+    | Some "awaiting_hello" -> Ok (Some Connector_gateway_awaiting_hello)
+    | Some "identifying" -> Ok (Some Connector_gateway_identifying)
+    | Some "resuming" -> Ok (Some Connector_gateway_resuming)
+    | Some "connected" -> Ok (Some Connector_gateway_connected)
+    | Some "reconnect_pending" -> Ok (Some Connector_gateway_reconnect_pending)
+    | Some "failed" -> Ok (Some Connector_gateway_failed)
+    | Some unknown ->
+      Error (Printf.sprintf "unknown connector gateway state %S" unknown)
+  in
+  let* raw_poll_state = optional_string_field json "poll_state" in
+  let* cn_poll_state =
+    match nonblank_option raw_poll_state with
+    | None -> Ok None
+    | Some "not_started" -> Ok (Some Connector_poll_not_started)
+    | Some "polling" -> Ok (Some Connector_poll_polling)
+    | Some "degraded" -> Ok (Some Connector_poll_degraded)
+    | Some unknown ->
+      Error (Printf.sprintf "unknown connector poll state %S" unknown)
+  in
   let* cn_endpoint = optional_string_field json "gate_base_url" in
   let* cn_status_path = optional_string_field json "status_path" in
   let* cn_binding_store_path = optional_string_field json "binding_store_path" in
@@ -3881,13 +4004,6 @@ let decode_connector json =
     optional_string_field json "directory_updated_at"
   in
   let* cn_workspace_id = optional_string_field json "workspace_id" in
-  let* cn_server_names_path = optional_string_field json "server_names_path" in
-  let* cn_channel_names_path = optional_string_field json "channel_names_path" in
-  let* cn_people_names_path = optional_string_field json "people_names_path" in
-  let* name_mappings_json = optional_list_field json "name_mappings" in
-  let* cn_name_mappings =
-    decode_list "name_mappings" decode_connector_name_mapping name_mappings_json
-  in
   let* bindings_json = required_list_field json "configured_bindings" in
   let* cn_bindings =
     decode_list "configured_bindings" decode_connector_binding bindings_json
@@ -3902,8 +4018,8 @@ let decode_connector json =
     ; cn_channel = nonblank_option cn_channel
     ; cn_error = nonblank_option cn_error
     ; cn_status_source = nonblank_option cn_status_source
-    ; cn_gateway_state = nonblank_option cn_gateway_state
-    ; cn_poll_state = nonblank_option cn_poll_state
+    ; cn_gateway_state
+    ; cn_poll_state
     ; cn_endpoint = nonblank_option cn_endpoint
     ; cn_status_path = nonblank_option cn_status_path
     ; cn_binding_store_path = nonblank_option cn_binding_store_path
@@ -3933,10 +4049,18 @@ let decode_connector json =
     ; cn_directory_errors
     ; cn_directory_updated_at = nonblank_option cn_directory_updated_at
     ; cn_workspace_id = nonblank_option cn_workspace_id
-    ; cn_server_names_path = nonblank_option cn_server_names_path
-    ; cn_channel_names_path = nonblank_option cn_channel_names_path
-    ; cn_people_names_path = nonblank_option cn_people_names_path
-    ; cn_name_mappings
+      (* Name evidence does not travel on the connector object. It arrives as
+         one connector name page per kind, and connector_with_name_pages
+         fills these in from those pages -- which is already why the two
+         fields below start empty. The connector used to be read for
+         server_names_path, channel_names_path, people_names_path and
+         name_mappings as well, but no producer has emitted any of them since
+         the page vocabulary landed, so those reads only claimed a source
+         that does not exist. *)
+    ; cn_server_names_path = None
+    ; cn_channel_names_path = None
+    ; cn_people_names_path = None
+    ; cn_name_mappings = []
     ; cn_name_mapping_scope = None
     ; cn_names_error = None
     ; cn_bindings
@@ -4041,8 +4165,25 @@ let connector_with_name_pages connector ~pages ~error =
 
 let decode_connector_snapshot json =
   let* connectors_json = required_list_field json "connectors" in
-  let* cs_connectors =
-    decode_list "connectors" decode_connector connectors_json
+  let row_connector_id = function
+    | `Assoc fields -> (
+        match List.assoc_opt "connector_id" fields with
+        | Some (`String id) -> nonblank_option (Some id)
+        | Some _ | None -> None)
+    | _ -> None
+  in
+  let cs_connectors, cs_refused =
+    connectors_json
+    |> List.mapi (fun row item ->
+           match decode_connector item with
+           | Ok connector -> Either.Left connector
+           | Error reason ->
+               Either.Right
+                 { cr_row = row
+                 ; cr_connector_id = row_connector_id item
+                 ; cr_reason = reason
+                 })
+    |> List.partition_map Fun.id
   in
   let cs_connectors =
     List.sort
@@ -4051,7 +4192,7 @@ let decode_connector_snapshot json =
   in
   let* cs_total = required_int_field json "total" in
   let* cs_active = required_int_field json "active_count" in
-  Ok { cs_connectors; cs_total; cs_active }
+  Ok { cs_connectors; cs_refused; cs_total; cs_active }
 
 let runtime_probe_refresh_state_to_string = function
   | Runtime_probe_fresh -> "fresh"
@@ -4848,11 +4989,45 @@ let memory_alert_code_of_wire = function
 let memory_alert_severity_wire code =
   match memory_alert_severity code with `Warn -> "warn" | `Error -> "error"
 
-(* The states the server sends (RFC §4.9). A spelling this build does not know
-   is refused rather than shown as an unknown word: the header's job is to say
-   whether the keeper is behind, and a word it cannot place says nothing. *)
-let memory_librarian_states =
-  [ "off"; "lane_unconfigured"; "drained"; "not_committed"; "stopped"; "raised" ]
+(* The endings the server sends (RFC §4.9). A spelling this build does not
+   know is refused rather than shown as an unknown word: the header's job is to
+   say whether the keeper is behind, and a word it cannot place says nothing.
+   [detail] travels with [stopped] and [raised] and with nothing else, so a
+   pair that breaks that is refused too. *)
+let decode_memory_librarian_pass_end ~state ~detail =
+  match state, detail with
+  | None, None -> Ok None
+  | None, Some _ -> Error "librarian detail without a state"
+  | Some "off", None -> Ok (Some Pass_off)
+  | Some "lane_unconfigured", None -> Ok (Some Pass_lane_unconfigured)
+  | Some "drained", None -> Ok (Some Pass_drained)
+  | Some "not_committed", None -> Ok (Some Pass_not_committed)
+  | Some "stopped", Some detail -> Ok (Some (Pass_stopped detail))
+  | Some "raised", Some detail -> Ok (Some (Pass_raised detail))
+  | Some (("off" | "lane_unconfigured" | "drained" | "not_committed") as state), Some _ ->
+    Error ("librarian state carries a detail it has none of: " ^ state)
+  | Some (("stopped" | "raised") as state), None ->
+    Error ("librarian state is missing its detail: " ^ state)
+  | Some state, (None | Some _) -> Error ("unsupported librarian state: " ^ state)
+
+let decode_memory_librarian_failure_kind = function
+  | None -> Ok None
+  | Some "prompt_render_failure" -> Ok (Some Failure_prompt_render)
+  | Some "execution_clock_unavailable" -> Ok (Some Failure_execution_clock_unavailable)
+  | Some "exact_setup_failure" -> Ok (Some Failure_exact_setup)
+  | Some "exact_execution_failure" -> Ok (Some Failure_exact_execution)
+  | Some "domain_output_invalid" -> Ok (Some Failure_domain_output_invalid)
+  | Some "memory_snapshot_write_failure" -> Ok (Some Failure_memory_snapshot_write)
+  | Some "runtime_context_unavailable" -> Ok (Some Failure_runtime_context_unavailable)
+  | Some "lane_cancelled" -> Ok (Some Failure_lane_cancelled)
+  | Some "unhandled_exception" -> Ok (Some Failure_unhandled_exception)
+  | Some kind -> Error ("unsupported librarian failure kind: " ^ kind)
+
+(* The server's account of why a pass stopped or crashed. The other endings
+   carry none. *)
+let memory_librarian_pass_end_cause = function
+  | Pass_stopped cause | Pass_raised cause -> Some cause
+  | Pass_off | Pass_lane_unconfigured | Pass_drained | Pass_not_committed -> None
 
 let decode_memory_librarian_health keeper_json =
   let* json = required_member keeper_json "librarian" in
@@ -4870,16 +5045,9 @@ let decode_memory_librarian_health keeper_json =
       ]
       json
   in
-  let* mlh_state = required_nullable_string_field json "state" in
-  let* () =
-    match mlh_state with
-    | None -> Ok ()
-    | Some state ->
-      if List.mem state memory_librarian_states
-      then Ok ()
-      else Error ("unsupported librarian state: " ^ state)
-  in
-  let* mlh_detail = required_nullable_string_field json "detail" in
+  let* state = required_nullable_string_field json "state" in
+  let* detail = required_nullable_string_field json "detail" in
+  let* mlh_state = decode_memory_librarian_pass_end ~state ~detail in
   let* mlh_measured_at = required_nullable_float_field json "measured_at" in
   let* mlh_unread_atom_turns = required_nullable_int_field json "unread_atom_turns" in
   let* mlh_unread_official_turns =
@@ -4894,6 +5062,7 @@ let decode_memory_librarian_health keeper_json =
   let* mlh_last_success_at = required_nullable_float_field json "last_success_at" in
   let* mlh_last_failure_kind =
     required_nullable_string_field json "last_failure_kind"
+    |> Fun.flip Result.bind decode_memory_librarian_failure_kind
   in
   let* () =
     if List.for_all
@@ -4913,7 +5082,6 @@ let decode_memory_librarian_health keeper_json =
   in
   Ok
     { mlh_state
-    ; mlh_detail
     ; mlh_measured_at
     ; mlh_unread_atom_turns
     ; mlh_unread_official_turns
@@ -5206,11 +5374,37 @@ let decode_memory_health_snapshot json =
     else Error "memory health observation metadata must be non-negative"
   in
   let* keepers_json = required_list_field json "keepers" in
-  let* mhs_keepers =
-    decode_list "keepers" decode_memory_keeper_health keepers_json
+  (* Each row is decoded on its own and a row that does not decode is kept as
+     a refusal, not dropped and not folded into a default: a pass ending or a
+     failure kind this build does not know stays refused, but only for that
+     keeper. *)
+  let rows =
+    List.mapi
+      (fun index row ->
+         match decode_memory_keeper_health row with
+         | Ok keeper -> Ok keeper
+         | Error reason ->
+           Error
+             { mkr_keeper_id =
+                 (* The row is already refused with [reason]; an unreadable
+                    [keeper_id] only means the refusal cannot name its keeper. *)
+                 (match required_string_field row "keeper_id" with
+                  | Ok keeper_id -> Some keeper_id
+                  | Error _ -> None)
+             ; mkr_reason = Printf.sprintf "keepers[%d]: %s" index reason
+             })
+      keepers_json
+  in
+  let mhs_keepers, mhs_refused_keepers =
+    List.partition_map
+      (function Ok keeper -> Either.Left keeper | Error refusal -> Either.Right refusal)
+      rows
   in
   let* () =
-    let keeper_ids = List.map (fun keeper -> keeper.mkh_keeper_id) mhs_keepers in
+    let keeper_ids =
+      List.map (fun keeper -> keeper.mkh_keeper_id) mhs_keepers
+      @ List.filter_map (fun refusal -> refusal.mkr_keeper_id) mhs_refused_keepers
+    in
     if List.length keeper_ids = List.length (List.sort_uniq String.compare keeper_ids)
     then Ok ()
     else Error "memory health keeper identities must be unique"
@@ -5347,6 +5541,11 @@ let decode_memory_health_snapshot json =
     then Ok ()
     else Error "memory health fleet totals must be non-negative"
   in
+  (* The server's totals and alert summary count every row it sent, including
+     any this build refused, so they can only be checked against the rows when
+     every row decoded. With a refused row the totals are the server's and the
+     refused row is drawn as refused. *)
+  let every_row_read = mhs_refused_keepers = [] in
   let sum field =
     List.fold_left (fun total keeper -> total + field keeper) 0 mhs_keepers
   in
@@ -5356,7 +5555,7 @@ let decode_memory_health_snapshot json =
     | Some total, Some atoms, Some official -> Some (total + atoms + official)
     | _ -> None) (Some 0) mhs_keepers in
   let* () =
-    if mhs_total_librarian_unread_turns = expected_unread then Ok ()
+    if (not every_row_read) || mhs_total_librarian_unread_turns = expected_unread then Ok ()
     else Error "memory health unread total disagrees with keeper rows"
   in
   let expected_continuity_unread, expected_continuity_unmeasured =
@@ -5369,8 +5568,9 @@ let decode_memory_health_snapshot json =
       mhs_keepers
   in
   let* () =
-    if mhs_total_librarian_continuity_unread_atoms = expected_continuity_unread
-       && mhs_total_librarian_continuity_unmeasured = expected_continuity_unmeasured
+    if (not every_row_read)
+       || (mhs_total_librarian_continuity_unread_atoms = expected_continuity_unread
+           && mhs_total_librarian_continuity_unmeasured = expected_continuity_unmeasured)
     then Ok ()
     else Error "memory health continuity lag totals disagree with keeper rows"
   in
@@ -5393,7 +5593,8 @@ let decode_memory_health_snapshot json =
     ]
   in
   let* () =
-    if List.for_all (fun (reported, actual) -> reported = actual) expected_totals
+    if (not every_row_read)
+       || List.for_all (fun (reported, actual) -> reported = actual) expected_totals
     then Ok ()
     else Error "memory health fleet totals disagree with keeper rows"
   in
@@ -5419,7 +5620,8 @@ let decode_memory_health_snapshot json =
   in
   let* () =
     if
-      total_alerts = sum (fun keeper -> List.length keeper.mkh_alerts)
+      (not every_row_read)
+      || total_alerts = sum (fun keeper -> List.length keeper.mkh_alerts)
       && mhs_warn_alerts = observed_warn_alerts
       && mhs_error_alerts = observed_error_alerts
       && keepers_with_alerts = sum (fun keeper -> if keeper.mkh_alerts = [] then 0 else 1)
@@ -5428,8 +5630,9 @@ let decode_memory_health_snapshot json =
       && librarian_stopped_keepers
          = sum (fun keeper ->
            match keeper.mkh_librarian.mlh_state with
-           | Some ("lane_unconfigured" | "not_committed" | "stopped" | "raised") -> 1
-           | Some _ | None -> 0)
+           | Some (Pass_lane_unconfigured | Pass_not_committed | Pass_stopped _ | Pass_raised _)
+             -> 1
+           | Some (Pass_off | Pass_drained) | None -> 0)
       && mhs_starving_keepers
          = sum (fun keeper ->
            if keeper.mkh_librarian_failures > 0 && not keeper.mkh_snapshot_present
@@ -5441,6 +5644,7 @@ let decode_memory_health_snapshot json =
   Ok
     { mhs_generated_at
     ; mhs_keepers
+    ; mhs_refused_keepers
     ; mhs_total_facts
     ; mhs_total_observed_facts
     ; mhs_total_derived_facts
@@ -5479,7 +5683,16 @@ let decode_memory_fact_events json =
 
 let decode_memory_fact json =
   let* mf_claim = required_string_field json "claim" in
-  let* mf_category = required_string_field json "category" in
+  let* raw_category = required_string_field json "category" in
+  let* mf_category =
+    (* The librarian taxonomy is a closed sum on the side that writes it
+       ([Keeper_memory_os_types.category]; the model's schema enum is built
+       from it and anything outside is rejected), so a word this build does
+       not know is a store written by something newer, not a category. *)
+    match Keeper_memory_os_types.category_of_string raw_category with
+    | Some category -> Ok category
+    | None -> Error (Printf.sprintf "unknown memory category %S" raw_category)
+  in
   let* mf_origin = required_string_field json "origin" in
   let* mf_first_seen = require_float_field json "first_seen" in
   let* mf_last_seen = require_float_field json "last_seen" in
@@ -5622,13 +5835,7 @@ let decode_harness_overview json =
         | `String value -> value
         | _ -> "unknown"
       in
-      let last_signal_at =
-        match member "last_signal_at" overview with
-        | `Float value -> Some value
-        | `Int value -> Some (Float.of_int value)
-        | _ -> None
-      in
-      Some { hov_evaluator_status = status; hov_last_signal_at = last_signal_at }
+      Some { hov_evaluator_status = status }
   | _ -> None
 
 let decode_harness_snapshot json =
@@ -5713,6 +5920,14 @@ let decode_verification_snapshot json =
   let* vs_awaiting_unresolved =
     decode_string_name_list json "awaiting_unresolved"
   in
+  let* vs_awaiting_unresolved_total =
+    match vs_view with
+    | Awaiting_queue -> required_int_field json "awaiting_unresolved_total"
+    | Full_history ->
+      (* The history view does not join the backlog, so it sends neither the
+         unresolved list nor its count; there is nothing it failed to find. *)
+      Ok 0
+  in
   let* vs_backlog_error = optional_string_field json "backlog_error" in
   let* vs_backlog_recovery = optional_string_field json "backlog_recovery" in
   Ok
@@ -5722,6 +5937,7 @@ let decode_verification_snapshot json =
     ; vs_offset
     ; vs_truncated
     ; vs_awaiting_unresolved
+    ; vs_awaiting_unresolved_total
     ; vs_backlog_error
     ; vs_backlog_recovery
     }
@@ -5780,11 +5996,6 @@ let decode_keeper_call json =
     | _ -> None
   in
   let kc_turn = match member "turn" json with `Int value -> Some value | _ -> None in
-  let string_opt key =
-    match member key json with
-    | `String value when String.trim value <> "" -> Some value
-    | _ -> None
-  in
   let optional_nonnegative_int key =
     match member key json with
     | `Null -> Ok None
@@ -5837,8 +6048,6 @@ let decode_keeper_call json =
       ; kc_outcome
       ; kc_duration_ms
       ; kc_turn
-      ; kc_task_id = string_opt "task_id"
-      ; kc_model = string_opt "model"
       ; kc_execution_id = nonblank kc_execution_id
       ; kc_tool_use_id = nonblank kc_tool_use_id
       ; kc_schedule
@@ -5849,7 +6058,6 @@ let decode_keeper_call json =
 
 let decode_keeper_calls_snapshot ~requested_keeper json =
   let* kcs_keeper = required_string_field json "keeper" in
-  let* kcs_count = required_int_field json "count" in
   let* kcs_health = required_string_field json "health" in
   let* entries_json = required_list_field json "entries" in
   let* rows =
@@ -5880,7 +6088,6 @@ let decode_keeper_calls_snapshot ~requested_keeper json =
   Ok
     { kcs_keeper
     ; kcs_entries = List.rev kcs_entries
-    ; kcs_count
     ; kcs_health
     ; kcs_latest_age_s
     ; kcs_stale_reason
@@ -6248,9 +6455,15 @@ let standalone_lane_configuration_of_string = function
   | "unavailable" -> Ok Lane_registry_unavailable
   | other -> Error ("standalone lane configuration: unknown value " ^ other)
 
-let standalone_lane_configuration_to_string = function
-  | Lane_ready -> "ready"
-  | Lane_slotless -> "no slot admitted"
+(* A clause, not a word. The lane detail line writes [obligation ^ " lane"],
+   then this, then the last run, and it used to write the noun itself:
+   "configuration " ^ the word here. Three of the four words already carry
+   their own subject, so the live screen read "configuration not configured",
+   and the other two read "configuration no slot admitted" and "configuration
+   registry unreadable". The sentence is written in one place now, here. *)
+let standalone_lane_configuration_phrase = function
+  | Lane_ready -> "configuration ready"
+  | Lane_slotless -> "configured, but no slot admitted"
   | Lane_unconfigured -> "not configured"
   | Lane_registry_unavailable -> "registry unreadable"
 
@@ -6384,6 +6597,10 @@ let decode_standalone_lane json =
   let* sl_selected_slots =
     decode_list "selected_slots" decode_standalone_lane_slot_count selected_slots
   in
+  let* runs_without_slot = required_member json "runs_without_slot" in
+  let* slws_vendor_system_one = required_int_field runs_without_slot "vendor_system_one" in
+  let* slws_server_restarted = required_int_field runs_without_slot "server_restarted" in
+  let* slws_no_slot = required_int_field runs_without_slot "no_slot" in
   Ok
     { sl_lane_id
     ; sl_label
@@ -6407,6 +6624,8 @@ let decode_standalone_lane json =
     ; sl_last_outcome
     ; sl_p50_elapsed_s
     ; sl_selected_slots
+    ; sl_runs_without_slot =
+        { slws_vendor_system_one; slws_server_restarted; slws_no_slot }
     }
 
 let decode_standalone_lanes_snapshot json =
@@ -7291,7 +7510,6 @@ type gate_rule = {
   gr_tool : string;
   gr_fingerprint : string;
   gr_created_at : float;
-  gr_created_by : string option;
   gr_expires_at : float option;
 }
 
@@ -7552,11 +7770,6 @@ let decode_gate_rule json =
     | `Int value -> Ok (float_of_int value)
     | _ -> Error "approval rule created_at must be a number"
   in
-  let optional_string field =
-    match member field json with
-    | `String value -> Some value
-    | _ -> None
-  in
   let gr_expires_at =
     match member "expires_at" json with
     | `Float value -> Some value
@@ -7569,7 +7782,6 @@ let decode_gate_rule json =
     ; gr_tool
     ; gr_fingerprint
     ; gr_created_at
-    ; gr_created_by = optional_string "created_by"
     ; gr_expires_at
     }
 
@@ -8021,7 +8233,6 @@ type server_gc_health = {
   sgc_heap_words : int;
   sgc_live_words : int;
   sgc_minor_heap_size : int;
-  sgc_space_overhead : int;
   sgc_minor_collections : int;
   sgc_major_collections : int;
   sgc_compactions : int;
@@ -8132,7 +8343,6 @@ let decode_server_identity json =
           { sgc_heap_words = int_in gc_obj "heap_words" 0
           ; sgc_live_words = int_in gc_obj "live_words" 0
           ; sgc_minor_heap_size = int_in gc_obj "minor_heap_size" 0
-          ; sgc_space_overhead = int_in gc_obj "space_overhead" 0
           ; sgc_minor_collections = int_in gc_obj "minor_collections" 0
           ; sgc_major_collections = int_in gc_obj "major_collections" 0
           ; sgc_compactions = int_in gc_obj "compactions" 0
@@ -9093,23 +9303,56 @@ let decode_lane_run_detail json =
                   | Exact_lane_run_registry.Unavailable _) -> Ok None
   in
   let* lrd_answer_source =
-    let board_attention_lane =
-      Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention
+    (* The lane key is read into the registry's lane once; the answer-source
+       rule below is about the Board-attention lane, and a key no registered
+       lane spells is not that lane. *)
+    let lane =
+      List.find_opt
+        (fun lane ->
+          String.equal (Exact_lane_run_registry.lane_key lane) summary.lrs_lane)
+        Exact_lane_run_registry.all_lanes
     in
-    let is_board_attention = String.equal summary.lrs_lane board_attention_lane in
+    let is_board_attention =
+      match lane with
+      | Some Exact_lane_run_registry.Board_attention -> true
+      | Some
+          ( Exact_lane_run_registry.Librarian
+          | Exact_lane_run_registry.Hitl_auto_judge
+          | Exact_lane_run_registry.Workspace_curator )
+      | None ->
+        false
+    in
     let* answer_succeeded =
       match summary.lrs_status with
       | Lane_run_succeeded -> Ok true
       | (Lane_run_completion_persistence_failed
         | Lane_run_completion_durability_unknown)
         when is_board_attention ->
-        let* intended_status = required_string_field run "intended_status" in
-        (match intended_status with
-         | "succeeded" -> Ok true
-         | "cancelled" | "failed" -> Ok false
-         | other ->
-           Error (Printf.sprintf "unknown intended lane run status %S" other))
-      | _ -> Ok false
+        (* The run's intended outcome, read with the same decoder as its
+           status. Only a run that meant to succeed, fail or be cancelled
+           reaches this record; any other word is a producer the reader does
+           not know, and says so. *)
+        let* intended = required_string_field run "intended_status" in
+        (match lane_run_status_of_string intended with
+         | Lane_run_succeeded -> Ok true
+         | Lane_run_cancelled | Lane_run_failed -> Ok false
+         | Lane_run_running | Lane_run_completion_persistence_failed
+         | Lane_run_completion_durability_unknown | Lane_run_approved
+         | Lane_run_reviewed | Lane_run_committed | Lane_run_superseded
+         | Lane_run_rejected | Lane_run_deferred | Lane_run_review_cancelled
+         | Lane_run_infrastructure_unavailable | Lane_run_not_reviewed
+         | Lane_run_commit_failed | Lane_run_raised | Lane_run_operator_routed
+         | Lane_run_other _ ->
+           Error (Printf.sprintf "unknown intended lane run status %S" intended))
+      | Lane_run_completion_persistence_failed
+      | Lane_run_completion_durability_unknown
+      | Lane_run_running | Lane_run_cancelled | Lane_run_failed
+      | Lane_run_approved | Lane_run_reviewed | Lane_run_committed
+      | Lane_run_superseded | Lane_run_rejected | Lane_run_deferred
+      | Lane_run_review_cancelled | Lane_run_infrastructure_unavailable
+      | Lane_run_not_reviewed | Lane_run_commit_failed | Lane_run_raised
+      | Lane_run_operator_routed | Lane_run_other _ ->
+        Ok false
     in
     match is_board_attention, answer_succeeded, lrd_output with
     | true, true, Some output ->
@@ -10941,4 +11184,19 @@ let decode_async_request_observation json =
     in
     Ok (Async_ready { summary; requests; recovery })
   | _ -> Error (Printf.sprintf "unknown async inventory status %S" status)
+;;
+
+type schedule_runner_hold =
+  { srh_occurrence_id : string
+  ; srh_due_at_iso : string
+  }
+
+let decode_schedule_runner_hold row =
+  match member "runner_hold" row with
+  | `Null -> Ok None
+  | `Assoc _ as hold ->
+    let* srh_occurrence_id = required_string_field hold "occurrence_id" in
+    let* srh_due_at_iso = required_string_field hold "due_at_iso" in
+    Ok (Some { srh_occurrence_id; srh_due_at_iso })
+  | bad -> field_type_error "runner_hold" "an object or null" bad
 ;;

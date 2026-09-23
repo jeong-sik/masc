@@ -149,6 +149,7 @@ module Task_error = struct
     | NotClaimed of string
     | InvalidState of string
     | InvalidId of string
+    | VerificationSuperseded of { task_id: string; requested: string; current: string }
 
   let to_string = function
     | NotFound id ->
@@ -165,6 +166,11 @@ module Task_error = struct
           id
     | InvalidState msg -> Printf.sprintf "[TaskError] Invalid task state: %s" msg
     | InvalidId reason -> Printf.sprintf "[TaskError] Invalid task ID: %s" reason
+    | VerificationSuperseded { task_id; requested; current } ->
+        Printf.sprintf
+          "[TaskError] Task %s verification %s is no longer the one awaiting a \
+           verdict; the current submission is %s."
+          task_id requested current
 end
 
 module Agent_error = struct
@@ -192,11 +198,6 @@ module Auth_error = struct
     | SameOriginBlocked
     | TokenExpired of string
     | InvalidToken of string
-
-  let unauthorized_reason_to_string = function
-    | Actor_mismatch -> "actor_mismatch"
-    | Missing_token -> "missing_token"
-    | Generic -> "unknown"
 
   let to_string = function
     | Unauthorized { message; _ } -> Printf.sprintf "[AuthError] Unauthorized: %s" message
@@ -277,6 +278,7 @@ let code = function
          | Task_error.NotClaimed _
          | Task_error.InvalidState _
          | Task_error.InvalidId _) -> 400
+  | Task (Task_error.VerificationSuperseded _) -> 409
   | Agent (Agent_error.InvalidName _) -> 400
   | System (System_error.NotInitialized
            | System_error.AlreadyInitialized
@@ -303,15 +305,51 @@ let code = function
    variant trips Warning 8 here instead of silently falling through.
    [SameOriginBlocked] is a distinct typed producer outcome; this mapping
    therefore cannot drift when a human-readable error message changes. *)
-let dashboard_auth_error_code : t -> string option = function
-  | Auth (Auth_error.InvalidToken _) -> Some "invalid_token"
-  | Auth (Auth_error.TokenExpired _) -> Some "token_expired"
-  | Auth Auth_error.SameOriginBlocked -> Some "same_origin_blocked"
-  | Auth (Auth_error.Forbidden _) -> Some "insufficient_role"
-  | Auth (Auth_error.Unauthorized { reason; _ }) ->
-      Some (Auth_error.unauthorized_reason_to_string reason)
+module Auth_error_code = struct
+  type t =
+    | Invalid_token
+    | Token_expired
+    | Same_origin_blocked
+    | Insufficient_role
+    | Actor_mismatch
+    | Missing_token
+    | Unknown
+
+  let to_string = function
+    | Invalid_token -> "invalid_token"
+    | Token_expired -> "token_expired"
+    | Same_origin_blocked -> "same_origin_blocked"
+    | Insufficient_role -> "insufficient_role"
+    | Actor_mismatch -> "actor_mismatch"
+    | Missing_token -> "missing_token"
+    | Unknown -> "unknown"
+
+  let of_string = function
+    | "invalid_token" -> Some Invalid_token
+    | "token_expired" -> Some Token_expired
+    | "same_origin_blocked" -> Some Same_origin_blocked
+    | "insufficient_role" -> Some Insufficient_role
+    | "actor_mismatch" -> Some Actor_mismatch
+    | "missing_token" -> Some Missing_token
+    | "unknown" -> Some Unknown
+    | _ -> None
+end
+
+let auth_error_code_of_error : t -> Auth_error_code.t = function
+  | Auth (Auth_error.InvalidToken _) -> Auth_error_code.Invalid_token
+  | Auth (Auth_error.TokenExpired _) -> Auth_error_code.Token_expired
+  | Auth Auth_error.SameOriginBlocked -> Auth_error_code.Same_origin_blocked
+  | Auth (Auth_error.Forbidden _) -> Auth_error_code.Insufficient_role
+  | Auth (Auth_error.Unauthorized { reason = Auth_error.Actor_mismatch; _ }) ->
+      Auth_error_code.Actor_mismatch
+  | Auth (Auth_error.Unauthorized { reason = Auth_error.Missing_token; _ }) ->
+      Auth_error_code.Missing_token
+  | Auth (Auth_error.Unauthorized { reason = Auth_error.Generic; _ })
   | Task _ | Agent _ | System _ | RateLimitExceeded _ | CacheError _ ->
-      Some "unknown"
+      Auth_error_code.Unknown
+
+let dashboard_auth_error_code (err : t) : string option =
+  Some (Auth_error_code.to_string (auth_error_code_of_error err))
 
 (* [is_retryable] mirrors [Error.is_retryable] in AGENT_CORE so MASC-side
    callers don't have to fall back on an AGENT_CORE-only predicate when

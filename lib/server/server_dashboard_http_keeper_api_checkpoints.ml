@@ -265,39 +265,12 @@ let purge_error_to_string = function
     "checkpoint purge install failed: " ^ detail
 ;;
 
-let checkpoint_load_error_to_string = function
-  | Keeper_checkpoint_store.Not_found -> "not found"
-  | Superseded_version { expected; got } ->
-    Printf.sprintf "version %d superseded by %d" got expected
-  | Store_error detail -> "store error: " ^ detail
-  | Parse_error detail -> "parse error: " ^ detail
-  | Io_error detail -> "io error: " ^ detail
-  | Agent_core_error detail -> "agent core error: " ^ detail
+let checkpoint_identity_error_to_string =
+  Keeper_checkpoint_store.checkpoint_identity_error_to_string
 ;;
 
-let checkpoint_ref_create_error_to_string = function
-  | Keeper_checkpoint_ref.Negative_turn_count value ->
-    Printf.sprintf "negative turn count %d" value
-  | Invalid_sha256 value ->
-    Printf.sprintf "invalid checkpoint sha256 %S" value
-;;
-
-let checkpoint_identity_error_to_string = function
-  | Keeper_checkpoint_store.Session_id_invalid detail ->
-    "invalid session id: " ^ detail
-  | Ref_create_failed error -> checkpoint_ref_create_error_to_string error
-;;
-
-let checkpoint_ref_load_error_to_string = function
-  | Keeper_checkpoint_store.Ref_not_found -> "not found"
-  | Ref_read_failed error -> checkpoint_load_error_to_string error
-  | Ref_identity_invalid error -> checkpoint_identity_error_to_string error
-  | Ref_session_mismatch { expected; actual } ->
-    Printf.sprintf
-      "session mismatch expected=%s actual=%s"
-      (Keeper_id.Trace_id.to_string expected)
-      (Keeper_id.Trace_id.to_string actual)
-  | Ref_lock_failed detail -> "checkpoint lock failed: " ^ detail
+let checkpoint_ref_load_error_to_string =
+  Keeper_checkpoint_store.checkpoint_ref_load_error_to_string
 ;;
 
 let checkpoint_cas_error_to_string = function
@@ -635,10 +608,12 @@ let purge_current config ~keeper_name ~apply =
               it, from the Librarian's read position or its own turn start,
               until the Librarian wrote it again from atom 0. So new units are
               kept out, and running ones cancelled and awaited, for the whole
-              read-rewrite-install. *)
+              read-rewrite-install. The purge also cancels the running
+              catch-up, so the Librarian is resubmitted once the exclusion is
+              released. *)
            match
              Eio_context.run_on_owner_domain (fun () ->
-               Keeper_memory_lane.with_librarian_purge
+               Keeper_librarian_queue_refresh.with_purge_then_catch_up
                  ~base_path:config.Workspace.base_path
                  ~keeper_name
                  (fun () -> purge_current_unlocked config ~keeper_name ~apply:true))

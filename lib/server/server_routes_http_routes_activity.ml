@@ -102,44 +102,16 @@ let schedule_write_schema tool =
   | None -> Error (Schedule_schema_not_registered tool)
 ;;
 
-let schedule_stamp_operator_actor ~agent_name = function
-  | `Assoc fields ->
-    let operator_kind =
-      Schedule_domain.actor_kind_to_string Schedule_domain.Human_operator
-    in
-    let stamped =
-      [ "requested_by_id", `String agent_name
-      ; "requested_by_kind", `String operator_kind
-      ; "scheduled_by_id", `String agent_name
-      ; "scheduled_by_kind", `String operator_kind
-      ]
-    in
-    let stamped_names = List.map fst stamped in
-    `Assoc
-      (stamped
-       @ List.filter
-           (fun (name, _) -> not (List.mem name stamped_names))
-           fields)
-  | other -> other
-;;
-
-let schedule_stamp_cancel_operator_actor ~agent_name = function
-  | `Assoc fields ->
-    let operator_kind =
-      Schedule_domain.actor_kind_to_string Schedule_domain.Human_operator
-    in
-    let stamped =
-      [ "cancelled_by_id", `String agent_name
-      ; "cancelled_by_kind", `String operator_kind
-      ]
-    in
-    let stamped_names = List.map fst stamped in
-    `Assoc
-      (stamped
-       @ List.filter
-           (fun (name, _) -> not (List.mem name stamped_names))
-           fields)
-  | other -> other
+(* Who a schedule route is acting for. [with_tool_actor_auth] admits a
+   request and names it, but a same-origin request with no bearer and a
+   keeper holding the internal token are admitted too, and neither is the
+   operator. Only an operator credential makes the operator. *)
+let schedule_caller ~state ~agent_name request =
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  match Server_auth.request_credential_standing ~base_path request with
+  | Server_auth.Operator_credential -> Tool_schedule.Operator_caller agent_name
+  | Server_auth.Agent_credential -> Tool_schedule.Named_caller agent_name
+  | Server_auth.No_credential -> Tool_schedule.Unnamed_caller
 ;;
 
 let handle_schedule_write_request
@@ -162,7 +134,6 @@ let handle_schedule_write_request
       try Ok (Yojson.Safe.from_string body_str) with
       | Yojson.Json_error message -> Error ("Invalid JSON: " ^ message)
     in
-    let args = schedule_stamp_operator_actor ~agent_name args in
     let schedule_tool = if update then Schedule_update else Schedule_create in
     let tool_name = schedule_write_tool_name schedule_tool in
     let* schema =
@@ -180,7 +151,7 @@ let handle_schedule_write_request
     let config = (Mcp_server.workspace_scope state).Mcp_server.config in
     let context : Tool_schedule.context =
       { config
-      ; caller = Tool_schedule.Named_caller agent_name
+      ; caller = schedule_caller ~state ~agent_name request
       ; stamp_keeper_wake_result_delivery =
           (fun ~payload ->
              Schedule_payload_projection.set_keeper_wake_result_delivery
@@ -1136,8 +1107,10 @@ let add_routes ~sw ~clock router =
        let json = `Assoc [("flairs", `List flairs)] in
        Http.Response.json_value json reqd)
 
-  |> Http.Router.get "/api/v1/board/sub-boards" (fun _request reqd ->
-       respond_board_json reqd (board_sub_boards_json ()))
+  |> Http.Router.get "/api/v1/board/sub-boards" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         respond_board_json reqd (board_sub_boards_json ())
+       ) request reqd)
 
   |> Http.Router.post "/api/v1/board/context-inference" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_keeper_delegate"
@@ -1164,13 +1137,12 @@ let add_routes ~sw ~clock router =
              in
              let members = Safe_ops.json_string_list "members" args in
              let owner = board_actor_author_for_write agent_name in
-             let access =
-               match Safe_ops.json_string_opt "access" args with
-               | Some s -> Board.sub_board_access_of_string_opt s
-               | None -> None
-             in
-             (match Board_dispatch.create_sub_board ~slug ~name ~description
-                      ~owner ~members ?access () with
+             (match
+                Result.bind (Board.sub_board_access_field_of_yojson args)
+                  (fun access ->
+                    Board_dispatch.create_sub_board ~slug ~name ~description
+                      ~owner ~members ?access ())
+              with
               | Ok sb ->
                   Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
               | Error e ->
@@ -1183,21 +1155,13 @@ let add_routes ~sw ~clock router =
                reqd))
          request reqd)
 
-  |> Http.Router.prefix_get "/api/v1/board/sub-boards/" (fun request reqd ->
-       let path = Http.Request.path request in
-       (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
-        | None ->
-            Http.Response.json_value ~status:`Bad_request
-              (`Assoc [("error", `String "sub_board_id is required")])
-              reqd
-        | Some sub_board_id ->
-            (match Board_dispatch.get_sub_board ~sub_board_id with
-             | Ok sb ->
-                 Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
-             | Error e ->
-                 Http.Response.json_value ~status:`Not_found
-                   (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
-                   reqd)))
+  |> Http.Router.prefix_get board_sub_board_detail_prefix (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         let status, json =
+           board_sub_board_detail_json ~path:(Http.Request.path request)
+         in
+         Http.Response.json_value ~status json reqd
+       ) request reqd)
 
   |> Http.Router.prefix_delete "/api/v1/board/sub-boards/" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_board_sub_board_delete"
@@ -1240,13 +1204,14 @@ let add_routes ~sw ~clock router =
              let description = Safe_ops.json_string_opt "description" args in
              let members = Safe_ops.json_string_list "members" args in
              let members_arg = if members = [] then None else Some members in
-             let access =
-               match Safe_ops.json_string_opt "access" args with
-               | Some s -> Board.sub_board_access_of_string_opt s
-               | None -> None
-             in
              let path = Http.Request.path request in
-             (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
+             (match Board.sub_board_access_field_of_yojson args with
+              | Error e ->
+                  Http.Response.json_value ~status:`Bad_request
+                    (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
+                    reqd
+              | Ok access ->
+             match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
               | None ->
                   Http.Response.json_value ~status:`Bad_request
                     (`Assoc [("error", `String "sub_board_id is required")])
@@ -1496,7 +1461,8 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   (* Schedule create/modify from the terminal. Their schemas share the same
      editable definition; update additionally requires the stable id. Actor
-     auth supplies the scheduler identity instead of trusting a form field. *)
+     auth resolves the caller; the tool records that caller as the actor and
+     refuses a form field that names someone else. *)
   |> Http.Router.post "/api/v1/tools/masc_schedule_create" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_schedule_create"
          (fun state agent_name _request reqd ->
@@ -1512,10 +1478,10 @@ let add_routes ~sw ~clock router =
                  ~request reqd))
          request reqd)
   (* Schedule cancel from the terminal (#29684). The workspace tool owns the
-     argument contract ([Tool_schedule.handle_cancel]: schedule_id,
-     cancelled_by_*, reason) and the store transition. The HTTP trust boundary
-     owns the canceller: client-supplied identity fields are replaced with the
-     actor resolved from the credential before entering the tool. *)
+     argument contract ([Tool_schedule.handle_cancel]: schedule_id, reason)
+     and the store transition. The HTTP trust boundary owns the canceller:
+     [schedule_caller] decides from the credential whether the caller is the
+     operator, who may cancel any schedule. *)
   |> Http.Router.post "/api/v1/tools/masc_schedule_cancel" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_schedule_cancel"
          (fun state agent_name _req reqd ->
@@ -1532,14 +1498,21 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
-             let args = schedule_stamp_cancel_operator_actor ~agent_name args in
              let config = (Mcp_server.workspace_scope state).Mcp_server.config in
+             let context : Tool_schedule.context =
+               { config
+               ; caller = schedule_caller ~state ~agent_name request
+               ; stamp_keeper_wake_result_delivery =
+                   (fun ~payload ->
+                      Schedule_payload_projection.set_keeper_wake_result_delivery
+                        ~payload ~channel:None)
+               ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+               }
+             in
              let start_time = Unix.gettimeofday () in
              let result =
                Tool_schedule.handle_cancel
-                 ~tool_name:"masc_schedule_cancel" ~start_time
-                 ~caller:(Tool_schedule.Named_caller agent_name)
-                 config args
+                 ~tool_name:"masc_schedule_cancel" ~start_time context args
              in
              let ok = Tool_result.is_success result in
              let msg = Tool_result.message result in

@@ -48,6 +48,23 @@ type retract_error =
   | Retract_fact_not_found of string
   | Retract_persistence_failed of string
 
+type supersede_error =
+  | Supersede_memory_id_invalid
+  | Supersede_self
+      (** The incoming claim has the superseded fact's exact bytes, so it
+          would name itself as its own successor. *)
+  | Supersede_target_not_current of string
+  | Supersede_target_not_authored of string
+      (** The target is current but was not written by this keeper through
+          [keeper_memory_write]; a Librarian copy is the Librarian's to
+          revise. *)
+  | Supersede_successor_rests_on_target of support_invalidation
+      (** The successor is derived and, once the target is gone, has no
+          complete support path left; the target is among its missing
+          premises. A claim cannot rest on the fact it replaces. *)
+  | Supersede_unsupported_derivation of support_invalidation
+  | Supersede_persistence_failed of string
+
 type retraction =
   { memory_id : string
   ; reason : string
@@ -264,20 +281,45 @@ val committed_official_range
 (** Same snapshot proof as [committed_durable_range], independently retained
     for official-client input in the shared receipt sidecar. *)
 
+type disposition =
+  { snapshot : t  (** the committed snapshot *)
+  ; absorbed_applied : Keeper_memory_os_types.absorbed_statement list
+        (** absorptions this commit applied: the source left the snapshot and
+            its {!Keeper_memory_absorbed} row points into the target. In the
+            answer's order. *)
+  ; absorbed_not_applied : Keeper_memory_os_types.absorbed_statement list
+        (** the other absorptions passed in: the target was neither in the
+            locked snapshot nor among the stored [new_claims] (the source
+            stays current), or the locked snapshot no longer held the source.
+            No row is written for them. *)
+  ; claims_not_applied : Keeper_memory_os_types.fact list
+        (** the [new_claims] not stored: each supersedes or absorbs a memory
+            the locked snapshot no longer holds. In the answer's order. *)
+  ; revisions_applied : Keeper_memory_os_types.revision list
+        (** the [revisions] this commit carried out: the old id left the
+            snapshot and its successor is in it. Only these get a [Revised]
+            event. In the answer's order. *)
+  }
+(** What one [apply_disposition] commit did. The absorptions, claims and
+    revisions a caller passed in are what it asked for; these lists are what
+    the store did. The two absorption lists together hold every absorption
+    passed in. *)
+
 val apply_disposition
-  :  ?on_committed:(t -> unit)
+  :  ?on_committed:(disposition -> unit)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
   -> ?durable_range_id:durable_range_id
   -> ?official_range_id:official_range_id
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> revisions:Keeper_memory_os_types.revision list
   -> keepers_dir:string
   -> keeper_id:string
   -> now:float
   -> source:source
   -> new_claims:Keeper_memory_os_types.fact list
   -> unit
-  -> (t, string) result
+  -> (disposition, string) result
 (** Apply a librarian's decision to whatever the snapshot holds when the lock
     is taken.
 
@@ -313,7 +355,31 @@ val apply_disposition
     snapshot is built and printed and right before it replaces the old one; if
     that append fails, nothing is committed (RFC-0456 §4.2). Required rather
     than defaulted: a caller that leaves it out would add the merged claim and
-    keep every fact it absorbs current. *)
+    keep every fact it absorbs current.
+
+    The librarian read the snapshot before its provider turn, so a memory its
+    answer names may be gone when the lock is taken: the keeper retracted it,
+    or superseded it with a successor of its own.
+
+    A new claim that supersedes (per [revisions]) or absorbs (per [absorbed])
+    a memory the locked snapshot does not hold is not stored and is returned
+    in [claims_not_applied]: it would carry on content the keeper already
+    removed or replaced, and give the old id a second successor. A memory
+    [revisions] supersedes stays current, even if [dropped_statements] retires
+    it, unless one of its successors is a stored new claim or a memory the
+    locked snapshot holds. Only the absorptions passed in [absorbed] are
+    checked: when a caller leaves an absorption out (the absorb gate declined
+    it), the claim is stored even if the memory that absorption named is
+    gone. [revisions] is required for the same
+    reason [absorbed] is: a caller that leaves it out would store a successor
+    of a memory the keeper already replaced.
+
+    An absorption goes into a memory the answer names: a stored new claim, or
+    a current memory the answer wrote again verbatim. An absorption whose
+    target the locked snapshot does not hold and this commit does not store is
+    not applied and is returned in [absorbed_not_applied]; its source stays
+    current, the removed memory is not brought back, and no absorbed row
+    points into an id no snapshot has (#38186). *)
 
 val replace
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -384,6 +450,24 @@ val retract_fact
     reason are written to the same journal commit as the resulting snapshot;
     cascaded removals are represented by [change.invalidated]. Invalid input
     and a missing target fail before any snapshot or journal write. *)
+
+val supersede_fact
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> keepers_dir:string
+  -> keeper_id:string
+  -> now:float
+  -> source:source
+  -> superseded_memory_id:string
+  -> Keeper_memory_os_types.fact
+  -> (t, supersede_error) result
+(** Atomically remove one current keeper-authored fact and insert its
+    successor in the same locked update. The successor is added under the
+    same rules as {!upsert_fact}: new claim bytes get the incoming
+    [first_seen]; bytes already current under another identity are a
+    re-observation of that fact. Derived facts that lose their support with
+    the target are removed as in {!retract_fact}. The removal is journaled
+    with a [superseded_by] reason in the same commit. Every refusal writes no
+    snapshot and no journal line. *)
 
 val retract_facts
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t

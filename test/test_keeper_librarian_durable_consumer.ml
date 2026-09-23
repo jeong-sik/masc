@@ -316,7 +316,7 @@ let test_committed_range_recovers_after_progress_write_failure () =
     committed_inputs := !committed_inputs @ [ text_markers input ];
     attempted_range := range_id;
     match
-      Current.apply_disposition
+      Current.apply_disposition ~revisions:[]
         ?durable_range_id:range_id
         ?official_range_id
         ~absorbed:[]
@@ -454,7 +454,7 @@ let test_committed_wide_range_recovers_before_retry_narrowing () =
   let commit ~expected_revision:_ ~range_id ~official_range_id input =
     incr commits;
     match
-      Current.apply_disposition
+      Current.apply_disposition ~revisions:[]
         ?durable_range_id:range_id
         ?official_range_id
         ~absorbed:[]
@@ -522,7 +522,7 @@ let test_receipt_does_not_cross_restarted_history_with_repeated_endpoint () =
   let commit ~expected_revision:_ ~range_id ~official_range_id input =
     incr commits;
     match
-      Current.apply_disposition
+      Current.apply_disposition ~revisions:[]
         ?durable_range_id:range_id
         ?official_range_id
         ~absorbed:[]
@@ -1586,9 +1586,10 @@ let test_restart_cut_never_commits_a_current_unfinished_turn () =
   let write_claims claims =
     let facts = List.map (fun claim -> Memory.observed ~claim ~category:Memory.Fact
         ~now:1. ~origin:{ kind = Memory.Authored; trace_id }) claims in
-    match Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:1.
+    match Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:1.
         ~source:{ kind = Current.Librarian; trace_id } ~new_claims:facts ~absorbed:[] () with
-    | Ok snapshot -> snapshot | Error detail -> fail detail in
+    | Ok (disposition : Current.disposition) -> disposition.snapshot
+    | Error detail -> fail detail in
   let seed = write_claims ["seed fact"] in
   check int "seed revision" 1 seed.revision;
   let old = List.map message ["old first"; "old middle"; "repeated endpoint"] in
@@ -1821,7 +1822,7 @@ let test_same_name_clusters_keep_independent_commit_receipts () =
   let commit ~expected_revision:_ ~range_id ~official_range_id input =
     incr commits;
     match
-      Current.apply_disposition
+      Current.apply_disposition ~revisions:[]
         ?durable_range_id:range_id
         ?official_range_id
         ~absorbed:[]
@@ -2289,7 +2290,7 @@ let test_official_commit_recovers_without_resynthesis ?(through_queue = false) ~
   let commit ~expected_revision:_ ~range_id ~official_range_id input =
     incr commits;
     check bool "official commit has a durable identity" true (Option.is_some official_range_id);
-    (match Current.apply_disposition ?durable_range_id:range_id ?official_range_id
+    (match Current.apply_disposition ~revisions:[] ?durable_range_id:range_id ?official_range_id
       ~absorbed:[] ~keepers_dir ~keeper_id:keeper_name ~now:4.
       ~source:{ kind = Current.Librarian; trace_id = Ids.Turn_ref.trace_id input.Masc.Keeper_librarian.turn_ref }
       ~new_claims:[] () with
@@ -2354,7 +2355,7 @@ let test_official_receipt_rejects_replaced_history () =
     ; turns = [ 1, Ids.Turn_ref.make ~trace_id:"old-official-history" ~absolute_turn:1 ]
     }
   in
-  (match Current.apply_disposition ~official_range_id ~absorbed:[] ~keepers_dir
+  (match Current.apply_disposition ~revisions:[] ~official_range_id ~absorbed:[] ~keepers_dir
     ~keeper_id:keeper_name ~now:1. ~source:{ kind = Current.Librarian; trace_id }
     ~new_claims:[] () with
    | Ok _ -> ()

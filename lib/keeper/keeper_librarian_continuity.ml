@@ -61,8 +61,11 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
   | Ok checkpoint ->
     let messages = C.exact_snapshot_messages checkpoint in
     match S.checkpoint_prefix_range ~trace_id ~lines ~messages with
-    | Error S.Uncovered_history -> Ok (No_source Source_unreadable)
-    | Error error -> Error (S.error_to_string error)
+    | Error (S.Uncovered_history | S.Unmatched_history) -> Ok (No_source Source_unreadable)
+    | Error
+        ((S.Range_stopped _ | S.Trace_mismatch | S.History_changed | S.Prefix_changed
+         | S.Invalid_snapshot _ | S.Read_failed _ | S.Write_failed _) as error) ->
+      Error (S.error_to_string error)
     | Ok range ->
       let fitting_previous = match previous with
         | Some snapshot -> (match S.restore ~trace_id ~lines ~messages snapshot with
@@ -86,12 +89,16 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
           let position = progress.position in
           String.equal position.trace_id trace_id && position.end_atom >= 1
           && W.atom_opening_digest messages (position.end_atom - 1) = Some position.last_atom_digest in
-        match
-          Keeper_librarian_progress.read
-            ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
-        with
+        let keepers_dir = Workspace.keepers_runtime_dir config in
+        match Keeper_librarian_progress.read ~keepers_dir ~keeper_id:keeper_name with
         | Ok (Some progress) when position_fits progress -> progress.position.end_atom
-        | Ok (Some _) | Ok None | Error _ -> range.end_atom in
+        | Ok (Some _) | Ok None -> range.end_atom
+        | Error error ->
+          Log.Keeper.warn ~keeper_name
+            "continuity catch-up target falls back to this range's end: %s unreadable: %s"
+            (Keeper_librarian_progress.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
+            (Keeper_librarian_progress.read_error_to_string error);
+          range.end_atom in
       let catch_up_target = match fitting_previous with
         | Some ((snapshot : S.t), _) ->
           Option.map (fun _ -> start_without_snapshot ()) snapshot.catch_up_end_atom
@@ -200,8 +207,7 @@ let memory_committed ~config ~keeper_name prepared =
               ~messages:prepared.messages prepared.range)
     | None, _ | Some _, None -> false)
 let prompt_json prepared =
-  `Assoc ["previous_working_state", (match prepared.previous_state with None -> `Null | Some text -> `String text);
-    "completed_conversation", `List (List.map Agent_core.Checkpoint.message_to_json prepared.unread)]
+  `Assoc ["previous_working_state", (match prepared.previous_state with None -> `Null | Some text -> `String text)]
 let commit ~config ~keeper_name ~prepared ~working_state =
   let* covered = memory_committed ~config ~keeper_name prepared in
   let* () = if covered then Ok () else Error "Memory has not committed this continuity source" in

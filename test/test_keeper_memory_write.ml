@@ -1600,7 +1600,7 @@ let test_absorbed_search_preserves_board_basis source =
     | Error error -> Alcotest.fail (Librarian.parse_error_to_string error)
   in
   (match
-     Current.apply_disposition
+     Current.apply_disposition ~revisions:[]
        ~keepers_dir ~keeper_id:meta.name ~now:(Time_compat.now ())
        ~source:{ Current.kind = Current.Librarian; trace_id = "absorb-board-sources" }
        ~new_claims:selection.new_claims ~dropped_statements:selection.dropped
@@ -1672,7 +1672,7 @@ let test_absorbed_facts_are_searchable () =
   replace_current_facts ~keepers_dir ~keeper_id:meta.name [ alpha; beta; gamma ];
   let merged = fact "alpha and beta deploy on tuesday" in
   (match
-     Current.apply_disposition
+     Current.apply_disposition ~revisions:[]
        ~keepers_dir
        ~keeper_id:meta.name
        ~now:(Time_compat.now ())
@@ -1788,6 +1788,170 @@ let test_absorbed_facts_are_searchable () =
      = `Assoc [ "count", `Int 1; "first", `Int 5; "last", `Int 5 ])
 ;;
 
+(* A claim a librarian made can be absorbed by a later pass. A row naming it
+   is followed to the claim that holds it now, so it is not reported as lost.
+   And under source=all, rows whose claim already answers the search are left
+   out before the limit is taken, so they do not keep a row that reaches a
+   different claim from being shown. *)
+let test_absorbed_rows_follow_later_merges_and_leave_room () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let absorb ~keeper_id ~trace_id pairs new_claims =
+    match
+      Current.apply_disposition ~revisions:[]
+        ~keepers_dir
+        ~keeper_id
+        ~now:(Time_compat.now ())
+        ~source:{ Current.kind = Current.Librarian; trace_id }
+        ~absorbed:
+          (List.map
+             (fun (absorbed, into) ->
+                { Masc.Keeper_memory_os_types.absorbed = id absorbed; into = id into })
+             pairs)
+        ~new_claims
+        ()
+    with
+    | Ok _ -> ()
+    | Error detail -> Alcotest.fail detail
+  in
+  let search ~meta ~source ~limit =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:
+        (`Assoc
+            [ "query", `String "deploy"; "source", `String source; "limit", `Int limit ])
+    |> Yojson.Safe.from_string
+  in
+  let matches response =
+    match json_field "matches" response with
+    | `List items -> items
+    | _ -> Alcotest.fail "matches is a list"
+  in
+  let chained = make_meta "absorbed-chain" in
+  let alpha = fact "alpha deploys on tuesday" in
+  let beta = fact "beta deploys on tuesday" in
+  replace_current_facts ~keepers_dir ~keeper_id:chained.name [ alpha; beta ];
+  let first_merge = fact "alpha and beta ship on tuesday" in
+  let second_merge = fact "every team ships on tuesday" in
+  absorb
+    ~keeper_id:chained.name
+    ~trace_id:"first-pass"
+    [ alpha, first_merge; beta, first_merge ]
+    [ first_merge ];
+  absorb
+    ~keeper_id:chained.name
+    ~trace_id:"second-pass"
+    [ first_merge, second_merge ]
+    [ second_merge ];
+  let followed = matches (search ~meta:chained ~source:"absorbed" ~limit:10) in
+  Alcotest.(check (list string))
+    "both rows of the first pass are found"
+    [ "alpha deploys on tuesday"; "beta deploys on tuesday" ]
+    (List.map (string_field "text") followed);
+  List.iter
+    (fun matched ->
+       Alcotest.(check string) "into names the claim that holds it now" (id second_merge)
+         (string_field "into" matched);
+       Alcotest.(check bool) "and says it is current" true
+         (json_field "into_current" matched = `Bool true))
+    followed;
+  let crowded = make_meta "absorbed-crowded" in
+  let gamma = fact "gamma deploys on friday" in
+  replace_current_facts ~keepers_dir ~keeper_id:crowded.name [ alpha; beta; gamma ];
+  let answering_merge = fact "alpha and beta deploy on tuesday" in
+  let quiet_merge = fact "gamma ships on friday" in
+  absorb
+    ~keeper_id:crowded.name
+    ~trace_id:"answering-pass"
+    [ alpha, answering_merge; beta, answering_merge ]
+    [ answering_merge ];
+  absorb
+    ~keeper_id:crowded.name
+    ~trace_id:"quiet-pass"
+    [ gamma, quiet_merge ]
+    [ quiet_merge ];
+  Alcotest.(check (list string))
+    "the row reaching a claim that does not answer is shown beside the one that does"
+    [ "alpha and beta deploy on tuesday"; "gamma deploys on friday" ]
+    (List.map (string_field "text") (matches (search ~meta:crowded ~source:"all" ~limit:2)))
+;;
+
+(* Rows a failed pass left can send a claim to one that never became current,
+   and rows can loop. Following [into], a claim the rows send to a current
+   claim goes there even when a later failed pass sent it elsewhere, and a
+   loop stops at the claim before it would come back. *)
+let test_absorbed_chain_prefers_current_and_stops_before_a_loop () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "absorbed-chain-edges" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let committed = fact "delta holds the release notes" in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ committed ];
+  let xray = fact "xray deploys on monday" in
+  let alpha = fact "alpha holds the release notes" in
+  let never_current = fact "echo holds the release notes" in
+  let yankee = fact "yankee deploys on sunday" in
+  let bravo = fact "bravo waits for yankee" in
+  let row ~trace_id (absorbed : Masc.Keeper_memory_os_types.fact) into =
+    { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
+    ; trace_id
+    ; memory_id = id absorbed
+    ; into = id into
+    ; fact = absorbed
+    }
+  in
+  (match
+     Masc.Keeper_memory_absorbed.append_all
+       ~keepers_dir
+       ~keeper_id:meta.name
+       [ row ~trace_id:"first-pass" xray alpha
+       ; row ~trace_id:"committed-pass" alpha committed
+       ; row ~trace_id:"failed-pass" alpha never_current
+       ; row ~trace_id:"loop-pass" yankee bravo
+       ; row ~trace_id:"loop-pass" bravo yankee
+       ]
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
+  let found =
+    match
+      Runtime.keeper_memory_search_json
+        ~config
+        ~meta
+        ~ctx_work:(empty_ctx ())
+        ~args:
+          (`Assoc
+              [ "query", `String "deploys"; "source", `String "absorbed"; "limit", `Int 10 ])
+      |> Yojson.Safe.from_string
+      |> json_field "matches"
+    with
+    | `List items -> items
+    | _ -> Alcotest.fail "matches is a list"
+  in
+  Alcotest.(check (list (triple string string bool)))
+    "a current claim is preferred over a failed pass, and a loop stops before it returns"
+    [ "xray deploys on monday", id committed, true
+    ; "yankee deploys on sunday", id bravo, false
+    ]
+    (List.map
+       (fun matched ->
+          ( string_field "text" matched
+          , string_field "into" matched
+          , json_field "into_current" matched = `Bool true ))
+       found)
+;;
+
 (* A keeper asks in several words, and a claim rarely holds them as one run of
    text. A claim answers when it holds the whole query or every word of it, in
    any order. The whole-query answers come first, so a search the substring
@@ -1816,7 +1980,7 @@ let test_a_query_of_several_words_is_answered () =
     [ apart; together; other; retired; retired_later ];
   let merged = fact "alpha deploys on a fixed weekday" in
   (match
-     Current.apply_disposition
+     Current.apply_disposition ~revisions:[]
        ~keepers_dir
        ~keeper_id:meta.name
        ~now:(Time_compat.now ())
@@ -1904,7 +2068,7 @@ let test_all_ranks_complete_queries_before_fragments_across_stores () =
     [ ordinary_fragment; absorbed_exact ];
   let merged = fact "merged weekday decision" in
   (match
-     Current.apply_disposition
+     Current.apply_disposition ~revisions:[]
        ~keepers_dir
        ~keeper_id:meta.name
        ~now:(Time_compat.now ())
@@ -2589,6 +2753,14 @@ let () =
             "absorbed facts are searchable"
             `Quick
             test_absorbed_facts_are_searchable
+        ; Alcotest.test_case
+            "absorbed rows follow later merges and leave room"
+            `Quick
+            test_absorbed_rows_follow_later_merges_and_leave_room
+        ; Alcotest.test_case
+            "absorbed chain prefers current and stops before a loop"
+            `Quick
+            test_absorbed_chain_prefers_current_and_stops_before_a_loop
         ; Alcotest.test_case
             "a query of several words is answered"
             `Quick

@@ -5,6 +5,7 @@
    and the specific drifts the table was written to close. *)
 
 open Masc_tui_types
+module Cat = Masc.Keeper_memory_os_types
 
 let check = Alcotest.check
 let str = Alcotest.string
@@ -340,6 +341,7 @@ let schedule_form_row : schedule_row =
   ; sch_queue_ack_recorded_at_iso = None
   ; sch_wake_cancelled_recorded_at_iso = None
   ; sch_reaction_quarantined = None
+  ; sch_runner_hold = None
   }
 
 let test_schedule_create_form_names_the_canonical_required_fields () =
@@ -355,6 +357,77 @@ let test_schedule_create_form_names_the_canonical_required_fields () =
     (form |> member "recurrence_interval_sec" |> to_int);
   check str "cron alternative is discoverable" "0 9 * * *"
     (form |> member "recurrence_cron" |> to_string)
+
+(* The modify key's help says "running/finished rows refuse". These pin that
+   the refusal now happens at the keypress, and that the set it refuses is the
+   store's own: both ask [Schedule_domain.modify_allowed].
+
+   The vocabulary is checked against
+   [Schedule_contract_values.schedule_status_strings] rather than trusted as a
+   hand-copied list, which is a second copy of the contract that goes stale
+   quietly. *)
+let refusal_for status =
+  Masc_tui_types.schedule_modify_refusal
+    { schedule_form_row with sch_status = status }
+
+let test_modify_refuses_exactly_the_statuses_the_store_refuses () =
+  (* The two sides are spelled out rather than recomputed from the gate's own
+     expression: a test that recomputes it only proves the code equals itself.
+     The sort below then checks these words against the contract's vocabulary,
+     so a status added upstream fails here instead of being classified
+     unasked. *)
+  let refused = [ "running"; "succeeded"; "failed"; "cancelled"; "expired" ] in
+  let opens = [ "scheduled"; "due" ] in
+  check (Alcotest.list str)
+    "the two sides together name every status the contract has"
+    (List.sort compare Schedule_contract_values.schedule_status_strings)
+    (List.sort compare (refused @ opens));
+  List.iter
+    (fun word ->
+      check Alcotest.bool (word ^ " is refused before the editor opens") true
+        (refusal_for word <> None))
+    refused;
+  (* The inputs that split this from a blanket refusal. Without them a gate
+     that refused everything would pass every assertion above. *)
+  List.iter
+    (fun word ->
+      check Alcotest.bool (word ^ " still opens the editor") true
+        (refusal_for word = None))
+    opens
+
+let test_modify_names_the_status_it_refuses () =
+  match refusal_for "running" with
+  | None -> Alcotest.fail "a running row must refuse"
+  | Some reason ->
+    (* The operator is told which word on the screen closed the door, not
+       just that it is closed. *)
+    check str "the reason quotes the status the screen showed"
+      "the store refuses to modify a running schedule (status as last read; \
+       refresh if it has changed)"
+      reason
+
+(* The TUI and [Schedule_store.update_request] both ask
+   [Schedule_domain.modify_allowed]; the store side is pinned in
+   test_schedule_store. This pins the TUI side for every contract status. *)
+let test_modify_refusal_is_the_shared_predicate () =
+  List.iter
+    (fun word ->
+      match Schedule_domain.schedule_status_of_string word with
+      | Error msg -> Alcotest.fail msg
+      | Ok status ->
+        check Alcotest.bool (word ^ " refuses iff modify_allowed is false")
+          (not (Schedule_domain.modify_allowed status))
+          (refusal_for word <> None))
+    Schedule_contract_values.schedule_status_strings
+
+let test_modify_leaves_an_unnamed_status_to_the_server () =
+  (* [sch_status] stays a string so a status this build does not name renders
+     as itself. Refusing on a word we cannot read would turn that forward
+     compatibility into a row nobody can edit, so the roundtrip is the right
+     answer here -- the server knows what it means. *)
+  check Alcotest.bool "a status this build does not name is not refused here"
+    true
+    (refusal_for "paused" = None)
 
 let test_schedule_update_form_preserves_exact_editable_definition () =
   let open Yojson.Safe.Util in
@@ -449,8 +522,8 @@ let memory_state_with_facts () =
             { Tui_decode.mos_revision = 1
             ; mos_updated_at = 0.
             ; mos_facts =
-                [ sample_memory_fact ~category:"lesson" ~claim:"a"
-                ; sample_memory_fact ~category:"blocker" ~claim:"b"
+                [ sample_memory_fact ~category:Cat.Lesson ~claim:"a"
+                ; sample_memory_fact ~category:Cat.Blocker ~claim:"b"
                 ]
             }
       ; mfs_source =
@@ -478,7 +551,9 @@ let memory_state_with_facts () =
 let category_filter_testable =
   let pp fmt = function
     | Category_all -> Format.pp_print_string fmt "Category_all"
-    | Category_ordinary s -> Format.fprintf fmt "Category_ordinary %S" s
+    | Category_ordinary c ->
+        Format.fprintf fmt "Category_ordinary %S"
+          (Cat.category_to_string c)
     | Category_source -> Format.pp_print_string fmt "Category_source"
     | Category_dropped -> Format.pp_print_string fmt "Category_dropped"
   in
@@ -488,7 +563,7 @@ let test_memory_fact_rows_follow_the_category_filter () =
   let state = memory_state_with_facts () in
   Alcotest.(check int) "All lists both stores plus the drops" 4
     (List.length (memory_fact_rows state));
-  state.memory_facts_category <- Category_ordinary "lesson";
+  state.memory_facts_category <- Category_ordinary Cat.Lesson;
   (match memory_fact_rows state with
    | [ Memory_row_fact fact ] ->
        check str "the filter narrows ordinary facts only" "a"
@@ -498,23 +573,23 @@ let test_memory_fact_rows_follow_the_category_filter () =
          (Printf.sprintf "unexpected filtered shape (%d rows)"
             (List.length rows)));
   Alcotest.(check (list category_filter_testable)) "categories are the loaded ones, sorted"
-    [ Category_ordinary "blocker"
-    ; Category_ordinary "lesson"
+    [ Category_ordinary Cat.Blocker
+    ; Category_ordinary Cat.Lesson
     ; Category_source
     ; Category_dropped
     ]
     (memory_fact_categories state)
 
 let test_memory_category_cycle_returns_to_all () =
-  let categories = [ Category_ordinary "blocker"; Category_ordinary "lesson" ] in
-  Alcotest.(check category_filter_testable) "All steps to the first" (Category_ordinary "blocker")
+  let categories = [ Category_ordinary Cat.Blocker; Category_ordinary Cat.Lesson ] in
+  Alcotest.(check category_filter_testable) "All steps to the first" (Category_ordinary Cat.Blocker)
     (next_memory_category Category_all categories);
-  Alcotest.(check category_filter_testable) "then to the next" (Category_ordinary "lesson")
-    (next_memory_category (Category_ordinary "blocker") categories);
+  Alcotest.(check category_filter_testable) "then to the next" (Category_ordinary Cat.Lesson)
+    (next_memory_category (Category_ordinary Cat.Blocker) categories);
   Alcotest.(check category_filter_testable) "the last returns to All" Category_all
-    (next_memory_category (Category_ordinary "lesson") categories);
+    (next_memory_category (Category_ordinary Cat.Lesson) categories);
   Alcotest.(check category_filter_testable) "a vanished category restarts at All" Category_all
-    (next_memory_category (Category_ordinary "gone") categories);
+    (next_memory_category (Category_ordinary Cat.Goal) categories);
   Alcotest.(check category_filter_testable) "no categories keeps All" Category_all
     (next_memory_category Category_all [])
 
@@ -1324,6 +1399,59 @@ let test_visible_surface_ring_declutter () =
   Alcotest.(check bool) "Approvals shown when pending items exist" true
     (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
 
+(* One ask can carry several questions, and the surface counts them under the
+   word "question": its title, the block header above the rows, and the tab
+   badge all read from [approvals_open_question_count]. It counted the asks,
+   so a fleet holding one ask of two questions said "1 question" while the
+   line three rows below it said "+2 more questions". *)
+let test_the_question_count_counts_questions () =
+  let ask id questions : Tui_decode.ask_row =
+    { Tui_decode.ar_keeper = "jazz-developer"
+    ; ar_id = id
+    ; ar_asked_at = 0.0
+    ; ar_context = None
+    ; ar_questions =
+        List.init questions (fun index ->
+            { Tui_decode.aq_id = Printf.sprintf "%s-q%d" id index
+            ; aq_header = "header"
+            ; aq_prompt = "prompt"
+            ; aq_mode = Tui_decode.Ask_single
+            ; aq_free_text = Tui_decode.Ask_choices_only
+            ; aq_choices = []
+            })
+    ; ar_resolution = Tui_decode.Ask_open
+    }
+  in
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.asks_snapshot <-
+    Some
+      { Tui_decode.asn_keeper = None
+      ; asn_open_count = 2
+      ; asn_rows = [ ask "a1" 2; ask "a2" 1 ]
+      };
+  Alcotest.(check int) "two asks holding three questions" 3
+    (approvals_open_question_count state);
+  (* The surface's own pending reading is the approvals plus these, and it
+     answers the tab badge as well as the title. *)
+  Alcotest.(check int) "and the surface counts them the same way" 3
+    (approvals_surface_pending state);
+  (* A resolved ask is not waiting on anyone, so its questions are not
+     counted either. *)
+  state.asks_snapshot <-
+    Some
+      { Tui_decode.asn_keeper = None
+      ; asn_open_count = 1
+      ; asn_rows =
+          [ ask "a1" 2
+          ; { (ask "a2" 4) with Tui_decode.ar_resolution =
+                Tui_decode.Ask_answered
+                  { aa_answered_at = 1.0; aa_question_ids = [] }
+            }
+          ]
+      };
+  Alcotest.(check int) "only the open ask's questions" 2
+    (approvals_open_question_count state)
+
 let test_visible_surface_ring_open_ask () =
   (* A keeper's question is an approval of a different kind: it waits on the
      same human, on the same surface. With zero approvals and one open ask
@@ -1926,6 +2054,8 @@ let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
   ; sl_last_outcome = None
   ; sl_p50_elapsed_s = None
   ; sl_selected_slots = []
+  ; sl_runs_without_slot =
+      { Tui_decode.slws_vendor_system_one = 0; slws_server_restarted = 0; slws_no_slot = 0 }
   }
 
 (* The four lanes the projection fixes, in its order
@@ -2053,7 +2183,7 @@ let board_post ?(author = "alpha") id title =
   ; bp_votes = 0
   ; bp_comment_count = 0
   ; bp_created_at = "2026-09-04T00:00:00Z"
-  ; bp_updated_at = None
+  ; bp_created_at_unix = None; bp_updated_at = None
   ; bp_hearth = None
   ; bp_kind = None
   }
@@ -2234,16 +2364,17 @@ let test_detail_tab_hint_projects_the_table () =
    strip and the sheet, so dropping a binding passed both -- the same shape
    as the drift they were written to close. This list is the contract:
    changing it is a decision, not a slip. Sources are the guarded arms in
-   masc_tui.ml (T/A// at Detail_identity, R at Detail_identity, L/P on the
-   GitHub tab, e for the settings form). *)
+   masc_tui.ml (T/A// at Detail_identity, R at Detail_identity, L/P and one
+   digit per login scope on the GitHub tab, e for the settings form, Q for
+   the Board requeue on Info). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
-  [ Detail_info, []
+  [ Detail_info, [ "Q" ]
   ; Detail_sandbox, [ "o"; "d/m/s"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
-  ; Detail_github, [ "L"; "P" ]
+  ; Detail_github, [ "L"; "P"; "1"; "2" ]
   ; Detail_identity, [ "arrows+enter"; "T"; "A"; "/"; "R" ]
-  ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u" ]
+  ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u"; "U U" ]
   ; Detail_automation, []
   ; Detail_runs, []
   ]
@@ -2264,7 +2395,9 @@ let test_key_atoms_read_the_table_notation () =
        [ "s"; "o" ]);
   Alcotest.(check bool) "Channels takes e" true
     (List.mem "e" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
-  Alcotest.(check (list string)) "Info takes nothing" []
+  Alcotest.(check bool) "Channels takes U for unbind all" true
+    (List.mem "U" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
+  Alcotest.(check (list string)) "Info takes only the Board requeue key" [ "Q" ]
     (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_info)
 
 let test_detail_tab_bindings_cover_the_live_keys () =
@@ -2764,6 +2897,16 @@ let () =
             test_schedules_footer_names_write_and_read_controls
         ; Alcotest.test_case "schedule create form names required fields" `Quick
             test_schedule_create_form_names_the_canonical_required_fields
+        ; Alcotest.test_case
+            "modify refuses exactly the statuses the store refuses" `Quick
+            test_modify_refuses_exactly_the_statuses_the_store_refuses
+        ; Alcotest.test_case "modify refusal is the shared predicate" `Quick
+            test_modify_refusal_is_the_shared_predicate
+        ; Alcotest.test_case "modify names the status it refuses" `Quick
+            test_modify_names_the_status_it_refuses
+        ; Alcotest.test_case
+            "modify leaves an unnamed status to the server" `Quick
+            test_modify_leaves_an_unnamed_status_to_the_server
         ; Alcotest.test_case "schedule update form preserves definition" `Quick
             test_schedule_update_form_preserves_exact_editable_definition
         ; Alcotest.test_case "Repositories offers Code and Git changes" `Quick
@@ -2868,6 +3011,8 @@ let () =
             test_visible_surface_ring_declutter
         ; Alcotest.test_case "open ask keeps approvals in the ring" `Quick
             test_visible_surface_ring_open_ask
+        ; Alcotest.test_case "the question count counts questions" `Quick
+            test_the_question_count_counts_questions
         ; Alcotest.test_case "braille sparkline renders levels" `Quick
             test_braille_sparkline
         ; Alcotest.test_case "fleet total cost sums correctly" `Quick

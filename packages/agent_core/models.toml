@@ -193,6 +193,28 @@ output_per_million = 25.0
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 
+# Claude Opus 5.5 (released 2026-09-22). Specs from the platform model page
+# and pricing table (checked 2026-09-23): 1M/128K, $4/$20, 5m cache write $5
+# = 1.25x, cache read $0.20 = 0.05x -- every other Opus reads at 0.1x, so a
+# 5.5 id landing on the opus-5 row bills cache reads at double the real rate.
+# Thinking cannot be disabled ("Adaptive (always on)" is a launch breaking
+# change), hence always_adaptive as on the Fable rows rather than opus-5's
+# adaptive_only. Forced tool use returns an error (second breaking change), so
+# required and named tool_choice are refused here while opus-5 still takes them.
+[[models]]
+id_prefix = "claude-opus-5-5"
+base = "anthropic"
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+input_per_million = 4.0
+output_per_million = 20.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.05
+
 [[models]]
 id_prefix = "claude-sonnet-5"
 base = "anthropic"
@@ -289,6 +311,37 @@ max_output_tokens = 128000
 accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 input_per_million = 2.0
 output_per_million = 12.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+# 2026-09-23: GPT-6 Sol and Luna (announced 2026-09-22) joined the codex CLI
+# cache that day. This project's OpenAI key has no model access for either id,
+# but /v1/responses still answered the reasoning.effort parameter check:
+# "'minimal' is not supported with the 'gpt-6-sol' model. Supported values
+# are: 'none', 'low', 'medium', 'high', 'xhigh', and 'max'" -- the same text
+# for luna. So both take none and refuse minimal, like the 5.6 rows above and
+# unlike gpt-6-astra, whose row omits none. Prices and cache rates are the
+# OpenRouter listing of the same ids (openrouter.ai /models, 2026-09-23):
+# sol $2/$10, luna $0.1/$0.5, cache write 1.25x / read 0.1x on both.
+[[models]]
+id_prefix = "gpt-6-sol"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+input_per_million = 2.0
+output_per_million = 10.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-6-luna"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+input_per_million = 0.1
+output_per_million = 0.5
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 
@@ -2107,9 +2160,17 @@ input_per_million = 0.0
 output_per_million = 0.0
 
 # xAI Grok Models
+# xAI documents the effort ladder per model, not per provider: grok-4.3 accepts
+# "none" (reasoning can be turned off) while grok-4.5 and later cannot, and
+# grok-4.7 accepts "xhigh" where grok-4.5 maps it to "high". So each row
+# declares its own accepted set rather than inheriting one from the base.
+# Sources (checked 2026-09-22):
+#   https://docs.x.ai/developers/models/grok-4.3  -> none, low, medium, high, xhigh (default low)
+#   https://docs.x.ai/developers/models/grok-4.7  -> low, medium, high, xhigh (default high)
 [[models]]
 id_prefix = "xai/grok-4.3"
 base = "openai_chat_extended"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh"]
 provider_name = "xai"
 max_context_tokens = 1000000
 supports_tools = true
@@ -2124,6 +2185,7 @@ supports_native_streaming = true
 [[models]]
 id_prefix = "grok-4.3"
 base = "openai_chat_extended"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh"]
 provider_name = "xai"
 max_context_tokens = 1000000
 supports_tools = true
@@ -2138,6 +2200,10 @@ supports_native_streaming = true
 [[models]]
 id_prefix = "grok-latest"
 base = "openai_chat_extended"
+# No accepted_reasoning_efforts: xAI's model data documents no "grok-latest"
+# alias (it lists grok-4.3-latest, grok-4.5-latest, grok-build-latest), so an
+# effort-carrying request is refused before it is sent and a wrong value never
+# goes out silently.
 provider_name = "xai"
 max_context_tokens = 1000000
 supports_tools = true
@@ -2693,6 +2759,8 @@ kind = "openai_compat"
 base_url = "https://api.x.ai/v1"
 request_path = "/chat/completions"
 api_key_env = "XAI_API_KEY"
+# The effort ladder is declared per grok row, not here: xAI documents it per
+# model (grok-4.3 accepts "none", grok-4.5 and later do not).
 capabilities_base = "xai"
 identity_hosts = ["api.x.ai"]
 
@@ -2756,6 +2824,38 @@ supports_response_format_json = true
 # Xiaomi documents structured output as JSON mode (`json_object`) and directs
 # clients to validate schema conformance locally. Do not advertise native
 # json_schema structured output from the chat-completions catalog row.
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_audio_input = false
+supports_video_input = false
+supports_native_streaming = true
+
+# MiMo-V2.6 (Xiaomi). Specs from the vendor release page
+# (mimo.mi.com/docs/en-US/news/latest/v2-6) and the HF model card
+# (XiaomiMiMo/MiMo-V2.6-Pro-RL), checked 2026-09-23: 1.02T total / 42B active
+# MoE, MIT, 1M context; AA Intelligence Index 46 (independently matched). It
+# rides the same openai_chat wire and thinking_object_only control as
+# mimo-v2.5-pro, so the row mirrors that sibling. No price is declared: the
+# vendor's "1/20~1/60" figure has no independent source. Multimodal stays off
+# like the sibling row -- the vendor advertises visual coding, but no probe
+# here sent an image.
+[[models]]
+id_prefix = "mimo-v2.6"
+base = "openai_chat"
+provider_name = "mimo"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_reasoning = true
+thinking_control_format = "thinking_object_only"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_response_format_json = true
 supports_structured_output = false
 supports_multimodal_inputs = false
 supports_image_input = false
@@ -3955,7 +4055,8 @@ supports_response_format_json = false
 supports_structured_output = false
 supports_native_streaming = true
 
-# api.kimi.com takes temperature 0.6 only at effort=none and 1.0 otherwise.
+# api.kimi.com takes temperature 0.6 only at effort=none and 1.0 otherwise,
+# so AGENT_CORE leaves temperature out and the endpoint picks it.
 # Only the none/not-none difference (reasoning_content present or absent) is
 # verified. The stream carries reasoning text on delta.reasoning_content
 # (raw chunk 2026-09-16T14:53Z: `"delta":{"reasoning_content":"Let"}`). Left
@@ -3975,6 +4076,7 @@ accepted_reasoning_efforts = ["none"]
 supports_image_input = true
 supports_multimodal_inputs = true
 supports_native_streaming = true
+ignored_sampling_parameters = ["temperature"]
 
 # The 256K variant of k3. GET /coding/v1/models on 2026-09-22 lists it with
 # context_length 262144 and otherwise the same metadata as k3 (reasoning,
@@ -3997,12 +4099,17 @@ accepted_reasoning_efforts = ["none"]
 supports_image_input = true
 supports_multimodal_inputs = true
 supports_native_streaming = true
+ignored_sampling_parameters = ["temperature"]
 
 # api.kimi.com/coding's kimi-for-coding. The alias follows whatever model the
 # plan currently serves: GET /coding/v1/models on 2026-09-22 names it
 # "K2.8 Preview" with context_length 1048576, up from the 262144 this row
 # carried for K2.7 Code. Output ceiling from the endpoint; no tool_choice on
-# this wire.
+# this wire. The keeper default temperature 0.4 answered 400 "invalid
+# temperature: only 1 is allowed for this model" (Terminal-Bench trial
+# 2026-09-23T19:15Z), so AGENT_CORE leaves temperature out. top_p is left
+# out on the unscoped row's evidence (the 2026-07-04 K2.x docs); it has not
+# been sent to the K2.8 alias.
 [[models]]
 id_prefix = "kimi-for-coding"
 provider_name = "kimi_coding"
@@ -4015,6 +4122,7 @@ supports_reasoning = true
 supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true
+ignored_sampling_parameters = ["temperature", "top_p"]
 
 # Local Ollama Gemma 4 QAT build, probed 2026-06-12. Reads images and audio.
 [[models]]

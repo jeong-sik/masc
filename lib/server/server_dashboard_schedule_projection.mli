@@ -31,6 +31,11 @@ val scheduled_automation_dashboard_json :
     rows. A GET therefore never enters the queue-owner transaction boundary
     and never rescans one Keeper's complete reaction ledger per row.
 
+    Each request row carries [runner_hold]: the occurrence the schedule
+    runner's newest tick held back for that schedule, read from
+    [Schedule_runner_status] (the list [/health] reports as
+    [schedule_runner.held]), or [null] when it holds none.
+
     A ledger read failure is reported, not hidden: [status] is ["unknown"],
     [counts] / [request_count] / [fsm.active_count] are [null], and
     [schedule_store_read_error] carries the reason. Consumers must render that

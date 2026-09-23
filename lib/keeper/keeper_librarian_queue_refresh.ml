@@ -101,6 +101,11 @@ let remember_input_capacity ~config ~keeper_name capacity =
   Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.replace input_capacities key capacity)
 ;;
 
+let forget_input_capacity ~config ~keeper_name =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.remove input_capacities key)
+;;
+
 let publish_measurement ~config ~keeper_name ~last_pass ~unread =
   let key = measurement_key ~config ~keeper_name in
   let measurement = { measured_at = Time_compat.now (); last_pass; unread } in
@@ -310,7 +315,21 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
           remember_input_capacity ~config ~keeper_name observed;
           capacity := Some observed)
         ~on_not_committed:(fun outcome -> cause := Some (merge_not_committed !cause outcome))
-        ~on_continuity_committed:(fun _ -> saved := true; observe O.Committed)
+        ~on_continuity_committed:(fun ~served_by _ ->
+          (* A CLI's reported limit is a fact about the CLI transport. The
+             walk sends one prompt to every slot, so the range is fitted to
+             it before dispatch whenever a CLI slot may be reached. An API
+             slot that committed took the range without that limit, so the
+             next attempt goes out whole again; if the walk reaches a CLI
+             again, that CLI measures anew. A CLI slot that committed, the
+             one that measured or another, answered inside the limit, so
+             the limit stands (#37625). *)
+          (match served_by with
+           | Runtime.Api_slot _ ->
+             forget_input_capacity ~config ~keeper_name;
+             capacity := None
+           | Runtime.Cli_slot _ -> ());
+          saved := true; observe O.Committed)
         ~base_path ~keepers_dir ~keeper_id:keeper_name
         ~expected_revision:(Option.map (fun (value : Keeper_memory_os_current.t) -> value.revision) current)
         input;
@@ -395,6 +414,22 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
   | exn -> observe O.Not_committed; raise exn
 ;;
 
+(* The queue pass organizes the inputs pending now, with no turn range, so
+   the Keeper's current task is the task these inputs belong to. The durable
+   and continuity passes read turns that may predate that task, and a turn
+   boundary does not record its task, so they stay [No_task]. *)
+let queue_input ~config ~(meta : Keeper_meta_contract.keeper_meta) ~current ~working_context
+  : Keeper_librarian.input =
+  { turn_ref = Ids.Turn_ref.make
+      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~absolute_turn:meta.runtime.usage.total_turns
+  ; goal_context = Domain_pool_ref.submit_io_or_inline (fun () ->
+      Keeper_librarian_input_sources.goal_context_for_task ~config meta.current_task_id)
+  ; keeper_instructions = meta.instructions
+  ; current
+  ; working_context
+  ; messages = []; tool_observations = []; counterpart_observations = [] }
+
 let run ~base_path ~keeper_name =
   run_durable ~base_path ~keeper_name;
   run_continuity ~base_path ~keeper_name ();
@@ -419,19 +454,8 @@ let run ~base_path ~keeper_name =
       | Ok current ->
         let current_selection = Option.map (fun (s : Keeper_memory_os_current.t) ->
           {Keeper_librarian.facts = s.facts}) current in
-        let inp : Keeper_librarian.input =
-          { turn_ref = Ids.Turn_ref.make
-              ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-              ~absolute_turn:meta.runtime.usage.total_turns
-          ; goal_context = (match meta.current_task_id with
-              | None -> Keeper_librarian.No_task
-              | Some task_id -> Keeper_librarian.Task_goals
-                  {task_id = Keeper_id.Task_id.to_string task_id;
-                   criteria = Error "goal context not observed before first completed turn"})
-          ; keeper_instructions = meta.instructions
-          ; current = current_selection
-          ; working_context
-          ; messages = []; tool_observations = []; counterpart_observations = [] } in
+        let inp = queue_input ~config:(Workspace.default_config base_path) ~meta
+            ~current:current_selection ~working_context in
         Keeper_librarian_runtime.run_best_effort
           ~write_scope:Keeper_librarian_runtime.Context_only
           ~base_path ~keepers_dir ~keeper_id:keeper_name
@@ -462,6 +486,23 @@ let submit_durable ~base_path ~keeper_name =
   ()
 ;;
 
+let with_purge_then_catch_up ~base_path ~keeper_name action =
+  (* The purge cancels the running unit and discards wakes while it holds
+     the Keeper's files, so nothing else puts the unread backlog back on the
+     lane. A stopped Keeper ends no turn, and a purge refused for unread
+     atoms would stay refused. The lane is serial and coalesces, so a
+     submission with nothing unread ends at once. *)
+  match Keeper_memory_lane.with_librarian_purge ~base_path ~keeper_name action with
+  | result ->
+    submit_durable ~base_path ~keeper_name;
+    result
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    submit_durable ~base_path ~keeper_name;
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
 let unlaunched_keeper_names ~persisted ~launched =
   List.filter (fun name -> not (List.mem name launched)) persisted
 ;;
@@ -474,7 +515,9 @@ let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
 
 module For_testing = struct
   let limited_width = limited_width
+  let last_input_capacity = last_input_capacity
   let merge_not_committed = merge_not_committed
   let run_continuity = run_continuity
   let run_durable_with_commit = run_durable_with_commit
+  let queue_input = queue_input
 end

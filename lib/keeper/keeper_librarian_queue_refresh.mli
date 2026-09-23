@@ -35,6 +35,28 @@ val submit_durable : base_path:string -> keeper_name:string -> unit
     {!submit_durable_for_unlaunched} submits it at boot for the Keepers that
     did not launch. *)
 
+val with_purge_then_catch_up
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit -> 'a)
+  -> ('a, Keeper_memory_lane.purge_cancel_error) result
+(** {!Keeper_memory_lane.with_librarian_purge}, then {!submit_durable} for the
+    same Keeper once the purge's exclusion is released. The submission
+    follows every exit but cancellation: a purge that ran, one refused (for
+    example for unread atoms), a lane-level error, and a raise. The purge
+    cancelled the catch-up that was running and discarded the wakes that
+    arrived meanwhile; without this the backlog waits for the Keeper's next
+    turn, and a purge retry is refused again.
+
+    On [Error Purge_already_in_progress] the submission is always discarded,
+    because the other purge still holds the exclusion; that purge submits
+    its own catch-up when it ends.
+
+    Call from the lane's owner domain ([Eio_context.run_on_owner_domain]),
+    as {!Keeper_memory_lane.with_librarian_purge} and
+    {!Keeper_memory_lane.submit} require. This function does not cross
+    domains itself. *)
+
 val unlaunched_keeper_names
   :  persisted:string list
   -> launched:string list
@@ -61,6 +83,12 @@ module For_testing : sig
   (** The width a later continuity pass will read at, if a refusal left one
       for this trace. *)
 
+  val last_input_capacity :
+    config:Workspace.config -> keeper_name:string
+    -> Keeper_lane_cli_oneshot.input_capacity option
+  (** The CLI limit the next continuity pass fits its range to, if one is
+      remembered for this Keeper. *)
+
   val merge_not_committed :
     Keeper_librarian_runtime.not_committed option
     -> Keeper_librarian_runtime.not_committed
@@ -81,4 +109,13 @@ module For_testing : sig
           -> bool)
     -> unit
   (** The production durable reader with a controlled Memory commit edge. *)
+
+  val queue_input
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> current:Keeper_librarian.current_selection option
+    -> working_context:Keeper_librarian_context.input
+    -> Keeper_librarian.input
+  (** The input the queue pass hands the Librarian. Reads the Goal store and
+      goal-task links for [meta.current_task_id] through the IO pool. *)
 end

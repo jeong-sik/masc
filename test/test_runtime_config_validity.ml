@@ -3070,6 +3070,71 @@ let test_runtime_toml_rejects_an_unknown_binding_key () =
          errs)
 ;;
 
+(* The accepted keys are the keys the binding parser reads, so a binding that
+   declares every one of them loads and each value lands in its field. A read
+   placed after the unknown-key check would refuse its own key and fail here. *)
+let test_runtime_toml_accepts_every_binding_key_it_reads () =
+  let extra =
+    "enabled = true\n\
+     wizard-default = false\n\
+     max-concurrent = 2\n\
+     disable-parallel-tool-use = true\n\
+     context-high-water-tokens = 900\n\
+     max-tokens = 128\n\
+     price-input = 0.5\n\
+     price-output = 1.5\n\
+     keep-alive = \"5m\"\n\
+     num-ctx = 4096\n\
+     repeat-penalty = 1.1\n\
+     repeat-last-n = 64\n\
+     return-progress = true\n"
+  in
+  (* The Ollama options (repeat-penalty, repeat-last-n) load only on an
+     ollama-http provider, so this binding is declared on one. *)
+  let toml =
+    "[providers.local]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     is-default = true\n\
+     context-low-water-tokens = 300\n"
+    ^ extra
+    ^ "\n[runtime]\ndefault = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errs ->
+    fail
+      (String.concat "; "
+         (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ (b : Runtime_schema.binding) ] ->
+       check bool "enabled" true b.enabled;
+       check bool "is-default" true b.is_default;
+       check bool "wizard-default" false b.wizard_default;
+       check (option int) "max-concurrent" (Some 2) b.max_concurrent;
+       check bool "disable-parallel-tool-use" true b.disable_parallel_tool_use;
+       (match b.context_marks with
+        | Some { Runtime_schema.high_water_tokens; low_water_tokens } ->
+          check int "context-high-water-tokens" 900 high_water_tokens;
+          check int "context-low-water-tokens" 300 low_water_tokens
+        | None -> fail "context marks must parse");
+       check (option int) "max-tokens" (Some 128) b.max_tokens;
+       check (option (float 1e-9)) "price-input" (Some 0.5) b.price_input;
+       check (option (float 1e-9)) "price-output" (Some 1.5) b.price_output;
+       check (option string) "keep-alive" (Some "5m") b.keep_alive;
+       check (option int) "num-ctx" (Some 4096) b.num_ctx;
+       check (option (float 1e-9)) "repeat-penalty" (Some 1.1) b.repeat_penalty;
+       check (option int) "repeat-last-n" (Some 64) b.repeat_last_n;
+       check (option bool) "return-progress" (Some true) b.return_progress
+     | _ -> fail "exactly one binding must parse")
+;;
+
 let test_runtime_toml_rejects_a_table_inside_a_binding () =
   match Runtime_toml.parse_string (binding_with_extra "context-high-water-tokens = 900\n\n[local.sample.alias]\nname = \"x\"\n") with
   | Ok _ -> fail "a table inside a binding must not load"
@@ -4043,32 +4108,17 @@ streaming = false
           Yojson.Safe.Util.(body |> member "temperature" |> to_float)))
 
 (* task-1649: a lane whose every candidate is missing from the catalog is
-   dropped whole at load. Read [degrade_loaded_for_missing_catalog]
-   (runtime.ml) end to end before trusting the ticket's premise here: its
-   [Ok] branch -- the only place a [startup_degradation] value is ever
-   built -- is reached only when [has_routing_references] is false, and
-   that flag covers [dropped_lanes] together with [dropped_lane_candidates]
-   / [dropped_routes] / [dropped_media_failover]. A fully-dropped lane
-   always makes [has_routing_references] true, so a live, returned
-   [Initialized_degraded] can never carry a non-empty [dropped_lanes] --
-   [init_default_degraded_report] refuses the boot instead
-   ([Runtime_config_error]), and [server_runtime_bootstrap.ml] answers that
-   by entering [Setup_required], not by serving keeper turns. There is no
-   path from a fully-dropped lane to [Runtime.resolve_assignment] returning
-   [`Missing] for it at keeper-turn time -- confirmed against every writer
-   of runtime state, including the hot-reload save path
-   ([Runtime.save_config_text] / [validate_config_text]), which rejects the
-   same config for the same reason before it is ever applied live.
-   The earlier form of this test asserted the unreachable branch
-   ([Ok (Initialized_degraded ...)] with [orphaned-lane] inside
-   [dropped_lanes]) and failed in CI exactly where this comment says it
-   must: [degrade_loaded_for_missing_catalog] returned [Error]. What *is*
-   reachable, and was still only pinned for a partially-dropped lane
-   (`test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes`,
-   whose lane keeps one live candidate), is that a *fully*-dropped lane
-   also refuses to boot and the refusal names the lane under
-   "[runtime.lanes].dropped.<lane>", not just
-   "[runtime.lanes].candidates.<lane>". That is what this pins. *)
+   dropped whole at load, and any routing reference to a missing runtime --
+   default, media failover, lane candidate or whole lane -- refuses the
+   degraded boot in [degrade_loaded_for_missing_catalog] (runtime.ml)
+   ([Runtime_config_error]); [server_runtime_bootstrap.ml] answers that by
+   entering [Setup_required]. The hot-reload save path
+   ([Runtime.save_config_text] / [validate_config_text]) rejects the same
+   config for the same reason. A partially-dropped lane is pinned by
+   `test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes`;
+   this pins that a *fully*-dropped lane also refuses to boot and the refusal
+   names the lane under "[runtime.lanes].dropped.<lane>", not just
+   "[runtime.lanes].candidates.<lane>". *)
 let test_fully_dropped_lane_refuses_degraded_boot_and_names_the_lane () =
   let catalog =
     "[[models]]\n\
@@ -4240,9 +4290,6 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check string "configured default"
            "ollama.good"
            degradation.configured_default_runtime_id;
-         check string "effective default"
-           "ollama.good"
-           degradation.effective_default_runtime_id;
          check (list string) "active runtime ids"
            [ "ollama.good" ]
            (Runtime.get_runtime_ids ());
@@ -4311,7 +4358,7 @@ let test_server_degraded_init_rejects_uncatalogued_default () =
        match Runtime.init_default_degraded_report ~config_path:path with
        | Ok Runtime.Initialized -> fail "expected missing default catalog row"
        | Ok (Runtime.Initialized_degraded _) ->
-         fail "missing configured default must not pick another effective default"
+         fail "a missing configured default must refuse the boot, not pick another default"
        | Error (Runtime.Missing_catalog_models report) ->
          failf
            "expected default-specific config error, got missing catalog report: %s"
@@ -4537,7 +4584,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        default = \"%s\"\n\
        \n\
        [runtime.exact_output_lanes.auxiliary_exact]\n\
-       slots = [\"%s\"]\n"
+       slots = [\"%s\"]\n\
+       max_output_tokens = 4096\n"
       default
       slot
   in
@@ -5682,6 +5730,8 @@ let () =
             test_runtime_toml_rejects_an_unknown_binding_key;
           test_case "a table inside a binding is refused" `Quick
             test_runtime_toml_rejects_a_table_inside_a_binding;
+          test_case "every binding key the parser reads is accepted" `Quick
+            test_runtime_toml_accepts_every_binding_key_it_reads;
           test_case "non-positive max-concurrent is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_concurrent;
           test_case "max-concurrent flows from binding to provider config" `Quick

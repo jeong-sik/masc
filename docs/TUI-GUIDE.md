@@ -226,8 +226,9 @@ pretending to render content. With detail focused, `[`/`]` read the previous
 or next resource without returning to the list. Responses are URI-stamped, so
 a slow older read cannot replace a newer selection. `Ctrl-W` switches between
 list and detail, and `j`/`k` move whichever pane has focus. The selected
-Keeper's Channels tab shows transport status; `b`/`u` open a binding form with
-that Keeper already named.
+Keeper's Channels tab shows transport status; `b` opens a binding form with
+that Keeper already named, and `U` `U` removes all of its bindings (see
+[Keeper detail](#keeper-detail)).
 
 Tools has five deliberately different questions under `p`: `available` is
 the effective surface delivered to the selected Keeper now; `async runs` is
@@ -589,6 +590,37 @@ collapsing to zero.
    Last Turn:             2026-08-23T01:53:26
   j/k:scroll  l:logs  m:message  Esc:back  Tab:next  q:quit  r:refresh
 ```
+
+The Channels tab lists every transport and its channel bindings. A channel
+reads `name (id)` when the connector's name directory knows it, and
+`id (name unknown)` when it does not.
+
+| Key | Effect |
+|-----|--------|
+| `j` / `k` | move between transports |
+| `J` / `K` | move between the selected transport's bindings |
+| `b` | bind a channel to this Keeper (`$EDITOR` form) |
+| `e` | reassign the selected binding |
+| `u` `u` | remove the selected binding; the first press names it, the second removes it |
+| `U` `U` | remove every binding this Keeper holds, on every transport; the first press lists the channels, the second sends them |
+
+`U` `U` sends one unbind per binding with the Keeper's name as a condition, so
+a channel rebound to another Keeper after the first press is left as is.
+Recent Events gets one line per binding -- removed, kept (now bound to
+another Keeper), not found (with the server's words), or FAILED with the
+server's reason, failures last -- and the footer shows the count of each and
+names the channels that failed. A transport whose binding list the server
+could not read is named in the prompt as not included. On this tab `U` is unbind-all; the runtime picker stays on `U`
+everywhere else in Keeper detail.
+
+Pausing (`p`) or shutting down (`s`) a Keeper that still holds channel
+bindings offers to remove them too. A paused Keeper keeps its channels routed
+to itself and answers on them as soon as it runs again. Once the pause or
+shutdown is accepted, the footer reads `y: also unbind <keeper>'s N channels,
+or any other key to keep them -- <channels>`. `y` sends the same conditional
+unbinds as `U` `U` on the Channels tab; any other key leaves the bindings.
+The offer does not answer to `U`: on the list `U` still opens the runtime
+picker, so pausing and then picking another runtime keeps the channels.
 
 ### Keeper logs
 
@@ -1238,7 +1270,7 @@ to wake up". Open it through the `go Schedules` palette entry. The selected
 Keeper also exposes its automation in the Automation detail tab.
 
 ```
- MASC Schedules  10:44:57  HTTP [connected]
+ MASC Keepers / Schedules  10:44:57  HTTP [connected]
  ─────────────────────────────────────────────────────────────────────────────
    Requests: 34  (page shows first 20)  ·  Next due: 2026-08-24 09:57:00
  ─────────────────────────────────────────────────────────────────────────────
@@ -1595,11 +1627,16 @@ metadata reachability reading by exact `runtime_id`.
 
 ```
  MASC Runtime (43 lanes, 46 candidates)  degraded / stale  19:20:04  [connected]
-   SSOT: runtime.toml  projections: resolved + probe  2 reachable / 16 failed / 28 skipped
+   SSOT: runtime.toml · projections: resolved + probe · 2 reachable / 16 failed / 28 skipped
+   /Users/operator/work/.masc/config/runtime.toml · 2 probe-only
    LANE           CANDIDATE                  PROVIDER / MODEL         ROUTE / PROBE
    primary        1/3 anthropic.opus         Anthropic / claude-opus ready / reachable
    local          1/1 local.codex            Codex / codex           ready / CLI not probed
 ```
+
+The authority row is one sentence of clauses and breaks at the clause marks
+when the frame is narrower than the sentence, so the config path it ends with
+is spelled whole at every width rather than cut at the right edge.
 
 The authority is `runtime.toml`, read through two server-owned views.
 `GET /api/v1/runtime/resolved` projects lane order, candidate identity and
@@ -1880,7 +1917,13 @@ out the two commands.
 own binary. `start-masc.sh` builds and restarts the server (`bin/main_eio.exe`)
 and does not touch it, so a server restart leaves the TUI on the binary it
 started with. Rebuild with `dune build bin/masc_tui.exe`, then quit and reopen
-the TUI.
+the TUI. `scripts/tui-graceful-restart.sh --build` does that hand quit for you:
+it builds first (a failed build leaves the running session untouched), sends
+the running surface `SIGTERM`, and only starts the fresh binary after the old
+session's per-PID log carries a graceful row (`exit: normal (signal SIGTERM)`,
+the vocabulary above). A session that does not end within `--timeout` is left
+alone — the script never escalates to `SIGKILL` and never starts a second
+surface on top of a live one.
 
 **Header shows `[disconnected]`.** The server is not answering on
 `127.0.0.1:<port>`. Keepers and the Tasks panel keep working; Approvals, Board,

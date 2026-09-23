@@ -65,11 +65,24 @@ type verdict_decision =
   ; verification_id : string
   }
 
+(** Why a verdict does not commit. [Verdict_cancellation_reason_unreadable]
+    is the verdict path's own: an approved stop ends with the producer's
+    stated reason, read from the verification record being approved, and a
+    record that does not give one refuses the approval rather than ending the
+    Task with no reason or with someone else's. *)
+type verdict_refusal =
+  | Verdict_invalid of invalid
+  | Verdict_cancellation_reason_unreadable of string
+
 (** Terminal verdict on an [AwaitingVerification] obligation.
 
     [authority] carries provenance from a caller that authenticated an operator
     or accepted a typed system-LLM judge result. The type separates verdicts
-    from Keeper actions; it does not perform authentication itself. *)
+    from Keeper actions; it does not perform authentication itself.
+
+    An approved stop ends as [Cancelled] under the producer's name with the
+    reason [read_cancellation_reason] returns for the verification being
+    approved; [notes] belong to the verdict and never become that reason. *)
 val decide_verdict
   :  authority:Masc_domain.completion_authority
   -> verdict:Masc_domain.completion_verdict
@@ -78,7 +91,9 @@ val decide_verdict
   -> task_status:Masc_domain.task_status
   -> now:string
   -> notes:string
-  -> (verdict_decision, invalid) result
+  -> read_cancellation_reason:
+       (verification_id:string -> Workspace_verification_store.cancellation_reason_read)
+  -> (verdict_decision, verdict_refusal) result
 
 val valid_next_actions
   :  same_agent:bool

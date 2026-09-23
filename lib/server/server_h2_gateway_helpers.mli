@@ -1,5 +1,15 @@
 (** H2 gateway response helpers. *)
 
+(** [h2_close_after_flush writer] closes [writer] once every byte written to it
+    so far has been handed to the connection, not right away. Close an H2
+    response body with this, never with [H2.Body.Writer.close]: h2 0.13.0 cuts
+    a closed body at the client's flow-control window
+    (anmonteiro/ocaml-h2#278).
+
+    Write the whole body first. Bytes written after this call are cut the same
+    way, because the flush only covers the bytes already written. *)
+val h2_close_after_flush : H2.Body.Writer.t -> unit
+
 val h2_respond_json :
   ?status:H2.Status.t ->
   ?extra_headers:(string * string) list ->
@@ -43,3 +53,9 @@ val h2_respond_empty :
   H2.Reqd.t -> unit
 
 val h2_read_body : H2.Reqd.t -> (string -> unit) -> unit
+(** Reads the request body and hands the bytes read to the callback when the
+    body reader reports end of input. h2 also reports end of input when it
+    closes the reader because the stream failed, so a failed stream can hand
+    the callback a partial body. A body over
+    [Http_server_eio.Request.max_body_bytes], the HTTP/1 ceiling, is answered
+    with 413 and the callback never runs. *)

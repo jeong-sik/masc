@@ -2139,7 +2139,8 @@ let test_every_speaker_mark_is_distinct () =
       (function
         | Layout.Skill Layout.Skill_live -> true
         | Layout.Skill
-            (Layout.Skill_used | Layout.Skill_attention | Layout.Skill_failure) ->
+            (Layout.Skill_settled | Layout.Skill_attention | Layout.Skill_failure)
+          ->
             false
         | Layout.User | Layout.Inbound | Layout.Keeper | Layout.Status
         | Layout.Local | Layout.Journal | Layout.Error | Layout.Tool
@@ -2167,11 +2168,11 @@ let test_every_speaker_mark_is_drawn_not_typed () =
     Layout.all_styles
 
 let test_skill_marks_keep_state_without_colour () =
-  check (list string) "live used warning and failure keep distinct shapes"
+  check (list string) "moving settled warning and failure keep distinct shapes"
     [ "\xe2\x97\x87"; "\xe2\x97\x86"; "\xe2\x96\xb3"; "\xe2\x9c\x97" ]
     (List.map Layout.speaker_mark
        [ Layout.Skill Layout.Skill_live
-       ; Layout.Skill Layout.Skill_used
+       ; Layout.Skill Layout.Skill_settled
        ; Layout.Skill Layout.Skill_attention
        ; Layout.Skill Layout.Skill_failure
        ]);
@@ -2203,7 +2204,7 @@ let test_skill_marks_keep_state_without_colour () =
         (List.for_all
            (fun (row : Layout.row) -> row.shade = Layout.Shade_quoted)
            evidence))
-    [ Layout.Skill_live; Layout.Skill_used; Layout.Skill_attention
+    [ Layout.Skill_live; Layout.Skill_settled; Layout.Skill_attention
     ; Layout.Skill_failure
     ]
 

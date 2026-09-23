@@ -1,6 +1,17 @@
+(** What the mark beside a Skill row says about the row, which is not the same
+    question as what the row's words say. The words carry the state -- read,
+    delivered, used, and the three that are not steps of that life -- and the
+    mark carries how far the reader should trust it: still moving, finished,
+    finished without the evidence it should have, or failed.
+
+    [Skill_settled] covers every state a skill's life ends in, whether or not
+    a tool followed. That difference is the row's to spell; a mark saying it
+    would need a fifth shape for a distinction the line already makes in
+    words, and the tone that used to be named for one of the two states read
+    as a claim the mark does not make. *)
 type skill_tone =
   | Skill_live
-  | Skill_used
+  | Skill_settled
   | Skill_attention
   | Skill_failure
 

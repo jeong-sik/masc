@@ -112,7 +112,7 @@ let handle_keeper_github_token_post state req reqd body_str =
         | Error err -> Error err
       with
       | Yojson.Json_error msg -> Error (Printf.sprintf "invalid json: %s" msg)
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Error (Printexc.to_string exn) (* cancel-guard-ok: Yojson decoding performs no Eio operation *)
     in
     match parsed with
     | Error msg -> respond_error ~status:`Bad_request reqd msg

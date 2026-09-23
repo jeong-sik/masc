@@ -142,14 +142,12 @@ val owner_turn_rejection_cycle_status :
     failed lane is removed before the suffix is recorded, so consecutive
     immediate cycles walk a finite candidate set and end when it is empty.
     [Wait_for_path_release] sleeps until [release_at]; [waiting_on] names the
-    runtime or assignment whose release that is. A rate limit or quota wait is
-    [Serve_wakeup_after_duration] (#34653), a capacity wait
-    [Interrupt_on_wakeup]. *)
+    runtime or assignment whose release that is. A wakeup does not cut it
+    short (#34653). *)
 type after_failure =
   | Continue_on_deferred_lane of { next_runtime_id : string }
   | Wait_for_path_release of
       { release_at : float
-      ; wake_policy : Keeper_keepalive_signal.wake_policy
       ; waiting_on : string
       }
 

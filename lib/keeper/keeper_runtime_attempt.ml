@@ -1,13 +1,5 @@
 (** agent-core error mapping for keeper-managed provider attempts. *)
 
-let capacity_backpressure_source_to_failure_scope = function
-  | Keeper_internal_error.Provider_capacity ->
-    Llm_provider.Http_client.Failure_scope_provider
-  | Keeper_internal_error.Client_capacity ->
-    Llm_provider.Http_client.Failure_scope_account
-  | Keeper_internal_error.Runtime_slot ->
-    Llm_provider.Http_client.Failure_scope_unknown
-
 let http_error ~code ~body =
   Llm_provider.Http_client.HttpError
     { code; body = Llm_provider.Http_client.Received body; retry_after_header = None }
@@ -113,7 +105,7 @@ let core_error_to_runtime_outcome err =
          (Llm_provider.Http_client.NetworkError
             { message = detail; kind = Llm_provider.Http_client.Unknown }))
   | Some
-      (Keeper_internal_error.Capacity_backpressure { detail; retry_after; source; _ }) ->
+      (Keeper_internal_error.Capacity_backpressure { detail; retry_after; _ }) ->
     let retry_after =
       match retry_after with
       | Keeper_internal_error.Explicit s -> Some s
@@ -124,7 +116,7 @@ let core_error_to_runtime_outcome err =
          (Llm_provider.Http_client.ProviderFailure
             { kind =
                 Llm_provider.Http_client.Capacity_exhausted
-                  { scope = capacity_backpressure_source_to_failure_scope source
+                  { scope = Llm_provider.Http_client.Failure_scope_provider
                   ; retry_after
                   ; model = None
                   }

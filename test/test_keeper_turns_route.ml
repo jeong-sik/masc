@@ -196,7 +196,7 @@ let test_interrupt_rejects_invalid_or_conflicting_identity () =
   with_test_state (fun ~sw:_ ~config:_ ~state ->
     List.iter (fun body ->
       let response = post_response
-        ~handle:(Server_routes_http_keeper_stream.handle_keeper_turn_interrupt state) body in
+        ~handle:(Server_routes_http_keeper_stream.handle_keeper_turn_interrupt ~actor:"turns-route-test" state) body in
       Alcotest.(check bool) "bad identity is rejected before any cancellation" true
         (String_util.contains_substring response "400 Bad Request"))
       [ "{"; {|{"name":"alpha","interrupt_token":null}|}

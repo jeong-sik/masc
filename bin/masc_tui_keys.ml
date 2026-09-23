@@ -1341,7 +1341,13 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       ; b Act "b / e / u u" "bind / reassign / remove"
           ~help:"bind a channel, reassign the selected row, or remove it twice-confirmed"
       ]
-  | Detail_info | Detail_secrets | Detail_automation | Detail_runs -> []
+  | Detail_info ->
+      [ b Act "Q" "requeue board"
+          ~help:
+            "requeue the oldest Board-attention partition blocked at a restart; \
+             its judgment call may run a second time"
+      ]
+  | Detail_secrets | Detail_automation | Detail_runs -> []
 
 (* The single keys a binding's key names, in this table's own notation:
    alternatives apart with "/" ("d/m/s", "Left / Esc"), a key pressed twice

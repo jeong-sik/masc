@@ -6671,6 +6671,24 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     |> List.iter (fun line -> add_line (indent ^ failure_tone ^ line ^ Ansi.reset));
     add_empty ();
 
+    (* Board-attention partitions stopped at a restart wait here for an
+       operator's requeue, and nothing else on the screens said they existed.
+       Beside the current failure because it is one: this Keeper's Board
+       judgments for those posts do not move until someone presses Q. *)
+    add_section "Board attention";
+    Masc_tui_board_quarantine.lines ~now:(Unix.gettimeofday ())
+      state.keeper_board_quarantines ~keeper_name:k.k_name
+    |> List.iter (fun (tone, text) ->
+         let color =
+           match tone with
+           | Masc_tui_board_quarantine.Plain -> ""
+           | Masc_tui_board_quarantine.Dim -> Ansi.dim
+           | Masc_tui_board_quarantine.Warn -> Theme.warn ()
+           | Masc_tui_board_quarantine.Bad -> Theme.bad ()
+         in
+         add_line (indent ^ color ^ text ^ Ansi.reset));
+    add_empty ();
+
     (* Gate section. Two settings with similar names decide different things,
        so both are named rather than merged: YOLO is the in-memory stance that
        stops this chat asking and a restart clears, while the Gate mode is

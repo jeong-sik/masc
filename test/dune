@@ -5335,6 +5335,11 @@
  (libraries alcotest masc_tui_wire_age))
 
 (test
+ (name test_tui_board_quarantine)
+ (modules test_tui_board_quarantine)
+ (libraries alcotest masc yojson masc_tui_fetched masc_tui_board_quarantine))
+
+(test
  (name test_tui_text_block)
  (modules test_tui_text_block)
  (libraries alcotest astring masc_tui_text_block))

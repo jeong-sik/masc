@@ -2185,6 +2185,11 @@ type async_msg =
       (Tui_decode.runtime_param_row list, string) result
   | Prompts_loaded of
       unit Masc_tui_fetched.request * (Tui_decode.prompts_snapshot, string) result
+  | Keeper_board_quarantines_loaded of
+      string Masc_tui_fetched.request
+      * (Masc_tui_board_quarantine.t, string) result
+  (* Keeper, partition, and what is known about the requeue's effect. *)
+  | Board_quarantine_requeued of string * string * Masc_tui_http.post_outcome
   (* Where a preset answer goes: the chat pane that typed the command, or
      the Config pane that pressed the key. *)
   | Presets_listed of preset_sink * (Tui_decode.presets_snapshot, string) result
@@ -4634,6 +4639,73 @@ let launch_keeper_sandbox_logs state ~mailbox keeper_name =
     enqueue_async mailbox
       (Keeper_sandbox_logs_loaded
          (keeper_name, generation, Error "Eio switch is unavailable"))
+
+(* The Info tab's Board-attention rows. [start] answers [Already_loading] for a
+   read already in flight for this Keeper, so the tab asks once per visit; a
+   read for a Keeper already on screen keeps its rows up while it runs. *)
+let launch_keeper_board_quarantines state ~mailbox keeper_name =
+  match
+    Masc_tui_fetched.start ~equal:String.equal state.keeper_board_quarantines
+      ~key:keeper_name
+  with
+  | Masc_tui_fetched.Already_loading -> ()
+  | Masc_tui_fetched.Started (next, request) ->
+    state.keeper_board_quarantines <- next;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try
+          Masc_tui_loader.load_keeper_board_quarantines ~host ~port ~keeper_name
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Keeper_board_quarantines_loaded (request, result))
+    in
+    (match Eio_context.get_switch_opt () with
+     | Some sw ->
+       Eio.Fiber.fork_daemon ~sw (fun () ->
+         run ();
+         `Stop_daemon)
+     | None ->
+       enqueue_async mailbox
+         (Keeper_board_quarantines_loaded
+            (request, Error "Eio switch is unavailable")))
+
+(* One press, one partition: the oldest one still waiting. Each requeue lets a
+   judgment call that may already have gone out run again, so the key takes
+   one at a time rather than the whole list. *)
+let launch_board_quarantine_requeue state ~mailbox ~keeper_name
+    (item : Masc.Keeper_board_attention_quarantine_command.inventory_item) =
+  let partition_id = item.Masc.Keeper_board_attention_quarantine_command.partition_id in
+  state.board_quarantine_requeue_inflight <- Some partition_id;
+  let host = server_peer_host in
+  let port = state.port in
+  let request = Masc_tui_board_quarantine.requeue_request item in
+  let run () =
+    let outcome =
+      try
+        Masc_tui_http.post_board_quarantine_requeue ~host ~port ~keeper_name
+          ~partition_id ~request
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Masc_tui_http.Post_unanswered (Printexc.to_string exn)
+    in
+    enqueue_async mailbox
+      (Board_quarantine_requeued (keeper_name, partition_id, outcome))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      run ();
+      `Stop_daemon)
+  | None ->
+    enqueue_async mailbox
+      (Board_quarantine_requeued
+         ( keeper_name
+         , partition_id
+         , Masc_tui_http.Post_unanswered "Eio switch is unavailable" ))
 
 let launch_github_identity_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_github ~keeper:keeper_name in
@@ -10772,7 +10844,7 @@ let load_keeper_logs_if_safe state base_path limit keeper =
    fetched nothing in all three. One table, called from all three. *)
 let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
   match state.detail_tab with
-  | Detail_info -> ()
+  | Detail_info -> launch_keeper_board_quarantines state ~mailbox keeper.k_name
   | Detail_sandbox ->
       state.keeper_sandbox_view <- None;
       state.keeper_sandbox_view_error <- None;
@@ -13685,6 +13757,29 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          now, so this arm no longer has to remember to do it. *)
       state.preset_detail <-
         Masc_tui_fetched.complete ~equal:String.equal state.preset_detail request result
+  | Keeper_board_quarantines_loaded (request, result) ->
+      state.keeper_board_quarantines <-
+        Masc_tui_fetched.complete ~equal:String.equal
+          state.keeper_board_quarantines request result
+  | Board_quarantine_requeued (keeper_name, partition_id, outcome) ->
+      state.board_quarantine_requeue_inflight <- None;
+      let partition = Terminal_text.single_line partition_id in
+      (match outcome with
+       | Masc_tui_http.Post_answered _ ->
+           report_action state "system"
+             ("Board partition requeued: " ^ partition)
+       | Masc_tui_http.Post_refused detail ->
+           report_action state "error"
+             ("Board requeue refused for " ^ partition ^ ": "
+              ^ Terminal_text.single_line detail)
+       | Masc_tui_http.Post_unanswered detail ->
+           report_action state "error"
+             ("Board requeue for " ^ partition
+              ^ " may or may not have landed: "
+              ^ Terminal_text.single_line detail));
+      (* Read the rows again whatever the answer: a refusal usually means the
+         row moved, and an unanswered press may have committed. *)
+      launch_keeper_board_quarantines state ~mailbox keeper_name
   | Preset_saved (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok manifest ->
@@ -20668,6 +20763,28 @@ and is loaded on demand through keeper_skill.
               else
                 Masc_tui_scroll.cursor_up ~count
                   state.connectors_binding_cursor)
+       | Some "Q"
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_info ->
+           (match selected_keeper state, state.board_quarantine_requeue_inflight with
+            | Some _, Some _ | None, _ -> ()
+            | Some keeper, None ->
+                (match
+                   Masc_tui_fetched.view_for ~equal:String.equal
+                     state.keeper_board_quarantines ~key:keeper.k_name
+                 with
+                 | Masc_tui_fetched.Ready quarantines ->
+                     (match Masc_tui_board_quarantine.oldest_waiting quarantines with
+                      | Some item ->
+                          launch_board_quarantine_requeue state
+                            ~mailbox:async_messages ~keeper_name:keeper.k_name item
+                      | None ->
+                          report_action state "system"
+                            "No blocked Board partition to requeue")
+                 | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                 | Masc_tui_fetched.Failed _ ->
+                     report_action state "error"
+                       "Board partitions are not read yet; nothing requeued"))
        | Some "L"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github ->

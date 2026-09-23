@@ -1468,7 +1468,12 @@ status: reference
 **Fact**
 : Memory OS의 기억 하나. 문장(`claim`), `category`, 처음·마지막으로 본 시각,
   `origin`, `basis`로 이뤄진다. id 필드는 없고 Memory ID는 `claim` 글자의
-  SHA-256이다. 글자가 하나라도 다르면 다른 Fact다.
+  SHA-256이다. 글자가 하나라도 다르면 다른 Fact다. 처음·마지막으로 본 시각
+  (`first_seen`, `last_seen`)은 둘 다 Fact가 기록된 시각(write time)이며, 상태가
+  지속된 시각이나 신뢰도·강도(strength) 신호가 아니다. 같은 내용(동일 바이트)으로
+  다시 쓰인 Fact는 최초의 `first_seen`을 보존하고 `last_seen`만 전진한다(#38056).
+  움직이는 상태(moving state)의 스냅샷들은 본문이 직접 밝히는 시각(날짜·서수·
+  프레임 번호), 그다음 `last_seen` 순으로 선후를 판정한다.
 
 **Origin**
 : Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,
@@ -1492,6 +1497,12 @@ status: reference
     Fact와 같은 글자를 다시 쓰는 것은 새 Fact가 아니라 그 Fact다 — 아무것도 더하지
     않고 저장된 Fact를 유지하며, 거절이 아니다. 같은 답이 그 Fact를 `dropped`로도
     적으면 "사라졌다"와 "남는다"를 함께 말한 모순이라 거절한다(`Dropped_memory_id_recreated`).
+    새로운 상태로 대체되어 낡게 된 이전 스냅샷(superseded state)은 새 claim이 그 내용을
+    온전히 대신 담고 있지 않으므로 `absorbs`가 아니라 반드시 `dropped`로 버려야 한다 —
+    내용이 다른 갱신을 `absorbs`로 지정하면 관문(absorb gate)을 통과하지 못한다(#38056).
+    회차 진행 도중 Keeper가 철회(`retract`)하거나 대체(`supersedes`)하여 스냅숏에서
+    사라진 Fact는 흡수 대상(`into`)으로 지목되더라도 되살아나지 않으며, 대상 없는 흡수는
+    취소(`cancelled`)되어 원문들이 현재 Fact로 남는다(#38231).
   - Keeper 직접 갱신: `keeper_memory_write`는 선택 인자 `supersedes`로 자신이 직접
     적은 이전 Fact 하나를 새 claim으로 대체할 수 있다(#38122). 원자적(locked) 한 번의
     커밋으로 이전 Fact를 지우고 새 Fact를 적으며, 저널에 `superseded_by` 사유를 남기고

@@ -234,6 +234,9 @@ let global =
   ; b Meta "&"
       "the MSX screen: the emulator core over the whole terminal (esc: back; \
        also `:` go MSX)"
+  ; b Meta "%"
+      "the DOS screen: watch the server's DOS machine; keys never reach it \
+       (esc: back; also `:` go DOS)"
   ; b Meta roster_toggle_key "keeper roster beside the chat — put away until you ask"
       ~help:"the Activity pane (Ctrl-L) answers the same question for every \
              keeper, so the column starts hidden; this brings it back on a \

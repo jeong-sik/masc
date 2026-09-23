@@ -985,6 +985,9 @@ let is_public_read_path path =
      game (RFC-0439 §3.7): file names under <.masc>/msx/carts, not workspace
      state. Loading a game stays a write, gated like the MSX tools. *)
   || String.equal path "/api/v1/msx/carts"
+  (* The DOS spectator frame (#38424): the same kind of game screen, read
+     without moving the machine's time. *)
+  || String.equal path "/api/v1/dos/frame"
   || String.starts_with ~prefix:"/static/" path
   || String.starts_with ~prefix:"/graphiql/" path
   (* Tier F2 dashboard reads — multimodal artifact gallery + detail

@@ -17978,6 +17978,97 @@ def run_msx_spectator_regression(executable: str) -> None:
     )
 
 
+# The DOS machine's frame, as the server sends it (server_routes_http_routes_dos:
+# width*height*3 raw RGB, base64, beside the program, controller and steps).
+DOS_FRAME_WIDTH = 640
+DOS_FRAME_HEIGHT = 400
+DOS_TITLE_PROGRAM = b"SAN3.EXE"
+DOS_TITLE_CONTROLLER = b"controller: keeper-cao-cao"
+DOS_TITLE_STEPS = b"step 4242"
+DOS_FOOTER_TAIL = b"keys never reach the machine"
+
+
+def dos_loaded_frame_fixture() -> HttpResponse:
+    """A 640x400 frame split down the middle: red left, blue right."""
+    row = (
+        bytes([255, 0, 0]) * (DOS_FRAME_WIDTH // 2)
+        + bytes([0, 0, 255]) * (DOS_FRAME_WIDTH - DOS_FRAME_WIDTH // 2)
+    )
+    return (
+        200,
+        {
+            "loaded": True,
+            "incarnation": "0190aaaa-bbbb-7ccc-8ddd-eeeeffff0000",
+            "steps": 4242,
+            "program": "SAN3.EXE",
+            "controller": "keeper-cao-cao",
+            "video_mode": 18,
+            "width": DOS_FRAME_WIDTH,
+            "height": DOS_FRAME_HEIGHT,
+            "pixels": "inline",
+            "rgb_base64": base64.b64encode(row * DOS_FRAME_HEIGHT).decode("ascii"),
+        },
+    )
+
+
+def run_dos_spectator_regression(executable: str) -> None:
+    """The palette opens the DOS spectator, and no key reaches the machine.
+
+    #38424: an operator watches Keepers play a DOS game. The screen names the
+    program, who holds the controller and the step count, draws the frame in
+    its own shape, and is a spectator only -- the game keys an MSX screen
+    would send are pressed here and nothing is POSTed anywhere. Esc hands the
+    terminal back.
+    """
+    posted: HttpRequests = []
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        read_available(master_fd, output)
+        start = len(output)
+        os.write(master_fd, b":go dos\r")
+        # The spectator paints past the frame presenter, so the wait is on the
+        # raw output; the footer is the last thing it writes. Its tail is the
+        # needle, because "Esc: back" is also on screens the palette passes.
+        wait_for_output(process, master_fd, output, DOS_FOOTER_TAIL, start=start,
+                        timeout=5.0)
+        watching = bytes(output)[start:]
+        watching = watching[watching.rfind(b"\x1b[2J"):]
+        for needle in (DOS_TITLE_PROGRAM, DOS_TITLE_CONTROLLER, DOS_TITLE_STEPS,
+                       b"spectating the server", b"Esc: back"):
+            if needle not in watching:
+                raise AssertionError(f"the DOS screen does not show {needle!r}: {watching[:300]!r}")
+        if MSX_LEFT_HALF not in watching or MSX_RIGHT_HALF not in watching:
+            raise AssertionError(f"the frame's two halves were not drawn: {watching[:400]!r}")
+        if watching.find(MSX_LEFT_HALF) > watching.find(MSX_RIGHT_HALF):
+            raise AssertionError("the halves were drawn in the wrong order")
+
+        # Game keys: each one only repaints, and the screen stays open.
+        for key in (b"a", b" ", b"\r", b"1"):
+            pressed_from = len(output)
+            os.write(master_fd, key)
+            wait_for_output(process, master_fd, output, DOS_FOOTER_TAIL,
+                            start=pressed_from, timeout=5.0)
+        if posted:
+            raise AssertionError(f"a spectator key was sent to the server: {posted!r}")
+
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="the DOS spectator shows the frame and sends no key",
+        interact=interact,
+        http_fixtures={"/api/v1/dos/frame": dos_loaded_frame_fixture()},
+        http_requests=posted,
+    )
+
+
 def run_msx_palette_regression(executable: str) -> None:
     """The command palette opens the MSX screen by name.
 
@@ -18339,6 +18430,7 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ),
     ScenarioFamily("msx-background-poll", "MSX background poll regression", (run_msx_background_poll_regression,)),
     ScenarioFamily("msx-size", "MSX size regression", (run_msx_size_regression,)),
+    ScenarioFamily("dos-spectator", "DOS spectator regression", (run_dos_spectator_regression,)),
     ScenarioFamily(
         "board-compose-footer",
         "board compose footer regression",

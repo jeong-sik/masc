@@ -10,6 +10,7 @@
 open Alcotest
 
 module Msx = Masc_tui_msx
+module View = Masc_tui_machine_view
 module Types = Masc_tui_types
 module Graphics = Masc_tui_graphics
 
@@ -88,8 +89,8 @@ let test_an_unreachable_server_is_not_a_missing_machine () =
    the next one. The setter is the only way in, so there is nothing to read
    back -- the default is what a terminal that never answered leaves. *)
 let with_protocol p f =
-  Msx.set_graphics_protocol p;
-  Fun.protect ~finally:(fun () -> Msx.set_graphics_protocol Graphics.Unsupported_protocol) f
+  View.set_graphics_protocol p;
+  Fun.protect ~finally:(fun () -> View.set_graphics_protocol Graphics.Unsupported_protocol) f
 ;;
 
 let test_a_graphics_terminal_gets_the_pixels () =
@@ -189,8 +190,8 @@ let test_checkpoint_bindings_and_result_are_visible () =
 (* Restore the cell size for the same reason [with_protocol] restores the
    protocol: it is module state and a case must not leak it. *)
 let with_cell_pixels px f =
-  Msx.set_cell_pixels px;
-  Fun.protect ~finally:(fun () -> Msx.set_cell_pixels None) f
+  View.set_cell_pixels px;
+  Fun.protect ~finally:(fun () -> View.set_cell_pixels None) f
 ;;
 
 (* The row count out of the placement escape: "...,r=N,...". Kitty derives the
@@ -299,8 +300,8 @@ let test_failed_write_and_layout () =
     let retry = drawn () in
     check bool "retry sends pixels" true (mentions ~needle:"f=24" retry);
     check bool "retry clears uncertain placement" true (mentions ~needle:"d=I,i=32" retry);
-    Msx.adjust_size (-1.0);
-    Fun.protect ~finally:(fun () -> Msx.adjust_size 1.0) (fun () ->
+    View.adjust_size (-1.0);
+    Fun.protect ~finally:(fun () -> View.adjust_size 1.0) (fun () ->
       let resized = drawn () in
       check bool "size change retires old placement" true (mentions ~needle:"d=I,i=32" resized);
       check bool "size change transmits" true (mentions ~needle:"f=24" resized));
@@ -322,8 +323,8 @@ let test_surface_lifecycle () =
 
 let test_synchronized_batch () =
   with_protocol Graphics.Kitty_protocol (fun () ->
-    Msx.set_synchronized_output true;
-    Fun.protect ~finally:(fun () -> Msx.set_synchronized_output false) (fun () ->
+    View.set_synchronized_output true;
+    Fun.protect ~finally:(fun () -> View.set_synchronized_output false) (fun () ->
       let out = drawn () in
       check bool "batch begins synchronized" true (String.starts_with ~prefix:"\027[?2026h" out);
       check bool "batch ends synchronized" true (String.ends_with ~suffix:"\027[?2026l" out));

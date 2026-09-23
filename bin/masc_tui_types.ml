@@ -5060,6 +5060,22 @@ type msx_frame = {
   msx_players : string list;  (* who pressed within the server's window, newest first *)
 }
 
+(* One DOS frame as the server hands it over (#38424): the machine's own
+   resolution (640x400 or 640x480) and what to title it with. The spectator
+   only reads it -- DOS time moves by tool calls, never by being watched.
+   [dos_incarnation] and [dos_steps] name this frame, so the next poll can ask
+   the server whether it is still current instead of receiving it again. *)
+type dos_frame = {
+  dos_incarnation : string;
+  dos_steps : int;
+  dos_program : string option;
+  dos_controller : string option;  (* who may move the machine's time; [None] when free *)
+  dos_video_mode : int;
+  dos_width : int;
+  dos_height : int;
+  dos_rgb : string;
+}
+
 (* A container-log read that has been asked for and not answered. The keeper and
    the generation identify it; the stamp says when it was asked, in monotonic
    nanoseconds. *)
@@ -5360,6 +5376,15 @@ type state = {
   mutable msx_menu_mode: msx_menu_mode;
   mutable msx_carts: string list;
   mutable msx_menu_index: int;
+  (* The DOS spectator screen (#38424), the MSX screen's read-only twin:
+     while [dos_open] is set the loop draws no frames and every key belongs
+     to this screen, and none of them reaches the machine. [dos_frame] is the
+     last frame the server handed over; [dos_notice] says why the latest poll
+     failed, next to the frame that is still shown. *)
+  mutable dos_open: bool;
+  mutable dos_frame: dos_frame option;
+  mutable dos_last_poll_ns: int64;
+  mutable dos_notice: string option;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -7657,6 +7682,10 @@ let create_state
   msx_menu_mode = Boot_game;
   msx_carts = [];
   msx_menu_index = 0;
+  dos_open = false;
+  dos_frame = None;
+  dos_last_poll_ns = 0L;
+  dos_notice = None;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
@@ -10997,6 +11026,7 @@ type palette_action =
      list and closes the lane to get there. *)
   | Palette_connectors
   | Palette_msx
+  | Palette_dos
   | Palette_lane_addons
   | Palette_goto of surface
   | Palette_config of config_pane
@@ -11120,6 +11150,7 @@ let palette_entries (state : state) =
      when there is no key path to it. *)
   @ [ "go Connectors", Palette_connectors ]
   @ [ "go MSX", Palette_msx ]
+  @ [ "go DOS", Palette_dos ]
   @ [ "go Lane Add-ons", Palette_lane_addons ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
@@ -11187,7 +11218,7 @@ let palette_action_words = function
       | Repositories | Code | Changes | Connectors | Runtime | Config
       | Resources | Tools | System_logs )
   | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
-  | Palette_msx
+  | Palette_msx | Palette_dos
   | Palette_lane_addons | Palette_config _ | Palette_gate_mode _
   | Palette_chat _ | Palette_task _ | Palette_board_hearth _
   | Palette_board_post _ | Palette_lsp _ ->

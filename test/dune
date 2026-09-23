@@ -2514,6 +2514,8 @@
 
 (include stanzas/test_msx_frame_route.inc)
 
+(include stanzas/test_dos_frame_route.inc)
+
 (include stanzas/test_discord_gateway_client.inc)
 
 (include stanzas/test_discord_tls_config_cache.inc)
@@ -4661,6 +4663,22 @@
  (deps (alias runtest-test_tui_keyboard_input-msx-size)))
 
 (rule
+ (alias runtest-test_tui_keyboard_input-dos-spectator)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   dos-spectator)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-dos-spectator)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-cli-base-path)
  (deps
   test_tui_keyboard_input.py
@@ -6096,7 +6114,18 @@
  (name test_tui_msx_graphics)
  (modules test_tui_msx_graphics)
  (libraries alcotest unix masc_tui_types masc_tui_interactive masc_tui_graphics
-   masc_tui_msx masc_tui_ansi))
+   masc_tui_msx masc_tui_machine_view masc_tui_ansi))
+
+(test
+ (name test_tui_dos_graphics)
+ (modules test_tui_dos_graphics)
+ (libraries alcotest unix masc_tui_types masc_tui_graphics masc_tui_dos
+   masc_tui_machine_view))
+
+(test
+ (name test_tui_dos_feed)
+ (modules test_tui_dos_feed)
+ (libraries alcotest yojson base64 masc_tui_types masc_tui_dos_feed))
 
 (test
  (name test_tui_interactive)

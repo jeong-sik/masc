@@ -4,28 +4,10 @@
     hands over. [state.msx_open] plays the role [state.image_open] plays for a
     picture: while it is set the render loop draws no frames of its own and the
     next key belongs to this screen. The frame to draw is [state.msx_frame],
-    refreshed by the loop's poll; this module only renders it. *)
-
-val set_graphics_protocol : Masc_tui_graphics.graphics_protocol -> unit
-(** Tell this screen what the boot probe found. A terminal that draws images
-    gets the frame's own pixels; every other one gets the block mosaic, which
-    is also what an unset protocol means.
-
-    Set once at startup from the same value the other image surfaces read, so
-    the spectator and the image overlay cannot disagree about what the
-    terminal can do. *)
-
-val set_synchronized_output : bool -> unit
-(** Use the executable's existing terminal synchronization policy. *)
-
-val invalidate : unit -> unit
-(** Forget the last accepted frame after another surface owns the terminal. *)
-
-val set_cell_pixels : (int * int) option -> unit
-(** Tell the spectator what one character cell measures, so an image placement
-    can be sized to stay inside the screen. [None] leaves it sizing in cells
-    alone. Set once at startup from the terminal probe, for the same reason
-    {!set_graphics_protocol} is: this screen cannot reach the reader's state. *)
+    refreshed by the loop's poll; this module only renders it, through
+    {!Masc_tui_machine_view}, which the DOS spectator draws with too. The
+    terminal-wide settings (graphics protocol, cell size, synchronized output,
+    picture size) are that module's. *)
 
 val render :
   write:(string -> unit)
@@ -48,11 +30,6 @@ val render :
     to say anything -- {!Masc_tui_http.fetch_msx_frame} maps a transport
     failure onto the same value -- and "no machine loaded" sends an operator to
     load one when the server is the thing that is down. *)
-
-val adjust_size : float -> unit
-(** Step the picture's share of this terminal's screen by an eighth, clamped
-    between a quarter and full. A local view setting -- the machine's frame
-    is the server's and is never resized. *)
 
 val consume : write:(string -> unit) -> Masc_tui_types.state -> string -> bool
 (** One key while open. [esc] closes the screen and returns [false] (the caller

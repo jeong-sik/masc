@@ -1883,6 +1883,15 @@ type msx_poll_state = Poll_idle | Poll_pending of msx_poll_request | Poll_failed
 let msx_pending_poll = ref Poll_idle
 let invalidate_msx_poll () = msx_poll_view := ref ()
 
+(* The DOS spectator's poll (#38424) is a read, so unlike the MSX tick it has
+   nothing to keep pending across a close: a result for a view that has been
+   closed or reopened since is dropped by [dos_poll_view], and at most one
+   read is in flight. A failed read is shown and the next interval asks
+   again -- a read changes nothing, so asking again is safe. *)
+let dos_poll_view = ref (ref ())
+let dos_poll_inflight = ref false
+let invalidate_dos_poll () = dos_poll_view := ref ()
+
 type async_msg =
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
@@ -1892,6 +1901,7 @@ type async_msg =
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request * (Masc_tui_types.msx_frame option, string) result
+  | Dos_frame_loaded of unit ref * (Masc_tui_types.dos_frame option, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
      roster cursor moves under a refresh, and a transcript that took several
@@ -3217,6 +3227,28 @@ let launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn -> enqueue_async mailbox
            (Msx_frame_loaded (request, Error (Printexc.to_string exn))))
+;;
+
+let launch_dos_poll (state : Masc_tui_types.state) ~mailbox =
+  if not !dos_poll_inflight then begin
+    dos_poll_inflight := true;
+    let view = !dos_poll_view and port = state.port and held = state.dos_frame in
+    let run () =
+      let frame =
+        try Masc_tui_http.fetch_dos_frame ~host:server_peer_host ~port ~held with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Dos_frame_loaded (view, frame))
+    in
+    try
+      match Eio_context.get_switch_opt () with
+      | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+      | None -> enqueue_async mailbox (Dos_frame_loaded (view, Error "Eio switch is unavailable"))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> enqueue_async mailbox (Dos_frame_loaded (view, Error (Printexc.to_string exn)))
+  end
 ;;
 
 let launch_keeper_turns_load state ~mailbox =
@@ -8828,7 +8860,7 @@ let open_msx_screen (state : Masc_tui_types.state) =
   state.image_request_generation <- state.image_request_generation + 1;
   state.browser_viewport <- None;
   if state.image_open then begin
-    Masc_tui_msx.invalidate ();
+    Masc_tui_machine_view.invalidate ();
     write_to_terminal Masc_tui_graphics.delete_all;
     state.image_open <- false
   end;
@@ -8837,6 +8869,37 @@ let open_msx_screen (state : Masc_tui_types.state) =
     Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
   Masc_tui_msx.open_menu ~write:write_to_terminal state
+
+let render_dos (state : Masc_tui_types.state) =
+  Masc_tui_dos.render ~write:write_to_terminal ~connection:state.connection_status
+    ?notice:state.dos_notice state.dos_frame
+
+(* The DOS door (#38424): a spectator over the server's DOS machine. There is
+   no menu -- loading a program is a Keeper's masc_dos_load -- so it opens
+   straight onto the frame. The first read is done here so the screen opens
+   on a picture; the poll keeps it current after that. [%] and the palette's
+   "go DOS" both land here. *)
+let open_dos_screen (state : Masc_tui_types.state) =
+  invalidate_dos_poll ();
+  state.image_request_generation <- state.image_request_generation + 1;
+  state.browser_viewport <- None;
+  if state.image_open then begin
+    Masc_tui_machine_view.invalidate ();
+    write_to_terminal Masc_tui_graphics.delete_all;
+    state.image_open <- false
+  end;
+  Masc_tui_machine_view.invalidate ();
+  (match
+     Masc_tui_http.fetch_dos_frame ~host:server_peer_host ~port:state.port
+       ~held:state.dos_frame
+   with
+   | Ok frame ->
+     state.dos_frame <- frame;
+     state.dos_notice <- None
+   | Error message -> state.dos_notice <- Some ("frame read failed: " ^ message));
+  state.dos_last_poll_ns <- Mtime_clock.elapsed_ns ();
+  state.dos_open <- true;
+  render_dos state
 
 (* Where a reference lands, and what it opens when it gets there.
 
@@ -9001,6 +9064,7 @@ let clamp_planning_cursor state =
    rule. *)
 let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~title data =
   if state.msx_open then refuse "MSX currently owns the terminal; reopen the image after leaving MSX"
+  else if state.dos_open then refuse "DOS currently owns the terminal; reopen the image after leaving DOS"
   else begin
   state.browser_viewport <- None;
   browser_image_region := None;
@@ -9064,7 +9128,7 @@ let draw_image state ?(caption = []) ?(footer = "  any key: back") ~refuse ~titl
                  (Message_layout.fit_width line (max 1 (columns - 1))))
              header_lines)
       in
-      Masc_tui_msx.invalidate ();
+      Masc_tui_machine_view.invalidate ();
       write_to_terminal
         (Ansi.clear ^ Masc_tui_graphics.delete_all ^ header
         ^ Printf.sprintf "\x1b[%d;1H" (header_rows + 1)
@@ -9384,7 +9448,7 @@ let close_image state =
   | false -> ()
   | true ->
       state.image_open <- false;
-      Masc_tui_msx.invalidate ();
+      Masc_tui_machine_view.invalidate ();
       write_to_terminal Masc_tui_graphics.delete_all
 
 let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
@@ -14681,7 +14745,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
   | Sent_image_ready { generation; view; keeper_name; name; result } ->
-      if not state.msx_open && generation = state.image_request_generation
+      if not state.msx_open && not state.dos_open && generation = state.image_request_generation
          && view = state.view && keeper_name = state.msg_target_keeper_name then begin
         let notice = chat_notice state ~keeper_name in
         let refuse reason =
@@ -14692,7 +14756,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Ok data -> draw_image state ~refuse ~title:name data
       end
   | Image_render_ready { title; caption; page_url; image_url; result } ->
-      if not state.msx_open then begin
+      if not state.msx_open && not state.dos_open then begin
       let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
       (match result with
        | Ok data ->
@@ -14742,6 +14806,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                     ~connection:state.connection_status state.msx_frame (msx_surface_current ())
                 end)
        | Poll_pending _ | Poll_idle | Poll_failed -> ())
+  | Dos_frame_loaded (view, result) ->
+      dos_poll_inflight := false;
+      (* A read for a view closed or reopened since is dropped: its frame was
+         decoded against pixels this view no longer holds. *)
+      if view == !dos_poll_view && state.dos_open then begin
+        (match result with
+         | Ok frame ->
+             state.dos_frame <- frame;
+             state.dos_notice <- None
+         | Error detail -> state.dos_notice <- Some ("frame read failed: " ^ detail));
+        render_dos state
+      end
   | Keeper_chat_control_received (keeper_name, generation, token) ->
       if generation = keeper_chat_control_generation state keeper_name then begin
         (* [false] means no control was pending for this generation and
@@ -16023,7 +16099,7 @@ let drain_async_messages state ~base_path ~http_refresh_inflight
    rather than skipped as unchanged. Both doors below end here so the two
    cannot come to disagree about what a resize costs. *)
 let discard_frame_for_new_size frame_presenter render_schedule =
-  Masc_tui_msx.invalidate ();
+  Masc_tui_machine_view.invalidate ();
   Frame_presenter.invalidate frame_presenter;
   Render_schedule.request render_schedule Render_schedule.Force
 
@@ -16355,7 +16431,7 @@ let main
   in
 
   let terminal_profile = Terminal_profile.detect ~getenv:Sys.getenv_opt in
-  Masc_tui_msx.set_synchronized_output
+  Masc_tui_machine_view.set_synchronized_output
     (Terminal_profile.synchronized_output terminal_profile);
   let frame_presenter =
     Frame_presenter.create
@@ -16696,6 +16772,13 @@ let main
   let msx_spectator_poll_interval_ns =
     Int64.of_float (msx_spectator_poll_seconds *. nanoseconds_per_second)
   in
+  (* DOS spectator cadence (#38424): 2 Hz. The frame moves only when a tool
+     call steps the machine, and an unchanged frame is answered without its
+     pixels, so a read is a few hundred bytes most of the time. *)
+  let dos_spectator_poll_seconds = 0.5 in
+  let dos_spectator_poll_interval_ns =
+    Int64.of_float (dos_spectator_poll_seconds *. nanoseconds_per_second)
+  in
   let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
   let roster_marquee_target = ref None in
   let roster_marquee_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
@@ -16743,10 +16826,10 @@ let main
   active_graphics_protocol := proto;
   (* The spectator draws its own screen and cannot reach this ref, so it is
      handed the same answer rather than probing again. *)
-  Masc_tui_msx.set_graphics_protocol proto;
+  Masc_tui_machine_view.set_graphics_protocol proto;
   (* And what a cell measures, for the same reason: the spectator sizes an
      image placement against the screen and cannot ask the terminal itself. *)
-  Masc_tui_msx.set_cell_pixels terminal_probe.cell_pixels;
+  Masc_tui_machine_view.set_cell_pixels terminal_probe.cell_pixels;
   image_cell_pixels := terminal_probe.cell_pixels;
   terminal_draws_images :=
     Some
@@ -18019,6 +18102,8 @@ and is loaded on demand through keeper_skill.
            and let a keypress wake the loop. *)
         if state.msx_open && not state.msx_menu_open then
           Float.min input_timeout msx_spectator_poll_seconds
+        else if state.dos_open then
+          Float.min input_timeout dos_spectator_poll_seconds
         else input_timeout
       in
       (* The load menu owns the terminal while it is up: skip the frame poll so
@@ -18027,7 +18112,7 @@ and is loaded on demand through keeper_skill.
       (* Console writes damage whichever surface owns the terminal, including
          the spectator whose output bypasses the ordinary frame presenter. *)
       if Terminal_write_repair.consume_damage () then begin
-        Masc_tui_msx.invalidate ();
+        Masc_tui_machine_view.invalidate ();
         Frame_presenter.invalidate frame_presenter;
         Render_schedule.request render_schedule Render_schedule.Force;
         if state.msx_open then
@@ -18035,7 +18120,20 @@ and is loaded on demand through keeper_skill.
             Masc_tui_msx.render_menu ~write:write_to_terminal state
           else
             Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-              ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+              ~connection:state.connection_status state.msx_frame (msx_surface_current ());
+        if state.dos_open then render_dos state
+      end;
+      (* The DOS poll is a read: it never moves the machine's time. *)
+      if state.dos_open then begin
+        let now_ns = Mtime_clock.elapsed_ns () in
+        if
+          Int64.compare (Int64.sub now_ns state.dos_last_poll_ns)
+            dos_spectator_poll_interval_ns
+          >= 0
+        then begin
+          state.dos_last_poll_ns <- now_ns;
+          launch_dos_poll state ~mailbox:async_messages
+        end
       end;
       if state.msx_open && not state.msx_menu_open then begin
         let now_ns = Mtime_clock.elapsed_ns () in
@@ -18071,6 +18169,7 @@ and is loaded on demand through keeper_skill.
                Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
                  ~connection:state.connection_status state.msx_frame (msx_surface_current ())
            end;
+           if state.dos_open then render_dos state;
            (match state.browser_viewport with
             | Some (shot, bytes) -> draw_browser_viewport state shot bytes
             | None -> ())
@@ -18157,13 +18256,26 @@ and is loaded on demand through keeper_skill.
         close_image state;
         invalidate_frame_for_resize frame_presenter render_schedule
       end;
+      (* The DOS spectator owns the keyboard while it is open, and sends
+         nothing on: [esc] closes it, the size keys resize the picture, and
+         every other input repaints. No surface underneath sees these keys,
+         and neither does the machine -- DOS time moves by tool calls. *)
+      let dos_owned_input =
+        (not dismissed_image) && state.dos_open && Option.is_some input
+      in
+      (if dos_owned_input then
+         let name = match input with Some (Key name) -> name | Some _ | None -> "" in
+         if not (Masc_tui_dos.consume ~write:write_to_terminal state name) then begin
+           invalidate_dos_poll ();
+           invalidate_frame_for_resize frame_presenter render_schedule
+         end);
       (* The MSX screen owns the keyboard the same way a showing picture
          does, except it answers keys instead of ending on the first one:
          each is injected into the machine and steps a frame, and only [esc]
          hands the terminal back. Intercepted before [key] is computed, so
          no surface underneath ever sees an emulator's keystroke. *)
       let msx_key =
-        if dismissed_image then None
+        if dismissed_image || dos_owned_input then None
         else if state.msx_open then
           match input with
           | Some (Key name) -> Some name
@@ -18249,7 +18361,7 @@ and is loaded on demand through keeper_skill.
              [consume], because every other key is a game key for the shared
              machine (RFC-0439 3.3): + and - change only how big this
              terminal draws the cached frame and never reach the machine. *)
-          Masc_tui_msx.adjust_size
+          Masc_tui_machine_view.adjust_size
             (if String.equal size_key "-" || String.equal size_key "_" then -1.0 else 1.0);
           Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
                 ~connection:state.connection_status state.msx_frame (msx_surface_current ()))
@@ -18272,7 +18384,7 @@ and is loaded on demand through keeper_skill.
           (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
           | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
       let key =
-        if dismissed_image || Option.is_some msx_key then None
+        if dismissed_image || dos_owned_input || Option.is_some msx_key then None
         else
           match input with
           | Some (Key name) -> Some name
@@ -20031,6 +20143,8 @@ and is loaded on demand through keeper_skill.
                      hide_browser_lane state
                  | Some (_, Masc_tui_types.Palette_msx) ->
                      open_msx_screen state
+                 | Some (_, Masc_tui_types.Palette_dos) ->
+                     open_dos_screen state
                  | Some (_, Masc_tui_types.Palette_lane_addons) ->
                      launch_lane_addons state ~mailbox:async_messages
                        Masc_tui_lane_addons.Inspect
@@ -21655,6 +21769,7 @@ and is loaded on demand through keeper_skill.
            state.help_open <- true;
            state.help_scroll <- 0
       | Some "&" -> open_msx_screen state
+      | Some "%" -> open_dos_screen state
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0;
@@ -25436,7 +25551,7 @@ and is loaded on demand through keeper_skill.
        with
        (* The terminal belongs to the picture until it is dismissed. A frame
           drawn now would clear the rows it occupies and leave the rest. *)
-       | Render_schedule.Render when state.image_open || state.msx_open -> ()
+       | Render_schedule.Render when state.image_open || state.msx_open || state.dos_open -> ()
        | Render_schedule.Render ->
            let frame, clamped, approval =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build

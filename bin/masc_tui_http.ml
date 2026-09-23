@@ -86,6 +86,7 @@ let msx_press_path = "/api/v1/msx/press"
 let msx_carts_path = "/api/v1/msx/carts"
 let msx_load_path = "/api/v1/msx/load"
 let msx_tick_path = "/api/v1/msx/tick"
+let dos_frame_path = "/api/v1/dos/frame"
 
 let trim_nonempty = String_util.trim_nonempty
 
@@ -333,6 +334,26 @@ let fetch_msx_frame ~(host : string) ~(port : int) :
   match get_json ~host ~port ~path:msx_frame_path with
   | Error _ -> None
   | Ok json -> Masc_tui_msx_tick.frame_of_json json
+
+(* The workspace DOS frame (#38424), read only. [held] is the frame the
+   spectator shows; the query names it so an unchanged machine answers without
+   its 1.2 MB of pixels. Unlike [fetch_msx_frame], a transport failure or an
+   unreadable answer is an [Error], not the [None] of an empty machine: the
+   spectator says which one happened. *)
+let fetch_dos_frame ~(host : string) ~(port : int)
+    ~(held : Masc_tui_types.dos_frame option) :
+    (Masc_tui_types.dos_frame option, string) result =
+  let query =
+    match Masc_tui_dos_feed.known_query held with
+    | [] -> ""
+    | params ->
+      "?"
+      ^ String.concat "&"
+          (List.map (fun (k, v) -> k ^ "=" ^ percent_encode_query_value v) params)
+  in
+  match get_json ~host ~port ~path:(dos_frame_path ^ query) with
+  | Error e -> Error e
+  | Ok json -> Masc_tui_dos_feed.decode ~held json
 
 (** POST a JSON body and parse the JSON response. *)
 let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)

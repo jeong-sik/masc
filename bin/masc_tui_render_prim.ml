@@ -2366,7 +2366,7 @@ let system_log_level_style : Masc.Tui_decode.system_log_level -> string = functi
 
 let system_log_category_text (entry : Masc.Tui_decode.system_log_entry) =
   match entry.sl_category with
-  | None -> "-"
+  | None -> Masc_tui_theme.Glyph.no_value
   | Some category -> category
 
 
@@ -2437,7 +2437,7 @@ let fusion_run_duration ~now run =
 
 
 let fusion_run_age ~now run =
-  Option.value ~default:"\xe2\x80\x94"
+  Option.value ~default:Masc_tui_theme.Glyph.no_value
     (Message_layout.age_text ~now ~since:run.fur_started_at)
 
 
@@ -3259,6 +3259,10 @@ let context_next_request_lines ?(show_scale_note = false) ~cols ~scale
   @ [ "" ]
 
 
+(* The width of a token figure in the recent-turns rows. "1.2M" and the
+   no-value mark both sit in it, so the rows line up on the same column. *)
+let token_cell_width = 7
+
 let context_composition_lines ~cols ~turn_back
     ~(forecast : (Masc_tui_context_inspector.forecast, string) result)
     (selection : Masc_tui_context_inspector.selection) =
@@ -3721,16 +3725,22 @@ let context_composition_lines ~cols ~turn_back
           ]
       | _, Some input ->
           fact
-            (Printf.sprintf "%s #%-4d %s  in %-7s  cache read %-7s  out %s"
+            (* fit_width, not %-7s: the cells hold the no-value mark, which is
+               three bytes and one column, and byte padding would end the row
+               two cells short of where the unset ones end. *)
+            (Printf.sprintf "%s #%-4d %s  in %s  cache read %s  out %s"
                (if index = turn_back then Masc_tui_theme.Glyph.current_entry else " ")
                recent.turn ts
-               (Inspector.format_tokens input)
-               (match recent.cache_read with
-                 | Some tokens -> Inspector.format_tokens tokens
-                 | None -> "-")
+               (Message_layout.fit_width (Inspector.format_tokens input)
+                  token_cell_width)
+               (Message_layout.fit_width
+                  (match recent.cache_read with
+                   | Some tokens -> Inspector.format_tokens tokens
+                   | None -> Masc_tui_theme.Glyph.no_value)
+                  token_cell_width)
                (match recent.output_tokens with
                  | Some tokens -> Inspector.format_tokens tokens
-                 | None -> "-"))
+                 | None -> Masc_tui_theme.Glyph.no_value))
       | _, None ->
           [ (if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " ")
             ^ Ansi.dim
@@ -3756,7 +3766,7 @@ let context_composition_lines ~cols ~turn_back
           let latest_tokens =
             match selection.Inspector.recent with
             | { input_tokens = Some n; _ } :: _ -> Inspector.format_tokens n
-            | _ -> "-"
+            | _ -> Masc_tui_theme.Glyph.no_value
           in
           [ Printf.sprintf "  %sVelocity:%s %s  %s(%d turns recorded)  ·  latest %s tokens%s"
               Ansi.dim Ansi.reset

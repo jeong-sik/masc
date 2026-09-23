@@ -98,7 +98,7 @@ let memory_date ts =
     tm.Unix.tm_hour tm.Unix.tm_min
 
 let memory_updated_text = function
-  | None -> "-"
+  | None -> Masc_tui_theme.Glyph.no_value
   | Some ts -> memory_date ts
 
 (* Every size on this screen is the recall block the keeper injects, not the
@@ -158,7 +158,7 @@ let memory_context_lines (k : memory_keeper_health) =
       (memory_updated_text librarian.mlh_last_success_at)
       (match librarian.mlh_last_failure_kind with
        | Some kind -> librarian_failure_words kind
-       | None -> "-")
+       | None -> Masc_tui_theme.Glyph.no_value)
       k.mkh_librarian_failures
   in
   let librarian_cause_lines =
@@ -303,15 +303,15 @@ let memory_deviation_style (k : memory_keeper_health) =
     | Memory_ordinary -> None
 
 let memory_row_line columns (k : memory_keeper_health) =
-  let em_dash = "\xe2\x80\x94" in
-  let ordinary_reading value = if k.mkh_snapshot_present then value () else em_dash in
+  let no_value = Masc_tui_theme.Glyph.no_value in
+  let ordinary_reading value = if k.mkh_snapshot_present then value () else no_value in
   let source =
     if Option.is_some k.mkh_source_read_error then "read error"
     else if k.mkh_source_snapshot_present then
       Printf.sprintf "r%d i%d %s tok" k.mkh_source_revision
         k.mkh_source_invalidations
         (recall_tokens k.mkh_source_snapshot_bytes)
-    else em_dash
+    else no_value
   in
   let delta =
     match k.mkh_added, k.mkh_removed with

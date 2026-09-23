@@ -408,7 +408,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
     let age =
       match row.keeper.okp_last_turn_ago_s with
       | Some seconds -> keeper_lane_idle_text (int_of_float seconds)
-      | None -> "\xe2\x80\x94"
+      | None -> Masc_tui_theme.Glyph.no_value
     in
     let detail =
       match row.detail with
@@ -896,7 +896,7 @@ let render_overview (state : state) =
               | Some ts ->
                   keeper_lane_idle_text
                     (int_of_float (Unix.gettimeofday () -. ts))
-              | None -> "\xe2\x80\x94"
+              | None -> Masc_tui_theme.Glyph.no_value
             in
             Printf.sprintf "%s%s%s " Ansi.dim (fit_width age_label 3) Ansi.reset
         in
@@ -1200,7 +1200,7 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
        (Terminal_text.short_timestamp task.created_at)
        (match task.created_by with
         | Some by -> Terminal_text.single_line by
-        | None -> "-")
+        | None -> Masc_tui_theme.Glyph.no_value)
        task.priority task.cycle_count
     ^ Ansi.reset);
   box_divider buf cols;
@@ -1954,7 +1954,7 @@ let render_approvals (state : state) =
           | None -> ""
           | Some (Operator_row a) ->
               let target_id =
-                Terminal_text.single_line_or ~default:"-" a.ap_target_id
+                Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value a.ap_target_id
               in
               Printf.sprintf "  %s  %s  %s  %s"
                 (fit_width (Terminal_text.single_line a.ap_actor) name_width)
@@ -2036,11 +2036,11 @@ let render_approvals (state : state) =
            the local reading next to it -- so a row could show a decision
            created at 09:03 expiring at 00:03 and read as already gone. It is
            also the longer of the two spellings, on the row this surface cuts
-           first (#36333). A decision with no deadline still draws "-": that
-           is not a time. *)
+           first (#36333). A decision with no deadline still draws the
+           no-value mark: that is not a time. *)
         let expires =
           match Terminal_text.optional_single_line approval.ap_expires_at with
-          | None -> "-"
+          | None -> Masc_tui_theme.Glyph.no_value
           | Some at -> Terminal_text.short_timestamp at
         in
         let payload =
@@ -3595,7 +3595,7 @@ let planning_detail_pane (state : state)
   let due_text =
     match Terminal_text.optional_single_line goal.pg_due_date with
     | Some d -> d
-    | None -> "\xe2\x80\x94"
+    | None -> Masc_tui_theme.Glyph.no_value
   in
   let metric_text =
     match Terminal_text.optional_single_line goal.pg_metric with
@@ -3606,7 +3606,7 @@ let planning_detail_pane (state : state)
           | None -> ""
         in
         m ^ target
-    | None -> "\xe2\x80\x94"
+    | None -> Masc_tui_theme.Glyph.no_value
   in
   box_line buf cols
     (Printf.sprintf "  Target:  %s   Due: %s   Priority: %sP%d%s"
@@ -3907,7 +3907,7 @@ let schedule_delivery_word (row : schedule_row) =
     else status
   in
   match row.sch_reaction_projection_status with
-  | None -> "\xe2\x80\x94"
+  | None -> Masc_tui_theme.Glyph.no_value
   | Some status -> cut status
 
 let schedule_delivery_summary (row : schedule_row) =
@@ -4086,7 +4086,7 @@ let render_schedule_list (state : state) =
                let due =
                  match row.sch_due_at_iso with
                  | Some iso -> Terminal_text.short_timestamp iso
-                 | None -> "-"
+                 | None -> Masc_tui_theme.Glyph.no_value
                in
                (* The payload target names who the wake reaches (a keeper for
                   keeper wakes); rows without one fall back to the summary,
@@ -4101,7 +4101,7 @@ let render_schedule_list (state : state) =
                let subject = schedule_row_subject row in
                let status_color = schedule_status_color row.sch_status in
                let last_wake =
-                 Option.fold ~none:"\xe2\x80\x94" ~some:schedule_wake_word
+                 Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:schedule_wake_word
                    row.sch_last_wake_status
                in
                (* The enqueue result and what became of the wake are two
@@ -4214,7 +4214,7 @@ let schedule_turn_rows
        takes -- claiming "no" for it would report a failure nobody observed. *)
     let step ?(bad_when_true = false) label observed recorded_at =
       match observed with
-      | None -> field label "\xe2\x80\x94"
+      | None -> field label Masc_tui_theme.Glyph.no_value
       | Some value ->
           let tone =
             if value = bad_when_true then Theme.bad () else Theme.ok ()
@@ -4255,10 +4255,10 @@ let schedule_turn_rows
       ; step ~bad_when_true:true "Cancelled" row.sch_wake_cancelled
           row.sch_wake_cancelled_recorded_at_iso
       ; field "Reaction kind"
-          (Option.value ~default:"\xe2\x80\x94" row.sch_reaction_kind)
+          (Option.value ~default:Masc_tui_theme.Glyph.no_value row.sch_reaction_kind)
       ; field
           ~style:(if Option.is_some row.sch_reaction_reason then Theme.warn () else Ansi.dim)
-          "Reason" (Option.value ~default:"\xe2\x80\x94" row.sch_reaction_reason)
+          "Reason" (Option.value ~default:Masc_tui_theme.Glyph.no_value row.sch_reaction_reason)
     ; field
         ~style:
           (match row.sch_reaction_quarantined with
@@ -4266,7 +4266,7 @@ let schedule_turn_rows
            | Some _ | None -> Ansi.dim)
         "Quarantined"
         (match row.sch_reaction_quarantined with
-         | None -> "\xe2\x80\x94"
+         | None -> Masc_tui_theme.Glyph.no_value
          | Some count -> string_of_int count)
       ]
 
@@ -4282,7 +4282,7 @@ let schedule_wake_lines
       ~(history_error : (string * string) option) =
   let last_wake_fields =
     [ (let word =
-         Option.fold ~none:"\xe2\x80\x94" ~some:schedule_wake_word
+         Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:schedule_wake_word
            row.sch_last_wake_status
        in
        field
@@ -4294,7 +4294,7 @@ let schedule_wake_lines
     ; field "Started" (timestamp row.sch_last_wake_started_at_iso)
     ; field
         ~style:(if Option.is_some row.sch_last_wake_error then Theme.bad () else Ansi.dim)
-        "Error" (Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_error)
+        "Error" (Option.value ~default:Masc_tui_theme.Glyph.no_value row.sch_last_wake_error)
     ]
   in
   match
@@ -4347,22 +4347,22 @@ let schedule_detail_lines ~width (row : schedule_row)
     ( style
     , Printf.sprintf "  %-14s %s" label (Terminal_text.single_line value) )
   in
-  let optional value = Option.value ~default:"\xe2\x80\x94" value in
+  let optional value = Option.value ~default:Masc_tui_theme.Glyph.no_value value in
   let timestamp value =
     match value with
-    | None -> "\xe2\x80\x94"
+    | None -> Masc_tui_theme.Glyph.no_value
     | Some iso -> Terminal_text.short_timestamp iso
   in
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
-    | None, None -> "\xe2\x80\x94"
+    | None, None -> Masc_tui_theme.Glyph.no_value
     | Some status, None -> status
     | None, Some count -> Printf.sprintf "pending=%d" count
     | Some status, Some count -> Printf.sprintf "%s  pending=%d" status count
   in
   let reaction =
     match row.sch_reaction_projection_status, row.sch_reaction_latest_at_iso with
-    | None, None -> "\xe2\x80\x94"
+    | None, None -> Masc_tui_theme.Glyph.no_value
     | Some status, None -> status
     | None, Some at -> Terminal_text.short_timestamp at
     | Some status, Some at ->
@@ -4566,7 +4566,7 @@ let keeper_health_deviation_word (health : Tui_decode.keeper_health option) =
    typed reading, while the sanitized id is the exact identity the gate named. *)
 let keeper_runtime_label (runtime : keeper_runtime option) =
   match runtime with
-  | None -> "\xe2\x80\x94"
+  | None -> Masc_tui_theme.Glyph.no_value
   | Some row ->
       Printf.sprintf "%s %s"
         (Tui_decode.keeper_phase_to_string row.kr_phase)
@@ -4594,7 +4594,7 @@ let keeper_runtime_cells (runtime : keeper_runtime option) =
 
 let keeper_runtime_cell ~width (runtime : keeper_runtime option) =
   match runtime with
-  | None -> fit_width "\xe2\x80\x94" width
+  | None -> fit_width Masc_tui_theme.Glyph.no_value width
   | Some row ->
       (* Running is the normal lifecycle and stays silent — eleven rows all
          reading "running" said nothing any row could act on; the cells go to
@@ -4723,7 +4723,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
   in
   let task =
     fit_width
-      (Terminal_text.single_line_or ~default:"\xe2\x80\x94"
+      (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
          keeper.k_current_task_id)
       columns.kcol_task
   in
@@ -4747,11 +4747,11 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
          itself still lives on the detail pane. *)
       (let last_turn_age =
          match Masc_domain.parse_iso8601_opt keeper.k_last_turn_ts with
-         | None -> "\xe2\x80\x94"
+         | None -> Masc_tui_theme.Glyph.no_value
          | Some since -> (
              match Message_layout.age_text ~now ~since with
              | Some text -> text
-             | None -> "\xe2\x80\x94")
+             | None -> Masc_tui_theme.Glyph.no_value)
        in
        Printf.sprintf " %s%*s%s" Ansi.dim
          Render_schedule.keeper_last_turn_width last_turn_age Ansi.reset)
@@ -4850,7 +4850,7 @@ let keeper_lane_lifecycle_text (lane : Tui_decode.keeper_lane) =
   | causes -> Printf.sprintf "%s (%s)" phase (String.concat ", " causes)
 
 let keeper_operations_outcome_text = function
-  | None -> "—"
+  | None -> Masc_tui_theme.Glyph.no_value
   | Some (outcome : Tui_decode.keeper_lane_last_outcome) ->
       let state = Terminal_text.single_line outcome.klo_runtime_state in
       (match outcome.klo_selected_model with
@@ -5231,7 +5231,7 @@ let standalone_lane_row ~now ~frame ~(columns : Lane_table.columns) width
   in
   let p50 =
     match lane.sl_p50_elapsed_s with
-    | None -> "—"
+    | None -> Masc_tui_theme.Glyph.no_value
     | Some seconds -> Printf.sprintf "%.1fs" seconds
   in
   let prefix = standalone_lane_status_style lane.sl_status in
@@ -5874,7 +5874,7 @@ let render_lane_run_list (state : state) ~lane_id =
       | Some (run : Tui_decode.lane_run_summary) ->
           let elapsed =
             match run.lrs_elapsed_s with
-            | None -> "—"
+            | None -> Masc_tui_theme.Glyph.no_value
             | Some seconds -> Printf.sprintf "%.1fs" seconds
           in
           let line =
@@ -5890,7 +5890,7 @@ let render_lane_run_list (state : state) ~lane_id =
                     Tui_decode.lane_run_status_label run.lrs_status
                 ; lrow_elapsed = elapsed
                 ; lrow_slot =
-                    Terminal_text.single_line_or ~default:"—"
+                    Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
                       run.lrs_selected_slot
                 ; lrow_run_id = Terminal_text.single_line run.lrs_run_id
                 }
@@ -6717,7 +6717,7 @@ let render_clients (state : state) =
           let task =
             match row.cr_current_task with
             | Some task -> Terminal_text.single_line task
-            | None -> "-"
+            | None -> Masc_tui_theme.Glyph.no_value
           in
           let line =
             Printf.sprintf "  %-9s %s %-10s %s%-9s %s" status
@@ -7152,7 +7152,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* Current work section *)
     add_section "Current Work";
     add_row "Task:"
-      (Terminal_text.single_line_or ~default:"-" k.k_current_task_id);
+      (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value k.k_current_task_id);
     add_empty ();
 
     (* Live Context section (Phase 2) *)
@@ -7336,7 +7336,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
          (string_of_int activity.Keeper_activity.aw_tool_calls);
        add_row "Top Tools:"
          (match activity.Keeper_activity.aw_top_tools with
-          | [] -> "-"
+          | [] -> Masc_tui_theme.Glyph.no_value
           | tools ->
             tools
             |> List.map (fun (tool : Keeper_activity.tool_use) ->
@@ -7350,7 +7350,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     add_row "Last Outcome:"
       (match k.k_last_proactive_outcome with
        | Some outcome -> proactive_outcome_word outcome
-       | None -> "-");
+       | None -> Masc_tui_theme.Glyph.no_value);
     add_empty ();
 
     (* Timestamps section *)
@@ -7550,7 +7550,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                     (Printf.sprintf "%s:%d"
                        Masc_network_defaults.masc_http_loopback_peer state.port)
                 ; Printf.sprintf "  %-18s %s" "Channel type"
-                    (Terminal_text.single_line_or ~default:"-" connector.cn_channel)
+                    (Terminal_text.single_line_or
+                       ~default:Masc_tui_theme.Glyph.no_value connector.cn_channel)
                 ]
                 @ optional_row "Runtime state"
                     (Masc_tui_connector_state.runtime_state_to_draw connector)
@@ -8151,7 +8152,7 @@ let system_log_detail_field ~width ~style label value =
       ~max_cells:(max 1 (width - Message_layout.display_width prefix))
       (Terminal_text.single_line value)
   with
-  | [] -> [ style, prefix ^ "-" ]
+  | [] -> [ style, prefix ^ Masc_tui_theme.Glyph.no_value ]
   | first :: rest ->
       (style, prefix ^ first)
       :: List.map (fun line -> style, continuation ^ line) rest
@@ -8171,7 +8172,10 @@ let system_log_detail_lines (state : state) ~seq ~width =
   | Some entry ->
       let level_style = system_log_level_style entry.sl_level in
       let keeper = Option.value ~default:"system" entry.sl_keeper in
-      let turn = Option.map string_of_int entry.sl_turn |> Option.value ~default:"-" in
+      let turn =
+        Option.map string_of_int entry.sl_turn
+        |> Option.value ~default:Masc_tui_theme.Glyph.no_value
+      in
       let fields =
         system_log_detail_field ~width ~style:Ansi.dim "Sequence"
           (string_of_int entry.sl_seq)
@@ -8404,7 +8408,7 @@ let render_system_logs (state : state) =
       | None -> box_empty buf cols
       | Some e ->
           let keeper =
-            match e.sl_keeper with None -> "-" | Some name -> name
+            match e.sl_keeper with None -> Masc_tui_theme.Glyph.no_value | Some name -> name
           in
           let category = system_log_category_text e in
           let level_style = system_log_level_style e.sl_level in
@@ -10854,9 +10858,10 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let notes =
     let turn =
       Printf.sprintf "  turn %s  task %s  %s"
-        (Option.fold ~none:"-" ~some:string_of_int change.Masc.Tui_decode.fc_turn)
+        (Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:string_of_int
+           change.Masc.Tui_decode.fc_turn)
         (Terminal_text.single_line
-           (Option.value ~default:"-" change.Masc.Tui_decode.fc_task_id))
+           (Option.value ~default:Masc_tui_theme.Glyph.no_value change.Masc.Tui_decode.fc_task_id))
         (if change.Masc.Tui_decode.fc_succeeded then "applied"
          else "the call failed; this is what it tried to write")
     in
@@ -11054,11 +11059,11 @@ let render_changes_list (state : state) =
             ^ Render_schedule.change_row ~op_style:kind_style ~result_style
                 ~summary_width
                 { Render_schedule.crow_turn =
-                    Option.fold ~none:"-" ~some:string_of_int
+                    Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:string_of_int
                       change.Masc.Tui_decode.fc_turn
                 ; crow_task =
                     Terminal_text.single_line
-                      (Option.value ~default:"-"
+                      (Option.value ~default:Masc_tui_theme.Glyph.no_value
                          change.Masc.Tui_decode.fc_task_id)
                 ; crow_op = kind
                 ; crow_result = result
@@ -11489,7 +11494,7 @@ let render_connectors (state : state) =
                   (yes_no connector.cn_available)
                   (yes_no connector.cn_connected)
                   (Terminal_text.single_line connector.cn_status)
-                  (Terminal_text.single_line_or ~default:"-"
+                  (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
                      connector.cn_channel)
               in
               let style =
@@ -11626,7 +11631,7 @@ let runtime_detail_field ~width ~style label value =
       (Terminal_text.single_line value)
   in
   match lines with
-  | [] -> [ style, prefix ^ "—" ]
+  | [] -> [ style, prefix ^ Masc_tui_theme.Glyph.no_value ]
   | first :: rest ->
       (style, prefix ^ first)
       :: List.map (fun line -> style, continuation ^ line) rest
@@ -12508,10 +12513,10 @@ let render_keeper_calls (state : state) =
          let duration =
            match call.kc_duration_ms with
            | Some ms -> Masc_tui_acting.elapsed_text ms
-           | None -> "-"
+           | None -> Masc_tui_theme.Glyph.no_value
          in
          let turn =
-           match call.kc_turn with Some value -> string_of_int value | None -> "-"
+           match call.kc_turn with Some value -> string_of_int value | None -> Masc_tui_theme.Glyph.no_value
          in
          let summary =
            Printf.sprintf "  #%d %s %s · %s · turn %s"
@@ -12978,7 +12983,7 @@ let render_runtime_pick (state : state) =
         state.runtime_assignments
     with
     | Some a -> runtime_assignment_label a
-    | None -> "-"
+    | None -> Masc_tui_theme.Glyph.no_value
   in
   let items = Masc_tui_types.runtime_picker_items state in
   let count = List.length items in
@@ -15125,7 +15130,7 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
     | Voice_setup.Tts -> "speech out"
     | Voice_setup.Stt -> "speech in"
   in
-  let shown value = if String.trim value = "" then "—" else value in
+  let shown value = if String.trim value = "" then Masc_tui_theme.Glyph.no_value else value in
   let steps = Voice_wizard.steps draft in
   let position =
     let rec index n = function
@@ -15321,7 +15326,7 @@ let render_voice (state : state) =
                        base_url for a voice_mcp endpoint that is called at
                        its mcp_url. A command kind has no address. *)
                     let address =
-                      Option.value (string_of [ "address" ] item) ~default:"—"
+                      Option.value (string_of [ "address" ] item) ~default:Masc_tui_theme.Glyph.no_value
                     in
                     let off =
                       match member [ "enabled" ] item with
@@ -15377,23 +15382,23 @@ let render_voice (state : state) =
   box_line buf cols (Printf.sprintf "  %sTTS%s" Ansi.bold Ansi.reset);
   from_config (fun json ->
     field "model"
-      (Option.value (string_of [ "tts"; "default_model" ] json) ~default:"—");
+      (Option.value (string_of [ "tts"; "default_model" ] json) ~default:Masc_tui_theme.Glyph.no_value);
     field "voice"
-      (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:"—"));
+      (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:Masc_tui_theme.Glyph.no_value));
   show_endpoints "tts";
   box_line buf cols "";
   box_line buf cols (Printf.sprintf "  %sSTT%s" Ansi.bold Ansi.reset);
   from_config (fun json ->
     field "model"
-      (Option.value (string_of [ "stt"; "default_model" ] json) ~default:"—");
+      (Option.value (string_of [ "stt"; "default_model" ] json) ~default:Masc_tui_theme.Glyph.no_value);
     field "endpoint"
       (Option.value
          (string_of [ "stt"; "active_endpoint"; "enabled" ] json)
-         ~default:"—");
+         ~default:Masc_tui_theme.Glyph.no_value);
     field "fallback"
       (Option.value
          (string_of [ "stt"; "active_endpoint"; "fallback_configured" ] json)
-         ~default:"—"));
+         ~default:Masc_tui_theme.Glyph.no_value));
   show_endpoints "stt";
   (* Said once, not per section: the endpoints are missing from both when this
      read fails, and repeating it twice would read as two faults. *)

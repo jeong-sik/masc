@@ -1310,7 +1310,7 @@ let board_cells ?(styles = board_no_styles) ~age_header ~title_width values =
    to this cell. *)
 let board_age_text ~now = function
   | Some at -> Masc_tui_message_layout.span_text (now -. at)
-  | None -> "\xe2\x80\x94"
+  | None -> Masc_tui_theme.Glyph.no_value
 
 let board_title_width ~inner_width =
   (* The header word does not move the column: [board_age_width] is fixed and

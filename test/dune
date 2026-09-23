@@ -3593,6 +3593,13 @@
  (libraries alcotest yojson masc_tui_types))
 
 (test
+ (name test_tui_no_value_mark)
+ (modules test_tui_no_value_mark)
+ (libraries alcotest ast_grep masc_tui_theme)
+ (deps
+  (source_tree ../bin)))
+
+(test
  (name test_tui_ask_selection_wiring)
  (modules test_tui_ask_selection_wiring)
  (libraries alcotest ast_grep)

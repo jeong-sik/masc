@@ -281,7 +281,7 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
         detail
   in
   { at
-  ; keeper = Option.value ~default:"-" e.Observer.agent
+  ; keeper = Option.value ~default:Masc_tui_theme.Glyph.no_value e.Observer.agent
   ; glyph
   ; label
   ; detail
@@ -290,7 +290,7 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
 let keeper_of_event ~traces (event : Observer.event) =
   match event with
   | Observer.Agent_core e -> (
-      let by_agent = Option.value ~default:"-" e.Observer.agent in
+      let by_agent = Option.value ~default:Masc_tui_theme.Glyph.no_value e.Observer.agent in
       match e.Observer.correlation with
       | None -> by_agent
       | Some correlation -> (

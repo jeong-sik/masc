@@ -502,7 +502,7 @@
  (modules masc_tui_acting)
  ; masc for the call log's disposition vocabulary, which the observer types
  ; the live rows with and the fold carries through unchanged.
- (libraries masc masc_tui_message_layout masc_tui_observer agent_core))
+ (libraries masc masc_tui_message_layout masc_tui_observer masc_tui_theme agent_core))
 
 (library
  (name masc_tui_keeper_chat_queue)
@@ -893,7 +893,7 @@
  ; than bytes: a slot list names runtimes, and a byte count would leave the
  ; observed column drawn where the row has no room for it.
  (modules masc_tui_lane_table)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_message_layout masc_tui_theme))
 
 (library
  (name masc_tui_fleet_line)
@@ -919,7 +919,7 @@
  (name masc_tui_render_schedule)
  (wrapped false)
  (modules masc_tui_render_schedule)
- (libraries masc_tui_message_layout masc_tui_table))
+ (libraries masc_tui_message_layout masc_tui_table masc_tui_theme))
 
 (library
  (name masc_tui_frame_timing)

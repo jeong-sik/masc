@@ -30,7 +30,7 @@ let slots_text ~admitted ~cli ~dropped ~admission_failed =
     match admitted with
     | [] ->
         if cli <> [] then "cli-only"
-        else if admission_failed then "\xe2\x80\x94"
+        else if admission_failed then Masc_tui_theme.Glyph.no_value
         else "no admitted slot"
     | admitted -> String.concat "," admitted
   in

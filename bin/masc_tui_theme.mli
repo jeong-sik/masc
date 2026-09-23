@@ -367,6 +367,14 @@ module Glyph : sig
   (** Where you are, on a strip of places you could be: the surface strip's
       active surface and the keeper detail screen's active tab. *)
 
+  val no_value : string  (* — *)
+  (** What a field with no value draws, where the surface measures in display
+      cells. A row and the detail pane behind it read the same field, so they
+      draw the same mark for its absence.
+
+      A byte-padded column and a one-cell glyph alphabet keep their own mark;
+      the implementation says why. *)
+
   val priority : int -> string
   (** ["!!!"] / ["!!"] / ["!"] / [""] for priorities 1, 2, 3, and lower. *)
 

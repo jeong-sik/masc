@@ -630,9 +630,11 @@ status: reference
   - 두 식별자: `schedule_id`는 정의를 교체해도 살아남는 안정 id이고,
     `schedule_instance_id`는 정의 하나의 인스턴스마다 새로 발급된다. 그래서 이전 정의의
     wake는 교체된 정의의 증거가 되지 않는다.
-  - 두 행위자: `requested_by`(요청한 쪽)와 `scheduled_by`(예약한 쪽)를 따로 적는다.
-    기록되는 actor는 인자가 아니라 경계가 인증한 호출자다(#38054·#38087·#38053).
-    도구 스키마에서 actor 인자 필드는 제거되었으며, 이름 없는 호출자(`Unnamed_caller`)는
+  - 두 행위자: 행은 `requested_by`(요청한 쪽)와 `scheduled_by`(예약한 쪽)를 가진다.
+    기록되는 actor는 인자가 아니라 경계가 인증한 호출자이고, 만들기(`create`)는 호출자를
+    두 칸에 똑같이 적는다. 도구 스키마에는 actor 인자가 없다. 호출이
+    `requested_by_*`·`scheduled_by_*`에 호출자와 다른 값을 적으면 `actor_mismatch`로
+    거절되고, 호출자와 같은 값은 아무것도 바꾸지 않는다. 이름 없는 호출자(`Unnamed_caller`)는
     거절된다. 수정(`update`)은 기존 행에 저장된 두 행위자를 보존하며, named caller는
     자신이 소유한 예약(`owner=self`: 자신이 예약했거나 자신을 깨우는 행)만 수정·취소할
     수 있고 다른 예약은 `not_schedule_owner`로 거절된다(운영자 자격만 임의 변경 가능).

@@ -196,7 +196,9 @@ only the current typed signal and
 `keeper_context {lane_keeper_name, board_interests}`; it stores no post/comment
 snapshot. The judge receives that signal plus
 `keeper_role {name, board_interests}`. The existing post-verdict Keeper event
-queue DTO remains unchanged. Older candidate schemas are not decoded.
+queue DTO remains unchanged. A `requeue_requested` or `requeued` quarantine
+phase carries `requested_by`, the authenticated principal that asked for the
+operator requeue. Older candidate schemas are not decoded.
 Deployment preflight requires every non-empty candidate ledger to use schema
 v7. Candidate and partition stores follow the fresh-state hard-cut contract.
 

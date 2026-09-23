@@ -235,6 +235,22 @@ let test_the_summary_row_does_not_count_the_panel_below_it () =
        ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"load_overview"
        ~literals:[ "attention_items" ])
 
+(* The briefing's command_focus repeats the first incident under
+   "top_attention". The loader decoded it into a field of its own, and no
+   screen ever drew that field: the Attention panel lists the incidents
+   themselves, first one first, so the repeat had no row to go to.
+
+   It was not free. [decode_attention_item] refuses an item that is missing a
+   required field, and that refusal came back as the whole overview load
+   failing -- the fleet counts, the health word and the panel itself, blanked
+   over a value nothing reads. The load now stops opening command_focus at
+   all. *)
+let test_the_overview_load_stops_reading_a_field_no_screen_draws () =
+  Alcotest.(check int) "the load no longer opens command_focus" 0
+    (Ast_grep.count_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"load_overview"
+       ~literals:[ "command_focus"; "top_attention" ])
+
 (* The briefing has always carried a liveness word per Keeper, written through
    the control plane's own printer. The Overview row read only how many rows
    there were, so a fleet with two Keepers that had stopped doing anything and
@@ -941,6 +957,8 @@ let () =
             `Quick test_the_overview_row_counts_every_approval_list
         ; Alcotest.test_case "the summary row does not count the panel below"
             `Quick test_the_summary_row_does_not_count_the_panel_below_it
+        ; Alcotest.test_case "the load stops reading a field no screen draws"
+            `Quick test_the_overview_load_stops_reading_a_field_no_screen_draws
         ; Alcotest.test_case "the fleet row reads the control plane's word"
             `Quick test_the_fleet_row_reads_the_control_planes_own_word
         ; Alcotest.test_case "the operation is compared before repeating"

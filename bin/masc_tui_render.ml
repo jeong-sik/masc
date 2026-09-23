@@ -8172,7 +8172,11 @@ let render_verification_list (state : state) =
         | [] -> ()
         | ids ->
             let named = List.filteri (fun i _ -> i < 3) ids in
-            let rest = List.length ids - List.length named in
+            (* The list is one page; the total counts them all. *)
+            let rest =
+              snapshot.Masc.Tui_decode.vs_awaiting_unresolved_total
+              - List.length named
+            in
             box_line_styled buf cols ~style:(Theme.warn ())
               (Printf.sprintf "  waiting on a record this store does not hold: %s%s"
                  (String.concat ", " named)

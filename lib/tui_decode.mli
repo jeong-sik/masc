@@ -1262,7 +1262,10 @@ type verification_snapshot = {
   vs_truncated : bool;  (** A further page exists. *)
   vs_awaiting_unresolved : string list;
       (** Request ids the backlog waits on that name no record. A task holding
-          one of these is waiting on something that is not there. *)
+          one of these is waiting on something that is not there. One page of
+          them: the server cuts the list at the request's limit. *)
+  vs_awaiting_unresolved_total : int;
+      (** How many such ids there are in all, which the page may not hold. *)
   vs_backlog_error : string option;
       (** Why the queue could not be resolved. An empty list carrying this is
           not an empty queue. *)

@@ -5875,6 +5875,14 @@ let decode_verification_snapshot json =
   let* vs_awaiting_unresolved =
     decode_string_name_list json "awaiting_unresolved"
   in
+  let* vs_awaiting_unresolved_total =
+    match vs_view with
+    | Awaiting_queue -> required_int_field json "awaiting_unresolved_total"
+    | Full_history ->
+      (* The history view does not join the backlog, so it sends neither the
+         unresolved list nor its count; there is nothing it failed to find. *)
+      Ok 0
+  in
   let* vs_backlog_error = optional_string_field json "backlog_error" in
   let* vs_backlog_recovery = optional_string_field json "backlog_recovery" in
   Ok
@@ -5884,6 +5892,7 @@ let decode_verification_snapshot json =
     ; vs_offset
     ; vs_truncated
     ; vs_awaiting_unresolved
+    ; vs_awaiting_unresolved_total
     ; vs_backlog_error
     ; vs_backlog_recovery
     }

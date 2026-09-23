@@ -2741,7 +2741,14 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "skill_body_bytes", `Int 4981
       ; "skills_left_out", `List []
       ; "skill_resource_read_max_bytes", `Int 65536
-      ; "count", `Int 1
+      ; "count", `Int 2
+        (* The origin shape here mirrors what
+           Keeper_effective_tool_surface.origin_to_yojson actually emits, and
+           the values are the ones test_keeper_effective_tool_surface pins on
+           the producer side. The second tool splits the two branches: a
+           descriptor origin carries no skill_provenance at all, so its
+           source id must read as None rather than inheriting the first
+           tool's. *)
       ; ( "tools"
         , `List
             [ `Assoc
@@ -2749,9 +2756,26 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                 ; ( "origin"
                   , `Assoc
                       [ "kind", `String "composition_skill"
-                      ; "skill_source"
-                        , `String "skills/work-intake/SKILL.md"
+                      ; ( "skill_provenance"
+                        , `Assoc
+                            [ ( "identity"
+                              , `Assoc
+                                  [ "source_id", `String "shared-catalog"
+                                  ; "package_id", `String "work-intake"
+                                  ; "name", `String "work-intake"
+                                  ] )
+                            ; ( "directory"
+                              , `String "/srv/shared-agent-skills/work-intake" )
+                            ; ( "source"
+                              , `Assoc
+                                  [ "path", `String "/srv/shared-agent-skills" ]
+                              )
+                            ] )
                       ] )
+                ]
+            ; `Assoc
+                [ "name", `String "Read"
+                ; "origin", `Assoc [ "kind", `String "descriptor" ]
                 ] ] )
       ; "tool_surface_sha256", `String (String.make 64 'a')
       ]
@@ -2772,7 +2796,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                  ets_skill_discovery_bytes;
                  ets_skill_eager_body_bytes;
                  ets_skill_body_bytes;
-                 ets_tools = [ tool ];
+                 ets_tools = [ tool; bare_tool ];
                  ets_tool_surface_sha256 = Some digest;
                  _
                });
@@ -2786,6 +2810,17 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
         (Skill_reference.list_to_yojson ets_instruction_skills
          |> Yojson.Safe.to_string);
       Alcotest.(check string) "tool origin" "composition_skill" tool.et_origin;
+      (* Without this the Tools screen prints a bare "composition_skill" for
+         every skill tool: the decoder used to read origin.skill_source,
+         which no producer has emitted since the surface moved to
+         skill_provenance. *)
+      Alcotest.(check (option string))
+        "composition tool names its configured skill source"
+        (Some "shared-catalog") tool.et_skill_source_id;
+      Alcotest.(check string) "plain tool origin" "descriptor" bare_tool.et_origin;
+      Alcotest.(check (option string))
+        "a tool with no skill behind it names no source"
+        None bare_tool.et_skill_source_id;
       Alcotest.(check string) "profile name" "work-intake" profile.esp_name;
       Alcotest.(check string)
         "profile keeps the exact editable reference"
@@ -2810,8 +2845,10 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       Alcotest.(check int) "Skill discovery bytes" 369 ets_skill_discovery_bytes;
       Alcotest.(check int) "Skill eager bytes" 0 ets_skill_eager_body_bytes;
       Alcotest.(check int) "Skill body bytes" 4981 ets_skill_body_bytes;
-      Alcotest.(check (option string)) "SKILL.md source"
-        (Some "skills/work-intake/SKILL.md") tool.et_skill_source;
+      (* The skill source is asserted above, against the shape the producer
+         emits. This used to pin a SKILL.md path that no producer has sent
+         since the surface moved to skill_provenance -- the fixture was the
+         only thing still producing it. *)
       Alcotest.(check int) "digest length" 64 (String.length digest)
   | Ok _ -> Alcotest.fail "expected an available effective Keeper surface"
 

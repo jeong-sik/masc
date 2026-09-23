@@ -6,9 +6,12 @@ module W = Runtime_model_input_tail_window
 let ( let* ) = Result.bind
 
 (* What the continuity file holds. The snapshot is derived from the
-   checkpoint and the boundary log, so one that cannot be decoded -- a torn
-   write, a format an older or newer binary wrote -- is rebuilt from atom 0
-   like an absent one, and the rebuilt snapshot replaces it on commit. A file
+   checkpoint and the boundary log, so one that cannot be decoded -- in
+   practice a format another binary wrote after a rollback or upgrade:
+   unknown or missing fields, or values that fail validation -- is rebuilt
+   from atom 0 like an absent one, and the rebuilt snapshot replaces it on
+   commit. Its working state is dropped under the hard-cut policy; the
+   rebuild costs one pass per completed turn. A file
    that cannot be read at all is an I/O failure, not a decode failure, and
    stays an error. *)
 type stored =

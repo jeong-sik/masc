@@ -2437,7 +2437,7 @@ let eviction_retry_to_json = function
    keeper-context-window-in-tokens §13.4; RFC librarian-lifecycle §4.10,
    rule 1). A typed size refusal, and also a refusal whose reason agent core
    does not model: every live size refusal measured so far arrives that way
-   -- ollama_cloud's "The prompt is too long" with a null code, glm's
+   -- one provider's "The prompt is too long" with a null code, another's
    "Prompt exceeds max length" -- and reading the sentence would be a string
    classifier. This is why it is not [refusal_evicts], which keeps only the
    two typed size refusals because its answer (a shorter range, held for

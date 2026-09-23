@@ -2725,11 +2725,8 @@ let rate_limited_route =
 let describe_dispatch ~now = function
   | None -> "no provider wait"
   | Some (Driver.Dispatch_now { runtime_id }) -> "dispatch " ^ runtime_id
-  | Some (Driver.Wait_until { release_at; waiting_on; wait }) ->
-    Printf.sprintf "wait %.0fs for %s (%s)" (release_at -. now) waiting_on
-      (match wait with
-       | Driver.Capacity_release -> "capacity"
-       | Driver.Path_release -> "path")
+  | Some (Driver.Wait_until { release_at; waiting_on }) ->
+    Printf.sprintf "wait %.0fs for %s" (release_at -. now) waiting_on
 ;;
 
 let failed_attempt_of runtime_id =
@@ -2749,6 +2746,7 @@ let attempt_failure : Runtime_candidate_backpressure.attempt_failure option Alco
          (match failure with
           | None -> "none"
           | Some Runtime_candidate_backpressure.Server_error -> "server_error"
+          | Some Runtime_candidate_backpressure.Provider_capacity -> "provider_capacity"
           | Some Runtime_candidate_backpressure.Network_transient -> "network_transient"
           | Some Runtime_candidate_backpressure.Provider_timeout -> "provider_timeout"))
     ( = )
@@ -2816,6 +2814,53 @@ let test_failed_attempts_demote_until_the_candidate_answers () =
       Alcotest.(check (list string)) "the answered candidate returns to its declared place"
         ["shared_a.test_model"; "other.test_model"; "shared_b.test_model"]
         (backpressure_order ids)))
+;;
+
+(* #38061: a head that answers HTTP 529 every turn is a provider out of
+   capacity, the same fact a 503 is. The turn walks on to the next candidate,
+   the head leaves failed-attempt evidence, and the next walk starts from the
+   candidate that answered. Before, the route called a 529 MASC's own
+   capacity: no evidence was kept and every turn led with the same head. *)
+let test_a_529_head_is_demoted_and_the_walk_moves_on () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let head = "shared_a.test_model" and next = "shared_b.test_model" in
+      let ids = [ head; next; "other.test_model" ] in
+      let attempts = ref [] in
+      let result =
+        walk_once
+          (fun runtime_id ->
+             attempts := runtime_id :: !attempts;
+             if String.equal runtime_id head
+             then Error (Agent_core.Error.Api (Agent_core.Retry.Overloaded { message = "overloaded" }))
+             else Ok ())
+          ids
+      in
+      (match result with
+       | Ok () -> ()
+       | Error error -> Alcotest.failf "the walk did not move on: %s" (Agent_core.Error.to_string error));
+      Alcotest.(check (list string)) "the turn walks from the 529 head to the next candidate"
+        [ head; next ] (List.rev !attempts);
+      Alcotest.check attempt_failure "the 529 head keeps failed-attempt evidence"
+        (Some Runtime_candidate_backpressure.Provider_capacity) (failed_attempt_of head);
+      Alcotest.(check (list string)) "the next walk leads with the candidate that answered"
+        [ next; "other.test_model"; head ]
+        (backpressure_order ids);
+      let now = Unix.gettimeofday () in
+      (match Driver.path_rest ~now head with
+       | Driver.Path_serving -> ()
+       | Driver.Path_resting _ -> Alcotest.fail "a 529 made the path rest instead of demoting it");
+      let overloaded_route =
+        Keeper_runtime_failure_route.route_of_error
+          ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+          (Agent_core.Error.Api (Agent_core.Retry.Overloaded { message = "overloaded" }))
+      in
+      Alcotest.(check string) "a 529 on the last candidate keeps the cadence, not a capacity wait"
+        "no provider wait"
+        (describe_dispatch ~now
+           (Driver.next_dispatch_after_failure ~now ~route:overloaded_route
+              ~assignment_id:"quota_lane" None))))
 ;;
 
 (* An attributed empty completion is still an answer from the candidate. It
@@ -2929,6 +2974,11 @@ let test_only_the_candidates_own_failures_are_evidence () =
         (Some Runtime_candidate_backpressure.Network_transient)
         (one "shared_b.test_model" (retryable_network_error "connection refused"));
       reset_quota_lane_rests ();
+      Alcotest.check attempt_failure "a provider overload (HTTP 529)"
+        (Some Runtime_candidate_backpressure.Provider_capacity)
+        (one "shared_a.test_model"
+           (Agent_core.Error.Api (Agent_core.Retry.Overloaded { message = "overloaded" })));
+      reset_quota_lane_rests ();
       Alcotest.check attempt_failure "a provider that sent no first token"
         (Some Runtime_candidate_backpressure.Provider_timeout)
         (one "shared_a.test_model"
@@ -2955,8 +3005,6 @@ let test_only_the_candidates_own_failures_are_evidence () =
         , Agent_core.Error.Api
             (Agent_core.Retry.Timeout
                { message = "capacity"; phase = Some Llm_provider.Http_client.Capacity_backpressure })
-        ; "provider overload is MASC-side capacity"
-        , Agent_core.Error.Api (Agent_core.Retry.Overloaded { message = "overloaded" })
         ; "a model the provider does not serve"
         , Agent_core.Error.Api (Agent_core.Retry.NotFound { message = "no such model" })
         ; "a context overflow is the turn's input"
@@ -3134,24 +3182,18 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
           ; deferred_runtime_lane = Some (quota_lane_suffix both_shared)
           }
       in
-      let waits_without_serving_a_wakeup =
+      let waits_for_the_path =
         match decision with
         | Some
             (Masc.Keeper_heartbeat_loop.Wait_for_path_release
-               { wake_policy = Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration
-               ; release_at = _
-               ; waiting_on = _
-               }) ->
+               { release_at = _; waiting_on = _ }) ->
           true
-        | Some
-            (Masc.Keeper_heartbeat_loop.Wait_for_path_release
-               { wake_policy = Masc.Keeper_keepalive_signal.Interrupt_on_wakeup; _ })
         | Some (Masc.Keeper_heartbeat_loop.Continue_on_deferred_lane _)
         | None ->
           false
       in
-      Alcotest.(check bool) "a failed cycle whose walk head rests waits without serving a wakeup"
-        true waits_without_serving_a_wakeup))
+      Alcotest.(check bool) "a failed cycle whose walk head rests waits for the path"
+        true waits_for_the_path))
 ;;
 
 (* A failure without a suffix used every path the input may take. Its wait
@@ -3170,7 +3212,7 @@ let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
              ~now ~route:rate_limited_route ~assignment_id:"quota_lane" None)
       in
       Alcotest.(check string) "a serving fresh walk head waits only for the failed path"
-        (Printf.sprintf "wait %.0fs for quota_lane (path)" floor_sec)
+        (Printf.sprintf "wait %.0fs for quota_lane" floor_sec)
         (decide ());
       Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 600.);
@@ -3180,14 +3222,14 @@ let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
         ~resets_at:(now +. 900.);
       Alcotest.(check string) "a resting fresh walk head extends the wait to its release"
-        "wait 600s for shared_a.test_model (path)"
+        "wait 600s for shared_a.test_model"
         (decide ())))
 ;;
 
 (* RFC-provider-path-rest §3.4: the chat lane's deferred retry reads the same
    next dispatch as the heartbeat. A suffix whose walk head serves is claimable
-   at once; a resting head holds the retry until its release; capacity
-   backpressure holds it for its own rest whatever the suffix is. *)
+   at once; a resting head holds the retry until its release; a provider's
+   capacity refusal is walked like a server error (#38061). *)
 let test_a_chat_retry_follows_the_shared_next_dispatch () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
@@ -3222,8 +3264,8 @@ let test_a_chat_retry_follows_the_shared_next_dispatch () =
       Alcotest.(check string) "a resting walk head holds the retry until its release"
         "claimable in 300s"
         (not_before (quota_lane_suffix ~failure:rate_limited [ "shared_a.test_model" ]));
-      Alcotest.(check string) "capacity backpressure holds the retry for its own rest"
-        "claimable in 5s"
+      Alcotest.(check string) "a provider's capacity refusal walks to a serving suffix head"
+        "claimable now"
         (not_before (quota_lane_suffix ~failure:capacity [ "other.test_model" ]))))
 ;;
 
@@ -4686,7 +4728,7 @@ let test_a_same_path_suffix_waits_only_for_a_recorded_rest () =
       Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate path) ~retry_after:(Some 120.);
       Alcotest.(check string) "a stated 429 rest holds the same path until it ends"
-        ("wait 120s for " ^ path ^ " (path)")
+        ("wait 120s for " ^ path)
         (next ~route:rate_limited_route bad_gateway)))
 ;;
 
@@ -5138,6 +5180,8 @@ let () =
             test_rate_limit_order_never_excludes_and_success_clears;
           Alcotest.test_case "failed attempts demote until the candidate answers" `Quick
             test_failed_attempts_demote_until_the_candidate_answers;
+          Alcotest.test_case "a 529 head is demoted and the walk moves on (#38061)" `Quick
+            test_a_529_head_is_demoted_and_the_walk_moves_on;
           Alcotest.test_case
             "an empty completion clears stale unavailability evidence"
             `Quick

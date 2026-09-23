@@ -223,10 +223,6 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_core.Error.t) : boo
       (Keeper_turn_driver.Runtime_exhausted
          { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
       true
-  | Some
-      (Keeper_turn_driver.Runtime_exhausted
-         { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
-      true
   | Some (Keeper_turn_driver.Capacity_backpressure _) ->
       (* A decoded receipt from the retired pre-dispatch gate carries no
          lifecycle authority. *)
@@ -336,10 +332,6 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
         Some Resumable_cli_session
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-        Some Capacity_backpressure
-    | Some
-        (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
         Some Capacity_backpressure
     | Some
         (Keeper_turn_driver.Runtime_exhausted

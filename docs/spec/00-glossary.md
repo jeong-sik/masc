@@ -66,6 +66,35 @@ status: reference
 : 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
   입구를 가리키며, 각 표면은 독립 상태를 소유하지 않는다.
 
+**Team 블록 (Overview Team)**
+: TUI Overview 에서 Keeper 한 명당 한 줄로 "누가 무엇을 하고 누가 막혔나" 를 보여주는
+  자리. briefing 의 `keeper_briefs` 와 backlog 를 합쳐 그린다. 줄은 네 무리로 나뉜다 —
+  막힘(Failing·Crashed, 또는 phase 없이 info 가 아닌 Attention 이 가리키는 Keeper),
+  일하는 중(Running·Draining·Restarting 이고 Claimed·InProgress Task 를 잡음), 쉬는 중,
+  멈춤(brief 의 `paused` 가 true 이거나 Paused·Stopped·Offline, 한 줄로 모음). 순서는
+  점수가 아니라 이 무리와 이름이다. 막힌 줄의 설명은 그 Keeper 를 `Attention_keeper` 로
+  가리키는 info 가 아닌 첫 Attention 문장을 그대로 싣는다. Keeper 가 아닌
+  담당자(MCP client 등)가 잡은 Task 는 "held outside the fleet" 한 줄로 센다.
+  → [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli), RFC-0464
+
+**Attention (Overview Attention 패널)**
+: briefing 의 `incidents` 와 `attention_queue` 를 합친 목록. 운영자가 봐야 할 조건 하나가
+  한 줄이다. 화면에 그려진 Team 줄이 문장으로 싣는 항목(막힌 Keeper 줄 하나에 항목 하나)은
+  Team 줄에만 두고, 나머지는 모두 Attention 패널에 남긴다. 살아 있는 Keeper 에 관한 항목,
+  같은 Keeper 의 둘째 항목, 화면이 짧아 잘린 Team 줄의 항목, parked 줄의 Keeper 항목이
+  여기에 든다. 패널 제목은 Team 줄로 옮긴 수를 `+N on Team` 으로 적는다. Task 소유권
+  문제만 모은 Operator Attention 과는 다른 목록이다.
+
+**닫힌 quota 창 (Shut Quota Window)**
+: provider 계정이나 자격 증명 하나가 사용 한도에 걸려 요청을 받지 않는 상태. 런타임
+  카탈로그(`/api/v1/runtime/resolved`)는 런타임마다 `quota_exhausted`·`quota_resets_at`·
+  `quota_scope` 를 싣는데, 같은 계정을 쓰는 런타임은 같은 `quota_scope`(예:
+  `provider:claude_code`)를 공유한다. Team 블록은 창을 scope 마다 한 번만, 그 뒤에 선
+  런타임 수와 다시 열리는 시각으로 적는다. 남은 사용량은 provider 가 알려주지 않으므로
+  퍼센트로 말하지 않는다.
+  → [Runtime_quota_window](../../lib/runtime/runtime_quota_window.ml),
+  [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli)
+
 **Server Push (서버가 밀어 보내는 사건)**
 : 서버가 클라이언트로 밀어 보내는 사건으로, Keeper가 한 일이 아니라 서버가 보고하는
   상태 변화. Activity 화면은 이런 사건을 `everything` scope 아래 조용한 회색 행으로

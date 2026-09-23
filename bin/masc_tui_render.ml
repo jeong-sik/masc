@@ -28,6 +28,7 @@ module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Overview_team = Masc_tui_overview_team
+module Repository_pulls = Masc_tui_repository_pulls
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
 module Markdown = Masc_tui_markdown
@@ -373,9 +374,12 @@ let overview_quota_line (state : state) ~now =
                Ansi.reset
                (String.concat " \xc2\xb7 " (List.map window_text windows))))
 
-(* Lines under the Team block that explain no Keeper row. *)
+let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
+
+(* Lines under the Team block that explain no Keeper row: an unread quota
+   and the pull request summary. *)
 let overview_team_detail_lines (state : state) =
-  Option.to_list (overview_quota_unread_line state)
+  Option.to_list (overview_quota_unread_line state) @ overview_pulls_lines state
 
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
@@ -414,7 +418,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
     in
     let detail =
       match row.detail with
-      | Overview_team.Blocker { summary; held } ->
+      | Overview_team.Blocker { summary; held; item = _ } ->
           Terminal_text.single_line summary ^ held_tail held
       | Overview_team.Phase_word { word = _; held } ->
           Printf.sprintf "%sno attention item names a cause%s%s" Ansi.dim
@@ -545,27 +549,45 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
 
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
 let overview_layout (state : state) ~terminal_rows =
-  let attention_items =
+  let all_attention =
     match state.overview with
     | None -> []
     | Some overview -> overview.ov_attention_items
   in
   let tasks_error = Terminal_text.optional_single_line state.tasks_error in
-  let row_budget =
+  let team_count =
+    match overview_team state with
+    | None -> 0
+    | Some team ->
+        Overview_team.drawn_rows team
+        + Option.fold ~none:0 ~some:(fun _ -> 1)
+            (overview_quota_line state ~now:(Unix.gettimeofday ()))
+  in
+  let allocate attention_items =
     Render_schedule.allocate_overview ~terminal_rows
       ~has_cluster:(Option.is_some state.overview)
       ~attention_count:(List.length attention_items)
       ~event_count:(List.length state.events)
-      ~team_count:
-        (match overview_team state with
-         | None -> 0
-         | Some team ->
-             Overview_team.drawn_rows team
-             + Option.fold ~none:0 ~some:(fun _ -> 1)
-                 (overview_quota_line state ~now:(Unix.gettimeofday ())))
+      ~team_count
       ~task_count:(List.length state.tasks)
       ~has_task_error:(Option.is_some tasks_error)
   in
+  (* An item a drawn Team row carries -- a stuck Keeper's row prints its
+     sentence -- is that Keeper's row there; drawn in both places the same
+     stop took two rows and read as two problems. Only items the viewport
+     actually draws on a Team row leave the panel: an item about a running
+     Keeper, a second item about the same Keeper, and the items of rows the
+     budget cuts all stay, because nothing else on screen says them. *)
+  let attention_items, row_budget =
+    match overview_team state with
+    | None -> (all_attention, allocate all_attention)
+    | Some team ->
+        Overview_team.settle team ~attention:all_attention ~allocate
+          ~team_rows:(fun (budget : Render_schedule.overview_allocation) ->
+            budget.team_rows)
+  in
+  (* Detail lines are settled after the Keeper rows: they only take rows
+     nothing else wanted, so they never change which items a row carries. *)
   let row_budget =
     match overview_team state with
     | None -> row_budget
@@ -760,13 +782,31 @@ let render_overview (state : state) =
      where it says something the rows cannot: that some did not fit. The
      Events panel beside it states its window the same way. *)
   let attention_count = List.length attention_items in
+  (* Items a drawn Team row carries are drawn there, not here
+     ([overview_layout]). The panel says how many went there, so its count
+     and the briefing's total do not disagree without a reason on screen,
+     and an empty panel is not read as "nothing needs attention". *)
+  let on_team_rows =
+    match ov with
+    | None -> 0
+    | Some o -> List.length o.ov_attention_items - attention_count
+  in
   let attention_title =
-    if attention_count = 0 then " Attention "
-    else if attention_count <= row_budget.attention_rows then
-      Printf.sprintf " Attention %d " attention_count
-    else
-      Printf.sprintf " Attention %d/%d " row_budget.attention_rows
-        attention_count
+    let counted =
+      if attention_count = 0 then " Attention "
+      else if attention_count <= row_budget.attention_rows then
+        Printf.sprintf " Attention %d " attention_count
+      else
+        Printf.sprintf " Attention %d/%d " row_budget.attention_rows
+          attention_count
+    in
+    let with_team =
+      Printf.sprintf "%s+%d on Team " counted on_team_rows
+    in
+    if attention_count > 0 && on_team_rows > 0
+       && String.length with_team <= panel_width
+    then with_team
+    else counted
   in
   (* A burst of identical lines (manual refreshes, a broadcast fan-out) folds
      into one row with a ×N tail; the window scrolls over folded rows. *)
@@ -812,6 +852,8 @@ let render_overview (state : state) =
      column. *)
   let attention_empty_note =
     match empty_page_of ~snapshot:state.overview ~error:overview_error with
+    | Page_empty when on_team_rows > 0 ->
+        Some (Printf.sprintf "(%d on Team rows below)" on_team_rows)
     | Page_empty -> Some "(nothing needs attention)"
     | Page_unread -> Some (String.trim page_unread_note)
     | Page_failed -> None

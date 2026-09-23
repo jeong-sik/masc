@@ -318,6 +318,10 @@ let unobserved_failure_routes =
   ; "configuration mismatch", exhausted_route "configuration mismatch" KFR.Config_mismatch
   ; "provider integration", exhausted_route "provider integration" KFR.Provider_integration
   ; "internal opaque", exhausted_route "internal opaque" KFR.Internal_opaque
+    (* The history was refused before dispatch (#38456). A rejected Gate
+       resolution reaches this refusal; retiring its wake would leave the
+       model never told of the rejection. *)
+  ; "transcript refused", exhausted_route "transcript refused" KFR.Transcript_refused
     (* The lanes set this before any answer: claude-code on spawn, codex when
        the turn input could not be written. A continuation that fails this
        way must keep its wake, or the model never sees the replay. *)

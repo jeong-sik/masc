@@ -1240,6 +1240,17 @@ let load_repository_pulls ~(host : string) ~(port : int) :
   | Error err -> Error ("pull requests load failed: " ^ err)
   | Ok json -> Repository_pulls.decode_reading json
 
+(* Each Keeper's spend over the Team block's window. A Keeper row the
+   decoder cannot read is counted, and that Keeper is drawn unknown. *)
+let load_keeper_spend ~(host : string) ~(port : int) :
+    (overview_spend_reading, string) result =
+  match
+    Masc_tui_http.fetch_keeper_costs ~host ~port
+      ~window_minutes:Masc_tui_keeper_spend.window_minutes
+  with
+  | Error err -> Error ("keeper spend load failed: " ^ err)
+  | Ok json -> Masc_tui_keeper_spend.decode_reading json
+
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
     (overview_snapshot, string) result =

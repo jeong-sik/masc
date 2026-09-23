@@ -2032,6 +2032,31 @@ type overview_pulls_reading =
     }
   | Overview_pulls_failed of string
 
+(** A sum over a Keeper's turns of a value its runtime may not report
+    (GET /api/v1/dashboard/keeper-costs). [Spend_sum] adds the turns that
+    reported one; [missing] counts the turns that gave none or could not be
+    read, so the sum is a floor whenever [missing > 0]. [Spend_unknown] is
+    turns that all left the value out: never a zero. *)
+type 'a spend_sum =
+  | Spend_sum of { sum : 'a; missing : int }
+  | Spend_unknown
+
+type keeper_spend =
+  | Spend_no_turns
+  | Spend_turns of { cost_usd : float spend_sum; tokens : int spend_sum }
+
+type overview_spend_reading =
+  | Overview_spend_unread
+  | Overview_spend_warming
+      (** The server answered its placeholder: nothing computed yet. *)
+  | Overview_spend_read of {
+      window_minutes : int;
+      keepers : (string * keeper_spend) list;
+      undecodable : int;
+          (** Rows this build could not read; their Keepers draw unknown. *)
+    }
+  | Overview_spend_failed of string
+
 (** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
     briefing writes [null] for a Keeper with no registry entry (an offline
     Keeper that never booted this process), which is a different fact from a
@@ -2887,6 +2912,7 @@ type surface_needs = {
   needs_asks : bool;
   needs_runtime_quota : bool;
   needs_repository_pulls : bool;
+  needs_keeper_spend : bool;
 }
 
 let nothing =
@@ -2901,6 +2927,7 @@ let nothing =
     needs_asks = false;
     needs_runtime_quota = false;
     needs_repository_pulls = false;
+    needs_keeper_spend = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -2929,6 +2956,7 @@ and surface_needs_of_surface : surface -> surface_needs = function
         needs_transport = true
       ; needs_runtime_quota = true
       ; needs_repository_pulls = true
+      ; needs_keeper_spend = true
       }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -2985,6 +3013,8 @@ let surface_needs_delta ~previous ~next =
       next.needs_runtime_quota && not previous.needs_runtime_quota
   ; needs_repository_pulls =
       next.needs_repository_pulls && not previous.needs_repository_pulls
+  ; needs_keeper_spend =
+      next.needs_keeper_spend && not previous.needs_keeper_spend
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -5633,6 +5663,7 @@ type state = {
      the rows under an open picker's cursor. *)
   mutable overview_quota: overview_quota_reading;
   mutable overview_pulls: overview_pulls_reading;
+  mutable overview_spend: overview_spend_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
@@ -7768,6 +7799,7 @@ let create_state
   runtime_catalog = [];
   overview_quota = Quota_unread;
   overview_pulls = Overview_pulls_unread;
+  overview_spend = Overview_spend_unread;
   runtime_lanes = [];
   runtime_assignments = [];
   runtime_catalog_error = None;

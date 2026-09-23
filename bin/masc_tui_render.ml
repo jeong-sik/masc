@@ -29,6 +29,7 @@ module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Overview_team = Masc_tui_overview_team
 module Repository_pulls = Masc_tui_repository_pulls
+module Keeper_spend = Masc_tui_keeper_spend
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
 module Markdown = Masc_tui_markdown
@@ -373,14 +374,22 @@ let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview
 (* Lines under the Team block that explain no Keeper row: an unread quota
    and the pull request summary. *)
 let overview_team_detail_lines (state : state) =
-  Option.to_list (overview_quota_unread_line state) @ overview_pulls_lines state
+  Option.to_list (overview_quota_unread_line state)
+  @ overview_pulls_lines state
+  @ Keeper_spend.lines state.overview_spend
 
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the parked roll call and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~quota_line ~detail_lines ~pr_tag_of_keeper =
+    ~quota_line ~detail_lines ~pr_tag_of_keeper ~spend_tags ~spend_total =
+  (* Each Keeper's spend over the window, padded to the widest tag among
+     the rows so the tags after it start in one column. *)
+  let spend_tag_of_keeper =
+    spend_tags
+      (List.map (fun (row : Overview_team.row) -> row.keeper.okp_name) team.rows)
+  in
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -432,11 +441,14 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
     (* The Keeper's PR, ahead of the detail so a narrow row keeps it: its
        number and one glyph for its checks, "+N" for more. *)
     let pr_tag = pr_tag_of_keeper row.keeper.okp_name in
-    Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s" tone mark Ansi.reset
+    (* Spend sits after the age, ahead of the PR: what the Keeper cost is
+       the row's report, the PR and the detail are what it is on. *)
+    let spend_tag = spend_tag_of_keeper row.keeper.okp_name in
+    Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s%s" tone mark Ansi.reset
       (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
       tone
       (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
-      Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset pr_tag detail
+      Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset spend_tag pr_tag detail
   in
   let parked_line =
     match team.parked with
@@ -499,8 +511,9 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
     if team_rows < total then Printf.sprintf " %d/%d" team_rows total else ""
   in
   let head =
-    Printf.sprintf " %sTeam%s%s  %s" Ansi.bold Ansi.reset window
+    Printf.sprintf " %sTeam%s%s  %s%s" Ansi.bold Ansi.reset window
       (String.concat " \xc2\xb7 " counts)
+      (match spend_total with Some total -> "   " ^ total | None -> "")
   in
   (* Completions per UTC day over the flow's span, oldest first, so the last
      glyph is today. Scaled from zero: a quiet day is the lowest bar, not the
@@ -953,6 +966,8 @@ let render_overview (state : state) =
            ~quota_line:(overview_quota_line state ~now:(Unix.gettimeofday ()))
            ~detail_lines:(overview_team_detail_lines state)
            ~pr_tag_of_keeper:(Repository_pulls.keeper_tag state.overview_pulls)
+           ~spend_tags:(Keeper_spend.keeper_tags state.overview_spend)
+           ~spend_total:(Keeper_spend.team_total state.overview_spend)
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;

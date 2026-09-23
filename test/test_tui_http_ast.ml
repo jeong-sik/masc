@@ -2480,9 +2480,15 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ];
   check_fields "overview_layout" [ "tasks_error" ];
   (* The Team block prints Keeper names and task text that producers wrote. *)
-  (* pr_tag_of_keeper looks the name up; it does not draw it. *)
-  check_fields ~non_rendering_calls:[ "pr_tag_of_keeper" ] "overview_team_lines"
+  (* pr_tag_of_keeper and spend_tag_of_keeper look the name up, and
+     spend_tags takes the names as lookup keys; none of them draws it. *)
+  check_fields
+    ~non_rendering_calls:[ "pr_tag_of_keeper"; "spend_tag_of_keeper"; "spend_tags" ]
+    "overview_team_lines"
     [ "okp_name"; "id"; "title" ];
+  (* The spend line prints the transport or decode failure it was given. *)
+  check_identifiers ~module_path:"bin/masc_tui_keeper_spend.ml" ~binding:"lines"
+    ~callees:sanitizer_calls [ "err" ];
   (* The pull request lines print repository ids and failure text the server
      relayed from GitHub. *)
   check_fields ~module_path:"bin/masc_tui_repository_pulls.ml" "lines"

@@ -1544,6 +1544,15 @@
  (wrapped false)
  (modules masc_tui_repository_pulls)
  (libraries unix masc masc_tui_types masc_tui_ansi yojson))
+;; The Overview's spend reading (GET /api/v1/dashboard/keeper-costs),
+;; decoder and Team row tags. A library so a test can decode the server's
+;; own encoder output.
+(library
+ (name masc_tui_keeper_spend)
+ (wrapped false)
+ (modules masc_tui_keeper_spend)
+ (libraries masc masc_tui_types masc_tui_ansi masc_tui_message_layout yojson))
+
 
 (executable
  (name masc_tui)
@@ -1556,6 +1565,7 @@
  (package masc)
  (libraries
   masc_tui_repository_pulls
+  masc_tui_keeper_spend
   digestif
   masc.string_util
   masc.keeper_runtime

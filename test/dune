@@ -4197,6 +4197,18 @@
  (modules test_tui_repository_pulls)
  (libraries alcotest masc.server masc_tui_types masc_tui_repository_pulls))
 
+; The Team block's per-Keeper spend decoder against the server's own encoder.
+(test
+ (name test_tui_keeper_spend)
+ (modules test_tui_keeper_spend)
+ (libraries
+  alcotest
+  masc_test_deps
+  masc.server
+  masc_tui_types
+  masc_tui_message_layout
+  masc_tui_keeper_spend))
+
 (test
  (name test_tui_overview_team)
  (modules test_tui_overview_team)

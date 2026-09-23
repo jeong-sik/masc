@@ -14322,6 +14322,37 @@ def repository_pulls_fixture() -> HttpResponse:
     )
 
 
+def keeper_costs_fixture() -> HttpResponse:
+    # GET /api/v1/dashboard/keeper-costs: k-author's runtime reported usage
+    # but no cost, so its Team row draws "$?" beside its tokens, never $0.
+    return (
+        200,
+        {
+            "keepers": [
+                {
+                    "keeper_name": "k-author",
+                    "total_cost_usd": None,
+                    "cost_reported_samples": 0,
+                    "cost_unreported_samples": 3,
+                    "cost_unread_samples": 0,
+                    "total_input_tokens": 1_000_000,
+                    "total_output_tokens": 200_000,
+                    "total_tokens": 1_200_000,
+                    "tokens_reported_samples": 3,
+                    "tokens_unreported_samples": 0,
+                    "tokens_unread_samples": 0,
+                    "p50_latency_ms": 100.0,
+                    "p95_latency_ms": 100.0,
+                    "sample_count": 3,
+                }
+            ],
+            "window_minutes": 1440,
+            "generated_at": 1_790_000_000.0,
+            "cache": {"state": "fresh", "generated_at": 1_790_000_000.0},
+        },
+    )
+
+
 def pull_requests_on_overview_interaction() -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -14330,7 +14361,14 @@ def pull_requests_on_overview_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        for needle in (b"1 conflicting", b"1 not by a Keeper", b"#11"):
+        for needle in (
+            b"1 conflicting",
+            b"1 not by a Keeper",
+            b"#11",
+            # The row's cost is unknown, drawn as "$?" beside its tokens.
+            b"$?\x1b[0m 1.2M tok  #11",
+            b"24h",
+        ):
             wait_for_output(process, master_fd, output, needle, start=0, timeout=10.0)
         # The harness confirms the exit that this first press arms.
         os.write(master_fd, b"q")
@@ -14954,6 +14992,7 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures={
             "/api/v1/dashboard/briefing": pull_requests_briefing(),
             "/api/v1/repositories/pulls": repository_pulls_fixture(),
+            "/api/v1/dashboard/keeper-costs": keeper_costs_fixture(),
         },
     )
     run_terminal_scenario(

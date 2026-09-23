@@ -104,6 +104,7 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
       ; delta.needs_asks
       ; delta.needs_runtime_quota
       ; delta.needs_repository_pulls
+      ; delta.needs_keeper_spend
       ]
       |> List.fold_left (fun total wanted -> if wanted then total + 1 else total) 0
     in

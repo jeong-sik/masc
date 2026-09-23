@@ -1842,6 +1842,7 @@ type http_scoped_surface_results = {
   http_repository_pulls:
     (overview_pulls_reading, string) result
     option;
+  http_keeper_spend: (overview_spend_reading, string) result option;
 }
 
 type http_surface_results = {
@@ -10563,6 +10564,13 @@ let apply_repository_pulls_load state = function
   | Ok reading -> state.overview_pulls <- reading
   | Error err -> state.overview_pulls <- Overview_pulls_failed err
 
+(* A failed read replaces the last good one, as the pull requests do: a
+   spend drawn after the reading that said so stopped arriving would be a
+   number nobody observed. *)
+let apply_keeper_spend_load state = function
+  | Ok reading -> state.overview_spend <- reading
+  | Error err -> state.overview_spend <- Overview_spend_failed err
+
 let apply_keeper_roster_load state = function
   | Ok roster ->
       state.keeper_roster <- roster;
@@ -10808,6 +10816,13 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
   in
+  let http_keeper_spend =
+    when_needed needs.needs_keeper_spend (fun () ->
+        match Masc_tui_loader.load_keeper_spend ~host ~port with
+        | result -> result
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn -> Error (Printexc.to_string exn))
+  in
   { http_transport
   ; http_approvals
   ; http_asks
@@ -10819,6 +10834,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   ; http_keeper_roster
   ; http_runtime_quota
   ; http_repository_pulls
+  ; http_keeper_spend
   }
 
 let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
@@ -10864,7 +10880,8 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   Option.iter (apply_runtime_quota_load state) results.http_runtime_quota;
-  Option.iter (apply_repository_pulls_load state) results.http_repository_pulls
+  Option.iter (apply_repository_pulls_load state) results.http_repository_pulls;
+  Option.iter (apply_keeper_spend_load state) results.http_keeper_spend
 
 (* This is a current reading, not a last-known cache. A failed probe makes
    the projection unread; every following refresh asks again, so a same-port

@@ -8611,7 +8611,7 @@ def skills_usage_clarity_interaction(
         # Tools hangs off Config under [t] now, so the walk goes to the
         # parent stop and hops from there.
         tab_until(process, master_fd, output, b"MASC Config")
-        send_and_wait(process, master_fd, output, b"t", b"MASC Tools")
+        send_and_wait(process, master_fd, output, b"t", b"MASC Config / Tools")
         usage = send_and_wait(
             process,
             master_fd,
@@ -8680,7 +8680,7 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
         def interact(process, master_fd, _slave_fd, output, _base_path):
             resize_and_wait(process, master_fd, output, rows=30, columns=160, needle=b"MASC Overview")
             tab_until(process, master_fd, output, b"MASC Config")
-            send_and_wait(process, master_fd, output, b"t", b"MASC Tools")
+            send_and_wait(process, master_fd, output, b"t", b"MASC Config / Tools")
             frame = send_and_wait(
                 process, master_fd, output, b"p" * 3,
                 b"Skill catalog read failed:" if initial_error else b"1 of 2 catalog Skills observed",
@@ -8952,7 +8952,7 @@ def run_tools_purpose_regression(executable: str) -> None:
         send_and_wait(process, master_fd, output, b"p", b"keeper_status")
         # The footer is the frame's last row, so wait for the frame to finish
         # rather than for its title: the key is read from that row below.
-        resize_and_wait(process, master_fd, output, rows=30, columns=90, needle=b"MASC Tools",
+        resize_and_wait(process, master_fd, output, rows=30, columns=90, needle=b"MASC Config / Tools",
                         final_cursor=b"\x1b[?25l")
         # The strip names the panes; the key that walks them is the footer's
         # "p:section" (#35638). The strip used to say it again as "p:다음 탭".
@@ -12693,7 +12693,7 @@ def schedule_detail_interaction() -> Interaction:
         _base_path: str,
     ) -> None:
         listing = palette_go(
-            process, master_fd, output, b"go schedules", b"MASC Schedules"
+            process, master_fd, output, b"go schedules", b"MASC Keepers / Schedules"
         )
         listing_plain = CSI_RE.sub(b"", listing)
         for needle in (
@@ -16352,7 +16352,7 @@ def run_schedule_delivery_regression(executable: str) -> None:
         _base_path: str,
     ) -> None:
         listing = palette_go(
-            process, master_fd, output, b"go schedules", b"MASC Schedules"
+            process, master_fd, output, b"go schedules", b"MASC Keepers / Schedules"
         )
         plain = CSI_RE.sub(b"", listing)
         for needle in (

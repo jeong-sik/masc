@@ -47,14 +47,18 @@ function costMatrixModelLabel(value: string | undefined, index: number): string 
 
 export interface KeeperCostMetric {
   keeper_name: string
-  total_cost_usd: number
+  // Sum over the samples whose runtime reported a cost. `null` when no sample
+  // in the window reported one (subscription runtimes write `cost_usd: null`),
+  // so an unknown cost never reads as $0.
+  total_cost_usd: number | null
+  cost_reported_samples: number
+  cost_unreported_samples: number
   total_input_tokens: number
   total_output_tokens: number
   total_tokens: number
   p50_latency_ms: number | null
   p95_latency_ms: number | null
   sample_count: number
-  model_breakdown: Array<{ model: string; cost_usd: number }>
 }
 
 export interface KeeperCostMetricsResponse {
@@ -67,26 +71,20 @@ function decodeKeeperCostMetric(raw: unknown): KeeperCostMetric | null {
   if (!isRecord(raw)) return null
   const keeperName = asString(raw.keeper_name)
   if (!keeperName) return null
-  const modelCosts = new Map<string, number>()
-  if (Array.isArray(raw.model_breakdown)) {
-    for (const item of raw.model_breakdown) {
-      if (!isRecord(item)) continue
-      const cost = asNumber(item.cost_usd) ?? 0
-      if (!Number.isFinite(cost) || cost <= 0) continue
-      const model = publicRuntimeModelLabel(asString(item.model))
-      modelCosts.set(model, (modelCosts.get(model) ?? 0) + cost)
-    }
-  }
+  const costReported = asInt(raw.cost_reported_samples)
+  const costUnreported = asInt(raw.cost_unreported_samples)
+  if (costReported === undefined || costUnreported === undefined) return null
   return {
     keeper_name: keeperName,
-    total_cost_usd: asNumber(raw.total_cost_usd) ?? 0,
+    total_cost_usd: asNumber(raw.total_cost_usd) ?? null,
+    cost_reported_samples: costReported,
+    cost_unreported_samples: costUnreported,
     total_input_tokens: asNumber(raw.total_input_tokens) ?? 0,
     total_output_tokens: asNumber(raw.total_output_tokens) ?? 0,
     total_tokens: asNumber(raw.total_tokens) ?? 0,
     p50_latency_ms: asNumber(raw.p50_latency_ms) ?? null,
     p95_latency_ms: asNumber(raw.p95_latency_ms) ?? null,
     sample_count: asNumber(raw.sample_count) ?? 0,
-    model_breakdown: Array.from(modelCosts.entries()).map(([model, cost_usd]) => ({ model, cost_usd })),
   }
 }
 

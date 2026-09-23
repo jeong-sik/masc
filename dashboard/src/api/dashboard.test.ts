@@ -4849,67 +4849,61 @@ describe('fetchRuntimeModelMetrics', () => {
 })
 
 describe('fetchKeeperCostMetrics', () => {
-  it('redacts legacy model breakdown labels while preserving cost totals', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        window_minutes: 60,
-        keepers: [
-          {
-            keeper_name: 'keeper-alpha',
-            total_cost_usd: 0.5,
-            total_input_tokens: 10,
-            total_output_tokens: 5,
-            total_tokens: 15,
-            p50_latency_ms: 100,
-            p95_latency_ms: 100,
-            sample_count: 2,
-            model_breakdown: [
-              { model: 'private-provider:claude', cost_usd: 0.2 },
-              { model: 'private-provider:model-b', cost_usd: 0.3 },
-            ],
-          },
-        ],
-        generated_at: 1,
-      }), {
+  function stubKeeperCosts(keepers: unknown[]) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ window_minutes: 60, keepers, generated_at: 1 }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
+    ))
+  }
+
+  it('keeps an unreported total cost as null instead of $0', async () => {
+    stubKeeperCosts([
+      {
+        keeper_name: 'subscription-keeper',
+        total_cost_usd: null,
+        cost_reported_samples: 0,
+        cost_unreported_samples: 3,
+        total_input_tokens: 10,
+        total_output_tokens: 5,
+        total_tokens: 15,
+        p50_latency_ms: 100,
+        p95_latency_ms: 100,
+        sample_count: 3,
+      },
+    ])
 
     const result = await fetchKeeperCostMetrics(60)
 
-    expect(result.keepers[0]?.model_breakdown).toEqual([
-      { model: 'runtime', cost_usd: 0.5 },
-    ])
+    expect(result.keepers[0]?.total_cost_usd).toBeNull()
+    expect(result.keepers[0]?.cost_unreported_samples).toBe(3)
   })
 
-  it('marks missing model breakdown labels as unknown instead of fabricating runtime', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        keepers: [
-          {
-            keeper_name: 'keeper-alpha',
-            total_cost_usd: 0.5,
-            sample_count: 2,
-            model_breakdown: [
-              { cost_usd: 0.2 },
-              { model: ' ', cost_usd: 0.3 },
-            ],
-          },
-        ],
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
+  it('keeps the reported sum and the unreported count side by side', async () => {
+    stubKeeperCosts([
+      {
+        keeper_name: 'mixed-keeper',
+        total_cost_usd: 0.25,
+        cost_reported_samples: 1,
+        cost_unreported_samples: 2,
+        sample_count: 3,
+      },
+    ])
 
     const result = await fetchKeeperCostMetrics(60)
 
-    expect(result.keepers[0]?.model_breakdown).toEqual([
-      { model: 'unknown_model', cost_usd: 0.5 },
-    ])
+    expect(result.keepers[0]?.total_cost_usd).toBe(0.25)
+    expect(result.keepers[0]?.cost_reported_samples).toBe(1)
+    expect(result.keepers[0]?.cost_unreported_samples).toBe(2)
+  })
+
+  it('drops a keeper row that does not say how many samples reported a cost', async () => {
+    stubKeeperCosts([{ keeper_name: 'keeper-alpha', total_cost_usd: 0.5, sample_count: 2 }])
+
+    const result = await fetchKeeperCostMetrics(60)
+
+    expect(result.keepers).toEqual([])
   })
 })
 

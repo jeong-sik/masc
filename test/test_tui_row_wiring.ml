@@ -154,6 +154,34 @@ let test_the_title_does_not_count_another_queue () =
   Alcotest.(check bool) "the filter note it keeps is still read" true
     (reads ~binding_name:"render_approvals" ~fields:[ "aps_hidden_count" ] > 0)
 
+(* The surface's own title, the tab badge and the Overview row answer the
+   same question, so they count the same population. The title counted the
+   approval rows alone: with one open question and no approvals the tab read
+   "Approvals\xc2\xb71" and the screen it opened read "MASC Approvals (0)",
+   with the question block further down the pane. *)
+let test_the_approvals_title_counts_what_the_badge_counts () =
+  Alcotest.(check int) "the title walks the shared pending helper" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_approvals"
+       ~callee:"approvals_surface_pending"
+     + Ast_grep.count_calls_in_value_binding ~module_path:render
+         ~binding_name:"render_approvals"
+         ~callee:"Masc_tui_types.approvals_surface_pending");
+  (* And names every kind it counted. A total with an unnamed part reads as
+     an arithmetic error on screen. *)
+  Alcotest.(check int) "the four kinds the surface answers" 4
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"render_approvals"
+       ~literals:[ "held"; "gate"; "op"; "question" ]);
+  (* And takes the question count from the same place the block heading and
+     the badge take it, rather than reading the asks snapshot a third time. *)
+  Alcotest.(check int) "the questions come off the shared reading" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_approvals"
+       ~callee:"Masc_tui_types.approvals_open_question_count");
+  Alcotest.(check int) "and the surface reads the asks snapshot nowhere else" 0
+    (reads ~binding_name:"render_approvals" ~fields:[ "asks_snapshot" ])
+
 (* The Overview summary row wears the same word as the tab badge beside it,
    and for a while they counted different things: the badge walked all three
    approval lists, the row read the confirm queue's own visible count. A
@@ -484,7 +512,17 @@ let test_repositories_show_the_server_resolved_checkout_path () =
        ~fields:[ "rp_resolved_local_path" ]
      > 0);
   Alcotest.(check bool) "and keeps assignment in the selected-row context" true
-    (reads ~binding_name:"repository_context_lines" ~fields:[ "rp_keepers" ] > 0)
+    (reads ~binding_name:"repository_context_lines" ~fields:[ "rp_keepers" ] > 0);
+  (* The status column has room for the word and not for the cause a failed
+     clone or fetch leaves behind, so the cause belongs in the selected row's
+     context. The route wrote it to the wire and nothing read it. *)
+  Alcotest.(check int) "the route names the cause it writes" 1
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:producer
+       ~binding_name:"repository_json" ~literals:[ "error_message" ]);
+  Alcotest.(check int) "and the context asks for it" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"repository_context_lines"
+       ~callee:"Masc.Tui_decode.repository_status_reason")
 
 let test_memory_surface_keeps_the_starvation_axes () =
   (* Starvation depends on ordinary absence and failed Librarian runs, while a
@@ -800,6 +838,18 @@ let test_both_strips_mark_where_they_are_from_one_value () =
   Alcotest.(check bool) "the surface strip reads the same mark" true
     (mark "surface_strip" "bin/masc_tui_render_prim.ml" > 0)
 
+(* The Board title's count. The listing is one server page and the board can
+   hold more, so the count beside the name has to be the one that knows both
+   numbers. A title that goes back to printing the page length typechecks and
+   says nothing on screen but a smaller board. *)
+let test_the_board_title_counts_through_the_helper_that_knows_the_board () =
+  let asks callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:"render_board_list" ~callee
+  in
+  Alcotest.(check int) "the title asks what the board holds" 1
+    (asks "board_list_count_text")
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -868,5 +918,9 @@ let () =
             test_no_row_of_a_drawing_loop_walks_a_list
         ; Alcotest.test_case "both strips mark where they are from one value"
             `Quick test_both_strips_mark_where_they_are_from_one_value
+        ; Alcotest.test_case "the Approvals title counts what the badge does"
+            `Quick test_the_approvals_title_counts_what_the_badge_counts
+        ; Alcotest.test_case "the Board title counts through the helper" `Quick
+            test_the_board_title_counts_through_the_helper_that_knows_the_board
         ] )
     ]

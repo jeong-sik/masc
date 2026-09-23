@@ -725,8 +725,8 @@ let test_h1_h2_read_gate_wiring_parity () =
     ~needle:"authorize_read_request" h2;
   assert_contains "H2 GET /graphql passes through the read gate"
     ~needle:"| `GET, \"/graphql\" ->\n          with_h2_read_auth h2_reqd" h2;
-  assert_contains "H2 POST /graphql passes through the read gate"
-    ~needle:"with_h2_read_auth h2_reqd (fun state ->\n              let response = Graphql_api.handle_request"
+  assert_contains "H2 POST /graphql passes through the read gate before its body"
+    ~needle:"| `POST, \"/graphql\" ->\n          with_h2_read_auth h2_reqd (fun state ->\n            h2_read_body h2_reqd"
     h2;
   assert_contains "H2 dashboard workspace mirrors H1 with_public_read"
     ~needle:"| `GET, \"/api/v1/dashboard/workspace\" ->\n          with_h2_public_read h2_reqd"

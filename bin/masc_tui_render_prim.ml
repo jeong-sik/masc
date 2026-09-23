@@ -1835,6 +1835,20 @@ let bracketed ~max_cells text =
   in
   "[" ^ text ^ "]"
 
+(* How many posts the Board list is holding, and how many the board holds.
+
+   The listing is one server page of fifty. A board with a hundred and seven
+   posts drew "(50)" beside its name with no second number anywhere near it,
+   so the page size read as the board's size and the fifty-seven posts the
+   page does not carry were invisible. The census counts the whole board, or
+   the narrowed hearth when one is being read, so the difference is a fact
+   this row can state. Equal counts say it once: a page that carries
+   everything has no difference to report. *)
+let board_list_count_text ~loaded ~holding =
+  match holding with
+  | Some holding when holding > loaded -> Printf.sprintf "(%d of %d)" loaded holding
+  | Some _ | None -> Printf.sprintf "(%d)" loaded
+
 (* The Board reader's title row: the screen, which post, its hearth, its score
    and its replies. The id is folded at the list's ID column. Replies read "💬3"
    and then "c0" at zero -- a second spelling for the same count -- and are one
@@ -2110,6 +2124,13 @@ let planning_backlog_counts (backlog : planning_backlog) =
      [in_progress], and so does the CLI's own tally. This row was the only
      place that renamed it, so one state read as two on one screen. *)
   ; ("in_progress", backlog.pb_running, progress_active ^ " in_progress")
+  (* Work that is finished and waiting on a verifier, which is the queue the
+     Task Review tab counts on this same surface. It sat inside [in_progress],
+     so the row said twenty-one were being worked while seven of them were
+     waiting for a reader. *)
+  ; ( "awaiting_verification"
+    , backlog.pb_awaiting_verification
+    , progress_active ^ " awaiting_verification" )
   ; ("done", backlog.pb_done, progress_done ^ " done")
   ; ("cancelled", backlog.pb_cancelled, progress_ended ^ " cancelled")
   ]
@@ -2840,20 +2861,19 @@ let tools_scrolled_for_lines state display_lines =
 (* The two keys this row draws in front of its strip. Named here because the
    row has to count them when it decides what is left for the file it is
    reading, and a second copy of the spelling would drift from this one. *)
+let config_pane_keys = "9:Runtime  p:next  "
+
 (* A file's address said from a directory it is under. The Config panes read
-   one file whose prefix is the server's masc root, the same for every screen
-   in a session, and the Config pane's own identity row names that root; spent
-   in the title beside it, the prefix pushed the reading past the row and the
-   row was cut in the middle -- "/Users/d\xe2\x80\xa6onfig/runtime.toml", where
-   neither end is the file. A path that is not under [root] is returned whole:
-   there the address is the news. *)
+   one file whose prefix is the server's masc root -- the same for every screen
+   in a session, and named on the Config pane's own identity row -- so the
+   title says the path from there and keeps its cells for the part that is
+   this file. A path that is not under [root] is returned whole: there the
+   address is the news. *)
 let path_from_root ~root path =
   let root = if root = "" then "" else root ^ Filename.dir_sep in
   if root <> "" && String.starts_with ~prefix:root path then
     String.sub path (String.length root) (String.length path - String.length root)
   else path
-
-let config_pane_keys = "9:Runtime  p:next  "
 
 let config_pane_tabs (state : state) =
   List.map (fun (pane, label) -> (label, state.config_pane = pane)) config_panes

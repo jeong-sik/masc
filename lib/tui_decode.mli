@@ -128,6 +128,7 @@ type planning_backlog = {
   pb_todo : int;
   pb_claimed : int;
   pb_running : int;
+  pb_awaiting_verification : int;
   pb_done : int;
   pb_cancelled : int;
 }
@@ -814,6 +815,19 @@ val runtime_probe_status_to_string : runtime_probe_status -> string
 val runtime_provider_status_to_string : runtime_provider_status -> string
 
 (** A repository the workspace tracks. *)
+type repository_status =
+  | Repository_status of Repo_manager_types.repository_status
+  | Unrecognised_repository_status of string
+(** What the server said a repository's status is. [Repo_manager_types] owns
+    the four words and the reason [Error] carries; an unrecognised word is the
+    reading of a server newer than this build. *)
+
+val repository_status_word : repository_status -> string
+(** The word to draw for this status. *)
+
+val repository_status_reason : repository_status -> string option
+(** The cause behind the word, which only [Error] has. *)
+
 type repository = {
   rp_id : string;  (** what the workspace routes' [?repo_id=] resolves *)
   rp_name : string;
@@ -829,7 +843,7 @@ type repository = {
           operations; clients display this value instead of guessing against
           their own cwd *)
   rp_default_branch : string;
-  rp_status : string;
+  rp_status : repository_status;
   rp_keepers : string list;  (** Which keepers work in it. *)
   rp_auto_sync : bool;
 }
@@ -1129,6 +1143,11 @@ type verification_request = {
   vr_task_title : string;
       (** What would move it forward, when the server can say. *)
   vr_submitted_by : string;
+  vr_intent : Masc_domain.verification_intent option;
+      (** Which verdict the row waits on, when the server joined the backlog
+          (the awaiting view): a completion, or a cancellation that only an
+          operator's verdict clears. [None] in the history view, which has
+          no join, and drawn as nothing rather than as [complete]. *)
   vr_created_at : string;
   vr_required_artifacts : string list;
   vr_submitted_evidence : string list;
@@ -2041,6 +2060,9 @@ type fleet_safety = {
   fs_official_client_recovery_required_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
+  fs_active_task_owner_scan_error_count : int;
+      (** Sources the task-owner scan could not read, so the count above is
+          short by whatever they held. *)
 }
 (** The operator reading of the keeper fleet, as [/health?full=1] reports it.
 

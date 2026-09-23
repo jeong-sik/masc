@@ -275,7 +275,14 @@ OVERVIEW = {
 }
 PLANNING = {
     "goals": [], "rollup": {"active_count": 0, "paused_count": 0, "verifying_count": 0, "done_count": 0, "dropped_count": 0},
-    "task_backlog": {"todo": 0, "claimed": 0, "in_progress": 0, "done": 0, "cancelled": 0},
+    "task_backlog": {
+        "todo": 0,
+        "claimed": 0,
+        "in_progress": 0,
+        "awaiting_verification": 0,
+        "done": 0,
+        "cancelled": 0,
+    },
     "generated_at": "2026-08-22T00:00:00Z",
 }
 OPERATOR = {"pending_confirm_envelope": {"items": [], "summary": {

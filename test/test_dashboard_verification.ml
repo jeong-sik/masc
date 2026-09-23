@@ -652,7 +652,7 @@ let backlog_of_tasks tasks =
   | Ok backlog -> backlog
   | Error detail -> Alcotest.fail ("backlog fixture: " ^ detail)
 
-let awaiting_task ~task_id ~verification_id =
+let awaiting_task ?(intent = "complete") ~task_id ~verification_id () =
   `Assoc
     [ ("id", `String task_id)
     ; ("title", `String "fixture")
@@ -662,7 +662,7 @@ let awaiting_task ~task_id ~verification_id =
     ; ("assignee", `String "keeper-alpha")
     ; ("started_at", `String "2026-09-16T00:00:00Z")
     ; ("submitted_at", `String "2026-09-16T00:00:00Z")
-    ; ("intent", `String "complete")
+    ; ("intent", `String intent)
     ; ("verification_id", `String verification_id)
     ]
 
@@ -699,18 +699,52 @@ let string_list_field name j =
         items
   | _ -> Alcotest.fail (name ^ " is not a list")
 
-let test_awaiting_request_ids_reads_the_id_the_task_waits_on () =
+(* A task waiting on a request is one that names it; both intents wait on the
+   same queue, so the join carries the intent beside the id. *)
+let complete request_id = { D.request_id; intent = Masc_domain.Complete_task }
+
+let test_awaiting_tasks_read_the_id_and_intent_the_task_waits_on () =
   let backlog =
     backlog_of_tasks
-      [ awaiting_task ~task_id:"task-1" ~verification_id:"vrf-1"
+      [ awaiting_task ~task_id:"task-1" ~verification_id:"vrf-1" ()
       ; done_task ~task_id:"task-2"
-      ; awaiting_task ~task_id:"task-3" ~verification_id:"vrf-3"
+      ; awaiting_task ~intent:"cancel" ~task_id:"task-3"
+          ~verification_id:"vrf-3" ()
       ]
   in
-  Alcotest.(check (list string))
-    "only awaiting tasks name a request"
-    [ "vrf-1"; "vrf-3" ]
-    (D.awaiting_request_ids backlog)
+  Alcotest.(check (list (pair string string)))
+    "only awaiting tasks name a request, each with its intent"
+    [ "vrf-1", "complete"; "vrf-3", "cancel" ]
+    (List.map
+       (fun (t : D.awaiting_task) ->
+         t.D.request_id, Masc_domain.verification_intent_to_string t.D.intent)
+       (D.awaiting_tasks backlog))
+
+(* The queue row says which verdict it waits on; the history view has no
+   backlog join and says so with [null] rather than guessing [complete]. *)
+let test_the_queue_row_says_which_verdict_it_waits_on () =
+  with_temp_base_path (fun base_path ->
+    let live =
+      create_pending_request ~base_path ~task_id:"task-stop"
+        ~worker:"keeper-alpha" ~criteria:[] ~evidence:[]
+    in
+    let view =
+      D.Awaiting_operator
+        (D.Backlog_read
+           { live = [ { D.request_id = live.V.id; intent = Masc_domain.Cancel_task } ]
+           })
+    in
+    let first_row_intent json =
+      match member "requests" json with
+      | `List (row :: _) -> member "intent" row
+      | _ -> Alcotest.fail "expected at least one row"
+    in
+    Alcotest.(check string) "the queue row names the cancel intent" "cancel"
+      (match first_row_intent (D.requests_json ~base_path ~view ()) with
+       | `String s -> s
+       | _ -> Alcotest.fail "intent is not a string");
+    Alcotest.(check bool) "the history row carries null, not a guess" true
+      (first_row_intent (D.requests_json ~base_path ()) = `Null))
 
 (* The store keeps every submission, so a task re-submitted twice leaves two
    records and is waiting on one of them. Matching on task status alone drew
@@ -730,7 +764,7 @@ let test_awaiting_view_joins_on_the_request_the_task_waits_on () =
         ~worker:"keeper-beta" ~criteria:[] ~evidence:[ "ref-3" ]
     in
     let view =
-      D.Awaiting_operator (D.Backlog_read { live_request_ids = [ live.V.id ] })
+      D.Awaiting_operator (D.Backlog_read { live = [ complete live.V.id ] })
     in
     let queue = D.requests_json ~base_path ~view () in
     Alcotest.(check int) "queue holds one row" 1 (int_field "total" queue);
@@ -761,7 +795,7 @@ let test_awaiting_view_reports_an_id_with_no_record () =
     let view =
       D.Awaiting_operator
         (D.Backlog_read
-           { live_request_ids = [ live.V.id; "vrf-no-such-record" ] })
+           { live = [ complete live.V.id; complete "vrf-no-such-record" ] })
     in
     let queue = D.requests_json ~base_path ~view () in
     Alcotest.(check int) "only the resolvable id becomes a row" 1
@@ -854,7 +888,7 @@ let test_a_task_filter_does_not_invent_unresolved_ids () =
     in
     let view =
       D.Awaiting_operator
-        (D.Backlog_read { live_request_ids = [ mine.V.id; other.V.id ] })
+        (D.Backlog_read { live = [ complete mine.V.id; complete other.V.id ] })
     in
     let queue = D.requests_json ~base_path ~task_id:"task-mine" ~view () in
     Alcotest.(check int) "one row for the task asked about" 1
@@ -876,7 +910,7 @@ let test_a_recovered_backlog_answers_with_its_provenance () =
     let view =
       D.Awaiting_operator
         (D.Backlog_recovered
-           { live_request_ids = [ live.V.id ]
+           { live = [ complete live.V.id ]
            ; detail = "read from backlog.json.last-good: primary is bad json"
            })
     in
@@ -922,13 +956,13 @@ let test_every_queue_answer_carries_the_same_keys () =
       ; "backlog_recovery"
       ]
     in
-    let read = of_join (D.Backlog_read { live_request_ids = [] }) in
+    let read = of_join (D.Backlog_read { live = [] }) in
     Alcotest.(check (list string)) "the queue names all four" expected read;
     Alcotest.(check (list string)) "an unreadable backlog agrees" expected
       (of_join (D.Backlog_unreadable "backlog.json: bad json"));
     Alcotest.(check (list string)) "a recovered one agrees" expected
       (of_join
-         (D.Backlog_recovered { live_request_ids = []; detail = "stale" })))
+         (D.Backlog_recovered { live = []; detail = "stale" })))
 
 (* The count is exact and the list is one page of it. Unbounded, the list rode
    every page of every response. *)
@@ -936,7 +970,7 @@ let test_the_unresolved_list_is_bounded_by_the_page () =
   with_temp_base_path (fun base_path ->
     let missing = List.init 5 (Printf.sprintf "vrf-missing-%d") in
     let view =
-      D.Awaiting_operator (D.Backlog_read { live_request_ids = missing })
+      D.Awaiting_operator (D.Backlog_read { live = List.map complete missing })
     in
     let queue = D.requests_json ~base_path ~limit:2 ~view () in
     Alcotest.(check int) "the count is all of them" 5
@@ -973,8 +1007,10 @@ let () =
         test_offset_pages_the_history_without_overlap;
     ];
     "queue_view", [
-      Alcotest.test_case "awaiting tasks name the request they wait on" `Quick
-        test_awaiting_request_ids_reads_the_id_the_task_waits_on;
+      Alcotest.test_case "awaiting tasks name the request and intent they wait on" `Quick
+        test_awaiting_tasks_read_the_id_and_intent_the_task_waits_on;
+      Alcotest.test_case "the queue row says which verdict it waits on" `Quick
+        test_the_queue_row_says_which_verdict_it_waits_on;
       Alcotest.test_case "the queue joins on that request, not on status" `Quick
         test_awaiting_view_joins_on_the_request_the_task_waits_on;
       Alcotest.test_case "an id with no record is reported, not dropped" `Quick

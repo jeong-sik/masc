@@ -1139,10 +1139,9 @@ let draw_ask_questions buf cols (state : state) ~budget =
     | Ask_answering { aam_ask_id } -> Some aam_ask_id
     | Ask_browsing -> None
   in
-  match state.asks_snapshot with
+  match Masc_tui_types.approvals_open_questions state with
   | None -> ()
-  | Some snapshot -> (
-      let open_rows = Ask_projection.open_rows snapshot in
+  | Some open_rows -> (
       box_divider buf cols;
       box_line buf cols
         (Printf.sprintf "  %s%s[?] Questions waiting on you (%d) · a:open answers%s" Ansi.bold (Theme.warn ())
@@ -1386,7 +1385,12 @@ let render_approvals (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let count = List.length approvals in
+  (* The same population the tab badge and the Overview row count: the
+     approval rows plus the open questions. This title counted the approval
+     rows alone, so an operator who came here from a badge of 1 was met with
+     "(0)" and had to find the question block further down to learn what the
+     badge had been counting. *)
+  let count = Masc_tui_types.approvals_surface_pending state in
   (* The count is what is on screen. It used to be the pending-confirm queue's
      own visible/total pair, and that queue is one of the three lists this
      screen draws: with seven Gate rows waiting and no confirm entries, the
@@ -1422,6 +1426,10 @@ let render_approvals (state : state) =
      with nothing in them, a bracket inside the parenthesis, and a total the
      one kind that did have rows had already said. With one kind its count is
      the total; with more, the total leads and the kinds follow it. *)
+  (* The questions a Keeper is waiting on are the fourth kind this surface
+     answers, and the only one whose word takes a plural, so it is built
+     beside the three rather than inside their format. *)
+  let question_count = Masc_tui_types.approvals_open_question_count state in
   let count_text =
     let kinds =
       [ (Theme.warn (), List.length state.keeper_tool_approvals, "held")
@@ -1433,6 +1441,15 @@ let render_approvals (state : state) =
              else
                Some
                  (Printf.sprintf "%s%d %s%s" style kind_count word Ansi.reset))
+    in
+    let kinds =
+      if question_count = 0 then kinds
+      else
+        kinds
+        @ [ Printf.sprintf "%s%s%s" (Theme.warn ())
+              (Masc_tui_message_layout.count_noun question_count "question")
+              Ansi.reset
+          ]
     in
     match kinds with
     | [] -> string_of_int count
@@ -2037,10 +2054,24 @@ let render_board_list (state : state) =
      read that failed, "(0)" read as a board with nothing on it. A count
      already on screen stays when a later refresh fails: those posts are
      still the last reading. *)
+  (* What the board holds behind this page: the census over the whole board,
+     or over the hearth being read when one is narrowed, since the listing
+     itself is narrowed server-side. A hearth the census has not counted
+     leaves the page to speak for itself. *)
+  let holding =
+    match state.board_hearth with
+    | Some hearth -> List.assoc_opt hearth state.board_hearths
+    | None ->
+        (match state.board_hearths with
+         | [] -> None
+         | census ->
+             Some (List.fold_left (fun sum (_, count) -> sum + count) 0 census))
+  in
   let header = Printf.sprintf "%s %s%s  %s  %s"
     (screen_title " MASC Board")
     (match state.board_posts, board_list_page state ~error:board_list_error with
-     | _ :: _, _ | [], Page_empty -> Printf.sprintf "(%d)" count
+     | _ :: _, _ | [], Page_empty ->
+         board_list_count_text ~loaded:count ~holding
      | [], (Page_unread | Page_failed) ->
          title_missing_reading ~error:board_list_error)
     hearth timestamp
@@ -2776,7 +2807,7 @@ let render_planning_list (state : state) =
   box_bottom tail cols;
   Buffer.add_string tail
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
   let tail_rows = count_frame_lines tail in
 
   let now_unix = Unix.gettimeofday () in
@@ -3403,7 +3434,7 @@ let render_planning_detail (state : state)
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints state.view));
+         (Masc_tui_keys.footer_hints ~detail_open:true state.view));
   finish_surface state ~clamped:(Planning_detail_scroll scroll)
       ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
 
@@ -3520,7 +3551,7 @@ let render_schedule_list (state : state) =
     (connection_badge state) in
 
   surface_chrome state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
-    ~hints:(Masc_tui_keys.footer_hints Schedules)
+    ~hints:(Masc_tui_keys.footer_hints ~detail_open:false Schedules)
     ~body:(fun ~budget c ->
   (match state.schedules with
    | None ->
@@ -4073,7 +4104,7 @@ let render_schedule_detail (state : state) (row : schedule_row) =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints Schedules));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true Schedules));
   finish_surface state ~clamped:(Schedule_detail_scroll scroll)
     ~surface_key:"schedule-detail" ~rows:terminal_rows ~cols buf
 
@@ -4532,15 +4563,17 @@ let render_keeper_list (state : state) =
        let failing_entry =
          Option.to_list (Masc_tui_fleet_line.failing_text fleet)
        in
+       let entry label n =
+         if n > 0 then [ Printf.sprintf "%s %d" label n ] else []
+       in
+       (* The owner count keeps its place in the row and brings its own
+          shortfall, which is the only reading that says the scan came up
+          short: an unread Keeper does not move the fleet status. *)
        let counts =
          failing_entry
-         @ (List.filter (fun (_, n) -> n > 0)
-              [ ("paused", fleet.fs_paused_count)
-              ; ( "task owner without fiber"
-                , fleet.fs_active_task_owner_without_fiber_count )
-              ; ("awaiting verdict", fleet.fs_completion_authority_pending_count)
-              ]
-            |> List.map (fun (label, n) -> Printf.sprintf "%s %d" label n))
+         @ entry "paused" fleet.fs_paused_count
+         @ Option.to_list (Masc_tui_fleet_line.owner_scan_text fleet)
+         @ entry "awaiting verdict" fleet.fs_completion_authority_pending_count
        in
        if counts <> [] then
          box_line buf cols
@@ -6365,16 +6398,6 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
      row it says the coverage, and on an unattached one it says the service
      is already in use somewhere, which is the row an operator is most likely
      to have lost track of. *)
-  let switch_of id =
-    List.find_map
-      (function
-        | Masc_tui_types.Identity_declared
-            { idp_id; idp_enabled; idp_switch_problem; _ }
-          when String.equal idp_id id -> Some (idp_enabled, idp_switch_problem)
-        | Masc_tui_types.Identity_declared _ | Masc_tui_types.Identity_unreadable _
-          -> None)
-      providers
-  in
   let also_on id =
     List.find_map
       (function
@@ -6389,24 +6412,22 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     List.mapi
       (fun index (id, label) ->
         (* Attached-and-offering-nothing is a third state. Reading it as "not
-           attached" would tell an operator to consent again for no reason. *)
+           attached" would tell an operator to consent again for no reason.
+           The reading itself is [Masc_tui_types.identity_row_state], which
+           is also what the summary above the list counts, so the line and
+           the rows cannot disagree about what this Keeper holds. *)
         let row_state =
-          match tools_of id with
-          | None -> Ansi.dim ^ "not attached" ^ Ansi.reset
-          | Some [] -> Ansi.dim ^ "attached, no tools" ^ Ansi.reset
-          | Some names -> (
-              (* The switch outranks the tool count: a service an operator
-                 turned off is handing this keeper nothing, however many
-                 tools its catalog names, and an unreadable switch store
-                 must not render as on. *)
-              match switch_of id with
-              | Some (_, Some _) ->
-                  (Theme.bad ()) ^ "switch unreadable" ^ Ansi.reset
-              | Some (Some false, None) ->
-                  (Theme.warn ()) ^ "off" ^ Ansi.reset
-              | Some ((Some true | None), None) | None ->
-                  Printf.sprintf "%s%s%s" (Theme.ok ())
-                    (Masc_tui_message_layout.count_noun (List.length names) "tool") Ansi.reset)
+          match Masc_tui_types.identity_row_state ~providers ~id with
+          | Masc_tui_types.Identity_not_attached ->
+              Ansi.dim ^ "not attached" ^ Ansi.reset
+          | Identity_attached_without_tools ->
+              Ansi.dim ^ "attached, no tools" ^ Ansi.reset
+          | Identity_switch_unreadable ->
+              (Theme.bad ()) ^ "switch unreadable" ^ Ansi.reset
+          | Identity_switched_off -> (Theme.warn ()) ^ "off" ^ Ansi.reset
+          | Identity_attached tools ->
+              Printf.sprintf "%s%s%s" (Theme.ok ())
+                (Masc_tui_message_layout.count_noun tools "tool") Ansi.reset
         in
         (* The row the arrows are on is marked rather than merely numbered:
            past nine the number is no longer a key an operator can press,
@@ -6523,7 +6544,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   in
   if numbered = [] && rejected = [] && state.identity_filter <> None then
     Masc_tui_types.identity_preamble
-      ~keeper:(Terminal_text.single_line k.k_name)
+      ~summary:(Masc_tui_types.identity_summary ~providers ~query)
       ~notice:
         (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)
@@ -6532,7 +6553,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
   else
     Masc_tui_types.identity_preamble
-      ~keeper:(Terminal_text.single_line k.k_name)
+      ~summary:(Masc_tui_types.identity_summary ~providers ~query)
       ~notice:
         (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)
@@ -6921,15 +6942,17 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
             | Connector_stale -> "STALE"
           in
           let connection_label (connector : Tui_decode.connector) =
+            let word =
+              Masc_tui_connector_state.badge_word connector.cn_connection
+            in
             match connector.cn_connection with
             | Tui_decode.Connector_connected ->
-                (Theme.ok ()) ^ "● CONNECTED" ^ Ansi.reset
+                (Theme.ok ()) ^ "● " ^ word ^ Ansi.reset
             | Connector_connected_unavailable ->
-                (Theme.warn ()) ^ "● CONNECTED / UNAVAILABLE" ^ Ansi.reset
-            | Connector_disconnected ->
-                (Theme.bad ()) ^ "● DISCONNECTED" ^ Ansi.reset
-            | Connector_offline -> Ansi.dim ^ "○ UNAVAILABLE" ^ Ansi.reset
-            | Connector_stale -> (Theme.warn ()) ^ "● STALE" ^ Ansi.reset
+                (Theme.warn ()) ^ "● " ^ word ^ Ansi.reset
+            | Connector_disconnected -> (Theme.bad ()) ^ "● " ^ word ^ Ansi.reset
+            | Connector_offline -> Ansi.dim ^ "○ " ^ word ^ Ansi.reset
+            | Connector_stale -> (Theme.warn ()) ^ "● " ^ word ^ Ansi.reset
           in
           let transport_rows =
             List.mapi
@@ -7036,16 +7059,21 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                     (match selected_binding with
                      | None -> "(no binding selected)"
                      | Some binding -> binding_reference binding)
-                ; Printf.sprintf "  %-18s %s · %s" "Connection"
+                  (* The badge is read from the status the row would print
+                     beside it ([decode_connector_connection] takes status,
+                     available and connected), so the word never differs from
+                     the badge and the row said the same thing twice. *)
+                ; Printf.sprintf "  %-18s %s" "Connection"
                     (connection_label connector)
-                    (Terminal_text.single_line connector.cn_status)
                 ; Printf.sprintf "  %-18s %s" "MASC API"
                     (Printf.sprintf "%s:%d"
                        Masc_network_defaults.masc_http_loopback_peer state.port)
                 ; Printf.sprintf "  %-18s %s" "Channel type"
                     (Terminal_text.single_line_or ~default:"-" connector.cn_channel)
                 ]
-                @ optional_row "Runtime state" runtime_state
+                @ optional_row "Runtime state"
+                    (Masc_tui_connector_state.runtime_state_to_draw
+                       ~connection:connector.cn_connection runtime_state)
                 @ optional_row "Status source" connector.cn_status_source
                 @ optional_row "Remote endpoint" connector.cn_endpoint
                 @ optional_row "Status file" connector.cn_status_path
@@ -8042,6 +8070,11 @@ let render_verification_list (state : state) =
             ^ Render_schedule.verification_row ~submitter_width ~title_width
                 { Render_schedule.vrow_task =
                     Terminal_text.single_line r.vr_task_id
+                ; vrow_verdict =
+                    (match r.vr_intent with
+                     | Some intent ->
+                         Masc_domain.verification_intent_to_string intent
+                     | None -> "")
                 ; vrow_submitted_by =
                     Terminal_text.single_line r.vr_submitted_by
                 ; vrow_evidence = evidence
@@ -8143,7 +8176,7 @@ let render_verification_list (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
   finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
 
 let verification_detail_lines ~width
@@ -8176,6 +8209,12 @@ let verification_detail_lines ~width
   ; field "Task" request.vr_task_id
   ; field "Title" request.vr_task_title
   ; field "Submitted by" request.vr_submitted_by
+  ; field "Waits on"
+      (match request.vr_intent with
+       | Some Masc_domain.Cancel_task ->
+           "cancel -- only an operator's verdict clears it"
+       | Some Masc_domain.Complete_task -> "complete"
+       | None -> "not joined (history view)")
     (* In the terminal's zone, like every other Created on a detail. This
        one printed the server's RFC 3339 text, offset and all, under a header
        clock in local time. *)
@@ -8327,7 +8366,9 @@ let render_verification_detail (state : state) request =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf "%s  %s" (Masc_tui_keys.footer_hints state.view) position));
+         (Printf.sprintf "%s  %s"
+            (Masc_tui_keys.footer_hints ~detail_open:true state.view)
+            position));
   finish_surface state
     ~clamped:(Verification_detail_scroll scroll)
     ~surface_key:"verification-detail" ~rows:terminal_rows ~cols buf
@@ -8600,7 +8641,8 @@ let render_harness_list (state : state) =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view ^ link_hint));
+       ~hints:
+         (Masc_tui_keys.footer_hints ~detail_open:false state.view ^ link_hint));
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
 (* Which goals the judged task serves, and what those goals are aiming at.
@@ -8786,10 +8828,14 @@ let render_harness_detail (state : state) verdict =
     end
   in
   Buffer.add_string buf
+    (* The key table, not a literal. This row was written out here, and what
+       it left out was the pair that answers a ruling -- [y / x] -- on the one
+       screen that exists for reading a ruling in full. It also left out
+       [[ / ]], which the dispatcher answers here and only here. *)
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf
-            "j/k:scroll  PgUp/PgDn:page  Left / Esc:list  Y:copy task  r:refresh  %s"
+         (Printf.sprintf "%s  %s"
+            (Masc_tui_keys.footer_hints ~detail_open:true Masc_tui_types.Harness)
             position));
   finish_surface state ~clamped:(Harness_detail_scroll scroll)
     ~surface_key:"harness-detail" ~rows:terminal_rows ~cols buf
@@ -9720,9 +9766,19 @@ let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
     | [] -> "none assigned"
     | names -> String.concat ", " names
   in
+  (* The status column has room for the word and not for the cause, and a
+     repository whose clone or fetch failed keeps that cause in its status.
+     The row says "error" and this says what it was; every other status has
+     nothing here to add. *)
+  let failure =
+    match Masc.Tui_decode.repository_status_reason repo.rp_status with
+    | None -> []
+    | Some reason -> wrap "Error" reason
+  in
   wrap "Path" repo.rp_resolved_local_path
   @ stored_path
   @ wrap "Keepers" keepers
+  @ failure
 
 let render_workspace_activity (state : state) repo_id =
   let terminal_rows, cols = get_terminal_size () in
@@ -9862,7 +9918,9 @@ let render_repository_list (state : state) =
                         Terminal_text.single_line r.rp_name
                     ; wrow_branch =
                         Terminal_text.single_line r.rp_default_branch
-                    ; wrow_status = Terminal_text.single_line r.rp_status
+                    ; wrow_status =
+                        Terminal_text.single_line
+                          (Masc.Tui_decode.repository_status_word r.rp_status)
                     ; wrow_sync = (if r.rp_auto_sync then "auto" else "manual")
                     ; wrow_path =
                         Terminal_text.single_line r.rp_resolved_local_path
@@ -12133,6 +12191,8 @@ let render_acting (state : state) =
       | Masc_tui_observer.Keeper_chat_stream_frame _
       | Masc_tui_observer.Keeper_waiting_inventory_changed _
       | Masc_tui_observer.Fusion_run_status _
+      | Masc_tui_observer.Internal_agent_runs_changed
+      | Masc_tui_observer.Lane_resource _
       | Masc_tui_observer.Snapshot _
       | Masc_tui_observer.Other _ ->
           None
@@ -14280,24 +14340,11 @@ let render_themes (state : state) =
        ~hints:(Masc_tui_keys.footer_hints_config ~pane:state.config_pane));
   finish_surface state ~surface_key:"themes" ~rows:terminal_rows ~cols buf
 
-(* The model knobs sit in different tables -- [reasoning-effort] and
-   [temperature] under [models.NAME], [max-tokens] under
-   [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
-   bottom never puts them side by side. On 2026-08-29 nine of ten
-   ollama_cloud bindings carried neither; a request with no reasoning_effort
-   has Ollama turn thinking on by itself, and one keeper spent a turn
-   producing 2,000 characters of reasoning and no answer. This pane is the
-   same source the runtime.toml pane shows, arranged so a missing knob is a
-   column and not an absence.
-
-   Read-only. Editing lands in the runtime.toml pane next door, which already
-   has the preview-checked write path. *)
 (* Where the config file being read lives, for the title row beside the strip
-   that already names the file. Said from the server's masc root: the prefix is
-   the same for every screen in the session, the Config pane's identity row
-   names it, and spending it here cut the reading in the middle -- the row read
-   "/Users/d\xe2\x80\xa6onfig/runtime.toml". Until the server has said where
-   its root is, the whole path is the only honest reading. *)
+   that already names the file. Said from the server's masc root, which is the
+   same for every screen in the session and named on the Config pane's identity
+   row. Until the server has said where its root is, the whole path is the only
+   honest reading. *)
 let config_path_note (state : state) =
   match state.runtime_config_view with
   | Some reading ->
@@ -14312,6 +14359,18 @@ let config_path_note (state : state) =
   | None ->
       Ansi.dim ^ title_missing_reading ~error:state.runtime_config_view_error ^ Ansi.reset
 
+(* The model knobs sit in different tables -- [reasoning-effort] and
+   [temperature] under [models.NAME], [max-tokens] under
+   [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
+   bottom never puts them side by side. On 2026-08-29 nine of ten
+   ollama_cloud bindings carried neither; a request with no reasoning_effort
+   has Ollama turn thinking on by itself, and one keeper spent a turn
+   producing 2,000 characters of reasoning and no answer. This pane is the
+   same source the runtime.toml pane shows, arranged so a missing knob is a
+   column and not an absence.
+
+   Read-only. Editing lands in the runtime.toml pane next door, which already
+   has the preview-checked write path. *)
 let render_config_models (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows_avail = Masc_tui_types.surface_body_rows state ~terminal_rows in

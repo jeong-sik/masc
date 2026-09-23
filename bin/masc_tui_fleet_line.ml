@@ -43,3 +43,27 @@ let failing_text (fleet : Tui_decode.fleet_safety) =
                 (List.map
                    (fun (label, count) -> Printf.sprintf "%s %d" label count)
                    classes)))
+
+(* The task owners the fleet has no fiber for, and how much of that reading is
+   missing. A Keeper whose profile does not load is a scan error: its tasks are
+   left out of the count, and only a backlog failure moves the fleet status off
+   "ok", so an unread Keeper left the row saying nothing at all. The count is
+   drawn beside its own shortfall rather than alone.
+
+   [None] where there is neither: a zero over a complete reading is a row spent
+   saying nothing happened. *)
+let owner_scan_text (fleet : Tui_decode.fleet_safety) =
+  let owners = fleet.fs_active_task_owner_without_fiber_count in
+  let unread = fleet.fs_active_task_owner_scan_error_count in
+  if owners = 0 && unread = 0 then None
+  else if unread = 0 then
+    Some (Printf.sprintf "task owner without fiber %d" owners)
+  else
+    (* [+] because the number is a lower bound, not a total: the unread
+       sources held whatever they held. The Changes pane spells an open
+       record's call count the same way for the same reason. Without it a
+       scan that read nothing said "0", which reads as "there are none"
+       while the row's own parenthesis says nobody looked. *)
+    Some
+      (Printf.sprintf "task owner without fiber %d+ (%s unread)" owners
+         (Masc_tui_message_layout.count_noun unread "source"))

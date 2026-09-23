@@ -1273,6 +1273,7 @@ def overview_event_http_fixtures() -> HttpFixtures:
                     "todo": 0,
                     "claimed": 0,
                     "in_progress": 0,
+                    "awaiting_verification": 0,
                     "done": 0,
                     "cancelled": 0,
                 },
@@ -1395,6 +1396,7 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
                 "todo": 0,
                 "claimed": 0,
                 "in_progress": 0,
+                "awaiting_verification": 0,
                 "done": 0,
                 "cancelled": 0,
             },
@@ -13114,7 +13116,7 @@ def fusion_list_detail_interaction(
         send_and_wait(process, master_fd, output, b"\r", b"EVALUATOR VERDICT")
         # The heading precedes asynchronous task/goal enrichment. Inspect one
         # completed screen after both the linked goal and footer are present.
-        observed = (b"masc://planning/goal-ssim-501", b"Left / Esc:list")
+        observed = (b"masc://planning/goal-ssim-501", b"Left / Esc:back")
         for needle in observed:
             wait_for_output(process, master_fd, output, needle,
                             start=verdict_start, timeout=10.0)
@@ -13137,8 +13139,16 @@ def fusion_list_detail_interaction(
             b"masc://planning/goal-ssim-501",
             # #35734 spells hint keys the way the key table does: "Left", not
             # "left"; and with the table's spaces, which is the spelling the
-            # footer's pin reads.
-            b"Left / Esc:list",
+            # footer's pin reads. The label is the table's own ("back") now
+            # that this footer is read from the table rather than written out
+            # in the renderer, where it read "list".
+            b"Left / Esc:back",
+            # #36652: the hand-written row left these two out. [ / ] is
+            # answered here and only here, and the pair that answers a ruling
+            # was missing from the one screen that exists for reading a ruling
+            # in full. The pair is pinned, so a narrow footer keeps it.
+            b"[ / ]:previous / next",
+            b"y / x:agree / overrule",
         ):
             if needle not in verdict_plain:
                 raise AssertionError(
@@ -16895,6 +16905,57 @@ def a_failing_keepers_open_turn_reads_failing(
     os.write(master_fd, b"q")
 
 
+def lanes_press_selects_the_lane_under_the_pointer(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """A press lands on the lane drawn under it.
+
+    The hit test turns a terminal row into a lane index by subtracting the
+    rows drawn above the list. That count and the unit test holding it were
+    each written by hand, agreed with each other, and both said five while
+    seven were drawn -- so a press on the first lane opened the third. Here
+    the row comes off the screen the binary just painted, which is the only
+    reading that cannot drift from it.
+
+    The pointer goes to the last lane rather than the first: the cursor
+    starts on the first, so selecting it again would pass without the press
+    doing anything."""
+    palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=220,
+        needle=b"Standalone LLM lanes",
+        controls=(FULL_REDRAW,),
+    )
+    drain_until_quiet(process, master_fd, output)
+    drawn = bytes(output)
+    row = screen_row_of(screen_rows(drawn), b"Verifier")
+    if row < 0:
+        raise AssertionError(
+            f"Lanes drew no Verifier row: {screen_text(drawn).decode('utf-8')!r}"
+        )
+    # SGR reports carry the column before the row, and both count from one --
+    # the same numbering [screen_rows] keys by.
+    press = b"\x1b[<0;6;%dM" % row
+    release = b"\x1b[<0;6;%dm" % row
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        press + release,
+        b"Reviews Task completion and Goal proof evidence.",
+    )
+    # Exit is armed: the first press asks, and the harness sends the second.
+    os.write(master_fd, b"q")
+
+
 def run_keeper_lanes_regression(executable: str) -> None:
     fixtures = keeper_runtime_http_fixtures()
     gate = GatedHttpResponse(
@@ -16942,6 +17003,17 @@ def run_keeper_lanes_regression(executable: str) -> None:
         description="Keepers operations and Standalone-only Lanes",
         interact=keeper_lanes_ia_interaction(gate, fixtures),
         http_fixtures=fixtures,
+    )
+    # Its own copy, with the gate replaced by a plain answer: this walk reads
+    # Standalone rows only, and a gate another scenario has to release would
+    # make it depend on running after that one.
+    pointer_fixtures = dict(fixtures)
+    pointer_fixtures[KEEPER_LANES_PATH] = keeper_lanes_response([])
+    run_terminal_scenario(
+        executable,
+        description="a press on a Standalone lane row selects that lane",
+        interact=lanes_press_selects_the_lane_under_the_pointer,
+        http_fixtures=pointer_fixtures,
     )
 
 

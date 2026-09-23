@@ -646,7 +646,8 @@ let test_harness_output_decoding () =
        (match r.cost_usd with
         | Some c -> check (float 1e-6) "cost" 0.005 c
         | None -> fail "cost missing")
-     | Usage_missing _ -> fail "expected reported usage");
+     | Usage_missing _ -> fail "expected reported usage"
+     | Usage_malformed _ -> fail "expected reported usage");
     check bool "scope matches" true (obs.usage_scope = Some Cumulative_request_snapshot)
   | Error err -> fail ("harness row decode failed: " ^ err)
 ;;
@@ -676,15 +677,17 @@ let test_roadmap_fixture_string_cost_decoding () =
        (match r.cost_usd with
         | Some c -> check (float 1e-6) "cost float" 0.01 c
         | None -> fail "cost float missing")
-     | Usage_missing _ -> fail "expected reported usage");
+     | Usage_missing _ -> fail "expected reported usage"
+     | Usage_malformed _ -> fail "expected reported usage");
     check bool "scope parsed from 'scope' key" true (obs.usage_scope = Some Per_request)
   | Error err -> fail ("roadmap fixture decode failed: " ^ err)
 ;;
 
 let test_usage_non_object_guard () =
-  (* Regression (task-1540): a malformed "usage" value (string) must not
-     kill the whole row with Type_error; decode degrades to the flat
-     top-level fallback instead. *)
+  (* Regression (task-1540): a malformed "usage" value must not kill the
+     whole row with Type_error. A string/list/number is corruption, not the
+     flat format, so the row survives with [Usage_malformed] and the damage
+     stays visible instead of reading as "usage absent". *)
   let json_str =
     {|{
       "case_id": "success",
@@ -701,24 +704,36 @@ let test_usage_non_object_guard () =
    | Ok obs ->
      check string "case_id" "success" obs.case_id;
      (match obs.usage with
-      | Usage_reported r ->
-        check int "input tokens" 77 r.input_tokens;
-        check int "output tokens" 12 r.output_tokens;
-        (match r.cost_usd with
-         | Some c -> check (float 1e-6) "cost" 0.02 c
-         | None -> fail "cost missing")
-      | Usage_missing reason ->
-        fail ("expected flat fallback usage, got missing: " ^ reason))
+      | Usage_malformed raw ->
+        check string "the corrupt value is carried verbatim" "\"n/a\""
+          (Yojson.Safe.to_string raw)
+      | Usage_reported _ | Usage_missing _ ->
+        fail "a string usage must decode as malformed, not as usage")
    | Error err -> fail ("non-object usage row decode failed: " ^ err));
-  (* A row with no usage object and no top-level tokens still decodes as
-     Usage_missing instead of raising. *)
+  (* A list is corruption too, and the row still survives. *)
   let json2 = Yojson.Safe.from_string {|{"case_id": "success", "run_index": 3, "usage": []}|} in
-  match run_observation_of_json json2 with
+  (match run_observation_of_json json2 with
+   | Ok obs ->
+     (match obs.usage with
+      | Usage_malformed _ -> ()
+      | Usage_reported _ | Usage_missing _ ->
+        fail "a list usage must decode as malformed")
+   | Error err -> fail ("usage-less row decode failed: " ^ err));
+  (* The flat format is the one that never carried a "usage" object: absent
+     or null, with the tokens at the top level. That still reports. *)
+  let json3 =
+    Yojson.Safe.from_string
+      {|{"case_id": "success", "run_index": 4, "input_tokens": 77, "output_tokens": 12, "cost_usd": 0.02}|}
+  in
+  match run_observation_of_json json3 with
   | Ok obs ->
     (match obs.usage with
-     | Usage_missing _ -> ()
-     | Usage_reported _ -> fail "expected missing usage for token-less row")
-  | Error err -> fail ("usage-less row decode failed: " ^ err)
+     | Usage_reported r ->
+       check int "flat input tokens" 77 r.input_tokens;
+       check int "flat output tokens" 12 r.output_tokens
+     | Usage_missing _ | Usage_malformed _ ->
+       fail "an absent usage with top-level tokens is the flat format")
+  | Error err -> fail ("flat-format row decode failed: " ^ err)
 ;;
 
 let test_roundtrip_observation () =

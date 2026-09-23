@@ -30,11 +30,9 @@ let extract_repo_id_for_sync path =
 
 let timestamp_json value = `Intlit (Int64.to_string value)
 
-let status_json = function
-  | Repo_manager_types.Active -> ("active", None)
-  | Paused -> ("paused", None)
-  | Cloning -> ("cloning", None)
-  | Error msg -> ("error", Some msg)
+let status_json status =
+  ( Repo_manager_types.status_wire_name status
+  , Repo_manager_types.status_error_message status )
 
 let git_status_json ~base_path (repo : Repo_manager_types.repository) =
   let abs_local_path = Repo_store.local_path ~base_path repo in

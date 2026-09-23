@@ -19,23 +19,26 @@ let wire_name = function
   | Release_confirmed -> "masc.lane.resource.release_confirmed"
   | Release_incomplete -> "masc.lane.resource.release_incomplete"
 
+let all = [ Acquired; Acquire_failed; Release_confirmed; Release_incomplete ]
+
 let optional = function Some value -> `String value | None -> `Null
 
+let event lifecycle (resource : resource) =
+  Agent_core.Event_bus.mk_event
+    ~correlation_id:resource.instance_id
+    ~run_id:resource.run_id
+    (Agent_core.Event_bus.Custom
+       ( wire_name lifecycle
+       , `Assoc
+           [ ("instance_id", `String resource.instance_id)
+           ; ("run_id", `String resource.run_id)
+           ; ("package_id", `String resource.package_id)
+           ; ("package_revision", `String resource.package_revision)
+           ; ("container_id", optional resource.container_id)
+           ; ("detail", optional resource.detail) ] ))
+
 let publish lifecycle (resource : resource) =
-  let event =
-    Agent_core.Event_bus.mk_event
-      ~correlation_id:resource.instance_id
-      ~run_id:resource.run_id
-      (Agent_core.Event_bus.Custom
-         ( wire_name lifecycle
-         , `Assoc
-             [ ("instance_id", `String resource.instance_id)
-             ; ("run_id", `String resource.run_id)
-             ; ("package_id", `String resource.package_id)
-             ; ("package_revision", `String resource.package_revision)
-             ; ("container_id", optional resource.container_id)
-             ; ("detail", optional resource.detail) ] ))
-  in
+  let event = event lifecycle resource in
   match Event_bus_slots.get_masc () with
   | Some bus -> Runtime_event_bus.publish bus event
   | None ->

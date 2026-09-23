@@ -3012,7 +3012,7 @@ let render_keeper_message (state : state) =
            | Working ->
                let heading =
                  if Keeper_chat_transcript.attempt live > 0 then
-                   "FAILOVER IN PROGRESS"
+                   "IN PROGRESS ON NEXT CANDIDATE"
                  else
                    "IN PROGRESS"
                in

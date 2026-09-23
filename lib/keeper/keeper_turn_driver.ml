@@ -95,10 +95,9 @@ let selected_runtime_result ?official_client_settlement (runtime : Runtime.t) ~l
     result
 ;;
 
-(* Whether the candidate answered at all. An attempt that yielded before any
-   provider turn completed -- the pre-first-token yield that
-   [Runtime_agent.yielded_pre_first_token] builds when a person queues behind
-   a silent provider -- did not, so it is no evidence the candidate is back. *)
+(* Whether the candidate answered at all. An attempt that stopped before any
+   provider turn completed did not, so it is no evidence the candidate is
+   back. *)
 let run_result_answered (run_result : Runtime_agent.run_result) =
   match run_result.Runtime_agent.stop_reason with
   | Runtime_agent.Completed -> true
@@ -907,9 +906,16 @@ let attempt_runtime_candidates
                 | Keeper_runtime_failure_route.Refusal_body_not_received
                 | Keeper_runtime_failure_route.Generation_repeated
                 | Keeper_runtime_failure_route.Attempt_rejected
-                | Keeper_runtime_failure_route.Provider_reported_failure )
+                | Keeper_runtime_failure_route.Provider_reported_failure
+                | Keeper_runtime_failure_route.Request_refused
+                | Keeper_runtime_failure_route.Provider_wire_defect )
             } ->
           ()
+        (* A 5xx the provider called permanent failed this candidate without
+           an answer, the same fact a transient 5xx records. *)
+        | Keeper_runtime_failure_route.Rotate_now
+            { rotate = Keeper_runtime_failure_route.Server_error_not_transient } ->
+          note_failed_attempt Runtime_candidate_backpressure.Server_error
         (* The turn's input or MASC itself failed; another candidate would not
            do better, so this is no evidence about this one. *)
         | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> ());
@@ -1010,6 +1016,12 @@ let attempt_runtime_candidates
        then lane_terminal (this_candidate terminal_error)
        else if retry_admitted && error_is_retryable
        then loop ~observed_overflow ~repeated_models (idx + 1) rest
+       else if Keeper_internal_error.is_preempted_before_first_token error
+       then
+         (* A person queued behind this turn (#38094). An overflow an earlier
+            candidate saw must not replace it: the turn yields, it does not
+            fail for capacity. *)
+         lane_terminal (this_candidate error)
        else if is_last
        then (
          (* Lane fully exhausted: an overflow seen anywhere in the rotation

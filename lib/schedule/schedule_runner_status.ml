@@ -6,7 +6,6 @@ type tick_counts =
   ; dispatch_failed : int
   ; dispatch_unsupported : int
   ; dispatch_start_rejected : int
-  ; dispatch_deferred : int
   ; wake_enqueued : int
   ; wake_skipped_no_keeper : int
   ; wake_skipped_missing_schedule : int
@@ -48,6 +47,7 @@ type snapshot =
   ; last_duration_sec : float option
   ; last_counts : tick_counts option
   ; totals : tick_counts
+  ; held : Schedule_runner.wake_signal list
   }
 
 let zero_counts : tick_counts =
@@ -58,7 +58,6 @@ let zero_counts : tick_counts =
   ; dispatch_failed = 0
   ; dispatch_unsupported = 0
   ; dispatch_start_rejected = 0
-  ; dispatch_deferred = 0
   ; wake_enqueued = 0
   ; wake_skipped_no_keeper = 0
   ; wake_skipped_missing_schedule = 0
@@ -77,7 +76,6 @@ let add_counts (left : tick_counts) (right : tick_counts) : tick_counts =
   ; dispatch_unsupported = left.dispatch_unsupported + right.dispatch_unsupported
   ; dispatch_start_rejected =
       left.dispatch_start_rejected + right.dispatch_start_rejected
-  ; dispatch_deferred = left.dispatch_deferred + right.dispatch_deferred
   ; wake_enqueued = left.wake_enqueued + right.wake_enqueued
   ; wake_skipped_no_keeper = left.wake_skipped_no_keeper + right.wake_skipped_no_keeper
   ; wake_skipped_missing_schedule =
@@ -104,6 +102,7 @@ let empty =
   ; last_duration_sec = None
   ; last_counts = None
   ; totals = zero_counts
+  ; held = []
   }
 ;;
 
@@ -126,25 +125,16 @@ let tick_counts_of_result
       ~(wake_enqueue_counts : wake_enqueue_counts)
       (result : Schedule_runner.tick_result)
   =
-  let ( dispatch_succeeded
-      , dispatch_failed
-      , dispatch_unsupported
-      , dispatch_start_rejected
-      , dispatch_deferred )
-    =
+  let dispatch_succeeded, dispatch_failed, dispatch_unsupported, dispatch_start_rejected =
     List.fold_left
-      (fun (succeeded, failed, unsupported, start_rejected, deferred)
+      (fun (succeeded, failed, unsupported, start_rejected)
         (dispatch : Schedule_runner.dispatch_result) ->
          match dispatch.status with
-         | Dispatch_succeeded -> succeeded + 1, failed, unsupported, start_rejected, deferred
-         | Dispatch_failed -> succeeded, failed + 1, unsupported, start_rejected, deferred
-         | Dispatch_unsupported ->
-           succeeded, failed, unsupported + 1, start_rejected, deferred
-         | Dispatch_start_rejected ->
-           succeeded, failed, unsupported, start_rejected + 1, deferred
-         | Dispatch_deferred ->
-           succeeded, failed, unsupported, start_rejected, deferred + 1)
-      (0, 0, 0, 0, 0)
+         | Dispatch_succeeded -> succeeded + 1, failed, unsupported, start_rejected
+         | Dispatch_failed -> succeeded, failed + 1, unsupported, start_rejected
+         | Dispatch_unsupported -> succeeded, failed, unsupported + 1, start_rejected
+         | Dispatch_start_rejected -> succeeded, failed, unsupported, start_rejected + 1)
+      (0, 0, 0, 0)
       result.dispatches
   in
   { due_changed = result.due_changed
@@ -154,7 +144,6 @@ let tick_counts_of_result
   ; dispatch_failed
   ; dispatch_unsupported
   ; dispatch_start_rejected
-  ; dispatch_deferred
   ; wake_enqueued = wake_enqueue_counts.wake_enqueued
   ; wake_skipped_no_keeper = wake_enqueue_counts.wake_skipped_no_keeper
   ; wake_skipped_missing_schedule =
@@ -187,6 +176,7 @@ let record_tick_ok
     ; last_duration_sec = Some (duration ~started_at ~finished_at)
     ; last_counts = Some counts
     ; totals = add_counts current.totals counts
+    ; held = result.Schedule_runner.held
     })
 ;;
 
@@ -225,7 +215,6 @@ let counts_json (counts : tick_counts) =
       ; "dispatch_failed", `Int counts.dispatch_failed
       ; "dispatch_unsupported", `Int counts.dispatch_unsupported
       ; "dispatch_start_rejected", `Int counts.dispatch_start_rejected
-      ; "dispatch_deferred", `Int counts.dispatch_deferred
       ; "wake_enqueued", `Int counts.wake_enqueued
       ; "wake_skipped_no_keeper", `Int counts.wake_skipped_no_keeper
       ; "wake_skipped_missing_schedule", `Int counts.wake_skipped_missing_schedule
@@ -312,6 +301,17 @@ let snapshot_to_yojson ?now ?stale_after_sec snapshot =
     ; "last_duration_sec", Json_util.float_opt_to_json snapshot.last_duration_sec
     ; "last_counts", option_int_counts_json snapshot.last_counts
     ; "totals", counts_json snapshot.totals
+    ; ( "held"
+      , `List
+          (List.map
+             (fun (signal : Schedule_runner.wake_signal) ->
+                `Assoc
+                  [ ( "occurrence_id"
+                    , `String (Schedule_occurrence_id.to_string signal.occurrence_id) )
+                  ; "schedule_id", `String signal.schedule_id
+                  ; "due_at", `Float signal.due_at
+                  ])
+             snapshot.held) )
     ; ( "stale_after_sec"
       , match stale_after_sec with
         | None -> `Null

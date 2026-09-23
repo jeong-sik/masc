@@ -20,6 +20,8 @@ let origin_sentence = function
       Printf.sprintf "front halved after a refusal (retry %d)" retry
   | Inspector.Carried_evicted_after_refusal { retry } ->
       Printf.sprintf "front evicted after a refusal (retry %d)" retry
+  | Inspector.Carried_turn_start_after_seed_refusal ->
+      "the seed range was refused: front moved to where this turn began"
   | Inspector.Carried_turn_start { end_atom } ->
       (* The fact line ahead of this sentence already says which atom the
          range opens on ([first_atom]); [end_atom] is the completed boundary

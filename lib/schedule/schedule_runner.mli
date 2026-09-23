@@ -24,6 +24,11 @@ type tick_result =
   ; emitted : wake_signal list
   ; rescheduled : int
   ; dispatches : dispatch_result list
+  ; held : wake_signal list
+      (** Due candidates the consumer held back this tick ([defer_wake]):
+          no signal was appended and nothing was dispatched, so they are not
+          dispatch results. A held occurrence keeps its identity from tick to
+          tick until its target consumes the previous one (#37912). *)
   }
 
 and dispatch_status =
@@ -31,7 +36,6 @@ and dispatch_status =
   | Dispatch_failed
   | Dispatch_unsupported
   | Dispatch_start_rejected
-  | Dispatch_deferred
 
 and dispatch_result =
   { occurrence_id : Schedule_occurrence_id.t
@@ -94,6 +98,12 @@ val dispatch_status_to_string : dispatch_status -> string
 val signals_dir : Workspace_utils.config -> string
 
 val wake_signal_of_yojson : Yojson.Safe.t -> (wake_signal, string) result
+
+val newly_held : previous:wake_signal list -> wake_signal list -> wake_signal list
+(** The held occurrences that were not held in [previous], by occurrence
+    identity. A hold is a state that lasts until the target consumes its
+    earlier occurrence, so a caller reports it when it starts rather than on
+    every tick that re-observes it (#37912). *)
 
 val tick :
   ?consumer:consumer ->

@@ -732,6 +732,136 @@ let test_stale_working_value_preserves_a_newer_table_observation () =
   Ledger.Table.For_testing.reset ()
 ;;
 
+(* A turn with no Librarian point opens on its seed (RFC
+   keeper-context-window-in-tokens §13.4). When the provider refuses that
+   range as too large, the turn boundary becomes the turn's front (§10.4) and
+   the same candidate is asked again from it. A later candidate in the same
+   turn opens there instead of on the refused range, and is not asked twice
+   when it refuses the boundary too. An accepted request is what the ledger
+   keeps, so the next turn opens on the boundary. [held] is the turn's slot
+   ([hold_carried_front] / [carried_front_after_refusal]); the front choice
+   ([carried_front]), the composition and the ledger are the turn driver's
+   own; the provider accepts a request that carries at most [limit] atoms. *)
+let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
+  Ledger.Table.For_testing.reset ();
+  let keeper_name = "seed-refused" and session_id = "trace-seed" in
+  let continuity = Some Try_provider.without_snapshot in
+  let run_candidate ~held ~runtime_id ~limit ~boundary history =
+    let digest_at = Window.atom_opening_digest history in
+    let atom_count = List.length history in
+    let working = ref (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id) in
+    let last = ref None and sent = ref [] and resent = ref 0 in
+    let outcome =
+      Try_provider.seed_refusal_sequence
+        ~same_run_retry_authorized:(fun () -> true)
+        ~refused_range:(fun () -> !last)
+        ~turn_start_front:(fun () ->
+          let first_atom = Front.clamp ~atom_count boundary in
+          Option.map
+            (fun front_digest ->
+               { Front.first_atom; front_digest; source = Front.Turn_start_after_seed_refusal })
+            (digest_at first_atom))
+        ~hold_front:(fun seed -> held := Some seed)
+        ~on_turn_start:(fun _ _ -> incr resent)
+        ~attempt:(fun () ->
+          let front, _ =
+            Try_provider.For_testing.carried_front
+              ~ledger:working ~keeper_name ~runtime_id ~session_id ~digest_at
+              ~after_refusal:!held ~cold:(fun () -> None)
+          in
+          let composed =
+            Try_provider.For_testing.compose_carried_model_input
+              ?continuity ~measure_message_bytes:(fun _ -> 1) ~front
+              ~history_digest_at:digest_at ~last_resort:false ~base_path:""
+              ~demote_before:boundary
+              ~turn_boundary:(Front.Turn_boundary { end_atom = boundary })
+              history
+          in
+          let first_atom = composed.Try_provider.projection.Window.dropped_atoms in
+          last := Some (composed.Try_provider.origin, first_atom);
+          sent := first_atom :: !sent;
+          if atom_count - first_atom > limit
+          then Error overflow
+          else (
+            let (_ : Ledger.observation) =
+              Ledger.Table.observe ~keeper_name ~runtime_id ~session_id ~digest_at
+                ~request:
+                  { (request ~first_atom ~atom_count) with
+                    ends = ends_from digest_at ~first_atom ~atom_count }
+                ~usage:
+                  (Some
+                     { Ledger.input_tokens = (atom_count - first_atom) * 100
+                     ; cache_read_input_tokens = 0 })
+            in
+            Ok composed.Try_provider.origin))
+        ()
+    in
+    outcome, List.rev !sent, !resent
+  in
+  let origin_is expected = function
+    | Ok origin -> String.equal (Front.origin_to_string origin) expected
+    | Error _ -> false
+  in
+  (* Turn 1, fresh, on [a]: no seed, the boundary at 0 carries all 8 atoms. *)
+  let first, first_sent, first_resent =
+    run_candidate ~held:(ref None) ~runtime_id:"a" ~limit:10 ~boundary:0 (exchanges ~from:0 4)
+  in
+  check bool "a fresh turn opens at its boundary" true (origin_is "turn_start" first);
+  check (list int) "one request" [ 0 ] first_sent;
+  check int "nothing to resend" 0 first_resent;
+  (* Turn 2, 14 atoms, boundary 8. [a] opens on its ledger's front 0 and is
+     refused; the boundary becomes the turn's front and [a] refuses that too. *)
+  let held = ref None in
+  let history = exchanges ~from:0 7 in
+  let a, a_sent, a_resent = run_candidate ~held ~runtime_id:"a" ~limit:1 ~boundary:8 history in
+  check bool "both of a's requests are refused" true (Result.is_error a);
+  check (list int) "the seed range, then the turn boundary" [ 0; 8 ] a_sent;
+  check int "a resends once" 1 a_resent;
+  check (option int) "the turn holds the boundary" (Some 8)
+    (Option.map (fun (seed : Front.seed) -> seed.first_atom) !held);
+  (* [c] opens on the held boundary; its refusal is not answered again,
+     since a resend would not shrink the range. *)
+  let c, c_sent, c_resent = run_candidate ~held ~runtime_id:"c" ~limit:1 ~boundary:8 history in
+  check bool "c's refusal stands" true (Result.is_error c);
+  check (list int) "c opens on the turn's front, once" [ 8 ] c_sent;
+  check int "c does not resend" 0 c_resent;
+  (* [b] opens on the held boundary, not on the refused range, and answers. *)
+  let b, b_sent, b_resent = run_candidate ~held ~runtime_id:"b" ~limit:10 ~boundary:8 history in
+  check bool "b answers from the turn's front" true (origin_is "turn_start_after_seed_refusal" b);
+  check (list int) "b sends one request from the boundary" [ 8 ] b_sent;
+  check int "b does not resend" 0 b_resent;
+  (* Turn 3 on [b]: its ledger kept that request, so the seed is 8. *)
+  let third, third_sent, _ =
+    run_candidate ~held:(ref None) ~runtime_id:"b" ~limit:10 ~boundary:14 (exchanges ~from:0 9)
+  in
+  check bool "the next turn opens on the ledger" true (origin_is "ledger" third);
+  check (list int) "at the boundary the resend used" [ 8 ] third_sent;
+  (* On one candidate: [a]'s ledger still opens at 0, so turn 3 on [a] is
+     refused, resends from 14 and is accepted; turn 4 opens at 14. *)
+  let held = ref None in
+  let resend, resend_sent, resend_count =
+    run_candidate ~held ~runtime_id:"a" ~limit:10 ~boundary:14 (exchanges ~from:0 9)
+  in
+  check bool "the resend is accepted" true (origin_is "turn_start_after_seed_refusal" resend);
+  check (list int) "the seed range, then the boundary" [ 0; 14 ] resend_sent;
+  check int "one resend" 1 resend_count;
+  let fourth, fourth_sent, fourth_resent =
+    run_candidate ~held:(ref None) ~runtime_id:"a" ~limit:10 ~boundary:18 (exchanges ~from:0 11)
+  in
+  check bool "the next turn opens on the ledger" true (origin_is "ledger" fourth);
+  check (list int) "at the accepted boundary" [ 14 ] fourth_sent;
+  check int "no resend" 0 fourth_resent;
+  (* A refusal of a range that did not open on a seed is returned at once. *)
+  Ledger.Table.For_testing.reset ();
+  let fresh, fresh_sent, fresh_resent =
+    run_candidate ~held:(ref None) ~runtime_id:"a" ~limit:1 ~boundary:0 (exchanges ~from:0 4)
+  in
+  check bool "a refused turn start stands" true (Result.is_error fresh);
+  check (list int) "one request" [ 0 ] fresh_sent;
+  check int "no resend" 0 fresh_resent;
+  Ledger.Table.For_testing.reset ()
+;;
+
 (* The pair table sits behind an Eio mutex. *)
 let () =
   Eio_main.run
@@ -781,6 +911,8 @@ let () =
             (test_a_refused_front_survives_candidate_changes ~blocks:true ~warm_fallback:false)
         ; test_case "block eviction survives a warm fallback" `Quick
             (test_a_refused_front_survives_candidate_changes ~blocks:true ~warm_fallback:true)
+        ; test_case "a refused seed moves the turn's front to the turn boundary" `Quick
+            test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary
         ; test_case "the actual request can advance beyond the fallback ledger" `Quick
             (test_a_refused_front_survives_candidate_changes
                ~fallback_atoms:8 ~blocks:true ~warm_fallback:true)

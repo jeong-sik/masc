@@ -14,6 +14,13 @@ module Current = Masc.Keeper_memory_os_current
 module Cli = Masc.Keeper_lane_cli_oneshot
 module Exact_lane_run_registry = Masc.Exact_lane_run_registry
 module Fixture = Exact_output_fixture
+
+let served_slot =
+  testable
+    (fun fmt -> function
+       | Runtime.Api_slot id -> Format.fprintf fmt "Api_slot %s" id
+       | Runtime.Cli_slot id -> Format.fprintf fmt "Cli_slot %s" id)
+    ( = )
 module Ids = Ids
 
 let () = Masc.Prompt_defaults.init ()
@@ -162,9 +169,9 @@ let test_cli_slot_answers_after_catalog_exhaustion ?(cli_only = false) () =
       "the declared cli slot ran"
       (Some Fixture.cli_primary_runtime)
       !seen;
-    check string
+    check served_slot
       "the answering slot is the cli runtime id"
-      Fixture.cli_primary_runtime
+      (Runtime.Cli_slot Fixture.cli_primary_runtime)
       selected_slot;
     check bool
       "the accepted output is the cli answer"
@@ -218,7 +225,8 @@ let test_domain_invalid_cli_answer_advances_to_valid_selection () =
   | Ok ((_selection, output), slot) ->
     check (list string) "domain rejection advances once"
       [Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] !attempts;
-    check string "accepted slot owns selection" Fixture.cli_secondary_runtime slot;
+    check served_slot "accepted slot owns selection"
+      (Runtime.Cli_slot Fixture.cli_secondary_runtime) slot;
     check bool "accepted domain output is preserved" true
       (Yojson.Safe.equal output valid_selection_json)
 ;;
@@ -242,7 +250,8 @@ let test_projection_refusal_tries_cli_slots () =
   | Ok (({ Runtime.selection; _ }, output), slot) ->
     check (list string) "projection refusal still walks declared CLI slots"
       [Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] !attempts;
-    check string "the valid CLI answer owns the result" Fixture.cli_secondary_runtime slot;
+    check served_slot "the valid CLI answer owns the result"
+      (Runtime.Cli_slot Fixture.cli_secondary_runtime) slot;
     check (list string) "the CLI answer changes memory through the same domain contract"
       [current_a.claim] (List.map (fun (fact : Memory.fact) -> fact.claim) selection.facts);
     check bool "the accepted output remains observable" true
@@ -534,11 +543,12 @@ let test_complete_domain_rejection_reaches_http_successor () =
   check int "control accepted HTTP output before CLI" 0 !cli_calls;
   match result with
   | Ok ((_selection, output), slot) ->
-    check string "control selected the second HTTP candidate"
-      "librarian-http-successor" slot;
+    check served_slot "control selected the second HTTP candidate"
+      (Runtime.Api_slot "librarian-http-successor") slot;
     check bool "control HTTP answer passed the Librarian domain validator"
       true (Yojson.Safe.equal output valid_selection_json);
-    Printf.printf "HTTP_SUCCESSOR_CONTROL api1=1 api2=1 cli=0 selected=%s\n%!" slot
+    Printf.printf "HTTP_SUCCESSOR_CONTROL api1=1 api2=1 cli=0 selected=%s\n%!"
+      (Runtime.served_slot_id slot)
   | Error error -> fail (Runtime.For_testing.classified_error_detail error)
 ;;
 

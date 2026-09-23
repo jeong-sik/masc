@@ -54,8 +54,9 @@
     [TMPDIR] taken from the shim's own environment when present, else the
     defaults [/tmp], ["masc"], [/tmp]), then the endpoint's declared
     environment ([env_file=], {!endpoint_env}), then the endpoint-allowlisted
-    request entries and the runner-owned [GH_CONFIG_DIR] and
-    [GIT_TERMINAL_PROMPT] entries.  A reserved-name denylist is NEVER accepted
+    request entries and the runner-owned [GH_CONFIG_DIR],
+    [GIT_TERMINAL_PROMPT] and Keeper commit-name
+    ({!Exec_ssh_protocol.keeper_git_author_env_names}) entries.  A reserved-name denylist is NEVER accepted
     from the wire — the denylist beats both allowlists. *)
 
 val default_base_path : string
@@ -119,13 +120,13 @@ val parse_env_file : path:string -> string -> (endpoint_env, string) result
     [PATH], a GitHub token name ({!Exec_ssh_protocol.github_token_env_names}:
     one token would make every keeper on the endpoint one GitHub identity), a
     name the runner sets for each request ([GH_CONFIG_DIR],
-    [GIT_TERMINAL_PROMPT]), a value holding a NUL byte, or a name declared
+    [GIT_TERMINAL_PROMPT], [GIT_AUTHOR_NAME], [GIT_COMMITTER_NAME]), a value holding a NUL byte, or a name declared
     twice is rejected with [remote_ssh_shim_config_error].
 
     [path] is the file the content was read from and appears only in the
     error.  The error prints that path, the line number, and only the fixed
     names it refuses ([PATH], the GitHub token names, [GH_CONFIG_DIR],
-    [GIT_TERMINAL_PROMPT]) — never other text from the line, since a
+    [GIT_TERMINAL_PROMPT], [GIT_AUTHOR_NAME], [GIT_COMMITTER_NAME]) — never other text from the line, since a
     malformed line may be a secret value. *)
 
 val synthesize_env :
@@ -143,7 +144,8 @@ val synthesize_env :
     replacing or adding its names,
     then each non-denylisted request entry overlaid
     when its name is in [allowlist] or is one of the runner-owned
-    [GH_CONFIG_DIR] and [GIT_TERMINAL_PROMPT] names.  A request entry whose
+    [GH_CONFIG_DIR], [GIT_TERMINAL_PROMPT], [GIT_AUTHOR_NAME] and
+    [GIT_COMMITTER_NAME] names.  A request entry whose
     name collides with a base or endpoint name replaces that value.  Duplicate names in
     [request_env] are last-wins.  The result has unique keys; order is
     unspecified. *)

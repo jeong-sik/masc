@@ -866,6 +866,17 @@ let test_the_board_title_counts_through_the_helper_that_knows_the_board () =
   Alcotest.(check int) "the title asks what the board holds" 1
     (asks "board_list_count_text")
 
+(* The slot history and the run total sit one line apart in the lane detail,
+   and the slots cover only the runs that named one -- on the live Board
+   Attention lane, 357 of 489, most of the rest Vendor System One answers.
+   The runs without a slot are drawn by the one function that reads the
+   server's reasons, rather than spelled again beside the line. *)
+let test_the_lane_slot_history_says_what_it_does_not_cover () =
+  Alcotest.(check int) "the detail asks for the runs that named no slot" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~callee:"standalone_lane_runs_without_slot_parts")
+
 (* A stamp that can be older than today is drawn as a span, not as a clock.
 
    Both of these sit beside the screen's own clock and used to draw the hour
@@ -1003,6 +1014,9 @@ let () =
             test_the_board_title_counts_through_the_helper_that_knows_the_board
         ; Alcotest.test_case "a stamp that can outlive today is a span" `Quick
             test_a_stamp_that_can_outlive_today_is_drawn_as_a_span
+        ; Alcotest.test_case
+            "the lane slot history says what it does not cover" `Quick
+            test_the_lane_slot_history_says_what_it_does_not_cover
         ; Alcotest.test_case
             "both doors into the runtime detail ask the same lane list" `Quick
             test_both_doors_into_the_runtime_detail_ask_the_same_lane_list

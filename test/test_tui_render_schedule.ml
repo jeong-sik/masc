@@ -360,6 +360,38 @@ let test_overview_blocks_grow_to_their_item_counts () =
    on the terminal's last row at every size, and a viewport too short for a
    title, a divider and one Keeper draws no Team block at all rather than
    chrome with nothing under it. *)
+(* Pull request lines under the Team block take only blank rows: the 24-row
+   Overview keeps every task, and a tall one draws the lines. *)
+let test_team_detail_lines_take_only_spare_rows () =
+  let tight =
+    Schedule.allocate_overview ~terminal_rows:24 ~has_cluster:true
+      ~attention_count:6 ~event_count:6 ~team_count:0 ~task_count:5
+      ~has_task_error:false
+  in
+  let spent = Schedule.spend_spare_rows_on_team tight ~extra:3 in
+  check int "no blank row, no pull request line" tight.team_rows spent.team_rows;
+  check int "the backlog is untouched" tight.task_rows spent.task_rows;
+  let tall =
+    Schedule.allocate_overview ~terminal_rows:40 ~has_cluster:true
+      ~attention_count:2 ~event_count:2 ~team_count:4 ~task_count:3
+      ~has_task_error:false
+  in
+  let spent = Schedule.spend_spare_rows_on_team tall ~extra:3 in
+  check int "three lines join the drawn block" (tall.team_rows + 3) spent.team_rows;
+  check int "paid from the filler" (tall.filler_rows - 3) spent.filler_rows;
+  check int "the backlog is untouched" tall.task_rows spent.task_rows;
+  check int "40-row frame is exact" 40 (overview_frame_rows ~has_cluster:true spent);
+  let empty =
+    Schedule.allocate_overview ~terminal_rows:40 ~has_cluster:true
+      ~attention_count:2 ~event_count:2 ~team_count:0 ~task_count:3
+      ~has_task_error:false
+  in
+  let spent = Schedule.spend_spare_rows_on_team empty ~extra:2 in
+  check int "a new block opens with two rows" 2 spent.team_rows;
+  check int "and pays its chrome from the filler"
+    (empty.filler_rows - 2 - Schedule.overview_team_chrome_rows) spent.filler_rows;
+  check int "40-row frame is exact" 40 (overview_frame_rows ~has_cluster:true spent)
+
 let test_overview_team_block_sits_between_panel_and_backlog () =
   let live =
     Schedule.allocate_overview ~terminal_rows:40 ~has_cluster:true
@@ -2048,6 +2080,8 @@ let () =
             test_overview_task_block_keeps_a_share_of_a_tall_viewport
         ; test_case "overview blocks grow to their item counts" `Quick
             test_overview_blocks_grow_to_their_item_counts
+        ; test_case "team detail lines take only spare rows" `Quick
+            test_team_detail_lines_take_only_spare_rows
         ; test_case "overview team block sits between panel and backlog" `Quick
             test_overview_team_block_sits_between_panel_and_backlog
         ; test_case "board read reserves comments and footer" `Quick

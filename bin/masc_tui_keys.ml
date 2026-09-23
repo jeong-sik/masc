@@ -393,7 +393,8 @@ let for_surface = function
                     Masc_tui_types.keeper_detail_tabs))
       ; b Act "o" "logs"
           ~help:"open container logs in Sandbox; Keeper activity elsewhere"
-      ; b Act "U" "runtime" ~help:"pick a runtime candidate order"
+      ; b Act "U" "runtime"
+          ~help:"pick a runtime candidate order (on the Channels tab U is unbind all)"
       ; b Act "Left / Esc" "back"
       ; b Navigate "Home/End" "top/bottom" ~help:"the ends of this tab"
       ]
@@ -1340,6 +1341,12 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       ; b Navigate "PgUp/PgDn" "detail page"
       ; b Act "b / e / u u" "bind / reassign / remove"
           ~help:"bind a channel, reassign the selected row, or remove it twice-confirmed"
+        (* Takes [U] from the runtime picker on this tab only, the way [u]
+           is taken above: the picker stays on every other tab. *)
+      ; b Act "U U" "unbind all"
+          ~help:"remove every channel binding of this Keeper on every \
+                 transport, twice-confirmed; a channel rebound to another \
+                 Keeper meanwhile is left as is"
       ]
   | Detail_info ->
       [ b Act "Q" "requeue board"

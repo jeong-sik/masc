@@ -128,8 +128,9 @@ env_file=/etc/masc-exec-shim.env
   request denylist does not apply to it; `PATH` is refused there because
   `path=` declares it. GitHub token names (`GH_TOKEN`, `GITHUB_TOKEN`,
   `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`) and the names the runner
-  sets for each request (`GH_CONFIG_DIR`, `GIT_TERMINAL_PROMPT`) are refused
-  too: each keeper acts as its own GitHub login. Request values admitted by
+  sets for each request (`GH_CONFIG_DIR`, `GIT_TERMINAL_PROMPT`,
+  `GIT_AUTHOR_NAME`, `GIT_COMMITTER_NAME`) are refused too: each keeper acts
+  as its own GitHub login and commits under its own name. Request values admitted by
   `env_allowlist` replace the file's values.
 
 In a boxed run (`observe`, `guest_local`) `HOME` and `TMPDIR` are the run's

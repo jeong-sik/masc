@@ -2728,6 +2728,32 @@ let post_connector_unbind ~(host : string) ~(port : int) ~(connector : string)
          (percent_encode_path_segment connector))
     ~body:body_json
 
+(** The same route, conditional on the owner: the server removes the binding
+    only while it still names [target.keeper_name]. The reply is read by its
+    status, since 409 (rebound) and 404 (already gone) are answers the caller
+    reports differently from a failure. *)
+let post_connector_unbind_owned ~(host : string) ~(port : int)
+    (target : Masc_tui_connector_unbind.target) :
+    Masc_tui_connector_unbind.outcome =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [ "channel_id", `String target.channel_id
+        ; "keeper_name", `String target.keeper_name
+        ])
+  in
+  match
+    http_post ~headers:(auth_headers ()) ~host ~port
+      ~path:
+        (Printf.sprintf "/api/v1/gate/connector/unbind?name=%s"
+           (percent_encode_path_segment target.connector_id))
+      ~body
+  with
+  | Error detail -> Masc_tui_connector_unbind.Failed detail
+  | Ok (status_code, response) ->
+      Masc_tui_connector_unbind.outcome_of_status ~status:status_code
+        ~refusal:(refusal ~status_code ~body:response)
+
 (** One [resources/list] over the MCP endpoint, on an open session. *)
 let call_mcp_resources_list ~(host : string) ~(port : int)
     ~(session_id : string) ~(request_id : string) :

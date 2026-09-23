@@ -100,6 +100,12 @@ let github_token_env_names =
   ]
 ;;
 
+let keeper_git_author_env_names = [ "GIT_AUTHOR_NAME"; "GIT_COMMITTER_NAME" ]
+
+let keeper_git_author_env ~keeper_name =
+  List.map (fun name -> name, keeper_name) keeper_git_author_env_names
+;;
+
 let default_scratch_root = "/tmp"
 
 let mode_to_string = function

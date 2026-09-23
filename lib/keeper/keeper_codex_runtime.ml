@@ -674,9 +674,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     (* Full canonical context is data, not a guessed unseen suffix. Resume
        replaces this configuration on the existing vendor thread; it never
        appends native tool calls into the vendor execution stream. *)
-    let snapshot_messages = List.filter (fun (message : Agent_core.Types.message) ->
-      Agent_core.Types.Extra_system_context_provenance.classify message.metadata
-      <> Agent_core.Types.Extra_system_context_provenance.Present) prepared.messages in
+    let snapshot_messages =
+      List.filter (fun message -> not (Host.is_composed_system_context message))
+        prepared.messages in
     let source_snapshot_sha256 = `List (List.map Keeper_official_client_context_codec.to_json initial_messages)
       |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
     let canonical_snapshot =

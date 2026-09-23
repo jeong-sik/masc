@@ -780,7 +780,7 @@ let test_stale_working_value_preserves_a_newer_table_observation () =
    ([hold_carried_front] / [carried_front_after_refusal]); the front choice
    ([carried_front]), the composition and the ledger are the turn driver's
    own; the provider accepts a request that carries at most [limit] atoms. *)
-let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
+let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary ~refusal () =
   Ledger.Table.For_testing.reset ();
   let keeper_name = "seed-refused" and session_id = "trace-seed" in
   let continuity = Some Try_provider.without_snapshot in
@@ -819,7 +819,7 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
           last := Some (composed.Try_provider.origin, first_atom);
           sent := first_atom :: !sent;
           if atom_count - first_atom > limit
-          then Error overflow
+          then Error refusal
           else (
             let (_ : Ledger.observation) =
               Ledger.Table.observe ~keeper_name ~runtime_id ~session_id ~digest_at
@@ -948,7 +948,10 @@ let () =
         ; test_case "block eviction survives a warm fallback" `Quick
             (test_a_refused_front_survives_candidate_changes ~blocks:true ~warm_fallback:true)
         ; test_case "a refused seed moves the turn's front to the turn boundary" `Quick
-            test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary
+            (test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary ~refusal:overflow)
+        ; test_case "a prose-only size refusal still resends from the turn boundary" `Quick
+            (test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary
+               ~refusal:unattributed_refusal)
         ; test_case "the actual request can advance beyond the fallback ledger" `Quick
             (test_a_refused_front_survives_candidate_changes
                ~fallback_atoms:8 ~blocks:true ~warm_fallback:true)

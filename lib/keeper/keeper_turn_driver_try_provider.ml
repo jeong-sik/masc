@@ -2433,10 +2433,53 @@ let eviction_retry_to_json = function
    rotating candidates: a retry here is a same-run retry too, so it must not
    fire once AGENT_CORE has mutated agent state at a durable checkpoint
    stage. *)
+(* The refusals the turn boundary resend answers (RFC
+   keeper-context-window-in-tokens §13.4; RFC librarian-lifecycle §4.10,
+   rule 1). A typed size refusal, and also a refusal whose reason agent core
+   does not model: every live size refusal measured so far arrives that way
+   -- ollama_cloud's "The prompt is too long" with a null code, glm's
+   "Prompt exceeds max length" -- and reading the sentence would be a string
+   classifier. This is why it is not [refusal_evicts], which keeps only the
+   two typed size refusals because its answer (a shorter range, held for
+   later turns) is wrong for a refusal that was not about size.
+   - A refusal that was not about size draws the same refusal from the
+     boundary, and the turn ends on it: one more request, nothing held.
+   - A refusal that was about size is answered once from the boundary.
+   Enumerated so a new variant forces a decision here. *)
+let boundary_resend_on = function
+  | Agent_core.Error.Api (ContextOverflow _)
+  | Agent_core.Error.Api
+      (InvalidRequest
+         { reason = (Request_body_refused_by_provider _ | Unknown_invalid_request); _ }) ->
+    true
+  | Agent_core.Error.Api
+      ( InvalidRequest
+          { reason = (Json_parse_error | Attempt_rejected | Refusal_body_not_received); _ }
+      | InputCapacity _
+      | RateLimited _
+      | Overloaded _
+      | ServerError _
+      | AuthError _
+      | AuthorizationError _
+      | PaymentRequired _
+      | NotFound _
+      | NetworkError _
+      | Timeout _ )
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> false
+;;
+
 (* The one answer a turn with no Librarian point has to a size refusal
    (RFC keeper-context-window-in-tokens §13.4). When the provider refuses a
-   range that a seed opened, with a refusal the no-continuity ladder moves
-   the front for ([refusal_evicts]), and the turn boundary lies after that
+   range that a seed opened, with a refusal [boundary_resend_on] names, and
+   the turn boundary lies after that
    range's first atom, the boundary is held as the turn's front and the same
    candidate is asked once more. The front belongs to the turn (§10.4): a
    later candidate or lane opens there instead of on the refused range. An
@@ -2460,7 +2503,7 @@ let seed_refusal_sequence
   | Error error as failed ->
     (match refused_range () with
      | Some (Keeper_carried_front.Carried _, refused_first_atom)
-       when refusal_evicts error && same_run_retry_authorized () ->
+       when boundary_resend_on error && same_run_retry_authorized () ->
        (match turn_start_front () with
         | Some (front : Keeper_carried_front.seed)
           when front.first_atom > refused_first_atom ->

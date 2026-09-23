@@ -580,8 +580,9 @@ val seed_refusal_sequence :
   ('ok, Agent_core.Error.t) result
 (** The retry policy of a turn with no Librarian point ({!without_snapshot}),
     over an injected [attempt] (RFC keeper-context-window-in-tokens §13.4).
-    When [attempt] fails with a refusal {!carried_range_eviction_sequence}
-    would move the front for, [refused_range] reports that the refused range
+    When [attempt] fails with a typed size refusal or a refusal whose
+    reason agent core does not model ([Unknown_invalid_request], which is how
+    live size refusals arrive), [refused_range] reports that the refused range
     opened on a seed ({!Keeper_carried_front.Carried}) at its first atom,
     [turn_start_front] names the turn boundary strictly after that atom
     ({!Keeper_carried_front.Turn_start_after_seed_refusal}), and

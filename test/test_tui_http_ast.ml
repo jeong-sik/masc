@@ -2543,6 +2543,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "gp_id"
     ; "gp_execution_sandbox"
     ; "gp_execution_cwd"
+    ; "gp_input_rows"
     ; "ap_actor"
     ; "ap_action_type"
     ; "ap_target_type"

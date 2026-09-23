@@ -1415,10 +1415,13 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
            now, and bolding the whole of it would weight the value too. *)
         let drawn = fit_width text (cols - 6) in
         let name = String.length label in
+        (* Split only where the whole name survived the cut. A narrow pane
+           can end the row inside the name, and [fit_width]'s ellipsis is
+           three bytes: splitting at the name's byte length there would cut
+           the ellipsis and send half a character to the terminal. *)
         box_line buf cols
-          (if String.length drawn >= name then
-             Printf.sprintf "  %s%s%s%s" Ansi.bold (String.sub drawn 0 name)
-               Ansi.reset
+          (if String.starts_with ~prefix:label drawn then
+             Printf.sprintf "  %s%s%s%s" Ansi.bold label Ansi.reset
                (String.sub drawn name (String.length drawn - name))
            else Printf.sprintf "  %s%s%s" Ansi.bold drawn Ansi.reset)
       | None ->

@@ -156,15 +156,34 @@ let test_an_escape_in_a_field_never_reaches_the_terminal () =
         line.Detail.label)
     lines;
   let all = joined lines in
+  (* The escape is drawn, not blanked: a space would hide that one was
+     tried. Each control byte reads as its [\xNN] and a C1 code point as
+     its [\u00NN], in place, so the ask reads in the order it was written. *)
   List.iter
     (fun fragment ->
-      check_bool ("the words around the escape stay: " ^ fragment) true
-        (contains all fragment))
-    [ "echo ok"; "rm -rf /?"; "namespace_pause"; "2Kforged"; "second line" ];
+      check_bool ("the pane draws " ^ fragment) true (contains all fragment))
+    [ "echo ok\\x1B[1A\\x1B[2Krm -rf /?"
+    ; "namespace_pause on workspace\\u009B2Kforged"
+    ; "second line\\x07"
+    ; "key\\x1B[1A\\x1B[2K"
+    ];
   check_bool "the value's own newline is still a row break" true
     (List.exists
-       (fun (line : Detail.line) -> String.trim line.Detail.text = "second line")
+       (fun (line : Detail.line) ->
+         String.trim line.Detail.text = "second line\\x07")
        lines)
+
+(* A Makefile's recipe line starts with a tab, and spaces there are a
+   different file. The pane shows which one the ask holds. *)
+let test_a_tab_is_drawn_as_a_tab () =
+  let lines =
+    Detail.of_fields ~width:60 [ "args", "all:\n\tmake build\r\n" ]
+  in
+  let all = joined lines in
+  check_bool "the tab reads as a tab" true (contains all "\\x09make build");
+  check_bool "a carriage return reads as one" true
+    (contains all "make build\\x0D");
+  check_bool "no raw tab reaches the pane" false (String.contains all '\t')
 
 let () =
   Alcotest.run "tui_approval_detail"
@@ -189,5 +208,7 @@ let () =
             test_a_narrow_pane_still_produces_rows
         ; Alcotest.test_case "an escape in a field never reaches the terminal"
             `Quick test_an_escape_in_a_field_never_reaches_the_terminal
+        ; Alcotest.test_case "a tab is drawn as a tab" `Quick
+            test_a_tab_is_drawn_as_a_tab
         ] )
     ]

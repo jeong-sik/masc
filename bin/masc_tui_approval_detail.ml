@@ -1,5 +1,5 @@
 module Message_layout = Masc_tui_message_layout
-module Keeper_chat = Masc_tui_keeper_chat_projection
+module Tui_decode = Masc.Tui_decode
 
 type line =
   { label : string option
@@ -45,13 +45,15 @@ let of_fields ~width fields =
      bytes are made safe to print. A value carrying ESC [ 1 A ESC [ 2 K would
      otherwise move the cursor and rub out rows the operator already read, and
      [y] would approve what the store holds rather than what the screen
-     showed. The newlines are kept -- they are how the ask was written -- and
-     a label is a single row, so it keeps none. *)
+     showed. The escape is drawn as [\x1B], not blanked: a blank would hide
+     that one was tried, and a Makefile's tab would read as spaces. The
+     newlines are kept -- they are how the ask was written -- and a label is
+     a single row, so it keeps none. *)
   let fields =
     List.map
       (fun (label, value) ->
-        ( Keeper_chat.terminal_safe_text label
-        , Keeper_chat.terminal_safe_text ~preserve_newlines:true value ))
+        ( Tui_decode.sanitize_terminal_text label
+        , Tui_decode.sanitize_terminal_lines value ))
       fields
   in
   let label_cells =

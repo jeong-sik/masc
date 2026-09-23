@@ -48,6 +48,13 @@ val sanitize_terminal_text : string -> string
     terminal rendering boundary; decoded records intentionally retain their raw
     typed value for non-terminal consumers. *)
 
+val sanitize_terminal_lines : string -> string
+(** [sanitize_terminal_lines text] keeps each LF of [text] as a line break and
+    puts every line between them through {!sanitize_terminal_text}, so each
+    other control byte -- a tab, a carriage return, an ESC -- is drawn as its
+    visible escape rather than sent to the terminal or folded into a space.
+    For a text read whole, where a reader must see what the bytes are. *)
+
 val preview_line : string -> string
 (** One row of a multi-line text for a list cell: each line break (LF, CR LF,
     or a lone CR) becomes the one-cell return mark U+23CE, a tab becomes a

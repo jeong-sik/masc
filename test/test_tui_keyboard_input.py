@@ -4350,6 +4350,7 @@ def concealed_input_detail_interaction() -> Interaction:
 # draw it and the frame that holds it is the detail's.
 ESCAPED_QUESTION_INJECTED = b"ok\x1b[1A\x1b[2Krm"
 ESCAPED_QUESTION_TAIL = b"rm -rf /tmp/forged?"
+ESCAPED_QUESTION_VISIBLE = b"ok\\x1B[1A\\x1B[2Krm"
 ESCAPED_QUESTION_DETAIL_MARKER = b"detail-only-marker"
 
 
@@ -4408,6 +4409,12 @@ def escaped_question_detail_interaction() -> Interaction:
             raise AssertionError(
                 "the approval detail drew the question's escapes raw, so the"
                 f" ask could rewrite the rows above it: {frame!r}"
+            )
+        # The escape is drawn as text where it sat, so the operator sees one
+        # was tried instead of a blank that reads as spacing.
+        if ESCAPED_QUESTION_VISIBLE not in plain:
+            raise AssertionError(
+                f"the question's escapes are not drawn visibly: {frame!r}"
             )
         # The words the escape surrounded are still on the pane.
         if ESCAPED_QUESTION_TAIL not in plain:

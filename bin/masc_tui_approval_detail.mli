@@ -24,8 +24,9 @@ val of_fields : width:int -> (string * string) list -> line list
     a blank value is drawn as such rather than omitted, because a field that
     is present and empty is a different fact from one that is absent.
 
-    Every label and value is put through
-    [Masc_tui_keeper_chat_projection.terminal_safe_text] first: C0 and C1
-    control characters other than a value's newlines become spaces, so no
-    field can carry an escape sequence to the terminal. [line] is private, so
-    this is the only way a row of the pane is made. *)
+    Every label goes through [Masc.Tui_decode.sanitize_terminal_text] and
+    every value through [Masc.Tui_decode.sanitize_terminal_lines] first: a
+    value's newlines stay line breaks, and every other control character is
+    drawn as its visible escape ([\x1B], [\x09]), so no field can carry an
+    escape sequence to the terminal and none is hidden as a space. [line] is
+    private, so this is the only way a row of the pane is made. *)

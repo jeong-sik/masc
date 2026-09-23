@@ -642,6 +642,17 @@ status: reference
   다시 만든다([board_types.mli](../../lib/board_types/board_types.mli)의 `karma_event`,
   [board_votes.ml](../../lib/board/board_votes.ml)).
 
+**Flair (표시 태그)**
+: 글쓴이가 본문에 `[flair:<name>]` 꼴로 적는 표시 태그. 이름은 소문자이고
+  (`[a-z]+`), 고정 카탈로그 `Board_votes.available_flairs`에 있는 이름만 붙는다 —
+  모르는 이름은 아무 표시도 붙지 않는다(`extract_flair`). 카탈로그 항목은
+  `(name, emoji, label)` 셋이고 `GET /api/v1/board/flairs`가 내보내며,
+  `flair_to_yojson`이 한 항목을 `{name, emoji, label}`로 직렬화한다. 대시보드는
+  이 값을 배지(`bd-badge`)로 그린다. 표시만 하고 아무것도 정하지 않는다 — 순위·권한·분류에
+  쓰이지 않는다. **Hearth**와 다른 축이다 — hearth는 글을 주제로 가르는 필드이고,
+  flair는 글쓴이가 본문에 적는 표시다.
+  → [board_votes.mli](../../lib/board/board_votes.mli)
+
 **Hearth (토픽 카테고리)**
 : Board 글을 주제로 가르는 축. 글은 선택적으로 `hearth` 필드를 갖고 lowercase로
   정규화한다. `list_hearths`가 hearth별 글 수를 내림차순으로 돌려주고,

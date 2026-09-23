@@ -431,11 +431,15 @@ let tools_display_lines (state : state) =
         let tool_lines =
           List.map
             (fun (tool : Masc.Tui_decode.effective_tool) ->
+               (* The source id, not the skill name: the name repeats what
+                  the tool is already called (keeper_compose_work-intake ->
+                  work-intake), while the id answers the question this
+                  column asks -- which configured source this came from. It
+                  is also short, so the column does not have to cut it. *)
                let source =
-                 match tool.et_skill_source, tool.et_group with
-                 | Some source, _ -> tool.et_origin ^ ":" ^ source
-                 | None, Some group -> tool.et_origin ^ ":" ^ group
-                 | None, None -> tool.et_origin
+                 match tool.et_skill_source_id with
+                 | Some source_id -> tool.et_origin ^ ":" ^ source_id
+                 | None -> tool.et_origin
                in
                Ansi.dim,
                Tool_table.effective_tool_line

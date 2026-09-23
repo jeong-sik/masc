@@ -686,7 +686,41 @@ let test_runtime_stops_round_trip_through_the_codec () =
     ; connection_closed
     ; KTD.Runtime_connection_closed
         { runtime_id = "claude_code"; detail = "exit 1"; turn_accepted = false }
+    ; KTD.Preempted_before_first_token { runtime_id = "glm-coding.glm-5.3-flash" }
     ]
+;;
+
+(* #38094: a preemption is not a failure of the turn. The classifiers the
+   unified turn consults must say so, and the lane walk must stop on it
+   without noting a rest against the candidate that did not fail. *)
+let test_a_preemption_is_its_own_typed_stop () =
+  let err =
+    KTD.core_error_of_masc_internal_error
+      (KTD.Preempted_before_first_token { runtime_id = "glm-coding.glm-5.3-flash" })
+  in
+  Alcotest.(check bool) "classified as a preemption" true
+    (Masc.Keeper_error_classify.is_preempted_before_first_token err);
+  Alcotest.(check bool) "not an input-required stop" false
+    (Masc.Keeper_error_classify.is_input_required_error err);
+  Alcotest.(check bool) "not runtime exhaustion" false
+    (Masc.Keeper_error_classify.is_runtime_exhausted_error err);
+  Alcotest.(check bool) "a host stop is not a preemption" false
+    (Masc.Keeper_error_classify.is_preempted_before_first_token
+       (KTD.core_error_of_masc_internal_error host_shutdown));
+  (* The receipt the preempted attempt writes is a cancellation, which the
+     operator disposition maps to [Disp_user_cancelled] instead of the
+     unmapped-state WARN a bare internal error reached. *)
+  Alcotest.(check string) "termination semantics name the preemption"
+    "preempted_by_person"
+    (AE.core_termination_semantics err |> AE.core_termination_semantics_to_string);
+  Alcotest.(check bool) "the receipt outcome is cancelled, not error" true
+    (match AE.receipt_outcome_kind_of_core_error err with
+     | `Cancelled -> true
+     | `Error | `Ok | `Skipped -> false);
+  match KFR.route_of_error ~boundary:KFR.Agent_core_execution err with
+  | KFR.Exhausted_visible_alive _ -> ()
+  | KFR.Rotate_now _ | KFR.Retry_after_observed _ ->
+    Alcotest.fail "a preemption must end the walk without rotating or resting"
 ;;
 
 (* Strict like its siblings: a spelling the encoder does not emit, a missing
@@ -824,6 +858,10 @@ let () =
             "the codec refuses what it did not write"
             `Quick
             test_the_codec_refuses_what_it_did_not_write
+        ; Alcotest.test_case
+            "a preemption is its own typed stop, not a failure"
+            `Quick
+            test_a_preemption_is_its_own_typed_stop
         ; Alcotest.test_case
             "both stops keep their envelope in the row"
             `Quick

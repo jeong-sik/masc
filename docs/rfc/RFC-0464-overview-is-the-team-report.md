@@ -71,13 +71,13 @@ Overview 의 Task 커서·상세 흐름을 옮기는 건 이 RFC 범위 밖이�
 | 2 | briefing `keeper_briefs` 를 행으로 디코드하고 Team 섹션을 그린다 | types/loader/schedule/새 모듈 |
 | 3 | 14일 완료 막대(`task_flow.daily`)를 Team 제목 줄 오른쪽에 싣는다 | 새 모듈 |
 | 4 | 닫힌 quota 창과 재개 시각을 Team 첫 줄에 (`/runtime/resolved`). 비용은 뺀다 — keeper-costs 가 모르는 비용을 0 으로 합친다(#38083) | types/masc_tui/render |
-| 5 | `[tui] overview_panels` 로 섹션 순서와 on/off 를 TOML 에서 고른다. 모르는 이름은 로드 오류 | config |
+| 5 | 보류 (2026-09-23 운영자): 섹션 켜기·끄기는 새 Overview 를 실제로 써 본 뒤 정한다 | — |
 | 6 | GitHub PR 동기화 — 서버에 PR 목록 수집기가 없다. 별도 RFC 로 설계한다 | — |
 
 ## 4. 트레이드오프
 
 - TUI Session Events 는 그대로 둔다. `RFC-tui-operator-ia` 의 결정과 같다.
-  132×40 실측에서 3줄 모두 TUI 기동 로그였으므로 5번에서 끌 수 있게 한다.
+  132×40 실측에서 3줄 모두 TUI 기동 로그였다. 끌 수 있게 할지는 5번(보류)에서 정한다.
 - Team 행은 오른쪽 roster pane(`Changes`)과 Keeper 이름을 같이 쓴다.
   roster 는 도구 호출 단위이고, Team 은 Task 와 막힘 단위다. 묻는 질문이 다르다.
 - `done 24h` 는 지금부터 24시간 전까지다. 달력의 "오늘"이 아니다. 달력 날짜는 14일 막대가 말한다.

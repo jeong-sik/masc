@@ -324,6 +324,54 @@ let codex_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_act
           emit Agent_core.Types.MessageStop)
 ;;
 
+(* The failed turn's [codexErrorInfo] is the provider's own classification,
+   so it picks the provider error the failure route reads. A usage or session
+   budget refusal is the hard quota the Claude Code runtime reports as
+   [Quota_blocked]; without this, a Codex head out of weekly usage rotated as
+   a generic provider failure every cycle and left no quota evidence.
+   [retry_after] stays [None]: the turn error carries no reset time. *)
+let turn_failure_to_provider_error ~detail codex_error_info =
+  let provider = "codex_app_server" in
+  let network kind =
+    Llm_provider.Error.NetworkError
+      { provider; kind; timeout_phase = None; detail }
+  in
+  match codex_error_info with
+  | Some
+      ( Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+      | Runtime_codex_app_server.Codex_error_info.Session_budget_exceeded ) ->
+    Llm_provider.Error.HardQuota { provider; retry_after = None; detail }
+  | Some Runtime_codex_app_server.Codex_error_info.Rate_limit_exceeded ->
+    Llm_provider.Error.RateLimit { provider; retry_after = None; detail }
+  | Some
+      ( Runtime_codex_app_server.Codex_error_info.Server_overloaded
+      | Runtime_codex_app_server.Codex_error_info.Internal_server_error
+      | Runtime_codex_app_server.Codex_error_info.Response_too_many_failed_attempts _ )
+    ->
+    Llm_provider.Error.ProviderUnavailable { provider; detail }
+  | Some
+      ( Runtime_codex_app_server.Codex_error_info.Http_connection_failed _
+      | Runtime_codex_app_server.Codex_error_info.Response_stream_connection_failed _ )
+    ->
+    network Llm_provider.Http_client.Unknown
+  | Some (Runtime_codex_app_server.Codex_error_info.Response_stream_disconnected _) ->
+    network Llm_provider.Http_client.End_of_file
+  | Some Runtime_codex_app_server.Codex_error_info.Unauthorized ->
+    Llm_provider.Error.AuthError { provider; detail }
+  | Some
+      ( Runtime_codex_app_server.Codex_error_info.Bad_request
+      | Runtime_codex_app_server.Codex_error_info.Cyber_policy
+      | Runtime_codex_app_server.Codex_error_info.Misalignment_policy_violation
+      | Runtime_codex_app_server.Codex_error_info.Thread_rollback_failed
+      | Runtime_codex_app_server.Codex_error_info.Sandbox_error
+      | Runtime_codex_app_server.Codex_error_info.Other
+      | Runtime_codex_app_server.Codex_error_info.Active_turn_not_steerable _
+      | Runtime_codex_app_server.Codex_error_info.Unrecognized _ )
+  | None ->
+    Llm_provider.Error.ProviderReportedError
+      { provider; error_type = Some "turn_failed"; detail }
+;;
+
 let codex_error_to_core_error = function
   | Runtime_codex_app_server.Invalid_config detail ->
     config_error ~field:"codex_app_server" detail
@@ -389,13 +437,8 @@ let codex_error_to_core_error = function
   (* Effectful failed turns are fenced out of same-turn retry by
      [Keeper_provider_attempt_effect] at the driver level, so this mapping
      stays purely descriptive of what the provider reported. *)
-  | Runtime_codex_app_server.Turn_failed detail ->
-    Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderReportedError
-         { provider = "codex_app_server"
-         ; error_type = Some "turn_failed"
-         ; detail
-         })
+  | Runtime_codex_app_server.Turn_failed { detail; codex_error_info } ->
+    Agent_core.Error.Provider (turn_failure_to_provider_error ~detail codex_error_info)
   | Runtime_codex_app_server.Timeout { seconds; turn_accepted = false } ->
     Agent_core.Error.Api
       (Agent_core.Retry.Timeout
@@ -468,6 +511,25 @@ let recovery_failure_of_client_error = function
        else Keeper_official_client_session_store.Bootstrap_floor_exceeded)
   | Runtime_codex_app_server.Stopped_by_host _ ->
     Keeper_official_client_session_store.Protocol_failed
+;;
+
+(* A Gate continuation may only resume the thread it was captured in. An
+   overflow there after a tool effect cannot be shrink-retried and the thread
+   cannot take the continuation again, so it is recorded [Vendor_session_full]
+   like the Claude Code lane: the Gate operation fails for good, the effect
+   stays on the attempt's evidence, and the next ordinary turn starts fresh.
+   An observation-free overflow keeps [Input_rejected Bootstrap_floor_exceeded]:
+   this lane resends its canonical context on resume, so the same-thread
+   shrink retry ([resolve_input_rejected_for_shrink_retry]) can still fit. *)
+let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
+  match thread_mode, gate_continuation, error with
+  | ( Runtime_codex_app_server.Resume _
+    , true
+    , Runtime_codex_app_server.Context_window_exceeded { tool_effect_attempted = true; _ } ) ->
+    Keeper_official_client_session_store.Vendor_session_full
+      Keeper_official_client_session_store.Activity_observed
+  | (Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), _ ->
+    recovery_failure_of_client_error error
 ;;
 
 (* Codex ships its own file tools and neither it nor MASC can switch them
@@ -1086,7 +1148,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
        (match error with
         | Runtime_codex_app_server.Turn_input_write_failed _ -> observe_transport_uncertain ()
         | _ -> ());
-       recovery_failure := recovery_failure_of_client_error error;
+       recovery_failure :=
+         recovery_failure_of_attempt ~thread_mode
+           ~gate_continuation:(Option.is_some official_client_continuation) error;
        Error (codex_error_to_core_error error)
      | Ok turn ->
        recovery_failure := Keeper_official_client_session_store.Protocol_failed;
@@ -1417,4 +1481,5 @@ module For_testing = struct
   let native_posture_note = native_posture_note
   let codex_error_to_core_error = codex_error_to_core_error
   let recovery_failure_of_client_error = recovery_failure_of_client_error
+  let recovery_failure_of_attempt = recovery_failure_of_attempt
 end

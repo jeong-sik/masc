@@ -4,10 +4,10 @@
     is held by the attempted runtime alone and read as ordering evidence by
     the lane walk (RFC-0370 §3.3, RFC-0433): a candidate under backpressure
     is demoted behind its lane siblings, never excluded. A server error,
-    network failure, timeout, or access refusal is held the same way until the
-    candidate answers (RFC-0458 §3.4). The observation cell lives on the
-    materialized runtime; frozen attempts retain the same cell, and the runtime
-    catalog owns its lifetime. *)
+    network failure or timeout is held the same way until the candidate
+    answers (RFC-0458 §3.4). The observation cell lives on the materialized
+    runtime; frozen attempts retain the same cell, and the runtime catalog
+    owns its lifetime. *)
 
 type rate_limit = Runtime_candidate_backpressure_state.rate_limit =
   | Unknown_scope_rate_limit of { noted_at : float; retry_after : float option }
@@ -16,7 +16,6 @@ type attempt_failure = Runtime_candidate_backpressure_state.attempt_failure =
   | Server_error
   | Network_transient
   | Provider_timeout
-  | Access_refused
 
 type failed_attempt = Runtime_candidate_backpressure_state.failed_attempt =
   | Failed_attempt of { noted_at : float; failure : attempt_failure }
@@ -42,8 +41,12 @@ val create_candidate : binding:candidate_binding -> candidate
     not introduce a dispatch gate, but cannot prove continuity on reload. *)
 
 val same_candidate_binding : candidate -> candidate -> bool
-(** Compare only frozen authoritative identities. Unknown identities never
-    establish equality. Used at catalog publication to preserve unchanged rows. *)
+(** Compare only frozen authoritative identities. An HTTP identity that could
+    not be built never establishes equality. An official client has no HTTP
+    identity: its dispatch is built from the provider and model alone, so two
+    official-client candidates are the same binding here and the caller's
+    provider, model and binding equality decides. Used at catalog publication
+    to preserve unchanged rows. *)
 
 val note_rate_limit : candidate:candidate -> retry_after:float option -> unit
 (** Record coarse HTTP/Provider rate-limit evidence for this attempted runtime

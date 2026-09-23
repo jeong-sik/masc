@@ -5456,12 +5456,11 @@ let test_composite_reconciliation_response_preserves_both_authorities () =
     Masc.Keeper_types_profile.tool_result_error_data
       ~class_:Tool_result.Runtime_failure error
   in
-  let projected =
-    match Masc.Keeper_turn_up_update.config_reconciliation_required_of_result result with
-    | Some projected -> projected
-    | None -> fail "composite reconciliation was not classified"
+  (* The config POST answers an indeterminate write with the refusal's data,
+     as this does. *)
+  let raw, json =
+    config_reconciliation_response ~name:"alpha" (Tool_result.data result)
   in
-  let raw, json = config_reconciliation_response ~name:"alpha" projected in
   expect_http_status "composite reconciliation" 503 raw;
   let open Yojson.Safe.Util in
   check string "typed composite reconciliation code"

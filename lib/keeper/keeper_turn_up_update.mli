@@ -17,6 +17,20 @@ type runtime_sync =
 val runtime_sync_to_wire : runtime_sync -> string
 (** ["lane_restarted"] or ["deferred_until_turn_end"]. *)
 
+(** What a refused update left in the keeper's declaration and runtime
+    assignment. *)
+type config_write =
+  | Config_unchanged
+      (** Both hold their pre-request contents: the update was refused before
+          writing (validation, revision conflict, shutdown preflight, a lock
+          or read failure), or its write was rolled back to the before-images. *)
+  | Config_committed
+      (** Both committed. The refusal came after: owner publication, the
+          shutdown supersession, or the lane restart failed. *)
+  | Config_indeterminate
+      (** A rollback or the journal retirement failed, so either contents may
+          be on disk until reconciliation. The payload names the files. *)
+
 type update_outcome =
   | Runtime_synced of
       { result : Keeper_types_profile.tool_result
@@ -24,10 +38,13 @@ type update_outcome =
       }
       (** The configuration was committed and published. [result] is a
           success carrying [runtime_sync] and the updated [meta]. *)
-  | Update_refused of Keeper_types_profile.tool_result
-      (** Any failure: CAS conflict, persistence, publication, or a lane
-          restart that failed. The error payload says which, and its
-          [keeper_config_write] metadata says whether the write applied. *)
+  | Update_refused of
+      { result : Keeper_types_profile.tool_result
+      ; config_write : config_write
+      }
+      (** Any failure. The error payload says which; [config_write] says what
+          it left on disk, and the [keeper_config_write] receipt's [applied],
+          when present, is read from it. *)
 
 val update_keeper_outcome :
   ?preserve_prompt_defaults:bool ->
@@ -67,8 +84,6 @@ val config_revision_conflict_of_result :
 val config_publication_rollback_of_result :
   Keeper_types_profile.tool_result -> string option
 
-val config_reconciliation_required_of_result :
-  Keeper_types_profile.tool_result -> Yojson.Safe.t option
 
 type lane_swap_refusal =
   | Swap_turn_in_flight of Keeper_owner.turn_in_flight

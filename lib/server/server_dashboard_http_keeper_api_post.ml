@@ -964,14 +964,36 @@ let runtime_sync_refusal_to_wire = function
   | Runtime_sync_not_attempted -> "not_attempted"
   | Runtime_sync_failed -> "failed"
 
+let config_write_receipt result =
+  match Tool_result.metadata result with
+  | Some (`Assoc fields) -> List.assoc_opt "keeper_config_write" fields
+  | Some _ | None -> None
+
+(* What a refusal says about the write, read off the update's own outcome.
+   The lane is touched only after the pair commits, so an unchanged or
+   indeterminate write never attempted the runtime sync. *)
+let config_write_fields = function
+  | Keeper_turn_up_update.Config_unchanged ->
+    [ "config_applied", `Bool false
+    ; "runtime_sync", `String (runtime_sync_refusal_to_wire Runtime_sync_not_attempted)
+    ]
+  | Keeper_turn_up_update.Config_committed ->
+    [ "config_applied", `Bool true
+    ; "runtime_sync", `String (runtime_sync_refusal_to_wire Runtime_sync_failed)
+    ]
+  | Keeper_turn_up_update.Config_indeterminate ->
+    [ "config_application", `Assoc [ "state", `String "indeterminate" ]
+    ; "runtime_sync", `String (runtime_sync_refusal_to_wire Runtime_sync_not_attempted)
+    ; "authoritative_reload_required", `Bool true
+    ]
+
 let respond_config_sync_error
-      ?config_write
       ~request
       reqd
       ~status
       ~name
-      ~config_applied
-      ~runtime_sync
+      ~config_write
+      ~result
       ~code
       ~detail
       ()
@@ -980,57 +1002,41 @@ let respond_config_sync_error
     ~status
     ~request
     (`Assoc
-      ([ "ok", `Bool false
-       ; "keeper", `String name
-       ; "config_applied", `Bool config_applied
-       ; "runtime_sync", `String (runtime_sync_refusal_to_wire runtime_sync)
-       ; "error", `Assoc [ "code", `String code; "detail", `String detail ]
-       ]
+      ([ "ok", `Bool false; "keeper", `String name ]
+       @ config_write_fields config_write
+       @ [ "error", `Assoc [ "code", `String code; "detail", `String detail ] ]
        @
-       match config_write with
+       match config_write_receipt result with
        | Some receipt -> [ "config_write", receipt ]
        | None -> []))
     reqd
-
-let config_write_receipt result =
-  match Tool_result.metadata result with
-  | Some (`Assoc fields) -> List.assoc_opt "keeper_config_write" fields
-  | Some _ | None -> None
 
 let respond_config_reconciliation ~request reqd ~name ~error =
   Http.Response.json_value
     ~status:`Service_unavailable
     ~request
     (`Assoc
-       [ "ok", `Bool false
-       ; "keeper", `String name
-       ; "config_application", `Assoc [ "state", `String "indeterminate" ]
-       ; ( "runtime_sync"
-         , `String (runtime_sync_refusal_to_wire Runtime_sync_not_attempted) )
-       ; "error", error
-       ; "authoritative_reload_required", `Bool true
-       ])
+       ([ "ok", `Bool false; "keeper", `String name ]
+        @ config_write_fields Keeper_turn_up_update.Config_indeterminate
+        @ [ "error", error ]))
     reqd
 
-let respond_config_revision_conflict ~request reqd ~name
+let respond_config_revision_conflict ~request reqd ~name ~config_write
       ({ expected; observed } : Keeper_turn_up_config_persistence.conflict)
   =
   Http.Response.json_value
     ~status:`Conflict
     ~request
     (`Assoc
-      [ "ok", `Bool false
-      ; "keeper", `String name
-      ; "config_applied", `Bool false
-      ; ( "runtime_sync"
-        , `String (runtime_sync_refusal_to_wire Runtime_sync_not_attempted) )
-      ; ( "error"
-        , `Assoc
-            [ "code", `String Keeper_turn_up_update.config_revision_conflict_code
-            ; "expected", Keeper_turn_up_config_persistence.config_revision_to_yojson expected
-            ; "observed", Keeper_turn_up_config_persistence.config_revision_to_yojson observed
-            ] )
-      ])
+      ([ "ok", `Bool false; "keeper", `String name ]
+       @ config_write_fields config_write
+       @ [ ( "error"
+           , `Assoc
+               [ "code", `String Keeper_turn_up_update.config_revision_conflict_code
+               ; "expected", Keeper_turn_up_config_persistence.config_revision_to_yojson expected
+               ; "observed", Keeper_turn_up_config_persistence.config_revision_to_yojson observed
+               ] )
+         ]))
     reqd
 
 let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
@@ -1178,25 +1184,29 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                              in
                              Http.Response.json_value ~compress:true
                                ~request:req json reqd
-                           | Keeper_turn_up_update.Update_refused result ->
+                           | Keeper_turn_up_update.Update_refused
+                               { result
+                               ; config_write =
+                                   Keeper_turn_up_update.Config_indeterminate
+                               } ->
+                             respond_config_reconciliation
+                               ~request:req
+                               reqd
+                               ~name
+                               ~error:(Tool_result.data result)
+                           | Keeper_turn_up_update.Update_refused
+                               { result
+                               ; config_write =
+                                   Keeper_turn_up_update.Config_unchanged as
+                                   config_write
+                               } ->
                            (match
                               Keeper_turn_up_update
                               .config_revision_conflict_of_result result
                             with
                             | Some conflict ->
                               respond_config_revision_conflict
-                                ~request:req reqd ~name conflict
-                            | None ->
-                           (match
-                              Keeper_turn_up_update
-                              .config_reconciliation_required_of_result result
-                            with
-                            | Some error ->
-                              respond_config_reconciliation
-                                ~request:req
-                                reqd
-                                ~name
-                                ~error
+                                ~request:req reqd ~name ~config_write conflict
                             | None ->
                            (match
                               Keeper_turn_up_update
@@ -1204,17 +1214,32 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                             with
                             | Some detail ->
                               respond_config_sync_error
-                                ?config_write:(config_write_receipt result)
                                 ~request:req
                                 reqd
                                 ~status:`Service_unavailable
                                 ~name
-                                ~config_applied:false
-                                ~runtime_sync:Runtime_sync_not_attempted
+                                ~config_write
+                                ~result
                                 ~code:"keeper_config_publication_rolled_back"
                                 ~detail
                                 ()
                             | None ->
+                              respond_config_sync_error
+                                ~request:req
+                                reqd
+                                ~status:`Service_unavailable
+                                ~name
+                                ~config_write
+                                ~result
+                                ~code:"keeper_config_update_refused"
+                                ~detail:(Keeper_types_profile.tool_result_body result)
+                                ()))
+                           | Keeper_turn_up_update.Update_refused
+                               { result
+                               ; config_write =
+                                   Keeper_turn_up_update.Config_committed as
+                                   config_write
+                               } ->
                              let detail = Keeper_types_profile.tool_result_body result in
                              Log.Keeper.error
                                "dashboard keeper config runtime sync failed keeper=%s: %s"
@@ -1222,16 +1247,15 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                                detail;
                              invalidate_config_surfaces ~config ~name None;
                              respond_config_sync_error
-                               ?config_write:(config_write_receipt result)
                                ~request:req
                                reqd
                                ~status:`Service_unavailable
                                ~name
-                               ~config_applied:true
-                               ~runtime_sync:Runtime_sync_failed
+                               ~config_write
+                               ~result
                                ~code:"keeper_runtime_sync_failed"
                                ~detail
-                               ()))))))))
+                               ())))))
            | None ->
                respond_error reqd "request body must be a JSON object"
          with Yojson.Json_error e ->

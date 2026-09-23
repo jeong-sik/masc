@@ -2281,31 +2281,39 @@ def keeper_long_runtime_identity_interaction(
         needle=b"MASC Overview",
     )
     # Both keepers run the same provider subscription, so their ids differ
-    # only after a 25-character shared prefix. What has to hold is that the
-    # elision cuts the shared middle and leaves the tail that tells the two
-    # apart. Where exactly it cuts is a function of the column width, so
-    # pinning the cut point spells a needle that a wider column retires --
-    # the earlier b"antigrav\xe2\x80\xa6.gemini-3-7-flash" was written against a
-    # narrower column and stopped matching without the behaviour changing.
+    # only in the variant suffix after a 51-character shared prefix. What
+    # has to hold is that the elision cuts the shared middle and leaves the
+    # tail that tells the two apart. Where exactly it cuts is a function of
+    # the column width, so pinning the cut point spells a needle that a
+    # wider column retires -- the earlier b"antigrav\xe2\x80\xa6.gemini-3-7-flash"
+    # was written against a narrower column and stopped matching without the
+    # behaviour changing.
+    #
+    # The ids are 55 and 58 cells wide because the column now sizes itself
+    # to the widest id the rows hold (#38320): at this scenario's 126
+    # columns the cell reaches 53 cells, and the narrowest inner width that
+    # draws the column at all (118) still gives it 47, so the shorter ids
+    # this scenario drew before -- 40 and 41 cells -- fit whole at every
+    # width and stopped exercising the elision (issue #38323).
     send_and_wait(
         process,
         master_fd,
         output,
         b"2",
-        b".gemini-3-7-flash",
+        b"flash-thinking-preview",
     )
     wait_for_output(
         process,
         master_fd,
         output,
-        b".claude-sonnet-4",
+        b"thinking-lite",
         start=0,
         timeout=3.0,
     )
-    frame = frame_containing(bytes(output), b".claude-sonnet-4")
+    frame = frame_containing(bytes(output), b"thinking-lite")
     for full_id in (
-        b"antigravity_subscription.gemini-3-7-flash",
-        b"antigravity_subscription.claude-sonnet-4",
+        b"antigravity_subscription.gemini-3-7-flash-thinking-preview",
+        b"antigravity_subscription.gemini-3-7-flash-thinking-lite",
     ):
         if full_id in frame:
             raise AssertionError(
@@ -15163,8 +15171,8 @@ def run_keyboard_regression(executable: str) -> None:
         description="Keeper long runtime identities remain distinguishable",
         interact=keeper_long_runtime_identity_interaction,
         http_fixtures=keeper_runtime_http_fixtures(
-            alpha_runtime_id="antigravity_subscription.gemini-3-7-flash",
-            beta_runtime_id="antigravity_subscription.claude-sonnet-4",
+            alpha_runtime_id="antigravity_subscription.gemini-3-7-flash-thinking-preview",
+            beta_runtime_id="antigravity_subscription.gemini-3-7-flash-thinking-lite",
         ),
     )
     run_terminal_scenario(

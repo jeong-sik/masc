@@ -264,8 +264,8 @@ let append_decision_record
                         ("streaming_inter_chunk_avg_ms", Json_util.float_opt_to_json co.streaming_inter_chunk_avg_ms);
                       ]
                     in
-                    (* Same split as [provider_context]: the lane, then the
-                       candidate that answered on it. The answerer is named
+                    (* Same split as [provider_context]: the keeper's lane,
+                       then the candidate that answered. The answerer is named
                        here too because model-inference attribution reads
                        this object before [provider_context] and falls back
                        to [runtime_id] only when [executed_runtime_id] is

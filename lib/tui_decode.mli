@@ -487,6 +487,16 @@ type effective_skill_profile = {
   esp_flow : skill_flow option;
 }
 
+type configured_skill_name_unavailable = {
+  csn_name : string;
+  csn_reason : string option;
+}
+(** A Skill name the Keeper profile selected that the turn's catalog does not
+    hold. Not a read failure, so it is a different fact from
+    [ets_skills_left_out]. [csn_reason] is the producer's word for why, and it
+    is [None] when the producer sent none rather than a word this reader made
+    up. *)
+
 type effective_tool_surface =
   | Effective_surface_available of {
       ets_keeper_name : string;
@@ -502,6 +512,10 @@ type effective_tool_surface =
          can call, and absence with no reason reads as a skill nobody
          wrote. *)
       ets_skills_left_out : string list;
+      (* Names the profile selected and the turn catalog does not carry. The
+         dashboard draws these under "Unavailable Skills"; the TUI reads the
+         same list so both renderers of this surface say it. *)
+      ets_unavailable_skill_names : configured_skill_name_unavailable list;
       ets_composition_skills : Skill_reference.t list;
       ets_skill_profiles : effective_skill_profile list;
       ets_tool_surface_bytes : int;

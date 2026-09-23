@@ -3885,6 +3885,9 @@
  (modules test_tui_render_tools)
  (libraries
   alcotest
+  ; The wire decoder, so the surface under test is built the way the live
+  ; loader builds it rather than by hand.
+  masc
   masc_tui_keys
   masc_tui_render_tools
   masc_tui_theme

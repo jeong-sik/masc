@@ -1292,6 +1292,7 @@ const storeMocks = vi.hoisted(() => ({
 vi.mock('../api/dashboard-keeper-github', () => ({
   fetchKeeperGithubIdentity: githubIdentityMocks.fetchKeeperGithubIdentity,
   streamKeeperGithubLogin: githubIdentityMocks.streamKeeperGithubLogin,
+  KEEPER_GITHUB_LOGIN_SCOPES: [{ scope: 'workflow', note: 'changes CI' }],
 }))
 
 import {

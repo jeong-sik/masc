@@ -177,6 +177,10 @@ type checkpoint_ref_load_error =
       }
   | Ref_lock_failed of string
 
+val checkpoint_ref_create_error_to_string : Keeper_checkpoint_ref.create_error -> string
+val checkpoint_identity_error_to_string : checkpoint_identity_error -> string
+val checkpoint_ref_load_error_to_string : checkpoint_ref_load_error -> string
+
 (** Canonical checkpoint value, exact persisted bytes, and their reference
     derived from one immutable byte snapshot. *)
 type exact_checkpoint_snapshot

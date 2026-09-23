@@ -861,6 +861,38 @@ let test_the_lane_slot_history_says_what_it_does_not_cover () =
        ~binding_name:"standalone_lane_detail_lines"
        ~callee:"standalone_lane_runs_naming_no_slot")
 
+(* The runtime detail opens from two doors: a lane's candidate row and the
+   catalog row. Both answer "Used by lanes", and the lane door used to answer
+   it with the one lane the reader arrived through -- a runtime seven lanes
+   fall back to said it was used by one. Both doors now ask
+   [runtime_lanes_using], which reads the resolved projection, so neither can
+   answer with a shorter list than the other. *)
+let test_both_doors_into_the_runtime_detail_ask_the_same_lane_list () =
+  let asks ~callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:"runtime_detail_lines" ~callee
+  in
+  Alcotest.(check int) "the lane door asks the projection for the lanes" 1
+    (asks ~callee:"runtime_lanes_using");
+  Alcotest.(check int) "the catalog door keeps reading the same rows" 1
+    (asks ~callee:"runtime_all_rows")
+
+(* The list is drawn in the order the server sent, and the column beside it is
+   only a reading of that order when it holds the time the order was made
+   from. The column used to hold the last move under every sort, so under
+   "newest post first" a post replied to a minute ago sat sixth reading "25s".
+   The sort is read once for the whole list: the header word and every row's
+   number name the same time only while one reading feeds both. *)
+let test_the_board_age_column_reads_the_sort_once () =
+  let asks ~callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:"render_board_list" ~callee
+  in
+  Alcotest.(check int) "the list asks which time the sort ordered by" 1
+    (asks ~callee:"board_sort_time");
+  Alcotest.(check int) "and names that time over the column once" 1
+    (asks ~callee:"board_age_header")
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -936,5 +968,10 @@ let () =
         ; Alcotest.test_case
             "the lane slot history says what it does not cover" `Quick
             test_the_lane_slot_history_says_what_it_does_not_cover
+        ; Alcotest.test_case
+            "both doors into the runtime detail ask the same lane list" `Quick
+            test_both_doors_into_the_runtime_detail_ask_the_same_lane_list
+        ; Alcotest.test_case "the Board age column reads the sort once" `Quick
+            test_the_board_age_column_reads_the_sort_once
         ] )
     ]

@@ -25,6 +25,7 @@
 - `/api/v1/dashboard/keeper-costs` reports `total_cost_usd` as `null` when no turn in the window reported a cost, adds `cost_reported_samples` and `cost_unreported_samples`, and drops `model_breakdown` (#38105).
 - The TUI says "candidate order" where it said "failover", and the runtime detail panel's `Failover Chain:` label reads `Candidate Chain:`. A script that reads the TUI screen for those words has to follow (#37918).
 - The keeper memory health payload (`/api/v1/dashboard/keeper-memory-health`) carries the Librarian's continuity lag: `continuity_unread_atoms` on each keeper's `librarian` object, and `librarian_continuity_unread_atoms` with `librarian_continuity_unmeasured` in `totals`. The TUI and the dashboard check the payload's key set exactly, so a server and a TUI or dashboard from different sides of this change do not draw the Memory screen, in either direction: the TUI shows the Memory header as failed and the dashboard shows the health panel's error. Upgrade the server together with the TUI and the dashboard, and roll them back together (#37856, #37863).
+- Keeper status no longer carries `execution_context.pr_history`. It never held a row, but a reader that decodes it as a required field has to stop expecting it (#38095).
 
 ### Fresh state required
 
@@ -51,6 +52,12 @@
   row naming the package. Operators remove a Skill with the existing editor
   delete. The server installs the publisher at boot; without it the tool
   answers `skill_publish_not_installed` (#38159).
+- The Memory screen's `Context saved` line now shows the Librarian's read position beside the cut point, so an operator can see how far the snapshot trails what has been read. A snapshot that is rewriting from atom 0 says how far it must reach before it is used, and a position that could not be read is told apart from one that was never taken (#37840).
+- `[[providers]]` entries in `models.toml` accept `serves_bare_rows` (bool, default `false`): the provider is the vendor's own endpoint for the models the bare rows describe, so a config naming it reads those rows by prefix after its scoped rows. Only the native `claude` provider declares it (#37924).
+- The model catalog carries Xiaomi's MiMo-V2.6 (1M context, tools and reasoning, the same wire as MiMo-V2.5-Pro). It is catalog-only: no runtime lane binds it yet (#38123).
+- The server reads the open pull requests of every registered github.com repository every 60 seconds and serves them at `GET /api/v1/repositories/pulls`, over HTTP/1 and h2. It reads with the token of the Keeper that runtime.toml `[repositories] pr_reader` names, taken from that Keeper's `github-cli/hosts.yml` on every read and never copied. A Remote_ssh reader is refused, since its login lives on its endpoint. When no reader is declared, the Keeper does not exist or holds no github.com token, the endpoint says which and nothing is read with another credential. Each repository is `not_read` until the first read after a restart, then `read`, `failed` (not visible to that account, token rejected, or rate limited with GitHub's wait: `retry-after` first, which also marks a 403 as GitHub's secondary rate limit, then `x-ratelimit-reset`) or `not_github`. A check or review state this build does not know is counted as `undecodable` instead of being shown as none. The result lives in memory only (RFC-0465, #38125).
+- A Keeper's GitHub CLI identity names the scopes its token carries. The probe runs `gh api --include user` and reads `X-OAuth-Scopes` beside the login, in the one request it already made; `stored` and `effective` gain `scopes`, `null` when GitHub lists none, as it does for a fine-grained PAT or an App token. The TUI's Keeper GitHub tab and the dashboard's GitHub CLI panel show the list, so an operator who ticked a scope can see whether the new token carries it (#38214).
+- A Keeper's GitHub CLI login can also ask for `write:packages`, for Keepers that publish to GitHub Packages such as ghcr.io images: key `2` on the TUI GitHub tab, a second checkbox in the dashboard (#38214).
 
 ### Changed
 
@@ -138,6 +145,9 @@
   back to the distribution copy, so later releases still reach it. The
   registry never reads the kept copy as a prompt and no sync retires it; the
   WARN boot line names where it is (#38204).
+- On the official-client lanes (Claude Code, Antigravity) a turn no longer carries the working-state summary when doing so would push newer atoms out of the request. The summary is dropped, a WARN names the reason and the first atom, and `masc_keeper_librarian_working_state_not_carried_total` counts it. The turn is never refused for this, and the summary is still carried when it displaces nothing (#37879).
+- The Overview draws a Team block: one row per Keeper, answering who is working on what and who is stuck. The briefing already sent a row per Keeper and the Overview only counted them, so seeing which Keeper held which task, or which one had stopped, meant crossing to the Keepers screen and the task list. Stuck Keepers come first with the attention sentence that names them and how many tasks they hold, then working Keepers with their first held task, then idle ones; paused Keepers share one line, and tasks held by assignees outside the fleet (such as an MCP client) are counted on another. Attention targets are parsed once into `Attention_keeper | Attention_other`, so the join is a constructor match rather than a comparison of the wire word A Keeper the brief marks `paused` is parked whatever its phase says, so a paused Keeper that autoboot skipped after a restart (phase null, a "paused" item from the status bridge) is not listed as needing the operator; info-severity items that name a Keeper neither move it to the stuck band nor explain its row (#38078).
+- The Overview Team title draws the last 14 UTC days of task completions as a sparkline scaled from zero, with today's count and the peak beside it. The task flow snapshot already counted them per day and only the Metrics screen showed them, as numbers (#38080).
 
 ### Fixed
 
@@ -265,6 +275,61 @@
   earlier release's text is saved as a prompt override. The manifest keeps
   the schema string those binaries read, and they rewrite it without
   `sha256` (#38210).
+- A continuity pass refused for size now carries its narrowed width into the next pass instead of restarting from the full range every time, so a keeper whose Librarian kept failing on an oversized request makes progress instead of looping (#37855).
+- The continuity lag in the keeper memory health payload is read from the runtime keepers directory, so it reports a real number instead of `null` for every keeper (#37870).
+- A continuity pass narrows its read width only when a failure actually shows a size problem. A quota, an auth refusal, a network error, or a failure that never reached the provider keeps the width, so one expired credential no longer collapses the width to a single atom and stalls there (#37875).
+- The `Context saved` read position is read from the runtime keepers directory, so it no longer shows "nothing read yet" for keepers that have read (#37896).
+- A successful tool call no longer reads as REJECTED in the Keeper's own recent-actions view, the IDE file-change list, the trust timeline, and `masc_trace`. The recorded outcome is read by one rule that understands `disposition` and `wire_outcome`, and a deferred or unrecorded call is shown as such instead of as a failure (#37901).
+- A config that names the native `claude` provider no longer has every reasoning-effort request refused with "has no declared categorical reasoning-effort contract"; it now reads the catalogued Claude model rows, so it gets the model's effort ladder, 1M context window and 128k output ceiling instead of the Anthropic preset's 200k/8192. Only the catalog is read on this path, and other providers are unchanged (#37924).
+- A malformed `usage` value in a G1 run observation is carried as malformed instead of being folded into "usage absent", and a usage-unreported run that carries one is invalidated with a finding, so corruption stays visible (#37932).
+- The media-degrade records keep their `image_occurrences` and `required_modalities` values in the public (dashboard) view, so an operator can see how many images were rewritten and which input blocked a candidate (#37933).
+- A tool result whose blocks were all dropped as unsupported media now sends the tool's own `content` string instead of the literal `[]` on the OpenAI wires, and the same for a result that arrived with an empty block list (#37939).
+- The Librarian reads an intervening trace (a keeper recreated under a new trace) before the current one, so turns that ended in the skipped trace are read instead of being jumped over (#37941).
+- Tool-call log rows keep JSON tool outputs parseable. An output over the
+  4000-byte preview is shrunk at member and element boundaries, and each cut
+  object or array ends with a `_truncated` marker instead of being cut
+  mid-structure. Secrets in a JSON output are redacted per string value, so a
+  URL in one member and an e-mail address in another no longer turn the stored
+  output into non-JSON. Object keys are redacted the same way, and a JSON
+  output is always stored as the redacted document serialized again, so a
+  credential in a key or in a comment the parser drops is not stored (#37947).
+- Two screens say how long ago rather than what time it was. Both drew the clock alone, on the reading that the header's own clock gives it a distance -- which holds only while the two are the same day. The Clients roster drew a session last seen on 2026-09-21 as `11:49:28` under a header reading `09:31:39` on 2026-09-23, so the only distance a reader could take from it pointed two hours ahead for a row that had been gone a day and a half; the planning trend read `Net change since 09:31:39`, and its baseline is the first successful read of the process and is never replaced, so a screen left open overnight named a moment on a day nobody could identify. Both now draw the span: `1s`, `7h48m`, `1d21h`, and the trend reads `Net change since this TUI's first reading 1d21h ago` -- naming where the span starts, because it is not a window anyone chose but how long this screen has been open. An empty stamp is `never`; one that will not parse, or that sits ahead of this clock, is shown as it arrived rather than as an age nothing measured (#38034).
+- The librarian now sees when each current memory was written: every fact in its prompt carries `first_seen` and `last_seen`, so snapshots of one moving state (a position rewritten every step) no longer read as equals. The prompt orders such snapshots by the moment the claim names first and by `last_seen` otherwise, keeps them when the order or the subject is unclear, and removes the stale ones through `dropped` rather than `absorbs`, since the current claim does not say their old values (#38056).
+- The Memory filter bar names the filter its number is over, and every count on the surface spells its own noun. `visible_memory_keepers` narrows on the text being typed while a search is open and on the applied one otherwise; the bar decided whether to draw from that value and then quoted the applied one instead, so typing the first filter drew the live count beside an empty pair of quotes -- a filter that matches everything, and a number that says one keeper. The counts around it hardcoded the plural, and one is what they reach on an ordinary day: filtering by a Keeper's name usually leaves exactly one, which read `1 matching keepers`, beside `1 keeper not measured`, `1 atom behind in continuity` and `1 failure since server start`. The unread turns keep `?` where nothing measured them, which is not a count and takes no noun from one. The fact browser's own bar had the same split and is now read from the same place: it decided and quoted from the applied filter while its rows were narrowed by the text being typed, so a second filter typed over an applied one drew the old word above rows the new one had left. The rule that picks between the two is written once, in `memory_search_query`, and the keeper list, the fact list, both bars, both empty-page notes and the fact list's row budget read it: a first filter typed that matched no fact used to read `(no facts in either store)`, and the list reserved its filter row from the applied filter, so a typed one pushed the last row off the screen (#38067).
+- Keeper status no longer carries `execution_context.pr_history`, and the dashboard's repository panel no longer draws PR and worktree sections. The field read a `.playground_pr_history.jsonl` file that no code writes, and `active_worktrees` had no producer; neither ever held a row, so both only suggested a record that did not exist (#38095).
+- The Task and Goal verification prompts now name only the tools the verifier actually has, judge only from evidence it can read (typed artifacts and live lookups), and no longer contradict themselves about notes and URLs (#38099).
+- Exact-output lanes no longer send the model's catalog `max_output_tokens` as
+  the request `max_tokens`. A lane may declare `max_output_tokens` under
+  `[runtime.exact_output_lanes.<lane>]`, and its requests carry that budget; a
+  lane that declares none sends no `max_tokens` of its own, so the provider's
+  default applies. Sending the catalog ceiling (384000 for deepseek-v4) made
+  OpenRouter reserve credit for the whole ceiling and refuse small judgments
+  with 402 (#38141).
+- A shared-mount Keeper's repository checkout with no `origin` remote now reads `catalog.state = "unregistered"` in keeper status instead of `origin_unavailable`: it names no catalog repository. `origin_unavailable` stays for a lookup that timed out or failed, an exhausted inspection budget, an origin that is not a comparable URL, and every endpoint-owned (remote sandbox) checkout without an origin, whose probe cannot tell a missing origin from a failed read (#38161).
+- The TUI reads the Board attention answer source by its typed lane and run status instead of comparing strings. A lane run status other than succeeded, failed or cancelled in `intended_status` is now reported as a decode error instead of being read as "not succeeded", and a new run status fails to compile at this match instead of falling into a catch-all (#38179).
+- The Memory fact detail escapes every value it draws. The claim always was, through `Message_layout.wrap_body`, but the seven fields beside it -- the category, the origin, the memory id, a bound path and its file hash, and a dropped row's reason and path -- went to the terminal as the keeper wrote them. The guard that would have caught it, `test_renderers_sanitize_untrusted_terminal_fields`, only ever looked at `bin/masc_tui_render.ml`; it watches the Memory pane's own file now. `Timeline` also takes a row of its own: it shared the Origin row behind a hand-sized slot of fifteen cells, and in the fleet reading the origin carries its keeper, so the shortest keeper name in the fleet already made it seventeen bytes and `Timeline:` lost the space before it on every row. Escaping can only lengthen a value, which the slot had no room for either (#38181).
+- A Claude Code or Codex keeper turn starts at the runtime's declared prompt
+  ceiling every time. The lane remembered the last capacity that completed a
+  turn and started the next one from it; only a success at that size was
+  recorded and nothing tried a larger one, so one oversized tool output
+  halved every later request until the server restarted (#38188).
+- `masc_keeper_clear` clears a keeper whose checkpoint an earlier build wrote.
+  A turn already reads such a checkpoint as no saved history; clear refused
+  it as unreadable and left the official-client session in place until a
+  turn saved again (#38223).
+- The Overview stops decoding a field no screen draws. The briefing's `command_focus.top_attention` repeats the first incident, and the loader turned it into `ov_top_attention`, which nothing read -- the Attention panel already lists the incidents themselves, most severe first. It was not free: `decode_attention_item` refuses an item missing a required field, and that refusal came back as the whole overview load failing, blanking the fleet counts, the health word and the panel over a value nobody reads. The load no longer opens `command_focus` (#38224).
+- The retained checkpoint sweep no longer skips itself on every startup. It
+  read every directory under `keepers/` as a keeper, and `keepers/tool_usage/`
+  (the tool-usage store, not a keeper) holds an empty
+  `chat-operations.sqlite3` that the operation store refuses. The tool-usage
+  store is now declared as `Keepers_root_scoped` instead of
+  `Workspace_scoped`, whose documented home is outside `keepers/`; its writer
+  builds the path from that declaration, and the sweep skips every such
+  directory. A keeper named like one of them stops the pass with nothing
+  removed (#38232).
+- Deleting a keeper also removes its `<keeper>.memory-events.jsonl` sidecar,
+  so a new keeper with the same name no longer inherits the old retrieval,
+  retraction and revision events (#38235).
 
 ### Internal
 

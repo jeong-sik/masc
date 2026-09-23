@@ -749,6 +749,7 @@ let test_runner_status_snapshot_tracks_liveness () =
     { due_changed = 1
     ; emitted = []
     ; rescheduled = 2
+    ; held = []
     ; dispatches =
         [ { occurrence_id = test_occurrence_id "status-1"
           ; schedule_id = "status-1"
@@ -784,6 +785,7 @@ let test_runner_status_snapshot_tracks_liveness () =
     { due_changed = 3
     ; emitted = []
     ; rescheduled = 0
+    ; held = []
     ; dispatches =
         [ { occurrence_id = test_occurrence_id "status-dispatch-failed"
           ; schedule_id = "status-dispatch-failed"
@@ -936,8 +938,21 @@ let test_tick_defers_held_wake_without_advancing () =
   let result = tick_ok config ~now:201.0 ~consumer in
   check int "held wake is not dispatched" 0 (List.length !calls);
   check int "held wake emits no signal" 0 (List.length result.emitted);
-  check int "held wake is reported once" 1 (List.length result.dispatches);
-  check_dispatch_status "deferred" Dispatch_deferred (List.hd result.dispatches).status;
+  check int "a held wake is not a dispatch" 0 (List.length result.dispatches);
+  check (list string) "held wake is reported as held once" [ request.schedule_id ]
+    (List.map (fun (signal : wake_signal) -> signal.schedule_id) result.held);
+  let again = tick_ok config ~now:216.0 ~consumer in
+  check (list string) "the same occurrence is held on the next tick"
+    (List.map
+       (fun (signal : wake_signal) -> Schedule_occurrence_id.to_string signal.occurrence_id)
+       result.held)
+    (List.map
+       (fun (signal : wake_signal) -> Schedule_occurrence_id.to_string signal.occurrence_id)
+       again.held);
+  check int "a hold that continues is not newly held" 0
+    (List.length (Schedule_runner.newly_held ~previous:result.held again.held));
+  check int "a hold with no earlier tick is newly held" 1
+    (List.length (Schedule_runner.newly_held ~previous:[] again.held));
   match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
   | None -> fail "schedule missing after deferral"
   | Some stored ->

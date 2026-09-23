@@ -564,7 +564,7 @@ let of_yojson json =
   let* version_json = field ~context "schema_version" fields in
   let* () =
     match version_json with
-    | `Int version when Int.equal version schema_version -> Ok ()
+    | `Int version when Int.equal version 6 || Int.equal version schema_version -> Ok ()
     | `Int version ->
       Error
         (Printf.sprintf

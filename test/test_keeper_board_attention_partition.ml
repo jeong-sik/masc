@@ -1029,9 +1029,10 @@ let test_strict_current_schema_rejects_old_json () =
     "strict codec roundtrip"
     true
     (ok "decode" (P.of_yojson encoded) = created);
-  expect_error
-    "immediate prior schema v6 is rejected without migration"
-    (P.of_yojson (replace_field "schema_version" (`Int 6) encoded));
+  Alcotest.(check bool)
+    "schema v6 is accepted without migration"
+    true
+    (ok "decode v6" (P.of_yojson (replace_field "schema_version" (`Int 6) encoded)) = created);
   expect_error
     "schema v5 is rejected without migration"
     (P.of_yojson (replace_field "schema_version" (`Int 5) encoded));

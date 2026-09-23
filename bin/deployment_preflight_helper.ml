@@ -778,9 +778,7 @@ let keeper_meta_store =
        from its declaration, losing accumulated counters and the task binding"
   ; scan =
       (fun ~base_path ->
-         let dir =
-           Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
-         in
+         let dir = Masc.Workspace.keepers_runtime_dir_for_base_path base_path in
          Ok
            (scan_files
               ~paths:
@@ -1101,8 +1099,11 @@ let official_client_session_store =
    store reports as [Incomplete_line] is an append a crash cut short, which the
    next durable append trims away; it is not a row the new binary refuses, so
    it is neither counted as a row nor held against the deploy. *)
+(* The runtime writes these under the cluster's keepers directory; reading
+   the default cluster's instead finds nothing on any other cluster and passes
+   without having read a row. *)
 let runtime_keepers_dir ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
+  Masc.Workspace.keepers_runtime_dir_for_base_path base_path
 ;;
 
 (* Journals and checkpoint locks live beside these directories. Their names

@@ -553,7 +553,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                  (List.length result.dispatches)
              else
                Log.Server.debug
-                 "schedule_runner: idle due_changed=0 emitted=0 rescheduled=0 dispatched=0";
+                 "schedule_runner: idle due_changed=%d emitted=0 rescheduled=0 dispatched=0 held=%d"
+                 result.due_changed
+                 (List.length result.held);
              result.held
            | Error err ->
              let finished_at = Time_compat.now () in

@@ -781,6 +781,38 @@ let test_runner_status_snapshot_tracks_liveness () =
   check int "last unsupported dispatch count" 0 (json_int "dispatch_unsupported" counts);
   check int "last start-rejected dispatch count" 0
     (json_int "dispatch_start_rejected" counts);
+  check int "a tick that held nothing lists no held occurrence" 0
+    (match json_field "held" ok with
+     | Some (`List held) -> List.length held
+     | Some _ | None -> fail "held is not a list");
+  let held_signal : wake_signal =
+    { occurrence_id = test_occurrence_id "status-held"
+    ; kind = Due_candidate
+    ; schedule_instance_id = "instance-status-held"
+    ; schedule_id = "status-held"
+    ; emitted_at = 1.5
+    ; due_at = 200.0
+    ; payload_digest = "test-payload"
+    ; payload = `Assoc []
+    }
+  in
+  Schedule_runner_status.record_tick_ok ~started_at:1.5 ~finished_at:1.75
+    (* A hold-only tick: zero counts, so the totals checked below are the
+       other ticks' sums. *)
+    { ok_result with due_changed = 0; rescheduled = 0; dispatches = []; held = [ held_signal ] };
+  let held_ids () =
+    match json_field "held" (render ~now:2.0 ()) with
+    | Some (`List held) ->
+      List.map
+        (fun row ->
+           match json_field "schedule_id" row with
+           | Some (`String id) -> id
+           | Some _ | None -> fail "held row has no schedule_id")
+        held
+    | Some _ | None -> fail "held is not a list"
+  in
+  check (list string) "the newest tick's held occurrence is listed" [ "status-held" ]
+    (held_ids ());
   let dispatch_failure_result =
     { due_changed = 3
     ; emitted = []
@@ -812,6 +844,8 @@ let test_runner_status_snapshot_tracks_liveness () =
     ~started_at:2.0
     ~finished_at:2.125
     dispatch_failure_result;
+  check (list string) "held is replaced by the next tick, not accumulated" []
+    (held_ids ());
   let dispatch_degraded = render ~now:2.25 () in
   check string "dispatch failure degrades status" "degraded"
     (json_string "status" dispatch_degraded);

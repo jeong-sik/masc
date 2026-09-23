@@ -1526,6 +1526,293 @@ let test_a_claim_without_a_statement_is_not_judged () =
     (List.map id (Gate.without_copies run [ blank ]))
 ;;
 
+(* --- The reverse question over more than one state ---
+
+   The case this question was written for (#38243) is a claim that named
+   dozens of memories: joined, they are over {!Gate.state_bytes_limit}, so
+   they are asked as several states. These fixtures are over the bound on
+   purpose. The judge answers from the state it is handed: a statement is
+   conveyed exactly when the state holds its words. *)
+
+let filler label =
+  (* About 8,000 bytes of statements that say nothing any claim below says. *)
+  String.concat " "
+    (List.init 220 (fun i -> Printf.sprintf "The %s ledger line %d is kept here." label i))
+;;
+
+let alpha_statement = "Alpha deploys every Tuesday at nine in the morning."
+let beta_statement = "Beta pages the on-call operator when a deploy fails."
+let gamma_statement = "Gamma keeps its release notes for exactly one year."
+
+let statement_of_question = function
+  | T.Noul { T.instructions; _ } ->
+    let prefix = "Statement:\n" in
+    let rec find i =
+      if i + String.length prefix > String.length instructions
+      then Alcotest.fail "no statement in the question"
+      else if String.sub instructions i (String.length prefix) = prefix
+      then String.sub instructions (i + String.length prefix)
+             (String.length instructions - i - String.length prefix)
+      else find (i + 1)
+    in
+    find 0
+  | T.Choice _ | T.Score _ -> Alcotest.fail "the gate asks noul questions only"
+;;
+
+(* Every request, as (state, statements asked), in the order made. *)
+let reading_the_state () =
+  let requests = ref [] in
+  let evaluate ~state ~questions =
+    let state = match state with `String state -> state | _ -> Alcotest.fail "a text state" in
+    let asked = List.map (fun (_, question) -> statement_of_question question) questions in
+    requests := (state, asked) :: !requests;
+    Ok
+      { T.model = "jev-test"
+      ; usage = None
+      ; answers =
+          List.map
+            (fun (qid, question) ->
+               let statement = statement_of_question question in
+               qid, T.Noul_answer { T.noul = (if String_util.contains_substring state statement then 0.9 else 0.1) })
+            questions
+      }
+  in
+  evaluate, fun () -> List.rev !requests
+;;
+
+let reverse_check ~evaluate ~sources ~claim =
+  only_check
+    (Gate.judge_copies ~evaluate ~facts:sources ~new_claims:[ claim ] ~superseding:[]
+       ~absorbed:(absorbed_into claim sources) ~applied:[])
+;;
+
+let test_a_statement_only_the_second_state_conveys_makes_a_copy () =
+  let first = fact (filler "first" ^ " " ^ alpha_statement) in
+  let second = fact (filler "second" ^ " " ^ beta_statement) in
+  Alcotest.(check bool) "the two memories do not fit one state" true
+    (String.length first.claim + String.length second.claim > Gate.state_bytes_limit);
+  let claim = fact (alpha_statement ^ " " ^ beta_statement) in
+  let evaluate, requests = reading_the_state () in
+  let check = reverse_check ~evaluate ~sources:[ first; second ] ~claim in
+  (match check.verdict with
+   | Gate.Copy { statements } ->
+     Alcotest.(check (list string)) "both statements conveyed"
+       [ alpha_statement; beta_statement ] statements
+   | Gate.Carries_new_statement _ | Gate.Not_judged _ ->
+     Alcotest.fail "the second state conveys what the first did not");
+  match requests () with
+  | [ (first_state, first_asked); (second_state, second_asked) ] ->
+    Alcotest.(check string) "the first state is the first memory" first.claim first_state;
+    Alcotest.(check string) "the second state is the second memory" second.claim second_state;
+    Alcotest.(check (list string)) "the first state is asked every statement"
+      [ alpha_statement; beta_statement ] first_asked;
+    Alcotest.(check (list string)) "the second is not asked what the first conveyed"
+      [ beta_statement ] second_asked;
+    Alcotest.(check int) "the check counts both requests" 2 check.requests
+  | made -> Alcotest.failf "expected one request per state, got %d" (List.length made)
+;;
+
+let test_a_statement_no_state_conveys_applies_the_claim () =
+  let first = fact (filler "first" ^ " " ^ alpha_statement) in
+  let second = fact (filler "second" ^ " " ^ beta_statement) in
+  let claim = fact (String.concat " " [ alpha_statement; beta_statement; gamma_statement ]) in
+  let evaluate, requests = reading_the_state () in
+  let check = reverse_check ~evaluate ~sources:[ first; second ] ~claim in
+  (match check.verdict with
+   | Gate.Carries_new_statement { statements; not_conveyed } ->
+     Alcotest.(check int) "three statements" 3 statements;
+     Alcotest.(check int) "the one no memory holds" 1 not_conveyed
+   | Gate.Copy _ | Gate.Not_judged _ -> Alcotest.fail "a statement no state conveys is new");
+  Alcotest.(check (list (list string))) "each state is asked what is still unconveyed"
+    [ [ alpha_statement; beta_statement; gamma_statement ]; [ beta_statement; gamma_statement ] ]
+    (List.map snd (requests ()))
+;;
+
+(* A memory over the state bound alone is never sent. What only it holds
+   looks unconveyed, which applies the claim. *)
+let test_a_memory_over_the_state_bound_is_left_out () =
+  let huge = fact (filler "one" ^ " " ^ filler "two" ^ " " ^ alpha_statement) in
+  Alcotest.(check bool) "the memory alone is over the bound" true
+    (String.length huge.claim > Gate.state_bytes_limit);
+  let small = fact beta_statement in
+  let claim = fact (alpha_statement ^ " " ^ beta_statement) in
+  let evaluate, requests = reading_the_state () in
+  (match (reverse_check ~evaluate ~sources:[ huge; small ] ~claim).verdict with
+   | Gate.Carries_new_statement { not_conveyed; _ } ->
+     Alcotest.(check int) "only the left-out memory's statement is unconveyed" 1 not_conveyed
+   | Gate.Copy _ | Gate.Not_judged _ ->
+     Alcotest.fail "a statement only an unsendable memory holds keeps the claim");
+  Alcotest.(check (list string)) "only the memory that fits is sent" [ small.claim ]
+    (List.map fst (requests ()));
+  let evaluate, requests = reading_the_state () in
+  (match (reverse_check ~evaluate ~sources:[ huge ] ~claim).verdict with
+   | Gate.Not_judged Gate.No_source_fits_the_state -> ()
+   | Gate.Not_judged
+       ( Gate.Gate_judgment_failed | Gate.Continues_a_dropped_memory | Gate.Statement_too_large
+       | Gate.No_statement | Gate.Request_failed _ )
+   | Gate.Copy _ | Gate.Carries_new_statement _ ->
+     Alcotest.fail "no memory fits a state, so nothing can be asked");
+  Alcotest.(check int) "nothing sent" 0 (List.length (requests ()))
+;;
+
+(* A statement that never fits a request beside a state is never asked.
+   Left over alone it is not evidence of anything: the claim is applied as
+   not judged. Left over beside a statement asked and not conveyed, the
+   claim carries a new statement. Both apply the claim; the verdict names
+   which. *)
+let test_a_statement_never_asked_is_told_apart_from_one_not_conveyed () =
+  let oversize = String.make Gate.request_bytes_limit 'x' in
+  let source = fact alpha_statement in
+  let evaluate, requests = reading_the_state () in
+  (match
+     (reverse_check ~evaluate ~sources:[ source ]
+        ~claim:(fact (alpha_statement ^ "\n" ^ oversize))).verdict
+   with
+   | Gate.Not_judged Gate.Statement_too_large -> ()
+   | Gate.Not_judged
+       ( Gate.Gate_judgment_failed | Gate.Continues_a_dropped_memory
+       | Gate.No_source_fits_the_state | Gate.No_statement | Gate.Request_failed _ )
+   | Gate.Copy _ | Gate.Carries_new_statement _ ->
+     Alcotest.fail "the only statement left was never asked");
+  Alcotest.(check (list (list string))) "only the statement that fits is asked"
+    [ [ alpha_statement ] ] (List.map snd (requests ()));
+  let evaluate, _ = reading_the_state () in
+  match
+    (reverse_check ~evaluate ~sources:[ source ]
+       ~claim:(fact (String.concat "\n" [ alpha_statement; gamma_statement; oversize ]))).verdict
+  with
+  | Gate.Carries_new_statement { statements; not_conveyed } ->
+    Alcotest.(check int) "three statements" 3 statements;
+    Alcotest.(check int) "the asked one and the unasked one are left" 2 not_conveyed
+  | Gate.Copy _ | Gate.Not_judged _ ->
+    Alcotest.fail "a statement asked and not conveyed is a new statement"
+;;
+
+(* The runtime leaves a copy out of what it saves (RFC-0463 section 2.8):
+   a real Librarian answer through [run_best_effort], a judge that conveys
+   no memory statement forward and every claim statement back. The claim
+   is not saved, and the memories it named stay current. Without the
+   runtime's [without_copies], the claim would be saved beside them. *)
+let test_the_runtime_does_not_save_a_copy () =
+  let module Librarian = Masc.Keeper_librarian in
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Absorbed = Masc.Keeper_memory_absorbed in
+  let module Fixture = Exact_output_fixture in
+  let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+  @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let base_path = Filename.temp_dir "librarian-copy-claim-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let root = match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root | None -> Sys.getcwd () in
+  Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+  Masc.Prompt_defaults.init ();
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let keeper_id = "copy-claim-runtime" in
+  let a = fact (List.nth sources 0) in
+  let b = fact (List.nth sources 1) in
+  let untouched = fact "The unrelated service retains its own deployment instructions." in
+  let source : Current.source = { kind = Current.Librarian; trace_id = "fixture" } in
+  let seeded =
+    Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+      ~now:100. ~source ~facts:[ a; b; untouched ] () |> require
+  in
+  let input : Librarian.input =
+    { turn_ref = Ids.Turn_ref.make ~trace_id:"fixture" ~absolute_turn:1
+    ; goal_context = Librarian.No_task
+    ; keeper_instructions = "Keep the service deployment instructions."
+    ; current = Some { Librarian.facts = seeded.facts }
+    ; working_context = Masc.Keeper_librarian_context.empty
+    ; messages = []; tool_observations = []; counterpart_observations = []
+    }
+  in
+  let tokens = List.mapi (fun i f -> id f, Printf.sprintf "m%d" (i + 1)) seeded.facts in
+  let copy = "The alpha service deploys every Tuesday at nine in the morning." in
+  let answer = `Assoc
+    [ "new_claims",
+      `List [ `Assoc [ "claim", `String copy; "category", `String "fact"
+                     ; "absorbs", `List [ `String (List.assoc (id a) tokens)
+                                        ; `String (List.assoc (id b) tokens) ] ] ]
+    ; "dropped", `List []; "working_contexts", `List [] ] in
+  let librarian = Fixture.start_server ~sw ~net ~clock
+    (Fixture.Reply (Fixture.openai_response answer)) in
+  (* Forward questions ([s..]) are answered "not conveyed", so nothing is
+     absorbed; reverse ones ([c..]) "conveyed", so the claim is a copy. *)
+  let jev_requests = ref [] in
+  let handler _conn _request body =
+    let raw = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let qids =
+      Yojson.Safe.from_string raw |> Yojson.Safe.Util.member "questions"
+      |> Yojson.Safe.Util.to_assoc |> List.map fst
+    in
+    jev_requests := qids :: !jev_requests;
+    let answers =
+      List.map
+        (fun qid ->
+           qid, `Assoc [ "type", `String "noul"
+                       ; "noul", `Float (if String.length qid > 0 && qid.[0] = 'c' then 0.9 else 0.0) ])
+        qids
+    in
+    Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:(Yojson.Safe.to_string (`Assoc [ "model", `String "jev-fixture"; "answers", `Assoc answers ]))
+      ()
+  in
+  let socket = Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+    (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+  let port = match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port
+    | _ -> Alcotest.fail "JEV fixture has no TCP address" in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket (Cohttp_eio.Server.make ~callback:handler ())
+      ~on_error:(fun exn -> Alcotest.fail (Printexc.to_string exn)));
+  let resolver = Fixture.resolver_snapshot ~source:"copy-claim-fixture"
+    [ { Fixture.id = "librarian-copy-fixture"; base_url = librarian.base_url } ] in
+  (match Runtime_exact_output_registry.publish
+    ~lanes:[ { Runtime_schema.id = "librarian_exact"
+             ; slot_ids = [ "librarian-copy-fixture" ]
+             ; cli_slot_ids = []
+             ; max_output_tokens = Some 4_096
+             } ] resolver with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail
+       (Runtime_exact_output_registry.publication_error_to_string error));
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") (fun () ->
+    Masc_test_deps.with_typesafeai_policy
+      { Runtime_schema.default_typesafeai with
+        lane_enabled = true
+      ; destinations =
+          ( { Runtime_schema.endpoint = Printf.sprintf "http://127.0.0.1:%d/evaluate" port
+            ; model = "copy-claim-model"; api_key_env = "TYPESAFEAI_API_KEY" }
+          , [] )
+      ; absorb_gate = true
+      }
+      (fun () ->
+        Masc.Keeper_librarian_runtime.run_best_effort
+          ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input));
+  Alcotest.(check int) "real Librarian request" 1 (Fixture.post_count librarian);
+  (match List.rev !jev_requests with
+   | [ forward; reverse ] ->
+     Alcotest.(check bool) "the forward request asks the memories" true
+       (List.for_all (fun qid -> qid.[0] = 's') forward);
+     Alcotest.(check (list string)) "the reverse request asks the claim" [ "c0" ] reverse
+   | made -> Alcotest.failf "expected a forward and a reverse request, got %d" (List.length made));
+  let stored = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
+    | Some snapshot -> snapshot
+    | None -> Alcotest.fail "current snapshot is missing" in
+  Alcotest.(check (list string)) "the memories stay current and the copy is not saved"
+    (List.sort String.compare (List.map id seeded.facts))
+    (List.sort String.compare (List.map id stored.facts));
+  Alcotest.(check bool) "no saved memory holds the copy's text" false
+    (List.exists (fun (f : Types.fact) -> String.equal f.claim copy) stored.facts);
+  Alcotest.(check int) "nothing is archived as absorbed" 0
+    (List.length (Absorbed.read ~keepers_dir ~keeper_id |> require))
+;;
+
 let () =
   if Array.length Sys.argv = 3 && String.equal Sys.argv.(1) "--emit-tui-fixtures"
   then run_runtime_evidence ~fixture_dir:Sys.argv.(2) ()
@@ -1611,6 +1898,16 @@ let () =
             test_a_reverse_tie_keeps_the_claim
         ; Alcotest.test_case "a claim without a statement is not judged" `Quick
             test_a_claim_without_a_statement_is_not_judged
+        ; Alcotest.test_case "a statement only the second state conveys makes a copy" `Quick
+            test_a_statement_only_the_second_state_conveys_makes_a_copy
+        ; Alcotest.test_case "a statement no state conveys applies the claim" `Quick
+            test_a_statement_no_state_conveys_applies_the_claim
+        ; Alcotest.test_case "a memory over the state bound is left out" `Quick
+            test_a_memory_over_the_state_bound_is_left_out
+        ; Alcotest.test_case "a statement never asked is told apart from one not conveyed" `Quick
+            test_a_statement_never_asked_is_told_apart_from_one_not_conveyed
+        ; Alcotest.test_case "the runtime does not save a copy" `Quick
+            test_the_runtime_does_not_save_a_copy
         ] )
     ]
 ;;

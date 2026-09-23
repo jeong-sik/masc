@@ -102,6 +102,7 @@ let server_answer ?(state = Route.Cache_fresh) ?age_s ?error config names =
   let body =
     Dashboard_http_keeper.keeper_cost_aggregates_json ~config
       ~keepers:(List.map make_meta names) ~window_minutes:Spend.window_minutes
+      ~now_ts:(Unix.gettimeofday ())
   in
   Route.json_with_cache_metadata body
     (Route.cache_metadata ~state ~generated_at:(Unix.gettimeofday ()) ?age_s ?error ())
@@ -205,8 +206,8 @@ let test_tags_draw_known_floor_and_unknown () =
 
 let total reading names =
   match Spend.team_total reading names with
-  | Some total -> strip total
-  | None -> fail "a read answer over drawn rows has a team total"
+  | total :: _ -> strip total
+  | [] -> fail "a read answer over the block's Keepers has a team total"
 
 let test_team_total () =
   let reading = decode (server_json ()) in
@@ -235,7 +236,7 @@ let test_team_total_of_an_empty_answer_is_unknown () =
   check (list string) "the answer has no rows" [] (List.map fst (read_keepers reading));
   check string "the drawn Keepers are unknown, not idle" "24h ? tok"
     (total reading [ "priced"; "subscription" ]);
-  check (option string) "a block with no rows has no total" None
+  check (list string) "a block with no Keepers has no total" []
     (Spend.team_total reading [])
 
 (* Each word the route can send, and what the Team block does with it. *)
@@ -254,8 +255,9 @@ let test_every_cache_state_decodes () =
               { freshness = Spend_stale { age_s; last_error = Some "EIO" }; _ } as reading
             ->
               check (float 0.001) "the age survives" 95.0 age_s;
-              check string "the title says how old" "24h, 1m old \xe2\x89\xa5$0.75 \xe2\x89\xa525 tok"
-                (total reading [ "priced"; "unlisted" ]);
+              check (list string) "the title's forms: the whole total, then its age"
+                [ "24h, 1m old \xe2\x89\xa5$0.75 \xe2\x89\xa525 tok"; "24h, 1m old" ]
+                (List.map strip (Spend.team_total reading [ "priced"; "unlisted" ]));
               check (list string) "the failed refresh is said"
                 [ "$ spend is 1m old, refresh failed: EIO" ]
                 (List.map strip (Spend.lines reading))
@@ -280,7 +282,7 @@ let test_not_read_draws_no_tag_and_one_line () =
   List.iter
     (fun (reading, label) ->
       check string (label ^ ": no tag") "" (Spend.keeper_tags reading names "priced");
-      check (option string) (label ^ ": no total") None (Spend.team_total reading names))
+      check (list string) (label ^ ": no total") [] (Spend.team_total reading names))
     [ (Overview_spend_unread, "unread")
     ; (Overview_spend_warming, "warming")
     ; (Overview_spend_failed "refused", "failed")
@@ -307,6 +309,7 @@ let test_torn_and_unreadable_stores () =
   let reading =
     with_workspace (fun config ->
         let now = Unix.gettimeofday () in
+        append_turns config "exact" [ (Some 0.5, Some 10) ];
         append_turns config "torn" [ (Some 0.5, Some 10) ];
         write_raw_line config "torn" ~ts:now "{\"ts_unix\":";
         append_turns config "broken" [ (Some 0.5, Some 10) ];
@@ -316,13 +319,16 @@ let test_torn_and_unreadable_stores () =
         let dated = Jsonl_writer.dated_path ~base_dir ~ts:now in
         Sys.remove dated.path;
         Unix.mkdir dated.path 0o755;
-        decode (server_answer config [ "torn"; "broken" ]))
+        decode (server_answer config [ "exact"; "torn"; "broken" ]))
   in
   let tag = Spend.keeper_tags reading [ "torn"; "broken" ] in
   check string "a torn row makes the sums floors" "\xe2\x89\xa5$0.50 \xe2\x89\xa510 tok"
     (strip (tag "torn"));
   check bool "an unreadable store is unknown" true
     (String.starts_with ~prefix:"? tok" (strip (tag "broken")));
+  check string "an unread store makes an exact Keeper's total a floor"
+    "24h \xe2\x89\xa5$0.50 \xe2\x89\xa510 tok"
+    (total reading [ "exact"; "broken" ]);
   check bool "the unreadable store is said" true
     (List.exists
        (String.starts_with ~prefix:"$ spend unread for 1 Keeper: ")
@@ -364,7 +370,7 @@ let test_unreadable_row_is_unknown () =
   check bool "another Keeper still draws" true
     (String.starts_with ~prefix:"3.5M tok" (tag "subscription"));
   check (list string) "the count is said under the block"
-    [ "$ spend rows unreadable: 1 Keeper drawn unknown" ]
+    [ "$ spend unknown for 1 unreadable Keeper row" ]
     (List.map strip (Spend.lines reading))
 
 (* The tag goes at the right of the row only where the row still fits whole:
@@ -379,7 +385,54 @@ let test_a_narrow_row_keeps_its_detail () =
   check int "a wide row spans the frame" 128 (Masc_tui_message_layout.display_width wide);
   check bool "a wide row starts with its detail" true (String.starts_with ~prefix:row wide);
   check bool "a wide row ends with the tag" true (String.ends_with ~suffix:tag wide);
-  check string "an empty tag leaves the row alone" row (Spend.place_tag ~inner:128 ~tag:"" row)
+  check string "an empty tag leaves the row alone" row (Spend.place_tag ~inner:128 ~tag:"" row);
+  let exact =
+    Masc_tui_message_layout.display_width row + Spend.tag_gap_cells
+    + Masc_tui_message_layout.display_width tag
+  in
+  check bool "a row that fits with its gap exactly takes the tag" true
+    (String.ends_with ~suffix:tag (Spend.place_tag ~inner:exact ~tag row));
+  check string "a row one cell short of its gap drops the tag" row
+    (Spend.place_tag ~inner:(exact - 1) ~tag row);
+  (* The spec, not the constant: a tag never sits closer than two blank
+     cells to the detail, so a frame with room for only one drops it. *)
+  let one_cell_gap =
+    Masc_tui_message_layout.display_width row + 1 + Masc_tui_message_layout.display_width tag
+  in
+  check string "a tag never sits one cell from the detail" row
+    (Spend.place_tag ~inner:one_cell_gap ~tag row)
+
+(* The title's total covers the parked roll call as well as the rows: the
+   render passes both. A parked Keeper that spent is in the figure, and one
+   whose row could not be read makes it a floor. *)
+let test_team_total_covers_parked_keepers () =
+  let reading = decode (server_json ()) in
+  let rows = [ "subscription" ] and parked = [ "priced" ] in
+  check string "a parked Keeper's spend is in the total"
+    "24h \xe2\x89\xa5$0.75 3.5M tok" (total reading (rows @ parked));
+  check string "a parked Keeper nobody read makes it a floor"
+    "24h \xe2\x89\xa53.5M tok" (total reading (rows @ [ "unlisted" ]))
+
+let head = " Team  1 need you \xc2\xb7 1 working \xc2\xb7 1 idle \xc2\xb7 1 parked"
+let full = "24h, 12m old \xe2\x89\xa5$123.45 \xe2\x89\xa5123.4M tok"
+let marker = "24h, 12m old"
+let spark = "   14d \xe2\x96\x81\xe2\x96\x81\xe2\x96\x81 today 0"
+
+(* At 80 columns the total does not fit beside these counts: it is dropped
+   whole, the stale fact stays, and no figure is cut. *)
+let test_title_sheds_the_total_whole () =
+  let fit cols = Spend.fit_title ~cols ~head ~forms:[ full; marker ] ~tails:[ spark ] in
+  let at_80 = fit 80 in
+  check bool "the title fits 80 cells" true (Masc_tui_message_layout.display_width at_80 <= 80);
+  check bool "no figure is drawn in part" false (String.contains at_80 '$');
+  check string "at 80 the title is the counts and the answer's age"
+    (head ^ Spend.title_gap ^ marker) at_80;
+  check string "wide enough, the tail goes before the total"
+    (head ^ Spend.title_gap ^ full)
+    (fit (Masc_tui_message_layout.display_width (head ^ Spend.title_gap ^ full)));
+  check string "wider, everything" (head ^ Spend.title_gap ^ full ^ spark) (fit 200);
+  check string "too narrow for any form, the counts alone" head
+    (fit (Masc_tui_message_layout.display_width head))
 
 let () =
   run "tui_keeper_spend"
@@ -399,5 +452,8 @@ let () =
         ; test_case "torn and unreadable stores" `Quick test_torn_and_unreadable_stores
         ; test_case "an unreadable row is unknown" `Quick test_unreadable_row_is_unknown
         ; test_case "a narrow row keeps its detail" `Quick test_a_narrow_row_keeps_its_detail
+        ; test_case "team total covers parked Keepers" `Quick
+            test_team_total_covers_parked_keepers
+        ; test_case "the title sheds the total whole" `Quick test_title_sheds_the_total_whole
         ] )
     ]

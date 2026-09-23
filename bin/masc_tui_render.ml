@@ -390,8 +390,12 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
   let spend_tag_of_keeper =
     spend_tags (List.map (fun (row : Overview_team.row) -> row.keeper.okp_name) team.rows)
   in
-  let spend_total =
-    spend_total (List.map (fun (row : Overview_team.row) -> row.keeper.okp_name) team.rows)
+  (* The title's total covers every Keeper the block knows, parked ones
+     included: a parked Keeper's turns in the window are still spend. *)
+  let spend_forms =
+    spend_total
+      (List.map (fun (row : Overview_team.row) -> row.keeper.okp_name) team.rows
+      @ List.map fst team.parked)
   in
   let inner = framed_inner_width cols in
   let name_cells =
@@ -517,9 +521,8 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
     if team_rows < total then Printf.sprintf " %d/%d" team_rows total else ""
   in
   let head =
-    Printf.sprintf " %sTeam%s%s  %s%s" Ansi.bold Ansi.reset window
+    Printf.sprintf " %sTeam%s%s  %s" Ansi.bold Ansi.reset window
       (String.concat " \xc2\xb7 " counts)
-      (match spend_total with Some total -> "   " ^ total | None -> "")
   in
   (* Completions per UTC day over the flow's span, oldest first, so the last
      glyph is today. Scaled from zero: a quiet day is the lowest bar, not the
@@ -552,15 +555,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
             ; spark
             ])
   in
-  let title =
-    match
-      List.find_opt
-        (fun tail -> Message_layout.display_width (head ^ tail) <= cols)
-        tails
-    with
-    | Some tail -> head ^ tail
-    | None -> head
-  in
+  let title = Keeper_spend.fit_title ~cols ~head ~forms:spend_forms ~tails in
   (title, List.filteri (fun index _ -> index < team_rows) rows)
 
 (** Project the shared Overview row budget and its sanitized variable inputs. *)

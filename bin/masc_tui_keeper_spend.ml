@@ -216,22 +216,31 @@ let add_sums add left right =
   | Spend_sum left, Spend_sum right ->
       Spend_sum { sum = add left.sum right.sum; missing = left.missing + right.missing }
 
-(* The team's spend over the window, for the Team title, summed over the
-   Keepers the block draws: a drawn Keeper the rows do not account for is
-   spend nobody read, so the total is then a floor or unknown. *)
+(* The team's spend over the window, for the Team title, summed over every
+   Keeper the block knows -- its rows and its parked roll call. A Keeper the
+   server's rows do not account for (not listed, its row unreadable, its
+   store unread) is spend nobody read, so the total is then a floor or
+   unknown.
+
+   The forms the title may use, longest first: the whole total, then, for a
+   stale answer, only how old it is. The title sheds a form whole, never
+   part of a figure, and keeps the stale fact after the figures are gone. *)
 let team_total (reading : overview_spend_reading) names =
   match reading with
   | Overview_spend_unread | Overview_spend_warming | Overview_spend_failed _ ->
-      None
+      []
   | Overview_spend_read { window_minutes; keepers; freshness; undecodable = _ } -> (
       match names with
-      | [] -> None
+      | [] -> []
       | _ :: _ ->
-          let window =
+          let window, stale_marker =
             match freshness with
-            | Spend_fresh -> window_text window_minutes
+            | Spend_fresh -> (window_text window_minutes, [])
             | Spend_stale { age_s; last_error = _ } ->
-                Printf.sprintf "%s, %s old" (window_text window_minutes) (age_text age_s)
+                let window =
+                  Printf.sprintf "%s, %s old" (window_text window_minutes) (age_text age_s)
+                in
+                (window, [ Ansi.dim ^ window ^ Ansi.reset ])
           in
           let contributions =
             List.filter_map
@@ -254,7 +263,28 @@ let team_total (reading : overview_spend_reading) names =
                 in
                 turns_text ~cost_usd ~tokens
           in
-          Some (Printf.sprintf "%s%s%s %s" Ansi.dim window Ansi.reset text))
+          Printf.sprintf "%s%s%s %s" Ansi.dim window Ansi.reset text :: stale_marker)
+
+(* Cells between the Team title's counts and its spend. *)
+let title_gap = "   "
+
+(* The Team title that fits [cols]: the spend forms in order, each with the
+   longest tail that fits, before any form is given up; the bare head last.
+   Tails (the completion sparkline) are shed before the spend, and a spend
+   form is kept whole or dropped, never cut inside a figure. *)
+let fit_title ~cols ~head ~forms ~tails =
+  let with_tails head = List.map (fun tail -> head ^ tail) tails @ [ head ] in
+  let candidates =
+    List.concat_map (fun form -> with_tails (head ^ title_gap ^ form)) forms
+    @ with_tails head
+  in
+  match
+    List.find_opt
+      (fun title -> Masc_tui_message_layout.display_width title <= cols)
+      candidates
+  with
+  | Some title -> title
+  | None -> head
 
 (* The lines under the Team block that say why no row carries a tag, or what
    the tags cannot vouch for. *)
@@ -298,7 +328,7 @@ let lines (reading : overview_spend_reading) =
         if undecodable = 0 then []
         else
           [ warn
-              (Printf.sprintf "$ spend rows unreadable: %d Keeper%s drawn unknown"
+              (Printf.sprintf "$ spend unknown for %d unreadable Keeper row%s"
                  undecodable
                  (if undecodable = 1 then "" else "s"))
           ]

@@ -14415,6 +14415,110 @@ def narrow_stuck_row_keeps_its_cause_interaction() -> Interaction:
     return interact
 
 
+def spend_title_briefing() -> HttpResponse:
+    status, body = stuck_keeper_briefing()
+    assert isinstance(body, dict)
+    body = dict(body)
+    body["keeper_briefs"] = [
+        {"name": "k-stuck", "phase": "crashed", "last_turn_ago_s": 180},
+        {"name": "k-idle", "phase": "running", "last_turn_ago_s": 30},
+        {"name": "k-parked", "phase": "stopped", "last_turn_ago_s": 600},
+    ]
+    return (status, body)
+
+
+def spend_title_costs_fixture() -> HttpResponse:
+    status, body = keeper_costs_fixture()
+    assert isinstance(body, dict)
+    base = dict(body["keepers"][0])
+
+    def priced(name: str, cost: float) -> dict[str, object]:
+        row = dict(base)
+        row.update(
+            keeper_name=name,
+            total_cost_usd=cost,
+            cost_reported_samples=3,
+            cost_unreported_samples=0,
+        )
+        return row
+
+    quiet = dict(base)
+    quiet.update(
+        keeper_name="k-stuck",
+        total_cost_usd=None,
+        cost_reported_samples=0,
+        cost_unreported_samples=0,
+        total_input_tokens=None,
+        total_output_tokens=None,
+        total_tokens=None,
+        tokens_reported_samples=0,
+        sample_count=0,
+    )
+    body = dict(body)
+    body["keepers"] = [priced("k-idle", 1.0), priced("k-parked", 2.0), quiet]
+    # Past its refresh time, with the refresh failing: the title says how old.
+    body["cache"] = {
+        "state": "stale_refreshing",
+        "generated_at": 1_790_000_000.0,
+        "age_s": 720.0,
+        "last_error": "EIO",
+    }
+    return (status, body)
+
+
+def team_title_line(frame: bytes) -> bytes:
+    parts = POSITION_RE.split(frame)
+    for index in range(3, len(parts), 3):
+        text = CSI_RE.sub(b"", parts[index])
+        if text.lstrip().startswith(b"Team "):
+            return text
+    raise AssertionError(f"no Team title in the frame: {frame!r}")
+
+
+def spend_title_interaction() -> Interaction:
+    # The title's total covers the parked Keeper too ($1.00 + $2.00), and a
+    # title too narrow for the total sheds it whole but keeps its age.
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(process, master_fd, output, b"12m old", start=0, timeout=10.0)
+        wide = team_title_line(
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=40,
+                columns=80,
+                needle=b"12m old",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+        )
+        if b"$3.00 2.4M tok" not in wide or b"1 parked" not in wide:
+            raise AssertionError(f"the 80-column title left the parked Keeper out: {wide!r}")
+        narrow = team_title_line(
+            resize_and_wait(
+                process,
+                master_fd,
+                output,
+                rows=40,
+                columns=56,
+                needle=b"12m old",
+                controls=(FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
+            )
+        )
+        if b"$" in narrow or b"12m old" not in narrow:
+            raise AssertionError(f"the 56-column title cut the total or lost its age: {narrow!r}")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def pull_requests_on_overview_interaction() -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -15057,6 +15161,15 @@ def run_keyboard_regression(executable: str) -> None:
             "/api/v1/dashboard/briefing": pull_requests_briefing(),
             "/api/v1/repositories/pulls": repository_pulls_fixture(),
             "/api/v1/dashboard/keeper-costs": keeper_costs_fixture(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Team spend title",
+        interact=spend_title_interaction(),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": spend_title_briefing(),
+            "/api/v1/dashboard/keeper-costs": spend_title_costs_fixture(),
         },
     )
     run_terminal_scenario(

@@ -8,6 +8,13 @@
 
 ### Changed
 
+- The boot asset sync records the SHA-256 of every file it writes in
+  `managed-assets.json` (schema `v2`) and tells a stale distribution copy
+  from an operator's edit. An edited prompt file becomes that prompt's
+  override in `prompt_overrides.json` and the file is reset; when the key
+  already has an override, or the file maps to no single key, the file is
+  kept as edited. Tool and MCP edits are still overwritten. Every edit gets
+  a WARN boot line naming the path and what was done (#38162).
 - The Librarian reads a new claim that repeats a current memory word for word
   as that memory instead of refusing the whole pass as
   `duplicate_selected_memory_id`: the stored fact keeps its first sighting and

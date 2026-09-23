@@ -477,6 +477,8 @@ let standalone_lane ~lane_id ~declared ~admitted : Masc.Tui_decode.standalone_la
   ; sl_last_outcome = None
   ; sl_p50_elapsed_s = None
   ; sl_selected_slots = []
+  ; sl_runs_without_slot =
+      { Tui_decode.slws_vendor_system_one = 0; slws_server_restarted = 0; slws_no_slot = 0 }
   }
 
 let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])

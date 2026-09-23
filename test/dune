@@ -3482,6 +3482,14 @@
  (modules test_tui_connection_status)
  (libraries alcotest masc masc_tui_types))
 
+; Its own anchor, under the other suite that links only the state vocabulary
+; and the wire types, so two pull requests adding a suite do not both land on
+; the head of this file.
+(test
+ (name test_tui_lane_slot_reach)
+ (modules test_tui_lane_slot_reach)
+ (libraries alcotest masc masc_tui_types))
+
 ; Its own anchor, under the other suite that links only the state vocabulary,
 ; so two pull requests adding a suite do not both land on the head of this
 ; file.

@@ -1985,6 +1985,8 @@ let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
   ; sl_last_outcome = None
   ; sl_p50_elapsed_s = None
   ; sl_selected_slots = []
+  ; sl_runs_without_slot =
+      { Tui_decode.slws_vendor_system_one = 0; slws_server_restarted = 0; slws_no_slot = 0 }
   }
 
 (* The four lanes the projection fixes, in its order

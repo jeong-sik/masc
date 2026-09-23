@@ -12805,9 +12805,32 @@ let render_acting (state : state) =
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  " ^ Acting.filter_explanation state.acting_filter);
   box_divider buf cols;
+  (* Measured over every row the filter keeps, not the page on screen, so the
+     columns do not move while a reader scrolls. This walks the list once and
+     builds a row per entry; what the note above avoids for the page is the
+     pairing, which is quadratic, and measuring needs neither the pairing nor
+     the duration it finds -- those reach the detail column, and the two
+     columns measured here are the keeper and the label. *)
+  let table_columns =
+    let measured =
+      match chunked with
+      | Some rows -> rows
+      | None ->
+          List.map
+            (fun (entry, _older) ->
+              let row = Acting.row_of_entry ~duration_ms:None entry in
+              { row with
+                Acting.keeper =
+                  Acting.keeper_of_event ~traces entry.Acting.ae_event
+              })
+            visible
+    in
+    Acting.columns ~inner_width:(framed_inner_width cols) measured
+  in
   let col_hdr =
-    Printf.sprintf "  %-8s %-16s %s %-16s %s" "TIME" "KEEPER" " " "EVENT"
-      "DETAIL"
+    Printf.sprintf "  %-8s %-*s %s %-*s %s" "TIME"
+      table_columns.Acting.keeper_cells "KEEPER" " "
+      table_columns.Acting.label_cells "EVENT" "DETAIL"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -12872,16 +12895,20 @@ let render_acting (state : state) =
           let detail = Terminal_text.single_line row.Acting.detail in
           let label = Terminal_text.single_line row.Acting.label in
           let line =
+            let keeper_cell =
+              fit_width
+                (Terminal_text.single_line row.Acting.keeper)
+                table_columns.Acting.keeper_cells
+            in
             if detail = "" then
-              Printf.sprintf "  %-8s %-16s %s %s" clock
-                (fit_width (Terminal_text.single_line row.Acting.keeper) 16)
+              Printf.sprintf "  %-8s %s %s %s" clock keeper_cell
                 (Acting.glyph_text row.Acting.glyph)
                 label
             else
-              Printf.sprintf "  %-8s %-16s %s %-16s %s" clock
-                (fit_width (Terminal_text.single_line row.Acting.keeper) 16)
+              Printf.sprintf "  %-8s %s %s %s %s" clock keeper_cell
                 (Acting.glyph_text row.Acting.glyph)
-                (fit_width label 16) detail
+                (fit_width label table_columns.Acting.label_cells)
+                detail
           in
           let selected = state.acting_filter <> Acting.Turns && idx = cursor in
           let line = if selected then "> " ^ String.sub line 2 (String.length line - 2) else line in

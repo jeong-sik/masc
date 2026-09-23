@@ -71,9 +71,10 @@ GitHub 가 모르는 값을 보내면 그 PR 행은 `Checks_none` 으로 접지 
 - 결과는 메모리에만 둔다. 재시작하면 다음 읽기까지 `Pulls_not_read` 로 보인다.
   PR 은 GitHub 이 원본이고, 서버가 영속할 사실이 아니다.
 
-## 4. 열린 질문 — 자격 증명
+## 4. 자격 증명 — B 로 결정 (2026-09-23 운영자)
 
-서버가 어느 GitHub 자격으로 읽을지 정해야 한다. 선택지:
+서버는 runtime.toml `[repositories] pr_reader = "<keeper>"` 가 가리키는 Keeper 의
+`github-cli/hosts.yml` 토큰으로 읽는다. 검토한 선택지:
 
 | 선택지 | 장점 | 단점 |
 |---|---|---|
@@ -81,8 +82,9 @@ GitHub 가 모르는 값을 보내면 그 PR 행은 `Checks_none` 으로 접지 
 | B. runtime.toml `[repositories] pr_reader = "<keeper>"` 로 한 Keeper 의 `github-cli/hosts.yml` 을 쓴다 | 이미 있는 Keeper 자격을 재사용. 경로 하드코딩 없음 | 그 Keeper 의 토큰 권한에 묶인다 |
 | C. GitHub App 설치 토큰(`keeper_github_app_broker`) | 권한이 저장소 단위로 좁다 | 지금 App 자격을 가진 Keeper 가 없다 |
 
-추천은 B 다. 새 환경변수나 새 비밀 저장소를 만들지 않고, 선언이 없으면 PR 섹션이
-"PR reader not declared" 로 말하고 읽지 않는다.
+B 를 고른 이유: 새 환경변수나 새 비밀 저장소를 만들지 않는다. 선언이 없거나, 가리킨 Keeper 가
+없거나, 그 Keeper 에 `hosts.yml` 토큰이 없으면 PR 섹션이 그 이유를 말하고 읽지 않는다.
+다른 자격으로 대신 읽지 않는다.
 
 ## 5. 스택
 

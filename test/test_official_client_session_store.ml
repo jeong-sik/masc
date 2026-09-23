@@ -1625,12 +1625,37 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
     check bool "transient spawn failure preserves verified unchanged source"
       true (validate_unchanged_context ~expected:(Some released)
         ~snapshot_sha256:frontier.snapshot_sha256 = Ok ());
-    check bool "changed source cannot claim the unchanged-source channel" true
-      (Result.is_error (claim_with_context_frontier
-        ~context_frontier:(Some {frontier with delivery=Canonical_source_guard;
-          snapshot_sha256=String.make 64 'b'; acknowledged_turn=None})
-        ~base_path ~keeper_name ~expected:(Some released) ~client_kind:Codex ~owner_epoch
-        ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:8.));
+    let plan = plan_claim ~expected:(Some released) ~client_kind:Codex
+      ~runtime_id:"codex.default" |> Result.get_ok in
+    let guard snapshot_sha256 =
+      Some {frontier with delivery=Canonical_source_guard; snapshot_sha256;
+        acknowledged_turn=None} in
+    (match reconcile_context_frontier plan ~expected:(Some released)
+             ~context_frontier:(guard frontier.snapshot_sha256) with
+     | kept, Context_kept ->
+       check bool "unchanged source keeps the settlement" true
+         (kept.previous_settlement <> None)
+     | _, Context_restarted _ -> fail "unchanged source restarted the session");
+    (match reconcile_context_frontier plan ~expected:(Some released)
+             ~context_frontier:(guard (String.make 64 'b')) with
+     | restarted, Context_restarted Canonical_context_changed ->
+       check bool "changed source drops the settlement" true
+         (restarted.previous_settlement = None);
+       check int "changed source starts at ordinal 1" 1 restarted.turn_count
+     | _, (Context_kept | Context_restarted Context_frontier_missing) ->
+       fail "changed source was not restarted as a changed context");
+    (* #38328: the refusal never settled, so the stored frontier kept the old
+       digest and every later turn was refused the same way. The changed
+       source now claims a fresh session instead. *)
+    let restarted =
+      match claim_with_context_frontier ~context_frontier:(guard (String.make 64 'b'))
+          ~base_path ~keeper_name ~expected:(Some released) ~client_kind:Codex ~owner_epoch
+          ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:8. with
+      | Ok ({ phase = Start { previous_settlement = None; _ }; turn_count = 1; _ } as claimed) ->
+        claimed
+      | Ok _ -> fail "changed source resumed the retained vendor session"
+      | Error detail -> fail ("changed source was refused: " ^ detail)
+    in
     let state_path = path ~base_path ~keeper_name |> Result.get_ok in
     let unbound_json = match Yojson.Safe.from_file state_path with
       | `Assoc fields -> `Assoc (List.remove_assoc "context_frontier" fields)
@@ -1638,7 +1663,7 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
     Yojson.Safe.to_file state_path unbound_json;
     match load ~base_path ~keeper_name with
     | Ok (Some binding) -> check bool "absent optional proof preserves session without fabricating acknowledgement" true
-        (binding.context_frontier = None && binding.phase = released.phase)
+        (binding.context_frontier = None && binding.phase = restarted.phase)
     | Ok None -> fail "existing vendor session disappeared with optional proof"
     | Error detail -> fail detail)
 ;;

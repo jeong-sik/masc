@@ -214,7 +214,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 
 ## 3. 현재 동작
 
-- **세션을 새로 여는 때** (`keeper_claude_code_runtime.ml:519-524`, `keeper_official_client_session_store.ml:810-869`): 저장 상태가 없거나 `ready` 일 때, `client_kind`·`runtime_id` 가 바뀌었을 때, 도구 표면 digest 가 바뀌었을 때, 복구가 승계되거나 새 시작을 고른 때. 그 밖에는 저장된 settlement 로 resume 한다.
+- **세션을 새로 여는 때** (`keeper_claude_code_runtime.ml:519-524`, `keeper_official_client_session_store.ml:810-869`): 저장 상태가 없거나 `ready` 일 때, `client_kind`·`runtime_id` 가 바뀌었을 때, 도구 표면 digest 가 바뀌었을 때, Antigravity 의 canonical 원본이 바뀌었을 때, 복구가 승계되거나 새 시작을 고른 때. 그 밖에는 저장된 settlement 로 resume 한다.
 - **새 세션의 이력 씨앗** (`:1193-1213`): 체크포인트 이력을 `min(max-prompt-bytes, max-request-body-bytes)` 바이트로 자른다. 라이브 설정은 둘 다 524,288 이다. 고정으로 붙는 맥락이 먼저 이 용량을 쓰고, 남은 자리를 60 atom 단위로 자른다(`runtime_model_input_tail_window.ml`).
 - **resume 턴** (`:579-613`, `runtime_claude_code.ml:1329-1331`): 프롬프트는 goal 한 줄이고 `--resume=<id>` 로 띄운다.
 - **usage** (`runtime_claude_code.ml:98-118`): 턴 레코드는 가장 최근 요청의 usage 를 `per_request` 로 적는다(#36725).
@@ -224,7 +224,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
   - direct checkpoint 이어가기(`keeper_direct_checkpoint_continuation.ml:18-27`). 사이에 끼인 steering 턴도 같은 세션에서 돌아야 한다.
   - `Retry_previous` 복구는 대화를 그대로 잇는 것이 계약이다(`keeper_official_client_session_store.ml:1219-1224`).
 - **Codex** (`keeper_codex_runtime.ml:591-595`): resume 규칙이 같다. usage 는 `tokenUsage.last` 다.
-- **Antigravity** (`keeper_antigravity_runtime.ml:455-477, 1055`): resume 규칙이 같다. canonical 원본이 바뀌면 resume 을 거절한다. usage 는 `conversation_cumulative` 다.
+- **Antigravity** (`keeper_antigravity_runtime.ml`, `reconcile_context_frontier`): resume 규칙이 같다. canonical 원본(Keeper 프롬프트와 이력)이 바뀌면 이어 쓰지 않고 새 세션을 연다. 원래 세션에 묶인 Gate 이어가기만 거절한다(#38328). usage 는 `conversation_cumulative` 다.
 
 ## 4. 결함
 

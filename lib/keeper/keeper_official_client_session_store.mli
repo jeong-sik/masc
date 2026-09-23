@@ -164,6 +164,13 @@ type t =
 
 type context_admission_error = Context_frontier_missing | Canonical_context_changed
 
+(** What a claim under [Canonical_source_guard] did with the stored settlement.
+    [Context_restarted] names why the retained vendor conversation could not be
+    resumed; the claim then opens a fresh session instead. *)
+type context_reconciliation =
+  | Context_kept
+  | Context_restarted of context_admission_error
+
 type claim_plan =
   { previous_settlement : settlement option
   ; turn_count : int
@@ -277,6 +284,20 @@ val validate_completed_continuation :
 val validate_unchanged_context : expected:t option -> snapshot_sha256:string ->
   (unit, context_admission_error) result
 val context_admission_error_to_string : context_admission_error -> string
+
+val reconcile_context_frontier :
+  claim_plan ->
+  expected:t option ->
+  context_frontier:context_frontier option ->
+  claim_plan * context_reconciliation
+(** Fold a moved canonical source into the plan. A resume under
+    [Canonical_source_guard] whose stored frontier does not match the prepared
+    snapshot becomes the fresh-session plan, as [reconcile_tool_surface] does
+    for a moved tool surface: refusing it left the settled session with no
+    recovery id and no settled turn to advance its frontier, so every later
+    turn was refused the same way (#38328). [claim_with_context_frontier]
+    applies it too. A caller bound to the original vendor session must refuse
+    on [Context_restarted] rather than proceed. *)
 
 val claim_with_context_frontier :
   context_frontier:context_frontier option ->

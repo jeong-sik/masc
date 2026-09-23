@@ -295,6 +295,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
       in
       let observed_initial_prompt = ref None in
       let observed_resumed_prompt = ref None in
+      let settled_after_resume = ref None in
       let stream_events = ref [] in
       let native_actions = ref [] in
       let cli_path = fixture_script ~base_path in
@@ -543,25 +544,39 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         "provider cumulative turn count"
                         73
                         resumed.turns;
-                      let preserved_prompt = In_channel.with_open_bin
-                        (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
-                      List.iter (fun (system_prompt, initial_messages) ->
+                      settled_after_resume :=
+                        Keeper_official_client_session_store.load
+                          ~base_path ~keeper_name:"antigravity-fixture"
+                        |> Result.get_ok;
+                      (* #38328: a moved canonical source used to refuse the
+                         resume with a config error, and since the refused turn
+                         never settled, every later turn met the same stored
+                         digest and was refused again. It now starts a fresh
+                         conversation seeded from the current source. Each case
+                         differs from the settlement before it, so each one
+                         must start fresh (the fixture reports turn 1 and
+                         demands --new-project) and carry its new source. *)
+                      List.iter (fun (system_prompt, initial_messages, marker) ->
                         match Keeper_turn_driver.run_named
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
-                          ~base_path ~goal:"New goal must not run with stale context"
+                          ~base_path ~goal:"Continue with the current context"
                           ~system_prompt ~tools:[tool] ~agent_core_tools:[tool]
                           ~initial_messages ~hooks ~context:(Agent_core.Context.create ())
                           ~sw ~net:(Eio.Stdenv.net env) () with
-                        | Error (Agent_core.Error.Config (InvalidConfig {field; _})) ->
-                          check string "changed context has explicit admission reason"
-                            "official_client_session.context_admission" field
                         | Error error -> fail (Agent_core.Error.to_string error)
-                        | Ok _ -> fail "Antigravity resumed stale canonical context")
-                        ["changed core instructions", large_history;
-                         "pre-dispatch fixture system prompt", large_history @ [Agent_core.Types.user_msg "new native correction"]];
-                      check string "rejected context never reaches CLI prompt"
-                        preserved_prompt (In_channel.with_open_bin
-                          (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all)))));
+                        | Ok restarted ->
+                          check int "changed context starts a fresh conversation" 1
+                            restarted.Keeper_turn_driver.run_result.turns;
+                          check bool "fresh prompt carries the changed source" true
+                            (String_util.contains_substring
+                               (In_channel.with_open_bin
+                                  (Filename.concat base_path "antigravity-prompt.txt")
+                                  In_channel.input_all)
+                               marker))
+                        ["changed core instructions", large_history, "changed core instructions";
+                         "pre-dispatch fixture system prompt",
+                         large_history @ [Agent_core.Types.user_msg "new native correction"],
+                         "new native correction"]))));
       (match List.rev !transmitted_inputs with
        | [ Keeper_official_client_host.Whole_input_transmitted messages;
            Keeper_official_client_host.Held_by_client_session ] ->
@@ -690,11 +705,9 @@ let test_keeper_projects_mcp_tool_and_settles () =
               && record.tool_name = Some "call_mcp_tool")
            native_starts);
       let session =
-        Keeper_official_client_session_store.load
-          ~base_path
-          ~keeper_name:"antigravity-fixture"
-        |> Result.get_ok
-        |> Option.get
+        match !settled_after_resume with
+        | Some session -> session
+        | None -> fail "no official-client session after the resumed turn"
       in
       (match session.phase with
        | Settled

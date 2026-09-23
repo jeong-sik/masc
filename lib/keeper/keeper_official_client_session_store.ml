@@ -153,6 +153,10 @@ type t =
 
 type context_admission_error = Context_frontier_missing | Canonical_context_changed
 
+type context_reconciliation =
+  | Context_kept
+  | Context_restarted of context_admission_error
+
 type claim_plan =
   { previous_settlement : settlement option
   ; turn_count : int
@@ -1014,6 +1018,11 @@ let plan_claim ~expected ~client_kind ~runtime_id =
   Ok { previous_settlement; turn_count; required_tool_surface_sha256 }
 ;;
 
+(* The plan [plan_claim] produces for a session with no prior settlement. *)
+let fresh_claim_plan =
+  { previous_settlement = None; turn_count = 1; required_tool_surface_sha256 = None }
+;;
+
 (* A settled session whose tool surface has moved is not resumable, and it was
    not recoverable either: [Settled] is a healthy phase, so nothing marks it
    [Recovery_required], and the resolve endpoint has no id to act on. Every
@@ -1031,8 +1040,7 @@ let reconcile_tool_surface plan ~tool_surface_sha256 =
   match plan.required_tool_surface_sha256 with
   | None -> plan
   | Some stored when String.equal stored tool_surface_sha256 -> plan
-  | Some _ ->
-    { previous_settlement = None; turn_count = 1; required_tool_surface_sha256 = None }
+  | Some _ -> fresh_claim_plan
 ;;
 
 let validate_continuation ~(checkpoint : Keeper_semantic_execution.official_client_checkpoint)
@@ -1079,6 +1087,35 @@ let context_admission_error_to_string = function
   | Canonical_context_changed ->
     "canonical_context_changed: retained vendor conversation cannot replace its canonical history or core instructions; original session and effects remain preserved"
 
+(* A resume under [Canonical_source_guard] sends none of the canonical source:
+   the vendor conversation already holds the history and core instructions it
+   was seeded with. When that source has moved -- a deployment that edits the
+   shared Keeper prompt is enough -- resuming would answer from the old one.
+
+   Refusing the turn instead stranded the Keeper: [Settled] is a healthy
+   phase, the stored frontier only advances on a settled turn, and the refused
+   turn never settles, so every later turn met the same digest and the same
+   refusal until an operator deleted the durable file (#38328). That is the
+   stranding [reconcile_tool_surface] documents for a moved tool surface, and
+   it takes the same way out: a fresh session seeded from the current source.
+   The retained vendor conversation is not touched; it is only no longer
+   resumed.
+
+   A caller bound to the original vendor session (a Gate continuation) cannot
+   take a fresh session and must refuse on [Context_restarted]. *)
+let reconcile_context_frontier plan ~expected ~context_frontier =
+  match context_frontier, plan.previous_settlement with
+  | Some { delivery = Canonical_source_guard; snapshot_sha256; _ }, Some _ ->
+    (match validate_unchanged_context ~expected ~snapshot_sha256 with
+     | Ok () -> plan, Context_kept
+     | Error reason -> fresh_claim_plan, Context_restarted reason)
+  | Some { delivery = (Prepared_start_context | Replaced_configuration
+                      | Canonical_source_guard | Held_by_vendor_session); _ }, None
+  | Some { delivery = (Prepared_start_context | Replaced_configuration
+                      | Held_by_vendor_session); _ }, Some _
+  | None, _ -> plan, Context_kept
+;;
+
 let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_id
     ~tool_surface_sha256 ~updated_at =
   let context_frontier = Option.map (fun frontier ->
@@ -1089,14 +1126,8 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
     |> Result.map_error claim_error_to_string
   in
   let plan = reconcile_tool_surface plan ~tool_surface_sha256 in
-  let* () = match context_frontier, plan.previous_settlement with
-    | Some {delivery=Canonical_source_guard; snapshot_sha256; _}, Some _ ->
-      validate_unchanged_context ~expected ~snapshot_sha256
-      |> Result.map_error context_admission_error_to_string
-    | Some {delivery=(Prepared_start_context | Replaced_configuration | Canonical_source_guard
-                     | Held_by_vendor_session); _}, None
-    | Some {delivery=(Prepared_start_context | Replaced_configuration | Held_by_vendor_session); _}, Some _
-    | None, _ -> Ok ()
+  let plan, context_reconciliation =
+    reconcile_context_frontier plan ~expected ~context_frontier
   in
   let last_recovery_resolution =
     Option.bind expected (fun binding -> binding.last_recovery_resolution)
@@ -1117,6 +1148,14 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
       ; updated_at
       }
   in
+  (match context_reconciliation with
+   | Context_kept -> ()
+   | Context_restarted reason ->
+     Log.Keeper.info
+       ~keeper_name
+       "official-client session starts fresh owner_epoch=%s: %s"
+       owner_epoch
+       (context_admission_error_to_string reason));
   (match expected with
    | Some { phase = Recovery_required recovery; _ } ->
      Log.Keeper.info

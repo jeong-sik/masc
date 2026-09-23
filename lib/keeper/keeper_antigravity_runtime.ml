@@ -441,6 +441,30 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let claim_plan =
       Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
     in
+    (* This CLI offers no replaceable configuration channel, so a resume cannot
+       carry new canonical history or core instructions. A moved source starts
+       a fresh conversation seeded from it; the retained one is left as it is.
+       Ephemeral world context remains on the per-turn prompt path. *)
+    let snapshot = `Assoc ["system_prompt", `String system_prompt;
+      "messages", `List (List.map Keeper_official_client_context_codec.to_json initial_messages)] in
+    let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
+      |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+    let context_frontier : Session_store.context_frontier =
+      {snapshot_sha256; message_count=List.length initial_messages;
+       delivery=Canonical_source_guard; acknowledged_turn=None} in
+    let claim_plan, context_reconciliation =
+      Session_store.reconcile_context_frontier claim_plan
+        ~expected:stored_session ~context_frontier:(Some context_frontier)
+    in
+    (* A Gate continuation must run in its original conversation; a fresh one
+       would not hold the turn it continues. *)
+    let* () = match official_client_continuation, context_reconciliation with
+      | Some _, Session_store.Context_restarted reason ->
+        Error (config_error ~field:"official_client_session.context_admission"
+          (Session_store.context_admission_error_to_string reason))
+      | Some _, Session_store.Context_kept
+      | None, (Session_store.Context_kept | Session_store.Context_restarted _) -> Ok ()
+    in
     let conversation_mode =
       match claim_plan.previous_settlement with
       | None -> Runtime_antigravity.Start
@@ -448,21 +472,6 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         Runtime_antigravity.Resume { conversation_id = session_id }
     in
     let is_resume = Option.is_some claim_plan.previous_settlement in
-    (* This CLI offers no replaceable configuration channel. Keep the vendor
-       session intact and refuse stale canonical history/core instructions;
-       ephemeral world context remains on the existing per-turn prompt path. *)
-    let snapshot = `Assoc ["system_prompt", `String system_prompt;
-      "messages", `List (List.map Keeper_official_client_context_codec.to_json initial_messages)] in
-    let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
-      |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
-    let* () = if not is_resume then Ok () else
-      Session_store.validate_unchanged_context ~expected:stored_session ~snapshot_sha256
-      |> Result.map_error (fun reason -> config_error
-           ~field:"official_client_session.context_admission"
-           (Session_store.context_admission_error_to_string reason)) in
-    let context_frontier : Session_store.context_frontier =
-      {snapshot_sha256; message_count=List.length initial_messages;
-       delivery=Canonical_source_guard; acknowledged_turn=None} in
     let turn_count = claim_plan.turn_count in
     let* goal =
       match goal_blocks with

@@ -214,6 +214,30 @@ Glossary(`docs/spec/00-glossary.md`)·constitution·코드를 같이 읽었다. 
 - Schedule runner `held` 목록을 읽는 곳이 없다. #38205 (이슈).
 - 그 밖에 Task·Goal·Keeper·Librarian/Memory health·HITL·Schedule·Lane·Skills·Connector 의 새 키는 양쪽이 맞았다.
 
+## 5. 저녁 점검 — 일자별 diff 와 기능별 bottom-up
+
+09-16~09-23 의 diff 를 이틀씩 나눠 코드로 읽었다(제목이 아니라 변경 내용). 기능별로는 상태 타입 → 쓰는 쪽 → 반복 루프 순서로 올라가며 봤다.
+
+| 기능 | 닫힘 | 찾은 것 | 처리 |
+|---|---|---|---|
+| Access Control | 닫힘(뒤) | MCP `masc_operator_confirm` 이 본문 `actor` 를 믿어, 권한이 낮은 토큰이 관리자가 올린 액션을 실행할 수 있었다 | #38211 (병합) |
+| Runtime 걸음 | 닫힘(뒤) | 보내기 전에 거절한 요청을 provider 거절로 적어 이력을 log2 번 줄였다 | #38217 |
+| Librarian | 닫힘(뒤) | CLI 가 잰 글자 한도가 프로세스 끝까지 모든 슬롯 범위를 잘랐다 | #38213 |
+| Keeper | 닫힘(뒤) | 이전 버전 checkpoint 가 있으면 clear 가 거절됐다 | #38223 (병합) |
+| Keeper 표면 | 닫힘(뒤) | 페이지보다 오래된 gate lane 을 읽을 길이 없었다 | #38218 (병합) |
+| Task | 열림 → 닫힘 | 반려된 Task 의 생산자가 돌아오지 않으면 영원히 InProgress. 복구 도구(`masc_operator_task_recovery_resolve`)는 있었지만 아무도 부르지 않았다 | 운영자 승인 뒤 12건을 Todo 로 돌렸다 |
+| Goal | 잠재적 열림 | Goal 하나의 원장 오류가 모든 Goal 검증을 멈춘다. 앞 4개만 보는 선택은 남는다 | #38245 |
+| Board | 열림 | 재시작 때 판정 중이던 partition 이 영구 격리되는데 운영자에게 보이지 않았다 | #38260 (TUI 에 보이고 `Q` 로 다시 넣기) |
+| Board | 열림 → 닫힘 | #37976 의 Fresh state(schema 7) 가 배포 뒤 수행되지 않아 모든 Keeper 의 Board attention 완료가 238번 실패했다 | 운영자 승인 뒤 백업·정지 확인·디렉터리 삭제·재기동. 0건 |
+| HITL | 저장소 열림 | 쓴 승인 전달이 저장소에서 지워지지 않는다(7.8 MB, 2,134 행) | #38252 |
+| Schedule | 저장소 열림 | seen key 가 하루 약 400개씩 늘고 tick 마다 전부 읽힌다 | #38247 |
+| Memory | 닫힘(설계) | 옛 `cited` 이벤트 134 줄이 배포 전 검사를 막았다. 강화는 RFC-0418 결정대로 없다 | 운영자 승인 뒤 백업하고 그 줄만 지웠다 |
+| Skills | 열림 → 닫힘(뒤) | `keeper_skill_publish` 는 있지만 어느 프롬프트도 부르라고 하지 않았다 | #38264 |
+| Deploy | 닫힘(뒤) | 배포 전 검사가 기본 cluster 만 읽었다 | #38227 |
+| Glossary | — | 코드와 어긋난 항목·없는 개념 | #38228 |
+
+나머지(backlog 필드 소실, `judgment_write` 이름, `exact/` lane 이름, 두 곳에 손으로 복사된 목록)는 #38219 에 모았다.
+
 ## 근거
 
 - Evidence: `git log origin/main`(`61992074eb`, 2026-09-23 10:35 KST fetch), `gh api repos/jeong-sik/masc/issues/<n>` 17건,

@@ -449,11 +449,20 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       "messages", `List (List.map Keeper_official_client_context_codec.to_json initial_messages)] in
     let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
       |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
-    let* reconciled_plan =
-      Session_store.reconcile_context claim_plan ~expected:stored_session ~snapshot_sha256
-      |> Result.map_error (fun reason -> config_error
-           ~field:"official_client_session.context_admission"
-           (Session_store.context_admission_error_to_string reason)) in
+    let admission_error reason = config_error
+        ~field:"official_client_session.context_admission"
+        (Session_store.context_admission_error_to_string reason) in
+    (* A Gate continuation is bound to its original vendor session: completion
+       requires that session to settle again, so a fresh one would run the
+       effects and then fail. It keeps the refusal, before any dispatch. *)
+    let* reconciled_plan = match official_client_continuation with
+      | Some _ when Option.is_some claim_plan.previous_settlement ->
+        Session_store.validate_unchanged_context ~expected:stored_session ~snapshot_sha256
+        |> Result.map (fun () -> claim_plan)
+        |> Result.map_error admission_error
+      | Some _ | None ->
+        Session_store.reconcile_context claim_plan ~expected:stored_session ~snapshot_sha256
+        |> Result.map_error admission_error in
     (match claim_plan.previous_settlement, reconciled_plan.previous_settlement with
      | Some { session_id; _ }, None ->
        Log.Keeper.info

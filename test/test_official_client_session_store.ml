@@ -1640,17 +1640,20 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
        check bool "changed source drops the settlement" true (plan.previous_settlement = None);
        check int "changed source starts at ordinal 1" 1 plan.turn_count
      | Error _ -> fail "changed source was refused instead of starting fresh");
-    check bool "a session with no acknowledged frontier is still refused" true
-      (reconcile_context resumable_plan ~expected:(Some started)
-         ~snapshot_sha256:frontier.snapshot_sha256 = Error Context_frontier_missing);
     let state_path = path ~base_path ~keeper_name |> Result.get_ok in
     let unbound_json = match Yojson.Safe.from_file state_path with
       | `Assoc fields -> `Assoc (List.remove_assoc "context_frontier" fields)
       | _ -> fail "binding encoding is not an object" in
     Yojson.Safe.to_file state_path unbound_json;
     match load ~base_path ~keeper_name with
-    | Ok (Some binding) -> check bool "absent optional proof preserves session without fabricating acknowledgement" true
-        (binding.context_frontier = None && binding.phase = released.phase)
+    | Ok (Some binding) ->
+      check bool "absent optional proof preserves session without fabricating acknowledgement" true
+        (binding.context_frontier = None && binding.phase = released.phase);
+      check bool "a settled session with no acknowledged frontier is still refused" true
+        (Result.is_error (claim_with_context_frontier
+          ~context_frontier:(Some {frontier with delivery=Canonical_source_guard; acknowledged_turn=None})
+          ~base_path ~keeper_name ~expected:(Some binding) ~client_kind:Codex ~owner_epoch
+          ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:9.))
     | Ok None -> fail "existing vendor session disappeared with optional proof"
     | Error detail -> fail detail)
 ;;

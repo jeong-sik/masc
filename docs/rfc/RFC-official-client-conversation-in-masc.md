@@ -224,7 +224,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
   - direct checkpoint 이어가기(`keeper_direct_checkpoint_continuation.ml:18-27`). 사이에 끼인 steering 턴도 같은 세션에서 돌아야 한다.
   - `Retry_previous` 복구는 대화를 그대로 잇는 것이 계약이다(`keeper_official_client_session_store.ml:1219-1224`).
 - **Codex** (`keeper_codex_runtime.ml:591-595`): resume 규칙이 같다. usage 는 `tokenUsage.last` 다.
-- **Antigravity** (`keeper_antigravity_runtime.ml:455-477, 1055`): resume 규칙이 같다. canonical 원본(시스템 프롬프트나 공유 기록)이 settle 때와 달라지면 그 세션을 이어 쓰지 않고 새 세션을 연다(`Keeper_official_client_session_store.reconcile_context`). 도구 목록이 바뀌었을 때와 같은 처리다. 옛 vendor 세션 안에만 있던 대화는 새 세션으로 넘어가지 않는다. usage 는 `conversation_cumulative` 다.
+- **Antigravity** (`Keeper_antigravity_runtime.run`): resume 규칙이 같다. canonical 원본(시스템 프롬프트나 공유 기록)이 settle 때와 달라지면 그 세션을 이어 쓰지 않고 새 세션을 연다(`Keeper_official_client_session_store.reconcile_context`). 도구 목록이 바뀌었을 때와 같은 처리다. 옛 vendor 세션 안에만 있던 대화는 새 세션으로 넘어가지 않는다. 예외: Gate 이어가기는 원래 세션에 묶여 있어서(완료 판정이 같은 세션의 다음 settle 을 요구한다) 새 세션을 열지 않고 dispatch 전에 거절한다. usage 는 `conversation_cumulative` 다.
 
 ## 4. 결함
 

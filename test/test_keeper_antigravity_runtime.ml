@@ -543,6 +543,35 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         "provider cumulative turn count"
                         73
                         resumed.turns;
+                      (* A Gate continuation is bound to the vendor session
+                         that opened it; a fresh session would run the effects
+                         and then fail completion. A changed prompt keeps the
+                         refusal there, before anything reaches the CLI. *)
+                      let gate_checkpoint =
+                        match Keeper_official_client_session_store.load ~base_path
+                                ~keeper_name:"antigravity-fixture" with
+                        | Ok (Some {phase=Settled {session_id; turn_id}; tool_surface_sha256; _}) ->
+                          { Keeper_semantic_execution.client_kind = Antigravity
+                          ; runtime_id = "antigravity.gemini"; session_id; turn_id
+                          ; tool_surface_sha256; frame = Keeper_repetition_snapshot.empty }
+                        | Ok _ | Error _ -> fail "resumed session did not settle" in
+                      let prompt_before_gate = In_channel.with_open_bin
+                        (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
+                      (match Keeper_turn_driver.run_named
+                          ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
+                          ~base_path ~goal:"Resume the approved call"
+                          ~official_client_continuation:gate_checkpoint
+                          ~system_prompt:"changed core instructions" ~tools:[tool] ~agent_core_tools:[tool]
+                          ~initial_messages:large_history ~hooks ~context:(Agent_core.Context.create ())
+                          ~sw ~net:(Eio.Stdenv.net env) () with
+                       | Error (Agent_core.Error.Config (InvalidConfig {field; _})) ->
+                         check string "a Gate continuation keeps the context refusal"
+                           "official_client_session.context_admission" field
+                       | Error error -> fail (Agent_core.Error.to_string error)
+                       | Ok _ -> fail "a Gate continuation ran in a fresh vendor session");
+                      check string "the refused Gate continuation never reaches the CLI"
+                        prompt_before_gate (In_channel.with_open_bin
+                          (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all);
                       (* The fixture answers 73 cumulative turns only when
                          asked to resume its conversation; a fresh start
                          reports 1. The control resume runs last, so the

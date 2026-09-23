@@ -404,29 +404,39 @@ let test_the_forecast_takes_the_drivers_start () =
     | None -> fail "a position that matches this history was refused" in
   let boundary = Front.Turn_boundary { end_atom = 2 } in
   let unknown = Front.Turn_boundary_unknown { reason = "boundary read failed: fixture" } in
+  (* The start the provider last accepted, as the turn record keeps it
+     (RFC librarian-lifecycle §4.10, rule 2): past the read position, so
+     both the driver and the forecast open there. *)
+  let accepted : Front.seed =
+    {first_atom = 2; front_digest = Option.get (digest_at 2); source = Front.Turn_record { turn = 3 }} in
   let cases =
-    [ "a fitting snapshot", summarized, Some held_seed, boundary,
+    [ "a fitting snapshot", summarized, Some held_seed, None, boundary,
       (function Front.Librarian_snapshot _ -> true | _ -> false);
-      "the read position", absorbed, Some held_seed, boundary,
+      "the read position", absorbed, Some held_seed, None, boundary,
       (function Front.Librarian_progress { end_atom = 1 } -> true | _ -> false);
-      "a held seed", Driver.without_snapshot, Some held_seed, boundary,
+      "an accepted start past the read position", absorbed, Some held_seed, Some accepted, boundary,
+      (function
+        | Front.Past_librarian_point
+            { librarian_end_atom = 1; source = Front.Turn_record { turn = 3 } } -> true
+        | _ -> false);
+      "a held seed", Driver.without_snapshot, Some held_seed, None, boundary,
       (function Front.Carried Front.Ledger -> true | _ -> false);
-      "an outlived seed", Driver.without_snapshot, Some outlived_seed, boundary,
+      "an outlived seed", Driver.without_snapshot, Some outlived_seed, None, boundary,
       (function Front.Turn_start { end_atom = 2 } -> true | _ -> false);
-      "the turn boundary", Driver.without_snapshot, None, boundary,
+      "the turn boundary", Driver.without_snapshot, None, None, boundary,
       (function Front.Turn_start { end_atom = 2 } -> true | _ -> false);
-      "an unknown boundary", Driver.without_snapshot, None, unknown,
+      "an unknown boundary", Driver.without_snapshot, None, None, unknown,
       (function Front.Turn_start_unknown _ -> true | _ -> false) ]
   in
-  List.iter (fun (name, continuity, front, turn_boundary, expected) ->
+  List.iter (fun (name, continuity, front, accepted, turn_boundary, expected) ->
     let driver =
       Driver.For_testing.request_view ~continuity ~provider_config
-        ~measure_message_bytes:measure ~accepted:None ~front ~history_digest_at:digest_at
+        ~measure_message_bytes:measure ~accepted ~front ~history_digest_at:digest_at
         ~current_turn_results:Driver.Current_turn_verbatim
         ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:0 ~turn_boundary
         ~materialize:(fun ~pending:_ messages -> messages) messages in
     let forecast =
-      Masc.Keeper_next_request_forecast.carry ~measure ~continuity:(Some continuity) ~accepted:None ~front
+      Masc.Keeper_next_request_forecast.carry ~measure ~continuity:(Some continuity) ~accepted ~front
         ~turn_start:turn_boundary ~counted_tokens:None messages in
     check bool (name ^ ": the driver takes the start this case names") true
       (expected driver.composed.origin);

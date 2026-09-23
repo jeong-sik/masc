@@ -536,6 +536,76 @@ let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
   check int "two retained atoms plus the next tick" 3 carried.kept_atoms
 ;;
 
+(* RFC librarian-lifecycle §4.10, rules 2, 5 and 7, from the files alone:
+   a server that just started holds no ledger and no measurement, only the
+   turn record of the last accepted request and the Librarian's position.
+   The next request starts at the accepted start while the Librarian stands
+   behind it, returns to the Librarian's position once that reaches or
+   passes it, and never starts past this turn's boundary. *)
+let test_a_restarted_turn_starts_at_the_recorded_accepted_start () =
+  with_turn_record_store @@ fun config store ->
+  let persisted = exchanges 8 in
+  let _, total_atoms = Window.annotate persisted in
+  let window : Turn_record.model_input_window =
+    { transmitted_atoms = total_atoms - 8
+    ; total_atoms
+    ; measurement = Turn_record.Wire_shape
+    ; front_atom_digest = (seed_at persisted 8).front_digest
+    }
+  in
+  Dated_jsonl.append store
+    (Turn_record.to_json
+       { (record ~turn:1 None) with
+         model_input_window = Some window
+       ; response_observed_model_input = Some { runtime_profile = "glm"; window }
+       });
+  let accepted = (Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1").Front.seed in
+  let next_tick = persisted @ [ text_message Types.User "next tick" ] in
+  let digest_at = Window.atom_opening_digest next_tick in
+  let start ~point ~boundary =
+    let progress : Masc.Keeper_librarian_progress.t =
+      { position =
+          { trace_id = "trace-1"
+          ; end_atom = point
+          ; last_atom_digest = Option.get (digest_at (point - 1))
+          }
+      ; boundary_lines_seen = 1
+      }
+    in
+    let continuity =
+      match
+        Masc.Keeper_turn_driver_try_provider.absorbed_history ~trace_id:"trace-1"
+          ~messages:next_tick progress
+      with
+      | Some (_, continuity) -> continuity
+      | None -> fail "the read position does not name an atom of this history"
+    in
+    let carried =
+      Masc.Keeper_next_request_forecast.carry
+        ~measure:(Masc.Keeper_context_core.message_measurer ())
+        ~continuity:(Some continuity) ~front:None ~accepted
+        ~turn_start:(Front.Turn_boundary { end_atom = boundary })
+        ~counted_tokens:None next_tick
+    in
+    carried.first_atom, Front.origin_to_json carried.origin
+  in
+  let past ~point =
+    Front.origin_to_json
+      (Front.Past_librarian_point
+         { librarian_end_atom = point; source = Front.Turn_record { turn = 1 } })
+  in
+  let progress_at end_atom = Front.origin_to_json (Front.Librarian_progress { end_atom }) in
+  let origin = testable Yojson.Safe.pp Yojson.Safe.equal in
+  check (pair int origin) "behind the accepted start: open there" (8, past ~point:2)
+    (start ~point:2 ~boundary:16);
+  check (pair int origin) "at the accepted start: the Librarian's position again"
+    (8, progress_at 8) (start ~point:8 ~boundary:16);
+  check (pair int origin) "past it: the Librarian's position" (10, progress_at 10)
+    (start ~point:10 ~boundary:16);
+  check (pair int origin) "never past this turn's boundary" (5, past ~point:2)
+    (start ~point:2 ~boundary:5)
+;;
+
 let test_read_seed_uses_the_last_response_when_a_retry_reuses_the_turn () =
   with_turn_record_store @@ fun config store ->
   let records =
@@ -763,6 +833,8 @@ let () =
             test_rows_that_do_not_decode_are_counted_with_the_first_reason
         ; test_case "stored response survives a window of unobserved rows" `Quick
             test_read_seed_keeps_a_response_beyond_unobserved_rows
+        ; test_case "a restarted turn starts at the recorded accepted start" `Quick
+            test_a_restarted_turn_starts_at_the_recorded_accepted_start
         ; test_case "a retry reusing the turn keeps the latest stored response" `Quick
             test_read_seed_uses_the_last_response_when_a_retry_reuses_the_turn
         ; test_case "only visited unreadable rows are counted" `Quick

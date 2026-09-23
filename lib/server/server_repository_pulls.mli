@@ -235,7 +235,7 @@ val read_repository :
     next page. *)
 
 val refresh :
-  now:(unit -> float) -> http_post:http_post -> base_path:string -> previous:snapshot -> snapshot
+  now:(unit -> float) -> http_post:http_post -> config:Workspace.config -> previous:snapshot -> snapshot
 (** One full read: resolve the reader, load the registered repositories and
     read each GitHub one. A repository whose previous answer was
     [Token_rejected] for the same token, or [Rate_limited] with a reset time
@@ -288,4 +288,5 @@ val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> config:Workspace.config
     {!refresh} is published as soon as GitHub has answered, then
     {!join_keepers} with {!inspect_fleet_checkouts} is published over it. A
     slow or failing fleet inspection never delays or discards the pull
-    requests. Cancelled with [sw]. *)
+    requests. A refresh that raises keeps the previous rows with
+    [repositories_error] set. Cancelled with [sw]. *)

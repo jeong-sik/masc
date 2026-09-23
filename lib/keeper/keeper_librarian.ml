@@ -758,13 +758,14 @@ let materialize_facts ~current_facts ~new_claims ~dropped ~absorbed =
   }
 ;;
 
-(* What the store is asked to add: the new claims, and each restated memory
-   that some applied absorption goes into. The store skips an identity it
-   still holds, so a restated memory is added again only when the keeper took
-   it away during the pass; without it the absorbed memories would leave and
-   their rows would point into an id no snapshot has. A restatement nothing
-   goes into stays a restatement: the keeper's retraction stands. *)
-let claims_to_apply (selection : selection) ~(absorbed : Keeper_memory_os_types.absorbed_statement list) =
+(* The restated memories some applied absorption goes into. The store decides
+   under its lock whether each is still current; one the keeper took away
+   during the pass is not brought back, and the absorptions into it are not
+   applied. A restatement nothing goes into is not handed over at all. *)
+let restated_absorption_targets
+      (selection : selection)
+      ~(absorbed : Keeper_memory_os_types.absorbed_statement list)
+  =
   let intos =
     List.fold_left
       (fun ids (statement : Keeper_memory_os_types.absorbed_statement) ->
@@ -772,8 +773,7 @@ let claims_to_apply (selection : selection) ~(absorbed : Keeper_memory_os_types.
       String_set.empty
       absorbed
   in
-  selection.new_claims
-  @ List.filter (fun fact -> String_set.mem (memory_id fact) intos) selection.restated
+  List.filter (fun fact -> String_set.mem (memory_id fact) intos) selection.restated
 ;;
 
 let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :

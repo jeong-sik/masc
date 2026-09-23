@@ -2205,6 +2205,7 @@ let apply_disposition
       ~now
       ~source
       ~new_claims
+      ?(restated = [])
       ()
   =
   let retired =
@@ -2214,10 +2215,36 @@ let apply_disposition
       Set_util.StringSet.empty
       (Option.value dropped_statements ~default:[])
   in
-  let absorbed_into =
+  (* A restated memory is one the librarian read as current. If the locked
+     snapshot no longer holds it, something took it away during the pass (a
+     keeper retraction or supersede); it is not brought back, and the
+     absorptions that went into it are not applied, so their sources stay
+     current instead of leaving for an id no snapshot has (#38186). *)
+  let absorbed_into (previous : t option) =
+    let current_ids =
+      match previous with
+      | None -> Set_util.StringSet.empty
+      | Some snapshot ->
+        List.fold_left
+          (fun ids fact -> Set_util.StringSet.add (memory_id fact) ids)
+          Set_util.StringSet.empty
+          snapshot.facts
+    in
+    let vanished =
+      List.fold_left
+        (fun ids fact ->
+           let identity = memory_id fact in
+           if Set_util.StringSet.mem identity current_ids
+           then ids
+           else Set_util.StringSet.add identity ids)
+        Set_util.StringSet.empty
+        restated
+    in
     List.fold_left
       (fun into_of (statement : Keeper_memory_os_types.absorbed_statement) ->
-         Set_util.StringMap.add statement.absorbed statement.into into_of)
+         if Set_util.StringSet.mem statement.into vanished
+         then into_of
+         else Set_util.StringMap.add statement.absorbed statement.into into_of)
       Set_util.StringMap.empty
       absorbed
   in
@@ -2227,6 +2254,7 @@ let apply_disposition
      they are written just before the replace; a failed write fails this
      commit. *)
   let write_absorbed_rows ~(previous : t option) ~(next : t) =
+    let absorbed_into = absorbed_into previous in
     let next_ids =
       List.fold_left
         (fun ids fact -> Set_util.StringSet.add (memory_id fact) ids)
@@ -2270,6 +2298,7 @@ let apply_disposition
          | None -> []
          | Some snapshot -> snapshot.facts
        in
+       let absorbed_into = absorbed_into previous in
        let kept =
          List.filter
            (fun fact ->

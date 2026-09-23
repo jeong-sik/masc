@@ -293,6 +293,7 @@ val apply_disposition
   -> now:float
   -> source:source
   -> new_claims:Keeper_memory_os_types.fact list
+  -> ?restated:Keeper_memory_os_types.fact list
   -> unit
   -> (t, string) result
 (** Apply a librarian's decision to whatever the snapshot holds when the lock
@@ -330,7 +331,15 @@ val apply_disposition
     snapshot is built and printed and right before it replaces the old one; if
     that append fails, nothing is committed (RFC-0456 §4.2). Required rather
     than defaulted: a caller that leaves it out would add the merged claim and
-    keep every fact it absorbs current. *)
+    keep every fact it absorbs current.
+
+    [restated] are the memories the answer wrote again verbatim that an
+    absorption goes into. They are never added: one the locked snapshot still
+    holds is already there, and one it no longer holds was taken away during
+    the pass, by a keeper retraction or supersede. For such a vanished memory
+    the absorptions into it are not applied and their sources stay current, so
+    the keeper's removal stands and no absorbed row points into an id no
+    snapshot has (#38186). *)
 
 val replace
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t

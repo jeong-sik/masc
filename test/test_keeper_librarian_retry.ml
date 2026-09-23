@@ -669,9 +669,9 @@ let test_a_restatement_keeps_the_stored_fields_and_names_the_rest () =
          ])
 ;;
 
-(* The store gets the restated memory an absorption goes into, and not one
-   nothing goes into. *)
-let test_claims_to_apply_carries_only_restatements_something_goes_into () =
+(* The store is told about the restated memory an absorption goes into, and
+   not one nothing goes into. *)
+let test_restated_absorption_targets_are_only_restatements_something_goes_into () =
   let parse_ok json =
     match parse json with
     | Ok selection -> selection
@@ -687,20 +687,66 @@ let test_claims_to_apply_carries_only_restatements_something_goes_into () =
   check (list string) "A, which B goes into"
     [ current_a_id ]
     (List.map Memory.memory_id
-       (Librarian.claims_to_apply absorbing ~absorbed:absorbing.absorbed));
+       (Librarian.restated_absorption_targets absorbing ~absorbed:absorbing.absorbed));
   check int "nothing when the gate applied no absorption" 0
-    (List.length (Librarian.claims_to_apply absorbing ~absorbed:[]));
+    (List.length (Librarian.restated_absorption_targets absorbing ~absorbed:[]));
   let plain =
     parse_ok (selection_json ~dropped:[] ~new_claims:[ new_claim ~claim:"keep A" () ] ())
   in
-  check int "a plain restatement is not re-added" 0
-    (List.length (Librarian.claims_to_apply plain ~absorbed:plain.absorbed))
+  check int "a plain restatement is not handed over" 0
+    (List.length (Librarian.restated_absorption_targets plain ~absorbed:plain.absorbed))
+;;
+
+(* Nothing touches A during the pass, and the answer restated A and absorbed B
+   into it. B leaves with its row pointing into A, and A is there once. *)
+let test_a_restated_memory_still_current_takes_its_absorptions () =
+  let keepers_dir = Filename.temp_dir "librarian-restated-kept-" "" in
+  Fun.protect ~finally:(fun () -> rm_rf keepers_dir) (fun () ->
+    let keeper_id = "kept" in
+    let require = function Ok value -> value | Error detail -> fail detail in
+    ignore
+      (Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:100.
+         ~source:{ kind = Current.Explicit_write; trace_id = "trace-seed" }
+         ~facts:[ current_a; current_b ] ()
+       |> require
+       : Current.t);
+    let selection =
+      match
+        parse
+          (selection_json
+             ~dropped:[]
+             ~new_claims:[ absorbing_claim ~claim:"keep A" (`List [ `String "m2" ]) () ]
+             ())
+      with
+      | Ok selection -> selection
+      | Error error -> fail (Librarian.parse_error_to_string error)
+    in
+    let committed =
+      Current.apply_disposition ~keepers_dir ~keeper_id ~now:200.
+        ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
+        ~dropped_statements:selection.dropped ~absorbed:selection.absorbed
+        ~new_claims:selection.new_claims
+        ~restated:
+          (Librarian.restated_absorption_targets selection ~absorbed:selection.absorbed)
+        ()
+      |> require
+    in
+    check (list string) "A once, B absorbed"
+      [ current_a_id ]
+      (List.map Memory.memory_id committed.facts);
+    match Masc.Keeper_memory_absorbed.read ~keepers_dir ~keeper_id with
+    | Error detail -> fail detail
+    | Ok [ (_, Ok (record : Masc.Keeper_memory_absorbed.record)) ] ->
+      check string "the row is B's" current_b_id record.memory_id;
+      check string "the row points into A" current_a_id record.into
+    | Ok lines -> failf "expected one absorbed row, read %d lines" (List.length lines))
 ;;
 
 (* The keeper retracts A while the pass runs, and the answer restated A and
-   absorbed B into it. A comes back with B's row pointing into it, rather than
-   B leaving for an id no snapshot has. *)
-let test_a_restated_memory_retracted_during_the_pass_comes_back_for_its_absorptions () =
+   absorbed B into it. The keeper's removal stands: A is not brought back, the
+   absorption into A is not applied, and B stays current with no absorbed row
+   (#38186). *)
+let test_a_restated_memory_retracted_during_the_pass_stays_retracted_and_keeps_its_sources () =
   let keepers_dir = Filename.temp_dir "librarian-restated-race-" "" in
   Fun.protect ~finally:(fun () -> rm_rf keepers_dir) (fun () ->
     let keeper_id = "race" in
@@ -733,19 +779,19 @@ let test_a_restated_memory_retracted_during_the_pass_comes_back_for_its_absorpti
       Current.apply_disposition ~keepers_dir ~keeper_id ~now:200.
         ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
         ~dropped_statements:selection.dropped ~absorbed:selection.absorbed
-        ~new_claims:(Librarian.claims_to_apply selection ~absorbed:selection.absorbed)
+        ~new_claims:selection.new_claims
+        ~restated:
+          (Librarian.restated_absorption_targets selection ~absorbed:selection.absorbed)
         ()
       |> require
     in
-    check (list string) "A is back and B went into it"
-      [ current_a_id ]
+    check (list string) "A stays retracted and B stays current"
+      [ current_b_id ]
       (List.map Memory.memory_id committed.facts);
     match Masc.Keeper_memory_absorbed.read ~keepers_dir ~keeper_id with
     | Error detail -> fail detail
-    | Ok [ (_, Ok (record : Masc.Keeper_memory_absorbed.record)) ] ->
-      check string "the row is B's" current_b_id record.memory_id;
-      check string "the row points into A" current_a_id record.into
-    | Ok lines -> failf "expected one absorbed row, read %d lines" (List.length lines))
+    | Ok [] -> ()
+    | Ok lines -> failf "expected no absorbed row, read %d lines" (List.length lines))
 ;;
 
 (* The two arrays stay required even when both are empty: an answer missing a
@@ -1715,10 +1761,12 @@ let () =
             test_restating_every_memory_plus_a_merge_applies_the_merge
         ; test_case "a restatement keeps the stored fields and names the rest" `Quick
             test_a_restatement_keeps_the_stored_fields_and_names_the_rest
-        ; test_case "claims_to_apply carries only restatements something goes into" `Quick
-            test_claims_to_apply_carries_only_restatements_something_goes_into
-        ; test_case "a restated memory retracted during the pass comes back for its absorptions" `Quick
-            test_a_restated_memory_retracted_during_the_pass_comes_back_for_its_absorptions
+        ; test_case "restated absorption targets are only restatements something goes into" `Quick
+            test_restated_absorption_targets_are_only_restatements_something_goes_into
+        ; test_case "a restated memory still current takes its absorptions" `Quick
+            test_a_restated_memory_still_current_takes_its_absorptions
+        ; test_case "a restated memory retracted during the pass stays retracted and keeps its sources" `Quick
+            test_a_restated_memory_retracted_during_the_pass_stays_retracted_and_keeps_its_sources
         ; test_case "selection without dropped field rejects" `Quick
             test_a_selection_without_the_dropped_field_rejects
         ; test_case "dropped statements validate" `Quick

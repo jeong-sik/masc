@@ -1240,8 +1240,11 @@ let run_best_effort
                  { kind = Keeper_memory_os_current.Librarian
                  ; trace_id = input_trace_id inp
                  }
-               ~new_claims:
-                 (Keeper_librarian.claims_to_apply selection ~absorbed:applied_absorbed)
+               ~new_claims:selection.new_claims
+               ~restated:
+                 (Keeper_librarian.restated_absorption_targets
+                    selection
+                    ~absorbed:applied_absorbed)
                ()
              |> Result.map_error (fun detail ->
                Memory_snapshot_write_failed { detail; selected_slot })

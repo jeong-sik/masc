@@ -316,10 +316,26 @@ status: reference
   [Keeper_terminal_reason](../../lib/keeper_runtime/keeper_terminal_reason.mli)
 
 **Keeper Chat Operation**
-: Keeper Owner가 접수한 메시지 실행의 durable 기록. `operation_id`로 식별하며
-  `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론도 이 operation을
-  제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상 Keeper다.
-  접수 응답은 실행 완료를 뜻하지 않는다.
+: Keeper 대화에 접수한 메시지 실행의 durable 기록. `operation_id`로 식별하며
+  `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론이나 다른 Keeper(`masc_keeper_msg`·
+  `delegate`)도 이 operation을 제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상
+  Keeper다. 소스 스키마는 `masc.keeper_chat_operation.source.v2`이며 발신 Keeper
+  식별자(`sender_keeper`)를 필수로 싣는다(RFC-0468 §3.2). 접수 응답은 실행 완료를 뜻하지 않는다.
+  → [Keeper_chat_operation_payload](../../lib/keeper/keeper_chat_operation_payload.mli)
+
+**Speaker Authority (화자 권한)**
+: Keeper 대화 turn을 연 발화자(human 또는 agent)의 권한 분류. 메시지 내용(content)에서
+  추측하지 않고 진입 경로와 Keeper 레지스트리 대조로 구조적으로 결정한다(RFC-0223 §3,
+  RFC-0468 §3.2). 닫힌 세 변형이다 — `Owner` (인증된 대시보드/운영자 경로), `External`
+  (Discord·Slack 등 커넥터 문맥을 나르는 외부 화자), `Keeper` (제출 지점이 Keeper
+  레지스트리와 일치시킨 등록된 다른 Keeper). wire 값은 각각 `"owner"`·`"external"`·
+  `"keeper"`다. `Keeper`인 경우 `speaker_id`와 `speaker_name`에 해당 Keeper 식별자가 실린다
+  (Keeper는 정확히 하나의 이름을 갖는다, RFC-0393).
+  Librarian의 대화 상대방 관측(`Keeper_counterpart_observation`)에서도 같은 닫힌 세
+  변형(`Owner`·`External`·`Keeper`)으로 전달되어, 호스트 참조가 부족해도 운영자,
+  등록된 Keeper, 외부 화자를 안전하게 분리한다.
+  → [Keeper_chat_store](../../lib/keeper/keeper_chat_store.mli),
+  [Keeper_counterpart_observation](../../lib/keeper/keeper_counterpart_observation.mli)
 
 **Turn Row Source (턴 행 출처)**
 : 채팅 transcript가 한 turn의 행을 그리는 출처. 코드의 타입 이름이 아니라 이 문서와

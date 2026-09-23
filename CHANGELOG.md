@@ -4,6 +4,15 @@
 
 ### Changed
 
+- The keeper failure route and the runtime candidate walk now give the same
+  answer for every error the rotation census covers (#38045). A provider's own
+  400/413 refusal, a malformed/unknown/oversized wire payload and a
+  non-transient 5xx are routed as same-turn rotations (`request_refused`,
+  `provider_wire_defect`, `server_error_not_transient`) instead of terminal
+  labels, matching the walk that already moved to the next candidate. A
+  `ProviderTerminal` error now stops the walk, as the route and every other
+  provider terminal already did, instead of rotating as an invented
+  `permission` capability mismatch.
 - The runtime failover concept is now named the **Runtime Candidate Order** in
   the TUI: the lane key help and status strings say "candidate order" where
   they said "failover" — the `e` key help and its label on the lane sheet

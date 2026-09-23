@@ -77,6 +77,14 @@ status: reference
   담당자(MCP client 등)가 잡은 Task 는 "held outside the fleet" 한 줄로 센다.
   → [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli), RFC-0464
 
+**Attention (Overview Attention 패널)**
+: briefing 의 `incidents` 와 `attention_queue` 를 합친 목록. 운영자가 봐야 할 조건 하나가
+  한 줄이다. 화면에 그려진 Team 줄이 문장으로 싣는 항목(막힌 Keeper 줄 하나에 항목 하나)은
+  Team 줄에만 두고, 나머지는 모두 Attention 패널에 남긴다. 살아 있는 Keeper 에 관한 항목,
+  같은 Keeper 의 둘째 항목, 화면이 짧아 잘린 Team 줄의 항목, parked 줄의 Keeper 항목이
+  여기에 든다. 패널 제목은 Team 줄로 옮긴 수를 `+N on Team` 으로 적는다. Task 소유권
+  문제만 모은 Operator Attention 과는 다른 목록이다.
+
 **닫힌 quota 창 (Shut Quota Window)**
 : provider 계정이나 자격 증명 하나가 사용 한도에 걸려 요청을 받지 않는 상태. 런타임
   카탈로그(`/api/v1/runtime/resolved`)는 런타임마다 `quota_exhausted`·`quota_resets_at`·

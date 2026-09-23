@@ -3070,6 +3070,51 @@ let test_runtime_toml_rejects_an_unknown_binding_key () =
          errs)
 ;;
 
+(* The accepted keys are the keys the binding parser reads, so a binding that
+   declares every one of them loads and each value lands in its field. A key
+   the parser reads but refuses as unknown, or accepts but never reads, fails
+   here. *)
+let test_runtime_toml_accepts_every_binding_key_it_reads () =
+  let extra =
+    "enabled = true\n\
+     wizard-default = false\n\
+     max-concurrent = 2\n\
+     disable-parallel-tool-use = true\n\
+     context-high-water-tokens = 900\n\
+     max-tokens = 128\n\
+     price-input = 0.5\n\
+     price-output = 1.5\n\
+     keep-alive = \"5m\"\n\
+     num-ctx = 4096\n\
+     repeat-penalty = 1.1\n\
+     repeat-last-n = 64\n\
+     return-progress = true\n"
+  in
+  match Runtime_toml.parse_string (binding_with_extra extra) with
+  | Error errs ->
+    fail
+      (String.concat "; "
+         (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ (b : Runtime_schema.binding) ] ->
+       check bool "enabled" true b.enabled;
+       check bool "is-default" true b.is_default;
+       check bool "wizard-default" false b.wizard_default;
+       check (option int) "max-concurrent" (Some 2) b.max_concurrent;
+       check bool "disable-parallel-tool-use" true b.disable_parallel_tool_use;
+       check bool "context marks" true (Option.is_some b.context_marks);
+       check (option int) "max-tokens" (Some 128) b.max_tokens;
+       check (option (float 1e-9)) "price-input" (Some 0.5) b.price_input;
+       check (option (float 1e-9)) "price-output" (Some 1.5) b.price_output;
+       check (option string) "keep-alive" (Some "5m") b.keep_alive;
+       check (option int) "num-ctx" (Some 4096) b.num_ctx;
+       check (option (float 1e-9)) "repeat-penalty" (Some 1.1) b.repeat_penalty;
+       check (option int) "repeat-last-n" (Some 64) b.repeat_last_n;
+       check (option bool) "return-progress" (Some true) b.return_progress
+     | _ -> fail "exactly one binding must parse")
+;;
+
 let test_runtime_toml_rejects_a_table_inside_a_binding () =
   match Runtime_toml.parse_string (binding_with_extra "context-high-water-tokens = 900\n\n[local.sample.alias]\nname = \"x\"\n") with
   | Ok _ -> fail "a table inside a binding must not load"
@@ -5665,6 +5710,8 @@ let () =
             test_runtime_toml_rejects_an_unknown_binding_key;
           test_case "a table inside a binding is refused" `Quick
             test_runtime_toml_rejects_a_table_inside_a_binding;
+          test_case "every binding key the parser reads is accepted" `Quick
+            test_runtime_toml_accepts_every_binding_key_it_reads;
           test_case "non-positive max-concurrent is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_concurrent;
           test_case "max-concurrent flows from binding to provider config" `Quick

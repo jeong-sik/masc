@@ -49,8 +49,38 @@ type revision =
   ; superseded_by : string
   }
 
+(* The claim fields a restated memory or a second same-text claim carries that
+   differ from the fields kept. [origin] is not among them: every claim the
+   librarian writes is [Injected], so a keeper-authored memory differs there on
+   every restatement and says nothing. *)
+type claim_field =
+  | Claim_category
+  | Claim_basis
+
+type kept_fields_from =
+  | Current_memory
+  | First_claim
+
+type ignored_fields =
+  { restated_id : string
+  ; kept_from : kept_fields_from
+  ; differing : claim_field list
+  }
+
+let claim_field_to_string = function
+  | Claim_category -> "category"
+  | Claim_basis -> "basis"
+;;
+
+let kept_fields_from_to_string = function
+  | Current_memory -> "current_memory"
+  | First_claim -> "first_claim"
+;;
+
 type selection =
   { new_claims : fact list
+  ; restated : fact list
+  ; ignored_fields : ignored_fields list
   ; dropped : dropped_statement list
   ; absorbed : Keeper_memory_os_types.absorbed_statement list
   ; facts : fact list
@@ -290,7 +320,7 @@ type parse_error =
   | Missing_required_fields
   | Claim_schema_mismatch
   | Dropped_schema_mismatch
-  | Duplicate_selected_memory_id of string
+  | Dropped_memory_id_recreated of string
   | Unknown_dropped_memory_id of string
   | Duplicate_dropped_memory_id of string
   | Supersedes_unknown_memory_id of string
@@ -308,8 +338,8 @@ let parse_error_to_string = function
   | Missing_required_fields -> "missing_required_fields"
   | Claim_schema_mismatch -> "claim_schema_mismatch"
   | Dropped_schema_mismatch -> "dropped_schema_mismatch"
-  | Duplicate_selected_memory_id identity ->
-    "duplicate_selected_memory_id: " ^ identity
+  | Dropped_memory_id_recreated identity ->
+    "dropped_memory_id_recreated: " ^ identity
   | Unknown_dropped_memory_id identity ->
     "unknown_dropped_memory_id: " ^ identity
   | Duplicate_dropped_memory_id identity ->
@@ -477,8 +507,9 @@ let translate_dropped_ids ~by_surrogate dropped =
 (* A revision pairs the dropped memory with the claim that continues it. The
    old id has to be one the librarian saw and dropped in this same answer: a
    supersede of a retained memory would keep both versions, and one of an
-   unknown id names nothing. *)
-let translate_revisions ~by_surrogate ~(dropped : dropped_statement list) pairs =
+   unknown id names nothing. A claim that [ignored] names (a restatement of a
+   memory another claim absorbs) continues nothing. *)
+let translate_revisions ~by_surrogate ~(dropped : dropped_statement list) ~ignored pairs =
   let dropped_ids =
     List.fold_left
       (fun set (statement : dropped_statement) -> String_set.add statement.memory_id set)
@@ -489,11 +520,21 @@ let translate_revisions ~by_surrogate ~(dropped : dropped_statement list) pairs 
     | [] -> Ok (List.rev acc)
     | { supersedes_token = None; claim_fact = _; absorbs_tokens = _ } :: rest -> loop acc rest
     | { supersedes_token = Some token; claim_fact = fact; absorbs_tokens = _ } :: rest ->
+      let identity = memory_id fact in
       (match String_map.find_opt token by_surrogate with
        | None -> Error (Supersedes_unknown_memory_id token)
+       | Some _ when String_set.mem identity ignored -> loop acc rest
        | Some superseded ->
          if String_set.mem superseded dropped_ids
-         then loop ({ superseded; superseded_by = memory_id fact } :: acc) rest
+         then (
+           let revision = { superseded; superseded_by = identity } in
+           (* Two claims with the same text and the same [supersedes] are one
+              revision. *)
+           let same (other : revision) =
+             String.equal other.superseded revision.superseded
+             && String.equal other.superseded_by revision.superseded_by
+           in
+           if List.exists same acc then loop acc rest else loop (revision :: acc) rest)
          else Error (Supersedes_not_dropped superseded))
   in
   loop [] pairs
@@ -516,11 +557,101 @@ let current_facts inp =
 
    What is checked here is not what deserves to be remembered -- that is the
    librarian's judgment and no rule here narrows it. It is whether the answer
-   refers to memories the librarian was actually shown: a retired id has to name
-   one of them, exactly once, and a new claim must not already be on file. *)
+   refers to memories the librarian was actually shown, and whether it
+   contradicts itself: a retired id has to name one of them, exactly once. A
+   claim that repeats a current memory word for word is read as that memory,
+   never as a reason to refuse the pass. *)
+
+(* The fields of [kept] that [claim] states differently. *)
+let differing_fields ~(kept : fact) (claim : fact) =
+  let category =
+    if String.equal
+         (Keeper_memory_os_types.category_to_string kept.category)
+         (Keeper_memory_os_types.category_to_string claim.category)
+    then []
+    else [ Claim_category ]
+  in
+  let basis =
+    if Yojson.Safe.equal
+         (Keeper_memory_os_types.basis_to_json kept.basis)
+         (Keeper_memory_os_types.basis_to_json claim.basis)
+    then []
+    else [ Claim_basis ]
+  in
+  category @ basis
+;;
+
+(* [memory_id] is the claim's own bytes, so two claims with the same text are
+   one memory. They become one claim: the first keeps its fields and gains the
+   [absorbs] ids the later one adds. A list that names an id twice still names
+   it twice, so {!translate_absorbs} still refuses it. A later claim whose
+   fields differ from the first one's is named in the second result. *)
+let merge_same_claims stated_claims =
+  let same identity claim = String.equal (memory_id claim.claim_fact) identity in
+  let rec loop acc ignored_rev = function
+    | [] -> List.rev acc, List.rev ignored_rev
+    | claim :: rest ->
+      let identity = memory_id claim.claim_fact in
+      (match List.find_opt (same identity) acc with
+       | None -> loop (claim :: acc) ignored_rev rest
+       | Some first ->
+         let added =
+           List.filter
+             (fun token -> not (List.exists (String.equal token) first.absorbs_tokens))
+             claim.absorbs_tokens
+         in
+         let merged = { first with absorbs_tokens = first.absorbs_tokens @ added } in
+         let ignored_rev =
+           match differing_fields ~kept:first.claim_fact claim.claim_fact with
+           | [] -> ignored_rev
+           | differing ->
+             { restated_id = identity; kept_from = First_claim; differing } :: ignored_rev
+         in
+         loop
+           (List.map (fun kept -> if same identity kept then merged else kept) acc)
+           ignored_rev
+           rest)
+  in
+  loop [] [] stated_claims
+;;
+
+(* The identities of claims that restate a current memory another claim of the
+   same answer absorbs. A restatement adds nothing, so the absorption wins and
+   the claim is read as not written. That includes its own [absorbs]: a memory
+   it names there stays current, which is what an absorption that is not
+   applied always does. A restatement of a memory the answer drops is not
+   here: that says both "gone" and "kept", and {!materialize_facts} refuses it. *)
+let ignored_restatements ~by_surrogate ~current_ids merged_claims =
+  let absorbed_by_another =
+    List.fold_left
+      (fun ids claim ->
+         let into = memory_id claim.claim_fact in
+         List.fold_left
+           (fun ids token ->
+              match String_map.find_opt token by_surrogate with
+              | Some absorbed when not (String.equal absorbed into) ->
+                String_set.add absorbed ids
+              | Some _ | None -> ids)
+           ids
+           claim.absorbs_tokens)
+      String_set.empty
+      merged_claims
+  in
+  List.fold_left
+    (fun ids claim ->
+       let identity = memory_id claim.claim_fact in
+       if String_set.mem identity current_ids && String_set.mem identity absorbed_by_another
+       then String_set.add identity ids
+       else ids)
+    String_set.empty
+    merged_claims
+;;
+
 (* An absorbed memory has to be one the librarian saw, has to still be current
    in the answer (a dropped one is gone, not said by the new claim), and can be
-   said by one new claim only. *)
+   said by one new claim only. A claim that writes a current memory again as it
+   stands is that memory, so its own id in its [absorbs] asks for nothing: the
+   memory stays, and no absorption row says it went into itself. *)
 let translate_absorbs ~by_surrogate ~(dropped : dropped_statement list) new_claims =
   let dropped_ids =
     List.fold_left
@@ -533,6 +664,7 @@ let translate_absorbs ~by_surrogate ~(dropped : dropped_statement list) new_clai
     | token :: rest ->
       (match String_map.find_opt token by_surrogate with
        | None -> Error (Absorbs_unknown_memory_id token)
+       | Some absorbed when String.equal absorbed into -> tokens seen acc ~into rest
        | Some absorbed ->
          if String_set.mem absorbed dropped_ids
          then Error (Absorbs_dropped_memory_id absorbed)
@@ -555,6 +687,20 @@ let translate_absorbs ~by_surrogate ~(dropped : dropped_statement list) new_clai
   claims String_set.empty [] new_claims
 ;;
 
+type materialized =
+  { facts_after : fact list
+  ; adds : fact list
+  ; restatements : fact list
+  ; restatement_fields : ignored_fields list
+  }
+
+(* The facts after the answer, the claims it adds to them, and the current
+   memories it wrote again. [new_claims] has no restatement of a memory another
+   claim absorbs ({!ignored_restatements} took those out). A claim naming a
+   memory the same answer drops, directly or as the target of its own
+   [supersedes], says both "gone" and "kept", so the answer is refused. Any
+   other claim whose identity is current is a memory the answer keeps: it adds
+   nothing, and the stored fact keeps its first sighting and its fields. *)
 let materialize_facts ~current_facts ~new_claims ~dropped ~absorbed =
   let open Result.Syntax in
   let current_by_id = current_facts_by_id current_facts in
@@ -568,39 +714,66 @@ let materialize_facts ~current_facts ~new_claims ~dropped ~absorbed =
       else validate_dropped (String_set.add statement.memory_id seen) rest
   in
   let* dropped_ids = validate_dropped String_set.empty dropped in
-  let leaving =
+  let absorbed_ids =
     List.fold_left
       (fun ids (statement : Keeper_memory_os_types.absorbed_statement) ->
          String_set.add statement.absorbed ids)
-      dropped_ids
+      String_set.empty
       absorbed
   in
   let retained =
     List.filter
-      (fun fact -> not (String_set.mem (memory_id fact) leaving))
+      (fun fact ->
+         let identity = memory_id fact in
+         not (String_set.mem identity dropped_ids || String_set.mem identity absorbed_ids))
       current_facts
   in
-  let retained_ids =
-    List.fold_left
-      (fun ids fact -> String_set.add (memory_id fact) ids)
-      String_set.empty
-      retained
-  in
-  let rec append_new selected_ids new_rev = function
-    | [] -> Ok (retained @ List.rev new_rev)
-    | fact :: rest ->
-      let identity = memory_id fact in
-      if
-        String_set.mem identity selected_ids
-        || String_map.mem identity current_by_id
-      then Error (Duplicate_selected_memory_id identity)
+  let rec split (added_rev, restated_rev, ignored_rev) = function
+    | [] -> Ok (added_rev, restated_rev, ignored_rev)
+    | claim :: rest ->
+      let identity = memory_id claim in
+      if String_set.mem identity dropped_ids
+      then Error (Dropped_memory_id_recreated identity)
       else
-        append_new
-          (String_set.add identity selected_ids)
-          (fact :: new_rev)
+        split
+          (match String_map.find_opt identity current_by_id with
+           | None -> claim :: added_rev, restated_rev, ignored_rev
+           | Some stored ->
+             let ignored_rev =
+               match differing_fields ~kept:stored claim with
+               | [] -> ignored_rev
+               | differing ->
+                 { restated_id = identity; kept_from = Current_memory; differing }
+                 :: ignored_rev
+             in
+             added_rev, stored :: restated_rev, ignored_rev)
           rest
   in
-  append_new retained_ids [] new_claims
+  let+ (added_rev, restated_rev, ignored_rev) = split ([], [], []) new_claims in
+  let added = List.rev added_rev in
+  { facts_after = retained @ added
+  ; adds = added
+  ; restatements = List.rev restated_rev
+  ; restatement_fields = List.rev ignored_rev
+  }
+;;
+
+(* What the store is asked to add: the new claims, and each restated memory
+   that some applied absorption goes into. The store skips an identity it
+   still holds, so a restated memory is added again only when the keeper took
+   it away during the pass; without it the absorbed memories would leave and
+   their rows would point into an id no snapshot has. A restatement nothing
+   goes into stays a restatement: the keeper's retraction stands. *)
+let claims_to_apply (selection : selection) ~(absorbed : Keeper_memory_os_types.absorbed_statement list) =
+  let intos =
+    List.fold_left
+      (fun ids (statement : Keeper_memory_os_types.absorbed_statement) ->
+         String_set.add statement.into ids)
+      String_set.empty
+      absorbed
+  in
+  selection.new_claims
+  @ List.filter (fun fact -> String_set.mem (memory_id fact) intos) selection.restated
 ;;
 
 let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
@@ -650,41 +823,44 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                    , traverse dropped_statement_of_json dropped_items
                  with
                  | Some stated_claims, Some dropped ->
-                   let new_claims =
-                     List.map (fun claim -> claim.claim_fact) stated_claims
+                   let merged_claims, same_text_fields = merge_same_claims stated_claims in
+                   let current = current_facts inp in
+                   let by_surrogate = surrogate_identity_map current in
+                   let* dropped = translate_dropped_ids ~by_surrogate dropped in
+                   let ignored =
+                     ignored_restatements
+                       ~by_surrogate
+                       ~current_ids:
+                         (String_set.of_list (List.map memory_id current))
+                       merged_claims
                    in
-                   let by_surrogate =
-                     surrogate_identity_map (current_facts inp)
+                   let applied_claims =
+                     List.filter
+                       (fun claim ->
+                          not (String_set.mem (memory_id claim.claim_fact) ignored))
+                       merged_claims
                    in
-                   (match translate_dropped_ids ~by_surrogate dropped with
-                   | Ok dropped ->
-                     (match translate_absorbs ~by_surrogate ~dropped stated_claims with
-                      | Ok absorbed ->
-                        (match
-                           materialize_facts
-                             ~current_facts:(current_facts inp)
-                             ~new_claims
-                             ~dropped
-                             ~absorbed
-                         with
-                         | Ok facts ->
-                           (match
-                              translate_revisions ~by_surrogate ~dropped stated_claims
-                            with
-                            | Ok revisions ->
-                              Ok
-                                { new_claims
-                                ; dropped
-                                ; absorbed
-                                ; facts
-                                ; revisions
-                                ; working_state
-                                ; working_contexts
-                                }
-                            | Error _ as error -> error)
-                         | Error _ as error -> error)
-                      | Error _ as error -> error)
-                   | Error _ as error -> error)
+                   let* absorbed = translate_absorbs ~by_surrogate ~dropped applied_claims in
+                   let* materialized =
+                     materialize_facts
+                       ~current_facts:current
+                       ~new_claims:(List.map (fun claim -> claim.claim_fact) applied_claims)
+                       ~dropped
+                       ~absorbed
+                   in
+                   let+ revisions =
+                     translate_revisions ~by_surrogate ~dropped ~ignored stated_claims
+                   in
+                   { new_claims = materialized.adds
+                   ; restated = materialized.restatements
+                   ; ignored_fields = same_text_fields @ materialized.restatement_fields
+                   ; dropped
+                   ; absorbed
+                   ; facts = materialized.facts_after
+                   ; revisions
+                   ; working_state
+                   ; working_contexts
+                   }
                  | Some _, None -> Error Dropped_schema_mismatch
                  | None, _ -> Error Claim_schema_mismatch)))
         | _ -> Error Missing_required_fields))

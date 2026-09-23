@@ -332,8 +332,9 @@ masc runtime-client-path --client claude-code   # where an official client runs 
 
 Preparation uses the selected backend, validates it before saving the selection,
 and starts or connects to the server for this workspace. It creates a local
-operator credential and starts `imp`. Later, bare `masc` opens the saved imp
-history without repeating model selection; the UI observes its current server
+operator credential and starts `imp`. Later, bare `masc` opens the workspace
+whenever any Keeper has saved history, imp or not, without repeating model
+selection; the UI observes its current server
 and execution state separately. A persisted history does not prove that the
 current account or sandbox is usable.
 

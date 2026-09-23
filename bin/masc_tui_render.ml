@@ -1364,11 +1364,20 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
       ; ( "working directory"
         , Terminal_text.single_line_or ~default:"(not recorded)"
             pending.Tui_decode.gp_execution_cwd )
-      ; "input",
-        (match pending.Tui_decode.gp_input_preview with
-         | Some preview -> preview
-         | None -> "")
       ]
+      @ (match pending.Tui_decode.gp_input_rows with
+         | Tui_decode.Rows (_ :: _ as fields) ->
+           List.map
+             (fun (key, value) ->
+               ( Terminal_text.single_line key
+               , Keeper_chat.terminal_safe_text ~preserve_newlines:true value ))
+             fields
+         | Tui_decode.Rows [] -> [ "input", "(the stored input object is empty)" ]
+         | Tui_decode.Flattened preview ->
+           [ ( "input (flattened preview, may be cut)"
+             , Terminal_text.single_line_or
+                 ~default:"(the server recorded no input preview)" preview )
+           ])
     | Operator_row a ->
       [ "actor", a.Masc_tui_operator_projection.ap_actor
       ; "action", a.Masc_tui_operator_projection.ap_action_type

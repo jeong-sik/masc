@@ -7344,7 +7344,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
              ^ Ansi.reset)
             :: List.mapi
                  (fun index scope ->
-                   let ticked = List.mem scope state.github_login_scopes in
+                   let ticked =
+                     List.mem scope
+                       (Masc_tui_types.github_login_scopes_for state
+                          ~keeper_name:k.k_name)
+                   in
                    let note =
                      match scope with
                      | Masc.Keeper_github_identity.Workflow ->

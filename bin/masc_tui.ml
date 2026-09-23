@@ -4268,7 +4268,9 @@ let launch_github_login state ~mailbox keeper_name =
   let port = state.port in
   (* Read once, at the key press: ticking another scope while the device flow
      waits on the browser must not change what this login asked for. *)
-  let scopes = state.github_login_scopes in
+  let scopes =
+    Masc_tui_types.github_login_scopes_for state ~keeper_name
+  in
   let run () =
     match Eio_context.get_clock_opt () with
     | None ->
@@ -20665,7 +20667,10 @@ and is loaded on demand through keeper_skill.
            (match selected_keeper state with
             | Some keeper ->
                 let asked =
-                  match state.github_login_scopes with
+                  match
+                    Masc_tui_types.github_login_scopes_for state
+                      ~keeper_name:keeper.k_name
+                  with
                   | [] -> "gh's default scopes"
                   | scopes ->
                       "+"
@@ -20694,11 +20699,20 @@ and is loaded on demand through keeper_skill.
              List.nth_opt Masc.Keeper_github_identity.all_login_scopes
                (Char.code digit.[0] - Char.code '1')
            with
-           | Some scope ->
-               state.github_login_scopes <-
-                 (if List.mem scope state.github_login_scopes then
-                    List.filter (fun s -> s <> scope) state.github_login_scopes
-                  else scope :: state.github_login_scopes)
+           | Some scope -> (
+               match selected_keeper state with
+               | Some keeper ->
+                   let current =
+                     Masc_tui_types.github_login_scopes_for state
+                       ~keeper_name:keeper.k_name
+                   in
+                   state.github_login_scopes <-
+                     Some
+                       ( keeper.k_name,
+                         if List.mem scope current then
+                           List.filter (fun s -> s <> scope) current
+                         else scope :: current )
+               | None -> ())
            | None -> ())
        | Some ("P" | "p")
          when state.view = Keepers Keeper_detail

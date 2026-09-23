@@ -673,7 +673,7 @@ let field_value fixture ~tool_name field_name schema =
   | "reason" when tool_name = "masc_handover_create" -> `String "explicit"
   | "notes" | "note" | "reason" -> `String "tool matrix note"
   | "priority" -> `Int 2
-  | "assertions" -> `List [ `String "joined" ]
+  | "assertions" -> `List [ `String "task_claimed" ]
   | "agents" -> `List [ `String "definitely-missing-agent" ]
   | "capabilities" -> `List [ `String "testing"; `String "tool-matrix" ]
   | "tasks" ->

@@ -123,6 +123,19 @@ val status_line_is_healthy : string -> bool
 
 val looks_like_server_command : string -> bool
 
+(** State of a recorded PID as the takeover reads it. [Zombie] is a process
+    that exited and awaits its parent's reap: [kill pid 0] still succeeds, but
+    it holds no port and never answers, so its lock is stale. *)
+type process_state =
+  | Running
+  | Zombie
+  | Gone
+
+(** [signal_reachable] is whether [kill pid 0] succeeded; [ps_stat] is the
+    output of [ps -o stat=], [None] when ps could not report. *)
+val process_state_of_observation :
+  signal_reachable:bool -> ps_stat:string option -> process_state
+
 val acquire_pid_lock :
   ?lock_path:string ->
   ?probe_timeout_sec:float ->

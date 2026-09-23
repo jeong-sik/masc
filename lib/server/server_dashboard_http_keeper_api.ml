@@ -876,25 +876,22 @@ let handle_keeper_get_subroutes state req request reqd =
         (error_json (Printf.sprintf "invalid keeper name: %s" name))
     else
       let config = Mcp_server.workspace_config state in
-      match Keeper_meta_store.read_meta config name with
+      (* Effective meta: the lane is chosen by the TOML-owned
+         [sandbox_profile], which a persisted read answers with the default. *)
+      match Keeper_meta_store.read_effective_meta config name with
       | Error message ->
         Server_auth.respond_json_value_with_cors ~status:`Internal_server_error request reqd
           (error_json message)
       | Ok None ->
         Server_auth.respond_json_value_with_cors ~status:`Not_found request reqd
           (error_json (Printf.sprintf "keeper %S not found" name))
-      | Ok (Some _) ->
+      | Ok (Some meta) ->
         let hostname =
           match Server_utils.query_param req "hostname" with
           | Some hostname -> hostname
-          | None -> "github.com"
+          | None -> Keeper_github_identity.default_hostname
         in
-        (match
-           Keeper_github_identity.observe
-             ~config
-             ~keeper_name:name
-             ~hostname
-         with
+        (match Keeper_github_login_lane.observe ~config ~meta ~hostname with
          | Error message ->
            Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
              (error_json message)

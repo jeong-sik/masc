@@ -3,7 +3,7 @@
 #
 # Every arm over the whole Terminal-Bench 4.0.0 dataset.
 #
-# env: BENCH_MODEL  <masc provider>/<model> (default anthropic/claude-fable-5)
+# env: BENCH_MODEL  <masc provider>/<model> (default anthropic/claude-fable-5-1)
 #      BENCH_FALLBACK_MODELS  comma-separated <provider>/<model> after
 #                   BENCH_MODEL in arm l's candidate order (same provider,
 #                   different models); required by arm l, read by no other arm
@@ -17,7 +17,7 @@ ARMS_CSV="${1:-a,b,c,e,f,h}"
 # The attempts Terminal-Bench's own leaderboard runs use (-k 5 in the
 # terminal-bench README).
 K="${2:-5}"
-MODEL="${BENCH_MODEL:-anthropic/claude-fable-5}"
+MODEL="${BENCH_MODEL:-anthropic/claude-fable-5-1}"
 FALLBACK_MODELS="${BENCH_FALLBACK_MODELS:-}"
 ENVIRONMENT="${BENCH_ENV:-docker}"
 CONCURRENCY="${CONCURRENCY:-2}"

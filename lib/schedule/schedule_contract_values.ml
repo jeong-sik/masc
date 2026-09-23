@@ -192,9 +192,9 @@ let owner_kind_strings = List.map owner_kind_to_string owner_kinds
    carries. A caller branches on this rather than on the sentence next to it,
    and each kind names a different next step: pick a later time, read the
    status the row is already in, name yourself, send exactly one due input,
-   stay inside the declared range, or start a listing again without the
-   cursor. A refusal without a kind here is one whose sentence is the whole
-   answer. *)
+   stay inside the declared range, start a listing again without the
+   cursor, or leave a schedule that belongs to another caller alone. A
+   refusal without a kind here is one whose sentence is the whole answer. *)
 type refusal_kind =
   | Refusal_due_already_past
   | Refusal_transition_refused
@@ -204,6 +204,7 @@ type refusal_kind =
   | Refusal_actor_mismatch
   | Refusal_argument_out_of_range
   | Refusal_cursor_mismatch
+  | Refusal_not_schedule_owner
 [@@deriving enumerate]
 
 let refusal_kinds = all_of_refusal_kind
@@ -217,6 +218,7 @@ let refusal_kind_to_string = function
   | Refusal_actor_mismatch -> "actor_mismatch"
   | Refusal_argument_out_of_range -> "argument_out_of_range"
   | Refusal_cursor_mismatch -> "cursor_mismatch"
+  | Refusal_not_schedule_owner -> "not_schedule_owner"
 ;;
 
 let refusal_kind_of_string =

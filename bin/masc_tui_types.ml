@@ -8703,6 +8703,20 @@ let memory_overview_scrolled ?cursor (state : state) =
         9 + List.length keeper.mkh_alerts
         + (if Option.is_some keeper.mkh_read_error then 1 else 0)
         + (if Option.is_some keeper.mkh_source_read_error then 1 else 0)
+        (* The Librarian cause row, drawn only for a pass that stopped or
+           crashed. *)
+        + (match
+             Option.bind keeper.mkh_librarian.Tui_decode.mlh_state
+               Tui_decode.memory_librarian_pass_end_cause
+           with
+           | Some _ -> 1
+           | None -> 0)
+  in
+  (* One row per keeper row the decoder refused, then a divider. *)
+  let refused_rows =
+    match state.memory_health with
+    | Some { Tui_decode.mhs_refused_keepers = []; _ } | None -> 0
+    | Some { Tui_decode.mhs_refused_keepers = refused; _ } -> List.length refused + 1
   in
   { sc_count = count
   ; sc_chrome =
@@ -8711,6 +8725,7 @@ let memory_overview_scrolled ?cursor (state : state) =
       + 7 + context_rows
       + (if memory_overview_query state <> "" then 1 else 0)
       + (if Option.is_some state.memory_health_error then 2 else 0)
+      + refused_rows
   ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
   }
@@ -9435,11 +9450,21 @@ let runtime_pick_facts_width facts =
     facts
   + max 0 (List.length facts - 1)
 
+(* The kind badge that opens each row. Both are padded to the wider one, so
+   the target column starts at the same cell on a lane row and a model row. *)
+let runtime_pick_lane_badge = "[LANE]"
+let runtime_pick_model_badge = "[MODEL]"
+
+let runtime_pick_badge_cells =
+  max
+    (Masc_tui_message_layout.display_width runtime_pick_lane_badge)
+    (Masc_tui_message_layout.display_width runtime_pick_model_badge)
+
 (* Everything in the row that is not one of the two columns and not the facts:
    the cursor mark, the kind badge, and the two-space gap on each side of the
    route column. The row the renderer draws is
    [cursor ^ badge ^ target ^ "  " ^ route ^ "  " ^ facts]. *)
-let runtime_pick_fixed_cells = 2 + 7 + 2 + 2
+let runtime_pick_fixed_cells = 2 + runtime_pick_badge_cells + 2 + 2
 
 (* What is left for the facts once the chrome and the two column floors are
    paid. At 80 columns that is 15 cells, which one fact fills. *)

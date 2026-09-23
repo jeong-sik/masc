@@ -148,9 +148,17 @@ chore: bump version to 0.34.0
    runtime, the dashboard, or none/internal.
 6. `Review evidence` records a cross-model review when the repo or a reviewer
    asks for one: which model reviewed, and why a fallback was used if one was.
-7. Pull requests are squash-merged. Never push to a branch whose pull request
+7. A changelog entry goes in `changelog.d/<PR number>.md`, not in
+   `CHANGELOG.md`: `### Added`, `### Changed`, `### Fixed`, `### Removed` (or
+   another heading `changelog.d/README.md` lists), then English bullets that
+   each cite the pull request as `#<number>`. Two pull requests never write
+   the same file, so one merge does not make the others conflict. CI checks
+   the fragments and refuses a new bullet under `## [Unreleased]`; the release
+   bump folds the fragments into `CHANGELOG.md`. Entries already under
+   `## [Unreleased]` stay where they are.
+8. Pull requests are squash-merged. Never push to a branch whose pull request
    has merged; open a new one.
-8. When the work is ready to verify, hand it over with typed evidence. Every
+9. When the work is ready to verify, hand it over with typed evidence. Every
    `evidence_refs` entry is `artifact:<producer-root-relative-path>` (a
    producer-relative file opened and snapshotted on submission; the reviewer
    reads that snapshot) or `note:<text>` (prose the reviewer reads but cannot
@@ -221,6 +229,9 @@ reproduce, expected versus actual behaviour, and the relevant log
   before a release review; the tag workflow runs the former and CI runs the
   latter. `check-release-train-guard.sh` is not wired into CI yet
   (`scripts/ci/guards-not-wired.txt`).
+- `scripts/bump-version.sh` runs `python3 scripts/changelog-fragments.py
+  assemble`, which folds `changelog.d/*.md` into `## [Unreleased]` and
+  deletes them; move those entries into the version section before tagging.
 - Release evidence follows [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md).
 
 ## Architecture notes
@@ -243,8 +254,8 @@ shape.
 - Nothing outside the binary is required to build, boot, or run a Keeper
   turn. Graph and vector integrations exist for specific workflows only.
 - A change that stops reading a state file's existing rows is a hard cut. The
-  code does not read or convert the old shape. The pull request adds a
-  `Fresh state required` entry to `CHANGELOG.md` that names the file and says
+  code does not read or convert the old shape. The pull request's changelog
+  fragment has a `### Fresh state required` entry that names the file and says
   whether to delete or rewrite it, and the load error names the file path.
 
 ### Runtime assignment

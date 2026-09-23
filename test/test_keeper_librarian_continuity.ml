@@ -358,8 +358,8 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
      current=Some {K.facts=current.facts};
      working_context=Masc.Keeper_librarian_context.empty;
      messages=P.messages half; tool_observations=[];counterpart_observations=[]} in
-  let variables = ("continuity", Yojson.Safe.to_string (P.prompt_json half)) ::
-    List.remove_assoc "continuity" (K.prompt_variables input) in
+  let variables =
+    Masc.Keeper_librarian_runtime.librarian_prompt_variables ~continuity:half input |> get in
   let _, prompt = Prompt_registry.resolve_and_render_prompt_template
     Prompt_names.librarian variables |> get in
   let requirement = Agent_core.Exact_output.make_output_requirement
@@ -602,6 +602,46 @@ let accepted_answer =
     (Yojson.Safe.from_string
        {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":"s"}|})
 let refused kind = Printf.sprintf {|{"error":{"message":"fixture %s","type":"%s"}}|} kind kind
+
+let contains ~sub text =
+  let n = String.length sub and m = String.length text in
+  let rec at i = i + n <= m && (String.sub text i n = sub || at (i + 1)) in
+  at 0
+
+(* A continuity range whose Memory the durable pass already committed is a
+   Context-only pass (#38184). It asks for the working state alone: the
+   request names no Memory output field, the conversation travels once inside
+   the continuity block instead of also as conversation_history, and an answer
+   of the working state alone commits the range without touching Memory. *)
+let test_a_committed_range_asks_for_the_working_state_alone () =
+  let requests = ref [] in
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun _index body ->
+      requests := !requests @ [ body ];
+      ( `OK
+      , Exact_output_fixture.openai_response
+          (`Assoc [ "working_state", `String "Continue from the eighth atom." ]) ))
+  @@ fun ~bodies:_ ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path in
+  let memory_revision () =
+    Masc.Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name
+    |> get
+    |> Option.map (fun (s : Masc.Keeper_memory_os_current.t) -> s.revision) in
+  record_memory config;
+  let before = memory_revision () in
+  pass ();
+  check int "one request" 1 (List.length !requests);
+  let body = List.hd !requests in
+  check bool "the request names no Memory output field" false
+    (contains ~sub:Masc.Keeper_librarian.wire_field_new_claims body);
+  (* Each atom is 8000 characters. Sent twice, as the Memory pass sends them,
+     the atoms alone reach twice their total. *)
+  check bool "the conversation is sent once" true
+    (String.length body < 2 * narrowing_atom_count * 8_000);
+  check (option int) "the working state alone commits the whole range"
+    (Some narrowing_atom_count) (coverage ());
+  check (option int) "Memory stays as the durable pass committed it" before (memory_revision ())
 
 let test_refused_width_carries_to_the_next_pass () =
   narrowing_fixture ~slot_count:1
@@ -849,6 +889,8 @@ let () = run "production continuity pair"
     test_case "pending receipt overrides next turn" `Quick test_recovery_overrides_next_turn;
     test_case "queue keeps capacity and alternative opportunity" `Quick test_queue_reuses_capacity_without_gating_alternatives;
     test_case "a refused width carries to the next pass" `Quick test_refused_width_carries_to_the_next_pass;
+    test_case "a committed range asks for the working state alone" `Quick
+      test_a_committed_range_asks_for_the_working_state_alone;
     test_case "an API commit releases the CLI limit" `Quick test_an_api_commit_releases_the_cli_limit;
     test_case "a refusal that is not about size keeps the width" `Quick test_a_refusal_that_is_not_about_size_keeps_the_width;
     test_case "a size refusal anywhere in the walk narrows" `Quick test_a_size_refusal_anywhere_in_the_walk_narrows;

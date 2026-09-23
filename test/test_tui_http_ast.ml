@@ -2532,7 +2532,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* The list sidebar is drawn beside more than one surface, so it sits with
      the shared primitives. *)
   check_identifiers ~module_path:"bin/masc_tui_render_prim.ml"
-    ~binding:"write_list_sidebar" ~callees:sanitizer_calls [ "label" ];
+    ~binding:"write_list_sidebar_selection" ~callees:sanitizer_calls [ "label" ];
   check_fields "render_planning_list"
     [ "planning_error"; "pg_due_date"; "pg_title" ];
   (* The drawing moved into [planning_detail_pane] when the goal list came to

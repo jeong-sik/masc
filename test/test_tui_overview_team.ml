@@ -9,8 +9,9 @@ module Team = Masc_tui_overview_team
 module Types = Masc_tui_types
 module Tui_decode = Masc.Tui_decode
 
-let keeper ?(ago = Some 60.) name phase : Types.overview_keeper =
-  { okp_name = name; okp_phase = phase; okp_last_turn_ago_s = ago }
+let keeper ?(ago = Some 60.) ?(paused = Some false) name phase :
+    Types.overview_keeper =
+  { okp_name = name; okp_phase = phase; okp_last_turn_ago_s = ago; okp_paused = paused }
 
 let task id assignee_status : Tui_decode.task =
   { id; title = "title of " ^ id; status = assignee_status; priority = 2; goal_ids = [] }
@@ -180,6 +181,71 @@ let test_a_stuck_row_prefers_the_blocker_sentence () =
         summary
   | _ -> fail "a failing Keeper named by an item is a Blocker row"
 
+(* A paused Keeper is left out of autoboot, so after a server restart it has
+   no registry entry: phase null, paused true, and the status bridge still
+   raises a "<name>: paused" item for it. That is the operator's own stop. *)
+let test_a_paused_keeper_without_a_phase_stays_parked () =
+  let team =
+    Team.project
+      ~keepers:
+        [ keeper ~ago:None ~paused:(Some true) "lane-smith"
+            Types.Keeper_phase_absent
+        ]
+      ~tasks:[ task "task-1" (in_progress "lane-smith") ]
+      ~attention:
+        [ { (keeper_item "lane-smith" "lane-smith: paused") with
+            ai_severity = Types.Attention_warning
+          }
+        ]
+  in
+  check (list string) "no Needs_you row" [] (names team.rows);
+  check (list (pair string int)) "parked, with the task it still holds"
+    [ ("lane-smith", 1) ] team.parked
+
+let test_paused_wins_over_a_stuck_phase () =
+  let team =
+    Team.project
+      ~keepers:[ keeper ~paused:(Some true) "x" (phase "failing") ]
+      ~tasks:[]
+      ~attention:[ keeper_item "x" "x: runtime_blocked" ]
+  in
+  check (list string) "no row" [] (names team.rows);
+  check (list (pair string int)) "parked" [ ("x", 0) ] team.parked
+
+let info_item name summary : Types.attention_item =
+  { (keeper_item name summary) with
+    ai_kind = "connector_backlog"
+  ; ai_severity = Types.Attention_info
+  }
+
+(* The connector's "N external messages waiting" names a Keeper at info
+   severity. It is not a stop and not a cause. *)
+let test_an_info_item_is_not_a_blocker () =
+  let phase_less =
+    Team.project
+      ~keepers:[ keeper "sangsu" Types.Keeper_phase_absent ]
+      ~tasks:[]
+      ~attention:[ info_item "sangsu" "sangsu has 3 external messages waiting" ]
+  in
+  check (list string) "an info item alone does not make Needs_you" []
+    (names phase_less.rows);
+  check (list (pair string int)) "it stays parked" [ ("sangsu", 0) ]
+    phase_less.parked;
+  let failing =
+    Team.project
+      ~keepers:[ keeper "x" (phase "failing") ]
+      ~tasks:[]
+      ~attention:
+        [ info_item "x" "x has 3 external messages waiting"
+        ; keeper_item "x" "x: runtime_blocked"
+        ]
+  in
+  match failing.rows with
+  | [ { detail = Team.Blocker { summary; _ }; _ } ] ->
+      check string "the non-info item explains the row" "x: runtime_blocked"
+        summary
+  | _ -> fail "a failing Keeper named by a bad item is a Blocker row"
+
 let () =
   run "tui_overview_team"
     [ ( "team"
@@ -196,5 +262,11 @@ let () =
             test_an_unreadable_phase_stays_visible
         ; test_case "stuck row prefers the blocker sentence" `Quick
             test_a_stuck_row_prefers_the_blocker_sentence
+        ; test_case "paused Keeper without a phase stays parked" `Quick
+            test_a_paused_keeper_without_a_phase_stays_parked
+        ; test_case "paused wins over a stuck phase" `Quick
+            test_paused_wins_over_a_stuck_phase
+        ; test_case "an info item is not a blocker" `Quick
+            test_an_info_item_is_not_a_blocker
         ] )
     ]

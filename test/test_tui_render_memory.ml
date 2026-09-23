@@ -287,7 +287,10 @@ let test_every_detail_block_starts_its_values_in_one_column () =
     |> List.filter_map (fun line ->
            Option.map (fun column -> (line, column)) (value_column line))
   in
-  check int "nine labelled rows across the three blocks" 9 (List.length columns);
+  (* Ten since Timeline took a row of its own. It used to ride in the Origin
+     row behind a fifteen-cell slot, so its label was the one label on this
+     pane that did not start where the others do. *)
+  check int "ten labelled rows across the three blocks" 10 (List.length columns);
   match columns with
   | [] -> fail "no labelled detail rows"
   | (_, first) :: _ ->

@@ -2541,6 +2541,25 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
     [ "pg_id" ];
   check_fields "render_keeper_list" [ "keepers_error" ];
+  (* The Memory pane draws from its own file, which this guard never looked
+     at. Its detail handed seven wire fields straight to the terminal: the
+     category, the origin, the memory id, a bound path and its file hash, and
+     a dropped row's reason and path. A keeper writes those, and an escape in
+     one of them reached the screen as an escape. The claim beside them was
+     always escaped, because it goes through [detail_claim_lines], which hands
+     the sanitiser to [Message_layout.wrap_body] a line at a time -- a body
+     cannot be escaped whole. *)
+  check_fields ~module_path:"bin/masc_tui_render_memory.ml"
+    ~non_rendering_calls:[ "detail_claim_lines" ] "memory_fact_detail_lines"
+    [ "mf_claim"
+    ; "mf_category"
+    ; "mf_origin"
+    ; "mf_memory_id"
+    ; "msf_path"
+    ; "msf_sha256"
+    ; "mi_reason"
+    ; "mi_source_path"
+    ];
   (* The roster's last-seen clock went out as a slice of the wire text. *)
   check_fields "render_clients" [ "cr_name"; "cr_agent_type"; "cr_last_seen" ];
   (* #29626 moved the row itself into [keeper_row_content] so the list could

@@ -488,29 +488,37 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
       in
       [ Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
-      @ [ detail_field "Category:" fact.mf_category
-        ; detail_field "Origin:"
-            (Printf.sprintf "%-15s %sTimeline:%s   First: %s · Last: %s"
-               fact.mf_origin (Theme.recede ()) Ansi.reset
+      @ [ detail_field "Category:" (Terminal_text.single_line fact.mf_category)
+          (* Two labelled readings used to share this row, the first in a
+             hand-sized slot of fifteen cells. Every other field in this pane
+             owns a row, and the slot was a guess: in the fleet reading the
+             origin carries its keeper, and the shortest keeper name in the
+             fleet already makes it seventeen bytes, so "Timeline:" lost the
+             space before it on every row. Printf's width counts bytes as
+             well, which the middle dot in that reading is three of. *)
+        ; detail_field "Origin:" (Terminal_text.single_line fact.mf_origin)
+        ; detail_field "Timeline:"
+            (Printf.sprintf "First: %s \xc2\xb7 Last: %s"
                (memory_fact_age_label fact.mf_first_seen)
                (memory_fact_age_label fact.mf_last_seen))
         ]
       @ history_lines
-      @ [ detail_field "Memory ID:" fact.mf_memory_id ]
+      @ [ detail_field "Memory ID:" (Terminal_text.single_line fact.mf_memory_id) ]
   | Memory_row_source_fact fact ->
       let claim_lines = detail_claim_lines ~inner_width fact.msf_claim in
       [ Printf.sprintf "  %s%sSource-Bound Fact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
-      @ [ detail_field "Bound Path:" fact.msf_path
+      @ [ detail_field "Bound Path:" (Terminal_text.single_line fact.msf_path)
         ; detail_field "File SHA:"
-            (Printf.sprintf "%s · %sFirst Seen:%s %s" fact.msf_sha256
+            (Printf.sprintf "%s · %sFirst Seen:%s %s" 
+               (Terminal_text.single_line fact.msf_sha256)
                (Theme.recede ()) Ansi.reset
                (memory_fact_age_label fact.msf_first_seen))
         ]
   | Memory_row_invalidation row ->
       [ Printf.sprintf "  %s%sDropped / Invalidated Fact%s" Ansi.bold (Theme.bad ()) Ansi.reset
-      ; detail_field "Reason:" row.mi_reason
-      ; detail_field "Source Path:" row.mi_source_path
+      ; detail_field "Reason:" (Terminal_text.single_line row.mi_reason)
+      ; detail_field "Source Path:" (Terminal_text.single_line row.mi_source_path)
       ; detail_field "Dropped At:"
           (memory_fact_age_label row.mi_invalidated_at ^ " ago")
       ]

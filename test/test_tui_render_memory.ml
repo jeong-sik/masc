@@ -452,7 +452,11 @@ let test_the_memory_filter_bar_names_the_query_it_counted () =
   (* Two matches keep the plural, so the case is about the number and not
      about dropping an "s". *)
   check bool "two matches keep the plural" true
-    (contains "(2 matching keepers)" (bar ~typing:true "a"))
+    (contains "(2 matching keepers)" (bar ~typing:true "a"));
+  (* A filter being typed that matches no keeper is the one the empty note
+     quotes, not the applied one (empty here). *)
+  check bool "the empty note quotes the filter being typed" true
+    (contains "(no keepers matching \"zzz\"" (bar ~typing:true "zzz"))
 
 let test_render_memory_body_with_keepers () =
   let state = make_state () in
@@ -728,7 +732,7 @@ let test_the_fact_filter_bar_names_the_query_it_counted () =
     ; mf_events = Decode.no_memory_fact_events
     }
   in
-  let bar ~applied ~typing =
+  let state_of ~applied ~typing =
     let state = make_state () in
     let store : Decode.memory_ordinary_store =
       { mos_revision = 1
@@ -749,6 +753,10 @@ let test_the_fact_filter_bar_names_the_query_it_counted () =
     state.memory_facts_cursor <- 0;
     state.Types.search_last <- applied;
     state.Types.search <- typing;
+    state
+  in
+  let bar ~applied ~typing =
+    let state = state_of ~applied ~typing in
     let drawn = ref [] in
     let add line = drawn := line :: !drawn in
     Render_memory.render_memory_facts_body ~cols:110 ~budget:24 state ~push:add
@@ -769,7 +777,29 @@ let test_the_fact_filter_bar_names_the_query_it_counted () =
   check bool "and the filter it replaced is not" false
     (contains "\"alpha\"" typed_over);
   check bool "its one match takes the singular too" true
-    (contains "(1 matching fact)" typed_over)
+    (contains "(1 matching fact)" typed_over);
+  (* The empty note reads the same filter the rows were counted by. With no
+     applied filter it said the store was empty; over an applied one it
+     quoted the old word. *)
+  check bool "a first filter matching nothing is quoted, not an empty store" true
+    (contains "(no facts matching \"zzz\"" (bar ~applied:"" ~typing:(Some "zzz")));
+  let typed_over_nothing = bar ~applied:"alpha" ~typing:(Some "zzz") in
+  check bool "a filter typed over an applied one is the one quoted" true
+    (contains "(no facts matching \"zzz\"" typed_over_nothing);
+  check bool "and the applied one is not" false
+    (contains "\"alpha\"" typed_over_nothing);
+  (* The list height leaves a row for the filter bar exactly when the bar is
+     drawn, whether the filter is being typed or applied. *)
+  let height ~applied ~typing =
+    Render_memory.memory_facts_content_height ~cols:110 ~budget:24 ~cursor:0
+      (state_of ~applied ~typing)
+  in
+  check int "a typed filter takes the same row as the applied one"
+    (height ~applied:"alpha" ~typing:None)
+    (height ~applied:"" ~typing:(Some "alpha"));
+  check int "an empty search box over an applied filter draws no bar and keeps no row"
+    (height ~applied:"" ~typing:None)
+    (height ~applied:"alpha" ~typing:(Some ""))
 ;;
 
 let test_render_memory_facts_body () =

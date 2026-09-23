@@ -687,7 +687,7 @@ let render_memory_body ~cols ~budget (state : state)
       | Page_unread -> page_unread_note
       | Page_empty when query <> "" ->
         Printf.sprintf "  (no keepers matching \"%s\" \xe2\x80\x94 Esc clears filter)"
-          state.search_last
+          (Terminal_text.single_line query)
       | Page_empty -> "  (no keepers with a memory config or snapshot)"
     in
     push_styled ~style:(Theme.recede ()) note
@@ -740,11 +740,12 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   (* Stats, optional categories/search, two dividers and the column header.
      These are the rows rendered above the list below; detail owns its own
      divider. Input asks for the target cursor because wrapped details can
-     change the height on every movement. *)
+     change the height on every movement. The search row is counted from
+     [memory_search_query], the same value the renderer draws it from. *)
   let fixed_rows =
     4
     + (if Option.is_some state.memory_facts then 1 else 0)
-    + (if String.trim state.search_last <> "" then 1 else 0)
+    + (if String.trim (memory_search_query state) <> "" then 1 else 0)
     + detail_rows + store_error_rows
     + (if Option.is_some state.memory_facts_error then 2 else 0)
   in
@@ -904,9 +905,13 @@ let render_memory_facts_body ~cols ~budget (state : state)
        | Page_failed, _ -> page_failed_note
        | Page_unread, _ -> page_unread_note
        | Page_empty, Category_all ->
-           if state.search_last <> "" then
+           (* [total] counts rows filtered by [memory_search_query], so the
+              note reads the same value; the store is not empty just because
+              a filter being typed matched nothing. *)
+           let filter = memory_search_query state in
+           if String.trim filter <> "" then
              Printf.sprintf "  (no facts matching \"%s\" \xe2\x80\x94 Esc clears filter)"
-               state.search_last
+               (Terminal_text.single_line filter)
            else if is_fleet then
              "  (no facts across any keeper in the fleet)"
            else "  (no facts in either store)"

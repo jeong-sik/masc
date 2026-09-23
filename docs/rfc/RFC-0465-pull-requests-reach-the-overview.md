@@ -29,7 +29,7 @@ Overview Team 블록(RFC-0464)은 누가 어떤 Task 를 잡았는지까지 말�
 |---|---|---|
 | PR 을 읽는 서버 코드 | 없음 | lib/ 에 GitHub API 클라이언트·`gh pr` 호출 없음 |
 | Keeper 상태의 `pr_history` | 늘 빈 목록 | `keeper_status_detail.ml` 이 `.playground_pr_history.jsonl` 을 읽지만, 이 파일을 쓰는 코드가 없다 |
-| Keeper GitHub 자격 | 12명이 계정 3개를 나눠 쓴다(anyang-keepers 6, pangyo-preachers 5, jeong-sik 1). App 자격 0명 | `~/.masc/keepers/*/github-cli/hosts.yml` 의 `user` |
+| Keeper GitHub 자격 | 12명이 계정 3개를 나눠 쓴다(anyang-keepers 6, pangyo-preachers 5, jeong-sik 1). App 자격 0명 | `<base-path>/.masc/keepers/*/github-cli/hosts.yml` 의 `user` |
 | 등록 저장소 | 3개: figma-mcp·masc(public), wkbl(private) | `/api/v1/repositories`, `gh repo view` |
 | masc 열린 PR | 44개 | `gh pr list` |
 | Task ↔ PR 연결 필드 | 없음 | backlog `execution_links` 는 operation/session id 뿐 |

@@ -548,11 +548,6 @@ let pending_entry_to_yojson
       ; ( "summary_attempt_disposition"
         , summary_attempt_disposition_to_yojson
             entry.summary_attempt_disposition )
-      ; ( "phase"
-        , approval_queue_phase_to_yojson
-            (phase_of_disposition_and_summary
-               ~disposition:entry.summary_attempt_disposition
-               ~summary_status:entry.summary_status) )
       ]
 ;;
 
@@ -1198,7 +1193,6 @@ let pending_entry_of_yojson ~base_path json =
           ; "summary_status"
           ; "exact_attempt"
           ; "summary_attempt_disposition"
-          ; "phase"
           ]
         fields
     in

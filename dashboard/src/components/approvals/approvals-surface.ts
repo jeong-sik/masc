@@ -389,92 +389,35 @@ type ApprovalPhase = {
 // stopped. Project the closed summary/disposition states instead of calling
 // every row "Human HITL": age is queue age, never model execution duration.
 function approvalPhase(item: KeeperApprovalQueueItem): ApprovalPhase {
-  if (item.phase) {
-    switch (item.phase) {
-      case 'blocked':
-        return {
-          key: 'blocked',
-          label: '● Auto Judge blocked',
-          detail: 'Auto Judge 종료 실패 · 재개나 Human 판단 필요',
-          severity: 'sev-bad',
-        }
-      case 'human_required':
-        return {
-          key: 'human_required',
-          label: '● Human required',
-          detail: 'Auto Judge 완료 · Human 판단 필요',
-          severity: 'sev-warn',
-        }
-      case 'judging':
-        return {
-          key: 'judging',
-          label: '● Auto Judging',
-          detail: 'Auto Judge 판정 중',
-          severity: 'sev-info',
-        }
-      case 'queued':
-        return {
-          key: 'queued',
-          label: '● Queue waiting',
-          detail: '판정 시작 대기',
-          severity: 'sev-warn',
-        }
-    }
-  }
-  const disposition = item.summary_attempt_disposition
-  const summary = item.summary_status
-  const blocked =
-    disposition.code === 'identity_unbound'
-    || disposition.code === 'persistence_uncertain'
-    || (
-      disposition.code === 'pre_worker_unavailable'
-      && disposition.reason_code !== 'start_reserved'
-    )
-    || summary.status === 'failed'
-  if (blocked) {
-    return {
-      key: 'blocked',
-      label: '● Auto Judge blocked',
-      detail: 'Auto Judge 종료 실패 · 재개나 Human 판단 필요',
-      severity: 'sev-bad',
-    }
-  }
-  if (
-    summary.status === 'available'
-    && summary.summary.judgment === 'require_human'
-  ) {
-    return {
-      key: 'human_required',
-      label: '● Human required',
-      detail: 'Auto Judge 완료 · Human 판단 필요',
-      severity: 'sev-warn',
-    }
-  }
-  const judging =
-    disposition.code === 'in_flight'
-    || summary.status === 'pending'
-    || (
-      disposition.code === 'pre_worker_unavailable'
-      && disposition.reason_code === 'start_reserved'
-    )
-    || (
-      disposition.code === 'settled'
-      && summary.status === 'available'
-      && summary.summary.judgment !== 'require_human'
-    )
-  if (judging) {
-    return {
-      key: 'judging',
-      label: '● Auto Judging',
-      detail: 'Auto Judge 판정 중',
-      severity: 'sev-info',
-    }
-  }
-  return {
-    key: 'queued',
-    label: '● Queue waiting',
-    detail: '판정 시작 대기',
-    severity: 'sev-warn',
+  switch (item.phase) {
+    case 'blocked':
+      return {
+        key: 'blocked',
+        label: '● Auto Judge blocked',
+        detail: 'Auto Judge 종료 실패 · 재개나 Human 판단 필요',
+        severity: 'sev-bad',
+      }
+    case 'human_required':
+      return {
+        key: 'human_required',
+        label: '● Human required',
+        detail: 'Auto Judge 완료 · Human 판단 필요',
+        severity: 'sev-warn',
+      }
+    case 'judging':
+      return {
+        key: 'judging',
+        label: '● Auto Judging',
+        detail: 'Auto Judge 판정 중',
+        severity: 'sev-info',
+      }
+    case 'queued':
+      return {
+        key: 'queued',
+        label: '● Queue waiting',
+        detail: '판정 시작 대기',
+        severity: 'sev-warn',
+      }
   }
 }
 

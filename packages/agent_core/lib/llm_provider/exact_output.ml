@@ -1839,6 +1839,17 @@ let execution_failure_may_advance (error : execution_error) =
        until the refusal kind survived classification the lane could not reach
        it — a 429 arrived here as [Completion_failed] and ended the flow. *)
     receipt_dispatch_count error.receipt = 1
+  | Provider_response_refused { refusal = Payment_required; _ }, Response_received ->
+    (* A 402 is a refusal before any generation ran, and the successor bills a
+       different account, so the frozen lane walks its next candidate instead
+       of ending. It is not always the account alone: OpenRouter compares
+       [max_tokens] times price against the balance, so a smaller request
+       could pass on the same account — either way the successor is a fresh
+       chance. The one-dispatch receipt stays as
+       evidence. Same shape as [Rate_limited] — this promotion is what lets a
+       lane whose last HTTP slot is out of paid quota fall through to its CLI
+       tail instead of recording a permanent failure. *)
+    receipt_dispatch_count error.receipt = 1
   | Provider_response_refused
       { refusal = Overloaded | Server_error; _ }, Response_received ->
     (* The provider returned a complete failure response. Exact requests have
@@ -1860,13 +1871,14 @@ let execution_failure_may_advance (error : execution_error) =
   | Missing_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
   (* The remaining refusals do not advance, as before this classification
-     existed. Promoting any one of them needs its own argument about whether the
-     successor can serve the same input, which this change does not make. *)
+     existed ([Payment_required] was promoted above: the successor bills a
+     different account). Promoting any other one
+     needs its own argument about whether the successor can serve the same
+     input, which this change does not make. *)
   | ( Provider_response_refused
         { refusal =
             ( Auth_failed
             | Authorization_refused
-            | Payment_required
             | Invalid_request
             | Refusal_body_not_received
             | Not_found
@@ -1881,7 +1893,14 @@ let execution_failure_may_advance (error : execution_error) =
   | Response_body_deadline_exceeded,
       (Not_started | Before_dispatch | Dispatch_started | Terminal)
   | ( Provider_response_refused
-        { refusal = Request_body_refused | Rate_limited | Overloaded | Server_error; _ }
+        { refusal =
+            ( Request_body_refused
+            | Rate_limited
+            | Overloaded
+            | Server_error
+            | Payment_required )
+        ; _
+        }
     , (Not_started | Before_dispatch | Dispatch_started | Terminal) )
   | Invalid_json_output, (Not_started | Before_dispatch | Dispatch_started)
   | ( ( Attempt_already_started

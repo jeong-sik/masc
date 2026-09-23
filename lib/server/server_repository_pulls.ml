@@ -10,6 +10,11 @@ type review_state =
   | Review_waiting
   | Review_none
 
+type mergeable =
+  | Mergeable
+  | Conflicting
+  | Mergeable_unknown
+
 type pull_request =
   { repo_slug : string
   ; number : int
@@ -18,6 +23,8 @@ type pull_request =
   ; draft : bool
   ; checks : check_state
   ; review : review_state
+  ; mergeable : mergeable
+  ; author : string option
   ; updated_at : float
   }
 
@@ -61,10 +68,16 @@ type repository_entry =
   ; pulls : repository_pulls
   }
 
+type keeper_names =
+  | Keepers_not_listed
+  | Keepers_listed of string list
+  | Keepers_list_failed of string
+
 type snapshot =
   { reader : reader
   ; repositories_error : string option
   ; repositories : repository_entry list
+  ; keepers : keeper_names
   ; rejected_token_digest : string option
   }
 
@@ -72,6 +85,7 @@ let initial =
   { reader = Reader_not_declared
   ; repositories_error = None
   ; repositories = []
+  ; keepers = Keepers_not_listed
   ; rejected_token_digest = None
   }
 
@@ -209,8 +223,8 @@ let query =
     pullRequests(states: OPEN, first: $first, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        number title headRefName isDraft updatedAt reviewDecision
-        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+        number title headRefName isDraft updatedAt reviewDecision mergeable
+        commits(last: 1) { nodes { commit { author { name } statusCheckRollup { state } } } }
       }
     }
   }
@@ -247,6 +261,12 @@ let review_state_of_wire = function
   | "REVIEW_REQUIRED" -> Some Review_waiting
   | _ -> None
 
+let mergeable_of_wire = function
+  | "MERGEABLE" -> Some Mergeable
+  | "CONFLICTING" -> Some Conflicting
+  | "UNKNOWN" -> Some Mergeable_unknown
+  | _ -> None
+
 let decode_checks node =
   match Option.bind (field "commits" node) (field "nodes") with
   | Some (`List []) -> Some Checks_none
@@ -269,6 +289,28 @@ let decode_review node =
   | Some (`String decision) -> review_state_of_wire decision
   | Some _ -> None
 
+let decode_mergeable node =
+  match field "mergeable" node with
+  | Some (`String state) -> mergeable_of_wire state
+  | _ -> None
+
+(* [Some None] is GitHub saying there is no author name: no commit, a
+   [null] author, or a [null] name. The query asks for [author { name }], so
+   a missing key is a shape this reader does not know and reads [None]. *)
+let decode_author node =
+  match Option.bind (field "commits" node) (field "nodes") with
+  | Some (`List []) -> Some None
+  | Some (`List (last :: _)) ->
+    (match Option.bind (field "commit" last) (field "author") with
+     | None -> None
+     | Some `Null -> Some None
+     | Some author ->
+       (match field "name" author with
+        | Some `Null -> Some None
+        | Some (`String name) -> Some (Some name)
+        | _ -> None))
+  | _ -> None
+
 let decode_pull ~repo_slug node =
   match
     ( field "number" node
@@ -283,10 +325,25 @@ let decode_pull ~repo_slug node =
     , Some (`Bool draft)
     , Some (`String updated_raw) ) ->
     (match
-       Time_codec.parse_rfc3339_opt updated_raw, decode_checks node, decode_review node
+       ( Time_codec.parse_rfc3339_opt updated_raw
+       , decode_checks node
+       , decode_review node
+       , decode_mergeable node
+       , decode_author node )
      with
-     | Some updated_at, Some checks, Some review ->
-       Some { repo_slug; number; title; head_branch; draft; checks; review; updated_at }
+     | Some updated_at, Some checks, Some review, Some mergeable, Some author ->
+       Some
+         { repo_slug
+         ; number
+         ; title
+         ; head_branch
+         ; draft
+         ; checks
+         ; review
+         ; mergeable
+         ; author
+         ; updated_at
+         }
      | _ -> None)
   | _ -> None
 
@@ -494,9 +551,27 @@ let is_token_rejected = function
   | Pulls_failed { failure = Token_rejected; _ } -> true
   | Pulls_not_read | Pulls_not_github | Pulls_read _ | Pulls_failed _ -> false
 
+(* Listing the Keepers creates their directory when it is missing, and a
+   failed mkdir raises. The raise is this list's failure, not the refresh's:
+   the GitHub reads beside it still publish. *)
+let list_keepers config =
+  match Keeper_meta_store.keeper_names_result config with
+  | Ok names -> Keepers_listed names
+  | Error reason -> Keepers_list_failed reason
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception exn -> Keepers_list_failed ("keeper list read raised " ^ Printexc.to_string exn)
+
+(* Exact match: git records the author name as the runtime exported it, and
+   a Keeper name that differs in case is another name. *)
+let keeper_of_author ~keepers pull =
+  match pull.author with
+  | Some author when List.exists (String.equal author) keepers -> Some author
+  | Some _ | None -> None
+
 let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
   let base_path = config.base_path in
   let now_s = now () in
+  let keepers = list_keepers config in
   let credential = resolve_reader ~config in
   let reader =
     match credential with
@@ -508,6 +583,7 @@ let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
     { reader
     ; repositories_error = Some ("repository list unread: " ^ reason)
     ; repositories = previous.repositories
+    ; keepers
     ; rejected_token_digest = previous.rejected_token_digest
     }
   | Ok repos ->
@@ -547,7 +623,12 @@ let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
         Some (token_digest token)
       | Ok _ | Error _ -> None
     in
-    { reader; repositories_error = None; repositories; rejected_token_digest }
+    { reader
+    ; repositories_error = None
+    ; repositories
+    ; keepers
+    ; rejected_token_digest
+    }
 
 (* --- JSON --- *)
 
@@ -563,7 +644,24 @@ let review_state_to_string = function
   | Review_waiting -> "waiting"
   | Review_none -> "none"
 
-let pull_request_to_yojson pull =
+let mergeable_to_string = function
+  | Mergeable -> "mergeable"
+  | Conflicting -> "conflicting"
+  | Mergeable_unknown -> "unknown"
+
+let string_or_null = function
+  | Some value -> `String value
+  | None -> `Null
+
+(* ["keeper"] is [null] both for a pull request no Keeper authored and while
+   the Keeper list is unread; the snapshot's ["keepers"] state tells the two
+   apart. *)
+let pull_request_to_yojson ~keepers pull =
+  let keeper =
+    match keepers with
+    | Keepers_listed names -> keeper_of_author ~keepers:names pull
+    | Keepers_not_listed | Keepers_list_failed _ -> None
+  in
   `Assoc
     [ "repo_slug", `String pull.repo_slug
     ; "number", `Int pull.number
@@ -572,6 +670,9 @@ let pull_request_to_yojson pull =
     ; "draft", `Bool pull.draft
     ; "checks", `String (check_state_to_string pull.checks)
     ; "review", `String (review_state_to_string pull.review)
+    ; "mergeable", `String (mergeable_to_string pull.mergeable)
+    ; "author", string_or_null pull.author
+    ; "keeper", string_or_null keeper
     ; "updated_at", `Float pull.updated_at
     ]
 
@@ -595,14 +696,14 @@ let failure_to_yojson = function
   | Response_unreadable message ->
     `Assoc [ "kind", `String "response_unreadable"; "message", `String message ]
 
-let repository_pulls_to_yojson = function
+let repository_pulls_to_yojson ~keepers = function
   | Pulls_not_read -> `Assoc [ "state", `String "not_read" ]
   | Pulls_not_github -> `Assoc [ "state", `String "not_github" ]
   | Pulls_read { observed_at; pulls; undecodable } ->
     `Assoc
       [ "state", `String "read"
       ; "observed_at", `Float observed_at
-      ; "pulls", `List (List.map pull_request_to_yojson pulls)
+      ; "pulls", `List (List.map (pull_request_to_yojson ~keepers) pulls)
       ; "undecodable", `Int undecodable
       ]
   | Pulls_failed { observed_at; failure } ->
@@ -623,22 +724,30 @@ let reader_to_yojson = function
       [ "state", `String "token_unavailable"; "keeper", `String keeper; "reason", `String reason ]
   | Reader_ready { keeper } -> `Assoc [ "state", `String "ready"; "keeper", `String keeper ]
 
-let entry_to_yojson entry =
+let entry_to_yojson ~keepers entry =
   `Assoc
     [ "repository_id", `String entry.repository_id
     ; "url", `String entry.url
     ; ("slug", match entry.slug with Some slug -> `String slug | None -> `Null)
-    ; "pulls", repository_pulls_to_yojson entry.pulls
+    ; "pulls", repository_pulls_to_yojson ~keepers entry.pulls
     ]
 
+let keeper_names_to_yojson = function
+  | Keepers_not_listed -> `Assoc [ "state", `String "not_listed" ]
+  | Keepers_listed _ -> `Assoc [ "state", `String "listed" ]
+  | Keepers_list_failed reason ->
+    `Assoc [ "state", `String "list_failed"; "reason", `String reason ]
+
 let snapshot_to_yojson snapshot =
+  let keepers = snapshot.keepers in
   `Assoc
     [ "reader", reader_to_yojson snapshot.reader
     ; ( "repositories_error"
       , match snapshot.repositories_error with
         | Some reason -> `String reason
         | None -> `Null )
-    ; "repositories", `List (List.map entry_to_yojson snapshot.repositories)
+    ; "keepers", keeper_names_to_yojson keepers
+    ; "repositories", `List (List.map (entry_to_yojson ~keepers) snapshot.repositories)
     ]
 
 

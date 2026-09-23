@@ -1113,16 +1113,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         let client_result =
            Runtime_claude_code.run_turn
              ~on_spawned:(fun () ->
-               (* A spawned client may act before it reports anything. That
-                  uncertainty never lowers an effect an earlier spawn of this
-                  run already recorded. *)
-               match
-                 Atomic.compare_and_set
-                   effect_disposition
-                   Keeper_provider_attempt_effect.No_effect_observed
-                   Keeper_provider_attempt_effect.Observation_unavailable
-               with
-               | true | false -> ())
+               Atomic.set
+                 effect_disposition
+                 Keeper_provider_attempt_effect.Observation_unavailable)
              ~mgr:process_mgr
              ~clock
              ~cwd:process_cwd
@@ -1199,15 +1192,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                 { tool_effect_attempted = false; response_emitted = false; _ }
             | Runtime_claude_code.Context_window_exceeded
                 { tool_effect_attempted = false; response_emitted = false; _ } ->
-              (* Only the uncertainty the spawn raised is lowered. A tool
-                 handler this run entered stays recorded. *)
-              (match
-                 Atomic.compare_and_set
-                   effect_disposition
-                   Keeper_provider_attempt_effect.Observation_unavailable
-                   Keeper_provider_attempt_effect.No_effect_observed
-               with
-               | true | false -> ())
+              Atomic.set
+                effect_disposition
+                Keeper_provider_attempt_effect.No_effect_observed
             | Runtime_claude_code.Turn_failed_with_observation _
             | Runtime_claude_code.Quota_blocked _
             | Runtime_claude_code.Context_window_exceeded _

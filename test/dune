@@ -5836,6 +5836,8 @@
 
 (include stanzas/test_tui_ask_projection.inc)
 
+(include stanzas/test_tui_ask_context_block.inc)
+
 (include stanzas/test_tui_memory_back.inc)
 
 (include stanzas/test_tui_resources_empty_note.inc)

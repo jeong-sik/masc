@@ -5623,6 +5623,9 @@ type state = {
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_inflight: bool;
+  (* A binding write landed while a load was in flight; read once more when
+     that load answers. *)
+  mutable connectors_reload_after_inflight: bool;
   mutable connectors_scroll: int;
   mutable connectors_cursor: int;
   mutable connectors_binding_cursor: int;
@@ -7597,6 +7600,7 @@ let create_state
   connectors = None;
   connectors_error = None;
   connectors_inflight = false;
+  connectors_reload_after_inflight = false;
   connectors_scroll = 0;
   connectors_cursor = 0;
   connectors_binding_cursor = 0;

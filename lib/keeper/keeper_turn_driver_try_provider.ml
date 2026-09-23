@@ -898,24 +898,9 @@ type sent_request =
   ; digest_at : int -> string option
   ; origin : Keeper_carried_front.origin
         (* Where the range the request carried started: a refusal of a
-           carried seed is answered from the turn boundary
-           ([seed_refusal_sequence]); a refusal of any other range is not. *)
+           range a seed opened ahead of the turn boundary is answered from
+           that boundary ([seed_refusal_sequence]). *)
   }
-
-(* Where a request with no Librarian point opens its range on this attempt
-   (RFC keeper-context-window-in-tokens §13.4). One step, taken at most once
-   per attempt, and only after the provider refused a range that opened on a
-   carried seed. *)
-type range_start =
-  | Seed_when_valid
-      (* The seed -- the ledger's front, or the range the newest turn record
-         joined to a response -- when one is valid for this history, and the
-         turn boundary otherwise. *)
-  | Turn_start_after_seed_refusal
-      (* The provider refused the range the seed opened as too large; this
-         attempt opens at the turn boundary. The request accepted from there
-         is what the ledger and the turn record keep, so the next turn's seed
-         is that boundary. *)
 
 (* What one provider attempt carries between its requests and the retry
    policy around it: its working ledger, the range the last request composed,
@@ -926,7 +911,6 @@ type attempt_state =
   ; ledger : Keeper_model_input_ledger.t option ref
   ; last_resort_armed : bool ref
   ; last_resort_probe : (unit -> bool) option ref
-  ; range_start : range_start ref
   }
 
 (* The ledger's session: the history the carried positions belong to. The
@@ -951,7 +935,6 @@ let new_attempt_state (ctx : try_provider_ctx) =
            ~session_id:(ledger_session ctx))
   ; last_resort_armed = ref false
   ; last_resort_probe = ref None
-  ; range_start = ref Seed_when_valid
   }
 ;;
 
@@ -1235,16 +1218,6 @@ let carried_front ~ledger ~keeper_name ~runtime_id ~session_id ~digest_at ~after
   | None -> without_ledger (), dropped
 ;;
 
-(* Whether a request reads the seed at all. An absorbed point replaces it,
-   and after a refusal of the range it opened the attempt starts at the turn
-   boundary ([seed_refusal_sequence]). *)
-let reads_seed continuity range_start =
-  match continuity, range_start with
-  | Some (Summarized _ | Absorbed _), (Seed_when_valid | Turn_start_after_seed_refusal)
-  | (None | Some Without_snapshot), Turn_start_after_seed_refusal -> false
-  | (None | Some Without_snapshot), Seed_when_valid -> true
-;;
-
 (* The carried range runs here rather than in the caller because its front
    belongs to the (keeper, runtime) pair: the ledger the previous response on
    this very attempt may have just moved. A caller that composed the range
@@ -1354,11 +1327,13 @@ let bounded_model_input_projection
     (* A turn with no Librarian point still carries the seed: the ledger's
        front, or the range the newest turn record joined to a response
        (RFC keeper-context-window-in-tokens §13.4). Only an absorbed point
-       replaces it, and a refusal of the range it opened moves this attempt
-       to the turn boundary ([reads_seed]). *)
+       replaces it. A refusal of the range a seed opened holds the turn
+       boundary as the turn's front ([seed_refusal_sequence]), which
+       [carried_front] reads here as it reads any front a refusal moved. *)
     let front, dropped_ledger =
-      if not (reads_seed ctx.continuity !(state.range_start)) then None, None
-      else carried_front
+      match ctx.continuity with
+      | Some (Summarized _ | Absorbed _) -> None, None
+      | None | Some Without_snapshot -> carried_front
         ~ledger:state.ledger
         ~keeper_name:ctx.keeper_name
         ~runtime_id:ctx.runtime_id
@@ -1667,7 +1642,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
             (function
               | Agent_core.Hooks.AfterTurn { response; _ } ->
                 (match !last_request with
-                 | Some { request; digest_at } ->
+                 | Some { request; digest_at; _ } ->
                    (match request.Keeper_model_input_ledger.ends with
                     | Keeper_model_input_ledger.Carried_atoms
                         { front_digest; _ } ->
@@ -2336,37 +2311,47 @@ let eviction_retry_to_json = function
    fire once AGENT_CORE has mutated agent state at a durable checkpoint
    stage. *)
 (* The one answer a turn with no Librarian point has to a size refusal
-   (RFC keeper-context-window-in-tokens §13.4). The attempt opens on the seed
-   when one is valid. When the provider refuses the range a carried seed
-   opened with a refusal the ladder would move the front for
-   ([refusal_evicts]), the same candidate is asked once more from the turn
-   boundary. An accepted request is what the ledger and the turn record keep,
-   so the next turn's seed is that boundary; the range grows back only
-   through responses. A refused turn-boundary request, a refusal of a range
-   that did not open on a seed, and every other error end the sequence with
+   (RFC keeper-context-window-in-tokens §13.4). When the provider refuses a
+   range that a seed opened, with a refusal the no-continuity ladder moves
+   the front for ([refusal_evicts]), and the turn boundary lies after that
+   range's first atom, the boundary is held as the turn's front and the same
+   candidate is asked once more. The front belongs to the turn (§10.4): a
+   later candidate or lane opens there instead of on the refused range. An
+   accepted request is what the ledger and the turn record keep, so the next
+   turn's seed is that boundary; the range grows back only through
+   responses. A refused boundary request, a refusal of a range that opened
+   at or after the boundary, and every other error end the sequence with
    the error in hand. The range is never halved on this path. *)
 let seed_refusal_sequence
       ~same_run_retry_authorized
-      ~(last_origin : unit -> Keeper_carried_front.origin option)
-      ~(on_turn_start : Agent_core.Error.t -> unit)
-      ~(attempt : range_start -> ('ok, Agent_core.Error.t) result)
+      ~(refused_range : unit -> (Keeper_carried_front.origin * int) option)
+      ~(turn_start_front : unit -> Keeper_carried_front.seed option)
+      ~(hold_front : Keeper_carried_front.seed -> unit)
+      ~(on_turn_start : Agent_core.Error.t -> Keeper_carried_front.seed -> unit)
+      ~(attempt : unit -> ('ok, Agent_core.Error.t) result)
       ()
   : ('ok, Agent_core.Error.t) result
   =
-  match attempt Seed_when_valid with
+  match attempt () with
   | Ok _ as ok -> ok
   | Error error as failed ->
-    (match last_origin () with
-     | Some (Keeper_carried_front.Carried _)
+    (match refused_range () with
+     | Some (Keeper_carried_front.Carried _, refused_first_atom)
        when refusal_evicts error && same_run_retry_authorized () ->
-       on_turn_start error;
-       attempt Turn_start_after_seed_refusal
+       (match turn_start_front () with
+        | Some (front : Keeper_carried_front.seed)
+          when front.first_atom > refused_first_atom ->
+          hold_front front;
+          on_turn_start error front;
+          attempt ()
+        | Some (_ : Keeper_carried_front.seed) | None -> failed)
      | Some
-         ( Keeper_carried_front.Carried _
-         | Keeper_carried_front.Librarian_snapshot _
-         | Keeper_carried_front.Librarian_progress _
-         | Keeper_carried_front.Turn_start _
-         | Keeper_carried_front.Turn_start_unknown _ )
+         ( ( Keeper_carried_front.Carried _
+           | Keeper_carried_front.Librarian_snapshot _
+           | Keeper_carried_front.Librarian_progress _
+           | Keeper_carried_front.Turn_start _
+           | Keeper_carried_front.Turn_start_unknown _ )
+         , _ )
      | None -> failed)
 ;;
 
@@ -2523,17 +2508,38 @@ let run_try_provider_with_carried_range_eviction
       seed_refusal_sequence
         ~same_run_retry_authorized:(fun () ->
           same_run_retry_allowed ctx.checkpoint_progress)
-        ~last_origin:(fun () ->
-          Option.map (fun (sent : sent_request) -> sent.origin) !(state.last_request))
-        ~on_turn_start:(fun error ->
+        ~refused_range:(fun () ->
+          Option.map
+            (fun (sent : sent_request) ->
+               sent.origin, sent.request.Keeper_model_input_ledger.first_atom)
+            !(state.last_request))
+        ~turn_start_front:(fun () ->
+          Option.bind !(state.last_request) (fun (sent : sent_request) ->
+            let atom_count = sent.request.Keeper_model_input_ledger.atom_count in
+            let first_atom =
+              match ctx.turn_boundary with
+              | Keeper_carried_front.Turn_boundary { end_atom } ->
+                Keeper_carried_front.clamp ~atom_count end_atom
+              | Keeper_carried_front.Turn_boundary_unknown _ ->
+                Keeper_carried_front.newest_atom ~atom_count
+            in
+            Option.map
+              (fun front_digest ->
+                 { Keeper_carried_front.first_atom
+                 ; front_digest
+                 ; source = Keeper_carried_front.Turn_start_after_seed_refusal
+                 })
+              (sent.digest_at first_atom)))
+        ~hold_front:ctx.hold_carried_front
+        ~on_turn_start:(fun error front ->
           Log.Keeper.info
             ~keeper_name:ctx.keeper_name
-            "model input carried seed refused runtime=%s: the same candidate is asked \
-             again from the turn boundary error=%s"
+            "model input carried seed refused runtime=%s: the turn's front moves to \
+             the turn boundary and the same candidate is asked again front=%s error=%s"
             ctx.runtime_id
+            (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json front))
             (Agent_core.Error.to_string error))
-        ~attempt:(fun range_start ->
-          state.range_start := range_start;
+        ~attempt:(fun () ->
           let attempt_result, attempt_checkpoint_after, attempt_success_sample =
             run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
           in
@@ -2869,7 +2875,6 @@ module For_testing = struct
   let message_measurement_hash = Agent_core.Types.Message_value.hash
   let compose_carried_model_input = compose_carried_model_input
   let request_view = request_view
-  let reads_seed = reads_seed
   let last_resort_demotes = last_resort_demotes
   let offload_model_input_cpu = offload_model_input_cpu
 end

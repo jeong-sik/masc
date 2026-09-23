@@ -12184,7 +12184,7 @@ def runtime_resolved_runtime(
     }
 
 
-def runtime_resolved_response() -> HttpResponse:
+def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpResponse:
     runtime_a = runtime_resolved_runtime("runtime-a", "Resolved A", "model-a")
     return (
         200,
@@ -12213,12 +12213,18 @@ def runtime_resolved_response() -> HttpResponse:
                 },
                 {
                     "id": "degraded",
-                    # runtime-a is here as well as in "primary" so the two
-                    # doors into the runtime detail -- a lane's candidate row
-                    # and the catalog row -- have something to disagree about.
-                    # With every runtime in one lane, a detail that named only
-                    # the lane the reader came through passed.
-                    "runtime_ids": ["runtime-c", "runtime-a"],
+                    # Off by default. With it on, runtime-a is here as well as
+                    # in "primary", which is what gives the two doors into the
+                    # runtime detail -- a lane's candidate row and the catalog
+                    # row -- something to disagree about. It adds a row to the
+                    # lane listing, and the scenarios that walk that listing by
+                    # row count on its shape, so only the scenario making that
+                    # comparison asks for it.
+                    "runtime_ids": (
+                        ["runtime-c", "runtime-a"]
+                        if runtime_a_in_two_lanes
+                        else ["runtime-c"]
+                    ),
                     "declared": True,
                 },
                 {
@@ -12253,7 +12259,9 @@ def runtime_http_fixtures() -> tuple[
     )
     fixtures[RUNTIME_PROBE_PATH] = initial_probe
     fixtures[RUNTIME_PROBE_FORCE_PATH] = force_probe
-    fixtures[RUNTIME_RESOLVED_PATH] = runtime_resolved_response()
+    fixtures[RUNTIME_RESOLVED_PATH] = runtime_resolved_response(
+        runtime_a_in_two_lanes=True
+    )
     return fixtures, initial_probe, force_probe
 
 

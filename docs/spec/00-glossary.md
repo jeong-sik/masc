@@ -157,7 +157,8 @@ status: reference
   Claude Code 레인은 이어 붙이기(resume) 때 세션을 처음 열 때 기록한 system prompt를
   대화를 압축할 때까지 그대로 다시 보낸다. 그래서 턴마다 바뀌는 내용(턴 컨텍스트와
   Librarian Working State)은 resume 사용자 프롬프트 앞에 붙여 보내고, 대화 기록은
-  보내지 않는다.
+  보내지 않는다. 그래서 resume 턴의 세션 기록 `context_frontier.delivery`는
+  `held_by_vendor_session`이고, 세션을 처음 여는 턴은 `prepared_start_context`다.
   → [Keeper_official_client_host.resume_prompt](../../lib/keeper/keeper_official_client_host.mli)
   경계: 여기의 "role"은 Message의 role(`System`·`User`·`Assistant`·`Tool`)도, Board
   Interest 판정의 `keeper_role {name, board_interests}`도, Fusion 심판의 `judge_role`

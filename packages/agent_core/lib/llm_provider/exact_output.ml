@@ -117,11 +117,18 @@ let provider_refusal_to_string = function
   | Timeout -> "timeout"
 ;;
 
+type generation_dispatch_fact =
+  | No_generation_dispatch
+  | Generation_dispatch_started
+
 type execution_error_cause =
   | Attempt_already_started
   | Clock_required_for_timeout
   | Frozen_request_mismatch
-  | Completion_failed of Http_client.http_error
+  | Completion_failed of
+      { error : Http_client.http_error
+      ; dispatch : generation_dispatch_fact
+      }
   | Response_body_deadline_exceeded
   | Provider_response_refused of
       { http_status : int
@@ -359,10 +366,6 @@ type flow_candidate_failure =
       { candidate : flow_attempt_receipt
       ; cause : execution_error
       }
-
-type generation_dispatch_fact =
-  | No_generation_dispatch
-  | Generation_dispatch_started
 
 type 'callback_error flow_execution_error =
   | Flow_attempt_already_started of flow_evidence
@@ -1686,7 +1689,7 @@ let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = functi
   | Retry.Timeout _ -> Timeout
 ;;
 
-let execution_error_cause ~http_status = function
+let execution_error_cause ~http_status ~dispatch = function
   | Exec.Clock_required_for_timeout -> Clock_required_for_timeout
   | Exec.Frozen_request_mismatch -> Frozen_request_mismatch
   | Exec.Response_body_deadline_exceeded -> Response_body_deadline_exceeded
@@ -1701,7 +1704,7 @@ let execution_error_cause ~http_status = function
       (Http_client.ProviderFailure { kind = Http_client.Context_overflow _; _ } as error) ->
     (match http_status with
      | Some http_status -> Provider_response_refused { http_status; refusal = Context_overflow }
-     | None -> Completion_failed error)
+     | None -> Completion_failed { error; dispatch })
   (* Other transport, provider parsing or observer failures remain distinct
      from an owned body deadline, even when their receipt has headers. The
      typed transport error travels with the cause so a consumer can tell a
@@ -1709,7 +1712,7 @@ let execution_error_cause ~http_status = function
   | Exec.Provider_error
       (( Http_client.NetworkError _ | Http_client.TimeoutError _
        | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _
-       | Http_client.ProviderFailure _ ) as error) -> Completion_failed error
+       | Http_client.ProviderFailure _ ) as error) -> Completion_failed { error; dispatch }
   | Exec.Output_normalization_failed (Exec.Incomplete_structured_response _) ->
     Incomplete_output
   | Exec.Output_normalization_failed Exec.Missing_structured_text -> Missing_output
@@ -1757,7 +1760,11 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
       Error
         { call_id = receipt_call_id receipt
         ; receipt
-        ; cause = execution_error_cause ~http_status:(receipt_http_status receipt) cause
+        ; cause =
+            execution_error_cause
+              ~http_status:(receipt_http_status receipt)
+              ~dispatch:(generation_dispatch_fact_of_receipt receipt)
+              cause
         ; raw_response = Option.map raw_response evidence
         }
     | Ok { outcome; raw_response = evidence } ->

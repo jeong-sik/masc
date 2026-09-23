@@ -351,9 +351,11 @@ let test_size_verdict_table () =
   let refused refusal = E.Provider_response_refused { http_status = any_status; refusal } in
   let module Http = Agent_core.Llm_provider.Http_client in
   let module Types = Agent_core.Llm_provider.Types in
-  let failed kind = E.Completion_failed (Http.ProviderFailure { kind; message = "" }) in
-  let network kind = E.Completion_failed (Http.NetworkError { message = ""; kind }) in
-  let timed_out phase = E.Completion_failed (Http.TimeoutError { message = ""; phase }) in
+  let sent error = E.Completion_failed { error; dispatch = E.Generation_dispatch_started } in
+  let unsent error = E.Completion_failed { error; dispatch = E.No_generation_dispatch } in
+  let failed kind = sent (Http.ProviderFailure { kind; message = "" }) in
+  let network kind = sent (Http.NetworkError { message = ""; kind }) in
+  let timed_out phase = sent (Http.TimeoutError { message = ""; phase }) in
   let empty stop_reason = failed (Http.Empty_completion { stop_reason }) in
   List.iter
     (fun (name, cause, expected) ->
@@ -383,6 +385,7 @@ let test_size_verdict_table () =
     ; "completion failed, empty at the context window", empty Types.ContextWindowExceeded, true
     ; "completion failed, empty at the output budget", empty Types.MaxTokens, true
     ; "completion failed, empty at end of turn", empty Types.EndTurn, false
+    ; "completion failed, empty for a reason not named", empty (Types.Unknown "x"), false
     ; "completion failed, hard quota", failed (Http.Hard_quota { retry_after = None }), false
     ; ( "completion failed, capacity exhausted"
       , failed
@@ -394,12 +397,32 @@ let test_size_verdict_table () =
       , false )
     ; "completion failed, dns failure", network Http.Dns_failure, false
     ; "completion failed, connection refused", network Http.Connection_refused, false
+    ; "completion failed, tls failure", network Http.Tls_error, false
     ; "completion failed, peer closed", network Http.End_of_file, false
-    ; "completion failed, request deadline", timed_out Http.Wall_clock, true
-    ; "completion failed, queued past its deadline", timed_out Http.Queue, false
-    ; ( "completion failed, wiring rejected"
-      , E.Completion_failed (Http.AcceptRejected { reason = "" })
+    ; "completion failed, unclassified network failure", network Http.Unknown, false
+    (* Deadlines on a sent request: those on the provider's handling of the
+       whole request count, those that say nothing about its size do not. *)
+    ; "completion failed, sent, whole-call deadline", timed_out Http.Wall_clock, true
+    ; "completion failed, sent, awaiting headers", timed_out Http.Http_operation, true
+    ; "completion failed, sent, awaiting first token", timed_out Http.First_token, true
+    ; ( "completion failed, sent, idle stream"
+      , timed_out (Http.Stream_idle Http.Streaming_answer)
       , false )
+    ; "completion failed, sent, deadline not named", timed_out Http.Unknown_timeout, false
+    ; "completion failed, queued past its deadline", timed_out Http.Queue, false
+    ; "completion failed, capacity backpressure", timed_out Http.Capacity_backpressure, false
+    (* The transport reports a connect deadline as [Http_operation]. A request
+       that was never sent was judged by no provider. *)
+    ; ( "completion failed, connect deadline, not sent"
+      , unsent (Http.TimeoutError { message = ""; phase = Http.Http_operation })
+      , false )
+    ; ( "completion failed, context overflow, not sent"
+      , unsent (Http.ProviderFailure { kind = Http.Context_overflow { limit = None }; message = "" })
+      , false )
+    ; ( "completion failed, provider terminal"
+      , sent (Http.ProviderTerminal { kind = Http.Session_conflict; message = "" })
+      , false )
+    ; "completion failed, wiring rejected", sent (Http.AcceptRejected { reason = "" }), false
     ; "incomplete output", E.Incomplete_output, true
     ; "missing output", E.Missing_output, true
     ; "ambiguous output", E.Ambiguous_output 2, true

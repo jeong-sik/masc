@@ -270,16 +270,24 @@ type provider_refusal =
   | Network_error
   | Timeout
 
+type generation_dispatch_fact =
+  | No_generation_dispatch
+  | Generation_dispatch_started
+
 type execution_error_cause =
   | Attempt_already_started
   | Clock_required_for_timeout
   | Frozen_request_mismatch
-  | Completion_failed of Http_client.http_error
+  | Completion_failed of
+      { error : Http_client.http_error
+      ; dispatch : generation_dispatch_fact
+      }
       (** A provider failure without a more specific Exact cause, carrying the
-          typed transport error that produced it: a network failure, a
+          typed transport error that produced it -- a network failure, a
           deadline, a rejected wiring, a provider terminal or a classified
-          provider failure such as a hard quota or an empty completion. An
-          HTTP refusal is {!Provider_response_refused} and never arrives here.
+          provider failure such as a hard quota or an empty completion -- and
+          whether the request had been sent when it failed. An HTTP refusal is
+          {!Provider_response_refused} and never arrives here.
           The receipt may already contain response headers, for example when
           provider parsing fails. This cause alone does not authorize a
           dispatched retry. *)
@@ -782,10 +790,6 @@ type flow_candidate_failure =
       { candidate : flow_attempt_receipt
       ; cause : execution_error
       }
-
-type generation_dispatch_fact =
-  | No_generation_dispatch
-  | Generation_dispatch_started
 
 type 'callback_error flow_execution_error =
   | Flow_attempt_already_started of flow_evidence

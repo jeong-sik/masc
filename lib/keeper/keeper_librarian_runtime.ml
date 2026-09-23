@@ -366,17 +366,18 @@ let prepare_attempt ~requirement ~selected_slots messages =
 
 module Http_client = Llm_provider.Http_client
 
-(* A provider error that is not an HTTP refusal, read by its typed kind. Only a
-   provider that named the size, an answer the size used up, or a deadline
-   (§4.3 counts timeouts among the size failures) moves the width. A transport
-   that could not carry the request, a quota, a provider that stopped for a
-   reason of its own, or a wiring error meets a smaller range the same way.
-   An empty completion counts only when its stop reason names the context
-   window or the output budget. *)
-let transport_error_shows_size (error : Http_client.http_error) =
+(* A provider error that is not an HTTP refusal, on a request that was sent,
+   read by its typed kind. Only a provider that named the size, an answer the
+   size used up, or a deadline on the request's own processing moves the
+   width. A transport that could not carry the request, a quota, a provider
+   that stopped for a reason of its own, a wiring error, and every failure
+   this layer could not classify meet a smaller range the same way: not
+   knowing why is no evidence of size. An empty completion counts only when
+   its stop reason names the context window or the output budget. *)
+let sent_error_shows_size (error : Http_client.http_error) =
   match error with
   (* Exact_output routes every HTTP refusal to [Provider_response_refused],
-     whose table is above; this constructor never carries one. *)
+     whose table is below; this constructor never carries one. *)
   | HttpError _ -> false
   | NetworkError
       { kind =
@@ -386,10 +387,15 @@ let transport_error_shows_size (error : Http_client.http_error) =
       } -> false
   | TimeoutError { phase; _ } ->
     (match phase with
-     | First_token | Wall_clock | Http_operation | Non_streaming_body | Stream_body
-     | Stream_idle _ | Provider_step | Cli_stdout_idle | Unknown_timeout -> true
-     (* Waiting for a slot or for capacity happens before the request runs. *)
-     | Queue | Capacity_backpressure -> false)
+     (* The provider held the whole request and did not finish with it in
+        time: §4.3 counts this among the size failures. *)
+     | First_token | Wall_clock | Http_operation | Non_streaming_body | Stream_body ->
+       true
+     (* A stream or a step that went quiet, a wait for a slot or for
+        capacity, or a deadline nobody named: none says how large the input
+        was. *)
+     | Stream_idle _ | Cli_stdout_idle | Provider_step | Queue | Capacity_backpressure
+     | Unknown_timeout -> false)
   | AcceptRejected _ | ProviderTerminal _ -> false
   | ProviderFailure { kind; _ } ->
     (match kind with
@@ -406,6 +412,15 @@ let transport_error_shows_size (error : Http_client.http_error) =
      | Repeating_generation _ | Unknown_provider_failure _ -> false)
 ;;
 
+(* A request that never left this process was judged by no provider, so its
+   failure says nothing about size -- a connect deadline included, which the
+   transport reports as an [Http_operation] timeout. *)
+let completion_failure_shows_size ~dispatch error =
+  match (dispatch : Exact_output.generation_dispatch_fact) with
+  | No_generation_dispatch -> false
+  | Generation_dispatch_started -> sent_error_shows_size error
+;;
+
 (* Whether a failure is evidence that the range's size is what stopped the
    pass. Only such evidence moves the width: a pass that saw none keeps what
    it had, because reading less answers nothing it met.
@@ -417,8 +432,9 @@ let cause_shows_size (cause : Exact_output.execution_error_cause) =
   | Provider_response_refused { refusal; _ } ->
     (match refusal with
      (* The provider judged the size. Timeout is counted with them by
-        RFC-librarian-lifecycle §4.3, and the two that do not say why are read
-        toward progress, which is reading less. *)
+        RFC-librarian-lifecycle §4.3. The two that do not say why are refusals
+        of a request that arrived, which the window RFC §10.4 answers as a
+        size refusal. *)
      | Context_overflow | Input_capacity | Request_body_refused | Timeout
      | Invalid_request | Refusal_body_not_received -> true
      (* The request was taken and the provider could not serve it, or only an
@@ -430,7 +446,7 @@ let cause_shows_size (cause : Exact_output.execution_error_cause) =
   | Incomplete_output | Missing_output | Ambiguous_output _
   | Unexpected_output_content | Invalid_json_output | Internal_non_json_output
   | Response_body_deadline_exceeded -> true
-  | Completion_failed error -> transport_error_shows_size error
+  | Completion_failed { error; dispatch } -> completion_failure_shows_size ~dispatch error
   (* Nothing was judged: this process could not start, time, or match the
      attempt it held. *)
   | Attempt_already_started | Clock_required_for_timeout | Frozen_request_mismatch -> false

@@ -23,8 +23,13 @@ let execution_cause_detail : Exact_output.execution_error_cause -> string = func
   | Attempt_already_started -> "attempt already started"
   | Clock_required_for_timeout -> "clock required for timeout"
   | Frozen_request_mismatch -> "frozen request mismatch"
-  | Completion_failed error ->
-    Printf.sprintf "completion failed (%s)" (transport_error_detail error)
+  | Completion_failed { error; dispatch } ->
+    Printf.sprintf
+      "completion failed (%s, %s)"
+      (transport_error_detail error)
+      (match dispatch with
+       | No_generation_dispatch -> "not sent"
+       | Generation_dispatch_started -> "sent")
   | Response_body_deadline_exceeded ->
     "total request deadline exceeded while reading response body"
   | Provider_response_refused { http_status; refusal } ->

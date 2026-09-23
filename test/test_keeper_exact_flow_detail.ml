@@ -23,19 +23,25 @@ let test_execution_cause_detail () =
      the provider answered empty (#37899). *)
   Alcotest.(check string)
     "completion, network"
-    "completion failed (network_error:dns_failure)"
+    "completion failed (network_error:dns_failure, not sent)"
     (Detail.execution_cause_detail
        (Exact_output.Completion_failed
-          (Http.NetworkError { message = "resolve failed"; kind = Http.Dns_failure })));
+          { error = Http.NetworkError { message = "resolve failed"; kind = Http.Dns_failure }
+          ; dispatch = Exact_output.No_generation_dispatch
+          }));
   Alcotest.(check string)
     "completion, empty"
-    "completion failed (empty_completion:end_turn)"
+    "completion failed (empty_completion:end_turn, sent)"
     (Detail.execution_cause_detail
        (Exact_output.Completion_failed
-          (Http.ProviderFailure
-             { kind = Http.Empty_completion { stop_reason = Agent_core.Llm_provider.Types.EndTurn }
-             ; message = ""
-             })));
+          { error =
+              Http.ProviderFailure
+                { kind =
+                    Http.Empty_completion { stop_reason = Agent_core.Llm_provider.Types.EndTurn }
+                ; message = ""
+                }
+          ; dispatch = Exact_output.Generation_dispatch_started
+          }));
   Alcotest.(check string)
     "ambiguous"
     "ambiguous output (candidates=2)"
@@ -153,9 +159,22 @@ let test_every_execution_cause_renders_distinctly () =
     [ Attempt_already_started
     ; Clock_required_for_timeout
     ; Frozen_request_mismatch
-    ; Completion_failed (Http.NetworkError { message = ""; kind = Http.End_of_file })
-    ; Completion_failed (Http.TimeoutError { message = ""; phase = Http.Wall_clock })
-    ; Completion_failed (Http.ProviderFailure { kind = Http.Hard_quota { retry_after = None }; message = "" })
+    ; Completion_failed
+        { error = Http.NetworkError { message = ""; kind = Http.End_of_file }
+        ; dispatch = Generation_dispatch_started
+        }
+    ; Completion_failed
+        { error = Http.TimeoutError { message = ""; phase = Http.Http_operation }
+        ; dispatch = No_generation_dispatch
+        }
+    ; Completion_failed
+        { error = Http.TimeoutError { message = ""; phase = Http.Http_operation }
+        ; dispatch = Generation_dispatch_started
+        }
+    ; Completion_failed
+        { error = Http.ProviderFailure { kind = Http.Hard_quota { retry_after = None }; message = "" }
+        ; dispatch = Generation_dispatch_started
+        }
     ; Response_body_deadline_exceeded
     ; Provider_response_refused { http_status = 413; refusal = Request_body_refused }
     ; Provider_response_refused { http_status = 429; refusal = Rate_limited }
@@ -191,7 +210,11 @@ let test_every_execution_cause_renders_distinctly () =
     false
     (String.equal
        (Detail.execution_cause_detail
-          (Completion_failed (Http.ProviderFailure { kind = Http.Hard_quota { retry_after = None }; message = "" })))
+          (Completion_failed
+             { error =
+                 Http.ProviderFailure { kind = Http.Hard_quota { retry_after = None }; message = "" }
+             ; dispatch = Generation_dispatch_started
+             }))
        (Detail.execution_cause_detail Incomplete_output))
 ;;
 

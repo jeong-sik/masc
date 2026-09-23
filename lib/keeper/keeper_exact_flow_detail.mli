@@ -15,7 +15,7 @@ val candidate_rejection_detail
   :  Agent_core.Exact_output.candidate_rejection_receipt
   -> string
 
-(** Typed execution failure cause ("completion failed (network_error:dns_failure)",
+(** Typed execution failure cause ("completion failed (network_error:dns_failure, not sent)",
     "provider refused (http_status=... refusal=...)", ...). *)
 val execution_cause_detail
   :  Agent_core.Exact_output.execution_error_cause

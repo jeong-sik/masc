@@ -1934,7 +1934,7 @@ let append_fd_observed ~io ~fd content =
           None
         with
         | Unix.Unix_error (Unix.EINTR, _, _) -> sync ()
-        | exception_ ->
+        | exception_ -> (* cancel-guard-ok: io.fsync is a Unix fsync, no Eio operation *)
           let backtrace = Printexc.get_raw_backtrace () in
           Some (capability_append_operation_failure exception_ backtrace)
       in

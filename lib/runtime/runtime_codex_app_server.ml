@@ -1643,7 +1643,7 @@ let terminate_spawned_process ~clock proc stdin_w =
            Log.Runtime_agent.warn
              "Codex app-server forced reap failed: %s"
              (Printexc.to_string exn))
-      | exn ->
+      | exn -> (* cancel-guard-ok: the body is Eio.Cancel.protect *)
         Log.Runtime_agent.debug
           "Codex app-server reap observed an already-closed process: %s"
           (Printexc.to_string exn))

@@ -25,6 +25,7 @@ type entry =
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
   ; supports_parallel_tool_suppression : bool
+  ; serves_bare_rows : bool
   }
 
 let find_string_field ~entry_id key toml =
@@ -115,6 +116,7 @@ let known_keys =
   ; "capabilities_base_by_identity_kind"
   ; "identity_hosts"
   ; "supports_parallel_tool_suppression"
+  ; "serves_bare_rows"
   ]
 ;;
 
@@ -306,6 +308,13 @@ let parse_entry provider_toml =
       Error (Printf.sprintf
         "provider entry %S field \"supports_parallel_tool_suppression\" expected bool" id)
   in
+  let* serves_bare_rows =
+    match Otoml.find_opt provider_toml Otoml.get_boolean [ "serves_bare_rows" ] with
+    | Some serves -> Ok serves
+    | None -> Ok false
+    | exception Otoml.Type_error _ ->
+      Error (Printf.sprintf "provider entry %S field \"serves_bare_rows\" expected bool" id)
+  in
   let* aliases = string_list_field ~entry_id:id "aliases" provider_toml in
   let* identity_hosts = string_list_field ~entry_id:id "identity_hosts" provider_toml in
   Ok
@@ -321,6 +330,7 @@ let parse_entry provider_toml =
     ; capabilities_base
     ; capabilities_base_by_identity_kind
     ; supports_parallel_tool_suppression
+    ; serves_bare_rows
     ; identity_hosts =
         Option.value identity_hosts ~default:[] |> List.map String.lowercase_ascii
     }

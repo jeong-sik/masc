@@ -24,7 +24,7 @@ let make_error_handler () =
     let headers = H2.Headers.of_list [("content-type", "text/plain")] in
     let body = respond headers in
     H2.Body.Writer.write_string body message;
-    H2.Body.Writer.close body
+    h2_close_after_flush body
   in
 
 
@@ -133,7 +133,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
     stop_once ();
     (* Cancellation travels as an exception in Eio, so a wildcard that ate it
        here would report a clean exit from a fiber the switch had cancelled. *)
-    (try H2.Body.Writer.close writer with
+    (try h2_close_after_flush writer with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | _ -> ())
   in
@@ -377,7 +377,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                ] @ cors) in
                let response = H2.Response.create ~headers:resp_headers `Not_modified in
                let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-               H2.Body.Writer.close writer
+               h2_close_after_flush writer
            | _ ->
                let extra = [("etag", etag_value); ("cache-control", dashboard_index_cache_control); ("vary", "Accept-Encoding")] @ cors in
                h2_respond_html h2_reqd body ~extra_headers:extra)
@@ -907,9 +907,12 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             let csp_header = ("content-security-policy", graphql_csp_header nonce) in
             h2_respond_html h2_reqd (graphql_playground_html ~nonce) ~extra_headers:(csp_header :: cors))
 
+      (* The gate runs before the body is read, as on H1 where [with_read_auth]
+         wraps [handle_post_graphql]; otherwise a client that will be refused
+         still gets the server to buffer its whole body first. *)
       | `POST, "/graphql" ->
-          h2_read_body h2_reqd (fun body_str ->
-            with_h2_read_auth h2_reqd (fun state ->
+          with_h2_read_auth h2_reqd (fun state ->
+            h2_read_body h2_reqd (fun body_str ->
               let response = Graphql_api.handle_request ~config:(Mcp_server.workspace_config state) body_str in
               let status = match response.status with `OK -> `OK | `Bad_request -> `Bad_request in
               h2_respond_json h2_reqd response.body ~status ~extra_headers:cors))
@@ -1472,7 +1475,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                      H2.Body.Writer.flush writer (fun _ -> ())
                    in
                    Fun.protect
-                     ~finally:(fun () -> H2.Body.Writer.close writer)
+                     ~finally:(fun () -> h2_close_after_flush writer)
                      (fun () ->
                         match
                           Keeper_github_identity.stream_login
@@ -1711,22 +1714,4 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         ~message:"MASC does not support authority-free OPTIONS *"
         h2_reqd
   in
-  (* H2 error handler *)
-  let _h2_error_handler _client_addr ?request:_ error respond =
-    let msg = match error with
-      | `Exn exn -> Printexc.to_string exn
-      | `Bad_request -> "Bad request"
-      | `Bad_gateway -> "Bad gateway"
-      | `Internal_server_error -> "Internal server error"
-    in
-    let headers = H2.Headers.of_list [
-      ("content-type", "text/plain");
-      ("content-length", string_of_int (String.length msg));
-    ] in
-    let body = respond headers in
-    H2.Body.Writer.write_string body msg;
-    H2.Body.Writer.close body
-  in
-
-
   h2_request_handler

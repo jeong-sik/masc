@@ -630,9 +630,12 @@ let purge_current config ~keeper_name ~apply =
               queue refresh prepares a working state from the checkpoint
               before it checks for an owner. A unit that read the old bytes
               and committed after the install would save a working state
-              hashed against them, refusing every Agent-Core turn. So new
-              units are kept out, and running ones cancelled and awaited, for
-              the whole read-rewrite-install. *)
+              hashed against them. It would not fit the rewritten history
+              ([Prefix_changed]), so every Agent-Core turn would start without
+              it, from the Librarian's read position or its own turn start,
+              until the Librarian wrote it again from atom 0. So new units are
+              kept out, and running ones cancelled and awaited, for the whole
+              read-rewrite-install. *)
            match
              Eio_context.run_on_owner_domain (fun () ->
                Keeper_memory_lane.with_librarian_purge

@@ -1546,7 +1546,7 @@ let test_a_working_state_that_leaves_no_turn_stays_out () =
     ; content = [ Text (Keeper_turn_driver_try_provider.working_state_text snapshot) ]
     ; name = None
     ; tool_call_id = None
-    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    ; metadata = Runtime_model_input_tail_window.working_state_metadata
     }
   in
   let pinned_floor =
@@ -1618,7 +1618,7 @@ let test_a_working_state_that_fits_the_cut_goes () =
     ; content = [ Text working_state ]
     ; name = None
     ; tool_call_id = None
-    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    ; metadata = Runtime_model_input_tail_window.working_state_metadata
     }
   in
   let preamble_bytes =

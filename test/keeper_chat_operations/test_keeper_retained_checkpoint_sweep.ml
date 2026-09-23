@@ -148,12 +148,32 @@ let test_symlinked_keeper_directories_are_read () =
     check bool "checkpoint named through a link kept" true (Sys.file_exists path)))
     [true; false]
 
+(* [keepers/tool_usage] is a store kept beside the keepers, not a keeper; a
+   stray empty operation store there (seen live) must not stop the sweep. A
+   keeper actually named tool_usage stops it instead. *)
+let test_workspace_store_directories_are_not_keepers () = with_root (fun root ->
+  let stray = keeper_store root "tool_usage" in
+  write stray "";
+  let orphan = retained root ~session:["sweep-trace"] (checkpoint "orphan") in
+  write orphan "{}";
+  let report = sweep root in
+  check int "orphan removed despite the stray store" 1 report.removed;
+  let keepers_dir = Filename.concat root Common.keepers_runtime_dirname in
+  write (Filename.concat keepers_dir "tool_usage.json") "{}";
+  write orphan "{}";
+  (match Sweep.run ~runtime_root:root with
+   | Error (Sweep.Keeper_shares_store_directory { keeper_name = "tool_usage" }) -> ()
+   | Error error -> fail (Sweep.error_to_string error)
+   | Ok _ -> fail "a keeper named like a keepers/ store must stop the sweep");
+  check bool "orphan kept while that keeper's store is ambiguous" true (Sys.file_exists orphan))
+
 let test_unreadable_store_removes_nothing () = with_root (fun root ->
   write (keeper_store root "broken") "not a sqlite database";
   let orphan = retained root ~session:["sweep-trace"] (checkpoint "orphan") in
   write orphan "{}";
   (match Sweep.run ~runtime_root:root with
    | Error (Sweep.Store_unreadable _) -> ()
+   | Error (Sweep.Keeper_shares_store_directory _ as error) -> fail (Sweep.error_to_string error)
    | Ok _ -> fail "an unreadable store must stop the sweep");
   check bool "orphan kept while the live set is unknown" true (Sys.file_exists orphan))
 
@@ -170,6 +190,8 @@ let () =
         ; test_case "a gate wait keeps its checkpoint" `Quick test_a_gate_wait_keeps_its_checkpoint
         ; test_case "symlinked keeper directories are read" `Quick
             test_symlinked_keeper_directories_are_read
+        ; test_case "workspace store directories are not keepers" `Quick
+            test_workspace_store_directories_are_not_keepers
         ; test_case "an unreadable store removes nothing" `Quick test_unreadable_store_removes_nothing
         ; test_case "missing directories are an empty sweep" `Quick
             test_missing_directories_are_an_empty_sweep

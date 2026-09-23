@@ -1027,15 +1027,8 @@ let test_keeper_shrinks_history_after_statusless_context_error
         (if index mod 2 = 0 then User else Assistant)
         (Printf.sprintf "%03d:%s" index (String.make 1_024 'x')))
   in
-  let reset_shrink_state () =
-    Eio_main.run (fun _ ->
-      Keeper_context_overflow_shrink_state.For_testing.reset ())
-  in
-  reset_shrink_state ();
   Fun.protect
-    ~finally:(fun () ->
-      reset_shrink_state ();
-      cleanup_tree base_path)
+    ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        let official_client_continuation = if not native_gate then None else (
          with_fixture

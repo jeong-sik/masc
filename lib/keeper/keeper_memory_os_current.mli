@@ -330,7 +330,15 @@ val apply_disposition
     snapshot is built and printed and right before it replaces the old one; if
     that append fails, nothing is committed (RFC-0456 §4.2). Required rather
     than defaulted: a caller that leaves it out would add the merged claim and
-    keep every fact it absorbs current. *)
+    keep every fact it absorbs current.
+
+    An absorption goes into a memory the answer names: one of [new_claims], or
+    a current memory the answer wrote again verbatim. The librarian read the
+    snapshot before its provider turn, so that memory may be gone when the lock
+    is taken. An absorption whose target the locked snapshot does not hold and
+    [new_claims] does not add is not applied and is logged; its source stays
+    current, the removed memory is not brought back, and no absorbed row points
+    into an id no snapshot has (#38186). *)
 
 val replace
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t

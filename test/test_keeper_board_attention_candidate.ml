@@ -149,7 +149,7 @@ let test_status_view_preserves_resumability_and_quarantine () =
    | A.Suspended_quarantine _ ->
      Alcotest.fail "active quarantine was not classified as suspended");
   let requeued =
-    quarantine_state ~phase:(A.Requeued { requeued_at = 4.0 }) pending
+    quarantine_state ~phase:(A.Requeued { requeued_at = 4.0; requested_by = "operator-test" }) pending
   in
   match A.status_view (A.Quarantine requeued) with
   | A.Requeued_resumable { resumable; quarantine }

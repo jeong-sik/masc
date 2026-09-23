@@ -2244,7 +2244,7 @@ let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   ; Detail_sandbox, [ "o"; "d/m/s"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
-  ; Detail_github, [ "L"; "P"; "1" ]
+  ; Detail_github, [ "L"; "P"; "1"; "2" ]
   ; Detail_identity, [ "arrows+enter"; "T"; "A"; "/"; "R" ]
   ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u"; "U U" ]
   ; Detail_automation, []

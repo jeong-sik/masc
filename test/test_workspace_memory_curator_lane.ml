@@ -65,10 +65,12 @@ let test_commit_coalescing_and_restart () = with_base (fun base_path clock ->
     await_idle ~clock ~base_path;
     Alcotest.(check (list string)) "in-flight input survives; pending work captures the latest commit"
       [Inventory.fingerprint first_context; Inventory.fingerprint latest] !contexts;
-    Alcotest.(check int) "both immutable proposals persisted" 2 (List.length (stored base_path));
     (match Masc.Workspace_memory_publication.observe ~base_path with
-     | Available descriptor -> Alcotest.(check string) "Keeper discovery points at latest captured input"
-         (Inventory.fingerprint latest) descriptor.context_sha256
+     | Available descriptor ->
+       Alcotest.(check string) "Keeper discovery points at latest captured input"
+         (Inventory.fingerprint latest) descriptor.context_sha256;
+       Alcotest.(check (list string)) "publishing the newer proposal removes the superseded one"
+         [descriptor.proposal_id] (List.map fst (stored base_path))
      | Missing | Unavailable _ -> Alcotest.fail "curator did not publish discovery");
     ignore (Worker.request ~base_path);
     await_idle ~clock ~base_path;

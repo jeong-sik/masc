@@ -145,6 +145,7 @@ type copy_not_judged =
       (** every memory it named is over {!state_bytes_limit} on its own *)
   | Statement_too_large
       (** a statement not conveyed so far never fit a request beside a state *)
+  | No_statement  (** the claim cuts into no statement, so nothing was asked *)
   | Request_failed of string
 
 type copy_verdict =
@@ -177,16 +178,24 @@ val judge_copies
     {!statements}; the memories it named are joined, in the answer's order,
     into states of at most {!state_bytes_limit} bytes (a memory over it alone
     is left out); each state is asked about the statements no earlier state
-    conveyed, in requests of at most {!questions_per_request} questions. A
-    statement is conveyed at {!conveyed_boundary}, the forward bound. A claim
-    whose id is in [superseding] is not asked. *)
+    conveyed, in requests of at most {!questions_per_request} questions. The
+    question names the memories, not a claim, as what is under review. A
+    statement is conveyed only above {!conveyed_boundary}: a tie, which
+    absorbs a source in the forward question, would here drop the claim, so
+    it counts as not conveyed. A claim whose id is in [superseding] is not
+    asked. *)
 
 (** {1 Entry point} *)
 
 type skip_reason = No_absorptions | Unavailable of Typesafeai_config.unavailable_reason
 
+type direction =
+  | Forward  (** the gate's question: does the claim convey a source's statement *)
+  | Reverse  (** the reverse question: do the sources convey a claim's statement *)
+
 type evaluation =
-  { destinations : Typesafeai_client.destination_id list
+  { direction : direction
+  ; destinations : Typesafeai_client.destination_id list
   ; state : Yojson.Safe.t
   ; questions : (string * Typesafeai_types.question) list
   ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result

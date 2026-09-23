@@ -1297,6 +1297,15 @@ let test_a_claim_its_sources_convey_is_not_applied () =
        (String.concat "\n\n" (List.map (fun (f : Types.fact) -> f.claim) copy_sources))
        reverse_state
    | _ -> Alcotest.fail "the reverse request carried no text state");
+  (let open Yojson.Safe.Util in
+   match Gate.run_result_to_yojson run |> member "copy_checks" with
+   | `List [ reported ] ->
+     Alcotest.(check (list string)) "the conveyed statements are reported by name"
+       claim_statements
+       (member "conveyed_statements" reported |> to_list |> List.map to_string);
+     Alcotest.(check bool) "no statement list under the count key" true
+       (member "statements" reported = `Null)
+   | _ -> Alcotest.fail "expected one reported reverse check");
   let other = fact "gamma restarts nightly and keeps its logs for a week" in
   Alcotest.(check (list string)) "the copy is left out of the claims applied"
     [ id other ]
@@ -1345,7 +1354,7 @@ let test_a_claim_the_judge_cannot_answer_for_is_applied () =
      Alcotest.(check string) "the refusal is carried" "HTTP 529" reason
    | Gate.Not_judged
        ( Gate.Gate_judgment_failed | Gate.Continues_a_dropped_memory
-       | Gate.No_source_fits_the_state | Gate.Statement_too_large )
+       | Gate.No_source_fits_the_state | Gate.Statement_too_large | Gate.No_statement )
    | Gate.Copy _ | Gate.Carries_new_statement _ ->
      Alcotest.fail "expected the failed reverse request");
   Alcotest.(check (list string)) "the claim is applied as today" [ id copy_claim ]
@@ -1405,7 +1414,7 @@ let test_a_claim_that_continues_a_dropped_memory_is_not_asked_back () =
    | Gate.Not_judged Gate.Continues_a_dropped_memory -> ()
    | Gate.Not_judged
        ( Gate.Gate_judgment_failed | Gate.Request_failed _ | Gate.No_source_fits_the_state
-       | Gate.Statement_too_large )
+       | Gate.Statement_too_large | Gate.No_statement )
    | Gate.Copy _ | Gate.Carries_new_statement _ ->
      Alcotest.fail "a revision must not be judged a copy");
   Alcotest.(check int) "only the forward request" 1 !requests;
@@ -1428,6 +1437,88 @@ let test_a_restated_memory_is_not_asked_back () =
   in
   Alcotest.(check int) "no reverse check" 0 (List.length checks);
   Alcotest.(check int) "no reverse request" before !requests
+;;
+
+(* The reverse question names the memories as what is under review, not a
+   claim. A judge that answers by the question's wording catches a mixup:
+   asked with the claim's wording it says no, with the memories' it says yes. *)
+let test_the_reverse_question_names_the_memories () =
+  let starts_with ~prefix text =
+    String.length text >= String.length prefix
+    && String.sub text 0 (String.length prefix) = prefix
+  in
+  let reverse_criteria = ref [] in
+  let evaluate ~state:_ ~questions =
+    Ok
+      { T.model = "jev-test"
+      ; usage = None
+      ; answers =
+          List.map
+            (fun (qid, question) ->
+               match question with
+               | T.Noul { T.instructions; criteria } ->
+                 if starts_with ~prefix:"The memories under review" instructions
+                 then (
+                   reverse_criteria := criteria :: !reverse_criteria;
+                   qid, T.Noul_answer { T.noul = 0.9 })
+                 else if starts_with ~prefix:"The claim under review" instructions
+                 then qid, T.Noul_answer { T.noul = 0.1 }
+                 else Alcotest.failf "a question in neither direction: %s" instructions
+               | T.Choice _ | T.Score _ -> Alcotest.fail "the gate asks noul questions only")
+            questions
+      }
+  in
+  let _, checks = copy_checks ~evaluate ~claim:copy_claim ~superseding:[] in
+  (match (only_check checks).verdict with
+   | Gate.Copy _ -> ()
+   | Gate.Carries_new_statement _ | Gate.Not_judged _ ->
+     Alcotest.fail "the reverse question was not asked in the memories' wording");
+  match !reverse_criteria with
+  | Some (yes, no) :: _ ->
+    List.iter
+      (fun (label, text) ->
+         Alcotest.(check bool) (label ^ " speaks of the memories") true
+           (starts_with ~prefix:"A reader of these memories" text
+            || starts_with ~prefix:"The memories do not" text))
+      [ "yes", yes; "no", no ]
+  | None :: _ -> Alcotest.fail "the reverse question carried no criteria"
+  | [] -> Alcotest.fail "no reverse question was asked"
+;;
+
+(* A tie absorbs a source in the forward question; in the reverse one it
+   would drop the claim, so it counts as not conveyed. *)
+let test_a_reverse_tie_keeps_the_claim () =
+  let claim_statements = Gate.statements copy_claim.claim in
+  let evaluate, _, _ =
+    table ~noul_of:(fun statement ->
+      if List.mem statement claim_statements then Gate.conveyed_boundary else 0.1)
+  in
+  let run, checks = copy_checks ~evaluate ~claim:copy_claim ~superseding:[] in
+  (match (only_check checks).verdict with
+   | Gate.Carries_new_statement { not_conveyed; _ } ->
+     Alcotest.(check int) "the tied statement is not conveyed" 1 not_conveyed
+   | Gate.Copy _ | Gate.Not_judged _ -> Alcotest.fail "a tie must not make a copy");
+  Alcotest.(check (list string)) "the claim is applied" [ id copy_claim ]
+    (List.map id (Gate.without_copies run [ copy_claim ]))
+;;
+
+(* A claim that cuts into no statement gives the question nothing to ask;
+   that is not evidence of a copy. *)
+let test_a_claim_without_a_statement_is_not_judged () =
+  let blank = fact " \n " in
+  Alcotest.(check (list string)) "the claim cuts into nothing" [] (Gate.statements blank.claim);
+  let evaluate, requests, _ = table ~noul_of:(fun _ -> 0.1) in
+  let run, checks = copy_checks ~evaluate ~claim:blank ~superseding:[] in
+  (match (only_check checks).verdict with
+   | Gate.Not_judged Gate.No_statement -> ()
+   | Gate.Not_judged
+       ( Gate.Gate_judgment_failed | Gate.Continues_a_dropped_memory
+       | Gate.No_source_fits_the_state | Gate.Statement_too_large | Gate.Request_failed _ )
+   | Gate.Copy _ | Gate.Carries_new_statement _ ->
+     Alcotest.fail "expected no statement to judge");
+  Alcotest.(check int) "only the forward request" 1 !requests;
+  Alcotest.(check (list string)) "the claim is applied" [ id blank ]
+    (List.map id (Gate.without_copies run [ blank ]))
 ;;
 
 let () =
@@ -1509,6 +1600,12 @@ let () =
             test_a_claim_that_continues_a_dropped_memory_is_not_asked_back
         ; Alcotest.test_case "a restated memory is not asked back" `Quick
             test_a_restated_memory_is_not_asked_back
+        ; Alcotest.test_case "the reverse question names the memories" `Quick
+            test_the_reverse_question_names_the_memories
+        ; Alcotest.test_case "a reverse tie keeps the claim" `Quick
+            test_a_reverse_tie_keeps_the_claim
+        ; Alcotest.test_case "a claim without a statement is not judged" `Quick
+            test_a_claim_without_a_statement_is_not_judged
         ] )
     ]
 ;;

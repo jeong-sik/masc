@@ -169,38 +169,62 @@ let questions_per_request = 64
 let request_bytes_limit = 32_000
 let state_bytes_limit = request_bytes_limit / 2
 
-let instructions_prefix =
-  "The claim under review conveys this statement, in any wording.\n\nStatement:\n"
+(* Which way a question points. [Forward]: the state is a claim, the
+   statement is from a memory it absorbs. [Reverse] (RFC-0463 section 2.8):
+   the state is the memories a claim tried to absorb, read together, and the
+   statement is from the claim. The model reads the question text, so each
+   direction names what it is actually handed. *)
+type direction =
+  | Forward
+  | Reverse
+
+let direction_to_string = function
+  | Forward -> "forward"
+  | Reverse -> "reverse"
 ;;
 
-let criteria =
-  ( "A reader of the claim alone would learn what the statement says, even if worded differently."
-  , "The claim does not say what the statement says, or says only a vaguer version of it." )
+let instructions_prefix = function
+  | Forward -> "The claim under review conveys this statement, in any wording.\n\nStatement:\n"
+  | Reverse ->
+    "The memories under review, read together, convey this statement, in any wording.\n\n\
+     Statement:\n"
 ;;
 
-let question statement =
+let criteria = function
+  | Forward ->
+    ( "A reader of the claim alone would learn what the statement says, even if worded differently."
+    , "The claim does not say what the statement says, or says only a vaguer version of it." )
+  | Reverse ->
+    ( "A reader of these memories alone would learn what the statement says, even if worded \
+       differently."
+    , "The memories do not say what the statement says, or say only a vaguer or partial \
+       version of it." )
+;;
+
+let question direction statement =
   Typesafeai_types.Noul
-    { Typesafeai_types.instructions = instructions_prefix ^ statement
-    ; criteria = Some criteria
+    { Typesafeai_types.instructions = instructions_prefix direction ^ statement
+    ; criteria = Some (criteria direction)
     }
 ;;
 
 (* What a statement adds to a request: its question, fixed text included. *)
-let question_bytes statement =
-  String.length instructions_prefix
+let question_bytes direction statement =
+  let yes, no = criteria direction in
+  String.length (instructions_prefix direction)
   + String.length statement
-  + String.length (fst criteria)
-  + String.length (snd criteria)
+  + String.length yes
+  + String.length no
 ;;
 
 (* [numbered] cut into requests of at most [questions_per_request] questions
    and at most [budget] bytes of questions each. Every question fits alone
    by construction (the caller keeps out the statements that do not). *)
-let chunks ~budget numbered =
+let chunks ~direction ~budget numbered =
   let rec go current_bytes current acc = function
     | [] -> List.rev (if current = [] then acc else List.rev current :: acc)
     | ((_, statement) as item) :: rest ->
-      let bytes = question_bytes statement in
+      let bytes = question_bytes direction statement in
       if current <> []
          && (List.length current >= questions_per_request
              || current_bytes + bytes > budget)
@@ -233,13 +257,15 @@ let decode chunk (response : Typesafeai_types.eval_response) =
    to [noul]. Asking stops at the first request that fails or cannot be
    read; the table holds the answers before it and the reason comes back
    beside it, so a verdict already reached is not lost to a later failure. *)
-let ask ~evaluate ~claim (numbered : (string * string) list) =
+let ask ~direction ~evaluate ~claim (numbered : (string * string) list) =
   let state = `String claim in
   let budget = request_bytes_limit - String.length claim in
   let rec go table requests = function
     | [] -> table, requests, None
     | chunk :: rest ->
-      let questions = List.map (fun (id, statement) -> id, question statement) chunk in
+      let questions =
+        List.map (fun (id, statement) -> id, question direction statement) chunk
+      in
       (match evaluate ~state ~questions with
        | Error reason -> table, requests, Some reason
        | Ok response ->
@@ -247,7 +273,7 @@ let ask ~evaluate ~claim (numbered : (string * string) list) =
           | Error reason -> table, requests + 1, Some reason
           | Ok answers -> go (answers @ table) (requests + 1) rest))
   in
-  go [] 0 (chunks ~budget numbered)
+  go [] 0 (chunks ~direction ~budget numbered)
 ;;
 
 (* The answer's absorptions into one claim, classified before any request
@@ -310,7 +336,8 @@ let classify ~facts ~new_claims ~absorbed =
          let budget = request_bytes_limit - String.length claim in
          let judgeable, unjudgeable =
            List.partition
-             (fun (_, sts) -> List.for_all (fun st -> question_bytes st <= budget) sts)
+             (fun (_, sts) ->
+                List.for_all (fun st -> question_bytes Forward st <= budget) sts)
              judgeable
          in
          { into; claim = Some claim; unjudged; unjudgeable = List.map fst unjudgeable; judgeable })
@@ -344,7 +371,7 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
                 (fun i (_, sts) -> List.mapi (fun k s -> Printf.sprintf "s%d_%d" i k, s) sts)
                 judgeable)
          in
-         let table, requests, failure = ask ~evaluate ~claim numbered in
+         let table, requests, failure = ask ~direction:Forward ~evaluate ~claim numbered in
          (* A source over the statements answered so far: one not conveyed
             keeps it current; all conveyed absorbs it once every statement
             was answered. *)
@@ -436,6 +463,7 @@ type copy_not_judged =
   | Continues_a_dropped_memory
   | No_source_fits_the_state
   | Statement_too_large
+  | No_statement
   | Request_failed of string
 
 type copy_verdict =
@@ -550,15 +578,22 @@ let judge_copy ~evaluate ~facts ((claim : Keeper_memory_os_types.fact), sources)
     | _ :: _, state :: rest ->
       let budget = request_bytes_limit - String.length state in
       let askable =
-        List.filter (fun (_, statement) -> question_bytes statement <= budget) remaining
+        List.filter
+          (fun (_, statement) -> question_bytes Reverse statement <= budget)
+          remaining
       in
-      let table, made, failure = ask ~evaluate ~claim:state askable in
+      let table, made, failure = ask ~direction:Reverse ~evaluate ~claim:state askable in
       (match failure with
        | Some reason -> check (Not_judged (Request_failed reason)) (requests + made)
        | None ->
+         (* A tie goes the other way from the forward question. There a
+            tie absorbs a source, and the source's text survives in the
+            claim; here a tie would drop the claim, and a statement only it
+            holds would be gone. So the reverse question needs strictly
+            more than the boundary. *)
          let conveyed (id, _) =
            match List.assoc_opt id table with
-           | Some noul -> noul >= conveyed_boundary
+           | Some noul -> noul > conveyed_boundary
            | None -> false
          in
          go
@@ -567,9 +602,12 @@ let judge_copy ~evaluate ~facts ((claim : Keeper_memory_os_types.fact), sources)
            ~requests:(requests + made)
            rest)
   in
-  match source_states texts with
-  | [] -> check (Not_judged No_source_fits_the_state) 0
-  | states -> go ~remaining:numbered ~asked:[] ~requests:0 states
+  match numbered, source_states texts with
+  | [], ([] | _ :: _) ->
+    (* Nothing to ask: a claim without a statement is not shown to be a copy. *)
+    check (Not_judged No_statement) 0
+  | _ :: _, [] -> check (Not_judged No_source_fits_the_state) 0
+  | _ :: _, (_ :: _ as states) -> go ~remaining:numbered ~asked:[] ~requests:0 states
 ;;
 
 let judge_copies ~evaluate ~facts ~new_claims ~superseding ~absorbed ~applied =
@@ -587,7 +625,8 @@ let judge_copies ~evaluate ~facts ~new_claims ~superseding ~absorbed ~applied =
 type skip_reason = No_absorptions | Unavailable of Typesafeai_config.unavailable_reason
 
 type evaluation =
-  { destinations : Typesafeai_client.destination_id list
+  { direction : direction
+  ; destinations : Typesafeai_client.destination_id list
   ; state : Yojson.Safe.t
   ; questions : (string * Typesafeai_types.question) list
   ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result
@@ -638,6 +677,7 @@ let copy_not_judged_to_string = function
   | Continues_a_dropped_memory -> "continues_a_dropped_memory"
   | No_source_fits_the_state -> "no_source_fits_the_state"
   | Statement_too_large -> "statement_too_large"
+  | No_statement -> "no_statement"
   | Request_failed _ -> "request_failed"
 ;;
 
@@ -646,7 +686,7 @@ let copy_check_to_yojson { claim_id; sources; verdict; requests } =
     match verdict with
     | Copy { statements } ->
       [ "verdict", `String "copy"
-      ; "statements", `List (List.map (fun statement -> `String statement) statements)
+      ; "conveyed_statements", `List (List.map (fun statement -> `String statement) statements)
       ]
     | Carries_new_statement { statements; not_conveyed } ->
       [ "verdict", `String "carries_new_statement"
@@ -662,7 +702,8 @@ let copy_check_to_yojson { claim_id; sources; verdict; requests } =
          | Gate_judgment_failed
          | Continues_a_dropped_memory
          | No_source_fits_the_state
-         | Statement_too_large -> [])
+         | Statement_too_large
+         | No_statement -> [])
   in
   `Assoc
     ([ "claim_id", `String claim_id
@@ -672,7 +713,7 @@ let copy_check_to_yojson { claim_id; sources; verdict; requests } =
      @ [ "requests", `Int requests ])
 ;;
 
-let evaluation_to_yojson { destinations; state; questions; result } =
+let evaluation_to_yojson { direction; destinations; state; questions; result } =
   let response =
     match result with
     | Error failure ->
@@ -715,7 +756,8 @@ let evaluation_to_yojson { destinations; state; questions; result } =
      this durable report so each answer remains interpretable; the outbound
      body hash identifies bytes but cannot recover that context. *)
   `Assoc (response
-    @ [ "request", `Assoc
+    @ [ "direction", `String (direction_to_string direction)
+      ; "request", `Assoc
           [ "destinations", `List (List.map Typesafeai_client.destination_id_to_yojson destinations)
           ; "state", state
           ; "questions", `Assoc
@@ -819,18 +861,23 @@ let log_copy_checks ~keeper_id checks =
              check.claim_id
              (String.concat "," check.sources)
              (String.concat " | " statements)
-         | Not_judged reason ->
-           Log.Keeper.info
+         | Not_judged (Request_failed detail) ->
+           Log.Keeper.warn
              ~keeper_name:keeper_id
-             "librarian absorb gate reverse: claim %s applied unjudged (%s%s)"
+             "librarian absorb gate reverse: claim %s applied unjudged, request failed: %s"
              check.claim_id
-             (copy_not_judged_to_string reason)
-             (match reason with
-              | Request_failed detail -> ": " ^ detail
-              | Gate_judgment_failed
+             detail
+         | Not_judged
+             ((Gate_judgment_failed
               | Continues_a_dropped_memory
               | No_source_fits_the_state
-              | Statement_too_large -> "")
+              | Statement_too_large
+              | No_statement) as reason) ->
+           Log.Keeper.info
+             ~keeper_name:keeper_id
+             "librarian absorb gate reverse: claim %s applied unjudged (%s)"
+             check.claim_id
+             (copy_not_judged_to_string reason)
          | Carries_new_statement _ -> ())
       checks
 ;;
@@ -887,14 +934,14 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~superseding ~absorbed () 
           log names exactly what was sent (the Board gate keeps the same
           value as provenance). *)
        let evaluations = ref [] in
-       let evaluate ~state ~questions =
+       let evaluate direction ~state ~questions =
          let result = Typesafeai_client.evaluate ?clock ~destinations:armed ~state ~questions () in
-         evaluations := { destinations; state; questions; result } :: !evaluations;
+         evaluations := { direction; destinations; state; questions; result } :: !evaluations;
          publish (Incomplete (List.rev !evaluations));
          Result.map (fun evaluated -> evaluated.Typesafeai_client.response) result
          |> Result.map_error Typesafeai_client.failure_to_string
        in
-       let outcome = judge ~evaluate ~facts ~new_claims ~absorbed in
+       let outcome = judge ~evaluate:(evaluate Forward) ~facts ~new_claims ~absorbed in
        (* The reverse question goes to the same judge through the same
           [evaluate], so its requests are in [evaluations] beside the
           forward ones. A forward judgment that failed leaves the lane in
@@ -902,7 +949,7 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~superseding ~absorbed () 
        let copy_checks =
          match outcome with
          | Judged judged ->
-           judge_copies ~evaluate ~facts ~new_claims ~superseding ~absorbed
+           judge_copies ~evaluate:(evaluate Reverse) ~facts ~new_claims ~superseding ~absorbed
              ~applied:judged.absorbed
          | Failed { absorbed = applied; _ } ->
            not_judged_checks

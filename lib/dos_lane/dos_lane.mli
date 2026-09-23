@@ -77,10 +77,6 @@ type error =
   | Unreadable of string
       (** a file that is there and will not read. A path that does not exist
           is [Invalid_request] — the caller named it. *)
-  | Not_kept of string
-      (** the call ran the guest, but a file the program wrote did not reach
-          [saves_dir]. The machine moved; the write is tried again after the
-          next call. *)
   | Held_by of string
       (** another caller holds the controller; nothing was done. *)
 
@@ -111,10 +107,21 @@ type ran = {
           it means the call reached its step ceiling: the rest were not
           recorded and never reached the ring, so the caller sends them
           again. *)
+  unsaved : string list;
+      (** files the program wrote during this call that did not reach the
+          saves directory, one line each with the reason. Empty when every
+          save is on disk. The call itself happened: the guest moved either
+          way, so this is not a reason to send the same keys again. *)
 }
 
 val settle_chunk : int
 (** Instructions between two screen readings while waiting for {!ran.settled}. *)
+
+val escapes : string -> bool
+(** A name that is a path or a drive rather than one plain file name: a
+    separator, a colon, [..] or a leading dot. The program inventory refuses
+    such names, and a file the guest creates under one is never written to
+    the saves directory. *)
 
 val load :
   who:string ->
@@ -141,8 +148,10 @@ val load :
     [saves_dir] holds what this program wrote on earlier machines. Its files
     are mounted over [files] of the same DOS name, and every call that runs
     the guest writes a file whose contents changed back to it, so a game's
-    own save survives an eject and a server restart. A file the program
-    deletes is not carried: the next load mounts the inventory copy again.
+    own save survives an eject and a server restart. A save that cannot be
+    written is listed in {!ran.unsaved}. A file the program deletes is not
+    carried: the next load mounts the inventory copy again. A save directory
+    that will not read is [Unreadable].
 
     [announce] runs while the machine's lock is still held, right after this
     machine becomes the workspace's. Announcements therefore reach whoever
@@ -170,16 +179,6 @@ val pass :
 (** The holder (or anyone, while it is free) hands the controller to [to_],
     or frees it with [None]. [announce] runs under the machine's lock, as
     {!load}'s does. *)
-
-type frame = { width : int; height : int; rgb : string }
-(** The frame as the display would show it: [width * height] pixels, three
-    bytes each, rows top to bottom. *)
-
-val capture : unit -> (observation * frame, error) result
-(** {!screen} and the frame it describes, read under one lock, so the two
-    cannot come from different moments. The frame is what a Keeper with
-    vision reads: a VGA game's Korean menus are glyphs in pixels, which
-    [frame_ascii]'s luminance cells cannot spell. *)
 
 val step :
   who:string -> steps:int -> until_ready:bool -> (observation * ran, error) result

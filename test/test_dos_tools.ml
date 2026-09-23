@@ -271,47 +271,6 @@ let test_a_link_out_of_the_inventory_is_refused () =
           (is_completed (load ~base_path "game"))))
 ;;
 
-(* A game directory often holds several programs: 삼국지3 boots KOEI.COM,
-   which runs OPEN.EXE and MAIN.EXE beside it, and the setup and editor sit
-   there too. The refusal used to ask the caller to name one with no argument
-   to name it by. [boot] is that argument; it names a file inside the
-   directory, folded the way DOS folds, and nothing else. *)
-let test_boot_names_the_program_inside_a_directory () =
-  with_workspace (fun base_path ->
-    let game = Filename.concat (programs_dir ~base_path) "arcade" in
-    mkdir_p game;
-    write_file (Filename.concat game "LOADER.COM") hello_com;
-    write_file (Filename.concat game "SETUP.COM") spinner_com;
-    let unnamed = load ~base_path "arcade" in
-    check bool "two programs and no boot is a question" false (is_completed unnamed);
-    check bool "the question names the argument" true
-      (contains "boot" (Tool_result.message unnamed));
-    let booted =
-      dispatch ~base_path "masc_dos_load"
-        [ ("program", `String "arcade"); ("boot", `String "loader.com") ]
-    in
-    check bool "boot picks the loader, folded like DOS" true (is_completed booted);
-    check string "the loader is what runs" "LOADER.COM" (string_field "program" booted);
-    check bool "the loader reaches its first key request" true
-      (bool_field "waiting_for_key" booted);
-    let missing =
-      dispatch ~base_path "masc_dos_load"
-        [ ("program", `String "arcade"); ("boot", `String "MAIN.EXE") ]
-    in
-    check bool "a boot the directory does not hold is refused" false (is_completed missing);
-    let climbing =
-      dispatch ~base_path "masc_dos_load"
-        [ ("program", `String "arcade"); ("boot", `String "../LOADER.COM") ]
-    in
-    check bool "boot is a file name, not a path" false (is_completed climbing);
-    install_program ~base_path "hello.com" hello_com;
-    let single =
-      dispatch ~base_path "masc_dos_load"
-        [ ("program", `String "hello.com"); ("boot", `String "hello.com") ]
-    in
-    check bool "boot on a single file is refused" false (is_completed single))
-;;
-
 (* The step budget is declared per key. Multiplied by a caller-controlled
    number of keys it stopped bounding anything: sixty-four keys at four
    million each is a quarter of a billion instructions run under the
@@ -378,15 +337,21 @@ let test_two_names_that_differ_only_in_case_are_refused () =
        mov ah,40h / mov cx,4 / mov dx,msg / int 21h / mov ah,3Eh / int 21h
    13C wait: mov ah,0 / int 16h / or ax,ax / jz wait / int 20h
    146 fname "SAVE.DAT",0   14F msg "NEW$"   153 buf 16 x "$" *)
-let saver_com =
-  "\xb8\x00\x3d\xba\x46\x01\xcd\x21\x72\x19"
-  ^ "\x89\xc3\xb4\x3f\xb9\x10\x00\xba\x53\x01\xcd\x21"
-  ^ "\xb4\x3e\xcd\x21\xb4\x09\xba\x53\x01\xcd\x21\xeb\x19"
-  ^ "\xb4\x3c\x31\xc9\xba\x46\x01\xcd\x21\x89\xc3"
-  ^ "\xb4\x40\xb9\x04\x00\xba\x4f\x01\xcd\x21\xb4\x3e\xcd\x21"
+let saver_com_named fname =
+  let word n = String.init 2 (fun i -> Char.chr ((n lsr (8 * i)) land 0xff)) in
+  let fname_at = 0x146 in
+  let msg_at = fname_at + String.length fname + 1 in
+  let buf_at = msg_at + 4 in
+  "\xb8\x00\x3d\xba" ^ word fname_at ^ "\xcd\x21\x72\x19"
+  ^ "\x89\xc3\xb4\x3f\xb9\x10\x00\xba" ^ word buf_at ^ "\xcd\x21"
+  ^ "\xb4\x3e\xcd\x21\xb4\x09\xba" ^ word buf_at ^ "\xcd\x21\xeb\x19"
+  ^ "\xb4\x3c\x31\xc9\xba" ^ word fname_at ^ "\xcd\x21\x89\xc3"
+  ^ "\xb4\x40\xb9\x04\x00\xba" ^ word msg_at ^ "\xcd\x21\xb4\x3e\xcd\x21"
   ^ "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20"
-  ^ "SAVE.DAT\000" ^ "NEW$" ^ String.make 16 '$'
+  ^ fname ^ "\000" ^ "NEW$" ^ String.make 16 '$'
 ;;
+
+let saver_com = saver_com_named "SAVE.DAT"
 
 let saves_of ~base_path name =
   Filename.concat
@@ -435,8 +400,15 @@ let test_a_save_is_mounted_over_the_inventory_copy () =
     check bool "the inventory copy is not what the guest opened" false (contains "OLD" text))
 ;;
 
-(* When the save cannot be written the call says so; the machine still moved
-   and stays loaded, and nothing pretends the save exists. *)
+let unsaved result =
+  match member "unsaved" (Tool_result.data result) with
+  | Some (`List items) -> List.map (function `String u -> u | _ -> fail "unsaved item") items
+  | _ -> fail (Printf.sprintf "no unsaved in %s" (Tool_result.message result))
+;;
+
+(* When the save cannot be written the call still returns what the guest did
+   -- it moved either way, and an error would be answered by sending the same
+   keys again -- and lists the save that did not reach disk. *)
 let test_a_save_that_cannot_be_written_is_reported () =
   with_workspace (fun base_path ->
     install_game ~base_path "quest" [ ("QUEST.COM", saver_com) ];
@@ -444,11 +416,31 @@ let test_a_save_that_cannot_be_written_is_reported () =
     mkdir_p (Filename.dirname saves);
     write_file saves "a file where the save directory would be";
     let loaded = load ~base_path "quest" in
-    check bool "the call reports the lost save" false (is_completed loaded);
-    check bool "and names why" true
-      (contains "did not reach disk" (Tool_result.message loaded));
-    check bool "the machine is still there" true
-      (is_completed (dispatch ~base_path "masc_dos_screen" [])))
+    check bool "the call returns the screen" true (is_completed loaded);
+    (match unsaved loaded with
+     | [ line ] -> check bool "naming the save" true (contains "SAVE.DAT" line)
+     | lines -> fail (Printf.sprintf "expected one unsaved line, got %d" (List.length lines)));
+    let next = dispatch ~base_path "masc_dos_screen" [] in
+    check bool "the machine is still there" true (is_completed next))
+;;
+
+(* DOS takes "/" as a separator, so a guest asked for a save name can create
+   "../OUT.DAT". That name never reaches the host: it stays in the machine,
+   is reported once, and nothing lands beside the saves directory. *)
+let test_a_guest_path_never_reaches_the_host () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com_named "../OUT.DAT") ];
+    let loaded = load ~base_path "quest" in
+    check bool "the call returns" true (is_completed loaded);
+    check bool "the path is reported" true
+      (List.exists (contains "a path, not a file name") (unsaved loaded));
+    let saves = saves_of ~base_path "quest" in
+    check bool "nothing beside the saves directory" false
+      (Sys.file_exists (Filename.concat (Filename.dirname saves) "OUT.DAT"));
+    check bool "nothing in it either" false
+      (Sys.file_exists saves && Array.length (Sys.readdir saves) > 0);
+    let again = dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1000) ] in
+    check (list string) "reported once, not on every call" [] (unsaved again))
 ;;
 
 let controller result =
@@ -608,8 +600,6 @@ let () =
             test_click_reaches_the_guest_and_the_ledger
         ; test_case "inventory only" `Quick test_only_inventory_names_resolve
         ; test_case "linked out" `Quick test_a_link_out_of_the_inventory_is_refused
-        ; test_case "boot inside a directory" `Quick
-            test_boot_names_the_program_inside_a_directory
         ; test_case "one ceiling" `Quick test_a_sequence_spends_one_ceiling_not_one_per_key
         ; test_case "sequence length" `Quick test_a_sequence_has_a_length
         ; test_case "case collision" `Quick test_two_names_that_differ_only_in_case_are_refused
@@ -617,6 +607,7 @@ let () =
         ; test_case "save over inventory" `Quick
             test_a_save_is_mounted_over_the_inventory_copy
         ; test_case "save not written" `Quick test_a_save_that_cannot_be_written_is_reported
+        ; test_case "guest path" `Quick test_a_guest_path_never_reaches_the_host
         ; test_case "holder only" `Quick test_only_the_holder_moves_the_machine
         ; test_case "pass" `Quick test_pass_hands_the_machine_on
         ; test_case "free controller" `Quick

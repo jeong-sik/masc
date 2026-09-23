@@ -45,6 +45,7 @@ let ran_fields (r : Dos_lane.ran) =
   ; ("settled", `Bool r.Dos_lane.settled)
   ; ("input_requests", `Int r.Dos_lane.input_requests)
   ; ("keys_pressed", `Int r.Dos_lane.keys_pressed)
+  ; ("unsaved", `List (List.map (fun u -> `String u) r.Dos_lane.unsaved))
   ]
 ;;
 
@@ -57,7 +58,7 @@ let of_lane ?(extra = []) ~tool_name ~start_time
       ()
   | Error ((Dos_lane.No_machine | Dos_lane.Invalid_request _ | Dos_lane.Held_by _) as e) ->
     reject ~tool_name ~start_time (Dos_lane.error_to_string e)
-  | Error ((Dos_lane.Unreadable _ | Dos_lane.Not_kept _) as e) ->
+  | Error (Dos_lane.Unreadable _ as e) ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
       (Dos_lane.error_to_string e)
 ;;
@@ -146,12 +147,7 @@ let executable_in ?boot dir =
    The name may be a file (boots alone) or a directory (boots with its data
    files mounted). It cannot climb out: a separator or a dot segment is
    refused before it reaches the filesystem. *)
-let escapes name =
-  String.contains name '/'
-  || String.contains name '\\'
-  || String.equal name ".."
-  || String.starts_with ~prefix:"." name
-;;
+let escapes = Dos_lane.escapes
 
 (* Spelling the name safely is not the whole boundary. Sys.file_exists and
    open both follow symbolic links, so an entry linked at a file outside

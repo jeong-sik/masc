@@ -613,6 +613,14 @@ names the channels that failed. A transport whose binding list the server
 could not read is named in the prompt as not included. On this tab `U` is unbind-all; the runtime picker stays on `U`
 everywhere else in Keeper detail.
 
+Pausing (`p`) or shutting down (`s`) a Keeper that still holds channel
+bindings offers to remove them too. A paused Keeper keeps its channels routed
+to itself and answers on them as soon as it runs again. Once the pause or
+shutdown is accepted, the footer reads `U: also unbind <keeper>'s N channels,
+or any other key to keep them -- <channels>`. `U` sends the same conditional
+unbinds as `U` `U` on the Channels tab; any other key leaves the bindings, and
+the next `U` is the runtime picker again.
+
 ### Keeper logs
 
 `l` from detail. The newest 200 physical rows from the keeper's dated metrics

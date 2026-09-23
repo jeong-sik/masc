@@ -97,9 +97,6 @@
 - A boot replay of a durable HITL delivery, and an operator resubmitting the same decision, no longer write a second `resolved` row to the approval audit ledger or announce the decision again. Both send the wake again and log `hitl resolution redelivered approval=… occasion=boot_replay|same_request_resubmitted`. One approval for an offline keeper had nineteen `resolved` rows across twenty-one boots on 2026-09-22, so a count of the ledger read as nineteen decisions for one click (#37964).
 
 
-### Added
-
-
 ## [0.36.0] - 2026-09-22
 
 > Before you upgrade: read the five items under **Upgrade notes** — the keeper system prompt's new worldview slot and role tags (#37753), the removed `--dup-threshold` purge option (#37751), the new Fusion `deliberation_evidence` shape that earlier run records do not read as (#37783), the required `--keeper` argument of `masc-checkpoint-purge` (#37802), and the continuity-lag keys the keeper memory health payload now carries, which a TUI or dashboard from the other side of that change refuses (#37856).

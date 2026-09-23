@@ -53,9 +53,17 @@ export interface KeeperCostMetric {
   total_cost_usd: number | null
   cost_reported_samples: number
   cost_unreported_samples: number
-  total_input_tokens: number
-  total_output_tokens: number
-  total_tokens: number
+  // Samples whose cost field was missing or had a shape the producer never
+  // writes. Kept apart from `cost_unreported_samples` (the runtime's `null`).
+  cost_unread_samples: number
+  // Sums over the samples whose runtime reported token usage. `null` when no
+  // sample in the window reported it, so unknown usage never reads as 0.
+  total_input_tokens: number | null
+  total_output_tokens: number | null
+  total_tokens: number | null
+  tokens_reported_samples: number
+  tokens_unreported_samples: number
+  tokens_unread_samples: number
   p50_latency_ms: number | null
   p95_latency_ms: number | null
   sample_count: number
@@ -67,26 +75,49 @@ export interface KeeperCostMetricsResponse {
   generated_at?: number | null
 }
 
+// A sum is a number exactly when some sample reported the value, and `null`
+// when none did. `undefined` marks a pair the producer cannot write.
+function reportedSum(raw: unknown, reportedSamples: number): number | null | undefined {
+  const sum = raw === null ? null : asNumber(raw)
+  if (sum === undefined) return undefined
+  if ((sum === null) !== (reportedSamples === 0)) return undefined
+  return sum
+}
+
 function decodeKeeperCostMetric(raw: unknown): KeeperCostMetric | null {
   if (!isRecord(raw)) return null
   const keeperName = asString(raw.keeper_name)
   if (!keeperName) return null
   const costReported = asInt(raw.cost_reported_samples)
   const costUnreported = asInt(raw.cost_unreported_samples)
-  if (costReported === undefined || costUnreported === undefined) return null
-  // The total is a number exactly when some sample reported a cost; a row
-  // where the two disagree is not a state the producer can write.
-  const totalCost = raw.total_cost_usd === null ? null : asNumber(raw.total_cost_usd)
-  if (totalCost === undefined) return null
-  if ((totalCost === null) !== (costReported === 0)) return null
+  const costUnread = asInt(raw.cost_unread_samples)
+  const tokensReported = asInt(raw.tokens_reported_samples)
+  const tokensUnreported = asInt(raw.tokens_unreported_samples)
+  const tokensUnread = asInt(raw.tokens_unread_samples)
+  if (
+    costReported === undefined || costUnreported === undefined || costUnread === undefined
+    || tokensReported === undefined || tokensUnreported === undefined || tokensUnread === undefined
+  ) return null
+  const totalCost = reportedSum(raw.total_cost_usd, costReported)
+  const totalInput = reportedSum(raw.total_input_tokens, tokensReported)
+  const totalOutput = reportedSum(raw.total_output_tokens, tokensReported)
+  const totalTokens = reportedSum(raw.total_tokens, tokensReported)
+  if (
+    totalCost === undefined || totalInput === undefined
+    || totalOutput === undefined || totalTokens === undefined
+  ) return null
   return {
     keeper_name: keeperName,
     total_cost_usd: totalCost,
     cost_reported_samples: costReported,
     cost_unreported_samples: costUnreported,
-    total_input_tokens: asNumber(raw.total_input_tokens) ?? 0,
-    total_output_tokens: asNumber(raw.total_output_tokens) ?? 0,
-    total_tokens: asNumber(raw.total_tokens) ?? 0,
+    cost_unread_samples: costUnread,
+    total_input_tokens: totalInput,
+    total_output_tokens: totalOutput,
+    total_tokens: totalTokens,
+    tokens_reported_samples: tokensReported,
+    tokens_unreported_samples: tokensUnreported,
+    tokens_unread_samples: tokensUnread,
     p50_latency_ms: asNumber(raw.p50_latency_ms) ?? null,
     p95_latency_ms: asNumber(raw.p95_latency_ms) ?? null,
     sample_count: asNumber(raw.sample_count) ?? 0,

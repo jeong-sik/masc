@@ -63,6 +63,16 @@ status: reference
   담당자(MCP client 등)가 잡은 Task 는 "held outside the fleet" 한 줄로 센다.
   → [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli), RFC-0464
 
+**닫힌 quota 창 (Shut Quota Window)**
+: provider 계정이나 자격 증명 하나가 사용 한도에 걸려 요청을 받지 않는 상태. 런타임
+  카탈로그(`/api/v1/runtime/resolved`)는 런타임마다 `quota_exhausted`·`quota_resets_at`·
+  `quota_scope` 를 싣는데, 같은 계정을 쓰는 런타임은 같은 `quota_scope`(예:
+  `provider:claude_code`)를 공유한다. Team 블록은 창을 scope 마다 한 번만, 그 뒤에 선
+  런타임 수와 다시 열리는 시각으로 적는다. 남은 사용량은 provider 가 알려주지 않으므로
+  퍼센트로 말하지 않는다.
+  → [Runtime_quota_window](../../lib/runtime/runtime_quota_window.ml),
+  [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli)
+
 **Server Push (서버가 밀어 보내는 사건)**
 : 서버가 클라이언트로 밀어 보내는 사건으로, Keeper가 한 일이 아니라 서버가 보고하는
   상태 변화. Activity 화면은 이런 사건을 `everything` scope 아래 조용한 회색 행으로

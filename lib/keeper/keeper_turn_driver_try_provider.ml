@@ -350,7 +350,7 @@ type try_provider_ctx =
   ; (* Where a front moved after a refusal is kept for the rest of the
        turn. The position is a fact about the history, not about the
        candidate that was refused, so the lane's next candidate composes
-       from it instead of starting at the whole history again. *)
+       from it instead of starting over from the turn start. *)
     hold_carried_front : Keeper_carried_front.seed -> unit
   ; base_path : string
   ; keeper_name : string
@@ -1124,7 +1124,7 @@ let compose_carried_model_input
    the carried range rather than the whole checkpoint. Projecting first
    would make the atom count a property of the dialect, so a front read from
    another runtime's record could fall under
-   [Keeper_carried_front.for_history] and start the whole history over. *)
+   [Keeper_carried_front.for_history] and start over from the turn start. *)
 type request_view =
   { composed : composed
   ; carried : Agent_core.Types.message list

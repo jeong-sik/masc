@@ -2079,6 +2079,23 @@ def navigate_with_arrows_and_quit(
     # then move to Overview where system events are visible.
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+    # The same claim for the command palette, which is the other place a
+    # printable key is text rather than a command. The quit key used to name
+    # three fields and let the rest through, so a typed "q" armed the exit and
+    # the next one ended the process -- from inside a field showing a cursor.
+    send_and_wait(process, master_fd, output, b":", b"MASC Command palette")
+    palette = send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"qqq",
+        # The prompt is styled, then a plain space, then the query, so the
+        # colon and what was typed are not adjacent bytes.
+        re.compile(rb":(?:" + CSI_RE.pattern + rb")* qqq"),
+    )
+    if b"press again to quit" in CSI_RE.sub(b"", palette):
+        raise AssertionError("a q typed into the palette armed the exit")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
     send_and_wait(
         process,
         master_fd,
@@ -4129,6 +4146,20 @@ def gate_mode_picker_interaction(requests: HttpRequests) -> Interaction:
         expected.append(("/api/v1/dashboard/gate/external-mode", {"mode": "manual"}))
         if mode_requests() != expected:
             raise AssertionError(f"Outside services choice used the wrong lane or mode: {requests!r}")
+        # [ and ] walk the ask cursor on this surface, and the walk used to
+        # take them from the command palette drawn over it: a query with a
+        # bracket in it, a task title like [#31874], arrived with the brackets
+        # gone and the cursor moved behind the overlay.
+        send_and_wait(process, master_fd, output, b":", b"MASC Command palette")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"a[b]c",
+            # The prompt is styled, then a plain space, then the query.
+            re.compile(rb":(?:" + CSI_RE.pattern + rb")* a\[b\]c"),
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Approvals")
         os.write(master_fd, b"q")
 
     return interact

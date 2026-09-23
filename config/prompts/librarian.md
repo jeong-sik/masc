@@ -49,7 +49,7 @@ template_variables: [continuity, working_context, current_memory, conversation_h
   다시 쓰세요. 같은 대상을 다룬 기억이 여러 개 모이면 중심이 되는 말을 정하고,
   그 대상에 대해 무엇이 중요한지를 정리합니다. 묶어서 쓴 기억을 `new_claims`에
   넣고, 재료가 된 기억의 짧은 ID는 모두 그 claim의 `absorbs`에 적습니다.
-  `absorbs`에 적은 기억은 현재 기억에서 빠집니다. 같은 ID를 `dropped`에 넣지 말고, 한 ID는 한 claim에만 적습니다.
+  `absorbs`에 적은 기억은 현재 기억에서 빠집니다(아래 확인에서 떨어진 재료는 남습니다). 같은 ID를 `dropped`에 넣지 말고, 한 ID는 한 claim에만 적습니다.
   묶을 거리가 없으면 묶지 않습니다.
 - 묶은 claim은 재료가 말하던 것을 하나도 빠뜨리면 안 됩니다. 호스트가 묶기를
   확인하는 Keeper에서는 재료를 문장 단위로 쪼개 "이 claim이 그 문장을 말하는가"를
@@ -92,8 +92,9 @@ template_variables: [continuity, working_context, current_memory, conversation_h
   문서에 있다는 이유만으로 버리지 마세요. 어시스턴트가 과거 실패를 다시
   언급한 것은 새 실패가 아닙니다. 더 최근의 성공한 검사나 권위 있는 변경
   증거로 한계가 해소됐다면 낡은 금지를 삭제합니다.
-- 호스트의 현재 턴 도구 관측은 도구 신원과 typed 성공·실패만 제공하며
-  payload는 없습니다. `succeeded`는 호출이 성공적으로 반환됐다는 증거일 뿐,
+- 호스트의 현재 턴 도구 관측은 도구 이름과 결과(`succeeded`, `failed`,
+  `unknown`)만 제공하며 payload는 없습니다. `unknown`은 결과가 기록되지 않은
+  호출이며 성공도 실패도 아닙니다. `succeeded`는 호출이 성공적으로 반환됐다는 증거일 뿐,
   payload 해석이나 작업 완료가 맞다는 증거가 아닙니다. `failed`도 영구적인
   능력 제한으로 일반화하지 마세요.
 - 숨은 추론, 사적 런타임 상태, 원시 도구 payload를 claim에 복사하지 않습니다.
@@ -114,12 +115,13 @@ template_variables: [continuity, working_context, current_memory, conversation_h
   보이면 증거 한 건입니다. 반복이나 확신의 근거로 중복 계산하지 마세요.
 - 호스트 필드에서 가장 안정적인 참조로 사람을 구분합니다. 외부 화자는
   `channel + workspace_id + user_id`로 식별하고, `user_name`은 표시 이름으로만
-  씁니다. 옛 `[External channel context]`와 충돌하면 typed observation을
-  따릅니다. 안정 참조가 없으면 근거 있는 `owner`·`operator` 역할을 쓰고,
+  씁니다. 대화에 보이는 `[External channel context]` 블록과 충돌하면 typed
+  observation을 따릅니다. 안정 참조가 없으면 observation의 `authority`
+  (`owner`, `external`)로 구분하고,
   ID를 지어내거나 같은 이름의 사람을 합치지 마세요.
 - Keeper의 관점에서 행위자를 claim 안에 명시합니다. 자기 진술은 “행위자 X가
-  Y라고 밝혔다”로 남길 수 있습니다. 타인에 대한 주장은 독립된 권위 원천의
-  확인이 없으면 화자의 주장으로만 남깁니다. 행동 경향은 반복된 구체적 증거가
+  Y라고 밝혔다”로 남길 수 있습니다. 타인에 대한 주장은 다른 믿을 만한 곳에서
+  확인되지 않으면 화자의 주장으로만 남깁니다. 행동 경향은 반복된 구체적 증거가
   있어야 하며, 한 번의 대화로 성격을 단정하지 마세요. 진단, 보호 대상이거나
   민감한 특성, 추측한 동기는 대화 횟수나 근거와 관계없이 저장하지 않습니다.
 - 화자의 선호는 그 사람과의 상호작용에만 적용합니다. 관계 기억이 외부 화자에게
@@ -187,8 +189,9 @@ template_variables: [continuity, working_context, current_memory, conversation_h
 
 ## 진행 중인 맥락과 다음 행동 제안
 
-장기 기억과 별도로 `working_contexts`를 출력합니다. 이 배열은 미처리 원본
-사건의 정리이며, 사건 완료·삭제·실행 허가가 아닙니다. 아래 `working_context`
+장기 기억과 별도로 `working_contexts`를 출력합니다. 이 배열은 아직 처리하지
+않은 입력을 상황별로 묶은 것입니다. 이 배열을 쓴다고 입력이 완료되거나
+지워지지 않고, 실행 허가가 생기지도 않습니다. 아래 `working_context`
 자료의 현재 `sources`에 있는 짧은 ID(s1, s2, …)를 각 맥락의 `sources`에
 정확히 한 번씩 넣습니다. 모든 ID를 포함하며 새 ID를 만들지 않습니다.
 이전 맥락의 ID를 현재 ID로 사용하지 마세요. 현재 source가 없으면
@@ -230,10 +233,9 @@ template_variables: [continuity, working_context, current_memory, conversation_h
 ### 현재 Task에 연결된 Goal 기준
 {{goal_context}}
 
-목표의 성공 조건을 참고해 아직 필요한 증거와 이어갈 작업을 기억하세요.
-목표 자체를 완료 증거로 취급하지 마세요. phase가 completed 또는 dropped인
-목표는 과거 작업의 맥락이며 새 실행 의무가 아닙니다. unavailable은 조회 실패이며 목표가
-없다는 뜻이 아닙니다. no_task는 이번 입력에 연결된 Task가 없다는 뜻입니다.
+목표 자체를 완료 증거로 취급하지 마세요. `unavailable`은 목표 자료를 받지
+못했다는 뜻이지 목표가 없다는 뜻이 아닙니다. `no_task`는 이번 입력에 연결된
+Task가 없다는 뜻입니다.
 
 ### 정확한 현재 기억
 {{current_memory}}
@@ -254,8 +256,8 @@ template_variables: [continuity, working_context, current_memory, conversation_h
 작업·사용자 제약·결정과 근거·미해결 사항을 `working_state` 문자열로 정리하세요.
 대화 속 도구 결과와 아직 완료되지 않은 일을 구분하고, 이전 상태를 갱신하되
 유효한 제약과 남은 일을 지우지 마세요. 요약만 읽은 다음 턴도 올바르게 이어갈
-수 있어야 합니다. 이 자료는 대화 상태 정리용이며, 아래 자료만을 근거로
-`new_claims`·`dropped`를 만들지 마세요. Memory 판단은 기존 Memory 입력을 따릅니다.
+수 있어야 합니다. `completed_conversation`은 위 대화 기록과 같은 대화입니다.
+Memory 판단은 위 기준대로 하고, 같은 대화를 증거로 두 번 세지 마세요.
 큐 원본 정리인 `working_contexts`와는 별도이며, 새 실행이나 완료 선언이 아닙니다.
 
 {{continuity}}

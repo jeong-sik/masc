@@ -159,14 +159,23 @@ let rec render ~palette ~indent ~prefix ~suffix (json : Yojson.Safe.t)
    the document arrives as structure instead of as one line the terminal
    wraps at column zero -- which is what a single-line payload did, dropping
    the branch glyph from every wrapped row. A scalar or a payload that does
-   not parse is its own best rendering and passes through untouched. *)
+   not parse is its own best rendering, and goes out as one terminal-safe
+   block: it is the only path here that the tree's own escaping does not
+   cover. *)
 let structured ?(palette = plain) value =
+  (* A payload the tree draws is safe by the way it is drawn: a JSON leaf goes
+     out through [Yojson.Safe.to_string], which writes a control byte as an
+     escape of its own, and a block's lines go through [terminal_safe_text].
+     What falls through here is the payload itself, so it is made safe here --
+     it arrives from the wire as a tool's recorded input or result, and
+     nothing else stands between it and the row. *)
+  let served text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
   match Yojson.Safe.from_string value with
   | (`Assoc _ | `List _) as json ->
     String.concat "\n"
       (render ~palette ~indent:0 ~prefix:"" ~suffix:"" (unfold json))
-  | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> value
-  | exception Yojson.Json_error _ -> value
+  | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> served value
+  | exception Yojson.Json_error _ -> served value
 ;;
 
 (* A detail is a small tree rather than another flat table. Values keep every

@@ -294,6 +294,33 @@ let test_the_note_draws_in_its_own_role () =
   check bool "the note is a note" true
     (List.exists (fun row -> holds "<note>+12 more<->" row) rendered)
 
+(* The tree's own drawing is what makes a document safe: a JSON leaf goes out
+   through [Yojson.Safe.to_string], which writes a control byte as an escape
+   of its own, and a block's lines go through [terminal_safe_text]. A payload
+   that does not parse takes neither path -- it used to be handed back as it
+   arrived, and it arrives from the wire as a tool's recorded input or
+   result. *)
+let holds needle text =
+  let n = String.length needle and h = String.length text in
+  let rec walk i =
+    i + n <= h
+    && (String.equal (String.sub text i n) needle || walk (i + 1))
+  in
+  walk 0
+;;
+
+let test_a_payload_that_does_not_parse_is_terminal_safe () =
+  let escape = "\027[31m" in
+  check bool "an escape does not survive a payload that is not JSON" false
+    (holds escape (Tool_detail.structured ("RETURNED" ^ escape)));
+  check bool "nor one in a bare scalar" false
+    (holds escape (Tool_detail.structured ("\"x" ^ escape ^ "\"")));
+  (* Making a payload safe replaces control bytes, and a newline is not one
+     of them: the lines a producer wrote are still its own. *)
+  check string "a payload keeps the lines it came with" "one\ntwo"
+    (Tool_detail.structured "one\ntwo")
+;;
+
 let () =
   run
     "tui_tool_detail"
@@ -337,6 +364,8 @@ let () =
             test_a_value_is_painted_after_it_is_made_safe
         ; test_case "a block keeps the pane foreground" `Quick
             test_a_block_keeps_the_pane_foreground
+        ; test_case "a payload that does not parse is terminal safe" `Quick
+            test_a_payload_that_does_not_parse_is_terminal_safe
         ] )
     ]
 ;;

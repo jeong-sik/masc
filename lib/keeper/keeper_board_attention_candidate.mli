@@ -338,17 +338,29 @@ val normalize_requeued_consumed :
     consumed resumable state. Direct [Consumed] is idempotent; every other
     state is rejected. *)
 
+type unreadable_row_owner =
+  | Row_names_candidate  (** the refused row's [candidate_id] is this one *)
+  | Row_candidate_id_unreadable
+      (** the refused row has no readable [candidate_id], so it could be any
+          candidate *)
+
 type judgment_delivery_outcome =
   | Delivered of candidate
   | Candidate_absent
-      (** The named candidate is not in the live ledger and no row the
-          decoder refused names it or hides its name — a retire moves the
-          whole store aside as one directory and never leaves a tombstone, so
-          the delivery cannot succeed on a retry of the identical request,
-          because there is no row left to update. A refused row that names the
-          candidate, or whose [candidate_id] cannot be read, makes the result
-          an [Error] instead: the candidate may still hold an undelivered
-          judgment. *)
+      (** The named candidate is not in the live ledger and no refused row
+          there could be it — a retire moves the whole store aside as one
+          directory and never leaves a tombstone, so the delivery cannot
+          succeed on a retry of the identical request, because there is no
+          row left to update. *)
+  | Candidate_row_unreadable of
+      { line_number : int
+      ; detail : string
+      ; owner : unreadable_row_owner
+      }
+      (** A refused row newer than the candidate's newest readable row (or
+          with no readable row at all) could be this candidate. Its state is
+          unknown: nothing was delivered or written. The caller keeps the
+          partition and its judgment until the row is readable. *)
 
 val apply_judgment_and_deliver :
   base_path:string ->
@@ -360,7 +372,8 @@ val apply_judgment_and_deliver :
     event delivery. [Delivered] means the candidate is [Consumed].
     [Candidate_absent] is explicit rather than folded into [Error] so a caller
     can settle the partition without delivery instead of retrying an update
-    that structurally cannot land. Conflicting prior judgment or a
+    that structurally cannot land. [Candidate_row_unreadable] is explicit so a
+    caller keeps that one partition and goes on with the others. Conflicting prior judgment or a
     non-terminal delivery result against a candidate that does exist remains
     an [Error]. *)
 

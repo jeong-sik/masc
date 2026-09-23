@@ -710,15 +710,21 @@ let is_not_relevant_completion partition =
   | Partition.Blocked _ -> false
 ;;
 
+type completed_disposition =
+  | Completed_settled of Partition.t
+  | Completed_kept_unreadable of Partition.t
+      (** The candidate's ledger row is unreadable, so this partition stays
+          [Completed] with its judgment. Nothing was delivered or settled. *)
+
 (* [Candidate_absent] means the candidate this partition's [Completed] item
-   names is not in the live ledger and no unreadable row there names it or
-   hides its name. A retire moves the whole candidate store aside as one
-   directory (scripts/check-runtime-deployment-preflight.sh) and leaves no
-   tombstone, so the delivery cannot succeed on a retry of the identical
-   request: the row it would update no longer exists. Settling the partition
-   here without one is the terminal outcome, not a fallback. An unreadable
-   row for the candidate comes back as [Error], and the partition stays
-   [Completed] with its judgment. *)
+   names is not in the live ledger and no refused row there could be it. A
+   retire moves the whole candidate store aside as one directory
+   (scripts/check-runtime-deployment-preflight.sh) and leaves no tombstone, so
+   the delivery cannot succeed on a retry of the identical request: the row it
+   would update no longer exists. Settling the partition here without one is
+   the terminal outcome, not a fallback. [Candidate_row_unreadable] is not
+   absence: the partition keeps its judgment and is settled on the first pass
+   that can read the row. *)
 let deliver_and_settle_completed ~base_path ~keeper_name partition =
   match partition.Partition.state with
   | Partition.Completed { item; _ } ->
@@ -729,18 +735,33 @@ let deliver_and_settle_completed ~base_path ~keeper_name partition =
         ~candidate_id:item.candidate_id
         ~judgment:item.judgment
     in
+    let settle () =
+      let* settled =
+        Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition
+      in
+      Ok (Completed_settled settled)
+    in
     (match delivery with
      | Candidate.Candidate_absent ->
        Log.Keeper.error
          "Board attention candidate permanently absent from the ledger; settling partition without delivery keeper=%s partition=%s candidate=%s"
          keeper_name
          partition.partition_id
+         item.candidate_id;
+       settle ()
+     | Candidate.Delivered (_ : Candidate.candidate) -> settle ()
+     | Candidate.Candidate_row_unreadable { line_number; detail; owner } ->
+       Log.Keeper.error
+         "Board attention candidate row unreadable; keeping completed partition undelivered keeper=%s partition=%s candidate=%s line=%d row=%s detail=%s"
+         keeper_name
+         partition.partition_id
          item.candidate_id
-     | Candidate.Delivered (_ : Candidate.candidate) -> ());
-    let* settled =
-      Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition
-    in
-    Ok settled
+         line_number
+         (match owner with
+          | Candidate.Row_names_candidate -> "names_candidate"
+          | Candidate.Row_candidate_id_unreadable -> "candidate_id_unreadable")
+         detail;
+       Ok (Completed_kept_unreadable partition))
   | Partition.Ready
   | Partition.Running _
   | Partition.Settled _
@@ -764,7 +785,7 @@ let signal_completion ~base_path = function
     let* () =
       if is_not_relevant_completion completed
       then (
-        let* (_ : Partition.t) =
+        let* (_ : completed_disposition) =
           deliver_and_settle_completed
             ~base_path
             ~keeper_name:completed.Partition.keeper_name
@@ -1041,7 +1062,7 @@ let complete_existing_judgment
     let* () =
       if is_not_relevant_completion completed
       then (
-        let* (_ : Partition.t) =
+        let* (_ : completed_disposition) =
           deliver_and_settle_completed
             ~base_path
             ~keeper_name:completed.Partition.keeper_name
@@ -1775,33 +1796,55 @@ let settle_completed_snapshot
     in
     deliver_and_settle_completed ~base_path ~keeper_name partition
   in
-  let rec settle_snapshot last_settled = function
-    | [] -> Ok last_settled
+  (* A partition kept for an unreadable candidate row does not stop the
+     snapshot: the partitions after it are settled in the same pass. *)
+  let rec settle_snapshot last_settled kept = function
+    | [] -> Ok (last_settled, List.rev kept)
     | partition :: rest ->
-      let* settled = settle_head partition in
+      let* disposition = settle_head partition in
       (match rest with
        | [] -> ()
        | _ :: _ -> Eio_guard.fair_yield ());
-      settle_snapshot settled rest
+      (match disposition with
+       | Completed_settled settled -> settle_snapshot (Some settled) kept rest
+       | Completed_kept_unreadable kept_partition ->
+         settle_snapshot last_settled (kept_partition :: kept) rest)
   in
   let* completed = completed_in_order ~base_path ~keeper_name in
   match completed with
   | [] -> Ok No_completed_partition
-  | first :: _ ->
-    let* settled = settle_snapshot first completed in
+  | _ :: _ ->
+    let* last_settled, kept = settle_snapshot None [] completed in
     Log.Keeper.info
-      "board_attention_completed_snapshot_settled keeper=%s count=%d"
+      "board_attention_completed_snapshot_settled keeper=%s count=%d kept_unreadable=%d"
       keeper_name
-      (List.length completed);
-    let* remaining = completed_in_order ~base_path ~keeper_name in
-    let continuation_wake =
-      match remaining with
-      | [] -> None
-      | _ :: _ -> Some (owner_wake ~base_path ~keeper_name)
-    in
-    Ok
-      (Partition_settled
-         { candidate_id = settled.Partition.candidate_id; continuation_wake })
+      (List.length completed - List.length kept)
+      (List.length kept);
+    (match last_settled with
+     | None ->
+       Error
+         (Printf.sprintf
+            "every completed Board attention partition in this snapshot names an unreadable candidate row keeper=%s kept=%d"
+            keeper_name
+            (List.length kept))
+     | Some settled ->
+       let* remaining = completed_in_order ~base_path ~keeper_name in
+       (* Kept partitions are still Completed; waking the owner for them
+          would only find them unreadable again. *)
+       let is_kept partition =
+         List.exists
+           (fun (kept_partition : Partition.t) ->
+              String.equal kept_partition.partition_id partition.Partition.partition_id)
+           kept
+       in
+       let continuation_wake =
+         match List.filter (fun partition -> not (is_kept partition)) remaining with
+         | [] -> None
+         | _ :: _ -> Some (owner_wake ~base_path ~keeper_name)
+       in
+       Ok
+         (Partition_settled
+            { candidate_id = settled.Partition.candidate_id; continuation_wake }))
 ;;
 
 let recovered_mutex = Stdlib.Mutex.create ()

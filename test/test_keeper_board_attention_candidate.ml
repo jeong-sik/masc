@@ -48,6 +48,8 @@ let delivered label = function
   | Ok (A.Delivered candidate) -> candidate
   | Ok A.Candidate_absent ->
     Alcotest.failf "%s: candidate absent (fixture did not persist it)" label
+  | Ok (A.Candidate_row_unreadable { line_number; detail; owner = _ }) ->
+    Alcotest.failf "%s: candidate row %d unreadable: %s" label line_number detail
   | Error detail -> Alcotest.failf "%s: %s" label detail
 ;;
 

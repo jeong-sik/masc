@@ -1479,6 +1479,8 @@ type rejected_row =
 type parse_report =
   { rows : candidate list
   ; rejected : rejected_row list
+  ; last_readable_line : int Candidate_map.t
+    (* line of the newest decoded row of each candidate_id *)
   }
 
 (* Reads only the [candidate_id] of a row the full decoder refused, through
@@ -1498,17 +1500,23 @@ let rejected_row_identity json =
 
 let parse_rows content =
   let lines = String.split_on_char '\n' content in
-  let rec loop line_number rows rejected = function
-    | [] -> { rows = List.rev rows; rejected = List.rev rejected }
+  let rec loop line_number rows rejected last_readable_line = function
+    | [] -> { rows = List.rev rows; rejected = List.rev rejected; last_readable_line }
     | line :: rest ->
       let line = String.trim line in
       if String.equal line ""
-      then loop (line_number + 1) rows rejected rest
+      then loop (line_number + 1) rows rejected last_readable_line rest
       else
         (match Yojson.Safe.from_string line with
          | json ->
            (match candidate_of_json json with
-            | Ok candidate -> loop (line_number + 1) (candidate :: rows) rejected rest
+            | Ok candidate ->
+              loop
+                (line_number + 1)
+                (candidate :: rows)
+                rejected
+                (Candidate_map.add candidate.candidate_id line_number last_readable_line)
+                rest
             | Error detail ->
               let row =
                 { rejected_line = line_number
@@ -1516,7 +1524,7 @@ let parse_rows content =
                 ; rejected_identity = rejected_row_identity json
                 }
               in
-              loop (line_number + 1) rows (row :: rejected) rest)
+              loop (line_number + 1) rows (row :: rejected) last_readable_line rest)
          | exception Yojson.Json_error detail ->
            let row =
              { rejected_line = line_number
@@ -1524,9 +1532,9 @@ let parse_rows content =
              ; rejected_identity = Rejected_unidentified
              }
            in
-           loop (line_number + 1) rows (row :: rejected) rest)
+           loop (line_number + 1) rows (row :: rejected) last_readable_line rest)
   in
-  loop 1 [] [] lines
+  loop 1 [] [] Candidate_map.empty lines
 ;;
 
 let ordered_latest by_id =
@@ -1669,7 +1677,7 @@ let cursor_result ~path result =
 ;;
 
 let apply_snapshot ~path state (snapshot : Fs_compat.private_jsonl_snapshot) =
-  let { rows; rejected } = parse_rows snapshot.Fs_compat.bytes in
+  let { rows; rejected; last_readable_line = _ } = parse_rows snapshot.Fs_compat.bytes in
   report_rejected_rows ~context:path rejected;
   let state = apply_decoded_rows state rows in
   { state with
@@ -1714,7 +1722,7 @@ let load_candidates_with_rejections ~base_path ~keeper_name =
     Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
     |> snapshot_result ~path
   in
-  let { rows; rejected } = parse_rows snapshot.Fs_compat.bytes in
+  let { rows; rejected; last_readable_line = _ } = parse_rows snapshot.Fs_compat.bytes in
   report_rejected_rows ~context:path rejected;
   Ok
     ( latest_candidates rows
@@ -2336,72 +2344,100 @@ let record_and_wake ~base_path candidate =
       }
 ;;
 
+type unreadable_row_owner =
+  | Row_names_candidate
+  | Row_candidate_id_unreadable
+
 type judgment_delivery_outcome =
   | Delivered of candidate
   | Candidate_absent
       (** The candidate this partition's [Completed] item names is not in the
-          live ledger, and every row of that ledger decoded or names another
-          candidate. A retire moves the whole candidate store aside as one
-          directory (scripts/check-runtime-deployment-preflight.sh); it never
-          leaves a tombstone the live ledger can read back, so the delivery
-          cannot succeed on a retry of the identical request, because the row
-          it would update no longer exists. A row the decoder refused that
-          names this candidate, or whose candidate cannot be read, is not
-          absence: the candidate may still carry an undelivered judgment, so
-          that case is an [Error] and the partition stays. Every other failure
-          below stays a typed [Error], because those represent a live
-          candidate in an unexpected state, which is a bug this function must
-          keep reporting loudly rather than quietly resolve. *)
+          live ledger, and no refused row there could be it. A retire moves
+          the whole candidate store aside as one directory
+          (scripts/check-runtime-deployment-preflight.sh) and leaves no
+          tombstone, so the delivery cannot succeed on a retry of the
+          identical request: the row it would update no longer exists. *)
+  | Candidate_row_unreadable of
+      { line_number : int
+      ; detail : string
+      ; owner : unreadable_row_owner
+      }
+      (** A row the decoder refused comes after the candidate's newest
+          readable row (or there is none) and either names the candidate or
+          has no readable [candidate_id]. The candidate's current state is
+          unknown, so nothing is delivered and nothing is settled: delivering
+          from an older readable row could enqueue a judgment twice, and
+          settling would drop one never delivered. Every other failure below
+          stays a typed [Error], because those represent a live candidate in
+          an unexpected state, which is a bug this function must keep
+          reporting loudly rather than quietly resolve. *)
 
-(* [load_candidates] drops rows it cannot decode, so a miss there does not
-   prove the candidate is gone. The miss is confirmed on a whole-store read
-   that returns the refused rows with the [candidate_id] each one carries. *)
+type delivery_lookup =
+  | Lookup_found of candidate
+  | Lookup_absent
+  | Lookup_unreadable of rejected_row
+
+(* The cached read drops rows it cannot decode. While the store holds none,
+   its answer is the whole truth. Otherwise the store is read whole and a
+   refused row newer than the candidate's newest readable row, naming it or
+   naming nothing readable, makes the candidate's state unknown. *)
 let find_candidate_for_delivery ~base_path ~keeper_name ~candidate_id =
-  let* candidates = load_candidates ~base_path ~keeper_name in
-  match find_candidate candidates candidate_id with
-  | Some candidate -> Ok (Some candidate)
-  | None ->
-    let path = candidate_path ~base_path ~keeper_name in
+  let path = candidate_path ~base_path ~keeper_name in
+  let entry = ledger_entry path in
+  let* cached =
+    Cross_context_mutex.with_lock entry.ledger_mutex (fun () ->
+      refresh_ledger ~path entry)
+  in
+  if Int.equal cached.rejected_rows 0
+  then
+    Ok
+      (match find_candidate cached.latest candidate_id with
+       | Some candidate -> Lookup_found candidate
+       | None -> Lookup_absent)
+  else
     let* snapshot =
       Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
       |> snapshot_result ~path
     in
-    let { rows; rejected } = parse_rows snapshot.Fs_compat.bytes in
-    (match find_candidate (latest_candidates rows) candidate_id with
-     | Some candidate -> Ok (Some candidate)
-     | None ->
-       let blocking =
-         List.find_opt
-           (fun { rejected_identity; rejected_line = _; rejected_detail = _ } ->
-              match rejected_identity with
-              | Rejected_candidate_id rejected_id -> String.equal rejected_id candidate_id
-              | Rejected_unidentified -> true)
-           rejected
-       in
-       (match blocking with
-        | None -> Ok None
-        | Some { rejected_line; rejected_detail; rejected_identity } ->
-          let owner =
-            match rejected_identity with
-            | Rejected_candidate_id _ -> "names this candidate"
-            | Rejected_unidentified -> "has no readable candidate_id"
-          in
-          Error
-            (Printf.sprintf
-               "Board attention candidate %s is not readable, so its absence is \
-                unproven: ledger %s line %d %s and was refused: %s"
-               candidate_id
-               path
-               rejected_line
-               owner
-               rejected_detail)))
+    let { rows; rejected; last_readable_line } = parse_rows snapshot.Fs_compat.bytes in
+    let newer_than_readable rejected_line =
+      match Candidate_map.find_opt candidate_id last_readable_line with
+      | None -> true
+      | Some newest_readable -> rejected_line > newest_readable
+    in
+    let could_be_this_candidate
+          { rejected_line; rejected_identity; rejected_detail = _ }
+      =
+      newer_than_readable rejected_line
+      &&
+      match rejected_identity with
+      | Rejected_candidate_id rejected_id -> String.equal rejected_id candidate_id
+      | Rejected_unidentified -> true
+    in
+    Ok
+      (match List.find_opt could_be_this_candidate rejected with
+       | Some row -> Lookup_unreadable row
+       | None ->
+         (match find_candidate (latest_candidates rows) candidate_id with
+          | Some candidate -> Lookup_found candidate
+          | None -> Lookup_absent))
 ;;
 
 let apply_judgment_and_deliver ~base_path ~keeper_name ~candidate_id ~judgment =
   let* found = find_candidate_for_delivery ~base_path ~keeper_name ~candidate_id in
   match found with
-  | None -> Ok Candidate_absent
-  | Some candidate ->
+  | Lookup_absent -> Ok Candidate_absent
+  | Lookup_unreadable { rejected_line; rejected_detail; rejected_identity } ->
+    Ok
+      (Candidate_row_unreadable
+         { line_number = rejected_line
+         ; detail = rejected_detail
+         ; owner =
+             (match rejected_identity with
+              | Rejected_candidate_id _ -> Row_names_candidate
+              | Rejected_unidentified -> Row_candidate_id_unreadable)
+         })
+  | Lookup_found candidate ->
     let* judged_candidate =
       match status_view candidate.status with
       | Direct_resumable (Resumable_pending _)

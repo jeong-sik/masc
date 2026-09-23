@@ -71,6 +71,8 @@ let delivered label = function
   | Ok (A.Delivered candidate) -> candidate
   | Ok A.Candidate_absent ->
     Alcotest.failf "%s: candidate absent (fixture did not persist it)" label
+  | Ok (A.Candidate_row_unreadable { line_number; detail; owner = _ }) ->
+    Alcotest.failf "%s: candidate row %d unreadable: %s" label line_number detail
   | Error detail -> Alcotest.failf "%s: %s" label detail
 ;;
 
@@ -2761,83 +2763,129 @@ let test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_
       "the terminalized partition was offered for settlement again (infinite retry)"
 ;;
 
-(* A ledger row the decoder refuses is dropped from [load_candidates], which
-   used to read as [Candidate_absent] and settle a Relevant judgment that was
-   never delivered. Here every row for the candidate carries an unsupported
-   schema_version: settlement must fail, keep the partition Completed with its
-   judgment, and deliver once the row is readable again. *)
+(* Unreadable-row fixtures. The writer never emits an unsupported
+   schema_version, so these rewrite the ledger bytes to model a row the
+   decoder refuses. A staged rename replaces the file, so the reader's cached
+   cursor sees a new store and reads it whole. *)
+let candidate_ledger_path ~base_path =
+  Filename.concat
+    (Filename.concat
+       (Common.masc_dir_from_base_path ~base_path)
+       "board_attention_candidates")
+    "alpha.jsonl"
+;;
+
+let read_candidate_ledger ~base_path =
+  In_channel.with_open_bin (candidate_ledger_path ~base_path) In_channel.input_all
+;;
+
+let replace_candidate_ledger ~base_path bytes =
+  let path = candidate_ledger_path ~base_path in
+  let staged = path ^ ".replace" in
+  Out_channel.with_open_bin staged (fun channel -> output_string channel bytes);
+  Sys.rename staged path
+;;
+
+let unsupported_schema_row (candidate : A.candidate) =
+  match A.candidate_to_json candidate with
+  | `Assoc fields ->
+    Yojson.Safe.to_string
+      (`Assoc (("schema_version", `Int (-1)) :: List.remove_assoc "schema_version" fields))
+    ^ "\n"
+  | _ -> Alcotest.fail "candidate JSON is not an object"
+;;
+
+let ledger_rows_without ~candidate_id bytes =
+  String.split_on_char '\n' bytes
+  |> List.filter (fun line ->
+    match String.trim line with
+    | "" -> false
+    | trimmed ->
+      (match Yojson.Safe.from_string trimmed with
+       | `Assoc fields ->
+         (match List.assoc_opt "candidate_id" fields with
+          | Some (`String id) -> not (String.equal id candidate_id)
+          | Some _ | None -> true)
+       | _ -> true))
+  |> List.map (fun line -> line ^ "\n")
+  |> String.concat ""
+;;
+
+(* Judges whichever Ready partition the worker picks next. *)
+let judge_next_to_completed ~base_path ~decision =
+  let execute ~before_dispatch ~before_advance:_ (prepared : A.candidate) =
+    let attempt = provenance ("attempt-" ^ prepared.candidate_id) in
+    ok "bind" (before_dispatch attempt);
+    Ok (judgment attempt decision)
+  in
+  match
+    ok
+      "judge to Completed"
+      (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+  with
+  | W.Judgment_completed { candidate_id = _; _ } -> ()
+  | W.Idle
+  | W.Contended _
+  | W.Rescan_later _
+  | W.Candidate_already_consumed _
+  | W.Partition_blocked _ -> Alcotest.fail "fixture did not reach Completed"
+;;
+
+let partition_state_of ~base_path ~candidate_id =
+  match
+    List.find_opt
+      (fun (partition : P.t) -> String.equal partition.candidate_id candidate_id)
+      (ok "load partitions" (P.load ~base_path ~keeper_name:"alpha"))
+  with
+  | Some partition -> partition.state
+  | None -> Alcotest.failf "no partition for %s" candidate_id
+;;
+
+let candidate_status_of ~base_path ~candidate_id =
+  match
+    List.find_opt
+      (fun (candidate : A.candidate) -> String.equal candidate.candidate_id candidate_id)
+      (ok "load candidates" (A.load_candidates ~base_path ~keeper_name:"alpha"))
+  with
+  | Some candidate -> candidate.status
+  | None -> Alcotest.failf "no readable candidate %s" candidate_id
+;;
+
+(* The cached ledger read drops a row it cannot decode. That used to read as
+   [Candidate_absent] and settle a Relevant judgment never delivered. With
+   the candidate's only row refused, settlement keeps the partition Completed
+   with its judgment and delivers once the row reads again. *)
 let test_settle_completed_snapshot_keeps_a_partition_whose_candidate_row_is_unreadable
   ()
   =
   with_temp_base "board-attention-worker-candidate-unreadable" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
-  ignore
-    (ok
-       "create Ready root"
-       (P.ensure_roots ~base_path ~keeper_name:"alpha" [ persisted ])
-      : int);
-  let attempt = provenance "candidate-unreadable" in
-  let execute ~before_dispatch ~before_advance _prepared =
-    ok "bind" (before_dispatch attempt);
-    ignore before_advance;
-    Ok (judgment attempt J.Relevant)
-  in
-  (match
-     ok
-       "judge to Completed"
-       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
-   with
-   | W.Judgment_completed { candidate_id; _ }
-     when String.equal candidate_id persisted.candidate_id -> ()
-   | _ -> Alcotest.fail "fixture did not reach Completed");
-  let ledger_path =
-    Filename.concat
-      (Filename.concat
-         (Common.masc_dir_from_base_path ~base_path)
-         "board_attention_candidates")
-      "alpha.jsonl"
-  in
-  let replace_ledger bytes =
-    let staged = ledger_path ^ ".replace" in
-    Out_channel.with_open_bin staged (fun channel -> output_string channel bytes);
-    Sys.rename staged ledger_path
-  in
-  let original = In_channel.with_open_bin ledger_path In_channel.input_all in
-  let unsupported_schema line =
-    match Yojson.Safe.from_string line with
-    | `Assoc fields ->
-      Yojson.Safe.to_string
-        (`Assoc
-            (("schema_version", `Int (-1)) :: List.remove_assoc "schema_version" fields))
-    | _ -> Alcotest.fail "candidate ledger row is not an object"
-  in
+  judge_next_to_completed ~base_path ~decision:J.Relevant;
+  let original = read_candidate_ledger ~base_path in
   let corrupted =
-    String.split_on_char '\n' original
-    |> List.filter (fun line -> not (String.equal (String.trim line) ""))
-    |> List.map (fun line -> unsupported_schema line ^ "\n")
-    |> String.concat ""
+    ledger_rows_without ~candidate_id:persisted.candidate_id original
+    ^ unsupported_schema_row (load_one_candidate ~base_path)
   in
-  replace_ledger corrupted;
-  Alcotest.(check int)
-    "the corrupt row is not a readable candidate"
-    0
-    (ok "load corrupt ledger" (A.load_candidates ~base_path ~keeper_name:"alpha")
-     |> List.length);
+  replace_candidate_ledger ~base_path corrupted;
   (match W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" with
    | Error (_ : string) -> ()
    | Ok (W.Partition_settled _) ->
      Alcotest.fail "an unreadable candidate row was settled as absent"
    | Ok W.No_completed_partition ->
      Alcotest.fail "the Completed partition disappeared before settlement");
-  (match (load_one_partition ~base_path).state with
-   | P.Completed { item = { judgment = kept; _ }; _ } ->
-     Alcotest.(check string) "the judgment stays on the partition" attempt.slot_id kept.slot_id
-   | _ -> Alcotest.fail "partition with an unreadable candidate left Completed");
+  (match partition_state_of ~base_path ~candidate_id:persisted.candidate_id with
+   | P.Completed _ -> ()
+   | P.Ready | P.Running _ | P.Settled _ | P.Blocked _ ->
+     Alcotest.fail "partition with an unreadable candidate left Completed");
   Alcotest.(check string)
-    "the unreadable rows stay on disk"
+    "the unreadable row stays on disk"
     corrupted
-    (In_channel.with_open_bin ledger_path In_channel.input_all);
-  replace_ledger original;
+    (read_candidate_ledger ~base_path);
+  Alcotest.(check int)
+    "nothing was enqueued while the row was unreadable"
+    0
+    (relevant_delivery_count ~base_path ~candidate_id:persisted.candidate_id);
+  replace_candidate_ledger ~base_path original;
   (match
      ok
        "settlement after the row is readable again"
@@ -2847,9 +2895,89 @@ let test_settle_completed_snapshot_keeps_a_partition_whose_candidate_row_is_unre
      when String.equal candidate_id persisted.candidate_id -> ()
    | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
    | W.No_completed_partition -> Alcotest.fail "the kept judgment was not settled");
-  match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+  match
+    ( candidate_status_of ~base_path ~candidate_id:persisted.candidate_id
+    , partition_state_of ~base_path ~candidate_id:persisted.candidate_id )
+  with
   | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }, P.Settled _ -> ()
   | _ -> Alcotest.fail "the kept judgment was not delivered after repair"
+;;
+
+(* One unreadable candidate must not hold back the keeper's other completed
+   partitions: the snapshot keeps that one and settles the rest. *)
+let test_an_unreadable_candidate_row_does_not_stop_the_other_settlements () =
+  with_temp_base "board-attention-worker-unreadable-one-of-two" @@ fun base_path ->
+  let unreadable =
+    record ~base_path (candidate ~id:"candidate-unreadable" ~recorded_at:1.0 ())
+  in
+  let readable =
+    record ~base_path (candidate ~id:"candidate-readable" ~recorded_at:2.0 ())
+  in
+  judge_next_to_completed ~base_path ~decision:J.Relevant;
+  judge_next_to_completed ~base_path ~decision:J.Relevant;
+  let original = read_candidate_ledger ~base_path in
+  replace_candidate_ledger
+    ~base_path
+    (ledger_rows_without ~candidate_id:unreadable.candidate_id original
+     ^ unsupported_schema_row unreadable);
+  (match
+     ok
+       "settle past the unreadable partition"
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
+   with
+   | W.Partition_settled { candidate_id; continuation_wake } ->
+     Alcotest.(check string) "the readable one settled" readable.candidate_id candidate_id;
+     Alcotest.(check bool)
+       "a kept partition does not wake the owner again"
+       true
+       (Option.is_none continuation_wake)
+   | W.No_completed_partition -> Alcotest.fail "nothing was settled");
+  (match partition_state_of ~base_path ~candidate_id:unreadable.candidate_id with
+   | P.Completed _ -> ()
+   | P.Ready | P.Running _ | P.Settled _ | P.Blocked _ ->
+     Alcotest.fail "the unreadable candidate's partition left Completed");
+  match partition_state_of ~base_path ~candidate_id:readable.candidate_id with
+  | P.Settled _ -> ()
+  | P.Ready | P.Running _ | P.Completed _ | P.Blocked _ ->
+    Alcotest.fail "the readable candidate's partition was not settled"
+;;
+
+(* An older readable row does not speak for a candidate whose newer row is
+   refused: delivering from it could enqueue a judgment the newer row already
+   carried. The Not_relevant path settles inside [process], so this also pins
+   that [process] reports the completion instead of an error. *)
+let test_a_newer_unreadable_row_hides_the_older_readable_one () =
+  with_temp_base "board-attention-worker-newer-row-unreadable" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ~id:"candidate-newer-unreadable" ()) in
+  let execute ~before_dispatch ~before_advance:_ (prepared : A.candidate) =
+    let attempt = provenance ("attempt-" ^ prepared.candidate_id) in
+    ok "bind" (before_dispatch attempt);
+    replace_candidate_ledger
+      ~base_path
+      (read_candidate_ledger ~base_path ^ unsupported_schema_row persisted);
+    Ok (judgment attempt J.Not_relevant)
+  in
+  (match
+     ok
+       "a Not_relevant completion on an unreadable row"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Judgment_completed _
+   | W.Idle
+   | W.Contended _
+   | W.Rescan_later _
+   | W.Candidate_already_consumed _
+   | W.Partition_blocked _ -> Alcotest.fail "the judgment did not complete");
+  (match partition_state_of ~base_path ~candidate_id:persisted.candidate_id with
+   | P.Completed _ -> ()
+   | P.Ready | P.Running _ | P.Settled _ | P.Blocked _ ->
+     Alcotest.fail "the partition left Completed on an unreadable row");
+  match candidate_status_of ~base_path ~candidate_id:persisted.candidate_id with
+  | A.Pending _ -> ()
+  | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+    Alcotest.fail "the older readable row was advanced past a newer unreadable one"
 ;;
 
 let () =
@@ -3021,6 +3149,14 @@ let () =
             "settle_completed_snapshot keeps a partition whose candidate row is unreadable"
             `Quick
             test_settle_completed_snapshot_keeps_a_partition_whose_candidate_row_is_unreadable
+        ; Alcotest.test_case
+            "an unreadable candidate row does not stop the other settlements"
+            `Quick
+            test_an_unreadable_candidate_row_does_not_stop_the_other_settlements
+        ; Alcotest.test_case
+            "a newer unreadable row hides the older readable one"
+            `Quick
+            test_a_newer_unreadable_row_hides_the_older_readable_one
         ; Alcotest.test_case
             "reconcile_quarantines settles a blocked partition whose candidate was retired"
             `Quick

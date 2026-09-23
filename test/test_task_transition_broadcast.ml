@@ -79,14 +79,35 @@ let contents config ~baseline_seq =
 ;;
 
 (* Every transition into [AwaitingVerification] persists a request before it
-   commits, and this suite has no verification store. Both obligations stand
-   in for one, so a cancellation reaches the wording under test rather than
-   failing on absent storage. *)
-let stub_verification_request ~task:_ ~assignee:_ ~verification_id:_ ~claim:_ = Ok ()
+   commits, and this suite has no verification store. The stub stands in for
+   one: it writes the producer's stated reason where the approved-cancellation
+   path reads it back (#38192), and nothing else. A completion claim carries
+   no reason, so it writes no record and the path under test is unchanged. *)
+let stub_verification_request config ~task:(task : D.task) ~assignee ~verification_id
+      ~claim =
+  match claim with
+  | D.Completion_evidence _ -> Ok ()
+  | D.Cancellation_reason { reason } ->
+    Masc.Verification.create_request
+      ~base_path:config.Workspace.base_path
+      ~task_id:task.id
+      ~output:
+        (`Assoc
+          [ Workspace_verification_store.cancellation_reason_field, `String reason ])
+      ~criteria:[]
+      ~worker:assignee
+      ~request_id:verification_id
+      ()
+    |> Result.map (fun (_ : Masc.Verification.verification_request) -> ())
+;;
 
 let transition config ~task_id ~action
-      ?(prepare_verification_request = stub_verification_request) ?(reason = "")
-      ?(notes = "") () =
+      ?prepare_verification_request ?(reason = "") ?(notes = "") () =
+  let prepare_verification_request =
+    match prepare_verification_request with
+    | Some prepare -> prepare
+    | None -> stub_verification_request config
+  in
   Workspace.transition_task_r
     config
     ~agent_name:owner
@@ -271,7 +292,7 @@ let test_explicit_reason_outranks_handoff_context () =
       (make_task ~id:"task-11" ~status:(D.InProgress { assignee = owner; started_at = now }));
     check_ok "cancel"
       (Workspace.transition_task_r config ~agent_name:owner ~task_id:"task-11"
-         ~prepare_verification_request:stub_verification_request
+         ~prepare_verification_request:(stub_verification_request config)
          ~action:D.Cancel ~notes:""
          ~reason:"superseded by task-12"
          ~handoff_context:

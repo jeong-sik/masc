@@ -168,9 +168,8 @@ let test_prefit_real_continuity ~base_path () =
   (* Independently measure the exact prompt contract to derive the fixture's
      server limit, including template, current facts, continuity and schema. *)
   let rendered prepared input =
-    let input = {input with Keeper_librarian.working_context=Context.empty} in
-    let variables = ("continuity", Yojson.Safe.to_string (P.prompt_json prepared))
-      :: List.remove_assoc "continuity" (Keeper_librarian.prompt_variables input) in
+    let variables =
+      Keeper_librarian_runtime.librarian_prompt_variables ~continuity:prepared input |> get in
     let _, prompt = Prompt_registry.resolve_and_render_prompt_template
       Prompt_names.librarian variables |> get in
     let requirement = Agent_core.Exact_output.make_output_requirement
@@ -311,7 +310,7 @@ let test_prefit_real_continuity ~base_path () =
   let fact = Keeper_memory_os_types.observed ~claim:("New fact " ^ String.make 200 'f')
     ~category:Keeper_memory_os_types.Fact ~now:1001.
     ~origin:{kind=Keeper_memory_os_types.Authored;trace_id} in
-  ignore (Current.apply_disposition ~keepers_dir ~keeper_id ~now:1001.
+  ignore (Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id ~now:1001.
     ~source:{kind=Current.Librarian;trace_id} ~absorbed:[] ~new_claims:[fact] () |> get);
   let next = prepare () in
   Alcotest.(check bool) "new state and Memory overhead make former atom count exceed limit"

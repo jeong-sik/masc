@@ -235,6 +235,27 @@ status: reference
     `Quarantined`)와 다른 층위다.
   → [Keeper_board_attention_partition](../../lib/keeper/keeper_board_attention_partition.mli)
 
+**Board Attention Quarantine (Board 판정 격리)**
+: Board attention 판정 워커가 정상적으로 완료할 수 없는 후보(`candidate`)와 파티션을
+  격리 보관하는 상태 및 그 인벤토리. 워커는 격리된 항목을 스스로 재시도하지 않으며,
+  오직 운영자의 재투입(`requeue`) 요청으로만 풀려난다(#38260·#38262).
+  - 격리 원인 카테고리(`quarantine_failure_category`): 닫힌 12개 값이다.
+    `Candidate_membership_conflict`·`Durable_partition_invariant`·`Exact_setup_unavailable`·`Exact_flow_replayed`·`Exact_lane_exhausted`(모든
+    HTTP 슬롯 및 CLI tail 거부로 모델 슬롯 소진)·`Exact_flow_bookkeeping_failed`(장부
+    기록 실패)·`Exact_completion_failed`(완료 단계 실패)·`Domain_output_invalid`·`Execution_provenance_mismatch`·`Unexpected_worker_failure`·`Exact_execution_quarantined`(호출
+    단계 미기록)·`Exact_execution_interrupted`(프로세스 재시작으로 바인딩된 실행이
+    끊김. 읽기 전용 모델 호출이라 토큰 외 부작용 없이 재투입 가능).
+  - TUI 표시 및 복구:
+    - Keeper Info 탭에 원인 카테고리별로 집계(건수, 최장 경과 시간, 파티션 ID, 재투입
+      대기 수)되어 표시된다. 수백 건의 슬롯 소진 행이 화면을 덮지 않도록 카테고리당 한 줄로 묶는다.
+    - `Q` 키를 누르면 가장 오래 대기 중인 항목(`oldest_waiting`)부터 원장의
+      `Requeue_requested`로 전이시키며 재투입을 요청한다.
+    - 재투입 요청은 읽을 때의 `quarantine_id`로 펜싱되어, 같은 파티션의 더 새로운 격리 상태를
+      낡은 식별자로 덮어쓰지 않는다.
+    - 서버가 새로 추가한 알 수 없는 카테고리는 떨어뜨리지 않고 `Unreadable_row`로 보존·계수하여
+      격리 수가 화면에서 축소 왜곡되지 않게 한다.
+  → [Keeper_board_attention_candidate](../../lib/keeper/keeper_board_attention_candidate.mli) · [Keeper_board_attention_quarantine_command](../../lib/keeper/keeper_board_attention_quarantine_command.mli) · [Masc_tui_board_quarantine](../../bin/masc_tui_board_quarantine.mli)
+
 **Keeper Cycle**
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
@@ -1052,6 +1073,18 @@ status: reference
   (RFC-0465).
   → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli)
 
+**PR Attribution (PR 귀속)**
+: 열린 GitHub Pull Request를 작업한 Keeper와 잇는 표시 규칙(RFC-0465).
+  `GET /api/v1/repositories/pulls`가 PR의 `author`(머지 커밋을 건너뛴 최신 단일
+  부모 커밋의 작성자 이름, #38277)와 지속된 Keeper 이름(`keepers_listed`)을 대조해
+  일치하는 Keeper에게 귀속한다(`keeper`). 샌드박스 런타임은 실행 환경의
+  `GIT_AUTHOR_NAME`과 `GIT_COMMITTER_NAME`에 그 Keeper 이름을 넣어 커밋에
+  작성자가 남도록 보장한다(#38253). Keeper 목록 조회가 실패하면(`Keepers_list_failed`)
+  PR을 일반(비-Keeper) PR로 오인하지 않고 목록 전체를 미결정으로 둔다. 이 귀속은
+  TUI와 대시보드의 표시 전용(display only)이며, 커미터가 작성자 이름을 임의
+  지정할 수 있으므로 권한(authority)이나 실행 증명으로 삼지 않는다.
+  → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli)
+
 ## Continuity
 
 **Autoboot Exclusion Reason (자동 부팅 제외 이유)**
@@ -1500,8 +1533,8 @@ status: reference
 **Origin**
 : Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,
   `injected`는 Librarian이 대화에서 뽑아 넣은 것이다. Keeper는 자신이 직접 적은
-  현재 Fact만 `supersedes`로 대체할 수 있고, Librarian이 넣은 `injected` Fact나
-  다른 Keeper의 Fact는 대체할 수 없다(#38122).
+  현재 Fact만 `supersedes`로 대체할 수 있고, Librarian이 넣은 `injected` Fact는
+  대체할 수 없다(#38122).
 
 **Basis**
 : Fact가 무엇에 근거하나. `observed`는 읽은 곳(자기 대화 또는 Board 글)을 갖고,
@@ -1526,19 +1559,48 @@ status: reference
     `dropped`에 넣고, 현재 상태 claim의 `absorbs`에 넣지 않는다.
     코드 규칙: absorb gate는 판정 모델에게 흡수된 Fact의 문장마다 새 claim이 그 내용을
     말하는지 묻는다. 말하지 않는 문장이 하나라도 있으면 그 Fact는 흡수되지 않고 현재
-    Fact로 남는다. 답 전체가 거절되지는 않고 새 claim은 그대로 적용된다(#38056).
-    흡수 대상(`into`)이 잠근 시점의 스냅숏에도, 이번 답의 새 claim에도 없으면(회차 도중
-    Keeper가 그 Fact를 철회하거나 `supersedes`로 대체한 경우) 그 흡수는 적용하지 않는다.
-    원문은 현재 Fact로 남고, 지워진 대상은 되살아나지 않으며, warn 로그만 남는다(#38231).
+    Fact로 남는다. 새 claim은 원칙적으로 적용되나, `absorbs`에 지정한 기억 중 어느 것도
+    흡수되지 않은 claim이 기존 기억의 사본이면 역방향 사본 판정(Reverse Copy Judgment)을
+    거쳐 저장하지 않고 버린다(#38056·#38243). 흡수 대상(`into`)이 잠근 시점의 스냅숏에도,
+    이번 답의 새 claim에도 없으면(회차 도중 Keeper가 그 Fact를 철회하거나 `supersedes`로
+    대체한 경우) 그 흡수는 적용하지 않는다. 원문은 현재 Fact로 남고, 지워진 대상은
+    되살아나지 않으며, Librarian 실행 기록(`run` 출력)에 실제로 적용된 흡수와 미적용
+    흡수를 구분해 남긴다(#38231·#38267).
   - Keeper 직접 갱신: `keeper_memory_write`는 선택 인자 `supersedes`로 자신이 직접
     적은 이전 Fact 하나를 새 claim으로 대체할 수 있다(#38122). 원자적(locked) 한 번의
     커밋으로 이전 Fact를 지우고 새 Fact를 적으며, 저널에 `superseded_by` 사유를 남기고
     원장에 `Revised` 이벤트를 기록한다. 철회와 마찬가지로 대체된 Fact를 전제로 삼던 유도
     Fact들도 함께 무효화되며 영수증의 `removed_memory_ids`와 `support_invalidations`로
-    보고된다. 알 수 없는 id, 이미 지난(non-current) id, `injected` id, 다른 Keeper의
-    id, 자기 자신 id, `source_path`와의 동시 지정, 그리고 대체될 Fact를 전제로
-    삼는 유도 claim(`supersedes_premise_of_successor`)은 모두 거절되며 아무것도 적지 않는다.
+    보고된다. 기억 저장소는 Keeper마다 따로라서, 이 Keeper의 현재 Fact가 아닌 id는
+    알 수 없는 id든 이미 지난 id든 모두 non-current로 거절된다. 그 밖에 `injected` id,
+    대체할 Fact와 글자까지 똑같은 claim(`supersedes_self`), `source_path`와의 동시 지정,
+    대체될 Fact를 전제로 삼는 유도 claim(`supersedes_premise_of_successor`), 근거 경로가
+    없는 유도 claim(`unsupported_derivation`)도 거절되며 아무것도 적지 않는다.
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.ml) · [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli) · [librarian.md](../../config/prompts/librarian.md)
+
+**Reverse Copy Judgment (역방향 사본 판정)**
+: Librarian 회차가 내놓은 새 claim 중 `absorbs`에 기억을 적었으나 실제로는 그 중
+  아무것도 흡수하지 못한 claim에 대해, 남겨진 기억들이 그 claim의 내용을 이미
+  담고 있는지 묻는 역방향 판정. "새 claim은 항상 적용된다"는 기본 규칙의 단 하나의
+  예외다(RFC-0463 §2.8·#38243).
+  - 배경: Librarian이 매 회차 같은 주제를 조금씩 다른 문장으로 다시 써서 기존 Fact가
+    흡수되지 않고 paraphrase 사본이 무한 축적되는 문제를 막는다.
+  - 전이 및 판정:
+    - 대상: `absorbs`에 기억을 나열했으나 absorb gate에서 0건만 흡수 승인된 새 claim.
+      단, `supersedes`로 대체 대상이 지정된 claim은 제외한다(`Continues_a_dropped_memory` —
+      버리면 대체 대상만 사라지고 빈자리가 남기 때문).
+    - 절차: 남겨진 원본 기억들을 최대 `state_bytes_limit` 바이트 크기로 묶어 상태를
+      구성하고, 새 claim을 문장 단위(`statements`)로 쪼개어 판정 모델에 묻는다.
+    - 경계: 점수가 `conveyed_boundary`를 엄격히 넘을 때만 전달된 것으로 인정하며,
+      동점(tie)은 claim을 버리지 않도록 미전달로 본다.
+    - 결과: 모든 문장이 전달되었으면 `Copy`로 판정해 원장에 저장하지 않고
+      탈락시킨다(`without_copies`). 전달되지 않은 문장이 하나라도 있으면
+      `Carries_new_statement`로 정상 적용한다. 판정 실패나 크기 초과 등
+      `Not_judged`(`Gate_judgment_failed`·`No_source_fits_the_state`·`Statement_too_large`·`No_statement`·`Request_failed`)인
+      경우에도 기존처럼 정상 적용한다.
+  - 저장 및 표면: 탈락된 claim은 원장에 쓰이지 않고 로그에 남으며, Librarian 회차
+    실행 결과의 `copy_checks`에 각 판정 결과(`verdict`)와 호출 횟수가 기록된다.
+  → [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli)
 
 **Memory Event**
 : Fact에 일어난 일의 기록(`<keeper>.memory-events.jsonl`). `retrieved`는

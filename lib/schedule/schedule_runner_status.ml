@@ -205,6 +205,14 @@ let record_tick_crash ~started_at ~finished_at error =
 
 let snapshot () = Atomic.get state
 
+let held_occurrence snapshot ~schedule_instance_id ~schedule_id =
+  List.find_opt
+    (fun (signal : Schedule_runner.wake_signal) ->
+       String.equal signal.schedule_instance_id schedule_instance_id
+       && String.equal signal.schedule_id schedule_id)
+    snapshot.held
+;;
+
 
 let counts_json (counts : tick_counts) =
     `Assoc

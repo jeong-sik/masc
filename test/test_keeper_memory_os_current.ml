@@ -69,6 +69,7 @@ let apply_disposition
       ?durable_range_id
       ?official_range_id
       ?(absorbed = [])
+      ?(revisions = [])
       ?(new_claims = [])
       ()
   =
@@ -77,12 +78,14 @@ let apply_disposition
     ?durable_range_id
     ?official_range_id
     ~absorbed
+    ~revisions
     ~keepers_dir
     ~keeper_id:"keeper"
     ~now:200.0
     ~source:(source Current.Librarian)
     ~new_claims
     ()
+  |> Result.map (fun (disposition : Current.disposition) -> disposition.snapshot)
 ;;
 
 let require_ok = function

@@ -15328,9 +15328,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                       selected, and nothing else is armed. Anywhere else a
                       [U] means something else, so the line only informs. *)
                    let offer_here =
-                     (match state.view with
-                      | Keepers (Keeper_list | Keeper_detail) -> true
-                      | _ -> false)
+                     Masc_tui_types.shows_selected_keeper state.view
                      && (match selected_keeper state with
                          | Some keeper -> String.equal keeper.k_name keeper_name
                          | None -> false)
@@ -23870,9 +23868,7 @@ and is loaded on demand through keeper_skill.
            launch_keeper_tool_mode_set state ~mailbox:async_messages
              ~keeper_name:keeper.k_name ~mode
        | Some "U"
-         when (match state.view with
-               | Keepers (Keeper_list | Keeper_detail) -> true
-               | _ -> false)
+         when Masc_tui_types.shows_selected_keeper state.view
               && Option.is_some state.connector_unbind_all_armed ->
            (* An armed unbind-all -- a first [U] on Channels, or the offer
               after a pause -- takes the next [U] before the runtime picker

@@ -65,9 +65,15 @@ type snapshot =
   { reader : reader
   ; repositories_error : string option
   ; repositories : repository_entry list
+  ; rejected_token_digest : string option
   }
 
-let initial = { reader = Reader_not_declared; repositories_error = None; repositories = [] }
+let initial =
+  { reader = Reader_not_declared
+  ; repositories_error = None
+  ; repositories = []
+  ; rejected_token_digest = None
+  }
 
 type response =
   { status : int
@@ -441,7 +447,27 @@ let resolve_reader ~base_path =
             reader_of_table ~base_path entries
           | Some _ -> declaration_invalid "[%s] must be a table" repositories_table)))
 
+(* A digest, so the snapshot can tell a new token from the refused one without
+   holding either. *)
+let token_digest token = Digest.BLAKE256.(to_hex (string token))
+
+(* GitHub's own answer about a credential or a quota, held until the fact it
+   names can have changed: a refused token until hosts.yml holds another one,
+   an exhausted limit until GitHub's reset time. Asking again sooner cannot get
+   a different answer. *)
+let held_answer ~now_s ~digest ~previous_digest = function
+  | Pulls_failed { failure = Token_rejected; _ } as held
+    when Option.equal String.equal previous_digest (Some digest) -> Some held
+  | Pulls_failed { failure = Rate_limited { reset_at = Some reset_at }; _ } as held
+    when now_s < reset_at -> Some held
+  | Pulls_not_read | Pulls_not_github | Pulls_read _ | Pulls_failed _ -> None
+
+let is_token_rejected = function
+  | Pulls_failed { failure = Token_rejected; _ } -> true
+  | Pulls_not_read | Pulls_not_github | Pulls_read _ | Pulls_failed _ -> false
+
 let refresh ~now ~http_post ~base_path ~previous =
+  let now_s = now () in
   let credential = resolve_reader ~base_path in
   let reader =
     match credential with
@@ -450,21 +476,49 @@ let refresh ~now ~http_post ~base_path ~previous =
   in
   match Repo_store.load_all ~base_path with
   | Error reason ->
-    { reader; repositories_error = Some reason; repositories = previous.repositories }
+    { reader
+    ; repositories_error = Some reason
+    ; repositories = previous.repositories
+    ; rejected_token_digest = previous.rejected_token_digest
+    }
   | Ok repos ->
+    let previous_pulls id =
+      match
+        List.find_opt (fun entry -> String.equal entry.repository_id id) previous.repositories
+      with
+      | Some entry -> entry.pulls
+      | None -> Pulls_not_read
+    in
     let entry (repo : Repo_manager_types.repository) =
       let slug = github_slug_of_remote repo.url in
       let pulls =
         match slug, credential with
         | None, _ -> Pulls_not_github
-        | Some slug, Ok { token; keeper = _ } -> read_repository ~now ~http_post ~token slug
+        | Some slug, Ok { token; keeper = _ } ->
+          (match
+             held_answer
+               ~now_s
+               ~digest:(token_digest token)
+               ~previous_digest:previous.rejected_token_digest
+               (previous_pulls repo.id)
+           with
+           | Some held -> held
+           | None -> read_repository ~now ~http_post ~token slug)
         (* An earlier read would show checks and reviews the server can no
            longer vouch for; [reader] says why nothing is read now. *)
         | Some _, Error _ -> Pulls_not_read
       in
       { repository_id = repo.id; url = repo.url; slug; pulls }
     in
-    { reader; repositories_error = None; repositories = List.map entry repos }
+    let repositories = List.map entry repos in
+    let rejected_token_digest =
+      match credential with
+      | Ok { token; keeper = _ }
+        when List.exists (fun entry -> is_token_rejected entry.pulls) repositories ->
+        Some (token_digest token)
+      | Ok _ | Error _ -> None
+    in
+    { reader; repositories_error = None; repositories; rejected_token_digest }
 
 (* --- JSON --- *)
 

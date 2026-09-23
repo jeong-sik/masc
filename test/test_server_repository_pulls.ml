@@ -262,6 +262,115 @@ let test_unknown_key_is_refused () =
   | Pulls.Reader_declaration_invalid _ -> ()
   | _ -> failf "a misspelt key must not read as no declaration"
 
+(* A workspace whose reader is ready: runtime.toml names [reader], the Keeper
+   is declared, and its GitHub CLI holds [token] for github.com. One GitHub
+   repository is registered. *)
+let reader_keeper = "pr-reader"
+
+let write_reader_token base_path token =
+  match Masc.Keeper_github_identity.secret_files_of_base_path ~base_path ~keeper_name:reader_keeper with
+  | [ hosts ] ->
+    write_file
+      hosts
+      (Printf.sprintf "github.com:\n  user: reader\n  oauth_token: %s\n" token);
+    Unix.chmod hosts 0o600
+  | _ -> failf "expected one hosts.yml path for the reader"
+
+let ready_base_path ~token =
+  let base_path = temp_base_path () in
+  (match
+     Repo_store.save_all
+       ~base_path
+       [ repository ~id:"masc" ~url:"https://github.com/jeong-sik/masc.git" ]
+   with
+   | Ok () -> ()
+   | Error message -> failf "save_all: %s" message);
+  write_file
+    (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+    (Printf.sprintf "[repositories]\npr_reader = %S\n" reader_keeper);
+  write_file
+    (Config_dir_resolver.keeper_toml_path_for_base_path ~base_path reader_keeper)
+    "[keeper]\n";
+  write_reader_token base_path token;
+  base_path
+
+(* Answers every call with [answer] and counts the calls. *)
+let counting_stub answer =
+  let calls = ref 0 in
+  let tokens = ref [] in
+  let http_post ~url:_ ~token ~body:_ =
+    incr calls;
+    tokens := token :: !tokens;
+    answer
+  in
+  http_post, calls, tokens
+
+let masc_pulls snapshot =
+  match pulls_by_id snapshot with
+  | [ ("masc", pulls) ] -> pulls
+  | _ -> failf "expected the one registered repository"
+
+let test_reader_ready_reads_with_the_keeper_token () =
+  let base_path = ready_base_path ~token:"gho_from_hosts" in
+  let http_post, calls, tokens =
+    counting_stub (ok_response (page ~has_next:false ~cursor:None []))
+  in
+  let snapshot = Pulls.refresh ~now ~http_post ~base_path ~previous:Pulls.initial in
+  (match snapshot.reader with
+   | Pulls.Reader_ready { keeper } -> Alcotest.(check string) "reader" reader_keeper keeper
+   | _ -> failf "a declared Keeper with a hosts.yml token must be ready");
+  Alcotest.(check int) "one call" 1 !calls;
+  Alcotest.(check (list string)) "the hosts.yml token is sent" [ "gho_from_hosts" ] !tokens;
+  match masc_pulls snapshot with
+  | Pulls.Pulls_read { pulls = []; undecodable = 0; _ } -> ()
+  | _ -> failf "an empty page reads as no open pull requests"
+
+let test_rejected_token_is_not_sent_again () =
+  let base_path = ready_base_path ~token:"gho_revoked" in
+  let rejected =
+    Ok { Pulls.status = 401; body = "{}"; rate_limit_remaining = None; rate_limit_reset = None }
+  in
+  let http_post, calls, _ = counting_stub rejected in
+  let first = Pulls.refresh ~now ~http_post ~base_path ~previous:Pulls.initial in
+  let later () = now () +. 60. in
+  let second = Pulls.refresh ~now:later ~http_post ~base_path ~previous:first in
+  Alcotest.(check int) "the same refused token is sent once" 1 !calls;
+  (match masc_pulls second with
+   | Pulls.Pulls_failed { failure = Pulls.Token_rejected; observed_at } ->
+     Alcotest.(check (float 0.)) "the first refusal's time stands" (now ()) observed_at
+   | _ -> failf "the refusal must stay on screen while the token is unchanged");
+  (match second.rejected_token_digest with
+   | Some digest ->
+     Alcotest.(check bool) "the digest is not the token" false (String.equal digest "gho_revoked")
+   | None -> failf "the refused token's digest must be kept");
+  write_reader_token base_path "gho_new_login";
+  let _third = Pulls.refresh ~now:later ~http_post ~base_path ~previous:second in
+  Alcotest.(check int) "a new token is asked about" 2 !calls
+
+let test_rate_limit_waits_for_reset () =
+  let base_path = ready_base_path ~token:"gho_reader" in
+  let reset_at = now () +. 600. in
+  let limited =
+    Ok
+      { Pulls.status = 403
+      ; body = {|{"message":"API rate limit exceeded"}|}
+      ; rate_limit_remaining = Some 0
+      ; rate_limit_reset = Some reset_at
+      }
+  in
+  let http_post, calls, _ = counting_stub limited in
+  let first = Pulls.refresh ~now ~http_post ~base_path ~previous:Pulls.initial in
+  let before_reset () = reset_at -. 1. in
+  let second = Pulls.refresh ~now:before_reset ~http_post ~base_path ~previous:first in
+  Alcotest.(check int) "no call before GitHub's reset" 1 !calls;
+  (match masc_pulls second with
+   | Pulls.Pulls_failed { failure = Pulls.Rate_limited { reset_at = Some at }; _ } ->
+     Alcotest.(check (float 0.)) "the reset time stands" reset_at at
+   | _ -> failf "the limit must stay on screen until its reset");
+  let after_reset () = reset_at in
+  let _third = Pulls.refresh ~now:after_reset ~http_post ~base_path ~previous:second in
+  Alcotest.(check int) "asked again at the reset" 2 !calls
+
 let test_github_slug () =
   List.iter
     (fun (remote, expected) ->
@@ -293,5 +402,16 @@ let () =
         ; Alcotest.test_case "keeper missing" `Quick test_reader_keeper_missing
         ; Alcotest.test_case "unknown key refused" `Quick test_unknown_key_is_refused
         ; Alcotest.test_case "github slug" `Quick test_github_slug
+        ; Alcotest.test_case
+            "ready reader reads with the keeper token"
+            `Quick
+            test_reader_ready_reads_with_the_keeper_token
+        ] )
+    ; ( "provider limits"
+      , [ Alcotest.test_case
+            "rejected token is not sent again"
+            `Quick
+            test_rejected_token_is_not_sent_again
+        ; Alcotest.test_case "rate limit waits for reset" `Quick test_rate_limit_waits_for_reset
         ] )
     ]

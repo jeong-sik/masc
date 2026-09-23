@@ -1,13 +1,35 @@
 module Exact_output = Agent_core.Exact_output
 
+module Http_client = Llm_provider.Http_client
+
+(* The typed kind of a transport error, never its message: the kind is what
+   tells a dropped connection from a quota or an empty completion, and a
+   message can echo request material. *)
+let transport_error_detail : Http_client.http_error -> string = function
+  | HttpError { code; _ } -> Printf.sprintf "http_status=%d" code
+  | NetworkError { kind; _ } ->
+    "network_error:" ^ Keeper_internal_error.network_error_kind_to_string kind
+  | TimeoutError { phase; _ } -> "timeout:" ^ Http_client.timeout_phase_to_label phase
+  | AcceptRejected _ -> "accept_rejected"
+  | ProviderTerminal { kind = Session_conflict; _ } -> "provider_terminal:session_conflict"
+  | ProviderTerminal { kind = Other subtype; _ } -> "provider_terminal:" ^ subtype
+  | ProviderFailure { kind; _ } -> Http_client.provider_failure_kind_to_string kind
+;;
+
 (* [Flow_exact_execution_failed] is the branch that carries the provider's own
-   verdict. The typed cause alone ("completion failed") says nothing about
-   which provider said what; the raw response body carried next to it does. *)
+   verdict. The typed cause names the kind of failure; the raw response body
+   carried next to it says which provider said what. *)
 let execution_cause_detail : Exact_output.execution_error_cause -> string = function
   | Attempt_already_started -> "attempt already started"
   | Clock_required_for_timeout -> "clock required for timeout"
   | Frozen_request_mismatch -> "frozen request mismatch"
-  | Completion_failed -> "completion failed"
+  | Completion_failed { error; dispatch } ->
+    Printf.sprintf
+      "completion failed (%s, %s)"
+      (transport_error_detail error)
+      (match dispatch with
+       | No_generation_dispatch -> "not sent"
+       | Generation_dispatch_started -> "sent")
   | Response_body_deadline_exceeded ->
     "total request deadline exceeded while reading response body"
   | Provider_response_refused { http_status; refusal } ->

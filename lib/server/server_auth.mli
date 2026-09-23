@@ -196,6 +196,7 @@ val ensure_same_origin_if_browser_request :
 val http_status_of_auth_error :
   Masc_domain.masc_error ->
   [> `Bad_request
+  | `Conflict
   | `Forbidden
   | `Internal_server_error
   | `Not_found
@@ -283,6 +284,7 @@ val auth_refusal_response :
   path:string ->
   Masc_domain.masc_error ->
   [> `Bad_request
+  | `Conflict
   | `Forbidden
   | `Internal_server_error
   | `Not_found
@@ -349,6 +351,24 @@ val authorize_tool_request_with_actor :
     token-less same-origin request uses its supplied header/query attribution,
     or ["dashboard"] when it supplies no name. The returned name alone does
     not distinguish credential identity from local attribution. *)
+
+(** What the request's credential says about who is calling, beyond the name
+    {!authorize_tool_request_with_actor} returns. *)
+type request_credential_standing =
+  | Operator_credential
+      (** A bearer whose stored credential has the [Admin] role, the one
+          [masc login] and the TUI's workspace credential carry. The
+          internal keeper token is never this. *)
+  | Agent_credential
+      (** The internal keeper token with its keeper name header, or a bearer
+          whose credential has the [Worker] role. The name is verified; the
+          caller is not the operator. *)
+  | No_credential
+      (** No bearer, or one that resolves to no credential: any name on the
+          request is the caller's own claim. *)
+
+val request_credential_standing :
+  base_path:string -> Httpun.Request.t -> request_credential_standing
 
 val authorize_token_bound_permission_request :
   base_path:string ->

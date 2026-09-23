@@ -213,6 +213,7 @@ type sub_board_access =
   | Open          (** Anyone can post and read. *)
   | Members_only  (** Only listed members can post; anyone can read. *)
   | Owner_only    (** Only the owner can post; anyone can read. *)
+[@@deriving enumerate]
 
 type sub_board = {
   id : Sub_board_id.t;

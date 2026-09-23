@@ -1377,8 +1377,10 @@ let test_contract_vocabularies_own_strings_and_errors () =
        ; "due_inputs_conflict"
        ; "due_input_missing"
        ; "caller_unidentified"
+       ; "actor_mismatch"
        ; "argument_out_of_range"
        ; "cursor_mismatch"
+       ; "not_schedule_owner"
        ],
        Schedule_contract_values.refusal_kind_strings,
        (fun v -> Result.is_ok (Schedule_contract_values.refusal_kind_of_string v)),

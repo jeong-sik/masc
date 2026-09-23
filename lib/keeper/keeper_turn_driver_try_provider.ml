@@ -138,7 +138,16 @@ let turn_start ~config ~keeper_name ~trace_id ~messages =
      | Ok end_atom -> Keeper_carried_front.Turn_boundary { end_atom }
      | Error Librarian_continuity_snapshot.Uncovered_history ->
        Keeper_carried_front.Turn_boundary { end_atom = 0 }
-     | Error error -> unknown (Librarian_continuity_snapshot.error_to_string error))
+     | Error
+         ((Librarian_continuity_snapshot.Unmatched_history
+          | Librarian_continuity_snapshot.Range_stopped _
+          | Librarian_continuity_snapshot.Trace_mismatch
+          | Librarian_continuity_snapshot.History_changed
+          | Librarian_continuity_snapshot.Prefix_changed
+          | Librarian_continuity_snapshot.Invalid_snapshot _
+          | Librarian_continuity_snapshot.Read_failed _
+          | Librarian_continuity_snapshot.Write_failed _) as error) ->
+       unknown (Librarian_continuity_snapshot.error_to_string error))
 ;;
 
 let prepare_continuity ~trace_id ~lines ~messages snapshot =
@@ -299,7 +308,8 @@ let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~pr
         | Error
             ((Librarian_continuity_snapshot.Trace_mismatch
              | Librarian_continuity_snapshot.History_changed
-             | Librarian_continuity_snapshot.Uncovered_history) as mismatch) ->
+             | Librarian_continuity_snapshot.Uncovered_history
+             | Librarian_continuity_snapshot.Unmatched_history) as mismatch) ->
           (* The history moved on from the snapshot. The Librarian's durable
              position may still fit: goo-yang-bong's did on 2026-09-22 while
              its snapshot did not, and the keeper sent its 12,720 atoms,
@@ -896,6 +906,10 @@ type composed =
 type sent_request =
   { request : Keeper_model_input_ledger.request
   ; digest_at : int -> string option
+  ; origin : Keeper_carried_front.origin
+        (* Where the range the request carried started: a refusal of a
+           range a seed opened ahead of the turn boundary is answered from
+           that boundary ([seed_refusal_sequence]). *)
   }
 
 (* What one provider attempt carries between its requests and the retry
@@ -990,17 +1004,25 @@ let compose_carried_model_input
      keeps the position. *)
   let front, outlived_seed =
     match continuity, front with
-    | Some _, _ -> None, None
-    | None, Some seed ->
+    | Some (Summarized _ | Absorbed _), _ -> None, None
+    | (None | Some Without_snapshot), Some seed ->
       (match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
        | Ok seed -> Some seed, None
        | Error dropped -> None, Some (seed, dropped))
-    | None, None -> None, None
+    | (None | Some Without_snapshot), None -> None, None
   in
+  (* A range that opens on a seed reaches behind this turn, so its aged tool
+     results are demoted at the turn boundary on either path that carries
+     one. A range that opens at the turn boundary or at a Librarian point
+     carries no atom behind it that demotion could shorten. *)
   let demote_before =
     match input_policy, continuity with
     | Keeper_input_policy.Small, _ -> demote_before
-    | Keeper_input_policy.Wide, Some _ -> 0
+    | Keeper_input_policy.Wide, Some (Summarized _ | Absorbed _) -> 0
+    | Wide, Some Without_snapshot ->
+      (match front with
+       | Some (_ : Keeper_carried_front.seed) -> demote_before
+       | None -> 0)
     | Wide, None -> if last_resort then history_atom_count else demote_before in
   let planned =
     demotion_plan ~measure_message_bytes ~base_path ~demote_before messages
@@ -1037,14 +1059,16 @@ let compose_carried_model_input
           planned.Keeper_model_input_demotion.messages
       in
       projection, transmitted_bytes, Keeper_carried_front.Librarian_progress { end_atom }
-    | None, Some (seed : Keeper_carried_front.seed) ->
+    | (None | Some Without_snapshot), Some (seed : Keeper_carried_front.seed) ->
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
       in
       (* A response-observed persisted seed is evidence for the range it names.
          Composition consumes that evidence; it does not reinterpret the prior
-         outcome as a size refusal. The next refusal is answered by the in-turn
-         ladder, which owns any further move toward the newest atom. *)
+         outcome as a size refusal. A size refusal of this range is answered
+         after the attempt: with no continuity by the in-turn ladder, which
+         owns any further move toward the newest atom; with no Librarian point
+         by one resend from the turn boundary ([seed_refusal_sequence]). *)
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes
@@ -1052,9 +1076,9 @@ let compose_carried_model_input
           planned.Keeper_model_input_demotion.messages
       in
       projection, transmitted_bytes, Keeper_carried_front.Carried seed.source
-    | None, None | Some Without_snapshot, _ ->
-      (* No absorbed point and no seed (RFC keeper-context-window-in-tokens
-         §13.4): the range begins where the last completed turn on this
+    | (None | Some Without_snapshot), None ->
+      (* No absorbed point and no seed valid for this history (RFC
+         keeper-context-window-in-tokens §13.4): the range begins where the last completed turn on this
          history ended, clamped so the newest atom always goes. The atoms
          before it wait for the Librarian's next pass. A history with no
          completed turn starts at 0, which is everything it has. The origin
@@ -1310,10 +1334,16 @@ let bounded_model_input_projection
       offload_model_input_cpu (fun () ->
         Runtime_model_input_tail_window.atom_opening_digest messages)
     in
+    (* A turn with no Librarian point still carries the seed: the ledger's
+       front, or the range the newest turn record joined to a response
+       (RFC keeper-context-window-in-tokens §13.4). Only an absorbed point
+       replaces it. A refusal of the range a seed opened holds the turn
+       boundary as the turn's front ([seed_refusal_sequence]), which
+       [carried_front] reads here as it reads any front a refusal moved. *)
     let front, dropped_ledger =
       match ctx.continuity with
-      | Some _ -> None, None
-      | None -> carried_front
+      | Some (Summarized _ | Absorbed _) -> None, None
+      | None | Some Without_snapshot -> carried_front
         ~ledger:state.ledger
         ~keeper_name:ctx.keeper_name
         ~runtime_id:ctx.runtime_id
@@ -1554,6 +1584,7 @@ let bounded_model_input_projection
               ; demote_before = view.composed.demote_before
               }
           ; digest_at = history_digest_at
+          ; origin = view.composed.origin
           });
     match ctx.model_input_projection with
     | None -> Ok windowed
@@ -1621,7 +1652,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
             (function
               | Agent_core.Hooks.AfterTurn { response; _ } ->
                 (match !last_request with
-                 | Some { request; digest_at } ->
+                 | Some { request; digest_at; _ } ->
                    (match request.Keeper_model_input_ledger.ends with
                     | Keeper_model_input_ledger.Carried_atoms
                         { front_digest; _ } ->
@@ -1976,20 +2007,23 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
          with
          | `Attempt_finished attempt_result -> attempt_result
          | `Attempt_preempted ->
-           (* Synthesized zero-turn durable-stimulus yield: nothing was
-              produced, no checkpoint, source wake stays pending and re-runs
-              fresh. Not an error, so no provider rotation and no failure
-              telemetry. *)
-           (* [ctx.session_id] is the turn's trace id, always present on the
-              autonomous lane where preemption is armed; the [None] arm names a
-              deterministic fallback for this zero-turn yield's cosmetic id
-              rather than defaulting an unknown input. *)
-           let session_id =
-             match ctx.session_id with
-             | Some id -> id
-             | None -> ctx.runtime_id
-           in
-           Ok (Runtime_agent.yielded_pre_first_token ~session_id)
+           (* Nothing was produced and nothing failed. This used to be a
+              synthesized zero-turn run result, which the keeper could only
+              read as a run that succeeded without an AfterTurn ordinal, so
+              every preemption became a failed cycle (#38094). It is its own
+              typed value now: the lane walk ends on it (Keeper_turn_driver),
+              the failure route notes no rest against the candidate, and the
+              unified turn settles it as skipped, leaving the source
+              pending. *)
+           Log.Keeper.info ~keeper_name:ctx.keeper_name
+             "%s: autonomous turn yielded to a queued person before the \
+              provider's first event runtime=%s"
+             ctx.keeper_name
+             ctx.runtime_id;
+           Error
+             (Keeper_internal_error.core_error_of_masc_internal_error
+                (Keeper_internal_error.Preempted_before_first_token
+                   { runtime_id = ctx.runtime_id }))
          | `Attempt_stalled ->
            Error
              (Agent_core.Error.Api
@@ -2177,8 +2211,7 @@ let context_overflow_shrink_sequence
            on a live keeper: a 469638-byte reserve against capacities of
            131072 then 65536, three refusals per turn, none of which could
            have succeeded. Returning the original failure here hands the turn
-           to the declared-lane walk, where a candidate with a larger
-           request-body cap is the thing that can actually carry it. *)
+           to the declared-lane walk. *)
         if shrunk_capacity >= capacity
            || not (shrink_admits_history ~capacity:shrunk_capacity)
         then failed
@@ -2196,8 +2229,7 @@ let context_overflow_shrink_sequence
 ;;
 
 (* The refusals that say the request outgrew what carries it: the provider's
-   context overflow, and the two size refusals on the byte axis, masc's own
-   against the declared request-body cap and the provider's without a bound.
+   context overflow and the provider's refusal of the request body.
    Each is answered by moving the carried front, never by rotating first: a
    shorter range of the SAME conversation can still answer the same turn.
    Enumerated so a new variant forces a decision here instead of a silent
@@ -2289,6 +2321,51 @@ let eviction_retry_to_json = function
    rotating candidates: a retry here is a same-run retry too, so it must not
    fire once AGENT_CORE has mutated agent state at a durable checkpoint
    stage. *)
+(* The one answer a turn with no Librarian point has to a size refusal
+   (RFC keeper-context-window-in-tokens §13.4). When the provider refuses a
+   range that a seed opened, with a refusal the no-continuity ladder moves
+   the front for ([refusal_evicts]), and the turn boundary lies after that
+   range's first atom, the boundary is held as the turn's front and the same
+   candidate is asked once more. The front belongs to the turn (§10.4): a
+   later candidate or lane opens there instead of on the refused range. An
+   accepted request is what the ledger and the turn record keep, so the next
+   turn's seed is that boundary; the range grows back only through
+   responses. A refused boundary request, a refusal of a range that opened
+   at or after the boundary, and every other error end the sequence with
+   the error in hand. The range is never halved on this path. *)
+let seed_refusal_sequence
+      ~same_run_retry_authorized
+      ~(refused_range : unit -> (Keeper_carried_front.origin * int) option)
+      ~(turn_start_front : unit -> Keeper_carried_front.seed option)
+      ~(hold_front : Keeper_carried_front.seed -> unit)
+      ~(on_turn_start : Agent_core.Error.t -> Keeper_carried_front.seed -> unit)
+      ~(attempt : unit -> ('ok, Agent_core.Error.t) result)
+      ()
+  : ('ok, Agent_core.Error.t) result
+  =
+  match attempt () with
+  | Ok _ as ok -> ok
+  | Error error as failed ->
+    (match refused_range () with
+     | Some (Keeper_carried_front.Carried _, refused_first_atom)
+       when refusal_evicts error && same_run_retry_authorized () ->
+       (match turn_start_front () with
+        | Some (front : Keeper_carried_front.seed)
+          when front.first_atom > refused_first_atom ->
+          hold_front front;
+          on_turn_start error front;
+          attempt ()
+        | Some (_ : Keeper_carried_front.seed) | None -> failed)
+     | Some
+         ( ( Keeper_carried_front.Carried _
+           | Keeper_carried_front.Librarian_snapshot _
+           | Keeper_carried_front.Librarian_progress _
+           | Keeper_carried_front.Turn_start _
+           | Keeper_carried_front.Turn_start_unknown _ )
+         , _ )
+     | None -> failed)
+;;
+
 let carried_range_eviction_sequence
       ~same_run_retry_authorized
       ~(ledger : unit -> Keeper_model_input_ledger.t option)
@@ -2430,11 +2507,58 @@ let run_try_provider_with_carried_range_eviction
       ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
       ~context_marks:ctx.context_marks state.ledger;
   match ctx.recovery_view, ctx.continuity with
-  | Some _, _ | None, Some _ ->
+  | Some _, _ | None, Some (Summarized _ | Absorbed _) ->
     (* The validated semantic view owns retained source obligations. Retrying
-       the same view with a shorter range cannot recover it. Final serialized
-       request admission still enforces the request-body cap. *)
+       the same view with a shorter range cannot recover it. *)
     run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
+  | None, Some Without_snapshot ->
+    let checkpoint_after = ref None in
+    let success_sample = ref None in
+    let result =
+      seed_refusal_sequence
+        ~same_run_retry_authorized:(fun () ->
+          same_run_retry_allowed ctx.checkpoint_progress)
+        ~refused_range:(fun () ->
+          Option.map
+            (fun (sent : sent_request) ->
+               sent.origin, sent.request.Keeper_model_input_ledger.first_atom)
+            !(state.last_request))
+        ~turn_start_front:(fun () ->
+          Option.bind !(state.last_request) (fun (sent : sent_request) ->
+            let atom_count = sent.request.Keeper_model_input_ledger.atom_count in
+            let first_atom =
+              match ctx.turn_boundary with
+              | Keeper_carried_front.Turn_boundary { end_atom } ->
+                Keeper_carried_front.clamp ~atom_count end_atom
+              | Keeper_carried_front.Turn_boundary_unknown _ ->
+                Keeper_carried_front.newest_atom ~atom_count
+            in
+            Option.map
+              (fun front_digest ->
+                 { Keeper_carried_front.first_atom
+                 ; front_digest
+                 ; source = Keeper_carried_front.Turn_start_after_seed_refusal
+                 })
+              (sent.digest_at first_atom)))
+        ~hold_front:ctx.hold_carried_front
+        ~on_turn_start:(fun error front ->
+          Log.Keeper.info
+            ~keeper_name:ctx.keeper_name
+            "model input carried seed refused runtime=%s: the turn's front moves to \
+             the turn boundary and the same candidate is asked again front=%s error=%s"
+            ctx.runtime_id
+            (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json front))
+            (Agent_core.Error.to_string error))
+        ~attempt:(fun () ->
+          let attempt_result, attempt_checkpoint_after, attempt_success_sample =
+            run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
+          in
+          checkpoint_after := attempt_checkpoint_after;
+          success_sample := attempt_success_sample;
+          attempt_result)
+        ()
+    in
+    result, !checkpoint_after, !success_sample
   | None, None ->
     (* An uncapped runtime retries like any other. #36817 kept such a
        runtime out of the token halving because that walk invented a seed
@@ -2557,6 +2681,7 @@ let max_tokens_truncation_error error =
       | Keeper_internal_error.Provider_attempt_effect_fenced _
       | Keeper_internal_error.Tool_correction_lost _
       | Keeper_internal_error.Host_stopped_turn _
+      | Keeper_internal_error.Preempted_before_first_token _
       | Keeper_internal_error.Runtime_connection_closed _
       | Keeper_internal_error.Receipt_persistence_failed _
       | Keeper_internal_error.Gate_replay_repair_required _ )

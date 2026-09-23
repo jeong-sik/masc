@@ -149,6 +149,7 @@ module Task_error = struct
     | NotClaimed of string
     | InvalidState of string
     | InvalidId of string
+    | VerificationSuperseded of { task_id: string; requested: string; current: string }
 
   let to_string = function
     | NotFound id ->
@@ -165,6 +166,11 @@ module Task_error = struct
           id
     | InvalidState msg -> Printf.sprintf "[TaskError] Invalid task state: %s" msg
     | InvalidId reason -> Printf.sprintf "[TaskError] Invalid task ID: %s" reason
+    | VerificationSuperseded { task_id; requested; current } ->
+        Printf.sprintf
+          "[TaskError] Task %s verification %s is no longer the one awaiting a \
+           verdict; the current submission is %s."
+          task_id requested current
 end
 
 module Agent_error = struct
@@ -277,6 +283,7 @@ let code = function
          | Task_error.NotClaimed _
          | Task_error.InvalidState _
          | Task_error.InvalidId _) -> 400
+  | Task (Task_error.VerificationSuperseded _) -> 409
   | Agent (Agent_error.InvalidName _) -> 400
   | System (System_error.NotInitialized
            | System_error.AlreadyInitialized

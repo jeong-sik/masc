@@ -15,11 +15,8 @@ type attempt_failure =
   | Server_error
   | Network_transient
   | Provider_timeout
-  | Access_refused
 (** The failure routes that say the candidate did not answer, and that are
-    neither the candidate's rate limit nor MASC's own capacity. Access refusal
-    means that this candidate did not produce a model answer; another declared
-    candidate may use a different credential. *)
+    neither the candidate's rate limit nor MASC's own capacity. *)
 
 type failed_attempt =
   | Failed_attempt of { noted_at : float; failure : attempt_failure }
@@ -38,9 +35,10 @@ val is_empty : candidate_backpressure -> bool
 val note_rate_limit :
   noted_at:float -> retry_after:float option ->
   candidate_backpressure -> candidate_backpressure
-(** Record the rate limit unless a newer one is already held. A delay that is
-    not a finite non-negative number is kept as no hint. The failed attempt, if
-    any, is kept. *)
+(** Record the rate limit unless a newer one is already held. The delay is
+    read by {!Keeper_runtime_failure_route.usable_retry_after}: one that names
+    no wait, zero included, is kept as no hint, so only an observed success
+    ends that rate limit. The failed attempt, if any, is kept. *)
 
 val note_failed_attempt :
   noted_at:float -> failure:attempt_failure ->

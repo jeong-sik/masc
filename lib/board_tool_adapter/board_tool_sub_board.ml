@@ -50,15 +50,11 @@ let handle_sub_board_create ~tool_name ~start_time args : Tool_result.result =
   let slug = get_string_opt args "slug" |> Option.value ~default:"" in
   let name = get_string_opt args "name" |> Option.value ~default:"" in
   let description = get_string_opt args "description" |> Option.value ~default:"" in
-  let access =
-    match get_string_opt args "access" with
-    | Some "members_only" -> Some Board.Members_only
-    | Some "owner_only" -> Some Board.Owner_only
-    | Some "open" | Some _ -> Some Board.Open
-    | None -> Some Board.Open
-  in
   let members = get_string_list args "members" in
   let owner = get_string_opt args "owner" |> Option.value ~default:"" in
+  match Board.sub_board_access_field_of_yojson args with
+  | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+  | Ok access ->
   match
     Board_dispatch.create_sub_board
       ~slug
@@ -133,16 +129,11 @@ let handle_sub_board_update ~tool_name ~start_time args : Tool_result.result =
   let sub_board_id = get_string_opt args "sub_board_id" |> Option.value ~default:"" in
   let name = get_string_opt args "name" in
   let description = get_string_opt args "description" in
-  let access =
-    match get_string_opt args "access" with
-    | Some "members_only" -> Some Board.Members_only
-    | Some "owner_only" -> Some Board.Owner_only
-    | Some "open" -> Some Board.Open
-    | Some _ -> None
-    | None -> None
-  in
   let members_raw = get_string_list args "members" in
   let members = if members_raw = [] then None else Some members_raw in
+  match Board.sub_board_access_field_of_yojson args with
+  | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+  | Ok access ->
   match owner_arg args with
   | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
   | Ok owner ->

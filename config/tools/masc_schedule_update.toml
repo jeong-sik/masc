@@ -6,7 +6,10 @@ from the previous definition. Only scheduled or due requests can be updated;
 running and terminal requests are immutable. The editable fields and
 due and recurrence rules are the same as masc_schedule_create. A due time
 that changes and lands before the current second is refused with error_kind
-due_already_past; the stored due time sent back unchanged is accepted."""
+due_already_past; the stored due time sent back unchanged is accepted.
+You may update a schedule you made or one that wakes you, and the
+replacement must still be one of those; any other is refused with error_kind
+not_schedule_owner. The requester and scheduler stay as they were."""
 additional_properties = false
 defer_loading = true
 
@@ -115,38 +118,6 @@ name = "allow_unregistered_keeper"
 type = "boolean"
 description = """
 Allow a wake whose target Keeper has no durable metadata yet. Default false."""
-
-[[params]]
-name = "requested_by_id"
-type = "string"
-description = "Requester actor id. Defaults to operator."
-
-[[params]]
-name = "requested_by_kind"
-type = "string"
-enum = ["human_operator", "automated_actor", "system"]
-
-[[params]]
-name = "requested_by_display_name"
-type = "string"
-description = "Requester display name."
-
-[[params]]
-name = "scheduled_by_id"
-type = "string"
-description = """
-Scheduler actor id. Defaults to the caller's name; required when the
-endpoint cannot name the caller."""
-
-[[params]]
-name = "scheduled_by_kind"
-type = "string"
-enum = ["human_operator", "automated_actor", "system"]
-
-[[params]]
-name = "scheduled_by_display_name"
-type = "string"
-description = "Scheduler display name."
 
 [[params]]
 name = "source"

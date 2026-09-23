@@ -98,8 +98,8 @@ let matrix =
     (GP.Executing, GP.Record_proof_proven, "invalid");
     (GP.Executing, GP.Record_proof_refuted, "invalid");
     (GP.Verifying, GP.Request_complete, "already:verifying");
-    (GP.Verifying, GP.Drop, "invalid");
-    (GP.Verifying, GP.Reopen, "invalid");
+    (GP.Verifying, GP.Drop, "move_to:dropped");
+    (GP.Verifying, GP.Reopen, "move_to:executing");
     (GP.Verifying, GP.Record_proof_proven, "move_to:awaiting_confirmation");
     (GP.Verifying, GP.Record_proof_refuted, "move_to:executing");
     (GP.Completed, GP.Request_complete, "already:completed");
@@ -179,8 +179,9 @@ let test_agrees_with_task_fsm_on_restating_a_terminal_state () =
 
 (* What [moves_goal] lights, per phase, over the operator's three keys. Stated
    as literals rather than recomputed from the matrix: the TUI goal detail lit
-   every key on every phase, and a verifying goal -- which only the verifier
-   moves -- offered drop and reopen that the server refuses. *)
+   every key on every phase. A verifying goal lights drop and reopen: the
+   operator can leave it when the verifier never answers, and request_complete
+   there only restates the pending request. *)
 let test_moves_goal_per_phase () =
   let module PA = GP.Public_action in
   let lit phase =
@@ -189,7 +190,7 @@ let test_moves_goal_per_phase () =
     |> List.map PA.to_string
   in
   check (list string) "executing" [ "request_complete"; "drop" ] (lit GP.Executing);
-  check (list string) "verifying" [] (lit GP.Verifying);
+  check (list string) "verifying" [ "drop"; "reopen" ] (lit GP.Verifying);
   check (list string) "awaiting_confirmation" [ "drop"; "reopen" ]
     (lit GP.Awaiting_confirmation);
   check (list string) "completed" [ "drop"; "reopen" ] (lit GP.Completed);

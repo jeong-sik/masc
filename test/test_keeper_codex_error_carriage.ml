@@ -15,6 +15,14 @@ let class_of (err : Agent_core.Error.t) =
     "api:context_overflow"
   | Agent_core.Error.Api (Agent_core.Retry.Timeout _) -> "api:timeout"
   | Agent_core.Error.Provider (Llm_provider.Error.AuthError _) -> "provider:auth"
+  | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) -> "provider:hard_quota"
+  | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _) -> "provider:rate_limit"
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.NetworkError { kind = Llm_provider.Http_client.End_of_file; _ }) ->
+    "provider:network:end_of_file"
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.NetworkError { kind = Llm_provider.Http_client.Unknown; _ }) ->
+    "provider:network:unknown"
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) ->
     "provider:unavailable"
   | Agent_core.Error.Provider (Llm_provider.Error.ParseError _) ->
@@ -77,7 +85,8 @@ let test_every_variant_lands_in_its_class () =
   check "turn input write failure"
     (Codex.Turn_input_write_failed "pipe closed") "provider:unavailable";
   check "turn_failed"
-    (Codex.Turn_failed "stream disconnected before completion")
+    (Codex.Turn_failed
+       { detail = "stream disconnected before completion"; codex_error_info = None })
     "provider:reported:turn_failed";
   check "idle timeout before turn/start rotates"
     (Codex.Timeout { seconds = 300.0; turn_accepted = false })
@@ -96,6 +105,74 @@ let test_every_variant_lands_in_its_class () =
   check "runtime shutdown is a typed host stop"
     Codex.Runtime_shutting_down
     "masc:host_stopped_turn"
+;;
+
+(* The provider's [codexErrorInfo] picks the class. Every constructor is
+   listed so a new one shows up here as well as in the mapping. *)
+let test_codex_error_info_lands_in_its_class () =
+  let failed info =
+    Codex.Turn_failed { detail = "fixture"; codex_error_info = Some info }
+  in
+  List.iter
+    (fun (label, info, expected) -> check label (failed info) expected)
+    Codex.Codex_error_info.
+      [ "usage limit", Usage_limit_exceeded, "provider:hard_quota"
+      ; "session budget", Session_budget_exceeded, "provider:hard_quota"
+      ; "rate limit", Rate_limit_exceeded, "provider:rate_limit"
+      ; "server overloaded", Server_overloaded, "provider:unavailable"
+      ; "internal server error", Internal_server_error, "provider:unavailable"
+      ; ( "too many failed attempts"
+        , Response_too_many_failed_attempts { http_status_code = None }
+        , "provider:unavailable" )
+      ; ( "http connection failed"
+        , Http_connection_failed { http_status_code = Some 502 }
+        , "provider:network:unknown" )
+      ; ( "stream connection failed"
+        , Response_stream_connection_failed { http_status_code = None }
+        , "provider:network:unknown" )
+      ; ( "stream disconnected"
+        , Response_stream_disconnected { http_status_code = None }
+        , "provider:network:end_of_file" )
+      ; "unauthorized", Unauthorized, "provider:auth"
+      ; "bad request", Bad_request, "provider:reported:turn_failed"
+      ; "cyber policy", Cyber_policy, "provider:reported:turn_failed"
+      ; ( "misalignment"
+        , Misalignment_policy_violation
+        , "provider:reported:turn_failed" )
+      ; "rollback", Thread_rollback_failed, "provider:reported:turn_failed"
+      ; "sandbox", Sandbox_error, "provider:reported:turn_failed"
+      ; "other", Other, "provider:reported:turn_failed"
+      ; ( "not steerable"
+        , Active_turn_not_steerable { turn_kind = Review }
+        , "provider:reported:turn_failed" )
+      ; ( "unrecognized"
+        , Unrecognized (`String "newVendorCode")
+        , "provider:reported:turn_failed" )
+      ]
+;;
+
+(* A Codex head out of weekly usage must reach the quota route the turn
+   driver records as candidate evidence, the same route Claude Code's
+   [Quota_blocked] takes, not the rotation that records nothing. *)
+let test_usage_limit_routes_to_hard_quota () =
+  let error =
+    Map.codex_error_to_core_error
+      (Codex.Turn_failed
+         { detail = "You've hit your usage limit."
+         ; codex_error_info = Some Codex.Codex_error_info.Usage_limit_exceeded
+         })
+  in
+  match
+    Keeper_runtime_failure_route.route_of_error
+      ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+      error
+  with
+  | Keeper_runtime_failure_route.Retry_after_observed
+      { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after = None } -> ()
+  | Keeper_runtime_failure_route.Retry_after_observed _
+  | Keeper_runtime_failure_route.Rotate_now _
+  | Keeper_runtime_failure_route.Exhausted_visible_alive _ ->
+    Alcotest.fail "usage limit did not route to hard quota"
 ;;
 
 (* The class above says which constructor; this says the fields survive, which
@@ -154,7 +231,8 @@ let test_context_overflow_maps_to_input_rejected_recovery () =
     true;
   Alcotest.(check bool)
     "turn failures stay generic provider rejections"
-    (recovery (Codex.Turn_failed "stream disconnected")
+    (recovery
+       (Codex.Turn_failed { detail = "stream disconnected"; codex_error_info = None })
      = Masc.Keeper_official_client_session_store.Provider_rejected)
     true
   ; Alcotest.(check bool)
@@ -162,6 +240,31 @@ let test_context_overflow_maps_to_input_rejected_recovery () =
       (recovery Codex.Runtime_shutting_down
        = Masc.Keeper_official_client_session_store.Transport_interrupted)
       true
+;;
+
+(* A Gate continuation's thread that overflowed after a tool effect cannot
+   take the continuation again, so the Gate ends; an observation-free overflow
+   keeps the same-thread shrink retry. *)
+let test_gate_resume_overflow_after_effect_is_session_full () =
+  let recovery = Map.recovery_failure_of_attempt in
+  let overflow tool_effect_attempted =
+    Codex.Context_window_exceeded { message = "full"; tool_effect_attempted } in
+  let resume = Codex.Resume { thread_id = "thread-1" } in
+  Alcotest.(check bool)
+    "Gate resume after a tool effect is session-full"
+    (recovery ~thread_mode:resume ~gate_continuation:true (overflow true)
+     = Masc.Keeper_official_client_session_store.(Vendor_session_full Activity_observed))
+    true;
+  Alcotest.(check bool)
+    "Gate resume without activity keeps the shrink retry"
+    (recovery ~thread_mode:resume ~gate_continuation:true (overflow false)
+     = Masc.Keeper_official_client_session_store.(Input_rejected Bootstrap_floor_exceeded))
+    true;
+  Alcotest.(check bool)
+    "an ordinary resume after a tool effect stays effect-fenced"
+    (recovery ~thread_mode:resume ~gate_continuation:false (overflow true)
+     = Masc.Keeper_official_client_session_store.(Input_rejected Effect_fenced))
+    true
 ;;
 
 let test_transport_uncertainty_preserves_stronger_evidence () =
@@ -190,6 +293,14 @@ let () =
             `Quick
             test_every_variant_lands_in_its_class
         ; Alcotest.test_case
+            "codex error info lands in its class"
+            `Quick
+            test_codex_error_info_lands_in_its_class
+        ; Alcotest.test_case
+            "usage limit routes to hard quota"
+            `Quick
+            test_usage_limit_routes_to_hard_quota
+        ; Alcotest.test_case
             "a host stop and a closed connection carry their fields"
             `Quick
             test_host_stop_and_closed_connection_carry_their_fields
@@ -197,5 +308,9 @@ let () =
             "context overflow maps to input-rejected recovery"
             `Quick
             test_context_overflow_maps_to_input_rejected_recovery
+        ; Alcotest.test_case
+            "Gate resume overflow after a tool effect is session-full"
+            `Quick
+            test_gate_resume_overflow_after_effect_is_session_full
         ] )
     ]

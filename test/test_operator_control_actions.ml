@@ -483,6 +483,51 @@ let test_quarantine_tool_rejects_retired_schema_field () =
    *_review_item) were also removed. Review decisions still reach the UI
    via [recent_reviews]. *)
 
+(* A confirm acts as the caller it authenticated as. Naming the stager in the
+   request body used to pass the owner check, so a caller that read the token
+   from a digest could run an action another actor staged. *)
+let test_a_body_actor_cannot_confirm_another_actors_action () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let operator = operator_ctx env sw config "operator" in
+      let worker = operator_ctx env sw config "worker" in
+      let staged =
+        Operator_control.action_json operator
+          (`Assoc
+            [ "action_type", `String "task_inject"
+            ; ( "target_type"
+              , `String Operator_action_constants.workspace_target_type )
+            ; ( "payload"
+              , `Assoc
+                  [ "title", `String "Injected task"
+                  ; "description", `String "staged by operator"
+                  ] )
+            ])
+        |> Result.get_ok
+      in
+      let confirm_token =
+        Yojson.Safe.Util.(staged |> member "confirm_token" |> to_string)
+      in
+      let confirm ctx =
+        Operator_control.confirm_json ctx
+          (`Assoc
+            [ "actor", `String "operator"
+            ; "confirm_token", `String confirm_token
+            ; "decision", `String "confirm"
+            ])
+      in
+      Alcotest.(check bool) "the worker naming the operator is refused" true
+        (Result.is_error (confirm worker));
+      Alcotest.(check bool) "the operator still confirms its own action" true
+        (Result.is_ok (confirm operator)))
+
 let () =
   Alcotest.run
     "operator_control_actions"
@@ -491,6 +536,10 @@ let () =
             "task inject executes after confirmation"
             `Quick
             test_task_inject_executes_after_confirmation
+        ; Alcotest.test_case
+            "a body actor cannot confirm another actor's action"
+            `Quick
+            test_a_body_actor_cannot_confirm_another_actors_action
         ; Alcotest.test_case
             "pending-confirm mutations invalidate snapshot views"
             `Quick

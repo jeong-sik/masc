@@ -41,6 +41,13 @@ type operator_edit_outcome =
   | Promoted_to_override of { key : string }
       (** The edit is saved as [key]'s prompt override and the file is reset
           to the embedded copy. *)
+  | Promoted_reset_failed of
+      { key : string
+      ; reason : string
+      }
+      (** The edit is saved as [key]'s override but the file could not be
+          reset; it still holds the edit, and the next pass, finding the same
+          text saved, resets it. *)
   | Kept_override_exists of { key : string }
       (** [key] already has a saved override, so the file is left as edited
           and the embedded copy is not installed. *)
@@ -96,10 +103,10 @@ val sync
     manifest is then rewritten from the current set ([managed_by],
     [schema], sorted [paths], and [sha256] mapping each path to the digest
     of the bytes this pass left there) as the record of what this binary
-    owns there. A [v1] manifest has paths and no digests: every differing
-    file under it is overwritten as stale, and the rewrite records digests.
-    Without a manifest a pass deletes nothing and writes one. A manifest
-    that does not read, or that another domain wrote, is reported in
+    owns there. Without a manifest, or with one under a schema no domain
+    writes, a pass deletes nothing, overwrites every differing file, and
+    writes one. A manifest that does not read, or that another domain
+    wrote, is reported in
     [failed] and left as it is: the pass deletes nothing and writes no
     manifest, so the same report returns every boot until the operator
     repairs or removes the file, and what it recorded is not lost. One

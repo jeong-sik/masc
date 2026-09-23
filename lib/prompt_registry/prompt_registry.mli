@@ -251,11 +251,13 @@ val promote_file_edit :
 (** Save an operator's edit of the runtime prompt file [file] (relative to
     the prompt directory) as a prompt override in
     [<base_path>/.masc/prompt_overrides.json], so the file can be reset to
-    the distribution copy [embedded] without losing the edit. Only a
-    top-level [<key>.md] without [### marker] slots, whose frontmatter the
-    edit left unchanged, maps to one key; the override is bound to
-    [embedded]'s body and must use only the variables its frontmatter
-    declares. A key that already has a saved override is left alone. Reads
+    the distribution copy [embedded] without losing the edit. The file maps
+    to one key only when [embedded] and [edited] each yield exactly that
+    key's registration and no slot — the registrations the directory scan
+    makes — and the edit left the frontmatter unchanged; the override is
+    bound to [embedded]'s body and must use only the variables it declares.
+    A key whose saved override already holds this text is [Promoted]; a key
+    with a different saved override is left alone. Reads
     and writes the file, not the live table: it runs at boot before
     {!restore_overrides}. *)
 

@@ -6,11 +6,12 @@ module Managed_asset_sync = Masc.Managed_asset_sync
 
 (* The runtime manifest a previous sync would have left behind. No embedded
    fixture carries one: the embedded tree is the managed set (#31283). *)
-let manifest ?(schema = "masc.prompt-managed-assets.v1") paths =
+let manifest ?(schema = "masc.prompt-managed-assets.v2") paths =
   Yojson.Safe.to_string
     (`Assoc
        [ "schema", `String schema
        ; "paths", `List (List.map (fun path -> `String path) paths)
+       ; "sha256", `Assoc []
        ])
 ;;
 
@@ -187,10 +188,10 @@ let test_a_foreign_or_broken_manifest_retires_nothing () =
           check string (name ^ ": the manifest is left as it was") content
             (read_file (Filename.concat dir "managed-assets.json"))))
     [ ( "tool-domain manifest"
-      , manifest ~schema:"masc.tool-managed-assets.v1" [ "keeper.stray.md" ]
+      , manifest ~schema:"masc.tool-managed-assets.v2" [ "keeper.stray.md" ]
       , "is not" )
     ; "not JSON", "{ this is not json", "not JSON"
-    ; "no paths", {|{"schema":"masc.prompt-managed-assets.v1"}|}, "lacks"
+    ; "no paths", {|{"schema":"masc.prompt-managed-assets.v2"}|}, "lacks"
     ; "unsafe path", manifest [ "../keeper.stray.md" ], "unsafe path"
     ]
 
@@ -510,6 +511,8 @@ let outcome_testable =
       Format.pp_print_string ppf
         (match outcome with
          | Managed_asset_sync.Promoted_to_override { key } -> "promoted " ^ key
+         | Managed_asset_sync.Promoted_reset_failed { key; reason = _ } ->
+           "promoted, reset failed " ^ key
          | Managed_asset_sync.Kept_override_exists { key } -> "kept, override exists " ^ key
          | Managed_asset_sync.Kept_not_promotable { reason } -> "kept: " ^ reason
          | Managed_asset_sync.Discarded -> "discarded"))
@@ -529,20 +532,27 @@ let prompt_embedded =
        matters in {{memory}}.\n" )
   ]
 
+let grouped_embedded =
+  ( "prompts/grouped.md"
+  , "---\ndescription: grouped\n---\n### one\nFirst slot.\n\n### two\nSecond slot.\n" )
+
 let with_workspace f =
   with_temp_prompts_dir (fun base ->
       let prompts = Filename.concat base "prompts" in
       Unix.mkdir prompts 0o700;
       f ~base ~prompts)
 
-let prompt_sync ~base ~prompts =
+let prompt_sync_with ~assets ~base ~prompts =
   Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
     ~edit_layer:
       (Managed_asset_sync.Prompt_overrides
          (Prompt_registry.promote_file_edit ~base_path:base))
-    ~read:(fun rel -> List.assoc_opt rel prompt_embedded)
-    ~files:(List.map fst prompt_embedded)
+    ~read:(fun rel -> List.assoc_opt rel assets)
+    ~files:(List.map fst assets)
     ~dest_dir:prompts ()
+
+let prompt_sync ~base ~prompts =
+  prompt_sync_with ~assets:(grouped_embedded :: prompt_embedded) ~base ~prompts
 
 let edited_curator = "---\ndescription: curator\ntemplate_variables: [memory]\n---\nKeep \
                       only decisions from {{memory}}.\n"
@@ -646,17 +656,24 @@ let test_edited_tool_is_overwritten_and_reported () =
         check bool "the line names the file" true (mentions ~line "tools/masc_board_vote.toml")
       | lines -> failf "expected one line, found %d" (List.length lines))
 
-(* A manifest from before digests were recorded lists paths only. Every
-   differing file is overwritten as stale, as it always was, and the
-   rewritten manifest carries a digest for each path. *)
-let test_a_digestless_manifest_overwrites_and_gains_digests () =
+(* A manifest under a schema no domain writes now -- here the paths-only
+   [v1] -- reads as no manifest: nothing is retired, every differing file is
+   overwritten, and the rewritten manifest is the current one with a digest
+   per path. *)
+let test_an_old_schema_manifest_reads_as_none () =
   with_temp_prompts_dir (fun dir ->
       let file = Filename.concat dir "keeper.example.md" in
       write_file file "an edit nobody recorded\n";
-      write_runtime_manifest dir [ "keeper.example.md"; "behavior/contract.md" ];
+      let retired = Filename.concat dir "keeper.retired.md" in
+      write_file retired "distribution copy\n";
+      write_file (Filename.concat dir "managed-assets.json")
+        (manifest ~schema:"masc.prompt-managed-assets.v1"
+           [ "keeper.example.md"; "behavior/contract.md"; "keeper.retired.md" ]);
       let result = sync ~prompts_dir:dir in
       check (list string) "overwritten as stale" [ "prompts/keeper.example.md" ]
         result.Managed_asset_sync.overwritten;
+      check (list string) "nothing retired" [] result.Managed_asset_sync.removed;
+      check bool "the listed file stays" true (Sys.file_exists retired);
       check int "no operator edit" 0 (List.length result.Managed_asset_sync.operator_edits);
       check int "no failure" 0 (List.length result.Managed_asset_sync.failed);
       match Yojson.Safe.from_file (Filename.concat dir "managed-assets.json") with
@@ -680,6 +697,105 @@ let test_a_digestless_manifest_overwrites_and_gains_digests () =
               | Some _ | None -> None)
          | Some _ | None -> fail "the rewritten manifest has no sha256 object")
       | _ -> fail "the rewritten manifest is not an object")
+
+(* The case that must never promote: the file is the copy an earlier binary
+   wrote -- it matches the recorded digest -- and this binary embeds a new
+   one. That is a stale copy, overwritten, and nothing reaches the override
+   file. *)
+let test_a_previous_distribution_copy_is_never_promoted () =
+  with_workspace (fun ~base ~prompts ->
+      let old_copy = "---\ndescription: curator\ntemplate_variables: [memory]\n---\nOld \
+                      wording for {{memory}}.\n" in
+      let (_ : Managed_asset_sync.sync_result) =
+        prompt_sync_with ~assets:[ "prompts/curator.md", old_copy ] ~base ~prompts
+      in
+      let result = prompt_sync ~base ~prompts in
+      check (list string) "overwritten as stale" [ "prompts/curator.md" ]
+        result.Managed_asset_sync.overwritten;
+      check int "not an operator edit" 0
+        (List.length result.Managed_asset_sync.operator_edits);
+      check bool "no override written" false (Sys.file_exists (overrides_path base));
+      check string "the file is the new distribution copy"
+        (List.assoc "prompts/curator.md" prompt_embedded)
+        (read_file (Filename.concat prompts "curator.md")))
+
+(* An edit that does not map to one override stays in the file, the
+   override file is not touched, and the reason is reported. *)
+let test_unpromotable_edits_are_kept () =
+  List.iter
+    (fun (name, file, edited, reason_part) ->
+      with_workspace (fun ~base ~prompts ->
+          let (_ : Managed_asset_sync.sync_result) = prompt_sync ~base ~prompts in
+          let path = Filename.concat prompts file in
+          write_file path edited;
+          let result = prompt_sync ~base ~prompts in
+          (match edits result with
+           | [ (_, Managed_asset_sync.Kept_not_promotable { reason }) ] ->
+             check bool (name ^ ": the reason says why") true
+               (mentions ~line:reason reason_part)
+           | found -> failf "%s: expected one kept edit, found %d" name (List.length found));
+          check string (name ^ ": the file keeps the edit") edited (read_file path);
+          check bool (name ^ ": no override written") false
+            (Sys.file_exists (overrides_path base))))
+    [ ( "slot file"
+      , "grouped.md"
+      , "---\ndescription: grouped\n---\n### one\nMy slot.\n\n### two\nSecond slot.\n"
+      , "### slots" )
+    ; ( "frontmatter change"
+      , "curator.md"
+      , "---\ndescription: mine\ntemplate_variables: [memory]\n---\nKeep {{memory}}.\n"
+      , "frontmatter" )
+    ; ( "undeclared variable"
+      , "curator.md"
+      , "---\ndescription: curator\ntemplate_variables: [memory]\n---\nKeep {{mood}}.\n"
+      , "mood" )
+    ]
+
+let with_read_only dir f =
+  Unix.chmod dir 0o500;
+  Fun.protect ~finally:(fun () -> Unix.chmod dir 0o700) f
+
+(* The override is saved and the file cannot be reset: the edit is in both
+   places and reported as such. The next pass finds the same text saved,
+   counts the edit as promoted, and resets the file. Root writes anywhere,
+   so the case is skipped there. *)
+let test_a_failed_reset_after_promotion_is_reported_then_finished () =
+  if Unix.geteuid () = 0 then ()
+  else
+    with_workspace (fun ~base ~prompts ->
+        let (_ : Managed_asset_sync.sync_result) = prompt_sync ~base ~prompts in
+        let file = Filename.concat prompts "curator.md" in
+        write_file file edited_curator;
+        let first = with_read_only prompts (fun () -> prompt_sync ~base ~prompts) in
+        (match edits first with
+         | [ (_, Managed_asset_sync.Promoted_reset_failed { key; reason = _ }) ] ->
+           check string "the key" "curator" key
+         | found -> failf "expected one reset failure, found %d" (List.length found));
+        check string "the file still holds the edit" edited_curator (read_file file);
+        let second = prompt_sync ~base ~prompts in
+        check (list (pair string outcome_testable)) "the next pass finishes it"
+          [ "prompts/curator.md", Managed_asset_sync.Promoted_to_override { key = "curator" } ]
+          (edits second);
+        check string "and resets the file"
+          (List.assoc "prompts/curator.md" prompt_embedded) (read_file file))
+
+(* The override file cannot be written: nothing was saved, so the edit
+   stays in the file and the reason is reported. *)
+let test_an_unwritable_override_file_keeps_the_edit () =
+  if Unix.geteuid () = 0 then ()
+  else
+    with_workspace (fun ~base ~prompts ->
+        let (_ : Managed_asset_sync.sync_result) = prompt_sync ~base ~prompts in
+        let masc = Filename.concat base ".masc" in
+        Unix.mkdir masc 0o700;
+        let file = Filename.concat prompts "curator.md" in
+        write_file file edited_curator;
+        let result = with_read_only masc (fun () -> prompt_sync ~base ~prompts) in
+        (match edits result with
+         | [ (_, Managed_asset_sync.Kept_not_promotable { reason }) ] ->
+           check bool "the reason names the write" true (mentions ~line:reason "not written")
+         | found -> failf "expected one kept edit, found %d" (List.length found));
+        check string "the file keeps the edit" edited_curator (read_file file))
 
 let () =
   run "prompt_asset_sync"
@@ -735,7 +851,14 @@ let () =
             test_edited_prompt_with_an_override_is_kept;
           test_case "an edited tool is overwritten and reported" `Quick
             test_edited_tool_is_overwritten_and_reported;
-          test_case "a digestless manifest overwrites and gains digests" `Quick
-            test_a_digestless_manifest_overwrites_and_gains_digests;
+          test_case "an old-schema manifest reads as none" `Quick
+            test_an_old_schema_manifest_reads_as_none;
+          test_case "a previous distribution copy is never promoted" `Quick
+            test_a_previous_distribution_copy_is_never_promoted;
+          test_case "unpromotable edits are kept" `Quick test_unpromotable_edits_are_kept;
+          test_case "a failed reset after promotion is reported, then finished" `Quick
+            test_a_failed_reset_after_promotion_is_reported_then_finished;
+          test_case "an unwritable override file keeps the edit" `Quick
+            test_an_unwritable_override_file_keeps_the_edit;
         ] );
     ]

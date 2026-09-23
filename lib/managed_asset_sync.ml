@@ -20,13 +20,7 @@ let manifest_schema = function
   | Mcp -> "masc.mcp-managed-assets.v2"
 ;;
 
-(* A manifest under this schema lists paths and no digests. Its paths are
-   read and every digest is unknown. *)
-let digestless_schema = function
-  | Prompts -> "masc.prompt-managed-assets.v1"
-  | Tools -> "masc.tool-managed-assets.v1"
-  | Mcp -> "masc.mcp-managed-assets.v1"
-;;
+let all_domains = [ Prompts; Tools; Mcp ]
 
 (* The noun used in operator-facing error messages. *)
 let noun = function
@@ -50,6 +44,10 @@ type edit_layer =
 
 type operator_edit_outcome =
   | Promoted_to_override of { key : string }
+  | Promoted_reset_failed of
+      { key : string
+      ; reason : string
+      }
   | Kept_override_exists of { key : string }
   | Kept_not_promotable of { reason : string }
   | Discarded
@@ -122,7 +120,8 @@ let parse_digests ~owned entries =
    not masc's to remove, and the registry reads it like any other prompt.
    No manifest means no owned paths, so a first pass deletes nothing. A
    manifest that does not read, or that another domain wrote, is reported
-   and also yields nothing to delete. *)
+   and also yields nothing to delete. A manifest under any schema no domain
+   writes now is read as no manifest. *)
 let previously_owned ~domain ~dest_dir =
   let path = Filename.concat dest_dir "managed-assets.json" in
   match read_file_opt path with
@@ -140,44 +139,44 @@ let previously_owned ~domain ~dest_dir =
      | exception Yojson.Json_error message ->
        Error (Printf.sprintf "runtime manifest is not JSON: %s" message)
      | `Assoc fields ->
-       let schema_digests =
-         match List.assoc_opt "schema" fields with
-         | Some (`String schema) when String.equal schema (manifest_schema domain) ->
-           Ok (`Recorded (List.assoc_opt "sha256" fields))
-         | Some (`String schema) when String.equal schema (digestless_schema domain) ->
-           Ok `Digestless
-         | Some (`String schema) ->
-           Error
-             (Printf.sprintf
-                "runtime manifest schema %S is not %S"
-                schema
-                (manifest_schema domain))
-         | Some _ | None -> Error "runtime manifest lacks a schema string or a paths list"
+       let owned paths =
+         List.fold_left
+           (fun acc entry ->
+             match acc, entry with
+             | Error _, _ -> acc
+             | Ok owned, `String rel when relative_asset_path rel ->
+               Ok (String_set.add rel owned)
+             | Ok _, `String rel ->
+               Error (Printf.sprintf "runtime manifest lists an unsafe path: %s" rel)
+             | Ok _, _ -> Error "runtime manifest paths must be strings")
+           (Ok String_set.empty)
+           paths
        in
-       let owned =
-         match List.assoc_opt "paths" fields with
-         | Some (`List paths) ->
-           List.fold_left
-             (fun acc entry ->
-               match acc, entry with
-               | Error _, _ -> acc
-               | Ok owned, `String rel when relative_asset_path rel ->
-                 Ok (String_set.add rel owned)
-               | Ok _, `String rel ->
-                 Error (Printf.sprintf "runtime manifest lists an unsafe path: %s" rel)
-               | Ok _, _ -> Error "runtime manifest paths must be strings")
-             (Ok String_set.empty)
-             paths
-         | Some _ | None -> Error "runtime manifest lacks a schema string or a paths list"
+       let foreign schema =
+         List.exists
+           (fun other -> other <> domain && String.equal schema (manifest_schema other))
+           all_domains
        in
-       (match schema_digests, owned with
-        | (Error _ as error), _ -> error
-        | Ok _, (Error _ as error) -> error
-        | Ok `Digestless, Ok owned -> Ok { owned; digests = String_map.empty }
-        | Ok (`Recorded (Some (`Assoc entries))), Ok owned ->
-          Result.map (fun digests -> { owned; digests }) (parse_digests ~owned entries)
-        | Ok (`Recorded (Some _ | None)), Ok _ ->
-          Error "runtime manifest lacks a sha256 object")
+       (match
+          ( List.assoc_opt "schema" fields
+          , List.assoc_opt "paths" fields
+          , List.assoc_opt "sha256" fields )
+        with
+        | Some (`String schema), paths, digests
+          when String.equal schema (manifest_schema domain) ->
+          (match paths, digests with
+           | Some (`List paths), Some (`Assoc entries) ->
+             Result.bind (owned paths) (fun owned ->
+               Result.map (fun digests -> { owned; digests }) (parse_digests ~owned entries))
+           | _, _ -> Error "runtime manifest lacks a paths list or a sha256 object")
+        | Some (`String schema), _, _ when foreign schema ->
+          Error
+            (Printf.sprintf
+               "runtime manifest schema %S is not %S"
+               schema
+               (manifest_schema domain))
+        | Some (`String _), _, _ -> Ok no_record
+        | (Some _ | None), _, _ -> Error "runtime manifest lacks a schema string")
      | _ -> Error "runtime manifest must be a JSON object")
 ;;
 
@@ -408,9 +407,15 @@ let sync_current_asset
                      | Prompt_registry.Promoted { key } ->
                        (* The override is saved before the file is reset, so
                           a failed reset leaves the edit in two places, never
-                          in none. *)
-                       let promoted = with_edit (Promoted_to_override { key }) acc in
-                       install ~written:promoted ~unwritten:promoted
+                          in none, and the next pass finds the same text
+                          saved and resets the file then. *)
+                       (match Fs_compat.save_file_atomic dest content with
+                        | Ok () ->
+                          ( with_edit (Promoted_to_override { key }) acc
+                          , record (Some embedded_digest) )
+                        | Error reason ->
+                          ( with_edit (Promoted_reset_failed { key; reason }) acc
+                          , record previous ))
                      | Prompt_registry.Override_exists { key } ->
                        with_edit (Kept_override_exists { key }) acc, record previous
                      | Prompt_registry.Not_promotable { reason } ->
@@ -576,6 +581,16 @@ let operator_edit_line ~label { path; outcome } =
       label
       path
       key
+  | Promoted_reset_failed { key; reason } ->
+    Printf.sprintf
+      "%s asset %s was edited after the last sync; the edited text is now the \
+       saved override for prompt %s, but resetting the file failed (%s). The \
+       file still holds the edit and the next boot resets it; fix the write \
+       failure or delete the file"
+      label
+      path
+      key
+      reason
   | Kept_override_exists { key } ->
     Printf.sprintf
       "%s asset %s was edited after the last sync, and prompt %s already has a \

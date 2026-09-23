@@ -1396,6 +1396,38 @@ let bootstrap_prompt_assets ~base_path =
     ~dest_dir:(Config_dir_resolver.prompts_dir ())
     ()
 
+(* A probe reads the prompts; it does not own the runtime directory. The
+   server's sync is the only writer there, so the manifest's digests only
+   ever describe what this server wrote. The probe unpacks its own
+   binary's prompts into a directory of its own, removed at exit, and
+   reads the workspace's saved overrides on top. *)
+let bootstrap_prompt_registry_from_binary ~base_path =
+  let dir = Filename.temp_dir "masc-probe-prompts" "" in
+  at_exit (fun () ->
+    try Fs_compat.remove_tree dir with
+    | Sys_error msg | Invalid_argument msg ->
+      Log.Misc.warn "probe prompt directory %s was not removed: %s" dir msg
+    | Unix.Unix_error (error, operation, argument) ->
+      Log.Misc.warn
+        "probe prompt directory %s was not removed: %s(%s): %s"
+        dir
+        operation
+        argument
+        (Unix.error_message error));
+  let sync =
+    Managed_asset_sync.sync
+      ~domain:Managed_asset_sync.Prompts
+      ~edit_layer:Managed_asset_sync.No_edit_layer
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+      ~dest_dir:dir
+      ()
+  in
+  List.iter
+    (fun (rel, msg) -> Log.Misc.warn "probe prompt unpack failed: %s: %s" rel msg)
+    sync.Managed_asset_sync.failed;
+  Prompt_defaults.bootstrap_markdown_dir ~workspace_path:base_path ~prompt_markdown_dir:dir
+
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();

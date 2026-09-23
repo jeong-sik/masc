@@ -705,9 +705,28 @@ status: reference
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
   `admits_self_directed_progress`가 이 경계를 정의한다.
 
-**Schedule**
-: 미래 시점에 Keeper를 깨우는 durable 요청. 만들기, 조회, 수정, 취소와
-  기록 추가·조회 도구가 있다. Schedule은 이후 외부 효과를 자동 승인하지 않는다.
+**Schedule (예약)**
+: 미래 시점에 Keeper를 깨우는 durable 요청. 만들기·조회·수정·취소와 기록(노트)
+  추가·조회 도구가 있다. Schedule은 이후 외부 효과를 자동 승인하지 않는다 — payload가
+  낳을 효과의 권한은 소비자의 leaf gate가 쥔다.
+  - 두 식별자: `schedule_id`는 정의를 교체해도 살아남는 안정 id이고,
+    `schedule_instance_id`는 정의 하나의 인스턴스마다 새로 발급된다. 그래서 이전 정의의
+    wake는 교체된 정의의 증거가 되지 않는다.
+  - 두 행위자: 행은 `requested_by`(요청한 쪽)와 `scheduled_by`(예약한 쪽)를 가진다.
+    기록되는 actor는 인자가 아니라 경계가 인증한 호출자이고, 만들기(`create`)는 호출자를
+    두 칸에 똑같이 적는다. 도구 스키마에는 actor 인자가 없다. 호출이
+    `requested_by_*`·`scheduled_by_*`에 호출자와 다른 값을 적으면 `actor_mismatch`로
+    거절되고, 호출자와 같은 값은 아무것도 바꾸지 않는다. 이름 없는 호출자(`Unnamed_caller`)는
+    거절된다. 수정(`update`)은 기존 행에 저장된 두 행위자를 보존하며, named caller는
+    자신이 소유한 예약(`owner=self`: 자신이 예약했거나 자신을 깨우는 행)만 수정·취소할
+    수 있고 다른 예약은 `not_schedule_owner`로 거절된다(운영자 자격만 임의 변경 가능).
+  - `wake_record`는 scheduler가 남기는 일반 wake 시도(`Wake_running`·`Wake_succeeded`·
+    `Wake_failed`)이고, Keeper turn 결과는 Keeper 원장에 산다 — 같은 것이 아니다.
+  - 노트는 `schedule_id`에 매이고 append-only다. terminal 전이 뒤에도 남는다 —
+    상태가 아니라 이력이다.
+  - 상태는 `Scheduled`·`Due`·`Running`·`Succeeded`·`Failed`·`Cancelled`·`Expired`,
+    반복은 `One_shot`·`Interval`·`Daily`·`Cron`이다.
+  → [Schedule_domain](../../lib/schedule/schedule_domain.mli) · [Schedule_store](../../lib/schedule/schedule_store.mli)
 
 **Fusion**
 : 여러 독립 판단을 비동기로 수집하고 하나의 결론으로 합성하는 실행. 패널 구성원
@@ -841,6 +860,11 @@ status: reference
 
 **Verification ID**
 : 제출 하나의 식별자. 판정은 자기가 읽은 id 가 지금 id 와 같을 때만 적용된다.
+  운영자 판정(`POST /api/v1/verification/verdict`)은 읽은 `verification_id`를
+  필수로 요구하며, 백로그 잠금 아래에서 지금 id와 다르면
+  `Task_error.VerificationSuperseded`(HTTP 409)로 거절된다. 판정자가 증거를
+  읽는 사이에 Producer가 재제출하거나 취소 요청으로 제출을 교체한 경우, 낡은
+  판정이 새 제출에 붙는 것을 막는다.
 
 **Completion Authority**
 : 판정을 내리는 쪽. 서버 안의 판정 에이전트(`System_llm_agent`)이거나 인증된 HTTP
@@ -876,6 +900,8 @@ status: reference
   생성되지는 않는다. 현재 발행·사용 경로는 [Skills](../SKILLS.md)를 따른다.
   `keeper_skill_validate`는 export한 문서를 정적 검증하며, 실행 성공·안전성·발행을
   뜻하지 않는다. 입력과 발행 경계도 위 [Skills](../SKILLS.md) 문서를 따른다.
+  `keeper_skill_publish`는 Keeper가 `project-agents` source에 새 Skill을 만들고
+  바로 발행하는 도구다. 이미 있는 이름은 덮어쓰지 않고, 지우는 건 운영자가 한다.
   → [Keeper_skill_catalog](../../lib/keeper/keeper_skill_catalog.mli),
   [Skill_reference](../../lib/skill_reference/skill_reference.mli)
 
@@ -1273,6 +1299,24 @@ status: reference
   요약이 빠져도 turn은 거절하지 않고 WARN으로 알린다.
   → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
 
+**Extra System Context (턴별 문맥)**
+: Keeper hook이 매 turn 새로 조립해 provider 지시 표면에 얹는 `System` 메시지.
+  `Agent_core.Types.Extra_system_context_provenance`를 달고, 그 태그가 `Invalid`나
+  `Duplicate`여도 이 문맥이다(`is_extra_context`). 고정(Pinned)이라 atom으로 세지
+  않고 어떤 자르기도 지우지 않는다 — 매 turn 다시 조립되므로 살아남아야 한다. 이
+  문맥을 실은 요청은 실어 보낸 History 크기의 표본이 아니다.
+  - **Working State와 다른 것**: Librarian working state도 같은 표면의 두 번째
+    `System` 메시지지만 표식이 다르다 — `working_state_marker_key`(`working_state_metadata`)
+    하나만 달고, 요약된 범위가 조립한다. 턴별 문맥은 AGENT_CORE가 덧붙이는 carrier이고,
+    working state는 범위가 조립하는 것이다.
+  - **Composed System Context**: 이 둘을 함께 부르는 이름(`is_composed_system_context`).
+    공식 클라이언트 어댑터는 이 메시지들을 canonical history 스냅숏에서 빼고 resume 때
+    다시 보낸다.
+  - **입력 귀속 검사**: turn 기록의 입력 귀속(`input_components`)은 요청 하나에 carrier가
+    하나라고 보고 푼다. carrier가 두 번 보이면 요청은 그대로 나가고, 입력 귀속만 비운 채
+    `prompt_context_carrier_repeated`를 사유로 남긴다.
+  → [Runtime_model_input_tail_window](../../lib/runtime/runtime_model_input_tail_window.mli) · [Keeper_official_client_host.is_composed_system_context](../../lib/keeper/keeper_official_client_host.mli) · [Keeper_agent_prompt_metrics](../../lib/keeper/keeper_agent_prompt_metrics.mli)
+
 **Continuity Synthesis Observation (대화 요약 진행 관측)**
 : 이번 서버 실행에서 Librarian이 마지막으로 선택한 Atom 구간, 그때 확인한
   완료 경계, 실행·저장·중단 상태. `context_cycle.synthesis`와 TUI Memory 화면에
@@ -1445,6 +1489,35 @@ status: reference
   낸다. 아무것도 쓰지 않는다 — progress 파일·boundary line·checkpoint 모두 없다.
   서버의 Librarian 실행이 아니라 그 읽기 규칙의 측정 하네스다.
   → [masc_librarian_replay](../../bin/masc_librarian_replay.ml)
+
+**Librarian Pass End (Librarian 회차 종결 상태)**
+: Memory health HTTP API와 TUI Memory 화면이 그리는 Librarian durable 회차의 종결 상태.
+  Memory health의 Librarian 행은 스냅숏의 source가 아니라 저널 최신 줄들을 역순으로 걸어
+  (`server_dashboard_http_keeper_memory_health.ml`), Librarian이 마지막으로 커밋한
+  성공과 그 뒤의 최신 실패를 독립적으로 읽는다. 따라서 키퍼가 `keeper_memory_write`나
+  철회(`retraction`)로 Fact를 직접 기록해도 Librarian의 성공을 지우거나 직전 실패를
+  가리지 않는다(#38049).
+  TUI(`lib/tui_decode.mli`, `bin/masc_tui_render_memory.ml`)는 회차 종결 상태와 실패
+  종류를 닫힌 타입으로 디코드하고 wire 단어 대신 일상 단어로 그린다:
+  - 닫힌 여섯 종결 상태(`memory_librarian_pass_end`):
+    `Pass_off`(\"switched off\"), `Pass_lane_unconfigured`(\"no model lane set up\"),
+    `Pass_drained`(\"caught up\"), `Pass_not_committed`(\"last pass saved nothing\"),
+    `Pass_stopped`(\"stopped on an error\"), `Pass_raised`(\"crashed\").
+  - 닫힌 아홉 실패 종류(`memory_librarian_failure_kind`):
+    `Failure_prompt_render`(\"prompt could not be built\"),
+    `Failure_execution_clock_unavailable`(\"no clock to run on\"),
+    `Failure_exact_setup`(\"model call could not be set up\"),
+    `Failure_exact_execution`(\"model call failed\"),
+    `Failure_domain_output_invalid`(\"model answer was not usable\"),
+    `Failure_memory_snapshot_write`(\"Memory could not be saved\"),
+    `Failure_runtime_context_unavailable`(\"no runtime context\"),
+    `Failure_lane_cancelled`(\"cancelled before saving\"),
+    `Failure_unhandled_exception`(\"unexpected crash\").
+  - `Librarian cause`: `Pass_stopped` 또는 `Pass_raised`일 때 서버가 기록한 구체적 원인을
+    별도 행에 그린다.
+  - 행 격리: 서버가 보낸 값을 TUI가 알지 못하면 전체 Memory 화면을 깨뜨리지 않고 해당
+    키퍼 행만 이름과 거절 사유 한 줄(`refusal`)로 격리하며 다른 행들은 정상 표시한다.
+  → [server_dashboard_http_keeper_memory_health](../../lib/server/server_dashboard_http_keeper_memory_health.ml) · [tui_decode](../../lib/tui_decode.mli) · [masc_tui_render_memory](../../bin/masc_tui_render_memory.ml)
 
 **JEV / Noul**
 : JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이

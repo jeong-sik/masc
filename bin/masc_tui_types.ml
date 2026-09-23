@@ -1,5 +1,6 @@
 [@@@warning "-32-69"]
 module Tui_decode = Masc.Tui_decode
+module Memory_category = Masc.Keeper_memory_os_types
 module Metrics_tail = Masc_tui_metrics_tail
 module Rows = Masc_tui_rows
 
@@ -1871,9 +1872,11 @@ let acting_retained_quiet = 200
     same as nine running ones.
 
     [klc_unreadable] counts rows whose word is missing or outside the
-    vocabulary. They are not folded into any state: a Keeper whose liveness
-    this build cannot name is a different fact from an idle one, and the row
-    says so rather than picking the convenient neighbour. *)
+    vocabulary, and the Keepers the briefing lists under [keepers_unread]
+    because the server could not build their row. They are not folded into
+    any state: a Keeper whose liveness this build cannot name is a different
+    fact from an idle one, and the row says so rather than picking the
+    convenient neighbour. *)
 type keeper_liveness_counts = {
   klc_active: int;
   klc_offline: int;
@@ -1886,7 +1889,7 @@ type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_cluster: string;
   ov_project: string;
-  ov_keepers: int;  (** [keeper_briefs] the briefing carried *)
+  ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
   ov_keeper_liveness: keeper_liveness_counts;
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_attention_items: attention_item list;
@@ -3579,13 +3582,13 @@ let next_memory_sort = function
 
 type memory_category_filter =
   | Category_all
-  | Category_ordinary of string
+  | Category_ordinary of Memory_category.category
   | Category_source
   | Category_dropped
 
 let memory_category_filter_label = function
   | Category_all -> "All"
-  | Category_ordinary cat -> cat
+  | Category_ordinary cat -> Memory_category.category_to_string cat
   | Category_source -> "source"
   | Category_dropped -> "dropped"
 
@@ -8536,8 +8539,9 @@ let surface_search_query surface query =
 
 let memory_fact_search_text = function
   | Memory_row_fact f ->
-      f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
-      ^ f.Tui_decode.mf_origin
+      f.Tui_decode.mf_claim ^ " "
+      ^ Memory_category.category_to_string f.Tui_decode.mf_category
+      ^ " " ^ f.Tui_decode.mf_origin
   | Memory_row_source_fact f ->
       f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
   | Memory_row_invalidation f ->
@@ -8721,7 +8725,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
               | Category_ordinary category ->
                   List.filter
                     (fun (fact : Tui_decode.memory_fact) ->
-                      String.equal fact.Tui_decode.mf_category category)
+                      fact.Tui_decode.mf_category = category)
                     store.Tui_decode.mos_facts
               | Category_source | Category_dropped -> []
             in
@@ -8812,7 +8816,8 @@ let memory_fact_rows (state : state) : memory_fact_row list =
            List.sort
              (fun a b ->
                let cat = function
-                 | Memory_row_fact f -> (0, f.Tui_decode.mf_category)
+                 | Memory_row_fact f ->
+                     (0, Memory_category.category_to_string f.Tui_decode.mf_category)
                  | Memory_row_source_fact _ -> (1, "source")
                  | Memory_row_invalidation _ -> (2, "dropped")
                in
@@ -8840,10 +8845,10 @@ let memory_fact_rows (state : state) : memory_fact_row list =
                String.compare (claim a) (claim b))
              filtered_rows)
 
-(* The categories the loaded ordinary store and source store actually hold, distinct and
-   sorted -- the [c] cycle walks these. Read from the rows, never from a
-   list this side hardcodes: the taxonomy is the server's, and a category it
-   adds appears here without a code change. *)
+(* The categories the loaded ordinary store and source store actually hold,
+   distinct and in the taxonomy's constructor order -- the [c] cycle walks
+   these. Read from the rows rather than [all_categories], so the strip names
+   only the categories this keeper has written. *)
 let memory_fact_categories (state : state) : memory_category_filter list =
   match state.memory_facts with
   | None -> []

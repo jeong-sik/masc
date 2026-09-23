@@ -1104,7 +1104,7 @@ val no_memory_fact_events : memory_fact_events
     equality and never classifies on its own. *)
 type memory_fact = {
   mf_claim : string;
-  mf_category : string;
+  mf_category : Keeper_memory_os_types.category;
   mf_origin : string;
   mf_first_seen : float;
   mf_last_seen : float;

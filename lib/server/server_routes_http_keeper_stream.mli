@@ -458,13 +458,11 @@ val handle_keeper_ask_answer :
     Reads [{"name", "ask_id", "answers": [{"question_id", "response"}], ...}]
     where a response is [{"kind": "chose", "choice_ids": [...]}],
     [{"kind": "wrote", "text": ...}], or [{"kind": "skipped"}]. Optional
-    ["session_id"] records which dashboard session answered.
-
-    [actor] is the authenticated caller (task-1662) and is what the durable
-    log records as the responder: a body ["actor_id"] field is ignored, a
-    self-reported identity would let the answering client write any name
-    into the log. The response echoes [actor] so the caller sees what was
-    recorded.
+    ["session_id"] records which dashboard session answered. The body has no
+    ["actor_id"] field: who answered is [actor], the authenticated caller
+    (task-1662) — a self-reported identity would let the answering client
+    write any name into the log. The response echoes [actor] so the caller
+    sees what was recorded.
 
     Two surfaces can submit for one ask at once and nothing locks the log. The
     fold settles on first write, so a submission that lost returns [`Conflict]

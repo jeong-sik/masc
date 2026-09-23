@@ -344,7 +344,8 @@ let rec reload_same_generation_ready
      | Partition.Blocked _
      | Partition.Running _
      | Partition.Completed _
-     | Partition.Settled _ ->
+     | Partition.Settled _
+     | Partition.Abandoned _ ->
        Error
          (Partition_state_conflict
             "the partition did not converge to Ready for this quarantine generation"))
@@ -376,7 +377,8 @@ let commit_partition_ready ~base_path command partition =
      | Ok (Partition.Requeued transition) ->
        confirm_requeue ~base_path transition)
   | Partition.Ready -> confirm_ready_partition ~base_path partition
-  | Partition.Running _ | Partition.Completed _ | Partition.Settled _ ->
+  | Partition.Running _ | Partition.Completed _ | Partition.Settled _
+  | Partition.Abandoned _ ->
     Error
       (Partition_state_conflict
          "partition advanced before candidate requeue authorization")
@@ -429,7 +431,8 @@ let execute_with_before_partition_commit
       (Partition_state_conflict
          "Ready partition is not the authorized generation successor")
   | Candidate.Requeued _,
-    (Partition.Running _ | Partition.Completed _ | Partition.Settled _) ->
+    (Partition.Running _ | Partition.Completed _ | Partition.Settled _
+    | Partition.Abandoned _) ->
     Error
       (Partition_state_conflict
          "partition advanced beyond the authorized Ready boundary")
@@ -475,7 +478,7 @@ let execute_with_before_partition_commit
          "candidate quarantine targets a different Blocked generation")
   | (Candidate.Quarantined | Candidate.Requeue_requested _),
     (Partition.Ready | Partition.Running _ | Partition.Completed _
-    | Partition.Settled _) ->
+    | Partition.Settled _ | Partition.Abandoned _) ->
     Error
       (Partition_state_conflict
          "partition became claimable before candidate requeue authorization")

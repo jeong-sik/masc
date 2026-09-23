@@ -7,6 +7,7 @@ module Message_layout = Masc_tui_message_layout
 module Terminal_text = Masc_tui_ansi.Terminal_text
 module Theme = Masc_tui_ansi.Theme
 module Rows = Masc_tui_rows
+module Memory_category = Masc.Keeper_memory_os_types
 
 let keeper_lane_idle_text seconds =
   let seconds = max 0 seconds in
@@ -335,18 +336,47 @@ let memory_row_line columns (k : memory_keeper_health) =
       ; mrow_delta = delta
       }
 
-let format_cat_badge cat =
-  let raw_cat = Terminal_text.single_line (String.trim cat) in
+(* What a row wears in its first cell. The category is the librarian
+   taxonomy, a closed sum the producer writes and the model's schema enum is
+   built from ([Keeper_memory_os_types.category]); the other two are this
+   pane's own words for rows that are not ordinary facts, and the call sites
+   know which they are drawing, so they say so rather than handing over a
+   string to be recognised. *)
+type memory_row_badge =
+  | Badge_category of Memory_category.category
+  | Badge_source
+  | Badge_dropped
+
+(* The word comes from [category_to_string], the one place that spells the
+   taxonomy, so the badge, the category strip and the detail all read one
+   value. A table used to answer both the word and its colour by matching the
+   string: across the fleet's 1768 facts it recognised 749 and let 1019 fall
+   through a catch-all, nine of its eleven spellings matched nothing any
+   keeper writes, and [preference] was renamed to PREF on the row while the
+   detail under it read "preference".
+
+   Only [Blocker] is dressed, because it is the one category whose name is an
+   alarm; the table used to draw it in the same receded style as every word it
+   did not know. The rest share one style: which of them matters is the
+   reader's question, not this cell's. *)
+let format_row_badge badge =
   let cat_style, label =
-    match String.lowercase_ascii raw_cat with
-    | "rule" | "rules" -> (Theme.warn (), "RULE")
-    | "persona" | "identity" -> (Theme.info (), "IDENTITY")
-    | "preference" | "user" -> (Theme.ok (), "PREF")
-    | "architecture" | "system" -> (Theme.info (), "ARCH")
-    | "lesson" -> (Theme.ok (), "LESSON")
-    | "source" -> (Theme.info (), "SOURCE")
-    | "dropped" -> (Theme.bad (), "DROPPED")
-    | other -> (Theme.recede (), String.uppercase_ascii other)
+    match badge with
+    | Badge_source -> (Theme.info (), "SOURCE")
+    | Badge_dropped -> (Theme.bad (), "DROPPED")
+    | Badge_category category ->
+        let style =
+          match category with
+          | Memory_category.Blocker -> Theme.warn ()
+          | Memory_category.Code_change | Memory_category.Fact
+          | Memory_category.Preference | Memory_category.Goal
+          | Memory_category.Constraint | Memory_category.Validated_approach
+          | Memory_category.Lesson ->
+              Theme.recede ()
+        in
+        ( style
+        , String.uppercase_ascii
+            (Memory_category.category_to_string category) )
   in
   let cat_str =
     if Message_layout.display_width label > 10 then
@@ -388,7 +418,7 @@ let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
   let keeper_cells = if is_fleet then 11 else 0 in
   match row with
   | Memory_row_fact fact ->
-      let cat_badge = format_cat_badge fact.mf_category in
+      let cat_badge = format_row_badge (Badge_category fact.mf_category) in
       let age = memory_fact_age_label fact.mf_last_seen in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
       let prefix = Printf.sprintf "  %s%s %s " keeper_prefix cat_badge age_badge in
@@ -404,7 +434,7 @@ let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
       in
       prefix ^ claim_display
   | Memory_row_source_fact fact ->
-      let cat_badge = format_cat_badge "source" in
+      let cat_badge = format_row_badge Badge_source in
       let age = memory_fact_age_label fact.msf_first_seen in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
       let raw_path =
@@ -436,7 +466,7 @@ let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
       in
       prefix ^ claim_display
   | Memory_row_invalidation row ->
-      let cat_badge = format_cat_badge "dropped" in
+      let cat_badge = format_row_badge Badge_dropped in
       let age = memory_fact_age_label row.mi_invalidated_at in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
       let raw_path =
@@ -521,7 +551,8 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
       in
       [ Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
-      @ [ detail_field "Category:" fact.mf_category
+      @ [ detail_field "Category:"
+            (Memory_category.category_to_string fact.mf_category)
         ; detail_field "Origin:"
             (Printf.sprintf "%-15s %sTimeline:%s   First: %s · Last: %s"
                fact.mf_origin (Theme.recede ()) Ansi.reset

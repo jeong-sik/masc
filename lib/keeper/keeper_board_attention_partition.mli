@@ -89,15 +89,17 @@ type state =
       ; completed_at : float
       }
   | Settled of { settled_at : float }
-      (** Terminal for [settle]'s own caller, but not for the ledger: [ensure_roots]
-          reopens a [Settled] root straight back to [Ready] (same deterministic
-          identity, next generation) when the matching candidate is still
-          [Resumable_pending] — the Candidate ledger never recorded any judgment
-          for it, so the root settling can only be a desync (e.g. the
-          "candidate permanently absent" path settling a [Blocked] root without
-          ever judging it). A [Resumable_judged] or [Requeued_resumable] match
-          leaves [Settled] alone; those belong to [reconcile_quarantines]'s own
-          bookkeeping instead. No other transition leaves [Settled]. *)
+      (** Terminal: a judgment is on record. No transition leaves [Settled]. *)
+  | Abandoned of { abandoned_at : float }
+      (** Terminal for judgment purposes and never reached by [settle]: the
+          root gave up its candidate without ever recording one (e.g.
+          [reconcile_quarantines] abandoning a [Blocked] root whose candidate
+          is permanently absent from the ledger). [ensure_roots] reopens an
+          [Abandoned] root back to [Ready] (same deterministic identity, next
+          generation) when the matching candidate is still [Resumable_pending]
+          — nothing was ever judged. A [Resumable_judged] or
+          [Requeued_resumable] match leaves [Abandoned] alone; those belong to
+          [reconcile_quarantines]'s own bookkeeping instead. *)
   | Blocked of
       { reason : blocked_reason
       ; blocked_at : float
@@ -250,6 +252,15 @@ val settle :
   now:float -> base_path:string -> partition:t -> (t, string) result
 (** Idempotently mark one [Completed] or terminal [Blocked] root [Settled]
     after its domain obligation or operator disposition has been applied. *)
+
+val abandon :
+  now:float -> base_path:string -> partition:t -> (t, string) result
+(** Idempotently mark one [Blocked] root [Abandoned]: its candidate is
+    permanently absent from the Candidate ledger, so the root gives up
+    without ever recording a judgment. Unlike [Settled], an [Abandoned] root
+    still reopens through [ensure_roots] when the matching candidate turns
+    out to be alive and [Resumable_pending]. A root that is already
+    [Abandoned] is returned unchanged. *)
 
 module For_testing : sig
   val path : base_path:string -> keeper_name:string -> string

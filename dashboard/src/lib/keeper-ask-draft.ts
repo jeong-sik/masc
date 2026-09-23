@@ -149,22 +149,21 @@ export type AnswerRequestBody = {
   readonly name: string
   readonly ask_id: string
   readonly answers: readonly AnswerWire[]
-  readonly actor_id?: string
   readonly session_id?: string
 }
 
+/** The body names the ask and the answers. Who answered is the
+    authenticated caller, which the server takes from the request. */
 export function answerRequestBody(
   row: AskRow,
   answers: readonly AnswerWire[],
-  identity: { readonly actorId?: string | null; readonly sessionId?: string | null } = {},
+  identity: { readonly sessionId?: string | null } = {},
 ): AnswerRequestBody {
-  const actorId = identity.actorId?.trim()
   const sessionId = identity.sessionId?.trim()
   return {
     name: row.keeper,
     ask_id: row.askId,
     answers,
-    ...(actorId !== undefined && actorId !== '' ? { actor_id: actorId } : {}),
     ...(sessionId !== undefined && sessionId !== '' ? { session_id: sessionId } : {}),
   }
 }

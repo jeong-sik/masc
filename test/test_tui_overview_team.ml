@@ -102,7 +102,7 @@ let detail_of name =
 
 let test_a_stuck_row_carries_the_attention_sentence_and_held_work () =
   (match detail_of "tui-developer" with
-   | Team.Blocker { summary; held } ->
+   | Team.Blocker { summary; held; _ } ->
        check string "the item naming this Keeper, verbatim"
          "tui-developer: runtime_blocked (Keeper turn failed 2 consecutive cycle(s))"
          summary;
@@ -110,7 +110,7 @@ let test_a_stuck_row_carries_the_attention_sentence_and_held_work () =
    | Team.Phase_word _ | Team.Working_on _ | Team.No_open_task _ ->
        fail "a failing Keeper named by an attention item carries its sentence");
   match detail_of "sangsu" with
-  | Team.Blocker { summary; held } ->
+  | Team.Blocker { summary; held; _ } ->
       check string "no registry phase, but named by attention"
         "sangsu: keepalive_stopped" summary;
       check int "the three tasks it stopped holding are said" 3 held
@@ -226,6 +226,69 @@ let test_a_stuck_row_prefers_the_blocker_sentence () =
         summary
   | _ -> fail "a failing Keeper named by an item is a Blocker row"
 
+(* The Attention panel beside the Team block (#38148). An item leaves the
+   panel only when a drawn Team row prints it; everything else stays. *)
+module Panel = struct
+  let a1 = keeper_item "stuck-a" "stuck-a: runtime_blocked"
+  let a2 = keeper_item "stuck-a" "stuck-a: trust_needs_attention"
+  let b1 = keeper_item "run-b" "run-b: runtime_blocked"
+  let c1 = keeper_item "stuck-c" "stuck-c: keepalive_stopped"
+
+  let o1 =
+    { (keeper_item "x" "a board item") with
+      ai_target = Types.Attention_other { target_type = "board"; target_id = None }
+    }
+
+  let attention = [ a1; a2; b1; c1; o1 ]
+
+  let team =
+    Team.project
+      ~keepers:
+        [ keeper "stuck-a" (phase "failing")
+        ; keeper "run-b" (phase "running")
+        ; keeper "stuck-c" (phase "crashed")
+        ]
+      ~tasks:[] ~attention
+
+  let summaries items =
+    List.map (fun (item : Types.attention_item) -> item.ai_summary) items
+
+  let panel ~rows =
+    fst (Team.settle team ~attention ~allocate:(fun _ -> rows) ~team_rows:Fun.id)
+end
+
+let test_a_running_keepers_item_stays_in_the_panel () =
+  check bool "run-b's item is drawn in the panel" true
+    (List.memq Panel.b1 (Panel.panel ~rows:10))
+
+let test_a_second_item_about_a_stuck_keeper_stays_in_the_panel () =
+  check (list string) "the row draws one item; the other stays"
+    (Panel.summaries [ Panel.a2; Panel.b1; Panel.o1 ])
+    (Panel.summaries (Panel.panel ~rows:10))
+
+let test_items_of_cut_rows_stay_in_the_panel () =
+  check (list string) "one row drawn: only stuck-a's item moved"
+    (Panel.summaries [ Panel.a2; Panel.b1; Panel.c1; Panel.o1 ])
+    (Panel.summaries (Panel.panel ~rows:1));
+  check (list string) "no Team row drawn: the panel keeps everything"
+    (Panel.summaries Panel.attention)
+    (Panel.summaries (Panel.panel ~rows:0))
+
+(* Handing items to the Team block frees panel rows, which can let the block
+   draw more rows, whose items move too. The result must be the fixed point,
+   and every moved item must sit on a row the final budget draws. *)
+let test_settle_reaches_the_rows_the_final_budget_draws () =
+  let allocate panel = if List.length panel >= 5 then 1 else 2 in
+  let panel, rows =
+    Team.settle Panel.team ~attention:Panel.attention ~allocate ~team_rows:Fun.id
+  in
+  check int "two rows drawn" 2 rows;
+  check (list string) "both stuck rows' items moved, nothing else"
+    (Panel.summaries [ Panel.a2; Panel.b1; Panel.o1 ])
+    (Panel.summaries panel);
+  check int "the budget is the one the panel was allocated with" rows
+    (allocate panel)
+
 let () =
   run "tui_overview_team"
     [ ( "team"
@@ -244,5 +307,13 @@ let () =
             test_shut_windows_name_each_window_once
         ; test_case "stuck row prefers the blocker sentence" `Quick
             test_a_stuck_row_prefers_the_blocker_sentence
+        ; test_case "a running Keeper's item stays in the panel" `Quick
+            test_a_running_keepers_item_stays_in_the_panel
+        ; test_case "a second item about a stuck Keeper stays" `Quick
+            test_a_second_item_about_a_stuck_keeper_stays_in_the_panel
+        ; test_case "items of cut rows stay in the panel" `Quick
+            test_items_of_cut_rows_stay_in_the_panel
+        ; test_case "settle reaches the final budget's rows" `Quick
+            test_settle_reaches_the_rows_the_final_budget_draws
         ] )
     ]

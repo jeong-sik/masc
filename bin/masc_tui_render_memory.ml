@@ -122,45 +122,28 @@ let recall_tokens bytes =
    to draw the roster, the Librarian row and an alert each need one break. *)
 let maximum_rows_for_a_reading = 2
 
-(* Every row of the keeper block is a list of clauses that a Printf joined
-   with the clause mark, so the mark is where the row may break. The block
-   was drawn one row per reading and cut at the frame: the Librarian row lost
+(* A row of the keeper block, given as its clauses rather than as the joined
+   string: [pack_clauses] keeps a clause whose own text holds the mark whole,
+   which it cannot do for a row that has already been joined. The block was
+   drawn one row per reading and cut at the frame: the Librarian row lost
    "failed N since server start", the tail #36497 records as reading like a
    running total, and a server alert lost the half that says what to do about
    it.
 
-   A row with no mark -- an alert is one sentence -- is one clause, and
-   [pack_clauses] wraps a clause too wide for a row rather than cutting it.
-   Continuation rows carry the same two-space indent as the first. *)
-let clause_rows ~cols line =
+   An alert is one sentence and arrives as one clause; [pack_clauses] wraps a
+   clause too wide for a row rather than cutting it. Continuation rows carry
+   the same two-space indent as the first. *)
+let clause_rows ~cols clauses =
   let indent = "  " in
   let indent_cells = Message_layout.display_width indent in
-  let body =
-    if String.starts_with ~prefix:indent line then
-      String.sub line indent_cells (String.length line - indent_cells)
-    else line
-  in
-  let separator = Message_layout.clause_separator in
-  let separator_length = String.length separator in
-  let clauses =
-    let length = String.length body in
-    let rec split ~from ~at acc =
-      if at + separator_length > length then
-        List.rev (String.sub body from (length - from) :: acc)
-      else if String.equal (String.sub body at separator_length) separator then
-        split ~from:(at + separator_length) ~at:(at + separator_length)
-          (String.sub body from (at - from) :: acc)
-      else split ~from ~at:(at + 1) acc
-    in
-    split ~from:0 ~at:0 []
-  in
   let packed =
     Message_layout.pack_clauses
       ~max_cells:(max 1 (framed_inner_width cols - indent_cells))
       clauses
     |> List.map (fun row -> indent ^ row)
   in
-  if List.length packed <= maximum_rows_for_a_reading then packed else [ line ]
+  if List.length packed <= maximum_rows_for_a_reading then packed
+  else [ indent ^ String.concat Message_layout.clause_separator clauses ]
 
 let memory_context_lines ~cols (k : memory_keeper_health) =
   let current_line =
@@ -178,7 +161,7 @@ let memory_context_lines ~cols (k : memory_keeper_health) =
   (* RFC librarian-lifecycle §4.9: how far behind, when that was counted,
      and what the journal last said. A count the durable drain could not take prints
      as "unread ?" rather than as zero. *)
-  let librarian_line =
+  let librarian_clauses =
     let librarian = k.mkh_librarian in
     let unread =
       match librarian.mlh_unread_atom_turns, librarian.mlh_unread_official_turns with
@@ -193,19 +176,20 @@ let memory_context_lines ~cols (k : memory_keeper_health) =
       | Some atoms -> Printf.sprintf "continuity behind %d" atoms
       | None -> "continuity behind ?"
     in
-    Printf.sprintf
-      "  Librarian · %s · %s · %s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
-      (match librarian.mlh_state with
+    [ "Librarian"
+    ; (match librarian.mlh_state with
        | Some state -> librarian_pass_end_words state
        | None -> "not measured")
-      unread
-      continuity
-      (memory_updated_text librarian.mlh_measured_at)
-      (memory_updated_text librarian.mlh_last_success_at)
-      (match librarian.mlh_last_failure_kind with
-       | Some kind -> librarian_failure_words kind
-       | None -> "-")
-      k.mkh_librarian_failures
+    ; unread
+    ; continuity
+    ; "measured " ^ memory_updated_text librarian.mlh_measured_at
+    ; "Memory saved " ^ memory_updated_text librarian.mlh_last_success_at
+    ; "last failure "
+      ^ (match librarian.mlh_last_failure_kind with
+         | Some kind -> librarian_failure_words kind
+         | None -> "-")
+    ; Printf.sprintf "failed %d since server start" k.mkh_librarian_failures
+    ]
   in
   let librarian_cause_lines =
     (* The cause is drawn on its own row because it is the part of the
@@ -296,7 +280,7 @@ let memory_context_lines ~cols (k : memory_keeper_health) =
   let alert_lines =
     List.map
       (fun (a : memory_alert) ->
-        Printf.sprintf "  [%s] %s \xe2\x80\x94 %s"
+        Printf.sprintf "[%s] %s \xe2\x80\x94 %s"
           (match Masc.Tui_decode.memory_alert_severity a.ma_code with
            | `Warn -> "warn"
            | `Error -> "error")
@@ -325,10 +309,10 @@ let memory_context_lines ~cols (k : memory_keeper_health) =
      breaking every row would double the block at the widths a terminal is
      likely to have. *)
   [ current_line; facts_line; source_line ]
-  @ clause_rows ~cols librarian_line
+  @ clause_rows ~cols librarian_clauses
   @ librarian_cause_lines @ context_lines
   @ (vision_line :: read_error_lines)
-  @ List.concat_map (clause_rows ~cols) alert_lines
+  @ List.concat_map (fun sentence -> clause_rows ~cols [ sentence ]) alert_lines
 
 type memory_state = Masc_tui_types.memory_state =
   | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current

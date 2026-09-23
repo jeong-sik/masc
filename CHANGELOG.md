@@ -5,6 +5,7 @@
 ### Added
 
 - The model catalog and the seed runtime config carry the three models released on 2026-09-22. `claude-opus-5-5` gets its own catalog row (1M/128K, $4/$20, cache read 0.05x, forced tool use refused) — without it the id lands on the `claude-opus-5` row and bills cache reads at double the real rate — plus Claude Code subscription bindings at low..max. `gpt-6-sol` and `gpt-6-luna` get bare catalog rows (efforts `none`,`low`..`max`, from a /v1/responses parameter probe) and Codex subscription bindings at low..max. Release evidence entries for all three (#38118).
+- TUI Keeper detail, Channels tab: `U` `U` removes every channel binding of the Keeper on every transport. The first press lists the channels; the second sends one unbind per binding conditioned on the Keeper's name, so a channel rebound to another Keeper meanwhile is left alone. Each binding's result (removed, skipped, or failed with the server's reason) is its own Recent Events line. Channels read `name (id)`, or `id (name unknown)` when the name directory has no entry, in the binding list and the unbind confirmations (#38183).
 
 ### Changed
 

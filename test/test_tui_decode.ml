@@ -3769,6 +3769,54 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     ; replace_field "prepared" (replace_field "input" (replace_field "kind" (`String "accepted") input) prepared) cycle
     ; replace_field "prepared" (replace_field "input" (replace_field "frontier" `Null input) prepared) cycle
     ];
+  (* How the last Librarian pass ended is a closed set on both sides: a
+     stopped or crashed pass keeps the server's cause on its constructor, and
+     a spelling this build does not know fails the decode instead of reaching
+     the screen as a raw word. *)
+  let with_librarian ~stopped_keepers updates =
+    let with_row =
+      map_keeper 0
+        (fun keeper -> match keeper with
+         | `Assoc fields ->
+           `Assoc (List.map (fun (key, value) -> key,
+             if key = "librarian"
+             then List.fold_left (fun row (name, v) -> replace_field name v row) value updates
+             else value) fields)
+         | _ -> keeper)
+        json
+    in
+    match with_row with
+    | `Assoc fields ->
+      `Assoc (List.map (fun (key, value) -> key,
+        if key = "alert_summary"
+        then replace_field "librarian_stopped_keepers" (`Int stopped_keepers) value
+        else value) fields)
+    | other -> other
+  in
+  (match Tui_decode.decode_memory_health_snapshot
+           (with_librarian ~stopped_keepers:1
+              [ "state", `String "stopped"
+              ; "detail", `String "the range could not be read"
+              ; "last_failure_kind", `String "exact_execution_failure"
+              ]) with
+   | Ok snapshot ->
+     let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
+     Alcotest.(check bool) "a stopped pass keeps its cause" true
+       (librarian.mlh_state = Some (Tui_decode.Pass_stopped "the range could not be read"));
+     Alcotest.(check bool) "the failure kind is decoded" true
+       (librarian.mlh_last_failure_kind = Some Tui_decode.Failure_exact_execution)
+   | Error detail -> Alcotest.fail detail);
+  List.iter
+    (fun (label, stopped_keepers, updates) ->
+       Alcotest.(check bool) label true
+         (Result.is_error
+            (Tui_decode.decode_memory_health_snapshot (with_librarian ~stopped_keepers updates))))
+    [ "a state this build does not know is refused", 1, [ "state", `String "paused" ]
+    ; "a stopped pass without its cause is refused", 1, [ "state", `String "stopped" ]
+    ; "a caught-up pass with a cause is refused", 0, [ "detail", `String "stray" ]
+    ; "a failure kind this build does not know is refused", 0,
+      [ "last_failure_kind", `String "quota" ]
+    ];
   let unknown_unread = map_keeper 0
       (fun keeper -> match keeper with
        | `Assoc fields ->

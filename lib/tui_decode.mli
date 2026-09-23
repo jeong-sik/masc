@@ -896,12 +896,37 @@ type memory_alert = {
   ma_message : string;
 }
 
+(** How the keeper's last durable Librarian pass ended, one constructor per
+    server [pass_end]. [Pass_stopped] and [Pass_raised] carry the server's
+    account of why; the other endings have none. An ending this build does not
+    know fails the decode. *)
+type memory_librarian_pass_end =
+  | Pass_off
+  | Pass_lane_unconfigured
+  | Pass_drained
+  | Pass_not_committed
+  | Pass_stopped of string
+  | Pass_raised of string
+
+(** Why a Librarian pass journaled a failure, one constructor per server
+    [librarian_failure_kind]. A kind this build does not know fails the
+    decode. *)
+type memory_librarian_failure_kind =
+  | Failure_prompt_render
+  | Failure_execution_clock_unavailable
+  | Failure_exact_setup
+  | Failure_exact_execution
+  | Failure_domain_output_invalid
+  | Failure_memory_snapshot_write
+  | Failure_runtime_context_unavailable
+  | Failure_lane_cancelled
+  | Failure_unhandled_exception
+
 (* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
    standing, and what its last pass and its journal say. [None] in a field is
    "not measured", which the header prints as such; it is not zero. *)
 type memory_librarian_health = {
-  mlh_state : string option;
-  mlh_detail : string option;
+  mlh_state : memory_librarian_pass_end option;
   mlh_measured_at : float option;
   mlh_unread_atom_turns : int option;
   mlh_unread_official_turns : int option;
@@ -912,7 +937,7 @@ type memory_librarian_health = {
           "cannot say" -- no snapshot, an unreadable one, or one from
           another trace -- and is not the same as caught up. *)
   mlh_last_success_at : float option;
-  mlh_last_failure_kind : string option;
+  mlh_last_failure_kind : memory_librarian_failure_kind option;
 }
 
 type memory_context_frontier = {

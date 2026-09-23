@@ -15,6 +15,34 @@ let keeper_lane_idle_text seconds =
   else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
   else Printf.sprintf "%dd" (seconds / 86400)
 
+(* What the operator reads for how the last Librarian pass ended. The wire
+   words name code paths ("not_committed"); these say what happened. *)
+let librarian_pass_end_words = function
+  | Pass_off -> "switched off"
+  | Pass_lane_unconfigured -> "no model lane set up"
+  | Pass_drained -> "caught up"
+  | Pass_not_committed -> "last pass saved nothing"
+  | Pass_stopped _ -> "stopped on an error"
+  | Pass_raised _ -> "crashed"
+
+(* The server's account of why a pass stopped or crashed, drawn on its own
+   row because it is the one part of the Librarian row an operator acts on.
+   The other endings carry none. *)
+let librarian_pass_end_cause = function
+  | Pass_stopped cause | Pass_raised cause -> Some cause
+  | Pass_off | Pass_lane_unconfigured | Pass_drained | Pass_not_committed -> None
+
+let librarian_failure_words = function
+  | Failure_prompt_render -> "prompt could not be built"
+  | Failure_execution_clock_unavailable -> "no clock to run on"
+  | Failure_exact_setup -> "model call could not be set up"
+  | Failure_exact_execution -> "model call failed"
+  | Failure_domain_output_invalid -> "model answer was not usable"
+  | Failure_memory_snapshot_write -> "Memory could not be saved"
+  | Failure_runtime_context_unavailable -> "no runtime context"
+  | Failure_lane_cancelled -> "cancelled before saving"
+  | Failure_unhandled_exception -> "unexpected crash"
+
 (* How the facts title reads its own keeper. "*" is how the fleet view is asked
    for, not how it should be read, so the title reads it as a phrase. The title
    is drawn at every terminal size; a body row is not. *)
@@ -128,14 +156,21 @@ let memory_context_lines (k : memory_keeper_health) =
     Printf.sprintf
       "  Librarian · %s · %s · %s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
       (match librarian.mlh_state with
-       | Some state -> state
+       | Some state -> librarian_pass_end_words state
        | None -> "not measured")
       unread
       continuity
       (memory_updated_text librarian.mlh_measured_at)
       (memory_updated_text librarian.mlh_last_success_at)
-      (Option.value librarian.mlh_last_failure_kind ~default:"-")
+      (match librarian.mlh_last_failure_kind with
+       | Some kind -> librarian_failure_words kind
+       | None -> "-")
       k.mkh_librarian_failures
+  in
+  let librarian_cause_lines =
+    match Option.bind k.mkh_librarian.mlh_state librarian_pass_end_cause with
+    | Some cause -> [ "  Librarian cause · " ^ Terminal_text.preview_line cause ]
+    | None -> []
   in
   let context_lines =
     let cycle = k.mkh_context_cycle in
@@ -236,7 +271,7 @@ let memory_context_lines (k : memory_keeper_health) =
           k.mkh_source_read_error
       ]
   in
-  [current_line; facts_line; source_line; librarian_line] @ context_lines
+  [current_line; facts_line; source_line; librarian_line] @ librarian_cause_lines @ context_lines
   @ (vision_line :: (read_error_lines @ alert_lines))
 
 type memory_state = Masc_tui_types.memory_state =

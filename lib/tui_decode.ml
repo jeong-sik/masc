@@ -2553,18 +2553,42 @@ type memory_alert = {
   ma_message : string;
 }
 
+(* How the keeper's last durable Librarian pass ended, one constructor per
+   [Keeper_librarian_queue_refresh.pass_end]. A pass that stopped on an error
+   or raised carries the server's account of why; the other endings have
+   none, so the detail lives on the constructor instead of beside it. *)
+type memory_librarian_pass_end =
+  | Pass_off
+  | Pass_lane_unconfigured
+  | Pass_drained
+  | Pass_not_committed
+  | Pass_stopped of string
+  | Pass_raised of string
+
+(* Why a Librarian pass journaled a failure, one constructor per
+   [Keeper_memory_os_current.librarian_failure_kind]. *)
+type memory_librarian_failure_kind =
+  | Failure_prompt_render
+  | Failure_execution_clock_unavailable
+  | Failure_exact_setup
+  | Failure_exact_execution
+  | Failure_domain_output_invalid
+  | Failure_memory_snapshot_write
+  | Failure_runtime_context_unavailable
+  | Failure_lane_cancelled
+  | Failure_unhandled_exception
+
 (* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
    standing, and what its last pass and its journal say. [None] in a field is
    "not measured", which the header prints as such; it is not zero. *)
 type memory_librarian_health = {
-  mlh_state : string option;
-  mlh_detail : string option;
+  mlh_state : memory_librarian_pass_end option;
   mlh_measured_at : float option;
   mlh_unread_atom_turns : int option;
   mlh_unread_official_turns : int option;
   mlh_continuity_unread_atoms : int option;
   mlh_last_success_at : float option;
-  mlh_last_failure_kind : string option;
+  mlh_last_failure_kind : memory_librarian_failure_kind option;
 }
 
 type memory_context_frontier = {
@@ -4831,11 +4855,39 @@ let memory_alert_code_of_wire = function
 let memory_alert_severity_wire code =
   match memory_alert_severity code with `Warn -> "warn" | `Error -> "error"
 
-(* The states the server sends (RFC §4.9). A spelling this build does not know
-   is refused rather than shown as an unknown word: the header's job is to say
-   whether the keeper is behind, and a word it cannot place says nothing. *)
-let memory_librarian_states =
-  [ "off"; "lane_unconfigured"; "drained"; "not_committed"; "stopped"; "raised" ]
+(* The endings the server sends (RFC §4.9). A spelling this build does not
+   know is refused rather than shown as an unknown word: the header's job is to
+   say whether the keeper is behind, and a word it cannot place says nothing.
+   [detail] travels with [stopped] and [raised] and with nothing else, so a
+   pair that breaks that is refused too. *)
+let decode_memory_librarian_pass_end ~state ~detail =
+  match state, detail with
+  | None, None -> Ok None
+  | None, Some _ -> Error "librarian detail without a state"
+  | Some "off", None -> Ok (Some Pass_off)
+  | Some "lane_unconfigured", None -> Ok (Some Pass_lane_unconfigured)
+  | Some "drained", None -> Ok (Some Pass_drained)
+  | Some "not_committed", None -> Ok (Some Pass_not_committed)
+  | Some "stopped", Some detail -> Ok (Some (Pass_stopped detail))
+  | Some "raised", Some detail -> Ok (Some (Pass_raised detail))
+  | Some (("off" | "lane_unconfigured" | "drained" | "not_committed") as state), Some _ ->
+    Error ("librarian state carries a detail it has none of: " ^ state)
+  | Some (("stopped" | "raised") as state), None ->
+    Error ("librarian state is missing its detail: " ^ state)
+  | Some state, (None | Some _) -> Error ("unsupported librarian state: " ^ state)
+
+let decode_memory_librarian_failure_kind = function
+  | None -> Ok None
+  | Some "prompt_render_failure" -> Ok (Some Failure_prompt_render)
+  | Some "execution_clock_unavailable" -> Ok (Some Failure_execution_clock_unavailable)
+  | Some "exact_setup_failure" -> Ok (Some Failure_exact_setup)
+  | Some "exact_execution_failure" -> Ok (Some Failure_exact_execution)
+  | Some "domain_output_invalid" -> Ok (Some Failure_domain_output_invalid)
+  | Some "memory_snapshot_write_failure" -> Ok (Some Failure_memory_snapshot_write)
+  | Some "runtime_context_unavailable" -> Ok (Some Failure_runtime_context_unavailable)
+  | Some "lane_cancelled" -> Ok (Some Failure_lane_cancelled)
+  | Some "unhandled_exception" -> Ok (Some Failure_unhandled_exception)
+  | Some kind -> Error ("unsupported librarian failure kind: " ^ kind)
 
 let decode_memory_librarian_health keeper_json =
   let* json = required_member keeper_json "librarian" in
@@ -4853,16 +4905,9 @@ let decode_memory_librarian_health keeper_json =
       ]
       json
   in
-  let* mlh_state = required_nullable_string_field json "state" in
-  let* () =
-    match mlh_state with
-    | None -> Ok ()
-    | Some state ->
-      if List.mem state memory_librarian_states
-      then Ok ()
-      else Error ("unsupported librarian state: " ^ state)
-  in
-  let* mlh_detail = required_nullable_string_field json "detail" in
+  let* state = required_nullable_string_field json "state" in
+  let* detail = required_nullable_string_field json "detail" in
+  let* mlh_state = decode_memory_librarian_pass_end ~state ~detail in
   let* mlh_measured_at = required_nullable_float_field json "measured_at" in
   let* mlh_unread_atom_turns = required_nullable_int_field json "unread_atom_turns" in
   let* mlh_unread_official_turns =
@@ -4877,6 +4922,7 @@ let decode_memory_librarian_health keeper_json =
   let* mlh_last_success_at = required_nullable_float_field json "last_success_at" in
   let* mlh_last_failure_kind =
     required_nullable_string_field json "last_failure_kind"
+    |> Fun.flip Result.bind decode_memory_librarian_failure_kind
   in
   let* () =
     if List.for_all
@@ -4896,7 +4942,6 @@ let decode_memory_librarian_health keeper_json =
   in
   Ok
     { mlh_state
-    ; mlh_detail
     ; mlh_measured_at
     ; mlh_unread_atom_turns
     ; mlh_unread_official_turns
@@ -5411,8 +5456,9 @@ let decode_memory_health_snapshot json =
       && librarian_stopped_keepers
          = sum (fun keeper ->
            match keeper.mkh_librarian.mlh_state with
-           | Some ("lane_unconfigured" | "not_committed" | "stopped" | "raised") -> 1
-           | Some _ | None -> 0)
+           | Some (Pass_lane_unconfigured | Pass_not_committed | Pass_stopped _ | Pass_raised _)
+             -> 1
+           | Some (Pass_off | Pass_drained) | None -> 0)
       && mhs_starving_keepers
          = sum (fun keeper ->
            if keeper.mkh_librarian_failures > 0 && not keeper.mkh_snapshot_present

@@ -314,8 +314,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
         mcc_read_position_unreadable = false; mcc_rewriting_through = None;
         mcc_prepared = None; mcc_synthesis = None }
   ; mkh_librarian =
-      { Decode.mlh_state = Some "drained"
-      ; mlh_detail = None
+      { Decode.mlh_state = Some Decode.Pass_drained
       ; mlh_measured_at = Some 1_775_000_000.0
       ; mlh_unread_atom_turns = Some 0
       ; mlh_unread_official_turns = Some 0
@@ -504,6 +503,69 @@ let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
   check bool "a measured lag prints its number" true (contains "continuity behind 3" both);
   check bool "the header sums the measured keepers and counts the rest" true
     (contains "3 atoms behind in continuity (1 keepers not measured)" both)
+;;
+
+(* How the last pass ended and what the journal last failed with are drawn
+   as words an operator reads, not as the wire words the server sends, and a
+   stopped pass draws the server's cause on a row of its own. *)
+let test_the_librarian_line_speaks_the_pass_ending_and_its_cause () =
+  let base = make_keeper_health ~keeper_id:"alpha" ~facts:5 ~snapshot_bytes:512 in
+  let keeper librarian_state =
+    { base with
+      mkh_librarian =
+        { base.mkh_librarian with
+          Decode.mlh_state = Some librarian_state
+        ; mlh_last_failure_kind = Some Decode.Failure_exact_execution
+        } }
+  in
+  let health keeper : Decode.memory_health_snapshot =
+    { mhs_generated_at = 1000.0
+    ; mhs_keepers = [ keeper ]
+    ; mhs_total_facts = 5
+    ; mhs_total_observed_facts = 5
+    ; mhs_total_derived_facts = 0
+    ; mhs_total_support_invalidations = 0
+    ; mhs_total_snapshot_bytes = 512
+    ; mhs_total_source_facts = 0
+    ; mhs_total_source_invalidations = 0
+    ; mhs_total_source_snapshot_bytes = 0
+    ; mhs_total_librarian_failures = 0
+    ; mhs_total_librarian_unread_turns = Some 0
+    ; mhs_total_librarian_continuity_unread_atoms = 0
+    ; mhs_total_librarian_continuity_unmeasured = 0
+    ; mhs_total_vision_ingest_errors = 0
+    ; mhs_total_read_errors = 0
+    ; mhs_total_source_read_errors = 0
+    ; mhs_warn_alerts = 0
+    ; mhs_error_alerts = 0
+    ; mhs_starving_keepers = 0
+    }
+  in
+  let render keeper =
+    let state = make_state () in
+    state.memory_health <- Some (health keeper);
+    state.memory_health_cursor <- 0;
+    let lines = ref [] in
+    Render_memory.render_memory_body ~cols:400 ~budget:30 state
+      ~push:(fun line -> lines := line :: !lines)
+      ~push_styled:(fun ~style:_ line -> lines := line :: !lines)
+      ~push_selected:(fun line -> lines := line :: !lines)
+      ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    String.concat "\n" !lines
+  in
+  let stopped = render (keeper (Decode.Pass_stopped "the range could not be read")) in
+  check bool "a stopped pass reads as words" true (contains "Librarian · stopped on an error" stopped);
+  check bool "the stopped pass draws its cause" true
+    (contains "Librarian cause · the range could not be read" stopped);
+  check bool "the failure kind reads as words" true
+    (contains "last failure model call failed" stopped);
+  check bool "no wire word reaches the row" false (contains "exact_execution_failure" stopped);
+  let uncommitted = render (keeper Decode.Pass_not_committed) in
+  check bool "an uncommitted pass reads as words" true
+    (contains "Librarian · last pass saved nothing" uncommitted);
+  check bool "an ending without a cause draws no cause row" false
+    (contains "Librarian cause" uncommitted)
 ;;
 
 let test_render_memory_body_cursor_clamping () =
@@ -1167,6 +1229,8 @@ let () =
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
         ; test_case "the librarian line says when the continuity lag is unknown" `Quick
             test_the_librarian_line_says_when_the_continuity_lag_is_unknown
+        ; test_case "the librarian line speaks the pass ending and its cause" `Quick
+            test_the_librarian_line_speaks_the_pass_ending_and_its_cause
         ; test_case "memory_body_sorting" `Quick test_render_memory_body_sorting
         ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
         ; test_case "memory_body_cursor_clamping" `Quick test_render_memory_body_cursor_clamping

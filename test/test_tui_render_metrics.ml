@@ -40,8 +40,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
         mcc_read_position_unreadable = false; mcc_rewriting_through = None;
         mcc_prepared = None; mcc_synthesis = None }
   ; mkh_librarian =
-      { Decode.mlh_state = Some "drained"
-      ; mlh_detail = None
+      { Decode.mlh_state = Some Decode.Pass_drained
       ; mlh_measured_at = Some 1_775_000_000.0
       ; mlh_unread_atom_turns = Some 0
       ; mlh_unread_official_turns = Some 0

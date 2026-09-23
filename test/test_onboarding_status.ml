@@ -270,6 +270,17 @@ let a_workspace_without_imp_opens_its_keepers_history () =
   check bool "and does not close the other Keepers' history" true
     (Onboarding_status.opening broken_imp = Onboarding_status.Open_existing_history);
   Sys.remove (Filename.concat keepers "imp.toml");
+  (* Once .masc/config exists the server does not write runtime.toml again, so
+     a missing one boots it with no runtime; the journey's model step writes it. *)
+  let runtime_path = Filename.concat root "config/runtime.toml" in
+  let runtime_text = read runtime_path in
+  Sys.remove runtime_path;
+  let no_runtime = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "a missing runtime.toml needs setup" true
+    (condition Onboarding_status.Runtime_configuration no_runtime = Onboarding_status.Needs_setup);
+  check bool "and keeps the journey" true
+    (Onboarding_status.opening no_runtime = Onboarding_status.Needs_journey);
+  write runtime_path runtime_text;
   (* The server's boot reconcile refuses every Keeper when one metadata file
      cannot be read, so the readable ones do not make the workspace openable. *)
   write (Filename.concat metadata_dir "broken-one.json") "{broken";
@@ -288,16 +299,17 @@ let a_workspace_without_imp_opens_its_keepers_history () =
    browser lane are advisory. Pinned per id so moving a check across fails here
    instead of silently changing what a bare `masc` opens. *)
 let only_shared_checks_hold_history_closed () =
-  List.iter (fun (id, expected) ->
+  (* Exhaustive, so a new check id does not compile here until its role is
+     decided in this test too. *)
+  let expected : Onboarding_status.check_id -> Onboarding_status.role = function
+    | Workspace | Runtime_configuration | Keeper_persistence -> Required_to_open
+    | Model_connection | Keeper_declaration | Sandbox | Browser_lane -> Advisory
+  in
+  List.iter (fun id ->
       check bool (Onboarding_status.check_id_name id) true
-        (Onboarding_status.role id = expected))
-    Onboarding_status.[ Workspace, Required_to_open;
-                        Runtime_configuration, Required_to_open;
-                        Keeper_persistence, Required_to_open;
-                        Model_connection, Advisory;
-                        Keeper_declaration, Advisory;
-                        Sandbox, Advisory;
-                        Browser_lane, Advisory ];
+        (Onboarding_status.role id = expected id))
+    Onboarding_status.[ Workspace; Runtime_configuration; Keeper_persistence;
+                        Model_connection; Keeper_declaration; Sandbox; Browser_lane ];
   check bool "no workspace never opens history" true
     (Onboarding_status.opening (Onboarding_status.inspect ~base_path:None)
      = Onboarding_status.Needs_journey)

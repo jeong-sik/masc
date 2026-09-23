@@ -55,9 +55,10 @@ let check_id_name = function
 
 (* Existing history opens on what every Keeper in the workspace shares: the
    workspace, a runtime.toml the server can load, and Keeper metadata its boot
-   admits. The server boots on a runtime.toml it cannot load, but in setup-
-   required mode with no runtime, so no Keeper can take a turn and the
-   journey's model step is the repair. imp's model binding, declaration and
+   admits. The server boots on a runtime.toml it cannot load or cannot find,
+   but in setup-required mode with no runtime (the embedded file is written
+   only when [.masc/config] is first created), so no Keeper can take a turn
+   and the journey's model step is the repair. imp's model binding, declaration and
    sandbox concern the Keeper the journey creates: the server skips an imp it
    cannot load and boots every other Keeper, so a workspace whose history
    belongs to other Keepers opens and reports them beside it. A browser lane
@@ -104,8 +105,14 @@ let model_checks config_path =
     let runtime = Option.bind selected (fun id ->
       List.find_opt (fun (runtime : Runtime.t) -> String.equal runtime.id id) runtimes) in
     match runtime with
-    | None -> selected, None,
-      [loaded; check Model_connection Invalid "imp's assigned runtime cannot be resolved."
+    | None ->
+      (* A loaded list has validated every assignment, lane candidate and the
+         default against its runtimes, so imp always resolves here. Reaching
+         this means the list and its validation disagree, which is a runtime.toml
+         fault the server shares, not a fact about imp. *)
+      selected, None,
+      [check Runtime_configuration Invalid
+         "runtime.toml loaded, but imp's runtime does not resolve against it."
          [Inspect_configuration; Configure_models]]
     | Some runtime when not runtime.model.tools_support -> selected, Some runtime.model.api_name,
       [loaded; check Model_connection Needs_setup "The selected model has tool calling disabled."
@@ -227,7 +234,7 @@ let opening t =
   match t.base_path with
   | None -> Needs_journey
   | Some _ ->
-    if satisfied Workspace && satisfied Keeper_persistence
+    if satisfied Workspace && satisfied Runtime_configuration && satisfied Keeper_persistence
        && not (List.exists holds_closed t.checks)
     then Open_existing_history
     else Needs_journey

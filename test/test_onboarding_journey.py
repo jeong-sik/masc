@@ -1173,8 +1173,7 @@ class InvalidWorkspaceDiagnostic(StepByStep):
 
     def test_fresh_workspace_still_opens_the_wizard(self):
         state = observation(None, (
-            ('workspace', 'needs_setup'),
-            ('model_connection', 'needs_setup')))
+            ('workspace', 'needs_setup'),))
         with patch.object(SETUP, 'onboarding_status', return_value=state), \
                 patch.object(SETUP, 'pick', return_value=[2]) as pick, \
                 contextlib.redirect_stderr(io.StringIO()):
@@ -1193,8 +1192,7 @@ class FailedSaveReporting(StepByStep):
 
     def run_journey(self, wizard_result):
         fresh = observation(None, (
-            ('workspace', 'needs_setup'),
-            ('model_connection', 'needs_setup')))
+            ('workspace', 'needs_setup'),))
         errors = io.StringIO()
         with patch.object(SETUP, 'onboarding_status', return_value=fresh), \
                 patch.object(SETUP, 'pick', return_value=[0]), \

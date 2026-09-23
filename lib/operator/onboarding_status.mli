@@ -52,8 +52,8 @@ val check_id_name : check_id -> string
 
 val role : check_id -> role
 
-(** [Open_existing_history] needs a workspace, [keeper_persistence] Satisfied,
-    and no [Required_to_open] check Invalid. It is a statement about readable
+(** [Open_existing_history] needs [workspace], [runtime_configuration] and
+    [keeper_persistence] Satisfied, and no [Required_to_open] check Invalid. It is a statement about readable
     history, never about a running Keeper, model or sandbox. *)
 val opening : t -> opening
 val to_json : t -> Yojson.Safe.t

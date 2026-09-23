@@ -146,8 +146,24 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
              Keeper_status_runtime.keeper_health_of_string_opt
                (string_field "health_state" (member_assoc "diagnostic" keeper))
            in
+           (* A paused keeper reads offline -- its keepalive is gone -- but
+              an operator stopped it on purpose, so it is not pressure. A
+              declaration row carries no [paused] key and is not paused;
+              every runtime row writes a boolean. *)
+           let paused =
+             match Json_util.assoc_member_opt "paused" keeper with
+             | None | Some (`Bool false) -> false
+             | Some (`Bool true) -> true
+             | Some other ->
+               invalid_arg
+                 (Printf.sprintf
+                    "dashboard briefing: keeper %S paused is not a boolean: %s"
+                    name
+                    (Yojson.Safe.to_string other))
+           in
+           let ranked_health = if paused then None else health in
            let pressure_rank =
-             match health with
+             match ranked_health with
              (* Ranked by health rather than by the status word: a keeper that
                 is not doing its work -- keepalive gone, or turns failing --
                 outranks one that has not turned yet, which outranks one that
@@ -162,7 +178,7 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                    context_ratio
                then 2
                else (
-                 match health with
+                 match ranked_health with
                  | Some Keeper_types.KH_idle -> 1
                  | Some (KH_healthy | KH_failing | KH_offline)
                  | None -> 0)

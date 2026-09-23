@@ -6447,9 +6447,15 @@ let standalone_lane_configuration_of_string = function
   | "unavailable" -> Ok Lane_registry_unavailable
   | other -> Error ("standalone lane configuration: unknown value " ^ other)
 
-let standalone_lane_configuration_to_string = function
-  | Lane_ready -> "ready"
-  | Lane_slotless -> "no slot admitted"
+(* A clause, not a word. The lane detail line writes [obligation ^ " lane"],
+   then this, then the last run, and it used to write the noun itself:
+   "configuration " ^ the word here. Three of the four words already carry
+   their own subject, so the live screen read "configuration not configured",
+   and the other two read "configuration no slot admitted" and "configuration
+   registry unreadable". The sentence is written in one place now, here. *)
+let standalone_lane_configuration_phrase = function
+  | Lane_ready -> "configuration ready"
+  | Lane_slotless -> "configured, but no slot admitted"
   | Lane_unconfigured -> "not configured"
   | Lane_registry_unavailable -> "registry unreadable"
 

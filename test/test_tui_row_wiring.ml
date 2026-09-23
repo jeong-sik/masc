@@ -712,8 +712,9 @@ let test_a_lane_mark_says_what_its_colour_says () =
    the first few words of it under a header promising slot names -- and that
    string set every other row's slot column too. It was drawn there because
    when that was written (#31395) nothing else drew it; the detail pane has
-   drawn it whole since #32194, and STATUS beside the cell already says
-   [unavailable].
+   drawn it whole since #32194, and STATUS beside the cell says [unavailable]
+   or [degraded] -- the projection reads a lane that could not admit as
+   degraded, whatever its slot list holds.
 
    So the table's cell binds no reason, and the detail pane reads the field.
    What the cell draws instead is checked in test_tui_lane_table, where the

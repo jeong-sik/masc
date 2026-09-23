@@ -135,7 +135,9 @@ let test_a_lane_that_could_not_admit_draws_no_sentence () =
   check string "the cell is the table's own no-value mark" "\xe2\x80\x94" cell
 
 (* A lane that admitted slots keeps them, and a failure beside them is still
-   the detail pane's to tell. *)
+   the detail pane's to tell. The row is not silent about it: the projection
+   reads such a lane as [degraded], which is the STATUS cell two columns to
+   the left (test_server_standalone_lane_projection pins that). *)
 let test_admitted_slots_draw_without_the_reason () =
   let cell =
     Lane_table.slots_text ~admitted:[ "a.one"; "b.two" ] ~cli:[] ~dropped:[]

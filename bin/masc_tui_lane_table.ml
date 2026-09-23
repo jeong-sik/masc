@@ -20,7 +20,8 @@ type columns = {
    The reason a lane could not admit used to be drawn here, because when that
    was written (#31395) nothing else drew it. The detail pane has drawn it
    whole under "Admission error:" since #32194, and the STATUS cell beside
-   this one already says [unavailable], so what reached the reader here was a
+   this one says [unavailable] or [degraded] -- a lane that could not admit
+   reads degraded even while it runs -- so what reached the reader here was a
    cut sentence under a header promising slot names: live, the cell drew the
    first twenty-two characters of it and stopped mid-word. A lane that could
    not admit has no slot list, and that is what the dash says. *)

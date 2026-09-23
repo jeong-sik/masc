@@ -23,6 +23,11 @@
 
 ### Fixed
 
+- `keeper_memory_search` absorbed results: `into` now follows a claim that a
+  later librarian pass absorbed to the claim holding it now, and `into_current`
+  judges that claim; under `source=all`, rows whose claim already answers the
+  query are dropped before `limit` is taken, so they no longer hide rows that
+  reach a different claim (#38040).
 - The chat status area no longer reserves a row it does not draw. The pane skips the in-flight row for the request the live transcript is already drawing — that transcript says the phase, the age and the tools, and a second row put a second age and an opaque request id above the `ACTIVE TURN` line — but the row budget counted every in-flight request. With one message in flight, which is the ordinary case, the area held a row nobody drew: a blank line under the status rows and the footer one row off from what was on screen. The pane and the budget now read the same list (#37741).
 - The Keepers fleet row says when its task-owner scan came up short. The scan reports what it could not read, and only a backlog failure moves the fleet status off `ok`, so a Keeper whose profile did not load left its tasks out of the count with nothing on the row saying so. The count now carries its own shortfall: `task owner without fiber 0 (2 sources unread)` (#38012).
 - The Identity tab no longer repeats the keys its footer draws. The sentence above the service list spelled them because the title row carried the hint and cut it (#35539); the keys have since moved to the footer, which draws all six at 120 columns and gives up `/:filter` and `R:refresh` at 80 with `?` naming what it dropped (#38011).

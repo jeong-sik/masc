@@ -40,7 +40,8 @@ let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id
   (match Runtime_exact_output_registry.publish
       ~lanes:[{Runtime_schema.id = "librarian_exact";
         slot_ids = List.map (fun (target : Fixture.target_fixture) -> target.id) targets;
-        cli_slot_ids = List.map fst cli_errors}] resolver with
+        cli_slot_ids = List.map fst cli_errors;
+        max_output_tokens = Some 4_096}] resolver with
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
   let input : Keeper_librarian.input =

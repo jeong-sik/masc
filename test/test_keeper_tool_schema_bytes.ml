@@ -281,7 +281,12 @@ open Alcotest
    One Keeper wrote about 285 near-identical position snapshots in nine hours,
    and every one of them rode in every later turn's recall. The parameter says
    where the id comes from, because recall does not show it. No headroom. *)
-let ceiling_bytes = 122_494
+(* 2026-09-23: 122,228 across 138 tools, measured locally by this suite at
+   the keeper_skill_publish branch merged with main. The new
+   keeper_skill_publish tool lets a Keeper publish a Skill package it wrote
+   (RFC keeper-self-authored-skills); main's surface had shrunk below the
+   entry above, so the total still falls. No headroom. *)
+let ceiling_bytes = 122_228
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -368,6 +373,8 @@ let all_surface_golden_names =
   ; "keeper_person_note_set"
   (* A Keeper can statically validate an artifact-backed Skill draft. *)
   ; "keeper_skill_validate"
+  (* A Keeper can publish a new Skill package; operators delete afterwards. *)
+  ; "keeper_skill_publish"
   ; "keeper_spawn"
   ; "keeper_spawn_read"
   ; "keeper_spawn_stop"

@@ -2293,13 +2293,17 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
     | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
       List.concat_map
         (fun (key, _) ->
-           if String.equal key "slots" || String.equal key "cli_slots"
+           if
+             String.equal key "slots"
+             || String.equal key "cli_slots"
+             || String.equal key "max_output_tokens"
            then []
            else
              error
                (path ^ "." ^ key)
                (Printf.sprintf
-                  "unknown exact-output lane key %S; expected slots or cli_slots"
+                  "unknown exact-output lane key %S; expected slots, cli_slots or \
+                   max_output_tokens"
                   key))
         entries
     | _ -> []
@@ -2333,20 +2337,47 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
                  "exact-output lane cli_slots must be an array of runtime ids; got %s"
                  msg)))
   in
+  let max_output_tokens_result =
+    match Otoml.find_opt tbl Fun.id [ "max_output_tokens" ] with
+    | None -> Ok None
+    | Some value ->
+      (try
+         let n = Otoml.get_integer value in
+         if n <= 0
+         then
+           Error
+             (error
+                (path ^ ".max_output_tokens")
+                (Printf.sprintf
+                   "exact-output lane max_output_tokens must be a positive \
+                    integer; got %d"
+                   n))
+         else Ok (Some n)
+       with Otoml.Type_error msg ->
+         Error
+           (error
+              (path ^ ".max_output_tokens")
+              (Printf.sprintf
+                 "exact-output lane max_output_tokens must be an integer; got %s"
+                 msg)))
+  in
   let slots_result =
-    match slots_result, cli_slots_result with
-    | Error slot_errors, Error cli_errors -> Error (slot_errors @ cli_errors)
-    | Error slot_errors, Ok _ -> Error slot_errors
-    | Ok _, Error cli_errors -> Error cli_errors
-    | Ok slots, Ok cli_slots -> Ok (slots, cli_slots)
+    match slots_result, cli_slots_result, max_output_tokens_result with
+    | Error slot_errors, Error cli_errors, _ ->
+      Error (slot_errors @ cli_errors)
+    | Error slot_errors, Ok _, _ -> Error slot_errors
+    | Ok _, Error cli_errors, _ -> Error cli_errors
+    | Ok _, Ok _, Error budget_errors -> Error budget_errors
+    | Ok slots, Ok cli_slots, Ok max_output_tokens ->
+      Ok (slots, cli_slots, max_output_tokens)
   in
   match unknown_key_errors, slots_result with
   | _ :: _, Error slot_errors -> Error (slot_errors @ unknown_key_errors)
   | _ :: _, Ok _ -> Error unknown_key_errors
   | [], (Error _ as error) -> error
-  | [], Ok ([], []) ->
+  | [], Ok ([], [], _) ->
     Error (error path "exact-output lane must have at least one slot")
-  | [], Ok (slot_ids, cli_slot_ids) ->
+  | [], Ok (slot_ids, cli_slot_ids, max_output_tokens) ->
     let rec validate_cli position seen = function
       | [] -> Ok ()
       | cli_id :: rest ->
@@ -2368,7 +2399,8 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
       | [] ->
         (match validate_cli 1 [] cli_slot_ids with
          | Error _ as error -> error
-         | Ok () -> Ok { Runtime_schema.id; slot_ids; cli_slot_ids })
+         | Ok () ->
+           Ok { Runtime_schema.id; slot_ids; cli_slot_ids; max_output_tokens })
       | slot_id :: rest ->
         if String.equal (String.trim slot_id) ""
         then

@@ -157,6 +157,12 @@ val target_identity_fingerprint : target_identity -> string
 val admitted_target_identity : admitted_target -> target_identity
 val admitted_target_catalog_generation : admitted_target -> catalog_generation
 val admitted_target_catalog_evidence : admitted_target -> catalog_evidence
+
+val admitted_target_with_max_tokens : admitted_target -> int -> admitted_target
+(** Rebuild an admitted target with its request [max_tokens] set to the given
+    output budget, leaving the binding identity untouched. A lane declares its
+    own budget; the catalog's [max_output_tokens] is a validation bound and
+    must not be sent as the request budget. *)
 val selected_target_identity : selected_target -> target_identity
 val selected_target_catalog_generation : selected_target -> catalog_generation
 val selected_target_catalog_evidence : selected_target -> catalog_evidence

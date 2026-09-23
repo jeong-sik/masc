@@ -4564,6 +4564,60 @@ let test_decode_memory_fact_reads_the_use_record () =
           Alcotest.fail "a row without events must be rejected"
       | Tui_decode.Memory_store_absent -> Alcotest.fail "ordinary store absent")
 
+(* The server writes a fact's category through [category_to_string], so a
+   word outside the eight is a wire error -- not a ninth category for the
+   renderer to guess a colour for. *)
+let test_decode_memory_fact_refuses_an_unknown_category () =
+  let snapshot category =
+    Tui_decode.decode_memory_fact_snapshot
+      (memory_fact_snapshot_json
+         ~ordinary:
+           (`Assoc
+              [ "present", `Bool true
+              ; "revision", `Int 7
+              ; "updated_at", `Float 1_775_000_100.0
+              ; ( "facts"
+                , `List
+                    [ `Assoc
+                        [ "claim", `String "the deploy needs assets"
+                        ; "category", `String category
+                        ; "origin", `String "authored"
+                        ; "first_seen", `Float 1_775_000_000.0
+                        ; "last_seen", `Float 1_775_000_050.0
+                        ; "memory_id", `String "mem-1"
+                        ; "events", memory_fact_events_json ()
+                        ]
+                    ] )
+              ])
+         ~source_bound:(`Assoc [ "present", `Bool false ]) ())
+  in
+  let contains_substring text needle =
+    let n = String.length needle and h = String.length text in
+    let rec go i = i + n <= h && (String.sub text i n = needle || go (i + 1)) in
+    go 0
+  in
+  let refused_naming word = function
+    | Error error -> contains_substring error word
+    | Ok snapshot -> (
+        match snapshot.Tui_decode.mfs_ordinary with
+        | Tui_decode.Memory_store_read_error error ->
+            contains_substring error word
+        | Tui_decode.Memory_store_present _ | Tui_decode.Memory_store_absent ->
+            false)
+  in
+  Alcotest.(check bool) "a word the producer never writes is refused" true
+    (refused_naming "rule" (snapshot "rule"));
+  List.iter
+    (fun category ->
+      let word = Masc.Keeper_memory_os_types.category_to_string category in
+      match snapshot word with
+      | Ok { Tui_decode.mfs_ordinary = Tui_decode.Memory_store_present
+               { Tui_decode.mos_facts = [ fact ]; _ }; _ } ->
+          Alcotest.(check bool) (word ^ " round-trips") true
+            (fact.Tui_decode.mf_category = category)
+      | Ok _ | Error _ -> Alcotest.failf "%s did not decode" word)
+    Masc.Keeper_memory_os_types.all_categories
+
 let test_decode_memory_facts_keeps_both_stores () =
   let ordinary =
     `Assoc
@@ -4621,7 +4675,9 @@ let test_decode_memory_facts_keeps_both_stores () =
            (match store.Tui_decode.mos_facts with
             | [ fact ] ->
                 Alcotest.(check string) "category as the server spelled it"
-                  "lesson" fact.Tui_decode.mf_category;
+                  "lesson"
+                  (Masc.Keeper_memory_os_types.category_to_string
+                     fact.Tui_decode.mf_category);
                 Alcotest.(check string) "origin" "authored"
                   fact.Tui_decode.mf_origin
             | facts ->
@@ -10671,6 +10727,8 @@ let () =
           test_decode_standalone_lane_configuration_is_a_closed_set;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
+        Alcotest.test_case "memory fact refuses an unknown category" `Quick
+          test_decode_memory_fact_refuses_an_unknown_category;
         Alcotest.test_case "memory fact row carries the use record" `Quick
           test_decode_memory_fact_reads_the_use_record;
         Alcotest.test_case "memory facts keep store states apart" `Quick

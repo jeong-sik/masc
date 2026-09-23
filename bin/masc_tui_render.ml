@@ -329,7 +329,7 @@ let overview_team (state : state) =
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the parked roll call and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
-let overview_team_lines (team : Overview_team.t) ~team_rows ~flow =
+let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols =
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -431,30 +431,49 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow =
   let window =
     if team_rows < total then Printf.sprintf " %d/%d" team_rows total else ""
   in
+  let head =
+    Printf.sprintf " %sTeam%s%s  %s" Ansi.bold Ansi.reset window
+      (String.concat " \xc2\xb7 " counts)
+  in
   (* Completions per UTC day over the flow's span, oldest first, so the last
      glyph is today. Scaled from zero: a quiet day is the lowest bar, not the
-     baseline of whatever the busiest fortnight happened to be. *)
-  let throughput =
+     baseline of whatever the busiest fortnight happened to be.
+
+     Measured at 132x40 beside the roster pane, the full tail ran off the
+     row and the cut took "today" and the peak. The tail now sheds its parts
+     from the right -- peak, then today -- and goes whole before the band
+     counts lose a cell: they are what the block is for. *)
+  let tails =
     match flow with
-    | None -> ""
+    | None -> []
     | Some (flow : Masc_tui_task_flow.t) -> (
         let per_day =
           List.map (fun (day : Masc_tui_task_flow.day) -> day.d_completed)
             flow.daily
         in
         match List.rev per_day with
-        | [] -> ""
+        | [] -> []
         | today :: _ ->
-            Printf.sprintf "   %sdone %dd%s %s%s%s today %d \xc2\xb7 peak %d"
-              Ansi.dim (List.length per_day) Ansi.reset (Theme.ok ())
-              (Chart.sparkline ~min:0 per_day)
-              Ansi.reset today
-              (List.fold_left max 0 per_day))
+            let spark =
+              Printf.sprintf "   %s%dd%s %s%s%s" Ansi.dim (List.length per_day)
+                Ansi.reset (Theme.ok ())
+                (Chart.sparkline ~min:0 per_day)
+                Ansi.reset
+            in
+            [ Printf.sprintf "%s today %d \xc2\xb7 peak %d" spark today
+                (List.fold_left max 0 per_day)
+            ; Printf.sprintf "%s today %d" spark today
+            ; spark
+            ])
   in
   let title =
-    Printf.sprintf " %sTeam%s%s  %s%s" Ansi.bold Ansi.reset window
-      (String.concat " \xc2\xb7 " counts)
-      throughput
+    match
+      List.find_opt
+        (fun tail -> Message_layout.display_width (head ^ tail) <= cols)
+        tails
+    with
+    | Some tail -> head ^ tail
+    | None -> head
   in
   (title, List.filteri (fun index _ -> index < team_rows) rows)
 
@@ -797,7 +816,7 @@ let render_overview (state : state) =
    | Some team when row_budget.team_rows > 0 ->
        let title, lines =
          overview_team_lines team ~team_rows:row_budget.team_rows
-           ~flow:state.task_flow
+           ~flow:state.task_flow ~cols
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;

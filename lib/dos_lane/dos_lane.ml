@@ -17,6 +17,7 @@ type observation = {
   frame_nonblack : int;
   frame_ascii : string;
   program : string option;
+  controller : string option;
   files : string list;
 }
 
@@ -27,6 +28,7 @@ type error =
   | Invalid_request of string
   | Unreadable of string
   | Not_kept of string
+  | Held_by of string
 
 let error_to_string = function
   | No_machine -> "no DOS machine is loaded: call masc_dos_load first"
@@ -34,6 +36,11 @@ let error_to_string = function
   | Unreadable message -> message
   | Not_kept message ->
     "the machine moved, but a file the program wrote did not reach disk: " ^ message
+  | Held_by holder ->
+    Printf.sprintf
+      "%s holds the controller, so nothing was done: wait until they pass it with \
+       masc_dos_pass. masc_dos_screen needs no controller"
+      holder
 ;;
 
 (* The core runs about 24 million instructions a second on this hardware
@@ -78,6 +85,8 @@ type machine = {
       (* DOS name -> the contents last known to be on disk, either in the
          inventory or in [saves_dir]. A file whose mounted contents differ
          from this is one the program wrote since. *)
+  mutable controller : string option;
+      (* Who may move this machine's time. See [with_control]. *)
 }
 
 let state : machine option ref = ref None
@@ -89,6 +98,39 @@ let with_machine f =
     match !state with
     | None -> Error No_machine
     | Some st -> f st)
+;;
+
+(* The controller is the hotseat's pad. A hotseat game such as 삼국지3 asks
+   each human ruler in turn at the same keyboard; on one shared machine a
+   second Keeper's keys land in whoever's turn is on screen. The MSX lane had
+   no such hand-off, and Keepers there swapped the program and restored slots
+   under each other mid-campaign.
+
+   Whoever moves the machine first holds it; everyone else is refused before
+   anything happens and can still watch. The holder hands it on with [pass].
+   A refused or failed call takes nothing: the controller is taken only when
+   the call succeeds. *)
+let refuse_other st ~who =
+  match st.controller with
+  | Some holder when not (String.equal holder who) -> Error (Held_by holder)
+  | Some _ | None -> Ok ()
+;;
+
+let with_control ~who f =
+  with_machine (fun st ->
+    match refuse_other st ~who with
+    | Error e -> Error e
+    | Ok () ->
+      (* Taken before the call so the observation it returns names the new
+         holder, and given back if the call fails. *)
+      let before = st.controller in
+      st.controller <- Some who;
+      let result = f st in
+      (match result with
+       | Ok _ | Error (Not_kept _) -> () (* the machine moved *)
+       | Error (No_machine | Invalid_request _ | Unreadable _ | Held_by _) ->
+         st.controller <- before);
+      result)
 ;;
 
 (* ---------- observation ---------- *)
@@ -150,6 +192,7 @@ let observe st =
     frame_nonblack = nonblack;
     frame_ascii = ascii;
     program = Some st.program;
+    controller = st.controller;
     files = Dos_machine.mounted_names m;
   }
 ;;
@@ -339,9 +382,12 @@ let is_mz image =
   String.length image >= 2 && Char.equal image.[0] 'M' && Char.equal image.[1] 'Z'
 ;;
 
-let load ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announce =
+let load ~who ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announce =
   let files = with_saves ~saves_dir files in
   locked (fun () ->
+    match Option.map (refuse_other ~who) !state with
+    | Some (Error e) -> Error e
+    | Some (Ok ()) | None ->
     if String.length program_bytes = 0 then
       Error (Invalid_request (Printf.sprintf "%s is empty" program_name))
     else
@@ -368,7 +414,8 @@ let load ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announce =
           (fun (name, contents) -> Hashtbl.replace kept (String.uppercase_ascii name) contents)
           files;
         let st =
-          { m; steps = 0; program = program_name; ledger_path; entries = []; saves_dir; kept }
+          { m; steps = 0; program = program_name; ledger_path; entries = []; saves_dir; kept
+          ; controller = Some who }
         in
         state := Some st;
         announce ();
@@ -377,14 +424,27 @@ let load ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announce =
       end)
 ;;
 
-let eject ~announce () =
+let eject ~who ~announce () =
   locked (fun () ->
     match !state with
     | None -> Error No_machine
-    | Some _ ->
-      state := None;
+    | Some st ->
+      (match refuse_other st ~who with
+       | Error e -> Error e
+       | Ok () ->
+         state := None;
+         announce ();
+         Ok ()))
+;;
+
+let pass ~who ~to_ ~announce =
+  with_machine (fun st ->
+    match refuse_other st ~who with
+    | Error e -> Error e
+    | Ok () ->
+      st.controller <- to_;
       announce ();
-      Ok ())
+      Ok (observe st))
 ;;
 
 let screen () = with_machine (fun st -> Ok (observe st))
@@ -397,8 +457,8 @@ let capture () =
     Ok (observe st, { width; height; rgb = Dos_machine.frame_rgb st.m }))
 ;;
 
-let step ~steps ~until_ready =
-  with_machine (fun st ->
+let step ~who ~steps ~until_ready =
+  with_control ~who (fun st ->
     match clamp_steps steps with
     | Error e -> Error e
     | Ok budget ->
@@ -455,7 +515,7 @@ let press_resolved st ~who ~keys ~budget =
 ;;
 
 let press ~who ~keys ~steps =
-  with_machine (fun st ->
+  with_control ~who (fun st ->
     if keys = [] then Error (Invalid_request "keys must name at least one key")
     else if List.length keys > max_keys_per_call then
       Error
@@ -485,7 +545,7 @@ let press ~who ~keys ~steps =
    whatever the down half saw, or the button would stay held for the next
    caller. A move ([buttons = 0]) sets the position and runs once. *)
 let click ~who ~x ~y ~buttons ~steps =
-  with_machine (fun st ->
+  with_control ~who (fun st ->
     let width, height = Dos_machine.frame_dims st.m in
     if x < 0 || y < 0 || x >= width || y >= height then
       Error
@@ -520,7 +580,7 @@ let click ~who ~x ~y ~buttons ~steps =
 ;;
 
 let type_text ~who ~text ~steps =
-  with_machine (fun st ->
+  with_control ~who (fun st ->
     if String.length text = 0 then Error (Invalid_request "text must not be empty")
     else if String.length text > max_text_length then
       Error

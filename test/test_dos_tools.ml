@@ -20,13 +20,24 @@ let dispatch ~base_path ?(agent = "dos-test") name assoc =
   | None -> fail (name ^ " is not dispatched by the misc tool owner")
 ;;
 
+(* Ejects whatever machine is there, as whoever holds it: the machine is
+   process-global and one test must not hand it to the next. *)
+let eject_held () =
+  let who =
+    match Dos_lane.screen () with
+    | Ok { Dos_lane.controller = Some holder; _ } -> holder
+    | Ok _ | Error _ -> "test-cleanup"
+  in
+  ignore (Dos_lane.eject ~who ~announce:ignore () : (unit, Dos_lane.error) result)
+;;
+
 let with_workspace f =
   let base_path = Filename.temp_dir "masc-dos-tools-" "" in
   Fun.protect
     ~finally:(fun () ->
       (* The machine is process-global: a test that leaves one loaded would
          hand it to the next one. *)
-      ignore (Dos_lane.eject ~announce:(fun () -> ()) () : (unit, Dos_lane.error) result);
+      eject_held ();
       Fs_compat.remove_tree base_path)
     (fun () -> f base_path)
 ;;
@@ -120,7 +131,10 @@ let load ~base_path name = dispatch ~base_path "masc_dos_load" [ ("program", `St
 
 (* Setup for the tests that are about what happens after a load. The load's
    own result has its own test. *)
-let boot ~base_path name = ignore (load ~base_path name : Tool_result.result)
+let boot ?(agent = "dos-test") ~base_path name =
+  ignore
+    (dispatch ~base_path ~agent "masc_dos_load" [ ("program", `String name) ]
+      : Tool_result.result)
 
 let test_no_machine () =
   with_workspace (fun base_path ->
@@ -169,7 +183,7 @@ let test_load_runs_to_the_first_key_request () =
 let test_press_reaches_the_guest_and_the_ledger () =
   with_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
-    boot ~base_path "hello.com";
+    boot ~agent:"vincent" ~base_path "hello.com";
     let result =
       dispatch ~base_path ~agent:"vincent" "masc_dos_press"
         [ ("keys", `List [ `String "enter" ]) ]
@@ -194,7 +208,7 @@ let test_press_reaches_the_guest_and_the_ledger () =
 let test_click_reaches_the_guest_and_the_ledger () =
   with_workspace (fun base_path ->
     install_program ~base_path "mouse.com" mouse_click_com;
-    boot ~base_path "mouse.com";
+    boot ~agent:"vincent" ~base_path "mouse.com";
     let result =
       dispatch ~base_path ~agent:"vincent" "masc_dos_click"
         [ ("x", `Int 1); ("y", `Int 1); ("steps", `Int 1_000) ]
@@ -343,7 +357,7 @@ let test_two_names_that_differ_only_in_case_are_refused () =
   with_workspace (fun base_path ->
     let announced = ref 0 in
     let result =
-      Dos_lane.load
+      Dos_lane.load ~who:"dos-test"
         ~ledger_dir:(Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos")
         ~saves_dir:(Filename.concat base_path "saves")
         ~program_name:"game.com" ~program_bytes:hello_com
@@ -386,7 +400,7 @@ let install_game ~base_path name files =
   List.iter (fun (f, contents) -> write_file (Filename.concat dir f) contents) files
 ;;
 
-let eject () = ignore (Dos_lane.eject ~announce:ignore () : (unit, Dos_lane.error) result)
+let eject () = eject_held ()
 
 (* A game saves by writing a file, and the machine kept what the guest wrote
    only in memory: an eject or a server restart took the campaign with it,
@@ -435,6 +449,75 @@ let test_a_save_that_cannot_be_written_is_reported () =
       (contains "did not reach disk" (Tool_result.message loaded));
     check bool "the machine is still there" true
       (is_completed (dispatch ~base_path "masc_dos_screen" [])))
+;;
+
+let controller result =
+  match member "controller" (Tool_result.data result) with
+  | Some (`String who) -> Some who
+  | Some `Null | None -> None
+  | Some _ -> fail "controller is neither a name nor null"
+;;
+
+let press_as ~base_path who key =
+  dispatch ~base_path ~agent:who "masc_dos_press" [ ("keys", `List [ `String key ]) ]
+;;
+
+(* A hotseat game asks each human ruler in turn at one keyboard. Without a
+   controller a second Keeper's key lands in whoever's turn is on screen, and
+   on the MSX lane Keepers swapped programs and restored slots under each
+   other mid-campaign. Whoever loads holds the machine; others are refused
+   before anything happens and can still watch. *)
+let test_only_the_holder_moves_the_machine () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    let loaded = dispatch ~base_path ~agent:"liu-bei" "masc_dos_load" [ ("program", `String "hello.com") ] in
+    check (option string) "the loader holds it" (Some "liu-bei") (controller loaded);
+    let refused = press_as ~base_path "cao-cao" "a" in
+    check bool "another player's key is refused" false (is_completed refused);
+    check bool "the refusal names the holder" true
+      (contains "liu-bei" (Tool_result.message refused));
+    check int "and nothing reached the ledger" 0 (List.length (Dos_lane.ledger ()));
+    check bool "watching needs no controller" true
+      (is_completed (dispatch ~base_path ~agent:"cao-cao" "masc_dos_screen" []));
+    check bool "nor may another player eject it" false
+      (is_completed (dispatch ~base_path ~agent:"cao-cao" "masc_dos_eject" []));
+    check bool "or load over it" false
+      (is_completed
+         (dispatch ~base_path ~agent:"cao-cao" "masc_dos_load" [ ("program", `String "hello.com") ])))
+;;
+
+let test_pass_hands_the_machine_on () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    let not_mine =
+      dispatch ~base_path ~agent:"cao-cao" "masc_dos_pass" [ ("to", `String "cao-cao") ]
+    in
+    check bool "only the holder passes" false (is_completed not_mine);
+    let passed =
+      dispatch ~base_path ~agent:"dos-test" "masc_dos_pass" [ ("to", `String "cao-cao") ]
+    in
+    check (option string) "the controller moves" (Some "cao-cao") (controller passed);
+    check bool "the new holder plays" true (is_completed (press_as ~base_path "cao-cao" "a"));
+    check bool "the old holder no longer does" false
+      (is_completed (press_as ~base_path "dos-test" "a")))
+;;
+
+(* A freed controller goes to whoever next moves the machine and succeeds; a
+   call that is refused for its own arguments takes nothing. *)
+let test_a_free_controller_goes_to_the_next_successful_mover () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    let freed = dispatch ~base_path ~agent:"dos-test" "masc_dos_pass" [] in
+    check (option string) "freed" None (controller freed);
+    let typo = press_as ~base_path "sun-quan" "no-such-key" in
+    check bool "a bad key is refused" false (is_completed typo);
+    let after_typo = dispatch ~base_path "masc_dos_screen" [] in
+    check (option string) "and took nothing" None (controller after_typo);
+    let moved = press_as ~base_path "sun-quan" "a" in
+    check (option string) "the next successful mover holds it" (Some "sun-quan")
+      (controller moved))
 ;;
 
 let test_unknown_key_is_refused () =
@@ -509,7 +592,8 @@ let test_every_tool_is_declared () =
            check string "schema name" name schema.name
          | None -> fail (name ^ " registers no schema")))
     [ "masc_dos_load"; "masc_dos_eject"; "masc_dos_screen"; "masc_dos_step";
-      "masc_dos_press"; "masc_dos_click"; "masc_dos_type"; "masc_dos_peek" ]
+      "masc_dos_press"; "masc_dos_click"; "masc_dos_type"; "masc_dos_peek";
+      "masc_dos_pass" ]
 ;;
 
 let () =
@@ -533,6 +617,10 @@ let () =
         ; test_case "save over inventory" `Quick
             test_a_save_is_mounted_over_the_inventory_copy
         ; test_case "save not written" `Quick test_a_save_that_cannot_be_written_is_reported
+        ; test_case "holder only" `Quick test_only_the_holder_moves_the_machine
+        ; test_case "pass" `Quick test_pass_hands_the_machine_on
+        ; test_case "free controller" `Quick
+            test_a_free_controller_goes_to_the_next_successful_mover
         ; test_case "unknown key" `Quick test_unknown_key_is_refused
         ; test_case "step cap" `Quick test_step_cap
         ; test_case "peek" `Quick test_peek_reads_the_text_page

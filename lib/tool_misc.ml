@@ -284,7 +284,13 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | Some Tool_schemas_misc.Misc_dos_screen ->
       Some (Tool_misc_dos_lane.handle_screen ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_dos_step ->
-      Some (Tool_misc_dos_lane.handle_step ~tool_name:name ~start_time:start args)
+      Some
+        (Tool_misc_dos_lane.handle_step ~tool_name:name ~start_time:start
+           ~who:ctx.agent_name args)
+  | Some Tool_schemas_misc.Misc_dos_pass ->
+      Some
+        (Tool_misc_dos_lane.handle_pass ~tool_name:name ~start_time:start
+           ~agent_name:ctx.agent_name args)
   | Some Tool_schemas_misc.Misc_dos_press ->
       Some
         (Tool_misc_dos_lane.handle_press ~tool_name:name ~start_time:start
@@ -346,6 +352,7 @@ let is_read_only = function
   (* Booting, ejecting, pressing and typing change the shared machine. *)
   | Tool_schemas_misc.Misc_dos_load
   | Tool_schemas_misc.Misc_dos_eject
+  | Tool_schemas_misc.Misc_dos_pass
   | Tool_schemas_misc.Misc_dos_press
   | Tool_schemas_misc.Misc_dos_click
   | Tool_schemas_misc.Misc_dos_type

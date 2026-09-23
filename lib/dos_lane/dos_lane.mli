@@ -63,6 +63,9 @@ type observation = {
           title screen, map and menus read here the way text programs read
           in [screen_text]. *)
   program : string option;  (** the loaded program's name *)
+  controller : string option;
+      (** who may move this machine's time now; [None] until someone does.
+          See {!pass}. *)
   files : string list;  (** file names the guest can open, sorted *)
 }
 
@@ -78,6 +81,8 @@ type error =
       (** the call ran the guest, but a file the program wrote did not reach
           [saves_dir]. The machine moved; the write is tried again after the
           next call. *)
+  | Held_by of string
+      (** another caller holds the controller; nothing was done. *)
 
 val error_to_string : error -> string
 
@@ -112,6 +117,7 @@ val settle_chunk : int
 (** Instructions between two screen readings while waiting for {!ran.settled}. *)
 
 val load :
+  who:string ->
   ledger_dir:string ->
   saves_dir:string ->
   program_name:string ->
@@ -143,10 +149,27 @@ val load :
     reads them in the order the machines actually changed. It must not call
     back into this module — the lock is not reentrant. *)
 
-val eject : announce:(unit -> unit) -> unit -> (unit, error) result
+val eject : who:string -> announce:(unit -> unit) -> unit -> (unit, error) result
 (** Drops the workspace machine. [announce] runs under the same lock as
     {!load}'s, with the same restriction. *)
 val screen : unit -> (observation, error) result
+
+(** {1 The controller}
+
+    One machine, several players: a hotseat game such as 삼국지3 asks each
+    human ruler in turn at the same keyboard. The controller says whose hands
+    are on it. {!load}, {!eject}, {!step}, {!press}, {!click} and
+    {!type_text} from anyone but the holder are refused with [Held_by] before
+    anything happens; reading ({!screen}, {!capture}, {!peek}) needs no
+    controller. A free controller goes to whoever next moves the machine
+    successfully, and {!load} gives the new machine's to its loader. *)
+
+val pass :
+  who:string -> to_:string option -> announce:(unit -> unit) ->
+  (observation, error) result
+(** The holder (or anyone, while it is free) hands the controller to [to_],
+    or frees it with [None]. [announce] runs under the machine's lock, as
+    {!load}'s does. *)
 
 type frame = { width : int; height : int; rgb : string }
 (** The frame as the display would show it: [width * height] pixels, three
@@ -158,7 +181,8 @@ val capture : unit -> (observation * frame, error) result
     vision reads: a VGA game's Korean menus are glyphs in pixels, which
     [frame_ascii]'s luminance cells cannot spell. *)
 
-val step : steps:int -> until_ready:bool -> (observation * ran, error) result
+val step :
+  who:string -> steps:int -> until_ready:bool -> (observation * ran, error) result
 (** Advances up to [steps] (1..{!max_steps_per_call}) with no key pressed.
     With [until_ready], stops as soon as the machine is ready for input —
     the normal way to hand a turn back. Without it, runs the whole budget,

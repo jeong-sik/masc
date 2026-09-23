@@ -450,6 +450,7 @@ let all_surface_golden_names =
   ; "masc_dos_click"
   ; "masc_dos_eject"
   ; "masc_dos_load"
+  ; "masc_dos_pass"
   ; "masc_dos_peek"
   ; "masc_dos_press"
   ; "masc_dos_screen"

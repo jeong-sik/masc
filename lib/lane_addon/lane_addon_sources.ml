@@ -96,7 +96,7 @@ let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = 
   | Misc_msx_save | Misc_msx_screen | Misc_msx_peek | Misc_msx_ram_diff
   | Misc_browser_tabs | Misc_browser_read
   | Misc_dos_load | Misc_dos_eject | Misc_dos_screen | Misc_dos_step
-  | Misc_dos_press | Misc_dos_click | Misc_dos_type | Misc_dos_peek
+  | Misc_dos_press | Misc_dos_click | Misc_dos_type | Misc_dos_peek | Misc_dos_pass
   | Misc_lane_declaration_read | Misc_lane_declaration_save | Misc_lane_attach
   | Misc_lane_inspect | Misc_lane_observe | Misc_lane_slice | Misc_lane_detach
   | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status | Misc_lane_updates

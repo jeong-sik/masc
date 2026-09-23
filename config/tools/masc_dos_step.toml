@@ -1,13 +1,11 @@
 name = "masc_dos_step"
 description = """
-Let the DOS machine run, with no key pressed.
+Let the DOS machine run with no key pressed.
 
-Time is 8086 instructions, not frames. Returns when the machine is ready for \
-input: it asked the BIOS for a key AND the screen stopped changing. Asking \
-alone is too early -- a game asks again a few hundred instructions after \
-taking a key, mid-repaint. until_ready=false spends the whole budget instead, \
-for a program that is computing rather than asking. Returns settled, \
-steps_run and input_requests."""
+Time is 8086 instructions. Returns when the machine is ready for input: the \
+program asked for a key AND the screen stopped changing (asking alone comes \
+mid-repaint). until_ready=false spends the whole budget, for a program that \
+is computing. Returns settled, steps_run and input_requests."""
 additional_properties = false
 
 defer_loading = true

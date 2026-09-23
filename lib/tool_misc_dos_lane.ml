@@ -35,6 +35,7 @@ let observation_fields (o : Dos_lane.observation) =
   ; ("frame_nonblack", `Int o.frame_nonblack)
   ; ("frame_ascii", `String o.frame_ascii)
   ; ("program", match o.program with Some p -> `String p | None -> `Null)
+  ; ("controller", match o.controller with Some c -> `String c | None -> `Null)
   ; ("files", `List (List.map (fun f -> `String f) o.files))
   ]
 ;;
@@ -54,7 +55,7 @@ let of_lane ?(extra = []) ~tool_name ~start_time
     Tool_result.make_ok ~tool_name ~start_time
       ~data:(`Assoc (observation_fields o @ extra))
       ()
-  | Error ((Dos_lane.No_machine | Dos_lane.Invalid_request _) as e) ->
+  | Error ((Dos_lane.No_machine | Dos_lane.Invalid_request _ | Dos_lane.Held_by _) as e) ->
     reject ~tool_name ~start_time (Dos_lane.error_to_string e)
   | Error ((Dos_lane.Unreadable _ | Dos_lane.Not_kept _) as e) ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
@@ -288,7 +289,7 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
      | Error message -> reject ~tool_name ~start_time message
      | Ok (program_name, program_bytes, files) ->
        let loaded =
-         Dos_lane.load ~ledger_dir:(dos_dir ~base_path)
+         Dos_lane.load ~who:agent_name ~ledger_dir:(dos_dir ~base_path)
            ~saves_dir:(saves_dir ~base_path (String.trim name)) ~program_name ~program_bytes
            ~files
            ~announce:(fun () ->
@@ -300,7 +301,7 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
 
 let handle_eject ~tool_name ~start_time ~agent_name _args =
   match
-    Dos_lane.eject
+    Dos_lane.eject ~who:agent_name
       ~announce:(fun () ->
         relay_to_board ~author:agent_name
           (Printf.sprintf "%s 님이 기계를 껐습니다" agent_name))
@@ -312,15 +313,35 @@ let handle_eject ~tool_name ~start_time ~agent_name _args =
   | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e)
 ;;
 
+(* The hand-off is also the wake-up: the board post names the next holder
+   with @, which the board delivers to that Keeper as an explicit mention, so
+   the player whose turn it is does not have to poll the machine to find out.
+   A post is a message in their queue, not an obligation to answer. *)
+let handle_pass ~tool_name ~start_time ~agent_name args =
+  let to_ =
+    match get_string_opt args "to" with
+    | Some t when String.trim t <> "" -> Some (String.trim t)
+    | Some _ | None -> None
+  in
+  let content =
+    match to_ with
+    | Some next -> Printf.sprintf "@%s 님 차례예요. %s 님이 DOS 조종권을 넘겼습니다" next agent_name
+    | None -> Printf.sprintf "%s 님이 DOS 조종권을 내려놓았습니다" agent_name
+  in
+  of_lane ~tool_name ~start_time
+    (Dos_lane.pass ~who:agent_name ~to_
+       ~announce:(fun () -> relay_to_board ~author:agent_name content))
+;;
+
 let handle_screen ~tool_name ~start_time _args =
   of_lane ~tool_name ~start_time (Dos_lane.screen ())
 ;;
 
 let default_steps = 1_000_000
 
-let handle_step ~tool_name ~start_time args =
+let handle_step ~tool_name ~start_time ~who args =
   of_lane_run ~tool_name ~start_time
-    (Dos_lane.step
+    (Dos_lane.step ~who
        ~steps:(get_int args "steps" default_steps)
        ~until_ready:(get_bool args "until_ready" true))
 ;;

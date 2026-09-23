@@ -2,15 +2,11 @@ name = "masc_dos_click"
 description = """
 Set the mouse and run the shared DOS machine.
 
-The mouse is state, not a queue: the cursor and buttons stay where they are \
-put until the next call moves them. A click (buttons 1 left or 2 right) is \
-button down, run, button up, run, in one call -- the up half always runs so \
-the button is never left held. buttons 0 is a move: position set, one run. \
-Coordinates are frame pixels and must land inside the frame; a graphics \
-mode's size is in the masc_dos_screen observation. A program that polls the \
-mouse instead of asking the BIOS for keys never settles; its clicks read as \
-settled false with the budget spent, which is the expected shape for a game \
-driven this way. The action is recorded in the ledger like a key."""
+The mouse is state: cursor and buttons stay until the next call. buttons 1 \
+or 2 clicks -- down, run, up, run, in one call, so the button is never left \
+held; 0 only moves. x and y are pixels inside the frame size masc_dos_screen \
+reports. A game that polls the mouse instead of asking for keys returns \
+settled false with the budget spent; that is normal. Recorded in the ledger."""
 additional_properties = false
 
 defer_loading = true

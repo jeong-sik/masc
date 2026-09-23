@@ -18,6 +18,17 @@ let be32 s i =
   lor (Char.code s.[i + 2] lsl 8) lor Char.code s.[i + 3]
 ;;
 
+(* Ejects whatever machine is there, as whoever holds it: the machine is
+   process-global and one test must not hand it to the next. *)
+let eject_held () =
+  let who =
+    match Dos_lane.screen () with
+    | Ok { Dos_lane.controller = Some holder; _ } -> holder
+    | Ok _ | Error _ -> "test-cleanup"
+  in
+  ignore (Dos_lane.eject ~who ~announce:ignore () : (unit, Dos_lane.error) result)
+;;
+
 let test_keeper_screen_carries_the_frame () =
   let base = Filename.temp_dir "dos-vision-" "" in
   let previous = Sys.getenv_opt "MASC_BASE_PATH" in
@@ -25,7 +36,7 @@ let test_keeper_screen_carries_the_frame () =
   Config_dir_resolver.reset ();
   Fun.protect
     ~finally:(fun () ->
-      ignore (Dos_lane.eject ~announce:ignore () : (unit, Dos_lane.error) result);
+      eject_held ();
       Unix.putenv "MASC_BASE_PATH" (Option.value ~default:"" previous);
       Config_dir_resolver.reset ();
       Fs_compat.remove_tree base)
@@ -40,11 +51,12 @@ let test_keeper_screen_carries_the_frame () =
         Keeper_tool_in_process_runtime.handle_masc_misc_with_outcome ~config ~meta
           ~name:"masc_dos_screen" ~args:(`Assoc [])
       in
-      ignore (Dos_lane.eject ~announce:ignore () : (unit, Dos_lane.error) result);
+      eject_held ();
       check bool "no machine fails" true
         (match (screen ()).disposition with Tool_result.Failed _ -> true | _ -> false);
       (match
-         Dos_lane.load ~ledger_dir:(Filename.concat base "dos") ~program_name:"HELLO.COM"
+         Dos_lane.load ~who:"dos-player" ~ledger_dir:(Filename.concat base "dos")
+           ~saves_dir:(Filename.concat base "saves") ~program_name:"HELLO.COM"
            ~program_bytes:hello_com ~files:[] ~announce:ignore
        with
        | Ok _ -> ()

@@ -982,6 +982,30 @@ let test_both_doors_into_the_runtime_detail_ask_the_same_lane_list () =
    "newest post first" a post replied to a minute ago sat sixth reading "25s".
    The sort is read once for the whole list: the header word and every row's
    number name the same time only while one reading feeds both. *)
+(* Both list panes drew a row's task id and nothing else. Measured on the
+   live history 2026-09-24: 200 Task Review rows carry 113 distinct ids, 45
+   of them more than once, and seven rows are task-1663 -- one submitter, no
+   stated intent, parted only by when each was sent, across two days. The
+   label helper is tested on its own in test_tui_render_schedule; these two
+   say the panes reach it, and which clock each reads. *)
+let test_both_task_history_panes_say_when_each_row_was_sent () =
+  List.iter
+    (fun binding_name ->
+      Alcotest.(check int)
+        (binding_name ^ " builds its labels through the shared one")
+        1
+        (Ast_grep.count_calls_in_value_binding ~module_path:render
+           ~binding_name
+           ~callee:"Render_schedule.task_history_sidebar_label"))
+    [ "render_verification_detail"; "render_harness_detail" ];
+  Alcotest.(check int) "Task Review reads the submission clock" 1
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"render_verification_detail" ~field_name:"vr_created_at");
+  Alcotest.(check int) "Verdicts reads the verdict clock" 1
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"render_harness_detail" ~field_name:"hv_at")
+;;
+
 let test_the_board_age_column_reads_the_sort_once () =
   let asks ~callee =
     Ast_grep.count_calls_in_value_binding ~module_path:render
@@ -1140,5 +1164,8 @@ let () =
             test_both_doors_into_the_runtime_detail_ask_the_same_lane_list
         ; Alcotest.test_case "the Board age column reads the sort once" `Quick
             test_the_board_age_column_reads_the_sort_once
+        ; Alcotest.test_case
+            "both task history panes say when each row was sent" `Quick
+            test_both_task_history_panes_say_when_each_row_was_sent
         ] )
     ]

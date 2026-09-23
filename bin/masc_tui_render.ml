@@ -8911,7 +8911,18 @@ let render_verification_detail (state : state) request =
         match state.verification with
         | None -> []
         | Some snapshot ->
-          List.map (fun (row : Tui_decode.verification_request) -> row.Tui_decode.vr_task_id)
+          let now = Unix.gettimeofday () in
+          List.map
+            (fun (row : Tui_decode.verification_request) ->
+              let age =
+                match
+                  Masc_domain.parse_iso8601_opt row.Tui_decode.vr_created_at
+                with
+                | None -> None
+                | Some since -> Message_layout.age_text ~now ~since
+              in
+              Render_schedule.task_history_sidebar_label
+                ~task_id:row.Tui_decode.vr_task_id ~age)
             snapshot.Tui_decode.vs_requests
       in
       let left_buf = Buffer.create 1024 in
@@ -9375,7 +9386,14 @@ let render_harness_detail (state : state) verdict =
         match state.harness with
         | None -> []
         | Some snapshot ->
-          List.map (fun (row : Tui_decode.harness_verdict) -> row.Tui_decode.hv_task_id)
+          let now = Unix.gettimeofday () in
+          List.map
+            (fun (row : Tui_decode.harness_verdict) ->
+              Render_schedule.task_history_sidebar_label
+                ~task_id:row.Tui_decode.hv_task_id
+                ~age:
+                  (Message_layout.age_text ~now
+                     ~since:row.Tui_decode.hv_at))
             snapshot.Tui_decode.hs_verdicts
       in
       let left_buf = Buffer.create 1024 in

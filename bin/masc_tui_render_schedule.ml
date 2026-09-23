@@ -1005,6 +1005,18 @@ let fusion_row ~state_style columns values =
 let fusion_sidebar_label ~status ~time ~keeper ~run_id =
   Printf.sprintf "[%s] %s @%s %s" status time keeper run_id
 
+(* Task Review and Verdicts drew a row's task id and nothing else, and both
+   lists hold a task once per submission. Measured on the live history
+   2026-09-24: 200 Task Review rows carry 113 distinct ids, 45 of them more
+   than once, and seven rows are task-1663 -- one submitter, no stated
+   intent, parted only by when each was sent, across two days.
+
+   The age is that reading, in the ladder the rest of the screen spells. A
+   row whose clock cannot be read keeps the id alone rather than inventing a
+   mark for it. *)
+let task_history_sidebar_label ~task_id ~age =
+  match age with None -> task_id | Some age -> task_id ^ "  " ^ age
+
 let fusion_pipeline_diagram
     ?(glyph_done = "●")
     ?(glyph_active = "◐")

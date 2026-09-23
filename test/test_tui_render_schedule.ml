@@ -1664,6 +1664,39 @@ let test_fusion_sidebar_label_format () =
   check string "label starts with status, time, keeper, and run id"
     "[done] 14:20:05 @edgar fusion-target-501" label
 
+(* Task Review and Verdicts drew a row's task id and nothing else. Measured
+   on the live history 2026-09-24: 200 Task Review rows carry 113 distinct
+   ids, 45 of them more than once, and seven rows are task-1663 -- one
+   submitter, no stated intent, parted only by when each was sent, across two
+   days. Seven rows reading "task-1663" cannot be picked between. *)
+let test_two_submissions_of_one_task_read_differently () =
+  let first =
+    Schedule.task_history_sidebar_label ~task_id:"task-1663" ~age:(Some "1d05h")
+  in
+  let second =
+    Schedule.task_history_sidebar_label ~task_id:"task-1663" ~age:(Some "22h14m")
+  in
+  check bool "the two rows read differently" true (first <> second);
+  check string "the id leads so the column reads down" "task-1663  1d05h" first
+
+(* A clock the codec cannot read keeps the id alone. The row said one thing
+   before this column and still says it; a mark for "no age" would be a
+   second vocabulary on a surface that has none. *)
+let test_a_row_without_a_readable_clock_keeps_its_id () =
+  check string "the id alone" "task-1663"
+    (Schedule.task_history_sidebar_label ~task_id:"task-1663" ~age:None)
+
+(* The list pane is [Masc_tui_roster_pane.pane_cols] wide and folds a label
+   to the room its caret lead leaves. The longest live id and the widest
+   reading the ladder draws have to fit that room, or every row is cut. *)
+let test_the_widest_row_fits_the_list_pane () =
+  let label =
+    Schedule.task_history_sidebar_label ~task_id:"task-1663" ~age:(Some "99d23h")
+  in
+  check bool "the widest row fits the pane's label room" true
+    (Masc_tui_message_layout.display_width label
+     <= Masc_tui_frame.inner_width ~cols:Masc_tui_roster_pane.pane_cols)
+
 let test_fusion_pipeline_diagram_stages () =
   let running_judge =
     Schedule.fusion_pipeline_diagram
@@ -2261,6 +2294,12 @@ let () =
             test_the_widest_failure_code_fits_the_state_cell
         ; test_case "fusion sidebar label format" `Quick
             test_fusion_sidebar_label_format
+        ; test_case "two submissions of one task read differently" `Quick
+            test_two_submissions_of_one_task_read_differently
+        ; test_case "a row without a readable clock keeps its id" `Quick
+            test_a_row_without_a_readable_clock_keeps_its_id
+        ; test_case "the widest row fits the list pane" `Quick
+            test_the_widest_row_fits_the_list_pane
         ; test_case "fusion pipeline diagram stages" `Quick
             test_fusion_pipeline_diagram_stages
         ; test_case "planning strip names only its own stops" `Quick

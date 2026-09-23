@@ -146,6 +146,27 @@ let already_published ~base_path ~request_identity registry =
   in
   find (Runs.list_runs registry)
 
+(* Readers reach a curator proposal through the publication descriptor, and a
+   successful run keeps its whole proposal in its own output. Once a newer
+   proposal is published, the earlier ones are read by nothing, so they are
+   removed: the proposal directory holds the published proposal, not one file
+   per input the curator ever saw. A run whose file is gone no longer counts
+   for [already_published], so an input that comes back is curated again. *)
+let discard_superseded ~base_path ~published registry =
+  Runs.list_runs registry
+  |> List.filter_map (fun (summary : Runs.run) ->
+    if summary.lane <> Runs.Workspace_curator || not (String.equal summary.actor base_path) then None
+    else match Runs.get registry ~run_id:summary.run_id with
+      | Some { status = Runs.Completed { outcome = Runs.Succeeded; output = `Assoc output; _ }; _ } ->
+        (match List.assoc_opt "proposal_id" output with
+         | Some (`String id) when not (String.equal id published) -> Some id
+         | _ -> None)
+      | _ -> None)
+  |> List.sort_uniq String.compare
+  |> List.iter (fun id -> match Proposals.discard ~base_path ~id with
+    | Ok () -> ()
+    | Error error -> Log.Server.error "workspace curator discard %s: %s" id (store_error error))
+
 type execution =
   { configuration : Yojson.Safe.t
   ; execute : rendered_prompt:string -> Context.t -> (Yojson.Safe.t * string, string) result
@@ -234,7 +255,9 @@ let run ~base_path ~prepare =
        | Ok (id, envelope, slot) ->
          complete ~selected_slot:slot Runs.Succeeded
            (`Assoc [ "proposal_id", `String id; "proposal", envelope;
-                     "semantic_verification", `String "not_performed" ])
+                     "semantic_verification", `String "not_performed" ]);
+         Domain_pool_ref.submit_io_or_inline (fun () ->
+           discard_superseded ~base_path ~published:id registry)
      with
      | Eio.Cancel.Cancelled _ as error ->
        Eio.Cancel.protect (fun () -> complete Runs.Cancelled (`Assoc [ "cancelled", `Bool true ]));

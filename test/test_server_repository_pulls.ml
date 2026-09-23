@@ -228,7 +228,7 @@ let test_reader_not_declared_reads_nothing () =
   let base_path = temp_base_path () in
   register base_path;
   let snapshot =
-    Pulls.refresh ~now ~http_post:never_called ~base_path ~previous:Pulls.initial
+    Pulls.refresh ~now ~http_post:never_called ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
   in
   (match snapshot.reader with
    | Pulls.Reader_not_declared -> ()
@@ -244,7 +244,7 @@ let test_reader_keeper_missing () =
     (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
     "[repositories]\npr_reader = \"nobody-here\"\n";
   let snapshot =
-    Pulls.refresh ~now ~http_post:never_called ~base_path ~previous:Pulls.initial
+    Pulls.refresh ~now ~http_post:never_called ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
   in
   match snapshot.reader with
   | Pulls.Reader_keeper_missing { keeper = "nobody-here" } -> ()
@@ -256,7 +256,7 @@ let test_unknown_key_is_refused () =
     (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
     "[repositories]\npr_raeder = \"edgar\"\n";
   let snapshot =
-    Pulls.refresh ~now ~http_post:never_called ~base_path ~previous:Pulls.initial
+    Pulls.refresh ~now ~http_post:never_called ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
   in
   match snapshot.reader with
   | Pulls.Reader_declaration_invalid _ -> ()
@@ -315,7 +315,7 @@ let test_reader_ready_reads_with_the_keeper_token () =
   let http_post, calls, tokens =
     counting_stub (ok_response (page ~has_next:false ~cursor:None []))
   in
-  let snapshot = Pulls.refresh ~now ~http_post ~base_path ~previous:Pulls.initial in
+  let snapshot = Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial in
   (match snapshot.reader with
    | Pulls.Reader_ready { keeper } -> Alcotest.(check string) "reader" reader_keeper keeper
    | _ -> failf "a declared Keeper with a hosts.yml token must be ready");
@@ -331,9 +331,9 @@ let test_rejected_token_is_not_sent_again () =
     Ok { Pulls.status = 401; body = "{}"; rate_limit_remaining = None; rate_limit_reset = None }
   in
   let http_post, calls, _ = counting_stub rejected in
-  let first = Pulls.refresh ~now ~http_post ~base_path ~previous:Pulls.initial in
+  let first = Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial in
   let later () = now () +. 60. in
-  let second = Pulls.refresh ~now:later ~http_post ~base_path ~previous:first in
+  let second = Pulls.refresh ~now:later ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:first in
   Alcotest.(check int) "the same refused token is sent once" 1 !calls;
   (match masc_pulls second with
    | Pulls.Pulls_failed { failure = Pulls.Token_rejected; observed_at } ->
@@ -344,7 +344,7 @@ let test_rejected_token_is_not_sent_again () =
      Alcotest.(check bool) "the digest is not the token" false (String.equal digest "gho_revoked")
    | None -> failf "the refused token's digest must be kept");
   write_reader_token base_path "gho_new_login";
-  let _third = Pulls.refresh ~now:later ~http_post ~base_path ~previous:second in
+  let _third = Pulls.refresh ~now:later ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:second in
   Alcotest.(check int) "a new token is asked about" 2 !calls
 
 let test_rate_limit_waits_for_reset () =
@@ -359,16 +359,16 @@ let test_rate_limit_waits_for_reset () =
       }
   in
   let http_post, calls, _ = counting_stub limited in
-  let first = Pulls.refresh ~now ~http_post ~base_path ~previous:Pulls.initial in
+  let first = Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial in
   let before_reset () = reset_at -. 1. in
-  let second = Pulls.refresh ~now:before_reset ~http_post ~base_path ~previous:first in
+  let second = Pulls.refresh ~now:before_reset ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:first in
   Alcotest.(check int) "no call before GitHub's reset" 1 !calls;
   (match masc_pulls second with
    | Pulls.Pulls_failed { failure = Pulls.Rate_limited { reset_at = Some at }; _ } ->
      Alcotest.(check (float 0.)) "the reset time stands" reset_at at
    | _ -> failf "the limit must stay on screen until its reset");
   let after_reset () = reset_at in
-  let _third = Pulls.refresh ~now:after_reset ~http_post ~base_path ~previous:second in
+  let _third = Pulls.refresh ~now:after_reset ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:second in
   Alcotest.(check int) "asked again at the reset" 2 !calls
 
 (* --- RFC-0465 §0.2: a pull request belongs to the Keepers whose checkout of
@@ -473,7 +473,7 @@ let catalog_ids = function
 let pulls_read () =
   let base_path = ready_base_path ~token:"gho_join" in
   let http_post, _, _ = counting_stub three_pull_page in
-  base_path, Pulls.refresh ~now ~http_post ~base_path ~previous:Pulls.initial
+  base_path, Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
 
 let test_keepers_join_by_exact_branch () =
   let base_path, read = pulls_read () in
@@ -517,7 +517,7 @@ let test_keepers_join_by_exact_branch () =
        (json_pulls joined));
   (* The next refresh keeps the join until the next join replaces it. *)
   let http_post, _, _ = counting_stub three_pull_page in
-  let next = Pulls.refresh ~now ~http_post ~base_path ~previous:joined in
+  let next = Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:joined in
   Alcotest.check
     join_testable
     "the previous join stands between refresh and join"
@@ -547,12 +547,12 @@ let test_no_open_pull_means_no_inspection () =
   (* Reader not declared: nothing read. *)
   let base_path = temp_base_path () in
   register base_path;
-  let unread = Pulls.refresh ~now ~http_post:never_called ~base_path ~previous:Pulls.initial in
+  let unread = Pulls.refresh ~now ~http_post:never_called ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial in
   let _ = Pulls.join_keepers ~now ~inspect_checkouts:refuse ~base_path unread in
   (* Read, but the repository has no open pull request. *)
   let base_path = ready_base_path ~token:"gho_empty" in
   let http_post, _, _ = counting_stub (ok_response (page ~has_next:false ~cursor:None [])) in
-  let empty = Pulls.refresh ~now ~http_post ~base_path ~previous:Pulls.initial in
+  let empty = Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial in
   let _ = Pulls.join_keepers ~now ~inspect_checkouts:refuse ~base_path empty in
   ()
 

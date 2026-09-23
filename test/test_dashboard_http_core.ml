@@ -5397,12 +5397,12 @@ let expect_http_status label status raw =
   if not (String.starts_with ~prefix raw)
   then failf "%s: expected %s, got %s" label prefix raw
 
-let config_reconciliation_response ~name error =
+let config_refusal_response ~name refusal =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
-      Keeper_config_post.For_testing.respond_config_reconciliation
-        ~request:(Httpun.Reqd.request reqd) reqd ~name ~error)
+      Keeper_config_post.For_testing.respond_config_refusal
+        ~request:(Httpun.Reqd.request reqd) reqd ~name ~refusal ~receipt:None)
   in
   let request = "POST /api/v1/keepers/test/config HTTP/1.1\r\nHost: x\r\n\r\n" in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
@@ -5448,18 +5448,10 @@ let test_composite_reconciliation_response_preserves_both_authorities () =
     ; detail = "runtime restore durability unconfirmed"
     }
   in
-  let error =
-    Masc.Keeper_turn_up_update.For_testing.composite_reconciliation_required_data
-      { manifest = Some manifest; runtime_assignment = Some runtime_assignment }
-  in
-  let result =
-    Masc.Keeper_types_profile.tool_result_error_data
-      ~class_:Tool_result.Runtime_failure error
-  in
-  (* The config POST answers an indeterminate write with the refusal's data,
-     as this does. *)
   let raw, json =
-    config_reconciliation_response ~name:"alpha" (Tool_result.data result)
+    config_refusal_response ~name:"alpha"
+      (Masc.Keeper_turn_up_update.Composite_reconciliation_required
+         { manifest = Some manifest; runtime_assignment = Some runtime_assignment })
   in
   expect_http_status "composite reconciliation" 503 raw;
   let open Yojson.Safe.Util in
@@ -6074,14 +6066,14 @@ let test_config_post_refused_before_write_says_not_applied () =
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
       ~name {|{"activation_mode":"autonomous","network_mode":"not-a-mode"}|}
   in
-  expect_http_status "refused update is HTTP 503" 503 raw;
+  expect_http_status "a profile the update cannot resolve is HTTP 400" 400 raw;
   let open Yojson.Safe.Util in
   check bool "nothing was written" false
     (json |> member "config_applied" |> to_bool);
   check string "runtime sync was not attempted" "not_attempted"
     (json |> member "runtime_sync" |> to_string);
-  check string "refusal is not a runtime sync failure"
-    "keeper_config_update_refused"
+  check string "refusal names the profile, not a runtime sync failure"
+    "keeper_config_profile_refused"
     (json |> member "error" |> member "code" |> to_string);
   check bool "refusal names the rejected value" true
     (String_util.contains_substring

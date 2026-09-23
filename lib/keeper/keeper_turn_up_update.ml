@@ -73,6 +73,44 @@ type config_write =
   | Config_committed
   | Config_indeterminate
 
+type refusal =
+  | Profile_resolution_refused of string
+  | Shutdown_preflight_failed of string
+  | Revision_conflict of Keeper_turn_up_config_persistence.conflict
+  | Publication_rolled_back of string
+  | Manifest_reconciliation_required of
+      Keeper_turn_up_config_persistence.reconciliation
+  | Composite_reconciliation_required of
+      Keeper_turn_up_config_persistence.composite_reconciliation
+  | Failed_after_commit of string
+
+let config_revision_conflict_code = "keeper_config_revision_conflict"
+
+let refusal_code = function
+  | Profile_resolution_refused _ -> "keeper_config_profile_refused"
+  | Shutdown_preflight_failed _ -> "keeper_shutdown_preflight_failed"
+  | Revision_conflict _ -> config_revision_conflict_code
+  | Publication_rolled_back _ -> "keeper_config_publication_rolled_back"
+  | Manifest_reconciliation_required _ -> "keeper_manifest_reconciliation_required"
+  | Composite_reconciliation_required _ ->
+    "keeper_config_composite_reconciliation_required"
+  | Failed_after_commit _ -> "keeper_runtime_sync_failed"
+;;
+
+(* Where each refusal is raised fixes what it left on disk: everything up to
+   the commit is refused before the first rename or after both before-images
+   were restored, and a failed restore or journal retirement is the
+   reconciliation pair. *)
+let config_write_of_refusal = function
+  | Profile_resolution_refused _
+  | Shutdown_preflight_failed _
+  | Revision_conflict _
+  | Publication_rolled_back _ -> Config_unchanged
+  | Manifest_reconciliation_required _ | Composite_reconciliation_required _ ->
+    Config_indeterminate
+  | Failed_after_commit _ -> Config_committed
+;;
+
 type update_outcome =
   | Runtime_synced of
       { result : tool_result
@@ -80,7 +118,7 @@ type update_outcome =
       }
   | Update_refused of
       { result : tool_result
-      ; config_write : config_write
+      ; refusal : refusal
       }
 
 let result_of_outcome = function
@@ -240,41 +278,14 @@ let rec swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
     Ok (swap (), start_keepalive ctx updated)
 ;;
 
-let config_revision_conflict_code = "keeper_config_revision_conflict"
-
 let config_revision_conflict_data
-      ({ expected; observed } : Keeper_turn_up_config_persistence.conflict)
+      ({ expected; observed } as conflict : Keeper_turn_up_config_persistence.conflict)
   =
   `Assoc
-    [ "code", `String config_revision_conflict_code
+    [ "code", `String (refusal_code (Revision_conflict conflict))
     ; "expected", Keeper_turn_up_config_persistence.config_revision_to_yojson expected
     ; "observed", Keeper_turn_up_config_persistence.config_revision_to_yojson observed
     ]
-;;
-
-let config_revision_conflict_of_result result =
-  match Tool_result.data result with
-  | `Assoc fields ->
-    (match List.assoc_opt "code" fields with
-     | Some (`String code)
-       when String.equal code config_revision_conflict_code ->
-       (match
-          List.assoc_opt "expected" fields,
-          List.assoc_opt "observed" fields
-        with
-        | Some expected_json, Some observed_json ->
-          (match
-             Keeper_turn_up_config_persistence.config_revision_of_yojson expected_json,
-             Keeper_turn_up_config_persistence.config_revision_of_yojson observed_json
-           with
-           | Ok expected, Ok observed ->
-             Some
-               ({ expected; observed } :
-                 Keeper_turn_up_config_persistence.conflict)
-           | Error _, _ | _, Error _ -> None)
-        | _ -> None)
-     | Some _ | None -> None)
-  | _ -> None
 ;;
 
 (* The receipt's [applied] is read off the outcome, so it cannot say
@@ -300,13 +311,13 @@ let with_config_receipt ~revision ~warnings outcome =
   match outcome with
   | Runtime_synced { result; runtime_sync } ->
     Runtime_synced { result = attach ~applied:true result; runtime_sync }
-  | Update_refused { result; config_write = Config_committed } ->
-    Update_refused
-      { result = attach ~applied:true result; config_write = Config_committed }
-  | Update_refused { result; config_write = Config_unchanged } ->
-    Update_refused
-      { result = attach ~applied:false result; config_write = Config_unchanged }
-  | Update_refused { config_write = Config_indeterminate; _ } -> outcome
+  | Update_refused { result; refusal } ->
+    (match config_write_of_refusal refusal with
+     | Config_committed ->
+       Update_refused { result = attach ~applied:true result; refusal }
+     | Config_unchanged ->
+       Update_refused { result = attach ~applied:false result; refusal }
+     | Config_indeterminate -> outcome)
 ;;
 
 let reconciliation_authority_fields
@@ -331,7 +342,7 @@ let reconciliation_authority_fields
 
 let reconciliation_required_data state =
   `Assoc
-    (("code", `String "keeper_manifest_reconciliation_required")
+    (("code", `String (refusal_code (Manifest_reconciliation_required state)))
      :: reconciliation_authority_fields state)
 ;;
 
@@ -340,7 +351,7 @@ let reconciliation_authority_data state =
 ;;
 
 let composite_reconciliation_required_data
-      ({ manifest; runtime_assignment } :
+      ({ manifest; runtime_assignment } as state :
         Keeper_turn_up_config_persistence.composite_reconciliation)
   =
   let manifest =
@@ -361,29 +372,32 @@ let composite_reconciliation_required_data
         ]
   in
   `Assoc
-    [ "code", `String "keeper_config_composite_reconciliation_required"
+    [ "code", `String (refusal_code (Composite_reconciliation_required state))
     ; "manifest", manifest
     ; "runtime_assignment", runtime_assignment
     ]
 ;;
 
-let config_publication_rollback_result detail =
-  tool_result_error_data
-    ~class_:Tool_result.Runtime_failure
-    (`Assoc
-      [ "code", `String "keeper_config_publication_rolled_back"
-      ; "detail", `String detail
-      ])
+let refusal_error_json refusal =
+  match refusal with
+  | Revision_conflict conflict -> config_revision_conflict_data conflict
+  | Manifest_reconciliation_required state -> reconciliation_required_data state
+  | Composite_reconciliation_required state ->
+    composite_reconciliation_required_data state
+  | Profile_resolution_refused detail
+  | Shutdown_preflight_failed detail
+  | Publication_rolled_back detail
+  | Failed_after_commit detail ->
+    `Assoc [ "code", `String (refusal_code refusal); "detail", `String detail ]
 ;;
 
-let config_publication_rollback_of_result result =
-  match Tool_result.data result with
-  | `Assoc fields ->
-    (match List.assoc_opt "code" fields, List.assoc_opt "detail" fields with
-     | Some (`String "keeper_config_publication_rolled_back"), Some (`String detail) ->
-       Some detail
-     | _ -> None)
-  | _ -> None
+(* A refusal whose tool data is its wire error body: the keeper tool surface
+   sees the same JSON the config POST answers with. *)
+let refused_with_data ~class_ refusal =
+  Update_refused
+    { result = tool_result_error_data ~class_ (refusal_error_json refusal)
+    ; refusal
+    }
 ;;
 
 type manifest_publication =
@@ -426,13 +440,8 @@ let profile_update_command (meta : keeper_meta) =
 (* Refused after [commit_configuration] returned: the declaration and runtime
    assignment are durable, and only publication or the lane restart failed. *)
 let refused_after_commit result =
-  Update_refused { result; config_write = Config_committed }
-;;
-
-(* Refused before the configuration pair was written, or after its write was
-   rolled back to the before-image. *)
-let refused_unchanged result =
-  Update_refused { result; config_write = Config_unchanged }
+  Update_refused
+    { result; refusal = Failed_after_commit (tool_result_body result) }
 ;;
 
 let finish_published_update ~supersession ctx updated =
@@ -551,7 +560,10 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
              (String.concat ", " Keeper_types_profile.valid_sandbox_profile_strings))
   with
   | Error msg ->
-    refused_unchanged (tool_result_error ~class_:Tool_result.Policy_rejection msg)
+    Update_refused
+      { result = tool_result_error ~class_:Tool_result.Policy_rejection msg
+      ; refusal = Profile_resolution_refused msg
+      }
   | Ok sandbox_profile ->
   (* Same non-durable pin as [sandbox_profile] above: [fallback] is the TOML
      declaration, never [old.network_mode]. The meta decoder fixes that field
@@ -569,7 +581,10 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
       ~fallback:p.profile_defaults.network_mode
   with
   | Error msg ->
-    refused_unchanged (tool_result_error ~class_:Tool_result.Policy_rejection msg)
+    Update_refused
+      { result = tool_result_error ~class_:Tool_result.Policy_rejection msg
+      ; refusal = Profile_resolution_refused msg
+      }
   | Ok network_mode ->
   let input_policy = match p.input_policy_opt, p.profile_defaults.input_policy with
     | Some policy, _ | None, Some policy -> policy
@@ -649,9 +664,12 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
               ~actor:ctx.agent_name
           with
           | Error error ->
-            refused_unchanged
-              (tool_result_error ~class_:Tool_result.Runtime_failure
-                 (Keeper_shutdown_supersession.error_to_string error))
+            let detail = Keeper_shutdown_supersession.error_to_string error in
+            Update_refused
+              { result =
+                  tool_result_error ~class_:Tool_result.Runtime_failure detail
+              ; refusal = Shutdown_preflight_failed detail
+              }
           | Ok supersession ->
             let publish outcome config_revision =
               let failed detail =
@@ -690,10 +708,8 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
              with
              | Error
                  (Keeper_turn_up_config_persistence.Revision_conflict conflict) ->
-               refused_unchanged
-                 (tool_result_error_data
-                    ~class_:Tool_result.Workflow_rejection
-                    (config_revision_conflict_data conflict))
+               refused_with_data ~class_:Tool_result.Workflow_rejection
+                 (Revision_conflict conflict)
              | Error (Keeper_turn_up_config_persistence.Io_error detail) ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string TurnUpUpdateFailures)
@@ -709,36 +725,27 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                   before-images. A rollback that could not restore them is
                   [Reconciliation_required] or
                   [Composite_reconciliation_required] instead. *)
-               refused_unchanged (config_publication_rollback_result detail)
+               refused_with_data ~class_:Tool_result.Runtime_failure
+                 (Publication_rolled_back detail)
                |> with_config_receipt ~revision:expected_config_revision
                     ~warnings:[]
              | Error
                  (Keeper_turn_up_config_persistence.Reconciliation_required state) ->
-               Update_refused
-                 { result =
-                     tool_result_error_data
-                       ~class_:Tool_result.Runtime_failure
-                       (reconciliation_required_data state)
-                 ; config_write = Config_indeterminate
-                 }
+               refused_with_data ~class_:Tool_result.Runtime_failure
+                 (Manifest_reconciliation_required state)
              | Error
                  (Keeper_turn_up_config_persistence.Composite_reconciliation_required
                     state) ->
-               Update_refused
-                 { result =
-                     tool_result_error_data
-                       ~class_:Tool_result.Runtime_failure
-                       (composite_reconciliation_required_data state)
-                 ; config_write = Config_indeterminate
-                 }
+               refused_with_data ~class_:Tool_result.Runtime_failure
+                 (Composite_reconciliation_required state)
              | Error
                  (Keeper_turn_up_config_persistence.Publication_exception
                     { detail; _ }) ->
                (* The persistence transaction rolls a [Publication_exception]
                   back before returning it; a failed rollback surfaces as a
                   reconciliation error instead. *)
-               refused_unchanged
-                 (config_publication_rollback_result
+               refused_with_data ~class_:Tool_result.Runtime_failure
+                 (Publication_rolled_back
                     ("keeper config publication raised and was rolled back: "
                      ^ detail))
                |> with_config_receipt ~revision:expected_config_revision
@@ -780,9 +787,6 @@ let update_keeper ?preserve_prompt_defaults ~expected_config_revision ctx p old 
 ;;
 
 module For_testing = struct
-  let composite_reconciliation_required_data =
-    composite_reconciliation_required_data
-
   let update_keeper_with_apply_profile
         ~apply_profile
         ?preserve_prompt_defaults
@@ -798,6 +802,5 @@ module For_testing = struct
       ctx
       p
       old
-    |> result_of_outcome
   ;;
 end

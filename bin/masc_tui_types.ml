@@ -1887,6 +1887,14 @@ type keeper_liveness_counts = {
   klc_unreadable: int;
 }
 
+(** The Overview's reading of the runtime catalogue's quota windows. A failed
+    read is kept apart from one not made yet, and neither is drawn as "no
+    window is shut". *)
+type overview_quota_reading =
+  | Quota_unread
+  | Quota_read of Tui_decode.runtime_option list
+  | Quota_failed of string
+
 (** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
     briefing writes [null] for a Keeper with no registry entry (an offline
     Keeper that never booted this process), which is a different fact from a
@@ -2620,6 +2628,7 @@ type surface_needs = {
   needs_keeper_chat : bool;
   needs_operator_approvals : bool;
   needs_asks : bool;
+  needs_runtime_quota : bool;
 }
 
 let nothing =
@@ -2632,6 +2641,7 @@ let nothing =
     needs_keeper_chat = false;
     needs_operator_approvals = false;
     needs_asks = false;
+    needs_runtime_quota = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -2652,7 +2662,11 @@ let rec surface_needs ~keeper_pane_drawn surface =
   else needs
 
 and surface_needs_of_surface : surface -> surface_needs = function
-  | Overview -> { nothing with needs_transport = true }
+  (* The Team block names the quota windows that are shut. The catalogue is
+     43 KB and answers in under two milliseconds on the live runtime, and
+     only this surface draws the windows beside the Keepers they stop. *)
+  | Overview ->
+      { nothing with needs_transport = true; needs_runtime_quota = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing
@@ -2704,6 +2718,8 @@ let surface_needs_delta ~previous ~next =
       next.needs_operator_approvals
       && not previous.needs_operator_approvals
   ; needs_asks = next.needs_asks && not previous.needs_asks
+  ; needs_runtime_quota =
+      next.needs_runtime_quota && not previous.needs_runtime_quota
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -5321,6 +5337,10 @@ type state = {
   mutable runtime_pick_keeper: string option;
   mutable runtime_pick_cursor: int;
   mutable runtime_catalog: Tui_decode.runtime_option list;
+  (* The Overview's own read of the same catalogue, kept apart from the
+     picker's [runtime_catalog] so a refresh behind the Overview never moves
+     the rows under an open picker's cursor. *)
+  mutable overview_quota: overview_quota_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
@@ -7410,6 +7430,7 @@ let create_state
   runtime_pick_keeper = None;
   runtime_pick_cursor = 0;
   runtime_catalog = [];
+  overview_quota = Quota_unread;
   runtime_lanes = [];
   runtime_assignments = [];
   runtime_catalog_error = None;

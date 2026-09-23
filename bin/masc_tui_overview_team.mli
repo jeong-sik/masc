@@ -64,3 +64,23 @@ val count : t -> group -> int
 val phase_word : Masc_tui_types.overview_keeper -> string
 (** The phase as the row prints it: the lifecycle word, the unreadable wire
     word as it came, or ["no phase"] when the briefing wrote none. *)
+
+(** {1 Quota windows} *)
+
+(** One provider or credential quota window that is shut, as the runtime
+    catalogue reports it. The catalogue carries the window on every runtime
+    that shares it; this is the window once. *)
+type shut_window = {
+  sw_scope : string option;
+      (** The catalogue's [quota_scope], e.g. ["provider:claude_code"]. [None]
+          groups the runtimes that report a shut window with no scope. *)
+  sw_runtimes : int;  (** Runtimes behind this window. *)
+  sw_resets_at : float option;
+      (** Epoch seconds the provider said the window reopens; [None] when it
+          did not say. The latest of the runtimes' readings. *)
+}
+
+val shut_windows : Tui_decode.runtime_option list -> shut_window list
+(** Every window with at least one exhausted runtime, soonest reopening first;
+    windows with no reopening time last, by scope. Runtimes whose quota is
+    open do not appear. *)

@@ -141,3 +141,44 @@ let phase_word (keeper : Types.overview_keeper) =
   | Types.Keeper_phase phase -> Tui_decode.keeper_phase_to_string phase
   | Types.Keeper_phase_unreadable word -> word
   | Types.Keeper_phase_absent -> "no phase"
+
+type shut_window = {
+  sw_scope : string option;
+  sw_runtimes : int;
+  sw_resets_at : float option;
+}
+
+let later left right =
+  match (left, right) with
+  | Some l, Some r -> Some (Float.max l r)
+  | Some at, None | None, Some at -> Some at
+  | None, None -> None
+
+let shut_windows (options : Tui_decode.runtime_option list) =
+  List.fold_left
+    (fun windows (option : Tui_decode.runtime_option) ->
+      if not option.ro_quota_exhausted then windows
+      else
+        let scope = option.ro_quota_scope in
+        match
+          List.partition
+            (fun window -> Option.equal String.equal window.sw_scope scope)
+            windows
+        with
+        | [ window ], rest ->
+            { window with
+              sw_runtimes = window.sw_runtimes + 1
+            ; sw_resets_at = later window.sw_resets_at option.ro_quota_resets_at
+            }
+            :: rest
+        | _, _ ->
+            { sw_scope = scope; sw_runtimes = 1; sw_resets_at = option.ro_quota_resets_at }
+            :: windows)
+    [] options
+  |> List.stable_sort (fun left right ->
+         match (left.sw_resets_at, right.sw_resets_at) with
+         | Some l, Some r when not (Float.equal l r) -> Float.compare l r
+         | Some _, None -> -1
+         | None, Some _ -> 1
+         | Some _, Some _ | None, None ->
+             Option.compare String.compare left.sw_scope right.sw_scope)

@@ -325,11 +325,53 @@ let overview_team (state : state) =
         (Overview_team.project ~keepers:overview.ov_keeper_rows
            ~tasks:state.tasks ~attention:overview.ov_attention_items)
 
+(* The quota windows the runtime catalogue reports shut, as one line at the
+   top of the Team block: a shut window is usually why the Keepers under it
+   are stuck, and when it reopens is what the operator waits on. Nothing is
+   drawn while every window is open or before the first read -- a line saying
+   "all open" on every frame would be texture. A failed read says so. *)
+let overview_quota_line (state : state) ~now =
+  match state.overview_quota with
+  | Quota_unread -> None
+  | Quota_failed err ->
+      Some
+        (Printf.sprintf "%squota windows unread: %s%s" Ansi.dim
+           (Terminal_text.single_line err) Ansi.reset)
+  | Quota_read options -> (
+      match Overview_team.shut_windows options with
+      | [] -> None
+      | windows ->
+          let window_text (window : Overview_team.shut_window) =
+            let scope =
+              match window.sw_scope with
+              | Some scope -> Terminal_text.single_line scope
+              | None -> "unscoped"
+            in
+            let reopen =
+              match window.sw_resets_at with
+              | None -> "reopening time not reported"
+              | Some at when at <= now -> "reopen due, not yet re-read"
+              | Some at ->
+                  let tm = Unix.gmtime at in
+                  Printf.sprintf "reopens %02d:%02dZ, in %s" tm.Unix.tm_hour
+                    tm.Unix.tm_min
+                    (keeper_lane_idle_text (int_of_float (at -. now)))
+            in
+            Printf.sprintf "%s%s%s (%d runtime%s) %s" (Theme.warn ()) scope
+              Ansi.reset window.sw_runtimes
+              (if window.sw_runtimes = 1 then "" else "s")
+              reopen
+          in
+          Some
+            (Printf.sprintf "%s\xe2\x8f\xb8%s quota shut: %s" (Theme.warn ())
+               Ansi.reset
+               (String.concat " \xc2\xb7 " (List.map window_text windows))))
+
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the parked roll call and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
-let overview_team_lines (team : Overview_team.t) ~team_rows ~flow =
+let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~quota_line =
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -414,7 +456,10 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow =
             Ansi.reset
         ]
   in
-  let rows = List.map keeper_line team.rows @ parked_line @ holders_line in
+  let rows =
+    Option.to_list quota_line @ List.map keeper_line team.rows @ parked_line
+    @ holders_line
+  in
   let total = List.length rows in
   let counts =
     List.filter_map
@@ -474,7 +519,10 @@ let overview_layout (state : state) ~terminal_rows =
       ~team_count:
         (match overview_team state with
          | None -> 0
-         | Some team -> Overview_team.drawn_rows team)
+         | Some team ->
+             Overview_team.drawn_rows team
+             + Option.fold ~none:0 ~some:(fun _ -> 1)
+                 (overview_quota_line state ~now:(Unix.gettimeofday ())))
       ~task_count:(List.length state.tasks)
       ~has_task_error:(Option.is_some tasks_error)
   in
@@ -798,6 +846,7 @@ let render_overview (state : state) =
        let title, lines =
          overview_team_lines team ~team_rows:row_budget.team_rows
            ~flow:state.task_flow
+           ~quota_line:(overview_quota_line state ~now:(Unix.gettimeofday ()))
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;

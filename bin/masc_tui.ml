@@ -1825,6 +1825,8 @@ type http_scoped_surface_results = {
      last Keepers refresh observed rather than dropping it. *)
   http_keeper_roster:
     (Keeper_control.roster, Keeper_control.roster_failure) result option;
+  (* [None] off the Overview, the one surface that draws the quota windows. *)
+  http_runtime_quota: (Tui_decode.runtime_option list, string) result option;
 }
 
 type http_surface_results = {
@@ -10400,6 +10402,12 @@ let apply_fleet_safety_load state = function
         ~set_error:(fun value -> state.fleet_safety_error <- value)
         err
 
+(* A failed read replaces the last good one: a window drawn as shut after the
+   reading that said so stopped arriving would name a stop nobody observed. *)
+let apply_runtime_quota_load state = function
+  | Ok options -> state.overview_quota <- Quota_read options
+  | Error err -> state.overview_quota <- Quota_failed err
+
 let apply_keeper_roster_load state = function
   | Ok roster ->
       state.keeper_roster <- roster;
@@ -10627,6 +10635,12 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
     when_needed needs.needs_keeper_roster (fun () ->
         load_keeper_roster ~host ~port)
   in
+  let http_runtime_quota =
+    when_needed needs.needs_runtime_quota (fun () ->
+        Result.map
+          (fun (options, _lanes, _assignments) -> options)
+          (Masc_tui_loader.load_runtime_resolved ~host ~port))
+  in
   { http_transport
   ; http_approvals
   ; http_asks
@@ -10636,6 +10650,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   ; http_system_logs
   ; http_fleet_safety
   ; http_keeper_roster
+  ; http_runtime_quota
   }
 
 let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
@@ -10679,7 +10694,8 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_planning_load state) results.http_planning;
   Option.iter (apply_system_logs_load state) results.http_system_logs;
   Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
-  Option.iter (apply_keeper_roster_load state) results.http_keeper_roster
+  Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
+  Option.iter (apply_runtime_quota_load state) results.http_runtime_quota
 
 (* This is a current reading, not a last-known cache. A failed probe makes
    the projection unread; every following refresh asks again, so a same-port

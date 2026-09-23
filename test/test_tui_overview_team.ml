@@ -156,6 +156,52 @@ let test_an_unreadable_phase_stays_visible () =
       check string "the wire word as it came" "hibernating" word
   | _ -> fail "a phase this build cannot name is shown, not folded away"
 
+(* The live catalogue on 2026-09-23 carried the Claude Code subscription's
+   shut window on each of its runtimes, all with one reopening time; the
+   Codex subscription's window was open. The Team block names the window
+   once, with how many runtimes stand behind it. *)
+let runtime ?resets ?scope ~exhausted id : Tui_decode.runtime_option =
+  { ro_id = id
+  ; ro_provider = "p"
+  ; ro_model = id
+  ; ro_effective_max_context = 200_000
+  ; ro_max_context_source = Tui_decode.Runtime_context_capability
+  ; ro_max_output_tokens = None
+  ; ro_declared_reasoning_effort = None
+  ; ro_is_local = false
+  ; ro_is_default = false
+  ; ro_quota_exhausted = exhausted
+  ; ro_quota_resets_at = resets
+  ; ro_quota_scope = scope
+  }
+
+let test_shut_windows_name_each_window_once () =
+  let claude = Some "provider:claude_code" in
+  let windows =
+    Team.shut_windows
+      [ runtime ~exhausted:true ~scope:"provider:claude_code" ~resets:1790140800.
+          "claude_code.claude-sonnet-5"
+      ; runtime ~exhausted:true ~scope:"provider:claude_code" ~resets:1790140800.
+          "claude_code.claude-opus-5-medium"
+      ; runtime ~exhausted:false ~scope:"provider:codex_subscription"
+          "codex_subscription.gpt-5.6-luna"
+      ; runtime ~exhausted:true ~scope:"provider:glm_coding" "glm-coding.glm-5.3-flash"
+      ; runtime ~exhausted:true ~scope:"provider:kimi" ~resets:1790130000.
+          "kimi.k3"
+      ]
+  in
+  check
+    (list (option string))
+    "soonest reopening first, unreported time last; open windows absent"
+    [ Some "provider:kimi"; claude; Some "provider:glm_coding" ]
+    (List.map (fun (w : Team.shut_window) -> w.sw_scope) windows);
+  check (list int) "runtimes behind each window" [ 1; 2; 1 ]
+    (List.map (fun (w : Team.shut_window) -> w.sw_runtimes) windows);
+  check int "every window open reports none" 0
+    (List.length
+       (Team.shut_windows
+          [ runtime ~exhausted:false ~scope:"provider:claude_code" "a" ]))
+
 let () =
   run "tui_overview_team"
     [ ( "team"
@@ -170,5 +216,7 @@ let () =
             test_work_held_outside_the_fleet_is_counted
         ; test_case "unreadable phase stays visible" `Quick
             test_an_unreadable_phase_stays_visible
+        ; test_case "shut windows name each window once" `Quick
+            test_shut_windows_name_each_window_once
         ] )
     ]

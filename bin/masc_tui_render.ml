@@ -5288,27 +5288,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
     Option.value ~default:"No consumer purpose reported by this server."
       lane.sl_purpose
   in
-  let exact_lane which =
-    Masc.Exact_lane_run_registry.lane_key which
-    |> String.equal lane.sl_lane_id
-  in
-  let output_meaning, evidence_contract =
-    if exact_lane Masc.Exact_lane_run_registry.Board_attention then
-      ( "Output meaning: the accepted candidate judgment JSON."
-      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output and outcome. HTTP/CLI attribution uses selected slot; Vendor System One provenance stays in Output." )
-    else if exact_lane Masc.Exact_lane_run_registry.Hitl_auto_judge then
-      ( "Output meaning: the validated and durably settled approval-context judgment summary."
-      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
-    else if exact_lane Masc.Exact_lane_run_registry.Librarian then
-      ( "Output meaning: selected memory facts plus committed snapshot metadata."
-      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
-    else if String.equal lane.sl_lane_id Runtime.verifier_exact_lane_id then
-      ( "Output meaning: Task completion or Goal proof verdict, reason, and evaluator runtime."
-      , "Evidence: Verifier review records also retain MASC tool observations; open a run to inspect inputs, dispositions, excerpts, duration, and truncation." )
-    else
-      ( "Output meaning: open a retained run for its exact result."
-      , "Evidence: this server did not report a known standalone-lane evidence contract." )
-  in
+  let answer = Tui_decode.standalone_lane_answer lane in
   (* Three facts the server has always sent and nothing drew.
 
      [required] is the one that changes what an operator does about a lane
@@ -5441,8 +5421,8 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
      Keeper columns and the Memory ST words already made. What stays here is
      what this lane answers: the section it configures is on the Config row
      above, and the evidence line below says what its runs retain. *)
-  @ wrap Ansi.reset output_meaning
-  @ wrap Ansi.dim evidence_contract
+  @ wrap Ansi.reset answer.sla_output_meaning
+  @ wrap Ansi.dim answer.sla_evidence
 
 let rec take_rows remaining acc = function
   | _ when remaining <= 0 -> List.rev acc
@@ -5824,8 +5804,14 @@ let render_lane_run_list (state : state) ~lane_id =
   box_line buf cols header;
   box_divider buf cols;
   let identity_heading =
-    if String.equal lane_id Runtime.verifier_exact_lane_id then "SUBJECT"
-    else "ACTOR"
+    match Standalone_lane.of_id lane_id with
+    | Some Standalone_lane.Verifier -> "SUBJECT"
+    | Some
+        ( Standalone_lane.Librarian
+        | Standalone_lane.Hitl_auto_judge
+        | Standalone_lane.Board_attention
+        | Standalone_lane.Workspace_curator )
+    | None -> "ACTOR"
   in
   (* The run id takes what the named columns leave; it used to run off the
      header with no end while the row cut it at twelve. *)

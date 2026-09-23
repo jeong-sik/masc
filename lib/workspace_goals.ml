@@ -466,7 +466,7 @@ let validate_verification_run_id verification_run_id =
 
 (* The authority is constructed inside the application boundary. It is not a
    field accepted from an MCP caller and cannot be replaced by a Keeper/session
-   name. [Runtime.verifier_exact_lane_id] is the runtime configuration SSOT. *)
+   name. [Standalone_lane.to_id Verifier] is the runtime configuration SSOT. *)
 let gate_verdict
       (outcome : Goal_verification.verdict_outcome)
       ~verification_run_id
@@ -481,7 +481,7 @@ let gate_verdict
   ; criterion
   ; authority =
       Masc_domain.System_llm_agent
-        { agent_run_id = Runtime.verifier_exact_lane_id }
+        { agent_run_id = Standalone_lane.to_id Standalone_lane.Verifier }
   ; evidence
   ; recorded_at = Masc_domain.now_iso ()
   }
@@ -580,7 +580,7 @@ let goal_after_proof (goal : Goal_store.goal) phase note =
 
 let commit_verifier_decision ~tool_name ~start_time config ~goal_id
     ~verification_run_id ~request_id ~criterion ~decision ~evidence =
-  let ctx : context = { config; agent_name = Runtime.verifier_exact_lane_id } in
+  let ctx : context = { config; agent_name = Standalone_lane.to_id Standalone_lane.Verifier } in
   let action, verdict_outcome, note = verifier_decision_parts decision in
   match validate_verification_run_id verification_run_id,
         validate_gate_evidence (`Assoc [ "evidence", `String evidence ]) action with
@@ -632,7 +632,7 @@ let commit_verifier_decision ~tool_name ~start_time config ~goal_id
 ;;
 
 let reconcile_committed_proof config ~goal_id =
-  let ctx : context = { config; agent_name = Runtime.verifier_exact_lane_id } in
+  let ctx : context = { config; agent_name = Standalone_lane.to_id Standalone_lane.Verifier } in
   let result = Goal_store.transact_goal config ~goal_id (fun goal ->
     if goal.phase <> Goal_phase.Verifying then
       Ok (goal, (Reconciliation_not_needed goal.phase, None))

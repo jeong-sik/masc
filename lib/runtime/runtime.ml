@@ -929,36 +929,16 @@ let validate_runtime_context_marks (runtimes : t list) : (unit, load_failure) re
   | Some failure -> Error failure
 ;;
 
-(* [runtime.exact_output_lanes.verifier_exact] (RFC-0361 D7(a)) is the single
-   selector for completion-authority judgement calls: admitted slots in frozen
-   declaration order, fail over in that order. *)
-let verifier_exact_lane_id = "verifier_exact"
-
-type exact_lane =
+(* The lanes and their ids are [Standalone_lane]'s. The Verifier lane
+   (RFC-0361 D7(a)) is the single selector for completion-authority judgement
+   calls: admitted slots in frozen declaration order, fail over in that
+   order. *)
+type exact_lane = Standalone_lane.t =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
   | Workspace_curator
   | Verifier
-
-let all_exact_lanes = [ Librarian; Hitl_auto_judge; Board_attention; Workspace_curator; Verifier ]
-
-let exact_lane_id = function
-  | Librarian -> "librarian_exact"
-  | Hitl_auto_judge -> "hitl_auto_judge"
-  | Board_attention -> "board_attention_exact"
-  | Workspace_curator -> "workspace_curator_exact"
-  | Verifier -> verifier_exact_lane_id
-;;
-
-let exact_lane_of_id = function
-  | "librarian_exact" -> Some Librarian
-  | "hitl_auto_judge" -> Some Hitl_auto_judge
-  | "board_attention_exact" -> Some Board_attention
-  | "workspace_curator_exact" -> Some Workspace_curator
-  | "verifier_exact" -> Some Verifier
-  | _ -> None
-;;
 
 (* [Server_workspace_memory_curator.execute] refuses a run whose lane declares
    any CLI slot, so [false] here is that refusal read in advance. The two are
@@ -998,7 +978,7 @@ let verifier_exact_slot_references
          { site =
              Printf.sprintf
                "[runtime.exact_output_lanes.%s].%s"
-               verifier_exact_lane_id
+               (Standalone_lane.to_id Verifier)
                key
          ; shape = List_entry
          ; id
@@ -1009,7 +989,7 @@ let verifier_exact_slot_references
   match
     List.find_opt
       (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal lane.id verifier_exact_lane_id)
+         String.equal lane.id (Standalone_lane.to_id Verifier))
       decls
   with
   | None -> []
@@ -1867,7 +1847,7 @@ let verifier_exact_lane_resolution () =
     (match
        Runtime_exact_output_registry.resolve_lane
          registry
-         ~lane_id:verifier_exact_lane_id
+         ~lane_id:(Standalone_lane.to_id Verifier)
      with
      | Error error ->
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error)
@@ -1875,7 +1855,7 @@ let verifier_exact_lane_resolution () =
        (match
           Runtime_exact_output_registry.declared_lane
             registry
-            ~lane_id:verifier_exact_lane_id
+            ~lane_id:(Standalone_lane.to_id Verifier)
         with
         | None ->
           (* [resolve_lane] answered [Ok], so the registry admitted this lane
@@ -1883,7 +1863,7 @@ let verifier_exact_lane_resolution () =
           Error
             (Runtime_exact_output_registry.lane_resolution_error_to_string
                (Runtime_exact_output_registry.Exact_lane_unconfigured
-                  { lane_id = verifier_exact_lane_id }))
+                  { lane_id = Standalone_lane.to_id Verifier }))
         | Some declared ->
           Ok
             (verifier_exact_lane_admission
@@ -1973,7 +1953,7 @@ let verifier_exact_slot_admission ~runtime_id =
   | Error Runtime_exact_output_registry.Registry_not_published -> direct ()
   | Error error -> Error (Runtime_exact_output_registry.publication_error_to_string error)
   | Ok registry ->
-    (match Runtime_exact_output_registry.resolve_lane registry ~lane_id:verifier_exact_lane_id with
+    (match Runtime_exact_output_registry.resolve_lane registry ~lane_id:(Standalone_lane.to_id Verifier) with
      | Ok {cli_slots; _} when List.mem runtime_id cli_slots -> verifier_cli_slot_admission ~runtime_id
      | Ok _ | Error _ -> direct ())
 ;;
@@ -3290,7 +3270,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
         let declared_verifier_lane =
           List.find_opt
             (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-               String.equal lane.id verifier_exact_lane_id)
+               String.equal lane.id (Standalone_lane.to_id Verifier))
             config.exact_output_lane_decls
         in
         let declared_lane_ids =
@@ -3335,7 +3315,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
         let next =
           List.fold_left
             (fun content lane ->
-              let lane_id = exact_lane_id lane in
+              let lane_id = Standalone_lane.to_id lane in
               let path = "runtime.exact_output_lanes." ^ lane_id in
               let lane_slots, lane_cli_slots = lane_slot_values lane in
               if lane_slots = [] && lane_cli_slots = []
@@ -3348,7 +3328,11 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
             next
             (* Shared-memory curation is explicitly configured, not enabled by
                provisioning a general-purpose runtime. *)
-            (List.filter (function Workspace_curator -> false | _ -> true) all_exact_lanes)
+            (List.filter
+               (function
+                 | Workspace_curator -> false
+                 | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true)
+               Standalone_lane.all)
         in
         commit_runtime_config_text ~path next)
     in
@@ -3569,12 +3553,12 @@ let remove_runtime_lane ?runtime_config_path ~lane_id () =
    walks a CLI tail, in [cli_slots] after them; the routing API edits them the
    same way conversation lanes edit [candidates]. Every exact lane id is a bare
    key. *)
-let exact_lane_table_path lane = "runtime.exact_output_lanes." ^ exact_lane_id lane
+let exact_lane_table_path lane = "runtime.exact_output_lanes." ^ Standalone_lane.to_id lane
 
 let exact_lane_decl (config : Runtime_schema.config) lane =
   List.find_opt
     (fun (decl : Runtime_schema.exact_output_lane_decl) ->
-       String.equal decl.id (exact_lane_id lane))
+       String.equal decl.id (Standalone_lane.to_id lane))
     config.exact_output_lane_decls
 ;;
 
@@ -3595,7 +3579,7 @@ let exact_lane_editable ~content (config : Runtime_schema.config) lane =
       (Printf.sprintf
          "exact-output lane %s is not written as its own [%s] table, so it cannot be \
           edited here"
-         (exact_lane_id lane)
+         (Standalone_lane.to_id lane)
          path)
 ;;
 
@@ -3659,7 +3643,7 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
          publication then fails for every lane. *)
       match List.find_opt (fun slot -> List.mem slot cli_slots) slots with
       | Some slot ->
-        Error (Printf.sprintf "%s is already a CLI slot of %s" slot (exact_lane_id lane))
+        Error (Printf.sprintf "%s is already a CLI slot of %s" slot (Standalone_lane.to_id lane))
       | None ->
         (match
            List.find_opt
@@ -3678,7 +3662,7 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
                    "%s is an official client and %s does not walk a CLI tail, so it \
                     has no list to go in")
                 slot
-                (exact_lane_id lane))
+                (Standalone_lane.to_id lane))
          | None ->
            Ok
              (Toml_line_editor.edit_table_multiline_array
@@ -3698,7 +3682,7 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
    duplicate too, but only as a lane it cannot publish. *)
 let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
   let slot = String.trim slot in
-  let lane_id = exact_lane_id lane in
+  let lane_id = Standalone_lane.to_id lane in
   if String.equal slot ""
   then Error "slot must not be empty"
   else if contains_newline slot
@@ -3755,7 +3739,7 @@ type exact_slot_move =
    order decides the rest. *)
 let with_declared_exact_slots ~lane ~slot decide =
   let slot = String.trim slot in
-  let lane_id = exact_lane_id lane in
+  let lane_id = Standalone_lane.to_id lane in
   if String.equal slot ""
   then Error "slot must not be empty"
   else if contains_newline slot

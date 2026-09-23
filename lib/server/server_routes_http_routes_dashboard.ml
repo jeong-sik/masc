@@ -567,7 +567,7 @@ let runtime_route_lane_to_string = function
   | Runtime_default -> "default"
   | Runtime_media_failover -> "media_failover"
   | Runtime_named_lane lane_id -> lane_id
-  | Runtime_exact_lane lane -> exact_route_prefix ^ Runtime.exact_lane_id lane
+  | Runtime_exact_lane lane -> exact_route_prefix ^ Standalone_lane.to_id lane
 
 (* Which name space a route string belongs to, before anything is resolved.
    Creating or renaming a lane asks only this: the name must land in the
@@ -591,21 +591,21 @@ let route_name_space = function
    [`Missing] for anything else, so a typo is refused with the name it could
    not find. An exact-output lane name never reaches that resolver: the prefix
    names which name space the rest of the string belongs to, and the name must
-   be one of the exact lanes the server runs ({!Runtime.exact_lane_of_id}), so
+   be one of the exact lanes the server runs ({!Standalone_lane.of_id}), so
    a typo is refused here instead of becoming a table nothing reads. *)
 let parse_runtime_route_lane lane =
   match route_name_space lane with
   | Default_route -> Ok Runtime_default
   | Media_failover_route -> Ok Runtime_media_failover
   | Exact_route name ->
-    (match Runtime.exact_lane_of_id name with
+    (match Standalone_lane.of_id name with
      | Some exact -> Ok (Runtime_exact_lane exact)
      | None ->
        Error
          (Printf.sprintf
             "unknown exact-output lane: %s (expected one of %s)"
             name
-            (String.concat ", " (List.map Runtime.exact_lane_id Runtime.all_exact_lanes))))
+            (String.concat ", " (List.map Standalone_lane.to_id Standalone_lane.all))))
   | Lane_route ->
     (match Runtime.resolve_assignment lane with
      | `Lane _ -> Ok (Runtime_named_lane lane)
@@ -1336,7 +1336,7 @@ module For_testing = struct
   let lane_string = function
     | Runtime_default -> "default"
     | Runtime_media_failover -> "media_failover"
-    | Runtime_exact_lane exact -> exact_route_prefix ^ Runtime.exact_lane_id exact
+    | Runtime_exact_lane exact -> exact_route_prefix ^ Standalone_lane.to_id exact
     | Runtime_named_lane id -> id
 
   let parse_runtime_route_body body =
@@ -1355,12 +1355,12 @@ module For_testing = struct
     | Ok (Runtime_route_lane_renamed (lane_id, new_lane_id)) ->
         Ok (lane_id, "rename", [ new_lane_id ])
     | Ok (Runtime_route_exact_slot_appended (exact, runtime_id)) ->
-        Ok (exact_route_prefix ^ Runtime.exact_lane_id exact, "append", [ runtime_id ])
+        Ok (exact_route_prefix ^ Standalone_lane.to_id exact, "append", [ runtime_id ])
     | Ok (Runtime_route_exact_slot_dropped (exact, runtime_id)) ->
-        Ok (exact_route_prefix ^ Runtime.exact_lane_id exact, "drop", [ runtime_id ])
+        Ok (exact_route_prefix ^ Standalone_lane.to_id exact, "drop", [ runtime_id ])
     | Ok (Runtime_route_exact_slot_moved (exact, runtime_id, move)) ->
         Ok
-          ( exact_route_prefix ^ Runtime.exact_lane_id exact
+          ( exact_route_prefix ^ Standalone_lane.to_id exact
           , "move"
           , [ runtime_id
             ; (match move with

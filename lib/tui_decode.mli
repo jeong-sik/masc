@@ -1533,6 +1533,18 @@ val standalone_lane_status_to_string : standalone_lane_status -> string
     the state needs one. The caller writes no noun of its own. *)
 val standalone_lane_configuration_phrase :
   standalone_lane_configuration -> string
+
+(** The lane detail's last two lines: what a retained run's Output holds, and
+    what the run record keeps. *)
+type standalone_lane_answer = {
+  sla_output_meaning : string;
+  sla_evidence : string;
+}
+
+val standalone_lane_answer : standalone_lane -> standalone_lane_answer
+(** Reads [sl_lane_id] as a {!Standalone_lane.t} once, and every lane has its
+    own pair. An id no lane has gets a pair that names the id, escaped for the
+    terminal. *)
 val decode_standalone_lanes_snapshot :
   Yojson.Safe.t -> (standalone_lanes_snapshot, string) result
 

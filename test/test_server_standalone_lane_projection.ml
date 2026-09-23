@@ -6,6 +6,8 @@ module Verification = Masc.Verification_run_registry
 module Goal_verification = Masc.Goal_verification_run_registry
 module Typesafeai = Masc.Typesafeai_config
 
+let verifier_lane_id = Standalone_lane.to_id Standalone_lane.Verifier
+
 let exact_run ~run_id ~lane ~started_at ~status : Exact.run =
   { run_id
   ; lane
@@ -208,7 +210,7 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
      |> Yojson.Safe.Util.to_string);
   check string "hitl idle" "idle" (status "hitl_auto_judge");
   check string "librarian degraded" "degraded" (status "librarian_exact");
-  check string "verifier idle" "idle" (status Runtime.verifier_exact_lane_id);
+  check string "verifier idle" "idle" (status verifier_lane_id);
   let hitl_slots =
     lane_by_id json "hitl_auto_judge"
     |> Yojson.Safe.Util.member "selected_slots"
@@ -387,12 +389,12 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
   check int
     "an exhausted evaluator counts as a lane failure"
     1
-    (field Runtime.verifier_exact_lane_id "failed_count"
+    (field verifier_lane_id "failed_count"
      |> Yojson.Safe.Util.to_int);
   check int
     "no verdict means no lane success"
     0
-    (field Runtime.verifier_exact_lane_id "succeeded_count"
+    (field verifier_lane_id "succeeded_count"
      |> Yojson.Safe.Util.to_int);
   check bool
     "p50 comes from measured durations only"
@@ -478,7 +480,7 @@ let test_an_operator_routed_claim_is_not_a_lane_run () =
       ~goal_verification_runs:[]
   in
   let field name =
-    lane_by_id json Runtime.verifier_exact_lane_id |> Yojson.Safe.Util.member name
+    lane_by_id json verifier_lane_id |> Yojson.Safe.Util.member name
   in
   check int "not a lane failure" 0 (field "failed_count" |> Yojson.Safe.Util.to_int);
   check int "not a lane success" 0 (field "succeeded_count" |> Yojson.Safe.Util.to_int);
@@ -579,7 +581,7 @@ let task_verification_run ~verification_id ~started_at : Verification.run =
   ; task_id = "task-9"
   ; producer = "keeper-test"
   ; authority_kind = "system_llm"
-  ; authority_actor = Runtime.verifier_exact_lane_id
+  ; authority_actor = verifier_lane_id
   ; started_at
   ; status =
       Verification.Completed
@@ -599,7 +601,7 @@ let goal_verification_run ~run_id ~started_at : Goal_verification.run =
       { revision = "criterion-4"; title = "Four verified services";
         metric = Some "verified services"; target_value = Some "4" }
   ; review_kind = Goal_verification.Proof
-  ; authority_actor = Runtime.verifier_exact_lane_id
+  ; authority_actor = verifier_lane_id
   ; started_at
   ; status =
       Goal_verification.Completed
@@ -634,7 +636,7 @@ let test_verifier_runs_are_filtered_before_pagination () =
       ~run_kind:None
       ~limit:1
       ~before:None
-      ~lane:(Some Runtime.verifier_exact_lane_id)
+      ~lane:(Some verifier_lane_id)
       ~exact_runs:busy_exact_runs
       ~verification_runs:[ task ]
       ~goal_verification_runs:[ goal ]
@@ -659,7 +661,7 @@ let test_verifier_runs_are_filtered_before_pagination () =
       ~run_kind:None
       ~limit:1
       ~before:(Some (100., "vrf-9"))
-      ~lane:(Some Runtime.verifier_exact_lane_id)
+      ~lane:(Some verifier_lane_id)
       ~exact_runs:busy_exact_runs
       ~verification_runs:[ task ]
       ~goal_verification_runs:[ goal ]
@@ -687,7 +689,7 @@ let test_goal_judgement_metric_does_not_depend_on_replacement_request () =
       ~resolve_lane:(fun _ -> Projection.Unconfigured "fixture")
       ~jev_readiness:Typesafeai.Off
       ~exact_runs_total:0 ~exact_runs:[] ~verification_runs:[] ~goal_verification_runs:[ run ] in
-    let lane = lane_by_id snapshot Runtime.verifier_exact_lane_id in
+    let lane = lane_by_id snapshot verifier_lane_id in
     check int "produced judgement succeeds independently of application" 1
       (Yojson.Safe.Util.member "succeeded_count" lane |> Yojson.Safe.Util.to_int);
     check int "application deferral does not become evaluator failure" 0
@@ -825,7 +827,7 @@ let check_no_keeper_skill_evidence ~label = function
 ;;
 
 let test_every_retained_run_kind_projects_skill_evidence () =
-  Exact.all_lanes
+  [ Exact.Librarian; Exact.Hitl_auto_judge; Exact.Board_attention; Exact.Workspace_curator ]
   |> List.iteri (fun index lane ->
     let run_id = Printf.sprintf "exact-skill-%d" index in
     let run = exact_run ~run_id ~lane ~started_at:100. ~status:Exact.Running in
@@ -834,7 +836,7 @@ let test_every_retained_run_kind_projects_skill_evidence () =
       ~exact_runs:[ run ]
       ~verification_runs:[]
       ~goal_verification_runs:[]
-    |> check_no_keeper_skill_evidence ~label:(Exact.lane_key lane));
+    |> check_no_keeper_skill_evidence ~label:(Standalone_lane.to_id lane));
   let task = task_verification_run ~verification_id:"task-skill" ~started_at:90. in
   Projection.For_testing.run_detail_json_with
     ~run_id:"task-skill"
@@ -988,7 +990,7 @@ let test_a_lane_that_could_not_admit_reads_degraded () =
     |> Yojson.Safe.Util.to_string
   in
   check string "an admission error is a degraded lane" "degraded"
-    (status Runtime.verifier_exact_lane_id);
+    (status verifier_lane_id);
   (* And a lane with the same shape and no error keeps the word it had. *)
   let clean_lane lane_id =
     Projection.Configured
@@ -1010,9 +1012,41 @@ let test_a_lane_that_could_not_admit_reads_degraded () =
       ~goal_verification_runs:[]
   in
   check string "a lane with no error is not degraded by this" "no_retained_observation"
-    (lane_by_id clean Runtime.verifier_exact_lane_id
+    (lane_by_id clean verifier_lane_id
     |> Yojson.Safe.Util.member "status"
     |> Yojson.Safe.Util.to_string)
+
+(* One row per lane, and each row's words come from that lane's own arm. The
+   rows used to be a table of lane-name strings kept beside two other tables of
+   the same names. *)
+let test_every_lane_has_one_row_with_its_own_spec () =
+  let json =
+    Projection.For_testing.snapshot_json_with
+      ~now:110.
+      ~resolve_lane:(fun lane_id -> Projection.Unconfigured lane_id)
+      ~jev_readiness:Typesafeai.Off
+      ~exact_runs_total:0
+      ~exact_runs:[]
+      ~verification_runs:[]
+      ~goal_verification_runs:[]
+  in
+  let rows = json |> Yojson.Safe.Util.member "lanes" |> Yojson.Safe.Util.to_list in
+  let text name row = row |> Yojson.Safe.Util.member name |> Yojson.Safe.Util.to_string in
+  let ids lanes = lanes |> List.map Standalone_lane.to_id |> List.sort String.compare in
+  let distinct values = List.length (List.sort_uniq String.compare values) in
+  check (list string) "one row per lane, no lane twice" (ids Standalone_lane.all)
+    (rows |> List.map (text "lane_id") |> List.sort String.compare);
+  check int "every row has its own label" (List.length rows)
+    (distinct (List.map (text "label") rows));
+  check int "every row has its own purpose" (List.length rows)
+    (distinct (List.map (text "purpose") rows));
+  check (list string) "Board Attention and HITL Auto Judge are the required lanes"
+    (ids [ Standalone_lane.Board_attention; Standalone_lane.Hitl_auto_judge ])
+    (rows
+     |> List.filter (fun row ->
+       row |> Yojson.Safe.Util.member "required" |> Yojson.Safe.Util.to_bool)
+     |> List.map (text "lane_id")
+     |> List.sort String.compare)
 
 let () =
   run
@@ -1074,6 +1108,10 @@ let () =
             "a lane that could not admit reads degraded"
             `Quick
             test_a_lane_that_could_not_admit_reads_degraded
+        ; test_case
+            "every lane has one row with its own spec"
+            `Quick
+            test_every_lane_has_one_row_with_its_own_spec
         ] )
     ]
 ;;

@@ -404,7 +404,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
     ~request_id
     ~criterion
     ~review_kind:Goal_verification_run_registry.Proof
-    ~authority_actor:Runtime.verifier_exact_lane_id
+    ~authority_actor:(Standalone_lane.to_id Standalone_lane.Verifier)
     ~started_at;
   let observe_tool ~input result =
     tools :=

@@ -5181,6 +5181,70 @@ let test_a_lane_configuration_clause_carries_its_own_subject () =
     ; Tui_decode.Lane_registry_unavailable
     ]
 
+(* The lane detail's last two lines belong to the lane. They used to be picked
+   by comparing the id with four lanes' spellings, and Workspace curator, with
+   no branch, drew the words meant for a lane the TUI does not know. Read
+   through the decoder, as the Lanes screen reads them. *)
+let test_every_lane_draws_its_own_answer () =
+  let snapshot =
+    `Assoc
+      [ "schema", `String "masc.standalone_llm_lanes.v2"
+      ; "generated_at", `String "2026-08-27T00:00:00Z"
+      ; "observed_at_unix", `Float 20.
+      ; "observation_only", `Bool true
+      ; "exact_run_projection_count", `Int 1
+      ; "exact_run_source_total", `Int 1
+      ; "exact_run_projection_truncated", `Bool false
+      ; ( "lanes"
+        , `List
+            (List.map
+               (fun lane ->
+                 let id = Standalone_lane.to_id lane in
+                 standalone_lane_json id id)
+               Standalone_lane.all) )
+      ]
+  in
+  match Tui_decode.decode_standalone_lanes_snapshot snapshot with
+  | Error detail -> Alcotest.failf "the five-lane snapshot did not decode: %s" detail
+  | Ok decoded ->
+    let lanes = decoded.Tui_decode.sls_lanes in
+    let known = List.map Tui_decode.standalone_lane_answer lanes in
+    let unknown_id id =
+      match lanes with
+      | lane :: _ -> Tui_decode.standalone_lane_answer { lane with sl_lane_id = id }
+      | [] -> Alcotest.fail "the snapshot decoded no lane"
+    in
+    let unknown = unknown_id "retired_lane_exact" in
+    let pair (answer : Tui_decode.standalone_lane_answer) =
+      answer.sla_output_meaning, answer.sla_evidence
+    in
+    Alcotest.(check int) "five lanes, five different answers"
+      (List.length Standalone_lane.all)
+      (List.length (List.sort_uniq compare (List.map pair known)));
+    List.iter2
+      (fun (lane : Tui_decode.standalone_lane) answer ->
+        Alcotest.(check bool)
+          (lane.sl_lane_id ^ " is not drawn as an unknown lane")
+          false
+          (String.equal answer.Tui_decode.sla_output_meaning
+             unknown.sla_output_meaning))
+      lanes known;
+    (* Both lines keep the heads the lane detail is read by. *)
+    List.iter
+      (fun (answer : Tui_decode.standalone_lane_answer) ->
+        Alcotest.(check bool) "the first line says what Output means" true
+          (String.starts_with ~prefix:"Output meaning: " answer.sla_output_meaning);
+        Alcotest.(check bool) "the second line says what the record keeps" true
+          (String.starts_with ~prefix:"Evidence: " answer.sla_evidence))
+      (unknown :: known);
+    Alcotest.(check string) "every unknown id reads the same way"
+      unknown.sla_output_meaning
+      (unknown_id "another_retired_lane").sla_output_meaning;
+    Alcotest.(check bool) "an unknown lane names its id" true
+      (String_util.contains_substring unknown.sla_evidence "retired_lane_exact");
+    Alcotest.(check bool) "and the id is escaped for the terminal" false
+      (String.contains (unknown_id "retired\027[31m").sla_evidence '\027')
+
 (* The start of the newest run. The fixture has carried it since this suite
    was written and the decoder read it into an underscore, so the field
    satisfied the strict contract and reached nothing -- the one number that
@@ -8571,9 +8635,9 @@ let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
             [ `Assoc
                 [ "run_id", `String "vrf-9"
                 ; "run_kind", `String "task_verification"
-                ; "lane", `String Runtime.verifier_exact_lane_id
+                ; "lane", `String (Standalone_lane.to_id Standalone_lane.Verifier)
                 ; "subject_id", `String "task-9"
-                ; "actor", `String Runtime.verifier_exact_lane_id
+                ; "actor", `String (Standalone_lane.to_id Standalone_lane.Verifier)
                 ; "started_at", `Float 100.
                 ; "status", `String "rejected"
                 ; "elapsed_s", `Float 3.
@@ -8581,7 +8645,7 @@ let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
                 ] ] )
       ]
   in
-  match Tui_decode.decode_lane_run_page ~lane:Runtime.verifier_exact_lane_id listing with
+  match Tui_decode.decode_lane_run_page ~lane:(Standalone_lane.to_id Standalone_lane.Verifier) listing with
   | Error detail -> Alcotest.fail detail
   | Ok page ->
     (match page.Tui_decode.lrpg_runs with
@@ -8866,10 +8930,10 @@ let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
         , `Assoc
             [ "run_id", `String "vrf-9"
             ; "run_kind", `String "task_verification"
-            ; "lane", `String Runtime.verifier_exact_lane_id
+            ; "lane", `String (Standalone_lane.to_id Standalone_lane.Verifier)
             ; "subject_id", `String "task-9"
             ; "payload_availability", lane_payload_availability ~running:false ~output:true
-            ; "actor", `String Runtime.verifier_exact_lane_id
+            ; "actor", `String (Standalone_lane.to_id Standalone_lane.Verifier)
             ; "started_at", `Float 100.
             ; "status", `String "approved"
             ; "elapsed_s", `Float 3.
@@ -8958,7 +9022,7 @@ let test_goal_run_decision_uses_evaluated_verdict_independently_of_settlement ()
       let replaced = [ "run_kind"; "lane"; "status"; "output" ] in
       `Assoc [ "run", `Assoc
         ([ "run_kind", `String "goal_verification";
-           "lane", `String Runtime.verifier_exact_lane_id;
+           "lane", `String (Standalone_lane.to_id Standalone_lane.Verifier);
            "status", `String status;
            "output", `Assoc ([ "tools", `List [] ] @ verdict) ]
          @ List.filter (fun (key, _) -> not (List.mem key replaced)) fields) ]
@@ -10839,6 +10903,8 @@ let () =
           test_decode_standalone_lane_configuration_is_a_closed_set;
         Alcotest.test_case "a lane configuration clause carries its subject"
           `Quick test_a_lane_configuration_clause_carries_its_own_subject;
+        Alcotest.test_case "every lane draws its own answer" `Quick
+          test_every_lane_draws_its_own_answer;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
         Alcotest.test_case "memory fact refuses an unknown category" `Quick

@@ -527,10 +527,12 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
-: 모델이 도는 Keeper의 exact-output 작업을 위한 고정 실행 경로. `Runtime.exact_lane`의
-  다섯(`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`)이
-  `all_exact_lanes`로 열거된다. 실행 기록(`Exact_lane_run_registry.lane`)은 이 중
-  `Verifier`를 뺀 넷을 센다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
+: 모델이 도는 Keeper의 exact-output 작업을 위한 고정 실행 경로. 다섯
+  (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`)은
+  닫힌 타입 `Standalone_lane.t` 하나다. `Standalone_lane.all`이 열거하고 `to_id`가
+  이름을 적는다. `Runtime.exact_lane`과 `Exact_lane_run_registry.lane`은 이 타입을
+  그대로 쓴다. 실행 기록은 `Verifier`를 적지 않는다. Verifier 검토는 Task·Goal
+  검증 기록에 남는다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
   Keeper turn이 runtime 후보를 시도하는 순서(`Runtime Candidate Order`)와 다른 층이다.
   경계: 코드와 문서가 lane이라는 말을 네 곳에 더 쓴다. 뜻이 모두 다르다.
   `[runtime.lanes.<이름>]` 표와 `Runtime_lane.t`는 **Runtime Candidate Order**다.
@@ -538,7 +540,7 @@ status: reference
   `Keeper_memory_lane`은 Keeper 하나의 Librarian 작업을 줄 세우는 **Memory queue**다.
   `Keeper_lane.t`는 Keeper 하나가 turn을 도는 fiber다. 넷 다 이름만 같고 이 항목의
   Lane과는 다른 개념이다. Memory queue에서 기다리던 일은 나중에 `Librarian` lane에서 돈다.
-  → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
+  → [Standalone_lane](../../lib/runtime/standalone_lane.mli) · [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
 
 **Runtime Candidate Order (런타임 후보 순서)**
 : Keeper turn이 배정된 runtime이 실패했을 때 시도할 runtime 후보의 순서 있는 목록.
@@ -552,8 +554,7 @@ status: reference
 **Standalone Lane**
 : TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
   admission·run registry를 서술할 뿐 제어 동작을 싣지 않는다. 위의 Lane
-  (고정 실행 경로) 생성자 넷에 `Runtime.verifier_exact_lane_id`("Verifier")를
-  더한 다섯 lane을 그린다 — Lane은 그 작업이 무엇을 실행할 수 있는지의 고정
+  (고정 실행 경로) 다섯을 그린다 — Lane은 그 작업이 무엇을 실행할 수 있는지의 고정
   경로이고, Standalone Lane은 그 lane이 무엇을 실행할 수 있고 무엇을
   실행했는지의 관찰이다. 두 축을 함께 갖는다:
   - `sl_status`(상태): `Standalone_running`·`Standalone_idle`·
@@ -565,10 +566,12 @@ status: reference
   합치지만, 아무도 구성하지 않은 lane과 registry를 읽지 못한 lane은 다른
   문제이고 다른 처방을 갖기에 여기서는 나눈다. `Lane_slotless`는 서버가
   "degraded"라 부르는 것 — 구성됐으나 catalog slot도 CLI slot도 admit되지
-  않은 상태다. lane은 다섯이고 `server_standalone_lane_projection.ml`의
-  `lane_specs`가 전부다 — `Board_attention`(Board lane)·`Hitl_auto_judge`·
-  `Librarian`·`Workspace_curator`·verifier exact lane. 앞의 넷은
-  `Exact_lane_run_registry.lane`의 생성자 전부이고 `all_lanes`로 열거된다.
+  않은 상태다. 행은 `Standalone_lane.t`의 lane마다 하나다.
+  `server_standalone_lane_projection.ml`의 `lane_spec`이 lane마다 이름·목적·필수
+  여부를 적고, 표는 필수 lane 둘(`Board_attention`·`Hitl_auto_judge`)을 먼저
+  그린다. 고른 lane의 상세 맨 아래 두 줄(Output meaning·Evidence)은
+  `Tui_decode.standalone_lane_answer`가 lane마다 따로 적는다. TUI가 모르는 lane
+  이름은 그 이름을 적은 줄로 따로 그린다.
   → [tui_decode.mli](../../lib/tui_decode.mli)
 
 **Keeper Health Reading (Keeper 건강 판독)**

@@ -459,30 +459,22 @@ val dashboard_runtime_defaults_snapshot : unit -> dashboard_runtime_defaults_sna
 (** Capture every value consumed by the dashboard runtime-defaults endpoint from
     one immutable loaded-state snapshot. *)
 
-type exact_lane =
+(** The exact-output lanes, one [\[runtime.exact_output_lanes.<id>\]] table
+    each. They are {!Standalone_lane.t}, whose [all], [to_id] and [of_id] list
+    and spell them; the equation keeps [Runtime.Librarian] and the other
+    constructor paths. [Verifier] is the single selector for completion
+    judgement calls (RFC-0361 D7(a)). *)
+type exact_lane = Standalone_lane.t =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
   | Workspace_curator
   | Verifier
 
-val all_exact_lanes : exact_lane list
-(** Every exact-output lane. *)
-
-val exact_lane_id : exact_lane -> string
-(** The lane table key under [\[runtime.exact_output_lanes\]]. *)
-
-val exact_lane_of_id : string -> exact_lane option
-(** Parse a lane table key into the closed exact-output lane variant. *)
-
 val exact_lane_supports_cli_tail : exact_lane -> bool
 (** Whether this exact lane can walk official-client [cli_slots] when HTTP
     provider slots are absent or exhausted. Verifier uses the managed tool-call
     runner and its typed verdict callback. *)
-
-val verifier_exact_lane_id : string
-(** ["verifier_exact"] — the [\[runtime.exact_output_lanes.verifier_exact\]]
-    lane id (RFC-0361 D7(a)). *)
 
 val verifier_runtime_admission : t -> (unit, string) result
 (** The one answer to "can this runtime judge a completion review?", used by

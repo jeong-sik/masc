@@ -75,10 +75,9 @@ export interface StandaloneLanesSnapshot {
   lanes: StandaloneLaneSnapshotRow[]
 }
 
-// The registry spellings come from Exact_lane_run_registry.lane_key and the
-// verifier from Runtime.verifier_exact_lane_id — the language-boundary copy,
-// pinned to those sources by standalone-lanes-parity.test.ts. `satisfies`
-// keeps this list and the StandaloneLaneId union from drifting apart.
+// The spellings come from Standalone_lane.to_id — the language-boundary copy,
+// pinned to that source by standalone-lanes-parity.test.ts. `satisfies` keeps
+// this list and the StandaloneLaneId union from drifting apart.
 export const LANE_IDS = [
   'board_attention_exact',
   'hitl_auto_judge',

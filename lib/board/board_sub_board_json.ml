@@ -15,12 +15,10 @@ let sub_board_access_to_string = function
   | Owner_only -> "owner_only"
 ;;
 
-let all_sub_board_accesses = [ Open; Members_only; Owner_only ]
-
 let sub_board_access_of_string_opt raw =
   List.find_opt
     (fun access -> String.equal (sub_board_access_to_string access) raw)
-    all_sub_board_accesses
+    all_of_sub_board_access
 ;;
 
 let access_field = "access"
@@ -32,7 +30,7 @@ let invalid_access_field ~got =
           "%s %s is not one of: %s"
           access_field
           got
-          (all_sub_board_accesses
+          (all_of_sub_board_access
            |> List.map sub_board_access_to_string
            |> String.concat ", ")))
 ;;

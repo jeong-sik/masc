@@ -990,12 +990,12 @@ let compose_carried_model_input
      keeps the position. *)
   let front, outlived_seed =
     match continuity, front with
-    | Some _, _ -> None, None
-    | None, Some seed ->
+    | Some (Summarized _ | Absorbed _), _ -> None, None
+    | (None | Some Without_snapshot), Some seed ->
       (match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
        | Ok seed -> Some seed, None
        | Error dropped -> None, Some (seed, dropped))
-    | None, None -> None, None
+    | (None | Some Without_snapshot), None -> None, None
   in
   let demote_before =
     match input_policy, continuity with
@@ -1037,7 +1037,7 @@ let compose_carried_model_input
           planned.Keeper_model_input_demotion.messages
       in
       projection, transmitted_bytes, Keeper_carried_front.Librarian_progress { end_atom }
-    | None, Some (seed : Keeper_carried_front.seed) ->
+    | (None | Some Without_snapshot), Some (seed : Keeper_carried_front.seed) ->
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
       in
@@ -1052,9 +1052,9 @@ let compose_carried_model_input
           planned.Keeper_model_input_demotion.messages
       in
       projection, transmitted_bytes, Keeper_carried_front.Carried seed.source
-    | None, None | Some Without_snapshot, _ ->
-      (* No absorbed point and no seed (RFC keeper-context-window-in-tokens
-         §13.4): the range begins where the last completed turn on this
+    | (None | Some Without_snapshot), None ->
+      (* No absorbed point and no seed valid for this history (RFC
+         keeper-context-window-in-tokens §13.4): the range begins where the last completed turn on this
          history ended, clamped so the newest atom always goes. The atoms
          before it wait for the Librarian's next pass. A history with no
          completed turn starts at 0, which is everything it has. The origin
@@ -1310,10 +1310,14 @@ let bounded_model_input_projection
       offload_model_input_cpu (fun () ->
         Runtime_model_input_tail_window.atom_opening_digest messages)
     in
+    (* A turn with no Librarian point still carries the seed: the ledger's
+       front, or the range the newest turn record joined to a response
+       (RFC keeper-context-window-in-tokens §13.4). Only an absorbed point
+       replaces it. *)
     let front, dropped_ledger =
       match ctx.continuity with
-      | Some _ -> None, None
-      | None -> carried_front
+      | Some (Summarized _ | Absorbed _) -> None, None
+      | None | Some Without_snapshot -> carried_front
         ~ledger:state.ledger
         ~keeper_name:ctx.keeper_name
         ~runtime_id:ctx.runtime_id

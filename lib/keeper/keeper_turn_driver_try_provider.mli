@@ -42,8 +42,11 @@ type continuity
 
 val without_snapshot : continuity
 (** No snapshot to summarize with: none is saved, or the saved one does not
-    fit this history or cannot be used ({!continuity_for_request}). The request starts at the turn's own boundary
-    ({!Keeper_carried_front.Turn_start}); an older eviction front is not used. *)
+    fit this history or cannot be used ({!continuity_for_request}). The request
+    starts at the seed -- the working ledger's front, or the range the newest
+    turn record joined to a response -- when one is valid for this history
+    ({!Keeper_carried_front.for_history}), and otherwise at the turn's own
+    boundary ({!Keeper_carried_front.Turn_start}). *)
 
 type continuity_choice =
   | Chose_no_point

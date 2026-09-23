@@ -487,22 +487,33 @@ let test_a_detail_heading_is_spelled_the_way_a_heading_is () =
     ]
 
 (* The Lanes list and the detail under it draw the same [sl_p50_elapsed_s] on
-   one screen, and they drew it to different precisions: the P50 column "8.0s"
-   and the detail "p50 latency 8.00s". A reader comparing the two is left
-   deciding whether they are the same figure. The column is the constrained
-   one -- [standalone_lane_p50_cells] is six -- so the detail follows it. *)
+   one screen. They drew it to different precisions first -- the column "8.0s"
+   and the detail "p50 latency 8.00s" -- and then to the same one, each with
+   its own Printf, which spelled a seven-minute reading "415.9s" beside a
+   detail block saying "2m11s". Both read the one ladder now, so a change of
+   spelling reaches the pair. *)
 let test_the_two_p50s_on_the_lanes_screen_agree () =
-  Alcotest.(check int) "the column draws one decimal" 1
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
-       ~binding_name:"standalone_lane_row" ~needle:"%.1fs");
-  Alcotest.(check int) "and the detail draws the same" 1
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
-       ~binding_name:"standalone_lane_detail_lines"
-       ~needle:" \xc2\xb7 p50 latency %.1fs");
-  Alcotest.(check int) "the two-decimal spelling is gone" 0
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
-       ~binding_name:"standalone_lane_detail_lines"
-       ~needle:" \xc2\xb7 p50 latency %.2fs")
+  let reads_the_ladder binding_name =
+    Ast_grep.count_calls_in_value_binding ~module_path:render ~binding_name
+      ~callee:"Message_layout.elapsed_text"
+  in
+  Alcotest.(check int) "the column reads the ladder" 1
+    (reads_the_ladder "standalone_lane_row");
+  Alcotest.(check int) "and the detail reads the same one" 1
+    (reads_the_ladder "standalone_lane_detail_lines");
+  (* The spellings each of them used to carry. The repo-wide guard against a
+     Printf of seconds is [test_tui_duration_spelling]. *)
+  List.iter
+    (fun (binding_name, needle) ->
+      Alcotest.(check int)
+        (Printf.sprintf "%s no longer spells %S itself" binding_name needle)
+        0
+        (Ast_grep.count_exact_string_literals_in_value_binding
+           ~module_path:render ~binding_name ~needle))
+    [ "standalone_lane_row", "%.1fs"
+    ; "standalone_lane_detail_lines", " \xc2\xb7 p50 latency %.1fs"
+    ; "standalone_lane_detail_lines", " \xc2\xb7 p50 latency %.2fs"
+    ]
 
 (* The configuration clause is written once, in [Tui_decode]. This line used
    to introduce it with a noun of its own -- "configuration " ^ a word that

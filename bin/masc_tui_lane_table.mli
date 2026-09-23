@@ -23,6 +23,18 @@ type columns = private {
     Private so the widths are the ones {!columns} derived from a frame and a
     set of readings, never a pair of numbers assembled at the call site. *)
 
+val slots_text :
+  admitted:string list ->
+  cli:string list ->
+  dropped:string list ->
+  admission_failed:bool ->
+  string
+(** The SLOTS cell for one lane: the slots it admitted, the cli slots it
+    declares and the ones dropped before execution. A lane that admitted
+    nothing draws a dash when admission failed and "no admitted slot" when it
+    simply has none; why admission failed is a sentence and belongs to the
+    detail pane, which draws it whole. *)
+
 val status_cells : int
 val ok_fail_cancel_cells : int
 val p50_cells : int

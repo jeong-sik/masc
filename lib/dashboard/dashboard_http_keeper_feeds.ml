@@ -52,6 +52,12 @@ type 'a tally =
 let empty_tally zero =
   { reported = zero; reported_samples = 0; unreported_samples = 0; unread_samples = 0 }
 
+let reset_tally tally zero =
+  tally.reported <- zero;
+  tally.reported_samples <- 0;
+  tally.unreported_samples <- 0;
+  tally.unread_samples <- 0
+
 let add_reading tally ~add reading =
   match reading with
   | Reported value ->
@@ -72,12 +78,20 @@ let tally_count_fields prefix tally =
 
 (** Per-keeper cost/latency aggregates for the O4 cost dashboard.
 
-    Reads each keeper's metrics JSONL and returns, over the turn rows in the
-    window, p50/p95 latency and the cost and token sums. Cost and tokens are
-    summed only over samples that reported them; [cost_*_samples] and
-    [tokens_*_samples] say how many samples reported the value, gave [null],
-    or could not be read. A sum is [null] when no sample in the window
-    reported it. *)
+    Reads every day file of each keeper's metrics store that the window
+    touches (UTC days from the window start to now) and aggregates the turn
+    rows at or after the window start: p50/p95 latency and the cost and
+    token sums. Cost and tokens are summed only over samples that reported
+    them; [cost_*_samples] and [tokens_*_samples] say how many samples
+    reported the value, gave [null], or could not be read. A sum is [null]
+    when no sample in the window reported it.
+
+    [metrics_read] says whether the whole window was read (#38364). It was
+    once the last 500 lines, which a busy day outgrows: turns older than
+    those lines vanished from the sums without a trace. [read] carries the
+    rows that were not JSON, any of which may have been a turn, so a sum
+    beside a non-zero count is a floor. [failed] is a store that could not
+    be read; its sums are zeroed and say nothing. *)
 let keeper_cost_aggregates_json
     ~(config : Workspace.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
@@ -90,39 +104,58 @@ let keeper_cost_aggregates_json
     List.map
       (fun (m : Keeper_meta_contract.keeper_meta) ->
         let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
-        let all_metrics_lines = Dated_jsonl.read_recent_lines metrics_store 500 in
         let cost = empty_tally 0.0 in
         let tokens = empty_tally { input = 0; output = 0; total = 0 } in
         let sample_count = ref 0 in
         let latencies_rev = ref [] in
-        List.iter
-          (fun line ->
-            try
-              let j = Yojson.Safe.from_string line in
-              if keeper_cost_metric_row_is_event j
-              then
-                match
-                  Json_util.assoc_member_opt "ts_unix" j,
-                  Json_util.assoc_member_opt "latency_ms" j
-                with
-                | Some (`Float ts_unix), Some (`Int latency_ms)
-                  when Float.is_finite ts_unix
-                       && latency_ms >= 0
-                       && ts_unix >= start_ts ->
-                    incr sample_count;
-                    latencies_rev := float_of_int latency_ms :: !latencies_rev;
-                    add_reading cost ~add:( +. ) (cost_reading_of_row j);
-                    add_reading tokens
-                      ~add:(fun sum counts ->
-                        { input = sum.input + counts.input
-                        ; output = sum.output + counts.output
-                        ; total = sum.total + counts.total
-                        })
-                      (token_reading_of_row j)
-                | _ -> ()
+        let malformed_rows = ref 0 in
+        let add_row j =
+          if keeper_cost_metric_row_is_event j
+          then
+            match
+              Json_util.assoc_member_opt "ts_unix" j,
+              Json_util.assoc_member_opt "latency_ms" j
             with
-            | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
-          all_metrics_lines;
+            | Some (`Float ts_unix), Some (`Int latency_ms)
+              when Float.is_finite ts_unix
+                   && latency_ms >= 0
+                   && ts_unix >= start_ts ->
+                incr sample_count;
+                latencies_rev := float_of_int latency_ms :: !latencies_rev;
+                add_reading cost ~add:( +. ) (cost_reading_of_row j);
+                add_reading tokens
+                  ~add:(fun sum counts ->
+                    { input = sum.input + counts.input
+                    ; output = sum.output + counts.output
+                    ; total = sum.total + counts.total
+                    })
+                  (token_reading_of_row j)
+            | _ -> ()
+        in
+        let read =
+          Dated_jsonl.iter_range_entries_result metrics_store
+            ~since:(Log.format_utc_date_of start_ts)
+            ~until:(Log.format_utc_date_of now_ts)
+            (function
+              | Dated_jsonl.Parsed j -> add_row j
+              | Dated_jsonl.Malformed_json _ -> incr malformed_rows)
+        in
+        let metrics_read =
+          match read with
+          | Ok () ->
+              `Assoc [ "state", `String "read"; "malformed_rows", `Int !malformed_rows ]
+          | Error error ->
+              (* The rows seen before the failure are a fragment of the
+                 window; drawing them would pass a part for the whole. *)
+              reset_tally cost 0.0;
+              reset_tally tokens { input = 0; output = 0; total = 0 };
+              sample_count := 0;
+              latencies_rev := [];
+              `Assoc
+                [ "state", `String "failed"
+                ; "reason", `String (Dated_jsonl.read_error_to_string error)
+                ]
+        in
         let latency_arr =
           let arr = Array.of_list !latencies_rev in
           Array.sort Float.compare arr;
@@ -151,6 +184,7 @@ let keeper_cost_aggregates_json
            @ [ "p50_latency_ms", Json_util.float_opt_to_json p50_latency
              ; "p95_latency_ms", Json_util.float_opt_to_json p95_latency
              ; "sample_count", `Int !sample_count
+             ; "metrics_read", metrics_read
              ]))
       keepers
   in

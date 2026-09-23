@@ -15218,6 +15218,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             (Printf.sprintf "journal for %s unavailable: %s"
                (Keeper_chat.compact_request_id operation_id)
                (Keeper_chat.terminal_safe_text detail))
+      | Error (Keeper_chat_log.Events_denied detail) ->
+          (* The server refused this operation's journal and said why; asking
+             again this session gets the same answer. *)
+          remember_journal_unavailable state operation_id;
+          add_event state "error"
+            (Printf.sprintf "journal for %s refused: %s"
+               (Keeper_chat.compact_request_id operation_id)
+               (Keeper_chat.terminal_safe_text detail))
       | Error (Keeper_chat_log.Events_undecodable detail) ->
           (* A body this build cannot read will not read differently next
              time; the v1 rows stay and this operation is not asked again. *)

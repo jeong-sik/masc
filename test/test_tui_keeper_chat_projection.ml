@@ -996,6 +996,19 @@ let test_reconciliation_failure_detail () =
       check bool (label ^ " does not paste the server body") false
         (has "auth_error_code" detail))
     [ ("absent", absent); ("rejected", rejected) ];
+  (* A 403 with no auth code is the handler refusing the request, so the
+     detail is the server's answer, not the credential remedy. *)
+  let handler_refusal : Chat.error =
+    Chat.Http_error
+      { status = 403; body = {|{"error":"only your own queued message can be prioritized"}|} }
+  in
+  let handler_detail =
+    Chat.reconciliation_failure_detail ~credential_sent:true handler_refusal
+  in
+  check bool "a handler refusal keeps the server's words" true
+    (has "only your own queued message" handler_detail);
+  check bool "a handler refusal does not send the operator to masc login" false
+    (has "masc login" handler_detail);
   let upstream : Chat.error =
     Chat.Http_error { status = 503; body = "owner_stopping" }
   in

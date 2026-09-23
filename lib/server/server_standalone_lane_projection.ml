@@ -719,6 +719,11 @@ let lane_json
     match configuration with
     | Registry_unavailable _ | Unconfigured _ -> "unavailable"
     | Configured { admitted_slots = []; cli_slots = []; _ } -> "degraded"
+    (* A lane that could not admit is not healthy while it runs. The workspace
+       curator with only cli tails admits slots and refuses them anyway, and
+       this word is where a reader learns that: the table beside it draws slot
+       names, not the sentence saying why. *)
+    | Configured { admission_error = Some _; _ } -> "degraded"
     | Configured _ when running_count > 0 -> "running"
     | Configured _ when runs = [] -> "no_retained_observation"
     | Configured _ ->

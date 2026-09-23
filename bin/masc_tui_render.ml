@@ -5185,35 +5185,13 @@ let standalone_lane_status_style = function
   | Tui_decode.Standalone_unavailable -> (Theme.bad ())
   | Tui_decode.Standalone_no_retained_observation -> (Theme.muted ())
 
-(* Why the lane cannot admit, where the cell used to restate that it cannot.
-   "no admitted slot" says the same thing the status word beside it already
-   says; the projection carries the reason -- an unconfigured lane and a lane
-   whose registry could not be read are different problems and the operator
-   acts on them differently -- and nothing drew it. *)
+(* The cell itself is [Lane_table.slots_text], beside the widths it sets.
+   CLI-only lanes are legal (RFC cli-runtimes-as-lane-slots): with a cli
+   suffix declared, an empty catalog list is a shape, not a failure. *)
 let standalone_lane_slots_text (lane : Tui_decode.standalone_lane) =
-  let base =
-    match lane.sl_admitted_slots, lane.sl_admission_error with
-    | [], Some reason -> reason
-    | [], None ->
-      (* CLI-only lanes are legal (RFC cli-runtimes-as-lane-slots): with a
-         cli suffix declared, an empty catalog list is a shape, not a
-         failure. *)
-      if lane.sl_cli_slots = [] then "no admitted slot" else "cli-only"
-    | admitted, None -> String.concat "," admitted
-    | admitted, Some reason ->
-      String.concat "," admitted ^ " \xc2\xb7 " ^ reason
-  in
-  let base =
-    match lane.sl_cli_slots with
-    | [] -> base
-    | cli -> base ^ " +cli:" ^ String.concat "," cli
-  in
-  (* A declared slot publication could not admit is the difference between
-     "configured single" and "configured double, one silently dropped" —
-     the boot WARN was the only place that said so before this. *)
-  match lane.sl_dropped_slots with
-  | [] -> base
-  | dropped -> base ^ " (dropped " ^ String.concat "," dropped ^ ")"
+  Lane_table.slots_text ~admitted:lane.sl_admitted_slots
+    ~cli:lane.sl_cli_slots ~dropped:lane.sl_dropped_slots
+    ~admission_failed:(Option.is_some lane.sl_admission_error)
 
 (* What one lane contributes to the table's measurement. Fit for a terminal
    line here, once, so the width a column is measured at is the width the row

@@ -74,6 +74,7 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
         ~official_range_id:{receipt_scope = keepers_dir; after_boundary_line = 0;
           turns = [1, Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1]}
         ~absorbed:[] ~new_claims:[] () |> require
+      |> fun (d : Current.disposition) -> d.snapshot
     else seeded in
   let memory_path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id in
   let memory_before = Fs_compat.load_file memory_path in

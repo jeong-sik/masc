@@ -1953,6 +1953,76 @@ let test_absorbed_chain_prefers_current_and_stops_before_a_loop () =
        found)
 ;;
 
+(* A claim the librarian absorbed into can later be replaced: the keeper
+   writes a new claim with [supersedes], and the old one is dropped with a
+   [Revised] event naming the new one. The absorbed row still names the
+   dropped claim, so the search follows the [Revised] event from there and
+   lands on the claim that is current now (#38543). *)
+let test_absorbed_chain_follows_a_revised_claim () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "absorbed-chain-revised" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let replacement = fact "foxtrot holds the release notes now" in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ replacement ];
+  let absorbed = fact "golf deploys on monday" in
+  let replaced = fact "foxtrot holds the release notes" in
+  (match
+     Masc.Keeper_memory_absorbed.append_all
+       ~keepers_dir
+       ~keeper_id:meta.name
+       [ { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
+         ; trace_id = "absorbing-pass"
+         ; memory_id = id absorbed
+         ; into = id replaced
+         ; fact = absorbed
+         }
+       ]
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
+  (match
+     Masc.Keeper_memory_os_events.append
+       ~keepers_dir
+       ~keeper_id:meta.name
+       { Masc.Keeper_memory_os_events.recorded_at = Time_compat.now ()
+       ; memory_id = id replaced
+       ; trace_id = "revising-turn"
+       ; kind = Revised { superseded_by = id replacement }
+       }
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_memory_os_events.append_error_to_string error));
+  let found =
+    match
+      Runtime.keeper_memory_search_json
+        ~config
+        ~meta
+        ~ctx_work:(empty_ctx ())
+        ~args:
+          (`Assoc
+              [ "query", `String "deploys"; "source", `String "absorbed"; "limit", `Int 10 ])
+      |> Yojson.Safe.from_string
+      |> json_field "matches"
+    with
+    | `List items -> items
+    | _ -> Alcotest.fail "matches is a list"
+  in
+  Alcotest.(check (list (triple string string bool)))
+    "the absorbed claim leads past the replaced claim to its replacement"
+    [ "golf deploys on monday", id replacement, true ]
+    (List.map
+       (fun matched ->
+          ( string_field "text" matched
+          , string_field "into" matched
+          , json_field "into_current" matched = `Bool true ))
+       found)
+;;
+
 (* A keeper asks in several words, and a claim rarely holds them as one run of
    text. A claim answers when it holds the whole query or every word of it, in
    any order. The whole-query answers come first, so a search the substring
@@ -2762,6 +2832,10 @@ let () =
             "absorbed chain prefers current and stops before a loop"
             `Quick
             test_absorbed_chain_prefers_current_and_stops_before_a_loop
+        ; Alcotest.test_case
+            "absorbed chain follows a revised claim"
+            `Quick
+            test_absorbed_chain_follows_a_revised_claim
         ; Alcotest.test_case
             "a query of several words is answered"
             `Quick

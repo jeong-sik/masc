@@ -75,17 +75,20 @@ type durable_search_error =
   | Snapshot_read_failed of string
   | Source_revalidate_failed of string
   | Absorbed_read_failed of string
+  | Events_read_failed of string
 
 let durable_search_error_kind_to_string = function
   | Snapshot_read_failed _ -> "snapshot_read_failed"
   | Source_revalidate_failed _ -> "source_revalidate_failed"
   | Absorbed_read_failed _ -> "absorbed_read_failed"
+  | Events_read_failed _ -> "events_read_failed"
 ;;
 
 let durable_search_error_detail = function
   | Snapshot_read_failed detail
   | Source_revalidate_failed detail
-  | Absorbed_read_failed detail -> detail
+  | Absorbed_read_failed detail
+  | Events_read_failed detail -> detail
 ;;
 
 let read_current_facts ~keepers_dir ~keeper_id =
@@ -207,6 +210,9 @@ type absorbed_search =
   { matches : absorbed_match list
   ; candidates : int
   ; unreadable : (int * Keeper_memory_absorbed.read_error) list
+  ; unreadable_events : (int * Keeper_memory_os_events.read_error) list
+        (** Lines of the memory events sidecar that did not decode. A
+            [Revised] step on such a line is not followed. *)
   }
 
 let current_memory_ids facts =
@@ -234,8 +240,13 @@ let current_memory_ids facts =
    several places, a current one is taken, since only a committed pass makes
    its claim current; with none current, the latest row is taken. A chain
    that would come back to a claim it already passed stops at the claim
-   before it. Only a claim that never became current, or whose own
-   absorption has no row, ends as [into_current = false].
+   before it. A claim that left the snapshot because a newer claim
+   continues it -- a [Revised] event (RFC-0418), written by the Librarian or
+   by [keeper_memory_write ~supersedes] -- is followed to that newer claim
+   the same way, so an absorbed fact whose claim was later revised still
+   reaches the claim current now. Only a claim that never became current, or
+   whose own departure has no row and no [Revised] event, ends as
+   [into_current = false].
 
    [answered_by] names the current claims that answer this search themselves.
    A row whose claim is one of them says the same thing again and is left
@@ -253,6 +264,32 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~que
   with
   | Error detail -> Error (Absorbed_read_failed detail)
   | Ok lines ->
+    match
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        Keeper_memory_os_events.read ~keepers_dir ~keeper_id)
+    with
+    | Error error ->
+      Error (Events_read_failed (Keeper_memory_os_events.file_read_error_to_string error))
+    | Ok event_lines ->
+    let revised_to, unreadable_events =
+      List.fold_left
+        (fun (revised_to, unreadable) (line, decoded) ->
+           match decoded with
+           | Ok
+               { Keeper_memory_os_events.memory_id
+               ; kind = Keeper_memory_os_events.Revised { superseded_by }
+               ; _
+               } -> StringMap.add memory_id superseded_by revised_to, unreadable
+           | Ok
+               { Keeper_memory_os_events.kind =
+                   Keeper_memory_os_events.(Retrieved _ | Retracted)
+               ; _
+               } -> revised_to, unreadable
+           | Error error -> revised_to, (line, error) :: unreadable)
+        (StringMap.empty, [])
+        event_lines
+    in
+    let unreadable_events = List.rev unreadable_events in
     let rows, unreadable =
       List.partition_map
         (fun (line, decoded) ->
@@ -286,7 +323,12 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~que
       then id
       else (
         let passed = StringSet.add id passed in
-        match StringMap.find_opt id into_of with
+        let next =
+          match StringMap.find_opt id into_of with
+          | Some _ as absorbed_into -> absorbed_into
+          | None -> StringMap.find_opt id revised_to
+        in
+        match next with
         | None -> id
         | Some next when StringSet.mem next passed -> id
         | Some next -> chain_end ~passed next)
@@ -322,6 +364,7 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~que
           |> take limit
       ; candidates = List.length statements
       ; unreadable
+      ; unreadable_events
       }
 ;;
 
@@ -586,6 +629,25 @@ let keeper_memory_search_with_outcome
                ; "last", `Int last
                ] )
          ])
+      @ (match absorbed.unreadable_events with
+         | [] -> []
+         | (first, first_error) :: _ ->
+           let last =
+             List.fold_left (fun _ (line, _) -> line) first absorbed.unreadable_events
+           in
+           Log.Keeper.warn
+             ~keeper_name:meta.name
+             "keeper_memory_search could not follow %d memory event line(s) it could not read; first: line %d: %s"
+             (List.length absorbed.unreadable_events)
+             first
+             (Keeper_memory_os_events.read_error_to_string first_error);
+           [ ( "event_unreadable_lines"
+             , `Assoc
+                 [ "count", `Int (List.length absorbed.unreadable_events)
+                 ; "first", `Int first
+                 ; "last", `Int last
+                 ] )
+           ])
       @
       match unavailable with
       | None -> []
@@ -666,7 +728,9 @@ let keeper_memory_search_with_outcome
                  ~limit
              with
              | Ok absorbed -> absorbed, None
-             | Error error -> { matches = []; candidates = 0; unreadable = [] }, Some error
+             | Error error ->
+               ( { matches = []; candidates = 0; unreadable = []; unreadable_events = [] }
+               , Some error )
            in
            let history = search_history ~config ~meta ~ctx_work ~query ~limit in
            let candidates =
@@ -686,7 +750,9 @@ let keeper_memory_search_with_outcome
                  ~extra_matches:[]
                  ~read_errors:
                    (history_has_read_errors history
-                    || absorbed.unreadable <> [] || unavailable <> None)
+                    || absorbed.unreadable <> []
+                    || absorbed.unreadable_events <> []
+                    || unavailable <> None)
                  ~read_error_fields:
                    (absorbed_fields ~absorbed ~unavailable
                     @ history_read_error_fields history)
@@ -735,7 +801,7 @@ let keeper_memory_search_with_outcome
                     ~fact_total:absorbed.candidates
                     ~total_matches:(List.length absorbed.matches)
                     ~extra_matches:[]
-                    ~read_errors:(absorbed.unreadable <> [])
+                    ~read_errors:(absorbed.unreadable <> [] || absorbed.unreadable_events <> [])
                     ~read_error_fields:(absorbed_fields ~absorbed ~unavailable:None)
                 , List.length absorbed.matches
                 , [] )))

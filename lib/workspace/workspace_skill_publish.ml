@@ -37,6 +37,11 @@ type outcome =
       { reference : Skill_reference.t
       ; snapshot_revision : string
       }
+  | Created_but_shadowed of
+      { reference : Skill_reference.t
+      ; snapshot_revision : string
+      ; winner : Skill_reference.identity
+      }
   | Created_but_unpublished of
       { reference : Skill_reference.t
       ; reason : string

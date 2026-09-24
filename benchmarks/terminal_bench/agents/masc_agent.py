@@ -319,6 +319,11 @@ class MascAgent(BaseInstalledAgent):
             "duration_ms": data.get("duration_ms"),
             "tool_calls": data.get("tool_calls"),
             "duplicate_tool_calls": data.get("duplicate_tool_calls"),
+            # Calls that failed, and per tool: calls, failures, result bytes and
+            # the most common failure (driver/tool_outcomes.sh). null means
+            # unmeasured, not "no calls".
+            "failed_tool_calls": data.get("failed_tool_calls"),
+            "tool_outcomes": data.get("tool_outcomes"),
             # The image variables its keepers ran without (driver/endpoint_env.sh).
             "endpoint_env_left_out": data.get("endpoint_env_left_out"),
             # Which candidate answered each turn, and which one a failed turn

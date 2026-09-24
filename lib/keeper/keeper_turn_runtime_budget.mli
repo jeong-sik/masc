@@ -59,6 +59,22 @@ val current_keeper_meta :
 (** Read the latest meta from the registry, falling back to the given
     [fallback_meta] when the registry entry is missing. *)
 
+(** The candidates a turn's walk may dispatch, as the walk itself reads them.
+    - [Lane_of_route route]: a fresh walk over every candidate of the lane
+      [route] names, or the runtime itself when it names one.
+    - [Deferred_candidates ids]: a deferred lane suffix, dispatched exactly as
+      listed. *)
+type briefing_candidates =
+  | Lane_of_route of string
+  | Deferred_candidates of string list
+
+val world_state_briefing_budget_bytes : briefing_candidates -> int option
+(** Byte budget for the pinned world-state briefing:
+    [keeper.context.briefing.share_percent] of the smallest [max-prompt-bytes]
+    those candidates declare, so the briefing fits whichever of them serves
+    the turn. A candidate that declares none adds no ceiling. [None] when no
+    candidate declares a ceiling, or the route names nothing. *)
+
 val resolved_max_context_for_turn
   :  meta:keeper_meta
   -> Keeper_context_runtime.max_context_resolution

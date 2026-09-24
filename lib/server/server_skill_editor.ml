@@ -59,6 +59,11 @@ type create_outcome =
       { preview : preview
       ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
       }
+  | Created_but_shadowed of
+      { preview : preview
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      ; winner : Skill_catalog_snapshot.identity
+      }
   | Created_but_unpublished of
       { preview : preview
       ; reason : string
@@ -514,6 +519,21 @@ let published_snapshot = function
   | Workspace_retired -> Error "workspace retired during Skill publication"
 ;;
 
+(* The entry that holds [identity]'s name ahead of it in catalog order, when
+   there is one: usually an earlier source's, or in the same source a
+   directory that sorts first and normalizes to the same name.
+   [resolve_reference] finds shadowed entries too, so a reference that
+   resolves is not yet one that turns listing Skills by name see
+   (RFC keeper-self-authored-skills). *)
+let shadow_winner snapshot identity =
+  List.find_map
+    (fun (shadow : Skill_catalog_snapshot.shadow) ->
+       if Skill_reference.equal_identity shadow.shadowed identity
+       then Some shadow.winner
+       else None)
+    (Skill_catalog_snapshot.shadows snapshot)
+;;
+
 let save ~base_path ~reference ~source_text ~refresh =
   let* initial_target = resolve_target ~base_path reference in
   if initial_target.access = Read_only
@@ -765,13 +785,14 @@ let create ~base_path ~source_id ~package_id ~source_text ~refresh =
                    published
                    preview.profile.reference
                with
-               | Ok _ ->
-                 Ok
-                   (Created_and_published
-                      { preview
-                      ; snapshot_revision =
-                          Skill_catalog_snapshot.snapshot_revision published
-                      })
+               | Ok entry ->
+                 let snapshot_revision =
+                   Skill_catalog_snapshot.snapshot_revision published
+                 in
+                 (match shadow_winner published entry.identity with
+                  | None -> Ok (Created_and_published { preview; snapshot_revision })
+                  | Some winner ->
+                    Ok (Created_but_shadowed { preview; snapshot_revision; winner }))
                | Error _ ->
                  Ok
                    (Created_but_unpublished
@@ -1318,6 +1339,14 @@ let create_outcome_to_yojson = function
       ; "preview", preview_to_yojson preview
       ; ( "snapshot_revision"
         , `String (Skill_catalog_snapshot.snapshot_revision_to_string snapshot_revision) )
+      ]
+  | Created_but_shadowed { preview; snapshot_revision; winner } ->
+    `Assoc
+      [ "status", `String "created_but_shadowed"
+      ; "preview", preview_to_yojson preview
+      ; ( "snapshot_revision"
+        , `String (Skill_catalog_snapshot.snapshot_revision_to_string snapshot_revision) )
+      ; "winner", Skill_catalog_snapshot.identity_to_yojson winner
       ]
   | Created_but_unpublished { preview; reason } ->
     `Assoc

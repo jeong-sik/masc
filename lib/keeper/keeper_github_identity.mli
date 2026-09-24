@@ -43,11 +43,17 @@ type observation =
 type login_scope =
   | Workflow
   | Write_packages
+  | Read_packages
+  | Project
+  | Write_repo_hook
 (** A scope a login may ask for beyond gh's own minimum ([repo], [read:org],
     [gist]). [Workflow] lets the token push changes under [.github/workflows];
     a workflow runs with the repository's secrets. [Write_packages] lets it
     publish to GitHub Packages, ghcr.io images among them, and includes
-    [read:packages]. No login asks for either unless the operator chose it. *)
+    [read:packages]; [Read_packages] is its download-only half. [Project] lets
+    it read and change Projects (v2) the account can reach. [Write_repo_hook]
+    lets it add and change repository webhooks, which post repository events
+    to any URL. No login asks for any of them unless the operator chose it. *)
 
 val login_scope_to_string : login_scope -> string
 (** The name [gh auth login --scopes] and the login request body use. *)

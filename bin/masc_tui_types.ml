@@ -5219,7 +5219,7 @@ type state = {
      rows when they were read and [] otherwise; this says which of the two
      an empty [tasks] is. [tasks_error] stays what the Tasks section prints,
      including notes (backup recovery, goal links) on rows that were read. *)
-  mutable task_rows: Masc_tui_overview_tasks.rows_reading;
+  mutable task_reading: Masc_tui_overview_tasks.rows_reading;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
@@ -7628,7 +7628,7 @@ let create_state
   task_flow = None;
   operator_stalled = None;
   task_focus = Masc_tui_overview_tasks.No_task_focus;
-  task_rows = Masc_tui_overview_tasks.Rows_unread;
+  task_reading = Masc_tui_overview_tasks.Rows_unread;
   help_open = false;
   keeper_deletions_open = false;
   keeper_deletions_loading = false;

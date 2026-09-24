@@ -335,7 +335,7 @@ let load_from_masc_dir (state : state) (base_path : string) =
     load_active_tasks base_path
   in
   state.tasks_domain <- tasks_domain;
-  state.task_rows <- rows;
+  state.task_reading <- rows;
   state.tasks <-
     (match rows with
      | Masc_tui_overview_tasks.Rows_read tasks -> tasks
@@ -489,7 +489,7 @@ let clear_local_workspace (state : state) =
   state.tasks <- [];
   state.tasks_domain <- [];
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
-  state.task_rows <- Masc_tui_overview_tasks.Rows_unread;
+  state.task_reading <- Masc_tui_overview_tasks.Rows_unread;
   state.task_flow <- None;
   state.operator_stalled <- None;
   state.tasks_error <- None;

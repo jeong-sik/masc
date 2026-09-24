@@ -208,6 +208,24 @@ let test_whole_request_failure_is_one_reading () =
     ; Masc_tui_context_inspector.Input_map
     ]
 
+let test_missing_exact_input_names_the_cause_once () =
+  let reading =
+    Masc_tui_context_inspector.Turn_read
+      { selection = selection (record ~wire:None ~scope:per_request ())
+      ; provider_input = Error "no turn on this page recorded an exact input composition"
+      ; response = Error "no row on this page to name"
+      ; forecast = Ok forecast_success
+      }
+  in
+  let rows =
+    context_pane_lines ~tab:Masc_tui_context_inspector.Exact_input reading
+  in
+  Alcotest.(check int) "one explanation row" 1 (List.length rows);
+  Alcotest.(check bool) "the screen names the cause" true
+    (says "Exact input unavailable: no turn on this page recorded an exact input composition" rows);
+  Alcotest.(check bool) "no second unavailable label" false
+    (says "provider-input unavailable" rows)
+
 (* 8,192 schema bytes at 18,000 tokens over 560,513 wire bytes is 263 tokens. *)
 let test_rows_read_at_this_turns_ratio () =
   let rows = lines (record ~wire:(Some 560_513) ~scope:per_request ()) in
@@ -482,6 +500,8 @@ let () =
             `Quick test_turn_read_error_keeps_forecast
         ; Alcotest.test_case "whole inspector failure is one reading"
             `Quick test_whole_request_failure_is_one_reading
+        ; Alcotest.test_case "missing exact input names cause once"
+            `Quick test_missing_exact_input_names_the_cause_once
         ] )
     ; ( "serialized request"
       , [ Alcotest.test_case "the band leads with the provider's count" `Quick

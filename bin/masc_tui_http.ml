@@ -1333,7 +1333,7 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
   let read_provider_input selection =
     match viewing_record selection with
     | None ->
-        Error "provider-input unavailable: no turn on this page recorded an exact input composition"
+        Error "no turn on this page recorded an exact input composition"
     | Some record ->
         let turn_ref = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
         fetch ~label:"provider-input"
@@ -1352,12 +1352,12 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
      say so; they never borrow another turn's answer. *)
   let read_response selection =
     match viewing_record selection with
-    | None -> Error "response unavailable: no row on this page to name"
+    | None -> Error "no row on this page to name"
     | Some record ->
         let key = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
         (match fetch_keeper_chat_history_page ~host ~port ~keeper_name
                  ~before:(Unix.gettimeofday ()) with
-            | Error detail -> Error ("response unavailable: " ^ detail)
+            | Error detail -> Error detail
             | Ok page ->
                 let parts =
                   List.filter_map

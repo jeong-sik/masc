@@ -353,7 +353,7 @@ let repeated_tool_call_input ~threshold tool_calls =
    scope contributes only its latched observation failure; it is not what
    makes the boundary exist (#34083). *)
 let official_client_tool_boundary
-      ~repetition_execution ?autonomous_yield_requested ~tool_calls =
+      ~repetition_execution ?autonomous_yield_requested ~tool_calls () =
   match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
@@ -1533,6 +1533,7 @@ let run_turn
              official_client_tool_boundary ~repetition_execution
                ?autonomous_yield_requested
                ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
+               ()
            with
            | Ok (Some (Keeper_official_client_host.Repeated_tool_call _)) as stop ->
              record_repetition_judged ();

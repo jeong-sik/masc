@@ -952,6 +952,7 @@ let test_repeated_exact_tool_call_seeded_from_checkpoint_history () =
     Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
       ~repetition_execution:None
       ~tool_calls:calls
+      ()
   in
   (match official (live_call () :: run_2_starts_from) with
    | Ok (Some (Masc.Keeper_official_client_host.Repeated_tool_call

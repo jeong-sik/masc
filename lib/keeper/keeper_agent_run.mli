@@ -91,6 +91,7 @@ module For_testing : sig
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
     ?autonomous_yield_requested:(unit -> (autonomous_yield_request option, string) result) ->
     tool_calls:Keeper_agent_result.tool_call_detail list ->
+    unit ->
     (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result
   val registry_progress_on_event
     :  record_turn_progress:(string -> unit)

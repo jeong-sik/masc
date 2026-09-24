@@ -294,8 +294,9 @@ let defer ~goal_id deferral =
 
 (* A deferral writes no ledger row, so no scan follows it and the Goal waits
    in Verifying until a Keeper asks again. The Board notice is how a Keeper
-   learns that. The verifier arms no retry, so the disposition is always
-   [No_retry_armed]; the notice posts once per (Goal, request, gate). The
+   learns that. The verifier arms no retry, and [Goal_review] carries no
+   disposition, so the post always reads [No_retry_armed]; the notice posts
+   once per (Goal, request, gate). The
    notice is a projection: an ordinary exception out of the Board is logged
    and changes neither the outcome nor the pending row. Cancellation is not
    contained. *)
@@ -306,7 +307,6 @@ let announce_deferral ~goal_id ~request_id deferral =
       ~subject:(Verification_protocol.Goal_review { goal_id; request_id })
       ~gate:(deferral_gate deferral)
       ~detail:(deferral_detail deferral)
-      ~disposition:Verification_protocol.No_retry_armed
   with
   | () -> ()
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn

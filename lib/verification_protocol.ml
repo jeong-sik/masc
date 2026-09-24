@@ -485,14 +485,25 @@ let retry_delay_sentence = function
   | Shared_timer -> "retry scheduled when the shared retry timer fires"
 
 type stalled_subject =
-  | Task_review of { task_id : string; verification_id : string }
+  | Task_review of
+      { task_id : string
+      ; verification_id : string
+      ; disposition : stall_disposition
+      }
   | Goal_review of { goal_id : string; request_id : string }
+
+(* The disposition the post reports. Only a Task review can have a retry
+   armed; the Goal verifier arms none, so a Goal review carries no
+   disposition and is always [No_retry_armed]. *)
+let subject_disposition = function
+  | Task_review { disposition; _ } -> disposition
+  | Goal_review _ -> No_retry_armed
 
 (* The subject's identity as metadata fields. The same list is what a post
    writes and what the repeat check compares, so a post and its lookup
    cannot name the subject two ways. *)
 let subject_identity_fields = function
-  | Task_review { task_id; verification_id } ->
+  | Task_review { task_id; verification_id; disposition = _ } ->
     [ ("task_id", task_id); ("verification_id", verification_id) ]
   | Goal_review { goal_id; request_id } ->
     [ ("goal_id", goal_id); ("request_id", request_id) ]
@@ -508,13 +519,13 @@ let subject_owner_id = function
 
 (* The sentence is rendered from the disposition the scheduling owner
    reported after it acted, so the post cannot say one thing while the lane
-   armed another. A Goal review names the forward path a Goal has: a Keeper
-   asking again with request_complete. Without new evidence that call keeps
-   the same request, so a review that stops again for the same reason is
-   not posted twice. *)
-let stalled_board_content ~subject ~gate ~detail ~disposition =
-  match subject, disposition with
-  | Task_review { task_id; verification_id }, Retry_scheduled { delay } ->
+   armed another. A Goal review has no retry to report and names the
+   forward path a Goal has: a Keeper asking again with request_complete.
+   Without new evidence that call keeps the same request, so a review that
+   stops again for the same reason is not posted twice. *)
+let stalled_board_content ~subject ~gate ~detail =
+  match subject with
+  | Task_review { task_id; verification_id; disposition = Retry_scheduled { delay } } ->
     Printf.sprintf
       "Stalled task %s (vrf:%s) — %s. gate=%s: %s. The authority reviews \
        this verification again on its own; resubmitting now would supersede \
@@ -524,7 +535,7 @@ let stalled_board_content ~subject ~gate ~detail ~disposition =
       (retry_delay_sentence delay)
       gate
       detail
-  | Task_review { task_id; verification_id }, No_retry_armed ->
+  | Task_review { task_id; verification_id; disposition = No_retry_armed } ->
     Printf.sprintf
       "Stalled task %s (vrf:%s) — no retry armed. gate=%s: %s. Forward path: \
        the assignee resubmits with submit_for_verification (supersedes this \
@@ -535,16 +546,7 @@ let stalled_board_content ~subject ~gate ~detail ~disposition =
       verification_id
       gate
       detail
-  | Goal_review { goal_id; request_id }, Retry_scheduled { delay } ->
-    Printf.sprintf
-      "Stalled goal %s (request:%s) — %s. gate=%s: %s. The verifier reviews \
-       this request again on its own."
-      goal_id
-      request_id
-      (retry_delay_sentence delay)
-      gate
-      detail
-  | Goal_review { goal_id; request_id }, No_retry_armed ->
+  | Goal_review { goal_id; request_id } ->
     Printf.sprintf
       "Stalled goal %s (request:%s) — no retry armed. gate=%s: %s. The Goal \
        stays verifying. Forward path: a Keeper calls request_complete on \
@@ -560,7 +562,6 @@ let stalled_metadata
       ~subject
       ~gate
       ~detail
-      ~disposition
   =
   `Assoc
     ([ ("type", `String "verification_stalled")
@@ -571,7 +572,7 @@ let stalled_metadata
      @ completion_authority_fields authority
      @ [ ("gate", `String gate)
        ; ("detail", `String detail)
-       ; ("disposition", stall_disposition_to_json disposition)
+       ; ("disposition", stall_disposition_to_json (subject_disposition subject))
        ; ("timestamp", `Float (Time_compat.now ()))
        ])
 
@@ -645,12 +646,11 @@ let notify_stalled_verification
       ~subject
       ~gate
       ~detail
-      ~disposition
   =
   let already_told =
     match latest_stall_disposition_on_the_board ~subject ~gate with
     | None -> false
-    | Some latest -> same_disposition latest disposition
+    | Some latest -> same_disposition latest (subject_disposition subject)
   in
   if already_told
   then ()
@@ -658,9 +658,9 @@ let notify_stalled_verification
   match
     Board_dispatch.create_post
       ~author:(Masc_domain.completion_authority_actor authority)
-      ~content:(stalled_board_content ~subject ~gate ~detail ~disposition)
+      ~content:(stalled_board_content ~subject ~gate ~detail)
       ~post_kind:Board.System_post
-      ~meta_json:(stalled_metadata ~authority ~subject ~gate ~detail ~disposition)
+      ~meta_json:(stalled_metadata ~authority ~subject ~gate ~detail)
       ~visibility:Board.Internal
       ~hearth:"verification"
       ()

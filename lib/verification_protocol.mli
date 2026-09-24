@@ -83,13 +83,20 @@ type stall_disposition =
   | Retry_scheduled of { delay : retry_delay }
   | No_retry_armed
 
-(** Which review stopped. A Task review is keyed by its verification id; a
-    Goal review by the durable request it answers. Both stops are the same
-    event — a verifier ended a review without a verdict — so both go through
+(** Which review stopped. A Task review is keyed by its verification id and
+    carries what its scheduling owner did about a retry; a Goal review is
+    keyed by the durable request it answers and carries no disposition,
+    because the Goal verifier arms no retry — its post always reads as
+    [No_retry_armed]. Both stops are the same event — a verifier ended a
+    review without a verdict — so both go through
     {!notify_stalled_verification} and share its channel, metadata and
     repeat rule. *)
 type stalled_subject =
-  | Task_review of { task_id : string; verification_id : string }
+  | Task_review of
+      { task_id : string
+      ; verification_id : string
+      ; disposition : stall_disposition
+      }
   | Goal_review of { goal_id : string; request_id : string }
 
 val notify_stalled_verification :
@@ -97,7 +104,6 @@ val notify_stalled_verification :
   subject:stalled_subject ->
   gate:string ->
   detail:string ->
-  disposition:stall_disposition ->
   unit
 (** Board projection for every review that stopped without a verdict —
     for a Task: [Not_reviewed], [Infrastructure_unavailable],
@@ -112,9 +118,9 @@ val notify_stalled_verification :
     [AwaitingVerification] that supersedes this verification), or an
     operator HITL verdict — and the sweep that reviews it again without
     either; a Goal post names a Keeper calling [request_complete] on the
-    Goal. The caller passes the disposition the scheduling owner reported
-    after it acted, so the post follows the timer, never the other way
-    round.
+    Goal. A Task caller passes, inside [Task_review], the disposition the
+    scheduling owner reported after it acted, so the post follows the
+    timer, never the other way round.
 
     One post per disposition change: for a (subject, gate) the notice
     compares against the disposition of the latest post on the Board
@@ -140,7 +146,6 @@ module For_testing : sig
     subject:stalled_subject ->
     gate:string ->
     detail:string ->
-    disposition:stall_disposition ->
     string
 
   val stalled_metadata :
@@ -148,7 +153,6 @@ module For_testing : sig
     subject:stalled_subject ->
     gate:string ->
     detail:string ->
-    disposition:stall_disposition ->
     Yojson.Safe.t
 
   val stall_disposition_of_json : Yojson.Safe.t -> stall_disposition option

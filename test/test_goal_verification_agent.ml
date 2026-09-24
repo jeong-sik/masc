@@ -1257,7 +1257,11 @@ let idle_tick_s = 0.02
    metadata the notice itself compares, so posts from sibling tests on the
    shared hearth cannot move the count. *)
 let goal_stall_posts ~goal_id ~request_id =
-  Board_dispatch.list_posts ~hearth:"verification" ~limit:200 ()
+  Board_dispatch.list_posts
+    ~hearth:"verification"
+    ~sort_by:Board_dispatch.Recent
+    ~limit:200
+    ()
   |> List.filter_map (fun (post : Board.post) ->
     match post.meta_json with
     | Some (`Assoc fields)

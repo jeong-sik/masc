@@ -95,38 +95,46 @@ sys.exit(int(os.environ['TEST_EXIT']))
 class SandboxImageCatalogCliTest(unittest.TestCase):
     """promote and rollback record builds in <base>/.masc/config/sandbox-images.toml."""
 
-    def run_cli(self, root, base, *args, inspect_output=''):
+    def run_cli(self, root, base, *args, inspect_output='', config_dir=None):
         env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ.get('PATH', ''),
                    TEST_RECEIPT=str(root / 'receipt.json'), TEST_EXIT='0',
                    TEST_INSPECT_EXIT='0', TEST_INSPECT_OUTPUT=inspect_output)
         env.pop('MASC_TEST_FAKE_DOCKER_PATH', None)
+        env.pop('MASC_CONFIG_DIR', None)
+        if config_dir is not None:
+            env['MASC_CONFIG_DIR'] = str(config_dir)
         subcommand, *rest = args
         return subprocess.run([BINARY, 'sandbox-image', subcommand, '--base-path', str(base), *rest],
                               env=env, text=True, capture_output=True)
 
-    def test_promote_then_rollback_on_apple_container(self):
-        digest_a = 'sha256:' + 'a' * 64
-        digest_b = 'sha256:' + 'b' * 64
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            capture = root / 'capture.py'
-            capture.write_text('''import os, sys
+    def install_fake_container(self, root):
+        capture = root / 'capture.py'
+        capture.write_text('''import os, sys
 args = sys.argv[2:]
 if args[:2] == ['image', 'inspect']:
     sys.stdout.write(os.environ.get('TEST_INSPECT_OUTPUT', ''))
     sys.exit(int(os.environ['TEST_INSPECT_EXIT']))
 sys.exit(0)
 ''')
-            fake = root / 'container'
-            fake.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' '
-                            + shlex.quote(str(capture)) + ' "$0" "$@"\n')
-            fake.chmod(0o755)
+        fake = root / 'container'
+        fake.write_text('#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' '
+                        + shlex.quote(str(capture)) + ' "$0" "$@"\n')
+        fake.chmod(0o755)
+
+    @staticmethod
+    def inspect(digest):
+        return json.dumps([{'configuration': {'descriptor': {'digest': digest}}}])
+
+    def test_promote_then_rollback_on_apple_container(self):
+        digest_a = 'sha256:' + 'a' * 64
+        digest_b = 'sha256:' + 'b' * 64
+        inspect = self.inspect
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.install_fake_container(root)
             base = root / 'workspace'
             (base / '.masc' / 'config').mkdir(parents=True)
             catalog = base / '.masc' / 'config' / 'sandbox-images.toml'
-
-            def inspect(digest):
-                return json.dumps([{'configuration': {'descriptor': {'digest': digest}}}])
 
             first = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox:general',
                                  '--runtime', 'apple_container', inspect_output=inspect(digest_a))
@@ -156,6 +164,23 @@ sys.exit(0)
                                 'base', '--privileged:x', inspect_output=inspect(digest_a))
             self.assertNotEqual(flag.returncode, 0, 'a flag-shaped reference was promoted')
             self.assertIn('is not repository:tag', flag.stderr)
+
+    def test_promote_writes_the_catalog_the_server_reads_under_masc_config_dir(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.install_fake_container(root)
+            base = root / 'workspace'
+            (base / '.masc' / 'config').mkdir(parents=True)
+            config_dir = root / 'elsewhere'
+            config_dir.mkdir()
+            result = self.run_cli(root, base, 'promote', 'base', 'masc-sandbox:general',
+                                  '--runtime', 'apple_container',
+                                  inspect_output=self.inspect('sha256:' + 'c' * 64),
+                                  config_dir=config_dir)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('[images.base.apple_container]',
+                          (config_dir / 'sandbox-images.toml').read_text())
+            self.assertFalse((base / '.masc' / 'config' / 'sandbox-images.toml').exists())
 
     def test_rollback_without_a_previous_build_changes_nothing(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -603,6 +603,13 @@ let test_run_failure_and_finish_set_the_phase () =
   check phase "a failed run says so"
     (Transcript.Stream_failed "provider 429")
     (Transcript.phase failed);
+  check string "failure progress carries the cause without another error label"
+    "provider 429 \xc2\xb7 0s"
+    (List.assoc Transcript.Progress (rows failed));
+  let missing = fresh () in
+  feed missing [ Live.Run_started; Live.Run_failed { message = " " } ];
+  check string "a missing cause is explicit" "cause not reported \xc2\xb7 0s"
+    (List.assoc Transcript.Progress (rows missing));
   let finished = fresh () in
   feed finished [ Live.Run_started; Live.Run_finished ];
   check phase "a finished run says so" Transcript.Stream_ended

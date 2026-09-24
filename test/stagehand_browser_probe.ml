@@ -119,7 +119,9 @@ let tool name result =
 ;;
 
 let ( let* ) = Result.bind
-let string_at path json = Yojson.Safe.Util.(List.fold_left (fun json key -> member key json) json path |> to_string_option)
+let string_at keys json =
+  List.fold_left (fun json key -> Yojson.Safe.Util.member key json) json keys
+  |> Yojson.Safe.Util.to_string_option
 
 let tab_for ~url tabs_data =
   match Yojson.Safe.Util.member "tabs" tabs_data with

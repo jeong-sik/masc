@@ -596,7 +596,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
          | Error error ->
            Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
       | Runtime_execution.Codex_app_server execution ->
-        (match Runtime_verification_codex_home.prepare ?source_home:execution.account_home ~directory:cwd_path with
+        (match Runtime_verification_codex_home.prepare ?source_home:execution.account_home ~directory:cwd_path () with
         | Error detail -> Error (Unavailable (Invalid_configuration detail))
         | Ok isolated_home ->
         (* Codex rejects Native_none. Native_read is its least supported

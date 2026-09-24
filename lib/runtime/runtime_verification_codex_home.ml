@@ -80,7 +80,7 @@ let inherited_server_names ~directory =
   |> List.sort_uniq String.compare
 ;;
 
-let prepare ?source_home ~directory =
+let prepare ?source_home ~directory () =
   (* These are the external Codex client's credential/configuration locations,
      not MASC configuration knobs. Read its existing CODEX_HOME/HOME contract
      at this projection boundary so the ordinary client and verifier select

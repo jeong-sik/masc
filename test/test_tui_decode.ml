@@ -1456,6 +1456,15 @@ let test_decode_fleet_safety_reads_how_current_the_reading_is () =
     (stale ~computed_at:(`Float Float.nan) ());
   (* Its age would overflow the integer the span is counted in. *)
   refused "a stale snapshot measured before 1970" (stale ~computed_at:(`Float (-1e300)) ());
+  (* The edge itself: one second before 1970 is refused, 1970 is a time. *)
+  refused "a stale snapshot measured one second before 1970"
+    (stale ~computed_at:(`Float (-1.0)) ());
+  (match freshness (stale ~computed_at:(`Float 0.0) ()) with
+   | Ok (Tui_decode.Fleet_last_good { measured_at_unix; stale_reason = _ }) ->
+       Alcotest.(check (float 0.)) "1970 is a time" 0.0 measured_at_unix
+   | Ok (Tui_decode.Fleet_current | Tui_decode.Unrecognised_snapshot_status _) ->
+       Alcotest.fail "a stale snapshot measured at 1970 decoded as not stale"
+   | Error err -> Alcotest.fail err);
   refused "a stale snapshot missing the time key"
     (`Assoc [ "status", `String "stale"; "stale_reason", `String "ttl_expired" ]);
   refused "a snapshot without a status" (`Assoc [ "computed_at_unix", `Float 1.0 ]);

@@ -2259,7 +2259,11 @@ type fleet_reading_freshness =
           [last_good_refresh_error], [ttl_expired]). *)
   | Unrecognised_snapshot_status of string
       (** A snapshot status this build has no reading for, beside a fleet
-          reading, kept as the server spelled it. *)
+          reading, kept as the server spelled it. The server's other words
+          ([warming], [timeout], [error]) do not arrive here: it writes them
+          only when it holds no last good snapshot, and then the fleet
+          section is the placeholder, not a reading
+          ([Server_routes_http_runtime.full_health_snapshot_metadata]). *)
 (** How current a fleet reading is. The fleet section does not say: the
     [full_health_snapshot] beside it in the same body does. *)
 

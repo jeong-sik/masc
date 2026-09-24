@@ -41,7 +41,8 @@ COLUMNS = [
     "arm", "candidates", "answered_by", "failed_on", "turns_unanswered",
     # 도구 호출 중 실패한 수와, 실패가 있었던 도구별 "도구=실패 수" 를 ; 로 이은 것.
     # 벤치 점수가 낮을 때 모델 탓인지 도구 결함(경로 거절 등) 탓인지 가르는 칸이다.
-    # 빈 칸이면 측정되지 않은 것이다(0 이 아니다).
+    # failed_tool_calls 가 빈 칸이면 측정되지 않은 것이다(0 이 아니다).
+    # failed_by_tool 은 실패한 호출이 없어도 빈 칸이라, 측정 여부는 failed_tool_calls 로 본다.
     "failed_tool_calls", "failed_by_tool",
 ]
 

@@ -19,7 +19,7 @@ def outcomes(tool_calls_dir):
         capture_output=True, text=True)
 
 
-def call(tool, disposition="succeeded", output="ok", result_bytes=10, **extra):
+def call(tool, disposition="completed", output="ok", result_bytes=10, **extra):
     row = {"record_kind": "tool_call", "tool": tool, "disposition": disposition,
            "output": output, "result_bytes": result_bytes}
     row.update(extra)
@@ -74,11 +74,35 @@ def test_the_failure_rule_is_the_repositorys(tmp_path):
     write_day(tmp_path, "24", [
         {"record_kind": "tool_call", "tool": "A", "wire_outcome": "error", "output": "boom"},
         {"record_kind": "tool_call", "tool": "B", "wire_outcome": "unknown"},
-        {"record_kind": "tool_call", "tool": "C", "disposition": "succeeded", "wire_outcome": "error"},
+        {"record_kind": "tool_call", "tool": "C", "disposition": "completed", "wire_outcome": "error"},
+        {"record_kind": "tool_call", "tool": "D", "disposition": "deferred"},
     ])
     data = json.loads(outcomes(tmp_path).stdout)
     failed = {row["tool"]: row["failed"] for row in data["by_tool"]}
-    assert failed == {"A": 1, "B": 0, "C": 0}
+    assert failed == {"A": 1, "B": 0, "C": 0, "D": 0}
+
+
+def test_an_outcome_the_writer_does_not_write_fails_rather_than_passing(tmp_path):
+    # Tool_result.recorded_call_outcome reads these as malformed. Counting
+    # them as successes would hide a broken row inside the success count.
+    broken = [
+        call("Execute", disposition="succeeded"),
+        call("Execute", disposition=None),
+        {"record_kind": "tool_call", "tool": "Execute", "wire_outcome": "failed"},
+        {"record_kind": "tool_call", "tool": "Execute", "wire_outcome": None},
+    ]
+    for row in broken:
+        write_day(tmp_path, "24", [call("Read"), row])
+        result = outcomes(tmp_path)
+        assert result.returncode != 0, row
+
+
+def test_result_bytes_is_null_when_a_call_did_not_record_them(tmp_path):
+    no_bytes = {k: v for k, v in call("Read").items() if k != "result_bytes"}
+    write_day(tmp_path, "24", [call("Execute"), call("Read"), no_bytes])
+    by_tool = {row["tool"]: row for row in json.loads(outcomes(tmp_path).stdout)["by_tool"]}
+    assert by_tool["Execute"]["result_bytes"] == 10
+    assert by_tool["Read"]["result_bytes"] is None
 
 
 def test_tools_are_ordered_by_failures_then_calls_then_name(tmp_path):

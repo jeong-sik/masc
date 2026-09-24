@@ -34,6 +34,7 @@ type recent_turn =
   ; input_tokens : int option
   ; cache_read : int option
   ; output_tokens : int option
+  ; turn_output_tokens : int option
   ; scope : Runtime_usage_scope.t
   }
 
@@ -79,10 +80,15 @@ type forecast_carried_origin =
   | Carried_halved_after_refusal of { retry : int }
   | Carried_evicted_after_refusal of { retry : int }
   | Carried_turn_start_after_seed_refusal
+  | Carried_turn_start_after_librarian_refusal
   | Carried_turn_start of { end_atom : int }
   | Carried_turn_start_unknown of { reason : string }
   | Carried_librarian_snapshot of { end_atom : int; boundary_line : int }
   | Carried_librarian_progress of { end_atom : int }
+  | Carried_past_librarian_point of
+      { librarian_end_atom : int
+      ; front : forecast_carried_origin
+      }
 
 type forecast_carried =
   { first_atom : int
@@ -218,6 +224,7 @@ let decode_turn_records = function
                       ; input_tokens = per_request_tokens record
                       ; cache_read = record.usage.cache_read_input_tokens
                       ; output_tokens = record.usage.output_tokens
+                      ; turn_output_tokens = record.turn_output_tokens
                       ; scope = record.usage.scope
                       })
                     newest_first
@@ -710,7 +717,7 @@ let decode_forecast_parts = function
          })
   | _ -> Error "parts is not an object"
 
-let decode_forecast_origin = function
+let rec decode_forecast_origin = function
   | `Assoc fields ->
     let* kind_json = field "kind" fields in
     let* kind = nonempty_string "origin.kind" kind_json in
@@ -729,6 +736,21 @@ let decode_forecast_origin = function
       Ok (Carried_evicted_after_refusal { retry })
     else if String.equal kind "turn_start_after_seed_refusal" then
       Ok Carried_turn_start_after_seed_refusal
+    else if String.equal kind "turn_start_after_librarian_refusal" then
+      Ok Carried_turn_start_after_librarian_refusal
+    else if String.equal kind "past_librarian_point" then
+      let* end_atom_json = field "librarian_end_atom" fields in
+      let* librarian_end_atom = nonnegative_int "origin.librarian_end_atom" end_atom_json in
+      let* front_json = field "front" fields in
+      let* front = decode_forecast_origin front_json in
+      (match front with
+       | Carried_from_ledger | Carried_from_turn_record _ | Carried_halved_after_refusal _
+       | Carried_evicted_after_refusal _ | Carried_turn_start_after_seed_refusal
+       | Carried_turn_start_after_librarian_refusal ->
+         Ok (Carried_past_librarian_point { librarian_end_atom; front })
+       | Carried_turn_start _ | Carried_turn_start_unknown _ | Carried_librarian_snapshot _
+       | Carried_librarian_progress _ | Carried_past_librarian_point _ ->
+         Error "origin.front is not a carried front")
     else if String.equal kind "turn_start" then
       let* end_atom_json = field "end_atom" fields in
       let* end_atom = nonnegative_int "origin.end_atom" end_atom_json in

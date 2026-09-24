@@ -797,7 +797,14 @@ let test_a_restated_memory_retracted_during_the_pass_stays_retracted_and_keeps_i
    with [keeper_facts] and record [keeper_events], then commit the answer and
    write its Revised events the way the runtime does, from the revisions the
    commit carried out. *)
-let librarian_round ~name ~answer ?keeper_facts ?(keeper_events = []) () =
+let librarian_round
+      ~name
+      ~answer
+      ?keeper_facts
+      ?(keeper_events = [])
+      ?(inspect = fun ~keepers_dir:_ ~keeper_id:_ -> ())
+      ()
+  =
   let keepers_dir = Filename.temp_dir ("librarian-" ^ name ^ "-") "" in
   Fun.protect ~finally:(fun () -> rm_rf keepers_dir) (fun () ->
     let keeper_id = name in
@@ -861,7 +868,25 @@ let librarian_round ~name ~answer ?keeper_facts ?(keeper_events = []) () =
       | Error detail -> fail detail
       | Ok lines -> List.length lines
     in
+    inspect ~keepers_dir ~keeper_id;
     selection, disposition, events, absorbed_rows)
+;;
+
+(* The drops the newest journal line names, which must be a committed
+   Librarian pass that states its drops. *)
+let journaled_drop_ids ~keepers_dir ~keeper_id =
+  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
+  | [ Ok
+        (Current.Journal_committed
+           { source = { kind = Current.Librarian; _ }; dropped = Some statements; _ })
+    ] ->
+    List.map (fun (statement : Memory.dropped_statement) -> statement.memory_id) statements
+  | [ Ok (Current.Journal_committed _) ] ->
+    fail "the newest journal line is not a Librarian pass that states its drops"
+  | [ Ok (Current.Journal_failed _ | Current.Journal_quarantined _) ] ->
+    fail "the newest journal line is not a committed pass"
+  | [ Error detail ] -> fail ("the newest journal line does not decode: " ^ detail)
+  | [] | _ :: _ :: _ -> fail "expected exactly one journal line"
 ;;
 
 let successors_of identity (events : Events.event list) =
@@ -894,7 +919,11 @@ let superseding_b = selection_json ~new_claims:[ superseding_claim (`String "m2"
    is stored and B gets that one Revised event. *)
 let test_a_supersede_of_a_memory_still_current_is_stored () =
   let selection, disposition, events, _ =
-    librarian_round ~name:"supersede-kept" ~answer:superseding_b ()
+    librarian_round ~name:"supersede-kept" ~answer:superseding_b
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal names B, which the commit dropped"
+          [ current_b_id ] (journaled_drop_ids ~keepers_dir ~keeper_id))
+      ()
   in
   let successor = the_one_new_claim selection in
   check (list string) "A stays and B's successor is stored"
@@ -921,6 +950,9 @@ let test_a_supersede_of_a_memory_the_keeper_superseded_during_the_pass_is_not_st
           ; kind = Events.Revised { superseded_by = keeper_successor_id }
           }
         ]
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal leaves B to the keeper's own revision" []
+          (journaled_drop_ids ~keepers_dir ~keeper_id))
       ()
   in
   let successor = the_one_new_claim selection in
@@ -948,6 +980,9 @@ let test_a_supersede_of_a_memory_the_keeper_retracted_during_the_pass_is_not_sto
           ; kind = Events.Retracted
           }
         ]
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal leaves B to the keeper's retraction" []
+          (journaled_drop_ids ~keepers_dir ~keeper_id))
       ()
   in
   let successor = the_one_new_claim selection in
@@ -997,6 +1032,9 @@ let test_a_memory_whose_only_successor_is_not_stored_stays_current () =
              ]
            ())
       ~keeper_facts:[ current_a ]
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal does not say A was dropped" []
+          (journaled_drop_ids ~keepers_dir ~keeper_id))
       ()
   in
   let successor = the_one_new_claim selection in
@@ -1015,6 +1053,9 @@ let test_a_memory_superseded_by_a_restatement_the_keeper_retracted_stays_current
     librarian_round ~name:"restated-successor-retracted"
       ~answer:(selection_json ~new_claims:[ superseding_claim ~claim:"keep A" (`String "m2") () ] ())
       ~keeper_facts:[ current_b ]
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal does not say B was dropped" []
+          (journaled_drop_ids ~keepers_dir ~keeper_id))
       ()
   in
   check (list string) "the answer did supersede B with A"
@@ -1041,6 +1082,83 @@ let test_a_selection_without_the_dropped_field_rejects () =
       "wrong missing-dropped-field error: %s"
       (Librarian.parse_error_to_string error)
   | Ok _ -> fail "selection without dropped field accepted"
+;;
+
+(* The pending-input organization is judged apart from the Memory decision
+   (#38422): an answer that leaves it out or gets it wrong keeps its drop, and
+   only the organization is set aside. *)
+let test_a_working_context_slip_keeps_the_memory_decision () =
+  let memory_answer working_contexts =
+    `Assoc
+      (working_contexts
+       @ [ Librarian.wire_field_new_claims, `List []
+         ; Librarian.wire_field_dropped, `List [ dropped_json "m2" ]
+         ])
+  in
+  let organization label working_contexts =
+    match parse (memory_answer working_contexts) with
+    | Error error ->
+      failf "%s: the Memory answer was refused: %s" label
+        (Librarian.parse_error_to_string error)
+    | Ok selection ->
+      check (list string) (label ^ ": the drop of B stands") [ current_b_id ]
+        (List.map (fun (d : Memory.dropped_statement) -> d.memory_id) selection.dropped);
+      selection.working_contexts
+  in
+  (match organization "empty" [ "working_contexts", `List [] ] with
+   | Librarian.Working_contexts_organized [] -> ()
+   | Librarian.Working_contexts_organized _ -> fail "an empty organization gained pockets"
+   | Librarian.Working_contexts_missing | Librarian.Working_contexts_invalid _ ->
+     fail "a valid empty organization was not taken");
+  (match organization "invalid" [ "working_contexts", `String "not a list" ] with
+   | Librarian.Working_contexts_invalid detail ->
+     check string "the selector's reason" "working context requires an array" detail
+   | Librarian.Working_contexts_organized _ | Librarian.Working_contexts_missing ->
+     fail "an invalid organization was not reported as invalid");
+  match organization "missing" [] with
+  | Librarian.Working_contexts_missing -> ()
+  | Librarian.Working_contexts_organized _ | Librarian.Working_contexts_invalid _ ->
+    fail "an absent organization was not reported as missing"
+;;
+
+(* The working state belongs to a continuity pass. A Memory answer's parse
+   does not read it, so a blank or non-text value cannot refuse the Memory
+   decision; the continuity reader alone requires nonblank text. *)
+let test_only_a_continuity_pass_reads_the_working_state () =
+  let memory_answer working_state =
+    `Assoc
+      [ "working_contexts", `List []
+      ; Librarian.wire_field_new_claims, `List []
+      ; Librarian.wire_field_dropped, `List [ dropped_json "m2" ]
+      ; Librarian.wire_field_working_state, working_state
+      ]
+  in
+  List.iter
+    (fun (label, working_state) ->
+       match parse (memory_answer working_state) with
+       | Ok selection ->
+         check (list string) (label ^ ": the drop of B stands") [ current_b_id ]
+           (List.map (fun (d : Memory.dropped_statement) -> d.memory_id) selection.dropped)
+       | Error error ->
+         failf "%s: the Memory answer was refused: %s" label
+           (Librarian.parse_error_to_string error))
+    [ "blank", `String ""; "non-text", `Int 5; "null", `Null ];
+  List.iter
+    (fun (label, answer) ->
+       match Librarian.continuity_working_state_of_json_result answer with
+       | Error (Librarian.Working_state_invalid _) -> ()
+       | Error error ->
+         failf "%s: wrong continuity refusal: %s" label
+           (Librarian.parse_error_to_string error)
+       | Ok text -> failf "%s: continuity accepted %S" label text)
+    [ "blank", memory_answer (`String " ")
+    ; "null", memory_answer `Null
+    ; "missing", `Assoc [ Librarian.wire_field_new_claims, `List [] ]
+    ];
+  match Librarian.continuity_working_state_of_json_result (memory_answer (`String "s")) with
+  | Ok text -> check string "a continuity pass keeps its state" "s" text
+  | Error error ->
+    failf "a nonblank working state was refused: %s" (Librarian.parse_error_to_string error)
 ;;
 
 let test_dropped_statements_validate () =
@@ -1193,6 +1311,85 @@ let test_prompt_carries_keeper_instructions () =
   check string "blank Keeper instructions render an explicit marker"
     "[no keeper instructions]"
     (List.assoc "keeper_instructions" (Librarian.prompt_variables blank))
+;;
+
+(* RFC-0468 §3.2: each User message's header names the speaker the host
+   stamped when it created the message. A message from before the speaker
+   existed says unknown, and a broken entry says it is broken. *)
+let test_conversation_headers_carry_the_stamped_speaker () =
+  let module S = Masc.Keeper_input_speaker in
+  let user ?speaker text =
+    Agent_core.Types.make_message
+      ?metadata:(Option.map S.metadata speaker)
+      ~role:Agent_core.Types.User
+      [ Agent_core.Types.Text text ]
+  in
+  let beta =
+    match Masc.Keeper_identity.Keeper_id.of_string "beta" with
+    | Some id -> id
+    | None -> fail "keeper id fixture"
+  in
+  let messages =
+    [ user
+        ~speaker:(S.Host_prompt (S.Autonomous_wake { answered_asks = [ S.Owner ] }))
+        "wake"
+    ; Agent_core.Types.assistant_msg "on it"
+    ; user ~speaker:(S.Person (S.Keeper beta)) "please review"
+    ; user ~speaker:(S.Person S.Owner) "stop merging"
+    ; user "from an old checkpoint"
+    ]
+  in
+  let history =
+    List.assoc "conversation_history"
+      (Librarian.prompt_variables { (input ()) with messages })
+  in
+  List.iter
+    (fun header ->
+       check bool header true (String_util.contains_substring history header))
+    [ "[turn=0 role=user speaker=host:autonomous_wake(answered_asks=owner)] wake"
+    ; "[turn=1 role=assistant] on it"
+    ; "[turn=2 role=user speaker=keeper:\"beta\"] please review"
+    ; "[turn=3 role=user speaker=owner] stop merging"
+    ; "[turn=4 role=user speaker=unknown] from an old checkpoint"
+    ];
+  (* A broken entry is shown as broken and the pass goes on, so one broken
+     message never holds the Librarian on the same range. *)
+  let broken =
+    Agent_core.Types.make_message
+      ~metadata:[ Agent_core.Types.Input_speaker.entry (`String "owner") ]
+      ~role:Agent_core.Types.User
+      [ Agent_core.Types.Text "broken" ]
+  in
+  let repeated =
+    Agent_core.Types.make_message
+      ~metadata:(S.metadata (S.Person S.Owner) @ S.metadata (S.Person S.Owner))
+      ~role:Agent_core.Types.User
+      [ Agent_core.Types.Text "repeated" ]
+  in
+  let broken_input = { (input ()) with messages = [ broken; repeated ] } in
+  let history =
+    List.assoc "conversation_history" (Librarian.prompt_variables broken_input)
+  in
+  check bool "an undecodable entry renders as invalid" true
+    (String_util.contains_substring history "[turn=0 role=user speaker=invalid(");
+  check bool "a repeated entry renders as duplicate" true
+    (String_util.contains_substring history "[turn=1 role=user speaker=duplicate] repeated");
+  match Runtime.messages_for_librarian broken_input with
+  | Error detail -> failf "the pass could not build its request: %s" detail
+  | Ok messages ->
+    check bool "the pass request carries the whole conversation" true
+      (List.exists
+         (fun (message : Agent_core.Types.message) ->
+            List.exists
+              (function
+                | Agent_core.Types.Text text ->
+                  String_util.contains_substring text "speaker=duplicate] repeated"
+                | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+                | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
+                | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+                | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> false)
+              message.content)
+         messages)
 ;;
 
 let user_text_of_messages messages =
@@ -2003,6 +2200,10 @@ let () =
             test_a_memory_superseded_by_a_restatement_the_keeper_retracted_stays_current
         ; test_case "selection without dropped field rejects" `Quick
             test_a_selection_without_the_dropped_field_rejects
+        ; test_case "a working-context slip keeps the Memory decision" `Quick
+            test_a_working_context_slip_keeps_the_memory_decision
+        ; test_case "only a continuity pass reads the working state" `Quick
+            test_only_a_continuity_pass_reads_the_working_state
         ; test_case "dropped statements validate" `Quick
             test_dropped_statements_validate
         ; test_case "strict JSON boundary" `Quick test_strict_json_boundary
@@ -2018,6 +2219,8 @@ let () =
             test_prompt_contains_exact_current_selection
         ; test_case "prompt carries Keeper instructions" `Quick
             test_prompt_carries_keeper_instructions
+        ; test_case "conversation headers carry the stamped speaker" `Quick
+            test_conversation_headers_carry_the_stamped_speaker
         ; test_case "prompt carries typed tool observations without payloads" `Quick
             test_prompt_carries_typed_tool_observations_without_payloads
         ; test_case "durable speaker attribution reaches counterpart observations" `Quick

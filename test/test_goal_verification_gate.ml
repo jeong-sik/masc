@@ -1091,8 +1091,6 @@ let test_keeper_keeps_and_sees_a_verifying_goal () =
   in
   let { Keeper_unified_prompt.world_state; _ } =
     Keeper_unified_prompt.build_prompt
-      ~meta
-      ~config
       ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
       ~current_task:Keeper_world_observation_inputs.No_current_task
       ~active_goal_summaries:(Ok summaries)

@@ -193,7 +193,7 @@ let test_hints_do_not_change_the_tail () =
   in
   let overview =
     Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:120 ~port:8935
-      ~hints:"j/k:events  t:tasks  q:quit" ()
+      ~hints:"m:telemetry  t:tasks  q:quit" ()
   in
   let help =
     Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:120 ~port:8935

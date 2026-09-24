@@ -341,7 +341,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
             context_tokens: 420,
             context_max: 1000,
             latency_ms: 110,
-            generation: 2,
             channel: 'turn',
             model_used: 'glm-5',
             cost_usd: 0.03,
@@ -634,7 +633,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
             context_tokens: 420,
             context_max: 1000,
             latency_ms: 100,
-            generation: 1,
             channel: 'turn',
             model_used: 'anthropic:claude-sonnet',
             runtime: {
@@ -677,7 +675,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
             context_tokens: 510,
             context_max: 1000,
             latency_ms: 95,
-            generation: 2,
             channel: 'turn',
             model_used: 'glm-5',
             cost_usd: 0.04,
@@ -787,7 +784,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
             context_tokens: 240,
             context_max: 1000,
             latency_ms: 2000,
-            generation: 2,
             channel: 'turn',
             model_used: 'glm-5',
             cost_usd: 0.05,
@@ -825,7 +821,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
         metrics_series: [
           {
             ts_unix: 7,
-            generation: 2,
             channel: 'turn',
             model_used: 'glm-5',
             cost_usd: 0.05,

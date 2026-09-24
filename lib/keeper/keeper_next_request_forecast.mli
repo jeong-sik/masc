@@ -9,7 +9,9 @@
     front beside it is the pair's ledger while the history holds it
     (process-local, absent after a restart until the first response
     observation), else the range the newest response-observed turn record on
-    the trace measured, whichever runtime ran it. [counted_tokens] is the
+    the trace measured, whichever runtime ran it. That record's range is also
+    the accepted start a Librarian point yields to when it lies past it
+    (RFC librarian-lifecycle §4.10), as the driver reads it. [counted_tokens] is the
     ledger's last measured total. Nothing here dispatches, advances a cursor,
     consumes a note, writes a front, or writes the turn's log lines.
 
@@ -168,6 +170,7 @@ val carry
   :  measure:(Agent_core.Types.message -> int)
   -> continuity:Keeper_turn_driver_try_provider.continuity option
   -> front:Keeper_carried_front.seed option
+  -> accepted:Keeper_carried_front.seed option
   -> turn_start:Keeper_carried_front.turn_start
   -> counted_tokens:int option
   -> Agent_core.Types.message list

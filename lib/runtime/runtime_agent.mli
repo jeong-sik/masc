@@ -455,6 +455,7 @@ val run :
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_core.Agent.t option ref ->
   ?cooperative_yield_probe:cooperative_yield_probe ->
+  ?input_metadata:Agent_core.Types.metadata ->
   string ->
   (run_result, Agent_core.Error.t) result
 (** Runs an Agent Core agent against [goal]. When
@@ -476,10 +477,13 @@ val run_blocks :
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_core.Agent.t option ref ->
   ?cooperative_yield_probe:cooperative_yield_probe ->
+  ?input_metadata:Agent_core.Types.metadata ->
   Agent_core.Types.content_block list ->
   (run_result, Agent_core.Error.t) result
 (** Runs an Agent Core agent against structured user-authored content blocks.
-    [on_event] follows the same streaming-capability rule as {!run}. *)
+    [on_event] follows the same streaming-capability rule as {!run}.
+    [input_metadata] (default empty) is stamped on the User message AGENT_CORE
+    appends for these blocks. *)
 
 val continue_from_checkpoint :
   sw:Eio.Switch.t ->

@@ -120,18 +120,14 @@ end
 
 (* A finished switch is not a root switch.
 
-   Nothing owns this slot's lifetime. Boot writes it once, and
-   [Mcp_server_eio_execute] rewrites it with the request's own switch on every
-   tool call -- its comment says why, "tests may leave a finished switch in
-   the global slot" -- but no one clears it when that scope ends. So between
-   requests the slot still answers [Some] with a switch nothing can fork into.
-
-   The caller then learns about it at [Fiber.fork], as
-   [Invalid_argument "Switch finished!"], far from the write that left it.
-   That is what [Keeper_keepalive]'s [lane_parent_sw] hits: it prefers the
-   root switch and falls back to [ctx.sw], and the fallback is right, but a
-   dead switch never reaches it. Measured 2026-09-06 in
-   test_heartbeat_integration, where six cases fail this way (#33200).
+   Nothing clears this slot when its switch finishes except the switch's own
+   release hook, and a scope that installs a switch can end before a reader
+   asks. A finished switch left in the slot cannot be forked into: the caller
+   would learn about it at [Fiber.fork], as [Invalid_argument "Switch
+   finished!"], far from the write that left it. Measured 2026-09-06 in
+   test_heartbeat_integration, where six cases failed this way (#33200).
+   Answering [None] instead lets [Keeper_lane.fork_server_owned] refuse the
+   lane as having no owner.
 
    Asking the switch is the only way to know: a finished switch is not a
    failed one, so [get_error] answers [None] for it. *)

@@ -958,6 +958,7 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
       Eio.Switch.run @@ fun sw ->
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let ctx : _ Keeper_types_profile.context =
         {
           config;
@@ -996,6 +997,54 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
          | Some (`Crashed reason) ->
            fail ("expected stopped promise, got crashed: " ^ reason)
          | None -> fail "expected done_p to resolve on stop"))
+
+(* #38175: a Keeper lane must outlive whatever asked for it. With no server
+   root switch installed, start_keepalive used to fork the lane on [ctx.sw]
+   and log a WARN, so a lane started from a turn died with that turn. Now
+   there is no owner to borrow: the lane is refused as a typed start error and
+   settled, and nothing runs on the caller's switch. *)
+let test_direct_start_without_server_root_refuses_the_lane () =
+  Eio_main.run @@ fun env ->
+  install_test_env env;
+  R.For_testing.clear ();
+  Eio_context.For_testing.clear_root_switch ();
+  let base_dir = temp_dir "direct-keepalive-no-root" in
+  let keeper_name = "direct-no-root" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      ensure_default_runtime ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
+      Eio.Switch.run @@ fun caller_sw ->
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "tester"
+        ; sw = caller_sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env caller_sw config)
+        }
+      in
+      match Masc.Keeper_keepalive.start_keepalive ctx meta with
+      | Masc.Keeper_keepalive.Keepalive_fork_rejected
+          Lane.Server_root_switch_unavailable ->
+        (match R.get ~base_path:config.base_path keeper_name with
+         | None -> fail "the refused lane left no registry entry to settle"
+         | Some entry ->
+           check bool "the refused lane is settled" true (R.lane_has_exited entry))
+      | outcome ->
+        failf
+          "a lane with no server root switch was not refused: %s"
+          (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome))
 
 let test_cross_domain_start_keepalive_and_swap () =
   Eio_main.run @@ fun env ->
@@ -1046,8 +1095,10 @@ let test_cross_domain_start_keepalive_and_swap () =
              check string "swapped keeper name matches" keeper_name new_entry.name
            | Ok (_, rejected) ->
              fail ("swap keepalive rejected: " ^ Masc.Keeper_keepalive.start_keepalive_outcome_to_string rejected)
-           | Error error ->
-             fail ("swap keepalive tool error: " ^ Tool_result.message error));
+           | Error (Masc.Keeper_turn_up_update.Swap_failed error) ->
+             fail ("swap keepalive tool error: " ^ Tool_result.message error)
+           | Error (Masc.Keeper_turn_up_update.Swap_turn_in_flight _) ->
+             fail "swap keepalive found a turn in flight");
           (match Masc.Keeper_keepalive.stop_keepalive_and_await ~base_path:config.base_path keeper_name with
            | Masc.Keeper_keepalive.Keeper_joined { terminal = `Stopped; _ } -> ()
            | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
@@ -1201,6 +1252,7 @@ let test_direct_stop_ignores_a_dead_librarian_executor () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
       Eio.Switch.run @@ fun keeper_sw ->
+      Masc_test_deps.with_server_root_switch ~sw:keeper_sw @@ fun () ->
       Masc.Keeper_process_switch.set keeper_sw;
       install_owner_inventory_exn ~sw:keeper_sw config;
       ensure_owner_meta_exn config meta;
@@ -1707,6 +1759,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let base_dir = temp_dir "shutdown-supersession" in
   Fun.protect
     ~finally:(fun () ->
@@ -2409,10 +2462,11 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
            stopped_name
           : Masc.Keeper_keepalive.joined_stop_result))
 
-let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
+let test_update_keeper_defers_lane_swap_while_turn_in_flight () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let base_dir = temp_dir "update-turn-in-flight" in
   Fun.protect
     ~finally:(fun () ->
@@ -2471,7 +2525,12 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
       in
       (* A keeper's own turn holds the slot while its tools run: invoking
          the update from inside the admitted closure reproduces the
-         mid-turn self masc_keeper_up of #26542 structurally. *)
+         mid-turn self masc_keeper_up of #26542 structurally. The lane that
+         keeper runs on is registered; a deferral promises that lane reads
+         the update on its next turn. *)
+      let running_lane =
+        Masc.Keeper_registry.register_offline ~base_path:config.base_path name meta
+      in
       (match
          Keeper_owner_registry.run_maintenance_if_idle
            ~base_path:config.base_path
@@ -2486,12 +2545,12 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
        | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
        | Ok (`Busy _) -> fail "Owner unexpectedly busy before the test turn"
        | Ok (`Ran result) ->
-         check bool "mid-turn update is rejected" false
+         check bool "mid-turn update succeeds with the lane swap deferred" true
            (Keeper_types_profile.tool_result_success result);
          let data = Tool_result.data result in
-         check (option string) "rejection is typed"
-           (Some "keeper_turn_in_flight")
-           (Json_util.get_string data "error");
+         check (option string) "deferral is typed"
+           (Some "deferred_until_turn_end")
+           (Json_util.get_string data "runtime_sync");
          check bool "rejection rolls the fence back inside the turn" true
            (Option.is_none
               (owner_shutdown_operation_id_exn
@@ -2503,9 +2562,12 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
         | Ok None -> fail "keeper metadata disappeared"
         | Error detail -> fail detail
       in
-      check string "metadata commit preceded the rejection"
+      check string "metadata commit preceded the deferral"
         "rejected mid-turn intent"
         after.instructions;
+      ignore
+        (Masc.Keeper_registry.unregister_exact running_lane
+          : Masc.Keeper_registry.unregister_exact_result);
       (match Keeper_meta_store.read_effective_meta config name with
        | Ok (Some effective) ->
          check (option string) "new image is materialized for the next turn"
@@ -2556,6 +2618,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       seed_keeper_sandbox_profile ~base_dir name;
       Eio.Switch.run @@ fun root_sw ->
+      Masc_test_deps.with_server_root_switch ~sw:root_sw @@ fun () ->
       install_owner_inventory_exn ~sw:root_sw config;
       Memory_lane.init ~sw:root_sw;
       let clock = Eio.Stdenv.clock env in
@@ -4916,6 +4979,7 @@ let test_running_librarian_does_not_block_start_keepalive () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
       Eio.Switch.run @@ fun sw ->
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       Memory_lane.init ~sw;
       let librarian_started, resolve_librarian_started = Eio.Promise.create () in
       let librarian_release, resolve_librarian_release = Eio.Promise.create () in
@@ -5059,6 +5123,7 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
            (KSM.Turn_failed { consecutive = 1 }));
       resolve_done_for_test original (`Crashed "provider runtime error");
       Eio.Switch.run @@ fun sw ->
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let ctx : _ Keeper_types_profile.context =
         {
           config;
@@ -5375,6 +5440,7 @@ let test_field_only_update_honors_toml_declared_profile () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let base_dir = temp_dir "update-toml-profile" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -5510,6 +5576,8 @@ let () =
     "direct_keepalive", [
       test_case "stop resolves done after lane exit" `Quick
         test_direct_start_keepalive_resolves_done_on_stop;
+      test_case "no server root switch refuses the lane" `Quick
+        test_direct_start_without_server_root_refuses_the_lane;
       test_case "cross-domain start keepalive and swap" `Quick
         test_cross_domain_start_keepalive_and_swap;
       test_case "cross-domain shutdown submit" `Quick
@@ -5534,8 +5602,8 @@ let () =
         test_operator_update_supersedes_exact_blocked_shutdown;
       test_case "field-only update honors TOML-declared profile" `Quick
         test_field_only_update_honors_toml_declared_profile;
-      test_case "update rejects lane swap while turn in flight" `Quick
-        test_update_keeper_rejects_lane_swap_while_turn_in_flight;
+      test_case "update defers lane swap while turn in flight" `Quick
+        test_update_keeper_defers_lane_swap_while_turn_in_flight;
       test_case "cancelled update finishes lane swap" `Quick
         test_update_keeper_cancellation_finishes_lane_swap;
       test_case "keeper up shared boundary outlives calling turn" `Quick

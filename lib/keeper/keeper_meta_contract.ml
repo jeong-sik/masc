@@ -40,7 +40,6 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
   | All_providers_failed
   | Candidates_filtered_after_cycles
   | Session_conflict
-  | Capacity_exhausted
   | Other_detail of string
 
 (** Total typed retryability for a runtime-exhaustion reason.
@@ -149,8 +148,6 @@ let runtime_exhaustion_summary = function
     "Runtime exhausted after provider candidates were filtered; inspect candidate filter reasons."
   | Session_conflict ->
     "Runtime exhausted because another process owns the provider session lease."
-  | Capacity_exhausted ->
-    "Runtime exhausted; all providers reported capacity backpressure."
   | Other_detail _ ->
     "Runtime exhausted; inspect runtime attempts for the dominant root cause."
 ;;

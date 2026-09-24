@@ -335,7 +335,6 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   degraded_retry: '저하 상태 재시도',
   runtime_fallback: '런타임 폴백',
   transient_runtime_retry: '일시적 런타임 재시도',
-  capacity_backpressure: 'Provider 수용량 부족',
   provider_runtime_error: '런타임 호출 오류',
   internal_error: '내부 오류',
   input_required: '사용자 입력 대기',

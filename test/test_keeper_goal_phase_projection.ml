@@ -248,8 +248,6 @@ let rendered_world_state config =
   in
   let { Keeper_unified_prompt.world_state; _ } =
     Keeper_unified_prompt.build_prompt
-      ~meta
-      ~config
       ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
       ~current_task:Keeper_world_observation_inputs.No_current_task
       ~observation
@@ -320,7 +318,6 @@ max-concurrent = 1
     let summaries = Keeper_unified_prompt.active_goal_summaries_for_task
       ~config ~current_task:(current_task_of "task-linked") in
     let { Keeper_unified_prompt.world_state; _ } = Keeper_unified_prompt.build_prompt
-      ~meta ~config
       ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
       ~current_task:(current_task_of "task-linked")
       ~active_goal_summaries:summaries ~observation () in
@@ -367,8 +364,7 @@ max-concurrent = 1
         ; kind = Keeper_world_observation_message_scope.Mention } ] } in
     let decision = Keeper_world_observation.keeper_cycle_decision ~meta observation in
     check bool "independent mention still admits a turn" true decision.should_run;
-    let { Keeper_unified_prompt.world_state; _ } = Keeper_unified_prompt.build_prompt
-      ~meta ~config ~turn_decision:decision
+    let { Keeper_unified_prompt.world_state; _ } = Keeper_unified_prompt.build_prompt ~turn_decision:decision
       ~current_task:(current_task_of "task-linked")
       ~active_goal_summaries:summaries ~observation () in
     check bool "Goal failure reaches the model context" true

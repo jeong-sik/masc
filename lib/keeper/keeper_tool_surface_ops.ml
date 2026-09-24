@@ -928,6 +928,7 @@ let complete_keeper_msg_stream_result : Turn.dispatch -> Turn.dispatch = functio
 let handle_keeper_msg_stream_admitted
       ~operation_id
       ~admission_token
+      ~input_speaker
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -962,6 +963,7 @@ let handle_keeper_msg_stream_admitted
     Turn.handle_keeper_msg_admitted
       ~operation_id
       ~admission_token
+      ~input_speaker
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation

@@ -421,6 +421,7 @@ def test_a_missing_architecture_names_the_fetch_step(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("version, reason", [
     ("0.35.19", "older than"),
+    ("0.36.0", "older than"),
     ("0.35.20-rc1", "not an X.Y.Z release"),
     ("v0.35.20", "not an X.Y.Z release"),
 ])

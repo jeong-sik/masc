@@ -16,9 +16,6 @@
     checkpoint were byte-identical world-state frames (59% of payload),
     which exhausted the request window and re-fed the model its own observations. *)
 type turn_prompt_parts = {
-  system_prompt : string;
-      (** Keeper identity, instructions, and turn intent. Stable across
-          turns of a generation. *)
   world_state : string;
       (** The "## Current World State" observation frame, rebuilt fresh
           every turn. Inject as per-turn [dynamic_context]; never append
@@ -117,23 +114,34 @@ val build_system_prompt :
   config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   unit ->
-  string
+  (string, World_constitution_store.read_error) result
 (** Build the model-facing stable Keeper contract shared by direct and
     autonomous turns. Channel-specific input belongs in dynamic context or the
     persisted user message, not in a second system-prompt implementation.
 
     [config] is the caller-owned workspace generation admitted for the turn.
-    Prompt construction never resolves a second default config. *)
+    Prompt construction never resolves a second default config.
 
-(** Build the three-channel unified prompt from keeper state.
+    The world's constitution articles are part of the contract. A world with
+    no ledger yet renders none. A ledger that exists but cannot be read is
+    [Error]: the prompt is not built without its articles (#38354). When
+    [?profile_defaults] is omitted, [instructions] falls back to
+    [meta.instructions]. *)
 
-    @param meta Keeper metadata (identity, soul, goals, instructions)
-    @param config Caller-owned workspace generation for this turn
+val emit_prompt_metrics :
+  meta:Keeper_meta_contract.keeper_meta ->
+  system_prompt:string ->
+  turn_prompt_parts ->
+  unit
+(** Publish the per-segment byte gauges and the instruction hash for one
+    autonomous turn. [system_prompt] is the one the turn sends. *)
+
+(** Build the per-turn channels of the unified prompt: the observation frame
+    and the user message. The system prompt is not built here; the turn sends
+    the one {!Keeper_run_context.prepare_run_context} built.
+
     @param observation Current world snapshot *)
 val build_prompt :
-  meta:Keeper_meta_contract.keeper_meta ->
-  config:Workspace.config ->
-  ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   turn_decision:Keeper_world_observation.keeper_cycle_decision ->
   ?previous_turn_stop:Keeper_turn_checkpoint_reason.t ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
@@ -146,11 +154,7 @@ val build_prompt :
   observation:Keeper_world_observation.world_observation ->
   unit ->
   turn_prompt_parts
-(** When [?profile_defaults] is omitted, [instructions] falls back to
-    [meta.instructions]. Production hot path supplies profile defaults;
-    tests can keep the bare call.
-
-    [?previous_turn_stop]: why this keeper's last turn in this process ended
+(** [?previous_turn_stop]: why this keeper's last turn in this process ended
     before completing, rendered as one line in the Autonomous Trigger layer.
     Omitted (the turn completed, failed, or this is the first turn since the
     process started), the layer says nothing about it.
@@ -173,9 +177,6 @@ val build_prompt :
       or empty, the layer is absent. *)
 
 val build_prompt_preview :
-  meta:Keeper_meta_contract.keeper_meta ->
-  config:Workspace.config ->
-  ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:(goal_summary list, Goal_store.unavailable) result ->
@@ -201,9 +202,17 @@ module For_testing : sig
       quoting. *)
 end
 
-val answered_ask_inputs : Keeper_world_observation.world_observation -> (string * string) list
-(** Ask correlation identity and the same attributed, quoted row used in the
-    ordinary user turn. Excludes all other world observations. *)
+val answered_ask_inputs :
+  Keeper_world_observation.world_observation ->
+  (string * string * Keeper_input_speaker.person) list
+(** Ask correlation identity, the same attributed, quoted row used in the
+    ordinary user turn, and who answered. Excludes all other world
+    observations. *)
+
+val autonomous_input_speaker :
+  Keeper_world_observation.world_observation -> Keeper_input_speaker.t
+(** The speaker of the autonomous turn's User message: the host's wake cue,
+    naming who answered each quoted Ask row in the order the rows appear. *)
 
 val format_workspace_memory_observation :
   Workspace_memory_publication.observation -> string option

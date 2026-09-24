@@ -498,7 +498,6 @@ describe('keeper tool telemetry fetchers', () => {
               keeper_name: 'keeper-alpha',
               trace_id: 'trace-1',
               session_id: 'trace-1',
-              generation: 1,
               keeper_turn_id: 29567,
               task_id: null,
               goal_ids: [],
@@ -563,7 +562,6 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.prompt_fingerprint).toBe('464ce7b3280c24fe1cbdcd990a70db87')
     expect(entry?.runtime_contract).toMatchObject({
       keeper_name: 'keeper-alpha',
-      generation: 1,
       sandbox_root: '/sandbox/keeper-alpha/',
       sandbox_roots: ['.masc/playground/keeper-alpha/'],
       network_mode: 'inherit',
@@ -3389,8 +3387,7 @@ describe('fetchKeeperConfig', () => {
           world: { key: 'keeper.world', source: 'override', text: 'world text' },
           capabilities: { key: 'keeper.capabilities', source: 'file', text: 'capabilities text' },
         },
-        effective_system_prompt: 'full prompt',
-        assembled_system_prompt: 'assembled prompt',
+        system_prompt: { state: 'available', effective: 'full prompt', assembled: 'assembled prompt' },
         unified_user_message_preview: 'world state',
       },
       execution: {
@@ -3442,7 +3439,6 @@ describe('fetchKeeperConfig', () => {
         override_fields: 'goal',
       },
       metrics: {
-        generation: '3',
         total_turns: '12',
         total_input_tokens: '1200',
         total_output_tokens: '800',
@@ -3515,6 +3511,37 @@ describe('fetchKeeperConfig', () => {
     await expect(fetchKeeperConfig('keeper-sangsu')).rejects.toThrowError(
       'Invalid keeper config response: max_context_override must be a positive safe integer or null',
     )
+  })
+
+  it('decodes the system prompt union and fails only that field on an unknown shape (#38354)', async () => {
+    const unavailable = {
+      state: 'unavailable',
+      reason: 'constitution_unreadable',
+      path: '/base/.masc/constitution/articles.jsonl',
+      detail: 'Sys_error("Is a directory")',
+    }
+    const body = (value: unknown) =>
+      `{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}},"max_context_override":null,"input_policy":"small","activation_mode":"manual","skills":{"names":null},"prompt":{"instructions":"be exact","system_prompt":${JSON.stringify(value)}}}`
+    const fetchWith = (value: unknown) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(body(value), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    fetchWith(unavailable)
+    expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual(unavailable)
+
+    fetchWith({ ...unavailable, reason: 'something_else' })
+    const unknownReason = await fetchKeeperConfig('keeper-sangsu')
+    expect(unknownReason.prompt.system_prompt).toEqual({
+      state: 'decode_failed',
+      detail: 'unknown unavailable reason "something_else"',
+    })
+    expect(unknownReason.prompt.instructions).toBe('be exact')
+
+    fetchWith({ state: 'later' })
+    expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual({
+      state: 'decode_failed',
+      detail: 'unknown prompt state "later"',
+    })
   })
 
   it('rejects a missing max_context_override wire field', async () => {
@@ -3744,6 +3771,7 @@ describe('keeper config mutation API', () => {
           selected_runtime_canonical: 'b.two',
           runtime_options: ['a.one', 'b.two'],
         },
+        runtime_sync: 'lane_restarted',
         sources: {
           default_source_kind: 'toml',
           default_manifest_path: '/tmp/.masc/config/keepers/sangsu.toml',
@@ -3785,6 +3813,7 @@ describe('keeper config mutation API', () => {
         config_revision: configRevision,
         max_context_override: null,
         skills: { names: ['ocaml-coding'] },
+        runtime_sync: 'lane_restarted',
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -3802,6 +3831,40 @@ describe('keeper config mutation API', () => {
       expected_config_revision: configRevision,
     })
     expect(result.skills.names).toEqual(['ocaml-coding'])
+  })
+
+  it('reads a save deferred until the running turn ends as a success', async () => {
+    const body = (runtimeSync: unknown) => JSON.stringify({
+      name: 'keeper-sangsu',
+      activation_mode: 'autonomous',
+      input_policy: 'small',
+      config_revision: configRevision,
+      max_context_override: null,
+      skills: { names: [] },
+      ...(runtimeSync === undefined ? {} : { runtime_sync: runtimeSync }),
+    })
+    const respond = (runtimeSync: unknown) => vi.fn().mockResolvedValue(
+      new Response(body(runtimeSync), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    vi.stubGlobal('fetch', respond('deferred_until_turn_end'))
+    const deferred = await patchKeeperConfig('keeper-sangsu', {
+      activation_mode: 'autonomous',
+    }, configRevision)
+    expect(deferred.runtime_sync).toBe('deferred_until_turn_end')
+
+    vi.stubGlobal('fetch', respond('failed'))
+    await expect(patchKeeperConfig('keeper-sangsu', {
+      activation_mode: 'autonomous',
+    }, configRevision)).rejects.toThrow('runtime_sync is not a success state')
+
+    vi.stubGlobal('fetch', respond(undefined))
+    await expect(patchKeeperConfig('keeper-sangsu', {
+      activation_mode: 'autonomous',
+    }, configRevision)).rejects.toThrow('runtime_sync is required after a save')
   })
 })
 

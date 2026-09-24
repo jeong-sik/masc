@@ -10,20 +10,43 @@ own section to the top of the body; the generated list still follows it.
 Failing loudly is the point: a tag whose version has no section would publish a
 page that says nothing about the release, so this exits non-zero instead. A
 section with no entries -- the bare stub a version bump leaves -- fails too.
+
+A body longer than the page can hold fails the same way. GitHub keeps the first
+125,000 characters of a release body and drops the rest without an error: the
+v0.37.0 page (run 35889074765, success) stopped mid-word in "- Audit how Boa",
+and the Documentation and Internal sections never reached the reader. With
+--max-chars this refuses to write such a body. The limit is measured on the
+body GitHub will store, so a list that is appended after the section --
+the generated pull-request notes -- is passed with --append and counted too.
 """
 
+import argparse
 import pathlib
 import sys
 
 
-def main() -> int:
-    if len(sys.argv) != 4:
-        print(
-            "usage: changelog-section.py <version> <changelog> <out>", file=sys.stderr
-        )
-        return 2
-    version, changelog, out = sys.argv[1], sys.argv[2], sys.argv[3]
-    lines = pathlib.Path(changelog).read_text(encoding="utf-8").splitlines()
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Cut one version's CHANGELOG section for a release body."
+    )
+    parser.add_argument("version")
+    parser.add_argument("changelog", type=pathlib.Path)
+    parser.add_argument("out", type=pathlib.Path)
+    parser.add_argument(
+        "--append",
+        type=pathlib.Path,
+        help="text placed after the section, separated by a blank line, "
+        "and counted against --max-chars",
+    )
+    parser.add_argument(
+        "--max-chars",
+        type=int,
+        help="refuse a body longer than this many characters",
+    )
+    args = parser.parse_args(argv)
+    version, changelog, out = args.version, args.changelog, args.out
+
+    lines = changelog.read_text(encoding="utf-8").splitlines()
     header = f"## [{version}]"
     starts = [i for i, line in enumerate(lines) if line.startswith(header)]
     if not starts:
@@ -56,8 +79,23 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    body = "\n".join(lines[start:end]).strip() + "\n"
-    pathlib.Path(out).write_text(body, encoding="utf-8")
+    section = "\n".join(lines[start:end]).strip()
+    appended = (
+        args.append.read_text(encoding="utf-8").strip() if args.append else ""
+    )
+    body = section + ("\n\n" + appended if appended else "") + "\n"
+    if args.max_chars is not None and len(body) > args.max_chars:
+        print(
+            f"release body for {version} is {len(body)} characters "
+            f"({len(section)} from the {header} section, {len(appended)} "
+            f"appended); the limit is {args.max_chars}, so "
+            f"{len(body) - args.max_chars} characters would be cut from the "
+            f"published page without an error. Shorten the section before "
+            f"tagging {version}.",
+            file=sys.stderr,
+        )
+        return 1
+    out.write_text(body, encoding="utf-8")
     return 0
 
 

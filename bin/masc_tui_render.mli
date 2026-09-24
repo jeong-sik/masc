@@ -84,11 +84,6 @@ val acting_pane_scroll_limit : unit -> int
 val keeper_roster_marquee_target :
   Masc_tui_types.state -> cols:int -> string option
 
-val overview_layout :
-  Masc_tui_types.state ->
-  terminal_rows:int ->
-  Masc_tui_types.attention_item list * string option *
-  Render_schedule.overview_allocation
 type lane_run_tool_counts = {
   completed : int;
   deferred : int;

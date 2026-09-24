@@ -90,12 +90,15 @@ let test_bands_order_stuck_then_working_then_idle () =
     [ "stuck-fixture-keeper"; "tui-developer"; "glossary-maniac"; "won-chik" ]
     (names team.rows);
   check (list (pair string int))
-    "paused Keepers roll into one parked line, with the work they still hold"
-    [ ("lane-smith", 0); ("parked-fixture-keeper", 1) ] team.parked;
+    "paused Keepers roll into one paused line, with the work they still hold"
+    [ ("lane-smith", 0); ("parked-fixture-keeper", 1) ] team.paused;
+  check (list (pair string int)) "no Keeper is stopped" [] team.stopped;
+  check (list (pair string int)) "every Keeper has a phase" [] team.no_phase;
   check int "need you" 2 (Team.count team Team.Needs_you);
   check int "working" 1 (Team.count team Team.Working);
   check int "idle" 1 (Team.count team Team.Idle);
-  check int "parked" 2 (Team.count team Team.Parked)
+  check int "paused" 2 (Team.count team Team.Paused);
+  check int "stopped" 0 (Team.count team Team.Stopped)
 
 let detail_of name =
   (List.find (fun (row : Team.row) -> String.equal row.keeper.okp_name name) team.rows)
@@ -145,7 +148,7 @@ let test_work_held_outside_the_fleet_is_counted () =
   check (list (pair string int)) "non-Keeper holders, most first"
     [ ("codex-mcp-client", 2); ("analyst", 1) ]
     team.other_holders;
-  check int "drawn rows: four Keepers, parked line, holders line" 6
+  check int "drawn rows: four Keepers, paused line, holders line" 6
     (Team.drawn_rows team)
 
 let test_an_unreadable_phase_stays_visible () =
@@ -293,7 +296,7 @@ let test_settle_reaches_the_rows_the_final_budget_draws () =
 (* A paused Keeper is left out of autoboot, so after a server restart it has
    no registry entry: phase null, paused true, and the status bridge still
    raises a "<name>: paused" item for it. That is the operator's own stop. *)
-let test_a_paused_keeper_without_a_phase_stays_parked () =
+let test_a_paused_keeper_without_a_phase_stays_paused () =
   let team =
     Team.project
       ~keepers:
@@ -308,8 +311,8 @@ let test_a_paused_keeper_without_a_phase_stays_parked () =
         ]
   in
   check (list string) "no Needs_you row" [] (names team.rows);
-  check (list (pair string int)) "parked, with the task it still holds"
-    [ ("lane-smith", 1) ] team.parked
+  check (list (pair string int)) "paused, with the task it still holds"
+    [ ("lane-smith", 1) ] team.paused
 
 let test_paused_wins_over_a_stuck_phase () =
   let team =
@@ -319,7 +322,7 @@ let test_paused_wins_over_a_stuck_phase () =
       ~attention:[ keeper_item "x" "x: runtime_blocked" ]
   in
   check (list string) "no row" [] (names team.rows);
-  check (list (pair string int)) "parked" [ ("x", 0) ] team.parked
+  check (list (pair string int)) "paused" [ ("x", 0) ] team.paused
 
 let info_item name summary : Types.attention_item =
   { (keeper_item name summary) with
@@ -338,8 +341,9 @@ let test_an_info_item_is_not_a_blocker () =
   in
   check (list string) "an info item alone does not make Needs_you" []
     (names phase_less.rows);
-  check (list (pair string int)) "it stays parked" [ ("stuck-fixture-keeper", 0) ]
-    phase_less.parked;
+  check (list (pair string int)) "its place is unknown"
+    [ ("stuck-fixture-keeper", 0) ] phase_less.no_phase;
+  check (list (pair string int)) "not stopped" [] phase_less.stopped;
   let failing =
     Team.project
       ~keepers:[ keeper "x" (phase "failing") ]
@@ -354,6 +358,35 @@ let test_an_info_item_is_not_a_blocker () =
       check string "the non-info item explains the row" "x: runtime_blocked"
         summary
   | _ -> fail "a failing Keeper named by a bad item is a Blocker row"
+
+(* A Keeper the operator paused, one that stopped and one with no phase are
+   three populations: the Team title counts each on its own line, so
+   "paused" never counts a stopped Keeper and "stopped" never counts one the
+   briefing said nothing about. *)
+let test_paused_stopped_and_no_phase_are_counted_apart () =
+  let team =
+    Team.project
+      ~keepers:
+        [ keeper ~paused:(Some true) "by-flag" (phase "running")
+        ; keeper "by-phase" (phase "paused")
+        ; keeper "halted" (phase "stopped")
+        ; keeper "gone" (phase "offline")
+        ; keeper "no-entry" Types.Keeper_phase_absent
+        ]
+      ~tasks:[ task "task-1" (in_progress "halted") ]
+      ~attention:[]
+  in
+  check (list string) "no Keeper row" [] (names team.rows);
+  check (list (pair string int)) "the paused line"
+    [ ("by-flag", 0); ("by-phase", 0) ] team.paused;
+  check (list (pair string int)) "the stopped line, with held work"
+    [ ("gone", 0); ("halted", 1) ] team.stopped;
+  check (list (pair string int)) "the no-phase line" [ ("no-entry", 0) ]
+    team.no_phase;
+  check int "paused count" 2 (Team.count team Team.Paused);
+  check int "stopped count" 2 (Team.count team Team.Stopped);
+  check int "no-phase count" 1 (Team.count team Team.No_phase);
+  check int "one row per name line" 3 (Team.drawn_rows team)
 
 let () =
   run "tui_overview_team"
@@ -381,10 +414,12 @@ let () =
             test_items_of_cut_rows_stay_in_the_panel
         ; test_case "settle reaches the final budget's rows" `Quick
             test_settle_reaches_the_rows_the_final_budget_draws
-        ; test_case "paused Keeper without a phase stays parked" `Quick
-            test_a_paused_keeper_without_a_phase_stays_parked
+        ; test_case "paused Keeper without a phase stays paused" `Quick
+            test_a_paused_keeper_without_a_phase_stays_paused
         ; test_case "paused wins over a stuck phase" `Quick
             test_paused_wins_over_a_stuck_phase
+        ; test_case "paused, stopped and no phase are counted apart" `Quick
+            test_paused_stopped_and_no_phase_are_counted_apart
         ; test_case "an info item is not a blocker" `Quick
             test_an_info_item_is_not_a_blocker
         ] )

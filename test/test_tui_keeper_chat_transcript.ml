@@ -1410,6 +1410,72 @@ let test_runtime_identity_separates_configured_and_observed () =
   check string "an error keeps the failing turn's runtime visible"
     "turn: observed-glm · configured: configured-claude" (identity (Some t))
 
+(* The dashboard reader keeps these counters from the same stream
+   (dashboard/src/keeper-stream.ts, KEEPER_STREAM_MESSAGE_DELTA), so a turn in
+   flight used to tell one renderer what it was spending and the other
+   nothing. *)
+let test_the_turn_reports_the_tokens_it_has_spent () =
+  let usage ?(keeper_name = "keeper.one") transcript =
+    Transcript.stream_usage_text ~keeper_name transcript
+  in
+  check (option string) "nothing is claimed without a transcript" None (usage None);
+  let t = fresh () in
+  check (option string) "a turn that reported no counters says nothing" None
+    (usage (Some t));
+  feed t
+    [ Live.Run_started
+    ; Live.Runtime_attempt_started
+        { runtime_id = Some "observed-glm"; attempt_index = Some 0 }
+    ; Live.Stream_usage
+        { input_tokens = Some 1200
+        ; output_tokens = Some 340
+        ; cache_read_input_tokens = None
+        ; cache_creation_input_tokens = None
+        }
+    ];
+  (* Counters that were not reported are absent rather than drawn as zero, and
+     the digits are written out: a reader checking this against a bill needs
+     the number, not a rounded stand-in. *)
+  check (option string) "the reported counters are drawn whole"
+    (Some "tokens: in 1200 \xc2\xb7 out 340") (usage (Some t));
+  check (option string) "another keeper's transcript reports nothing" None
+    (usage ~keeper_name:"keeper.other" (Some t));
+  (* Cumulative: a later report replaces the earlier one instead of adding. *)
+  feed t
+    [ Live.Stream_usage
+        { input_tokens = Some 1200
+        ; output_tokens = Some 900
+        ; cache_read_input_tokens = Some 4096
+        ; cache_creation_input_tokens = None
+        }
+    ];
+  check (option string) "the latest report stands for the request"
+    (Some "tokens: in 1200 \xc2\xb7 out 900 \xc2\xb7 cache read 4096") (usage (Some t));
+  (* The provider accumulates counters inside one request, and a turn that
+     calls tools asks again after every tool result. Round two therefore
+     starts from no counters: leaving round one's numbers up would call one
+     round's tokens what the turn has spent. *)
+  feed t [ Live.Stream_model_started { model = "glm-5-turbo" } ];
+  check (option string) "a second round starts from no counters" None
+    (usage (Some t));
+  feed t
+    [ Live.Stream_usage
+        { input_tokens = Some 30
+        ; output_tokens = Some 12
+        ; cache_read_input_tokens = None
+        ; cache_creation_input_tokens = None
+        }
+    ];
+  check (option string) "and reports only what that round has spent"
+    (Some "tokens: in 30 \xc2\xb7 out 12") (usage (Some t));
+  (* A new attempt counts its own tokens: carrying the old ones over would
+     bill the new runtime for what the failed one spent. *)
+  feed t
+    [ Live.Runtime_attempt_started
+        { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
+    ];
+  check (option string) "a new attempt starts from no counters" None (usage (Some t))
+
 let test_new_attempt_does_not_inherit_previous_runtime () =
   List.iter (fun attempt_index ->
     let t = fresh () in
@@ -2743,6 +2809,8 @@ let () =
             test_the_row_names_the_model_phase_between_tool_calls
         ; test_case "header separates configured and observed runtimes" `Quick
             test_runtime_identity_separates_configured_and_observed
+        ; test_case "the turn reports the tokens it has spent" `Quick
+            test_the_turn_reports_the_tokens_it_has_spent
         ; test_case "new attempt does not inherit previous runtime" `Quick
             test_new_attempt_does_not_inherit_previous_runtime
         ; test_case "drawn items carry superseded runtime id" `Quick

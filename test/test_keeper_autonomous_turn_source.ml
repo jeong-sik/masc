@@ -138,6 +138,7 @@ let write_turn_record ?(execution_ids = []) config ~absolute_turn ~turn_kind ~ra
       ; max_tokens = None
       ; enable_thinking = None
       }
+    ~turn_output_tokens:None
     ~usage:
       { input_tokens = None
       ; output_tokens = None

@@ -88,11 +88,6 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
   | Session_conflict
       (** The provider session lease is owned by another process. This remains
           terminal for automatic retry and is never inferred from message text. *)
-  | Capacity_exhausted
-      (** Typed surface for capacity-induced runtime exhaustion.
-          Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
-          through to [Other_detail message], losing auto-recovery eligibility
-          and triggering the harsher failure policy. *)
   | Other_detail of string
 
 type blocker_class =
@@ -271,8 +266,11 @@ val missing_required_sandbox_profile_error :
     declarative keeper profile omits the required [sandbox_profile]. *)
 
 val runtime_id_of_meta : keeper_meta -> string
-(** Runtime id selected for keeper dispatch. Uses the keeper profile [model]
-    when present; otherwise falls back to the configured default runtime id. *)
+(** The route a turn of this Keeper enters on: the Keeper's assignment in the
+    runtime file ([runtime.assignments]) when it has one, otherwise the
+    default route ([runtime.default]). Either may name a lane rather than a
+    single runtime. It is read when called, so a later reader can see a
+    different route than the one an earlier turn used. *)
 
 (** {1 Outcome <-> string} *)
 

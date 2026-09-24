@@ -60,13 +60,36 @@ let validate_user_input_blocks blocks =
             }))
 ;;
 
-let append_user_input agent user_blocks =
+(* A checkpoint encodes metadata as one JSON object, so a key may appear once. *)
+let validate_user_input_metadata metadata =
+  let rec first_duplicate seen = function
+    | [] -> None
+    | (key, _) :: rest ->
+      if List.exists (String.equal key) seen
+      then Some key
+      else first_duplicate (key :: seen) rest
+  in
+  match first_duplicate [] metadata with
+  | None -> Ok ()
+  | Some key ->
+    Error
+      (Error.Config
+         (Error.InvalidConfig
+            { field = "input_metadata"
+            ; detail = Printf.sprintf "user input metadata repeats key %S" key
+            }))
+;;
+
+(* The caller's metadata is stamped here, where the durable User message is
+   born, and never added or removed afterwards: replay prefixes compare the
+   whole message. *)
+let append_user_input agent ~metadata user_blocks =
   let user_msg =
     { role = User
     ; content = sanitize_user_input_blocks user_blocks
     ; name = None
     ; tool_call_id = None
-    ; metadata = []
+    ; metadata
     }
   in
   update_state agent (fun state ->

@@ -143,12 +143,13 @@ let measure (message : Agent_core.Types.message) =
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
-let carry ~measure ~continuity ~front ~turn_start ~counted_tokens messages =
+let carry ~measure ~continuity ~front ~accepted ~turn_start ~counted_tokens messages =
   let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
   let { Keeper_turn_driver_try_provider.start; outlived_seed = _ } =
     Keeper_turn_driver_try_provider.choose_range_start
       ~continuity
       ~front
+      ~accepted
       ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
       ~turn_boundary:turn_start
   in
@@ -159,6 +160,7 @@ let carry ~measure ~continuity ~front ~turn_start ~counted_tokens messages =
     | Keeper_turn_driver_try_provider.From_seed _ -> counted_tokens
     | Keeper_turn_driver_try_provider.From_snapshot _
     | Keeper_turn_driver_try_provider.From_read_position _
+    | Keeper_turn_driver_try_provider.Past_librarian_point _
     | Keeper_turn_driver_try_provider.From_turn_boundary _ -> None
   in
   let projection, transmitted_bytes =
@@ -415,7 +417,9 @@ let candidate
          candidate alike. The forecast only reads: a ledger that does not
          hold is passed over here and dropped by the turn driver's next
          composition. Where the range starts is then the driver's own
-         choice ({!Keeper_turn_driver_try_provider.choose_range_start}). *)
+         choice ({!Keeper_turn_driver_try_provider.choose_range_start}). A
+         Librarian point weighs the seed alone, never the ledger: the
+         driver reads the accepted start from the turn record too. *)
       let front, counted_tokens =
         match
           Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
@@ -429,6 +433,7 @@ let candidate
            ~measure:(Keeper_context_core.message_measurer ())
            ~continuity:(Some continuity)
            ~front
+           ~accepted:(Lazy.force seed)
            ~turn_start
            ~counted_tokens
            messages)

@@ -377,6 +377,16 @@ let test_allowed_paths_parse () =
   reject "/app/./work" "normalized";
   reject "/app/" "normalized";
   reject "//app" "normalized";
+  (* The fixture's remote_root is /srv/masc/playground: a root equal to it or
+     above it would let every keeper on the endpoint name the others' areas. *)
+  reject "/srv/masc/playground" "remote_root";
+  reject "/srv/masc" "remote_root";
+  reject "/srv" "remote_root";
+  (match
+     parse_cfg (endpoint_toml "dev" {|allowed_paths = ["/srv/masc/playground2"]|})
+   with
+   | Error errors -> fail (render_errors errors)
+   | Ok _ -> ());
   match parse_cfg (endpoint_toml "dev" "allowed_paths = \"/app\"") with
   | Ok _ -> fail "a bare string is not an array of roots"
   | Error errors ->

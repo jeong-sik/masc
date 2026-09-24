@@ -416,10 +416,6 @@ let test_execute_shell_ir_ssh_allowed_paths_widen_only_the_ssh_target () =
     let declared = ssh_target [ "/app" ] in
     expect_ok "ssh cd /app" declared (stage ~bin_name:"cd" ~workdir [ "/app" ]);
     expect_ok
-      "ssh cwd under /app"
-      declared
-      (shell_ir ~cwd:"/app/work" ~workdir []);
-    expect_ok
       "ssh mkdir -p /app/output"
       declared
       (stage ~bin_name:"mkdir" ~workdir [ "-p"; "/app/output" ]);

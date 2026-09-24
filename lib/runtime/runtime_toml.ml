@@ -1397,7 +1397,23 @@ let exec_ssh_allowed_path_error (value : string) : string option =
     else None)
 ;;
 
-let exec_ssh_allowed_paths_field ~(path : string) (tbl : Otoml.t)
+(* The roots belong to the endpoint, not to one keeper: every keeper on it
+   under [remote_root] may name them. A root that is [remote_root] or one of
+   its ancestors would therefore let each keeper name the others' areas. *)
+let exec_ssh_allowed_path_covers_remote_root ~remote_root value =
+  let rec strip_trailing_slash dir =
+    let n = String.length dir in
+    if n > 1 && Char.equal dir.[n - 1] '/'
+    then strip_trailing_slash (String.sub dir 0 (n - 1))
+    else dir
+  in
+  let remote_root = strip_trailing_slash remote_root in
+  String.equal value remote_root
+  || String.starts_with ~prefix:(value ^ "/") remote_root
+;;
+
+let exec_ssh_allowed_paths_field ~(path : string) ~(remote_root : string option)
+      (tbl : Otoml.t)
   : (string list, parse_error list) result
   =
   match
@@ -1415,7 +1431,15 @@ let exec_ssh_allowed_paths_field ~(path : string) (tbl : Otoml.t)
       List.concat
         (List.mapi
            (fun index value ->
-              match exec_ssh_allowed_path_error value with
+              let reason =
+                match exec_ssh_allowed_path_error value, remote_root with
+                | (Some _ as reason), (Some _ | None) -> reason
+                | None, Some remote_root
+                  when exec_ssh_allowed_path_covers_remote_root ~remote_root value ->
+                  Some "must not be remote_root or an ancestor of it"
+                | None, (Some _ | None) -> None
+              in
+              match reason with
               | None -> []
               | Some reason ->
                 error
@@ -1503,7 +1527,9 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
   let private_home_result =
     typed_find_or "a boolean" path tbl "private_home" Otoml.get_boolean ~default:false
   in
-  let allowed_paths_result = exec_ssh_allowed_paths_field ~path tbl in
+  let allowed_paths_result =
+    exec_ssh_allowed_paths_field ~path ~remote_root:(Result.to_option remote_root_result) tbl
+  in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let field_errors =
     errs host_result

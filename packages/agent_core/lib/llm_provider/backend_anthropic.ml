@@ -319,14 +319,14 @@ let anthropic_message_to_json (msg : message) =
    the top level.
 
    masc emits one: [config/tools/tool_execute.toml] declares [[one_of]] blocks
-   for "argv or script, not both", which the TOML reader renders as a
+   for "argv or command, not both", which the TOML reader renders as a
    top-level [oneOf] sitting next to [type]/[properties]. Measured 2026-09-09,
    every turn of every anthropic keeper lane failed on this alone (release
    v0.35.1/v0.35.2), making the lane unusable end to end.
 
    What is lost is the model's hint, not the rule. The dispatcher's
    [[params]] validation remains the authority for what a tool accepts, so a
-   model that names both script and argv is answered by the tool instead of
+   model that names both command and argv is answered by the tool instead of
    being told in advance. Same rationale as the OpenAI projection in
    backend_openai_serialize.ml, except Anthropic's restriction is
    provider-wide rather than model-specific, and the Kimi endpoint served

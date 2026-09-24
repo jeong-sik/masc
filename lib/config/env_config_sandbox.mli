@@ -134,6 +134,13 @@ module Runtime : sig
       per-keeper work volume that holds the keeper's working tree (RFC-0400);
       the image is sparse. *)
 
+  val microvm_build_volume_size : unit -> string
+  (** [MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE], default [128g] -- RFC-0399's
+      original default, set against one keeper's real 87 GB across three
+      checkouts. Ceiling of the per-keeper build volume that holds derived
+      [_build] output (RFC-0468), `Apple_container` only; the image is
+      sparse. *)
+
   val microvm_payload_path : unit -> string
   (** [MASC_KEEPER_MICROVM_PAYLOAD_PATH]. The PATH the guest's shim hands
       every payload, written into the guest's shim config as [path=].

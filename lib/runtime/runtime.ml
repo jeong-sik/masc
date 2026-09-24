@@ -1952,6 +1952,14 @@ let publish_exact_output_registry ?required_lane_ids ?excused_lane_ids ~lanes re
     Error (Runtime_exact_output_registry.publication_error_to_string error)
 ;;
 
+(* Withdrawing the registry also ends any stale state: nothing kept is
+   serving any more. Setup resume withdraws through here when it cannot
+   publish. *)
+let unpublish_exact_output_registry () =
+  Runtime_exact_output_registry.unpublish ()
+  |> Result.map (fun () -> Atomic.set exact_output_registry_stale_ref None)
+;;
+
 (* Fail-closed startup entry point: [load_list] (RFC-0206 routing validation)
    PLUS the AGENT_CORE capability-catalog gate. Strict callers use this so an operator
    runtime.toml whose model is absent from the catalog is rejected before boot —

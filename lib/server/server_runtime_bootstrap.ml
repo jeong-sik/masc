@@ -1318,7 +1318,7 @@ let resume_model_configuration () =
         in
         let withdrawn =
           if registry_published then Ok ()
-          else Runtime_exact_output_registry.unpublish ()
+          else Runtime.unpublish_exact_output_registry ()
         in
         match withdrawn with
         | Error _ -> Error "authority publication busy"

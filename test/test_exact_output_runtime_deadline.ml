@@ -105,7 +105,9 @@ let with_runtime_fixture f =
   let previous_startup = Runtime_startup_state.get () in
   let previous_catalog = Llm_provider.Model_catalog.global () in
   Fun.protect ~finally:(fun () ->
-    Registry.unpublish () |> require_ok "unpublish fixture registry";
+    (* The production withdrawal: it also clears a stale registry a case
+       left behind when it failed between a kept save and the fixing one. *)
+    Runtime.unpublish_exact_output_registry () |> require_ok "unpublish fixture registry";
     Runtime.For_testing.restore previous_runtime;
     Runtime_startup_state.set previous_startup;
     (match previous_catalog with

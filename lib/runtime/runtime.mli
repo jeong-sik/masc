@@ -512,6 +512,12 @@ val publish_exact_output_registry :
     [excused_lane_ids] (the lanes rule 3 emptied); that validation happens
     before the global publication changes. *)
 
+val unpublish_exact_output_registry :
+  unit -> (unit, Runtime_exact_output_registry.publication_error) result
+(** Withdraw the published exact-output registry and clear
+    {!exact_output_registry_stale}, since no kept registry serves any more.
+    Refuses, changing nothing, while a replacement reservation is active. *)
+
 val init_default_strict : config_path:string -> (unit, string) result
 (** Fail-closed startup entry point: {!init_default} plus the capability check
     on the materialized runtime list. Rejects ([Error]) a binding whose model

@@ -147,6 +147,8 @@ let test_load_refusals () =
        let inputs_of name = Filename.concat (Filename.concat (Filename.concat root "sandbox-images") name) "inputs" in
        expect_error "bad name" (V.Invalid_name "Base") (V.load ~source ~name:"Base");
        expect_error "leading dash" (V.Invalid_name "-x") (V.load ~source ~name:"-x");
+       expect_error "trailing dash" (V.Invalid_name "x-") (V.load ~source ~name:"x-");
+       expect_error "double dash" (V.Invalid_name "x--y") (V.load ~source ~name:"x--y");
        expect_error "no recipe"
          (V.Recipe_missing
             { path = Filename.concat (Filename.concat (Filename.concat root "sandbox-images") "nope") "Dockerfile" })

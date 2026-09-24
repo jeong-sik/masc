@@ -85,10 +85,14 @@ let press_result_json ~ok ?message (obs : Msx_lane.observation option) : Yojson.
    typed activity a Keeper's finished MSX tool produces through the event
    bridge (RFC machine-spectating-goes-through-lanes §2.2). These routes call
    [Msx_lane] or the tool handlers directly and publish no ToolCompleted, so the
-   bridge never notifies for the same operation. Only an accepted operation
-   notifies: [Msx_lane] commits a new machine only when it answers [Ok], so a
-   refusal or failure leaves nothing new to observe. Save does not move the
-   machine. Tick advances it every poll and stays silent until the RFC's §4
+   bridge never notifies for the same operation. An [Error] answer took no
+   effect (msx_lane.mli error contract), so it does not notify. An exception is
+   not an [Error]: a press or a restore/disk worker that raised may already have
+   run frames or swapped the machine, so it notifies before the failure is
+   reported, as the Keeper tool path notifies for a failed ToolCompleted. A
+   cancelled press is re-raised without notifying: cancellation belongs to the
+   caller and the notification would wait on the root domain. Save does not
+   move the machine. Tick advances it every poll and stays silent until the RFC's §4
    realtime question has an answer. *)
 let machine_changed ~config =
   Lane_addon_runtime.notify_activity ~config ~activity:Lane_addon_sources.Msx_changed
@@ -127,6 +131,11 @@ let press_response ~config ~who ~body =
     | Ok ([], _, _, _) -> error `Bad_request "keys must name at least one key"
     | Ok (keys, hold_frames, step_frames, sequence) -> (
       match Msx_lane.press ~who ~keys ~hold_frames ~step_frames ~sequence with
+      | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+      | exception failure ->
+        let bt = Printexc.get_raw_backtrace () in
+        machine_changed ~config;
+        Printexc.raise_with_backtrace failure bt
       | Ok obs ->
         machine_changed ~config;
         `OK, press_result_json ~ok:true (Some obs)
@@ -417,7 +426,12 @@ let checkpoint_response ~(config : Workspace.config) ~restore ~body =
          response
        | Error (Executor_pool_ref.Pool_unavailable | Executor_pool_ref.Caller_not_in_eio) ->
          error `Service_unavailable "MSX checkpoint worker is unavailable"
-       | Error failure ->
+       | Error (Executor_pool_ref.Work_failed _ as failure) ->
+         (* The worker ran and raised; a restore may have replaced the machine. *)
+         if restore then machine_changed ~config;
+         Log.Http.error "MSX checkpoint: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
+         error `Internal_server_error "MSX checkpoint failed; inspect the current state before retrying"
+       | Error (Executor_pool_ref.Submission_failed _ as failure) ->
          Log.Http.error "MSX checkpoint: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
          error `Internal_server_error "MSX checkpoint failed; inspect the current state before retrying")
 ;;
@@ -441,7 +455,12 @@ let handle_change_disk ~(config : Workspace.config) request reqd =
           response
         | Error (Executor_pool_ref.Pool_unavailable | Executor_pool_ref.Caller_not_in_eio) ->
           error `Service_unavailable "MSX disk worker is unavailable"
-        | Error failure ->
+        | Error (Executor_pool_ref.Work_failed _ as failure) ->
+          (* The worker ran and raised; the disk may already be swapped. *)
+          machine_changed ~config;
+          Log.Http.error "MSX disk change: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
+          error `Internal_server_error "MSX disk change failed; inspect the current state before retrying"
+        | Error (Executor_pool_ref.Submission_failed _ as failure) ->
           Log.Http.error "MSX disk change: %s" (Executor_pool_ref.strict_submit_error_to_string failure);
           error `Internal_server_error "MSX disk change failed; inspect the current state before retrying") in
     respond_json_value_with_cors ~status request reqd json)

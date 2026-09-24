@@ -2,7 +2,7 @@
 
 module Exact_output = Agent_core.Exact_output
 
-let exact_lane_id = "librarian_exact"
+let exact_lane_id = Standalone_lane.to_id Standalone_lane.Librarian
 
 let input_trace_id (inp : Keeper_librarian.input) =
   Ids.Turn_ref.trace_id inp.turn_ref
@@ -451,7 +451,7 @@ let sent_error_shows_size (error : Http_client.http_error) =
   | NetworkError
       { kind =
           ( Connection_refused | Dns_failure | Tls_error | Timeout
-          | Local_resource_exhaustion | End_of_file | Unknown )
+          | Local_resource_exhaustion | Connection_reset | End_of_file | Unknown )
       ; _
       } -> false
   | TimeoutError { phase; _ } ->

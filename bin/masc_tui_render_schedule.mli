@@ -290,13 +290,30 @@ type schedule_row_values = {
 
 val schedule_minimum_recurrence_width : int
 
+val schedule_minimum_delivery_width : int
+val schedule_maximum_delivery_width : int
+
+val schedule_delivery_width : string list -> int
+(** Cells the delivery column needs for [words]: the widest of them, never
+    under {!schedule_minimum_delivery_width} -- what the column drew before it
+    was measured -- and never over {!schedule_maximum_delivery_width}, so one
+    long word cannot take the recurrence's room. *)
+
 val schedule_recurrence_width :
-  inner_width:int -> target_width:int -> wake_width:int -> int
+  inner_width:int ->
+  target_width:int ->
+  wake_width:int ->
+  delivery_width:int ->
+  int
 (** Cells the recurrence may occupy: what the named columns leave, never below
     {!schedule_minimum_recurrence_width}. *)
 
 val schedule_header_row :
-  target_width:int -> wake_width:int -> recurrence_width:int -> string
+  target_width:int ->
+  wake_width:int ->
+  delivery_width:int ->
+  recurrence_width:int ->
+  string
 
 val schedule_row :
   ?status_style:string ->
@@ -304,6 +321,7 @@ val schedule_row :
   ?recurrence_style:string ->
   target_width:int ->
   wake_width:int ->
+  delivery_width:int ->
   recurrence_width:int ->
   schedule_row_values ->
   string
@@ -617,3 +635,14 @@ val schedule_hold_reading : due:string -> string
 (** What the Schedules screen says about a schedule the runner is holding:
     since when its held occurrence has been due, and that it waits for the
     target Keeper to take the previous wake. [due] is already formatted. *)
+
+val schedule_hold_as_of_tag : checked:string -> string
+(** The short form of a hold the runner has not read again since [checked]:
+    the time the hold was seen, in place of since when it has been due. It
+    leads {!schedule_hold_as_of_reading}. *)
+
+val schedule_hold_as_of_reading : checked:string -> string
+(** The same hold in the detail pane: that the keeper had not taken the
+    previous wake as of [checked]. Drawn instead of {!schedule_hold_reading}
+    when the runner status beside the list is not [ok], because a failed tick
+    does not re-read the hold (#38411). [checked] is already formatted. *)

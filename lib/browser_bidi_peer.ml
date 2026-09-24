@@ -130,7 +130,7 @@ let dispatch t ~verb args =
         Ok (obj ["tabId",`Int id;"url",str url;"title",title;"mimeType",str "image/png";"data",str data;"viewport",viewport])))
   | Page_interact -> on_tab (fun context _id ->
       let* fields=pre (match args with `Assoc xs->Ok xs|_->Error "invalid interaction") in
-      let* request=pre (Browser_interaction.parse (obj (("lane",str "live")::fields))) in
+      let* request=pre (Browser_interaction.parse (obj (("lane",str Browser_lane.Lane_name.(to_wire Live))::fields))) in
       (match request.action with
       | Browser_lane.Click_at {point;viewport} -> pointer t context args ~viewport ~start:point Click_pointer
       | Browser_lane.Scroll_at {point;viewport;x;y} -> pointer t context args ~viewport ~start:point (Wheel_pointer {x;y})

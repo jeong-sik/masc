@@ -285,19 +285,18 @@ let take_results limit hits =
   in
   loop limit [] hits
 
-(* A snippet is the preview a caller picks results by. Ollama and Exa send
-   page text in the field read as the snippet -- for Ollama several KB per
-   hit and up to about 1 MB (measured 2026-09-24) -- while SearXNG's own
-   snippets stayed under 1 KB. The bound sits above every snippet an engine
-   writes as one. Page text is what [includeContent] fetches, capped by
-   [contentMaxChars]. *)
+(* A snippet is the preview a caller picks results by. Ollama sends page
+   text in the field read as the snippet: 8,257 bytes at the median and up
+   to 988,998 across 1,865 hits, while SearXNG's own snippets never passed
+   812 bytes across 316 (measured 2026-09-24). The bound counts bytes, marker
+   included, so a CJK snippet is cut at about a third as many characters.
+   Page text is what [includeContent] fetches, capped by [contentMaxChars]. *)
 let snippet_max_bytes = 1024
 let snippet_cut_marker = "…"
 
 let bound_snippet snippet =
-  if String.length snippet <= snippet_max_bytes
-  then snippet
-  else String_util.utf8_prefix ~max_bytes:snippet_max_bytes snippet ^ snippet_cut_marker
+  String_util.utf8_safe ~max_bytes:snippet_max_bytes ~suffix:snippet_cut_marker snippet
+  |> String_util.to_string
 
 let normalize_hits ~source tuples =
   tuples

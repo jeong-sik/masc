@@ -267,7 +267,11 @@ let agent_core_tool_of_descriptor (d : Keeper_tool_descriptor.t) : Agent_core.To
     let start_time = Unix.gettimeofday () in
     match d.Keeper_tool_descriptor.internal_name with
     | "masc_web_search" ->
+      (* The descriptor offers [includeContent]; the other two entry points
+         honour it through the same enrichment, so a panelist does too. *)
       Tool_misc_web_search.handle ~tool_name:d.internal_name ~start_time args
+      |> Tool_misc_web_enrichment.enrich_result_if_requested
+           ~tool_name:d.internal_name ~start_time args
     | "masc_web_fetch" ->
       Tool_misc_web_fetch.handle ~tool_name:d.internal_name ~start_time args
     | _ ->

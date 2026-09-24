@@ -551,6 +551,22 @@ exit 0
        ; observed_syscalls = []
        })
 
+let fake_ssh_read_status_script code =
+  Printf.sprintf
+    {|#!/bin/sh
+cat >/dev/null 2>/dev/null &
+printf '%%s' '%s' >&2
+exit 0
+|}
+    (Exec_ssh_protocol.render_trailer
+       { v = Exec_ssh_protocol.newest
+       ; exit = Some code
+       ; signal = None
+       ; timed_out = false
+       ; shim_error = None
+       ; observed_syscalls = []
+       })
+
 let test_remote_ssh_read_skips_host_existence_preflight () =
   let base, config, meta = setup_config "remote-reader" in
   let meta =
@@ -1252,6 +1268,41 @@ exit 0
        ; shim_error = None
        ; observed_syscalls = []
        })
+
+(* The remote shim's typed exit is carried in its trailer, not in the host
+   ssh process status. Exercise that wire boundary as well as the local sh
+   script, including an unrelated command failure that must stay runtime. *)
+let test_remote_read_classifies_only_the_declared_exit_codes () =
+  let base, config, meta =
+    remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> [ "/app" ])
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
+  let read ~start_line code =
+    with_fake_ssh (fake_ssh_read_status_script code) @@ fun () ->
+    Keeper_sandbox_read_backend.read_file ~config ~meta
+      ~host_path:"/app/read-target" ~start_line ~max_bytes:4096
+      ~timeout_sec:2.0 ()
+  in
+  List.iter
+    (fun start_line ->
+      (match read ~start_line Keeper_sandbox_read_backend.read_window_missing_exit with
+       | Error (Keeper_sandbox_read_backend.Missing_file detail) ->
+         Alcotest.(check bool) "missing path stays typed" true
+           (String_util.contains_substring detail "path_not_found")
+       | Error error -> Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
+       | Ok _ -> Alcotest.fail "missing path read as success");
+      (match read ~start_line Keeper_sandbox_read_backend.read_window_not_a_file_exit with
+       | Error (Keeper_sandbox_read_backend.Not_a_file detail) ->
+         Alcotest.(check bool) "directory stays typed" true
+           (String_util.contains_substring detail "path_is_not_a_file")
+       | Error error -> Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
+       | Ok _ -> Alcotest.fail "directory read as success");
+      match read ~start_line 1 with
+      | Error (Keeper_sandbox_read_backend.Read_failed _) -> ()
+      | Error error -> Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
+      | Ok _ -> Alcotest.fail "unexpected command failure read as success")
+    [ 1; 10 ]
 
 let test_declared_endpoint_root_maps_as_itself () =
   let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> [ "/app" ]) in
@@ -2950,6 +3001,8 @@ let run_tests ~clock () =
             test_read_directory_names_a_real_listing_tool;
           Alcotest.test_case "remote read skips host existence preflight" `Quick
             test_remote_ssh_read_skips_host_existence_preflight;
+          Alcotest.test_case "remote read classifies only declared exit codes" `Quick
+            test_remote_read_classifies_only_the_declared_exit_codes;
           Alcotest.test_case "declared endpoint root maps as itself" `Quick
             test_declared_endpoint_root_maps_as_itself;
           Alcotest.test_case "undeclared endpoint root stays refused" `Quick

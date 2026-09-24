@@ -2,7 +2,7 @@
 title: "기계 화면은 Lane 라우트 하나로 보고, 사람의 조작도 알림을 낸다"
 status: Draft
 created: 2026-09-24
-updated: 2026-09-24
+updated: 2026-09-25
 author: vincent + claude
 supersedes: []
 superseded_by: null
@@ -93,5 +93,5 @@ implementation_prs: ["#38733", "#38730", "#38815"]
 | 3a (#38815) | TUI 가 `live` 로 그린다. TUI 의 `/api/v1/msx/frame` 호출을 지운다 | PTY: DOS 도구 한 번 → 그림이 바뀐다. 안 바뀌면 "그대로"만 온다. `rg '/api/v1/(msx|dos)/frame' bin` 결과 0 |
 | 3b (후속) | 서버의 옛 `/api/v1/msx/frame` 라우트와 공개 읽기 허용 항목을 지운다 | `rg '/api/v1/(msx|dos)/frame' bin lib` 결과 0. 라우트 테스트도 `live` 계약으로 옮긴다 |
 
-#38439 는 Draft 로 둔다. TUI 그리기(`masc_tui_machine_view`)는 전역 상태 모듈이므로 3 단계에서
-그 PR 에서 가져올 부분을 다시 정한다.
+#38439 는 전용 DOS frame 라우트 방식으로 작성됐고 2026-09-24 병합 없이 닫혔다.
+TUI 의 DOS·MSX 관전은 #38733 의 `live` 계약 위에 쌓인 #38815 에서 진행한다.

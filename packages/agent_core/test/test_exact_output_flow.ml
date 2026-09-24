@@ -976,6 +976,49 @@ let test_missing_output_advances_to_frozen_successor () =
   | Error _ -> fail "missing output did not advance to its frozen successor"
 ;;
 
+(* The first candidate sends, returns no output and advances; the successor's
+   bind fails before it sends. The error answers for the invocation that ended
+   the flow, which sent nothing. The evidence answers for the walk, which did:
+   a caller that reports what the walk sent reads the second (#38450). *)
+let test_walk_dispatch_counts_a_candidate_that_advanced () =
+  let first_response = `OK, missing_output_response in
+  let result, posts =
+    with_server ~first_response ~response:(openai_response {|{"name":"unused"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"sent-first" ~base_url ~native:false ~json:false ()
+      ; catalog_entry ~id:"bind-refused" ~base_url ~native:false ~json:false ()
+      ]
+    @@ fun snapshot ->
+    execute_with_accepting_test_validator
+      ~clock
+      ~net
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~before_dispatch:(fun candidate ->
+        if String.equal (candidate_id candidate) "bind-refused"
+        then Error "bind-not-durable"
+        else Ok ())
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      (start_flow (frozen_flow snapshot [ "sent-first"; "bind-refused" ]))
+  in
+  check int "only the first candidate sent" 1 posts;
+  match result with
+  | Error (EO.Flow_before_dispatch_callback_failed { candidate; evidence; _ } as error) ->
+    check string "the flow ended on the successor" "bind-refused" (candidate_id candidate);
+    check
+      bool
+      "the invocation that ended the flow sent nothing"
+      true
+      (EO.flow_execution_error_generation_dispatch error = EO.No_generation_dispatch);
+    check
+      bool
+      "the walk sent from its first candidate"
+      true
+      (EO.flow_evidence_generation_dispatch evidence = EO.Generation_dispatch_started)
+  | Ok _ | Error _ -> fail "a refused successor bind did not end the flow"
+;;
+
 let test_provider_schema_still_requires_native_capability () =
   let requirement =
     EO.make_output_requirement ~schema ~minimum_guarantee:EO.Provider_schema
@@ -3391,6 +3434,11 @@ let test_callback_failures_are_terminal () =
        "before-dispatch callback failure starts no outward dispatch"
        true
        (EO.flow_execution_error_generation_dispatch error = EO.No_generation_dispatch);
+     check
+       bool
+       "a walk whose only bind failed sent nothing"
+       true
+       (EO.flow_evidence_generation_dispatch evidence = EO.No_generation_dispatch);
      check string "failed bind candidate" "bind-a" (candidate_id candidate);
      check
        bool
@@ -3932,6 +3980,11 @@ let test_postdispatch_and_structural_outcomes_never_advance () =
         true
         (EO.flow_execution_error_generation_dispatch error
          = EO.Generation_dispatch_started);
+      check
+        bool
+        (label ^ " walk evidence counts the attempt that ended it")
+        true
+        (EO.flow_evidence_generation_dispatch evidence = EO.Generation_dispatch_started);
       check string (label ^ " terminal candidate") (label ^ "-a") (candidate_id candidate);
       check
         int
@@ -4520,6 +4573,10 @@ let () =
             "missing output advances to frozen successor"
             `Quick
             test_missing_output_advances_to_frozen_successor
+        ; test_case
+            "walk dispatch counts a candidate that advanced"
+            `Quick
+            test_walk_dispatch_counts_a_candidate_that_advanced
         ; test_case
             "provider schema still requires native capability"
             `Quick

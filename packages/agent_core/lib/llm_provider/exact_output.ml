@@ -588,6 +588,16 @@ let flow_execution_error_generation_dispatch = function
     generation_dispatch_fact_of_receipt cause.receipt
 ;;
 
+let flow_evidence_generation_dispatch (evidence : flow_evidence) =
+  if
+    List.exists
+      (fun (attempt : flow_attempt_snapshot) ->
+         Generation_receipt.snapshot_generation_dispatched attempt.receipt)
+      evidence.attempts
+  then Generation_dispatch_started
+  else No_generation_dispatch
+;;
+
 let receipt_http_status = Generation_receipt.http_status
 let receipt_provider_trace = Generation_receipt.provider_trace
 let provider_trace_fingerprint = Trace.fingerprint

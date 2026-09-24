@@ -10598,15 +10598,11 @@ let apply_overview_goals_load state = function
 
 (* A failed read replaces the last good one, as the goals reading does: a cost
    drawn after the read that summed it stopped arriving would be a sum nobody
-   observed this refresh. A reply that lands after [/team-cost] hid the cost
-   was asked for before; kept, it would come back as a sum nobody observed
-   since when the cost is shown again, so it is dropped and the reading
-   stays unread. *)
-let apply_overview_cost_load state result =
-  if state.overview_cost_visible then
-    match result with
-    | Ok costs -> state.overview_cost <- Cost_read costs
-    | Error err -> state.overview_cost <- Cost_failed err
+   observed this refresh. A reply that lands while the cost is hidden is never
+   drawn, and showing it again resets the reading (the [/team-cost] toggle). *)
+let apply_overview_cost_load state = function
+  | Ok costs -> state.overview_cost <- Cost_read costs
+  | Error err -> state.overview_cost <- Cost_failed err
 
 let apply_keeper_roster_load state = function
   | Ok roster ->

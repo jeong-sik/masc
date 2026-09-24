@@ -275,10 +275,10 @@ let viewport_y (viewport : Browser_lane.Pointer.viewport) (point : Browser_lane.
    checks the page is the one observed, the browser takes the input, and the
    receipt reads where the page is afterwards. *)
 let pointer ~call ~tab_id ~page_id ~args ~name input =
-  let* before = evaluate ~send:(send_guard call) ~args page_id Browser_interaction.pointer_guard_script in
+  let* before = evaluate ~runtime:Scene_runtime ~send:(send_guard call) ~args page_id Browser_interaction.pointer_guard_script in
   let* url_before = string_field ~method_:"page.evaluate" "url" before in
   let* _ = send call input in
-  let* after = evaluate ~send:(send_after_effect call) page_id Browser_interaction.pointer_receipt_script in
+  let* after = evaluate ~runtime:No_runtime ~send:(send_after_effect call) page_id Browser_interaction.pointer_receipt_script in
   match after with
   | `Assoc fields ->
     let* _ = string_field ~method_:"page.evaluate" "url" after in
@@ -307,7 +307,7 @@ let interact ~tabs ~call ~tab_id ~expected_url action =
          ; to_x = viewport_x viewport to_; to_y = viewport_y viewport to_ })
   | Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Scroll _ | Browser_lane.Follow_link _
   | Browser_lane.Click_node _ | Browser_lane.Fill_node _ ->
-    let* receipt = evaluate ~send:(send call) ~args page_id Browser_interaction.script in
+    let* receipt = evaluate ~runtime:Scene_runtime ~send:(send call) ~args page_id Browser_interaction.script in
     interaction_receipt ~tab_id receipt
 ;;
 

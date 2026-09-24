@@ -254,7 +254,7 @@ let test_interactions () =
   (match fake.sent with
    | [ Wire.Page_evaluate { expression; _ } ] ->
      check string "the automation lane's interaction script"
-       (Executor.evaluate_expression ~body:Masc.Browser_interaction.script
+       (Executor.evaluate_expression ~runtime:Executor.Scene_runtime ~body:Masc.Browser_interaction.script
           ~args:(Lane.interaction_args ~tab_id:0 ~expected_url click))
        expression
    | _ -> fail "one page.evaluate");

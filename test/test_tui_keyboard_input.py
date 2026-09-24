@@ -14367,8 +14367,6 @@ def pull_request_row(number: int, keeper: str | None, mergeable: str) -> dict[st
     return {
         "repo_slug": "jeong-sik/masc",
         "number": number,
-        "title": f"pull {number}",
-        "head_branch": f"fix/{number}",
         "draft": False,
         "checks": "passing",
         "review": "waiting",

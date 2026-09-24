@@ -14,8 +14,6 @@ let pull ?(checks = Server.Checks_passing) ?(review = Server.Review_waiting)
     number : Server.pull_request =
   { repo_slug = "jeong-sik/masc"
   ; number
-  ; title = Printf.sprintf "pull %d" number
-  ; head_branch = Printf.sprintf "fix/%d" number
   ; draft
   ; checks
   ; review
@@ -113,35 +111,6 @@ let test_every_server_state_decodes () =
         [ "limited"; "hidden"; "refused"; "policy"; "broken"; "graphql"; "wire"; "shape" ]
   | _ -> fail "a ready reader decodes as ready"
 
-(* Nothing on the Overview draws a PR's title or head branch, so a row the
-   server sends without them still counts as open. The server's own JSON has
-   both keys; this removes them from every pull row. *)
-let test_pull_without_title_or_branch_decodes () =
-  let rec drop_keys = function
-    | `Assoc fields ->
-        `Assoc
-          (List.filter_map
-             (fun (key, value) ->
-               if List.mem key [ "title"; "head_branch" ] then None
-               else Some (key, drop_keys value))
-             fields)
-    | `List items -> `List (List.map drop_keys items)
-    | other -> other
-  in
-  let json = drop_keys (Server.snapshot_to_yojson every_state) in
-  match Pulls.decode_reading json with
-  | Error err -> failf "a reading without titles did not decode: %s" err
-  | Ok (Overview_pulls_read { repositories; _ }) -> (
-      match
-        (List.find (fun (row : repository_pulls_row) -> String.equal row.rp_repository "masc")
-           repositories).rp_state
-      with
-      | Repo_pulls_read { pulls; undecodable } ->
-          check int "every pull decodes without a title" 8 (List.length pulls);
-          check int "only the server's undecodable count remains" 1 undecodable
-      | _ -> fail "a read repository decodes as read")
-  | Ok _ -> fail "a ready reader decodes as ready"
-
 let test_every_reader_state_decodes () =
   List.iter
     (fun (reader, label) ->
@@ -234,8 +203,6 @@ let () =
   run "tui_repository_pulls"
     [ ( "server JSON"
       , [ test_case "every repository state decodes" `Quick test_every_server_state_decodes
-        ; test_case "a pull without title or branch decodes" `Quick
-            test_pull_without_title_or_branch_decodes
         ; test_case "every reader state decodes" `Quick test_every_reader_state_decodes
         ; test_case "lines say what needs a person" `Quick test_lines_say_what_needs_a_person
         ; test_case "keeper list states" `Quick test_keeper_list_states

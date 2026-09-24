@@ -52,8 +52,6 @@ type merge_state = Merge_clean | Merge_conflicting | Merge_unknown
 type pull_request = {
   repo_slug : string;         (* owner/repo *)
   number : int;
-  title : string;
-  head_branch : string;
   draft : bool;
   checks : check_state;       (* PR head 커밋(commits(last:1))의 statusCheckRollup.state 를 디코드 경계에서 한 번 변환 *)
   review : review_state;      (* reviewDecision 을 같은 방식으로 *)

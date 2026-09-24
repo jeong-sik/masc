@@ -40,8 +40,6 @@ type mergeable =
 type pull_request =
   { repo_slug : string  (** [owner/repo] *)
   ; number : int
-  ; title : string
-  ; head_branch : string
   ; draft : bool
   ; checks : check_state
   ; review : review_state

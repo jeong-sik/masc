@@ -267,7 +267,17 @@ module Deferred_lane_slot = struct
          restored.failed_runtime_id
          restored.next_runtime_id;
        slot.hint := Some restored
-     | Error error -> log_store_error slot ~action:"restore" error);
+     | Error error ->
+       (* The file is kept as evidence, so this warning repeats on every
+          start until an operator acts on it or the next deferral replaces
+          it; name that action in the line itself. *)
+       Log.Keeper.warn
+         ~keeper_name
+         "deferred runtime lane restore failed at %s: %s; this start walks \
+          the assignment from its head. Delete the file to start without a \
+          hint; the next deferred lane replaces it otherwise"
+         (Store.path_for ~keepers_dir ~keeper_name)
+         (Store.error_to_string error));
     slot
   ;;
 

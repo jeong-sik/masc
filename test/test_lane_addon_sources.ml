@@ -219,7 +219,7 @@ let test_dos_capture_retains_the_machines_history () = with_store (fun dir store
   let ledger_dir = Filename.concat dir "dos" in
   let load () = ignore (dos (Dos_lane.load ~who:"keeper-A" ~ledger_dir
     ~saves_dir:(Filename.concat dir "saves") ~program_name:"HELLO.COM" ~program_bytes:hello
-    ~files:[] ~announce:ignore)) in
+    ~files:[] ~mouse:false ~announce:ignore)) in
   load ();
   Fun.protect ~finally:(fun () -> ignore (Dos_lane.eject ~who:"keeper-A" ~announce:ignore ())) (fun () ->
     let capture () =
@@ -343,7 +343,7 @@ let dos_counter () = match Dos_lane.loaded_changes () with
   | Some counter -> counter | None -> fail "no DOS machine loaded"
 let load_dos dir name bytes = Dos_lane.load ~who:"keeper-A" ~ledger_dir:(Filename.concat dir "dos")
   ~saves_dir:(Filename.concat dir "saves") ~program_name:name ~program_bytes:bytes
-  ~files:[] ~announce:ignore
+  ~files:[] ~mouse:false ~announce:ignore
 (* The DOS machine is process-global: every live DOS test starts from none and
    ejects in [finally], whatever ran before. An eject's result only says
    whether one was loaded. *)

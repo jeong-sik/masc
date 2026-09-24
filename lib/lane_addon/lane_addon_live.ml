@@ -35,7 +35,7 @@ let dos_capture () =
       time = Dos_steps c.observation.steps; incarnation = c.incarnation; counter = c.changes })
   | Error Dos_lane.No_machine -> Ok Not_loaded
   | Error (Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
-          | Dos_lane.Guest_fault _ as e) ->
+          | Dos_lane.Guest_fault _ | Dos_lane.No_mouse as e) ->
       Error (Capture_failed (Dos_lane.error_to_string e))
 
 let machine_capture : capture = fun reader ~since ->

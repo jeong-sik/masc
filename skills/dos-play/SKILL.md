@@ -65,4 +65,5 @@ on the call that wrote it; the call itself still happened.
 
 `masc_dos_load` with no `program` lists the inventory. A game directory with
 several programs needs `boot` (for example `KOEI.COM`). Loading replaces the
-machine: never load over a game someone else is playing.
+machine: never load over a game someone else is playing. A game played with
+the mouse needs `mouse=true` at load; without it `masc_dos_click` is refused.

@@ -6,7 +6,8 @@ The mouse is state: cursor and buttons stay until the next call. buttons 1 \
 or 2 clicks -- down, run, up, run, in one call, so the button is never left \
 held; 0 only moves. x and y are pixels inside the frame size masc_dos_screen \
 reports. A game that polls the mouse instead of asking for keys returns \
-settled false with the budget spent; that is normal. Recorded in the ledger."""
+settled false with the budget spent; that is normal. Recorded in the ledger. \
+A machine loaded without mouse=true has no mouse, and the click is refused."""
 additional_properties = false
 
 defer_loading = true

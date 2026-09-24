@@ -20,3 +20,9 @@ description = "Name in the programs inventory. Omit to list what is there."
 name = "boot"
 type = "string"
 description = "Executable inside a game directory, e.g. KOEI.COM. A file name, not a path."
+
+[[params]]
+name = "mouse"
+type = "boolean"
+description = "Attach a mouse the program can find. Default false: no mouse, and masc_dos_click is refused."
+default = false

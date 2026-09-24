@@ -16253,6 +16253,10 @@ let read_terminal_probe reader ~palette_requested =
 let bracketed_paste_enable = "\x1b[?2004h"
 let bracketed_paste_disable = "\x1b[?2004l"
 
+let enable_bracketed_paste () =
+  output_string stdout bracketed_paste_enable;
+  flush stdout
+
 (* Raw mode, and the keys the record cannot ask for.
 
    [Unix.tcsetattr] writes a C-side termios buffer that its last [tcgetattr]
@@ -16527,6 +16531,7 @@ let main
            frame lands on top of whatever the user did meanwhile. *)
         Frame_presenter.setup frame_presenter ~write:(output_string stdout)
           ~flush:(fun () -> flush stdout);
+        enable_bracketed_paste ();
         request_full_repaint 0)
       (fun () -> Unix.kill (Unix.getpid ()) Sys.sigtstp)
   in
@@ -16606,7 +16611,7 @@ let main
      background rather than only its ink. *)
   sync_theme_page state;
   output_string stdout mouse_tracking_enable;
-  output_string stdout bracketed_paste_enable;
+  enable_bracketed_paste ();
   (* Only terminals with an extended profile receive this opt-in. Apple
      Terminal does not implement the protocol; keeping an unsupported control
      sequence off its parser also keeps its crash-sensitive render path small. *)
@@ -16640,6 +16645,7 @@ let main
      originally carried this definition. *)
   let reenter_terminal () =
     apply_raw_mode new_term;
+    enable_bracketed_paste ();
     request_full_repaint 0
   in
   let reject_gate_approval (pending : Tui_decode.gate_pending) =

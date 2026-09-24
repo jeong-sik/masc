@@ -2,7 +2,9 @@
 import json
 import os
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 import test_tui_keyboard_input as h
 
@@ -58,6 +60,35 @@ def run(executable: str) -> None:
         },
         http_requests=requests,
     )
+
+    def editor_interact(process, master_fd, _slave_fd, output, _base_path):
+        h.wait_for_output(process, master_fd, output, h.BRACKETED_PASTE_ON,
+                          start=0, timeout=5.0)
+        h.palette_go(process, master_fd, output, b"go board", b"MASC Board")
+        h.send_and_wait(process, master_fd, output, b"w", b"MASC Board")
+        start = len(output)
+        h.send_and_wait(process, master_fd, output, b"\x05",
+                        b"Board draft updated from editor")
+        if h.BRACKETED_PASTE_ON not in output[start:]:
+            raise AssertionError("bracketed paste was not reenabled after $EDITOR")
+        h.send_and_wait(process, master_fd, output, b"\x1b", b"d:discard")
+        h.send_and_wait(process, master_fd, output, b"d", b"MASC Board")
+        os.write(master_fd, b"q")
+
+    with tempfile.TemporaryDirectory(prefix="masc-tui-paste-editor-") as directory:
+        editor = Path(directory, "editor.sh")
+        editor.write_text(
+            "#!/bin/sh\n"
+            "printf '%s' 'draft from editor' > \"$1\"\n"
+            "printf '\\033[?2004l'\n"
+        )
+        editor.chmod(0o755)
+        h.run_terminal_scenario(
+            executable,
+            description="Bracketed paste is reenabled after an editor returns",
+            interact=editor_interact,
+            extra_env={"EDITOR": str(editor)},
+        )
 
 
 if __name__ == "__main__":

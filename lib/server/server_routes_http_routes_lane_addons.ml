@@ -184,32 +184,28 @@ type live_answer = Answered of Yojson.Safe.t | Needs_locked_read
 
 (* Both lanes publish the same three states. A running machine cannot answer
    unchanged from a mark it published before finishing the current run. *)
-type screen_publication = No_screen | Stable of since | Running
+type screen_publication = since Machine_live_publication.t
 
 let answer_from_publication source ~since = function
-  | No_screen -> Answered (no_machine_json source)
-  | Stable { count; incarnation } ->
+  | Machine_live_publication.No_screen -> Answered (no_machine_json source)
+  | Machine_live_publication.Stable { count; incarnation } ->
       (match since with
        | Some seen when seen.count = count && String.equal seen.incarnation incarnation ->
            Answered (`Assoc (marked_json source "unchanged" ~count ~incarnation))
        | Some _ | None -> Needs_locked_read)
-  | Running -> Needs_locked_read
-
-let msx_publication = function
-  | Msx_lane.No_screen -> No_screen
-  | Msx_lane.Stable { count; incarnation } -> Stable { count; incarnation }
-  | Msx_lane.Running _ -> Running
-
-let dos_publication = function
-  | Dos_lane.No_screen -> No_screen
-  | Dos_lane.Stable { count; incarnation } -> Stable { count; incarnation }
-  | Dos_lane.Running _ -> Running
+  | Machine_live_publication.Running _ -> Needs_locked_read
 
 let live_from_published_mark source ~since =
   let publication =
     match source with
-    | Msx_screen -> msx_publication (Msx_lane.current_publication ())
-    | Dos_screen -> dos_publication (Dos_lane.current_publication ())
+    | Msx_screen ->
+        Machine_live_publication.map
+          (fun { Msx_lane.count; incarnation } -> { count; incarnation })
+          (Msx_lane.current_publication ())
+    | Dos_screen ->
+        Machine_live_publication.map
+          (fun { Dos_lane.count; incarnation } -> { count; incarnation })
+          (Dos_lane.current_publication ())
   in
   answer_from_publication source ~since publication
 

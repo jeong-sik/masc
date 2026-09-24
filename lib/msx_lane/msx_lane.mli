@@ -252,10 +252,11 @@ type change_mark = {
   incarnation : string;  (** as in {!identified_capture} *)
 }
 
-type published_state =
+type 'mark publication = 'mark Machine_live_publication.t =
   | No_screen
-  | Stable of change_mark
-  | Running of change_mark
+  | Stable of 'mark
+  | Running of 'mark
+type published_state = change_mark publication
 
 val current_publication : unit -> published_state
 (** An atomic, lock-free read. [Running] is published before frames mutate

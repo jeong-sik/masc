@@ -33,7 +33,7 @@ type live_answer =
       (** The mark moved, no [since] was given, or the machine is running:
           the frame has to be copied under the machine lock. *)
 
-type screen_publication = No_screen | Stable of since | Running
+type screen_publication = since Machine_live_publication.t
 val answer_from_publication :
   screen_source -> since:since option -> screen_publication -> live_answer
 (** Both machine kinds use the same rule: [Running] always needs a locked read,

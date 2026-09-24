@@ -534,15 +534,15 @@ let test_live_route () =
           let since =
             "&since=" ^ string_of_int (int_member "change_count" json)
             ^ "&incarnation=" ^ string_member "incarnation" json in
-          let dos_since =
-            Some
-              { Routes.count = int_member "change_count" json
-              ; incarnation = string_member "incarnation" json } in
+          let current_mark =
+            { Routes.count = int_member "change_count" json
+            ; incarnation = string_member "incarnation" json } in
+          let dos_since = Some current_mark in
           List.iter
             (fun source ->
               check bool "a running machine never answers unchanged from its old mark" true
                 (match Routes.answer_from_publication source ~since:dos_since
-                         Routes.Running with
+                         (Machine_live_publication.Running current_mark) with
                  | Routes.Needs_locked_read -> true
                  | Routes.Answered _ -> false))
             [Routes.Msx_screen; Routes.Dos_screen];

@@ -5,4 +5,4 @@
 (test
  (name test_lane_addon_live_route)
  (modules test_lane_addon_live_route)
- (libraries masc_test_deps alcotest yojson base64 bigstringaf unix eio eio_main masc.masc_core masc.msx_lane masc.dos_lane masc.server))
+ (libraries masc_test_deps alcotest yojson base64 bigstringaf unix eio eio_main masc.masc_core masc.machine_live_publication masc.msx_lane masc.dos_lane masc.server))

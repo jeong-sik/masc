@@ -61,7 +61,11 @@ let effective_account_home = function
   | None ->
     (match Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
      | Some path when path <> "" ->
-       Result.to_option (Runtime_account_home.of_inherited path)
+       (match Runtime_account_home.of_inherited path with
+        | Ok selected -> Some selected
+        (* Keep an invalid inherited choice visible to validation. Falling
+           back to HOME here would silently switch login identities. *)
+        | Error _ -> Some path)
      | Some _ | None ->
        Option.map
          (fun home -> Filename.concat home ".claude")

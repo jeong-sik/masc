@@ -11,4 +11,4 @@
   %{workspace_root}/config/sandbox-images.toml
   (source_tree %{workspace_root}/sandbox-images))
  (action (run %{test}))
- (libraries alcotest masc masc.fs_compat masc.masc_process unix))
+ (libraries alcotest masc masc.keeper_sandbox_image masc.fs_compat masc.masc_process unix))

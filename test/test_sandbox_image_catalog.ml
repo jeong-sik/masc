@@ -126,6 +126,20 @@ let test_names_are_words_joined_by_single_dashes () =
     [ "Base"; "-x"; "a-"; "a--b" ];
   check int "a-b is a name" 1 (List.length (entries (parsed "[images.a-b]\n")))
 
+(* The recipe builder and the catalog must agree before an operator builds an
+   image: a buildable directory name must also be promotable. *)
+let test_recipe_and_catalog_names_agree () =
+  List.iter
+    (fun name ->
+       let catalog_accepts =
+         match parse (Printf.sprintf "[images.%S]\n" name) with
+         | Ok _ -> true
+         | Error (Invalid_name rejected) when String.equal rejected name -> false
+         | Error error -> fail (name ^ ": " ^ parse_error_to_string error)
+       in
+       check bool name (Keeper_sandbox_image_version.valid_name name) catalog_accepts)
+    [ "base"; "a-b"; "1-a"; "a0"; "Base"; "-x"; "a-"; "a--b"; "a_b"; "a/b" ]
+
 (* A reference goes into a runtime's argv. Without a tag it would mean
    "latest", with a leading '-' it would read as a flag, and a digest belongs
    in the digest field. *)
@@ -572,6 +586,8 @@ let () =
       , [ test_case "malformed catalogs are refused" `Quick test_malformed_catalogs_are_refused
         ; test_case "names are words joined by single dashes" `Quick
             test_names_are_words_joined_by_single_dashes
+        ; test_case "recipe and catalog names agree" `Quick
+            test_recipe_and_catalog_names_agree
         ; test_case "references are repository and tag" `Quick
             test_references_are_repository_and_tag
         ; test_case "the shipped catalog promotes nothing" `Quick

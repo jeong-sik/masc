@@ -95,7 +95,7 @@ let observation_detail_with ~current observation =
   | Unavailable detail ->
       observation_name observation ^ ": " ^ Terminal_text.single_line detail
   | Stale detail ->
-      observation_name observation ^ ": previous reading, refresh failed: "
+      observation_name observation ^ ": previous reading; "
       ^ Terminal_text.single_line detail
 
 let observation_detail observation =

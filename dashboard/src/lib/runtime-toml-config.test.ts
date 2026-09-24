@@ -383,14 +383,22 @@ sangsu = "runpod_mtp.qwen"
   })
 
   it('deletes quoted provider and credential tables with their binding', () => {
-    const quoted = sourceText.replaceAll('providers.runpod_mtp', 'providers."runpod_mtp"')
-    const next = cascadeDeleteProvider(quoted, 'runpod_mtp')
+    for (const quote of ['"', "'"]) {
+      const quoted = sourceText
+        .replaceAll('providers.runpod_mtp', `providers.${quote}runpod_mtp${quote}`)
+        .replace('[runpod_mtp.qwen]', `[${quote}runpod_mtp${quote}.${quote}qwen${quote}]`)
+        + '\n[runtime.assignments]\nsangsu = "runpod_mtp.qwen"\n'
+      expect(parseRuntimeTomlEnvironment(quoted).bindings.map(binding => binding.id))
+        .toEqual(['runpod_mtp.qwen'])
 
-    expect(parseRuntimeTomlEnvironment(next).providers).toEqual([])
-    expect(next).not.toContain('[providers."runpod_mtp"]')
-    expect(next).not.toContain('[providers."runpod_mtp".credentials]')
-    expect(next).not.toContain('[runpod_mtp.qwen]')
-    expect(next).not.toContain('default = "runpod_mtp.qwen"')
+      const next = cascadeDeleteProvider(quoted, 'runpod_mtp')
+      expect(parseRuntimeTomlEnvironment(next).providers).toEqual([])
+      expect(next).not.toContain(`[providers.${quote}runpod_mtp${quote}]`)
+      expect(next).not.toContain(`[providers.${quote}runpod_mtp${quote}.credentials]`)
+      expect(next).not.toContain(`[${quote}runpod_mtp${quote}.${quote}qwen${quote}]`)
+      expect(next).not.toContain('default = "runpod_mtp.qwen"')
+      expect(next).not.toContain('sangsu = "runpod_mtp.qwen"')
+    }
   })
 
   it('retargets default and clears the dependent route when deleting a provider with a fallback binding', () => {

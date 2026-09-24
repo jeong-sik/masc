@@ -281,12 +281,26 @@ function modelIds(document: TomlDocument): string[] {
     .filter((id): id is string => Boolean(id))
 }
 
+// Runtime ids use the logical TOML keys, not the source spelling of a table
+// header. A provider/model binding may be written as ["provider".'model'].
+const BINDING_PROVIDER_KEY = '(?:"[A-Za-z0-9_-]+"|\'[A-Za-z0-9_-]+\'|[A-Za-z0-9_-]+)'
+const BINDING_MODEL_KEY = '(?:"[A-Za-z0-9._-]+"|\'[A-Za-z0-9._-]+\'|[A-Za-z0-9_-]+)'
+const BINDING_HEADER = new RegExp(`^(${BINDING_PROVIDER_KEY})\\s*\\.\\s*(${BINDING_MODEL_KEY})$`)
+const BINDING_OWNER = new RegExp(`^(${BINDING_PROVIDER_KEY})\\s*\\.`)
+
+function bindingProviderId(sectionName: string): string | null {
+  const providerKey = sectionName.match(BINDING_OWNER)?.[1]
+  return providerKey ? dequoteTomlKey(providerKey) : null
+}
+
 function bindingSections(document: TomlDocument): Array<{ providerId: string; modelId: string; section: string }> {
   return document.sections
     .map(section => {
-      const parts = section.name.split('.')
-      if (parts.length !== 2 || RESERVED_TOP_LEVEL.has(parts[0] ?? '')) return null
-      return { providerId: parts[0] ?? '', modelId: parts[1] ?? '', section: section.name }
+      const match = section.name.match(BINDING_HEADER)
+      if (!match) return null
+      const providerId = dequoteTomlKey(match[1])
+      if (RESERVED_TOP_LEVEL.has(providerId)) return null
+      return { providerId, modelId: dequoteTomlKey(match[2]), section: section.name }
     })
     .filter((entry): entry is { providerId: string; modelId: string; section: string } => {
       return Boolean(entry?.providerId && entry.modelId)
@@ -631,7 +645,6 @@ export function cascadeDeleteProvider(sourceText: string, providerId: string): s
   const env = parseRuntimeTomlEnvironment(sourceText)
   const prefix = `providers.${providerId}`
   const prefixDot = `providers.${providerId}.`
-  const bindingPrefixDot = `${providerId}.`
   const canDeleteBindingNamespace = !isReservedRuntimeTomlId(providerId)
   const sectionsToDelete = document.sections
     .map(s => s.name)
@@ -639,7 +652,7 @@ export function cascadeDeleteProvider(sourceText: string, providerId: string): s
       const logicalName = providerSectionName(name)
       return logicalName === prefix ||
         logicalName.startsWith(prefixDot) ||
-        (canDeleteBindingNamespace && name.startsWith(bindingPrefixDot))
+        (canDeleteBindingNamespace && bindingProviderId(name) === providerId)
     })
   
   let next = sourceText

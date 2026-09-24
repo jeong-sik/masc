@@ -373,6 +373,9 @@ let optional_int stage name fields =
 ;;
 
 let client_environment account_home =
+  (* A selected CLI home isolates Claude's own credential store. HOME and XDG
+     remain available for OS facilities, so settings under those shared paths
+     can still influence more than one selected home. *)
   let base_names =
     [ "HOME"
     ; "USER"

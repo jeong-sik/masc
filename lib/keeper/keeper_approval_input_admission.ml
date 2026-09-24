@@ -35,8 +35,12 @@ type admission =
 
 let marker_key = "masc.approval_input_admission"
 
-let digest message =
-  Keeper_context_core_message_json.message_to_json message
+(* The input speaker (RFC-0468 §3.2) is attribution, not evidence: the digest
+   leaves it out, so a message admitted before its speaker was stamped still
+   matches the stamped copy of the same input and is not admitted again. *)
+let digest (message : Agent_core.Types.message) =
+  { message with metadata = Agent_core.Types.Input_speaker.without message.metadata }
+  |> Keeper_context_core_message_json.message_to_json
   |> Yojson.Safe.to_string
   |> Digestif.SHA256.digest_string
   |> Digestif.SHA256.to_hex

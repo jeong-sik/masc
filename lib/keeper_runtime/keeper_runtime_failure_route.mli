@@ -196,9 +196,6 @@ val route_of_error : boundary:error_boundary -> Agent_core.Error.t -> route
     crosses the live AGENT_CORE tool boundary and is therefore decoded at either
     boundary. No arm returns "no route". *)
 
-val retry_after_of_route : route -> float option
-(** [Some hint] only for [Retry_after_observed] carrying a provider hint. *)
-
 val usable_retry_after : float option -> float option
 (** The provider hint that names a wait: present, finite, above zero. A
     hint that is absent, zero, negative, infinite or NaN names none, and every

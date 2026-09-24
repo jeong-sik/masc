@@ -121,13 +121,12 @@ let completed_history_end ~trace_id ~lines ~messages =
    the newest atom alone and the origin says so, rather than on the whole
    history under a boundary that was never read (§13.4 does not fold an
    unknown start into 0). Under the small input policy no completed-turn
-   boundary demotes tool bodies either. *)
+   boundary demotes tool bodies either. Reading it logs nothing: a request
+   whose range it opens says so ([Keeper_carried_front.warn_range_opens_on_newest_atom]),
+   and the dispatches that read it but start from a seed or a Librarian
+   point, or the forecast that only looks, have nothing to report. *)
 let turn_start ~config ~keeper_name ~trace_id ~messages =
-  let unknown reason =
-    Log.Keeper.warn ~keeper_name
-      "turn start unknown, the range opens on the newest atom alone: %s" reason;
-    Keeper_carried_front.Turn_boundary_unknown { reason }
-  in
+  let unknown reason = Keeper_carried_front.Turn_boundary_unknown { reason } in
   match
     Keeper_turn_boundaries.read
       ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
@@ -388,6 +387,9 @@ type try_provider_ctx =
   ; (* Agent config — fields passed through the runtime candidate boundary. *)
     goal : string
   ; goal_blocks : Agent_core.Types.content_block list option
+  ; (* Metadata AGENT_CORE stamps on the User message it creates for the goal:
+       the input speaker (RFC-0468 §3.2). *)
+    goal_metadata : Agent_core.Types.metadata
   ; session_id : string option
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
@@ -1624,6 +1626,8 @@ let bounded_model_input_projection
         messages
     in
     let composed = view.composed in
+    Keeper_carried_front.warn_if_origin_is_unknown_start
+      ~keeper_name:ctx.keeper_name composed.origin;
     let history_atom_count = composed.history_atom_count in
     (* Asked only after a refusal ([current_turn_demotion_sequence]). *)
     state.current_turn_demotion :=
@@ -1653,8 +1657,8 @@ let bounded_model_input_projection
            refuses the request with its typed error, which the turn's failure
            route reads; the carried range is handed over for that refusal,
            and nothing is observed for a body that does not go out. A
-           malformed tag outside the carried range no longer reaches the
-           projection at all. *)
+           malformed tag outside the carried range never reaches the
+           projection. *)
         if not !decline_reported
         then (
           decline_reported := true;
@@ -2137,6 +2141,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 ~on_resume
                 ~agent_ref:attempt_agent_ref
                 ?cooperative_yield_probe:ctx.cooperative_yield_probe
+                ~input_metadata:ctx.goal_metadata
                 blocks
           | None, None ->
               Runtime_agent.run
@@ -2149,6 +2154,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 ~on_resume
                 ~agent_ref:attempt_agent_ref
                 ?cooperative_yield_probe:ctx.cooperative_yield_probe
+                ~input_metadata:ctx.goal_metadata
                 ctx.goal
         in
         run_fn ())
@@ -2222,11 +2228,9 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
          with
          | `Attempt_finished attempt_result -> attempt_result
          | `Attempt_preempted ->
-           (* Nothing was produced and nothing failed. This used to be a
-              synthesized zero-turn run result, which the keeper could only
-              read as a run that succeeded without an AfterTurn ordinal, so
-              every preemption became a failed cycle (#38094). It is its own
-              typed value now: the lane walk ends on it (Keeper_turn_driver),
+           (* Nothing was produced and nothing failed, so this is its own
+              typed value rather than a run result (#38094): the lane walk
+              ends on it (Keeper_turn_driver),
               the failure route notes no rest against the candidate, and the
               unified turn settles it as skipped, leaving the source
               pending. *)
@@ -2806,7 +2810,7 @@ let run_try_provider_with_carried_range_eviction
   let same_run_retry_authorized () = same_run_retry_allowed ctx.checkpoint_progress in
   (* The lane's own answer to a size refusal, which depends on where the
      range started; what is left after it is the current turn's demotion. *)
-  let boundary_resend ~source =
+  let boundary_resend ?(on_turn_start_extra = fun (_ : Keeper_carried_front.seed) -> ()) ~source () =
     turn_boundary_resend_sequence
       ~same_run_retry_authorized
       ~refused_range:(fun () ->
@@ -2830,6 +2834,7 @@ let run_try_provider_with_carried_range_eviction
             (sent.digest_at first_atom)))
       ~hold_front:ctx.hold_carried_front
       ~on_turn_start:(fun error front ->
+        on_turn_start_extra front;
         Log.Keeper.info
           ~keeper_name:ctx.keeper_name
           "model input carried range refused runtime=%s: the turn's front moves to \
@@ -2843,9 +2848,19 @@ let run_try_provider_with_carried_range_eviction
   let range_answer () =
     match ctx.continuity with
     | Some (Summarized _ | Absorbed _) ->
-      boundary_resend ~source:Keeper_carried_front.Turn_start_after_librarian_refusal
+      boundary_resend ~source:Keeper_carried_front.Turn_start_after_librarian_refusal ()
     | Some Without_snapshot ->
-      boundary_resend ~source:Keeper_carried_front.Turn_start_after_seed_refusal
+      boundary_resend
+        ~on_turn_start_extra:(fun (_ : Keeper_carried_front.seed) ->
+          (* The refused seed gives way to the turn start; an unknown one puts
+             the front on the newest atom alone for the rest of the turn. *)
+          match ctx.turn_boundary with
+          | Keeper_carried_front.Turn_boundary_unknown { reason } ->
+            Keeper_carried_front.warn_range_opens_on_newest_atom
+              ~keeper_name:ctx.keeper_name ~reason
+          | Keeper_carried_front.Turn_boundary _ -> ())
+        ~source:Keeper_carried_front.Turn_start_after_seed_refusal
+        ()
     | None ->
       (* An uncapped runtime retries like any other. #36817 kept such a
          runtime out of the token halving because that walk invented a seed
@@ -2965,7 +2980,6 @@ let max_tokens_truncation_error error =
   | Some
       ( Keeper_internal_error.Accept_rejected _
       | Keeper_internal_error.Runtime_exhausted _
-      | Keeper_internal_error.Capacity_backpressure _
       | Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Internal_unhandled_exception _
       | Keeper_internal_error.Internal_bridge_exception _

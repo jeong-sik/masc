@@ -56,6 +56,7 @@ let add t ~seq (delta : Live.delta) =
     (match delta with
      | Live.Runtime_attempt_started _ -> t.attempt <- t.attempt + 1
      | Live.Run_started | Live.Batch_bound _ | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
+     | Live.Stream_usage _
      | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
      | Live.Stream_protocol_error _ | Live.Approval_requested _
      | Live.Approval_settled _ | Live.Accepted _ | Live.Checkpoint
@@ -120,7 +121,16 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
     Some (Live.Runtime_attempt_started { runtime_id; attempt_index })
   | E.Agent_core_stream_message_start { model; _ } ->
     Some (Live.Stream_model_started { model })
-  | E.Agent_core_stream_message_delta _
+  | E.Agent_core_stream_message_delta { usage = Some usage; _ } ->
+    (* Through the same reader as the live arm, over the same bytes the
+       producer writes, so a reloaded turn and a live one report the counters
+       identically. [stop_reason] stays unread here: this module's dune unit
+       does not link agent_core, and the turn's outcome already has its own
+       row. *)
+    Option.map
+      (fun usage -> Live.Stream_usage usage)
+      (Live.stream_usage_of_usage_json (E.delta_usage_to_json usage))
+  | E.Agent_core_stream_message_delta { usage = None; _ }
   | E.Agent_core_stream_message_stop
   | E.Agent_core_stream_ping
   | E.Agent_core_content_block_start _

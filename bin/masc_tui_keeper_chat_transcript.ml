@@ -233,6 +233,12 @@ type t =
            binds a provider and a model under an operator-chosen id), so a
            model observed without a runtime is shown as a model, never as the
            runtime. Reset per attempt with the runtime. *)
+  ; mutable observed_usage : Live.stream_usage option
+        (* The token counters the provider last reported for the request now
+           streaming. They are cumulative inside one request, so the latest
+           report replaces the one before it rather than adding to it. Reset
+           when the next request starts ([Stream_model_started]) and per
+           attempt with the runtime. *)
   ; mutable model_signal : model_signal option
         (* The last thing the model side sent in this attempt, and when.
            Tool calls carry their own pending state; this covers the stretches
@@ -294,6 +300,7 @@ let create ~keeper_name ~request_id ~started_at =
   ; attempt = 0
   ; current_runtime_id = None
   ; observed_model = None
+  ; observed_usage = None
   ; model_signal = None
   ; runtime_named_at = None
   ; reply = None
@@ -319,6 +326,36 @@ let runtime_identity_text ~keeper_name ~configured_runtime transcript =
      | None, Some model -> "model: " ^ safe_line model ^ " · " ^ configured
      | None, None -> configured)
   | Some _ | None -> configured
+
+(* What the request now streaming has spent so far, in the clause shape the
+   rest of this screen uses. It is that request's running total, not the
+   turn's: a turn that calls tools asks several times and each answer counts
+   from zero. Only counters the provider reported appear, and each is written
+   out in full: a reader comparing this against a bill needs the digits, not a
+   rounded stand-in. [None] when nothing was reported, so the row stays as it
+   was instead of gaining an empty label. *)
+let stream_usage_text ~keeper_name transcript =
+  match transcript with
+  | Some t when String.equal t.keeper_name keeper_name ->
+    (match t.observed_usage with
+     | None -> None
+     | Some usage ->
+       let clause label value =
+         Option.map (fun value -> Printf.sprintf "%s %d" label value) value
+       in
+       let parts =
+         List.filter_map
+           (fun clause -> clause)
+           [ clause "in" usage.Live.input_tokens
+           ; clause "out" usage.Live.output_tokens
+           ; clause "cache read" usage.Live.cache_read_input_tokens
+           ; clause "cache write" usage.Live.cache_creation_input_tokens
+           ]
+       in
+       (match parts with
+        | [] -> None
+        | parts -> Some ("tokens: " ^ String.concat " · " parts)))
+  | Some _ | None -> None
 
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
    between closes it. Coalescing here rather than at draw time keeps the trail
@@ -1837,6 +1874,7 @@ let apply_delta ~now t (delta : Live.delta) =
       (* The model the stream named belongs to the attempt it was named in;
          a repeated event for the same attempt keeps it. *)
       if new_attempt then t.observed_model <- None;
+      if new_attempt then t.observed_usage <- None;
       t.model_signal <- None;
       t.runtime_named_at <- Some now;
       t.awaiting <- None;
@@ -1845,7 +1883,18 @@ let apply_delta ~now t (delta : Live.delta) =
        | Stream_ended | Stream_failed _ -> ())
   | Live.Stream_model_started { model } ->
       t.observed_model <- Some model;
+      (* A request's counters belong to that request. The provider accumulates
+         them inside one request, so a turn that calls tools asks several
+         times, and each answer starts from zero. Carrying the previous
+         request's numbers into this one would label one round's tokens as
+         what the turn has spent. *)
+      t.observed_usage <- None;
       t.model_signal <- Some (Model_started_at now)
+  | Live.Stream_usage usage ->
+      (* Counters only: this says what the request being streamed has spent so
+         far, not that anything was written, so the model-side signal is left
+         as whatever last moved the answer. *)
+      t.observed_usage <- Some usage
   | Live.Text text ->
       t.model_signal <- Some (Answering_at now);
       Buffer.add_string t.text_buffer text;

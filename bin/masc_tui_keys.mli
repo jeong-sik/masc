@@ -136,10 +136,9 @@ val footer_hints_prompt_assets : string
 
 val footer_hints_overview : task_focus:bool -> string
 (** The Overview footer. Separate from {!footer_hints} because Overview owns
-    one runtime fact the static table cannot: whether j/k currently drives
-    the task list (task_focus) or the event list. The projection relabels
-    j/k by focus and drops the keys dead in the other mode — the table
-    stays the SSOT, no second key list. *)
+    one runtime fact the static table cannot: whether the task list is
+    selected (task_focus). The projection drops the keys dead in the other
+    mode — the table stays the SSOT, no second key list. *)
 
 type code_pane =
   | Code_tree  (** the file list has focus *)

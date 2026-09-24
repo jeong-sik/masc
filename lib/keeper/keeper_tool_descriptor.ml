@@ -2925,6 +2925,7 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "dos_click" "masc_dos_click" ~readonly:false
   ; masc_misc_descriptor "dos_type" "masc_dos_type" ~readonly:false
   ; masc_misc_descriptor "dos_peek" "masc_dos_peek" ~readonly:true
+  ; masc_misc_descriptor "dos_pass" "masc_dos_pass" ~readonly:false
   ; masc_misc_descriptor "dashboard" "masc_dashboard"
        ~readonly:true
   ; cluster_descriptor
@@ -3045,6 +3046,25 @@ let keeper_model_names descriptor =
   | [], Internal_name ->
     [ descriptor.internal_name ]
   | [], (Operator_only | Transport_alias _) -> []
+;;
+
+(* A descriptor's [defer_loading] lives in the TOML named for its internal
+   name. The model may know the tool by a public name ([BrowserRead] for
+   [masc_browser_read]), so a lookup by the model name misses it. *)
+let declared_loading descriptor =
+  Tool_loading_declarations.loading_of_tool descriptor.internal_name
+;;
+
+(* A name no descriptor offers (a Skill composition tool) is declared under
+   that name itself. *)
+let declared_loading_of_model_name name =
+  match
+    List.find_opt
+      (fun d -> List.exists (String.equal name) (keeper_model_names d))
+      (all_descriptors ())
+  with
+  | Some descriptor -> declared_loading descriptor
+  | None -> Tool_loading_declarations.loading_of_tool name
 ;;
 
 let registered_names descriptor =

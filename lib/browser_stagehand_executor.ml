@@ -32,6 +32,7 @@ let failure_message = function
   | Session.Connection_gone reason -> "the Stagehand connection ended: " ^ reason
   | Session.Abandoned_call_pending -> "a Stagehand call whose caller left has not answered yet"
   | Session.Not_delivered detail -> "the call did not reach Stagehand: " ^ detail
+  | Session.Answer_unreceived seconds -> Printf.sprintf "Stagehand did not answer within %.0f s" seconds
   | Session.Rejected { code; message } -> Printf.sprintf "Stagehand refused the call (%d): %s" code message
   | Session.Lost detail -> "Stagehand did not answer: " ^ detail
 ;;
@@ -51,7 +52,7 @@ let answer_before_effect failure =
   match failure with
   | Session.Not_attached | Session.Detached | Session.Connection_gone _ | Session.Abandoned_call_pending
   | Session.Not_delivered _ -> Browser_lane.Rejected_before_effect (failure_message failure)
-  | Session.Rejected _ | Session.Lost _ -> Browser_lane.Refused (failure_message failure)
+  | Session.Answer_unreceived _ | Session.Rejected _ | Session.Lost _ -> Browser_lane.Refused (failure_message failure)
 ;;
 
 (* For calls sent up to and including the verb's effect. *)
@@ -205,20 +206,16 @@ let capture ~tabs ~call ~tab_id =
 
 (* The reads run the automation lane's page scripts, so an observation has
    the same shape on every lane. *)
-let read_text ~tabs ~call ~tab_id ~max_chars =
-  let cap = match max_chars with Some cap -> cap | None -> Browser_page_script.default_text_chars in
-  if cap < 1 || cap > Browser_page_script.max_text_chars then
-    Error
-      (Browser_lane.Rejected_before_effect
-         (Printf.sprintf "maxChars must be between 1 and %d" Browser_page_script.max_text_chars))
-  else
-    let* _, page_id = page_or_active ~tabs ~call tab_id in
-    evaluate ~runtime:No_runtime ~send:(send call) ~args:(`Int cap) page_id Browser_page_script.text
-;;
-
 let with_tab_id tab_id method_ = function
   | `Assoc fields -> Ok (`Assoc (("tabId", `Int tab_id) :: fields))
   | _ -> Error (malformed "page.evaluate" method_)
+;;
+
+let read_text ~tabs ~call ~tab_id ~max_chars =
+  let* cap = Result.map_error (fun detail -> Browser_lane.Rejected_before_effect detail) (Browser_page_script.text_cap max_chars) in
+  let* tab_id, page_id = page_or_active ~tabs ~call tab_id in
+  let* text = evaluate ~runtime:No_runtime ~send:(send call) ~args:(`Int cap) page_id Browser_page_script.text in
+  with_tab_id tab_id "a text observation" text
 ;;
 
 let read_elements ~tabs ~call ~tab_id =
@@ -343,11 +340,11 @@ let execute ~tabs ~call verb =
     | Browser_lane.Page_scene { tab_id; max_chars; view; scope } -> read_scene ~tabs ~call ~tab_id ~max_chars ~view ~scope
     | Browser_lane.Page_interact { tab_id; expected_url; action } -> interact ~tabs ~call ~tab_id ~expected_url action
     | Browser_lane.Page_instruct { tab_id; instruction } ->
-      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Act { page_id; instruction })
+      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Act { page_id; instruction; timeout = Wire.sentence_timeout })
     | Browser_lane.Page_locate { tab_id; instruction } ->
-      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Observe { page_id; instruction })
+      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Observe { page_id; instruction; timeout = Wire.sentence_timeout })
     | Browser_lane.Page_extract { tab_id; instruction; schema } ->
-      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Extract { page_id; instruction; schema })
+      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Extract { page_id; instruction; schema; timeout = Wire.sentence_timeout })
     | Browser_lane.Session_open _ | Browser_lane.Session_close | Browser_lane.Session_status
     | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_act _
     | Browser_lane.Page_context _ ->

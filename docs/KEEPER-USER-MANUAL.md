@@ -254,8 +254,9 @@ Re-run them on your own root before treating any of them as a target.
 | [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | Bearer tokens and dashboard write access |
 | [`README.md`](../README.md) | Install, MCP client setup, and the dashboard |
 
-`activation_mode` is the single Keeper activation setting. `manual` does not
-restore an owner automatically; explicit requested work may activate it.
+`activation_mode` is the single Keeper activation setting. `manual` never
+starts the owner by itself. Work addressed to a stopped `manual` Keeper is
+accepted and waits in the durable queue until an operator starts the Keeper.
 `on_demand` restores the owner at startup but does not invent periodic work.
 `autonomous` also allows periodic self-directed turns. Direct messages,
 approval continuations, and due schedules remain requested work in every mode;

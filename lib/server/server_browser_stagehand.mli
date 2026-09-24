@@ -4,15 +4,24 @@
 
 type t
 
+(** Frontend HTTP wait for a Stagehand open, derived from the port, CDP, and
+    attach waits plus one command window for process/transport overhead. *)
+val open_http_timeout_s : float
+
 (** [open_ ~sw ~env ~masc_root ~config ~headless ~model ~log] starts
     Chromium with the configured extension, connects, attaches and calls
     [stagehand.init], whose result it returns with the session.
 
     The browser, its connection and the session's fibers live on [sw]:
-    releasing [sw] stops the browser and removes its record. On [Error] the
-    browser may already be running, so the caller releases [sw]. A profile the
+    releasing [sw] stops the browser and removes its record. On [Error] after
+    launch, this function stops the Chromium process group and removes its
+    record before returning, so the same switch may retry. A profile the
     operator configured is kept; otherwise the server's own profile is emptied
-    first. The profile directory is made owner-only. *)
+    first. A recorded Chromium from a previous server is stopped before that
+    profile is prepared and before its owner record can be replaced. The
+    profile directory is made owner-only. An unreadable or malformed prior
+    owner record, or a browser group that cannot be confirmed stopped,
+    returns [Error] before resetting the profile or spawning a replacement. *)
 val open_ :
   sw:Eio.Switch.t
   -> env:Eio_unix.Stdenv.base
@@ -26,9 +35,9 @@ val open_ :
 val session : t -> Browser_stagehand_session.t
 val pid : t -> int
 
-(** Stops the Chromium a server that died before releasing left recorded for
-    this workspace, if that pid still runs the recorded executable on the
-    recorded profile, and removes the record. *)
+(** Startup cleanup for a Chromium left by a crashed server. Refuses to
+    erase the owner record when it cannot identify or stop that browser;
+    [open_] will then return [Error] before replacing its profile. *)
 val stop_left_behind : masc_root:string -> unit
 
 val attach_error_message : Browser_stagehand_session.attach_error -> string

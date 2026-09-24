@@ -96,8 +96,11 @@ All three are absolute paths. MASC loads the extension over the debugging
 connection (`Extensions.loadUnpacked`), which was verified with Chrome Canary
 156 and Chrome for Testing 154; branded Chrome refuses `--load-extension` from version 137, and whether a
 given build accepts the CDP load depends on the build. The debugging port
-listens on loopback and admits only the extension's own origin. Without
-`profile`, each session starts from a server-owned profile that is emptied
+listens on loopback. The origin flag permits the extension's WebSocket Origin;
+it does not exclude local clients that omit that header. Protect the host and
+any configured login profile accordingly.
+
+Without `profile`, each session starts from a server-owned profile that is emptied
 first; a configured profile is kept. Either way the directory is owner-only.
 
 The Stagehand runtime asks for a model through `llm.generate`. MASC answers it

@@ -30,7 +30,7 @@ let slots_text ~admitted ~cli ~dropped ~admission_failed =
     match admitted with
     | [] ->
         if cli <> [] then "cli-only"
-        else if admission_failed then "\xe2\x80\x94"
+        else if admission_failed then Masc_tui_theme.Glyph.no_value
         else "no admitted slot"
     | admitted -> String.concat "," admitted
   in
@@ -136,7 +136,7 @@ let tail columns ~slots ~observed =
    every row: the rows carried "slots", "active", "runs", "ok/fail/cancel",
    "p50" and "observed" as words of their own, which beside the roster pane
    cut every row at "runs 12" and left the failure counts off the screen for
-   all five lanes. The mark's field is blank here. *)
+   every lane. The mark's field is blank here. *)
 let header columns width =
   fit_width
     (String.concat gap

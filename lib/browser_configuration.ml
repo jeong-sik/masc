@@ -36,6 +36,9 @@ let parse_automation toml =
 ;;
 
 let parse_stagehand toml =
+  let configured =
+    Option.is_some (Otoml.find_opt toml Fun.id [ "browser"; "stagehand" ])
+  in
   let* chrome =
     absolute toml [ "browser"; "stagehand"; "chrome" ]
       ~refusal:"browser.stagehand.chrome must be an absolute path to a Chromium-family executable"
@@ -46,10 +49,11 @@ let parse_stagehand toml =
   in
   let* profile =
     absolute toml [ "browser"; "stagehand"; "profile" ]
-      ~refusal:"browser.stagehand.profile must be an absolute path to an operator-owned profile directory"
+      ~refusal:
+        "browser.stagehand.profile must be an absolute path to an operator-owned profile directory (not Chrome's default user-data-dir: Chrome 136+ refuses remote debugging there)"
   in
   match chrome, extension, profile with
-  | None, None, None -> Ok None
+  | None, None, None when not configured -> Ok None
   | Some chrome, Some extension, profile -> Ok (Some { chrome; extension; profile })
   | None, _, _ -> Error "browser.stagehand.chrome is required when [browser.stagehand] is configured"
   | Some _, None, _ -> Error "browser.stagehand.extension is required when [browser.stagehand] is configured"

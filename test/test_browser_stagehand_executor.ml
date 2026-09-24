@@ -182,12 +182,16 @@ let test_sentence_verbs () =
       check (list string) "tab, Stagehand's data and metadata" [ "data"; "metadata"; "tabId" ]
         (match data with `Assoc fields -> List.sort compare (List.map fst fields) | _ -> []);
       match fake.sent with
-      | [ sent ] -> check string (Wire.method_name expected) (to_s (Wire.call_params expected)) (to_s (Wire.call_params sent))
+      | [ sent ] ->
+        check string (Wire.method_name expected) (to_s (Wire.call_params expected)) (to_s (Wire.call_params sent));
+        check int "the protocol receives the per-call timeout in milliseconds"
+          (Wire.timeout_ms Wire.sentence_timeout)
+          Yojson.Safe.Util.(Wire.call_params sent |> member "options" |> member "timeout" |> to_int)
       | _ -> fail "one Stagehand call")
-    [ Lane.Page_instruct { tab_id = 1; instruction = "click Buy" }, Wire.Act { page_id = "P2"; instruction = "click Buy" };
-      Lane.Page_locate { tab_id = 1; instruction = None }, Wire.Observe { page_id = "P2"; instruction = None };
+    [ Lane.Page_instruct { tab_id = 1; instruction = "click Buy" }, Wire.Act { page_id = "P2"; instruction = "click Buy"; timeout = Wire.sentence_timeout };
+      Lane.Page_locate { tab_id = 1; instruction = None }, Wire.Observe { page_id = "P2"; instruction = None; timeout = Wire.sentence_timeout };
       Lane.Page_extract { tab_id = 0; instruction = "the price"; schema = Some schema },
-      Wire.Extract { page_id = "P1"; instruction = "the price"; schema = Some schema } ];
+      Wire.Extract { page_id = "P1"; instruction = "the price"; schema = Some schema; timeout = Wire.sentence_timeout } ];
   fake.failing <- (function Wire.Act _ -> Some (Session.Rejected { code = -32603; message = "no element" }) | _ -> None);
   check bool "an act the extension refused may have acted" true
     (refused (Executor.execute ~tabs ~call:(call fake) (Lane.Page_instruct { tab_id = 1; instruction = "click Buy" })));
@@ -207,7 +211,8 @@ let test_reads_run_the_page_scripts () =
     | _ -> fail "no page.evaluate was sent"
   in
   fake.sent <- [];
-  ignore (served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_read { tab_id = Some 1; max_chars = None })));
+  let text = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_read { tab_id = None; max_chars = None })) in
+  check int "text of the active tab names it" 1 Yojson.Safe.Util.(member "tabId" text |> to_int);
   check string "text read with the default cap"
     (Executor.evaluate_expression ~runtime:Executor.No_runtime ~body:Masc.Browser_page_script.text ~args:(`Int Masc.Browser_page_script.default_text_chars))
     (sent_expression ());

@@ -29,12 +29,19 @@ let init_answer_s = 30.
    longest CDP command (the readiness wait), and the init answer. *)
 let attach_deadline_s = service_worker_wait_s +. cdp_command_deadline_s +. init_answer_s
 
+(* The HTTP client gives one additional CDP command window to process startup
+   and response transport after the bounded port, connect, and attach steps.
+   The server does not abandon an in-flight open at this frontend deadline. *)
+let open_http_timeout_s =
+  devtools_port_timeout_s +. cdp_command_deadline_s +. attach_deadline_s +. cdp_command_deadline_s
+
 (* ws-direct's own default. A screenshot of a long page is the largest
    frame the connection carries. *)
 let max_message_bytes = 64 * 1024 * 1024
 
 (* A stopped browser gets this long to exit before its group is killed. *)
 let stop_grace_s = 5.
+let stop_confirm_poll_s = 0.1
 let owner_only = 0o700
 
 type t = { session : Session.t; pid : int }
@@ -58,38 +65,138 @@ let attach_error_message = function
   | Session.Runtime_marker detail -> "the Stagehand runtime marker is unreadable: " ^ detail
   | Session.Runtime_incompatible { found; supported } ->
     Printf.sprintf "the Stagehand runtime speaks protocol %s; masc speaks major %d" found supported
+  | Session.Init_unanswered seconds -> Printf.sprintf "stagehand.init did not answer within %.0f s" seconds
   | Session.Init_failed failure -> "stagehand.init failed: " ^ Browser_stagehand_executor.failure_message failure
   | Session.Cdp failure -> "a CDP command failed: " ^ failure_message failure
 ;;
 
+let ( let* ) = Result.bind
+
+(* A failed or empty [ps] answer is not proof that the recorded PID is gone.
+   Only ESRCH establishes absence; a live but unidentified PID must keep its
+   owner record until an operator or a later retry can identify it. *)
 let process_command pid =
-  match Process_eio.run_argv_with_status [ "ps"; "-p"; string_of_int pid; "-o"; "command=" ] with
-  | Unix.WEXITED 0, output -> (match String.trim output with "" -> None | command -> Some command)
-  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None
+  match Process_eio.run_argv_with_status [ "ps"; "-ww"; "-p"; string_of_int pid; "-o"; "command=" ] with
+  | Unix.WEXITED 0, output when String.trim output <> "" -> Ok (Some (String.trim output))
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ ->
+    (match Unix.kill pid 0 with
+     | () -> Error (Printf.sprintf "recorded Chromium pid %d still exists but ps did not identify it" pid)
+     | exception Unix.Unix_error (Unix.ESRCH, _, _) -> Ok None
+     | exception Unix.Unix_error (error, _, _) ->
+       Error (Printf.sprintf "cannot establish whether recorded Chromium pid %d exists: %s"
+                pid (Unix.error_message error)))
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    Error (Printf.sprintf "cannot inspect recorded Chromium pid %d: %s" pid
+             (Printexc.to_string exn))
+;;
+
+let confirm_group_stopped pgid =
+  match Unix.kill (-pgid) 0 with
+  | () -> Error (Printf.sprintf "recorded Chromium group %d is still alive" pgid)
+  | exception Unix.Unix_error (Unix.ESRCH, _, _) -> Ok ()
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (Printf.sprintf "cannot confirm recorded Chromium group %d stopped: %s"
+             pgid (Unix.error_message error))
+;;
+
+(* [tree_kill] sends SIGKILL at the end of its grace period and returns before
+   the kernel necessarily reports group absence. Confirm for one further
+   existing stop-grace interval in a systhread; uncertainty still keeps the
+   owner record and blocks profile replacement. *)
+let confirm_group_stopped_after_kill pgid =
+  let deadline = Monotonic_deadline.after ~seconds:stop_grace_s in
+  let rec check () =
+    match confirm_group_stopped pgid with
+    | Ok () -> Ok ()
+    | Error _ as error when Monotonic_deadline.passed deadline -> error
+    | Error _ ->
+      (try ignore (Unix.select [] [] [] stop_confirm_poll_s) with
+       | Unix.Unix_error (Unix.EINTR, _, _) -> ());
+      check ()
+  in
+  check ()
+;;
+
+(* An owner record is the only route to a browser left by a crashed server.
+   Keep it when ownership cannot be read or the group cannot be confirmed
+   stopped: resetting that browser's profile would make its live process
+   unreachable on the next attempt. *)
+let stop_left_behind_checked ~masc_root =
+  let record_path = Process.owner_record_path ~masc_root in
+  let* present =
+    match Unix.lstat record_path with
+    | stat when stat.Unix.st_kind = Unix.S_REG -> Ok true
+    | _ -> Error ("stagehand owner record is not a regular file: " ^ record_path)
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+    | exception Unix.Unix_error (error, _, _) ->
+      Error ("cannot inspect stagehand owner record " ^ record_path ^ ": " ^ Unix.error_message error)
+  in
+  if not present then Ok ()
+  else
+    let* text =
+      Result.map_error
+        (fun detail -> "cannot read stagehand owner record " ^ record_path ^ ": " ^ detail)
+        (Safe_ops.read_file_safe record_path)
+    in
+    let* owner =
+      Result.map_error
+        (fun detail -> "malformed stagehand owner record " ^ record_path ^ ": " ^ detail)
+        (Process.owner_of_string text)
+    in
+    let* command = process_command owner.pid in
+    let* () =
+      match Process.leftover owner ~command with
+      | Process.Not_the_recorded_browser ->
+        (match command with
+         | None -> confirm_group_stopped owner.pid
+         | Some _ ->
+           Error
+             (Printf.sprintf
+                "recorded Chromium pid %d still exists but does not match its owner record"
+                owner.pid))
+      | Process.Stop_recorded_browser pgid ->
+        Log.Server.warn "browser-lane: stopping Chromium pid %d left by a server that did not stop it" pgid;
+        (match
+           Eio_unix.run_in_systhread (fun () ->
+             Process_eio_detached.tree_kill ~pgid ~signal:Sys.sigterm ~grace_sec:stop_grace_s;
+             confirm_group_stopped_after_kill pgid)
+         with
+         | result -> result
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn ->
+           Error (Printf.sprintf "cannot stop recorded Chromium group %d: %s" pgid
+                    (Printexc.to_string exn)))
+    in
+    (match Sys.remove record_path with
+     | () -> Ok ()
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception exn ->
+       Error ("cannot remove stagehand owner record " ^ record_path ^ ": " ^ Printexc.to_string exn))
 ;;
 
 let stop_left_behind ~masc_root =
-  let record_path = Process.owner_record_path ~masc_root in
-  if Sys.file_exists record_path then begin
-    (match Safe_ops.read_file_safe record_path with
-     | Error detail -> Log.Server.warn "browser-lane: stagehand record %s unreadable: %s" record_path detail
-     | Ok text ->
-       (match Process.owner_of_string text with
-        | Error detail -> Log.Server.warn "browser-lane: stagehand record %s is malformed: %s" record_path detail
-        | Ok owner ->
-          (match Process.leftover owner ~command:(process_command owner.pid) with
-           | Process.Not_the_recorded_browser -> ()
-           | Process.Stop_recorded_browser pgid ->
-             Log.Server.warn "browser-lane: stopping Chromium pid %d left by a server that did not stop it" pgid;
-             Eio_unix.run_in_systhread (fun () ->
-               Process_eio_detached.tree_kill ~pgid ~signal:Sys.sigterm ~grace_sec:stop_grace_s))));
-    Safe_ops.remove_file_logged ~context:"browser-lane stagehand record" record_path
-  end
+  match stop_left_behind_checked ~masc_root with
+  | Ok () -> ()
+  | Error detail -> Log.Server.warn "browser-lane: %s" detail
 ;;
 
 (* For the three exceptions a file or process step raises: [Eio.Io],
    [Unix.Unix_error] and [Sys_error]. *)
 let io_error what exn = Error (Printf.sprintf "%s: %s" what (Printexc.to_string exn))
+
+(* A failed attempt can be retried on the same switch. Keep an older attempt's
+   release hook from deleting a later attempt's record. *)
+let remove_record_if_owned ~record_path ~pid =
+  if Sys.file_exists record_path then
+    match Safe_ops.read_file_safe record_path with
+    | Ok text ->
+      (match Process.owner_of_string text with
+       | Ok owner when owner.pid = pid ->
+         Safe_ops.remove_file_logged ~context:"browser-lane stagehand record" record_path
+       | Ok _ | Error _ -> ())
+    | Error detail -> Log.Server.warn "browser-lane: cannot check stagehand record %s: %s" record_path detail
+;;
 
 (* An operator-owned profile keeps its logins; only the port file of an
    earlier run is removed, so the new port is not confused with it. The
@@ -129,8 +236,6 @@ let await_devtools_endpoint ~clock ~profile ~process =
     Error (Format.asprintf "Chromium exited before writing its debugging port (%a)" Eio.Process.pp_status status))
 ;;
 
-let ( let* ) = Result.bind
-
 let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headless ~model ~log =
   let clock = Eio.Stdenv.clock env in
   let lane = Filename.concat masc_root "browser-lane" in
@@ -141,16 +246,23 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
     | exception (Unix.Unix_error _ as exn) -> io_error "the Stagehand extension directory" exn
   in
   let extension_id = Browser_stagehand_wire.extension_id_of_real_path extension_dir in
+  (* Retire a Chromium left by a previous server before its profile is
+     prepared or its owner record can be replaced by this launch. *)
+  let* () = stop_left_behind_checked ~masc_root in
   let* profile = prepare_profile ~masc_root config in
+  let started_pid = ref None in
   (* Registered before the spawn, so it runs after the spawn's own release
      has stopped the browser's process group. *)
   Eio.Switch.on_release sw (fun () ->
-    if Sys.file_exists record_path then Safe_ops.remove_file_logged ~context:"browser-lane stagehand record" record_path);
+    match !started_pid with
+    | Some pid -> remove_record_if_owned ~record_path ~pid
+    | None -> ());
   let* process =
     match
       Fs_compat.mkdir_p lane;
       let output =
-        Eio.Path.open_out ~sw ~create:(`Or_truncate 0o600) Eio.Path.(Eio.Stdenv.fs env / Filename.concat lane "chromium.log")
+        Eio.Path.open_out ~sw ~append:true ~create:(`If_missing 0o600)
+          Eio.Path.(Eio.Stdenv.fs env / Filename.concat lane "chromium.log")
       in
       Eio.Process.spawn ~sw
         (Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:stop_grace_s)
@@ -161,27 +273,36 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
     | exception ((Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn) -> io_error "Chromium did not start" exn
   in
   let pid = Eio.Process.pid process in
-  let* () =
-    Result.map_error
-      (fun detail -> Printf.sprintf "cannot record Chromium pid %d in %s: %s" pid record_path detail)
-      (Fs_compat.save_file_atomic record_path
-         (Process.owner_to_string { Process.pid; chrome = config.chrome; profile }))
+  started_pid := Some pid;
+  let stop_failed () =
+    Eio.Cancel.protect (fun () ->
+      Eio.Process.signal process Sys.sigterm;
+      (* See Posix_spawn_process_mgr: await completes group cleanup; its status is unused here. *)
+      ignore (Eio.Process.await process);
+      remove_record_if_owned ~record_path ~pid;
+      started_pid := None)
   in
-  let* port, path = await_devtools_endpoint ~clock ~profile ~process in
-  let url = Process.browser_ws_url ~port ~path in
-  let session = Session.create ~sw ~clock ~worker_wait_s:service_worker_wait_s ~model ~log in
-  let* cdp =
-    Browser_cdp.connect ~sw ~net:(Eio.Stdenv.net env) ~clock ~url ~max_message:max_message_bytes
-      ~command_deadline_s:cdp_command_deadline_s ~on_event:(Session.on_cdp_event session)
+  let open_started () =
+    let* () =
+      Result.map_error
+        (fun detail -> Printf.sprintf "cannot record Chromium pid %d in %s: %s" pid record_path detail)
+        (Fs_compat.save_file_atomic record_path
+           (Process.owner_to_string { Process.pid; chrome = config.chrome; profile }))
+    in
+    let* port, path = await_devtools_endpoint ~clock ~profile ~process in
+    let url = Process.browser_ws_url ~port ~path in
+    let session = Session.create ~sw ~clock ~worker_wait_s:service_worker_wait_s ~init_answer_s ~model ~log in
+    let* cdp =
+      Browser_cdp.connect ~sw ~net:(Eio.Stdenv.net env) ~clock ~url ~max_message:max_message_bytes
+        ~command_deadline_s:cdp_command_deadline_s ~on_event:(Session.on_cdp_event session)
+    in
+    let* init = Result.map_error attach_error_message (Session.attach session cdp ~extension_dir ~browser_cdp_url:url) in
+    Ok ({ session; pid }, init)
   in
-  let* init =
-    Watched_work.run
-      ~watcher:(fun () ->
-        Eio.Time.sleep clock attach_deadline_s;
-        Error (Printf.sprintf "Stagehand did not finish attaching within %.0f s" attach_deadline_s))
-      (fun () -> Result.map_error attach_error_message (Session.attach session cdp ~extension_dir ~browser_cdp_url:url))
-  in
-  Ok ({ session; pid }, init)
+  match open_started () with
+  | Ok _ as opened -> opened
+  | Error _ as failed -> stop_failed (); failed
+  | exception exn -> stop_failed (); raise exn
 ;;
 
 let log_event = function

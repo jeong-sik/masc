@@ -44,11 +44,38 @@ let test_a_request_without_a_server_lane_is_refused () =
   check int "no executor was reached" 0 (List.length !automation + List.length !stagehand)
 ;;
 
+let test_stagehand_open_waits_for_attach () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Time_compat.set_clock clock;
+  Lane.install_stagehand_executor
+    (Some (fun _ ->
+       Eio.Time.sleep clock 0.01;
+       answered));
+  Fun.protect
+    ~finally:(fun () -> Lane.install_stagehand_executor None)
+    (fun () ->
+      check bool "generic deadline does not abandon a Stagehand open" true
+        (Lane.issue_server_lane Lane.Server_stagehand
+           ~verb:(Lane.Session_open { headless = None }) ~timeout_sec:0.0 = answered))
+;;
+
+let test_live_route_explains_ownership () =
+  match Routes.session (body [ "action", `String "open"; "lane", `String "live" ]) with
+  | Error detail ->
+    check bool "live rejection says why" true
+      (String.starts_with ~prefix:"the live browser belongs to the operator" detail)
+  | Ok _ -> fail "the live browser must not be opened by the server"
+;;
+
 let () =
   run "browser_surface_session_routes" [
     "lanes", [
       test_case "the named server lane takes the verb" `Quick test_the_named_lane_takes_the_verb;
       test_case "a request without a server lane is refused" `Quick test_a_request_without_a_server_lane_is_refused;
+      test_case "Stagehand open keeps its attach wait" `Quick test_stagehand_open_waits_for_attach;
+      test_case "live rejection explains ownership" `Quick test_live_route_explains_ownership;
     ];
   ]
 ;;

@@ -6,7 +6,7 @@
     send the same text through [sh -c] and lose every guarantee the gate
     applies. So a refusal became a rewrite.
 
-    RFC execute-boundary-is-the-sandbox removed the refusal. [script] is a
+    RFC execute-boundary-is-the-sandbox removed the refusal. [command] is a
     shell and an argv-shaped shell normalises into it, so a caller who wrote
     [$(...)], [$PWD] or a loop wrote something that works. Advice against it
     is not stale, it is wrong -- on 2026-08-31 a keeper was told "this tool
@@ -19,7 +19,7 @@
       returns a handle for one;
     - a nested pipeline is what {!Connector} names. The typed [pipeline]
       field is gone from the Execute schema, so this arm is unreachable until
-      the Shell IR parser judges [script] (RFC-execute-boundary-is-the-sandbox).
+      the Shell IR parser judges [command] (RFC-execute-boundary-is-the-sandbox).
 
     Everything else answers {!Unrepresentable}: the shell runs the line, and
     the only thing worth adding is that argv is the form that gets path
@@ -34,9 +34,9 @@ type field = Connector
     at the connector between stages, so each stage is named once.
 
     Not a field of the Execute schema. It read as one when the schema carried
-    a typed [pipeline]; since #32650 the schema is [argv], [script], [shell],
-    [cwd], [timeout_sec], and this arm is unreachable until the Shell IR
-    parser judges [script] -- the same note {!of_reason} carries above. *)
+    a typed [pipeline]; the schema is [argv], [command], [shell], [cwd],
+    [timeout_sec], and this arm is unreachable until the Shell IR parser
+    judges [command] -- the same note {!of_reason} carries above. *)
 
 type call =
   | Spawn

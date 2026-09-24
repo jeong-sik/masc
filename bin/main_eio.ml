@@ -3399,7 +3399,12 @@ let setup_validate_runtime base_path =
             (fun failure ->
                Printf.eprintf "%s: %s\n%!"
                  (Runtime_verification.failure_code failure)
-                 (Runtime_verification.failure_message failure))
+                 (Runtime_verification.failure_message failure);
+               (* The detail carries the provider's retry hint or the usage
+                  window's reopen time, which the setup wizard already shows. *)
+               Option.iter
+                 (Printf.eprintf "  %s\n%!")
+                 (Runtime_verification.failure_detail failure))
             result.failure;
           prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.");
         code

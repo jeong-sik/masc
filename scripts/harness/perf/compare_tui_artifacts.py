@@ -155,10 +155,15 @@ def main():
             if digest(binary) != binary_hash:
                 raise ValueError('binary changed before execution')
             name = f'{repeat + 1:02d}-{role}'
+            frame_timing = out / (name + '.frame-timing.txt')
             returncode, stdout = run_scenario(
-                scenario, binary, root=root, environment=environment, out=out, name=name)
+                scenario, binary, root=root,
+                environment={**environment, 'MASC_TUI_FRAME_TIMING': str(frame_timing)},
+                out=out, name=name)
             if returncode != 0 or 'input and scroll frames: PASS' not in stdout.splitlines():
                 raise RuntimeError(f'{name} failed: exit {returncode}; see raw logs')
+            if not frame_timing.is_file() or not frame_timing.read_text().strip():
+                raise ValueError(f'{name}: internal frame timing receipt is missing')
             observations = [json.loads(line) for line in stdout.splitlines()
                             if line.startswith('{')]
             if len(observations) != 1:
@@ -181,7 +186,8 @@ def main():
                 value = sample['complete_frame_ms']
                 if not math.isfinite(value) or value < 0:
                     raise ValueError(f'{name}: invalid timing observation')
-            receipt = {'role': role, 'repetition': repeat + 1, **observation}
+            receipt = {'role': role, 'repetition': repeat + 1,
+                       'frame_timing_file': frame_timing.name, **observation}
             receipts.append(receipt)
             (out / (name + '.json')).write_text(json.dumps(receipt, indent=2) + '\n')
             print(json.dumps(receipt), flush=True)

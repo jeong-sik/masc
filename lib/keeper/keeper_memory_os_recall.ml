@@ -80,7 +80,7 @@ let render_with_source_revalidation ~config ~meta ~keepers_dir ~keeper_id ~now =
     render_context_result ~keepers_dir ~keeper_id ~now
   | Ok { snapshot = None; _ } ->
     render_context_result ~keepers_dir ~keeper_id ~now
-  | Ok { snapshot = Some source_snapshot; facts = source_facts; invalidations } ->
+  | Ok { snapshot = Some source_snapshot; facts = source_facts; invalidations; unverified_paths } ->
     let ordinary_snapshot =
       match Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id with
       | Ok snapshot -> snapshot
@@ -100,7 +100,12 @@ let render_with_source_revalidation ~config ~meta ~keepers_dir ~keeper_id ~now =
     in
     let lines =
       List.map Keeper_memory_os_render.render_fact ordinary_facts
-      @ List.map Keeper_memory_source_current.render_fact source_facts
+      @ List.map
+          (fun (fact : Keeper_memory_source_current.fact) ->
+             Keeper_memory_source_current.render_fact
+               ~verified:(not (List.mem fact.source.path unverified_paths))
+               fact)
+          source_facts
       @ List.map Keeper_memory_source_current.render_invalidation invalidations
     in
     let payload = String.concat "\n" lines in

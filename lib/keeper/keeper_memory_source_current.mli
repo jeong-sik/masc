@@ -42,6 +42,9 @@ type projection =
   { snapshot : t option
   ; facts : fact list
   ; invalidations : invalidation list
+  ; unverified_paths : string list
+      (** Facts kept this time without a re-read ([Source_io_failed]); a
+          recall renders them as unverified. *)
   }
 
 (** Why a source file could not be read. All but [Source_io_failed] are the
@@ -129,6 +132,8 @@ val revalidate :
   -> unit
   -> (projection, string) result
 
-val render_fact : fact -> string
+val render_fact : ?verified:bool -> fact -> string
+(** [~verified:false] marks a fact whose source could not be re-read this
+    turn. *)
 val render_invalidation : invalidation -> string
 val to_json : t -> Yojson.Safe.t

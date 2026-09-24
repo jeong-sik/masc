@@ -911,6 +911,53 @@ let test_endpoint_source_read_reports_by_exit_status () =
     (fst (run_endpoint_source dir ~max_bytes:64) = exit_of S.endpoint_source_not_regular_exit)
 ;;
 
+(* A source the store cannot read this time is not an answer about the
+   source. The fact stays, nothing is invalidated, and the recall is told it
+   was not re-read. A permission-denied host file stands in for a stopped
+   guest: both are Source_io_failed. *)
+let test_unreadable_source_keeps_its_fact_marked_unverified () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_temp_dir
+  @@ fun base_path ->
+  let module Source = Masc.Keeper_memory_source_current in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "source-unreadable" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let source_path = "source.txt" in
+  let host_path = Filename.concat sandbox_root source_path in
+  Fs_compat.mkdir_p sandbox_root;
+  (match Fs_compat.save_file_atomic host_path "value\n" with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  (match
+     Source.upsert_file_fact
+       ~config ~meta ~keepers_dir ~now:100.0 ~claim:"the value is set" ~source_path ()
+   with
+   | Ok _ -> ()
+   | Error (Source.Source_read_failed failure) ->
+     Alcotest.fail (Source.source_read_failure_to_string failure)
+   | Error (Source.Store_write_failed detail) -> Alcotest.fail detail);
+  Unix.chmod host_path 0o000;
+  let revalidated =
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod host_path 0o600)
+      (fun () -> Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
+  in
+  match revalidated with
+  | Error detail -> Alcotest.fail detail
+  | Ok projection ->
+    Alcotest.(check int) "the fact is kept" 1 (List.length projection.Source.facts);
+    Alcotest.(check int)
+      "nothing is invalidated" 0 (List.length projection.Source.invalidations);
+    Alcotest.(check (list string))
+      "the recall is told it was not re-read"
+      [ source_path ]
+      projection.Source.unverified_paths
+;;
+
 let test_source_bound_write_is_not_gated_by_recall_size () =
   with_temp_dir
   @@ fun base_path ->
@@ -2828,6 +2875,10 @@ let () =
             "endpoint source read reports absence by exit status"
             `Quick
             test_endpoint_source_read_reports_by_exit_status
+        ; Alcotest.test_case
+            "an unreadable source keeps its fact, marked unverified"
+            `Quick
+            test_unreadable_source_keeps_its_fact_marked_unverified
         ] )
     ]
 ;;

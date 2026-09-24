@@ -38,6 +38,7 @@ type projection =
   { snapshot : t option
   ; facts : fact list
   ; invalidations : invalidation list
+  ; unverified_paths : string list
   }
 
 type source_read_failure =
@@ -135,12 +136,13 @@ let sha256 content =
   "sha256:" ^ Digestif.SHA256.(digest_string content |> to_hex)
 ;;
 
-let render_fact fact =
+let render_fact ?(verified = true) fact =
   Printf.sprintf
-    "- [category=fact recorded=%s source=file:%S source_sha256=%s] %s"
+    "- [category=fact recorded=%s source=file:%S source_sha256=%s%s] %s"
     (Masc_domain.iso8601_of_unix_seconds fact.first_seen)
     fact.source.path
     fact.source.sha256
+    (if verified then "" else " unverified=source_unreadable_this_turn")
     fact.claim
 ;;
 
@@ -573,6 +575,9 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
   if not (finite_nonnegative now)
   then Error "source-bound memory timestamp must be finite and non-negative"
   else
+    (* Paths whose fact was kept without a re-read. Reset at the top of the
+       locked step so a repeated step cannot count a path twice. *)
+    let unverified = ref [] in
     let+ snapshot =
       with_commit_notification
         ~keepers_dir ~keeper_id:meta.Keeper_meta_contract.name (fun on_commit ->
@@ -583,6 +588,7 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
         ~on_commit
         (function
         | None ->
+          unverified := [];
           Ok
             ( { revision = 1
               ; updated_at = now
@@ -592,6 +598,7 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
               }
             , false )
         | Some previous ->
+          unverified := [];
           let facts_rev, newly_invalidated_rev =
             List.fold_left
               (fun (facts, invalidations) fact ->
@@ -609,16 +616,13 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
                      ; reason = Source_changed
                      }
                      :: invalidations )
-                 | Error (Source_io_failed detail) ->
+                 | Error (Source_io_failed _) ->
                    (* Not being able to ask is not an answer. A stopped guest
                       or a timed-out endpoint keeps the fact as it was last
                       verified; only a source that answered as changed,
-                      missing or unusable invalidates it. *)
-                   Log.Keeper.warn
-                     "source-bound memory kept unverified keeper=%s source=%S detail=%s"
-                     meta.Keeper_meta_contract.name
-                     fact.source.path
-                     detail;
+                      missing or unusable invalidates it. The recall marks
+                      it, so the model can tell it from a re-read fact. *)
+                   unverified := fact.source.path :: !unverified;
                    fact :: facts, invalidations
                  | Error failure ->
                    Log.Keeper.warn
@@ -635,6 +639,12 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
               ([], [])
               previous.facts
           in
+          if !unverified <> []
+          then
+            Log.Keeper.warn
+              "source-bound memory kept %d fact(s) unverified keeper=%s: source unreadable"
+              (List.length !unverified)
+              meta.Keeper_meta_contract.name;
           let facts = List.rev facts_rev in
           let newly_invalidated = List.rev newly_invalidated_rev in
           if newly_invalidated = []
@@ -667,10 +677,11 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
       else Some snapshot
     in
     match snapshot with
-    | None -> { snapshot = None; facts = []; invalidations = [] }
+    | None -> { snapshot = None; facts = []; invalidations = []; unverified_paths = [] }
     | Some snapshot ->
       { snapshot = Some snapshot
       ; facts = snapshot.facts
       ; invalidations = snapshot.invalidations
+      ; unverified_paths = List.rev !unverified
       }
 ;;

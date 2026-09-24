@@ -3313,10 +3313,11 @@ let sandbox_image_store_digest ~builder ~store ~reference =
          "reading an image digest from the %s store is not supported yet"
          (Keeper_sandbox_image_catalog.store_to_string store))
 
+(* The catalog is read by the server from the config root it resolves for its
+   workspace, [MASC_CONFIG_DIR] included, so it is written there too. *)
 let sandbox_image_config_root base_path =
-  Config_dir_resolver.base_path_config_root
-    ~cwd:(Config_dir_resolver.current_working_dir ())
-    base_path
+  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+  resolution.Config_dir_resolver.config_root.Config_dir_resolver.path
 
 (* Load this host's catalog (or the shipped one it starts from), apply one
    change, and write it back. *)

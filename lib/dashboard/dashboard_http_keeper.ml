@@ -53,17 +53,7 @@ let degraded_keeper_dashboard_row
       (m : Keeper_meta_contract.keeper_meta)
   =
   let attention_reason = Option.value ~default:site error in
-  let runtime_trust =
-    `Assoc
-      [ ("disposition", `String "Degraded")
-      ; ("disposition_reason", `String site)
-      ; ("operator_disposition", `String "blocked_runtime")
-      ; ("operator_disposition_reason", `String site)
-      ; ("needs_attention", `Bool true)
-      ; ("attention_reason", `String attention_reason)
-      ; ("next_human_action", `String "inspect_keeper_dashboard_worker")
-      ]
-  in
+  let runtime_trust = Trust.degraded_keeper_trust_json ~site ~attention_reason in
   let fd_observation = `Assoc (Keeper_fd_pressure.projection_fields ()) in
   let runtime_id =
     Keeper_meta_contract.runtime_id_of_meta m |> non_empty_trimmed_string_opt

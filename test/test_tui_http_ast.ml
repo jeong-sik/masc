@@ -2278,7 +2278,7 @@ let test_missing_operator_token_is_reported () =
   check int "the window comes from the one place that states it" 1
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
        ~module_path:"bin/masc_tui_http.ml"
-       ~binding_name:"install_operator_token"
+       ~binding_name:"mint_operator_token"
        ~callees:[]
        ~identifiers:[ "Masc_tui_credential.self_mint_expiry_hours" ]);
   (* Both refusal surfaces must ask what this process actually holds. Passing a
@@ -2552,13 +2552,30 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* [Link.scan] reads the body without drawing it, but what it returns is
      drawn -- and [Link.parse] percent-decodes, so an id can carry the escape
      bytes the body could not. Sanitize where it lands. *)
+  (* The metrics pane draws four wire words and escaped none of them: the
+     scheduler's probe word beside this pane's own prose, a Keeper id fitted
+     to sixteen cells (fitting is not escaping), and the tool name each
+     pending gate call and held approval is counted under, which the bar
+     chart draws as a label. The pane already escapes the YOLO Keeper names
+     beside them, so the invariant was understood here and these four were
+     missed. *)
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    ~non_rendering_calls:[ "scheduler_probe_text" ] "render_kpi_cards"
+    [ "ssch_probe" ];
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    ~non_rendering_calls:[ "scheduler_probe_text" ] "render_section_fleet"
+    [ "ssch_probe" ];
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    "render_section_tools"
+    [ "mkh_keeper_id"; "gp_display_tool"; "kta_tool" ];
   check_identifiers ~module_path:render_path ~binding:"board_read_pane"
     ~callees:sanitizer_calls [ "id" ];
   (* Every split surface hands its list through one sidebar, so this is the
      single place a row label can reach the terminal unsanitized. Seven
      callers now pass titles that came off the wire. *)
   (* The list sidebar is drawn beside more than one surface, so it sits with
-     the shared primitives. *)
+     the shared primitives. [write_list_sidebar] hands its labels to this
+     one, so this is where a row label reaches the terminal. *)
   check_identifiers ~module_path:"bin/masc_tui_render_prim.ml"
     ~binding:"write_list_sidebar_selection" ~callees:sanitizer_calls [ "label" ];
   check_fields "render_planning_list"
@@ -2582,6 +2599,28 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     [ "pg_id"; "pg_title"; "pg_due_date"; "pg_metric"; "pg_target_value" ];
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
     [ "pg_id" ];
+  (* The verifier's reason for skipping a Verifying goal comes off the wire
+     from the goal store's error text. *)
+  check_fields "planning_proof_detail" [ "vu_detail" ];
+  (* The judge's evidence, its refusal reason and a ledger read error are the
+     verdict's own wire text, bound by the pattern rather than read as a
+     field, so they are named as identifiers. *)
+  check_identifiers ~module_path:render_path ~binding:"planning_proof_detail"
+    ~callees:sanitizer_calls [ "evidence"; "reason"; "detail" ];
+  (* The goal detail's verdict block, note and timeline all wrap through this
+     one helper. It splits the text on LF (not drawn) and escapes each line
+     before it wraps. *)
+  check_identifiers ~module_path:"bin/masc_tui_planning_detail.ml" ~binding:"wrapped"
+    ~callees:[ "Tui_decode.sanitize_terminal_text"; "String.split_on_char" ]
+    [ "text"; "line" ];
+  check int "the goal detail heads a stuck goal with the verifier's reason" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"planning_detail_pane"
+       ~callee:"Planning_detail.unreconciled_lines");
+  check int "the Verifying next step comes from the tested sentence" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"planning_next_step"
+       ~callee:"Planning_detail.verifying_next_step");
   check_fields "render_keeper_list" [ "keepers_error" ];
   (* The Memory pane draws from its own file. The guard reaches other files
      by name -- the primitives and the chat pane each have entries -- but no

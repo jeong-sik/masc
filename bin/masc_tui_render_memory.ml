@@ -98,7 +98,7 @@ let memory_date ts =
     tm.Unix.tm_hour tm.Unix.tm_min
 
 let memory_updated_text = function
-  | None -> "-"
+  | None -> Masc_tui_theme.Glyph.no_value
   | Some ts -> memory_date ts
 
 (* Every size on this screen is the recall block the keeper injects, not the
@@ -158,8 +158,36 @@ let memory_context_lines (k : memory_keeper_health) =
       (memory_updated_text librarian.mlh_last_success_at)
       (match librarian.mlh_last_failure_kind with
        | Some kind -> librarian_failure_words kind
-       | None -> "-")
+       | None -> Masc_tui_theme.Glyph.no_value)
       k.mkh_librarian_failures
+  in
+  (* RFC librarian-lifecycle §4.10: the atoms requests skip while the
+     Librarian stands behind the start the provider last accepted. An alarm,
+     not a state anything waits on. On its own row, under the Librarian line,
+     so the frame cutting a long Librarian line never cuts its atom numbers.
+     A file the gap is read from that did not read gets the same row, naming
+     which file: it is neither "no gap" nor a gap. *)
+  let librarian_stalled_lines =
+    match k.mkh_librarian.mlh_stalled with
+    | Some (Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }) ->
+      let atoms =
+        if mls_gap_end_atom - mls_gap_start_atom = 1
+        then Printf.sprintf "atom %d is" mls_gap_start_atom
+        else Printf.sprintf "atoms %d-%d are" mls_gap_start_atom (mls_gap_end_atom - 1)
+      in
+      [ Printf.sprintf "  Librarian stalled · %s in neither the request nor memory" atoms ]
+    | Some (Stalled_unmeasured { mls_cause; mls_detail }) ->
+      let cause =
+        match mls_cause with
+        | Stall_meta_unreadable -> "keeper meta unreadable"
+        | Stall_turn_records_unreadable -> "turn records unreadable"
+        | Stall_turn_boundary_refused -> "turn boundaries unreadable"
+        | Stall_snapshot_unreadable -> "continuity snapshot unreadable"
+        | Stall_read_position_unreadable -> "read position unreadable"
+      in
+      [ Printf.sprintf "  Librarian stalled · not measured, %s · %s" cause
+          (Terminal_text.preview_line mls_detail) ]
+    | None -> []
   in
   let librarian_cause_lines =
     (* The cause is drawn on its own row because it is the part of the
@@ -205,10 +233,14 @@ let memory_context_lines (k : memory_keeper_health) =
               value.mcpo_end_atom (Terminal_text.single_line value.mcpo_trace_id)
           | Context_without_snapshot -> "no snapshot: this turn only"
           | Context_not_applied -> "saved context not applied" in
+        (* The size as a size. The row drew the digit count -- one live block
+           read "446558 request bytes" -- while every other size on this TUI
+           goes through the shared ladder and reads "436.1 KB". The heading a
+           line above already says what was prepared, so the figure needs no
+           noun of its own. *)
         Printf.sprintf "%s · %s · %s"
           (memory_updated_text (Some value.mcp_prepared_at))
-          (Masc_tui_message_layout.count_noun value.mcp_request_bytes
-             "request byte")
+          (Masc_tui_context_inspector.format_bytes value.mcp_request_bytes)
           (Terminal_text.single_line value.mcp_runtime_id), input in
     let synthesis = match cycle.mcc_synthesis with
       | None -> "not observed since server start"
@@ -270,7 +302,8 @@ let memory_context_lines (k : memory_keeper_health) =
           k.mkh_source_read_error
       ]
   in
-  [current_line; facts_line; source_line; librarian_line] @ librarian_cause_lines @ context_lines
+  [current_line; facts_line; source_line; librarian_line] @ librarian_stalled_lines
+  @ librarian_cause_lines @ context_lines
   @ (vision_line :: (read_error_lines @ alert_lines))
 
 type memory_state = Masc_tui_types.memory_state =
@@ -303,15 +336,15 @@ let memory_deviation_style (k : memory_keeper_health) =
     | Memory_ordinary -> None
 
 let memory_row_line columns (k : memory_keeper_health) =
-  let em_dash = "\xe2\x80\x94" in
-  let ordinary_reading value = if k.mkh_snapshot_present then value () else em_dash in
+  let no_value = Masc_tui_theme.Glyph.no_value in
+  let ordinary_reading value = if k.mkh_snapshot_present then value () else no_value in
   let source =
     if Option.is_some k.mkh_source_read_error then "read error"
     else if k.mkh_source_snapshot_present then
       Printf.sprintf "r%d i%d %s tok" k.mkh_source_revision
         k.mkh_source_invalidations
         (recall_tokens k.mkh_source_snapshot_bytes)
-    else em_dash
+    else no_value
   in
   let delta =
     match k.mkh_added, k.mkh_removed with
@@ -533,12 +566,23 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
   | Memory_row_fact fact ->
       let claim_lines = detail_claim_lines ~inner_width fact.mf_claim in
       let history =
-        Printf.sprintf "Retrieved %d · %s · last %s · Retracted %d · Revised from %d"
-          fact.mf_events.mfe_retrieved_count
-          (Message_layout.count_noun fact.mf_events.mfe_retrieved_distinct_days "day")
-          (match fact.mf_events.mfe_last_retrieved_at with
-           | None -> "never"
-           | Some at -> memory_fact_age_label at)
+        (* The retrieval count, its day count and its last clock are one
+           reading: the server derives all three from the same list of
+           retrieval times, and the decoder keeps them as one value. A fact
+           nobody has read draws the single phrase "Never retrieved".
+
+           [Retracted] and [Revised from] keep their zeros. Both are measured
+           counts the server always sends, and hiding a measured zero makes it
+           read as "not measured" -- the shape RFC-0462 closed. *)
+        let read =
+          match fact.mf_events.mfe_retrieval with
+          | Never_retrieved -> "Never retrieved"
+          | Retrieved { count; distinct_days; last_at } ->
+              Printf.sprintf "Retrieved %d on %s · last %s" count
+                (Message_layout.count_noun distinct_days "day")
+                (memory_fact_age_label last_at)
+        in
+        Printf.sprintf "%s · Retracted %d · Revised from %d" read
           fact.mf_events.mfe_retracted_count
           (List.length fact.mf_events.mfe_revised_from)
       in

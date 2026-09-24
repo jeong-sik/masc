@@ -282,6 +282,11 @@ let route_lane_name = function
   | Stagehand_route -> Lane_name.Stagehand
 ;;
 
+let route_lane_name = function
+  | Automation_route -> Lane_name.Automation
+  | Live_route _ -> Lane_name.Live
+;;
+
 (* Why a live request names no browser to send its command to. Each case has
    a different next step: a browser has to connect, or the caller has to
    choose one of several. No command is dispatched in any of them. *)
@@ -413,7 +418,9 @@ let stagehand_executor : (verb -> answer) option Atomic.t = Atomic.make None
 let install_stagehand_executor executor = Atomic.set stagehand_executor executor
 let issue_stagehand ~verb ~timeout_sec =
   if not (verb_allowed_on_stagehand verb) then
-    Rejected_before_effect ("the stagehand lane does not serve " ^ verb_to_string verb ^ " yet")
+    Rejected_before_effect
+      ("the stagehand lane serves session, tabs, goto, capture and sentence verbs, not "
+       ^ verb_to_string verb)
   else
   match Atomic.get stagehand_executor with
   | None -> Lane_absent

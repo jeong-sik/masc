@@ -53,48 +53,77 @@ type observed_status =
   | Terminal of observed_terminal
 
 type observed_run =
-  { lane_id : string
+  { lane : Standalone_lane.t
   ; started_at : float
   ; status : observed_status
   }
 
 type lane_spec =
-  { lane_id : string
+  { lane : Standalone_lane.t
   ; label : string
   ; purpose : string
   ; required : bool
   }
 
-let lane_specs =
-  [ { lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention
+(* Every lane's row, one arm each: a lane added to [Standalone_lane.t] does
+   not compile here until it has a label, a purpose and an obligation. *)
+let lane_spec (lane : Standalone_lane.t) =
+  match lane with
+  | Standalone_lane.Board_attention ->
+    { lane
     ; label = "Board Attention"
     ; purpose = "Judges one durable Board candidate for Keeper attention."
     ; required = true
     }
-  ; { lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Hitl_auto_judge
+  | Standalone_lane.Hitl_auto_judge ->
+    { lane
     ; label = "HITL Auto Judge"
     ; purpose = "Produces the structured judgment for one held approval."
     ; required = true
     }
-  ; { lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Librarian
+  | Standalone_lane.Librarian ->
+    { lane
     ; label = "Librarian"
     ; purpose = "Selects the next Memory OS snapshot from immutable Keeper history."
     ; required = false
     }
-  ; { lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Workspace_curator
+  | Standalone_lane.Workspace_curator ->
+    { lane
     ; label = "Workspace Curator"
     ; purpose = "Synthesizes attributed proposals after committed workspace memory changes; semantic verification is not performed."
     ; required = false
     }
-  ; { lane_id = Runtime.verifier_exact_lane_id
+  | Standalone_lane.Verifier ->
+    { lane
     ; label = "Verifier"
     ; purpose = "Reviews Task completion and Goal proof evidence."
     ; required = false
     }
-  ]
+  | Standalone_lane.Browser_stagehand ->
+    { lane
+    ; label = "Browser Stagehand"
+    ; purpose = "Answers structured model requests from the Stagehand browser lane; run records are not retained yet."
+    ; required = false
+    }
 ;;
 
-(* The overview above joins three durable registries into five lanes. The run
+(* The order the Lanes table draws: the two required lanes first. That is not
+   [Standalone_lane.all]'s order, which the runtime file editor keeps, so the
+   list is its own; test_server_standalone_lane_projection holds it to
+   [Standalone_lane.all] as a set. *)
+let lane_specs =
+  List.map
+    lane_spec
+    [ Standalone_lane.Board_attention
+    ; Standalone_lane.Hitl_auto_judge
+    ; Standalone_lane.Librarian
+    ; Standalone_lane.Workspace_curator
+    ; Standalone_lane.Verifier
+    ; Standalone_lane.Browser_stagehand
+    ]
+;;
+
+(* The overview above joins three durable registries into all declared lanes. The run
    drill-down must read the same set: serving only [Exact_lane_run_registry]
    made the Verifier row open an empty list even while its task and Goal
    registries held reviews, tool observations, and verdicts. Keep the source
@@ -146,8 +175,10 @@ let retained_run_id = function
 ;;
 
 let retained_run_lane = function
-  | Exact_run run -> Exact_lane_run_registry.lane_key run.Exact_lane_run_registry.lane
-  | Task_verification_run _ | Goal_verification_run _ -> Runtime.verifier_exact_lane_id
+  | Exact_run run ->
+    Standalone_lane.to_id (Exact_lane_run_registry.standalone_lane run.Exact_lane_run_registry.lane)
+  | Task_verification_run _ | Goal_verification_run _ ->
+    Standalone_lane.to_id Standalone_lane.Verifier
 ;;
 
 let retained_run_started_at = function
@@ -157,7 +188,9 @@ let retained_run_started_at = function
 ;;
 
 let known_lane lane_id =
-  List.exists (fun spec -> String.equal spec.lane_id lane_id) lane_specs
+  List.exists
+    (fun (spec : lane_spec) -> String.equal (Standalone_lane.to_id spec.lane) lane_id)
+    lane_specs
 ;;
 
 let selected_slot_field = function
@@ -175,7 +208,7 @@ let task_verification_summary_fields (run : Verification_run_registry.run) =
   in
   [ "run_id", `String run.verification_id
   ; "run_kind", `String "task_verification"
-  ; "lane", `String Runtime.verifier_exact_lane_id
+  ; "lane", `String (Standalone_lane.to_id Standalone_lane.Verifier)
   ; "subject_id", `String run.task_id
   ; "actor", `String run.authority_actor
   ; "started_at", `Float run.started_at
@@ -194,7 +227,7 @@ let goal_verification_summary_fields (run : Goal_verification_run_registry.run) 
   in
   [ "run_id", `String run.run_id
   ; "run_kind", `String "goal_verification"
-  ; "lane", `String Runtime.verifier_exact_lane_id
+  ; "lane", `String (Standalone_lane.to_id Standalone_lane.Verifier)
   ; "subject_id", `String run.goal_id
   ; "actor", `String run.authority_actor
   ; "started_at", `Float run.started_at
@@ -522,7 +555,7 @@ let observed_exact_run (run : Exact_lane_run_registry.run) =
             exact_answered_by ~lane:run.lane ~outcome:intended_outcome selected_slot
         }
   in
-  { lane_id = Exact_lane_run_registry.lane_key run.lane; started_at = run.started_at; status }
+  { lane = Exact_lane_run_registry.standalone_lane run.lane; started_at = run.started_at; status }
 ;;
 
 (* Success for this lane means A VERDICT WAS PRODUCED. [Not_reviewed] is
@@ -561,7 +594,7 @@ let observed_verification_run (run : Verification_run_registry.run) =
   in
   Option.map
     (fun status ->
-       { lane_id = Runtime.verifier_exact_lane_id; started_at = run.started_at; status })
+       { lane = Standalone_lane.Verifier; started_at = run.started_at; status })
     status
 ;;
 
@@ -590,7 +623,7 @@ let observed_goal_verification_run (run : Goal_verification_run_registry.run) =
         ; answered_by = optional_slot evaluator_runtime
         }
   in
-  { lane_id = Runtime.verifier_exact_lane_id; started_at = run.started_at; status }
+  { lane = Standalone_lane.Verifier; started_at = run.started_at; status }
 ;;
 
 let p50 values =
@@ -670,7 +703,7 @@ let lane_json
   =
   let runs =
     List.filter
-      (fun (run : observed_run) -> String.equal run.lane_id spec.lane_id)
+      (fun (run : observed_run) -> run.lane = spec.lane)
       all_runs
   in
   let running_count =
@@ -703,12 +736,14 @@ let lane_json
     | None -> None
     | Some (_, terminal) -> Some terminal.kind
   in
-  let configuration = resolve_lane spec.lane_id in
+  let lane_id = Standalone_lane.to_id spec.lane in
+  let configuration = resolve_lane lane_id in
   let configured, config_state, admitted_slots, admission_error =
     match configuration with
     | Configured { admitted_slots; cli_slots; dropped_slots; declared_slots; admission_error } ->
       Some true,
-      (if admitted_slots = [] && cli_slots = [] then "degraded" else "ready"),
+      (if Option.is_some admission_error || admitted_slots = [] && cli_slots = []
+       then "degraded" else "ready"),
       (admitted_slots, cli_slots, dropped_slots, declared_slots),
       admission_error
     | Unconfigured error -> Some false, "unconfigured", ([], [], [], []), Some error
@@ -742,14 +777,17 @@ let lane_json
       else None)
   in
   let jev_field =
-    if
-      String.equal spec.lane_id
-        (Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention)
-    then [ "jev", jev_readiness_json (jev_lane_readiness configuration jev_readiness) ]
-    else []
+    match spec.lane with
+    | Standalone_lane.Board_attention ->
+      [ "jev", jev_readiness_json (jev_lane_readiness configuration jev_readiness) ]
+    | Standalone_lane.Librarian
+    | Standalone_lane.Hitl_auto_judge
+    | Standalone_lane.Workspace_curator
+    | Standalone_lane.Verifier
+    | Standalone_lane.Browser_stagehand -> []
   in
   `Assoc
-    ([ "lane_id", `String spec.lane_id
+    ([ "lane_id", `String lane_id
     ; "label", `String spec.label
     ; "purpose", `String spec.purpose
     ; "required", `Bool spec.required
@@ -842,7 +880,7 @@ let live_lane_configuration registry lane_id =
             else None)
   in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-  | Ok { selected_slots; cli_slots } ->
+  | Ok ({ selected_slots; cli_slots } as resolved) ->
     (* [verifier_exact] dispatches each of its slots as a judge, so the ids it
        can actually judge through are a shorter list than the declaration
        whenever one names a binding that takes no inline tools or no system
@@ -856,9 +894,11 @@ let live_lane_configuration registry lane_id =
         (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
         selected_slots
     in
-    let admitted_catalog_slots, admitted_cli_slots, slot_rejections =
+    let typed_lane = Standalone_lane.of_id lane_id in
+    let admitted_catalog_slots, admitted_cli_slots, slot_rejections,
+        stagehand_dropped_slots, stagehand_error =
       match
-        Runtime.exact_lane_of_id lane_id,
+        typed_lane,
         Runtime_exact_output_registry.declared_lane registry ~lane_id
       with
       | Some Runtime.Verifier, Some declared ->
@@ -867,16 +907,37 @@ let live_lane_configuration registry lane_id =
         in
         ( lane.Runtime.admitted_catalog_slot_ids
         , lane.Runtime.admitted_cli_slot_ids
-        , lane.Runtime.slot_rejections )
+        , lane.Runtime.slot_rejections
+        , []
+        , None )
+      | Some Runtime.Browser_stagehand, _ ->
+        (match Browser_stagehand_model.admit_lane resolved with
+         | Ok admitted ->
+           ( List.map
+               (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+               (admitted.first_slot :: admitted.other_slots)
+           , []
+           , []
+           , List.map
+               (fun (slot : Browser_stagehand_model.refused_slot) -> slot.slot_id)
+               admitted.refused_slots
+           , None )
+         | Error refusal ->
+           ( []
+           , cli_slots
+           , []
+           , []
+           , Some
+               (Browser_stagehand_model.refusal_to_string
+                  (Browser_stagehand_model.Lane_refused refusal)) ))
       | Some Runtime.Verifier, None
       | Some
           ( Runtime.Librarian
           | Runtime.Hitl_auto_judge
           | Runtime.Board_attention
-          | Runtime.Workspace_curator
-          | Runtime.Browser_stagehand )
+          | Runtime.Workspace_curator )
         , _
-      | None, _ -> registry_admitted_catalog_slots, cli_slots, []
+      | None, _ -> registry_admitted_catalog_slots, cli_slots, [], [], None
     in
     let dropped_slots =
       dropped_slots
@@ -884,6 +945,7 @@ let live_lane_configuration registry lane_id =
           (fun (rejection : Runtime.verifier_slot_rejection) ->
              rejection.Runtime.slot_id)
           slot_rejections
+      @ stagehand_dropped_slots
     in
     Configured
       { admitted_slots = admitted_catalog_slots
@@ -891,6 +953,9 @@ let live_lane_configuration registry lane_id =
       ; dropped_slots
       ; declared_slots
       ; admission_error =
+          (match stagehand_error with
+           | Some _ as error -> error
+           | None ->
           (match admitted_catalog_slots, admitted_cli_slots with
            | [], [] ->
              (match slot_rejections with
@@ -901,14 +966,20 @@ let live_lane_configuration registry lane_id =
                      "; "
                      (List.map Runtime.verifier_slot_rejection_to_string rejections)))
            | [], _ :: _ | _ :: _, [] | _ :: _, _ :: _ ->
-             if
-               String.equal lane_id Server_workspace_memory_curator.lane_id
-               && admitted_cli_slots <> []
-             then
-               Some
-                 "Workspace curator requires admitted exact-output slots; CLI tails \
-                  are not supported"
-             else None)
+             (match typed_lane, admitted_cli_slots with
+              | Some Standalone_lane.Workspace_curator, _ :: _ ->
+                Some
+                  "Workspace curator requires admitted exact-output slots; CLI tails \
+                   are not supported"
+              | Some Standalone_lane.Workspace_curator, []
+              | Some
+                  ( Standalone_lane.Librarian
+                  | Standalone_lane.Hitl_auto_judge
+                  | Standalone_lane.Board_attention
+                  | Standalone_lane.Verifier
+                  | Standalone_lane.Browser_stagehand )
+                , _
+              | None, _ -> None)))
       }
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
     Unconfigured

@@ -492,6 +492,89 @@ let test_external_composition_preserves_snapshot_provenance () =
 ;;
 
 
+(* The TUI reads this surface through Tui_decode.decode_tool_snapshot. The
+   producer's own JSON goes through it here, so the two spellings of each
+   origin kind -- origin_to_yojson on this side, the TUI decoder on the other
+   -- cannot drift apart without a failing test. *)
+let test_the_tui_reads_the_origin_of_every_tool_this_surface_writes () =
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let surface =
+    match
+      Keeper_effective_tool_surface.For_testing.project
+        ~keeper_name:"fixture"
+        ~runtime_id:"fixture.runtime"
+        ~official_client_kind:"codex"
+        ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
+        ~tool_deny:[]
+        ~sandbox_profile:Masc.Keeper_types_profile.Docker
+        ~native_posture:None
+        ~skill_names:None
+        ~current_task_id:None
+        ~skills_left_out:[]
+        ~task_skill_references:[]
+        ~task_selection:None
+        ~skill_snapshot:(configured_external_skill_snapshot ())
+    with
+    | Ok surface -> surface
+    | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  in
+  let expected =
+    List.map
+      (fun (tool : Keeper_effective_tool_surface.tool) ->
+         ( tool.name
+         , match tool.origin with
+           | Keeper_effective_tool_surface.Descriptor -> Tui_decode.Descriptor_origin
+           | Instruction_skill -> Tui_decode.Instruction_skill_origin
+           | Composition_skill { provenance = Some provenance } ->
+             Tui_decode.Composition_skill_origin
+               { skill_source_id =
+                   Some
+                     (Skill_source_config.source_id_to_string
+                        provenance.identity.source_id)
+               }
+           | Composition_skill { provenance = None } ->
+             Tui_decode.Composition_skill_origin { skill_source_id = None }
+           | Composition_control -> Tui_decode.Composition_control_origin ))
+      surface.tools
+  in
+  check bool "the fixture carries a descriptor and a sourced composition skill" true
+    (List.exists (fun (_, origin) -> origin = Tui_decode.Descriptor_origin) expected
+     && List.exists
+          (fun (_, origin) ->
+             match origin with
+             | Tui_decode.Composition_skill_origin { skill_source_id = Some _ } -> true
+             | Tui_decode.Composition_skill_origin { skill_source_id = None }
+             | Tui_decode.Descriptor_origin
+             | Tui_decode.Instruction_skill_origin
+             | Tui_decode.Composition_control_origin
+             | Tui_decode.Unrecognised_origin _ -> false)
+          expected);
+  let dashboard_tools =
+    `Assoc
+      [ "generated_at", `String "2026-09-24T00:00:00Z"
+      ; "config_resolution", `Assoc []
+      ; "runtime_resolution", `Assoc []
+      ; ( "tool_inventory"
+        , `Assoc [ "count", `Int 0; "tools", `List []; "surface_summary", `Assoc [] ] )
+      ; "tool_usage", `Assoc []
+      ; "effective_keeper_surface", Keeper_effective_tool_surface.to_yojson (Available surface)
+      ; "skill_activations", `Null
+      ]
+  in
+  match Tui_decode.decode_tool_snapshot dashboard_tools with
+  | Error error -> fail ("the TUI refused the surface's own JSON: " ^ error)
+  | Ok
+      { Tui_decode.ts_effective =
+          Some (Tui_decode.Effective_surface_available { ets_tools; _ })
+      ; _
+      } ->
+    check bool "every tool decodes to the origin the surface wrote" true
+      (List.map
+         (fun (tool : Tui_decode.effective_tool) -> tool.et_name, tool.et_origin)
+         ets_tools
+       = expected)
+  | Ok _ -> fail "the TUI did not read an available surface"
+
 let test_instruction_skill_without_read_is_admitted () =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let snapshot = skill_snapshot () in
@@ -976,6 +1059,8 @@ let () =
             "external composition preserves snapshot provenance"
             `Quick
             test_external_composition_preserves_snapshot_provenance
+        ; test_case "the TUI reads the origin of every tool this surface writes" `Quick
+            test_the_tui_reads_the_origin_of_every_tool_this_surface_writes
         ; test_case "instruction skill does not require Read" `Quick
             test_instruction_skill_without_read_is_admitted
         ; test_case "left out skills reach the surface" `Quick

@@ -1547,6 +1547,12 @@ type schedule_snapshot = {
       [scs_request_count = None] carries. *)
   scs_counts: (Schedule_domain.schedule_status * int) list option;
   scs_rows: schedule_row list;
+  scs_runner_status: Tui_decode.schedule_runner_status;
+  (** The schedule runner's status word, sent once beside the rows. A row's
+      [sch_runner_hold] is what the runner's newest successful tick decided,
+      at its [srh_observed_at]; only [Runner_ok] says that tick is recent and
+      the runner is healthy, so only then is the hold drawn as the present
+      (#38411). *)
 }
 
 (** One recorded wake attempt of a schedule instance. The list surface carries
@@ -2000,8 +2006,6 @@ type pull_mergeable = Pull_mergeable | Pull_conflicting | Pull_mergeable_unknown
 
 type open_pull = {
   op_number: int;
-  op_title: string;
-  op_head_branch: string;
   op_draft: bool;
   op_checks: pull_checks;
   op_review: pull_review;
@@ -2095,6 +2099,7 @@ type planning_goal = Tui_decode.planning_goal
   pg_metric: string option;
   pg_target_value: string option;
   pg_proof: Tui_decode.goal_proof;
+  pg_verifier_unreconciled: Tui_decode.verifier_unreconciled option;
   pg_last_review_note: string option;
   pg_last_review_at: string option;
   pg_created_at: string option;
@@ -3071,6 +3076,23 @@ type scrolled = {
 let listing_chrome ~error = if Option.is_some error then 9 else 7
 let lanes_listing_chrome ~load_error ~action_error =
   listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
+
+(* A listing draws a reading of the selected row under its list, and both are
+   paid for out of the same frame. The reading was given exactly one row and
+   cut there, while a list shorter than the frame drew blank rows under its
+   last entry -- nineteen of them, above a ruling cut mid-sentence (#38434).
+
+   The reading takes those blank rows and no others. [body_rows] is what the
+   frame leaves for the list and the reading together, [entries] is how many
+   rows the list has something to draw on, and [wanted] is how many rows the
+   reading packs into at this width. The answer never drops below one row, so
+   a list that fills the frame draws what it drew before, and it never rises
+   past the spare, so [body_rows - answer >= entries]: no entry loses its row
+   to a longer reading. *)
+let listing_note_rows ~body_rows ~entries ~wanted =
+  let body_rows = max 2 body_rows in
+  let spare = max 0 (body_rows - 1 - max 0 entries) in
+  min (max 1 wanted) (1 + spare)
 
 (* [authority_rows] is how many rows the line naming the SSOT and the last
    probe took at this width. It wraps at clause marks
@@ -5192,7 +5214,15 @@ type state = {
      the first load answers: an empty list is a fact about the workspace and
      "not looked yet" is not. *)
   mutable operator_stalled: Masc_tui_agenda.stalled list option;
-  mutable task_focus: pane_focus;
+  (* Whether the Overview task list owns j/k and which task it has chosen,
+     by id. An index into the rows would name another task after a poll
+     drops a finished one. *)
+  mutable task_focus: Masc_tui_overview_tasks.focus;
+  (* What the last backlog read said about the rows. [tasks] holds the same
+     rows when they were read and [] otherwise; this says which of the two
+     an empty [tasks] is. [tasks_error] stays what the Tasks section prints,
+     including notes (backup recovery, goal links) on rows that were read. *)
+  mutable task_reading: Masc_tui_overview_tasks.rows_reading;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
@@ -5563,9 +5593,6 @@ type state = {
      until it is sent, and cleared with the form -- a field left filled is a
      credential sitting in the process for as long as the pane is up. *)
   mutable identity_app_form: identity_app_form option;
-  mutable task_selected_id: string option;
-      (* The Overview task row the operator chose, by id. An index into the
-         rows would name another task after a poll drops a finished one. *)
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
   mutable tasks_error: string option;
@@ -7603,7 +7630,8 @@ let create_state
   tasks_domain = [];
   task_flow = None;
   operator_stalled = None;
-  task_focus = Left_pane;
+  task_focus = Masc_tui_overview_tasks.No_task_focus;
+  task_reading = Masc_tui_overview_tasks.Rows_unread;
   help_open = false;
   keeper_deletions_open = false;
   keeper_deletions_loading = false;
@@ -7761,7 +7789,6 @@ let create_state
   identity_filter = None;
   identity_app_form = None;
   github_identity_view_error = None;
-  task_selected_id = None;
   task_detail_id = None;
   task_detail_scroll = 0;
   tasks_error = None;
@@ -8272,6 +8299,25 @@ let title_missing_reading ~error =
    said. *)
 let field_missing_reading ~error =
   if Option.is_some error then field_failed else field_unread
+
+(* The Activity feed's title reading. A count is a reading only once the feed
+   has answered. With no server on the port the feed never opens, and a title
+   reading "(0 rows \xc2\xb7 0 events held)" there states a measurement of
+   nothing while the row under it reads "the feed is not open"; every other
+   surface's title in that frame, and the Logs tab of this very surface, reads
+   "(load failed)" or "(not loaded)".
+
+   Held frames outlive the stream that delivered them, so a closed feed, or one
+   switched back off, with frames in hand still has a reading to report. Only
+   the state before any answer, with nothing held, has none. *)
+let activity_title_reading ~observer ~shown ~held =
+  match observer, held with
+  | (Observer_off | Observer_opening), 0 -> title_missing_reading ~error:None
+  | (Observer_off | Observer_opening | Observer_live _ | Observer_closed _), _
+    ->
+    Printf.sprintf "(%s \xc2\xb7 %s held)"
+      (Masc_tui_message_layout.count_noun shown "row")
+      (Masc_tui_message_layout.count_noun held "event")
 
 (* The same answer for a pane whose reading is a [Masc_tui_fetched] view: the
    count once it has answered, and otherwise which of the two it is. Asked and
@@ -9113,9 +9159,9 @@ let memory_fact_rows (state : state) : memory_fact_row list =
              (fun a b ->
                let key = function
                  | Memory_row_fact f ->
-                   (match f.Tui_decode.mf_events.Tui_decode.mfe_last_retrieved_at with
-                    | Some at -> (0, at)
-                    | None -> (1, f.Tui_decode.mf_last_seen))
+                   (match f.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
+                    | Tui_decode.Retrieved { last_at; _ } -> (0, last_at)
+                    | Tui_decode.Never_retrieved -> (1, f.Tui_decode.mf_last_seen))
                  | Memory_row_source_fact f -> (2, f.Tui_decode.msf_first_seen)
                  | Memory_row_invalidation f -> (2, f.Tui_decode.mi_invalidated_at)
                in
@@ -9129,7 +9175,9 @@ let memory_fact_rows (state : state) : memory_fact_row list =
                let key = function
                  | Memory_row_fact f ->
                    ( 0
-                   , f.Tui_decode.mf_events.Tui_decode.mfe_retrieved_count
+                   , (match f.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
+                      | Tui_decode.Retrieved { count; _ } -> count
+                      | Tui_decode.Never_retrieved -> 0)
                    , f.Tui_decode.mf_last_seen )
                  | Memory_row_source_fact f -> (1, 0, f.Tui_decode.msf_first_seen)
                  | Memory_row_invalidation f -> (1, 0, f.Tui_decode.mi_invalidated_at)
@@ -10242,6 +10290,21 @@ let approvals_open_question_count (state : state) =
           total + List.length row.Tui_decode.ar_questions)
         0 rows
   | None -> 0
+
+(* Whether the rows behind [approvals_open_question_count] are the server's
+   current answer. Before the first poll answers there are no rows, so the
+   count holds no question because none was read; a failed poll keeps the
+   previous rows, as [apply_asks_load] replaces them only on [Ok]. *)
+type questions_reading =
+  | Questions_current
+  | Questions_unread
+  | Questions_stale
+
+let approvals_questions_reading (state : state) =
+  match (state.asks_snapshot, state.asks_error) with
+  | None, _ -> Questions_unread
+  | Some _, Some _ -> Questions_stale
+  | Some _, None -> Questions_current
 
 let approvals_surface_pending (state : state) =
   List.length (approval_items state) + approvals_open_question_count state

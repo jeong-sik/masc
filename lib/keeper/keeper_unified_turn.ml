@@ -154,25 +154,8 @@ let turn_success_of_stop_reason ~meta ~continuation_route = function
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;
 
-let chat_yield_request ~base_path ~keeper_name =
-  match Keeper_registry.get ~base_path keeper_name with
-  | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
-  | Some _ ->
-    (match Keeper_owner_registry.operation_projection ~base_path ~keeper_name with
-     | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
-     | Ok operations ->
-       if operations.Keeper_owner.store_unavailable
-       then (
-         Log.Keeper.warn ~keeper_name
-           "chat readiness unavailable; retaining current autonomous progress";
-         Ok None)
-       else if operations.has_claimable_queued
-       then Ok (Some Keeper_agent_run.{ reason = Operation_queued })
-       else Ok None)
-;;
-
 let autonomous_yield_request ~base_path ~keeper_name =
-  match chat_yield_request ~base_path ~keeper_name with
+  match Keeper_chat_yield_request.request ~base_path ~keeper_name with
   | Error _ as error -> error
   | Ok (Some _) as request -> request
   | Ok None ->
@@ -381,7 +364,7 @@ let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
      terminal. *)
   | Keeper_registry.Woken (_ :: _) ->
     fun () ->
-      (match chat_yield_request ~base_path ~keeper_name with
+      (match Keeper_chat_yield_request.request ~base_path ~keeper_name with
        | Error _ as error -> error
        | Ok (Some _) as request -> request
        | Ok None ->

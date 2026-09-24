@@ -179,6 +179,20 @@ let runtime_yield_reason request =
     Runtime_agent.Durable_stimulus_waiting
 ;;
 
+let person_queued_probe ~turn_kind ~autonomous_yield_requested =
+  match turn_kind with
+  | Turn_record.Direct -> None
+  | Turn_record.Autonomous ->
+    Option.map
+      (fun requested () ->
+         match requested () with
+         | Ok (Some { reason = Operation_queued }) -> true
+         | Ok (Some { reason = Durable_stimulus_waiting _ })
+         | Ok None
+         | Error _ -> false)
+      autonomous_yield_requested
+;;
+
 (* Constitution exception (named bound + rationale): loop detection is
    inherently a repetition count, so no closed variant can replace the
    number — what counts as "the same call" is already typed (tool name +
@@ -338,21 +352,35 @@ let repeated_tool_call_input ~threshold tool_calls =
    same reading [native_tool_boundary] makes for AGENT_CORE. An admitted
    scope contributes only its latched observation failure; it is not what
    makes the boundary exist (#34083). *)
-let official_client_tool_boundary ~repetition_execution ~tool_calls =
+let official_client_tool_boundary
+      ~repetition_execution ?autonomous_yield_requested ~tool_calls =
   match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
   | None ->
-    let repeated =
-      match repeated_exact_tool_call
-              ~threshold:repeated_tool_call_yield_threshold tool_calls with
-      | Some _ as repeated -> repeated
-      | None ->
-        repeated_tool_call_input
-          ~threshold:repeated_tool_call_input_yield_threshold tool_calls
+    let repetition_stop () =
+      let repeated =
+        match repeated_exact_tool_call
+                ~threshold:repeated_tool_call_yield_threshold tool_calls with
+        | Some _ as repeated -> repeated
+        | None ->
+          repeated_tool_call_input
+            ~threshold:repeated_tool_call_input_yield_threshold tool_calls
+      in
+      Ok (Option.map (fun (tool_name, repeated_count) ->
+        Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
     in
-    Ok (Option.map (fun (tool_name, repeated_count) ->
-      Keeper_official_client_host.Repeated_tool_call { tool_name; repeated_count }) repeated)
+    (match autonomous_yield_requested with
+     | None -> repetition_stop ()
+     | Some requested ->
+       (match requested () with
+        | Ok (Some { reason = Operation_queued }) ->
+          Ok (Some Keeper_official_client_host.Queued_chat_operation)
+        | Ok (Some { reason = Durable_stimulus_waiting _ }) | Ok None ->
+          repetition_stop ()
+        | Error detail ->
+          Error (Agent_core.Error.Internal
+            ("keeper cooperative-yield snapshot failed: " ^ detail))))
 ;;
 
 let assistant_text_is_blank text =
@@ -710,6 +738,7 @@ let native_tool_boundary
 ;;
 
 module For_testing = struct
+  let person_queued_probe = person_queued_probe
   let native_tool_boundary = native_tool_boundary
   let tool_boundary_before_repetition = tool_boundary_before_repetition
   let official_client_tool_boundary = official_client_tool_boundary
@@ -1502,6 +1531,7 @@ let run_turn
          let on_official_client_tool_boundary () =
            match
              official_client_tool_boundary ~repetition_execution
+               ?autonomous_yield_requested
                ~tool_calls:(Keeper_run_tools_hook_accumulator.tool_calls_for_repetition s.acc)
            with
            | Ok (Some (Keeper_official_client_host.Repeated_tool_call _)) as stop ->
@@ -1540,21 +1570,13 @@ let run_turn
                           "keeper cooperative-yield probe failed: %s"
                           (Printexc.to_string exn))))
          in
-         (* The same queue snapshot the tool-boundary probe reads, narrowed to a
-            person's own chat operation ([Operation_queued]). The turn driver
-            races this against the pre-first-token wait so a queued person is
-            not stuck behind a provider that has produced nothing (RFC-0441
-            pre-first-token gap). Autonomous-only: [autonomous_yield_requested]
-            is [None] off the autonomous lane, so the probe is too. *)
+         (* The autonomous lane can abandon a call before its first event: its
+            stimulus stays pending for a later cycle. A direct operation has
+            already claimed its user's input, so it hands over only after a
+            tool boundary has persisted a resumable checkpoint. Applying the
+            pre-first-token abort to it would fail that operation instead. *)
          let person_queued_probe =
-           Option.map
-             (fun requested () ->
-                match requested () with
-                | Ok (Some { reason = Operation_queued }) -> true
-                | Ok (Some { reason = Durable_stimulus_waiting _ })
-                | Ok None
-                | Error _ -> false)
-             autonomous_yield_requested
+           person_queued_probe ~turn_kind ~autonomous_yield_requested
          in
          let checkpoint_sidecar =
                 ctx_work.checkpoint.Agent_core.Checkpoint.working_context

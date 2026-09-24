@@ -71,6 +71,10 @@ val terminal_effect_boundary_decision
     envelope. *)
 
 module For_testing : sig
+  val person_queued_probe :
+    turn_kind:Turn_record.turn_kind ->
+    autonomous_yield_requested:(unit -> (autonomous_yield_request option, string) result) option ->
+    (unit -> bool) option
   val native_tool_boundary :
     keeper_name:string ->
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
@@ -85,6 +89,7 @@ module For_testing : sig
     (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
   val official_client_tool_boundary :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
+    ?autonomous_yield_requested:(unit -> (autonomous_yield_request option, string) result) ->
     tool_calls:Keeper_agent_result.tool_call_detail list ->
     (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result
   val registry_progress_on_event
@@ -305,8 +310,9 @@ val run_turn
   -> ?on_gate_deferred:(string -> unit)
   -> ?autonomous_yield_requested:
        (unit -> (autonomous_yield_request option, string) result)
-       (* Evaluated only after a typed AGENT_CORE tool boundary. Snapshot failures
-          remain explicit errors. The chat lane never receives this hook. *)
+       (* Evaluated after a settled tool result on either runtime path. A
+          direct turn may yield to a newer queued person only with its
+          resumable checkpoint. Snapshot failures remain explicit errors. *)
   -> ?on_checkpoint_stage:(Agent_core.Agent.checkpoint_stage -> unit)
   -> unit
   -> turn_settlement

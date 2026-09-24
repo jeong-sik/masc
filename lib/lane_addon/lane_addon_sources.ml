@@ -59,6 +59,8 @@ let parse_source = function
              | Some Browser_lane.Lane_name.Live, None -> Error "live browser observation requires an explicit client_id"
              | Some Browser_lane.Lane_name.Automation, None -> Ok Automation
              | Some Browser_lane.Lane_name.Automation, Some _ -> Error "automation does not use a live client_id"
+             | Some Browser_lane.Lane_name.Stagehand, _ ->
+               Error "a lane addon cannot observe the stagehand lane: it has no idle document observer"
              | None, _ -> Error ("browser source requires " ^ Browser_lane.Lane_name.expected ^ " lane") in
            let* tab_id = match List.assoc_opt "tab_id" fields with
              | Some (`Int value) when value >= 0 -> Ok value

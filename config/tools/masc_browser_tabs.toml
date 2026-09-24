@@ -6,7 +6,7 @@ additional_properties = false
 [[params]]
 name = "lane"
 type = "string"
-enum = ["live", "automation"]
+enum = ["live", "automation", "stagehand"]
 default = "live"
 
 [[params]]

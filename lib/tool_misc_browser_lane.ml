@@ -31,16 +31,18 @@ let make_workflow_err ~tool_name ~start_time message =
 
 (* The lane names are the closed set the state module admits; anything else
    is refused here rather than queued into a lane that cannot exist. *)
-let route_of ~tool_name ~start_time args =
+(* [default] is the lane a missing [lane] means, the one each tool declares. *)
+let route_of ~default ~tool_name ~start_time args =
   match args with
   | `Assoc fields ->
     let lane = match List.assoc_opt "lane" fields with
-      | None -> Some Browser_lane.Lane_name.Live
+      | None -> Some default
       | Some (`String raw) -> Browser_lane.Lane_name.of_wire raw
       | Some _ -> None in
     (match lane with
      | Some Browser_lane.Lane_name.Live -> Ok (Browser_lane.Live_route None)
      | Some Browser_lane.Lane_name.Automation -> Ok Browser_lane.Automation_route
+     | Some Browser_lane.Lane_name.Stagehand -> Ok Browser_lane.Stagehand_route
      | None ->
        Error (make_input_err ~tool_name ~start_time ("lane must be " ^ Browser_lane.Lane_name.expected)))
   | _ -> Error (make_input_err ~tool_name ~start_time "browser arguments must be an object")
@@ -140,26 +142,30 @@ let handle_tabs ~base_path ~tool_name ~start_time args : Tool_result.result =
       | Ok answer -> answer_to_result ~tool_name ~start_time (add_client target answer)
 ;;
 
-(* Sessions and navigations are automation-lane verbs; the state module
-   refuses them on the live lane too (live_lane_refused), so a caller cannot
-   route them there even by naming it. *)
+(* Sessions and navigations belong to the lanes the server owns, automation
+   and stagehand; a missing lane is automation, as both tools declare. The
+   live lane refuses them (verb_allowed_on_live), so a caller cannot route
+   them there even by naming it. *)
+let issue_on_lane ~tool_name ~start_time args ~verb ~timeout_sec =
+  match route_of ~default:Browser_lane.Lane_name.Automation ~tool_name ~start_time args with
+  | Error error -> error
+  | Ok route ->
+    (match Result.bind (Browser_lane.resolve_target route) (fun target -> Browser_lane.issue_for ~target ~verb ~timeout_sec) with
+     | Ok answer -> answer_to_result ~tool_name ~start_time answer
+     | Error selection -> make_workflow_err ~tool_name ~start_time (Browser_lane.selection_error_code selection))
+;;
+
 let handle_session ~tool_name ~start_time args : Tool_result.result =
   let action = get_string args "action" "" in
   match action with
   | "open" ->
     let headless = Some (get_bool args "headless" true) in
-    answer_to_result ~tool_name ~start_time
-      (Browser_lane.issue_automation
-         ~verb:(Browser_lane.Session_open { headless })
-         ~timeout_sec:60.0)
-  | "close" ->
-    answer_to_result ~tool_name ~start_time
-      (Browser_lane.issue_automation ~verb:Browser_lane.Session_close ~timeout_sec:60.0)
+    issue_on_lane ~tool_name ~start_time args ~verb:(Browser_lane.Session_open { headless }) ~timeout_sec:60.0
+  | "close" -> issue_on_lane ~tool_name ~start_time args ~verb:Browser_lane.Session_close ~timeout_sec:60.0
   | "status" ->
     (* Reads the backend's record rather than the browser, so the short timeout
        is the lane round trip, not a page load. *)
-    answer_to_result ~tool_name ~start_time
-      (Browser_lane.issue_automation ~verb:Browser_lane.Session_status ~timeout_sec:10.0)
+    issue_on_lane ~tool_name ~start_time args ~verb:Browser_lane.Session_status ~timeout_sec:10.0
   | _ ->
     make_input_err ~tool_name ~start_time
       "action must be one of: open, close, status"
@@ -172,10 +178,8 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
     make_input_err ~tool_name ~start_time
       "url must be a valid http or https URL"
   else
-    answer_to_result ~tool_name ~start_time
-      (Browser_lane.issue_automation
-         ~verb:(Browser_lane.Page_goto { url; tab_id = get_int_opt args "tabId" })
-         ~timeout_sec:45.0)
+    issue_on_lane ~tool_name ~start_time args
+      ~verb:(Browser_lane.Page_goto { url; tab_id = get_int_opt args "tabId" }) ~timeout_sec:45.0
 ;;
 
 let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_result.result =
@@ -189,7 +193,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
   | Ok request ->
     let automation = match request.route with
       | Browser_lane.Automation_route -> true
-      | Browser_lane.Live_route _ -> false in
+      | Browser_lane.Live_route _ | Browser_lane.Stagehand_route -> false in
     match Browser_lane.Action.parse_frame_path args with
     | Error detail -> make_input_err ~tool_name ~start_time detail
     | Ok frame_path ->
@@ -312,11 +316,7 @@ let handle_read_with_retention ~base_path ?keeper_name ~tool_name ~start_time ar
 let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
   let pre_error detail =
     make_workflow_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect in
-  let args = match args with
-    | `Assoc fields when not (List.mem_assoc "lane" fields) ->
-      `Assoc (("lane", `String Browser_lane.Lane_name.(to_wire Automation)) :: fields)
-    | _ -> args in
-  match route_of ~tool_name ~start_time args, Browser_lane.Action.parse args with
+  match route_of ~default:Browser_lane.Lane_name.Automation ~tool_name ~start_time args, Browser_lane.Action.parse args with
   | Error error, _ -> error, Tool_result.Proven_pre_effect
   | _, Error detail -> make_input_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect
   | Ok _, Ok (Browser_lane.Action.On_tab {interaction=Upload _;_}) when upload_paths = None ->
@@ -335,7 +335,7 @@ let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
       let phase = match answer, route with
         | (Browser_lane.Rejected_before_effect _ | Browser_lane.Lane_absent), _ -> Tool_result.Proven_pre_effect
         | Browser_lane.Refused _, Browser_lane.Live_route _ -> Tool_result.Proven_pre_effect
-        | Browser_lane.Refused _, Browser_lane.Automation_route
+        | Browser_lane.Refused _, (Browser_lane.Automation_route | Browser_lane.Stagehand_route)
         | (Browser_lane.Timed_out | Browser_lane.Answered _), _ -> Tool_result.Effect_outcome_unknown in
       answer_to_result ~tool_name ~start_time answer, phase
 ;;

@@ -20,7 +20,7 @@ default = 50000
 [[params]]
 name = "lane"
 type = "string"
-enum = ["live", "automation"]
+enum = ["live", "automation", "stagehand"]
 default = "live"
 
 [[params]]

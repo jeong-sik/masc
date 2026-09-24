@@ -5323,7 +5323,7 @@ let refresh_browser_lane state ~mailbox =
   | Some view when not (Browser_lane_view.busy view) ->
       state.browser_lane <- Some (Browser_lane_view.refresh view);
       launch_browser_lane state ~mailbox
-        (match view.source with Live -> Discover Read_after_discovery | Automation -> Read)
+        (match view.source with Live -> Discover Read_after_discovery | Automation | Stagehand -> Read)
   | Some _ | None -> ()
 
 let open_browser_lane state ~mailbox =
@@ -9415,7 +9415,8 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
     | Some (width, height) when width > 0 && height > 0 ->
         (match shot.source with
          | Browser_lane_view.Live -> "click: link   drag: requires automation"
-         | Browser_lane_view.Automation -> "click: link   drag: move")
+         | Browser_lane_view.Automation -> "click: link   drag: move"
+         | Browser_lane_view.Stagehand -> "click/drag: not served on the stagehand lane")
     | _ -> "click/drag unavailable: terminal cell geometry unknown" in
   let wheel_hint = match !image_cell_pixels with
     | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"

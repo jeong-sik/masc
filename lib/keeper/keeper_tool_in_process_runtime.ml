@@ -458,7 +458,8 @@ let handle_memory_retract_with_outcome
 
 (* Browser lane tools preserve selected native-client identity. The closed
    state-layer verb set distinguishes reads from explicit-tab interactions;
-   session ownership and direct navigation remain automation-only. *)
+   session ownership and direct navigation stay with the lanes the server
+   owns (automation, stagehand). *)
 let handle_browser_tabs_with_outcome ~(config : Workspace.config) ~args =
   Keeper_tool_execution.of_tool_result
     (Tool_misc_browser_lane.handle_tabs ~base_path:config.base_path

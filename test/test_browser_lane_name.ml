@@ -6,7 +6,7 @@ let lane = testable (fun fmt lane -> Format.pp_print_string fmt (Lane_name.to_wi
 let test_round_trip () =
   List.iter (fun name -> check (option lane) (Lane_name.to_wire name) (Some name)
     (Lane_name.of_wire (Lane_name.to_wire name))) Lane_name.all;
-  check string "error text lists every lane" "live or automation" Lane_name.expected
+  check string "error text lists every lane" "live or automation or stagehand" Lane_name.expected
 
 let test_rejects_non_names () =
   List.iter (fun raw -> check (option lane) (Printf.sprintf "%S" raw) None (Lane_name.of_wire raw))
@@ -42,7 +42,14 @@ let test_tool_enums () =
   check (list lane) "masc_browser_act offers automation only" [ Lane_name.Automation ]
     (decode_all "masc_browser_act" (lane_enum act));
   check (list lane) "masc_browser_act defaults to automation" [ Lane_name.Automation ]
-    (decode_all "masc_browser_act" [ lane_default act ])
+    (decode_all "masc_browser_act" [ lane_default act ]);
+  (* Sessions and navigation belong to the lanes the server owns. *)
+  List.iter (fun (tool, schema) ->
+    check (list lane) (tool ^ " offers the server's lanes") (sorted [ Lane_name.Automation; Lane_name.Stagehand ])
+      (sorted (decode_all tool (lane_enum schema)));
+    check (list lane) (tool ^ " defaults to automation") [ Lane_name.Automation ] (decode_all tool [ lane_default schema ]))
+    [ "masc_browser_session", Tool_schemas_misc_toml.browser_session;
+      "masc_browser_goto", Tool_schemas_misc_toml.browser_goto ]
 
 let () =
   run "browser_lane_name" [

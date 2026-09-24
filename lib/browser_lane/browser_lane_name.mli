@@ -9,12 +9,13 @@
     with that reader. *)
 
 (** [all] (derived) lists every lane in constructor order. *)
-type t = Live | Automation [@@deriving enumerate]
+type t = Live | Automation | Stagehand [@@deriving enumerate]
 
 val to_wire : t -> string
 
 (** [None] for any string that is not exactly a lane name. *)
 val of_wire : string -> t option
 
-(** ["live or automation"]: the names a reader accepts, for its error text. *)
+(** ["live or automation or stagehand"]: the names a reader accepts, for its
+    error text. *)
 val expected : string

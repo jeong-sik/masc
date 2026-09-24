@@ -3293,9 +3293,9 @@ let check_keeper_shrinks_history_after_typed_context_error ~read_only_tool () =
          (fun cli_path ->
             match
               run_keeper_turn
-                ~session_id:fixture_trace_with_no_completed_turn
                 ~tools
                 ~initial_messages
+                ~session_id:fixture_trace_with_no_completed_turn
                 ~keeper_name:"codex-fixture-same-size-shrink"
                 ~cli_path
                 ~model:"gpt-fixture"

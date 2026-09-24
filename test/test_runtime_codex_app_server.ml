@@ -2714,6 +2714,37 @@ let test_account_home_does_not_apply_readiness_overrides () =
         | Error error -> fail (Runtime_codex_app_server.error_to_string error)))
 ;;
 
+let test_account_home_passes_its_declared_provider_key () =
+  let home = Filename.temp_file "masc-codex-declared-home-" "" in
+  Sys.remove home;
+  Unix.mkdir home 0o700;
+  let config_path = Filename.concat home "config.toml" in
+  let previous = Sys.getenv_opt "OPENAI_API_KEY" in
+  Unix.putenv "OPENAI_API_KEY" "fixture-selected-key";
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv "OPENAI_API_KEY" (Option.value previous ~default:"");
+    Sys.remove config_path;
+    Unix.rmdir home) (fun () ->
+    let output = open_out_bin config_path in
+    output_string output "[model_providers.selected]\nenv_key = \"OPENAI_API_KEY\"\n";
+    close_out output;
+    with_fixture
+      [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+      (fun fixture ->
+        let wrapper = Filename.temp_file "masc-codex-declared-wrapper-" ".sh" in
+        Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+          let output = open_out_bin wrapper in
+          output_string output "#!/bin/sh\nset -eu\n";
+          output_string output ("[ \"$CODEX_HOME\" = " ^ shell_quote home ^ " ] || exit 78\n");
+          output_string output "[ \"$OPENAI_API_KEY\" = fixture-selected-key ] || exit 79\n";
+          output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+          close_out output;
+          Unix.chmod wrapper 0o700;
+          match run_fixture ~account_home:home wrapper with
+          | Ok _ -> ()
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error))))
+;;
+
 let write_fixture_file path content =
   let output = open_out_bin path in
   Fun.protect
@@ -5341,6 +5372,8 @@ let () =
             test_readiness_home_overrides_inherited_home
         ; test_case "selected account home keeps normal CLI configuration" `Quick
             test_account_home_does_not_apply_readiness_overrides
+        ; test_case "selected home admits its declared provider key" `Quick
+            test_account_home_passes_its_declared_provider_key
         ; test_case
             "child environment is allowlisted"
             `Quick

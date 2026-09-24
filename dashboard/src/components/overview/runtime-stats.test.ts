@@ -1,12 +1,13 @@
 import { html } from 'htm/preact'
 import { render, cleanup, fireEvent, waitFor, act } from '@testing-library/preact'
 import { afterEach, expect, it, vi } from 'vitest'
-import { get } from '../../api/core'
+import { get, post } from '../../api/core'
 import { DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 import { route } from '../../router'
 import { OverviewRuntimeStats } from './runtime-stats'
 import { runtimeCatalogState } from '../../lib/runtime-catalog-resource'
-vi.mock('../../api/core', () => ({ get: vi.fn() }))
+vi.mock('../../api/core', () => ({ get: vi.fn(), post: vi.fn() }))
+vi.mock('../../api/dev-token', () => ({ ensureDevToken: vi.fn(async () => {}) }))
 vi.mock('../../lib/runtime-catalog-resource', () => ({
   runtimeCatalogState: { value: { status: 'idle' } },
   loadRuntimeCatalog: vi.fn(),
@@ -32,6 +33,26 @@ it('shows each official client account once beside per-runtime usage', async () 
   expect(accounts.textContent).toContain('Codex · two')
   expect(accounts.textContent?.match(/Claude · one/g)).toHaveLength(1)
   expect(accounts.textContent).toContain('로그인 미측정')
+  vi.mocked(post).mockResolvedValue({
+    schema: 'masc.dashboard.official-client-probe.v1',
+    ok: true,
+    runtime_id: 'claude_one.shared',
+    client_kind: 'claude_code',
+    configured_model: 'shared-model',
+    measured_at: 1_000,
+    login: {
+      status: 'ready', authenticated: true,
+      evidence_source: 'configured_executable_self_report',
+      identity_verified: false, auth_method: 'claude.ai',
+      subscription_type: 'max', api_provider: 'firstParty',
+    },
+    client: { user_agent: null },
+    execution: { status: 'not_measured', reason: 'login_probe_does_not_submit_model_turn' },
+  })
+  fireEvent.click(view.getByTestId('overview-client-claude_one').querySelector('button')!)
+  await waitFor(() => expect(view.getByTestId('overview-client-claude_one').textContent).toContain('CLI 자체 보고: ready'))
+  expect(view.getByTestId('overview-client-codex_two').textContent).toContain('로그인 미측정')
+  expect(post).toHaveBeenCalledWith('/api/v1/runtime/official-client/probe', { runtime_id: 'claude_one.shared' })
 })
 it('keeps stale values explicit until a refresh returns fresh cache metadata', async () => {
   vi.mocked(get).mockResolvedValueOnce({ ...response,

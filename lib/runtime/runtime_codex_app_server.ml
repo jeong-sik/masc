@@ -1760,7 +1760,10 @@ let client_environment account_home =
     name <> "CODEX_HOME"
     && (match account_home with
         | None -> true
-        | Some _ -> not (List.mem name [ "OPENAI_API_KEY"; "OPENAI_BASE_URL"; "CODEX_API_KEY"; "CODEX_ACCESS_TOKEN" ]))
+        | Some _ ->
+          not (List.mem name
+            [ "OPENAI_API_KEY"; "OPENAI_BASE_URL"; "CODEX_API_KEY"; "CODEX_ACCESS_TOKEN" ])
+          || List.mem name configured)
     && (child_environment_key_allowed name || List.mem name configured))
   |> fun entries ->
     Option.fold ~none:entries ~some:(fun path -> ("CODEX_HOME=" ^ path) :: entries) home

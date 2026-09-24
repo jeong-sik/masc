@@ -1,6 +1,12 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
-import { fetchRuntimeModelMetrics, type DashboardRuntimeModelMetricsResponse, type DashboardRuntimeProviderSnapshot } from '../../api/dashboard-runtime'
+import { useEffect, useRef, useState } from 'preact/hooks'
+import {
+  fetchRuntimeModelMetrics,
+  probeOfficialClientLogin,
+  type DashboardOfficialClientProbeResponse,
+  type DashboardRuntimeModelMetricsResponse,
+  type DashboardRuntimeProviderSnapshot,
+} from '../../api/dashboard-runtime'
 import { loadRuntimeCatalog, runtimeCatalogState } from '../../lib/runtime-catalog-resource'
 import { setupVisibleAutoRefresh, DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 import { RouteLink } from '../common/route-link'
@@ -11,6 +17,52 @@ type State = { kind: 'loading' } | { kind: 'error'; message: string }
 function number(value: number | null | undefined, unit = ''): string {
   return value != null && Number.isFinite(value) && value >= 0
     ? `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })}${unit}` : '미보고'
+}
+
+function OfficialClientAccount({ client }: { client: DashboardRuntimeProviderSnapshot }) {
+  const runtimeId = client.runtime_id ?? client.provider
+  const [measured, setMeasured] = useState<DashboardOfficialClientProbeResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const requestVersion = useRef(0)
+  useEffect(() => {
+    requestVersion.current += 1
+    setMeasured(null)
+    setLoading(false)
+    setError(null)
+  }, [client])
+  const checkLogin = async () => {
+    if (loading) return
+    const version = ++requestVersion.current
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await probeOfficialClientLogin(runtimeId)
+      if (version !== requestVersion.current) return
+      if (result.runtime_id !== runtimeId) throw new Error('런타임 인증 검사 응답 불일치')
+      setMeasured(result)
+    } catch (cause) {
+      if (version !== requestVersion.current) return
+      setMeasured(null)
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      if (version === requestVersion.current) setLoading(false)
+    }
+  }
+  return html`
+    <div class="rounded border border-border px-2 py-1 text-xs" data-testid=${`overview-client-${client.provider_id ?? client.provider}`}>
+      <span class="font-medium">${client.provider_display_name ?? client.provider_id ?? client.provider}</span>
+      <span class="ml-1 text-text-muted">(${client.provider_id ?? client.provider})</span>
+      <span class="ml-2" role="status">${measured
+        ? `CLI 자체 보고: ${measured.login.status}`
+        : loading ? '로그인 검사 중' : '로그인 미측정'}</span>
+      <button type="button" class="ml-2 underline" disabled=${loading}
+        onClick=${() => void checkLogin()}>로그인 확인</button>
+      ${measured ? html`<span class="ml-2 text-text-muted">측정 ${new Date(measured.measured_at * 1000).toLocaleString()} · 신원 미검증</span>` : null}
+      ${measured?.login.detail ? html`<span class="ml-2 text-text-muted">${measured.login.detail}</span>` : null}
+      ${error ? html`<span class="ml-2" role="alert">${error}</span>` : null}
+    </div>
+  `
 }
 
 export function OverviewRuntimeStats() {
@@ -66,14 +118,10 @@ export function OverviewRuntimeStats() {
     <p class="text-sm text-text-muted">Keeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.</p>
     ${clients.length > 0 ? html`
       <div class="flex flex-wrap gap-2" aria-label="공식 Client 계정별 런타임" data-testid="overview-official-client-accounts">
-        ${clients.map(client => html`
-          <span class="rounded border border-border px-2 py-1 text-xs" key=${client.provider_id ?? client.provider}>
-            ${client.provider_display_name ?? client.provider_id ?? client.provider}
-            · 설정됨 · 로그인 미측정
-          </span>
-        `)}
+        ${clients.map(client => html`<${OfficialClientAccount}
+          key=${client.runtime_id ?? client.provider} client=${client} />`)}
       </div>
-      <p class="text-xs text-text-muted">계정별 로그인은 Monitoring의 공식 CLI 인증 검사에서 확인합니다. 아래 사용량은 런타임 ID별 기록입니다.</p>
+      <p class="text-xs text-text-muted">로그인 확인은 선택한 계정의 공식 CLI 자체 보고만 검사합니다. 아래 사용량은 런타임 ID별 기록입니다.</p>
     ` : null}
     ${state.kind === 'loading' ? html`<p role="status">런타임 통계를 읽고 있습니다.</p>` : null}
     ${state.kind === 'error' ? html`<p role="alert">통계를 읽지 못했습니다: ${state.message}</p>` : null}

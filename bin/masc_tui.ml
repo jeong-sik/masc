@@ -471,6 +471,7 @@ type input_reader = {
           So the head waits here instead. The next read resumes it, which is
           the same character arriving late rather than a lost one. Empty
           whenever no character is in flight. *)
+  mutable paste_decoder : Masc_tui_paste.decoder option;
 }
 
 (* One terminal read. Bigger than any escape sequence and big enough that a
@@ -487,6 +488,7 @@ let create_input_reader () =
     late_palette_publisher = None;
     last_source = None;
     partial_scalar = "";
+    paste_decoder = None;
   }
 
 (* Whether the terminal has bytes for us, waited for inside Eio rather than
@@ -732,9 +734,8 @@ type input_event =
           other one into the [wheel-up] / [wheel-down] key the surfaces bind,
           so no surface learned a new key when the pane appeared. *)
 
-(* How long to wait for the next byte of a paste already in progress. The
-   terminal writes the payload in one go behind the start marker, so this is a
-   liveness bound on a stream that stalled, not a pace. *)
+(* The per-read wait while a paste is in progress. A pause yields to the main
+   loop without ending the paste: only ESC[201~ makes its contents a draft. *)
 let paste_byte_timeout_seconds = 0.5
 
 (* Read an APC body to its terminator. Bounded: a terminal that opens one and
@@ -769,6 +770,19 @@ let read_apc_body reader =
 let read_input ?(timeout = 0.1) reader () : input_event option =
   Eio_guard.run_in_systhread ~label:"tui-read-key" (fun () ->
       let key name = Some (Key name) in
+      let rec continue_paste decoder =
+        match take_input_byte reader ~timeout:paste_byte_timeout_seconds with
+        | None -> None
+        | Some byte ->
+            (match Masc_tui_paste.feed decoder byte with
+             | None -> continue_paste decoder
+             | Some paste ->
+                 reader.paste_decoder <- None;
+                 Some (Pasted paste))
+      in
+      match reader.paste_decoder with
+      | Some decoder -> continue_paste decoder
+      | None ->
       (* A character left half-read by the previous call is finished before
          anything else is looked at. Its remaining bytes are the next thing in
          the stream, so reading past them would decode the tail of one
@@ -812,11 +826,9 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
                   Every newline in them is text; without this mode each one
                   arrives as Return and a three-line paste is three sends. *)
                | Some ("200", '~') ->
-                   Some
-                     (Pasted
-                        (Masc_tui_paste.read ~next_byte:(fun () ->
-                             take_input_byte reader
-                               ~timeout:paste_byte_timeout_seconds)))
+                   let decoder = Masc_tui_paste.create () in
+                   reader.paste_decoder <- Some decoder;
+                   continue_paste decoder
                (* A parameter span starting with [<] is an SGR mouse report.
                   A wheel notch travels with its position, so the loop can
                   give it to the pane under the pointer and turn the rest into

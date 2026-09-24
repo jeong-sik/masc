@@ -20,6 +20,14 @@ type t = {
           about to send part of a file needs to know how much is missing. *)
 }
 
+type decoder
+(** A paste in progress. An idle terminal read leaves this state intact until
+    the closing marker arrives. *)
+
+val create : unit -> decoder
+val feed : decoder -> char -> t option
+(** Consume one byte. [None] means the closing marker has not arrived yet. *)
+
 val end_marker : string
 (** What closes a paste. The start marker is consumed by the escape decoder
     that dispatches here. *)

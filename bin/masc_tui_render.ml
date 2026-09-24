@@ -12828,23 +12828,19 @@ let render_acting (state : state) =
     ("  " ^ Acting.filter_explanation state.acting_filter);
   box_divider buf cols;
   (* Measured over every row the filter keeps, not the page on screen, so the
-     columns do not move while a reader scrolls. This walks the list once and
-     builds a row per entry; what the note above avoids for the page is the
-     pairing, which is quadratic, and measuring needs neither the pairing nor
-     the duration it finds -- those reach the detail column, and the two
-     columns measured here are the keeper and the label. *)
+     columns do not move while a reader scrolls. Only the two named columns
+     are measured, so this asks the event for its keeper and its label rather
+     than building a row: a row carries the detail sentence too, and spelling
+     one per kept entry on every frame is work the screen never shows. The
+     chunked list is already built, so its rows are read as they are. *)
   let table_columns =
     let measured =
       match chunked with
-      | Some rows -> rows
+      | Some rows -> List.map Acting.measured_of_row rows
       | None ->
           List.map
             (fun (entry, _older) ->
-              let row = Acting.row_of_entry ~duration_ms:None entry in
-              { row with
-                Acting.keeper =
-                  Acting.keeper_of_event ~traces entry.Acting.ae_event
-              })
+              Acting.measured_of_event ~traces entry.Acting.ae_event)
             visible
     in
     Acting.columns ~inner_width:(framed_inner_width cols) measured

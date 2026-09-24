@@ -1312,10 +1312,15 @@ let test_call_key_prefers_the_provider_id () =
 let table_row ?(keeper = "keeper") ?(label = "turn") ?(detail = "") () =
   { Acting.at = 100.; keeper; glyph = Acting.Turn_boundary; label; detail }
 
+(* Measuring reads a row's two named columns; the table is sized from these,
+   never from a row's detail. *)
+let measured_row ?keeper ?label () =
+  Acting.measured_of_row (table_row ?keeper ?label ())
+
 let test_a_long_keeper_widens_its_column () =
   let name = "agent_core-glm-coding.glm-5-turbo" in
   let columns =
-    Acting.columns ~inner_width:160 [ table_row ~keeper:name () ]
+    Acting.columns ~inner_width:160 [ measured_row ~keeper:name () ]
   in
   check int "the column holds the name whole" (String.length name)
     columns.Acting.keeper_cells
@@ -1325,7 +1330,7 @@ let test_a_long_keeper_widens_its_column () =
 let test_short_rows_leave_the_columns_where_they_were () =
   let columns =
     Acting.columns ~inner_width:160
-      [ table_row ~keeper:"short-name" ~label:"turn" () ]
+      [ measured_row ~keeper:"short-name" ~label:"turn" () ]
   in
   check int "the keeper column is what it drew before" 16
     columns.Acting.keeper_cells;
@@ -1336,7 +1341,8 @@ let test_short_rows_leave_the_columns_where_they_were () =
 let test_no_column_goes_under_what_it_drew_before () =
   for inner_width = 0 to 200 do
     let columns =
-      Acting.columns ~inner_width [ table_row ~keeper:"a-very-long-agent-name-indeed" () ]
+      Acting.columns ~inner_width
+        [ measured_row ~keeper:"a-very-long-agent-name-indeed" () ]
     in
     check bool
       (Printf.sprintf "inner %d keeps the keeper column" inner_width)
@@ -1350,11 +1356,51 @@ let test_no_column_goes_under_what_it_drew_before () =
 
 (* And the detail column keeps half the row: it is the one that carries
    sentences. *)
+(* Measuring asks the event for its keeper and its label. The row the screen
+   draws has to say the same two words: if the two readings drifted, the
+   columns would be sized for a table that is not on the screen. The keeper
+   is the reading that already differed -- a correlated agent_core row is
+   drawn under the keeper whose trace it carries, not under its lane. *)
+let test_measuring_reads_what_the_row_draws () =
+  let traces = [ ("keeper-one", "trace-1") ] in
+  let correlated =
+    match agent_core ~tool:"masc_board_stats" "agent_core-glm-coding.glm-5-turbo" with
+    | Observer.Agent_core e ->
+        Observer.Agent_core { e with Observer.correlation = Some "trace-1" }
+    | other -> other
+  in
+  List.iter
+    (fun (what, event) ->
+      let row = Acting.row_of_event ~at:100. ~duration_ms:None event in
+      let measured = Acting.measured_of_event ~traces event in
+      check string (what ^ ": the same event word") row.Acting.label
+        measured.Acting.measured_label;
+      check string (what ^ ": the keeper the row is drawn under")
+        (Acting.keeper_of_event ~traces event)
+        measured.Acting.measured_keeper)
+    [ ("a plain tool call", agent_core ~tool:"masc_board_stats" "alpha")
+    ; ("a skill call", agent_core ~tool:"keeper_skill" "alpha")
+    ; ("a correlated call", correlated)
+    ; ( "a failed container"
+      , lane_resource ~detail:"No such image" Lane_events.Acquire_failed )
+    ; ("a removed container", lane_resource Lane_events.Release_confirmed)
+    ; ("a heartbeat", heartbeat "keeper-one")
+    ; ("a registry push", Observer.Internal_agent_runs_changed)
+    ];
+  (* The dividing case: the correlated call is measured under the keeper, and
+     that is not the name its own row field carries. Without this, measuring
+     off [row.keeper] would pass every line above. *)
+  let row = Acting.row_of_event ~at:100. ~duration_ms:None correlated in
+  check string "the row's own field still names the lane"
+    "agent_core-glm-coding.glm-5-turbo" row.Acting.keeper;
+  check string "and measuring names the keeper" "keeper-one"
+    (Acting.measured_of_event ~traces correlated).Acting.measured_keeper
+
 let test_the_named_columns_leave_detail_its_half () =
   let long = String.make 80 'x' in
   for inner_width = 80 to 200 do
     let columns =
-      Acting.columns ~inner_width [ table_row ~keeper:long ~label:long () ]
+      Acting.columns ~inner_width [ measured_row ~keeper:long ~label:long () ]
     in
     let taken = columns.Acting.keeper_cells + columns.Acting.label_cells in
     let half = max 32 ((inner_width - 15) / 2) in
@@ -1468,5 +1514,7 @@ let () =
             test_no_column_goes_under_what_it_drew_before
         ; test_case "the named columns leave detail its half" `Quick
             test_the_named_columns_leave_detail_its_half
+        ; test_case "measuring reads what the row draws" `Quick
+            test_measuring_reads_what_the_row_draws
         ] )
     ]

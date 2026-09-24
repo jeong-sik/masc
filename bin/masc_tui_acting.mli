@@ -88,6 +88,12 @@ val keeper_of_event :
     carries. [traces] is (keeper name, trace id) for every keeper the TUI
     knows. An event whose correlation matches none keeps its agent name. *)
 
+val label_of_event : Observer.event -> string
+(** What happened, in the EVENT column's one or two words. The sibling of
+    {!keeper_of_event} for the other measured column: [row_of_event] reads
+    its label here, so a measurement can ask for the word without building
+    the detail sentence that would sit beside it. *)
+
 val row_of_entry : duration_ms:float option -> entry -> row
 (** The row an entry draws, wearing the entry's arrival clock. Render calls
     this rather than [row_of_event] so there is no clock argument at the call
@@ -249,7 +255,26 @@ type columns = private {
     row lays itself out on the widths {!columns} derived from the rows it
     draws, never on a pair of numbers assembled at the call site. *)
 
-val columns : inner_width:int -> row list -> columns
+type measured = private {
+  measured_keeper : string;
+  measured_label : string;
+}
+(** What {!columns} reads off one entry: the two named columns, without the
+    detail sentence the third column draws. Private so a measurement comes
+    from an event or from a row that was drawn, never from a pair of strings
+    assembled at the call site. *)
+
+val measured_of_row : row -> measured
+(** The measurement a drawn row already carries. *)
+
+val measured_of_event :
+  traces:(string * string) list -> Observer.event -> measured
+(** The measurement of an event that has no row yet. Activity measures every
+    entry its filter keeps so the columns hold still while a reader scrolls;
+    building a row for each of those spells a detail sentence the page never
+    shows, once per frame, for every entry the feed still holds. *)
+
+val columns : inner_width:int -> measured list -> columns
 (** How wide the keeper and event columns have to be for [rows].
 
     Both were literals of 16. The agent_core family names its runtime lane as

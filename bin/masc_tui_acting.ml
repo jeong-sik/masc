@@ -208,46 +208,65 @@ let is_skill_tool tool =
   String.equal tool skill_read_tool_name
   || String.starts_with ~prefix:composition_tool_name_prefix tool
 
+(* The EVENT column's word, on its own. Measuring the table needs the two
+   named columns and nothing else, and building a row to read one of them
+   spells every detail sentence the measurement throws away. The row asks
+   this function for its label rather than spelling the word a second time,
+   so the two readings cannot drift. *)
+let agent_core_label (e : Observer.agent_core) =
+  let tool = Option.value ~default:"?" e.Observer.tool in
+  match e.Observer.kind with
+  | Observer.Tool_called -> if is_skill_tool tool then "skill call" else "call"
+  | Observer.Tool_completed ->
+      if is_skill_tool tool then "skill returned" else "returned"
+  | Observer.Turn_started -> "turn start"
+  | Observer.Turn_ready -> "turn ready"
+  | Observer.Turn_completed -> "turn end"
+  | Observer.Agent_started -> "agent start"
+  | Observer.Agent_completed _ -> "agent done"
+  | Observer.Agent_failed _ -> "agent failed"
+  | Observer.Agent_yielded _ -> "agent yielded"
+  | Observer.Agent_input_required _ -> "waiting for input"
+  | Observer.Tool_approval_completed -> "approval settled"
+  | Observer.Telemetry -> "telemetry"
+  | Observer.Agent_core_other name -> name
+
 let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
   let tool = Option.value ~default:"?" e.Observer.tool in
-  let glyph, label, detail =
+  let label = agent_core_label e in
+  let glyph, detail =
     match e.Observer.kind with
     (* The wire's [turn] is the agent session's ordinal for the provider
        call, not the keeper's turn number that [turn N] means everywhere else
        on this surface, so a flat row does not print it; the event evidence
        shows it under its own name. *)
     | Observer.Tool_called ->
-        ( Call_started
-        , (if is_skill_tool tool then "skill call" else "call")
-        , Printf.sprintf "%s%s" tool (batch_text e.Observer.batch) )
+        (Call_started, Printf.sprintf "%s%s" tool (batch_text e.Observer.batch))
     | Observer.Tool_completed ->
         ( Call_returned
-        , (if is_skill_tool tool then "skill returned" else "returned")
         , Printf.sprintf "%s%s%s" tool
             (match duration_ms with
              | Some ms -> " \xc2\xb7 " ^ elapsed_text ms
              | None -> "")
             (batch_text e.Observer.batch) )
-    | Observer.Turn_started -> (Turn_boundary, "turn start", "")
-    | Observer.Turn_ready -> (Turn_boundary, "turn ready", "")
-    | Observer.Turn_completed -> (Turn_boundary, "turn end", "")
+    | Observer.Turn_started -> (Turn_boundary, "")
+    | Observer.Turn_ready -> (Turn_boundary, "")
+    | Observer.Turn_completed -> (Turn_boundary, "")
     (* A run's own wire id rides these four as [task_id]; it is not a MASC
        task, and the event evidence shows it under its own name. What the row
        says is how the run went: how long it ran, and for a failure the
        error's code and text. *)
-    | Observer.Agent_started -> (Turn_boundary, "agent start", "")
+    | Observer.Agent_started -> (Turn_boundary, "")
     | Observer.Agent_completed { elapsed_s } ->
-        (Turn_done, "agent done", elapsed_text (elapsed_s *. 1000.))
+        (Turn_done, elapsed_text (elapsed_s *. 1000.))
     | Observer.Agent_failed { elapsed_s; error_code; error } ->
         ( Failure
-        , "agent failed"
         , String.concat " \xc2\xb7 "
             [ elapsed_text (elapsed_s *. 1000.); error_code; error ] )
     | Observer.Agent_yielded { elapsed_s } ->
-        (Quiet, "agent yielded", elapsed_text (elapsed_s *. 1000.))
+        (Quiet, elapsed_text (elapsed_s *. 1000.))
     | Observer.Agent_input_required { elapsed_s; question } ->
         ( Attention
-        , "waiting for input"
         , String.concat " · " [ elapsed_text (elapsed_s *. 1000.); question ] )
     (* Where the tool name is the whole detail, an event that carries none
        leaves the cell empty rather than printing the [?] the default stands
@@ -255,10 +274,10 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
        nothing; [masc:audit_event] drew one. The arms above spell the tool
        into a longer sentence, where the placeholder still marks its slot. *)
     | Observer.Tool_approval_completed ->
-        (Attention, "approval settled", Option.value ~default:"" e.Observer.tool)
-    | Observer.Telemetry -> (Quiet, "telemetry", "")
-    | Observer.Agent_core_other name ->
-        (Attention, name, Option.value ~default:"" e.Observer.tool)
+        (Attention, Option.value ~default:"" e.Observer.tool)
+    | Observer.Telemetry -> (Quiet, "")
+    | Observer.Agent_core_other _ ->
+        (Attention, Option.value ~default:"" e.Observer.tool)
   in
   let detail =
     match e.Observer.kind, e.Observer.task with
@@ -315,14 +334,52 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Snapshot _ | Observer.Other _ ->
       "server"
 
+(* The EVENT column's word for any event, the sibling of {!keeper_of_event}
+   for the other measured column. [row_of_event] reads its label here, so the
+   word has one owner and a measurement can ask for it without building the
+   detail sentence that sits beside it. *)
+let label_of_event (event : Observer.event) =
+  match event with
+  | Observer.Agent_core e -> agent_core_label e
+  | Observer.Keeper_heartbeat _ -> "heartbeat"
+  | Observer.Keeper_tool_call c -> (
+      let skill = is_skill_tool c.Observer.kt_tool in
+      match c.Observer.kt_disposition with
+      | Some disposition ->
+          let word =
+            match disposition with
+            | Ok disposition ->
+                Masc.Tui_decode.keeper_call_disposition_to_string disposition
+            | Error _ -> "unknown disposition"
+          in
+          if skill then "skill \xc2\xb7 " ^ word else word
+      | None -> if skill then "skill call" else "tool call")
+  | Observer.Keeper_turn_complete _ -> "turn done"
+  | Observer.Keeper_composite_changed _ -> "composite"
+  | Observer.Keeper_turn_observation _ -> "call"
+  | Observer.Keeper_chat_appended _ -> "chat"
+  | Observer.Keeper_chat_stream_frame _ -> "chat stream"
+  | Observer.Keeper_waiting_inventory_changed _ -> "waiting queue"
+  | Observer.Fusion_run_status _ -> "fusion"
+  | Observer.Lane_resource resource -> (
+      match resource.Observer.lr_lifecycle with
+      | Masc.Lane_addon_resource_events.Acquired -> "container up"
+      | Masc.Lane_addon_resource_events.Acquire_failed -> "container failed"
+      | Masc.Lane_addon_resource_events.Release_confirmed -> "container removed"
+      | Masc.Lane_addon_resource_events.Release_incomplete -> "removal unproven")
+  | Observer.Internal_agent_runs_changed -> "internal runs"
+  | Observer.Snapshot _ -> "snapshot"
+  | Observer.Other name -> name
+
 let row_of_event ~at ~duration_ms (event : Observer.event) =
+  let label = label_of_event event in
   match event with
   | Observer.Agent_core e -> agent_core_row ~at ~duration_ms e
   | Observer.Keeper_heartbeat h ->
       { at
       ; keeper = h.Observer.hb_keeper
       ; glyph = Quiet
-      ; label = "heartbeat"
+      ; label
       ; detail =
           (let phase = Option.value ~default:"" h.Observer.hb_phase in
            match (h.Observer.hb_in_turn, h.Observer.hb_in_flight_ms) with
@@ -331,21 +388,10 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
            | (Some true | Some false | None), (Some _ | None) -> phase)
       }
   | Observer.Keeper_tool_call c ->
-      let skill = is_skill_tool c.Observer.kt_tool in
       { at
       ; keeper = c.Observer.kt_keeper
       ; glyph = Call_returned
-      ; label =
-          (match c.Observer.kt_disposition with
-           | Some disposition ->
-               let word =
-                 match disposition with
-                 | Ok disposition ->
-                     Masc.Tui_decode.keeper_call_disposition_to_string disposition
-                 | Error _ -> "unknown disposition"
-               in
-               if skill then "skill \xc2\xb7 " ^ word else word
-           | None -> if skill then "skill call" else "tool call")
+      ; label
       ; detail =
           (match c.Observer.kt_duration_ms with
            | Some ms -> c.Observer.kt_tool ^ " \xc2\xb7 " ^ elapsed_text ms
@@ -376,40 +422,40 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at
       ; keeper = t.Observer.tc_keeper
       ; glyph = Turn_done
-      ; label = "turn done"
+      ; label
       ; detail =
           [ turn_detail t.Observer.tc_turn; tokens; cost; calls ]
           |> List.filter (fun part -> part <> "")
           |> String.concat " \xc2\xb7 "
       }
   | Observer.Keeper_composite_changed { keeper; _ } ->
-      { at; keeper; glyph = Quiet; label = "composite"; detail = "" }
+      { at; keeper; glyph = Quiet; label; detail = "" }
   | Observer.Keeper_turn_observation o ->
       { at
       ; keeper = o.Observer.to_keeper
       ; glyph = Quiet
-      ; label = "call"
+      ; label
       ; detail = turn_detail (keeper_turn_of_observation o)
       }
   | Observer.Keeper_chat_appended { keeper; connector; _ } ->
       { at
       ; keeper
       ; glyph = Turn_boundary
-      ; label = "chat"
+      ; label
       ; detail = Option.value ~default:"" connector
       }
   | Observer.Keeper_chat_stream_frame { keeper; frame; _ } ->
       { at
       ; keeper
       ; glyph = Quiet
-      ; label = "chat stream"
+      ; label
       ; detail = Option.value ~default:"" frame
       }
   | Observer.Keeper_waiting_inventory_changed { keeper; queue_kind; _ } ->
       { at
       ; keeper
       ; glyph = Quiet
-      ; label = "waiting queue"
+      ; label
       ; detail = Option.value ~default:"" queue_kind
       }
   | Observer.Fusion_run_status { keeper; run_id; status } ->
@@ -420,16 +466,16 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at
       ; keeper
       ; glyph = Quiet
-      ; label = "fusion"
+      ; label
       ; detail = status ^ " \xc2\xb7 " ^ run_id
       }
   | Observer.Lane_resource resource ->
-      let glyph, label =
+      let glyph =
         match resource.Observer.lr_lifecycle with
-        | Masc.Lane_addon_resource_events.Acquired -> (Quiet, "container up")
-        | Masc.Lane_addon_resource_events.Acquire_failed -> (Failure, "container failed")
-        | Masc.Lane_addon_resource_events.Release_confirmed -> (Quiet, "container removed")
-        | Masc.Lane_addon_resource_events.Release_incomplete -> (Failure, "removal unproven")
+        | Masc.Lane_addon_resource_events.Acquired -> Quiet
+        | Masc.Lane_addon_resource_events.Acquire_failed -> Failure
+        | Masc.Lane_addon_resource_events.Release_confirmed -> Quiet
+        | Masc.Lane_addon_resource_events.Release_incomplete -> Failure
       in
       (* The package says which add-on; the reason is the server's own words,
          and it is the part a failure row exists to carry. *)
@@ -443,13 +489,13 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at
       ; keeper = "server"
       ; glyph = Quiet
-      ; label = "internal runs"
+      ; label
       ; detail = "a run registry changed"
       }
   | Observer.Snapshot name ->
-      { at; keeper = "server"; glyph = Quiet; label = "snapshot"; detail = name }
-  | Observer.Other name ->
-      { at; keeper = "server"; glyph = Attention; label = name; detail = "" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = name }
+  | Observer.Other _ ->
+      { at; keeper = "server"; glyph = Attention; label; detail = "" }
 
 (* The screen draws entries, not bare events. Taking the entry means there is
    no clock argument at the call site to hand in the wrong value. *)
@@ -1193,15 +1239,34 @@ let label_minimum_cells = 16
 
 type columns = { keeper_cells : int; label_cells : int }
 
-let columns ~inner_width rows =
+(* What measuring reads: the two named columns and nothing else. A row is
+   more than this -- it carries the detail sentence the table's third column
+   draws -- and measuring every kept entry as a row spells that sentence for
+   entries the page never shows. [measured_of_event] builds this straight
+   from the event instead. *)
+type measured = { measured_keeper : string; measured_label : string }
+
+let measured_of_row row =
+  { measured_keeper = row.keeper; measured_label = row.label }
+
+let measured_of_event ~traces event =
+  { measured_keeper = keeper_of_event ~traces event
+  ; measured_label = label_of_event event
+  }
+
+let columns ~inner_width measures =
   let widest pick =
     List.fold_left
-      (fun widest row ->
-        max widest (Masc_tui_message_layout.display_width (pick row)))
-      0 rows
+      (fun widest measure ->
+        max widest (Masc_tui_message_layout.display_width (pick measure)))
+      0 measures
   in
-  let keeper_needed = max keeper_minimum_cells (widest (fun row -> row.keeper)) in
-  let label_needed = max label_minimum_cells (widest (fun row -> row.label)) in
+  let keeper_needed =
+    max keeper_minimum_cells (widest (fun m -> m.measured_keeper))
+  in
+  let label_needed =
+    max label_minimum_cells (widest (fun m -> m.measured_label))
+  in
   (* Detail is the column that carries sentences -- a tool name, a turn, a
      cost -- so the two named ones together take at most half of what the
      frame leaves. *)

@@ -71,7 +71,13 @@ let tool_names tools =
 
 (* No descriptors, so the only difference between the two shapes is the one
    under test. *)
-let with_bundle ?(history = []) ?(attached = true) ?(with_loader = true) f =
+let with_bundle
+      ?(history = [])
+      ?(attached = true)
+      ?(with_loader = true)
+      ?(skill_catalog = Keeper_skill_catalog.empty)
+      f
+  =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -85,8 +91,9 @@ let with_bundle ?(history = []) ?(attached = true) ?(with_loader = true) f =
     ~registry_root:dir
   @@ fun registry ->
   let meta = make_meta () in
-  (* No skills, so the bundle carries no composition tools and the only
-     difference between the two shapes is the one under test. *)
+  (* No skills unless a case passes a catalog, so the bundle carries no
+     composition tools and the only difference between the two shapes is the
+     one under test. *)
   let snapshot =
     match Skill_source_config.parse_text "" with
     | Error _ -> failf "an empty skill source config must parse"
@@ -100,7 +107,7 @@ let with_bundle ?(history = []) ?(attached = true) ?(with_loader = true) f =
       ~tool_deny:[]
       ~sandbox_profile:Masc.Keeper_types_profile.Docker
       ~skill_names:None
-      ~global_skill_catalog:Keeper_skill_catalog.empty
+      ~global_skill_catalog:skill_catalog
       ~skill_inventory:(Keeper_skill_inventory.of_snapshot snapshot)
       ~task_skills:[]
   in
@@ -266,6 +273,113 @@ let test_a_builtin_that_declares_deferral_leaves_the_request () =
       "the lanes that cannot widen a turn still get them as schemas"
       true
       (List.for_all (fun n -> List.mem n sent) declared_deferrable))
+;;
+
+(* A Skill composition declares [defer_loading] in its composition block, not
+   in a [config/tools] file. Two compositions over the same node tool, one
+   declaring deferral and one not, so the declaration is the only thing that
+   separates them. *)
+let composition_skill_document ~name ~defer_line =
+  Printf.sprintf
+    "---\nname: %s\ndescription: Read the Keeper lane status.\n---\n\nComposition fixture.\n\n```toml composition\n[[compositions]]\nname = \"%s\"\nexecution = \"inline\"\n%s\n[[compositions.nodes]]\nid = \"lane\"\ntool = \"keeper_lane_status\"\n[compositions.nodes.input]\nkind = \"literal\"\nvalue = {}\n```\n"
+    name
+    name
+    defer_line
+;;
+
+let composition_skill_catalog documents =
+  let config_text =
+    {|[skills]
+resource-read-max-bytes = 65536
+[[skills.sources]]
+id = "composition-fixture"
+anchor = "base-path"
+path = "skills"
+access = "read-write"
+|}
+  in
+  let skill_config =
+    match Skill_source_config.parse_text config_text with
+    | Ok config -> config
+    | Error _ -> fail "composition Skill source fixture was rejected"
+  in
+  let source =
+    match skill_config.Skill_source_config.sources with
+    | [ source ] -> source
+    | _ -> fail "composition Skill fixture must have one source"
+  in
+  let scan : Skill_catalog_snapshot.source_scan =
+    { source =
+        Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
+    ; observation =
+        Skill_catalog_snapshot.Source_ready
+          { resolved_path = "/workspace/skills"; candidates = List.length documents }
+    ; candidates =
+        List.map
+          (fun (directory, source_text) ->
+             Skill_catalog_snapshot.Candidate_document { directory; source_text })
+          documents
+    }
+  in
+  let snapshot =
+    match Skill_catalog_snapshot.configured ~config:skill_config [ scan ] with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "composition Skill snapshot fixture was rejected"
+  in
+  match Keeper_skill_catalog.of_snapshot snapshot with
+  | catalog, [] -> catalog
+  | _, diagnostic :: _ ->
+    failf
+      "composition fixture was rejected as a skill: %s"
+      (Keeper_skill_catalog.error_to_string diagnostic.error)
+;;
+
+let composition_tool_name catalog name =
+  match
+    List.find_map
+      (fun (skill : Keeper_skill_catalog.skill) ->
+         match skill.surface with
+         | Keeper_skill_catalog.Composition entry
+           when String.equal entry.Keeper_tool_composition_catalog.name name ->
+           Some (Keeper_tool_composition_catalog.tool_name entry)
+         | Keeper_skill_catalog.Composition _ | Keeper_skill_catalog.Instruction -> None)
+      (Keeper_skill_catalog.skills catalog)
+  with
+  | Some tool_name -> tool_name
+  | None -> failf "composition %S is not in the fixture catalog" name
+;;
+
+let test_a_composition_that_declares_deferral_leaves_the_request () =
+  let skill_catalog =
+    composition_skill_catalog
+      [ ( "lane-deferred"
+        , composition_skill_document ~name:"lane-deferred" ~defer_line:"defer_loading = true" )
+      ; "lane-loaded", composition_skill_document ~name:"lane-loaded" ~defer_line:""
+      ]
+  in
+  let deferred = composition_tool_name skill_catalog "lane-deferred" in
+  let loaded = composition_tool_name skill_catalog "lane-loaded" in
+  with_bundle ~skill_catalog (fun bundle ->
+    let sent = tool_names bundle.Keeper_tools_agent_core.tools in
+    let listed = tool_names bundle.Keeper_tools_agent_core.agent_core_tools in
+    let held = listing_deferred_names bundle in
+    check
+      bool
+      "both compositions reach the bundle, or this proves nothing"
+      true
+      (List.mem deferred sent && List.mem loaded sent);
+    check
+      bool
+      "the composition that declared deferral is not sent as a schema"
+      false
+      (List.mem deferred listed);
+    check bool "and the listing names it" true (List.mem deferred held);
+    check
+      bool
+      "the composition that declared nothing is sent as a schema"
+      true
+      (List.mem loaded listed);
+    check bool "and the listing does not name it" false (List.mem loaded held))
 ;;
 
 (* [Keeper_run_tools_setup] compares the bundle against what the descriptor
@@ -510,6 +624,10 @@ let () =
             "holds back a built-in that declares deferral"
             `Quick
             test_a_builtin_that_declares_deferral_leaves_the_request
+        ; test_case
+            "holds back a Skill composition that declares deferral"
+            `Quick
+            test_a_composition_that_declares_deferral_leaves_the_request
         ; test_case
             "does not report a declared tool this conversation ran as held"
             `Quick

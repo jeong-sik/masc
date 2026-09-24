@@ -18,6 +18,7 @@ export const TURN_PROMPT_BLOCK_IDS = [
   'temporal_summary',
   'memory_os_recall',
   'operator_note',
+  'skill_compositions',
 ] as const
 
 export type TurnPromptBlockId = (typeof TURN_PROMPT_BLOCK_IDS)[number]
@@ -395,13 +396,15 @@ function decodeTurnBlockList(raw: unknown): TurnBlock[] | null {
     : null
 }
 
-function decodeTurnInputComponentId(raw: unknown): TurnInputComponentId | null {
+// Mirrors [input_component_id_of_string] (lib/types/turn_record.ml): a prompt
+// component is the block id behind a fixed prefix, so it is parsed through
+// decodeTurnPromptBlockId instead of listed a second time: a new block id is
+// one edit to TURN_PROMPT_BLOCK_IDS. A component this rejects makes the whole
+// turn record decode to null, so a missing id hides every row that carries it.
+const TURN_PROMPT_COMPONENT_PREFIX = 'prompt.'
+
+export function decodeTurnInputComponentId(raw: unknown): TurnInputComponentId | null {
   switch (raw) {
-    case 'prompt.keeper_instructions':
-    case 'prompt.dynamic_context':
-    case 'prompt.temporal_summary':
-    case 'prompt.memory_os_recall':
-    case 'prompt.operator_note':
     case 'tool_schemas':
     case 'message_user':
     case 'message_system':
@@ -414,8 +417,11 @@ function decodeTurnInputComponentId(raw: unknown): TurnInputComponentId | null {
     case 'message_document':
     case 'message_audio':
       return raw
-    default:
-      return null
+    default: {
+      if (typeof raw !== 'string' || !raw.startsWith(TURN_PROMPT_COMPONENT_PREFIX)) return null
+      const block = decodeTurnPromptBlockId(raw.slice(TURN_PROMPT_COMPONENT_PREFIX.length))
+      return block === null ? null : (`prompt.${block}` as const)
+    }
   }
 }
 

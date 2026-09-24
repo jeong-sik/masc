@@ -374,7 +374,7 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
            else [ "slot" ])
       ; declared_cli_slots =
           (if String.equal lane_id "hitl_auto_judge"
-           then [ "antigravity_subscription.gemini-3-7-flash-high" ]
+           then [ "antigravity_subscription.gemini-3-7-flash-high"; "cli-backup" ]
            else [])
       ; admission_error = None
       }
@@ -425,7 +425,10 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
      | _ -> false);
   check bool "the declared CLI order survives the observation" true
     (field "hitl_auto_judge" "declared_cli_slots"
-     = `List [ `String "antigravity_subscription.gemini-3-7-flash-high" ]);
+     = `List
+         [ `String "antigravity_subscription.gemini-3-7-flash-high"
+         ; `String "cli-backup"
+         ]);
   (* RFC cli-runtimes-as-lane-slots: the declared cli suffix is on the wire,
      and a lane whose only slots are cli ones is ready, not degraded. *)
   check bool

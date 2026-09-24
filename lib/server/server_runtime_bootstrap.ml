@@ -1091,6 +1091,12 @@ let validate_embedded_mcp_surface () =
   | Ok () -> ()
   | Error message -> failwith (Printf.sprintf "embedded mcp surface: %s" message)
 
+(* Prompt files are written with an fsync each; tool and MCP files are not
+   (Managed_asset_sync.asset_write, #37503). A crash can leave a prompt
+   torn with its frontmatter whole, and the edit layer below,
+   Prompt_registry.promote_file_edit, would read that as an operator edit
+   and keep it as an override (#38741). Tools and MCP have no edit layer,
+   so the next boot rewrites a torn file from the binary. *)
 let bootstrap_prompt_assets ~base_path =
   sync_managed_assets_from_binary
     ~label:"prompt"

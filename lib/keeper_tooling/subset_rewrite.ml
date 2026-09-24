@@ -29,7 +29,7 @@ type t =
 
 (* RFC execute-boundary-is-the-sandbox. Every sentence below was written while
    the subset was what ran, so "this tool does not do that" was a fact about
-   the tool. It is not one any more: [script] is a shell, and an argv-shaped
+   the tool. It is not one any more: [command] is a shell, and an argv-shaped
    shell normalises into it, so a caller who wrote [$(...)] or [$PWD] or a
    loop wrote something that works.
 

@@ -151,7 +151,7 @@ let read_archived_tasks config : (Masc_domain.task list * int, string) result =
     tasks remain available in Planning rollups and the detail view but do not
     occupy the Overview list. *)
 let load_active_tasks (base_path : string) :
-    task list
+    Masc_tui_overview_tasks.rows_reading
     * Masc_domain.task list
     * string option
     * Masc_tui_task_flow.t option
@@ -161,7 +161,12 @@ let load_active_tasks (base_path : string) :
   match Workspace_backlog.read_backlog_observation_with_source_r config with
   | Error err ->
       report path err;
-      [], [], Some ("task backlog unavailable: " ^ err), None, None
+      let reason = "task backlog unavailable: " ^ err in
+      ( Masc_tui_overview_tasks.Rows_unavailable reason
+      , []
+      , Some reason
+      , None
+      , None )
   | Ok observation ->
       let recovery_error =
         match observation.recovered_from with
@@ -200,8 +205,9 @@ let load_active_tasks (base_path : string) :
           report (Workspace_utils_paths_backend.archive_path config) error;
           [], Some ("task archive unavailable, the day bars miss archived tasks: " ^ error)
       in
-      ( Tui_decode.active_tasks_of_domain ~goals_for_task
-          observation.observed_backlog.tasks
+      ( Masc_tui_overview_tasks.Rows_read
+          (Tui_decode.active_tasks_of_domain ~goals_for_task
+             observation.observed_backlog.tasks)
       , observation.observed_backlog.tasks
       , (match recovery_error, goal_link_error, archive_error with
          | Some recovery, _, _ -> Some recovery
@@ -270,6 +276,28 @@ let load_selected_live_context (state : state) (base_path : string)
 let load_live_context state base_path keeper =
   load_selected_live_context state base_path (Some keeper)
 
+(** Add an event to the TUI session log, which Metrics draws. *)
+let add_event (state : state) event_type content =
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp = Printf.sprintf "%02d:%02d:%02d"
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
+  let ev = { timestamp; event_type; content } in
+  state.events <- ev :: List.filteri (fun i _ -> i < 10) state.events
+
+(* An outcome the operator pressed a key for, rather than something that
+   happened on its own. It goes to the session log like any other event, and
+   to the footer, because the log is drawn by Metrics alone: the operator who
+   pressed [a] on Workspace reads on Workspace whether the registration
+   landed, the declaration was refused, or the editor never started. Every
+   call site that answers a key or a command, or finishes the request one
+   started, uses this; [add_event] alone is for what happened on its own --
+   the feed, a failed poll, the server's lifecycle. The footer copy is one
+   line: a server's reason can carry newlines. *)
+let report_action (state : state) event_type content =
+  add_event state event_type content;
+  state.last_action <-
+    Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
+
 (** Load state from .masc directory *)
 let load_from_masc_dir (state : state) (base_path : string) =
   let masc_dir = Filename.concat base_path Common.masc_dirname in
@@ -303,12 +331,34 @@ let load_from_masc_dir (state : state) (base_path : string) =
   (* Load tasks from their single durable source. The domain rows land first:
      a detail view open across this refresh keeps its row even when the task
      just turned terminal, because the projection below drops exactly those. *)
-  let tasks, tasks_domain, tasks_error, task_flow, operator_stalled =
+  let rows, tasks_domain, tasks_error, task_flow, operator_stalled =
     load_active_tasks base_path
   in
   state.tasks_domain <- tasks_domain;
-  state.tasks <- tasks;
+  state.task_reading <- rows;
+  state.tasks <-
+    (match rows with
+     | Masc_tui_overview_tasks.Rows_read tasks -> tasks
+     | Masc_tui_overview_tasks.Rows_unread
+     | Masc_tui_overview_tasks.Rows_unavailable _ -> []);
   state.tasks_error <- tasks_error;
+  (* A chosen task that left rows that were read (finished, or back to Todo)
+     is dropped here, where the rows change, and said once. A failed read
+     keeps the choice: it did not look, so nothing left. With that task's
+     detail open the detail still shows it, so the footer says nothing that
+     the screen contradicts. *)
+  (let focus, left =
+     Masc_tui_overview_tasks.after_read rows state.task_focus
+   in
+   state.task_focus <- focus;
+   Option.iter
+     (fun task_id ->
+       if not (Option.equal String.equal state.task_detail_id (Some task_id))
+       then
+         report_action state "system"
+           (Printf.sprintf "%s left the held tasks; nothing is chosen"
+              task_id))
+     left);
   state.task_flow <- task_flow;
   state.operator_stalled <- operator_stalled;
 
@@ -438,6 +488,8 @@ let clear_local_workspace (state : state) =
   state.agents <- [];
   state.tasks <- [];
   state.tasks_domain <- [];
+  state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
+  state.task_reading <- Masc_tui_overview_tasks.Rows_unread;
   state.task_flow <- None;
   state.operator_stalled <- None;
   state.tasks_error <- None;
@@ -450,28 +502,6 @@ let clear_local_workspace (state : state) =
   state.live_context <- Context_state.empty;
   state.local_workspace <- Local_workspace_unread
 ;;
-
-(** Add an event to the TUI session log, which Metrics draws. *)
-let add_event (state : state) event_type content =
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let ev = { timestamp; event_type; content } in
-  state.events <- ev :: List.filteri (fun i _ -> i < 10) state.events
-
-(* An outcome the operator pressed a key for, rather than something that
-   happened on its own. It goes to the session log like any other event, and
-   to the footer, because the log is drawn by Metrics alone: the operator who
-   pressed [a] on Workspace reads on Workspace whether the registration
-   landed, the declaration was refused, or the editor never started. Every
-   call site that answers a key or a command, or finishes the request one
-   started, uses this; [add_event] alone is for what happened on its own --
-   the feed, a failed poll, the server's lifecycle. The footer copy is one
-   line: a server's reason can carry newlines. *)
-let report_action (state : state) event_type content =
-  add_event state event_type content;
-  state.last_action <-
-    Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
 
 (** HTTP JSON decoding helpers. These intentionally fail closed for the TUI
     dashboard surfaces: an empty list means the API really returned an empty
@@ -997,6 +1027,7 @@ let decode_schedule_snapshot json =
   in
   let* rows = required_list_field json "requests" in
   let* scs_rows = decode_schedule_rows rows in
+  let* scs_runner_status = Tui_decode.decode_schedule_runner_status json in
   Ok
     { scs_status
     ; scs_read_error
@@ -1005,6 +1036,7 @@ let decode_schedule_snapshot json =
     ; scs_next_due_iso
     ; scs_counts
     ; scs_rows
+    ; scs_runner_status
     }
 
 (** Load the schedule list from /api/v1/dashboard/scheduled-automation. *)
@@ -1731,17 +1763,11 @@ let load_keeper_roster ~(host : string) ~(port : int) :
           | Ok (rows, errors, truncated, total) ->
               Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total)))
 
-(* The two detail-pane tab reads. Lines are built here so the renderer draws
-   what one place formatted; a decode that only feeds a read-only pane keeps
-   the JSON generic instead of growing a typed mirror of the config shape. *)
 (* Every line these views hand the renderer goes through the terminal
    sanitizer: a CR, a tab, or a stray OSC in fetched text is data to show
    escaped, not a control to replay into the frame. *)
 let sanitize_view_lines lines =
   List.map Masc.Tui_decode.sanitize_terminal_text lines
-
-let json_block_lines (json : Yojson.Safe.t) =
-  Yojson.Safe.pretty_to_string json |> String.split_on_char '\n'
 
 let load_keeper_config_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =
@@ -1788,105 +1814,16 @@ let load_keeper_config_editor ~(host : string) ~(port : int)
   | Error err -> Error ("keeper config load failed: " ^ err)
   | Ok json -> Ok (json, Masc_tui_keeper_config.editor_stem json)
 
-(* The github-identity payload is the fixed record built by
-   Keeper_github_identity.observation_to_yojson: hostname, config_dir,
-   projected_token_env_names, stored + effective (each
-   authenticated/login/scopes/error), effective_probe_scope. Read those fields into a
-   short human view rather than pretty-printing the raw JSON. Any shape surprise
-   (hostname absent, an error envelope, a field of the wrong type) falls back to
-   the raw block, so the tab never shows less than the payload carried. *)
-let github_identity_lines (json : Yojson.Safe.t) : string list =
-  let fallback () = sanitize_view_lines (json_block_lines json) in
-  match json with
-  | `Assoc fields -> (
-    let string_field key =
-      match List.assoc_opt key fields with
-      | Some (`String value) -> Some value
-      | Some _ | None -> None
-    in
-    let auth_status = function
-      | Some (`Assoc af) ->
-        let authenticated =
-          match List.assoc_opt "authenticated" af with
-          | Some (`Bool value) -> value
-          | Some _ | None -> false
-        in
-        let login =
-          match List.assoc_opt "login" af with
-          | Some (`String value) -> Some value
-          | Some _ | None -> None
-        in
-        let error =
-          match List.assoc_opt "error" af with
-          | Some (`String value) -> Some value
-          | Some _ | None -> None
-        in
-        (* What the token may do, as GitHub listed it. A token GitHub lists
-           no scopes for (a fine-grained PAT, an App token) says so rather
-           than showing an empty list, which would read as "none". *)
-        let scopes =
-          match List.assoc_opt "scopes" af with
-          | Some (`List items) ->
-            " \xc2\xb7 scopes: "
-            ^ (match
-                 List.filter_map
-                   (function `String scope -> Some scope | _ -> None)
-                   items
-               with
-               | [] -> "(none)"
-               | scopes -> String.concat ", " scopes)
-          | Some `Null -> " \xc2\xb7 scopes: not listed by GitHub"
-          (* No key at all is a server that does not report scopes, not a
-             token GitHub lists none for; say nothing rather than the wrong
-             one of the two. *)
-          | Some _ | None -> ""
-        in
-        Some
-          (match authenticated, login, error with
-           | true, Some who, _ -> "signed in as " ^ who ^ scopes
-           | true, None, _ -> "signed in" ^ scopes
-           | false, _, Some message -> "not signed in (" ^ message ^ ")"
-           | false, _, None -> "not signed in")
-      | Some _ | None -> None
-    in
-    match string_field "hostname" with
-    | None -> fallback ()
-    | Some hostname ->
-      let effective_label =
-        match string_field "effective_probe_scope" with
-        | Some "host_process_credential_only" -> "effective (this host)"
-        | Some "endpoint_process_only" -> "effective (remote endpoint)"
-        | Some _ | None -> "effective"
-      in
-      let token_env_line =
-        match List.assoc_opt "projected_token_env_names" fields with
-        | Some (`List ((_ :: _) as names)) ->
-          let names =
-            List.filter_map
-              (function `String value -> Some value | _ -> None)
-              names
-          in
-          "  token env: " ^ String.concat ", " names
-        | Some _ | None -> "  token env: (none)"
-      in
-      let line label = function Some status -> [ "  " ^ label ^ ": " ^ status ] | None -> [] in
-      let lines =
-        [ Printf.sprintf "GitHub (%s)" hostname ]
-        @ line "stored" (auth_status (List.assoc_opt "stored" fields))
-        @ line effective_label (auth_status (List.assoc_opt "effective" fields))
-        @ [ token_env_line ]
-        @ (match string_field "config_dir" with Some dir -> [ "  config: " ^ dir ] | None -> [])
-      in
-      sanitize_view_lines lines)
-  | _ -> fallback ()
-
 let load_keeper_github_identity_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =
   match
     Masc_tui_http.fetch_keeper_github_identity ~host ~port ~keeper_name
   with
   | Error err -> Error ("github identity load failed: " ^ err)
-  | Ok json -> Ok (github_identity_lines json)
+  | Ok json ->
+    Ok
+      (Masc_tui_github_identity.view_lines
+         ~sanitize:Masc.Tui_decode.sanitize_terminal_text json)
 
 let load_keeper_board_quarantines ~(host : string) ~(port : int)
     ~(keeper_name : string) :

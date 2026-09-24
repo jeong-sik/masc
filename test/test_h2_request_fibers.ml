@@ -104,7 +104,7 @@ let test_reader_control () =
     (* Admission is already waiting on a worker held by this fixture. The
        bounded observation is a baseline reproduction, not a latency gate. *)
     let observed = Eio.Time.with_timeout (Eio.Stdenv.clock env) 0.05
-      (fun () -> Eio.Promise.await acknowledged) in
+      (fun () -> Ok (Eio.Promise.await acknowledged)) in
     check bool "direct reader cannot acknowledge PING while waiting for CPU" true
       (match observed with Error `Timeout -> true | Ok _ -> false);
     release ();

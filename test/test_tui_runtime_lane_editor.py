@@ -538,6 +538,8 @@ def run_exact_slot_editor(executable: str) -> None:
                         b"> 11  CLI  codex_subscription.fixture-10")
         h.send_and_wait(process, fd, output, b"a",
                         b"adding a candidate to librarian_exact")
+        # The picker owns focus; d must not jump to the underlying HTTP slot.
+        os.write(fd, b"d")
         h.send_and_wait(process, fd, output, b"e",
                         b"> 11  CLI  codex_subscription.fixture-10")
         os.write(fd, b"q")

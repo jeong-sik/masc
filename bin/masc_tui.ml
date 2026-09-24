@@ -25032,6 +25032,12 @@ and is loaded on demand through keeper_skill.
            handle_connector_edit ()
        | Some "d"
          when state.view = Lanes && state.lanes_mode = Lanes_overview
+              && Option.is_some state.slot_editor
+              && Option.is_some state.runtime_lane_pick ->
+           ()
+       | Some "d"
+         when state.view = Lanes && state.lanes_mode = Lanes_overview
+              && Option.is_none state.runtime_lane_pick
               && Option.is_some state.slot_editor ->
            (match Masc_tui_types.slot_editor_cursor_row state with
             | Some { sr_kind = `Http; sr_slot; _ } ->

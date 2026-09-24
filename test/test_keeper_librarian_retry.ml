@@ -1195,6 +1195,85 @@ let test_prompt_carries_keeper_instructions () =
     (List.assoc "keeper_instructions" (Librarian.prompt_variables blank))
 ;;
 
+(* RFC-0468 §3.2: each User message's header names the speaker the host
+   stamped when it created the message. A message from before the speaker
+   existed says unknown, and a broken entry says it is broken. *)
+let test_conversation_headers_carry_the_stamped_speaker () =
+  let module S = Masc.Keeper_input_speaker in
+  let user ?speaker text =
+    Agent_core.Types.make_message
+      ?metadata:(Option.map S.metadata speaker)
+      ~role:Agent_core.Types.User
+      [ Agent_core.Types.Text text ]
+  in
+  let beta =
+    match Masc.Keeper_identity.Keeper_id.of_string "beta" with
+    | Some id -> id
+    | None -> fail "keeper id fixture"
+  in
+  let messages =
+    [ user
+        ~speaker:(S.Host_prompt (S.Autonomous_wake { answered_asks = [ S.Owner ] }))
+        "wake"
+    ; Agent_core.Types.assistant_msg "on it"
+    ; user ~speaker:(S.Person (S.Keeper beta)) "please review"
+    ; user ~speaker:(S.Person S.Owner) "stop merging"
+    ; user "from an old checkpoint"
+    ]
+  in
+  let history =
+    List.assoc "conversation_history"
+      (Librarian.prompt_variables { (input ()) with messages })
+  in
+  List.iter
+    (fun header ->
+       check bool header true (String_util.contains_substring history header))
+    [ "[turn=0 role=user speaker=host:autonomous_wake(answered_asks=owner)] wake"
+    ; "[turn=1 role=assistant] on it"
+    ; "[turn=2 role=user speaker=keeper:\"beta\"] please review"
+    ; "[turn=3 role=user speaker=owner] stop merging"
+    ; "[turn=4 role=user speaker=unknown] from an old checkpoint"
+    ];
+  (* A broken entry is shown as broken and the pass goes on, so one broken
+     message never holds the Librarian on the same range. *)
+  let broken =
+    Agent_core.Types.make_message
+      ~metadata:[ Agent_core.Types.Input_speaker.entry (`String "owner") ]
+      ~role:Agent_core.Types.User
+      [ Agent_core.Types.Text "broken" ]
+  in
+  let repeated =
+    Agent_core.Types.make_message
+      ~metadata:(S.metadata (S.Person S.Owner) @ S.metadata (S.Person S.Owner))
+      ~role:Agent_core.Types.User
+      [ Agent_core.Types.Text "repeated" ]
+  in
+  let broken_input = { (input ()) with messages = [ broken; repeated ] } in
+  let history =
+    List.assoc "conversation_history" (Librarian.prompt_variables broken_input)
+  in
+  check bool "an undecodable entry renders as invalid" true
+    (String_util.contains_substring history "[turn=0 role=user speaker=invalid(");
+  check bool "a repeated entry renders as duplicate" true
+    (String_util.contains_substring history "[turn=1 role=user speaker=duplicate] repeated");
+  match Runtime.messages_for_librarian broken_input with
+  | Error detail -> failf "the pass could not build its request: %s" detail
+  | Ok messages ->
+    check bool "the pass request carries the whole conversation" true
+      (List.exists
+         (fun (message : Agent_core.Types.message) ->
+            List.exists
+              (function
+                | Agent_core.Types.Text text ->
+                  String_util.contains_substring text "speaker=duplicate] repeated"
+                | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+                | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
+                | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+                | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> false)
+              message.content)
+         messages)
+;;
+
 let user_text_of_messages messages =
   messages
   |> List.filter_map (fun (m : Agent_core.Types.message) ->
@@ -2018,6 +2097,8 @@ let () =
             test_prompt_contains_exact_current_selection
         ; test_case "prompt carries Keeper instructions" `Quick
             test_prompt_carries_keeper_instructions
+        ; test_case "conversation headers carry the stamped speaker" `Quick
+            test_conversation_headers_carry_the_stamped_speaker
         ; test_case "prompt carries typed tool observations without payloads" `Quick
             test_prompt_carries_typed_tool_observations_without_payloads
         ; test_case "durable speaker attribution reaches counterpart observations" `Quick

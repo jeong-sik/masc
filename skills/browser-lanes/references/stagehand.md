@@ -6,7 +6,8 @@ Chromium이며, 운영자의 브라우저가 아니다.
 ## 열고 탭 잡기
 
 1. `BrowserSession` action=open, lane=stagehand. 설정이 없으면 무엇을 설정할지
-   답이 온다. 그 답을 운영자에게 전하고 다른 lane으로 대신하지 않는다.
+   답이 온다. 그 답을 운영자에게 전하고 다른 lane으로 대신하지 않는다. `reused=true`는
+   서버의 기존 세션을 돌려받았다는 뜻이며, 연결이 살아 있다는 증거는 아니다.
 2. `BrowserGoto` lane=stagehand로 이동한다. tabId를 주지 않으면 active 탭이 이동한다.
 3. `BrowserTabs` lane=stagehand로 tabId를 얻는다. 번호는 이 세션 안에서만 뜻이 있고,
    닫힌 탭의 번호를 다른 탭이 받지 않는다. 모르는 번호는 거절된다.
@@ -26,7 +27,12 @@ Chromium이며, 운영자의 브라우저가 아니다.
 - extract의 `schema`는 JSON Schema **문자열**이다. 필요한 필드만 적는다.
 - act 뒤에는 observe나 extract로 결과를 확인한다. `success`만 보고 끝났다고 쓰지 않는다.
 - 실패한 act도 이미 동작했을 수 있다. 같은 act를 바로 반복하지 말고 먼저 페이지를 본다.
-- 세션이 없거나 lane이 바쁘면 효과 전 거절이 온다. 그때는 다시 시도해도 된다.
+- 세션이 없으면 `BrowserSession`으로 열고, lane이 바쁘다는 효과 전 거절이면
+  해당 작업이 끝난 뒤 다시 시도한다.
+- 연결이 끊겼다는 답을 받으면 `BrowserSession` action=status, lane=stagehand의
+  `ended`를 확인한다. 끊긴 세션에는 open만 다시 불러도 `reused=true`가 올 수 있다.
+  세션을 종료해도 되는지 확인한 뒤 close → open으로 다시 열고, `BrowserTabs`에서
+  새 tabId를 받는다. 실패한 act를 그대로 반복하지 않는다.
 
 ## 읽기 도구와의 관계
 
@@ -39,5 +45,8 @@ live·automation과 같은 스크립트로 읽으므로 결과 모양도 같다.
 
 ## 닫기
 
-자신이 연 세션만 `BrowserSession` action=close, lane=stagehand로 닫는다.
-다른 작업이 쓰는 세션은 닫지 않는다.
+Stagehand는 서버가 공유하는 세션 하나를 사용한다. `BrowserSession` action=status는
+누가 열었거나 지금 쓰는지 알려주지 않으며, open을 호출했어도 기존 세션을 재사용했을
+수 있다. 이 세션을 종료해도 된다는 운영자 확인이나 명시적인 독점 사용 범위가 있을
+때만 `BrowserSession` action=close, lane=stagehand로 닫는다. 그 외에는 세션을
+남겨 두고 사용 관계를 인계한다.

@@ -32,7 +32,7 @@ type request =
   { messages : message list
   ; system_prompt : string option
   ; temperature : float option
-  ; stop_sequences : string list
+  ; stop_sequences : string list option
   ; generation : generation
   }
 
@@ -151,11 +151,11 @@ let response_format_of_json ~at json =
    message (tools, text format). A request that mixes them fits neither. *)
 let generation_of ~at ~response_format ~tool_names =
   match response_format, tool_names with
-  | Some (Json_schema_format { name; schema }), [] -> Ok (Structured { name; schema })
-  | Some (Json_schema_format _), _ :: _ ->
+  | Some (Json_schema_format { name; schema }), (None | Some []) -> Ok (Structured { name; schema })
+  | Some (Json_schema_format _), Some (_ :: _) ->
     Error (at ^ " declares tools with a json_schema response_format")
-  | (None | Some Text_format), [] -> Ok Text_generation
-  | (None | Some Text_format), (_ :: _ as tool_names) -> Ok (Tool_generation { tool_names })
+  | (None | Some Text_format), (None | Some []) -> Ok Text_generation
+  | (None | Some Text_format), Some (_ :: _ as tool_names) -> Ok (Tool_generation { tool_names })
 ;;
 
 let parse_params json =
@@ -179,13 +179,13 @@ let parse_params json =
     in
     let* response_format = optional "response_format" json ~at response_format_of_json in
     let* generation =
-      generation_of ~at ~response_format ~tool_names:(Option.value tool_names ~default:[])
+      generation_of ~at ~response_format ~tool_names
     in
     Ok
       { messages
       ; system_prompt
       ; temperature
-      ; stop_sequences = Option.value stop_sequences ~default:[]
+      ; stop_sequences
       ; generation
       }
   | _ -> Error (at ^ " is not an object")

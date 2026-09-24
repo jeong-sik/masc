@@ -39,7 +39,8 @@ type failure =
 
 type envelope =
   | Reply of { id : int; result : (Yojson.Safe.t, int * string) result }
-  | Event of { method_ : string; session : session_id option; params : Yojson.Safe.t }
+  | Event of { method_ : string; session : session_id option; params : Yojson.Safe.t option }
+      (** CDP omits [params] for an event that has none. *)
 
 (** One inbound text frame. [Error] for anything that is neither a reply nor an
     event. *)
@@ -47,8 +48,9 @@ val decode : string -> (envelope, string) result
 
 val encode_command : id:int -> ?session:session_id -> string -> Yojson.Safe.t -> string
 
-(** [event_of ~method_ ~session params] reads the events this module names. *)
-val event_of : method_:string -> session:session_id option -> Yojson.Safe.t -> event
+(** [event_of ~method_ ~session params] reads the events this module names.
+    One of them without [params] is malformed. *)
+val event_of : method_:string -> session:session_id option -> Yojson.Safe.t option -> event
 
 (** {1 Connection} *)
 

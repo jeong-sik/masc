@@ -28,6 +28,7 @@ let pending ?(waiting_s = Some 90.) ?(phase = Decode.Gate_judging) ~keeper ~tool
   ; gp_operation = "tool_execute"
   ; gp_display_tool = tool
   ; gp_input_preview = None
+  ; gp_input_rows = Decode.Flattened None
   ; gp_execution_cwd = None
   ; gp_execution_sandbox = None
   ; gp_waiting_s = waiting_s

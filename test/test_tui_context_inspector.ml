@@ -49,6 +49,7 @@ let record ?(blocks = []) ?input_components ?(usage_scope = Runtime_usage_scope.
       ; cache_read_input_tokens = Some 500
       ; scope = usage_scope
       }
+  ; turn_output_tokens = None
   ; ts = 1_787_600_000.
   }
 

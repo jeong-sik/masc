@@ -45,11 +45,11 @@ let test_api_quota_message_does_not_override_rate_limit () =
     (Agent_core.Error.Api
        (Llm_provider.Retry.PaymentRequired { message = "billing required" }))
 
-let test_api_overloaded_is_backpressure () =
+let test_api_overloaded_is_provider_capacity () =
   check_route
-    "typed Overloaded stays transient backpressure (#23483)"
+    "a 529 overload is the provider's capacity, not MASC's (#38061)"
     (KFR.Retry_after_observed
-       { retry_class = KFR.Capacity_backpressure; retry_after = None })
+       { retry_class = KFR.Provider_capacity; retry_after = None })
     (Agent_core.Error.Api (Llm_provider.Retry.Overloaded { message = "overloaded" }))
 
 let test_api_server_error_uses_typed_variant () =
@@ -196,9 +196,9 @@ let test_provider_quota_family_threads_hint () =
        (Llm_provider.Error.HardQuota
           { provider = "glm"; retry_after = Some 3600.0; detail = "balance 0" }));
   check_route
-    "provider CapacityExhausted stays typed"
+    "provider CapacityExhausted is the provider's capacity"
     (KFR.Retry_after_observed
-       { retry_class = KFR.Capacity_backpressure; retry_after = None })
+       { retry_class = KFR.Provider_capacity; retry_after = None })
     (Agent_core.Error.Provider
        (Llm_provider.Error.CapacityExhausted
           { scope = Llm_provider.Error.CapacityUnknown
@@ -382,26 +382,6 @@ let test_repeating_generation_rotates_the_model () =
   Alcotest.(check bool) "the model answered, so the input was observed" true
     (KFR.response_observed route)
 
-let test_masc_internal_backpressure_hint () =
-  let err =
-    internal_err
-      (Keeper_internal_error.Capacity_backpressure
-         { runtime_id = "glm-coding.glm-5-turbo"
-         ; source = Keeper_internal_error.Provider_capacity
-         ; detail = "429 burst"
-         ; retry_after = Keeper_internal_error.Explicit 45.0
-         })
-  in
-  check_masc_route
-    "masc backpressure carries typed Explicit hint"
-    (KFR.Retry_after_observed
-       { retry_class = KFR.Capacity_backpressure; retry_after = Some 45.0 })
-    err;
-  Alcotest.(check (option (float 1e-6)))
-    "retry_after_of_route extracts the hint"
-    (Some 45.0)
-    (KFR.retry_after_of_route (route_of_masc_error err))
-
 let test_masc_internal_terminal_classes () =
   (match
      route_of_masc_error
@@ -417,13 +397,6 @@ let test_masc_internal_terminal_classes () =
    | other ->
      Alcotest.failf "internal contract rejection should remain opaque, got %s"
        (KFR.route_kind_label other));
-  check_masc_route
-    "capacity-exhausted runtime stays typed"
-    (KFR.Retry_after_observed
-       { retry_class = KFR.Capacity_backpressure; retry_after = None })
-    (internal_err
-       (Keeper_internal_error.Runtime_exhausted
-          { runtime_id = "r"; reason = Keeper_internal_error.Capacity_exhausted }));
   check_masc_route
     "session conflict rotates"
     (KFR.Rotate_now { rotate = KFR.Runtime_exhausted })
@@ -502,7 +475,7 @@ let test_response_observed_per_class () =
     (check_observed false)
     [ retry KFR.Rate_limited
     ; retry KFR.Hard_quota
-    ; retry KFR.Capacity_backpressure
+    ; retry KFR.Provider_capacity
     ; retry KFR.Server_error
     ; retry KFR.Network_transient
     ; retry KFR.Provider_timeout
@@ -667,7 +640,7 @@ let test_route_resumes_on_same_path_per_class () =
     (check_resumes true)
     [ "", retry KFR.Rate_limited
     ; "with a hint", retry ~retry_after:30.0 KFR.Rate_limited
-    ; "", retry KFR.Capacity_backpressure
+    ; "", retry KFR.Provider_capacity
     ; "end turn", retry (empty_completion Agent_core.Types.EndTurn)
     ; "max tokens", retry (empty_completion Agent_core.Types.MaxTokens)
     ; "stop sequence", retry (empty_completion Agent_core.Types.StopSequence)
@@ -738,7 +711,7 @@ let () =
             "quota prose stays rate limited"
             `Quick
             test_api_quota_message_does_not_override_rate_limit
-        ; Alcotest.test_case "overloaded backpressure" `Quick test_api_overloaded_is_backpressure
+        ; Alcotest.test_case "overloaded is provider capacity" `Quick test_api_overloaded_is_provider_capacity
         ; Alcotest.test_case
             "server error typed variant"
             `Quick
@@ -782,8 +755,7 @@ let () =
             test_repeating_generation_rotates_the_model
         ] )
     ; ( "masc_internal"
-      , [ Alcotest.test_case "backpressure hint" `Quick test_masc_internal_backpressure_hint
-        ; Alcotest.test_case "terminal classes" `Quick test_masc_internal_terminal_classes
+      , [ Alcotest.test_case "terminal classes" `Quick test_masc_internal_terminal_classes
         ] )
     ; ( "families"
       , [ Alcotest.test_case "non-provider terminal" `Quick test_non_provider_families_judge ] )

@@ -681,13 +681,18 @@ let default_owned_target ~ownership_root ~path =
         | _ -> (ownership_root, path)))
 [@@coverage off]
 
-(* Every refusal here names the caller's path or cwd: an empty path, a cwd
-   outside the ownership root or not a directory, or a cwd that does not
-   exist. *)
+(* A refusal names the caller's path or cwd: an empty path, or a cwd outside
+   the ownership root, not a directory, or missing. With no cwd the directory
+   is the default this module picked, so its absence is not the caller's. *)
 let resolve_owned_read_target ~ownership_root ~path ~cwd =
   if String.equal path ""
   then Error (Keeper_alerting_path.caller_refusal "path is required")
   else
+    let refusal message =
+      match cwd with
+      | Some _ -> Keeper_alerting_path.caller_refusal message
+      | None -> { Keeper_alerting_path.failure_class = Tool_result.Runtime_failure; message }
+    in
     let cwd_abs, target_rel =
       match cwd with
       | None -> default_owned_target ~ownership_root ~path
@@ -698,13 +703,9 @@ let resolve_owned_read_target ~ownership_root ~path ~cwd =
     in
     match Fs_compat.inspect_owned_directory_chain ~ownership_root cwd_abs with
     | Error rejection ->
-      Error
-        (Keeper_alerting_path.caller_refusal
-           (Fs_compat.owned_directory_chain_rejection_to_string rejection))
+      Error (refusal (Fs_compat.owned_directory_chain_rejection_to_string rejection))
     | Ok Fs_compat.Owned_directory_missing ->
-      Error
-        (Keeper_alerting_path.caller_refusal
-           (fs_guidance_text (Cwd_not_directory { cwd = cwd_abs })))
+      Error (refusal (fs_guidance_text (Cwd_not_directory { cwd = cwd_abs })))
     | Ok (Fs_compat.Owned_directory _) ->
       let target =
         if Filename.is_relative target_rel
@@ -2759,10 +2760,12 @@ let handle_file_write_content_with_outcome
            run
        with
        | Ok attempt -> file_write_attempt_to_execution ~config attempt
-       (* The path was admitted above, and a refusal the write can name comes
-          back as [Ok (Write_failed _)] with its class. What arrives here is
-          the rest: the sandbox isolation invariant, the parent chain, file
-          permissions, the effect projection. *)
+       (* An untyped string from the write: the sandbox isolation invariant,
+          the parent chain, file permissions, the effect projection. It also
+          carries refusals the caller could correct (a directory at the
+          target, a non-regular append or patch target, a file in the parent
+          path), which have no type to tell them apart yet; none reached the
+          September 2026 ledger. Runtime_failure until they are typed. *)
        | Error msg ->
          Keeper_tool_execution.failure
            ~class_:Tool_result.Runtime_failure
@@ -2891,10 +2894,12 @@ let handle_file_write_content_with_outcome
            run
        with
        | Ok attempt -> file_write_attempt_to_execution ~config attempt
-       (* The path was admitted above, and a refusal the write can name comes
-          back as [Ok (Write_failed _)] with its class. What arrives here is
-          the rest: the sandbox isolation invariant, the parent chain, file
-          permissions, the effect projection. *)
+       (* An untyped string from the write: the sandbox isolation invariant,
+          the parent chain, file permissions, the effect projection. It also
+          carries refusals the caller could correct (a directory at the
+          target, a non-regular append or patch target, a file in the parent
+          path), which have no type to tell them apart yet; none reached the
+          September 2026 ledger. Runtime_failure until they are typed. *)
        | Error msg ->
          Keeper_tool_execution.failure
            ~class_:Tool_result.Runtime_failure
@@ -3221,8 +3226,7 @@ let handle_file_write_content_with_outcome
                    run
                with
                | Ok attempt -> file_write_attempt_to_execution ~config attempt
-               (* As for the atomic and append writes above: what is not an
-                  [Ok (Write_failed _)] is the runtime's. *)
+               (* Untyped, as for the atomic and append writes above. *)
                | Error msg ->
                  Keeper_tool_execution.failure
                    ~class_:Tool_result.Runtime_failure

@@ -113,13 +113,15 @@ let try_handle_with_outcome
         | None -> []
         | Some path -> [ "path", `String path ]
     in
-    (* The command is built here from the caller's pattern and path, so a gate
-       or path refusal is about what the caller named, while a command this
-       module built and cannot parse is its own. *)
+    (* This module builds the command: one rg with literal arguments, no cwd
+       change and no redirect. The gate refuses only pipes and redirects, and
+       the path check reads only cwd, redirects and a few programs' operands,
+       so neither judges anything the caller named; if one fires, this module
+       or a policy changed. *)
     match dispatch_host_shell_ir ~workdir ir with
     | Error (Gate_reject diagnostic) ->
       Keeper_tool_execution.failure
-        ~class_:Tool_result.Policy_rejection
+        ~class_:Tool_result.Runtime_failure
         (error_json ~fields diagnostic)
     | Error (Cannot_parse reason) ->
       Keeper_tool_execution.failure
@@ -141,7 +143,7 @@ let try_handle_with_outcome
                  (Keeper_tooling.Subset_rewrite.of_reason reason))))
     | Error (Path_reject e) ->
       Keeper_tool_execution.failure
-        ~class_:Tool_result.Policy_rejection
+        ~class_:Tool_result.Runtime_failure
         (error_json ~fields:[ "blocked_cmd", `String cmd ] e)
     | Ok result -> on_ok result
   in
@@ -252,8 +254,10 @@ let try_handle_with_outcome
                   if is_ok
                   then Keeper_tool_execution.success_data payload
                   else
-                    (* rg's own error exit: the cause is in its stderr, which
-                       is passed on as [error_detail] and not parsed here. *)
+                    (* rg's error exit (2) is either the caller's --type,
+                       --glob or path, or an I/O error. Only its stderr, passed
+                       on as [error_detail] and not parsed here, tells them
+                       apart, so it is not claimed as the caller's. *)
                     Keeper_tool_execution.failure
                       ~class_:Tool_result.Runtime_failure
                       (Yojson.Safe.to_string payload))

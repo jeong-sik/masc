@@ -7,9 +7,10 @@ val max_file_bytes : int
 
 (** Why staging stopped. A path the caller named that the Keeper's read
     authority refuses carries that refusal's class. Everything after the paths
-    resolved -- reading the bytes, a file over [max_file_bytes], the lease --
-    reaches this module as one string from [Browser_lane.Upload_lease], so it
-    is not claimed as the caller's to correct. *)
+    resolved -- a missing file, a file over [max_file_bytes] (refused here),
+    a failed read, the lease -- comes back through
+    [Browser_lane.Upload_lease.with_staged_files] as one string, which loses
+    which it was, so it is not claimed as the caller's to correct. *)
 type staging_error =
   | Path_refused of Keeper_alerting_path.path_refusal
   | Staging_failed of string

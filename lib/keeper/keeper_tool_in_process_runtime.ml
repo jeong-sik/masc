@@ -2089,8 +2089,10 @@ let handle_keeper_spawn_with_outcome
        Tool_spawn.dispatch { Tool_spawn.registry; sw } ~name ~args
        |> dispatch_option_to_execution ~failure_effect_disposition ~name)
   | (Some _ | None), (Some _ | None) ->
+    (* The spawn registry is installed by the keeper turn; a call without one
+       is wiring, and the caller has nothing to change. *)
     Keeper_tool_execution.failure
-      ~class_:Tool_result.Workflow_rejection
+      ~class_:Tool_result.Runtime_failure
       (Yojson.Safe.to_string
          (`Assoc
              [ "error", `String "spawn is only available inside a keeper turn"

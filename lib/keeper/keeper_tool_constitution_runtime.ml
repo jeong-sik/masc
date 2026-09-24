@@ -83,8 +83,16 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
         ~text ~author:meta.name ~at:(Time_compat.now ()) ~evidence
     with
     | Error invalid ->
+      (* The author is this keeper's name, not the caller's argument. *)
+      let class_ =
+        match invalid with
+        | World_constitution_types.Empty_text
+        | World_constitution_types.Multiline_text
+        | World_constitution_types.Empty_evidence_uri _ -> Tool_result.Policy_rejection
+        | World_constitution_types.Empty_author -> Tool_result.Runtime_failure
+      in
       Keeper_tool_execution.failure
-        ~class_:Tool_result.Policy_rejection
+        ~class_
         (World_constitution_types.invalid_to_string invalid)
     | Ok article -> (
       match load_ledger ~base_path with

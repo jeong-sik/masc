@@ -155,7 +155,8 @@ let turn_success_of_stop_reason ~meta ~continuation_route = function
 ;;
 
 let autonomous_yield_request ~base_path ~keeper_name =
-  match Keeper_chat_yield_request.request ~base_path ~keeper_name with
+  match Keeper_chat_yield_request.request
+          ~turn:Keeper_chat_yield_request.Autonomous ~base_path ~keeper_name with
   | Error _ as error -> error
   | Ok (Some _) as request -> request
   | Ok None ->
@@ -364,7 +365,8 @@ let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
      terminal. *)
   | Keeper_registry.Woken (_ :: _) ->
     fun () ->
-      (match Keeper_chat_yield_request.request ~base_path ~keeper_name with
+      (match Keeper_chat_yield_request.request
+               ~turn:Keeper_chat_yield_request.Autonomous ~base_path ~keeper_name with
        | Error _ as error -> error
        | Ok (Some _) as request -> request
        | Ok None ->

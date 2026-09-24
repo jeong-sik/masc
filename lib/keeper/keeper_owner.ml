@@ -541,6 +541,7 @@ let answer : type response. response command -> answer = function
   | Exact_projection -> In_its_drain_step
   | Apply_meta _ -> In_its_drain_step
   | Exact_operation _ -> In_its_drain_step
+  | Has_newer_original_queued _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
   | Defer_direct_checkpoint _ -> In_its_drain_step
   | Resume_direct_checkpoint _ -> In_its_drain_step

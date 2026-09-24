@@ -832,6 +832,21 @@ let decode_semantic stmt =
     Error (Integrity_error "semantic execution index and record disagree")
   else Ok execution
 ;;
+
+let semantic_get_with_db db id =
+  with_statement db ~operation:"lookup semantic execution"
+    "SELECT scope_key, revision, phase, record_json FROM semantic_executions WHERE scope_key = ?"
+    (fun stmt ->
+      let* () = bind_text db stmt ~operation:"bind semantic identity" 1 (scope_key id) in
+      let rc = Sqlite3.step stmt in
+      if rc = Sqlite3.Rc.DONE then Ok None
+      else if rc = Sqlite3.Rc.ROW then
+          let* current = decode_semantic stmt in
+          let* () = expect_done db stmt ~operation:"complete semantic lookup" in
+          Ok (Some current)
+      else Error (Store_unavailable (sqlite_error db "lookup semantic execution" rc)))
+;;
+
 let semantic_rows db ~active_only =
   with_statement db ~operation:"read semantic executions"
     "SELECT scope_key, revision, phase, record_json FROM semantic_executions ORDER BY scope_key"
@@ -1190,7 +1205,6 @@ let has_newer_original_queued store ~operation_id =
   | Operation.Queued | Operation.Succeeded _ | Operation.Failed _
   | Operation.Cancelled _ -> Error (Not_running operation_id)
   | Operation.Running _ ->
-    let* executions = semantic_rows store.db ~active_only:false in
     with_statement store.db ~operation:"read newer original chat operations"
       ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' AND created_at > ? "
        ^ "AND NOT EXISTS (SELECT 1 FROM operation_batch_members b "
@@ -1204,10 +1218,9 @@ let has_newer_original_queued store ~operation_id =
           if rc = Sqlite3.Rc.DONE then Ok false
           else if rc = Sqlite3.Rc.ROW then
             let* candidate = decode_operation statement in
-            if List.exists (fun (execution : Semantic.t) ->
-                Keeper_execution_scope_id.equal execution.id
-                  (Keeper_execution_scope_id.direct_operation candidate.operation_id)) executions
-            then read () else Ok true
+            let* execution = semantic_get_with_db store.db
+              (Keeper_execution_scope_id.direct_operation candidate.operation_id) in
+            (match execution with Some _ -> read () | None -> Ok true)
           else Error (Store_unavailable
             (sqlite_error store.db "read newer original chat operations" rc))
         in
@@ -1567,19 +1580,6 @@ let semantic_error_to_string = function
 ;;
 let semantic_store_result result = Result.map_error (fun error -> Semantic_store_error error) result
 
-let semantic_get_with_db db id =
-  with_statement db ~operation:"lookup semantic execution"
-    "SELECT scope_key, revision, phase, record_json FROM semantic_executions WHERE scope_key = ?"
-    (fun stmt ->
-      let* () = bind_text db stmt ~operation:"bind semantic identity" 1 (scope_key id) in
-      let rc = Sqlite3.step stmt in
-      if rc = Sqlite3.Rc.DONE then Ok None
-      else if rc = Sqlite3.Rc.ROW then
-          let* current = decode_semantic stmt in
-          let* () = expect_done db stmt ~operation:"complete semantic lookup" in
-          Ok (Some current)
-      else Error (Store_unavailable (sqlite_error db "lookup semantic execution" rc)))
-;;
 let semantic_get store id =
   let* () = ensure_open store |> semantic_store_result in
   semantic_get_with_db store.db id |> semantic_store_result

@@ -29,8 +29,8 @@ let provider_error ~runtime_id detail : Fusion_types.panel_failure =
    function because Eio_context has no reset, so a test that drove the real
    globals could only reach these arms in one fragile order.
 
-   Its result is already carried to the caller as a typed
-   [Fusion_types.panel_failure] and lands in the fusion run record. *)
+   Its raw detail is carried as [Setup_failure]; runtime attribution happens
+   once when the panel result or diagnostic line is rendered. *)
 (* TEL-OK: pure string selection, no effect; the failure it names is already
    observable through the panel outcome. *)
 let missing_handle_detail ~env_present ~clock_present =
@@ -48,7 +48,7 @@ let missing_handle_detail ~env_present ~clock_present =
     Some "official-client panelist requires Eio_context clock; it is not published"
 ;;
 
-let eio_context ~runtime_id =
+let eio_context () =
   let env = Eio_context.get_env_opt () in
   let clock = Eio_context.get_clock_opt () in
   match env, clock with
@@ -66,7 +66,7 @@ let eio_context ~runtime_id =
          raise on a live panel. *)
       | None -> "official-client panelist could not resolve the Eio context"
     in
-    Error (provider_error ~runtime_id detail)
+    Error detail
 ;;
 
 (* [Runtime_execution.*] carries admission-time config; each adapter has its own
@@ -164,34 +164,29 @@ let antigravity_config ~base_dir ~runtime_id ~override_s ~output_schema
    ({!Antigravity_input_frame}). Without this the panel or judge system prompt
    — for a judge-of-judges first judge, its whole lens — never reaches the
    model. *)
-let antigravity_prompt ~runtime_id ~system_prompt ~prompt =
+let antigravity_prompt ~system_prompt ~prompt =
   match system_prompt with
   | None -> Ok prompt
   | Some instructions ->
-    Result.map_error
-      (fun detail -> provider_error ~runtime_id detail)
-      (Result.bind (Antigravity_input_frame.system_instructions_label ()) (fun system_label ->
+    Result.bind (Antigravity_input_frame.system_instructions_label ()) (fun system_label ->
          Result.map
            (fun goal_label ->
               String.concat Antigravity_input_frame.section_separator
                 [ system_label ^ instructions; goal_label ^ prompt ])
-           (Antigravity_input_frame.current_goal_label ())))
+           (Antigravity_input_frame.current_goal_label ()))
 ;;
 
 type image_input = { media_type : string; base64_data : string }
 type response = { text : string; model : string }
 type failure =
-  | Setup_failure of Fusion_types.panel_failure
-  | Attributed_setup_failure of Fusion_types.panel_failure
+  | Setup_failure of string
   | Codex_failure of Runtime_codex_app_server.error
   | Claude_failure of Runtime_claude_code.error
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
 
 let failure_detail ~runtime_id = function
-  | Setup_failure failure ->
-    Printf.sprintf "%s: %s" runtime_id (Fusion_agent_core.panel_failure_text failure)
-  | Attributed_setup_failure failure -> Fusion_agent_core.panel_failure_text failure
+  | Setup_failure detail -> Printf.sprintf "%s: %s" runtime_id detail
   | Codex_failure error ->
     Printf.sprintf "%s: %s" runtime_id (Runtime_codex_app_server.error_to_string error)
   | Claude_failure error | Claude_admission_failure error ->
@@ -205,9 +200,7 @@ let failure_detail ~runtime_id = function
    HTTP 쪽 [Fusion_panel.attempt_of_result] 가 두 timeout 갈래를 [Timeout] 으로
    올리는 것과 같은 규칙을 여기에도 적용한다. *)
 let panel_failure ~runtime_id = function
-  | Setup_failure (Fusion_types.Provider_error detail) ->
-    provider_error ~runtime_id detail
-  | Setup_failure failure | Attributed_setup_failure failure -> failure
+  | Setup_failure detail -> provider_error ~runtime_id detail
   | Codex_failure (Runtime_codex_app_server.Timeout _) -> Fusion_types.Timeout
   | Codex_failure error -> provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)
   | Claude_failure (Runtime_claude_code.Timeout _)
@@ -246,8 +239,8 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
      | _ -> ());
     Error (if admission then Claude_admission_failure error else Claude_failure error)
   in
-  let* env, clock = eio_context ~runtime_id
-    |> Result.map_error (fun failure -> Attributed_setup_failure failure) in
+  let* env, clock = eio_context ()
+    |> Result.map_error (fun detail -> Setup_failure detail) in
   let mgr = Posix_spawn_process_mgr.mgr in
   let cwd = Eio.Path.(Eio.Stdenv.fs env / base_dir) in
   match execution with
@@ -255,10 +248,8 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
     (* Callers route Agent_core panelists through Fusion_agent_core. Reaching
        here means the split in Fusion_panel disagreed with [is_official_client],
        which is a bug in this module's callers rather than a provider failure. *)
-    Error
-      (Attributed_setup_failure (provider_error
-         ~runtime_id
-         "runtime is Agent_core-owned; it belongs on the Async_agent path"))
+    Error (Setup_failure
+      "runtime is Agent_core-owned; it belongs on the Async_agent path")
   | Runtime_execution.Claude_code execution ->
     let config =
       claude_config ~base_dir ~runtime_id ~system_prompt ~override_s:timeout_s
@@ -303,7 +294,7 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
      | Error error ->
        Error (Codex_failure error))
   | Runtime_execution.Antigravity_cli _ when not (List.is_empty images) ->
-    Error (Attributed_setup_failure (provider_error ~runtime_id "Antigravity transport does not support image input"))
+    Error (Setup_failure "Antigravity transport does not support image input")
   | Runtime_execution.Antigravity_cli execution ->
     let config =
       antigravity_config ~base_dir ~runtime_id ~override_s:timeout_s ~output_schema execution
@@ -312,8 +303,8 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
        where its OAuth token already lives. The keeper path overrides it for
        per-keeper isolation; a panelist has no durable state to isolate. *)
     let* prompt =
-      antigravity_prompt ~runtime_id ~system_prompt ~prompt
-      |> Result.map_error (fun failure -> Attributed_setup_failure failure)
+      antigravity_prompt ~system_prompt ~prompt
+      |> Result.map_error (fun detail -> Setup_failure detail)
     in
     (match Runtime_antigravity.run_turn ~mgr ~clock ~cwd config ~prompt with
      | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model }

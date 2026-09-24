@@ -36,8 +36,7 @@ type runner =
 let default_runner ~base_dir : runner =
   fun ~runtime_id ~system_prompt ~output_schema ~prompt ->
   match Runtime.get_runtime_by_id runtime_id with
-  | None -> Error (Fusion_official_client.Setup_failure
-      (Fusion_types.Provider_error "runtime is not configured"))
+  | None -> Error (Fusion_official_client.Setup_failure "runtime is not configured")
   | Some runtime ->
     Fusion_official_client.run_with_images ~images:[]
       ~base_dir ~runtime ~system_prompt ~output_schema ~prompt ()

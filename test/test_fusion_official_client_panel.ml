@@ -541,23 +541,13 @@ let test_client_timeouts_project_to_timeout () =
 let test_setup_failure_attribution_is_single () =
   let runtime_id = official_client_runtime in
   let attributed = runtime_id ^ ": quota" in
-  let raw =
-    Masc.Fusion_official_client.Setup_failure
-      (Fusion_types.Provider_error "quota")
-  in
-  let already_attributed =
-    Masc.Fusion_official_client.Attributed_setup_failure
-      (Fusion_types.Provider_error attributed)
-  in
-  List.iter
-    (fun failure ->
-      check string "the setup detail names the runtime once" attributed
-        (Masc.Fusion_official_client.failure_detail ~runtime_id failure);
-      match Masc.Fusion_official_client.panel_failure ~runtime_id failure with
-      | Fusion_types.Provider_error detail ->
-        check string "the panel failure names the runtime once" attributed detail
-      | _ -> fail "a setup provider error changed its panel failure kind")
-    [ raw; already_attributed ]
+  let failure = Masc.Fusion_official_client.Setup_failure "quota" in
+  check string "the setup detail names the runtime once" attributed
+    (Masc.Fusion_official_client.failure_detail ~runtime_id failure);
+  match Masc.Fusion_official_client.panel_failure ~runtime_id failure with
+  | Fusion_types.Provider_error detail ->
+    check string "the panel failure names the runtime once" attributed detail
+  | _ -> fail "a setup provider error changed its panel failure kind"
 ;;
 
 (* A stand-in that appends one line per execution, so a test can count how

@@ -477,7 +477,7 @@ let test_cli_size_verdict_table () =
     ; "an id this module cannot run", L.Not_an_official_client { runtime_id }, false
     ; "a client that failed without saying why",
       L.Execution_failed
-        { runtime_id; cause = Fusion_official_client.Setup_failure (Provider_error "quota") },
+        { runtime_id; cause = Fusion_official_client.Setup_failure "quota" },
       false
     ]
 
@@ -523,7 +523,7 @@ let () =
     "input_error_code", `String "input_too_large";
     "actual_chars", `Int 23; "max_chars", `Int 17])) in
   let generic = codex_error None in
-  let quota = Fusion_official_client.Setup_failure (Provider_error "quota") in
+  let quota = Fusion_official_client.Setup_failure "quota" in
   let cli_case ?(first_overflow = false) name cli_errors expected shows_size =
     Alcotest.test_case name `Quick (fun () ->
       Fixture.with_official_client_runtimes @@ fun () ->

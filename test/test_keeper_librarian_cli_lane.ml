@@ -142,11 +142,7 @@ let test_execution_failure_names_cli_slot_once () =
     (Masc.Fusion_official_client.Codex_failure
        (Runtime_codex_app_server.Invalid_config "synthetic failure"));
   check_once
-    (Masc.Fusion_official_client.Setup_failure
-       (Provider_error "synthetic failure"));
-  check_once
-    (Masc.Fusion_official_client.Attributed_setup_failure
-       (Provider_error (runtime_id ^ ": synthetic failure")))
+    (Masc.Fusion_official_client.Setup_failure "synthetic failure")
 ;;
 
 let invalid_domain_failure () =
@@ -330,7 +326,7 @@ let test_domain_failure_kind_survives_failed_cli_slot () =
   let attempts = ref 0 in
   let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr attempts;
-    Error (Masc.Fusion_official_client.Setup_failure (Provider_error "synthetic bridge failure"))
+    Error (Masc.Fusion_official_client.Setup_failure "synthetic bridge failure")
   in
   match execute ~net ~clock ~base_path ~runner with
   | Ok _ -> fail "domain-invalid API and failed CLI unexpectedly produced a selection"
@@ -345,8 +341,7 @@ let test_domain_failure_kind_survives_failed_cli_slot () =
       ~cli_failure:
         (Cli.Execution_failed
            { runtime_id = Fixture.cli_primary_runtime
-           ; cause = Masc.Fusion_official_client.Setup_failure
-               (Provider_error "synthetic bridge failure")
+           ; cause = Masc.Fusion_official_client.Setup_failure "synthetic bridge failure"
            })
       (Runtime.For_testing.classified_error_detail error)
 ;;
@@ -477,7 +472,7 @@ let test_cli_prompt_drift_is_not_reported_as_no_cli_declaration () =
   let calls = ref 0 in
   let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr calls;
-    Error (Masc.Fusion_official_client.Setup_failure (Provider_error "must not run"))
+    Error (Masc.Fusion_official_client.Setup_failure "must not run")
   in
   match
     Runtime.For_testing.execute_exact_output_classified ~continuity:None
@@ -670,11 +665,11 @@ let () =
             test_domain_invalid_cli_answer_keeps_the_terminal
         ; test_case "no CLI declaration preserves the API failure" `Quick
             (test_failure_reaches_journal ~cli_only:false ~cli_slot_ids:[]
-              ~answer:(Error (Masc.Fusion_official_client.Setup_failure (Provider_error "must not run"))) ~failure:None
+              ~answer:(Error (Masc.Fusion_official_client.Setup_failure "must not run")) ~failure:None
               ~kind:Current.Exact_setup_failure ~calls:0)
         ; test_case "CLI admission refusal reaches journal and exact-run projection" `Quick
             (test_failure_reaches_journal ~cli_only:false
-              ~cli_slot_ids:["missing-cli-runtime"] ~answer:(Error (Masc.Fusion_official_client.Setup_failure (Provider_error "must not run")))
+              ~cli_slot_ids:["missing-cli-runtime"] ~answer:(Error (Masc.Fusion_official_client.Setup_failure "must not run"))
               ~failure:(Some (Cli.Not_an_official_client {runtime_id = "missing-cli-runtime"}))
               ~kind:Current.Exact_setup_failure ~calls:0)
         ; test_case "CLI domain failure reaches journal and exact-run projection" `Quick
@@ -694,10 +689,9 @@ let () =
                 ~requires_token_measurement:true ())
         ; test_case "CLI execution failure reaches journal and exact-run projection" `Quick
             (test_failure_reaches_journal ~cli_only:false
-              ~cli_slot_ids:[Fixture.cli_primary_runtime] ~answer:(Error (Masc.Fusion_official_client.Setup_failure (Provider_error "synthetic bridge failure")))
+              ~cli_slot_ids:[Fixture.cli_primary_runtime] ~answer:(Error (Masc.Fusion_official_client.Setup_failure "synthetic bridge failure"))
               ~failure:(Some (Cli.Execution_failed
-                {runtime_id = Fixture.cli_primary_runtime; cause = Masc.Fusion_official_client.Setup_failure
-                  (Provider_error "synthetic bridge failure")}))
+                {runtime_id = Fixture.cli_primary_runtime; cause = Masc.Fusion_official_client.Setup_failure "synthetic bridge failure"}))
               ~kind:Current.Exact_setup_failure ~calls:1)
         ; test_case "CLI-only failure reaches journal and exact-run projection" `Quick
             (fun () -> test_failure_reaches_journal ~cli_only:true

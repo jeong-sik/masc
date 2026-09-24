@@ -682,11 +682,11 @@ let default_owned_target ~ownership_root ~path =
    is the default this module picked, so its absence is not the caller's. *)
 let resolve_owned_read_target ~ownership_root ~path ~cwd =
   if String.equal path ""
-  then Error (Keeper_alerting_path.caller_refusal "path is required")
+  then Error (Keeper_alerting_path.refusal_of_rejection Keeper_alerting_path.Path_required)
   else
     let refusal message =
       match cwd with
-      | Some _ -> Keeper_alerting_path.caller_refusal message
+      | Some _ -> { Keeper_alerting_path.failure_class = Tool_result.Policy_rejection; message }
       | None -> { Keeper_alerting_path.failure_class = Tool_result.Runtime_failure; message }
     in
     let cwd_abs, target_rel =

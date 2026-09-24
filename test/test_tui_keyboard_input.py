@@ -18299,9 +18299,11 @@ def dashboard_usage_interaction(
     _base_path: str,
 ) -> None:
     wait_for_output(process, master_fd, output, b"MASC Dashboard", start=0, timeout=30.0)
+    wait_for_output(process, master_fd, output, b"actual 3 (reported)", start=0, timeout=10.0)
     dashboard = unwrapped(screen_text(bytes(output)))
-    if b"Goals" not in dashboard or b"Work" not in dashboard:
+    if b"Goals" not in dashboard or b"Work" not in dashboard or b"linked tasks 0/1 done" not in dashboard:
         raise AssertionError(f"Dashboard summary missing: {dashboard!r}")
+    print("DASHBOARD_PTY_SCREEN=" + json.dumps(dashboard.decode("utf-8", errors="replace")), flush=True)
     send_and_wait(process, master_fd, output, b"\t", b"MASC Work")
     send_and_wait(process, master_fd, output, b"t", b"MASC Work / Tasks")
     usage = tab_until(process, master_fd, output, b"MASC Usage")
@@ -18313,6 +18315,7 @@ def dashboard_usage_interaction(
     plain = unwrapped(screen_text(bytes(output)))
     if b"UTC days reported" not in plain or b"Keeper usage" not in plain:
         raise AssertionError(f"Usage evidence and coverage missing: {plain!r}")
+    print("USAGE_PTY_SCREEN=" + json.dumps(plain.decode("utf-8", errors="replace")), flush=True)
     send_and_wait(process, master_fd, output, b"w", b"7 UTC days")
     system = tab_until(process, master_fd, output, b"MASC System")
     if b"MASC System" not in system:
@@ -18350,6 +18353,41 @@ def run_dashboard_usage_regression(executable: str) -> None:
         interact=dashboard_usage_interaction,
         refresh=1.0,
         http_fixtures={
+            "/api/v1/dashboard/briefing": (200, overview_event_briefing()),
+            DASHBOARD_GOALS_PATH: (
+                200,
+                {
+                    "generated_at": "2026-09-25T00:00:00Z",
+                    "tree": [
+                        {
+                            "id": "goal-fixture",
+                            "title": "Fixture Goal",
+                            "phase": "executing",
+                            "priority": 1,
+                            "criterion_revision": "r1",
+                            "metric": "accepted checks",
+                            "target_value": "5",
+                            "measurement": {
+                                "state": "reported",
+                                "record": {
+                                    "goal_id": "goal-fixture",
+                                    "criterion_revision": "r1",
+                                    "observed_value": "3",
+                                    "evidence": "artifact:fixture-checks",
+                                    "actor": "fixture",
+                                    "recorded_at": "2026-09-25T00:00:00Z",
+                                },
+                            },
+                            "due_date": None,
+                            "task_count": 1,
+                            "task_done_count": 0,
+                            "stagnation_seconds": None,
+                            "tasks": [{"id": "task-fixture", "status": "todo"}],
+                            "children": [],
+                        }
+                    ],
+                },
+            ),
             RUNTIME_RESOLVED_PATH: (200, runtime),
             "/api/v1/dashboard/provider-usage-history?days=14": (
                 200,

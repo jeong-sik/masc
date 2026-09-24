@@ -490,6 +490,15 @@ let test_measurement_requires_current_criterion_and_evidence () =
        check string "actual is stored exactly" "0" row.observed_value;
        check string "evidence survives" "artifact:measured-count" row.evidence
    | Ok None | Error _ -> fail "explicit measurement was not retained");
+  let listed = must_succeed "goal list after measurement"
+      (dispatch ctx ~name:"masc_goal_list" []) in
+  (match Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list with
+   | [ goal_json ] ->
+       check string "list reports actual state" "reported"
+         (json_state goal_json [ "measurement"; "state" ]);
+       check string "list preserves reported zero" "0"
+         (json_state goal_json [ "measurement"; "record"; "observed_value" ])
+   | _ -> fail "expected one listed Goal");
   let changed =
     match Goal_store.upsert_goal config ~id:goal_id ~target_value:"2" () with
     | Ok (goal, _) -> goal
@@ -498,6 +507,13 @@ let test_measurement_requires_current_criterion_and_evidence () =
   (match Goal_measurement.latest_for_goal config ~goal:changed with
    | Ok None -> ()
    | Ok (Some _) | Error _ -> fail "old criterion was presented as current");
+  let listed = must_succeed "goal list after criterion revision"
+      (dispatch ctx ~name:"masc_goal_list" []) in
+  (match Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list with
+   | [ goal_json ] ->
+       check string "revised criterion has no actual" "not_recorded"
+         (json_state goal_json [ "measurement"; "state" ])
+   | _ -> fail "expected one listed Goal");
   ignore (must_fail "stale criterion"
             (dispatch ctx ~name:"masc_goal_measure"
                (args goal.criterion_revision "artifact:stale")))

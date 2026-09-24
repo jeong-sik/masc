@@ -293,7 +293,11 @@ open Alcotest
    whole sentence that fits. What it bought: those four schemas, 8,370 bytes,
    leave every Agent Core request that has not used them (5,047 requests on
    2026-09-23). No headroom. *)
-let ceiling_bytes = 122_275
+(* PR #38784 adds masc_goal_measure so a Keeper can record a reported metric
+   with evidence against an exact Goal criterion revision. The CI inventory at
+   d1a2e0a57f measured 122,668 bytes across 140 tools, 393 bytes beyond the
+   prior 122,275-byte ceiling. Pin the measured size without slack. *)
+let ceiling_bytes = 122_668
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -447,6 +451,7 @@ let all_surface_golden_names =
   ; "masc_gc"
   ; "masc_get_metrics"
   ; "masc_goal_list"
+  ; "masc_goal_measure"
   ; "masc_goal_transition"
   ; "masc_goal_upsert"
   ; "masc_keeper_delegate"

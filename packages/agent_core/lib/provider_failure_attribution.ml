@@ -295,17 +295,6 @@ let failure_ownership_to_string = function
   | Unclassified -> "unclassified"
 ;;
 
-let network_to_string = function
-  | Http.Connection_refused -> "connection_refused"
-  | Http.Dns_failure -> "dns_failure"
-  | Http.Tls_error -> "tls_error"
-  | Http.Timeout -> "timeout"
-  | Http.Local_resource_exhaustion -> "local_resource_exhaustion"
-  | Http.Connection_reset -> "connection_reset"
-  | Http.End_of_file -> "end_of_file"
-  | Http.Unknown -> "unknown"
-;;
-
 let provider_terminal_to_yojson = function
   | Http.Session_conflict -> `Assoc [ "kind", `String "session_conflict" ]
   | Http.Other _ -> `Assoc [ "kind", `String "other" ]
@@ -403,7 +392,7 @@ let provider_failure_to_yojson = function
 let evidence_to_yojson = function
   | Http_status status -> `Assoc [ "kind", `String "http_status"; "status", `Int status ]
   | Network kind ->
-    `Assoc [ "kind", `String "network"; "network_kind", `String (network_to_string kind) ]
+    `Assoc [ "kind", `String "network"; "network_kind", `String (Http.network_error_kind_to_string kind) ]
   | Timeout phase ->
     `Assoc
       [ "kind", `String "timeout"; "phase", `String (Http.timeout_phase_to_label phase) ]

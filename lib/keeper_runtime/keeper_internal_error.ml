@@ -430,16 +430,7 @@ let string_list_of_assoc key json =
          | _ -> None)
 ;;
 
-let network_error_kind_to_string = function
-  | Llm_provider.Http_client.Connection_refused -> "connection_refused"
-  | Llm_provider.Http_client.Dns_failure -> "dns_failure"
-  | Llm_provider.Http_client.Tls_error -> "tls_error"
-  | Llm_provider.Http_client.Timeout -> "timeout"
-  | Llm_provider.Http_client.Local_resource_exhaustion -> "local_resource_exhaustion"
-  | Llm_provider.Http_client.Connection_reset -> "connection_reset"
-  | Llm_provider.Http_client.End_of_file -> "end_of_file"
-  | Llm_provider.Http_client.Unknown -> "unknown"
-;;
+let network_error_kind_to_string = Llm_provider.Http_client.network_error_kind_to_string
 
 let network_error_kind_of_string = function
   | "connection_refused" -> Some Llm_provider.Http_client.Connection_refused

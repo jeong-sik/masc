@@ -13,36 +13,15 @@ type agent_core_tool_projector =
   (Yojson.Safe.t -> Tool_result.result) ->
   Agent_core.Tool.t
 
-let network_error_kind_of_unix_error = function
-  | Unix.ECONNREFUSED -> Llm_provider.Http_client.Connection_refused
-  | Unix.ECONNRESET -> Llm_provider.Http_client.Connection_reset
-  | Unix.EPIPE -> Llm_provider.Http_client.End_of_file
-  | Unix.ETIMEDOUT -> Llm_provider.Http_client.Timeout
-  | Unix.ENETUNREACH | Unix.EHOSTUNREACH -> Llm_provider.Http_client.Dns_failure
-  | Unix.EMFILE | Unix.ENFILE | Unix.ENOBUFS | Unix.EADDRNOTAVAIL ->
-    Llm_provider.Http_client.Local_resource_exhaustion
-  | _ -> Llm_provider.Http_client.Unknown
-;;
-
-let network_error_kind_of_eio_error = function
-  | Eio.Net.E (Eio.Net.Connection_reset (Eio_unix.Unix_error (code, _, _))) ->
-    Some (network_error_kind_of_unix_error code)
-  | Eio.Net.E (Eio.Net.Connection_reset _) -> Some Llm_provider.Http_client.End_of_file
-  | Eio.Net.E (Eio.Net.Connection_failure (Eio.Net.Refused _)) ->
-    Some Llm_provider.Http_client.Connection_refused
-  | Eio.Net.E (Eio.Net.Connection_failure Eio.Net.Timeout) ->
-    Some Llm_provider.Http_client.Timeout
-  | Eio.Net.E (Eio.Net.Connection_failure Eio.Net.No_matching_addresses) ->
-    Some Llm_provider.Http_client.Dns_failure
-  | Eio.Exn.X _ -> None
-  | _ -> None
-;;
-
 let transport_error_kind_of_exception = function
   | End_of_file -> Some Llm_provider.Http_client.End_of_file
   | Eio.Time.Timeout -> Some Llm_provider.Http_client.Timeout
-  | Unix.Unix_error (code, _, _) -> Some (network_error_kind_of_unix_error code)
-  | Eio.Io (err, _) -> network_error_kind_of_eio_error err
+  | Unix.Unix_error (code, _, _) ->
+    Some (Llm_provider.Http_client.classify_unix_error code)
+  (* [Eio.Io] also carries file-system errors, so an Eio error no arm names
+     stays [None] (not known to be transport) rather than [Some Unknown]. *)
+  | Eio.Io (err, _) ->
+    Llm_provider.Http_client.(classify_eio_error err |> known_network_error_kind)
   | Tls_eio.Tls_alert _ | Tls_eio.Tls_failure _ ->
     Some Llm_provider.Http_client.Tls_error
   | Sys_error _ | Failure _ -> Some Llm_provider.Http_client.Unknown
@@ -980,6 +959,7 @@ let prefer_cooperative_probe_error probe_error advanced_result =
 ;;
 
 module For_testing = struct
+  let transport_error_kind_of_exception = transport_error_kind_of_exception
   let runtime_observation_for_completed_config =
     runtime_observation_for_completed_config
   let runtime_observation_for_terminal_config =

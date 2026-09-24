@@ -57,17 +57,6 @@ let server_status_class_of_code = function
   | _ -> None
 ;;
 
-let network_error_kind_label = function
-  | Http_client.Connection_refused -> "connection_refused"
-  | Http_client.Dns_failure -> "dns_failure"
-  | Http_client.Tls_error -> "tls_error"
-  | Http_client.Timeout -> "timeout"
-  | Http_client.Local_resource_exhaustion -> "local_resource_exhaustion"
-  | Http_client.Connection_reset -> "connection_reset"
-  | Http_client.End_of_file -> "end_of_file"
-  | Http_client.Unknown -> "unknown"
-;;
-
 let invalid_request_reason_to_string = function
   | Json_parse_error -> "json_parse_error"
   | Attempt_rejected -> "attempt_rejected"
@@ -108,7 +97,7 @@ let error_message = function
     Printf.sprintf "Input capacity (%s): %s" reason r.message
   | NetworkError { message; kind = Unknown } -> Printf.sprintf "Network error: %s" message
   | NetworkError { message; kind } ->
-    Printf.sprintf "Network error (%s): %s" (network_error_kind_label kind) message
+    Printf.sprintf "Network error (%s): %s" (Http_client.network_error_kind_to_string kind) message
   | Timeout r ->
     (* The phase is the whole diagnostic value of a timeout -- a stalled stream
        and a refused admission are different failures. It was carried in the

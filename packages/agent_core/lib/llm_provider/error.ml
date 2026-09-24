@@ -120,17 +120,6 @@ let capacity_scope_to_string = function
   | CapacityUnknown -> "unknown"
 ;;
 
-let network_error_kind_to_string = function
-  | Http_client.Connection_refused -> "connection_refused"
-  | Http_client.Dns_failure -> "dns_failure"
-  | Http_client.Tls_error -> "tls_error"
-  | Http_client.Timeout -> "timeout"
-  | Http_client.Local_resource_exhaustion -> "local_resource_exhaustion"
-  | Http_client.Connection_reset -> "connection_reset"
-  | Http_client.End_of_file -> "end_of_file"
-  | Http_client.Unknown -> "unknown"
-;;
-
 let timeout_phase_suffix = function
   | None -> ""
   | Some phase -> Printf.sprintf " phase=%s" (Http_client.timeout_phase_to_label phase)
@@ -221,7 +210,7 @@ let to_string = function
     Printf.sprintf
       "Provider '%s' network error (%s%s): %s"
       r.provider
-      (network_error_kind_to_string r.kind)
+      (Http_client.network_error_kind_to_string r.kind)
       (timeout_phase_suffix r.timeout_phase)
       r.detail
   | Timeout r ->

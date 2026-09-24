@@ -88,10 +88,8 @@ type accept_rejection_kind =
   | Accept_no_usable_progress
   | Accept_predicate_rejected
 
-(** The wire label for a {!Llm_provider.Http_client.network_error_kind}.
-    Exported because [Keeper_agent_error] renders the same seven kinds for
-    its own [network_kind] field and kept a byte-identical copy; two
-    mappings for one type can be renamed apart. *)
+(** {!Llm_provider.Http_client.network_error_kind_to_string}, re-exported
+    next to its decoder. *)
 val network_error_kind_to_string :
   Llm_provider.Http_client.network_error_kind -> string
 

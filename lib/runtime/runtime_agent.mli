@@ -335,6 +335,11 @@ val media_degrade_note :
     was dropped rather than vanishing. [None] when nothing was dropped. *)
 
 module For_testing : sig
+  (** The transport kind recorded on an unhandled runner exception; [None]
+      when the exception is not known to be a transport failure. *)
+  val transport_error_kind_of_exception :
+    exn -> Llm_provider.Http_client.network_error_kind option
+
   val stop_reason_of_cooperative_yield :
     turns_used:int -> cooperative_yield_reason -> stop_reason
 

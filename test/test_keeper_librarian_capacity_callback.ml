@@ -416,6 +416,7 @@ let test_size_verdict_table () =
     ; "completion failed, dns failure", network Http.Dns_failure, false
     ; "completion failed, connection refused", network Http.Connection_refused, false
     ; "completion failed, tls failure", network Http.Tls_error, false
+    ; "completion failed, peer reset", network Http.Connection_reset, false
     ; "completion failed, peer closed", network Http.End_of_file, false
     ; "completion failed, unclassified network failure", network Http.Unknown, false
     (* Deadlines on a sent request: those on the provider's handling of the

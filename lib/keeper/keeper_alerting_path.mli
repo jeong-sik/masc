@@ -17,7 +17,7 @@ val failure_class_of_rejection : keeper_path_rejection -> Tool_result.tool_failu
 
 (** A refused path as a tool reports it: the rejection's message and the
     class {!failure_class_of_rejection} gives it. *)
-type path_refusal =
+type path_refusal = private
   { failure_class : Tool_result.tool_failure_class
   ; message : string
   }

@@ -123,7 +123,7 @@ let with_eio f =
 ;;
 
 let projection_failure =
-  "librarian request projection failed for slot=librarian-cli-unreachable reason=librarian-cli-unreachable: wire_admission_rejected:target_request_rejected"
+  "request projection refused by all API slots: librarian-cli-unreachable: wire_admission_rejected:target_request_rejected"
 ;;
 
 let invalid_domain_failure () =
@@ -273,9 +273,14 @@ let test_projection_refusal_survives_failed_cli_slots () =
   (match execute ~net ~clock ~base_path ~runner with
    | Ok _ -> fail "a domain-invalid CLI answer must not be accepted"
    | Error error ->
+     let detail = Runtime.For_testing.classified_error_detail error in
      check_detail ~api_failure:projection_failure
-       ~cli_failure:(invalid_domain_failure ())
-       (Runtime.For_testing.classified_error_detail error));
+       ~cli_failure:(invalid_domain_failure ()) detail;
+     (match Astring.String.cut ~sep:"librarian-cli-unreachable" detail with
+      | None -> fail "the rejected API slot is missing"
+      | Some (_, tail) ->
+        check bool "the API slot is named once" false
+          (Astring.String.is_infix ~affix:"librarian-cli-unreachable" tail)));
   check (list string) "the declared CLI slot was attempted"
     [Fixture.cli_primary_runtime] !attempts
 ;;

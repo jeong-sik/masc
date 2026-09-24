@@ -502,9 +502,13 @@ let test_excluded_last_slot_preserves_domain_failure () =
      check (list string)
        "the refused slot is reported, not fatal"
        [ "librarian-bad" ]
-       (List.map fst preflight.Runtime.unusable);
+       (List.map (fun (refusal : Runtime.slot_refusal) -> refusal.slot_id)
+          preflight.Runtime.unusable);
      (match preflight.Runtime.unusable with
-      | [ (_, reason) ] ->
+      | [ refusal ] ->
+        let reason =
+          Agent_core.Exact_output.admission_error_reason refusal.cause
+        in
         check bool
           "the refusal names its kind"
           true
@@ -566,7 +570,7 @@ let test_an_empty_ladder_reports_nothing () =
   match Runtime.preflight_slots ~requirement:ordinary_requirement ~selected_slots:[] ~messages:[ message ] with
   | Ok preflight ->
     check int "no selected slots" 0 (List.length preflight.Runtime.selected_slots);
-    check (list (pair string string)) "nothing to exclude" [] preflight.Runtime.unusable
+    check int "nothing to exclude" 0 (List.length preflight.Runtime.unusable)
   | Error error -> fail (Runtime.extraction_error_to_string error)
 ;;
 

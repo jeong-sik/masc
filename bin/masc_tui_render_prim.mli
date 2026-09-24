@@ -416,14 +416,6 @@ val sidebar_row_lead_cells : int
     and a space each side. The room a label folds to is the frame's inner
     width less this, which is what a width check has to compare against. *)
 
-val sidebar_handle_cells : int
-
-val sidebar_handle : string -> string
-(** A row's own handle, cut to the cells a list index spends on one. The Task
-    Review index draws the request id the server writes; a Verdicts row has
-    no id of its own, so its notes hash is cut to the same width and the two
-    indexes read down alike. *)
-
 val fusion_run_clock : Masc_tui_types.Tui_decode.fusion_run -> string
 
 val fusion_run_duration :

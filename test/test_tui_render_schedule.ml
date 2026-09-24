@@ -1739,11 +1739,17 @@ let test_two_submissions_of_one_task_read_differently () =
    spells seconds under an hour, so a row read one thing and another a second
    later, and two requests minutes apart round to the same reading. *)
 let test_the_parting_value_does_not_move_under_the_reader () =
-  let handle = Masc_tui_render_prim.sidebar_handle "4d461da516af9c02b1" in
-  check string "a handle is the same on every frame" handle
-    (Masc_tui_render_prim.sidebar_handle "4d461da516af9c02b1");
-  check bool "and two rows carry different ones" true
-    (handle <> Masc_tui_render_prim.sidebar_handle "a6bab710199c3f77d0")
+  (* Two request ids, which is what the Task Review index parts its rows by.
+     They are the row's own value: the same row reads the same way on every
+     frame, and two rows never read alike. *)
+  let first = "vrf-2dc02d93" and second = "vrf-9f1b0c47" in
+  check string "the same row reads the same way twice"
+    (Schedule.task_history_sidebar_label ~task_id:"task-1663" ~apart:(Some first))
+    (Schedule.task_history_sidebar_label ~task_id:"task-1663" ~apart:(Some first));
+  check bool "and two rows do not read alike" true
+    (Schedule.task_history_sidebar_label ~task_id:"task-1663" ~apart:(Some first)
+     <> Schedule.task_history_sidebar_label ~task_id:"task-1663"
+          ~apart:(Some second))
 
 (* A row with nothing to part it keeps the id alone. The row said one thing
    before this column and still says it; a mark for "nothing here" would be a
@@ -1771,10 +1777,9 @@ let test_the_widest_row_fits_the_list_pane () =
          (Printf.sprintf "%S fits the pane's label room" apart)
          true
          (Masc_tui_message_layout.display_width label <= room))
-    [ "vrf-2dc02d93"
-    ; Masc_tui_render_prim.sidebar_handle
-        "4d461da516af9c02b1e7c5d3a0f428b6c9e1740d2358af61bc09d47e5a8f312b"
-    ]
+    (* A request id, and the clock the Verdicts index draws. A verdict has no
+       id of its own on the wire, so when it was recorded is what parts it. *)
+    [ "vrf-2dc02d93"; "09-25 01:12:45" ]
 
 let test_fusion_pipeline_diagram_stages () =
   let running_judge =

@@ -1001,10 +1001,13 @@ let test_both_doors_into_the_runtime_detail_ask_the_same_lane_list () =
    shorter and collides too -- of eight rows one task carries two verdicts at
    the same gate.
 
-   What parts a row has to be the row's own and has to hold still, so each
-   pane reads the field that is one per row rather than a clock it would have
-   to re-read on every frame. The label helper is tested on its own in
-   test_tui_render_schedule; these two say the panes reach it, and which
+   What parts a row has to be the row's own and has to hold still. Task
+   Review has a request id. A verdict has no id on the wire, and its notes
+   hash is not one either -- it is SHA256 of the task title and the
+   completion notes, so a second verdict on the same submission hashes the
+   same -- so that pane reads when the verdict was recorded. Neither reads an
+   age, which moves under the reader. The label helper is tested on its own
+   in test_tui_render_schedule; these two say the panes reach it, and which
    field each hands it. *)
 let test_both_task_history_panes_say_which_row_each_is () =
   List.iter
@@ -1019,21 +1022,18 @@ let test_both_task_history_panes_say_which_row_each_is () =
   Alcotest.(check int) "Task Review reads the request id" 1
     (Ast_grep.count_field_reads_in_value_binding ~module_path:render
        ~binding_name:"render_verification_detail" ~field_name:"vr_request_id");
-  Alcotest.(check int) "Verdicts reads the notes hash" 1
+  Alcotest.(check int) "Verdicts reads when the verdict was recorded" 1
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"render_harness_detail" ~field_name:"hv_at");
+  (* And not the notes hash, which two verdicts on one submission share. *)
+  Alcotest.(check int) "and not the notes hash" 0
     (Ast_grep.count_field_reads_in_value_binding ~module_path:render
        ~binding_name:"render_harness_detail" ~field_name:"hv_notes_hash");
-  (* And neither reads a clock for it any more. A clock changes under the
-     reader, which is what this pair of fields replaced. *)
-  List.iter
-    (fun (binding_name, field_name) ->
-      Alcotest.(check int)
-        (binding_name ^ " no longer reads " ^ field_name)
-        0
-        (Ast_grep.count_field_reads_in_value_binding ~module_path:render
-           ~binding_name ~field_name))
-    [ "render_verification_detail", "vr_created_at"
-    ; "render_harness_detail", "hv_at"
-    ]
+  (* Neither reads an age. An age moves under the reader, which is what this
+     pair of fields replaced. *)
+  Alcotest.(check int) "Task Review no longer reads a clock to age" 0
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"render_verification_detail" ~field_name:"vr_created_at")
 ;;
 
 (* The Tasks pane beside the detail drew a row's title and nothing else. The

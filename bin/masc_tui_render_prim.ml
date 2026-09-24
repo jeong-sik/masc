@@ -2445,18 +2445,6 @@ let fusion_run_clock run =
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min
 
-(* How much of a row's own handle a list index draws beside its subject. The
-   Task Review index draws a request id, which the server writes as "vrf-"
-   and eight hex; a Verdicts row has no id of its own on the wire and its
-   notes hash is the only value that is one per row, so it is cut to the same
-   cells and the two indexes read down alike.
-
-   A full clock was the other candidate and does not fit: "2026-09-25 01:12"
-   beside a five-digit task id is 28 cells in a 27-cell room. *)
-let sidebar_handle_cells = String.length "vrf-2dc02d93"
-
-let sidebar_handle text =
-  Masc_tui_message_layout.fit_width text sidebar_handle_cells
 
 
 let fusion_run_duration ~now run =

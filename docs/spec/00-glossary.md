@@ -261,8 +261,8 @@ status: reference
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
 
 **Turn**
-: "turn"이 붙은 용어는 넷이고 서로 다르다. 앞의 셋은 단위나 기록이고, 마지막 하나는
-  실패 원인이다. 문맥 없이 쓰지 않는다.
+: "turn"만 쓰면 아래 넷 가운데 무엇인지 알 수 없다. 앞의 셋은 단위나 기록이고, 마지막
+  하나는 실패 원인이다. 문맥 없이 쓰지 않는다.
   - **Keeper Turn** — MASC가 하나의 Keeper 작업을 시도하는 단위. (아래 항목)
   - **agent core Turn** — 하나의 agent core Agent run 내부의 한 단계. Keeper turn과
     동일한 단위가 아니다. (아래 항목)
@@ -1370,7 +1370,7 @@ status: reference
   (`librarian-official-progress.json`의 `boundary_line`,
   [Keeper_librarian_official_progress](../../lib/keeper/keeper_librarian_official_progress.mli)).
   turn-boundary 파일은 줄을 뒤에 붙이기만 하고 고쳐 쓰지 않으므로 이 번호는 커지기만 한다.
-  파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
+  위치 파일은 둘 다, 없으면 아직 읽은 적이 없다는 뜻이다. 못
   읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
   전체가 안 읽은 것으로 보인다.
   이 값도 선택한 cluster의 Turn Boundary와 History에만 의미가 있으며, 다른

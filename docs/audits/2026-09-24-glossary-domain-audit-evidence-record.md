@@ -23,7 +23,7 @@ Keeper, Librarian, Memory, HITL, 접근 제어, Multi Lane, Schedule, Runtime �
   (`keeper_registry_event_queue.ml:17`). 겹치지 않는 이름은 `Keeper_librarian_drain` 같은 것이다.
 - 09-23 Tick 표가 "열림" 으로 남긴 PR 가운데 아래 여덟은 병합됐다: #38096(401 강등), #38047(Goal `Verifying` 에서 Drop·Reopen),
   #38042(purge 뒤 Librarian 다시 넣기), #38048(같은 기억 id 다시 쓰기), #38045(경로 표시와 걸음), #38188, #38043, #38053.
-  #38205(held 목록)는 #38304 가 TUI 만 고치고 닫혔고, 남은 것은 #38411(열림)이다.
+  issue #38205(held 목록)는 #38304 가 TUI 만 고치고 닫혔고, 남은 것은 issue #38411(열림)이다.
 - 09-23 결합 제안 가운데 끝난 것: Karma 항목과 11-board §9, Evidence Reference·Working Context 합치기, Producer, Gate 문장.
   `board:`·`fusion:` 근거는 한 번 해석하도록 바뀌었지만(`workspace_verification_store.ml:117-125`) 저장은 여전히 `string list` 다.
   나머지 제안(TUI Agenda 가 backlog 를 직접 읽음, Librarian 이 Keeper 메타 전체를 읽음, Runtime → keeper_runtime,
@@ -140,7 +140,7 @@ Librarian Range Receipt, Memory OS 항목들, Library, Librarian Pass End(종결
 - 턴 하나 안의 걸음은 닫힌다. 상한은 lane 후보 수이고, 그 안의 줄이기·반 접기는 값이 한쪽으로만 움직여 멈춘다. 확신 High.
 - 401 순환은 #38096 으로 닫혔다. 확신 High.
 - **열림(결정된 설계)**: 5xx·타임아웃·네트워크·529 로 강등된 후보는 그 후보가 답하거나 프로세스가 다시 뜰 때만 풀린다(`runtime_candidate_backpressure_state.ml:27-43`). fallback 이 답하는 동안 머리는 다시 안 불린다. RFC-0458 §3.4 가 이 값을 운영자 결정으로 적었다.
-- **열림**: 연속 실패 턴 수에 상한이 없다. `Turn_failed { consecutive }` 는 수만 센다(`keeper_state_machine.ml:79-87`). 모든 후보가 계속 실패하는 lane 은 cycle 마다(자극이 오면 더 빨리) 끝없이 다시 돈다. 확신 High.
+- **설계대로**: 연속 실패 턴 수에 상한이 없다. `Turn_failed { consecutive }` 는 수만 센다(`keeper_state_machine.ml:79-87`). constitution `forbidden#budget_gate` 가 누적 turn 수로 행동을 막는 게이트를 금하고, 실패 카운터는 관측값으로만 둔다. 모든 후보가 계속 실패하는 lane 은 cycle 마다(자극이 오면 더 빨리) 다시 돈다. 확신 High.
 
 ### 5.3 Goal 검증
 
@@ -180,16 +180,16 @@ Librarian Range Receipt, Memory OS 항목들, Library, Librarian Pass End(종결
 
 1. 4c: 등록됐지만 fiber 가 안 도는 Keeper. `Due` → `Running` → `Due` 를 15초마다 되풀이하고, `expires_at` 말고는 상한이 없다. 저장은 wake 32개로 묶이지만(`schedule_store.ml:452`) 시간은 안 묶인다.
    가장 작은 방향: 4b 처럼 받아들인다(자극은 이미 저장돼 있다).
-2. held 인데 대상이 계속 실패: 실패한 턴은 ack 하지 않으니 `delivery=none` interval 은 Keeper 가 실패하는 동안 계속 붙잡혀 있다. 5.2 의 "상한 없는 연속 실패" 를 물려받는다.
+2. held 인데 대상이 계속 실패: 실패한 턴은 ack 하지 않으니 `delivery=none` interval 은 Keeper 가 실패하는 동안 계속 붙잡혀 있다. 5.2 에서 설계대로인 "상한 없는 연속 실패" 가 여기서는 일정이 풀리지 않는 모양으로 나타난다.
 3. 멈춘 Keeper 의 Cron·Daily 일정: 회차마다 받아들여 자극을 넣고, 이벤트 대기열에는 상한이 없다(`keeper_event_queue.ml:311-317`). 멈춘 동안 자극이 쌓인다.
 
-`delivery=none` interval 자체는 닫힌다(대기 한 회차, 놓친 회차는 한 번으로 따라잡음). held 표시는 TUI 는 닫혔고(#38304) 실패 중 낡은 표시와 dashboard 는 #38411(열림)이다.
+`delivery=none` interval 자체는 닫힌다(대기 한 회차, 놓친 회차는 한 번으로 따라잡음). held 표시는 TUI 는 닫혔고(#38304) 실패 중 낡은 표시와 dashboard 는 issue #38411(열림)이다.
 
 ## 6. 다음에 할 만한 코드 변경 (제안)
 
 영향이 큰 순서다. 이 PR 은 코드를 바꾸지 않는다.
 
-1. **Goal `Deferred` 알림** (5.3): `Deferred` 에서 주인 Keeper 에게 자극이나 Goal 사건을 보낸다. 지금은 Goal 이 소리 없이 `Verifying` 에 남는다.
+1. **Goal `Deferred` 알림** (5.3): `Deferred` 에서 주인 Keeper 에게 자극이나 Goal 사건을 보낸다. 지금은 Goal 이 `Verifying` 에 남고, 흔적은 WARN 로그(`goal verifier deferred`)와 Standalone Lane 행뿐이다.
 2. **Librarian 못 읽는 턴 영수증** (5.1-1): 나눌 수 없는 턴의 크기·출력 실패를 타입으로 적고 위치를 옮긴다. 지금은 신호마다 같은 턴에서 걸음을 쓴다.
 3. **Schedule 4c 받아들이기** (5.4-1): fiber 가 안 도는 등록 Keeper 도 멈춘 Keeper 처럼 자극을 남기고 회차를 넘긴다.
 4. **C1 exact lane 타입 하나로**: `Exact_lane_run_registry.lane` 이 `Runtime.exact_lane` 을 쓰고, Verifier 를 빼야 하면 변환 함수 하나로 뺀다. wire 표가 하나가 된다. 41곳·13파일, 67곳·11파일.
@@ -208,11 +208,11 @@ Turn, Runtime Attempt, Demotion, Gate, Claim, PR Reader, Transcript Tail Recover
 ## 근거
 
 - Evidence: `git fetch origin` 뒤 `origin/main 203322c692`, `docs/spec/00-glossary.md`, 위 표의 `.mli`·`.ml` 줄,
-  `lib/**/dune` 의 `libraries`, `gh pr view <n> --json state,mergedAt`(#38096·#38047·#38042·#38048·#38045·#38188·#38043·#38053·#38304·#38411),
+  `lib/**/dune` 의 `libraries`, `gh pr view <n> --json state,mergedAt`(#38096·#38047·#38042·#38048·#38045·#38188·#38043·#38053·#38304), `gh api repos/jeong-sik/masc/issues/<n>`(issue #38205·#38411),
   용어집을 고치는 열린 PR 13건(#38511·#38497·#38484·#38463·#38453·#38447·#38443·#38442·#38438·#38421·#38344·#38341·#38309)의 용어집 diff
 - Timestamp: 2026-09-24T10:30:00+09:00
 - Confidence: High(목록 대조, PR 상태, 닫힘 판정의 코드 경로), Medium(열린 갈래가 라이브에서 얼마나 자주 일어나는지, Atom 위치 타입 합치기의 이득), Low(`Hitl_auto_judge` lane 이 Gate `Auto_judge` 를 맡는지)
-- Delta: 09-23 Tick 표의 열린 PR 여덟이 병합됐고 #38411 과 결합 제안 대부분은 아직 열려 있음을 확인했다. 그리고 새로 열린 갈래 여섯(Librarian 둘, Keeper 연속 실패, Goal `Deferred`, Schedule 둘)과 중복 개념 13건, 새 결합 5건을 더했다.
+- Delta: 09-23 Tick 표의 열린 PR 여덟이 병합됐고 issue #38411 과 결합 제안 대부분은 아직 열려 있음을 확인했다. 그리고 새로 열린 갈래 다섯(Librarian 둘, Goal `Deferred`, Schedule 둘)과 중복 개념 13건, 새 결합 5건을 더했다. Keeper 연속 실패에 상한이 없는 것은 설계대로라고 적었다.
 
 ## 불확실성
 

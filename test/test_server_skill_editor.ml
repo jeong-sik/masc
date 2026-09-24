@@ -437,19 +437,29 @@ let test_delete_keeps_package_with_other_files () =
   Unix.mkdir references_dir 0o700;
   let note = Filename.concat references_dir "note.md" in
   write_file note "kept";
-  let package_directory = delete_package_directory ~base_path ~reference ~refresh in
-  (match package_directory with
-   | Editor.Package_directory_kept_non_empty -> ()
-   | Package_directory_removed -> fail "a folder with other files was removed"
-   | Package_directory_removed_unsynced detail -> fail detail
-   | Package_directory_remove_failed detail -> fail detail);
-  (* The same rendering goes into the delete response and the audit row. *)
+  let outcome =
+    match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
+    | Ok outcome -> outcome
+    | Error error -> fail (Editor.error_to_string error)
+  in
+  (match outcome with
+   | Editor.Deleted_and_published { package_directory = Package_directory_kept_non_empty; _ }
+     -> ()
+   | Deleted_and_published _ -> fail "a folder with other files was not reported as kept"
+   | Deleted_but_unpublished _ -> fail "deleted Skill was not published");
+  (* The row the delete route writes: a kept folder is what a later
+     package_already_exists for this id traces back to. *)
+  let audit_outcome, details =
+    Server_routes_http_routes_dashboard.For_testing.skill_delete_audit_of_outcome
+      ~reference
+      outcome
+  in
+  check bool "audit outcome" true (audit_outcome = Masc.Audit_log.Success);
   check
     string
-    "rendered kind"
+    "audit row package_directory"
     "kept_non_empty"
-    Yojson.Safe.Util.(
-      Editor.package_directory_to_yojson package_directory |> member "kind" |> to_string);
+    Yojson.Safe.Util.(details |> member "package_directory" |> member "kind" |> to_string);
   check bool "SKILL.md moved out" false (Sys.file_exists skill_path);
   check string "other file untouched" "kept" (read_file note)
 ;;

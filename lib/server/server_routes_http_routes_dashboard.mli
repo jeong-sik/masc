@@ -77,4 +77,11 @@ module For_testing : sig
 
   val gate_mode_change_json :
     Keeper_gate_mode.change -> gate_mode_recovery -> Yojson.Safe.t
+
+  val skill_delete_audit_of_outcome :
+    reference:Skill_reference.t ->
+    Server_skill_editor.delete_outcome ->
+    Audit_log.outcome * Yojson.Safe.t
+  (** The [skill_delete] audit row the delete route writes for a successful
+      delete, built from the outcome alone. *)
 end

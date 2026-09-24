@@ -1020,37 +1020,56 @@ let audit_skill_write state agent_name ~reference ~source_text ~status ~outcome 
 (* [package_directory] is kept in the audit row because a later create for
    the same id answers [package_already_exists] when the folder stayed, and
    the WARN log line that also says so rotates away. *)
-let audit_skill_delete
-      state
-      agent_name
-      ~reference
-      ~status
-      ~recovery
-      ~package_directory
-      ~outcome
-  =
+let skill_delete_audit_details ~reference ~status ~recovery ~package_directory =
+  `Assoc
+    ([ "reference", Skill_reference.to_yojson reference
+     ; "status", `String status
+     ]
+     @ (match recovery with
+        | None -> []
+        | Some (recovery_id, disposition) ->
+          [ "recovery_id", `String recovery_id
+          ; "recovery_disposition", `String disposition
+          ])
+     @ match package_directory with
+       | None -> []
+       | Some package_directory ->
+         [ ( "package_directory"
+           , Server_skill_editor.package_directory_to_yojson package_directory )
+         ])
+;;
+
+(* The success row is read off the delete outcome here, not in the handler,
+   so a field the outcome carries cannot be dropped on the way to the audit. *)
+let skill_delete_audit_of_outcome ~reference outcome =
+  let recovery recovery_id disposition =
+    Some (recovery_id, Server_skill_editor.recovery_disposition_to_string disposition)
+  in
+  match outcome with
+  | Server_skill_editor.Deleted_and_published
+      { recovery_id; disposition; package_directory; _ } ->
+    ( Audit_log.Success
+    , skill_delete_audit_details
+        ~reference
+        ~status:"deleted_and_published"
+        ~recovery:(recovery recovery_id disposition)
+        ~package_directory:(Some package_directory) )
+  | Deleted_but_unpublished { reason; recovery_id; disposition; package_directory; _ } ->
+    ( Audit_log.Failure (Server_skill_editor.delete_unpublished_reason_to_string reason)
+    , skill_delete_audit_details
+        ~reference
+        ~status:"deleted_but_unpublished"
+        ~recovery:(recovery recovery_id disposition)
+        ~package_directory:(Some package_directory) )
+;;
+
+let audit_skill_delete state agent_name ~details ~outcome =
   try
     Audit_log.log_action
       (Mcp_server.workspace_config state)
       ~agent_id:agent_name
       ~action:(Audit_log.Custom "skill_delete")
-      ~details:
-        (`Assoc
-          ([ "reference", Skill_reference.to_yojson reference
-           ; "status", `String status
-           ]
-           @ (match recovery with
-              | None -> []
-              | Some (recovery_id, disposition) ->
-                [ "recovery_id", `String recovery_id
-                ; "recovery_disposition", `String disposition
-                ])
-           @ match package_directory with
-             | None -> []
-             | Some package_directory ->
-               [ ( "package_directory"
-                 , Server_skill_editor.package_directory_to_yojson package_directory )
-               ]))
+      ~details
       ~outcome
       ()
   with
@@ -1397,6 +1416,7 @@ module For_testing = struct
   let handle_runtime_routing_post = handle_runtime_routing_post
   let fusion_run_detail_response = fusion_run_detail_response
   let fusion_run_list_response = fusion_run_list_response
+  let skill_delete_audit_of_outcome = skill_delete_audit_of_outcome
 end
 
 (* One keeper held to a higher bar than the workspace. Its own handler
@@ -2333,41 +2353,20 @@ let add_routes ~sw ~clock router =
                  Eio.Cancel.protect (fun () ->
                   match result with
                   | Error error ->
-                    audit_skill_delete state agent_name ~reference
-                      ~status:(Server_skill_editor.error_code error)
-                      ~recovery:(skill_error_recovery error)
-                      ~package_directory:None
+                    audit_skill_delete state agent_name
+                      ~details:
+                        (skill_delete_audit_details ~reference
+                           ~status:(Server_skill_editor.error_code error)
+                           ~recovery:(skill_error_recovery error)
+                           ~package_directory:None)
                       ~outcome:
                         (Audit_log.Failure (Server_skill_editor.error_to_string error));
                     respond_skill_editor_error ~request:req reqd error
                   | Ok outcome ->
-                    let status, audit_outcome, recovery_id, disposition, package_directory =
-                      match outcome with
-                      | Server_skill_editor.Deleted_and_published
-                          { recovery_id; disposition; package_directory; _ } ->
-                        ( "deleted_and_published"
-                        , Audit_log.Success
-                        , recovery_id
-                        , disposition
-                        , package_directory )
-                      | Deleted_but_unpublished
-                          { reason; recovery_id; disposition; package_directory; _ } ->
-                        ( "deleted_but_unpublished"
-                        , Audit_log.Failure
-                            (Server_skill_editor.delete_unpublished_reason_to_string
-                               reason)
-                        , recovery_id
-                        , disposition
-                        , package_directory )
+                    let audit_outcome, details =
+                      skill_delete_audit_of_outcome ~reference outcome
                     in
-                    audit_skill_delete state agent_name ~reference ~status
-                      ~recovery:
-                        (Some
-                           ( recovery_id
-                           , Server_skill_editor.recovery_disposition_to_string
-                               disposition ))
-                      ~package_directory:(Some package_directory)
-                      ~outcome:audit_outcome;
+                    audit_skill_delete state agent_name ~details ~outcome:audit_outcome;
                     Http.Response.json_value
                       ~compress:true
                       ~request:req

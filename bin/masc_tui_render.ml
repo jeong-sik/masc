@@ -5834,11 +5834,14 @@ let render_lanes_overview (state : state) =
    | Some picker ->
        box_line_styled buf cols ~style:(Theme.info ())
          (Printf.sprintf
-            "  adding a candidate to the candidate order of %s — j/k move, Enter append, e cancel"
-            (Terminal_text.single_line picker.Masc_tui_types.rlp_lane));
+            "  adding a candidate to the candidate order of %s — %s — %s"
+            (Terminal_text.single_line picker.Masc_tui_types.rlp_lane)
+            picker.Masc_tui_types.rlp_summary
+            (Masc_tui_types.runtime_picker_keys "Enter append"
+               picker.Masc_tui_types.rlp_filter));
        if picker.Masc_tui_types.rlp_choices = [] then
          box_line_styled buf cols ~style:(Theme.recede ())
-           "  (runtime catalogue unread)"
+           (Masc_tui_types.runtime_picker_empty_note picker)
        else
          List.iteri
            (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
@@ -5849,18 +5852,19 @@ let render_lanes_overview (state : state) =
                 then "  (same provider as a current slot)"
                 else ""
               in
-              let mark = if offset = 0 then ">" else " " in
+              let mark =
+                if picker.Masc_tui_types.rlp_selected_row = Some offset then ">" else " "
+              in
               let ctx =
                 Printf.sprintf " [%s ctx]"
                   (format_context_tokens runtime.ro_effective_max_context)
               in
               let def = if runtime.ro_is_default then " [default]" else "" in
               box_line buf cols
-                (Printf.sprintf "  %s %s   %s / %s%s%s%s"
+                (Printf.sprintf "  %s %s%s%s%s"
                    mark
-                   (Terminal_text.single_line runtime.ro_id)
-                   (Terminal_text.single_line runtime.ro_provider)
-                   (Terminal_text.single_line runtime.ro_model)
+                   (Terminal_text.single_line
+                      (Masc_tui_types.runtime_picker_label runtime))
                    ctx def
                    (Ansi.dim ^ note ^ Ansi.reset)))
            picker.Masc_tui_types.rlp_choices);
@@ -12296,22 +12300,29 @@ let render_runtime (state : state) =
   (match runtime_picker_projection state with
    | None -> ()
    | Some picker ->
+       let what, enter =
+         match picker.rlp_pick with
+         | Masc_tui_types.Pick_new_lane lane ->
+             ( Printf.sprintf "first runtime of new lane %s" (Terminal_text.single_line lane)
+             , "Enter create" )
+         | Masc_tui_types.Pick_conversation_lane lane | Masc_tui_types.Pick_exact_lane lane ->
+             ( Printf.sprintf "adding a candidate to the candidate order of %s"
+                 (Terminal_text.single_line lane)
+             , "Enter append" )
+         | Masc_tui_types.Pick_media_failover ->
+             ( "adding to [runtime].media_failover, the order the vision fleet is called in"
+             , "Enter append" )
+         | Masc_tui_types.Pick_route_default ->
+             (* Replaces rather than appends, and the row it replaces is
+                marked "(already a candidate)" in the choices below. *)
+             ("the runtime an unassigned keeper walks", "Enter replace")
+       in
        c.push_styled ~style:(Theme.info ())
-         (match picker.rlp_pick with
-          | Masc_tui_types.Pick_new_lane lane ->
-              Printf.sprintf "  first runtime of new lane %s — j/k move, Enter create, e cancel"
-                (Terminal_text.single_line lane)
-          | Masc_tui_types.Pick_conversation_lane lane | Masc_tui_types.Pick_exact_lane lane ->
-              Printf.sprintf "  adding a candidate to the candidate order of %s — j/k move, Enter append, e cancel"
-                (Terminal_text.single_line lane)
-          | Masc_tui_types.Pick_media_failover ->
-              "  adding to [runtime].media_failover, the order the vision fleet is called in — j/k move, Enter append, e cancel"
-          | Masc_tui_types.Pick_route_default ->
-              (* Replaces rather than appends, and the row it replaces is
-                 marked "(already a candidate)" in the choices below. *)
-              "  the runtime an unassigned keeper walks — j/k move, Enter replace, e cancel");
+         (Printf.sprintf "  %s — %s — %s" what picker.rlp_summary
+            (Masc_tui_types.runtime_picker_keys enter picker.rlp_filter));
        if picker.rlp_choices = [] then
-         c.push_styled ~style:(Theme.recede ()) "  (runtime catalogue unread)"
+         c.push_styled ~style:(Theme.recede ())
+           (Masc_tui_types.runtime_picker_empty_note picker)
        else
          List.iteri (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
            let note =
@@ -12327,11 +12338,9 @@ let render_runtime (state : state) =
            in
            let def = if runtime.ro_is_default then " [default]" else "" in
            c.push
-             (Printf.sprintf "  %s %s   %s / %s%s%s%s"
-                (if offset = 0 then ">" else " ")
-                (Terminal_text.single_line runtime.ro_id)
-                (Terminal_text.single_line runtime.ro_provider)
-                (Terminal_text.single_line runtime.ro_model)
+             (Printf.sprintf "  %s %s%s%s%s"
+                (if picker.rlp_selected_row = Some offset then ">" else " ")
+                (Terminal_text.single_line (Masc_tui_types.runtime_picker_label runtime))
                 ctx def
                 (Ansi.dim ^ note ^ Ansi.reset))) picker.rlp_choices;
        c.push_divider ());

@@ -23,6 +23,29 @@ let check_layout state expected =
   | None -> Alcotest.fail "runtime list has no scroll geometry"
   | Some layout -> expect "keyboard shares rendering chrome" expected layout.sc_chrome
 
+(* The picker's list after these keys, read through the same list the key
+   handler reads. *)
+let pick_list_after state keys =
+  match state.runtime_lane_pick with
+  | None -> Alcotest.fail "no picker is open"
+  | Some pick ->
+      let _, _, catalog = runtime_picker_rows state pick in
+      List.fold_left
+        (fun list key ->
+          match
+            Masc_tui_pick_list.action_of_key ~close_keys:[] list key
+          with
+          | None -> Alcotest.failf "key %S is not the picker's" key
+          | Some action -> (
+              match
+                Masc_tui_pick_list.apply ~page:runtime_picker_page
+                  ~label:runtime_picker_label catalog list action
+              with
+              | Masc_tui_pick_list.Stay list -> list
+              | Masc_tui_pick_list.Chosen _ | Masc_tui_pick_list.Dismissed ->
+                  Alcotest.failf "key %S left the picker" key))
+        state.runtime_lane_pick_list keys
+
 let test_picker_and_refusal_keep_footer_space () =
   let state = state () in
   state.runtime_catalog <- [runtime "a"; runtime "b"; runtime "c"];
@@ -34,8 +57,10 @@ let test_picker_and_refusal_keep_footer_space () =
   check_layout state 19;
   state.runtime_surface_error <- Some "resolved unavailable";
   check_layout state 21;
-  state.runtime_lane_pick_cursor <- 2;
-  check_layout state 19;
+  (* The cursor on the last runtime keeps the window a full page: the rows
+     the listing gave up stay given up while the cursor moves. *)
+  state.runtime_lane_pick_list <- pick_list_after state [ "end" ];
+  check_layout state 21;
   state.runtime_lane_pick <- None;
   check_layout state 16
 
@@ -809,6 +834,90 @@ let test_the_route_editor_keeps_an_unresolved_entry_in_place () =
     "[runtime].media_failover order [a; b] gone.model, cursor stays"
     (slot_plan_text (plan_slot_edit state Drop_slot))
 
+let catalogue_state () =
+  let state = state () in
+  state.runtime_catalog <-
+    [ runtime "anthropic.claude"; runtime "openai.gpt"; runtime "ollama.qwen";
+      runtime "zai.glm"; runtime "kimi.k2" ];
+  state.runtime_lane_pick <- Some (Pick_conversation_lane "primary");
+  state.view <- Runtime;
+  state
+
+let drawn state =
+  match runtime_picker_projection state with
+  | None -> Alcotest.fail "the picker is not drawn"
+  | Some picker ->
+      ( List.map (fun (r : Masc.Tui_decode.runtime_option) -> r.ro_id) picker.rlp_choices,
+        Option.bind picker.rlp_selected_row (fun row ->
+          Option.map (fun (r : Masc.Tui_decode.runtime_option) -> r.ro_id)
+            (List.nth_opt picker.rlp_choices row)),
+        picker )
+
+(* The operator types part of a runtime id and the drawn choices are the ones
+   that carry it; the header says how many of the catalogue those are. *)
+let test_a_typed_filter_narrows_the_drawn_choices () =
+  let state = catalogue_state () in
+  state.runtime_lane_pick_list <- pick_list_after state [ "/"; "o"; "l" ];
+  let rows, selected, picker = drawn state in
+  Alcotest.(check (list string)) "only the ids with ol" [ "ollama.qwen" ] rows;
+  Alcotest.(check (option string)) "and it is under the cursor" (Some "ollama.qwen") selected;
+  Alcotest.(check string) "the header counts the catalogue"
+    "filter: ol\xe2\x96\x8f 1 of 5" picker.rlp_summary;
+  Alcotest.(check bool) "the filter holds typed keys" true
+    (text_input_target state ~compact_viewport:false = Some Text_runtime_picker_filter);
+  Alcotest.(check bool) "and so holds q" false
+    (quit_key_allowed_for (text_input_target state ~compact_viewport:false))
+
+(* A filter nothing matches draws one row that says so, and not the row an
+   unread catalogue draws: the fix for one is typing, for the other waiting. *)
+let test_an_empty_match_is_not_an_unread_catalogue () =
+  let filtered = catalogue_state () in
+  filtered.runtime_lane_pick_list <- pick_list_after filtered [ "/"; "x"; "y" ];
+  let rows, selected, picker = drawn filtered in
+  Alcotest.(check (list string)) "nothing is drawn" [] rows;
+  Alcotest.(check (option string)) "nothing is selected" None selected;
+  Alcotest.(check string) "the note says the filter kept nothing"
+    "  (no runtime among 5 matches the filter)" (runtime_picker_empty_note picker);
+  let unread = state () in
+  unread.runtime_lane_pick <- Some (Pick_conversation_lane "primary");
+  let _, _, picker = drawn unread in
+  Alcotest.(check string) "an unread catalogue still says unread"
+    "  (runtime catalogue unread)" (runtime_picker_empty_note picker)
+
+(* A reload that shortens the catalogue under a cursor on its last row draws
+   the new last row selected, never a cursor past the end. *)
+let test_the_drawn_cursor_clamps_to_a_shorter_catalogue () =
+  let state = catalogue_state () in
+  state.runtime_lane_pick_list <- pick_list_after state [ "end" ];
+  state.runtime_catalog <- [ runtime "anthropic.claude"; runtime "openai.gpt" ];
+  let rows, selected, _ = drawn state in
+  Alcotest.(check (list string)) "both are drawn" [ "anthropic.claude"; "openai.gpt" ] rows;
+  Alcotest.(check (option string)) "the last is selected" (Some "openai.gpt") selected
+
+(* The key handler, the paste and both renderers read the one list. The key
+   path lives in the executable, so the calls are counted in its source. *)
+let test_the_picker_keys_and_rows_go_through_the_shared_list () =
+  let calls ~module_path ~binding_name callee =
+    Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
+  in
+  Alcotest.(check int) "the key arm applies the shared list" 1
+    (calls ~module_path:"bin/masc_tui.ml" ~binding_name:"main" "Masc_tui_pick_list.apply");
+  Alcotest.(check int) "and reads the rows the projection reads" 1
+    (calls ~module_path:"bin/masc_tui.ml" ~binding_name:"main"
+       "Masc_tui_types.runtime_picker_rows");
+  Alcotest.(check int) "a paste types into the same filter" 1
+    (calls ~module_path:"bin/masc_tui.ml" ~binding_name:"main" "Masc_tui_pick_list.type_text");
+  Alcotest.(check int) "the projection draws the shared window" 1
+    (calls ~module_path:"bin/masc_tui_types.ml" ~binding_name:"runtime_picker_projection"
+       "Masc_tui_pick_list.view");
+  List.iter
+    (fun binding_name ->
+      Alcotest.(check int)
+        (binding_name ^ " draws the label the filter matches") 1
+        (calls ~module_path:"bin/masc_tui_render.ml" ~binding_name
+           "Masc_tui_types.runtime_picker_label"))
+    [ "render_lanes_overview"; "render_runtime" ]
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
       Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
@@ -858,4 +967,12 @@ let () = Alcotest.run "runtime list geometry"
       Alcotest.test_case "the pick dispatch asks the same question" `Quick
         test_the_pick_dispatch_asks_the_same_question;
       Alcotest.test_case "the route editor edits a partly unresolved route" `Quick
-        test_the_route_editor_keeps_an_unresolved_entry_in_place]]
+        test_the_route_editor_keeps_an_unresolved_entry_in_place;
+      Alcotest.test_case "a typed filter narrows the drawn choices" `Quick
+        test_a_typed_filter_narrows_the_drawn_choices;
+      Alcotest.test_case "an empty match is not an unread catalogue" `Quick
+        test_an_empty_match_is_not_an_unread_catalogue;
+      Alcotest.test_case "the drawn cursor clamps to a shorter catalogue" `Quick
+        test_the_drawn_cursor_clamps_to_a_shorter_catalogue;
+      Alcotest.test_case "picker keys and rows go through the shared list" `Quick
+        test_the_picker_keys_and_rows_go_through_the_shared_list]]

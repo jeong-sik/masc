@@ -20,6 +20,7 @@ let target =
       | Some Tui_types.Text_voice_wizard -> "voice-wizard"
       | Some Tui_types.Text_palette -> "palette"
       | Some Tui_types.Text_row_search -> "row-search"
+      | Some Tui_types.Text_runtime_picker_filter -> "runtime-picker-filter"
       | Some Tui_types.Text_identity_app_form -> "identity-app-form"
       | Some Tui_types.Text_identity_filter -> "identity-filter"
       | Some Tui_types.Text_github_token -> "github-token"
@@ -232,6 +233,25 @@ let test_the_fusion_launch_form_claims_while_open () =
          ; fls_reads_left = Tui_types.fusion_started_list_reads
          });
   check target "a started run is the list again" None (resolved state)
+;;
+
+(* The runtime picker's filter holds typing only once [/] opened it: before
+   that, j/k and e are the picker's keys. It is drawn on Runtime and Lanes,
+   and a compact frame draws neither. *)
+let test_the_runtime_picker_filter_claims_once_opened () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Runtime;
+  state.Tui_types.runtime_lane_pick <- Some (Tui_types.Pick_conversation_lane "primary");
+  check target "the open picker takes no text" None (resolved state);
+  state.Tui_types.runtime_lane_pick_list <-
+    Masc_tui_pick_list.type_text Masc_tui_pick_list.closed "gl";
+  check target "the filter claims typing" (Some Tui_types.Text_runtime_picker_filter)
+    (resolved state);
+  state.Tui_types.view <- Tui_types.Lanes;
+  check target "on Lanes too" (Some Tui_types.Text_runtime_picker_filter) (resolved state);
+  check target "a compact frame lets go" None (resolved ~compact_viewport:true state);
+  state.Tui_types.runtime_lane_pick <- None;
+  check target "a closed picker holds nothing" None (resolved state)
 ;;
 
 (* A new lane's name is typed on the Runtime surface, where x, J, K and D are
@@ -481,6 +501,8 @@ let () =
             test_the_palette_claims_over_a_board_draft;
           test_case "a new lane name claims typing on Runtime" `Quick
             test_a_new_lane_name_claims_typing_on_runtime;
+          test_case "the runtime picker filter claims once opened" `Quick
+            test_the_runtime_picker_filter_claims_once_opened;
           test_case "the Fusion launch form claims while open" `Quick
             test_the_fusion_launch_form_claims_while_open;
           test_case "the loop drops a launch form left on another surface" `Quick

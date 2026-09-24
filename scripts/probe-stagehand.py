@@ -67,11 +67,17 @@ fixture_url = f"http://127.0.0.1:{server.server_port}/"
 # first launch several times over.
 PROBE_TIMEOUT_S = 600
 with open(out / "probe.log", "w") as log:
-    probe = subprocess.run(
-        [str(args.probe), "--chrome", str(args.chrome), "--extension", extension,
-         "--fixture-url", fixture_url, "--out", str(out)],
-        stdout=log, stderr=subprocess.STDOUT, timeout=PROBE_TIMEOUT_S,
-    )
+    try:
+        returncode = subprocess.run(
+            [str(args.probe), "--chrome", str(args.chrome), "--extension", extension,
+             "--fixture-url", fixture_url, "--out", str(out)],
+            stdout=log, stderr=subprocess.STDOUT, timeout=PROBE_TIMEOUT_S,
+        ).returncode
+    except subprocess.TimeoutExpired:
+        # The log so far says which step never finished.
+        returncode = None
 server.shutdown()
 sys.stdout.write((out / "probe.log").read_text())
-sys.exit(probe.returncode)
+if returncode is None:
+    sys.exit(f"the probe did not finish within {PROBE_TIMEOUT_S} s; the log above ends at the step that hung")
+sys.exit(returncode)

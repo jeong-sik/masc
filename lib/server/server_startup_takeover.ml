@@ -378,21 +378,89 @@ let status_line_is_healthy line =
 ;;
 
 
-let looks_like_server_command command =
-  List.exists
-    (fun marker -> String_util.contains_substring command marker)
-    [ "main_eio"; "masc" ]
-;;
-
-let process_command pid =
+(* The start time ps reports for a pid, fixed to the C locale and UTC so two
+   boots under different settings read the same process the same way. The
+   kernel reuses pid numbers; it does not reuse (pid, start time). *)
+let process_started pid =
   match
     Process_eio.run_argv_with_status
-      [ "ps"; "-p"; string_of_int pid; "-o"; "command=" ]
+      [ "env"; "LC_ALL=C"; "TZ=UTC"; "ps"; "-p"; string_of_int pid; "-o"; "lstart=" ]
   with
   | Unix.WEXITED 0, output ->
-    let trimmed = String.trim output in
-    if trimmed = "" then None else Some trimmed
+    (match String.trim output with
+     | "" -> None
+     | started -> Some started)
   | _ -> None
+;;
+
+type pid_lock_record =
+  { pid : int
+  ; started : string option
+  }
+
+let pid_lock_record_of_string data =
+  let lines =
+    String.split_on_char '\n' data
+    |> List.map String.trim
+    |> List.filter (fun line -> not (String.equal line ""))
+  in
+  let record pid started =
+    match int_of_string_opt pid with
+    | Some pid when pid > 0 -> Some { pid; started }
+    | Some _ | None -> None
+  in
+  match lines with
+  | [ pid ] -> record pid None
+  | [ pid; started ] -> record pid (Some started)
+  | _ -> None
+;;
+
+let pid_lock_record_to_string { pid; started } =
+  match started with
+  | Some started -> Printf.sprintf "%d\n%s\n" pid started
+  | None -> Printf.sprintf "%d\n" pid
+;;
+
+type holder_identity =
+  | Same_process
+  | Identity_unrecorded
+  | Identity_unreadable
+  | Different_process of { recorded : string; current : string }
+
+(* Whether the live pid is still the process that wrote the lock. Only
+   [Same_process] lets the takeover signal it; every other answer leaves the
+   holder alone, because a signal sent on a guess can kill an unrelated
+   process the kernel gave the number to. *)
+let holder_identity { pid; started } =
+  match started with
+  | None -> Identity_unrecorded
+  | Some recorded ->
+    (match process_started pid with
+     | None -> Identity_unreadable
+     | Some current ->
+       if String.equal recorded current
+       then Same_process
+       else Different_process { recorded; current })
+;;
+
+let holder_identity_refusal pid = function
+  | Same_process -> None
+  | Identity_unrecorded ->
+    Some
+      (Printf.sprintf
+         "PID %d is alive but the lock does not record when its writer started, \
+          so it cannot be shown to be the masc server that wrote it"
+         pid)
+  | Identity_unreadable ->
+    Some (Printf.sprintf "PID %d is alive but ps did not report its start time" pid)
+  | Different_process { recorded; current } ->
+    Some
+      (Printf.sprintf
+         "PID %d is alive but started at %s, not at %s when the lock was written: \
+          the number now belongs to another process"
+         pid
+         current
+         recorded)
 ;;
 
 let read_status_line fd ~timeout_sec =
@@ -448,9 +516,9 @@ let read_pid_file path =
 let parsed_pid path =
   match read_pid_file path with
   | Some data ->
-    (match String.trim data |> int_of_string_opt with
-     | Some pid when pid > 0 -> Some pid
-     | _ -> None)
+    (match pid_lock_record_of_string data with
+     | Some { pid; _ } -> Some pid
+     | None -> None)
   | None -> None
 ;;
 
@@ -463,17 +531,17 @@ let register_pid_cleanup ~path ~pid =
     | None -> ())
 ;;
 
-let write_pid_file path pid =
+let write_pid_file path record =
   let oc = open_out path in
   Eio_guard.protect
     ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> Printf.fprintf oc "%d\n" pid)
+    (fun () -> output_string oc (pid_lock_record_to_string record))
 ;;
 
 let claim_pid_file path =
   Fs_compat.mkdir_p (Filename.dirname path);
   let pid = Unix.getpid () in
-  write_pid_file path pid;
+  write_pid_file path { pid; started = process_started pid };
   register_pid_cleanup ~path ~pid;
   Acquired
 ;;
@@ -599,26 +667,21 @@ let acquire_pid_lock
   in
   (match read_pid_file path with
    | Some data ->
-     (match String.trim data |> int_of_string_opt with
-      | Some pid when pid > 0 ->
+     (match pid_lock_record_of_string data with
+      | Some ({ pid; _ } as record) ->
         (match process_state pid with
         | Running ->
           if probe_liveness ~timeout_sec:probe_timeout_sec port
           then Already_running { pid }
-          else if
-            match process_command pid with
-            | Some command -> not (looks_like_server_command command)
-            | None -> true
-          then (
-            Log.legacy_stderr
-              ~level:Log.Error
-              ~module_name:"Server"
-              (Printf.sprintf
-                 "[FATAL] PID %d is alive but does not look like a masc server; \
-                  refusing takeover"
-                 pid);
-            Already_running { pid })
           else (
+            match holder_identity_refusal pid (holder_identity record) with
+            | Some refusal ->
+              Log.legacy_stderr
+                ~level:Log.Error
+                ~module_name:"Server"
+                (Printf.sprintf "[FATAL] %s; refusing takeover (lock %s)" refusal path);
+              Already_running { pid }
+            | None -> (
             Log.legacy_stderr
               ~level:Log.Warn
               ~module_name:"Server"
@@ -654,7 +717,7 @@ let acquire_pid_lock
                   (Printf.sprintf
                      "[WARN] PID %d still appears alive after SIGKILL escalation"
                      pid));
-            Acquired)
+            Acquired))
         | Zombie ->
           Log.legacy_stderr
             ~level:Log.Warn

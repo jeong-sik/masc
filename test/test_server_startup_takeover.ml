@@ -183,6 +183,13 @@ let with_forever_process ?argv0 ~ignore_sigterm f =
 let lock_path dir =
   Filename.concat dir "masc.pid"
 
+(* The lock as a live server writes it: its pid and the start time ps reports
+   for that pid. *)
+let write_holder_lock path pid =
+  match Server_startup_takeover.process_started pid with
+  | Some started -> write_file path (Printf.sprintf "%d\n%s\n" pid started)
+  | None -> Alcotest.failf "ps reported no start time for fixture pid %d" pid
+
 let base_path_lock_path ~run_dir base_path =
   Server_startup_takeover.base_path_lock_path
     ~run_dir:(Unix.realpath run_dir)
@@ -206,7 +213,12 @@ let with_base_and_run prefix f =
       f ~base_path ~run_dir))
 
 let pid_from_file path =
-  match read_file path |> String.trim |> int_of_string_opt with
+  let first_line =
+    match String.split_on_char '\n' (read_file path) with
+    | line :: _ -> String.trim line
+    | [] -> ""
+  in
+  match int_of_string_opt first_line with
   | Some pid -> pid
   | None -> Alcotest.failf "invalid pid file contents in %s" path
 
@@ -218,16 +230,21 @@ let test_status_line_parser () =
   Alcotest.(check bool) "503 rejected" false
     (Server_startup_takeover.status_line_is_healthy "HTTP/1.1 503 Service Unavailable")
 
-let test_server_command_heuristic () =
-  Alcotest.(check bool) "main_eio path accepted" true
-    (Server_startup_takeover.looks_like_server_command
-       "/tmp/_build/default/bin/main_eio.exe --port 8935");
-  Alcotest.(check bool) "public name accepted" true
-    (Server_startup_takeover.looks_like_server_command
-       "/usr/local/bin/masc --host 127.0.0.1");
-  Alcotest.(check bool) "unrelated process rejected" false
-    (Server_startup_takeover.looks_like_server_command
-       "python3 -m http.server 8935")
+let test_claimed_lock_records_writer_start_time () =
+  with_temp_dir "startup-takeover-claim" (fun dir ->
+      let path = lock_path dir in
+      let port = find_free_port () in
+      match Server_startup_takeover.acquire_pid_lock ~lock_path:path port with
+      | Server_startup_takeover.Acquired ->
+          let own_pid = Unix.getpid () in
+          Alcotest.(check (list string)) "pid and start time, one per line"
+            [ string_of_int own_pid
+            ; Option.value ~default:"<ps reported none>"
+                (Server_startup_takeover.process_started own_pid) ]
+            (read_file path |> String.split_on_char '\n'
+             |> List.filter (fun line -> line <> ""))
+      | Server_startup_takeover.Already_running _ ->
+          Alcotest.fail "an absent lock should be claimed")
 
 let test_rejects_responsive_holder () =
   with_temp_dir "startup-takeover-responsive" (fun dir ->
@@ -340,9 +357,32 @@ let test_reclaims_zombie_pid_file () =
           | Server_startup_takeover.Already_running _ ->
               Alcotest.fail "a zombie holder must not block the lock"))
 
+(* The pid in the lock now belongs to another process: the kernel reused the
+   number, so the start time ps reports is not the one the writer recorded.
+   Its command line may well contain "masc" (an editor on masc.toml, a shell
+   in a masc checkout); only the recorded identity decides. *)
 let test_refuses_live_unrelated_holder () =
   with_temp_dir "startup-takeover-unrelated" (fun dir ->
-      with_forever_process ~argv0:"unrelated-holder" ~ignore_sigterm:false
+      with_forever_process ~argv0:"masc-unrelated-holder" ~ignore_sigterm:false
+        (fun pid ->
+          let path = lock_path dir in
+          write_file path (Printf.sprintf "%d\nThu Jan  1 00:00:00 1970\n" pid);
+          let port = find_free_port () in
+          match
+            Server_startup_takeover.acquire_pid_lock ~lock_path:path
+              ~probe_timeout_sec:0.1 port
+          with
+          | Server_startup_takeover.Already_running { pid = running_pid } ->
+              Alcotest.(check int) "pid preserved" pid running_pid;
+              Alcotest.(check bool) "holder left alive" true (process_alive pid)
+          | Server_startup_takeover.Acquired ->
+              Alcotest.fail "a live non-masc holder must block takeover"))
+
+(* A lock with a bare pid does not say who wrote it, so a live holder is left
+   alone rather than signalled on a guess. *)
+let test_refuses_live_holder_without_recorded_start () =
+  with_temp_dir "startup-takeover-unrecorded" (fun dir ->
+      with_forever_process ~argv0:"main_eio.exe" ~ignore_sigterm:false
         (fun pid ->
           let path = lock_path dir in
           write_file path (Printf.sprintf "%d\n" pid);
@@ -355,13 +395,13 @@ let test_refuses_live_unrelated_holder () =
               Alcotest.(check int) "pid preserved" pid running_pid;
               Alcotest.(check bool) "holder left alive" true (process_alive pid)
           | Server_startup_takeover.Acquired ->
-              Alcotest.fail "a live non-masc holder must block takeover"))
+              Alcotest.fail "an unproven holder must block takeover"))
 
 let test_escalates_sigkill_for_unresponsive_holder () =
   with_temp_dir "startup-takeover-unresponsive" (fun dir ->
       with_forever_process ~argv0:"main_eio.exe" ~ignore_sigterm:true (fun pid ->
           let path = lock_path dir in
-          write_file path (Printf.sprintf "%d\n" pid);
+          write_holder_lock path pid;
           let port = find_free_port () in
           match
             Server_startup_takeover.acquire_pid_lock ~lock_path:path
@@ -410,7 +450,7 @@ let test_breadcrumb_written_when_takeover_kills () =
   with_temp_dir "startup-takeover-breadcrumb-kill" (fun dir ->
       with_forever_process ~argv0:"main_eio.exe" ~ignore_sigterm:true (fun pid ->
           let path = lock_path dir in
-          write_file path (Printf.sprintf "%d\n" pid);
+          write_holder_lock path pid;
           let port = find_free_port () in
           match
             Server_startup_takeover.acquire_pid_lock ~lock_path:path
@@ -1340,8 +1380,8 @@ let () =
             `Quick test_contention_recovery_guidance;
           Alcotest.test_case "status line parser is exact" `Quick
             test_status_line_parser;
-          Alcotest.test_case "server command heuristic rejects unrelated processes"
-            `Quick test_server_command_heuristic;
+          Alcotest.test_case "a claimed lock records its writer's start time"
+            `Quick test_claimed_lock_records_writer_start_time;
         ] );
       ( "takeover",
         [
@@ -1357,6 +1397,8 @@ let () =
             test_reclaims_zombie_pid_file;
           Alcotest.test_case "live unrelated holder blocks takeover" `Quick
             test_refuses_live_unrelated_holder;
+          Alcotest.test_case "live holder without a recorded start blocks takeover"
+            `Quick test_refuses_live_holder_without_recorded_start;
           Alcotest.test_case "unresponsive holder escalates to sigkill" `Quick
             test_escalates_sigkill_for_unresponsive_holder;
           Alcotest.test_case "breadcrumb round-trips and ages out" `Quick

@@ -121,7 +121,11 @@ val base_path_lock_path :
 
 val status_line_is_healthy : string -> bool
 
-val looks_like_server_command : string -> bool
+(** The start time ps reports for [pid] (C locale, UTC), or [None] when ps
+    cannot report it. The pid lock records its writer's value next to the pid,
+    and a takeover signals a live, unresponsive holder only when the two are
+    equal: pid numbers are reused, a (pid, start time) pair is not. *)
+val process_started : int -> string option
 
 (** State of a recorded PID as the takeover reads it. [Zombie] is a process
     that exited and awaits its parent's reap: [kill pid 0] still succeeds, but

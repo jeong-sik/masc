@@ -35,8 +35,23 @@ expected cluster widths and added EOF and prior emoji/RI/Indic contexts.
 ## Verification status
 
 - `git diff --check`: passed.
-- No local build, test execution or measured candidate speedup.
+- No local build. [Focused CI 36023767765](https://github.com/jeong-sik/masc/actions/runs/36023767765)
+  passed all 103 layout cases at source commit
+  `06e8ed5effeafd739b18802ed19a763d0c962ac4`.
 - CI suite: `test_tui_message_layout`, including cut/wrap boundaries and
   observation cases for ASCII, CSI, late Unicode, leading box drawing, short
   mixed runs and pure Unicode. No timing threshold.
 - Runtime comparison and the overall 0.1ms objective remain unproven.
+
+Candidate width observations in that run (2,000 operations each):
+
+| Row | CPU microseconds/op | Allocated bytes/op |
+| --- | ---: | ---: |
+| Printable ASCII | 0.186 | 64 |
+| Late Unicode | 4.429 | 11,640 |
+| Leading box drawing | 3.915 | 11,728 |
+| Repeated short mixed runs | 8.610 | 16,992 |
+| Pure Unicode | 8.836 | 14,768 |
+
+The parent observations above came from a different CI run. These observations
+do not establish a controlled speedup or terminal response latency.

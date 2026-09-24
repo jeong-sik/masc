@@ -7,7 +7,7 @@ open Keeper_path_rejection
 let resolve_missing_cwd cwd =
   Error
     (Keeper_alerting_path.caller_refusal
-       (Printf.sprintf "cwd_not_directory: %s (directory does not exist)" cwd))
+       (Keeper_alerting_path.Missing_cwd { cwd; read_hint = None }))
 
 type execute_cwd_resolution_error =
   | Cwd_missing of { cwd : string }
@@ -70,7 +70,7 @@ let resolve_tool_read_cwd
      | Host_file ->
        Error
          (Keeper_alerting_path.caller_refusal
-            (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)))
+            (Keeper_alerting_path.Cwd_is_file { cwd })))
 
 let requested_tool_execute_cwd ~config ~meta ~write_enabled ~args =
   let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in

@@ -288,6 +288,13 @@ let test_interactions () =
        (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport } })));
   check bool "native input was sent before the malformed receipt" true
     (List.exists (function Wire.Page_click _ -> true | _ -> false) fake.sent);
+  fake.evaluated <- Some (`Assoc []);
+  fake.sent <- [];
+  check bool "a malformed guard result is before effect" true
+    (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
+       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport } })));
+  check bool "a malformed guard never sends native input" true
+    (List.for_all (function Wire.Page_click _ -> false | _ -> true) fake.sent);
   fake.evaluated <- None;
   fake.sent <- [];
   fake.failing <- (function Wire.Page_evaluate _ -> Some (Session.Rejected { code = -32603; message = "page_url_changed" }) | _ -> None);

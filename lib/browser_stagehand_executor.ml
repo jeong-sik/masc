@@ -243,6 +243,14 @@ let send_guard call request =
   Result.map_error (fun failure -> Browser_lane.Rejected_before_effect (failure_message failure)) (call request)
 ;;
 
+let guard_result result =
+  Result.map_error
+    (function
+      | Browser_lane.Refused detail -> Browser_lane.Rejected_before_effect detail
+      | answer -> answer)
+    result
+;;
+
 (* The interaction script reports a refusal in its answer, and whether the
    action had started when it was refused. *)
 let interaction_receipt ~tab_id = function
@@ -275,8 +283,12 @@ let viewport_y (viewport : Browser_lane.Pointer.viewport) (point : Browser_lane.
    checks the page is the one observed, the browser takes the input, and the
    receipt reads where the page is afterwards. *)
 let pointer ~call ~tab_id ~page_id ~args ~name input =
-  let* before = evaluate ~runtime:Scene_runtime ~send:(send_guard call) ~args page_id Browser_interaction.pointer_guard_script in
-  let* url_before = string_field ~method_:"page.evaluate" "url" before in
+  let* url_before =
+    Result.bind
+      (evaluate ~runtime:Scene_runtime ~send:(send_guard call) ~args page_id Browser_interaction.pointer_guard_script)
+      (string_field ~method_:"page.evaluate" "url")
+    |> guard_result
+  in
   let* _ = send call input in
   let* after = evaluate ~runtime:No_runtime ~send:(send_after_effect call) page_id Browser_interaction.pointer_receipt_script in
   match after with

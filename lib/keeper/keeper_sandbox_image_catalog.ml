@@ -40,7 +40,7 @@ type parse_error =
   | Missing_field of { path : string list; field : string }
   | Expected_string of { path : string list; field : string }
   | Invalid_digest of { path : string list; value : string }
-  | Empty_reference of { path : string list }
+  | Invalid_reference of { path : string list; value : string }
 
 let dotted path = String.concat "." path
 
@@ -64,7 +64,10 @@ let parse_error_to_string = function
     Printf.sprintf "%s.%s is not a string" (dotted path) field
   | Invalid_digest { path; value } ->
     Printf.sprintf "%s.digest %S is not sha256:<64 lowercase hex>" (dotted path) value
-  | Empty_reference { path } -> Printf.sprintf "%s.reference is empty" (dotted path)
+  | Invalid_reference { path; value } ->
+    Printf.sprintf
+      "%s.reference %S is empty or has a character outside A-Z a-z 0-9 . _ / : @ -"
+      (dotted path) value
 
 let ( let* ) = Result.bind
 
@@ -83,6 +86,15 @@ let valid_digest value =
   String.length value = prefix_length + sha256_hex_length
   && String.equal (String.sub value 0 prefix_length) digest_prefix
   && String.for_all hex (String.sub value prefix_length sha256_hex_length)
+
+(* The characters an OCI image reference is spelt with. Holding references to
+   them is also what lets {!to_toml} write one between quotes as it is. *)
+let valid_reference value =
+  let allowed = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '/' | ':' | '@' | '-' -> true
+    | _ -> false
+  in
+  String.length value > 0 && String.for_all allowed value
 
 let table ~path = function
   | Otoml.TomlTable fields | Otoml.TomlInlineTable fields -> Ok fields
@@ -105,16 +117,16 @@ let reference_key = "reference"
 let digest_key = "digest"
 let previous_key = "previous"
 
+let checked_pin ~path ~reference ~digest =
+  if not (valid_reference reference) then Error (Invalid_reference { path; value = reference })
+  else if not (valid_digest digest) then Error (Invalid_digest { path; value = digest })
+  else Ok { reference; digest }
+
 let pinned ~path fields =
   let* () = only_keys ~path ~allowed:[ reference_key; digest_key ] fields in
   let* reference = string_field ~path ~field:reference_key fields in
   let* digest = string_field ~path ~field:digest_key fields in
-  let* () =
-    if String.length (String.trim reference) > 0 then Ok ()
-    else Error (Empty_reference { path })
-  in
-  if valid_digest digest then Ok { reference; digest }
-  else Error (Invalid_digest { path; value = digest })
+  checked_pin ~path ~reference ~digest
 
 let promotion ~path fields =
   let* () = only_keys ~path ~allowed:[ reference_key; digest_key; previous_key ] fields in
@@ -201,3 +213,98 @@ let load ~config_root =
     match In_channel.with_open_bin path In_channel.input_all with
     | exception Sys_error detail -> Error (Unreadable { path; detail })
     | text -> Result.map_error (fun error -> Invalid { path; error }) (parse text)
+
+type change_error =
+  | No_such_image of { name : string; known : string list }
+  | Invalid_pin of parse_error
+  | Nothing_to_roll_back of { name : string; store : store }
+
+let change_error_to_string = function
+  | No_such_image { name; known } ->
+    Printf.sprintf "the catalog has no image %S (it has: %s)" name
+      (match known with [] -> "none" | names -> String.concat ", " names)
+  | Invalid_pin error -> parse_error_to_string error
+  | Nothing_to_roll_back { name; store } ->
+    Printf.sprintf "%s on %s has no previous build to roll back to" name
+      (store_to_string store)
+
+let known_names t = List.map (fun entry -> entry.name) t
+
+let change_entry t ~name f =
+  match List.find_opt (fun entry -> String.equal entry.name name) t with
+  | None -> Error (No_such_image { name; known = known_names t })
+  | Some _ ->
+    let rec replace = function
+      | [] -> Ok []
+      | entry :: rest when String.equal entry.name name ->
+        let* promoted = f entry.promoted in
+        Ok ({ entry with promoted } :: rest)
+      | entry :: rest ->
+        let* rest = replace rest in
+        Ok (entry :: rest)
+    in
+    replace t
+
+let set_store store promotion promoted =
+  if List.mem_assoc store promoted
+  then List.map (fun (s, p) -> if s = store then (s, promotion) else (s, p)) promoted
+  else promoted @ [ store, promotion ]
+
+let promote t ~name ~store ~reference ~digest =
+  let path = [ images_key; name; store_to_string store ] in
+  match checked_pin ~path ~reference ~digest with
+  | Error error -> Error (Invalid_pin error)
+  | Ok pin ->
+    change_entry t ~name (fun promoted ->
+      match List.assoc_opt store promoted with
+      | Some { current; _ } when current = pin -> Ok promoted
+      | Some { current; _ } ->
+        Ok (set_store store { current = pin; previous = Some current } promoted)
+      | None -> Ok (set_store store { current = pin; previous = None } promoted))
+
+let rollback t ~name ~store =
+  change_entry t ~name (fun promoted ->
+    match List.assoc_opt store promoted with
+    | Some { current; previous = Some previous } ->
+      Ok (set_store store { current = previous; previous = Some current } promoted)
+    | Some { previous = None; _ } | None -> Error (Nothing_to_roll_back { name; store }))
+
+let header =
+  "# Sandbox images a Keeper can name in `sandbox_image`, and the build this\n\
+   # host promoted for each image store. `masc sandbox-image promote` and\n\
+   # `rollback` rewrite this file. RFC keeper-sandbox-images-have-versions.\n"
+
+let to_toml t =
+  let buf = Buffer.create 512 in
+  Buffer.add_string buf header;
+  List.iter
+    (fun entry ->
+       Printf.bprintf buf "\n[%s.%s]\n" images_key entry.name;
+       List.iter
+         (fun (store, promotion) ->
+            Printf.bprintf buf "\n[%s.%s.%s]\n%s = \"%s\"\n%s = \"%s\"\n" images_key
+              entry.name (store_to_string store) reference_key
+              promotion.current.reference digest_key promotion.current.digest;
+            Option.iter
+              (fun previous ->
+                 Printf.bprintf buf "%s = { %s = \"%s\", %s = \"%s\" }\n" previous_key
+                   reference_key previous.reference digest_key previous.digest)
+              promotion.previous)
+         entry.promoted)
+    t;
+  Buffer.contents buf
+
+type save_error = Unwritable of { path : string; detail : string }
+
+let save_error_to_string (Unwritable { path; detail }) =
+  Printf.sprintf "cannot write %s: %s" path detail
+
+let save ~config_root t =
+  let path = Filename.concat config_root file_name in
+  let staging = path ^ ".tmp" in
+  match
+    Out_channel.with_open_bin staging (fun oc -> Out_channel.output_string oc (to_toml t));
+    Sys.rename staging path
+  with
+  | () -> Ok ()
+  | exception Sys_error detail -> Error (Unwritable { path; detail })

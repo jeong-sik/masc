@@ -110,9 +110,12 @@ let test_malformed_catalogs_are_refused () =
   check error "half a previous"
     (Missing_field { path = [ "images"; "ocaml"; "apple_container"; "previous" ]; field = "digest" })
     (refused "previous" (one_store (pinned_body ^ "previous = { reference = \"x:z\" }\n")));
-  check error "empty reference"
-    (Empty_reference { path = [ "images"; "ocaml"; "apple_container" ] })
-    (refused "empty" (one_store (Printf.sprintf "reference = \" \"\ndigest = \"%s\"\n" (digest 'a'))));
+  check error "blank reference"
+    (Invalid_reference { path = [ "images"; "ocaml"; "apple_container" ]; value = " " })
+    (refused "blank" (one_store (Printf.sprintf "reference = \" \"\ndigest = \"%s\"\n" (digest 'a'))));
+  check error "quote in reference"
+    (Invalid_reference { path = [ "images"; "ocaml"; "apple_container" ]; value = "x\"y" })
+    (refused "quote" (one_store (Printf.sprintf "reference = 'x\"y'\ndigest = \"%s\"\n" (digest 'a'))));
   check error "bad name" (Invalid_name "Base") (refused "name" "[images.Base]\n");
   check error "store is not a table"
     (Expected_table { path = [ "images"; "ocaml"; "apple_container" ] })
@@ -120,6 +123,68 @@ let test_malformed_catalogs_are_refused () =
   (match refused "syntax" "[images.base\n" with
    | Toml_syntax _ -> ()
    | other -> fail ("expected a syntax error, got " ^ parse_error_to_string other))
+
+let changed label = function
+  | Ok catalog -> catalog
+  | Error e -> fail (label ^ ": " ^ change_error_to_string e)
+
+let current catalog name store =
+  match resolve catalog ~name ~store with
+  | Resolved p -> Some p.reference
+  | Unknown_image _ | Not_built_on_host _ -> None
+
+let test_to_toml_round_trips () =
+  let catalog = parsed promoted_ocaml in
+  check string "parse (to_toml c) = c" (to_toml catalog) (to_toml (parsed (to_toml catalog)));
+  check bool "same entries" true (entries (parsed (to_toml catalog)) = entries catalog)
+
+let test_promote_keeps_what_it_replaced () =
+  let catalog = parsed promoted_ocaml in
+  let next =
+    changed "promote"
+      (promote catalog ~name:"ocaml" ~store:apple ~reference:"masc-sandbox-ocaml:20260925T0900Z-11112222"
+         ~digest:(digest 'c'))
+  in
+  check (option string) "current" (Some "masc-sandbox-ocaml:20260925T0900Z-11112222")
+    (current next "ocaml" apple);
+  (match rollback next ~name:"ocaml" ~store:apple with
+   | Ok back ->
+     check (option string) "rolled back" (Some "masc-sandbox-ocaml:20260924T1130Z-3f9a1c07")
+       (current back "ocaml" apple);
+     check (option string) "rolling back twice returns"
+       (Some "masc-sandbox-ocaml:20260925T0900Z-11112222")
+       (current (changed "rollback" (rollback back ~name:"ocaml" ~store:apple)) "ocaml" apple)
+   | Error e -> fail (change_error_to_string e));
+  check bool "promoting the current build again changes nothing" true
+    (entries next
+     = entries
+         (changed "again"
+            (promote next ~name:"ocaml" ~store:apple
+               ~reference:"masc-sandbox-ocaml:20260925T0900Z-11112222" ~digest:(digest 'c'))))
+
+let test_first_promotion_and_other_stores () =
+  let catalog = parsed promoted_ocaml in
+  let next =
+    changed "base on docker"
+      (promote catalog ~name:"base" ~store:Docker_daemon ~reference:"masc-sandbox:general"
+         ~digest:(digest 'd'))
+  in
+  check (option string) "docker" (Some "masc-sandbox:general") (current next "base" Docker_daemon);
+  check (option string) "apple untouched" None (current next "base" apple);
+  check (option string) "ocaml untouched" (Some "masc-sandbox-ocaml:20260924T1130Z-3f9a1c07")
+    (current next "ocaml" apple)
+
+let test_changes_are_refused_with_reasons () =
+  let catalog = parsed promoted_ocaml in
+  (match promote catalog ~name:"rust" ~store:apple ~reference:"r:1" ~digest:(digest 'a') with
+   | Error (No_such_image { name = "rust"; known = [ "base"; "ocaml" ] }) -> ()
+   | _ -> fail "an unknown name was promoted");
+  (match promote catalog ~name:"base" ~store:apple ~reference:"r:1" ~digest:"sha256:short" with
+   | Error (Invalid_pin (Invalid_digest _)) -> ()
+   | _ -> fail "a bad digest was promoted");
+  (match rollback catalog ~name:"base" ~store:apple with
+   | Error (Nothing_to_roll_back _) -> ()
+   | _ -> fail "rolled back a name with no build")
 
 let with_dir f =
   let dir = Filename.temp_file "masc-image-catalog-" ".d" in
@@ -145,6 +210,16 @@ let test_load_reads_the_config_root () =
     | Ok catalog -> check int "entries" 2 (List.length (entries catalog))
     | Error e -> fail (load_error_to_string e))
 
+let test_save_then_load () =
+  with_dir (fun config_root ->
+    let catalog = parsed promoted_ocaml in
+    (match save ~config_root catalog with
+     | Ok () -> ()
+     | Error e -> fail (save_error_to_string e));
+    match load ~config_root with
+    | Ok loaded -> check bool "same catalog" true (entries loaded = entries catalog)
+    | Error e -> fail (load_error_to_string e))
+
 let () =
   run "Sandbox image catalog"
     [ ( "resolve"
@@ -162,5 +237,13 @@ let () =
     ; ( "parse"
       , [ test_case "malformed catalogs are refused" `Quick test_malformed_catalogs_are_refused
         ; test_case "load reads the config root" `Quick test_load_reads_the_config_root
+        ] )
+    ; ( "change"
+      , [ test_case "to_toml round-trips" `Quick test_to_toml_round_trips
+        ; test_case "promote keeps what it replaced" `Quick test_promote_keeps_what_it_replaced
+        ; test_case "first promotion and other stores" `Quick
+            test_first_promotion_and_other_stores
+        ; test_case "changes are refused with reasons" `Quick test_changes_are_refused_with_reasons
+        ; test_case "save then load" `Quick test_save_then_load
         ] )
     ]

@@ -59,7 +59,8 @@ type parse_error =
   | Missing_field of { path : string list; field : string }
   | Expected_string of { path : string list; field : string }
   | Invalid_digest of { path : string list; value : string }
-  | Empty_reference of { path : string list }
+  | Invalid_reference of { path : string list; value : string }
+      (** Empty, or a character outside [A-Z a-z 0-9 . _ / : @ -]. *)
 
 val parse_error_to_string : parse_error -> string
 
@@ -85,3 +86,36 @@ type load_error =
 val load_error_to_string : load_error -> string
 
 val load : config_root:string -> (t, load_error) result
+
+(** {1 Changing what a name means on this host} *)
+
+type change_error =
+  | No_such_image of { name : string; known : string list }
+  | Invalid_pin of parse_error
+  | Nothing_to_roll_back of { name : string; store : store }
+
+val change_error_to_string : change_error -> string
+
+val promote :
+  t -> name:string -> store:store -> reference:string -> digest:string ->
+  (t, change_error) result
+(** Make [reference]/[digest] the current build of [name] for [store], and
+    keep the build it replaces as [previous]. Promoting the current build
+    again changes nothing. The name must already be in the catalog: names
+    come from the repository, builds from the host. *)
+
+val rollback : t -> name:string -> store:store -> (t, change_error) result
+(** Swap the current build with [previous]. A second rollback undoes the
+    first. *)
+
+val to_toml : t -> string
+(** The catalog as the file {!parse} reads, names in order, one table per
+    promoted store. {!parse} of the result gives back the same catalog. *)
+
+type save_error = Unwritable of { path : string; detail : string }
+
+val save_error_to_string : save_error -> string
+
+val save : config_root:string -> t -> (unit, save_error) result
+(** Write {!to_toml} beside the file and rename it into place, so a reader
+    never sees half a catalog. *)

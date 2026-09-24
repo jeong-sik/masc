@@ -469,6 +469,13 @@ let move_lane view delta =
            | None -> view
            | Some (row_cursor, _) -> {view with row_cursor;scroll=0;document_key=None})
   | _ -> view
+(* What the status row says while a read is in flight. The row claimed a
+   previous reading whatever the view held, so a first read said one remained
+   visible while the rows under it said "No reading yet" in the same frame. *)
+let reading_in_flight_text ~held =
+  if held then "Refreshing · previous reading remains visible"
+  else "Reading · nothing held yet"
+
 let visual_lines ?(failed_note = "") ~height ~width view =
   let clean = Masc.Tui_decode.sanitize_terminal_text in
   let fit size text = Masc_tui_message_layout.fit_width (clean text) (max 0 size) in
@@ -484,7 +491,12 @@ let visual_lines ?(failed_note = "") ~height ~width view =
     [Timeline,"1:Time";Connections,"2:Links";Configurations,"3:TOML";Instances,"4:Workers";Rows,"5:Rows"])) in
   let status = match view.loading, view.snapshot, view.error with
     | _, Some _, Some error -> [line ~tone:Attention ("Error: " ^ error ^ " · previous reading retained")]
-    | true, _, _ -> [line ~tone:Dim "Refreshing · previous reading remains visible"]
+    | true, Some _, None -> [line ~tone:Dim (reading_in_flight_text ~held:true)]
+    (* A read that failed and is being tried again holds nothing either, and
+       the failure is the part an operator can act on. *)
+    | true, None, Some error ->
+      wrap ~tone:Attention ("Load failed: " ^ error ^ " · reading again")
+    | true, None, None -> [line ~tone:Dim (reading_in_flight_text ~held:false)]
     | false, None, Some error -> wrap ~tone:Attention ("Load failed: " ^ error)
     | false, None, None -> [line ~tone:Dim "No reading yet · r:refresh"]
     | false, Some _, _ -> [line ~tone:Dim "Recorded observations · r:refresh"] in

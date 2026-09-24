@@ -46,6 +46,21 @@ let test_a_read_that_found_some_counts_them () =
   check bool "two declarations" true
     (UI.installed (view_of [ declaration; declaration ]) = UI.Installed 2)
 
+(* The status row while a read is in flight. Measured on the live server at
+   150 columns: pressing [o] drew
+
+     Refreshing · previous reading remains visible
+     No reading yet · r:refresh
+
+   two rows apart, in the frame before the first read landed. A view that
+   holds nothing has no previous reading to keep visible. *)
+let test_a_first_read_has_no_previous_reading () =
+  check string "nothing held yet" "Reading · nothing held yet"
+    (UI.reading_in_flight_text ~held:false);
+  check string "and a refresh over a reading says so"
+    "Refreshing · previous reading remains visible"
+    (UI.reading_in_flight_text ~held:true)
+
 let () =
   run "tui lane addon reading"
     [ ( "installed"
@@ -57,5 +72,7 @@ let () =
             test_a_read_that_found_none_says_so
         ; test_case "a read that found some counts them" `Quick
             test_a_read_that_found_some_counts_them
+        ; test_case "a first read has no previous reading" `Quick
+            test_a_first_read_has_no_previous_reading
         ] )
     ]

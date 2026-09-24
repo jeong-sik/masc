@@ -5,6 +5,7 @@ module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_sandbox_control = Masc.Keeper_sandbox_control
 module Keeper_tool_filesystem_runtime = Masc.Keeper_tool_filesystem_runtime
 module Keeper_tool_shared_runtime = Masc.Keeper_tool_shared_runtime
+module Keeper_alerting_path = Masc.Keeper_alerting_path
 
 (* [Keeper_tool_filesystem_runtime.handle_read_file] / [handle_file_write]
    (the bare string-returning wrappers) were retired: they had zero

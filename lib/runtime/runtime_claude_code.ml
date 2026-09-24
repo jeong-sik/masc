@@ -59,12 +59,12 @@ let default_config ~cwd =
 let effective_account_home = function
   | Some path -> Some path
   | None ->
-    (match Sys.getenv_opt "CLAUDE_CONFIG_DIR" with
+    (match Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
      | Some path when path <> "" -> Some path
      | Some _ | None ->
        Option.map
          (fun home -> Filename.concat home ".claude")
-         (Sys.getenv_opt "HOME"))
+         (Env_config_core.raw_value_opt "HOME"))
 ;;
 
 let timeout_s_for_phase config ~turn_admitted =
@@ -372,7 +372,7 @@ let optional_int stage name fields =
 ;;
 
 let client_environment account_home =
-  let inherited_names =
+  let base_names =
     [ "HOME"
     ; "USER"
     ; "PATH"
@@ -387,7 +387,11 @@ let client_environment account_home =
     ; "LC_CTYPE"
     ; "TERM"
     ; "NO_COLOR"
-    ; "CLAUDE_CONFIG_DIR"
+    ]
+  in
+  let inherited_names =
+    base_names @
+    [ "CLAUDE_CONFIG_DIR"
     ; "ANTHROPIC_API_KEY"; "ANTHROPIC_AUTH_TOKEN"; "ANTHROPIC_BASE_URL"
     ; "ANTHROPIC_CUSTOM_HEADERS"; "ANTHROPIC_MODEL"
     ; "ANTHROPIC_DEFAULT_OPUS_MODEL"; "ANTHROPIC_DEFAULT_SONNET_MODEL"
@@ -411,11 +415,7 @@ let client_environment account_home =
   |> List.filter (fun name ->
     match account_home with
     | None -> true
-    | Some _ -> List.mem name
-        [ "HOME"; "USER"; "PATH"; "TMPDIR"; "XDG_CONFIG_HOME"
-        ; "XDG_DATA_HOME"; "XDG_CACHE_HOME"; "SSL_CERT_FILE"
-        ; "SSL_CERT_DIR"; "LANG"; "LC_ALL"; "LC_CTYPE"
-        ; "TERM"; "NO_COLOR" ])
+    | Some _ -> List.mem name base_names)
   |> List.filter_map (fun name ->
     Option.map (fun value -> name ^ "=" ^ value) (Sys.getenv_opt name))
   |> fun inherited ->
@@ -1679,8 +1679,12 @@ let validate_process_config config =
   then Error (Invalid_config "cli_path must not be empty")
   else if (match config.account_home with
       | None -> false
-      | Some home -> home = "" || home <> String.trim home || Filename.is_relative home)
+      | Some home -> not (Runtime_account_home.is_valid home))
   then Error (Invalid_config "account_home must be a non-empty absolute path")
+  else if (match effective_account_home config.account_home with
+      | Some home -> not (Runtime_account_home.is_valid home)
+      | None -> true)
+  then Error (Invalid_config "Claude Code needs account_home, CLAUDE_CONFIG_DIR, or HOME")
   else if String.trim config.cwd = "" || Filename.is_relative config.cwd
   then Error (Invalid_config "cwd must be an absolute path")
   else if

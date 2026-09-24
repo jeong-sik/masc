@@ -2690,9 +2690,15 @@ let test_readiness_home_overrides_inherited_home () =
         output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
         close_out output;
         Unix.chmod wrapper 0o700;
-        match run_fixture ~isolated_home wrapper with
-        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-        | Ok _ -> ()))
+        Masc_test_deps.with_process_env "HOME" (Some "") (fun () ->
+          Masc_test_deps.with_process_env "CODEX_HOME" (Some "") (fun () ->
+            (match run_fixture ~isolated_home wrapper with
+             | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+             | Ok _ -> ());
+            match run_fixture ~isolated_home:"relative-readiness-home" wrapper with
+            | Error (Runtime_codex_app_server.Invalid_config _) -> ()
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+            | Ok _ -> fail "relative isolated home was accepted"))))
 ;;
 
 let test_account_home_does_not_apply_readiness_overrides () =

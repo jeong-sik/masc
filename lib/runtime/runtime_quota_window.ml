@@ -13,7 +13,6 @@ type scope =
   | Credential_env of string
   | Credential_file of string
   | Official_client_home of string * string
-  | Official_client_default of string * string option
 
 (* Two facts, not one duration. [Until] is the provider's own reset time.
    [Observed] is a hard-quota rejection that stated no reset. It claims no end
@@ -94,10 +93,6 @@ let scope_to_string = function
   | Credential_env name -> "env:" ^ name
   | Credential_file path -> "file:" ^ path
   | Official_client_home (client, home) -> "official:" ^ client ^ ":home:" ^ home
-  | Official_client_default (client, Some home) ->
-    "official:" ^ client ^ ":default:" ^ home
-  | Official_client_default (client, None) ->
-    "official:" ^ client ^ ":default:home-unset"
 
 let scope_equal left right =
   match left, right with
@@ -106,32 +101,35 @@ let scope_equal left right =
   | Credential_file a, Credential_file b -> String.equal a b
   | Official_client_home (a_client, a_home), Official_client_home (b_client, b_home) ->
     String.equal a_client b_client && String.equal a_home b_home
-  | Official_client_default (a_client, a_home), Official_client_default (b_client, b_home) ->
-    String.equal a_client b_client && a_home = b_home
   | (Provider_row _ | Credential_env _ | Credential_file _
-    | Official_client_home _ | Official_client_default _), _ -> false
+    | Official_client_home _), _ -> false
 ;;
 
-let official_client_scope ~client ~env_name account_home =
+let official_client_scope ~client ~env_name ~default_subdir account_home =
   let home =
     match account_home with
     | Some _ -> account_home
     | None ->
-      (match Sys.getenv_opt env_name with
+      (match Env_config_core.raw_value_opt env_name with
        | Some path when path <> "" -> Some path
-       | Some _ | None -> None)
+       | Some _ | None ->
+         Option.map (fun path -> Filename.concat path default_subdir)
+           (Env_config_core.raw_value_opt "HOME"))
   in
   match home with
-  | Some path -> Official_client_home (client, path)
-  | None -> Official_client_default (client, Sys.getenv_opt "HOME")
+  | Some path when Runtime_account_home.is_valid path -> Official_client_home (client, path)
+  | Some _ | None ->
+    invalid_arg ("official client " ^ client ^ " has no absolute account home")
 ;;
 
 let scope_of_claude_code_home =
   official_client_scope ~client:"claude-code" ~env_name:"CLAUDE_CONFIG_DIR"
+    ~default_subdir:".claude"
 ;;
 
 let scope_of_codex_home =
   official_client_scope ~client:"codex-app-server" ~env_name:"CODEX_HOME"
+    ~default_subdir:".codex"
 ;;
 
 let scope_of_credential ~provider_id (credential : Runtime_schema.credential option) =

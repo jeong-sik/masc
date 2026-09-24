@@ -274,6 +274,19 @@ let test_selected_environment_alias_owns_scope () =
          true
          (Option.is_some (Q.active_until ~scope:legacy_scope ~now:100.0)))
 
+let test_official_client_without_home_has_no_shared_scope () =
+  with_env_values
+    [ "HOME", ""; "CLAUDE_CONFIG_DIR", ""; "CODEX_HOME", "" ]
+    (fun () ->
+       List.iter
+         (fun (client, scope) ->
+            match scope () with
+            | exception Invalid_argument _ -> ()
+            | _ -> Alcotest.fail (client ^ " created a quota scope without an account home"))
+         [ "Claude Code", (fun () -> Q.scope_of_claude_code_home None)
+         ; "Codex", (fun () -> Q.scope_of_codex_home None)
+         ])
+
 let () =
   Alcotest.run
     "runtime_quota_window"
@@ -328,5 +341,9 @@ let () =
             "selected environment alias owns scope"
             `Quick
             test_selected_environment_alias_owns_scope
+        ; Alcotest.test_case
+            "official client without home has no shared scope"
+            `Quick
+            test_official_client_without_home_has_no_shared_scope
         ] )
     ]

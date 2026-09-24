@@ -35,7 +35,7 @@ let model_answer =
     ]
 ;;
 
-type act_behaviour = Ask_the_model | Hold
+type act_behaviour = Ask_the_model | Ask_the_model_without_params | Hold
 
 type fake =
   { inbox : string Eio.Stream.t
@@ -66,6 +66,7 @@ let to_host fake message =
 let rpc_result id result = obj [ "jsonrpc", str "2.0"; "id", id; "result", result ]
 let rpc_error id message = obj [ "jsonrpc", str "2.0"; "id", id; "error", obj [ "code", `Int (-32603); "message", str message ] ]
 let rpc_request id method_ params = obj [ "jsonrpc", str "2.0"; "id", str id; "method", str method_; "params", params ]
+let rpc_request_without_params id method_ = obj [ "jsonrpc", str "2.0"; "id", str id; "method", str method_ ]
 
 let extension_receives fake message =
   let member = Yojson.Safe.Util.member in
@@ -77,7 +78,10 @@ let extension_receives fake message =
      | Hold -> fake.held_act <- Some id
      | Ask_the_model ->
        fake.waiting_on_model <- Some (str "g1", id);
-       to_host fake (rpc_request "g1" "llm.generate" (obj [ "messages", `List [] ])))
+       to_host fake (rpc_request "g1" "llm.generate" (obj [ "messages", `List [] ]))
+     | Ask_the_model_without_params ->
+       fake.waiting_on_model <- Some (str "g1", id);
+       to_host fake (rpc_request_without_params "g1" "llm.generate"))
   | `String "page.goto", id -> to_host fake (rpc_result id (obj [ "page", obj [ "page_id", str "P" ] ]))
   | `Null, id ->
     fake.answers_from_host <- message :: fake.answers_from_host;
@@ -341,6 +345,21 @@ let test_model_request_without_a_call () =
   check bool "the refusal is logged" true (logged h (function Session.Model_request_refused _ -> true | _ -> false))
 ;;
 
+let test_model_request_without_params () =
+  with_session ~configure:(fun fake -> fake.act <- Ask_the_model_without_params)
+  @@ fun h ->
+  attached h;
+  (match Session.call h.session act with
+   | Error (Session.Rejected _) -> ()
+   | Ok _ | Error _ -> fail "act should finish after the malformed model request is refused");
+  check string "the request id is preserved" "g1" Yojson.Safe.Util.(only_answer h |> member "id" |> to_string);
+  check int "invalid params code" Wire.invalid_params (error_code (only_answer h));
+  check int "the model was not asked" 0 !(h.model_calls);
+  check bool "the malformed request is logged" true
+    (logged h (function Session.Malformed_message "llm.generate without params" -> true | _ -> false));
+  goto_succeeds h
+;;
+
 let test_abandoned_call () =
   with_session ~configure:(fun fake -> fake.act <- Hold)
   @@ fun h ->
@@ -469,6 +488,7 @@ let () =
     "calls", [
       test_case "act asks the model" `Quick test_act_uses_the_model;
       test_case "a model request with no call is refused" `Quick test_model_request_without_a_call;
+      test_case "a model request without params is refused and releases the call" `Quick test_model_request_without_params;
       test_case "an abandoned call blocks until its reply" `Quick test_abandoned_call;
       test_case "a reply read before the cancelled caller resumes settles the call" `Quick
         test_reply_read_before_the_cancelled_caller_resumes;

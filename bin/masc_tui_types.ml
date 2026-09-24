@@ -5093,15 +5093,21 @@ type runtime_config_reading = {
    RGB plus what to title it. The spectator downsamples the pixels itself. *)
 type msx_menu_mode = Boot_game | Change_disk
 
+type msx_meta = {
+  msx_mode : string;
+  msx_cartridge : string option;
+  msx_disk : string option;
+  msx_players : string list;  (* who pressed within the server's window, newest first *)
+}
+
+(* [msx_meta] is [None] for a frame read through the live route, which names
+   no mode, media or players; the next tick answer carries them again. *)
 type msx_frame = {
   msx_number : int;
   msx_width : int;
   msx_height : int;
   msx_rgb : string;
-  msx_mode : string;
-  msx_cartridge : string option;
-  msx_disk : string option;
-  msx_players : string list;  (* who pressed within the server's window, newest first *)
+  msx_meta : msx_meta option;
 }
 
 (* A container-log read that has been asked for and not answered. The keeper and
@@ -5402,6 +5408,13 @@ type state = {
      the last frame the server handed it and when it last asked. *)
   mutable msx_frame: msx_frame option;
   mutable msx_last_poll_ns: int64;
+  (* Which machine the spectator shows. The menu picks it. *)
+  mutable machine_source: Masc_tui_machine_live.source;
+  (* The last live read of each machine. [msx_live] holds a counter only while
+     [msx_frame] is that read's picture: a tick answer carries no counter, so
+     it resets [msx_live] to [Unread] and the next read asks for a picture. *)
+  mutable msx_live: Masc_tui_machine_live.view;
+  mutable dos_live: Masc_tui_machine_live.view;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -7710,6 +7723,9 @@ let create_state
   msx_open = false;
   msx_frame = None;
   msx_last_poll_ns = 0L;
+  machine_source = Masc_tui_machine_live.Msx;
+  msx_live = Masc_tui_machine_live.Unread;
+  dos_live = Masc_tui_machine_live.Unread;
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;

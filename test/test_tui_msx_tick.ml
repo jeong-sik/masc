@@ -33,7 +33,8 @@ let test_retained_metadata () =
       check bool "advertise exact pixels" true (known body = `Assoc (reference tag));
       Ok (frame ~player:"bob" number (retained tag))) |> require |> loaded in
     check int "clock is fresh" number current.msx_number;
-    check (list string) "players are fresh" ["bob"] current.msx_players;
+    check (option (list string)) "players are fresh" (Some ["bob"])
+      (Option.map (fun (m : Masc_tui_types.msx_meta) -> m.msx_players) current.msx_meta);
     check bool "retained pixels reuse immutable decoded bytes" true (current.msx_rgb == initial.msx_rgb)
   done;
   Printf.printf "100 retained MSX tick client responses allocate %.0f bytes (includes test assertions)\n%!"

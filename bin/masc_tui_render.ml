@@ -7192,10 +7192,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                        ~inner_width:inner
                    in
                    add_row "Context:"
-                     (Printf.sprintf "%s%.1f%%%s  %s  %d / %d tokens"
+                     (Printf.sprintf "%s%.1f%%%s  %s  %s / %s tokens"
                         (ctx_color ratio) pct Ansi.reset
-                        (ctx_bar ratio bar_width) observation.tokens
-                        observation.maximum);
+                        (ctx_bar ratio bar_width)
+                        (Masc_tui_message_layout.compact_count
+                           observation.tokens)
+                        (Masc_tui_message_layout.compact_count
+                           observation.maximum));
                    add_row "Observed:"
                      (Terminal_text.short_timestamp observation.observed_at);
                    add_row "Turn Ref:"
@@ -7212,8 +7215,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                       confirmed the turn's own usage. *)
                    add_row "Context:"
                      (Printf.sprintf
-                        "%d tokens in context; window not observed"
-                        observation.tokens);
+                        "%s tokens in context; window not observed"
+                        (Masc_tui_message_layout.compact_count
+                           observation.tokens));
                    add_row "Observed:"
                      (Terminal_text.short_timestamp observation.observed_at);
                    add_row "Turn Ref:"
@@ -7302,7 +7306,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        add_row "Preparation:" (String.concat " · "
          (List.map Masc.Keeper_declared_roster.requirement_label requirements)));
     add_row "Total Turns:" (string_of_int k.k_total_turns);
-    add_row "Total Tokens:" (string_of_int k.k_total_tokens);
+    (* Read at a glance, the way the Acting pane's block already reads its
+       token figures. A live roster drew "75111274" here: eight digits a
+       reader counts rather than reads. Turns and tool calls keep their
+       digits -- three or four of them, and a count of things done rather
+       than a size. *)
+    add_row "Total Tokens:"
+      (Masc_tui_message_layout.compact_count k.k_total_tokens);
     add_row "Total Cost:" (Printf.sprintf "$%.4f" k.k_total_cost_usd);
     add_row "Last Turn:" (Terminal_text.short_timestamp k.k_last_turn_ts);
     add_empty ();
@@ -7335,8 +7345,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
          (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_turns
             activity.Keeper_activity.aw_heartbeats);
        add_row "Tokens In / Out:"
-         (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_input_tokens
-            activity.Keeper_activity.aw_output_tokens);
+         (Printf.sprintf "%s / %s"
+            (Masc_tui_message_layout.compact_count
+               activity.Keeper_activity.aw_input_tokens)
+            (Masc_tui_message_layout.compact_count
+               activity.Keeper_activity.aw_output_tokens));
        add_row "Cost:"
          (match activity.Keeper_activity.aw_cost_usd with
           | Some cost -> Printf.sprintf "$%.4f" cost

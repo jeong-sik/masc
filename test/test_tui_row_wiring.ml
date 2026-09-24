@@ -1010,6 +1010,30 @@ let test_the_board_age_column_reads_the_sort_once () =
    Each binding is checked twice: the key it no longer opens, and a key it
    still does, so a renamed binding cannot make this pass by matching
    nothing. *)
+(* The Keeper detail's token rows. A live roster drew "Total Tokens:
+   75111274" and "Tokens In / Out: 56865402 / 56616" -- eight digits a reader
+   counts rather than reads -- while the Acting pane's own block beside it
+   already spelled the same kind of figure "75.1M". Six figures on this pane
+   are sizes: the cumulative total, the window's input and output, and the
+   used/maximum pair of each Context row -- the observed one and the one
+   drawn when the window is not observed. *)
+let test_the_keeper_detail_reads_its_token_figures_at_a_glance () =
+  Alcotest.(check int) "every token figure goes through the ladder" 6
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"keeper_detail_pane"
+       ~callee:"Masc_tui_message_layout.compact_count");
+  (* The pair in the Context row is a size, so the row no longer spells it
+     with digits. Turns, heartbeats and tool calls keep theirs: three or four
+     digits, and a count of things done rather than a size. *)
+  Alcotest.(check int) "the Context row spells no digits of its own" 0
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"keeper_detail_pane"
+       ~literals:
+         [ "%s%.1f%%%s  %s  %d / %d tokens"
+         ; "%d tokens in context; window not observed"
+         ])
+;;
+
 let test_the_loader_stops_opening_keys_no_screen_draws () =
   let decode = "lib/tui_decode.ml" in
   let dropped =
@@ -1065,6 +1089,9 @@ let () =
             `Quick test_the_summary_row_does_not_count_the_panel_below_it
         ; Alcotest.test_case "the load stops reading a field no screen draws"
             `Quick test_the_overview_load_stops_reading_a_field_no_screen_draws
+        ; Alcotest.test_case
+            "the keeper detail reads its token figures at a glance" `Quick
+            test_the_keeper_detail_reads_its_token_figures_at_a_glance
         ; Alcotest.test_case "the loader stops opening keys no screen draws"
             `Quick test_the_loader_stops_opening_keys_no_screen_draws
         ; Alcotest.test_case "the schedule counts read the shared status list"

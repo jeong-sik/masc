@@ -290,9 +290,12 @@ let memo_line_error_to_string = function
   | Breaks_comment why -> "the memo would not stay inside its comment: " ^ why
 ;;
 
-(* OCaml lexes string literals inside comments, so a ["] or a quoted-string
-   opener ([{|], [{id|], [{%ext|]) in the text starts a string the comment's
-   closer cannot end, and the rest of the file is read as that string. *)
+(* OCaml lexes string literals inside comments, so a double quote, or a
+   quoted-string opener (a left brace, an optional lower-case id or a
+   percent-sign extension, then a bar), in the text starts a string the
+   comment's closer cannot end, and the rest of the file is read as that
+   string. The same rule is why this comment names those characters instead
+   of writing them. *)
 let ocaml_string_opener_in text =
   let n = String.length text in
   let rec quoted_id_then_bar i =

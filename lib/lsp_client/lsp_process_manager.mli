@@ -125,8 +125,8 @@ type memo_line_error =
   | Breaks_comment of string
       (** the text would leave the comment it is written in: a block
           comment's closer or opener ({!Ide_memo.breaks_comment}), or in
-          OCaml a [\"] or [{|] that the lexer reads as a string inside the
-          comment. The reason names which. *)
+          OCaml a double quote or a quoted-string opener, which the lexer
+          reads as a string inside the comment. The reason names which. *)
 
 val memo_line_error_to_string : memo_line_error -> string
 

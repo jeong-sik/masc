@@ -59,18 +59,25 @@ type projection =
 type window_observation =
   { transmitted_atoms : int
   ; total_atoms : int
-  ; front_atom_digest : string
+  ; model_input_front : Model_input_front.t
   }
 
-(* A window names its front by the message that opens it. A projection that
-   carried no atom puts its front at [history_atom_count], an index the
-   history's lookup has no atom at, so it is no observation. *)
+(* Empty carriage records the end of the offered history. It must replace
+   the preceding projection even when an overflow retry carries no atom. *)
 let observe ~digest_at ~history_atom_count (projection : projection) =
   let transmitted_atoms = projection.atom_count - projection.dropped_atoms in
+  let front =
+    if transmitted_atoms > 0 then
+      Option.map (fun digest -> Model_input_front.At_atom digest)
+        (digest_at (history_atom_count - transmitted_atoms))
+    else if history_atom_count = 0 then Some Model_input_front.Empty_history
+    else Option.map (fun digest -> Model_input_front.After_history digest)
+        (digest_at (history_atom_count - 1))
+  in
   Option.map
-    (fun front_atom_digest ->
-       { transmitted_atoms; total_atoms = history_atom_count; front_atom_digest })
-    (digest_at (history_atom_count - transmitted_atoms))
+    (fun model_input_front ->
+       { transmitted_atoms; total_atoms = history_atom_count; model_input_front })
+    front
 ;;
 
 let budget_error_to_string = function

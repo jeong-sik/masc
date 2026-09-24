@@ -28,7 +28,7 @@ let atom_bytes messages =
 (* A front measured on [messages]: its index and the message that opens it. *)
 let seed ~messages first_atom : Keeper_carried_front.seed =
   match Runtime_model_input_tail_window.atom_opening_digest messages first_atom with
-  | Some front_digest -> { first_atom; front_digest; source = Keeper_carried_front.Ledger }
+  | Some front_digest -> { first_atom; front = Model_input_front.At_atom front_digest; source = Keeper_carried_front.Ledger }
   | None -> Alcotest.fail "the seed's own history has the atom"
 
 let carry ?front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ?counted_tokens messages =
@@ -234,7 +234,7 @@ max-concurrent = 1
     { transmitted_atoms = total_atoms - 8
     ; total_atoms
     ; measurement = Turn_record.Wire_shape
-    ; front_atom_digest = (seed ~messages:persisted 8).front_digest
+    ; model_input_front = (seed ~messages:persisted 8).front
     }
   in
   let write_record ~turn response_observed_model_input =
@@ -449,7 +449,7 @@ let test_the_librarian_gap_is_read_from_small_files () =
       { transmitted_atoms = total_atoms - first_atom
       ; total_atoms
       ; measurement = Turn_record.Wire_shape
-      ; front_atom_digest = (seed ~messages:persisted first_atom).front_digest
+      ; model_input_front = (seed ~messages:persisted first_atom).front
       }
     in
     Keeper_turn_record_writer.write

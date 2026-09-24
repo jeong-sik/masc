@@ -11,6 +11,7 @@
   prompt_block_id
   runtime_usage_scope
   runtime_attempt_dispatch
+  model_input_front
   turn_record
   health_status
   types_core

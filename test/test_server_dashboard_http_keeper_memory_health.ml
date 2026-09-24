@@ -1070,7 +1070,7 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
       { transmitted_atoms = total_atoms - first_atom
       ; total_atoms
       ; measurement = Turn_record.Wire_shape
-      ; front_atom_digest = Option.get (digest_at first_atom)
+      ; model_input_front = Model_input_front.At_atom (Option.get (digest_at first_atom))
       }
     in
     Masc.Keeper_turn_record_writer.write

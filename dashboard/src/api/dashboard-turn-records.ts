@@ -82,12 +82,17 @@ export const TURN_USAGE_SCOPES = ['per_request', 'turn_total', 'conversation_cum
 
 type TurnModelInputMeasurement = 'wire_shape' | 'durable_shape'
 
+export type TurnModelInputFront =
+  | { kind: 'at_atom'; digest: string }
+  | { kind: 'after_history'; digest: string }
+  | { kind: 'empty_history' }
+
 export type TurnResponseObservedModelInput = {
   runtime_profile: string
   transmitted_atoms: number
   total_atoms: number
   model_input_measurement: TurnModelInputMeasurement
-  front_atom_digest: string
+  model_input_front: TurnModelInputFront
 }
 export type TurnRecordEntry = {
   execution_ids: string[]
@@ -473,29 +478,44 @@ function decodeTurnModelInputMeasurement(raw: unknown): TurnModelInputMeasuremen
   return raw === 'wire_shape' || raw === 'durable_shape' ? raw : null
 }
 
+function decodeTurnModelInputFront(raw: unknown): TurnModelInputFront | null {
+  if (!isRecord(raw)) return null
+  if (raw.kind === 'empty_history' && hasNoUnknownKeys(raw, ['kind'])) {
+    return { kind: 'empty_history' }
+  }
+  if ((raw.kind === 'at_atom' || raw.kind === 'after_history')
+    && hasNoUnknownKeys(raw, ['kind', 'digest'])
+    && typeof raw.digest === 'string' && /^[0-9a-f]{64}$/.test(raw.digest)) {
+    return { kind: raw.kind, digest: raw.digest }
+  }
+  return null
+}
+
 function decodeTurnResponseObservedModelInput(raw: unknown): TurnResponseObservedModelInput | null {
   if (!isRecord(raw) || !hasExactKeys(raw, [
     'runtime_profile',
     'transmitted_atoms',
     'total_atoms',
     'model_input_measurement',
-    'front_atom_digest',
+    'model_input_front',
   ])) return null
   const runtime_profile = decodeExactNonEmptyString(raw.runtime_profile)
   const transmitted_atoms = decodeNonNegativeSafeInteger(raw.transmitted_atoms)
   const total_atoms = decodeNonNegativeSafeInteger(raw.total_atoms)
   const model_input_measurement = decodeTurnModelInputMeasurement(raw.model_input_measurement)
-  const front_atom_digest = decodeExactNonEmptyString(raw.front_atom_digest)
+  const model_input_front = decodeTurnModelInputFront(raw.model_input_front)
   if (
     runtime_profile === null
     || transmitted_atoms === null
     || total_atoms === null
     || transmitted_atoms > total_atoms
     || model_input_measurement === null
-    || front_atom_digest === null
-    || !/^[0-9a-f]{64}$/.test(front_atom_digest)
+    || model_input_front === null
+    || (model_input_front.kind === 'at_atom' && transmitted_atoms === 0)
+    || (model_input_front.kind === 'after_history' && (transmitted_atoms !== 0 || total_atoms === 0))
+    || (model_input_front.kind === 'empty_history' && total_atoms !== 0)
   ) return null
-  return { runtime_profile, transmitted_atoms, total_atoms, model_input_measurement, front_atom_digest }
+  return { runtime_profile, transmitted_atoms, total_atoms, model_input_measurement, model_input_front }
 }
 
 function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
@@ -520,7 +540,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     // The window's front position (RFC keeper-context-window-in-tokens
     // §10.4). The inspector does not render it; it is accepted so a record
     // carrying it is not rejected as unknown.
-    'front_atom_digest',
+    'model_input_front',
     'runtime_profile',
     'selected_model',
     'finish_reason',

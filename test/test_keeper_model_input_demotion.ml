@@ -709,7 +709,7 @@ let compose ~base_path ~front ~current_turn_results ~demote_before messages =
     ~accepted:None ~front:
       (Some
          { Masc.Keeper_carried_front.first_atom = front
-         ; front_digest
+         ; front = Model_input_front.At_atom front_digest
          ; source = Masc.Keeper_carried_front.Ledger
          })
     ~history_digest_at:(Window.atom_opening_digest messages)
@@ -1029,7 +1029,7 @@ let only_the_current_turn_is_demoted () =
       ~accepted:None ~front:
         (Some
            { Masc.Keeper_carried_front.first_atom = 0
-           ; front_digest = Option.get (Window.atom_opening_digest messages 0)
+           ; front = Model_input_front.At_atom (Option.get (Window.atom_opening_digest messages 0))
            ; source = Masc.Keeper_carried_front.Ledger
            })
       ~history_digest_at:(Window.atom_opening_digest messages)
@@ -1104,7 +1104,7 @@ let a_front_the_history_shrank_under_starts_over () =
       ~accepted:None ~front:
         (Some
            { Masc.Keeper_carried_front.first_atom = 3_100
-           ; front_digest = String.make 64 'f'
+           ; front = Model_input_front.At_atom (String.make 64 'f')
            ; source = Masc.Keeper_carried_front.Ledger
            })
       ~history_digest_at:(Window.atom_opening_digest messages)
@@ -1134,7 +1134,7 @@ let a_front_that_opens_with_another_message_starts_over () =
       ~accepted:None ~front:
         (Some
            { Masc.Keeper_carried_front.first_atom = 1
-           ; front_digest = String.make 64 'f'
+           ; front = Model_input_front.At_atom (String.make 64 'f')
            ; source = Masc.Keeper_carried_front.Ledger
            })
       ~history_digest_at:(Window.atom_opening_digest messages)

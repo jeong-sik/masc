@@ -591,9 +591,8 @@ let carried_start_range
       (match Keeper_carried_front.for_history ~digest_at seed with
        | Ok admitted ->
          Some
-           ( Keeper_carried_front.clamp
-               ~atom_count:history_atom_count
-               admitted.Keeper_carried_front.first_atom
+           ( Keeper_carried_front.clamp_seed
+               ~atom_count:history_atom_count admitted
            , admitted.Keeper_carried_front.source )
        | Error dropped ->
          (* The position names no atom of this history: it is shorter than the
@@ -648,6 +647,12 @@ let carried_start_range
     | Some (first_atom, _) -> first_atom
     | None -> own_first_atom
   in
+  let librarian_first_atom end_atom =
+    let first = Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom in
+    match seed_held with
+    | Some (accepted, _) -> max accepted first
+    | None -> first
+  in
   let absorbed = librarian_front in
   (* The range and what it must carry, decided together: a front that stands
      for absorbed atoms cannot be composed without the working state that
@@ -663,7 +668,7 @@ let carried_start_range
          which is the view a provider just refused on the Claude Code lane. *)
       Absorbed_through
         { first_atom =
-            Keeper_carried_front.clamp ~atom_count:history_atom_count snapshot.end_atom
+            librarian_first_atom snapshot.end_atom
         ; absorbed_through = snapshot.end_atom
         ; boundary_line = snapshot.end_boundary_line
         ; working_state = Keeper_turn_driver_try_provider.working_state_text snapshot
@@ -676,7 +681,7 @@ let carried_start_range
          ([Keeper_carried_front.Librarian_progress]). Clamped like every
          other front, so the range carries the turn it answers. *)
       Plain
-        ( Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom
+        ( librarian_first_atom end_atom
         , Librarian_progress { end_atom } )
     | Keeper_turn_driver_try_provider.Librarian_snapshot _
     | Keeper_turn_driver_try_provider.Librarian_progress _
@@ -703,6 +708,7 @@ let carried_start_range
   let projection, transmitted_bytes =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->
       Runtime_model_input_tail_window.project_from_atom
+        ~allow_empty_history:(first_atom = history_atom_count)
         ~measure_message_bytes
         ~first_atom
         carried_messages)

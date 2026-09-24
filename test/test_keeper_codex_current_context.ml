@@ -469,7 +469,7 @@ let seed_at first_atom () =
     | None -> fail "the history opens that atom"
   in
   { Keeper_carried_front.seed =
-      Some { Keeper_carried_front.first_atom; front_digest; source = Keeper_carried_front.Ledger }
+      Some { Keeper_carried_front.first_atom; front = Model_input_front.At_atom front_digest; source = Keeper_carried_front.Ledger }
   ; unreadable = None
   ; boundary_error = None
   }

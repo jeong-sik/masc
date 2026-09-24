@@ -331,7 +331,7 @@ let with_window measurement turn =
         { transmitted_atoms = 26
         ; total_atoms = 9137
         ; measurement
-        ; front_atom_digest = String.make 64 'd'
+        ; model_input_front = Model_input_front.At_atom (String.make 64 'd')
         }
   }
 

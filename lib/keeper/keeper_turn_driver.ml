@@ -2180,7 +2180,7 @@ let run_named
                                        window.transmitted_atoms
                                    ; total_atoms = window.total_atoms
                                    ; measurement = Turn_record.Durable_shape
-                                   ; front_atom_digest = window.front_atom_digest
+                                   ; model_input_front = window.model_input_front
                                    }
                                })
                           observed;

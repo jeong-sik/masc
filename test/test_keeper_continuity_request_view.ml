@@ -97,7 +97,7 @@ let test_without_snapshot_seed_demotes_earlier_tool_bodies () =
   let completed_end = snd (Window.annotate earlier) in
   let history_digest_at = Window.atom_opening_digest messages in
   let front_digest = history_digest_at 0 |> Option.get in
-  let front : Front.seed = {first_atom = 0; front_digest; source = Front.Ledger} in
+  let front : Front.seed = {first_atom = 0; front = Model_input_front.At_atom front_digest; source = Front.Ledger} in
   let planned = ref 0 in
   let seeded =
     Driver.For_testing.request_view ~continuity:Driver.without_snapshot
@@ -140,7 +140,7 @@ let test_an_old_front_does_not_drop_unread () =
     @ [text T.User "Second pending request"] in
   let messages = source @ suffix in
   let front_digest = Window.atom_opening_digest messages 4 |> Option.get in
-  let front : Front.seed = {first_atom = 4; front_digest; source = Front.Ledger} in
+  let front : Front.seed = {first_atom = 4; front = Model_input_front.At_atom front_digest; source = Front.Ledger} in
   let projected = view ~front snapshot messages in
   check string "old advanced ledger cannot discard pending work" (encode (pinned :: suffix))
     (encode (without_working_state (wire projected)));
@@ -200,7 +200,7 @@ let test_without_snapshot_starts_at_the_turn_start () =
      goes out with this turn, and the origin names the seed's source. *)
   let seed_atom = 1 in
   let front_digest = Window.atom_opening_digest messages seed_atom |> Option.get in
-  let front : Front.seed = {first_atom = seed_atom; front_digest; source = Front.Ledger} in
+  let front : Front.seed = {first_atom = seed_atom; front = Model_input_front.At_atom front_digest; source = Front.Ledger} in
   let seeded =
     project ~front ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end }) () in
   check int "the seed, not the turn boundary, opens the range" seed_atom
@@ -218,7 +218,7 @@ let test_without_snapshot_starts_at_the_turn_start () =
   (* A seed whose atom this history opens with another message is dropped
      and the range falls back to the turn boundary. *)
   let other_digest = Window.atom_opening_digest messages 0 |> Option.get in
-  let stale : Front.seed = {first_atom = seed_atom; front_digest = other_digest; source = Front.Ledger} in
+  let stale : Front.seed = {first_atom = seed_atom; front = Model_input_front.At_atom (other_digest); source = Front.Ledger} in
   let dropped =
     project ~front:stale ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end }) () in
   check int "a seed this history does not hold falls back to the turn boundary" completed_end
@@ -424,9 +424,9 @@ let test_the_forecast_takes_the_drivers_start () =
   let messages = source @ [fresh] in
   let digest_at = Window.atom_opening_digest messages in
   let held_seed : Front.seed =
-    {first_atom = 0; front_digest = Option.get (digest_at 0); source = Front.Ledger} in
+    {first_atom = 0; front = Model_input_front.At_atom (Option.get (digest_at 0)); source = Front.Ledger} in
   let outlived_seed : Front.seed =
-    {first_atom = 0; front_digest = "not-the-opening-message"; source = Front.Ledger} in
+    {first_atom = 0; front = Model_input_front.At_atom ("not-the-opening-message"); source = Front.Ledger} in
   let snapshot, lines = capture_source source in
   let summarized = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
     | Ok continuity -> continuity | Error error -> fail (Snapshot.error_to_string error) in
@@ -441,7 +441,7 @@ let test_the_forecast_takes_the_drivers_start () =
      (RFC librarian-lifecycle §4.10, rule 2): past the read position, so
      both the driver and the forecast open there. *)
   let accepted : Front.seed =
-    {first_atom = 2; front_digest = Option.get (digest_at 2); source = Front.Turn_record { turn = 3 }} in
+    {first_atom = 2; front = Model_input_front.At_atom (Option.get (digest_at 2)); source = Front.Turn_record { turn = 3 }} in
   let cases =
     [ "a fitting snapshot", summarized, Some held_seed, None, boundary,
       (function Front.Librarian_snapshot _ -> true | _ -> false);
@@ -496,7 +496,7 @@ let test_a_start_past_the_snapshot_keeps_the_working_state () =
   let summarized = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
     | Ok continuity -> continuity | Error error -> fail (Snapshot.error_to_string error) in
   let accepted : Front.seed =
-    {first_atom = 3; front_digest = Option.get (digest_at 3); source = Front.Turn_record { turn = 5 }} in
+    {first_atom = 3; front = Model_input_front.At_atom (Option.get (digest_at 3)); source = Front.Turn_record { turn = 5 }} in
   let projected =
     Driver.For_testing.request_view ~continuity:summarized ~provider_config
       ~measure_message_bytes:measure ~accepted:(Some accepted) ~front:None

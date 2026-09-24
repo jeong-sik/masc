@@ -1,6 +1,12 @@
 open Alcotest
 open Masc
 
+let carried_digest = function
+  | Model_input_front.At_atom digest -> digest
+  | Model_input_front.After_history _ | Model_input_front.Empty_history ->
+    Alcotest.fail "expected a nonempty carried window"
+;;
+
 let shell_quote value =
   "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' value) ^ "'"
 ;;
@@ -1220,7 +1226,7 @@ let test_declared_capacity_windows_history_and_reports_the_cut () =
             (Runtime_model_input_tail_window.atom_opening_digest
                history
                (history_atoms - projected_atoms))
-            (Some reading.front_atom_digest)))
+            (Some (carried_digest reading.model_input_front))))
 ;;
 
 let test_appended_gate_reference_is_inside_the_window () =
@@ -1241,7 +1247,7 @@ let test_appended_gate_reference_is_inside_the_window () =
     { seed =
         Some
           { first_atom = seed_first_atom
-          ; front_digest = seed_front_digest
+          ; front = Model_input_front.At_atom seed_front_digest
           ; source = Keeper_carried_front.Turn_record { turn = 40 }
           }
     ; unreadable = None
@@ -1284,10 +1290,10 @@ let test_appended_gate_reference_is_inside_the_window () =
           let expected_front = reading.total_atoms - reading.transmitted_atoms in
           check (option string) "the front digest uses the original history coordinate"
             (Runtime_model_input_tail_window.atom_opening_digest history expected_front)
-            (Some reading.front_atom_digest);
+            (Some (carried_digest reading.model_input_front));
           let next_seed : Keeper_carried_front.seed =
             { first_atom = expected_front
-            ; front_digest = reading.front_atom_digest
+            ; front = reading.model_input_front
             ; source = Keeper_carried_front.Turn_record { turn = 41 }
             }
           in
@@ -1347,7 +1353,7 @@ let seed_read_at ~messages first_atom =
   { Keeper_carried_front.seed =
       Some
         { Keeper_carried_front.first_atom
-        ; front_digest
+        ; front = Model_input_front.At_atom front_digest
         ; source = Keeper_carried_front.Turn_record { turn = 41 }
         }
   ; unreadable = None
@@ -1776,7 +1782,7 @@ let test_a_dropped_preamble_is_not_a_durable_atom () =
       (List.length durable) reading.transmitted_atoms;
     check (option string) "so its front is the first atom sent"
       (Runtime_model_input_tail_window.atom_opening_digest history 30)
-      (Some reading.front_atom_digest)
+      (Some (carried_digest reading.model_input_front))
 ;;
 
 let test_a_front_from_another_history_is_dropped () =

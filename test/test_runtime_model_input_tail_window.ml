@@ -12,6 +12,12 @@
 module Window = Runtime_model_input_tail_window
 module Types = Agent_core.Types
 
+let carried_digest = function
+  | Model_input_front.At_atom digest -> digest
+  | Model_input_front.After_history _ | Model_input_front.Empty_history ->
+    Alcotest.fail "expected a nonempty carried window"
+;;
+
 let k = Window.atoms_per_window
 
 let message ?(metadata = []) ~role text : Types.message =
@@ -555,7 +561,7 @@ let test_chained_cut_keeps_the_whole_history_as_denominator () =
     (Window.atom_opening_digest
        history
        (observed.Window.total_atoms - observed.Window.transmitted_atoms))
-    (Some observed.Window.front_atom_digest);
+    (Some (carried_digest observed.Window.model_input_front));
   Alcotest.(check int)
     "denominator is the whole history, not the survivors"
     (count_atoms history)
@@ -1024,11 +1030,8 @@ let test_opening_digest_names_the_first_message_of_each_atom () =
   | None -> Alcotest.fail "atom 0 exists"
 ;;
 
-(* A projection that carried no atom has no front to name: its front index is
-   the history's atom count, which the lookup over that history has no atom
-   at. The same history carrying its newest atom does name one, so the [None]
-   is the index, not the lookup. *)
-let test_a_window_without_an_atom_is_no_observation () =
+(* No carried atom still observes the boundary after the offered history. *)
+let test_a_window_without_an_atom_observes_the_history_end () =
   let history = atoms 5 in
   let atom_count = count_atoms history in
   let digest_at = Window.atom_opening_digest history in
@@ -1038,14 +1041,19 @@ let test_a_window_without_an_atom_is_no_observation () =
       ~history_atom_count:atom_count
       { Window.messages = []; dropped_atoms; atom_count }
   in
-  Alcotest.(check bool) "every atom dropped, nothing observed" true
-    (Option.is_none (observe ~dropped_atoms:atom_count));
+  (match observe ~dropped_atoms:atom_count with
+   | Some observed ->
+     Alcotest.(check int) "empty transmission" 0 observed.transmitted_atoms;
+     Alcotest.(check bool) "the end is witnessed by the omitted last atom" true
+       (observed.model_input_front =
+          Model_input_front.After_history (Option.get (digest_at (atom_count - 1))))
+   | None -> Alcotest.fail "the empty projection lost its observation");
   match observe ~dropped_atoms:(atom_count - 1) with
   | None -> Alcotest.fail "the newest atom alone is a window"
   | Some observed ->
     Alcotest.(check (option string)) "named by the newest atom"
       (digest_at (atom_count - 1))
-      (Some observed.Window.front_atom_digest)
+      (Some (carried_digest observed.Window.model_input_front))
 ;;
 
 let () =
@@ -1102,8 +1110,8 @@ let () =
             `Quick test_chained_cut_keeps_the_whole_history_as_denominator
         ; Alcotest.test_case "opening digest names the first message of each atom"
             `Quick test_opening_digest_names_the_first_message_of_each_atom
-        ; Alcotest.test_case "a window without an atom is no observation" `Quick
-            test_a_window_without_an_atom_is_no_observation
+        ; Alcotest.test_case "an empty window observes the history end" `Quick
+            test_a_window_without_an_atom_observes_the_history_end
         ; Alcotest.test_case "dropping unsent reasoning widens the window"
             `Quick test_dropping_unsent_reasoning_widens_the_window
         ; Alcotest.test_case "tool results stay with their call" `Quick

@@ -151,7 +151,20 @@ describe('keeper turn record cache token counts', () => {
   })
 
   it.each([
-    'runtime_profile', 'transmitted_atoms', 'total_atoms', 'model_input_measurement', 'front_atom_digest',
+    [8, { kind: 'after_history', digest: 'a'.repeat(64) }],
+    [0, { kind: 'empty_history' }],
+  ])('decodes accepted empty-history boundary %s', async (total_atoms, model_input_front) => {
+    const observed = {
+      runtime_profile: 'codex', transmitted_atoms: 0, total_atoms,
+      model_input_measurement: 'durable_shape', model_input_front,
+    }
+    getMock.mockResolvedValue(payload(entry({ response_observed_model_input: observed })))
+    const response = await fetchKeeperTurnRecords('sangsu')
+    expect(response.entries[0]?.record.response_observed_model_input).toEqual(observed)
+  })
+
+  it.each([
+    'runtime_profile', 'transmitted_atoms', 'total_atoms', 'model_input_measurement', 'model_input_front',
   ])('rejects a response observation missing %s', async field => {
     const observed = { ...writerRows[0]?.response_observed_model_input as Record<string, unknown> }
     delete observed[field]
@@ -164,8 +177,12 @@ describe('keeper turn record cache token counts', () => {
     ['transmitted_atoms', -1], ['transmitted_atoms', 1.5], ['transmitted_atoms', 7701],
     ['total_atoms', -1], ['total_atoms', Number.MAX_SAFE_INTEGER + 1],
     ['model_input_measurement', 'unknown'], ['model_input_measurement', null],
-    ['front_atom_digest', 'a'.repeat(63)], ['front_atom_digest', 'A'.repeat(64)],
-    ['front_atom_digest', 'g'.repeat(64)], ['front_atom_digest', null],
+    ['model_input_front', 'a'.repeat(63)], ['model_input_front', 'A'.repeat(64)],
+    ['model_input_front', 'g'.repeat(64)], ['model_input_front', null],
+    ['model_input_front', { kind: 'at_atom', digest: 'g'.repeat(64) }],
+    ['model_input_front', { kind: 'after_history', digest: 'a'.repeat(64) }],
+    ['model_input_front', { kind: 'empty_history' }],
+    ['model_input_front', { kind: 'unknown' }],
     ['unexpected_observation_field', true],
   ])('rejects an invalid response observation field %s=%s', async (field, value) => {
     const observed = { ...writerRows[0]?.response_observed_model_input as Record<string, unknown>, [String(field)]: value }
@@ -230,7 +247,7 @@ describe('keeper turn record cache token counts', () => {
   })
 
   // The writer names the window's front by the message that opens it
-  // (front_atom_digest). The decoder rejects keys it does not know, so a row
+  // (model_input_front). The decoder rejects keys it does not know, so a row
   // carrying the window must still decode.
   it('accepts a row whose window names its front atom digest', async () => {
     getMock.mockResolvedValue(
@@ -239,7 +256,7 @@ describe('keeper turn record cache token counts', () => {
           transmitted_atoms: 7,
           total_atoms: 9,
           model_input_measurement: 'wire_shape',
-          front_atom_digest: 'a'.repeat(64),
+          model_input_front: { kind: 'at_atom', digest: 'a'.repeat(64) },
         }),
       ),
     )

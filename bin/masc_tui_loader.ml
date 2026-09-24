@@ -997,6 +997,7 @@ let decode_schedule_snapshot json =
   in
   let* rows = required_list_field json "requests" in
   let* scs_rows = decode_schedule_rows rows in
+  let* scs_runner_status = Tui_decode.decode_schedule_runner_status json in
   Ok
     { scs_status
     ; scs_read_error
@@ -1005,6 +1006,7 @@ let decode_schedule_snapshot json =
     ; scs_next_due_iso
     ; scs_counts
     ; scs_rows
+    ; scs_runner_status
     }
 
 (** Load the schedule list from /api/v1/dashboard/scheduled-automation. *)
@@ -1815,10 +1817,14 @@ let github_identity_lines (json : Yojson.Safe.t) : string list =
     in
     let auth_status = function
       | Some (`Assoc af) ->
+        (* A missing key is not a negative answer. This read "not signed in"
+           for a server that left the key out or changed its type, which is
+           the opposite of the truth for a Keeper that is signed in, and the
+           operator's next move on that row is to sign in again. *)
         let authenticated =
           match List.assoc_opt "authenticated" af with
-          | Some (`Bool value) -> value
-          | Some _ | None -> false
+          | Some (`Bool value) -> `Known value
+          | Some _ | None -> `Unreported
         in
         let login =
           match List.assoc_opt "login" af with
@@ -1852,10 +1858,13 @@ let github_identity_lines (json : Yojson.Safe.t) : string list =
         in
         Some
           (match authenticated, login, error with
-           | true, Some who, _ -> "signed in as " ^ who ^ scopes
-           | true, None, _ -> "signed in" ^ scopes
-           | false, _, Some message -> "not signed in (" ^ message ^ ")"
-           | false, _, None -> "not signed in")
+           | `Known true, Some who, _ -> "signed in as " ^ who ^ scopes
+           | `Known true, None, _ -> "signed in" ^ scopes
+           | `Known false, _, Some message -> "not signed in (" ^ message ^ ")"
+           | `Known false, _, None -> "not signed in"
+           | `Unreported, _, Some message ->
+               "sign-in not reported (" ^ message ^ ")"
+           | `Unreported, _, None -> "sign-in not reported")
       | Some _ | None -> None
     in
     match string_field "hostname" with
@@ -1879,10 +1888,26 @@ let github_identity_lines (json : Yojson.Safe.t) : string list =
         | Some _ | None -> "  token env: (none)"
       in
       let line label = function Some status -> [ "  " ^ label ^ ": " ^ status ] | None -> [] in
+      (* The second reading is here to show a difference: what the keeper's
+         config stores, against what this host resolves from it. They agree
+         on every keeper whose login is plain, and then the two rows are the
+         same sentence twice -- on the live roster code-reviewer drew
+         "signed in as pangyo-preachers · scopes: gist, read:org, repo,
+         workflow" on both. Agreement is one row carrying both labels, so a
+         reader is never left wondering whether the effective side was read
+         at all; a difference is still two rows. *)
+      let stored = auth_status (List.assoc_opt "stored" fields) in
+      let effective = auth_status (List.assoc_opt "effective" fields) in
+      let identity_lines =
+        match stored, effective with
+        | Some stored_status, Some effective_status
+          when String.equal stored_status effective_status ->
+            line ("stored and " ^ effective_label) stored
+        | Some _, _ | None, _ -> line "stored" stored @ line effective_label effective
+      in
       let lines =
         [ Printf.sprintf "GitHub (%s)" hostname ]
-        @ line "stored" (auth_status (List.assoc_opt "stored" fields))
-        @ line effective_label (auth_status (List.assoc_opt "effective" fields))
+        @ identity_lines
         @ [ token_env_line ]
         @ (match string_field "config_dir" with Some dir -> [ "  config: " ^ dir ] | None -> [])
       in

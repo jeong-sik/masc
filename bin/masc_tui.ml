@@ -11702,7 +11702,7 @@ let toggle_ask_choice state index =
 let begin_ask_text_entry state =
   match (selected_ask_row state, selected_ask_question state) with
   | Some row, Some question ->
-      let slot = Ask.free_text_slot question in
+      let slot = Ask.free_text_slot ~ask_id:row.Tui_decode.ar_id question in
       let existing =
         match Ask.response_for (Ask.draft_for state.ask_draft ~row) ~question with
         | Some (Ask.Draft_wrote text) -> text
@@ -11723,13 +11723,27 @@ let commit_ask_text_entry state =
   match state.ask_text_entry with
   | None -> ()
   | Some entry ->
-      (* Through the slot, which names its own question: the cursor may have
-         been moved by a snapshot arriving while the operator typed, and the
-         answer belongs to the question the editor was opened on. Blank text
-         clears the response rather than recording one -- an editor emptied by
-         backspaces means unanswered, and the domain refuses a blank write. *)
-      with_ask_draft state (fun draft _question ->
-          Ask.set_text draft ~slot:entry.ate_slot ~text:entry.ate_text);
+      (* Through the slot, which names its own ask and question: a snapshot
+         arriving while the operator typed may have moved the cursor, even to
+         another ask whose question carries the same id (masc_ask numbers
+         every ask from q1), and the answer belongs to the question the editor
+         was opened on. So the ask is looked up by the slot's id, not taken
+         from the cursor. Blank text clears the response rather than recording
+         one -- an editor emptied by backspaces means unanswered, and the
+         domain refuses a blank write. *)
+      let ask_id = Ask.free_text_ask_id entry.ate_slot in
+      (match
+         List.find_opt
+           (fun (row : Tui_decode.ask_row) -> String.equal row.Tui_decode.ar_id ask_id)
+           (open_ask_rows state)
+       with
+       | Some row ->
+           let draft = Ask.draft_for state.ask_draft ~row in
+           state.ask_draft <- Some (Ask.set_text draft ~slot:entry.ate_slot ~text:entry.ate_text);
+           state.pending_ask_submit <- None
+       | None ->
+           report_action state "system"
+             "The question you were writing to is no longer open; the text was not recorded");
       state.ask_text_entry <- None
 
 let cancel_ask_text_entry state = state.ask_text_entry <- None

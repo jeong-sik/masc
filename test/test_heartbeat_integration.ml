@@ -2541,16 +2541,28 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         , meta_snapshot () )
       in
       let before_stale_update = authority_snapshot () in
-      let stale_result =
-        Turn_up_update.update_keeper
+      let stale_outcome =
+        Turn_up_update.update_keeper_outcome
           ~expected_config_revision:initial_revision
           ctx
           stale_parsed
           stale_meta
       in
       check bool "stale paused update is rejected by manifest CAS" true
-        (Option.is_some
-           (Turn_up_update.config_revision_conflict_of_result stale_result));
+        (match stale_outcome with
+         | Turn_up_update.Update_refused
+             { refusal = Turn_up_update.Revision_conflict _; _ } -> true
+         | Turn_up_update.Update_refused
+             { refusal =
+                 ( Turn_up_update.Profile_resolution_refused _
+                 | Turn_up_update.Shutdown_preflight_failed _
+                 | Turn_up_update.Publication_rolled_back _
+                 | Turn_up_update.Manifest_reconciliation_required _
+                 | Turn_up_update.Composite_reconciliation_required _
+                 | Turn_up_update.Failed_after_commit _ )
+             ; _
+             }
+         | Turn_up_update.Runtime_synced _ -> false);
       check bool
         "stale paused update leaves manifest, receipt, runtime, checkpoint, and meta unchanged"
         true
@@ -2561,7 +2573,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        | Ok None -> fail "stale update removed paused metadata"
        | Error detail -> fail detail);
       let before_profile_failure = authority_snapshot () in
-      let profile_failure_result =
+      let profile_failure_outcome =
         Turn_up_update.For_testing.update_keeper_with_apply_profile
           ~apply_profile:(fun ~base_path:_ ~keeper_name _command ->
             Error
@@ -2572,11 +2584,24 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
           stale_parsed
           stale_meta
       in
-      check bool "owner publication failure is not a created/running success" false
-        (Keeper_types_profile.tool_result_success profile_failure_result);
-      check bool "committed configuration is not reported as rolled back" true
-        (Option.is_none
-           (Turn_up_update.config_publication_rollback_of_result profile_failure_result));
+      let profile_failure_result =
+        match profile_failure_outcome with
+        | Turn_up_update.Update_refused
+            { refusal = Turn_up_update.Failed_after_commit _; result } -> result
+        | Turn_up_update.Update_refused
+            { refusal =
+                ( Turn_up_update.Profile_resolution_refused _
+                | Turn_up_update.Shutdown_preflight_failed _
+                | Turn_up_update.Revision_conflict _
+                | Turn_up_update.Publication_rolled_back _
+                | Turn_up_update.Manifest_reconciliation_required _
+                | Turn_up_update.Composite_reconciliation_required _ )
+            ; _
+            } ->
+          fail "owner publication failure was not refused after the commit"
+        | Turn_up_update.Runtime_synced _ ->
+          fail "owner publication failure reported a runtime sync"
+      in
       let receipt = match Tool_result.metadata profile_failure_result with
         | Some json -> Yojson.Safe.Util.member "keeper_config_write" json
         | None -> fail "missing committed configuration receipt" in

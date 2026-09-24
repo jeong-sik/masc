@@ -58,6 +58,8 @@ let test_ascii_columns_keep_unicode_boundaries () =
     [ ascii; styled ];
   check string "cutting a styled column resets before the cut mark"
     "\027[31mabc\027[0m…" (Layout.fit_width "\027[31mabcdef\027[0m" 4);
+  check string "cutting printable ASCII keeps its exact cell prefix"
+    (String.sub ascii 0 79 ^ "…") (Layout.fit_width ascii 80);
   List.iter
     (fun (text, cells, prefix) ->
       check int "mixed column width" cells (Layout.display_width text);

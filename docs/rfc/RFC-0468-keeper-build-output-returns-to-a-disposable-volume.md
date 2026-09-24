@@ -125,11 +125,31 @@ volumes/masc-keeper-build-<name>/           /masc-build/<checkout>/
   volume.img (ext4, sparse, small)  ── virtio-blk ──▶  (disposable)
 ```
 
-`plan_build_link`, `Build_absent | Build_symlink | Build_real_directory`,
-`ensure_build_links`, the per-turn refresh, the never-follow-a-symlink walk,
-the never-delete-a-real-directory refusal — RFC-0399's mechanism carries over
-unchanged; it was never wrong, it was disconnected. The only new part is
-recreation.
+`plan_build_link`, `Build_absent | Build_symlink | Build_real_directory`, the
+never-follow-a-symlink walk, the never-delete-a-real-directory refusal — the
+*decision* RFC-0399 made carries over unchanged. The *mechanics* do not: a
+first pass ported RFC-0399's walk and link as host-side
+`Unix.lstat`/`Sys.readdir`/`Unix.symlink` on a `playground_root`, which was
+correct when RFC-0399 wrote it and stopped being correct when RFC-0400 made
+a `Micro_vm` keeper's tree `Endpoint_owned`
+(`Keeper_types_profile_sandbox.tree_location_of_profile`): the host keeps
+only a bookkeeping bundle, and that type's own doc comment says a host-side
+file operation on it "would silently miss the tree." Wired into boot as
+first drafted, the walk would have found zero checkouts and done nothing —
+its unit tests passed because they built synthetic host directories, not
+real RFC-0400 keeper trees. Caught before boot-wiring, in review of this
+RFC's own implementation PR.
+
+Corrected: the walk, the `_build` state read, and the symlink itself all run
+inside the guest over `container exec`, as the keeper's own uid:gid (the
+owner of everything under its work root — running these as root would leave
+root-owned entries inside a tree the keeper's own subsequent `dune build`
+needs to modify). One `find | while` script reports every checkout's state
+as `<relative path>\t<absent|real|symlink>[\t<target>]`; the host parses
+that, decides each plan purely as before, and a second exec runs `ln -sfn`
+only for the checkouts whose plan needs one. Only `plan_build_link` and the
+pure state/plan types are unchanged from RFC-0399; the walk and the act are
+new.
 
 **Recreation trigger — reactive, not predictive.** An earlier draft of this
 section proposed probing each build volume's host size on a timer and
@@ -179,42 +199,35 @@ unmeasured, as RFC-0399 left it.
 
 ## Scope, as a stack
 
-### A. Reattach the RFC-0399 mechanism
+### A. Reattach the mechanism (implemented, PR #38563)
 
-Not a revert — checked against current `main`. RFC-0400's deletion commit
-(`37d26eab2f`, "RFC-0400 C") landed after `keeper_sandbox_microvm.ml` was
-already refactored onto a multi-backend `Keeper_microvm_backend.t`
-(container/nerdctl/msb), and roughly fifty commits have deepened that since.
-Every CLI-effectful function in the file now carries that backend as an
-explicit argument, spelled with a `_for` suffix — `image_present_for`,
-`network_args_for`, and the pattern this RFC's functions must match,
-`ensure_work_volume_for`.
+Not a revert. RFC-0400's deletion commit (`37d26eab2f`, "RFC-0400 C") landed
+after `keeper_sandbox_microvm.ml` was already refactored onto a
+multi-backend `Keeper_microvm_backend.t` (container/nerdctl/msb), and
+roughly fifty commits have deepened that since. Every CLI-effectful
+function in the file now carries that backend as an explicit argument,
+spelled with a `_for` suffix, matching `ensure_work_volume_for`'s pattern.
+Volume provisioning (`build_volume_name`, `apple_build_volume_create_argv`,
+`apple_build_volume_probe`, `ensure_apple_build_volume`) was ported this
+way, Apple-only per this RFC's backend scope, reusing the already-generic
+`classify_volume_probe`/`volume_names_of_json` rather than duplicating
+them.
 
-The pure functions restore unchanged: `build_link_target`, `type
-build_link_state = Build_absent | Build_symlink of string |
-Build_real_directory`, `type build_link_plan = Link_create | Link_retarget
-| Link_already_correct | Link_refused_real_directory`, `plan_build_link`,
-`build_link_state_of_path`, `build_roots_under`, `playground_relative` —
-none of these touched a backend, so none of them changed shape.
-
-The effectful functions are ported, not copied: `build_volume_name`,
-`build_volume_create_argv`, `build_volume_mount_args`,
-`volume_names_of_json`, `classify_volume_probe`, `volume_probe`,
-`ensure_build_volume`, `apply_build_link`, `ensure_build_links`,
-`build_target_mkdir_argv` each gain the `Keeper_microvm_backend.t ->`
-parameter and follow `ensure_work_volume_for`'s current template, the same
-way `Fd_pressure` was meant to alias `Resource_pressure.S` in RFC-0122 —
-existing shape, new implementer. `volume_probe_outcome` and
-`classify_volume_probe` already survived the RFC-0400 cut once, live today
-under the work-volume path; the build-volume port reuses those types rather
-than declaring parallel ones. `type volume_kind = Build_volume |
-Work_volume` already exists for this — the port is a second match arm on a
-type the codebase already has, not a new type.
-
-Insertion point: the file's `build_volume_*` section used to sit where
-`work_volume_*` now lives (lines 121–139 roughly, pre-cut); it goes back in
-beside it, not in place of it — both volume kinds are provisioned by turn
-end, one owning the tree, one owning derived output.
+The walk and the link needed more than a signature change. A first pass
+ported RFC-0399's host-side `Unix.lstat`/`Sys.readdir`/`Unix.symlink`
+directly, which compiled and passed its own unit tests (built against
+synthetic host directories) but would have found nothing wired into a real
+boot: a `Micro_vm` keeper's tree is `Endpoint_owned`
+(`Keeper_types_profile_sandbox.tree_location_of_profile`), so the host has
+no filesystem path to the checkouts RFC-0399's walk expected. Caught in
+review before boot-wiring, and corrected — see "Design" above. Only
+`plan_build_link` and the pure `build_link_state`/`build_link_plan` types
+carry over from RFC-0399 unchanged. The walk (`build_scan_argv_for`, one
+`find | while` script reporting every checkout's `_build` state) and the
+act (`build_link_apply_argv_for`, one `ln -sfn` script for the checkouts
+whose plan needs one) are both new, run inside the guest as the keeper's
+own uid:gid over `container exec`, and are covered by tests that check
+argv/script shape rather than a real filesystem.
 
 No new refusal semantics: a real `_build` directory already found on the
 unified volume (pre-existing keepers, mid-flight at cutover) is left alone

@@ -28,6 +28,7 @@ module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Overview_team = Masc_tui_overview_team
+module Overview_goals = Masc_tui_overview_goals
 module Repository_pulls = Masc_tui_repository_pulls
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
@@ -580,6 +581,7 @@ let overview_layout (state : state) ~terminal_rows =
   let allocate attention_items =
     Render_schedule.allocate_overview ~terminal_rows
       ~attention_count:(List.length attention_items)
+      ~goal_count:(Overview_goals.wanted_rows state.overview_goals)
       ~team_count
       ~task_count:(List.length state.tasks)
       ~has_task_error:(Option.is_some tasks_error)
@@ -730,6 +732,10 @@ let render_overview (state : state) =
   let attention_items, tasks_error, row_budget =
     overview_layout state ~terminal_rows:rows
   in
+  Overview_goals.draw buf ~cols ~rows:row_budget.goal_rows
+    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime
+    ~tasks:(Option.fold ~none:(Ok state.tasks) ~some:Result.error tasks_error)
+    state.overview_goals;
   (* The panel spans the band the rest of the screen's rows cover: one cell of
      margin on each side of the frame. *)
   let panel_width = cols - 2 in

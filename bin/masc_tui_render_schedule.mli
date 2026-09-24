@@ -47,6 +47,9 @@ end
 
 type overview_allocation = {
   attention_rows : int;
+  goal_rows : int;
+      (** Rows of the GOALS block, its headline included. The divider under
+          it is one more row, drawn only when this is positive. *)
   team_rows : int;
       (** Keeper rows in the Team block. The block's title and its closing
           divider are two more rows, drawn only when this is positive. *)
@@ -63,6 +66,10 @@ val overview_team_chrome_rows : int
 (** The Team block's title row and the divider under it, drawn only when
     [team_rows] is positive. *)
 
+val overview_goal_chrome_rows : int
+(** The divider under the GOALS block, drawn only when [goal_rows] is
+    positive. *)
+
 val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allocation
 (** Adds up to [extra] Team rows out of [filler_rows] only: rows nothing else
     on the Overview wanted. A Team block not yet drawn also pays its
@@ -72,6 +79,7 @@ val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allo
 val allocate_overview :
   terminal_rows:int ->
   attention_count:int ->
+  goal_count:int ->
   team_count:int ->
   task_count:int ->
   has_task_error:bool ->

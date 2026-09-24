@@ -769,15 +769,33 @@ let recover_operation_with_corrupt_owner_fence
    the original worker held. A registered-lane operation that stopped before
    [Finalized] would unregister nothing with [entry = None], so it waits for
    boot recovery, where the process that held the lane has ended. *)
-let redrivable_in_process (operation : Keeper_shutdown_types.t) =
+type redrive_walk =
+  | Walk_recovery
+      (** The path boot recovery takes for this operation. *)
+  | Walk_admission_release
+      (** Only the fence release: the purge receipt is already delivered. *)
+
+let redrive_walk ~(config : Workspace.config) (operation : Keeper_shutdown_types.t) =
   match operation.phase, operation.lane_ownership with
-  (* Recovery treats a delivered purge receipt as retained evidence and walks
-     nothing, so asking again every tick would only report it settled. *)
+  (* A delivered purge receipt whose release failed still holds the fence
+     (#38629). Recovery reads the receipt as retained evidence and walks
+     nothing, so only the release is retried, and only while the fence is
+     this operation's: a fence another operation holds is not its to
+     release. After a restart the fence is gone, since boot restores fences
+     only for operations that still require one. *)
   | Finalized { completion = Completion_delivered Dashboard_keeper_purged; _ }
-  , (Dormant_meta | Registered_lane _) -> false
-  | Finalized _, (Dormant_meta | Registered_lane _) -> true
-  | (Joined_idle | Finalizing_tasks _ | Cleanup_ready _), Dormant_meta -> true
-  | (Joined_idle | Finalizing_tasks _ | Cleanup_ready _), Registered_lane _ -> false
+  , (Dormant_meta | Registered_lane _) ->
+    (match
+       Keeper_shutdown_intake_fence.shutdown_operation_id
+         ~base_path:config.base_path
+         ~keeper_name:operation.keeper_name
+     with
+     | Some holder when Operation_id.equal holder operation.operation_id ->
+       Some Walk_admission_release
+     | Some _ | None -> None)
+  | Finalized _, (Dormant_meta | Registered_lane _) -> Some Walk_recovery
+  | (Joined_idle | Finalizing_tasks _ | Cleanup_ready _), Dormant_meta -> Some Walk_recovery
+  | (Joined_idle | Finalizing_tasks _ | Cleanup_ready _), Registered_lane _ -> None
   | ( ( Prepared
       | Joining_lanes
       | Reconciliation_required _
@@ -785,42 +803,55 @@ let redrivable_in_process (operation : Keeper_shutdown_types.t) =
       | Owner_absent _
       | Operator_absence_acknowledged _
       | Superseded _ )
-    , (Dormant_meta | Registered_lane _) ) -> false
+    , (Dormant_meta | Registered_lane _) ) -> None
 ;;
 
 let redrive_claimed ~config (operation : Keeper_shutdown_types.t) =
-  if redrivable_in_process operation
-  then (
-    match
-      Keeper_shutdown_store.corrupt_operation_id_for_keeper
-        ~config
-        ~keeper_name:operation.keeper_name
-    with
-    | Error error ->
-      Log.Keeper.error
-        "re-driven shutdown finalization could not read corrupt siblings: keeper=%s operation=%s error=%s"
-        operation.keeper_name
-        (worker_key operation)
-        (Keeper_shutdown_store.error_to_string error)
-    | Ok corrupt_operation_id ->
-      let corrupt_owner_fence =
-        Option.map
-          (fun operation_id -> { keeper_name = operation.keeper_name; operation_id })
-          corrupt_operation_id
-      in
-      (match recover_claimed ~config ~corrupt_owner_fence operation with
-       | Ok settled ->
-         Log.Keeper.info
-           "re-driven shutdown finalization settled: keeper=%s operation=%s phase=%s"
-           settled.keeper_name
-           (worker_key settled)
-           (phase_to_string settled.phase)
-       | Error detail ->
-         Log.Keeper.error
-           "re-driven shutdown finalization stopped: keeper=%s operation=%s error=%s"
-           operation.keeper_name
-           (worker_key operation)
-           detail))
+  match redrive_walk ~config operation with
+  | None -> ()
+  | Some walk ->
+    (match
+       Keeper_shutdown_store.corrupt_operation_id_for_keeper
+         ~config
+         ~keeper_name:operation.keeper_name
+     with
+     | Error error ->
+       Log.Keeper.error
+         "re-driven shutdown finalization could not read corrupt siblings: keeper=%s operation=%s error=%s"
+         operation.keeper_name
+         (worker_key operation)
+         (Keeper_shutdown_store.error_to_string error)
+     | Ok corrupt_operation_id ->
+       let walked =
+         match walk with
+         | Walk_recovery ->
+           let corrupt_owner_fence =
+             Option.map
+               (fun operation_id -> { keeper_name = operation.keeper_name; operation_id })
+               corrupt_operation_id
+           in
+           recover_claimed ~config ~corrupt_owner_fence operation
+         | Walk_admission_release ->
+           Keeper_shutdown_finalize.run
+             ~config
+             ~entry:None
+             ?successor_operation_id:corrupt_operation_id
+             operation
+           |> Result.map_error Keeper_shutdown_finalize.error_to_string
+       in
+       (match walked with
+        | Ok settled ->
+          Log.Keeper.info
+            "re-driven shutdown finalization settled: keeper=%s operation=%s phase=%s"
+            settled.keeper_name
+            (worker_key settled)
+            (phase_to_string settled.phase)
+        | Error detail ->
+          Log.Keeper.error
+            "re-driven shutdown finalization stopped: keeper=%s operation=%s error=%s"
+            operation.keeper_name
+            (worker_key operation)
+            detail))
 ;;
 
 type redrive_error =
@@ -845,7 +876,7 @@ let rec redrive_finalization ~config ~keeper_name ~operation_id =
     (* Checked before claiming as well as after: a phase the walk refuses
        must not hold the claim, or boot recovery of that operation, running
        beside the first tick, finds it taken and gives up. *)
-    | Ok operation when not (redrivable_in_process operation) -> Ok ()
+    | Ok operation when Option.is_none (redrive_walk ~config operation) -> Ok ()
     | Ok operation ->
       (match fork_claimed ~config ~run:(redrive_claimed ~config) operation with
        | Worker_started | Worker_already_active -> Ok ()

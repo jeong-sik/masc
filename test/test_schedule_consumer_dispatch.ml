@@ -1417,7 +1417,12 @@ let rec files_named root name =
   else []
 ;;
 
-let fenced_purge_operation config ~keeper_name meta =
+let fenced_purge_operation
+    ?(completion = Keeper_shutdown_types.Completion_pending Dashboard_keeper_purged)
+    config
+    ~keeper_name
+    meta
+  =
   let trace_id =
     match Keeper_id.Trace_id.of_string ("trace-" ^ keeper_name) with
     | Ok trace_id -> trace_id
@@ -1433,7 +1438,7 @@ let fenced_purge_operation config ~keeper_name meta =
     ; session_removed = true
     ; registry_unregistered = true
     ; accumulator_dropped = true
-    ; completion = Completion_pending Dashboard_keeper_purged
+    ; completion
     }
   in
   let operation : Keeper_shutdown_types.t =
@@ -1579,6 +1584,71 @@ let test_fenced_purge_settles_on_the_first_tick_after_its_blocker_is_repaired ()
        check int "after: nothing is dispatched" 0 (List.length after.dispatches);
        check int "after: the settled purge is not walked again"
          (List.length blocked_ticks + 1) !completion_attempts)
+;;
+
+(* #38629: the purge receipt is delivered but the fence release failed, so the
+   fence stays until the next restart. The re-drive retries only the release,
+   and only while the fence is this operation's. *)
+let test_delivered_purge_releases_only_its_own_fence () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  let delivered = Keeper_shutdown_types.Completion_delivered Dashboard_keeper_purged in
+  let fence keeper_name =
+    Keeper_shutdown_intake_fence.shutdown_operation_id ~base_path ~keeper_name
+    |> Option.map Keeper_shutdown_types.Operation_id.to_string
+  in
+  let tick now =
+    Eio.Switch.run (fun sw ->
+      Keeper_process_switch.set sw;
+      tick_ok config ~now)
+  in
+  Fun.protect
+    ~finally:(fun () -> Keeper_process_switch.For_testing.clear ())
+    (fun () ->
+       let own = "delivered-own-fence" in
+       let own_meta = (register_keeper config own).Keeper_registry_types.meta in
+       ignore
+         (create_named_keeper_wake_schedule config ~schedule_id:"delivered-own"
+            ~keeper_name:own
+          : Schedule_domain.schedule_request);
+       let own_operation =
+         fenced_purge_operation ~completion:delivered config ~keeper_name:own own_meta
+       in
+       (match
+          Keeper_owner_registry.begin_shutdown ~base_path ~keeper_name:own
+            ~operation_id:own_operation.operation_id
+        with
+        | Ok _ -> ()
+        | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+       let other = "delivered-other-fence" in
+       let other_meta = (register_keeper config other).Keeper_registry_types.meta in
+       ignore
+         (create_named_keeper_wake_schedule config ~schedule_id:"delivered-other"
+            ~keeper_name:other
+          : Schedule_domain.schedule_request);
+       ignore
+         (fenced_purge_operation ~completion:delivered config ~keeper_name:other other_meta
+          : Keeper_shutdown_types.t);
+       let newer = Keeper_shutdown_types.Operation_id.generate () in
+       (match
+          Keeper_owner_registry.begin_shutdown ~base_path ~keeper_name:other
+            ~operation_id:newer
+        with
+        | Ok _ -> ()
+        | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+       let first = tick 201.0 in
+       check int "both fenced schedules are held" 2 (List.length first.held);
+       check (option string) "the delivered purge releases its own fence" None
+         (fence own);
+       check (option string) "a fence another operation holds is left alone"
+         (Some (Keeper_shutdown_types.Operation_id.to_string newer))
+         (fence other);
+       let second = tick 202.0 in
+       check (list string) "only the other keeper stays held" [ "delivered-other" ]
+         (List.map
+            (fun ({ signal; _ } : Schedule_runner.held) -> signal.schedule_id)
+            second.held))
 ;;
 
 let test_shutdown_fence_covers_direct_durable_queue_producers () =
@@ -3349,6 +3419,8 @@ let () =
         ; test_case "fenced purge settles on the first tick after its blocker is repaired"
             `Quick
             test_fenced_purge_settles_on_the_first_tick_after_its_blocker_is_repaired
+        ; test_case "delivered purge releases only its own fence" `Quick
+            test_delivered_purge_releases_only_its_own_fence
         ; test_case "shutdown fence covers direct durable queue producers" `Quick
             test_shutdown_fence_covers_direct_durable_queue_producers
         ; test_case "transferred retry uses resolved owner shutdown fence" `Quick

@@ -2087,6 +2087,16 @@ type overview_spend_reading =
     }
   | Overview_spend_failed of string
 
+let cost_reply_is_current ~visible ~current_generation ~reply_generation =
+  visible && current_generation = reply_generation
+
+let toggle_cost_visibility ~visible ~generation =
+  (not visible, generation + 1)
+
+let cost_refresh_needed ~visible = function
+  | Overview_spend_unread -> visible
+  | Overview_spend_warming | Overview_spend_read _ | Overview_spend_failed _ -> false
+
 (** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
     briefing writes [null] for a Keeper with no registry entry (an offline
     Keeper that never booted this process), which is a different fact from a
@@ -6148,6 +6158,7 @@ type state = {
      rereads every day file of every Keeper's metrics whenever its server
      cache expires, so a hidden spend is not fetched at all. *)
   mutable cost_visible: bool;
+  mutable cost_generation: int;
   (* Code surface: one directory level at a time through the lazy /children
      route; the file arrives whole and is lexed once at load. *)
   mutable code_dir: string;
@@ -8114,6 +8125,7 @@ let create_state
   link_modal_cursor = 0;
   link_previews_mode = `Rich;
   cost_visible = false;
+  cost_generation = 0;
   code_dir = "";
   code_listing = Masc_tui_fetched.initial;
   code_cursor = 0;

@@ -1846,7 +1846,7 @@ type http_scoped_surface_results = {
   http_repository_pulls:
     (overview_pulls_reading, string) result
     option;
-  http_keeper_spend: (overview_spend_reading, string) result option;
+  http_keeper_spend: (int * (overview_spend_reading, string) result) option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Tui_decode.overview_goal list, string) result option;
 }
@@ -9841,7 +9841,12 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         ~scope:Tui_decode.Repository_change_project ~path:target_path
   | Masc_tui_command.Toggle_cost ->
       Buffer.clear state.msg_input;
-      state.cost_visible <- not state.cost_visible;
+      let visible, generation =
+        Masc_tui_types.toggle_cost_visibility ~visible:state.cost_visible
+          ~generation:state.cost_generation
+      in
+      state.cost_visible <- visible;
+      state.cost_generation <- generation;
       (* Hidden, spend stops being read, so a reading kept from before would
          come back as a number nobody observed since. Shown again, it starts
          unread and the next refresh fills it. *)
@@ -10590,12 +10595,12 @@ let apply_repository_pulls_load state = function
 (* A failed read replaces the last good one, as the pull requests do: a
    spend drawn after the reading that said so stopped arriving would be a
    number nobody observed. *)
-let apply_keeper_spend_load state result =
-  (* A reply that lands while [/cost] hides the spend is not drawn and not
-     kept: kept, it would come back when the spend is shown again. A reply
-     asked for before a hide and landing after the next show is applied; it
-     is still a reading the server just made. *)
-  if state.cost_visible then
+let apply_keeper_spend_load state ~generation result =
+  (* A response from before an off/on cycle cannot certify the new reading,
+     even if it arrives after the operator turns spend back on. *)
+  if Masc_tui_types.cost_reply_is_current ~visible:state.cost_visible
+       ~current_generation:state.cost_generation ~reply_generation:generation
+  then
     state.overview_spend <- Masc_tui_keeper_spend.reading_of_load result
 
 (* A failed read replaces the last good one, as the quota reading does: goals
@@ -10791,7 +10796,8 @@ let refresh_status results =
   | _ -> Masc_tui_types.Degraded
 
 let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
-    ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~system_log_level ~cost_generation
+    ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   (* Metrics draws the transport and the Overview reads its queue pressure,
      so a refresh on another surface does not spend a request on it. [None]
@@ -10855,9 +10861,9 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   let http_keeper_spend =
     when_needed needs.needs_keeper_spend (fun () ->
         match Masc_tui_loader.load_keeper_spend ~host ~port with
-        | result -> result
+        | result -> (cost_generation, result)
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-        | exception exn -> Error (Printexc.to_string exn))
+        | exception exn -> (cost_generation, Error (Printexc.to_string exn)))
   in
   let http_overview_goals =
     when_needed needs.needs_overview_goals (fun () ->
@@ -10882,7 +10888,8 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   }
 
 let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
-    ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~system_log_level ~cost_generation
+    ~(needs : Masc_tui_types.surface_needs) =
   (* A process can disappear and another bind the same endpoint between two
      successful ticks. The compact /health identity is therefore revalidated
      on every refresh rather than inferred from connection failure. It goes
@@ -10906,7 +10913,7 @@ let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
          still decides whether the panel renders, only the fetch is
          unconditional. Targeted scoped refreshes keep their own needs. *)
       load_http_scoped_surfaces ~host ~port ~approval_ticket:None
-        ~board_sort ~board_hearth ~system_log_level
+        ~board_sort ~board_hearth ~system_log_level ~cost_generation
         ~needs:{ needs with needs_asks = true }
     in
     Refresh_surfaces
@@ -10925,7 +10932,9 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   Option.iter (apply_runtime_quota_load state) results.http_runtime_quota;
   Option.iter (apply_repository_pulls_load state) results.http_repository_pulls;
-  Option.iter (apply_keeper_spend_load state) results.http_keeper_spend;
+  Option.iter
+    (fun (generation, result) -> apply_keeper_spend_load state ~generation result)
+    results.http_keeper_spend;
   Option.iter (apply_overview_goals_load state) results.http_overview_goals
 
 (* This is a current reading, not a last-known cache. A failed probe makes
@@ -11302,11 +11311,13 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        is in the payload whether or not the tail is. *)
     if not was_booting then launch_schedules_load state ~mailbox;
 
+    let cost_generation = state.cost_generation in
     let run_refresh () =
       try
         enqueue_async mailbox
           (Http_refresh_done
              (load_http_surfaces ~host ~port ~approval_ticket
+                ~cost_generation
                 ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -11330,6 +11341,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
           (fun () ->
              apply_http_refresh_outcome state
                (load_http_surfaces ~host ~port ~approval_ticket
+                  ~cost_generation
                   ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -11354,11 +11366,13 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
        match state.msg_target_keeper_name with
        | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
        | None -> ());
+    let cost_generation = state.cost_generation in
     let run_refresh () =
       try
         enqueue_async mailbox
           (Http_scoped_refresh_done
              (load_http_scoped_surfaces ~host ~port
+                ~cost_generation
                 ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -11382,6 +11396,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
           (fun () ->
              apply_http_scoped_surfaces state
                (load_http_scoped_surfaces ~host ~port
+                  ~cost_generation
                   ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -25285,13 +25300,21 @@ and is loaded on demand through keeper_skill.
           ~cost_shown:state.cost_visible
           state.view
       in
+      let cost_retry =
+        needed.needs_keeper_spend
+        && Masc_tui_types.cost_refresh_needed ~visible:state.cost_visible
+             state.overview_spend
+      in
       if
-        needed <> !drawn_needs
+        (needed <> !drawn_needs || cost_retry)
         && not !http_refresh_inflight
         && not !http_scoped_refresh_inflight
       then begin
         let delta =
           Masc_tui_types.surface_needs_delta ~previous:!drawn_needs ~next:needed
+        in
+        let delta =
+          { delta with needs_keeper_spend = delta.needs_keeper_spend || cost_retry }
         in
         drawn_needs := needed;
         if Masc_tui_types.surface_needs_any delta then

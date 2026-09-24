@@ -1115,6 +1115,12 @@ self_test() {
   check "a source edit selects the suites named after it" \
     "test/test_keeper_toml.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml"
+  # Turn-record keys live in OCaml, while the Context Inspector's HTTP
+  # response is a Python fixture. Run only that PTY scenario when the
+  # contract moves; the full keyboard walk costs hundreds of seconds.
+  check_required "turn record contract selects its Python fixture consumer" \
+    "test/test_tui_context_inspector.py" \
+    "lib/types/turn_record.ml"
   # A module whose name is a namespace attributes nothing by name -- it
   # prefixes 136 suites, and picking those off one edit says nothing. What it
   # still selects is the guards and PTY scenarios that name the file. The name

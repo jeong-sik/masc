@@ -54,7 +54,11 @@ val read_sandbox_bytes :
   path:string -> max_bytes:int -> unit ->
   (string, string) result
 (** Resolve like Read, enforce this Keeper's containment, and read binary bytes
-    through the existing sandbox runner. Never falls back to a host read. *)
+    through the existing sandbox runner. Never falls back to a host read. A
+    remote Keeper's path under its endpoint's declared roots
+    ({!Keeper_sandbox_remote_lane.declared_endpoint_path_of_args}) is the
+    endpoint's own path: it skips the host containment check and is read as
+    itself, the endpoint account being its boundary as for Execute. *)
 
 val read_complete_sandbox_bytes :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->

@@ -177,7 +177,7 @@ is-default = true
       let deferred = ref None in
       Option.iter (fun admission -> Continuation.consume ~base_path ~keeper_name ~operation_id admission
         |> require "consume same checkpoint") admission;
-      let result = Keeper_turn_driver.run_named
+      let result = Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~runtime_id:(match admission with None -> "direct" | Some value -> (Continuation.lane value).next_runtime_id)
         ~keeper_name ~base_path ~session_id ~goal:"Finish original task"
         ~system_prompt:"Use the effect receipt to finish the original task."
@@ -442,7 +442,7 @@ is-default = true
       let deferred = ref None in
       Option.iter (fun admission -> Continuation.consume ~base_path ~keeper_name ~operation_id admission
         |> require "consume same checkpoint") admission;
-      let result = Keeper_turn_driver.run_named
+      let result = Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~checkpoint_progress
         ~runtime_id:(match admission with None -> "direct" | Some value -> (Continuation.lane value).next_runtime_id)
         ~keeper_name ~base_path ~session_id ~goal:"Finish original task"

@@ -1056,12 +1056,15 @@ let test_endpoint_source_outcome_separates_endpoint_from_file () =
   let check label expected outcome =
     Alcotest.(check string) label expected (describe (S.endpoint_source_read_of_outcome outcome))
   in
+  (* Error texts in the shape Keeper_sandbox_read_backend's
+     classify_read_outcome_with_limit gives them; the mapping reads only the
+     Error case, never the text. *)
   check "a transport failure is the endpoint" "endpoint_unanswered"
-    (Error "microvm_remote_read_transport_failed");
+    (Error "microvm_remote_read_transport_failed: endpoint=guest reason=exec failed stderr=");
   check "a signalled run is the endpoint" "endpoint_unanswered"
-    (Ok (Unix.WSIGNALED Sys.sigkill, ""));
-  check "an undeclared exit is the endpoint" "endpoint_unanswered"
-    (Ok (Unix.WEXITED 126, ""));
+    (Error "microvm_remote_read_signaled: endpoint=guest signal=9 stderr=");
+  check "an undeclared exit (no head on the endpoint) is the endpoint" "endpoint_unanswered"
+    (Error "microvm_remote_read_failed: endpoint=guest exit=127 stderr=head: not found");
   check "the unreadable exit is the file" "file_unreadable"
     (Ok (Unix.WEXITED S.endpoint_source_unreadable_exit, ""));
   check "the missing exit" "missing" (Ok (Unix.WEXITED S.endpoint_source_missing_exit, ""));

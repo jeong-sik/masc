@@ -352,7 +352,10 @@ let read_for_keepers_dir ~keepers_dir ~keeper_id =
    is read on the host as before.
 
    The endpoint reports a missing path, a non-file and a file it could not
-   read by exit status. Every answer about the file is a declared exit, so
+   read by exit status. Only head's own failure status (1) becomes the
+   unreadable exit; any other status (126/127: no head on the endpoint,
+   128+n: head was signalled) passes through undeclared, because it is about
+   the endpoint, not the file. Every answer about the file is a declared exit, so
    the caller's mistake (wrong path) and one unreadable file stay apart from
    an endpoint that did not answer at all, without parsing its stderr. *)
 let endpoint_source_missing_exit = 3
@@ -363,7 +366,7 @@ let endpoint_source_argv ~path ~max_bytes =
   [ "sh"
   ; "-c"
   ; Printf.sprintf
-      {|if [ ! -e "$1" ]; then exit %d; fi; if [ ! -f "$1" ]; then exit %d; fi; head -c "$2" "$1" || exit %d|}
+      {|if [ ! -e "$1" ]; then exit %d; fi; if [ ! -f "$1" ]; then exit %d; fi; head -c "$2" "$1"; s=$?; if [ "$s" -eq 1 ]; then exit %d; fi; exit "$s"|}
       endpoint_source_missing_exit
       endpoint_source_not_regular_exit
       endpoint_source_unreadable_exit
@@ -387,6 +390,9 @@ let endpoint_source_read_of_outcome = function
   | Ok (Unix.WEXITED 0, content) when String.length content > max_source_bytes ->
     Error (Source_over_limit { max_bytes = max_source_bytes })
   | Ok (Unix.WEXITED 0, content) -> Ok content
+  (* Not produced by the backend, which returns [Ok] only for a status in
+     [ok_exit_codes] and turns every other status into [Error]; kept because
+     the status type is wider than that contract. *)
   | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
     Error
       (Source_endpoint_unanswered "endpoint source read ended outside its declared exits")

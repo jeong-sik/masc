@@ -474,7 +474,7 @@ let live_references ~base_path =
        (fun result root ->
           Result.bind result (fun progress -> scan_directory root progress))
        (Ok Artifact_reference_set.empty)
-  |> Result.bind scan_board_post_file
+  |> (fun result -> Result.bind result scan_board_post_file)
 ;;
 
 let expand_artifact_manifests ~store references =

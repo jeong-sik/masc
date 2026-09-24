@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
+import { act } from 'preact/test-utils'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { EditorView } from '@codemirror/view'
 import { currentFileFindMatches, IdeEditor } from './ide-editor'
@@ -240,6 +241,14 @@ describe('IdeEditor', () => {
     }
 
     await waitFor(() => expect(selectedText()).toBe('1:runtime'))
+
+    // Enter that commits an IME composition belongs to the query, not Next.
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
+    })
+    expect(container.querySelector('[data-testid="ide-find-status"]')?.textContent)
+      .toContain('1 of 2 matches')
+    expect(selectedText()).toBe('1:runtime')
 
     fireEvent.keyDown(input, { key: 'Enter' })
     await waitFor(() => {

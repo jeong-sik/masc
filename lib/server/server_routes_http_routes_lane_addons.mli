@@ -9,7 +9,7 @@ val decode_inspect_query : (string * string) list -> (Yojson.Safe.t, string) res
 
 (** The source kinds [GET /api/v1/lane-addons/live] can watch: the ones with a
     machine screen behind them ([msx_capture], [dos_capture]). *)
-type screen_source = Msx_screen | Dos_screen
+type screen_source = Lane_addon_sources.live_reader = Msx_screen | Dos_screen
 
 (** A spectator's last mark: the change count it read and the incarnation it
     read it under. *)

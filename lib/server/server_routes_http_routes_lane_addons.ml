@@ -121,10 +121,9 @@ let get_action request reqd =
       dispatch state Runtime.Action_status args in
     respond request reqd result) request reqd
 
-(* The source kinds [live] can watch: the ones with a machine screen behind
-   them. Another machine is one more constructor here and one arm each in
-   [live_from_published_mark] and [live_json]. *)
-type screen_source = Msx_screen | Dos_screen
+(* Use the source binding's kind table so a new kind must say whether it has a
+   current screen before the live route can decode it. *)
+type screen_source = Lane_addon_sources.live_reader = Msx_screen | Dos_screen
 
 let screen_source_kind = function
   | Msx_screen -> "msx_capture"
@@ -141,12 +140,15 @@ let decode_live_query fields =
     | Some name -> Error ("unknown live parameter: " ^ name)
     | None ->
         let* source = match List.assoc_opt "source_kind" fields with
-          | Some "msx_capture" -> Ok Msx_screen
-          | Some "dos_capture" -> Ok Dos_screen
-          | Some ("snapshot_file" | "lane_output" | "browser_document" as kind) ->
-              Error (kind ^ " has no screen to watch; live accepts msx_capture and dos_capture")
-          | Some kind -> Error ("unknown source_kind: " ^ kind)
-          | None -> Error "live requires source_kind" in
+          | None -> Error "live requires source_kind"
+          | Some raw ->
+              (match Lane_addon_sources.kind_of_string raw with
+               | None -> Error ("unknown source_kind: " ^ raw)
+               | Some kind ->
+                   (match Lane_addon_sources.live_screen_of_kind kind with
+                    | Some screen -> Ok screen
+                    | None ->
+                        Error (raw ^ " has no screen to watch; live accepts msx_capture and dos_capture"))) in
         (* Decimal digits only: int_of_string_opt also reads 0x10 and 1_000.
            Digits it still cannot read overflow an int. *)
         let count_of value =

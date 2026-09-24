@@ -104,12 +104,11 @@ type change_mark = { count : int; incarnation : string }
 (* The machine change counter a spectator compares against, one per process,
    written only while holding [lock]. It is not [steps]: a guest fault raises
    out of the core before [steps] moves, so a faulting run can leave [steps]
-   where it was while the attempt still happened. Every run attempt marks
-   before it touches the machine -- a key in the ring, the mouse, the core --
-   so a run that faults at its first instruction still moves the count. A
-   call refused before that point leaves it. A load marks right after
-   installing the new machine, an eject right after dropping it, and nothing
-   resets it, so one value never names two screens while the server runs.
+   where it was while the attempt still happened. [running] marks every
+   completed run, including a guest fault, in one place. A call refused
+   before running leaves the count alone. A load also marks when it installs
+   the new machine, an eject marks when it drops it, and nothing resets the
+   count, so one value never names two screens while the server runs.
 
    [published] is the same count with the incarnation of [!state], or [None]
    with no machine. It is set only here, under [lock], every time either
@@ -118,11 +117,6 @@ type change_mark = { count : int; incarnation : string }
 let change_count = ref 0
 let published : change_mark option Atomic.t = Atomic.make None
 
-(* WORKAROUND: each call that runs the machine marks at its own call site,
-   unlike Msx_lane, which marks in its one run primitive. A new function that
-   runs the guest must call this itself, or a spectator stays on the last
-   screen. PR #38715 is rewriting the advance_* lines around run_until; the
-   root fix moves the mark into one run_until wrapper after it lands (#38754). *)
 let mark_change () =
   incr change_count;
   Atomic.set published
@@ -152,10 +146,20 @@ let with_machine f =
    raises rather than misbehave quietly), or the ledger file will not take a
    line. Both come back as errors, not exceptions out of the tool. *)
 let running f =
-  match f () with
-  | result -> result
-  | exception Cpu86.Unsupported message -> Error (Guest_fault message)
-  | exception Sys_error message -> Error (Unreadable message)
+  let result =
+    match f () with
+    | result -> result
+    | exception Cpu86.Unsupported message -> Error (Guest_fault message)
+    | exception Sys_error message -> Error (Unreadable message)
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      mark_change ();
+      Printexc.raise_with_backtrace exn backtrace
+  in
+  (match result with
+   | Ok _ | Error (Unreadable _ | Guest_fault _) -> mark_change ()
+   | Error (No_machine | Invalid_request _ | Held_by _) -> ());
+  result
 ;;
 
 let refuse_other st ~who =
@@ -601,7 +605,6 @@ let step ~who ~steps ~until_ready =
     match clamp_steps steps with
     | Error e -> Error e
     | Ok budget ->
-      mark_change ();
       let ran = advance st ~budget ~until_ready in
       ran_then_kept st ran)
 ;;
@@ -632,8 +635,6 @@ let resolve_keys names =
    rest; the keys not pressed are not in the ledger and never reached the
    ring. *)
 let press_resolved st ~who ~keys ~budget =
-  (* Called with at least one key, so the first key always goes in. *)
-  mark_change ();
   let total = ref 0 and requests = ref 0 and pressed = ref 0 in
   let last_settled = ref false in
   List.iter
@@ -709,7 +710,6 @@ let click ~who ~x ~y ~buttons ~steps =
       match clamp_steps steps with
       | Error e -> Error e
       | Ok budget ->
-        mark_change ();
         append_entry st
           { at_step = st.steps; who; key_name = Printf.sprintf "mouse(%d,%d,%d)" x y buttons };
         Dos_machine.set_mouse st.m ~x ~y ~buttons;

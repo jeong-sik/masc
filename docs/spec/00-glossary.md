@@ -446,6 +446,24 @@ status: reference
   합계·누적·범위 미상인 값으로 단일 요청의 컨텍스트 점유율이나 비용을 계산하지
   않는다. 클라이언트 턴 합계도 runtime 후보 순서를 포함한 Keeper turn 전체 합계는 아니다.
 
+**Provider Usage Window (제공자 사용량 창)**
+: Claude Code(`rate_limit_event`의 `unifiedWindows`)나 Codex app-server
+  (`account/rateLimits/updated`)가 턴 도중 wire로 통보한 제공자 자체의 사용량 한도 창
+  (`Runtime_provider_usage_window.t`). (quota scope, limit, window)별 최신 관측값과
+  수신 시각을 기록하며, `GET /api/v1/runtime/resolved`에 읽기 전용으로 노출된다(#38380).
+  - **관측 권위**: 이것은 순수한 관측(observation)이다. codex-cli 규약에 따라 클라이언트는
+    소진율(utilization)이나 리셋 시각(`resets_at`)으로 복구 시점을 추론해서는 안 되므로,
+    MASC의 라우팅·후보 순서(candidate ordering)·승인(admission)·재시도(retry) 판단은 이 숫자를
+    일절 읽지 않는다. 제공자가 알려준 사실 그대로를 기록하고 보여줄 뿐이다.
+  - **비영속·프로세스 로컬**: 프로세스 메모리에만 존재하며 저장소에 남지 않는다. 프로세스
+    기동 후 통보가 한 번도 없었던 scope는 0이나 빈 창으로 꾸며내지 않고
+    `Not_reported_since_start`로 명시한다.
+  - **TTL 부재**: `resets_at` 시각이 지나도 자동으로 삭제되거나 만료되지 않으며, 더 새로운
+    보고가 올 때까지 마지막 수신 기록을 유지한다.
+  - **Usage Scope와의 구분**: 위의 Usage Scope(MASC가 집계하는 토큰 수의 범위)와 다른 축이다 —
+    이쪽은 모델 제공자가 wire로 알려준 자기 계정의 5시간·7일 한도 창이다.
+  → [Runtime_provider_usage_window](../../lib/runtime/runtime_provider_usage_window.mli)
+
 **Caller Scope**
 : 이벤트를 발행하는 코드가 bus handle에 실어 봉투에 붙는 불투명한 값
   (`Caller_scope.t`, `Event_envelope.caller_scope`). Agent Core는 그대로 나르기만 하고

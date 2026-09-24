@@ -83,16 +83,16 @@ let active_of = function
   | json -> Result.map Option.some (page_id_of ~method_:"context.active_page" json)
 ;;
 
-let evaluate_expression ?(with_scene = false) ~body ~args =
-  let runtime = if with_scene then Browser_scene_script.runtime else "" in
+type page_runtime = Scene_runtime | No_runtime
+
+let evaluate_expression ~runtime ~body ~args =
+  let runtime = match runtime with Scene_runtime -> Browser_scene_script.runtime | No_runtime -> "" in
   Printf.sprintf "(function(args) { %s\nreturn JSON.stringify((function(){ %s }).call(null, args)); })(%s)"
     runtime body (Yojson.Safe.to_string args)
 ;;
 
-let evaluate ?(with_scene = false) ~send page_id body =
-  let* reply =
-    send (Wire.Page_evaluate { page_id; expression = evaluate_expression ~with_scene ~body ~args:`Null })
-  in
+let evaluate ~runtime ~send page_id body =
+  let* reply = send (Wire.Page_evaluate { page_id; expression = evaluate_expression ~runtime ~body ~args:`Null }) in
   match field "value" reply with
   | Some (`String encoded) ->
     (match Yojson.Safe.from_string encoded with
@@ -145,7 +145,7 @@ let list_tabs ~tabs ~call =
   let* listed =
     traverse
       (fun page_id ->
-        let* summary = Result.bind (evaluate ~send page_id summary_body) summary_of in
+        let* summary = Result.bind (evaluate ~runtime:No_runtime ~send page_id summary_body) summary_of in
         Ok
           (`Assoc
             [ "id", `Int (Tabs.id_of_page tabs page_id)
@@ -168,18 +168,20 @@ let goto ~tabs ~call ~url ~tab_id =
       Option.to_result ~none:(Browser_lane.Rejected_before_effect "no active tab to navigate; name a tabId") active
   in
   let* _ = send call (Wire.Page_goto { page_id; url }) in
-  let* summary = Result.bind (evaluate ~send:(send_after_effect call) page_id summary_body) summary_of in
+  let* summary =
+    Result.bind (evaluate ~runtime:No_runtime ~send:(send_after_effect call) page_id summary_body) summary_of
+  in
   Ok (`Assoc [ "url", `String summary.url; "title", `String summary.title ])
 ;;
 
 let capture ~tabs ~call ~tab_id =
   let send = send call in
   let* page_id = page_of ~tabs tab_id in
-  let* (before, viewport) = Result.bind (evaluate ~with_scene:true ~send page_id observation_body) observation_of in
+  let* (before, viewport) = Result.bind (evaluate ~runtime:Scene_runtime ~send page_id observation_body) observation_of in
   let* shot = send (Wire.Page_screenshot { page_id }) in
   let* data = string_field ~method_:"page.screenshot" "data" shot in
   let* (after, viewport_after) =
-    Result.bind (evaluate ~with_scene:true ~send page_id observation_body) observation_of
+    Result.bind (evaluate ~runtime:Scene_runtime ~send page_id observation_body) observation_of
   in
   if String.equal before.url after.url && Yojson.Safe.equal viewport viewport_after then
     Ok

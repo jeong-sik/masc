@@ -202,8 +202,8 @@ let test_unserved_verbs () =
 
 let test_evaluate_expression () =
   let args = `Assoc [ "mode", `String "viewport" ] in
-  let expression = Executor.evaluate_expression ~body:"return 1;" ~args in
-  let with_scene = Executor.evaluate_expression ~with_scene:true ~body:"return 1;" ~args in
+  let expression = Executor.evaluate_expression ~runtime:Executor.No_runtime ~body:"return 1;" ~args in
+  let with_scene = Executor.evaluate_expression ~runtime:Executor.Scene_runtime ~body:"return 1;" ~args in
   check bool "called at once with its arguments as a JSON literal" true
     (String.ends_with ~suffix:("(" ^ to_s args ^ ")") expression);
   check int "scene runtime is added only when requested"

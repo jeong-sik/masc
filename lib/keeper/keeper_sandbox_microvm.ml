@@ -611,7 +611,7 @@ let build_recipe_image_for backend ~image ~timeout_sec =
         let argv =
           command_argv_for backend
           @ Keeper_sandbox_image.context_directory_build_argv ~tag:image
-              ~dockerfile ~context
+              ~dockerfile ~context ()
         in
         match Process_eio.run_argv_with_status_split ~timeout_sec argv with
         | Unix.WEXITED 0, _, _ -> Ok ()

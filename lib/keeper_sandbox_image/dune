@@ -1,5 +1,6 @@
-; The general Keeper sandbox recipe. No dependencies: it is a string and the
-; argv that feeds it to docker, so it can be read from a test without a daemon.
+; The Keeper sandbox recipes and the tag that names each build. Nothing here
+; talks to an image store, so all of it can be read from a test without a
+; daemon.
 
 (include_subdirs no)
 
@@ -7,7 +8,11 @@
  (name keeper_sandbox_image)
  (public_name masc.keeper_sandbox_image)
  (wrapped false)
- (modules keeper_sandbox_image keeper_sandbox_image_base_recipe))
+ (libraries digestif unix)
+ (modules
+  keeper_sandbox_image
+  keeper_sandbox_image_base_recipe
+  keeper_sandbox_image_version))
 
 ; sandbox-images/base/Dockerfile is the recipe's only copy. The binary carries
 ; it as a string so an installed binary can build the image with no checkout.

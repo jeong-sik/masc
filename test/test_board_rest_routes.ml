@@ -719,7 +719,17 @@ let test_board_http_typed_attachments () =
       "HTTP raw meta"
       [ "meta", `Assoc [ "attachments", `List [ image ] ] ]
   in
-  check int "HTTP raw meta attachments rejected" 400 status
+  check int "HTTP raw meta attachments rejected" 400 status;
+  let status, _ =
+    post
+      "HTTP duplicate meta"
+      [ "meta", `Assoc [ "source", `String "client" ]
+      ; "meta", `Assoc [ "attachments", `List [ image ] ]
+      ]
+  in
+  check int "HTTP duplicate meta rejected" 400 status;
+  check bool "HTTP duplicate meta did not create a post" true
+    (Option.is_none (board_post_by_title "HTTP duplicate meta"))
 
 let test_sub_board_routes_use_authenticated_owner () =
   with_authenticated_activity_router

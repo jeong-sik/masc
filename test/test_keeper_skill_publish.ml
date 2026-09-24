@@ -48,7 +48,12 @@ let config_text =
     Server_keeper_skill_publish.project_agents_source_id
 ;;
 
-let with_workspace ?(source_root_exists = true) f =
+type source_root_fixture =
+  | Root_directory
+  | Root_absent
+  | Root_regular_file
+
+let with_workspace ?(source_root = Root_directory) f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -60,10 +65,14 @@ let with_workspace ?(source_root_exists = true) f =
       Service.retire ~workspace;
       remove_tree base_path)
     (fun () ->
-      if source_root_exists
-      then (
-        Unix.mkdir (Filename.concat base_path ".agents") 0o700;
-        Unix.mkdir (Filename.concat base_path ".agents/skills") 0o700);
+      (match source_root with
+       | Root_absent -> ()
+       | Root_directory ->
+         Unix.mkdir (Filename.concat base_path ".agents") 0o700;
+         Unix.mkdir (Filename.concat base_path ".agents/skills") 0o700
+       | Root_regular_file ->
+         Unix.mkdir (Filename.concat base_path ".agents") 0o700;
+         Out_channel.with_open_bin (Filename.concat base_path ".agents/skills") (fun _ -> ()));
       let refresh () =
         Ok
           (Service.refresh
@@ -296,7 +305,7 @@ let test_editor_publishes_and_never_overwrites () =
    the live one did not: every publish was refused as source_not_ready. The
    first publish makes the declared folder and lands the package. *)
 let test_first_publish_creates_the_source_folder () =
-  with_workspace ~source_root_exists:false
+  with_workspace ~source_root:Root_absent
   @@ fun ~base_path ~workspace:_ ~config ~refresh ->
   Atomic.set Workspace_hooks.keeper_skill_publish_fn
     (Server_keeper_skill_publish.publish ~refresh);
@@ -307,6 +316,52 @@ let test_first_publish_creates_the_source_folder () =
   check string "status" "created_and_published" (string_field "status" data);
   check string "SKILL.md bytes" original
     (read_file (Filename.concat base_path ".agents/skills/first/SKILL.md"))
+;;
+
+(* The live 09-23 refusal said only "Skill source is not ready", and the
+   Keeper guessed the source was undeclared when its folder was missing. A
+   folder is now made when missing, so the refusal that remains is a declared
+   path that is not a folder: the Keeper must be told which path and why. *)
+let test_refusal_names_the_path_and_why () =
+  with_workspace ~source_root:Root_regular_file
+  @@ fun ~base_path ~workspace:_ ~config ~refresh ->
+  let source_id =
+    Skill_source_config.source_id_of_string
+      Server_keeper_skill_publish.project_agents_source_id
+    |> require "source id"
+  in
+  let error =
+    match
+      Server_skill_editor.create
+        ~base_path
+        ~source_id
+        ~package_id:"blocked"
+        ~source_text:(instruction "blocked")
+        ~refresh
+    with
+    | Error error -> error
+    | Ok _ -> fail "a regular file in place of the source folder must refuse"
+  in
+  (match error with
+   | Server_skill_editor.Source_not_ready
+       (Source_root_not_directory { resolved_path; kind = Unix.S_REG }) ->
+     check string "names the declared path" "skills" (Filename.basename resolved_path)
+   | other -> fail ("unexpected refusal: " ^ Server_skill_editor.error_to_string other));
+  check bool "reason kind on the wire" true
+    (Yojson.Safe.Util.(
+       Server_skill_editor.error_to_yojson error |> member "reason" |> member "kind")
+     = `String "not_directory");
+  Atomic.set Workspace_hooks.keeper_skill_publish_fn
+    (Server_keeper_skill_publish.publish ~refresh);
+  let ((_, data) as outcome) = call config (args ~package_id:"blocked" (instruction "blocked")) in
+  failed_with
+    ~code:"source_not_ready"
+    ~class_:Tool_result.Dependency_unavailable
+    ~effect_disposition:Tool_result.Proven_pre_effect
+    outcome;
+  check string "Keeper reads the same reason"
+    (Server_skill_editor.error_to_string error)
+    (string_field "message" data)
 ;;
 
 let () =
@@ -322,6 +377,8 @@ let () =
             test_editor_publishes_and_never_overwrites
         ; test_case "first publish creates the source folder" `Quick
             test_first_publish_creates_the_source_folder
+        ; test_case "refusal names the path and why" `Quick
+            test_refusal_names_the_path_and_why
         ] )
     ]
 ;;

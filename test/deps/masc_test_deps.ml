@@ -22,6 +22,16 @@ let init_eio_clock ?sw env =
   Eio_context.set_clock clock;
   Option.iter Eio_context.set_switch sw
 
+(** Run [f] with [sw] installed as the server root switch, then put back the
+    Eio context the caller had. A Keeper lane forks only on the server root
+    switch ([Keeper_lane.fork_server_owned]); a fixture that starts lanes
+    (keeper up, keeper create, supervisor launch) without one has them
+    refused. *)
+let with_server_root_switch ~sw f =
+  let previous = Eio_context.snapshot_state () in
+  Eio_context.set_switch sw;
+  Fun.protect ~finally:(fun () -> Eio_context.restore_state previous) f
+
 (* [Unix] has no unsetenv, and an empty value is not an absent one: the
    timeout readers reject "" as malformed. The stub removes the variable. *)
 external unsetenv : string -> unit = "masc_test_unsetenv"
@@ -214,6 +224,14 @@ let current_meta_json_fixture ~name () =
   | Ok meta -> Masc.Keeper_meta_json.meta_to_json meta
   | Error detail ->
     failwith ("current_meta_json_fixture could not build current meta: " ^ detail)
+
+(** The identity a fixture [Keeper_librarian.input] names as the Keeper whose
+    memory it curates. Raises [Failure] on a blank name, which no fixture
+    should pass. *)
+let keeper_id_fixture name =
+  match Masc.Keeper_identity.Keeper_id.of_string name with
+  | Some id -> id
+  | None -> failwith "keeper_id_fixture: the keeper name is blank"
 
 (** Walk up the directory tree from [Sys.getcwd()] until [dune-project] is
     found, then return that directory.

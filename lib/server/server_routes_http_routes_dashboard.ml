@@ -530,7 +530,7 @@ let skill_editor_error_status = function
   | Package_already_exists ->
     `Conflict
   | Snapshot_not_registered | Snapshot_uninitialized | Reference_not_current
-  | Source_not_ready | Source_file_missing ->
+  | Source_not_ready _ | Source_file_missing ->
     `Not_found
   | Invalid_workspace | Source_read_failed | Write_failed _ | Quarantine_failed _ ->
     `Internal_server_error

@@ -11,6 +11,7 @@ type decoded_source =
   ; external_message_id : string option
   ; workspace_id : string option
   ; extra_mentions : Keeper_identity.Keeper_id.t list
+  ; sender_keeper : Keeper_identity.Keeper_id.t option
   ; user_row_origin : Keeper_chat_store.user_row_origin
   }
 
@@ -22,7 +23,7 @@ type decoded_input =
   ; attachments : Keeper_chat_store.attachment list
   }
 
-let source_schema = "masc.keeper_chat_operation.source.v1"
+let source_schema = "masc.keeper_chat_operation.source.v2"
 let input_schema = "masc.keeper_chat_operation.input.v1"
 
 let strict_fields ~context ~expected = function
@@ -159,10 +160,32 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
       Error "Keeper chat operation surface kind does not match continuation"
 ;;
 
+(* A sender Keeper is only ever written by the Keeper-to-Keeper submit path,
+   which is the Agent surface with no connector speaker. Any other surface or
+   a connector speaker beside it would name two different speakers. *)
+let validate_sender_keeper ~sender_keeper ~surface ~channel_user_id =
+  match sender_keeper with
+  | None -> Ok ()
+  | Some _ ->
+    (match surface with
+     | Surface_ref.Agent ->
+       if String.trim channel_user_id = ""
+       then Ok ()
+       else Error "Keeper chat operation source cannot carry both a sender Keeper and an external speaker"
+     | Surface_ref.Broadcast
+     | Surface_ref.Dashboard _
+     | Surface_ref.Discord _
+     | Surface_ref.Slack _
+     | Surface_ref.Webhook _
+     | Surface_ref.Gate _ ->
+       Error "Keeper chat operation source names a sender Keeper outside the Agent surface")
+;;
+
 let source_to_json ~submitted_by ~thread_id ~continuation_channel ~surface
       ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
       ~conversation_id ~external_message_id ~workspace_id
       ~extra_mentions
+      ~sender_keeper
       ~user_row_origin =
   let ( let* ) = Result.bind in
   let* () =
@@ -178,6 +201,7 @@ let source_to_json ~submitted_by ~thread_id ~continuation_channel ~surface
         ~channel_workspace_id
         ~workspace_id
   in
+  let* () = validate_sender_keeper ~sender_keeper ~surface ~channel_user_id in
   let* user_row_origin =
     match user_row_origin with
     | Keeper_chat_store.Needs_append -> Ok "needs_append"
@@ -208,6 +232,10 @@ let source_to_json ~submitted_by ~thread_id ~continuation_channel ~surface
                 (fun keeper_id ->
                    `String (Keeper_identity.Keeper_id.to_string keeper_id))
                 extra_mentions) )
+       ; ( "sender_keeper"
+         , match sender_keeper with
+           | None -> `Null
+           | Some keeper_id -> `String (Keeper_identity.Keeper_id.to_string keeper_id) )
        ; "user_row_origin", `String user_row_origin
        ])
 ;;
@@ -231,6 +259,7 @@ let source_of_json json =
         ; "external_message_id"
         ; "workspace_id"
         ; "extra_mentions"
+        ; "sender_keeper"
         ; "user_row_origin"
         ]
       json
@@ -285,6 +314,15 @@ let source_of_json json =
       loop [] [] values
     | _ -> Error "Keeper chat operation source extra_mentions must be an array"
   in
+  let* sender_keeper =
+    match List.assoc "sender_keeper" fields with
+    | `Null -> Ok None
+    | `String value ->
+      (match Keeper_identity.Keeper_id.of_string value with
+       | Some keeper_id -> Ok (Some keeper_id)
+       | None -> Error "Keeper chat operation source sender_keeper must not be blank")
+    | _ -> Error "Keeper chat operation source sender_keeper must be a string or null"
+  in
   let* user_row_origin =
     match List.assoc "user_row_origin" fields with
     | `String "needs_append" -> Ok Keeper_chat_store.Needs_append
@@ -305,6 +343,7 @@ let source_of_json json =
       ~channel_workspace_id
       ~workspace_id
   in
+  let* () = validate_sender_keeper ~sender_keeper ~surface ~channel_user_id in
   Ok
     { submitted_by
     ; thread_id
@@ -318,6 +357,7 @@ let source_of_json json =
     ; external_message_id
     ; workspace_id
     ; extra_mentions
+    ; sender_keeper
     ; user_row_origin
     }
 ;;

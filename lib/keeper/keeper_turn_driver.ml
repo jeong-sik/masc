@@ -17,7 +17,6 @@ include Keeper_internal_error
 include Keeper_turn_driver_helpers
 
 include Keeper_turn_driver_provider_attempt
-include Keeper_turn_driver_backpressure
 
 let positive_modality_counts counts =
   counts
@@ -242,16 +241,11 @@ type walk_rest =
       ; resting_runtime_id : string
       }
 
-type failure_wait =
-  | Capacity_release
-  | Path_release
-
 type next_dispatch =
   | Dispatch_now of { runtime_id : string }
   | Wait_until of
       { release_at : float
       ; waiting_on : string
-      ; wait : failure_wait
       }
 
 (* When one runtime path is released, read from the same two stores the walk
@@ -391,14 +385,12 @@ let assignment_walk_rest ~now assignment_id =
    the chat lane's deferred retry so both answer one failure the same way
    (RFC-provider-path-rest §3.1).
 
-   Capacity backpressure is MASC's own slot and client envelope, not one
-   path's, so it waits for its own rest whatever was deferred. A deferred
-   suffix names where the input goes next, and its walk decides. Without a
-   suffix the turn used every path the input may take: a rate limit or quota
-   waits for the failed path's rest, and no less than the moment a fresh walk
-   of the assignment can start on a serving path, so the wait never ends on a
-   head that still rests. Every other failure without a suffix has no provider
-   wait. *)
+   A deferred suffix names where the input goes next, and its walk decides.
+   Without a suffix the turn used every path the input may take: a rate limit
+   or quota waits for the failed path's rest, and no less than the moment a
+   fresh walk of the assignment can start on a serving path, so the wait never
+   ends on a head that still rests. Every other failure without a suffix has
+   no provider wait. *)
 let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   let module Route = Keeper_runtime_failure_route in
   let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
@@ -406,18 +398,11 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
     now +. Route.path_rest_sec ~cap_sec ~retry_class ~retry_after_hint:retry_after
   in
   match route, deferred with
-  | Route.Retry_after_observed { retry_class = Route.Capacity_backpressure; retry_after }, _ ->
-    Some
-      (Wait_until
-         { release_at = route_release Route.Capacity_backpressure retry_after
-         ; waiting_on = assignment_id
-         ; wait = Capacity_release
-         })
   | ( ( Route.Retry_after_observed
           { retry_class =
-              ( Route.Rate_limited | Route.Hard_quota | Route.Server_error
-              | Route.Empty_completion _ | Route.Network_transient
-              | Route.Provider_timeout )
+              ( Route.Rate_limited | Route.Hard_quota | Route.Provider_capacity
+              | Route.Server_error | Route.Empty_completion _
+              | Route.Network_transient | Route.Provider_timeout )
           ; _
           }
       | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
@@ -426,7 +411,7 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
       (match deferred_lane_rest ~now hint with
        | Walk_head_serving { runtime_id } -> Dispatch_now { runtime_id }
        | Walk_waits_until { release_at; resting_runtime_id } ->
-         Wait_until { release_at; waiting_on = resting_runtime_id; wait = Path_release })
+         Wait_until { release_at; waiting_on = resting_runtime_id })
   | ( Route.Retry_after_observed
         { retry_class = (Route.Rate_limited | Route.Hard_quota) as retry_class; retry_after }
     , None ) ->
@@ -439,10 +424,10 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
       | Walk_waits_until { release_at = _; resting_runtime_id = _ } | Walk_head_serving _ ->
         failed_release_at, assignment_id
     in
-    Some (Wait_until { release_at; waiting_on; wait = Path_release })
+    Some (Wait_until { release_at; waiting_on })
   | ( ( Route.Retry_after_observed
           { retry_class =
-              Route.Empty_completion _ | Route.Server_error
+              Route.Provider_capacity | Route.Empty_completion _ | Route.Server_error
               | Route.Network_transient | Route.Provider_timeout
           ; _
           }
@@ -882,10 +867,11 @@ let attempt_runtime_candidates
             { retry_class = Keeper_runtime_failure_route.Provider_timeout; retry_after = _ } ->
           if not expired_in_admission
           then note_failed_attempt Runtime_candidate_backpressure.Provider_timeout
-        (* MASC's own slot and client envelope, not a fact about the candidate. *)
+        (* A 529 or a provider capacity pool refused this candidate without
+           an answer. The next candidate is a different pool. *)
         | Keeper_runtime_failure_route.Retry_after_observed
-            { retry_class = Keeper_runtime_failure_route.Capacity_backpressure; retry_after = _ } ->
-          ()
+            { retry_class = Keeper_runtime_failure_route.Provider_capacity; retry_after = _ } ->
+          note_failed_attempt Runtime_candidate_backpressure.Provider_capacity
         (* These candidates answered, or the failure says nothing durable
            about their ability to answer a later turn (RFC-0458 §3.4, §6).
            A credential denial rotates to the next candidate within this
@@ -1239,6 +1225,7 @@ let project_input_for_attempt
        Keeper_runtime_manifest.event_kind ->
        unit)
     ~goal_blocks
+    ~goal_metadata
     ~initial_messages
     ~agent_core_checkpoint
     ~runtime_id
@@ -1405,7 +1392,9 @@ let project_input_for_attempt
               message after the seed history. Record the boundary now, before
               the provider can append answers, tools or injected context. *)
            let input_message blocks =
-             Agent_core.Types.user_msg_blocks
+             Agent_core.Types.make_message
+               ~metadata:goal_metadata
+               ~role:Agent_core.Types.User
                (List.map
                   (function
                     | Agent_core.Types.Text text ->
@@ -1463,6 +1452,7 @@ let run_named
     ~base_path
     ~goal
     ?goal_blocks
+    ?(goal_metadata = [])
     ?session_id
     (* Required, not defaulted to "". Three of the runtimes this dispatches to
        -- Codex, Claude Code, Antigravity -- refuse a blank composition in
@@ -1618,8 +1608,9 @@ let run_named
 	     takes ([continuity] above): one choice per turn for every lane, so a
 	     fitting working state, else the Librarian's read position, is the same
 	     absorbed point on both. What each lane weighs it against differs: the
-	     Agent Core branch composes from the absorbed point whenever there is
-	     one ([compose_carried_model_input]), while these lanes cut their start
+	     Agent Core branch composes from the absorbed point, or from a later
+	     start the provider accepted past it ([choose_range_start]), while
+	     these lanes cut their start
 	     seed themselves and keep a seed or a lane cut that sits past it
 	     ([Keeper_official_client_host.carried_start_range]). The choice is
 	     handed over as a position in the exact list each composition cuts,
@@ -1655,6 +1646,9 @@ let run_named
 	     range in the canonical encoding, which is what these lanes measure;
 	     the Agent Core record holds its serialized body. *)
 	  let record_official_client_continuity ~runtime_id front ~transmitted_bytes =
+	    (* Reached only for a range the lane sent: a Claude Code resume reports
+	       no front, and composing a range logs nothing. *)
+	    Keeper_official_client_host.warn_if_sent_on_unknown_start ~keeper_name front;
 	    match session_id with
 	    | None -> ()
 	    | Some trace_id ->
@@ -2019,6 +2013,7 @@ let run_named
           ~keeper_name
           ~emit_runtime_manifest
           ~goal_blocks
+          ~goal_metadata
           ~initial_messages
           ~agent_core_checkpoint
           ~runtime_id:attempt_runtime_id
@@ -2590,13 +2585,16 @@ let run_named
             ; input_policy
             ; turn_boundary = Eio.Lazy.force turn_boundary
             ; continuity
-            ; (* Read only when the process holds no ledger for this pair:
-                 the range the newest completed Agent Core turn record on
-                 this history measured, whichever runtime ran it, so a
-                 restart or a lane's next candidate resumes the range the
-                 last turn carried rather than this turn's own boundary. A
-                 caller that reads no records leaves the first request to
-                 that boundary. *)
+            ; (* The range the newest response-observed turn record on this
+                 history measured, whichever runtime ran it. Without a
+                 Librarian point it is read only when the process holds no
+                 ledger for this pair, so a restart or a lane's next
+                 candidate resumes the range the last turn carried rather
+                 than this turn's own boundary. With one it is the accepted
+                 start the point yields to when it lies past the point (RFC
+                 librarian-lifecycle §4.10). A caller that reads no records
+                 leaves the first request to that boundary, or to the
+                 point. *)
               carried_front_seed =
                 (fun () ->
                    match carried_front_seed with
@@ -2609,6 +2607,7 @@ let run_named
             ; name
             ; goal
             ; goal_blocks
+            ; goal_metadata
             ; session_id
             ; system_prompt
             ; (* Only this lane can widen a running turn, so only this lane

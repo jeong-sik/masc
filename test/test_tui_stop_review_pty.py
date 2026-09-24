@@ -18,12 +18,6 @@ SOURCE_MODULES = (
 )
 
 
-def latest_frame(output):
-    data = bytes(output)
-    start = data.rfind(h.FRAME_START)
-    return data[max(0, start):]
-
-
 def capture_screen(label, output):
     """Leave a synthetic PTY screen capture in the CI suite log."""
     screen = h.screen_text(bytes(output)).decode("utf-8", errors="replace")
@@ -84,7 +78,7 @@ def full_queue(process, master_fd, _slave_fd, output, _base_path):
     for _ in range(3):
         h.send_and_wait(process, master_fd, output, b"j", b"MASC Agenda")
     h.send_and_wait(process, master_fd, output, b"\r", b"awaiting 7")
-    frame = h.CSI_RE.sub(b"", latest_frame(output))
+    frame = h.screen_text(bytes(output))
     if b"task-stop-6" not in frame:
         raise AssertionError(f"the full queue omitted its seventh request: {frame!r}")
     if b"stop for specific test-0" in frame:
@@ -100,7 +94,7 @@ def exact_jump(gate):
             process, master_fd, output, rows=30, columns=60,
             needle=b"MASC Agenda", final_cursor=b"\x1b[?25l",
         )
-        narrow = h.CSI_RE.sub(b"", latest_frame(output))
+        narrow = h.screen_text(bytes(output))
         for count in (b"tool approvals 0", b"stop requests 7",
                       b"held without actor 0", b"unreadable producer 0"):
             if count not in narrow:
@@ -113,7 +107,7 @@ def exact_jump(gate):
         h.wait_for_output(
             process, master_fd, output, b"stop for specific test-1", start=0, timeout=3.0
         )
-        frame = h.CSI_RE.sub(b"", latest_frame(output))
+        frame = h.screen_text(bytes(output))
         for needle in (b"vr-stop-1", b"task-stop-1", b"a twice: cancel task"):
             if needle not in frame:
                 raise AssertionError(f"jump lost {needle!r}: {frame!r}")
@@ -136,7 +130,7 @@ def changed_request(gate, requests):
         h.wait_for_output(
             process, master_fd, output, b"changed or closed", start=0, timeout=3.0
         )
-        frame = h.CSI_RE.sub(b"", latest_frame(output))
+        frame = h.screen_text(bytes(output))
         if b"VERIFICATION REQUEST" in frame:
             raise AssertionError(f"a changed request opened another detail: {frame!r}")
         os.write(master_fd, b"r")
@@ -172,7 +166,7 @@ def verdict_refresh(requests, stale_read):
     def interact(process, master_fd, _slave_fd, output, _base_path):
         open_agenda(process, master_fd, output)
         h.send_and_wait(process, master_fd, output, b"\r", b"stop for specific test-0")
-        detail = h.CSI_RE.sub(b"", latest_frame(output))
+        detail = h.screen_text(bytes(output))
         if b"vr-stop-0" not in detail:
             raise AssertionError(f"the visible request ID is missing: {detail!r}")
         stale_read["gate_next"] = True

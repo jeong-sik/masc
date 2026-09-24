@@ -391,6 +391,34 @@ let warn_optional_exact_output_lane registry ~lane_id ~feature =
       lane_id
 ;;
 
+(* The Stagehand browser lane is optional: without it only the browser target
+   that asks it for answers is degraded. A slot whose model takes no system
+   prompt is named once here, at boot, and not only in each refused
+   llm.generate. *)
+let warn_browser_stagehand_lane registry =
+  let lane_id = Runtime.exact_lane_id Runtime.Browser_stagehand in
+  warn_optional_exact_output_lane registry ~lane_id ~feature:"the Stagehand browser lane";
+  match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+  | Error
+      ( Runtime_exact_output_registry.Exact_lane_unconfigured _
+      | Runtime_exact_output_registry.No_admitted_lane_slots _ ) ->
+    (* [warn_optional_exact_output_lane] reported it just above. *)
+    ()
+  | Ok resolved ->
+    (match Browser_stagehand_model.admit_lane resolved with
+     | Ok { refused_slots = []; _ } -> ()
+     | Ok { refused_slots = _ :: _ as refused_slots; _ } ->
+       Log.Server.warn
+         "exact_output: lane %S skips slots it cannot use: %s"
+         lane_id
+         (String.concat "; " (List.map Browser_stagehand_model.refused_slot_to_string refused_slots))
+     | Error refusal ->
+       Log.Server.warn
+         "exact_output: lane %S refuses every request: %s"
+         lane_id
+         (Browser_stagehand_model.refusal_to_string (Browser_stagehand_model.Lane_refused refusal)))
+;;
+
 (* An exact-output slot names a runtime binding: the lane configuration and the
    binding table use the same "<provider>.<model>" id. Restating that binding in
    a second file is how a slot came to point at a declaration nobody had
@@ -509,7 +537,8 @@ let configure_exact_output_registry ?config_root () =
        warn_optional_exact_output_lane
          registry
          ~lane_id:Runtime.verifier_exact_lane_id
-         ~feature:"completion authority")
+         ~feature:"completion authority";
+       warn_browser_stagehand_lane registry)
 ;;
 
 let install_domain_pool_references domain_pool =

@@ -873,7 +873,8 @@ let live_lane_configuration registry lane_id =
           ( Runtime.Librarian
           | Runtime.Hitl_auto_judge
           | Runtime.Board_attention
-          | Runtime.Workspace_curator )
+          | Runtime.Workspace_curator
+          | Runtime.Browser_stagehand )
         , _
       | None, _ -> registry_admitted_catalog_slots, cli_slots, []
     in

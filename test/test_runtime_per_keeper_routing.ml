@@ -923,7 +923,7 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
         match exact_lane with
         | Runtime.Verifier -> true
         | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
-        | Runtime.Workspace_curator -> false
+        | Runtime.Workspace_curator | Runtime.Browser_stagehand -> false
       in
       let expected =
         if is_verifier && not judges

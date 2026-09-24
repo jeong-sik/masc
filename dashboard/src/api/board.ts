@@ -854,7 +854,7 @@ function normalizeBoardReactionSummary(raw: unknown): BoardReactionSummary | nul
   if (!isRecord(raw)) return null
   const emoji = asString(raw.emoji, '').trim()
   if (!emoji) return null
-  const hasReacted = raw.has_reacted === true || raw.reacted === true
+  const reacted = raw.reacted === true
   const recentUserIds = Array.isArray(raw.recent_user_ids)
     ? raw.recent_user_ids
         .map(value => asString(value, '').trim())
@@ -863,8 +863,7 @@ function normalizeBoardReactionSummary(raw: unknown): BoardReactionSummary | nul
   return {
     emoji,
     count: asNumber(raw.count, 0),
-    reacted: hasReacted,
-    has_reacted: hasReacted,
+    reacted,
     recent_user_ids: recentUserIds,
   }
 }

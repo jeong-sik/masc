@@ -633,7 +633,6 @@ describe('fetchBoard', () => {
           emoji: '🔥',
           count: 2,
           reacted: true,
-          has_reacted: true,
           recent_user_ids: ['analyst', 'reviewer'],
         },
       ],
@@ -879,7 +878,7 @@ describe('fetchBoardPost', () => {
           {
             emoji: '👍',
             count: 1,
-            has_reacted: false,
+            reacted: false,
             recent_user_ids: ['reader-a'],
           },
         ],
@@ -932,7 +931,6 @@ describe('fetchBoardPost', () => {
           emoji: '🚀',
           count: 4,
           reacted: true,
-          has_reacted: true,
           recent_user_ids: ['reviewer'],
         },
       ],
@@ -944,7 +942,6 @@ describe('fetchBoardPost', () => {
         emoji: '👍',
         count: 1,
         reacted: false,
-        has_reacted: false,
         recent_user_ids: ['reader-a'],
       },
     ])
@@ -1179,7 +1176,7 @@ describe('board reactions', () => {
         reactions: [{
           emoji: '👍',
           count: 2,
-          has_reacted: true,
+          reacted: true,
           recent_user_ids: ['agent-b', 'agent-a'],
         }],
         supported_reaction_emojis: ['👍', '🚀'],
@@ -1197,7 +1194,6 @@ describe('board reactions', () => {
         emoji: '👍',
         count: 2,
         reacted: true,
-        has_reacted: true,
         recent_user_ids: ['agent-b', 'agent-a'],
       }],
       supportedEmojis: ['👍', '🚀'],
@@ -1229,7 +1225,7 @@ describe('board reactions', () => {
         summary: [{
           emoji: '🚀',
           count: 1,
-          has_reacted: true,
+          reacted: true,
           recent_user_ids: ['dashboard-reviewer'],
         }],
       }), {
@@ -1245,7 +1241,6 @@ describe('board reactions', () => {
       emoji: '🚀',
       count: 1,
       reacted: true,
-      has_reacted: true,
       recent_user_ids: ['dashboard-reviewer'],
     }])
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]

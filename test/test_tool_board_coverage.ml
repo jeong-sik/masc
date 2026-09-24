@@ -319,7 +319,9 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   Alcotest.(check int) "post reaction count" 1
     (json_member_int post_summary "count");
   Alcotest.(check bool) "post reaction selected" true
-    (json_member_bool post_summary "has_reacted");
+    (json_member_bool post_summary "reacted");
+  Alcotest.(check bool) "post reaction has one selection field" true
+    (Yojson.Safe.Util.member "has_reacted" post_summary = `Null);
   let comment_reactions =
     Server_utils.board_reactions_for_comment ~voter:(Some "reactor") ~comment_id
   in
@@ -334,7 +336,9 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   Alcotest.(check string) "comment reaction emoji" "👏"
     (json_member_string comment_summary "emoji");
   Alcotest.(check bool) "comment reaction selected" true
-    (json_member_bool comment_summary "has_reacted")
+    (json_member_bool comment_summary "reacted");
+  Alcotest.(check bool) "comment reaction has one selection field" true
+    (Yojson.Safe.Util.member "has_reacted" comment_summary = `Null)
 
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =

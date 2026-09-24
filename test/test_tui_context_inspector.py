@@ -10,7 +10,8 @@ import test_tui_keyboard_input as keyboard
 SOURCE_MODULES = (
     "lib/types/turn_record.ml",
     "lib/types/turn_record.mli",
-    "lib/runtime/runtime_usage_scope.ml",
+    "lib/types/runtime_usage_scope.ml",
+    "lib/types/runtime_usage_scope.mli",
 )
 
 if __name__ == "__main__":

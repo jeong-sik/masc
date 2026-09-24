@@ -1121,6 +1121,15 @@ self_test() {
   check_required "turn record contract selects its Python fixture consumer" \
     "test/test_tui_context_inspector.py" \
     "lib/types/turn_record.ml"
+  check_required "turn record interface selects its Python fixture consumer" \
+    "test/test_tui_context_inspector.py" \
+    "lib/types/turn_record.mli"
+  check_required "usage scope contract selects its Python fixture consumer" \
+    "test/test_tui_context_inspector.py" \
+    "lib/types/runtime_usage_scope.ml"
+  check_required "usage scope interface selects its Python fixture consumer" \
+    "test/test_tui_context_inspector.py" \
+    "lib/types/runtime_usage_scope.mli"
   # A module whose name is a namespace attributes nothing by name -- it
   # prefixes 136 suites, and picking those off one edit says nothing. What it
   # still selects is the guards and PTY scenarios that name the file. The name

@@ -1344,7 +1344,7 @@ let board_cells ?(styles = board_no_styles) ~age_header ~title_width values =
    to this cell. *)
 let board_age_text ~now = function
   | Some at -> Masc_tui_message_layout.span_text (now -. at)
-  | None -> "\xe2\x80\x94"
+  | None -> Masc_tui_theme.Glyph.no_value
 
 (* A list pane's row label: what the row is about, then the reading that
    parts it from its neighbours. The pane folds a label from the middle and

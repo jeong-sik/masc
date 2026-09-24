@@ -121,7 +121,7 @@ stream_idle_timeout_sec = %g
        suite, a failure with no name. *)
     let result =
       Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds (fun () ->
-        Keeper_turn_driver.run_named
+        Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
           ~system_prompt:"Stream idle bound proof."
           ~runtime_id:"stall.sample"
           ~keeper_name:"stream-idle-bound-proof"

@@ -2066,6 +2066,10 @@ type keeper_spend =
   | Spend_turns of { cost_usd : float spend_sum; tokens : int spend_sum }
   | Spend_unread of string
       (** The server could not read this Keeper's metrics store. *)
+  | Spend_rows_unread of { rows : int }
+      (** No turn read, but [rows] rows that may have been turns did not:
+          rows that were not JSON, or turn rows whose time, latency or kind
+          the server could not read. What it spent is unknown. *)
 
 (** How old the server's cached answer is. [Spend_stale] is an answer past
     its refresh time; [last_error] is why the last refresh failed, if it

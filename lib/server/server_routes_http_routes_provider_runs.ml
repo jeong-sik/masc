@@ -246,12 +246,20 @@ let add_routes ~sw router =
                   ~keepers:[] ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
              ~compute:(fun () ->
                let keeper_names = Keeper_meta_store.keeper_names config in
+               (* Only Keepers whose meta reads have a row. A Keeper whose meta
+                  is there but does not read is reported once, by the operator
+                  snapshot's [keepers_unread], which the briefing carries; a
+                  reader that asks this answer for it finds no row and draws it
+                  unknown. *)
                let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
+                 List.filter_map
+                   (fun name ->
+                     match Keeper_meta_store.read_meta_presence config name with
+                     | Ok (Keeper_meta_store.Meta_present m) -> Some m
+                     | Ok Keeper_meta_store.Meta_absent
+                     | Ok (Keeper_meta_store.Meta_not_current _)
+                     | Error _ -> None)
+                   keeper_names
                in
                (* NDT-OK: request-time clock for a cost window; a dashboard read endpoint, not durable output. *)
                Dashboard_http_keeper.keeper_cost_aggregates_json ~config

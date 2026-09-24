@@ -14295,7 +14295,7 @@ def keeper_costs_fixture() -> HttpResponse:
                     "p50_latency_ms": 100.0,
                     "p95_latency_ms": 100.0,
                     "sample_count": 3,
-                    "metrics_read": {"state": "read", "malformed_rows": 0},
+                    "metrics_read": {"state": "read", "malformed_rows": 0, "unread_turn_rows": 0},
                 }
             ],
             "window_minutes": 1440,

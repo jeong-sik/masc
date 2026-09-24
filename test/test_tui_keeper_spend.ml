@@ -108,7 +108,8 @@ let server_default_window =
 let server_answer ?(state = Route.Cache_fresh) ?age_s ?error config names =
   let body =
     Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-      ~keepers:(List.map make_meta names) ~window_minutes:server_default_window
+      ~keepers:(List.map make_meta names)
+      ~window_minutes:server_default_window
       ~now_ts:(Unix.gettimeofday ())
   in
   Route.json_with_cache_metadata body
@@ -151,6 +152,7 @@ let spend_testable =
       match spend with
       | Spend_no_turns -> Format.fprintf fmt "no turns"
       | Spend_unread reason -> Format.fprintf fmt "unread: %s" reason
+      | Spend_rows_unread { rows } -> Format.fprintf fmt "%d rows unread" rows
       | Spend_turns { cost_usd; tokens } ->
           Format.fprintf fmt "cost %a, tokens %a"
             (sum_pp (fun fmt -> Format.fprintf fmt "%.4f")) cost_usd
@@ -345,6 +347,37 @@ let test_torn_and_unreadable_stores () =
        (String.starts_with ~prefix:"$ spend unread for 1 Keeper: ")
        (List.map strip (Spend.lines reading)))
 
+(* #38728: a turn row whose time or latency the server could not read may
+   have been a turn in the window, so that Keeper's sums are floors. With no
+   readable turn at all the Keeper is unknown, not "no turns". *)
+let test_unread_turn_rows_make_floors () =
+  let reading =
+    with_workspace (fun config ->
+        let now = Unix.gettimeofday () in
+        append_turns config "exact" [ (Some 0.5, Some 10) ];
+        append_turns config "odd" [ (Some 0.5, Some 10) ];
+        let unplaceable () =
+          let row = turn_row ~cost:(Some 0.25) ~tokens:(Some 5) in
+          Yojson.Safe.to_string
+            (`Assoc (("ts_unix", `String "yesterday") :: List.remove_assoc "ts_unix" row))
+        in
+        write_raw_line config "odd" ~ts:now (unplaceable ());
+        write_raw_line config "only-odd" ~ts:now (unplaceable ());
+        decode (server_answer config [ "exact"; "odd"; "only-odd" ]))
+  in
+  let tag = Spend.keeper_tags reading [ "exact"; "odd"; "only-odd" ] in
+  (* Tags are padded to the widest one so they stand in one column. *)
+  check string "a readable Keeper stays exact" "$0.50 10 tok"
+    (String.trim (strip (tag "exact")));
+  check string "an unplaceable turn row makes the sums floors"
+    "\xe2\x89\xa5$0.50 \xe2\x89\xa510 tok" (String.trim (strip (tag "odd")));
+  check bool "only unplaceable rows is unknown, not no turns" true
+    (String.starts_with ~prefix:"? tok" (strip (tag "only-odd")));
+  check bool "and a line says why" true
+    (List.exists
+       (String.equal "$ spend unknown for 1 Keeper: its 1 row did not read")
+       (List.map strip (Spend.lines reading)))
+
 (* A row this build cannot read leaves its Keeper unknown and is counted;
    the other rows still draw. *)
 let test_unreadable_row_is_unknown () =
@@ -469,6 +502,8 @@ let () =
         ; test_case "a failed load replaces the last good reading" `Quick
             test_a_failed_load_replaces_the_last_good_reading
         ; test_case "torn and unreadable stores" `Quick test_torn_and_unreadable_stores
+        ; test_case "unread turn rows make floors" `Quick
+            test_unread_turn_rows_make_floors
         ; test_case "an unreadable row is unknown" `Quick test_unreadable_row_is_unknown
         ; test_case "a narrow row keeps its detail" `Quick test_a_narrow_row_keeps_its_detail
         ; test_case "team total covers Keepers on the name lines" `Quick

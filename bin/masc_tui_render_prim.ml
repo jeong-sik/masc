@@ -730,7 +730,7 @@ let surface_strip (state : state) ~cols =
   Buffer.add_char parts ' ';
   if lo > 0 then
     Buffer.add_string parts
-      (Printf.sprintf "%s\xe2\x80\xb9%d%s " Ansi.dim lo Ansi.reset);
+      (Printf.sprintf "%s%s%s " Ansi.dim (hidden_before_mark lo) Ansi.reset);
   for i = lo to hi do
     if i > lo then Buffer.add_string parts "  ";
     let surface, _ = ring.(i) in
@@ -752,7 +752,7 @@ let surface_strip (state : state) ~cols =
   done;
   if hi < n - 1 then
     Buffer.add_string parts
-      (Printf.sprintf " %s%d\xe2\x80\xba%s" Ansi.dim (n - 1 - hi) Ansi.reset);
+      (Printf.sprintf " %s%s%s" Ansi.dim (hidden_after_mark (n - 1 - hi)) Ansi.reset);
   (match burn_hud_text state with
    | None -> ()
    | Some hud_raw ->

@@ -2887,69 +2887,6 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
   | Error detail -> failf "a declared seed bound must still load: %s" detail
 ;;
 
-(* max-prompt-bytes is read only by Claude Code and Antigravity. On any other
-   runtime it bounds nothing the provider checks, yet the briefing budget takes
-   the smallest ceiling a lane declares, so an HTTP declaration would shrink
-   every turn's briefing. Loading refuses it per binding: the key sits on the
-   model, and the provider it is bound through decides whether it is read. *)
-let test_runtime_toml_refuses_max_prompt_bytes_on_a_runtime_that_does_not_read_it () =
-  let content ~bindings =
-    Printf.sprintf
-      "[providers.cloud]\n\
-       protocol = \"openai-compatible-http\"\n\
-       endpoint = \"https://example.invalid/v1\"\n\
-       \n\
-       [providers.subscription]\n\
-       protocol = \"claude-code\"\n\
-       command = \"/usr/bin/true\"\n\
-       is-non-interactive = true\n\
-       \n\
-       [models.seeded]\n\
-       api-name = \"seeded\"\n\
-       max-context = 1024\n\
-       max-prompt-bytes = 262144\n\
-       \n\
-       [models.sample]\n\
-       api-name = \"sample\"\n\
-       max-context = 1024\n\
-       \n\
-       [cloud.sample]\n\
-       %s\
-       \n\
-       [runtime]\n\
-       default = \"cloud.sample\"\n"
-      bindings
-  in
-  let refused_on_seeded text =
-    match Runtime_toml.parse_string text with
-    | Ok _ -> false
-    | Error errs ->
-      List.exists
-        (fun (err : Runtime_toml.parse_error) ->
-           String.equal err.path "models.seeded.max-prompt-bytes")
-        errs
-  in
-  check
-    bool
-    "an HTTP binding of a model that declares it is refused"
-    true
-    (refused_on_seeded (content ~bindings:"\n[cloud.seeded]\n"));
-  check
-    bool
-    "a model bound through both kinds is refused on the HTTP binding"
-    true
-    (refused_on_seeded
-       (content ~bindings:"\n[subscription.seeded]\n\n[cloud.seeded]\n"));
-  match Runtime_toml.parse_string (content ~bindings:"\n[subscription.seeded]\n") with
-  | Ok _ -> ()
-  | Error errs ->
-    failf
-      "a Claude Code binding reads max-prompt-bytes and must load: %s"
-      (String.concat
-         "; "
-         (List.map (fun (err : Runtime_toml.parse_error) -> err.message) errs))
-;;
-
 let test_runtime_toml_separates_wizard_default_from_runtime_default_marker () =
   let content =
     "[providers.local]\n\
@@ -5825,10 +5762,6 @@ let () =
             "runtime config admits an undeclared official-client seed"
             `Quick
             test_runtime_config_validation_admits_undeclared_official_client_seed;
-          test_case
-            "max-prompt-bytes is refused on a runtime that does not read it"
-            `Quick
-            test_runtime_toml_refuses_max_prompt_bytes_on_a_runtime_that_does_not_read_it;
           test_case
             "unknown capabilities key is rejected at load"
             `Quick test_unknown_capability_key_rejected_at_load;

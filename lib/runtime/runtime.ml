@@ -2046,9 +2046,10 @@ let entry_runtime_id_of_route (route : string) : string option =
    sending, and no other runtime reads the field. It adds no bound here, and
    it does not erase a bound a sibling declares.
 
-   Every declaration this sees is a real ceiling: loading the configuration
-   refuses [max-prompt-bytes] on a binding whose provider does not read it
-   ([Runtime_toml.validate_max_prompt_bytes_readers]).
+   A declaration on a runtime that does not read it
+   ([Runtime_schema.api_format_reads_max_prompt_bytes]) is not a ceiling
+   either: that provider never checks the number, so counting it would shrink
+   the whole lane's budget for nothing.
 
    An id the loaded catalog does not hold adds no bound either: the walk
    cannot dispatch it, so it cannot serve the turn. *)
@@ -2057,6 +2058,7 @@ let smallest_declared_max_prompt_bytes (runtimes : t list) candidate_ids =
     List.filter_map
       (fun (runtime : t) ->
          if List.mem runtime.id candidate_ids
+            && api_format_reads_max_prompt_bytes runtime.provider.api_format
          then runtime.model.max_prompt_bytes
          else None)
       runtimes

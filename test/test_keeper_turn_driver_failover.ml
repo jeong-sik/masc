@@ -183,10 +183,12 @@ max-concurrent = 1
 (* The head declares a large prompt ceiling, the fallback a small one, and a
    third binding declares none. [roomy] and [tight] are the declared
    ceilings the briefing-budget tests read back. Both declare through a
-   Claude Code provider: loading refuses [max-prompt-bytes] on a runtime that
-   does not read it. *)
+   Claude Code provider, which reads [max-prompt-bytes]. [unread] is the
+   smallest number in the file, declared on a model bound through an HTTP
+   provider that never reads it, so no lane minimum may pick it. *)
 let roomy_max_prompt_bytes = 1_048_576
 let tight_max_prompt_bytes = 131_072
+let unread_max_prompt_bytes = 65_536
 
 let runtime_toml_with_uneven_prompt_ceilings =
   Printf.sprintf
@@ -205,6 +207,9 @@ candidates = [ "open.open_model" ]
 
 [runtime.lanes.three_deep]
 candidates = [ "open.open_model", "primary.roomy_model", "fallback.tight_model" ]
+
+[runtime.lanes.unread_declaration]
+candidates = [ "primary.roomy_model", "open.unread_model" ]
 
 [providers.primary]
 display-name = "Primary Provider"
@@ -243,6 +248,13 @@ max-context = 200000
 tools-support = true
 streaming = true
 
+[models.unread_model]
+api-name = "unread-model"
+max-context = 200000
+max-prompt-bytes = %d
+tools-support = true
+streaming = true
+
 [primary.roomy_model]
 is-default = true
 max-concurrent = 1
@@ -252,9 +264,13 @@ max-concurrent = 1
 
 [open.open_model]
 max-concurrent = 1
+
+[open.unread_model]
+max-concurrent = 1
 |}
     roomy_max_prompt_bytes
     tight_max_prompt_bytes
+    unread_max_prompt_bytes
 
 let runtime_toml_quota_lane_with_shared_credential shared_credential =
   Printf.sprintf
@@ -770,6 +786,26 @@ let test_briefing_budget_spans_the_whole_deferred_suffix () =
          (Masc.Keeper_unified_turn.briefing_candidates_for_turn
             ~deferred_runtime_lane:None
             ~assigned_route:"three_deep")))
+
+(* Only Claude Code and Antigravity read [max-prompt-bytes]. A number declared
+   on an HTTP candidate bounds nothing that provider checks, so it must not
+   become the lane's minimum: counted, it would shrink every turn's briefing
+   even while the Claude Code head serves. Two reading candidates still give
+   their minimum ([uneven]). *)
+let test_briefing_budget_ignores_a_ceiling_its_runtime_does_not_read () =
+  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
+    Alcotest.(check (option int))
+      "the HTTP declaration does not become the lane minimum"
+      (Some roomy_max_prompt_bytes)
+      (Runtime.smallest_max_prompt_bytes_of_route "unread_declaration");
+    Alcotest.(check (option int))
+      "a lone HTTP declaration bounds nothing"
+      None
+      (Runtime.smallest_max_prompt_bytes_of_runtime_ids [ "open.unread_model" ]);
+    Alcotest.(check (option int))
+      "two reading candidates give their minimum"
+      (Some tight_max_prompt_bytes)
+      (Runtime.smallest_max_prompt_bytes_of_route "uneven"))
 
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
@@ -5156,6 +5192,10 @@ let () =
             "the briefing budget spans the whole deferred suffix"
             `Quick
             test_briefing_budget_spans_the_whole_deferred_suffix;
+          Alcotest.test_case
+            "the briefing budget ignores a ceiling its runtime does not read"
+            `Quick
+            test_briefing_budget_ignores_a_ceiling_its_runtime_does_not_read;
           Alcotest.test_case
             "a bare runtime assignment walks only itself"
             `Quick

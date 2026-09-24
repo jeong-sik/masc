@@ -2446,15 +2446,6 @@ let parse_exact_output_lanes (toml : Otoml.t)
          "[runtime.exact_output_lanes] must be a table of lane tables")
 ;;
 
-let api_format_of_provider (providers : Runtime_schema.provider list) provider_id =
-  List.find_map
-    (fun (provider : Runtime_schema.provider) ->
-       if String.equal provider.id provider_id
-       then Some provider.api_format
-       else None)
-    providers
-;;
-
 (* [repeat-penalty] and [repeat-last-n] are fields of Ollama's own
    [/api/chat] [options] object. No other request builder has a field to put
    them in, so on any other wire the declaration was accepted, dropped without
@@ -2478,9 +2469,17 @@ let validate_ollama_only_binding_fields
       (bindings : Runtime_schema.binding list)
   : parse_error list
   =
+  let api_format_of_provider provider_id =
+    List.find_map
+      (fun (provider : Runtime_schema.provider) ->
+         if String.equal provider.id provider_id
+         then Some provider.api_format
+         else None)
+      providers
+  in
   List.concat_map
     (fun (binding : Runtime_schema.binding) ->
-       match api_format_of_provider providers binding.provider_id with
+       match api_format_of_provider binding.provider_id with
        | None | Some Runtime_schema.Ollama_api -> []
        | Some
            (( Runtime_schema.Messages_api
@@ -2509,69 +2508,6 @@ let validate_ollama_only_binding_fields
          @ (match binding.repeat_last_n with
             | Some _ -> refuse "repeat-last-n"
             | None -> []))
-    bindings
-;;
-
-(* [max-prompt-bytes] is read by exactly two runtimes: Claude Code cuts the
-   history it seeds a start turn with to it, and Antigravity refuses to send
-   a prompt above it. No other runtime reads it, so on any other runtime the
-   declaration bounds nothing the provider sees.
-
-   Accepted there, it would still reach one reader that looks at every
-   candidate of a lane: the world-state briefing budget takes the smallest
-   ceiling the lane declares
-   ([Runtime.smallest_max_prompt_bytes_of_route]). A declaration on an HTTP
-   binding there shrinks every turn's briefing to a number the provider never
-   checks. Refusing it here keeps every declared ceiling a real one, so that
-   reader can take each declaration at its word.
-
-   The key sits on the model, but whether it is read depends on the provider
-   the model is bound through, so each binding is judged. A model bound
-   through both kinds of provider is refused on the non-reading binding;
-   declaring it needs one model row per kind. A binding whose provider is not
-   declared is not judged, as in [validate_ollama_only_binding_fields]. *)
-let validate_max_prompt_bytes_readers
-      (providers : Runtime_schema.provider list)
-      (models : Runtime_schema.model_spec list)
-      (bindings : Runtime_schema.binding list)
-  : parse_error list
-  =
-  let declared_max_prompt_bytes model_id =
-    List.find_map
-      (fun (model : Runtime_schema.model_spec) ->
-         if String.equal model.id model_id then model.max_prompt_bytes else None)
-      models
-  in
-  List.concat_map
-    (fun (binding : Runtime_schema.binding) ->
-       match
-         ( api_format_of_provider providers binding.provider_id
-         , declared_max_prompt_bytes binding.model_id )
-       with
-       | None, _ | _, None -> []
-       | ( Some
-             (Runtime_schema.Claude_code_runtime | Runtime_schema.Antigravity_cli_runtime)
-         , Some _ ) -> []
-       | ( Some
-             (( Runtime_schema.Messages_api
-              | Runtime_schema.Chat_completions_api
-              | Runtime_schema.Ollama_api
-              | Runtime_schema.Gemini_api
-              | Runtime_schema.Vertex_gemini_api
-              | Runtime_schema.Codex_app_server_runtime ) as api_format)
-         , Some declared ) ->
-         error
-           (Printf.sprintf "models.%s.max-prompt-bytes" binding.model_id)
-           (Printf.sprintf
-              "max-prompt-bytes = %d is read only by Claude Code and Antigravity \
-               runtimes, and model %S is bound through provider %S, which speaks \
-               %s and never reads it -- the value would bound nothing the \
-               provider checks. Remove it, or bind that provider to a separate \
-               model row that does not declare it."
-              declared
-              binding.model_id
-              binding.provider_id
-              (Runtime_schema.show_api_format api_format)))
     bindings
 ;;
 
@@ -2844,10 +2780,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     (* Cross-table Gate: a binding field only reaches the wire through its
        provider's request builder, so whether it is carriable is a fact about
        the provider, not about the binding table it was written in. *)
-    match
-      validate_ollama_only_binding_fields providers bindings
-      @ validate_max_prompt_bytes_readers providers models bindings
-    with
+    match validate_ollama_only_binding_fields providers bindings with
     | _ :: _ as errors -> Error errors
     | [] ->
       Ok

@@ -245,12 +245,11 @@ let clamp_steps steps =
   else Ok steps
 ;;
 
-(* [run_until], with [st.steps] kept true when the guest faults. A fault
-   raises out of [run_until] before it returns its count, and the
-   instructions that completed before it may already have repainted the
-   screen. [run_until] calls [stop] once per completed instruction, so
-   counting there gives that number. A watcher that keys the picture on the
-   step count then sees the new picture instead of the one before. *)
+(* [run_until] calls [stop] once per completed instruction, but an exception
+   escapes before it can return that count. Keep [st.steps] aligned with the
+   instructions that actually ran so tool responses and ledger positions are
+   accurate even when the guest faults. Preserve the original exception and
+   backtrace for the caller. *)
 let run_counted st ~max_steps =
   let completed = ref 0 in
   match
@@ -261,9 +260,10 @@ let run_counted st ~max_steps =
   | n ->
     st.steps <- st.steps + n;
     n
-  | exception (Cpu86.Unsupported _ as fault) ->
+  | exception fault ->
+    let backtrace = Printexc.get_raw_backtrace () in
     st.steps <- st.steps + !completed;
-    raise fault
+    Printexc.raise_with_backtrace fault backtrace
 ;;
 
 (* Runs the budget straight through, with nothing watching. *)

@@ -675,9 +675,9 @@ let test_an_unimplemented_instruction_is_an_error () =
 ;;
 
 (* The instructions before a fault still ran and may have repainted the
-   screen. The step count must say so, or a watcher that keys the picture on
-   it keeps showing the frame from before. Three instructions complete here
-   (mov ax,0xb800; mov es,ax; mov byte es:[0],'X') before lea ax,ax faults. *)
+   screen. The step count in tool responses and ledger positions must include
+   them. Three instructions complete here (mov ax,0xb800; mov es,ax;
+   mov byte es:[0],'X') before lea ax,ax faults. *)
 let test_a_fault_keeps_the_steps_that_ran () =
   with_workspace (fun base_path ->
     install_program ~base_path "paint-then-fault.com"

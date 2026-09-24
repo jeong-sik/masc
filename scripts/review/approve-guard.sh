@@ -4,7 +4,8 @@
 # Refuses unless ALL of these hold at call time (task-1718, goal-1790241464021):
 #   1. --head is a 40-hex SHA and --slot is exactly "SLOT: #<pr> head <same sha>"
 #   2. the PR is open, not draft, base == main, and its head is still that SHA
-#   3. every check-run on that SHA is completed+success (none -> refuse)
+#   3. the newest check-run of every name on that SHA is completed+success
+#      (none -> refuse)
 #   4. the newest run of every GitHub Actions workflow for that SHA is
 #      completed+success
 #      (a queued workflow has no check-runs yet; this catches it)
@@ -78,7 +79,14 @@ IFS=$'\t' read -r st draft base cur merged <<<"$pr_row"
 [ "$cur" = "$head" ] || refuse "head moved: PR head is ${cur}"
 
 # ---- 3. check-runs on this exact SHA ----
+# One SHA can carry several check-runs of one name: a Draft-time suite whose
+# jobs were skipped, then the suite that ran after ready_for_review; or a
+# failed run followed by a re-run. The API returns every suite's rows, not one
+# per name, so only the newest check-run of each name (the highest id; ids
+# grow with creation) says what that check thinks of this SHA now.
+# sort+awk rather than an associative array: lanes may run bash 3.2.
 runs="$(gh_json "repos/${repo}/commits/${head}/check-runs?per_page=100" '.check_runs[] | [.name, .status, (.conclusion // "none"), (.id|tostring)] | @tsv')" || exit 1
+runs="$(printf '%s\n' "$runs" | sort -t "$(printf '\t')" -k1,1 -k4,4nr | awk -F '\t' 'NF && !seen[$1]++')"
 n_runs=0; run_ids=()
 while IFS=$'\t' read -r name status concl id; do
   [ -n "${name:-}" ] || continue
@@ -93,7 +101,7 @@ done <<<"$runs"
 # One SHA can carry several runs of one workflow: a run cancelled by a
 # concurrency group, or a failed run followed by a reopen or a dispatch that
 # passed. Only the newest run of each workflow says what that workflow thinks
-# of this SHA now, as the check-runs API already answers per check name.
+# of this SHA now -- the same rule section 3 applies per check name.
 # sort+awk rather than an associative array: lanes may run bash 3.2.
 wf="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [(.workflow_id|tostring), (.run_number|tostring), .name, .status, (.conclusion // "none"), (.id|tostring)] | @tsv')" || exit 1
 wf="$(printf '%s\n' "$wf" | sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++')"

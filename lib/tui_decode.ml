@@ -911,15 +911,13 @@ let decode_task json =
    sanitizers route those codepoints through here, so the rule lives in one
    place: the codepoint is drawn as its own escape text, never dropped. *)
 let is_invisible_codepoint code =
-  code = 0x061C
-  || (code >= 0x200B && code <= 0x200F)
-  || (code >= 0x202A && code <= 0x202E)
-  || (code >= 0x2066 && code <= 0x2069)
-  || code = 0xFEFF
-  (* #38501: the tag block copies ASCII into characters a terminal draws as
-     nothing (U+E0061 is a tag "a"), so a sentence can be spelled twice --
-     once for the reader and once for the bytes the approval hash covers. *)
-  || (code >= 0xE0000 && code <= 0xE007F)
+  (* Unicode's own list, not a hand-kept one: Default_Ignorable_Code_Point is
+     every scalar a renderer may draw as nothing -- the bidi controls, the
+     zero-widths, the word joiner family (U+2060-U+2064), the Hangul fillers
+     (U+115F, U+1160, U+3164, U+FFA0), the soft hyphen, the variation
+     selectors (U+FE00-U+FE0F, U+E0100-U+E01EF) and the tag block. A list
+     kept by hand here missed every one of those after the tag block. *)
+  Uchar.is_valid code && Uucp.Gen.is_default_ignorable (Uchar.of_int code)
 ;;
 
 let zero_width_joiner = 0x200D
@@ -1019,7 +1017,12 @@ let escape_text code =
 let escape_invisible text =
   let output = Buffer.create (String.length text) in
   let length = String.length text in
-  let rec walk index ~after_pictograph =
+  (* [after_base]: the scalar before this one was drawn and is not itself
+     ignorable. A variation selector picks the form of that one base (the
+     emoji form of U+2764, a CJK ideograph's variant), so exactly one is kept
+     after a base. A second one in a row selects nothing a reader can see: it
+     is how bytes are hidden behind a single glyph, so it is drawn. *)
+  let rec walk index ~after_pictograph ~after_base =
     if index < length
     then (
       let decoded = String.get_utf_8_uchar text index in
@@ -1035,7 +1038,7 @@ let escape_invisible text =
       match flag_tags with
       | Some tail ->
         Buffer.add_substring output text index (step + tail);
-        walk (index + step + tail) ~after_pictograph:true
+        walk (index + step + tail) ~after_pictograph:true ~after_base:false
       | None ->
         let joins_two_pictographs =
           valid
@@ -1043,9 +1046,20 @@ let escape_invisible text =
           && after_pictograph
           && opens_pictograph text (index + step)
         in
-        if valid && is_invisible_codepoint code && not joins_two_pictographs
+        let selects_its_base =
+          valid && after_base && Uucp.Gen.is_variation_selector scalar
+        in
+        let escaped =
+          valid
+          && is_invisible_codepoint code
+          && not (joins_two_pictographs || selects_its_base)
+        in
+        if escaped
         then Buffer.add_string output (escape_text code)
         else Buffer.add_substring output text index step;
+        let after_base =
+          valid && (not escaped) && not (is_invisible_codepoint code)
+        in
         let after_pictograph =
           if not valid
           then false
@@ -1059,9 +1073,9 @@ let escape_invisible text =
           then after_pictograph
           else false
         in
-        walk (index + step) ~after_pictograph)
+        walk (index + step) ~after_pictograph ~after_base)
   in
-  walk 0 ~after_pictograph:false;
+  walk 0 ~after_pictograph:false ~after_base:false;
   Buffer.contents output
 ;;
 

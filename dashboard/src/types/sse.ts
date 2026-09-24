@@ -19,8 +19,6 @@ export type SSEEventType =
   | 'reaction_changed'
   | 'heartbeat'
   | 'keeper_heartbeat'
-  | 'keeper_handoff'
-  | 'masc/keeper_handoff'
   | 'keeper_phase_changed'
   | 'keeper_composite_changed'
   | 'keeper_chat_appended'
@@ -155,8 +153,6 @@ export interface SSEEvent {
   name?: string
   context_ratio?: number
   ts_unix?: number
-  from_generation?: number
-  to_generation?: number
   from_model?: string
   to_model?: string
   before_tokens?: number
@@ -275,7 +271,6 @@ export type JournalEventType =
   | 'board_delete'
   | 'board_vote'
   | 'keeper_heartbeat'
-  | 'keeper_handoff'
   | 'keeper_phase_changed'
   | 'keeper_tool_call'
   | 'agent_core_tool'

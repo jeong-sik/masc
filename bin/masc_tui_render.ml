@@ -6753,7 +6753,7 @@ let render_lane_run_detail (state : state) ~run_id =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints_lanes_run_detail ~position));
+       ?position ~hints:Masc_tui_keys.footer_hints_lanes_run_detail);
   finish_surface state ~clamped:(Lane_run_detail_scroll { scroll; content_height })
     ~surface_key:"lane-run" ~rows:terminal_rows ~cols buf
 
@@ -10481,9 +10481,8 @@ let render_fusion_detail (state : state) run_id =
     end
   in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Masc_tui_keys.footer_hints_fusion_detail ~position));
+    (footer_line state ~max_cells:cols ~position
+       ~hints:Masc_tui_keys.footer_hints_fusion_detail);
   finish_surface state ~clamped:(Fusion_detail_scroll scroll)
     ~surface_key:"fusion-detail" ~rows:terminal_rows ~cols buf
 

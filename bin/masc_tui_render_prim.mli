@@ -125,7 +125,12 @@ val search_marker_styled : Masc_tui_types.state -> string
 
 val footer_line :
   ?status:Masc_tui_footer.status_item list ->
+  ?position:string ->
   Masc_tui_types.state -> max_cells:int -> hints:string -> string
+(** [position] is where a scrolling surface stands in what it is scrolling.
+    It is separate from [hints] because the fitter gives up key items from
+    the back, and a position is the one item on the row that [?] cannot
+    recover; kept with the keys that cannot be dropped. *)
 
 val keeper_split_threshold_cols : int
 

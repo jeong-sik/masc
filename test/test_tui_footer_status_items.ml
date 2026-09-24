@@ -657,6 +657,69 @@ let contains ~needle haystack =
    the [Esc] that leaves it. Dropping from the back was written for the
    [r] / [Tab] / [q] tail, which every surface shares and the sheet holds;
    it kept going once the row was full enough. *)
+(* Where a scrolling surface stands is not a key and cannot be looked up: [?]
+   opens the key sheet, and the sheet does not say where a run detail's scroll
+   sits. Spelled onto the end of [hints] it was one more item to the fitter,
+   which gives up from the back -- so it was the first thing to go, and on the
+   Fusion run detail at sixty and at eighty columns it was never drawn.
+
+   It travels as its own argument now and is kept with the pinned keys. *)
+let test_a_scroll_position_outlives_a_droppable_key () =
+  let hints =
+    "j/k:scroll  PgUp/PgDn:page  K:calling Keeper  B:board post  Y:copy  \
+     Esc:back  r:refresh  Tab:next  q:quit"
+  in
+  let line =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:80 ~port:8935 ~hints
+      ~position:"4-25/119" ()
+  in
+  Alcotest.(check bool) "the row was cut" true
+    (contains ~needle:"\xe2\x80\xa6" line);
+  Alcotest.(check bool) "a droppable key went" false
+    (contains ~needle:"Y:copy" line);
+  Alcotest.(check bool) "the position stayed" true
+    (contains ~needle:"4-25/119" line);
+  Alcotest.(check bool) "so did the way out" true
+    (contains ~needle:"Esc:back" line);
+  check_at_most_cells "and the row keeps its budget" 80 line;
+  check_one_line "one line" line
+;;
+
+(* The same row without a position is the control: the fitter is doing its
+   ordinary work, and the position is not paid for by a key the row would
+   otherwise have kept. *)
+let test_a_row_without_a_position_is_not_shortened_for_one () =
+  let hints =
+    "j/k:scroll  PgUp/PgDn:page  K:calling Keeper  B:board post  Y:copy  \
+     Esc:back  r:refresh  Tab:next  q:quit"
+  in
+  let without =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:80 ~port:8935 ~hints ()
+  in
+  let with_position =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:80 ~port:8935 ~hints
+      ~position:"4-25/119" ()
+  in
+  Alcotest.(check bool) "a position costs the row something" true
+    (Masc_tui_message_layout.display_width with_position
+     >= Masc_tui_message_layout.display_width without
+     || not (contains ~needle:"4-25/119" with_position));
+  check_at_most_cells "neither row overruns" 80 without
+;;
+
+(* A row with cells to spare draws the position without giving anything up. *)
+let test_a_wide_row_draws_its_position_whole () =
+  let hints = "j/k:scroll  Esc:back  q:quit" in
+  let line =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:120 ~port:8935 ~hints
+      ~position:"1-22/119" ()
+  in
+  Alcotest.(check bool) "nothing was cut" false
+    (contains ~needle:"\xe2\x80\xa6" line);
+  Alcotest.(check bool) "the position is on the row" true
+    (contains ~needle:"1-22/119" line)
+;;
+
 let test_the_cut_keeps_the_way_out () =
   let hints =
     "j/k:roster move  Enter:send / open  Ctrl-J:newline  Ctrl-G:next keeper  \
@@ -1269,6 +1332,12 @@ let tests =
           test_cut_hints_name_the_key_that_shows_them
       ; Alcotest.test_case "the cut keeps the way out" `Quick
           test_the_cut_keeps_the_way_out
+      ; Alcotest.test_case "a scroll position outlives a droppable key" `Quick
+          test_a_scroll_position_outlives_a_droppable_key
+      ; Alcotest.test_case "a row without a position is not shortened for one"
+          `Quick test_a_row_without_a_position_is_not_shortened_for_one
+      ; Alcotest.test_case "a wide row draws its position whole" `Quick
+          test_a_wide_row_draws_its_position_whole
       ; Alcotest.test_case "the cut keeps the key that opens a row" `Quick
           test_the_cut_keeps_the_key_that_opens_a_row
       ; Alcotest.test_case "a compound leave key is the same door" `Quick

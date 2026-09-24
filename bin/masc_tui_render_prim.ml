@@ -386,7 +386,7 @@ let search_marker_styled (state : state) =
          | None -> Ansi.dim)
         marker Ansi.reset
 
-let footer_line ?(status = []) (state : state) ~max_cells ~hints =
+let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
      a setting instead of per-screen behaviour. *)
@@ -525,7 +525,7 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
             }
         ]
   in
-  Masc_tui_footer.line ?literal_prefix ?action_text
+  Masc_tui_footer.line ?literal_prefix ?action_text ?position
     ~status:(status @ identity @ conflict @ answering @ answered)
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 

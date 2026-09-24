@@ -490,9 +490,10 @@ let initial_runtime_id ~default_runtime_id ~assignments ~lanes ~keeper_name =
    cause is read from the typed error each transport already produces, never
    from its wording. *)
 let with_retry_after retry_after detail =
-  match retry_after with
+  match Keeper_runtime_failure_route.usable_retry_after retry_after with
   | None -> detail
-  | Some seconds -> Printf.sprintf "%s (provider asks to retry after %.0fs)" detail seconds
+  | Some seconds ->
+    Printf.sprintf "%s (provider asks to retry after %.0fs)" detail (Float.ceil seconds)
 ;;
 
 let failure_of_agent_core_error error =
@@ -501,7 +502,8 @@ let failure_of_agent_core_error error =
   match Route.route_of_error ~boundary:Route.Agent_core_execution error with
   | Route.Retry_after_observed { retry_class = Route.Rate_limited; retry_after } ->
     Rate_limited (with_retry_after retry_after detail)
-  | Route.Retry_after_observed { retry_class = Route.Hard_quota; _ } -> Quota_exhausted detail
+  | Route.Retry_after_observed { retry_class = Route.Hard_quota; retry_after } ->
+    Quota_exhausted (with_retry_after retry_after detail)
   | Route.Retry_after_observed
       { retry_class = Route.Provider_capacity | Route.Server_error; retry_after } ->
     Provider_overloaded (with_retry_after retry_after detail)

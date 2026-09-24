@@ -129,7 +129,9 @@ def run_with_elapsed(argv, label):
     Provider checks wait on remote models; without a visible clock a slow or
     throttled provider looks exactly like a hung installer. Off a terminal the
     child runs exactly as before."""
-    if not label or not color_enabled():
+    # NO_COLOR removes color, not the clock: the line is shown on any terminal
+    # that can redraw it, and paint() alone decides on color.
+    if not label or not sys.stderr.isatty() or os.environ.get('TERM') == 'dumb':
         return subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     started = time.monotonic()
     with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:

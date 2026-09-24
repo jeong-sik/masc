@@ -641,9 +641,10 @@ ping_provider() {
 
   local http_status
   if [ -z "$key_var" ]; then
+    # A transfer cut off by --max-time after a 2xx header did not answer.
     http_status=$(curl -sS -o /dev/null -w '%{http_code}' \
       --max-time "$MASC_INSTALL_PUBLIC_PING_TIMEOUT_S" \
-      "$ping_url" 2>/dev/null) || true
+      "$ping_url" 2>/dev/null) || http_status=000
     report_ping_status "$idx" "$ping_url" "${http_status:-000}" ""
     return
   fi
@@ -659,7 +660,7 @@ ping_provider() {
   http_status=$(curl -sS -o /dev/null -w '%{http_code}' \
     --max-time "$MASC_INSTALL_AUTH_PING_TIMEOUT_S" \
     -H @<(printf 'Authorization: Bearer %s\n' "$key") \
-    "$ping_url" 2>/dev/null) || true
+    "$ping_url" 2>/dev/null) || http_status=000
   report_ping_status "$idx" "$ping_url" "${http_status:-000}" "$key_var"
 }
 
@@ -670,7 +671,7 @@ report_ping_status() {
   local idx="$1" url="$2" status="$3" key_var="$4" name
   name=$(provider_name "$idx")
   case "$status" in
-    2??) return 0 ;;
+    2??|3??) return 0 ;;
     429) warn "$name: rate limit (HTTP 429) -- temporary, the setup is fine; retry in a little while" ;;
     401|403) warn "$name: credential refused (HTTP $status) -- not a rate limit; check ${key_var:-access to the endpoint}" ;;
     402) warn "$name: quota or balance used up (HTTP 402) -- not a rate limit; check the plan or billing" ;;

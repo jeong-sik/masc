@@ -1684,7 +1684,7 @@ tools-support = true
          | Ok _ -> ()
          | Error reason ->
            Alcotest.failf "unrelated HTTP binding was rejected: %s"
-             (Runtime.string_of_drop_reason reason)))
+             (Runtime.string_of_drop_reason reason))))
 ;;
 
 (* The base file, loaded, with the official clients and [lane] written after

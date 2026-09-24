@@ -1257,6 +1257,9 @@
   masc.masc_goal
   masc.masc_types
   masc.time_codec
+  ;; [Standalone_lane.t] is what the lane pick, the lane run views and the
+  ;; slot editor carry.
+  masc.runtime
   masc_tui_acting
   masc_tui_composer
   masc_tui_audio_device

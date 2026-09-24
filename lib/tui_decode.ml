@@ -186,7 +186,7 @@ type standalone_lane_jev =
   | Jev_lane_unavailable
 
 type standalone_lane = {
-  sl_lane_id : string;
+  sl_lane : Standalone_lane.t;
   sl_label : string;
   sl_purpose : string option;
   sl_required : bool;
@@ -7057,36 +7057,35 @@ let standalone_lane_configuration_phrase = function
   | Lane_unconfigured -> "not configured"
   | Lane_registry_unavailable -> "registry unreadable"
 
-(* The lane detail's last two lines. They used to be picked by comparing the
-   id with each lane's spelling in turn, and Workspace curator had no branch,
-   so it drew the sentence meant for a lane this TUI does not know. The id is
-   now read into the lane once and every lane has its own arm. *)
+(* The lane detail's last two lines. Every lane has its own arm, so a lane
+   added to [Standalone_lane.t] fails here until it says what its output
+   means. *)
 let standalone_lane_answer (lane : standalone_lane) =
   let structured_output_without_ledger =
     "Evidence: structured-output generation, not a MASC tool loop; the run \
      retains exact Input/Output, outcome, and selected slot, so no tool-call \
      ledger exists."
   in
-  match Standalone_lane.of_id lane.sl_lane_id with
-  | Some Standalone_lane.Board_attention ->
+  match lane.sl_lane with
+  | Standalone_lane.Board_attention ->
     { sla_output_meaning = "Output meaning: the accepted candidate judgment JSON."
     ; sla_evidence =
         "Evidence: structured-output generation, not a MASC tool loop; the run \
          retains exact Input/Output and outcome. HTTP/CLI attribution uses \
          selected slot; Vendor System One provenance stays in Output."
     }
-  | Some Standalone_lane.Hitl_auto_judge ->
+  | Standalone_lane.Hitl_auto_judge ->
     { sla_output_meaning =
         "Output meaning: the validated and durably settled approval-context \
          judgment summary."
     ; sla_evidence = structured_output_without_ledger
     }
-  | Some Standalone_lane.Librarian ->
+  | Standalone_lane.Librarian ->
     { sla_output_meaning =
         "Output meaning: selected memory facts plus committed snapshot metadata."
     ; sla_evidence = structured_output_without_ledger
     }
-  | Some Standalone_lane.Workspace_curator ->
+  | Standalone_lane.Workspace_curator ->
     { sla_output_meaning =
         "Output meaning: the id of the proposal it published, with shared claims \
          and conflicts that each cite source ids, and the sources it excluded \
@@ -7097,7 +7096,7 @@ let standalone_lane_answer (lane : standalone_lane) =
          memory inventory and rendered prompt as Input, the proposal as Output, \
          outcome, and selected slot."
     }
-  | Some Standalone_lane.Verifier ->
+  | Standalone_lane.Verifier ->
     { sla_output_meaning =
         "Output meaning: Task completion or Goal proof verdict, reason, and \
          evaluator runtime."
@@ -7105,13 +7104,6 @@ let standalone_lane_answer (lane : standalone_lane) =
         "Evidence: Verifier review records also retain MASC tool observations; \
          open a run to inspect inputs, dispositions, excerpts, duration, and \
          truncation."
-    }
-  | None ->
-    { sla_output_meaning = "Output meaning: open a retained run for its exact result."
-    ; sla_evidence =
-        Printf.sprintf
-          "Evidence: unknown lane id: %s; this TUI has no evidence contract for it."
-          (sanitize_terminal_text lane.sl_lane_id)
     }
 
 let standalone_lane_status_of_string = function
@@ -7168,7 +7160,12 @@ let decode_standalone_lane_jev json =
   | other -> Error ("standalone lane JEV state: unknown value " ^ other)
 
 let decode_standalone_lane json =
-  let* sl_lane_id = required_string_field json "lane_id" in
+  let* lane_id = required_string_field json "lane_id" in
+  let* sl_lane =
+    match Standalone_lane.of_id lane_id with
+    | Some lane -> Ok lane
+    | None -> Error ("standalone lane: unknown lane_id " ^ lane_id)
+  in
   let* sl_label = required_string_field json "label" in
   let* sl_purpose = optional_string_field json "purpose" in
   let* sl_required = required_bool_field json "required" in
@@ -7183,17 +7180,15 @@ let decode_standalone_lane json =
     standalone_lane_configuration_of_string configuration_state
   in
   let* sl_jev =
-    match Standalone_lane.of_id sl_lane_id with
-    | Some Standalone_lane.Board_attention ->
+    match sl_lane with
+    | Standalone_lane.Board_attention ->
       let* jev = required_object_field json "jev" in
       let* decoded = decode_standalone_lane_jev jev in
       Ok (Some decoded)
-    | Some
-        ( Standalone_lane.Librarian
-        | Standalone_lane.Hitl_auto_judge
-        | Standalone_lane.Workspace_curator
-        | Standalone_lane.Verifier )
-    | None -> Ok None
+    | Standalone_lane.Librarian
+    | Standalone_lane.Hitl_auto_judge
+    | Standalone_lane.Workspace_curator
+    | Standalone_lane.Verifier -> Ok None
   in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
@@ -7252,7 +7247,7 @@ let decode_standalone_lane json =
   let* slws_server_restarted = required_int_field runs_without_slot "server_restarted" in
   let* slws_no_slot = required_int_field runs_without_slot "no_slot" in
   Ok
-    { sl_lane_id
+    { sl_lane
     ; sl_label
     ; sl_purpose
     ; sl_required
@@ -7315,7 +7310,9 @@ let decode_standalone_lanes_snapshot json =
     List.map Standalone_lane.to_id Standalone_lane.all |> List.sort String.compare
   in
   let observed_lane_ids =
-    sls_lanes |> List.map (fun lane -> lane.sl_lane_id) |> List.sort String.compare
+    sls_lanes
+    |> List.map (fun lane -> Standalone_lane.to_id lane.sl_lane)
+    |> List.sort String.compare
   in
   if observed_lane_ids = expected_lane_ids
   then
@@ -9777,13 +9774,13 @@ let decode_lane_run_skill_evidence run =
   | other -> Error (Printf.sprintf "unknown lane run Skill evidence state %S" other)
 ;;
 
-let decode_lane_run_gate_judgment ~lane ~status ~output =
-  let hitl_lane =
-    Standalone_lane.to_id Standalone_lane.Hitl_auto_judge
-  in
-  if not (String.equal lane hitl_lane)
-  then Ok Lane_run_not_gate_judgment
-  else
+let decode_lane_run_gate_judgment ~(lane : Standalone_lane.t) ~status ~output =
+  match lane with
+  | Standalone_lane.Librarian
+  | Standalone_lane.Board_attention
+  | Standalone_lane.Workspace_curator
+  | Standalone_lane.Verifier -> Ok Lane_run_not_gate_judgment
+  | Standalone_lane.Hitl_auto_judge ->
     let decode_advisory output =
       let* judgment = required_string_field output "judgment" in
       match
@@ -9839,7 +9836,7 @@ type lane_run_failure =
 type lane_run_summary =
   { lrs_run_id : string
   ; lrs_run_kind : lane_run_kind
-  ; lrs_lane : string
+  ; lrs_lane : Standalone_lane.t
   ; lrs_subject_id : string option
   ; lrs_actor : string
   ; lrs_started_at : float
@@ -9866,7 +9863,7 @@ type lane_run_answer_source =
 type lane_run_detail =
   { lrd_run_id : string
   ; lrd_run_kind : lane_run_kind
-  ; lrd_lane : string
+  ; lrd_lane : Standalone_lane.t
   ; lrd_subject_id : string option
   ; lrd_actor : string
   ; lrd_started_at : float
@@ -9888,7 +9885,12 @@ type lane_run_detail =
 let decode_lane_run_summary json =
   let* lrs_run_id = required_string_field json "run_id" in
   let* lrs_run_kind = optional_string_field json "run_kind" in
-  let* lrs_lane = required_string_field json "lane" in
+  let* lane_id = required_string_field json "lane" in
+  let* lrs_lane =
+    match Standalone_lane.of_id lane_id with
+    | Some lane -> Ok lane
+    | None -> Error ("lane run: unknown lane " ^ lane_id)
+  in
   let* lrs_subject_id = optional_string_field json "subject_id" in
   let* lrs_actor = required_string_field json "actor" in
   let* lrs_started_at = require_float_field json "started_at" in
@@ -9943,7 +9945,7 @@ let decode_lane_run_page ~lane json =
     | Some _ | None -> Ok () in
   let* runs = decode_list "runs" decode_lane_run_summary runs_json in
   let lrpg_runs =
-    List.filter (fun run -> String.equal run.lrs_lane lane) runs
+    List.filter (fun run -> Standalone_lane.equal run.lrs_lane lane) runs
   in
   let* lrpg_next =
     if not has_more
@@ -9994,14 +9996,12 @@ let decode_lane_run_detail json =
        is about the Board-attention lane, and a key no lane spells is not
        that lane. *)
     let is_board_attention =
-      match Standalone_lane.of_id summary.lrs_lane with
-      | Some Standalone_lane.Board_attention -> true
-      | Some
-          ( Standalone_lane.Librarian
-          | Standalone_lane.Hitl_auto_judge
-          | Standalone_lane.Workspace_curator
-          | Standalone_lane.Verifier )
-      | None ->
+      match summary.lrs_lane with
+      | Standalone_lane.Board_attention -> true
+      | Standalone_lane.Librarian
+      | Standalone_lane.Hitl_auto_judge
+      | Standalone_lane.Workspace_curator
+      | Standalone_lane.Verifier ->
         false
     in
     let* answer_succeeded =
@@ -10086,8 +10086,7 @@ let decode_lane_run_detail json =
     match lrd_output_availability with
     | Some (Exact_lane_run_registry.Not_loaded
            | Exact_lane_run_registry.Unavailable _)
-      when String.equal summary.lrs_lane
-        (Standalone_lane.to_id Standalone_lane.Hitl_auto_judge) ->
+      when Standalone_lane.equal summary.lrs_lane Standalone_lane.Hitl_auto_judge ->
       Ok Lane_run_gate_judgment_unavailable
     | _ ->
       decode_lane_run_gate_judgment ~lane:summary.lrs_lane

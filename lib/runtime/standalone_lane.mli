@@ -22,5 +22,7 @@ val to_id : t -> string
     standalone-lane projection serves, and the [lane] a run record carries.
     Code that sends, stores or compares a lane id takes it from here. *)
 
+val equal : t -> t -> bool
+
 val of_id : string -> t option
 (** The lane whose {!to_id} is the argument. An id no lane has is [None]. *)

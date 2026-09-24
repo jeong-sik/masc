@@ -524,9 +524,9 @@ let test_narrow_target_column_still_tells_the_variants_apart () =
    by whether publication admitted it. A rejected slot keeps its place: the
    admitted list alone cannot say where that is, and the editor moves and
    drops by position. *)
-let standalone_lane ~lane_id ~declared ~admitted : Masc.Tui_decode.standalone_lane =
-  { Masc.Tui_decode.sl_lane_id = lane_id
-  ; sl_label = lane_id
+let standalone_lane ~(lane : Standalone_lane.t) ~declared ~admitted : Masc.Tui_decode.standalone_lane =
+  { Masc.Tui_decode.sl_lane = lane
+  ; sl_label = Standalone_lane.to_id lane
   ; sl_purpose = None
   ; sl_required = false
   ; sl_status = Masc.Tui_decode.Standalone_idle
@@ -561,10 +561,10 @@ let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])
       ; sls_exact_run_projection_count = 0
       ; sls_exact_run_source_total = 0
       ; sls_exact_run_projection_truncated = false
-      ; sls_lanes = [ standalone_lane ~lane_id:"librarian_exact" ~declared ~admitted ]
+      ; sls_lanes = [ standalone_lane ~lane:Standalone_lane.Librarian ~declared ~admitted ]
       };
   state.slot_editor <-
-    Some { se_target = Exact_lane_slots "librarian_exact"; se_cursor = cursor };
+    Some { se_target = Exact_lane_slots Standalone_lane.Librarian; se_cursor = cursor };
   state
 
 let slot_plan_text = function
@@ -758,13 +758,13 @@ let test_the_writes_a_stale_list_can_undo_are_named_once () =
   pick "a conversation lane sends its whole order" true
     (Pick_conversation_lane "coding");
   pick "so does the media failover route" true Pick_media_failover;
-  pick "an exact lane appends one slot" false (Pick_exact_lane "verifier_exact");
+  pick "an exact lane appends one slot" false (Pick_exact_lane Standalone_lane.Verifier);
   pick "a new lane sends only the pick" false (Pick_new_lane "fresh");
   pick "the default is one entry, replaced" false Pick_route_default;
   Alcotest.(check bool) "the route editor sends its whole order" true
     (slot_editor_target_sends_whole_order Media_failover_slots);
   Alcotest.(check bool) "the exact-lane editor names one slot" false
-    (slot_editor_target_sends_whole_order (Exact_lane_slots "verifier_exact"))
+    (slot_editor_target_sends_whole_order (Exact_lane_slots Standalone_lane.Verifier))
 
 let test_the_route_editor_writes_the_whole_order () =
   let state = media_failover_state () in

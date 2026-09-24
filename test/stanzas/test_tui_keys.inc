@@ -5,6 +5,8 @@
   ;; The modify gate is checked against the schedule contract's own status
   ;; vocabulary, so the test reads that list instead of keeping a copy.
   masc.masc_schedule
+  ;; [Standalone_lane.t] is what the lane rows and lane views carry.
+  masc.runtime
   masc_tui_mcp masc_tui_types
   masc_tui_keys masc_tui_keeper_mark masc_tui_memory_mark masc_tui_footer
   masc_tui_config_mark

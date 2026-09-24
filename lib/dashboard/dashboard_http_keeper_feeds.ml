@@ -121,17 +121,15 @@ let keeper_costs_window_of_query = function
     [ts_unix] or [latency_ms] has a shape the writer never produces: a time
     that cannot place the row, or an in-window row with no readable latency.
     Either may have been a turn in the window, so a sum beside a non-zero
-    count is a floor. A row whose time places it before the window start is
-    outside it and counts nowhere.
-
-    [unread_keepers] are Keepers whose meta could not be read. They have no
-    row in [keepers], so they are listed apart as [keepers_unread], in the
-    {!Keeper_snapshot_unread} shape the operator snapshot uses: their turns
-    are in no sum. *)
+    count is a floor. A row whose kind this build cannot read (another
+    schema, or no [record_kind]) is counted there too: it may have been a
+    turn. A row whose time places it before the window start is outside it
+    and counts nowhere. The window's first day file is read whole, so an
+    unreadable row from earlier that day counts as well: the count is rows
+    that may be in the window, not rows known to be. *)
 let keeper_cost_aggregates_json
     ~(config : Workspace.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
-    ~(unread_keepers : Keeper_snapshot_unread.t list)
     ~(window_minutes : int)
     ~(now_ts : float)
   : Yojson.Safe.t =
@@ -148,8 +146,13 @@ let keeper_cost_aggregates_json
         let malformed_rows = ref 0 in
         let unread_turn_rows = ref 0 in
         let add_row j =
-          if keeper_cost_metric_row_is_event j
-          then
+          (* A row whose kind this build cannot read may have been a turn:
+             it is counted with the turn rows that did not read, never
+             dropped. A heartbeat is not a turn. *)
+          match Keeper_metrics_record.kind_of_json j with
+          | Some Keeper_metrics_record.Heartbeat -> ()
+          | None -> incr unread_turn_rows
+          | Some Keeper_metrics_record.Turn ->
             match
               Json_util.assoc_member_opt "ts_unix" j,
               Json_util.assoc_member_opt "latency_ms" j
@@ -237,7 +240,6 @@ let keeper_cost_aggregates_json
   in
   `Assoc
     [ "keepers", `List keeper_items
-    ; "keepers_unread", `List (List.map Keeper_snapshot_unread.to_json unread_keepers)
     ; "window_minutes", `Int window_minutes
     ; "generated_at", `Float now_ts
     ]

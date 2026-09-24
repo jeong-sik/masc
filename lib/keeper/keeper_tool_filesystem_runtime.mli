@@ -118,8 +118,8 @@ val declared_root_write_gate_input :
 (** The [filesystem_write] Gate input for a write to an endpoint path under a
     declared root (#38593). Its effect names the operation as a host write
     does, so {!approved_write_of_gate_input} decodes it to the same target and
-    mode, and carries the endpoint's name, host, user, port, remote root and
-    declared roots. Replay rebuilds the input from the configuration current
+    mode, and carries the endpoint's name and its whole configuration as
+    {!Exec_ssh_endpoint.to_toml} writes it. Replay rebuilds the input from the configuration current
     then, so a changed endpoint yields a different input and the old approval
     does not apply. *)
 

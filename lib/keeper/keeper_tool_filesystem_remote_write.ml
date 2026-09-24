@@ -101,16 +101,18 @@ type patch_request =
   ; replace_all : bool
   }
 
+type authorize_declared_root =
+  endpoint:Exec_ssh_endpoint.t
+  -> requested_target:string
+  -> mode:Keeper_tool_write_mode.t
+  -> content_source:Keeper_write_content.t
+  -> content:string
+  -> patch:patch_request option
+  -> Keeper_gate.decision
+
 type declared_root_writes =
   | Refuse_declared_roots
-  | Authorize_declared_roots of
-      (endpoint:Exec_ssh_endpoint.t
-       -> requested_target:string
-       -> mode:Keeper_tool_write_mode.t
-       -> content_source:Keeper_write_content.t
-       -> content:string
-       -> patch:patch_request option
-       -> Keeper_gate.decision)
+  | Authorize_declared_roots of authorize_declared_root
 
 (* Where a remote write lands. A name in the keeper's tree is internal and
    needs no decision; an endpoint path under a declared root is outside the
@@ -124,14 +126,7 @@ type remote_target =
   | Declared_root_target of
       { endpoint_path : string
       ; endpoint_config : Exec_ssh_endpoint.t
-      ; authorize :
-          endpoint:Exec_ssh_endpoint.t
-          -> requested_target:string
-          -> mode:Keeper_tool_write_mode.t
-          -> content_source:Keeper_write_content.t
-          -> content:string
-          -> patch:patch_request option
-          -> Keeper_gate.decision
+      ; authorize : authorize_declared_root
       }
 
 let handle_content_with_endpoint

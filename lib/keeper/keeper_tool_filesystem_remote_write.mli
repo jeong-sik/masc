@@ -16,17 +16,19 @@ type patch_request =
   ; replace_all : bool
   }
 
+type authorize_declared_root =
+  endpoint:Exec_ssh_endpoint.t
+  -> requested_target:string
+  -> mode:Keeper_tool_write_mode.t
+  -> content_source:Keeper_write_content.t
+  -> content:string
+  -> patch:patch_request option
+  -> Keeper_gate.decision
+
 type declared_root_writes =
   | Refuse_declared_roots
       (** A path outside the keeper's tree is refused, declared or not. *)
-  | Authorize_declared_roots of
-      (endpoint:Exec_ssh_endpoint.t
-       -> requested_target:string
-       -> mode:Keeper_tool_write_mode.t
-       -> content_source:Keeper_write_content.t
-       -> content:string
-       -> patch:patch_request option
-       -> Keeper_gate.decision)
+  | Authorize_declared_roots of authorize_declared_root
       (** A path under a declared root is written only when this decision
           allows it. It is asked right before the write, with the bytes that
           would be written ([content]; for a patch, the patched file), the

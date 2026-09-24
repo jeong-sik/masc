@@ -1591,9 +1591,11 @@ let path_effect_operation_of_write_mode = function
 (* A write to a path under an endpoint's declared roots (#38593) is outside
    the keeper's tree, so it takes the Gate decision a host write outside the
    playground takes, with the same operation and the same input shape. The
-   effect carries the endpoint's configuration, not only its name: replay
-   rebuilds this input from the configuration current then, so an approval
-   given for one host is not spent on another that took the same name. *)
+   effect carries the endpoint's whole configuration, not only its name:
+   replay rebuilds this input from the configuration current then, so an
+   approval given for one host, key or pinned host key is not spent on
+   another that took the same name. The configuration is the endpoint's own
+   runtime.toml serialization, so a field added to the endpoint joins it. *)
 let declared_root_write_gate_input
       ~(endpoint : Exec_ssh_endpoint.t)
       ~requested_target
@@ -1611,11 +1613,7 @@ let declared_root_write_gate_input
       ; ( "endpoint"
         , `Assoc
             [ "name", `String endpoint.name
-            ; "host", `String endpoint.host
-            ; "user", `String endpoint.user
-            ; "port", `Int endpoint.port
-            ; "remote_root", `String endpoint.remote_root
-            ; "allowed_paths", `List (List.map (fun root -> `String root) endpoint.allowed_paths)
+            ; "config_toml", `String (Exec_ssh_endpoint.to_toml endpoint)
             ] )
       ; "endpoint_path", `String requested_target
       ]

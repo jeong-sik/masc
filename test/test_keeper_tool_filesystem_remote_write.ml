@@ -538,6 +538,20 @@ let test_another_host_behind_the_name_is_another_gate_input () =
     (Yojson.Safe.equal (input "host-a.invalid") (input "host-a.invalid"));
   check bool "another host gives another input" false
     (Yojson.Safe.equal (input "host-a.invalid") (input "host-b.invalid"));
+  let repinned =
+    Keeper_tool_filesystem_runtime.declared_root_write_gate_input
+      ~endpoint:
+        { (endpoint_config ~host:"host-a.invalid") with
+          Exec_ssh_endpoint.known_hosts_file = "/etc/masc/ssh/another_known_hosts"
+        }
+      ~requested_target:"/app/out.txt"
+      ~mode:Keeper_tool_write_mode.Overwrite
+      ~content_source:(Keeper_write_content.Text "x")
+      ~content:"x"
+      ~patch:None
+  in
+  check bool "another pinned host key gives another input" false
+    (Yojson.Safe.equal (input "host-a.invalid") repinned);
   match Keeper_tool_filesystem_runtime.approved_write_of_gate_input (input "host-a.invalid") with
   | Error error -> fail error
   | Ok approved ->

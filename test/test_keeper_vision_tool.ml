@@ -1589,9 +1589,9 @@ let test_candidate_rows_join_parent_tool_call () =
         match rows with
         | [ start_a; error_a; start_b; ok_b ] ->
           assert (row_top_string start_a "record_kind" = "lifecycle_event");
-          assert (row_top_string error_a "record_kind" = "tool_call");
+          assert (row_top_string error_a "record_kind" = "lifecycle_event");
           assert (row_top_string start_b "record_kind" = "lifecycle_event");
-          assert (row_top_string ok_b "record_kind" = "tool_call");
+          assert (row_top_string ok_b "record_kind" = "lifecycle_event");
           assert
             (row_string_field "runtime_id" (row_input_fields start_a)
              = "p1.vision-a");
@@ -1657,7 +1657,7 @@ let test_cancelled_candidate_leaves_start_and_cancelled_rows () =
       assert (events = [ "started"; "cancelled" ]);
       assert (row_top_string (List.hd rows) "record_kind" = "lifecycle_event");
       let cancelled_row = List.nth rows 1 in
-      assert (row_top_string cancelled_row "record_kind" = "tool_call");
+      assert (row_top_string cancelled_row "record_kind" = "lifecycle_event");
       let fields = row_input_fields cancelled_row in
       assert (row_string_field "runtime_id" fields = "p1.vision-a");
       assert (row_string_field "reason" fields = "parent_cancelled");

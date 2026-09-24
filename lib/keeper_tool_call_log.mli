@@ -250,7 +250,9 @@ val log_call :
     [record_kind] defaults to [Tool_call]; [Composition_run] is the explicit
     terminal aggregate for a composition and must not be interpreted as a
     second physical invocation. [Lifecycle_event] is an opening or progress
-    marker, not an invocation outcome, and quality aggregators exclude it.
+    marker, not an invocation outcome, and quality aggregators exclude it. A
+    step inside an invocation, such as a vision candidate arm starting or
+    ending, is one even when it carries the step's own outcome.
     [skill_reference], when present, is the exact published Skill revision
     that produced the run; clients must not infer it from the mutable
     composition tool name.

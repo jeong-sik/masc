@@ -62,6 +62,10 @@ Stagehand 런타임은 `llm.generate`로 모델을 요청합니다. MASC는 `run
 
 브라우저는 `BrowserSession`을 `lane="stagehand"`로 열 때 뜨고, 닫을 때·세션이 실패할 때·서버가 멈출 때 내려갑니다. 비정상 종료한 서버가 남긴 Chromium은 다음 시작 때 정리합니다.
 
+Stagehand는 서버가 공유하는 세션 하나를 사용합니다. `BrowserSession action="open"`은 기존 세션을 재사용할 수 있으며, `reused: true`는 연결이 살아 있다는 증거가 아닙니다. 연결이 끊겼다는 답이 오면 `action="status"`의 `ended`를 확인합니다. 세션을 종료해도 되는지 확인한 뒤 `action="close"` → `action="open"`으로 다시 열고, `BrowserTabs`로 새 tab ID를 찾습니다. `open`만 반복하면 끊긴 세션에도 `reused: true`가 올 수 있습니다. 이미 페이지를 바꿨을 수 있는 act는 그대로 반복하지 않습니다.
+
+`status`는 누가 세션을 열었거나 지금 쓰는지 알려주지 않습니다. 운영자가 종료해도 된다고 확인했거나 작업에 명시적인 독점 사용 범위가 있을 때만 닫고, 그 외에는 사용 관계를 조율해 인계합니다.
+
 ## Keeper와 MCP 도구
 
 Keeper에 보이는 이름은 CamelCase이고, MCP 등록 이름은 `masc_browser_*`입니다.

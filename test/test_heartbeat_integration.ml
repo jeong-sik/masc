@@ -1325,8 +1325,9 @@ let test_direct_stop_ignores_a_dead_librarian_executor () =
 
    The launch clears the wakeup flag ([Keeper_registry.prepare_fiber_launch])
    and this test never sets it. The lane runs with a nonzero warmup, and the
-   test requires that no turn has started at half the warmup and that one has
-   started before [first_cycle_deadline_sec]. That fails for:
+   test requires that no turn has started at [fresh_lane_warmup_check_sec]
+   (a third of the warmup) and that one has started before
+   [first_cycle_deadline_sec]. That fails for:
    - a lane that ignores warmup and dispatches at once;
    - a lane that serves the queue only after a wakeup;
    - a lane that waits a full keepalive interval before the first cycle that
@@ -1339,7 +1340,10 @@ let test_direct_stop_ignores_a_dead_librarian_executor () =
    The warmup check compares the wall clock ([Time_compat.now]) with the
    monotonic cadence clock; a wall clock step backwards during the test could
    defer the first reading cycle by an interval. *)
-let fresh_lane_warmup_sec = 2
+let fresh_lane_warmup_sec = 6
+(* A third of the warmup: the early check fails as too late only after a
+   scheduler stall of the remaining two thirds (4 s). *)
+let fresh_lane_warmup_check_sec = 2.0
 (* Must stay below one keepalive interval (checked) so a lane that sleeps a
    full cadence fails, and far above the warmup so a cycle's own work on a
    slow runner does not fail the test. *)
@@ -1454,7 +1458,7 @@ let test_fresh_lane_serves_queued_schedule_wake_after_warmup () =
          failf
            "fresh lane failed to start: %s"
            (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
-      let mid_warmup = launched_at +. (warmup /. 2.0) in
+      let mid_warmup = launched_at +. fresh_lane_warmup_check_sec in
       Eio.Time.sleep ctx.clock
         (Float.max 0.0 (mid_warmup -. Eio.Time.now ctx.clock));
       let observed_at = Eio.Time.now ctx.clock in

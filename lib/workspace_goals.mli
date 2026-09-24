@@ -68,6 +68,13 @@ val commit_verifier_decision
   -> evidence:string
   -> Tool_result.result
 
+val announce_proof_deferred :
+  Workspace_utils_backend_setup.config -> goal:Goal_store.goal -> reason:string -> unit
+(** Tell the Keepers, as [verifier_exact], that a review of this still-
+    Verifying Goal ended without a verdict and why. A deferral writes no
+    ledger row, so no scan follows it; this message is how the Keepers learn
+    the Goal is waiting. A failed broadcast is logged, never raised. *)
+
 val reconcile_committed_proof :
   Workspace_utils_backend_setup.config ->
   goal_id:string ->

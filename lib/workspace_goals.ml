@@ -528,6 +528,35 @@ let announce_proof_verdict
       (Workspace_broadcast.broadcast_error_to_string error)
 ;;
 
+(* A review that ends without a verdict changes nothing in the ledger, so no
+   scan follows it: the Goal waits in Verifying until something asks again.
+   The Keepers are told here, with the reason, so one of them can choose to
+   ask again once the cause is gone. No retry is scheduled. *)
+let announce_proof_deferred config ~(goal : Goal_store.goal) ~reason =
+  let content =
+    Printf.sprintf
+      "[goal_review_deferred] %s — %s\nreason: %s\n\
+       The Goal stays verifying. It is reviewed again on the next verifier \
+       scan; request_complete on this Goal starts one."
+      goal.Goal_store.id
+      goal.Goal_store.title
+      reason
+  in
+  match
+    Workspace_broadcast.broadcast
+      ~audience:Workspace_broadcast.Fleet_conversation
+      config
+      ~from_agent:Runtime.verifier_exact_lane_id
+      ~content
+  with
+  | Ok _ -> ()
+  | Error error ->
+    Log.Misc.warn
+      "goal review deferral announcement failed goal_id=%s: %s"
+      goal.Goal_store.id
+      (Workspace_broadcast.broadcast_error_to_string error)
+;;
+
 let gate_event_payload (ctx : context) ~phase (verdict : Goal_verification.verdict) =
   let outcome_fields =
     match verdict.outcome with

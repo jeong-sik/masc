@@ -26,7 +26,9 @@
     all slots failed, or a refused commit leaves the pending row durable and
     stops. Nothing re-runs the same review on a clock — the next scan comes
     from a Keeper requesting completion or from another review committing a
-    verdict. No wall-clock expiry and no retry timer anywhere. *)
+    verdict. So a deferral of a Goal still waiting on the same request is
+    announced to the Keepers with its reason, and they choose whether to ask
+    again. No wall-clock expiry and no retry timer anywhere. *)
 
 type pending_work = { goal_id : string }
 
@@ -272,12 +274,6 @@ let bind_review config ~goal_id =
           | Some _ | None -> Error "goal has no pending proof for its current criterion"))
 ;;
 
-let newer_request_pending config ~goal_id ~request_id =
-  match bind_review config ~goal_id with
-  | Ok (_, (current_request_id, _, _)) -> not (String.equal request_id current_request_id)
-  | Error _ -> false
-;;
-
 let process_pending_work_inner
       ?(sw : Eio.Switch.t option = None)
       ~observe_tool
@@ -380,9 +376,18 @@ let process_pending_work_inner
     in
     match outcome with
     | Committed | Superseded -> outcome
-    | Deferred _ when newer_request_pending config ~goal_id:work.goal_id ~request_id ->
-      Superseded
-    | Deferred _ -> outcome
+    | Deferred reason ->
+      (* Re-read the Goal under its lock. A newer request supersedes this
+         review; the same request still standing is a Goal nothing will
+         rescan, so the Keepers are told why it waits. A Goal that left
+         Verifying has nothing to wait for. *)
+      (match bind_review config ~goal_id:work.goal_id with
+       | Ok (_, (current_request_id, _, _))
+         when not (String.equal request_id current_request_id) -> Superseded
+       | Ok (current_goal, _) ->
+         Workspace_goals.announce_proof_deferred config ~goal:current_goal ~reason;
+         outcome
+       | Error _ -> outcome)
 ;;
 
 let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pending_work)

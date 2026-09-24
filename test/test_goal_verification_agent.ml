@@ -1246,6 +1246,97 @@ let test_reopen_from_verifying_cancels_a_hung_review () =
   check string "the new request committed" "awaiting_confirmation" (stored_phase config goal_id)
 ;;
 
+(* The idle window after a deferral, as ticks of the real clock. A plain
+   scheduler yield is not a tick here: a rescan waits on store reads, which
+   only finish when the loop polls for I/O. A rescan that a deferral started
+   registers its review within one tick; the window is several of them. *)
+let idle_ticks_after_deferral = 10
+let idle_tick_s = 0.02
+
+let deferral_announcements config goal_id =
+  Workspace.get_all_messages_raw config ~since_seq:0
+  |> List.filter (fun (message : Masc_domain.message) ->
+    String_util.string_contains_substring ~needle:"[goal_review_deferred]" message.content
+    && String_util.string_contains_substring ~needle:goal_id message.content)
+;;
+
+(* A deferral writes no ledger row, so nothing rescans: the Goal would sit in
+   Verifying with nobody told. Tick by tick on the real daemon: the boot scan
+   defers once and the Keepers get one message naming the reason; the idle
+   ticks start no review and repeat no message; the request_complete that the
+   message names starts the next review, which commits. *)
+let test_deferred_review_is_announced_and_waits_for_a_request () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Verifier lane is down" in
+  ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+  let registry = Goal_verification_run_registry.global () in
+  let completed_outcomes () =
+    reviews_of_goal registry goal_id
+    |> List.filter_map (fun (run : Goal_verification_run_registry.run) ->
+      match run.status with
+      | Goal_verification_run_registry.Completed { outcome; _ } -> Some outcome
+      | Goal_verification_run_registry.Running -> None)
+  in
+  let deferred, resolve_deferred = Eio.Promise.create () in
+  let committed, resolve_committed = Eio.Promise.create () in
+  let saved_observer = Atomic.get Goal_verification_run_registry.change_observer_fn in
+  let observer () =
+    List.iter (function
+      | Goal_verification_run_registry.Deferred _ ->
+        ignore (Eio.Promise.try_resolve resolve_deferred ())
+      | Goal_verification_run_registry.Committed ->
+        ignore (Eio.Promise.try_resolve resolve_committed ())
+      | Goal_verification_run_registry.Reviewed
+      | Goal_verification_run_registry.Superseded _
+      | Goal_verification_run_registry.Review_cancelled _
+      | Goal_verification_run_registry.Raised _ -> ())
+      (completed_outcomes ())
+  in
+  let await_within label promise =
+    let clock = match !workspace_clock with
+      | Some clock -> clock
+      | None -> fail "test setup: with_workspace did not record its clock" in
+    match Eio.Time.with_timeout clock hung_review_wait_s (fun () ->
+        Eio.Promise.await promise; Ok ()) with
+    | Ok () -> ()
+    | Error `Timeout -> fail (Printf.sprintf "%s did not happen within %.0fs" label hung_review_wait_s)
+  in
+  Fun.protect ~finally:(fun () -> Atomic.set Goal_verification_run_registry.change_observer_fn saved_observer)
+    (fun () ->
+      Atomic.set Goal_verification_run_registry.change_observer_fn observer;
+      with_lane_and_reviewer ~slots:(fun () -> Ok ["verifier-a"])
+        ~reviewer:(recording_reviewer (ref []) ["verifier-a", Stub_unavailable])
+        (fun () ->
+          Eio.Switch.run (fun sw ->
+            Goal_verification_agent.start ~sw ~config;
+            await_within "the boot scan's deferral" deferred;
+            (match deferral_announcements config goal_id with
+             | [ message ] ->
+               check bool "the announcement carries the deferral reason" true
+                 (String_util.string_contains_substring
+                    ~needle:"test evaluator unavailable" message.content)
+             | messages ->
+               fail (Printf.sprintf "expected one deferral announcement, got %d"
+                       (List.length messages)));
+            let clock = match !workspace_clock with
+              | Some clock -> clock
+              | None -> fail "test setup: with_workspace did not record its clock" in
+            for _ = 1 to idle_ticks_after_deferral do Eio.Time.sleep clock idle_tick_s done;
+            check int "idle ticks start no review" 1 (List.length (reviews_of_goal registry goal_id));
+            check int "idle ticks repeat no announcement" 1
+              (List.length (deferral_announcements config goal_id));
+            check string "the Goal waits in verifying" "verifying" (stored_phase config goal_id);
+            Atomic.set AR.run_llm_reviewer_fn
+              (recording_reviewer (ref []) ["verifier-a", Stub_approve "lane back, target met"]);
+            ignore (must_succeed "the request the announcement names"
+              (transition ctx goal_id "request_complete"));
+            await_within "the requested review's commit" committed)));
+  check int "the request started exactly one more review" 2
+    (List.length (reviews_of_goal registry goal_id));
+  check string "the requested review committed" "awaiting_confirmation" (stored_phase config goal_id)
+;;
+
 let test_pending_before_phase_waits_for_explicit_request () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
@@ -1413,6 +1504,8 @@ let () =
     ; ( "drain"
       , [ test_case "wake after deferred persistence survives active scan" `Quick
             test_wake_after_deferred_persist_survives_active_scan
+        ; test_case "deferred review is announced and waits for a request" `Quick
+            test_deferred_review_is_announced_and_waits_for_a_request
         ; test_case "pending before phase waits for explicit retry" `Quick
             test_pending_before_phase_waits_for_explicit_request
         ; test_case "reopen from verifying cancels a hung review" `Quick

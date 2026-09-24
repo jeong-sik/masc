@@ -24,6 +24,12 @@ def latest_frame(output):
     return data[max(0, start):]
 
 
+def capture_screen(label, output):
+    """Leave a synthetic PTY screen capture in the CI suite log."""
+    screen = h.screen_text(bytes(output)).decode("utf-8", errors="replace")
+    print("TUI_CAPTURE " + label + " " + json.dumps(screen, ensure_ascii=False), flush=True)
+
+
 def rows():
     result = []
     for number in range(7):
@@ -83,6 +89,7 @@ def full_queue(process, master_fd, _slave_fd, output, _base_path):
         raise AssertionError(f"the full queue omitted its seventh request: {frame!r}")
     if b"stop for specific test-0" in frame:
         raise AssertionError("the full queue opened an arbitrary detail")
+    capture_screen("full_queue", output)
     os.write(master_fd, b"q")
 
 
@@ -112,6 +119,7 @@ def exact_jump(gate):
                 raise AssertionError(f"jump lost {needle!r}: {frame!r}")
         if b"stop for specific test-0" in frame:
             raise AssertionError(f"jump opened the first request: {frame!r}")
+        capture_screen("exact_detail_narrow", output)
         os.write(master_fd, b"q")
 
     return interact
@@ -195,6 +203,7 @@ def verdict_refresh(requests, stale_read):
         h.wait_for_output(process, master_fd, output, b"awaiting 6", start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b";", b"MASC Agenda")
         h.wait_for_output(process, master_fd, output, b"stop requests 6", start=0, timeout=5.0)
+        capture_screen("after_approval_agenda", output)
         h.send_and_wait(process, master_fd, output, b";", b"Task Review")
         os.write(master_fd, b"x")
         if not h.wait_for_fixture_state(

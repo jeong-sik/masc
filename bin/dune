@@ -1453,6 +1453,7 @@
  (wrapped false)
  (modules masc_tui_render_prim)
  (libraries
+  masc_tui_overview_team
   masc_tui_next_request_band
   masc_tui_answering
   masc_tui_composer_projection

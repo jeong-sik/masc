@@ -9843,17 +9843,23 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Toggle_burn_hud ->
       Buffer.clear state.msg_input;
       state.burn_hud_visible <- not state.burn_hud_visible;
-      let status_str = if state.burn_hud_visible then "shown" else "hidden" in
-      let cost = Masc_tui_types.fleet_total_cost_usd state in
+      (* The tab row draws keeper-costs' 24h reading, which is fetched only
+         while something shows it; once nothing does, a reading kept from
+         before would come back as a sum nobody observed since. *)
+      if not (state.burn_hud_visible || state.overview_cost_visible) then
+        state.overview_cost <- Cost_unread;
       notice ~kind:Notice_reply
-        (Printf.sprintf "Fleet cost in the tab row: %s ($%.4f so far)" status_str cost)
+        (if state.burn_hud_visible then "Fleet 24h cost in the tab row: shown"
+         else "Fleet 24h cost in the tab row: hidden")
   | Masc_tui_command.Toggle_team_cost ->
       Buffer.clear state.msg_input;
       state.overview_cost_visible <- not state.overview_cost_visible;
-      (* Hidden, the cost stops being read, so a reading kept from before
-         would come back as a sum nobody observed since. Shown again, it
-         starts unread and the next refresh fills it. *)
-      state.overview_cost <- Cost_unread;
+      (* Once nothing shows it the cost stops being read, so a reading kept
+         from before would come back as a sum nobody observed since. Shown
+         again, it starts unread and the next refresh fills it. [/burn] reads
+         the same, so while it is shown the reading stays. *)
+      if not (state.burn_hud_visible || state.overview_cost_visible) then
+        state.overview_cost <- Cost_unread;
       notice ~kind:Notice_reply
         (if state.overview_cost_visible then
            "Fleet 24h cost on the Overview Team line: shown"
@@ -11246,6 +11252,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
         ~overview_cost_shown:state.overview_cost_visible
+        ~burn_hud_shown:state.burn_hud_visible
         state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not
@@ -16781,6 +16788,7 @@ let main
       (Masc_tui_types.surface_needs
          ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state))
          ~overview_cost_shown:state.overview_cost_visible
+         ~burn_hud_shown:state.burn_hud_visible
          state.view)
   in
   let input_reader = create_input_reader () in
@@ -25275,6 +25283,7 @@ and is loaded on demand through keeper_skill.
           ~keeper_pane_drawn:
             (not (Masc_tui_render.acting_pane_suppressed state))
           ~overview_cost_shown:state.overview_cost_visible
+          ~burn_hud_shown:state.burn_hud_visible
           state.view
       in
       if

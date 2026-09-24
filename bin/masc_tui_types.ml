@@ -2941,18 +2941,22 @@ let nothing =
    instead of the roster. The roster is 8.4 KB and answers in about a
    millisecond, which is what makes this affordable where planning is not.
 
-   [overview_cost_shown] is the other one: the Team title draws the fleet's
-   cost only after [/team-cost], and keeper-costs rereads every day file of
-   every Keeper's metrics in its window whenever its server cache expires, so
-   a surface that could draw it asks for it only while it is shown. *)
-let rec surface_needs ~keeper_pane_drawn ~overview_cost_shown surface =
+   [overview_cost_shown] and [burn_hud_shown] are the other two. The fleet's
+   cost is drawn by the Team title after [/team-cost] and by the tab row after
+   [/burn], and keeper-costs rereads every day file of every Keeper's metrics
+   in its window whenever its server cache expires, so it is asked for only
+   while one of them draws it: the Team title on the Overview, the tab row on
+   every surface. *)
+let rec surface_needs ~keeper_pane_drawn ~overview_cost_shown ~burn_hud_shown
+    surface =
   let needs = surface_needs_of_surface surface in
   let needs =
     if keeper_pane_drawn then { needs with needs_keeper_roster = true }
     else needs
   in
   { needs with
-    needs_overview_cost = needs.needs_overview_cost && overview_cost_shown
+    needs_overview_cost =
+      (needs.needs_overview_cost && overview_cost_shown) || burn_hud_shown
   }
 
 and surface_needs_of_surface : surface -> surface_needs = function
@@ -3038,9 +3042,11 @@ let surface_needs_delta ~previous ~next =
 let surface_needs_any needs = needs <> nothing
 
 let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn
-    ~overview_cost_shown surface =
+    ~overview_cost_shown ~burn_hud_shown surface =
   if scoped_refresh_inflight then nothing
-  else surface_needs ~keeper_pane_drawn ~overview_cost_shown surface
+  else
+    surface_needs ~keeper_pane_drawn ~overview_cost_shown ~burn_hud_shown
+      surface
 
 type full_refresh_intent = Cadence | Revalidate
 
@@ -5704,7 +5710,8 @@ type state = {
   mutable overview_pulls: overview_pulls_reading;
   mutable overview_goals: overview_goals_reading;
   mutable overview_cost: overview_cost_reading;
-  (* [/team-cost]: off until the operator asks. keeper-costs rereads every day
+  (* [/team-cost]: off until the operator asks. [/burn] draws the same
+     reading in the tab row, so either one being shown fetches it. keeper-costs rereads every day
      file of every Keeper's metrics in the window whenever its server cache
      expires, so a hidden cost is not fetched at all. Process-only, like [burn_hud_visible]. *)
   mutable overview_cost_visible: bool;

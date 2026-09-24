@@ -109,7 +109,7 @@ let catalog =
   ; { word = "burn"
     ; aliases = [ "cost" ]
     ; args = ""
-    ; summary = "show or hide the fleet cost and each Keeper's token total in the tab row"
+    ; summary = "show or hide the fleet's 24h cost and each Keeper's token total in the tab row"
     }
   ; { word = "team-cost"
     ; aliases = []

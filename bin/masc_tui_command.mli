@@ -35,7 +35,7 @@ type t =
   | Open_patch_modal
       (** [/patch] or [/review] — open the patch review overlay. *)
   | Toggle_burn_hud
-      (** [/burn] or [/cost] — show or hide the fleet cost and each Keeper's token total in the tab row. *)
+      (** [/burn] or [/cost] — show or hide the fleet's 24h cost and each Keeper's token total in the tab row. *)
   | Toggle_team_cost
       (** [/team-cost] — show or hide the fleet's 24h cost on the Overview Team line. *)
   | Open_link_preview of string option

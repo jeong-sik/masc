@@ -653,11 +653,17 @@ let overview_pulse_text (state : state) ~now =
    braille bar per Keeper for its token total when any Keeper has spent one.
    It read "[HUD $0.00   ]": a word naming the widget rather than what it shows,
    and, with nothing spent, bars of blank cells inside the brackets. The bars
-   are each Keeper's running total, not a rate over time. *)
+   are each Keeper's running total, not a rate over time.
+
+   The cost is keeper-costs' 24h reading in the Team title's words (#38717).
+   It was each Keeper's lifetime [k_total_cost_usd] added up, a float that
+   takes a turn with no price as $0, so a subscription fleet read "$0.00".
+   Only the lead is drawn: the tab row has no room for the clauses, and the
+   lead alone already says "at least" or "unknown". *)
 let burn_hud_text (state : state) =
   if not state.burn_hud_visible then None
   else
-    let cost = Printf.sprintf "$%.2f" (Masc_tui_types.fleet_total_cost_usd state) in
+    let cost = (Masc_tui_overview_team.cost_words state.overview_cost).lead in
     if List.exists (fun (k : keeper) -> k.k_total_tokens > 0) state.keepers then
       Some (cost ^ " " ^ Masc_tui_types.fleet_token_sparkline state)
     else Some cost

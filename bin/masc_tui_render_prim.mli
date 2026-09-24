@@ -263,8 +263,9 @@ val overview_pulse_text : Masc_tui_types.state -> now:float -> string
     any keeper-turn reading has come back. *)
 
 val burn_hud_text : Masc_tui_types.state -> string option
-(** The tab row's [/burn] reading without styling: the fleet's cost, and each
-    Keeper's token total as a braille bar when any Keeper has spent one.
+(** The tab row's [/burn] reading without styling: the fleet's 24h cost as
+    the Team title words it ({!Masc_tui_overview_team.cost_words}'s lead), and
+    each Keeper's token total as a braille bar when any Keeper has spent one.
     [None] while it is hidden. *)
 
 val fenced_document_text : language:string -> string -> string

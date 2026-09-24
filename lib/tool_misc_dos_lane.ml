@@ -315,7 +315,13 @@ let off_domain f = Eio_guard.run_in_systhread ~label:"dos-lane" f
    until a restart. [holder_left] says whether a holder can no longer act;
    the Keeper boundary supplies it from Keeper state, which this tool surface
    does not read (RFC-0194). Called before a call that needs the controller,
-   it frees a stopped holder's controller and tells the board. *)
+   it frees a stopped holder's controller and tells the board.
+
+   The holder's state is read between two lane calls, not under the lane's
+   lock, so a holder resumed in those milliseconds still loses it and must
+   wait for a pass like any other player. And the name is
+   the caller's own: an MCP client named like a stopped Keeper is let go as
+   that Keeper would be. *)
 let free_left_controller ~holder_left ~who =
   match off_domain Dos_lane.screen with
   | Ok { Dos_lane.controller = Some holder; _ }
@@ -328,7 +334,9 @@ let free_left_controller ~holder_left ~who =
                 (Printf.sprintf
                    "%s 님의 Keeper 가 멈춰서 DOS 조종권이 풀렸어요" holder)))
      with
-     | Ok true -> ()
+     (* Posted now: the call that follows may be refused before it reaches
+        the lane, and would not post it. *)
+     | Ok true -> flush_announcements ()
      (* A hand-off that landed after the read above: that pass stands. *)
      | Ok false -> ()
      (* The machine went away; the call that follows reports it. *)

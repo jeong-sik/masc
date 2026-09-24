@@ -551,6 +551,36 @@ let () = test "web_search_simulate_for_test_falls_back_after_error" (fun () ->
   assert (Yojson.Safe.Util.member "result_count" result_json = `Int 1)
 )
 
+(* Ollama and Exa send page text in the field read as a snippet. A snippet
+   past the bound is cut at a character boundary and marked; one an engine
+   wrote as a snippet stays whole. *)
+let () = test "web_search_snippet_is_a_bounded_preview" (fun () ->
+  let page = String.concat " " (List.init 2000 (fun _ -> "한글")) in
+  let result =
+    Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3
+      [ ( "ollama",
+          `Hits
+            [ ("Page", "https://example.com/page", page);
+              ("Short", "https://example.com/short", "Fiber runtime") ] ) ]
+  in
+  assert (Tool_result.is_success result);
+  let snippets =
+    parse_json (Tool_result.message result)
+    |> Yojson.Safe.Util.member "result"
+    |> Yojson.Safe.Util.member "results"
+    |> Yojson.Safe.Util.to_list
+    |> List.map (fun hit -> Yojson.Safe.Util.(member "snippet" hit |> to_string))
+  in
+  match snippets with
+  | [ long_snippet; short_snippet ] ->
+      assert (String.length long_snippet < String.length page);
+      assert (String.length long_snippet <= 1024 + String.length "…");
+      assert (String.ends_with ~suffix:"…" long_snippet);
+      assert (String.is_valid_utf_8 long_snippet);
+      assert (short_snippet = "Fiber runtime")
+  | _ -> failwith "expected two hits"
+)
+
 let () = test "web_search_simulate_for_test_reports_all_failures" (fun () ->
   let result =
     Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3

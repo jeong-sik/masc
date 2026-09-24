@@ -285,6 +285,20 @@ let take_results limit hits =
   in
   loop limit [] hits
 
+(* A snippet is the preview a caller picks results by. Ollama and Exa send
+   page text in the field read as the snippet -- for Ollama several KB per
+   hit and up to about 1 MB (measured 2026-09-24) -- while SearXNG's own
+   snippets stayed under 1 KB. The bound sits above every snippet an engine
+   writes as one. Page text is what [includeContent] fetches, capped by
+   [contentMaxChars]. *)
+let snippet_max_bytes = 1024
+let snippet_cut_marker = "…"
+
+let bound_snippet snippet =
+  if String.length snippet <= snippet_max_bytes
+  then snippet
+  else String_util.utf8_prefix ~max_bytes:snippet_max_bytes snippet ^ snippet_cut_marker
+
 let normalize_hits ~source tuples =
   tuples
   |> List.filter (fun (title, url, _snippet) -> not (String.equal title "") && valid_search_result_url url)
@@ -292,7 +306,7 @@ let normalize_hits ~source tuples =
          {
            title;
            url;
-           snippet = clean_search_text snippet;
+           snippet = clean_search_text snippet |> bound_snippet;
            source;
            rank = idx + 1;
            published_at = None;

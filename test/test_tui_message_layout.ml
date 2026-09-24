@@ -74,7 +74,58 @@ let test_ascii_columns_keep_unicode_boundaries () =
   check int "an unfinished CSI is not swallowed" 4
     (Layout.display_width "a\027[31")
 
-(* Observe equal-cell rows, including the fallback after a long ASCII prefix.
+(* Explicit clusters and cell widths exercise both ends of printable ASCII
+   runs without deriving expected values from the layout under test. Under
+   Uucp's terminal width policy, U+0600 (Cf), U+0301/U+094D (Mn) and ZWJ (Cf)
+   occupy zero cells; U+093E (Mc) occupies one. Controls are clamped to zero. *)
+let test_mixed_ascii_cluster_boundaries () =
+  let fixtures =
+    [ "prepend and combining", [ "\xd8\x80a", 1; "b", 1; "c", 1; "d\xcc\x81", 1; "한", 2 ]
+    ; "keycap", [ "한", 2; "a", 1; "b", 1; "1\xef\xb8\x8f\xe2\x83\xa3", 2; "Z", 1 ]
+    ; "text selector", [ "한", 2; "a", 1; "b", 1; "1\xef\xb8\x8e", 1; "Z", 1 ]
+    ; "joiner", [ "a", 1; "b", 1; "c\xe2\x80\x8d", 1; "👩‍💻", 2; "Z", 1 ]
+    ; "spacing mark", [ "a", 1; "b", 1; "c\xe0\xa4\xbe", 2; "Z", 1 ]
+    ; "short runs", [ "한", 2; "a", 1; "국", 2; "b", 1; "c", 1; "어", 2 ]
+    ; "two runs", [ "가", 2; "a", 1; "b", 1; "c", 1; "나", 2; "d", 1; "e", 1; "f\xcc\x81", 1; "다", 2 ]
+    ; "hangul and flag", [ "각", 2; "a", 1; "b", 1; "c", 1; "🇰🇷", 2; "d", 1; "e", 1; "f", 1; "한", 2 ]
+    ; "controls", [ "a", 1; "b", 1; "c", 1; "\r\n", 0; "d", 1; "e", 1; "f", 1; "\t", 0; "Z", 1 ]
+    ; "leading combining", [ "\xcc\x81", 0; "a", 1; "b", 1; "c", 1; "한", 2 ]
+    ; "trailing ASCII", [ "한", 2; "a", 1; "b", 1; "c", 1 ]
+    ; "emoji context resets", [ "👩", 2; "a", 1; "b", 1; "c\xe2\x80\x8d", 1; "👩", 2 ]
+    ; "regional indicator context resets", [ "🇰", 1; "a", 1; "b", 1; "c", 1; "🇰🇷", 2; "🇺", 1 ]
+    ; "Indic context resets", [ "क्", 1; "a", 1; "b", 1; "c", 1; "क", 1 ]
+    ]
+  in
+  List.iter
+    (fun (name, clusters) ->
+      let text = String.concat "" (List.map fst clusters) in
+      let cells = List.fold_left (fun cells (_, width) -> cells + width) 0 clusters in
+      check int (name ^ ": width") cells (Layout.display_width text);
+      for budget = 0 to cells + 1 do
+        let rec take remaining = function
+          | (cluster, width) :: rest when width <= remaining ->
+              cluster ^ take (remaining - width) rest
+          | _ -> ""
+        in
+        let expected = take budget clusters in
+        check string (name ^ ": prefix") expected (Layout.take_cells text budget);
+        if budget > 0 then begin
+          let prefix, tail = Layout.split_at_cells text budget in
+          check string (name ^ ": wrap boundary") expected prefix;
+          check string (name ^ ": wrap preserves bytes") text (prefix ^ tail)
+        end
+      done)
+    fixtures;
+  let styled = "\027[31m한abc1\xef\xb8\x8f\xe2\x83\xa3Z\027[0m" in
+  check string "styled cut keeps the keycap whole"
+    "\027[31m한abc1\xef\xb8\x8f\xe2\x83\xa3" (Layout.take_cells styled 7);
+  check string "styled narrow cut stops before the keycap"
+    "\027[31m한abc" (Layout.take_cells styled 6);
+  let malformed = "abc1\xef\xb8\x8f\xe2\x83\xa3\xff" in
+  check int "malformed range keeps scalar widths throughout" 5
+    (Layout.display_width malformed)
+
+(* Observe equal-cell rows, including mixed runs, short runs and no ASCII.
    These are batch CPU/allocation readings with harness overhead, not terminal
    response latency or a comparison against an earlier implementation. Keep
    correctness assertions outside the measured loop and impose no time gate. *)
@@ -110,6 +161,9 @@ let test_column_layout_observations () =
     [ "ascii", ascii
     ; "ansi", "\027[38;2;90;120;180m" ^ ascii ^ "\027[0m"
     ; "late_unicode", String.sub ascii 0 118 ^ "한"
+    ; "leading_box", "│" ^ String.sub ascii 0 119
+    ; "short_mixed", String.concat "" (List.init 24 (fun _ -> "ab한c"))
+    ; "unicode", String.concat "" (List.init 60 (fun _ -> "한"))
     ]
 
 let test_a_load_failure_keeps_its_address_at_eighty_columns () =
@@ -2801,6 +2855,8 @@ let () =
             test_ascii_columns_keep_unicode_boundaries
         ; test_case "column CPU and allocation observations" `Quick
             test_column_layout_observations
+        ; test_case "mixed ASCII retains Unicode cluster boundaries" `Quick
+            test_mixed_ascii_cluster_boundaries
         ; test_case "an emoji cluster with VS16, ZWJ, or a skin tone is two cells"
             `Quick test_emoji_cluster_is_two_cells
         ; test_case "the scroll hint says how far back" `Quick

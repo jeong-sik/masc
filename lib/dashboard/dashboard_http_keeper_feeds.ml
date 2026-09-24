@@ -145,37 +145,32 @@ let keeper_cost_aggregates_json
         let malformed_rows = ref 0 in
         let unread_turn_rows = ref 0 in
         let add_row j =
-          (* A row whose kind this build cannot read may have been a turn:
-             it is counted with the turn rows that did not read, never
-             dropped. A heartbeat is not a turn. *)
-          match Keeper_metrics_record.kind_of_json j with
-          | Some Keeper_metrics_record.Heartbeat -> ()
-          | None -> incr unread_turn_rows
-          | Some Keeper_metrics_record.Turn ->
-            match
-              Json_util.assoc_member_opt "ts_unix" j,
-              Json_util.assoc_member_opt "latency_ms" j
-            with
-            (* The time places the row first: a row before the window start
-               is outside it whatever else it carries. Only a row the window
-               may hold is read further. *)
-            | Some (`Float ts_unix), latency when Float.is_finite ts_unix ->
-                if ts_unix >= start_ts then begin
-                  match latency with
+          let ts = Json_util.assoc_member_opt "ts_unix" j in
+          (* The first day file is read whole. Even an unknown-kind row is
+             outside this window when its readable time precedes the start. *)
+          match ts with
+          | Some (`Float value) when Float.is_finite value && value < start_ts -> ()
+          | Some _ | None ->
+            (match Keeper_metrics_record.kind_of_json j with
+             | Some Keeper_metrics_record.Heartbeat -> ()
+             | None -> incr unread_turn_rows
+             | Some Keeper_metrics_record.Turn ->
+               match ts, Json_util.assoc_member_opt "latency_ms" j with
+               | Some (`Float ts_unix), latency when Float.is_finite ts_unix ->
+                 (match latency with
                   | Some (`Int latency_ms) when latency_ms >= 0 ->
-                      incr sample_count;
-                      latencies_rev := float_of_int latency_ms :: !latencies_rev;
-                      add_reading cost ~add:( +. ) (cost_reading_of_row j);
-                      add_reading tokens
-                        ~add:(fun sum counts ->
-                          { input = sum.input + counts.input
-                          ; output = sum.output + counts.output
-                          ; total = sum.total + counts.total
-                          })
-                        (token_reading_of_row j)
-                  | Some _ | None -> incr unread_turn_rows
-                end
-            | Some _, _ | None, _ -> incr unread_turn_rows
+                    incr sample_count;
+                    latencies_rev := float_of_int latency_ms :: !latencies_rev;
+                    add_reading cost ~add:( +. ) (cost_reading_of_row j);
+                    add_reading tokens
+                      ~add:(fun sum counts ->
+                        { input = sum.input + counts.input
+                        ; output = sum.output + counts.output
+                        ; total = sum.total + counts.total
+                        })
+                      (token_reading_of_row j)
+                  | Some _ | None -> incr unread_turn_rows)
+               | Some _, _ | None, _ -> incr unread_turn_rows)
         in
         let read =
           Dated_jsonl.iter_range_entries_result metrics_store

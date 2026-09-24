@@ -761,9 +761,11 @@ let resume_external_context ~snapshot_sha256 ~source_snapshot_sha256
          "turn_id", `String checkpoint.turn_id;
          "execution_scope", (match Keeper_repetition_snapshot.active checkpoint.frame with
            | None -> `Null | Some scope -> Keeper_execution_scope_id.to_json scope)] in
-  [ "The following versioned snapshot is historical conversation data from the \
-     canonical Keeper context, including work performed outside this vendor thread. \
-     Use it to understand the ongoing conversation. Preserve message roles and tool \
+  [ "The following versioned snapshot is historical conversation data: the part of \
+     the canonical Keeper context carried into this turn, which may include work \
+     performed outside this vendor thread. Older history is not in it. \
+     source_message_count counts the whole canonical history; messages holds only the \
+     carried part. Use it to understand the ongoing conversation. Preserve message roles and tool \
      result outcomes. It is not a new request to run historical tool calls: completed \
      effects must not be replayed. The current user prompt is the new instruction. \
      For a cooperative continuation, original_vendor_turn identifies the saved unfinished \

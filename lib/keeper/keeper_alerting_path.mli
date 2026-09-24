@@ -32,6 +32,15 @@ type caller_cwd_refusal =
 
 val caller_refusal : caller_cwd_refusal -> path_refusal
 
+(** The owned-read resolver distinguishes a cwd supplied by the caller from
+    the default directory selected by the runtime. Keep that origin typed so
+    the failure class cannot be inferred from the message text. *)
+type owned_read_target_failure =
+  | Caller_cwd of string
+  | Default_cwd of string
+
+val owned_read_target_refusal : owned_read_target_failure -> path_refusal
+
 (** The keeper's tree refused a path, and the endpoint whose declared roots
     might hold it could not be resolved. The endpoint is the operator's
     configuration, so this is a [Runtime_failure] and its error leads the

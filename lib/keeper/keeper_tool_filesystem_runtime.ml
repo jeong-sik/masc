@@ -686,8 +686,12 @@ let resolve_owned_read_target ~ownership_root ~path ~cwd =
   else
     let refusal message =
       match cwd with
-      | Some _ -> { Keeper_alerting_path.failure_class = Tool_result.Policy_rejection; message }
-      | None -> { Keeper_alerting_path.failure_class = Tool_result.Runtime_failure; message }
+      | Some _ ->
+        Keeper_alerting_path.owned_read_target_refusal
+          (Keeper_alerting_path.Caller_cwd message)
+      | None ->
+        Keeper_alerting_path.owned_read_target_refusal
+          (Keeper_alerting_path.Default_cwd message)
     in
     let cwd_abs, target_rel =
       match cwd with

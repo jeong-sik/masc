@@ -552,7 +552,9 @@ let test_checkpoint_read_error_stops_turn ~io_failure () =
       ~build_turn_prompt:(fun ~base_system_prompt:_ ~messages:_ ->
         prompt_built := true;
         fail "a failed checkpoint read reached prompt construction")
-      ~user_message:"continue the saved work" ~turn_kind:Turn_record.Direct
+      ~user_message:"continue the saved work"
+      ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
+      ~turn_kind:Turn_record.Direct
       ~skill_snapshot:(Skill_catalog_snapshot.config_unreadable ~detail:"unused fixture")
       ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
       ~runtime_id:"unconfigured-test-runtime" ()
@@ -603,7 +605,9 @@ let test_unreadable_constitution_stops_turn_and_the_next_tick_resumes () =
       ~build_turn_prompt:(fun ~base_system_prompt:_ ~messages:_ ->
         prompt_built := true;
         fail "an unreadable constitution reached prompt construction")
-      ~user_message:"continue the saved work" ~turn_kind:Turn_record.Direct
+      ~user_message:"continue the saved work"
+      ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
+      ~turn_kind:Turn_record.Direct
       ~skill_snapshot:(Skill_catalog_snapshot.config_unreadable ~detail:"unused fixture")
       ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
       ~runtime_id:"unconfigured-test-runtime" ()
@@ -662,7 +666,12 @@ let test_autonomous_turn_sends_the_run_context_base_prompt () =
         ~build_turn_prompt:(fun ~base_system_prompt:_ ~messages:_ ->
           { Keeper_agent_prompt_metrics.dynamic_context = world_state
           ; dynamic_context_for_tools = None })
-        ~user_message:"Continue." ~config ~meta
+        ~user_message:"Continue."
+        ~input_metadata:
+          (Keeper_input_speaker.metadata
+             (Keeper_input_speaker.Host_prompt
+                (Keeper_input_speaker.Autonomous_wake { answered_asks = [] })))
+        ~config ~meta
         ~turn_ref:
           (Ids.Turn_ref.make
              ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

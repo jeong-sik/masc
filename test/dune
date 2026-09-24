@@ -252,6 +252,7 @@
   test_keeper_librarian_context
   test_keeper_librarian_context_recall
   test_surface_ref
+  test_keeper_input_speaker
   test_inference_inflight_observation
   test_audit_projection
   test_keeper_turn_outcome
@@ -610,6 +611,7 @@
   test_keeper_librarian_context_recall
   test_keeper_skill_catalog
   test_surface_ref
+  test_keeper_input_speaker
   test_inference_inflight_observation
   test_audit_projection
   test_keeper_turn_outcome

@@ -5,7 +5,6 @@ module IntMap : Map.S with type key = int
 
 type recent_entry =
   { re_ts_unix : float
-  ; re_provider : string option
   ; re_outcome : string
   ; re_stop_reason : string option
   ; re_turn_lane : string option
@@ -53,7 +52,6 @@ type model_bucketed =
 
 type model_stats =
   { model_id : string
-  ; provider : string option
   ; entry_count : int
   ; avg_tok_per_sec : float option
   ; p50_tok_per_sec : float option
@@ -119,7 +117,6 @@ type aggregate =
 
 type raw_entry =
   { model : string
-  ; provider : string option
   ; inference_identity : Cost_ledger.inference_identity option
   ; ts_unix : float
   ; outcome : string

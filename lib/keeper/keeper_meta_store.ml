@@ -693,23 +693,35 @@ let read_effective_meta config name
   | Error _ as err -> err
 ;;
 
+(* The one place a requested name is refused as blank, so the identity minted
+   here is the only one a reader of this presence needs. *)
+let read_effective_meta_presence_named config name
+  : (Keeper_identity.Keeper_id.t * meta_presence, string) result =
+  match Keeper_identity.Keeper_id.of_string name with
+  | None -> Error "keeper name is empty"
+  | Some keeper_id ->
+    let requested_name = String.trim name in
+    let presence =
+      match
+        read_meta_file_path_presence
+          ~ownership_root:config.Workspace.base_path
+          (keeper_meta_path config requested_name)
+      with
+      | Error _ as err -> err
+      | Ok (Meta_absent | Meta_not_current _) as presence -> presence
+      | Ok (Meta_present meta) ->
+        Keeper_meta_contract.effective_meta_result
+          ~base_path:config.Workspace.base_path
+          meta
+        |> Result.map (fun meta -> Meta_present meta)
+    in
+    Result.map (fun presence -> keeper_id, presence) presence
+;;
+
 let read_effective_meta_presence config name : (meta_presence, string) result =
-  let requested_name = String.trim name in
-  if requested_name = ""
-  then Error "keeper name is empty"
-  else (
-    match
-      read_meta_file_path_presence
-        ~ownership_root:config.Workspace.base_path
-        (keeper_meta_path config requested_name)
-    with
-    | Error _ as err -> err
-    | Ok (Meta_absent | Meta_not_current _) as presence -> presence
-    | Ok (Meta_present meta) ->
-      Keeper_meta_contract.effective_meta_result
-        ~base_path:config.Workspace.base_path
-        meta
-      |> Result.map (fun meta -> Meta_present meta))
+  Result.map
+    (fun (_keeper_id, presence) -> presence)
+    (read_effective_meta_presence_named config name)
 ;;
 
 let replace_snapshot config (persisted : Keeper_meta_contract.keeper_meta) =

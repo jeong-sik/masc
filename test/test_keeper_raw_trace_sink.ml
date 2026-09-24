@@ -142,6 +142,7 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
       ; max_tokens = None
       ; enable_thinking = None
       }
+    ~turn_output_tokens:None
     ~usage:
       { input_tokens = None
       ; output_tokens = None

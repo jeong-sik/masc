@@ -8,6 +8,12 @@
 (* Runtime types                                                     *)
 (* ================================================================ *)
 
+type request_context = {
+  input_tokens : int;
+  cache_creation_input_tokens : int;
+  cache_read_input_tokens : int;
+}
+
 type runtime_observation = {
   runtime_id : string;
   selected_model : string option;
@@ -20,6 +26,7 @@ type runtime_observation = {
   streaming_inter_chunk_count : int;
   streaming_inter_chunk_avg_ms : float option;
   usage_scope : Runtime_usage_scope.t;
+  request_context : request_context option;
 }
 
 and runtime_attempt = {
@@ -48,6 +55,7 @@ let runtime_observation_of_candidates ~runtime_id
     ?(streaming_inter_chunk_count = 0)
     ?(streaming_inter_chunk_avg_ms = None)
     ?(usage_scope = Runtime_usage_scope.Usage_scope_unavailable)
+    ?request_context
     () : runtime_observation =
   (* Thread the caller-supplied raw model attribution into both fields.
      Without this, success rows lose model attribution at construction
@@ -69,6 +77,7 @@ let runtime_observation_of_candidates ~runtime_id
     streaming_inter_chunk_count;
     streaming_inter_chunk_avg_ms;
     usage_scope;
+    request_context;
   }
 
 (* ================================================================ *)
@@ -226,6 +235,7 @@ let runtime_observation_with_metrics ~runtime_id
     ?(attempt_details_source = "agent_core_metrics_callbacks")
     ?(agent_core_internal_runtime_allowed = false)
     ?(usage_scope = Runtime_usage_scope.Usage_scope_unavailable)
+    ?request_context
     () =
   let ttfrc, chunk_count, chunk_avg =
     streaming_metrics_of_capture capture.streaming
@@ -239,4 +249,5 @@ let runtime_observation_with_metrics ~runtime_id
     ~streaming_inter_chunk_count:chunk_count
     ~streaming_inter_chunk_avg_ms:chunk_avg
     ~usage_scope
+    ?request_context
     ()

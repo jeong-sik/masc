@@ -570,7 +570,7 @@ let test_summary_row_not_counted_as_malformed () =
   let lines =
     [
       {|{"ts":1000.0,"ts_iso":"2026-07-01T00:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":10,"error":null}|}
-    ; {|{"type":"trajectory_summary","keeper_name":"k","trace_id":"t","generation":0,"total_turns":0,"total_tool_calls":0,"outcome":{"status":"completed"},"task_id":null,"started_at":0.0,"ended_at":0.0}|}
+    ; {|{"type":"trajectory_summary","keeper_name":"k","trace_id":"t","total_turns":0,"total_tool_calls":0,"outcome":{"status":"completed"},"task_id":null,"started_at":0.0,"ended_at":0.0}|}
     ; "{not valid json"
     ]
   in

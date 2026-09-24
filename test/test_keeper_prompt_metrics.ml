@@ -80,7 +80,7 @@ let build_separated () : KAR.turn_prompt =
       turn_instructions_text ]
   in
   let dynamic_context = String.concat "\n\n" soft_parts in
-  { system_prompt = base_system_prompt; dynamic_context; dynamic_context_for_tools = None }
+  { dynamic_context; dynamic_context_for_tools = None }
 
 (* Comparison fixture with every segment in one string. *)
 let build_combined () : string =
@@ -95,9 +95,8 @@ let build_combined () : string =
 (* ── Tests ────────────────────────────────────────────── *)
 
 let test_system_prompt_shorter_than_combined () =
-  let tp = build_separated () in
   let combined = build_combined () in
-  let system_bytes = measure_bytes tp.system_prompt in
+  let system_bytes = measure_bytes base_system_prompt in
   let combined_bytes = measure_bytes combined in
   check bool
     (Printf.sprintf
@@ -116,7 +115,7 @@ let test_total_bytes_preserved () =
   let tp = build_separated () in
   let combined = build_combined () in
   let separated_total =
-    measure_bytes tp.system_prompt + measure_bytes tp.dynamic_context
+    measure_bytes base_system_prompt + measure_bytes tp.dynamic_context
   in
   let combined_total = measure_bytes combined in
   check int "combined adds one two-byte separator"
@@ -166,9 +165,9 @@ let test_soft_context_in_dynamic_only () =
     (has_in tp.dynamic_context "Turn-specific instructions");
   (* Soft context must NOT be in system_prompt *)
   check bool "no checkpoint context in system" true
-    (not (has_in tp.system_prompt "checkpoint context"));
+    (not (has_in base_system_prompt "checkpoint context"));
   check bool "no worktree in system" true
-    (not (has_in tp.system_prompt "Worktree changes"))
+    (not (has_in base_system_prompt "Worktree changes"))
 
 (* Every assembled Keeper system prompt opens with the shared cacheable block. *)
 let test_assembled_prompt_opens_with_system_tag () =

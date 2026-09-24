@@ -42,7 +42,7 @@ assignments, or authorization."""
 [[params]]
 name = "sandbox_image"
 type = "string"
-description = "Keeper sandbox container image tag or digest. Omit to retain the current setting. The config API accepts null to clear the override. Applies through the idle lane restart boundary, never replaces a running turn's sandbox."
+description = "Keeper sandbox container image tag or digest. Required for sandbox_profile docker or microvm unless the keeper TOML already names one; there is no default image. masc-sandbox:general has no language toolchain. Omit to retain the current setting. Applies through the idle lane restart boundary, never replaces a running turn's sandbox."
 
 [[params]]
 name = "sandbox_profile"

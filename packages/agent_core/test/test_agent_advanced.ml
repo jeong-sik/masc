@@ -222,6 +222,92 @@ let test_advanced_run_emits_lifecycle_events () =
     lifecycle_event_kinds
 ;;
 
+(* RFC-0468 §3.2: the caller's input metadata is stamped on the User message
+   when AGENT_CORE creates it, on both entry points the keeper uses. *)
+let speaker_entry = Types.Input_speaker.entry (`Assoc [ "kind", `String "owner" ])
+
+let appended_user_metadata agent =
+  match
+    List.filter
+      (fun (message : Types.message) -> message.role = Types.User)
+      (Agent.state agent).messages
+  with
+  | [ message ] -> message.metadata
+  | messages ->
+    Alcotest.failf "expected exactly one User message, got %d" (List.length messages)
+;;
+
+let test_user_input_metadata_is_stamped_at_creation () =
+  with_temp_trace
+  @@ fun trace_path ->
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let trace = Raw_trace.create ~path:trace_path () |> Result.get_ok in
+  let new_agent () =
+    let transport, _call_count = sequence_transport [ text_response "done" ] in
+    make_agent
+      ~net:env#net
+      ~transport
+      ~raw_trace:trace
+      ~checkpoint_sink:(fun _ -> Ok ())
+      ~context_injector:None
+      ~on_run_complete:None
+      ~tool:(time_tool ignore)
+  in
+  let regular = new_agent () in
+  (match
+     Agent.run_blocks ~sw ~input_metadata:[ speaker_entry ] regular [ Types.Text "hi" ]
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Error.to_string error));
+  Alcotest.(check bool)
+    "run_blocks stamps the input metadata"
+    true
+    (appended_user_metadata regular = [ speaker_entry ]);
+  let advanced = new_agent () in
+  (match
+     Agent.Advanced.run_blocks
+       ~sw
+       ~input_metadata:[ speaker_entry ]
+       ~api_strategy:Agent.Sync
+       ~on_tool_boundary:(fun _ -> Agent.Advanced.Continue)
+       advanced
+       [ Types.Text "hi" ]
+   with
+   | Ok (Agent.Advanced.Completed _) -> ()
+   | Ok (Agent.Advanced.Yielded _ | Agent.Advanced.Terminal_tool_completed _) ->
+     Alcotest.fail "advanced run did not complete"
+   | Error error -> Alcotest.fail (Error.to_string error));
+  Alcotest.(check bool)
+    "Advanced.run_blocks stamps the input metadata"
+    true
+    (appended_user_metadata advanced = [ speaker_entry ]);
+  let unstamped = new_agent () in
+  (match Agent.run_blocks ~sw unstamped [ Types.Text "hi" ] with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Error.to_string error));
+  Alcotest.(check bool)
+    "no input metadata leaves the message untouched"
+    true
+    (appended_user_metadata unstamped = []);
+  let repeated = new_agent () in
+  match
+    Agent.run_blocks
+      ~sw
+      ~input_metadata:[ speaker_entry; speaker_entry ]
+      repeated
+      [ Types.Text "hi" ]
+  with
+  | Ok _ -> Alcotest.fail "a repeated metadata key was accepted"
+  | Error _ ->
+    Alcotest.(check int)
+      "nothing is appended for rejected input"
+      0
+      (List.length (Agent.state repeated).messages)
+;;
+
 let test_advanced_continue_does_not_append_user_input () =
   with_temp_trace
   @@ fun trace_path ->
@@ -1306,6 +1392,10 @@ let () =
             "Advanced continuation does not append a user input"
             `Quick
             test_advanced_continue_does_not_append_user_input
+        ; Alcotest.test_case
+            "user input metadata is stamped at creation"
+            `Quick
+            test_user_input_metadata_is_stamped_at_creation
         ] )
     ; ( "tool boundary"
       , [ Alcotest.test_case

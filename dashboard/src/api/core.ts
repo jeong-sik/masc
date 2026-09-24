@@ -227,6 +227,10 @@ export {
   NAMESPACE_TRUTH_GET_TIMEOUT_MS,
 } from '../config/constants'
 
+/** [runtime_sync] on a refused config POST: the lane restart failed, or the
+ *  write never reached the point of trying one. */
+export type ConfigRuntimeSyncRefusal = 'failed' | 'not_attempted'
+
 export class ApiRequestError extends Error {
   method: string
   path: string
@@ -239,7 +243,7 @@ export class ApiRequestError extends Error {
   responseData?: unknown
   configApplied?: boolean
   configApplicationState?: 'indeterminate'
-  runtimeSync?: boolean
+  runtimeSync?: ConfigRuntimeSyncRefusal
   authoritativeReloadRequired: boolean
 
   constructor(opts: {
@@ -255,7 +259,7 @@ export class ApiRequestError extends Error {
     responseData?: unknown
     configApplied?: boolean
     configApplicationState?: 'indeterminate'
-    runtimeSync?: boolean
+    runtimeSync?: ConfigRuntimeSyncRefusal
     authoritativeReloadRequired?: boolean
   }) {
     const method = opts.method.toUpperCase()
@@ -498,7 +502,7 @@ interface ErrorResponseInfo {
   responseData?: unknown
   configApplied?: boolean
   configApplicationState?: 'indeterminate'
-  runtimeSync?: boolean
+  runtimeSync?: ConfigRuntimeSyncRefusal
   authoritativeReloadRequired?: boolean
 }
 
@@ -560,7 +564,8 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
               ? parsed.config_applied
               : undefined,
           configApplicationState,
-          runtimeSync: typeof parsed.runtime_sync === 'boolean'
+          runtimeSync: parsed.runtime_sync === 'failed'
+            || parsed.runtime_sync === 'not_attempted'
             ? parsed.runtime_sync
             : undefined,
           authoritativeReloadRequired:

@@ -161,6 +161,8 @@ export interface KeeperAutoJudgeRearmExpectation {
   summary_attempt_disposition: KeeperBlockedSummaryAttemptDisposition
 }
 
+export type ApprovalQueuePhase = 'queued' | 'judging' | 'human_required' | 'blocked'
+
 export interface KeeperApprovalQueueItem {
   id: string
   keeper_name: string
@@ -175,6 +177,7 @@ export interface KeeperApprovalQueueItem {
   goal_ids?: string[]
   input?: unknown
   input_preview?: string | null
+  phase: ApprovalQueuePhase
   summary_status: HitlSummaryStatus
   exact_attempt: KeeperExactAttemptState
   summary_attempt_disposition: KeeperSummaryAttemptDisposition

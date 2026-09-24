@@ -93,6 +93,7 @@ let make_gate_pending ~id ~keeper : Decode.gate_pending =
   ; gp_operation = "tool_execute"
   ; gp_display_tool = "bash"
   ; gp_input_preview = Some "echo test"
+  ; gp_input_rows = Decode.Flattened None
   ; gp_execution_cwd = None
   ; gp_execution_sandbox = None
   ; gp_waiting_s = Some 10.0
@@ -440,6 +441,139 @@ let test_section_fleet_lines () =
     lines
 ;;
 
+(* The Transport delivery block is where the transport and this TUI's event
+   feed are read: the path in use, the gRPC port, the sessions, the queue and
+   the feed's count after its state word. *)
+let test_transport_block_reads_the_feed () =
+  let state = make_state () in
+  state.transport <-
+    Some
+      { Decode.th_primary_path = Masc.Transport_metrics.Streamable_http
+      ; th_queue_pressure = Masc.Transport_metrics.Watch
+      ; th_sse_sessions = 0
+      ; th_websocket_sessions = Some 0
+      ; th_grpc_port = None
+      ; th_events_dropped = 2
+      };
+  state.observer <- Types.Observer_live { session_id = "s-1"; since = 0.; events = 85 };
+  let text =
+    String.concat "\n"
+      (List.map Masc_tui_theme.strip_sgr
+         (Render_metrics.render_section_fleet ~cols:160 state))
+  in
+  check bool "the path in use and the gRPC listener" true
+    (contains text "Primary path streamable_http \xc2\xb7 gRPC off");
+  check bool "dropped events" true (contains text "dropped events 2");
+  check bool "queue pressure" true (contains text "Queue pressure: watch");
+  check bool "the feed, count after the state word" true
+    (contains text "Runtime event feed: live 85");
+  state.observer <-
+    Types.Observer_closed { reason = "eof"; at = 0.; events = 3 };
+  let closed =
+    String.concat "\n"
+      (List.map Masc_tui_theme.strip_sgr
+         (Render_metrics.render_section_fleet ~cols:160 state))
+  in
+  check bool "a closed feed keeps its count and says why" true
+    (contains closed "Runtime event feed: closed 3 (eof)")
+;;
+
+(* The TUI session block is where this process's own log is read. The log is
+   kept newest first; the block lists it oldest first so the newest line is
+   the last one, folds a run of the same line into one row with its count,
+   and marks an error with the chat pane's glyph. *)
+let test_session_block_lists_newest_last () =
+  let state = make_state () in
+  let event timestamp event_type content : Types.event =
+    { timestamp; event_type; content }
+  in
+  state.events <-
+    [ event "10:00:04" "error" "mint failed"
+    ; event "10:00:03" "system" "Manual refresh"
+    ; event "10:00:02" "system" "Manual refresh"
+    ; event "10:00:01" "system" "TUI started"
+    ];
+  let lines =
+    List.map Masc_tui_theme.strip_sgr
+      (Render_metrics.render_section_fleet ~cols:120 state)
+  in
+  let index_of needle =
+    let rec go i = function
+      | [] -> failf "the fleet section has no line with %S" needle
+      | line :: rest -> if contains line needle then i else go (i + 1) rest
+    in
+    go 0 lines
+  in
+  check bool "the block leads the section" true
+    (contains (List.hd lines) "TUI session");
+  check bool "oldest first, newest last" true
+    (index_of "TUI started" < index_of "Manual refresh"
+     && index_of "Manual refresh" < index_of "mint failed");
+  check bool "a run of one line folds with its count" true
+    (contains (List.nth lines (index_of "Manual refresh")) "Manual refresh \xc3\x972");
+  check bool "an error carries the glyph after its clock" true
+    (contains (List.nth lines (index_of "mint failed")) "[10:00:04] \xe2\x9c\x97 mint failed");
+  check bool "the block ends before the engine readings" true
+    (index_of "mint failed" < index_of "Engine memory");
+  state.events <- [];
+  check bool "an empty log says so" true
+    (List.exists
+       (fun line -> contains line "(no events yet)")
+       (List.map Masc_tui_theme.strip_sgr
+          (Render_metrics.render_section_fleet ~cols:120 state)))
+;;
+
+(* A frame too short for the whole log keeps the newest line in view: the
+   block drops its oldest rows behind a "+N earlier" row instead of running
+   past the bottom, and the rows it keeps still read oldest to newest. *)
+let test_session_block_keeps_the_newest_line_in_a_short_frame () =
+  let state = make_state () in
+  state.metrics_section <- Types.Section_fleet;
+  state.events <-
+    List.init 11 (fun index ->
+        let n = 10 - index in
+        ({ timestamp = Printf.sprintf "10:00:%02d" n
+         ; event_type = "system"
+         ; content = Printf.sprintf "event-%02d" n
+         } : Types.event));
+  let lines = ref [] in
+  let push line = lines := Masc_tui_theme.strip_sgr line :: !lines in
+  Render_metrics.render_metrics_body ~cols:120 ~budget:16 state
+    ~report_scroll:(fun _ -> ())
+    ~push ~push_styled:(fun ~style:_ line -> push line)
+    ~push_selected:push ~push_divider:(fun () -> ())
+    ~push_empty:(fun () -> ());
+  let drawn = List.rev !lines in
+  let index_of needle =
+    let rec go i = function
+      | [] -> None
+      | line :: rest -> if contains line needle then Some i else go (i + 1) rest
+    in
+    go 0 drawn
+  in
+  check bool "the block does fold" true
+    (Option.is_some (index_of " earlier"));
+  check bool "the newest line is drawn" true
+    (Option.is_some (index_of "event-10"));
+  check bool "the oldest line is the one left out" true
+    (Option.is_none (index_of "event-00"));
+  (match index_of " earlier", index_of "event-09", index_of "event-10" with
+   | Some earlier, Some older, Some newest ->
+     check bool "the count leads, then oldest to newest" true
+       (earlier < older && older < newest)
+   | _ -> fail "the kept rows are not all drawn");
+  let tall = ref [] in
+  Render_metrics.render_metrics_body ~cols:120 ~budget:60 state
+    ~report_scroll:(fun _ -> ())
+    ~push:(fun line -> tall := Masc_tui_theme.strip_sgr line :: !tall)
+    ~push_styled:(fun ~style:_ line -> tall := line :: !tall)
+    ~push_selected:(fun line -> tall := line :: !tall)
+    ~push_divider:(fun () -> ()) ~push_empty:(fun () -> ());
+  check bool "a frame with room draws the whole log" true
+    (List.exists (fun line -> contains line "event-00") !tall
+     && not (List.exists (fun line -> contains line " earlier") !tall))
+;;
+
 let test_section_resources_lines () =
   let state = make_state () in
   let lines = Render_metrics.render_section_resources ~cols:90 state in
@@ -725,6 +859,12 @@ let () =
         ; test_case "scheduler sample availability" `Quick test_scheduler_sample_availability
         ; test_case "resources" `Quick test_section_resources_lines
         ; test_case "tools" `Quick test_section_tools_lines
+        ; test_case "transport block reads the feed" `Quick
+            test_transport_block_reads_the_feed
+        ; test_case "session block lists newest last" `Quick
+            test_session_block_lists_newest_last
+        ; test_case "session block keeps the newest line in a short frame" `Quick
+            test_session_block_keeps_the_newest_line_in_a_short_frame
         ; test_case "fleet_populated" `Quick test_section_fleet_populated
         ; test_case "resources_populated" `Quick test_section_resources_populated
         ; test_case "tools_populated" `Quick test_section_tools_populated

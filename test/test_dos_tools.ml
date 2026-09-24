@@ -257,6 +257,53 @@ let test_a_link_out_of_the_inventory_is_refused () =
           (is_completed (load ~base_path "game"))))
 ;;
 
+(* A game directory often holds several programs: 삼국지3 boots KOEI.COM,
+   which runs OPEN.EXE and MAIN.EXE beside it, and the setup and editor sit
+   there too. The refusal used to ask the caller to name one with no argument
+   to name it by. [boot] is that argument; it names a file inside the
+   directory, folded the way DOS folds, and nothing else. *)
+let test_boot_names_the_program_inside_a_directory () =
+  with_workspace (fun base_path ->
+    let game = Filename.concat (programs_dir ~base_path) "arcade" in
+    mkdir_p game;
+    write_file (Filename.concat game "LOADER.COM") hello_com;
+    write_file (Filename.concat game "SETUP.COM") spinner_com;
+    let unnamed = load ~base_path "arcade" in
+    check bool "two programs and no boot is a question" false (is_completed unnamed);
+    check bool "the question names the argument" true
+      (contains "boot" (Tool_result.message unnamed));
+    let booted =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "loader.com") ]
+    in
+    check bool "boot picks the loader, folded like DOS" true (is_completed booted);
+    check string "the loader is what runs" "LOADER.COM" (string_field "program" booted);
+    check bool "the loader reaches its first key request" true
+      (bool_field "waiting_for_key" booted);
+    let missing =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "MAIN.EXE") ]
+    in
+    check bool "a boot the directory does not hold is refused" false (is_completed missing);
+    write_file (Filename.concat game "SAVE.DAT") "not a program";
+    let data =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "SAVE.DAT") ]
+    in
+    check bool "a boot that is not a program is refused" false (is_completed data);
+    let climbing =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "../LOADER.COM") ]
+    in
+    check bool "boot is a file name, not a path" false (is_completed climbing);
+    install_program ~base_path "hello.com" hello_com;
+    let single =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "hello.com"); ("boot", `String "hello.com") ]
+    in
+    check bool "boot on a single file is refused" false (is_completed single))
+;;
+
 (* The step budget is declared per key. Multiplied by a caller-controlled
    number of keys it stopped bounding anything: sixty-four keys at four
    million each is a quarter of a billion instructions run under the
@@ -304,12 +351,129 @@ let test_two_names_that_differ_only_in_case_are_refused () =
     let result =
       Dos_lane.load
         ~ledger_dir:(Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos")
+        ~saves_dir:(Filename.concat base_path "saves")
         ~program_name:"game.com" ~program_bytes:hello_com
         ~files:[ ("GAME.COM", hello_com); ("DATA.DAT", "upper"); ("data.dat", "lower") ]
         ~announce:(fun () -> incr announced)
     in
     check bool "the load is refused" true (Result.is_error result);
     check int "and nothing was announced" 0 !announced)
+;;
+
+(* A game in miniature: if SAVE.DAT opens it prints it, otherwise it writes
+   "NEW$" there -- create, write, close -- and waits for a key either way.
+
+   100 mov ax,3D00h / mov dx,fname / int 21h / jc create
+   10A mov bx,ax / mov ah,3Fh / mov cx,16 / mov dx,buf / int 21h
+   116 mov ah,3Eh / int 21h / mov ah,9 / mov dx,buf / int 21h / jmp wait
+   123 create: mov ah,3Ch / xor cx,cx / mov dx,fname / int 21h / mov bx,ax
+       mov ah,40h / mov cx,4 / mov dx,msg / int 21h / mov ah,3Eh / int 21h
+   13C wait: mov ah,0 / int 16h / or ax,ax / jz wait / int 20h
+   146 fname "SAVE.DAT",0   14F msg "NEW$"   153 buf 16 x "$" *)
+let saver_com_named fname =
+  let word n = String.init 2 (fun i -> Char.chr ((n lsr (8 * i)) land 0xff)) in
+  let fname_at = 0x146 in
+  let msg_at = fname_at + String.length fname + 1 in
+  let buf_at = msg_at + 4 in
+  "\xb8\x00\x3d\xba" ^ word fname_at ^ "\xcd\x21\x72\x19"
+  ^ "\x89\xc3\xb4\x3f\xb9\x10\x00\xba" ^ word buf_at ^ "\xcd\x21"
+  ^ "\xb4\x3e\xcd\x21\xb4\x09\xba" ^ word buf_at ^ "\xcd\x21\xeb\x19"
+  ^ "\xb4\x3c\x31\xc9\xba" ^ word fname_at ^ "\xcd\x21\x89\xc3"
+  ^ "\xb4\x40\xb9\x04\x00\xba" ^ word msg_at ^ "\xcd\x21\xb4\x3e\xcd\x21"
+  ^ "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20"
+  ^ fname ^ "\000" ^ "NEW$" ^ String.make 16 '$'
+;;
+
+let saver_com = saver_com_named "SAVE.DAT"
+
+let saves_of ~base_path name =
+  Filename.concat
+    (Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos") "saves")
+    name
+;;
+
+let install_game ~base_path name files =
+  let dir = Filename.concat (programs_dir ~base_path) name in
+  mkdir_p dir;
+  List.iter (fun (f, contents) -> write_file (Filename.concat dir f) contents) files
+;;
+
+let eject () = ignore (Dos_lane.eject ~announce:ignore () : (unit, Dos_lane.error) result)
+
+(* A game saves by writing a file, and the machine kept what the guest wrote
+   only in memory: an eject or a server restart took the campaign with it,
+   as the MSX 삼국지2 lane's Keepers found. What the program wrote is now on
+   disk after the call that wrote it, and the next load mounts it. *)
+let test_a_save_outlives_its_machine () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com) ];
+    let first = load ~base_path "quest" in
+    check bool "the first run boots" true (is_completed first);
+    let kept = Filename.concat (saves_of ~base_path "quest") "SAVE.DAT" in
+    check bool "the save is on disk after the call that wrote it" true (Sys.file_exists kept);
+    check string "with what the program wrote" "NEW$"
+      (In_channel.with_open_bin kept In_channel.input_all);
+    eject ();
+    let second = load ~base_path "quest" in
+    check bool "the next machine finds the save and prints it" true
+      (contains "NEW" (string_field "screen_text" second)))
+;;
+
+(* A save made earlier stands in for the inventory's copy of the same file,
+   matched the way DOS matches names. *)
+let test_a_save_is_mounted_over_the_inventory_copy () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com); ("SAVE.DAT", "OLD$") ];
+    let saves = saves_of ~base_path "quest" in
+    mkdir_p saves;
+    write_file (Filename.concat saves "save.dat") "MINE$";
+    let loaded = load ~base_path "quest" in
+    let text = string_field "screen_text" loaded in
+    check bool "the save wins" true (contains "MINE" text);
+    check bool "the inventory copy is not what the guest opened" false (contains "OLD" text))
+;;
+
+let unsaved result =
+  match member "unsaved" (Tool_result.data result) with
+  | Some (`List items) -> List.map (function `String u -> u | _ -> fail "unsaved item") items
+  | _ -> fail (Printf.sprintf "no unsaved in %s" (Tool_result.message result))
+;;
+
+(* When the save cannot be written the call still returns what the guest did
+   -- it moved either way, and an error would be answered by sending the same
+   keys again -- and lists the save that did not reach disk. *)
+let test_a_save_that_cannot_be_written_is_reported () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com) ];
+    let saves = saves_of ~base_path "quest" in
+    mkdir_p (Filename.dirname saves);
+    write_file saves "a file where the save directory would be";
+    let loaded = load ~base_path "quest" in
+    check bool "the call returns the screen" true (is_completed loaded);
+    (match unsaved loaded with
+     | [ line ] -> check bool "naming the save" true (contains "SAVE.DAT" line)
+     | lines -> fail (Printf.sprintf "expected one unsaved line, got %d" (List.length lines)));
+    let next = dispatch ~base_path "masc_dos_screen" [] in
+    check bool "the machine is still there" true (is_completed next))
+;;
+
+(* DOS takes "/" as a separator, so a guest asked for a save name can create
+   "../OUT.DAT". That name never reaches the host: it stays in the machine,
+   is reported once, and nothing lands beside the saves directory. *)
+let test_a_guest_path_never_reaches_the_host () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com_named "../OUT.DAT") ];
+    let loaded = load ~base_path "quest" in
+    check bool "the call returns" true (is_completed loaded);
+    check bool "the path is reported" true
+      (List.exists (contains "a path, not a file name") (unsaved loaded));
+    let saves = saves_of ~base_path "quest" in
+    check bool "nothing beside the saves directory" false
+      (Sys.file_exists (Filename.concat (Filename.dirname saves) "OUT.DAT"));
+    check bool "nothing in it either" false
+      (Sys.file_exists saves && Array.length (Sys.readdir saves) > 0);
+    let again = dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1000) ] in
+    check (list string) "reported once, not on every call" [] (unsaved again))
 ;;
 
 let test_unknown_key_is_refused () =
@@ -399,9 +563,16 @@ let () =
             test_click_reaches_the_guest_and_the_ledger
         ; test_case "inventory only" `Quick test_only_inventory_names_resolve
         ; test_case "linked out" `Quick test_a_link_out_of_the_inventory_is_refused
+        ; test_case "boot inside a directory" `Quick
+            test_boot_names_the_program_inside_a_directory
         ; test_case "one ceiling" `Quick test_a_sequence_spends_one_ceiling_not_one_per_key
         ; test_case "sequence length" `Quick test_a_sequence_has_a_length
         ; test_case "case collision" `Quick test_two_names_that_differ_only_in_case_are_refused
+        ; test_case "save outlives machine" `Quick test_a_save_outlives_its_machine
+        ; test_case "save over inventory" `Quick
+            test_a_save_is_mounted_over_the_inventory_copy
+        ; test_case "save not written" `Quick test_a_save_that_cannot_be_written_is_reported
+        ; test_case "guest path" `Quick test_a_guest_path_never_reaches_the_host
         ; test_case "unknown key" `Quick test_unknown_key_is_refused
         ; test_case "step cap" `Quick test_step_cap
         ; test_case "peek" `Quick test_peek_reads_the_text_page

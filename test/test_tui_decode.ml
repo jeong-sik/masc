@@ -258,6 +258,184 @@ let test_terminal_text_is_idempotent_and_single_line () =
   Alcotest.(check string) "sanitization is idempotent" once
     (Tui_decode.sanitize_terminal_text once)
 
+let test_terminal_text_escapes_invisible_codepoints () =
+  (* #38445: a terminal draws bidi controls and zero-width characters as
+     nothing, so the glyphs an operator reads can differ from the bytes an
+     approval hash covers (Trojan Source, CVE-2021-42574). *)
+  let contains_substring hay needle =
+    let n = String.length needle and h = String.length hay in
+    let rec scan i =
+      i + n <= h && (String.sub hay i n = needle || scan (i + 1))
+    in
+    n = 0 || scan 0
+  in
+  let rlo = "\xe2\x80\xae" in
+  let escaped = Tui_decode.sanitize_terminal_text ("a" ^ rlo ^ "b") in
+  Alcotest.(check string) "the bidi override is drawn as its escape text"
+    "a\\u202Eb" escaped;
+  Alcotest.(check bool) "the raw RLO bytes are gone" false
+    (contains_substring escaped rlo);
+  Alcotest.(check string) "escape_invisible is the one rule" "a\\u202Eb"
+    (Tui_decode.escape_invisible ("a" ^ rlo ^ "b"));
+  List.iter
+    (fun (label, bytes, expected) ->
+       Alcotest.(check string) label expected
+         (Tui_decode.escape_invisible bytes))
+    [ "ALM", "\xd8\x9c", "\\u061C"
+    ; "ZWSP", "\xe2\x80\x8b", "\\u200B"
+    ; "ZWNJ", "\xe2\x80\x8c", "\\u200C"
+    ; "ZWJ", "\xe2\x80\x8d", "\\u200D"
+    ; "LRM", "\xe2\x80\x8e", "\\u200E"
+    ; "RLM", "\xe2\x80\x8f", "\\u200F"
+    ; "LRE", "\xe2\x80\xaa", "\\u202A"
+    ; "RLE", "\xe2\x80\xab", "\\u202B"
+    ; "PDF", "\xe2\x80\xac", "\\u202C"
+    ; "LRO", "\xe2\x80\xad", "\\u202D"
+    ; "RLO", "\xe2\x80\xae", "\\u202E"
+    ; "LRI", "\xe2\x81\xa6", "\\u2066"
+    ; "RLI", "\xe2\x81\xa7", "\\u2067"
+    ; "FSI", "\xe2\x81\xa8", "\\u2068"
+    ; "PDI", "\xe2\x81\xa9", "\\u2069"
+    ; "BOM", "\xef\xbb\xbf", "\\uFEFF"
+    ];
+  Alcotest.(check string) "an ordinary string is unchanged" "café"
+    (Tui_decode.escape_invisible "café");
+  Alcotest.(check string) "the escape is idempotent" "a\\u202Eb"
+    (Tui_decode.escape_invisible
+       (Tui_decode.escape_invisible ("a" ^ rlo ^ "b")))
+
+(* #38485 review: the first cut escaped every ZWJ, and the ZWJ an operator
+   types most often is the one inside an emoji. UAX #29 GB11 is the rule this
+   screen follows: between two pictographs the joiner stays, anywhere else it
+   is drawn as its escape like the other invisibles. *)
+let test_terminal_text_keeps_the_joiner_inside_an_emoji () =
+  let zwj = "\xe2\x80\x8d" in
+  let zwsp = "\xe2\x80\x8b" in
+  let shrug = "\xf0\x9f\xa4\xb7" (* U+1F937 *) in
+  let male = "\xe2\x99\x82" (* U+2642 *) in
+  let vs16 = "\xef\xb8\x8f" (* U+FE0F *) in
+  let person = "\xf0\x9f\xa7\x91" (* U+1F9D1 *) in
+  let skin_tone = "\xf0\x9f\x8f\xbd" (* U+1F3FD *) in
+  let laptop = "\xf0\x9f\x92\xbb" (* U+1F4BB *) in
+  let man = "\xf0\x9f\x91\xa8" and woman = "\xf0\x9f\x91\xa9" in
+  let girl = "\xf0\x9f\x91\xa7" in
+  let keeps label text =
+    Alcotest.(check string) label text (Tui_decode.escape_invisible text)
+  in
+  keeps "the shrugging man keeps its joiner" (shrug ^ zwj ^ male ^ vs16);
+  keeps "a skin tone before the joiner does not end the emoji"
+    (person ^ skin_tone ^ zwj ^ laptop);
+  keeps "both joiners of a family survive"
+    (man ^ zwj ^ woman ^ zwj ^ girl);
+  keeps "an emoji inside a sentence is untouched"
+    ("배포 끝났어요 " ^ shrug ^ zwj ^ male ^ vs16 ^ " 확인 부탁해요");
+  (* The dividing inputs: each side of the joiner is asked separately, so a
+     rule that only looked left, or only right, or let every joiner through
+     fails here. *)
+  Alcotest.(check string) "a joiner between letters is still escaped"
+    ("a\\u200Db") (Tui_decode.escape_invisible ("a" ^ zwj ^ "b"));
+  Alcotest.(check string) "a joiner after an emoji but before a letter is escaped"
+    (shrug ^ "\\u200Da")
+    (Tui_decode.escape_invisible (shrug ^ zwj ^ "a"));
+  Alcotest.(check string) "a joiner before an emoji but after a letter is escaped"
+    ("a\\u200D" ^ shrug)
+    (Tui_decode.escape_invisible ("a" ^ zwj ^ shrug));
+  (* A joiner that was escaped is text now, so the next one is not inside an
+     emoji either: carrying the state through an escaped joiner would let the
+     second one through raw. *)
+  Alcotest.(check string) "a doubled joiner does not smuggle one through"
+    (shrug ^ "\\u200D\\u200D" ^ laptop)
+    (Tui_decode.escape_invisible (shrug ^ zwj ^ zwj ^ laptop));
+  Alcotest.(check string) "only the joiner is spared, not every zero width"
+    (shrug ^ "\\u200B" ^ laptop)
+    (Tui_decode.escape_invisible (shrug ^ zwsp ^ laptop));
+  (* The sanitizer the screens call has to agree with the rule, or the rule
+     is only true of a function nothing draws through. *)
+  Alcotest.(check string) "the terminal sanitizer keeps it too"
+    (shrug ^ zwj ^ male ^ vs16)
+    (Tui_decode.sanitize_terminal_text (shrug ^ zwj ^ male ^ vs16))
+
+(* #38501: the tag block copies ASCII into characters a terminal draws as
+   nothing, so a sentence can be spelled twice -- once for the reader and once
+   for the bytes an approval hash covers. The same block spells a subregion
+   flag, so escaping it everywhere would repeat the joiner defect on flags.
+   The neighbours decide again: a complete sequence (U+1F3F4, tag bases,
+   terminator) stays whole, and every other tag character is drawn as its
+   escape. *)
+let test_terminal_text_keeps_the_tags_that_spell_a_flag () =
+  let flag = "\xf0\x9f\x8f\xb4" (* U+1F3F4 *) in
+  let cancel = "\xf3\xa0\x81\xbf" (* U+E007F, the terminator *) in
+  let tag_g = "\xf3\xa0\x81\xa7" (* U+E0067 *) in
+  let tag_b = "\xf3\xa0\x81\xa2" (* U+E0062 *) in
+  let tag_s = "\xf3\xa0\x81\xb3" (* U+E0073 *) in
+  let tag_c = "\xf3\xa0\x81\xa3" (* U+E0063 *) in
+  let tag_t = "\xf3\xa0\x81\xb4" (* U+E0074 *) in
+  let tag_u = "\xf3\xa0\x81\xb5" (* U+E0075 *) in
+  let tag_x = "\xf3\xa0\x81\xb8" (* U+E0078 *) in
+  let tag_r = "\xf3\xa0\x81\xb2" (* U+E0072 *) in
+  let tag_m = "\xf3\xa0\x81\xad" (* U+E006D *) in
+  let tag_f = "\xf3\xa0\x81\xa6" (* U+E0066 *) in
+  let tag_space = "\xf3\xa0\x80\xa0" (* U+E0020 *) in
+  let tag_dash = "\xf3\xa0\x80\xad" (* U+E002D *) in
+  let tag_slash = "\xf3\xa0\x80\xaf" (* U+E002F *) in
+  let tag_y = "\xf3\xa0\x81\xb9" (* U+E0079 *) in
+  let tag_z = "\xf3\xa0\x81\xba" (* U+E007A *) in
+  let language_tag = "\xf3\xa0\x80\x81" (* U+E0001, deprecated *) in
+  let scotland = flag ^ tag_g ^ tag_b ^ tag_s ^ tag_c ^ tag_t ^ cancel in
+  let texas = flag ^ tag_u ^ tag_s ^ tag_t ^ tag_x ^ cancel in
+  let keeps label text =
+    Alcotest.(check string) label text (Tui_decode.escape_invisible text)
+  in
+  keeps "the flag of Scotland is spelled whole" scotland;
+  keeps "so is the flag of Texas" texas;
+  keeps "a flag inside a sentence is untouched" ("approve " ^ scotland ^ " now");
+  keeps "two flags in a row each close their own sequence" (scotland ^ texas);
+  (* The dividing inputs: a rule that let the block through, or that read only
+     the opening flag, or that never looked for the terminator, fails here. *)
+  Alcotest.(check string) "a command spelled in tag characters is drawn"
+    "\\U000E0072\\U000E006D\\U000E0020\\U000E002D\\U000E0072\\U000E0066\\U000E0020\\U000E002F"
+    (Tui_decode.escape_invisible
+       (tag_r ^ tag_m ^ tag_space ^ tag_dash ^ tag_r ^ tag_f ^ tag_space
+        ^ tag_slash));
+  Alcotest.(check string) "a sequence that never closes is not a flag"
+    (flag ^ "\\U000E0067\\U000E0062\\U000E0073\\U000E0063\\U000E0074")
+    (Tui_decode.escape_invisible (flag ^ tag_g ^ tag_b ^ tag_s ^ tag_c ^ tag_t));
+  (* #38557 review: the opening flag is not a licence for the block behind it.
+     A reader sees one flag; without these the bytes under it could spell a
+     sentence, which is the smuggling this whole rule exists to stop. Only the
+     shape of a subdivision is kept -- lowercase and digits, three to seven. *)
+  Alcotest.(check string) "a command behind a flag is still drawn"
+    (flag
+     ^ "\\U000E0072\\U000E006D\\U000E0020\\U000E002D\\U000E0072\\U000E0066\\U000E0020\\U000E002F\\U000E007F")
+    (Tui_decode.escape_invisible
+       (flag ^ tag_r ^ tag_m ^ tag_space ^ tag_dash ^ tag_r ^ tag_f ^ tag_space
+        ^ tag_slash ^ cancel));
+  Alcotest.(check string) "a run too long to be a subdivision is drawn"
+    (flag
+     ^ "\\U000E0067\\U000E0062\\U000E0073\\U000E0063\\U000E0074\\U000E0078\\U000E0079\\U000E007A\\U000E007F")
+    (Tui_decode.escape_invisible
+       (flag ^ tag_g ^ tag_b ^ tag_s ^ tag_c ^ tag_t ^ tag_x ^ tag_y ^ tag_z
+        ^ cancel));
+  Alcotest.(check string) "a run too short to be a subdivision is drawn"
+    (flag ^ "\\U000E0067\\U000E0062\\U000E007F")
+    (Tui_decode.escape_invisible (flag ^ tag_g ^ tag_b ^ cancel));
+  Alcotest.(check string) "a terminator with nothing to spell is drawn"
+    (flag ^ "\\U000E007F")
+    (Tui_decode.escape_invisible (flag ^ cancel));
+  (* The wider escape is the notation decision this defect forced: the
+     tag block needs five hex digits, and in the four-digit form the
+     fifth digit would read as ordinary text after the escape. *)
+  Alcotest.(check string) "a tag character after a letter is drawn"
+    "a\\U000E0062"
+    (Tui_decode.escape_invisible ("a" ^ tag_b));
+  Alcotest.(check string) "the deprecated language tag has no flag to belong to"
+    "\\U000E0001"
+    (Tui_decode.escape_invisible language_tag);
+  (* The sanitizer the screens call has to agree, or the rule is only true of
+     a function nothing draws through. *)
+  Alcotest.(check string) "the terminal sanitizer keeps the flag too" scotland
+    (Tui_decode.sanitize_terminal_text scotland)
+
 let test_preview_line_marks_breaks_and_escapes_the_rest () =
   let mark = "\xe2\x8f\x8e" in
   Alcotest.(check string) "a break is one return mark" ("a" ^ mark ^ "b")
@@ -1099,7 +1277,8 @@ let fleet_safety_json ?(missing = true)
   `Assoc
     [ ( "keeper_fleet_safety"
       , `Assoc
-          ([ "status", `String "degraded"
+          ([ "schema", `String "masc.keeper_fleet_operator.v1"
+           ; "status", `String "degraded"
            ; "blocker", `String blocker
            ; "operator_action_required", `Bool true
            ; "bootable_keeper_count", `Int 10
@@ -1124,6 +1303,8 @@ let fleet_safety_json ?(missing = true)
                       (if missing
                        then [ "analyst"; "bluebird"; "haneul" ]
                        else [ "analyst"; "bluebird" ])) )
+             ; ( "running_keeper_names"
+               , `List [ `String "analyst"; `String "bluebird" ] )
              ; ( "executable_keeper_names"
                , `List [ `String "analyst"; `String "bluebird" ] )
              ; ( "turn_configuration_error_keeper_names"
@@ -1131,94 +1312,150 @@ let fleet_safety_json ?(missing = true)
              ]) )
     ]
 
+let measured = function
+  | Ok (Tui_decode.Fleet_measured fleet) -> fleet
+  | Ok (Tui_decode.Fleet_not_measured _) ->
+      Alcotest.fail "a fleet reading decoded as not measured"
+  | Error err -> Alcotest.fail err
+
 (* The scan errors ride the same section. A Keeper whose profile did not load
    is left out of the owner count above and does not move [status], so the row
    can only say the reading was short if this number reaches it. *)
 let test_decode_fleet_safety_carries_the_scan_shortfall () =
-  match Tui_decode.decode_fleet_safety (fleet_safety_json ()) with
-  | Error err -> Alcotest.fail err
-  | Ok fleet ->
-      Alcotest.(check int) "sources the scan could not read" 2
-        fleet.Tui_decode.fs_active_task_owner_scan_error_count
+  let fleet = measured (Tui_decode.decode_fleet_safety (fleet_safety_json ())) in
+  Alcotest.(check int) "sources the scan could not read" 2
+    fleet.Tui_decode.fs_active_task_owner_scan_error_count
 
 let test_decode_fleet_safety_carries_both_name_lists () =
-  match Tui_decode.decode_fleet_safety (fleet_safety_json ()) with
-  | Error err -> Alcotest.fail err
-  | Ok fleet ->
-      Alcotest.(check string) "status" "degraded" fleet.fs_status;
-      Alcotest.(check bool) "the blocker is read as the reason it names" true
-        (fleet.fs_blocker
-         = Some
-             (Tui_decode.Blocker
-                Keeper_fleet_blocker.Reaction_capacity_below_target));
-      Alcotest.(check bool) "operator must act" true
-        fleet.fs_operator_action_required;
-      Alcotest.(check int) "bootable" 10 fleet.fs_bootable_count;
-      Alcotest.(check int) "running" 8 fleet.fs_running_count;
-      Alcotest.(check int) "shortfall" 1 fleet.fs_reaction_capacity_shortfall;
-      Alcotest.(check int) "task owner without fiber" 1
-        fleet.fs_active_task_owner_without_fiber_count;
-      (* The failing partition the header prints beside the whole: retrying
-         plus configuration-blocked. The reader takes both; the server does
-         not precompute the display string. *)
-      Alcotest.(check int) "failing" 1 fleet.fs_failing_count;
-      Alcotest.(check int) "retrying" 0 fleet.fs_recovering_count;
-      Alcotest.(check int) "config-blocked" 1
-        fleet.fs_turn_configuration_error_count;
-      Alcotest.(check (list string)) "config-blocked names" [ "bluebird" ]
-        fleet.fs_turn_configuration_error_names;
-      Alcotest.(check int) "no session recovery required" 0
-        fleet.fs_official_client_recovery_required_count;
-      (* The reader takes the difference; the server does not precompute it. *)
-      Alcotest.(check (list string)) "keepers that should run"
-        [ "analyst"; "bluebird"; "haneul" ] fleet.fs_bootable_names;
-      (* Executable holds every keeper with a live fiber, failing ones
-         included -- bluebird is failing here and stays out of the
-         not-running difference the header draws from it. *)
-      Alcotest.(check (list string)) "keepers that can execute a turn"
-        [ "analyst"; "bluebird" ] fleet.fs_executable_names;
-      Alcotest.(check (list string)) "the difference names the missing keeper"
-        [ "haneul" ]
-        (List.filter
-           (fun n -> not (List.mem n fleet.fs_executable_names))
-           fleet.fs_bootable_names)
+  let fleet =
+    measured (Tui_decode.decode_fleet_safety (fleet_safety_json ()))
+  in
+  Alcotest.(check string) "status" "degraded" fleet.fs_status;
+  Alcotest.(check bool) "the blocker is read as the reason it names" true
+    (fleet.fs_blocker
+     = Some
+         (Tui_decode.Blocker
+            Keeper_fleet_blocker.Reaction_capacity_below_target));
+  Alcotest.(check bool) "operator must act" true
+    fleet.fs_operator_action_required;
+  Alcotest.(check int) "bootable" 10 fleet.fs_bootable_count;
+  Alcotest.(check int) "running" 8 fleet.fs_running_count;
+  Alcotest.(check int) "shortfall" 1 fleet.fs_reaction_capacity_shortfall;
+  Alcotest.(check int) "task owner without fiber" 1
+    fleet.fs_active_task_owner_without_fiber_count;
+  (* The failing partition the header prints beside the whole: retrying
+     plus configuration-blocked. The reader takes both; the server does
+     not precompute the display string. *)
+  Alcotest.(check int) "failing" 1 fleet.fs_failing_count;
+  Alcotest.(check int) "retrying" 0 fleet.fs_recovering_count;
+  Alcotest.(check int) "config-blocked" 1
+    fleet.fs_turn_configuration_error_count;
+  Alcotest.(check (list string)) "config-blocked names" [ "bluebird" ]
+    fleet.fs_turn_configuration_error_names;
+  Alcotest.(check int) "no session recovery required" 0
+    fleet.fs_official_client_recovery_required_count;
+  (* The reader takes the difference; the server does not precompute it. *)
+  Alcotest.(check (list string)) "keepers that should run"
+    [ "analyst"; "bluebird"; "haneul" ] fleet.fs_bootable_names;
+  (* Executable holds every keeper with a live fiber, failing ones
+     included -- bluebird is failing here and stays out of the
+     not-running difference the header draws from it. *)
+  Alcotest.(check (list string)) "keepers that can execute a turn"
+    [ "analyst"; "bluebird" ] fleet.fs_executable_names;
+  Alcotest.(check (list string)) "the difference names the missing keeper"
+    [ "haneul" ]
+    (List.filter
+       (fun n -> not (List.mem n fleet.fs_executable_names))
+       fleet.fs_bootable_names)
 
-(* A fleet where every bootable keeper runs leaves the difference empty. *)
-let test_decode_fleet_safety_requires_session_recovery_fields () =
+(* The fleet reading writes every field on every scan, so each one the TUI
+   reads is required: a missing count is a broken payload, and reading it as
+   zero would draw an idle fleet nobody measured. [schema] is left out of the
+   walk because without it the section is the server's placeholder. *)
+let test_decode_fleet_safety_requires_every_field () =
   let section = Yojson.Safe.Util.member "keeper_fleet_safety" (fleet_safety_json ()) in
   match section with
   | `Assoc fields ->
     List.iter
-      (fun field ->
-        let json = `Assoc [ "keeper_fleet_safety", `Assoc (List.remove_assoc field fields) ] in
-        Alcotest.(check bool) ("missing observation is not zero: " ^ field) true
-          (Result.is_error (Tui_decode.decode_fleet_safety json)))
-      [ "official_client_recovery_required_keeper_count"
-      ; "official_client_recovery_required_keeper_names" ]
+      (fun (field, _) ->
+        if not (String.equal field "schema") then
+          let json =
+            `Assoc [ "keeper_fleet_safety", `Assoc (List.remove_assoc field fields) ]
+          in
+          Alcotest.(check bool) ("missing observation is not zero: " ^ field) true
+            (Result.is_error (Tui_decode.decode_fleet_safety json)))
+      fields
   | _ -> Alcotest.fail "fleet fixture must be an object"
+
+(* Server_routes_http_runtime.full_health_component_placeholder is what the
+   section holds while the health snapshot is rebuilt, and when its refresh
+   timed out or the scan raised. It carries no counts. A rebuild reads as "not
+   measured"; a failure carries [error], and stays an error with the server's
+   reason in it, never a fleet of zeros. *)
+let test_decode_fleet_safety_reads_the_placeholder_as_not_measured () =
+  let placeholder fields = `Assoc [ "keeper_fleet_safety", `Assoc fields ] in
+  let says what ~needle = function
+    | Ok _ -> Alcotest.failf "%s decoded" what
+    | Error err ->
+        Alcotest.(check bool) (what ^ ": " ^ needle) true
+          (String_util.contains_substring err needle)
+  in
+  (match
+     Tui_decode.decode_fleet_safety
+       (placeholder
+          [ "component", `String "keeper_fleet_safety"
+          ; "status", `String "warming"
+          ; "component_timed_out", `Bool false
+          ])
+   with
+   | Ok (Tui_decode.Fleet_not_measured { status }) ->
+       Alcotest.(check string) "the placeholder's word" "warming" status
+   | Ok (Tui_decode.Fleet_measured _) ->
+       Alcotest.fail "a warming placeholder decoded as a reading"
+   | Error err -> Alcotest.fail err);
+  says "a scan that raised" ~needle:"Not_found"
+    (Tui_decode.decode_fleet_safety
+       (placeholder
+          [ "component", `String "keeper_fleet_safety"
+          ; "status", `String "error"
+          ; "component_timed_out", `Bool false
+          ; "error", `String "Not_found"
+          ]));
+  says "a refresh that ran out of time" ~needle:"(timeout, refresh timed out)"
+    (Tui_decode.decode_fleet_safety
+       (placeholder
+          [ "component", `String "keeper_fleet_safety"
+          ; "status", `String "timeout"
+          ; "component_timed_out", `Bool true
+          ; "error", `String "full health refresh timed out"
+          ]));
+  says "a schema this build does not know" ~needle:"masc.keeper_fleet_operator.v2"
+    (Tui_decode.decode_fleet_safety
+       (placeholder [ "schema", `String "masc.keeper_fleet_operator.v2" ]));
+  says "a section that is neither shape" ~needle:"no schema"
+    (Tui_decode.decode_fleet_safety (placeholder [ "status", `String "ok" ]))
 
 (* A newer server can name a reason this build has no constructor for. The
    header still has something to say, so the name is kept rather than read as
    no blocker at all. *)
 let test_decode_fleet_safety_keeps_an_unknown_blocker_by_name () =
-  match
-    Tui_decode.decode_fleet_safety
-      (fleet_safety_json ~blocker:"lane_capacity_withdrawn" ())
-  with
-  | Error err -> Alcotest.fail err
-  | Ok fleet ->
-      Alcotest.(check bool) "the unknown name is kept" true
-        (fleet.fs_blocker
-         = Some (Tui_decode.Unrecognised_blocker "lane_capacity_withdrawn"))
+  let fleet =
+    measured
+      (Tui_decode.decode_fleet_safety
+         (fleet_safety_json ~blocker:"lane_capacity_withdrawn" ()))
+  in
+  Alcotest.(check bool) "the unknown name is kept" true
+    (fleet.fs_blocker
+     = Some (Tui_decode.Unrecognised_blocker "lane_capacity_withdrawn"))
 
 let test_decode_fleet_safety_with_nothing_missing () =
-  match Tui_decode.decode_fleet_safety (fleet_safety_json ~missing:false ()) with
-  | Error err -> Alcotest.fail err
-  | Ok fleet ->
-      Alcotest.(check (list string)) "nothing missing" []
-        (List.filter
-           (fun n -> not (List.mem n fleet.fs_executable_names))
-           fleet.fs_bootable_names)
+  let fleet =
+    measured (Tui_decode.decode_fleet_safety (fleet_safety_json ~missing:false ()))
+  in
+  Alcotest.(check (list string)) "nothing missing" []
+    (List.filter
+       (fun n -> not (List.mem n fleet.fs_executable_names))
+       fleet.fs_bootable_names)
 
 (* A body without the section is refused rather than read as a healthy fleet.
    Rendering "ok" for "the server did not say" is how a blocked keeper stays
@@ -9255,6 +9492,7 @@ let test_decode_gate_identity_row_reads_its_target () =
       [ ("id", `String "appr-1");
         ("keeper_name", `String "echo");
         ("tool_name", `String "identity_call");
+        ("phase", `String "queued");
         ("input_preview", `String "{\"provider_id\":\"atlassian\"}");
         ("waiting_s", `Int 42);
         ( "input",
@@ -9285,86 +9523,63 @@ let test_decode_gate_identity_row_reads_its_target () =
           Alcotest.failf "expected one pending row, got %d" (List.length rows))
 
 let test_decode_gate_rows_distinguish_operator_phases () =
-  let phase ~summary_status ~disposition =
-    let row =
-      `Assoc
-        [ "id", `String "appr-phase"
-        ; "keeper_name", `String "phase-keeper"
-        ; "tool_name", `String "tool_execute"
-        ; "input_preview", `String "gh auth status"
-        ; "waiting_s", `Int 42
-        ; "input", `Assoc []
-        ; "summary_status", summary_status
-        ; "summary_attempt_disposition", disposition
-        ]
+  let phase ?phase_field () =
+    let base_fields =
+      [ "id", `String "appr-phase"
+      ; "keeper_name", `String "phase-keeper"
+      ; "tool_name", `String "tool_execute"
+      ; "input_preview", `String "gh auth status"
+      ; "waiting_s", `Int 42
+      ; "input", `Assoc []
+      ]
     in
+    let fields =
+      match phase_field with
+      | Some p -> ("phase", p) :: base_fields
+      | None -> base_fields
+    in
+    let row = `Assoc fields in
     match
       Tui_decode.decode_gate_snapshot
         (gate_snapshot_json ~queue:(`List [ row ]) ())
     with
-    | Ok { gs_pending = [ pending ]; _ } -> pending.gp_phase
+    | Ok { gs_pending = [ pending ]; _ } -> Ok pending.gp_phase
     | Ok snapshot ->
       Alcotest.failf
         "expected one pending phase row, got %d"
         (List.length snapshot.gs_pending)
-    | Error detail -> Alcotest.fail detail
+    | Error detail -> Error detail
   in
-  let available judgment =
-    `Assoc
-      [ "status", `String "available"
-      ; ( "summary"
-        , `Assoc [ "judgment", `String judgment ] )
-      ]
-  in
-  let disposition code = `Assoc [ "code", `String code ] in
   Alcotest.check
     Alcotest.bool
-    "ready work is queued"
+    "queued phase"
     true
-    (phase
-       ~summary_status:(`String "not_requested")
-       ~disposition:(disposition "ready")
-     = Tui_decode.Gate_queued);
+    (phase ~phase_field:(`String "queued") () = Ok Tui_decode.Gate_queued);
   Alcotest.check
     Alcotest.bool
-    "in-flight work is judging"
+    "judging phase"
     true
-    (phase
-       ~summary_status:(`String "pending")
-       ~disposition:(disposition "in_flight")
-     = Tui_decode.Gate_judging);
+    (phase ~phase_field:(`String "judging") () = Ok Tui_decode.Gate_judging);
   Alcotest.check
     Alcotest.bool
-    "require_human is a terminal handoff"
+    "human_required phase"
     true
-    (phase
-       ~summary_status:(available "require_human")
-       ~disposition:(disposition "settled")
-     = Tui_decode.Gate_human_required);
+    (phase ~phase_field:(`String "human_required") () = Ok Tui_decode.Gate_human_required);
   Alcotest.check
     Alcotest.bool
-    "failed Auto Judge work is blocked"
+    "blocked phase"
     true
-    (phase
-       ~summary_status:
-         (`Assoc
-            [ "status", `String "failed"
-            ; "reason", `String "exact attempt quarantined"
-            ])
-       ~disposition:(disposition "settled")
-     = Tui_decode.Gate_blocked);
+    (phase ~phase_field:(`String "blocked") () = Ok Tui_decode.Gate_blocked);
   Alcotest.check
     Alcotest.bool
-    "a start reservation surfaces as blocked, not judging"
+    "unknown phase rejects"
     true
-    (phase
-       ~summary_status:(`String "pending")
-       ~disposition:
-         (`Assoc
-            [ "code", `String "pre_worker_unavailable"
-            ; "reason_code", `String "start_reserved"
-            ])
-     = Tui_decode.Gate_blocked)
+    (Result.is_error (phase ~phase_field:(`String "unknown_phase") ()));
+  Alcotest.check
+    Alcotest.bool
+    "missing phase rejects"
+    true
+    (Result.is_error (phase ()))
 ;;
 
 let test_decode_gate_block_reason_and_retry_contract () =
@@ -9373,6 +9588,7 @@ let test_decode_gate_block_reason_and_retry_contract () =
       [ "id", `String "appr-retry"
       ; "keeper_name", `String "retry-keeper"
       ; "tool_name", `String "identity_call"
+      ; "phase", `String "blocked"
       ; "input_preview", `String "{}"
       ; "input_hash", `String (String.make 64 'a')
       ; "sequence", `Int 41
@@ -9431,6 +9647,7 @@ let execute_gate_row ~preview ~input =
     [ ("id", `String "appr-1");
       ("keeper_name", `String "rw-e0-r9-20260820-review");
       ("tool_name", `String "tool_execute");
+      ("phase", `String "queued");
       ("input_preview", `String preview);
       ("waiting_s", `Int 57330);
       ("input", input);
@@ -9445,6 +9662,17 @@ let decoded_execute_preview ~preview ~input =
   | Ok snapshot -> (
       match snapshot.Tui_decode.gs_pending with
       | [ pending ] -> pending.Tui_decode.gp_input_preview
+      | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
+
+let decoded_execute_rows ~preview ~input =
+  match
+    Tui_decode.decode_gate_snapshot
+      (gate_snapshot_json ~queue:(`List [ execute_gate_row ~preview ~input ]) ())
+  with
+  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.gs_pending with
+      | [ pending ] -> pending.Tui_decode.gp_input_rows
       | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
 
 (* The envelope opens with the schema URN and an absolute cwd, so the command
@@ -9540,6 +9768,7 @@ let test_decode_gate_row_of_another_operation_has_no_site () =
       [ ("id", `String "appr-3");
         ("keeper_name", `String "code-reviewer");
         ("tool_name", `String "memory_write");
+        ("phase", `String "queued");
         ("input_preview", `String "{}");
         ("input", `Assoc [ ("cwd", `String "/somewhere") ]);
       ]
@@ -9588,6 +9817,96 @@ let test_decode_execute_gate_row_keeps_the_preview_on_an_unknown_shape () =
     "an argv that is not words keeps the server preview"
     (Some observed_execute_preview) preview
 
+let test_decode_execute_row_details_the_whole_command () =
+  (* The summary line may be cut; the detail pane may not be. The stored
+     input's own keys are the detail's fields, so argv rides whole no matter
+     how long the command is. A list rides as the JSON it is: joined with
+     spaces, ["rm"; "-rf"; "a b"] and ["rm"; "-rf"; "a"; "b"] would draw as
+     the same line and the word boundaries the operator approves between
+     would be gone. *)
+  let long_url = String.make 180 'x' in
+  let rows =
+    decoded_execute_rows ~preview:"{\"cut\":true}"
+      ~input:
+        (`Assoc
+           [ ( "input",
+               `Assoc
+                 [ ("cwd", `String "/home/keeper/playground/polisher");
+                   ( "argv",
+                     `List
+                       [ `String "git"; `String "clone";
+                         `String ("https://example.org/" ^ long_url) ] );
+                 ] );
+           ])
+  in
+  match rows with
+  | Tui_decode.Rows fields ->
+    Alcotest.check Alcotest.int "one field per stored key" 2 (List.length fields);
+    Alcotest.check
+      Alcotest.(option string)
+      "argv is whole, not the cut summary"
+      (Some
+         (Yojson.Safe.to_string
+            (`List
+               [ `String "git"; `String "clone";
+                 `String ("https://example.org/" ^ long_url) ])))
+      (List.assoc_opt "argv" fields)
+  | Tui_decode.Flattened _ ->
+    Alcotest.fail "an object input must draw key by key"
+
+let test_decode_connector_row_holds_a_korean_body_whole () =
+  (* The queue's 200-byte preview spends its budget on JSON keys first, so a
+     1,500-character Korean body showed 52 characters of itself. The detail
+     carries the body as its own field, and the preview budget never
+     touches it. *)
+  let body = String.concat "" (List.init 1500 (fun _ -> "\xea\xb0\x80")) in
+  let row =
+    `Assoc
+      [ ("id", `String "appr-9");
+        ("keeper_name", `String "messenger");
+        ("tool_name", `String "connector_post");
+        ("input_preview", `String "{\"connector\":\"discord\",\"channel_id\"");
+        ( "input",
+          `Assoc
+            [ ("connector", `String "discord");
+              ("channel_id", `String "123");
+              ("content", `String body);
+            ] );
+      ]
+  in
+  match
+    Tui_decode.decode_gate_snapshot (gate_snapshot_json ~queue:(`List [ row ]) ())
+  with
+  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
+  | Ok snapshot -> (
+    match snapshot.Tui_decode.gs_pending with
+    | [ pending ] -> (
+      match pending.Tui_decode.gp_input_rows with
+      | Tui_decode.Rows fields ->
+        Alcotest.check
+          Alcotest.(option string)
+          "the Korean body is carried whole"
+          (Some body) (List.assoc_opt "content" fields)
+      | Tui_decode.Flattened _ ->
+        Alcotest.fail "an object input must draw key by key")
+    | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
+
+let test_decode_execute_row_with_no_command_names_the_preview () =
+  (* This is the quiet fallback the detail pane used to have: a command that
+     would not assemble sank into the flattened preview under the label
+     "input". Now the pane is told what it is showing, and says so. *)
+  let rows =
+    decoded_execute_rows ~preview:observed_execute_preview
+      ~input:(`Assoc [ ("input", `String "not an object") ])
+  in
+  match rows with
+  | Tui_decode.Flattened preview ->
+    Alcotest.check
+      Alcotest.(option string)
+      "the server preview is kept" (Some observed_execute_preview) preview
+  | Tui_decode.Rows _ ->
+    Alcotest.fail "a non-object input has no keys to show"
+
 let test_decode_gate_row_of_another_operation_keeps_its_preview () =
   (* A memory_write row already leads with its title, and nothing here should
      touch it. *)
@@ -9596,6 +9915,7 @@ let test_decode_gate_row_of_another_operation_keeps_its_preview () =
       [ ("id", `String "appr-2");
         ("keeper_name", `String "code-reviewer");
         ("tool_name", `String "memory_write");
+        ("phase", `String "queued");
         ("input_preview", `String "{\"title\":\"PR #31279 turn 109\"}");
         ("input", `Assoc [ ("title", `String "PR #31279 turn 109") ]);
       ]
@@ -11140,8 +11460,10 @@ let () =
           test_decode_fleet_safety_carries_both_name_lists;
         Alcotest.test_case "fleet safety carries the scan shortfall" `Quick
           test_decode_fleet_safety_carries_the_scan_shortfall;
-        Alcotest.test_case "session recovery fields are required" `Quick
-          test_decode_fleet_safety_requires_session_recovery_fields;
+        Alcotest.test_case "every field is required" `Quick
+          test_decode_fleet_safety_requires_every_field;
+        Alcotest.test_case "the placeholder reads as not measured" `Quick
+          test_decode_fleet_safety_reads_the_placeholder_as_not_measured;
         Alcotest.test_case "an unknown blocker is kept by name" `Quick
           test_decode_fleet_safety_keeps_an_unknown_blocker_by_name;
         Alcotest.test_case "a full fleet leaves the difference empty" `Quick
@@ -11156,6 +11478,12 @@ let () =
           test_terminal_text_preserves_printable_utf8
       ; Alcotest.test_case "escapes malformed UTF-8 bytes" `Quick
           test_terminal_text_escapes_malformed_utf8_bytes
+      ; Alcotest.test_case "escapes invisible codepoints" `Quick
+          test_terminal_text_escapes_invisible_codepoints
+      ; Alcotest.test_case "keeps the joiner inside an emoji" `Quick
+          test_terminal_text_keeps_the_joiner_inside_an_emoji
+      ; Alcotest.test_case "keeps the tags that spell a flag" `Quick
+          test_terminal_text_keeps_the_tags_that_spell_a_flag
       ; Alcotest.test_case "is idempotent and single-line" `Quick
           test_terminal_text_is_idempotent_and_single_line
       ; Alcotest.test_case "preview marks breaks and escapes the rest" `Quick
@@ -11396,6 +11724,13 @@ let () =
           test_decode_execute_gate_row_quotes_a_word_with_a_space;
         Alcotest.test_case "an unknown execute shape keeps the preview" `Quick
           test_decode_execute_gate_row_keeps_the_preview_on_an_unknown_shape;
+        Alcotest.test_case "an execute detail draws the whole command" `Quick
+          test_decode_execute_row_details_the_whole_command;
+        Alcotest.test_case "a connector body is carried whole" `Quick
+          test_decode_connector_row_holds_a_korean_body_whole;
+        Alcotest.test_case
+          "a command that will not assemble names the flattened preview" `Quick
+          test_decode_execute_row_with_no_command_names_the_preview;
         Alcotest.test_case "another operation keeps its preview" `Quick
           test_decode_gate_row_of_another_operation_keeps_its_preview;
         Alcotest.test_case "a null queue is empty with modes" `Quick

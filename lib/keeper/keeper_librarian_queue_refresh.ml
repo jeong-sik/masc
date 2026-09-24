@@ -213,10 +213,10 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
     match Env_config.KeeperMemoryOs.librarian_config_state () with
     | Disabled | Invalid -> observe O.Disabled
     | Enabled ->
-      match Keeper_meta_store.read_effective_meta_presence config keeper_name with
-      | Error detail | Ok (Keeper_meta_store.Meta_not_current detail) -> report O.Source_unavailable detail
-      | Ok Keeper_meta_store.Meta_absent -> observe O.Source_unavailable
-      | Ok (Keeper_meta_store.Meta_present meta) ->
+      match Keeper_meta_store.read_effective_meta_presence_named config keeper_name with
+      | Error detail | Ok (_, Keeper_meta_store.Meta_not_current detail) -> report O.Source_unavailable detail
+      | Ok (_, Keeper_meta_store.Meta_absent) -> observe O.Source_unavailable
+      | Ok (keeper_id, Keeper_meta_store.Meta_present meta) ->
         let current_trace = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
         if !trace_id <> Some current_trace then selected_range := None;
         trace_id := Some current_trace;
@@ -241,9 +241,9 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
         | Ok (P.No_source no_source) -> settle_no_source no_source
         | Ok (P.Ready prepared) ->
           (match limited_width ~config ~keeper_name ~trace_id:current_trace with
-           | None -> attempt meta prepared
+           | None -> attempt ~keeper_id meta prepared
            | Some width when P.end_atom prepared - P.start_atom prepared <= width ->
-             attempt meta prepared
+             attempt ~keeper_id meta prepared
            | Some width ->
              (* Cut at the width: the unit read is then the width the last
                 refusal left, and the logged number is the number of atoms
@@ -268,14 +268,15 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
                    end_atom=%d -> %d"
                   width (P.start_atom prepared) (P.completed_end_atom prepared)
                   (P.end_atom prepared) (P.end_atom one_unit);
-                attempt meta one_unit))
-  and attempt meta prepared =
+                attempt ~keeper_id meta one_unit))
+  and attempt ~keeper_id meta prepared =
     select prepared;
     let inputs = Domain_pool_ref.submit_io_or_inline (fun () ->
       let ( let* ) = Result.bind in
       let* current = Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
       let input : Keeper_librarian.input =
         { turn_ref = P.turn_ref prepared; goal_context = Keeper_librarian.No_task;
+          keeper_id;
           keeper_instructions = meta.Keeper_meta_contract.instructions;
           current = Option.map (fun (value : Keeper_memory_os_current.t) ->
             {Keeper_librarian.facts = value.facts}) current;
@@ -405,7 +406,7 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
              "continuity input fitted to reported capacity; runtime=%s max_chars=%d end_atom=%d -> %d"
              observed.runtime_id observed.capacity.max_chars
              (P.end_atom selected) (P.end_atom smaller);
-           attempt meta smaller
+           attempt ~keeper_id meta smaller
          | Ok (Some _) ->
            report O.Capacity_refused "provider capacity refusal disagrees with local prompt measurement")
   in
@@ -418,9 +419,10 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
    the Keeper's current task is the task these inputs belong to. The durable
    and continuity passes read turns that may predate that task, and a turn
    boundary does not record its task, so they stay [No_task]. *)
-let queue_input ~config ~(meta : Keeper_meta_contract.keeper_meta) ~current ~working_context
-  : Keeper_librarian.input =
-  { turn_ref = Ids.Turn_ref.make
+let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta) ~current
+    ~working_context : Keeper_librarian.input =
+  { keeper_id
+  ; turn_ref = Ids.Turn_ref.make
       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ~absolute_turn:meta.runtime.usage.total_turns
   ; goal_context = Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -430,7 +432,20 @@ let queue_input ~config ~(meta : Keeper_meta_contract.keeper_meta) ~current ~wor
   ; working_context
   ; messages = []; tool_observations = []; counterpart_observations = [] }
 
+(* The queue signal hands this unit a bare name, and the queue pass reads the
+   Owner's meta, not the store read that refuses a blank name for the durable
+   and continuity passes. So the name is parsed here, once, before any pass
+   runs. A blank one names no Keeper the Librarian could be told about
+   (RFC-0468 §3.1): the unit raises, and the memory lane logs and counts it
+   as a failed unit. *)
+exception Blank_keeper_name
+
 let run ~base_path ~keeper_name =
+  let keeper_id =
+    match Keeper_identity.Keeper_id.of_string keeper_name with
+    | Some keeper_id -> keeper_id
+    | None -> raise Blank_keeper_name
+  in
   run_durable ~base_path ~keeper_name;
   run_continuity ~base_path ~keeper_name ();
   match Env_config.KeeperMemoryOs.librarian_config_state (),
@@ -454,7 +469,7 @@ let run ~base_path ~keeper_name =
       | Ok current ->
         let current_selection = Option.map (fun (s : Keeper_memory_os_current.t) ->
           {Keeper_librarian.facts = s.facts}) current in
-        let inp = queue_input ~config:(Workspace.default_config base_path) ~meta
+        let inp = queue_input ~config:(Workspace.default_config base_path) ~keeper_id ~meta
             ~current:current_selection ~working_context in
         Keeper_librarian_runtime.run_best_effort
           ~write_scope:Keeper_librarian_runtime.Context_only

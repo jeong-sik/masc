@@ -367,6 +367,7 @@ mid-session fails the tool call with a named error.
 | `env_allowlist` | `[]` | request env names allowed to cross the wire |
 | `capabilities` | `[]` | reserved: `kvm`, `firecracker` (Phase 2); unknown values warn-and-ignore |
 | `private_home` | `false` | the operator declares this account's home is the keeper's alone. Required before a keeper on this endpoint may set `observation_run = "guest_local"` (RFC-0422 §3.4); without it a guest_local request keeps the judge |
+| `allowed_paths` | `[]` | extra endpoint roots an Execute command may name besides the keeper workdir and `/tmp` (e.g. `["/app"]`). Each entry must be absolute and normalized and not `/`, or the load fails |
 
 Unknown registry keys and unknown `remote_endpoint` names in keeper TOML are
 config-load errors (fail-closed).

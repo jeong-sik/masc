@@ -4,6 +4,41 @@
     a [masc_keeper_up] tool call. Pairs with [Keeper_turn_up_create]
     for the new-keeper path. *)
 
+(** What happened to the running keepalive lane after a published update. *)
+type runtime_sync =
+  | Lane_restarted
+      (** The lane was stopped and started again on the updated meta. *)
+  | Deferred_until_turn_end of Keeper_owner.turn_in_flight
+      (** A turn held the keeper's slot, so the lane was left running. The
+          owner already carries the published profile: the turn in flight
+          finishes on the meta it was admitted with and the next admitted
+          turn reads the new one. Nothing needs to be resent. *)
+
+val runtime_sync_to_wire : runtime_sync -> string
+(** ["lane_restarted"] or ["deferred_until_turn_end"]. *)
+
+type update_outcome =
+  | Runtime_synced of
+      { result : Keeper_types_profile.tool_result
+      ; runtime_sync : runtime_sync
+      }
+      (** The configuration was committed and published. [result] is a
+          success carrying [runtime_sync] and the updated [meta]. *)
+  | Update_refused of Keeper_types_profile.tool_result
+      (** Any failure: CAS conflict, persistence, publication, or a lane
+          restart that failed. The error payload says which, and its
+          [keeper_config_write] metadata says whether the write applied. *)
+
+val update_keeper_outcome :
+  ?preserve_prompt_defaults:bool ->
+  expected_config_revision:Keeper_turn_up_config_persistence.config_revision ->
+  _ Keeper_types_profile.context ->
+  Keeper_turn_up_args.parsed_args ->
+  Keeper_meta_contract.keeper_meta ->
+  update_outcome
+(** Same update as {!update_keeper}, keeping the runtime-sync outcome typed
+    for callers that answer differently per outcome. *)
+
 (** Update an existing keeper's meta record. Validates tool-access
     transitions, resolves active goals, applies parsed-arg overrides,
     persists the new meta, and broadcasts state-machine events.
@@ -35,6 +70,12 @@ val config_publication_rollback_of_result :
 val config_reconciliation_required_of_result :
   Keeper_types_profile.tool_result -> Yojson.Safe.t option
 
+type lane_swap_refusal =
+  | Swap_turn_in_flight of Keeper_owner.turn_in_flight
+      (** A turn holds the slot; the lane was not touched. *)
+  | Swap_failed of Keeper_types_profile.tool_result
+      (** The shutdown reservation itself failed. *)
+
 (** Swap a live keeper's lane under the owner-domain fence: stop the old
     lane, persist the updated meta, and start the replacement. Runs on the
     root-switch owner domain when called from a worker domain, so the new
@@ -45,7 +86,7 @@ val swap_keepalive_lane_fenced :
   Keeper_meta_contract.keeper_meta ->
   ( Keeper_keepalive.joined_stop_result
     * Keeper_keepalive.start_keepalive_outcome
-  , Keeper_types_profile.tool_result )
+  , lane_swap_refusal )
   result
 
 module For_testing : sig

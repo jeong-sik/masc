@@ -82,6 +82,7 @@ remote_endpoint = "fixture"
            ; env_allowlist = [ "LANG" ]
            ; capabilities = []
            ; private_home = false
+           ; allowed_paths = []
            });
     f ~config ~meta ~playground)
 ;;

@@ -1571,6 +1571,7 @@ let test_absorbed_search_preserves_board_basis source =
   let input : Librarian.input =
     { turn_ref = Ids.Turn_ref.make ~trace_id:"absorb-board-sources" ~absolute_turn:8
     ; goal_context = Librarian.No_task
+    ; keeper_id = Masc_test_deps.keeper_id_fixture meta.name
     ; keeper_instructions = "Preserve useful observations."
     ; current = Some { Librarian.facts = original }
     ; working_context = Masc.Keeper_librarian_context.empty
@@ -1949,6 +1950,133 @@ let test_absorbed_chain_prefers_current_and_stops_before_a_loop () =
           ( string_field "text" matched
           , string_field "into" matched
           , json_field "into_current" matched = `Bool true ))
+       found)
+;;
+
+(* A claim the librarian absorbed into can later be replaced: the keeper
+   writes a new claim with [supersedes], and the old one is dropped with a
+   [Revised] event naming the new one. The absorbed row still names the
+   dropped claim, so the search follows the [Revised] event from there and
+   lands on the claim that is current now (#38543). *)
+let test_absorbed_chain_follows_a_revised_claim () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "absorbed-chain-revised" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let replacement = fact "foxtrot holds the release notes now" in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ replacement ];
+  let absorbed = fact "golf deploys on monday" in
+  let replaced = fact "foxtrot holds the release notes" in
+  (match
+     Masc.Keeper_memory_absorbed.append_all
+       ~keepers_dir
+       ~keeper_id:meta.name
+       [ { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
+         ; trace_id = "absorbing-pass"
+         ; memory_id = id absorbed
+         ; into = id replaced
+         ; fact = absorbed
+         }
+       ]
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
+  (match
+     Masc.Keeper_memory_os_events.append
+       ~keepers_dir
+       ~keeper_id:meta.name
+       { Masc.Keeper_memory_os_events.recorded_at = Time_compat.now ()
+       ; memory_id = id replaced
+       ; trace_id = "revising-turn"
+       ; kind = Revised { superseded_by = id replacement }
+       }
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_memory_os_events.append_error_to_string error));
+  let found =
+    match
+      Runtime.keeper_memory_search_json
+        ~config
+        ~meta
+        ~ctx_work:(empty_ctx ())
+        ~args:
+          (`Assoc
+              [ "query", `String "deploys"; "source", `String "absorbed"; "limit", `Int 10 ])
+      |> Yojson.Safe.from_string
+      |> json_field "matches"
+    with
+    | `List items -> items
+    | _ -> Alcotest.fail "matches is a list"
+  in
+  Alcotest.(check (list (triple string string bool)))
+    "the absorbed claim leads past the replaced claim to its replacement"
+    [ "golf deploys on monday", id replacement, true ]
+    (List.map
+       (fun matched ->
+          ( string_field "text" matched
+          , string_field "into" matched
+          , json_field "into_current" matched = `Bool true ))
+       found)
+;;
+
+(* The events sidecar grows with every search, so a search whose absorbed rows
+   all reach a current claim does not read it. A sidecar that cannot be read
+   then costs that search nothing. *)
+let test_absorbed_search_reads_events_only_for_a_stopped_chain () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "absorbed-events-unread" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let current = fact "hotel holds the release notes" in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ current ];
+  let absorbed = fact "india deploys on monday" in
+  (match
+     Masc.Keeper_memory_absorbed.append_all
+       ~keepers_dir
+       ~keeper_id:meta.name
+       [ { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
+         ; trace_id = "absorbing-pass"
+         ; memory_id = id absorbed
+         ; into = id current
+         ; fact = absorbed
+         }
+       ]
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
+  (* A directory where the sidecar file should be: reading it fails. *)
+  Unix.mkdir
+    (Masc.Keeper_memory_os_events.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
+    0o755;
+  let search () =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:
+        (`Assoc
+            [ "query", `String "deploys"; "source", `String "absorbed"; "limit", `Int 10 ])
+    |> Yojson.Safe.from_string
+  in
+  let found =
+    match search () |> json_field "matches" with
+    | `List items -> items
+    | _ -> Alcotest.fail "matches is a list"
+  in
+  Alcotest.(check (list (pair string bool)))
+    "a chain that reaches a current claim does not need the events sidecar"
+    [ "india deploys on monday", true ]
+    (List.map
+       (fun matched ->
+          string_field "text" matched, json_field "into_current" matched = `Bool true)
        found)
 ;;
 
@@ -2761,6 +2889,14 @@ let () =
             "absorbed chain prefers current and stops before a loop"
             `Quick
             test_absorbed_chain_prefers_current_and_stops_before_a_loop
+        ; Alcotest.test_case
+            "absorbed chain follows a revised claim"
+            `Quick
+            test_absorbed_chain_follows_a_revised_claim
+        ; Alcotest.test_case
+            "absorbed search reads events only for a stopped chain"
+            `Quick
+            test_absorbed_search_reads_events_only_for_a_stopped_chain
         ; Alcotest.test_case
             "a query of several words is answered"
             `Quick

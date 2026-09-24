@@ -56,6 +56,7 @@ let add t ~seq (delta : Live.delta) =
     (match delta with
      | Live.Runtime_attempt_started _ -> t.attempt <- t.attempt + 1
      | Live.Run_started | Live.Batch_bound _ | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
+     | Live.Stream_details _
      | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
      | Live.Stream_protocol_error _ | Live.Approval_requested _
      | Live.Approval_settled _ | Live.Accepted _ | Live.Checkpoint
@@ -120,7 +121,29 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
     Some (Live.Runtime_attempt_started { runtime_id; attempt_index })
   | E.Agent_core_stream_message_start { model; _ } ->
     Some (Live.Stream_model_started { model })
-  | E.Agent_core_stream_message_delta _
+  | E.Agent_core_stream_message_delta { stop_reason; usage } ->
+    (* Through the same readers as the live arm, over the same bytes the
+       producer writes ([E.delta_usage_to_json], [E.stop_reason_to_string]), so
+       a reloaded turn and a watched one report this identically. A delta that
+       carried neither fact is not a row. *)
+    let usage =
+      Option.bind usage (fun usage ->
+        Live.stream_usage_of_usage_json (E.delta_usage_to_json usage))
+    in
+    (* The live arm drops a blank reason rather than drawing [stopped: ] with
+       nothing after it, so this arm drops it too: a reason that is only
+       whitespace is not a reason, and the two entrances have to agree about
+       that as much as about the bytes. [Unknown ""] reaches here from a
+       provider that failed without a message. *)
+    let stop_reason =
+      Option.bind stop_reason (fun reason ->
+        match String.trim (E.stop_reason_to_string reason) with
+        | "" -> None
+        | reason -> Some reason)
+    in
+    if usage = None && stop_reason = None
+    then None
+    else Some (Live.Stream_details { usage; stop_reason })
   | E.Agent_core_stream_message_stop
   | E.Agent_core_stream_ping
   | E.Agent_core_content_block_start _

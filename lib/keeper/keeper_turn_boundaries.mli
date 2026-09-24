@@ -8,8 +8,12 @@
     no directories. The line
     names the turn and the end of the saved history in the atom vocabulary of
     {!Runtime_model_input_tail_window}: how many atoms the checkpoint holds and
-    the digest of the message that opens the last one. Where a turn started is
-    not written; the end an earlier line states is that start.
+    the digest of the message that opens the last one. A turn that continued a
+    non-empty history also states the position it started from
+    ({!Continued_history_from}), so a line is self-describing and a reader can
+    answer what an unreadable line before it was (RFC §4.4 row 2c, masc#37061);
+    the end an earlier line states is that start for a line written before this
+    branch existed.
 
     A history whose atoms are numbered from zero again has no such earlier
     line, so whoever restarts it says so with a [History_restarted] line. A
@@ -105,15 +109,33 @@ type position =
           not in the durable history. The line is kept, with no span of its
           own, because a reader counts finished turns in lines. *)
 
-(** Whether the atoms this turn saved are numbered from zero. A reader cannot
-    infer it. [Fresh_history] is every way a history is empty when a turn
-    starts, and the turn does not tell them apart: no checkpoint was loaded (a
-    new trace, a purged or superseded checkpoint, one that could not be read),
-    or the loaded one held no atom (the checkpoint a keeper is created with, a
-    history [masc_keeper_clear] emptied). *)
+(** Whether the atoms this turn saved are numbered from zero, and, when they are
+    not, the position the turn started from. A reader cannot infer it.
+    [Fresh_history] is every way a history is empty when a turn starts, and the
+    turn does not tell them apart: no checkpoint was loaded (a new trace, a
+    purged or superseded checkpoint, one that could not be read), or the loaded
+    one held no atom (the checkpoint a keeper is created with, a history
+    [masc_keeper_clear] emptied).
+
+    [Continued_history_from] carries the start state so that a line is
+    self-describing: a later line can answer what an unreadable line before it
+    was, which is what ends the stall of RFC §4.4 row 2c (masc#37061). It is a
+    new branch of this sum type, not a field added to [Turn_ended], because the
+    line is strictly decoded (RFC §5). [Continued_history] is the bare token a
+    line written before this branch existed carries, and the fallback when the
+    start atom has no opening message; a reader does not treat it as a start
+    state. *)
 type history_at_start =
   | Fresh_history  (** The history the turn started from held no atom. *)
   | Continued_history  (** It held atoms, and the turn appended to them. *)
+  | Continued_history_from of
+      { start_atom : int
+            (** The number of atoms the history held when the turn started. *)
+      ; start_atom_digest : string
+            (** {!Runtime_model_input_tail_window.atom_opening_digest} of atom
+                [start_atom - 1]. *)
+      }
+      (** It held atoms, and the turn says which position it started from. *)
 
 (** What a line states. The wire form carries a [kind] tag from the first line
     ever written, so a kind of line is a constructor rather than a field on a

@@ -1107,7 +1107,7 @@ let heartbeat_event_intake
             | Keeper_world_observation.Task_outcome _
             | Keeper_world_observation.Task_cancelled _
             | Keeper_world_observation.Delegate_completed
-            | Keeper_world_observation.Ask_answered_row
+            | Keeper_world_observation.Ask_answered_row _
             | Keeper_world_observation.Composition_completed ->
               Log.Keeper.info
                 "turn entry: promoted queued observation post_id=%s keeper=%s"

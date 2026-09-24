@@ -37,7 +37,6 @@ let is_transient_internal_runner_error (err : Agent_core.Error.t) : bool =
   | Some
       ( Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Runtime_exhausted _
-      | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
       | Keeper_turn_driver.Accept_rejected _
       | Keeper_turn_driver.Internal_bridge_exception _
@@ -223,14 +222,6 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_core.Error.t) : boo
       (Keeper_turn_driver.Runtime_exhausted
          { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
       true
-  | Some
-      (Keeper_turn_driver.Runtime_exhausted
-         { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
-      true
-  | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-      (* A decoded receipt from the retired pre-dispatch gate carries no
-         lifecycle authority. *)
-      true
   | Some (Keeper_turn_driver.Runtime_exhausted _) ->
       false
   | Some (Keeper_turn_driver.Accept_rejected _)
@@ -262,7 +253,6 @@ let is_accept_no_usable_progress_error (err : Agent_core.Error.t) : bool =
     false
   | Some
       ( Keeper_turn_driver.Runtime_exhausted _
-      | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
       | Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Internal_bridge_exception _
@@ -335,12 +325,6 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
     match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
         Some Resumable_cli_session
-    | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-        Some Capacity_backpressure
-    | Some
-        (Keeper_turn_driver.Runtime_exhausted
-           { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
-        Some Capacity_backpressure
     | Some
         (Keeper_turn_driver.Runtime_exhausted
            { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
@@ -355,10 +339,9 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
         Some Runtime_exhausted
     | Some (Keeper_turn_driver.Accept_rejected _) ->
         accept_rejection_degraded_retry_reason err
-    (* A closed runtime connection reached this function as agent-core's
-       [ProviderUnavailable] before RFC-0454 P2 typed it, and the arm below
-       for that constructor answers [Server_error]. The typed value does not
-       move the deferred whole-runtime lane, so it answers the same. *)
+    (* A closed runtime connection answers [Server_error], as agent-core's
+       [ProviderUnavailable] does in the arm below. The typed value does not
+       move the deferred whole-runtime lane. *)
     | Some (Keeper_turn_driver.Runtime_connection_closed _) -> Some Server_error
     (* Typed [Internal_*] variants are not runtime-rotation reasons; they
        carry the raw exception payload. *)
@@ -492,15 +475,15 @@ let is_invalid_request_error : Agent_core.Error.t -> bool = function
 
 (** [true] when a structured error indicates context overflow.
 
-    The [UnrecognizedStopReason { reason = "model_context_window_exceeded" }] arm
-    was removed. Not because agent core cannot construct that value — it can: only
+    This does not read [UnrecognizedStopReason { reason = "model_context_window_exceeded" }].
+    Agent core can construct that value: only
     [Types.stop_reason_of_string] maps the overflow tokens to the typed
     [ContextWindowExceeded]; the Ollama backend, the Ollama NDJSON terminal
     chunk, and the OpenAI Responses decoder each build [Types.Unknown <raw>]
     without consulting it, and [pipeline.ml] turns [Unknown] into
-    [UnrecognizedStopReason]. It was removed because classifying an
-    [Error.Agent _] as a context overflow here is a string classifier standing in
-    for a typed provider signal, and no production caller consumed the result:
+    [UnrecognizedStopReason]. Classifying an [Error.Agent _] as a context
+    overflow here would be a string classifier standing in for a typed provider
+    signal, and no production caller would consume the result:
     the live classifiers ([Keeper_turn_runtime_budget.capacity_transition_of_error],
     [Keeper_turn_driver_try_runtime]) already treat every [Error.Agent _] as
     not-overflow. Routing an Ollama-dialect overflow belongs in AGENT_CORE, at the
@@ -546,7 +529,6 @@ let should_warn_keeper_cycle_failed (err : Agent_core.Error.t) : bool =
   then true
   else
     match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Capacity_backpressure _) -> true
   | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.Accept_rejected _)
@@ -568,13 +550,10 @@ let should_warn_keeper_cycle_failed (err : Agent_core.Error.t) : bool =
   | None ->
     false
 
-(* [is_context_overflow] now lives earlier in this file, above
-   [is_auto_recoverable_turn_error], since that predicate depends on it. *)
-
 (** Extract the [InputRequired] payload from an [core_error], if any.
     Typed companion to {!is_input_required_error}; callers that need
-    the [input_required] record use this option-returning function so
-    a [match ... | _ -> assert false] tail is no longer required. *)
+    the [input_required] record use this option-returning function
+    instead of a [match ... | _ -> assert false] tail. *)
 let extract_input_required (err : Agent_core.Error.t)
   : Agent_core.Error.input_required option
   =
@@ -616,7 +595,6 @@ let is_runtime_exhausted_error (err : Agent_core.Error.t) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> true
-  | Some (Keeper_turn_driver.Capacity_backpressure _)
   | Some (Keeper_turn_driver.Accept_rejected _)
   (* Opaque internal failures are not runtime exhaustion. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)

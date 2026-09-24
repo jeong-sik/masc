@@ -51,8 +51,8 @@ python_suite_is_runnable() {
 # step's continue-on-error says.
 per_suite_timeout=300
 
-# WORKAROUND: production-blocking. One suite is a single walk of 74 PTY
-# scenarios and legitimately takes longer than the bound above. It measures
+# WORKAROUND: production-blocking. One suite is a single walk of PTY
+# scenarios and legitimately takes longer than the bound above. It measured
 # 261s locally and CI killed it at exactly 300.0s on two separate runs
 # (14:19:05->14:24:05 and 14:38:55->14:43:55, #36343), so every pull request
 # that edits that file is killed whatever it changed. #36349 is one: it
@@ -62,14 +62,29 @@ per_suite_timeout=300
 # The bound stays 300s for every other suite. Raising it everywhere would
 # double what a genuinely hung suite costs, which is what that bound is for.
 #
-# Removal target: #36343's split. Once enough of that walk's 69 inline
-# scenarios live in focused suites of their own, the walk fits 300s again and
-# this case goes with it. Nothing else belongs in this list -- a second entry
-# means the split stopped being the plan.
+# Removal target: #36343's split. Measured 2026-09-24: the walk holds 73
+# inline scenarios and takes 340s of this step's 612s (run 35953309482), so
+# the bound keeps 260s of headroom. Once enough of those scenarios live in
+# focused suites of their own, the walk fits 300s again and this case goes
+# with it, and so do the phase below and its self-test fixture. Nothing else
+# belongs in this list -- a second entry means the split stopped being the
+# plan.
+# The list is a literal, so reading it answers "what has a custom bound".
+# --self-test needs one entry it can point at a stand-in: a fixture that
+# cannot enter the custom-bound phase proves nothing about that phase. The
+# hook names one suite by its exact path and only --self-test sets it, so
+# with the variable unset this function is the production one.
 suite_timeout() {
   case "$1" in
     */test_tui_keyboard_input.py) echo 600 ;;
-    *) echo "${per_suite_timeout}" ;;
+    *)
+      if [ -n "${MASC_SELFTEST_CUSTOM_BOUND_SUITE:-}" ] \
+        && [ "$1" = "${MASC_SELFTEST_CUSTOM_BOUND_SUITE}" ]; then
+        echo "${MASC_SELFTEST_CUSTOM_BOUND_SECONDS:-600}"
+      else
+        echo "${per_suite_timeout}"
+      fi
+      ;;
   esac
 }
 
@@ -239,6 +254,39 @@ test/test_tools_coverage.ml"
   themes_changed=$( { printf '%s\n' "${changed}" \
     | grep -E '^config/themes/' || [ $? -eq 1 ]; } | head -1)
   theme_guard="test/test_tui_theme_contrast.ml"
+
+  # A fifth guard over the same shape, and the only one whose input is the
+  # source tree itself. discovery 17 in test_keeper_toml walks bin, lib,
+  # packages and test at run time (ocaml_source_files) and fails when a
+  # string literal anywhere in them spells a live Keeper's name. Nothing
+  # refers to it, so referencing_suites.py cannot reach it: its module rule
+  # takes changed sources under bin/, lib/ and packages/*/lib only, its file
+  # rule excludes test/ outright, and both strip string literals before
+  # matching -- which is the very thing this guard reads. The suite is
+  # therefore selected only by an edit to its own file or stanza, and an
+  # edit that plants a violation never selects it.
+  #
+  # Measured 2026-09-23, three times in one day from unrelated pull
+  # requests: #37691 (test_tui_acting_pane.ml), the #38183/#38078 pair, and
+  # #38325 (test_tui_acting.ml:1328). All three were green on their own
+  # checks. The third failed release candidate 35876460562 on main and held
+  # the v0.37.0 tag until #38398 changed one word.
+  #
+  # Why a trigger here rather than a wider rule: no rule that matches by
+  # reference can reach a suite that reads the tree instead of naming it.
+  # The trigger is the suite's real input -- any OCaml source under the four
+  # roots it walks -- so a documentation-only pull request still runs
+  # nothing. Whole suite measured at 1.193s over 100 tests (run
+  # 35847452251), against the CI and release-candidate cycles the three
+  # misses above cost.
+  #
+  # The name is plural on purpose. test_provider_prefix_boundary walks lib/
+  # the same way (repo_root () with source_path root "lib") and belongs here
+  # once an actual miss is measured for it; listing it on suspicion would
+  # spend budget on every OCaml pull request for a fault never seen.
+  ocaml_sources_changed=$( { printf '%s\n' "${changed}" \
+    | grep -E '^(bin|lib|packages|test)/.*\.mli?$' || [ $? -eq 1 ]; } | head -1)
+  tree_reading_guards="test/test_keeper_toml.ml"
 
 
   # A source edit runs the suites named after it. Before this, only editing a
@@ -534,6 +582,13 @@ EXACTPATHS
   if [ -n "${themes_changed}" ]; then
     echo "this pull request changes theme assets; adding ${theme_guard}"
     sources=$(printf '%s\n%s\n' "${sources}" "${theme_guard}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
+  if [ -n "${ocaml_sources_changed}" ]; then
+    echo "this pull request changes OCaml sources; adding the suites that read the tree:"
+    printf '%s\n' "${tree_reading_guards}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${tree_reading_guards}" \
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
@@ -1053,7 +1108,7 @@ self_test() {
   # The regression this mapping exists for: #34247 edited only this module and
   # ran no suite, so the escape it dropped went to main.
   check "a source edit selects the suites named after it" \
-    "test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
+    "test/test_keeper_toml.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml"
   # A module whose name is a namespace attributes nothing by name -- it
   # prefixes 136 suites, and picking those off one edit says nothing. What it
@@ -1073,7 +1128,7 @@ self_test() {
   # because the claim it holds -- that every session mover has a key -- is a
   # fact about this dispatcher.
   check_required "an umbrella module selects its guards and declared PTY scenario" \
-    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_decode.ml test/test_tui_http_ast.ml test/test_tui_reading_ends.py test/test_tui_row_wiring.ml test/test_tui_voice_wizard_wiring.ml" \
+    "test/test_keeper_toml.ml test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_decode.ml test/test_tui_http_ast.ml test/test_tui_reading_ends.py test/test_tui_row_wiring.ml test/test_tui_voice_wizard_wiring.ml" \
     "bin/masc_tui.ml"
   # The regression the declared mapping exists for: #35011 changed this file,
   # test_tui_http_ast watches it through 52 ~module_path declarations, and the
@@ -1091,7 +1146,7 @@ self_test() {
   # test_tui_tab_strip joined when it began reading this file: the Runtime
   # header's two views must be drawn by tab_strip, and render_runtime is here.
   check_required "a watched source reaches the guard that declares it" \
-    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_config_highlight_wiring.ml test/test_tui_http_ast.ml test/test_tui_reading_ends.py test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_render_tools.ml test/test_tui_row_wiring.ml test/test_tui_tab_strip.ml test/test_tui_voice_wizard_wiring.ml" \
+    "test/test_keeper_toml.ml test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_config_highlight_wiring.ml test/test_tui_http_ast.ml test/test_tui_reading_ends.py test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_render_tools.ml test/test_tui_row_wiring.ml test/test_tui_tab_strip.ml test/test_tui_voice_wizard_wiring.ml" \
     "bin/masc_tui_render.ml"
   # A guard that reads its input with open_in instead of Ast_grep is watching
   # it just the same. test_blocker_class_mirror pulls the blocker class list
@@ -1103,19 +1158,19 @@ self_test() {
   # only inside the whole-screen walk -- which names no source. Nothing ran.
   # It merged green and main was red until #36327.
   check_required "the shared chrome selects the strip scenario" \
-    "test/test_tui_tab_strip_pty.py" \
+    "test/test_keeper_toml.ml test/test_tui_tab_strip_pty.py" \
     "bin/masc_tui_ansi.ml"
   # The five cases below were exact before the module rule: each module is
   # also called by suites that neither carry its name nor quote its path, and
   # those now run too. What each case pins is the suite it was written for.
   check_required "a guard that opens its input is selected too" \
-    "test/test_blocker_class_mirror.ml" \
+    "test/test_blocker_class_mirror.ml test/test_keeper_toml.ml" \
     "lib/keeper/keeper_meta_contract.ml"
   # A package source names its suites the same way, in whichever test root
   # holds them. event_bus has one in each, which is why it is the fixture:
   # before this, an edit under packages/ selected nothing by name.
   check_required "a package source selects its suites in both test roots" \
-    "packages/agent_core/test/test_event_bus.ml test/test_event_bus_subscription_contract.ml" \
+    "packages/agent_core/test/test_event_bus.ml test/test_event_bus_subscription_contract.ml test/test_keeper_toml.ml" \
     "packages/agent_core/lib/event_bus.ml"
   # A suite with its own directory is named for its module the same way, and
   # the flat glob never looked there. The fixture is voice_wizard because that
@@ -1123,7 +1178,7 @@ self_test() {
   # and lib/voice_wizard, both merged green, and both had to have these suites
   # run by hand afterwards -- the first time, after main was already red.
   check_required "a module with its own test directory selects the suite in it" \
-    "test/voice_wizard/test_voice_wizard.ml" \
+    "test/test_keeper_toml.ml test/voice_wizard/test_voice_wizard.ml" \
     "lib/voice_wizard/voice_wizard.ml"
   # The path matters: "docs/x.md" used to be the fixture here and stopped
   # meaning "no suite names this" -- test_tui_memory_facts_explorer carries it
@@ -1137,13 +1192,29 @@ self_test() {
   check "a document a suite reads selects that suite" \
     "test/test_tui_render_memory.ml" \
     "docs/constitution.xml"
+
+  # discovery 17 in test_keeper_toml walks bin, lib, packages and test at run
+  # time, so no reference-based rule can reach it and only an edit to its own
+  # file used to select it. Named here so the trigger is a claim of its own:
+  # a source edit that could plant a live Keeper's name runs the suite that
+  # looks for one. #38325 planted one, was green on its own checks, and
+  # failed release candidate 35876460562 on main.
+  check "an OCaml source edit runs the suite that reads the whole tree" \
+    "test/test_keeper_toml.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
+    bin/masc_tui_msx.ml
+  # The input that splits it. Without this, a guard appended unconditionally
+  # passes the case above and spends the budget on every documentation pull
+  # request; the trigger is the suite's real input, not the calendar.
+  check "a change that touches no OCaml source does not run it" \
+    "test/test_tui_render_memory.ml" \
+    "docs/constitution.xml"
   # A tool definition reaches both: the one that says the asset embeds and
   # syncs, and the one that says its first line fits the line it is offered in.
   # Thirteen edited suites used to be discarded, including every source-derived
   # guard. A wide change must retain its tests with or without an asset edit.
   local wide_sources="test/test_wide_01.ml test/test_wide_02.ml test/test_wide_03.ml test/test_wide_04.ml test/test_wide_05.ml test/test_wide_06.ml test/test_wide_07.ml test/test_wide_08.ml test/test_wide_09.ml test/test_wide_10.ml test/test_wide_11.ml test/test_wide_12.ml test/test_wide_13.ml"
   check "thirteen edited suites all remain selected" \
-    "${wide_sources}" \
+    "test/test_keeper_toml.ml ${wide_sources}" \
     test/test_wide_01.ml test/test_wide_02.ml test/test_wide_03.ml \
     test/test_wide_04.ml test/test_wide_05.ml test/test_wide_06.ml \
     test/test_wide_07.ml test/test_wide_08.ml test/test_wide_09.ml \
@@ -1151,7 +1222,7 @@ self_test() {
     test/test_wide_13.ml
 
   check "thirteen edited suites retain both themselves and asset guards" \
-    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tool_loading_declarations.ml test/test_tools_coverage.ml ${wide_sources}" \
+    "test/test_keeper_toml.ml test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tool_loading_declarations.ml test/test_tools_coverage.ml ${wide_sources}" \
     test/test_wide_01.ml test/test_wide_02.ml test/test_wide_03.ml \
     test/test_wide_04.ml test/test_wide_05.ml test/test_wide_06.ml \
     test/test_wide_07.ml test/test_wide_08.ml test/test_wide_09.ml \
@@ -1164,13 +1235,13 @@ self_test() {
   # The three regressions the module and file-name rules exist for, with the
   # source files each pull request changed.
   check_required "#29365: a module edit reaches the suite that calls it" \
-    "test/test_runtime_toml_overrides.ml" \
+    "test/test_keeper_toml.ml test/test_runtime_toml_overrides.ml" \
     lib/config/env_config_keeper.ml lib/config/env_config_keeper.mli \
     lib/config/keeper_runtime_setting_registry.ml \
     lib/keeper/keeper_heartbeat_stimulus_intake.ml \
     lib/schedule/schedule_domain.ml lib/schedule/schedule_domain.mli
   check_required "#36885: a module and a script reach the suites that call and run them" \
-    "test/test_install_runtime_setup.py test/test_runtime_setup_batch.ml test/test_server_runtime_setup_actions.ml" \
+    "test/test_install_runtime_setup.py test/test_keeper_toml.ml test/test_runtime_setup_batch.ml test/test_server_runtime_setup_actions.ml" \
     lib/runtime/runtime_setup_spec.ml scripts/install-runtime-setup.py
   check "a file name many files share selects nothing by name" "" \
     "packages/agent_core/lib/dune"
@@ -1186,23 +1257,23 @@ self_test() {
     "test/test_tui_theme_contrast.ml" \
     "config/themes/foo.toml"
   check "an edited test is still selected on its own" \
-    "test/test_tui_graphics.ml" "test/test_tui_graphics.ml"
+    "test/test_keeper_toml.ml test/test_tui_graphics.ml" "test/test_tui_graphics.ml"
   # The hole this closes: the pattern wanted test_ straight after test/, so a
   # suite one directory down was not a "test source this pull request edits".
   check "an edited suite under a test directory is selected too" \
-    "test/keeper_chat_operations/test_keeper_chat_operation_store.ml" \
+    "test/keeper_chat_operations/test_keeper_chat_operation_store.ml test/test_keeper_toml.ml" \
     "test/keeper_chat_operations/test_keeper_chat_operation_store.ml"
   # An interface is the same module: #36279 re-documented this one and the
   # suite over the function it documents did not run.
   check_required "an interface edit selects the suites named after its module" \
-    "packages/agent_core/test/test_provider_admission.ml" \
+    "packages/agent_core/test/test_provider_admission.ml test/test_keeper_toml.ml" \
     "packages/agent_core/lib/llm_provider/provider_admission.mli"
   # The third way: the suite's dune stanza links the module. Neither rule
   # above reaches test_tui_theme_contrast from the contrast formula -- the
   # suite is named after what it asserts and opens config/themes, not this
   # source -- and it is the only suite that measures the 53 shipped schemes.
   check "a module its suite links selects that suite" \
-    "test/test_tui_theme_contrast.ml" \
+    "test/test_keeper_toml.ml test/test_tui_theme_contrast.ml" \
     "bin/masc_tui_color.ml"
   # And the cap holds on that rule too. 34 suites link masc_tui_message_layout,
   # so the link says nothing about an edit there and only the suite named
@@ -1210,11 +1281,11 @@ self_test() {
   # The link mapping still drops this module -- 34 suites link it -- and the
   # module rule selects the suites that call it, which include its own.
   check_required "a module many suites link still reaches the suites that call it" \
-    "test/test_tui_markdown.ml test/test_tui_message_layout.ml" \
+    "test/test_keeper_toml.ml test/test_tui_markdown.ml test/test_tui_message_layout.ml" \
     "bin/masc_tui_message_layout.ml"
   # Both halves together, deduplicated.
   check "a source and its own suite are one entry" \
-    "test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
+    "test/test_keeper_toml.ml test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml" "test/test_tui_msx_load.ml"
   # The regression these two exist for: every terminal scenario under test/
   # is a .py run by a dune rule, and no pull request ran one. #35534 added
@@ -1236,10 +1307,10 @@ self_test() {
   # scenario that declares the path and the one suite whose stanza links the
   # library -- two precise claims where the name was a namespace.
   check "an interface over the cap still reaches two precise claims" \
-    "test/test_tui_browser.ml test/test_tui_browser_history.py" \
+    "test/test_keeper_toml.ml test/test_tui_browser.ml test/test_tui_browser_history.py" \
     "bin/masc_tui_browser.mli"
   check "an interface and its edited PTY suite select one entry" \
-    "test/test_tui_browser.ml test/test_tui_browser_history.py" \
+    "test/test_keeper_toml.ml test/test_tui_browser.ml test/test_tui_browser_history.py" \
     "bin/masc_tui_browser.mli" "test/test_tui_browser_history.py"
   # No dune rule declares an alias for this one, so nothing can run it and
   # selecting it would fail the step on a file that is not a suite.
@@ -1270,6 +1341,18 @@ for target in "$@"; do
     *slow*) body='sleep "${FAKE_DUNE_SUITE_SECONDS:-60}"' ;;
     *failing*) body='exit 1' ;;
     *) body='exit 0' ;;
+  esac
+  case "${target}" in
+    @*)
+      # Real dune builds and runs an alias in one command, so the suite's own
+      # time lands here. Writing an executable that nothing on this path runs
+      # made a "slow" alias cost nothing, which is how the walk fixture below
+      # used to pass without the walk ever costing a second.
+      case "${name}" in
+        *slow*) sleep "${FAKE_DUNE_SUITE_SECONDS:-60}" ;;
+      esac
+      continue
+      ;;
   esac
   mkdir -p "_build/default/$(dirname "${target}")"
   printf '#!/bin/sh\n%s\n' "${body}" > "_build/default/${target}"
@@ -1375,12 +1458,32 @@ FAKE
   # that also carries linked suites used to reach it with the remainder only
   # (202s/221s in run 35685267067) and its bound shrank to that. It must run
   # first, at its own bound, with everything else fitted into what is left.
-  # The stand-in walk (slow_py) sleeps past any small budget, so a pass here
-  # means it was handed its own bound, not the remainder.
-  RUNNER_DIRECT_SOURCES="test/test_slow_py.py" \
-    runner_check "a custom-bound walk runs first and whole, before linked suites" \
-      "" \
-      0 4 test_ok test_ok_too test/test_slow_py.py
+  #
+  # The phase does not make a selection cheaper, it decides who is starved
+  # when the budget cannot hold all of it, so what this pins is that pair:
+  # the walk finishes whole and the suite after it is the one the budget
+  # names. Disable the phase and this fixture fails -- nothing is named,
+  # because the walk then spends the budget the other suite was going to use.
+  # MASC_SELFTEST_CUSTOM_BOUND_SUITE is what puts the stand-in on the
+  # custom-bound list; without it the walk never enters the phase and any
+  # ordering passes. When #36343 removes the custom bound, the phase, the
+  # hook and this fixture go together.
+  MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py" \
+  FAKE_DUNE_SUITE_SECONDS=2 \
+    runner_check "a custom-bound walk runs first and whole, and the budget names what follows" \
+      "test/test_slow_one (not built: the step budget ran out);" \
+      1 4 test_slow_one test/test_slow_py.py
+
+  # Production is untouched by the hook: with the variable unset a plain
+  # Python suite keeps the default bound and only the walk has its own.
+  if [ "$(suite_timeout test/test_slow_py.py)" = "${per_suite_timeout}" ] \
+    && [ "$(suite_timeout test/test_tui_keyboard_input.py)" = "600" ]; then
+    echo "ok   the custom-bound list is the walk alone when the hook is unset"
+  else
+    echo "FAIL the custom-bound list is the walk alone when the hook is unset"
+    echo "     got:  slow_py=$(suite_timeout test/test_slow_py.py) walk=$(suite_timeout test/test_tui_keyboard_input.py)"
+    failures=$((failures + 1))
+  fi
   # Count the call instead of inferring one call from whether two-second
   # stand-in builds fit inside a three-second wall-clock budget. On a loaded
   # runner the setup could consume that one-second margin before dune began.

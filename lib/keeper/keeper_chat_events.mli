@@ -311,6 +311,13 @@ val api_usage_to_json : Agent_core.Types.api_usage -> Yojson.Safe.t
 (** JSON for cumulative mid-stream counters: only reported fields appear,
     so "not reported" stays distinguishable from 0. *)
 val delta_usage_to_json : Agent_core.Types.delta_usage -> Yojson.Safe.t
+
+(** The wire spelling of why the provider stopped writing, as
+    [Keeper_chat_event_log] writes it into the journal and the AGUI projection
+    sends it to a client. Re-exported here so a reader whose dune unit does not
+    link agent_core still spells the word the producer wrote. *)
+val stop_reason_to_string : Agent_core.Types.stop_reason -> string
+
 val stream_protocol_error_kind_to_string : stream_protocol_error_kind -> string
 val stream_protocol_error_kind_of_string :
   string -> stream_protocol_error_kind option

@@ -40,7 +40,7 @@ let test_the_rows_under_the_list_are_counted () =
   Alcotest.(check int) "a quiet list has the listing frame" frame
     (layout (state ())).sc_chrome;
   let armed = state () in
-  armed.verification_verdict_armed <- Some "task-armed";
+  armed.verification_verdict_armed <- Some ("task-armed", "request-armed");
   Alcotest.(check int) "an armed approval takes a row" (frame + 1)
     (layout armed).sc_chrome;
   armed.verification_verdict_error <- Some "refused";
@@ -81,7 +81,7 @@ let test_the_rows_under_the_list_are_counted () =
 let test_an_armed_overflowing_queue_fills_the_body_exactly () =
   let body_rows = 24 in
   let armed = state () in
-  armed.verification_verdict_armed <- Some "task-armed";
+  armed.verification_verdict_armed <- Some ("task-armed", "request-armed");
   armed.verification <- Some answered;
   let shape = layout armed in
   let list_rows =

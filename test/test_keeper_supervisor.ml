@@ -184,6 +184,7 @@ let write_keeper_toml config_dir ~name =
 name = "%s"
 instructions = "test keeper"
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 |}
        name)
 
@@ -197,6 +198,7 @@ let write_keeper_toml_with_instructions config_dir ~name ~instructions =
 [keeper]
 name = "%s"
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 activation_mode = "on_demand"
 instructions = "%s"
 |}
@@ -212,6 +214,7 @@ let write_empty_keeper_toml config_dir ~name =
 name = "%s"
 instructions = "test keeper"
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 activation_mode = "on_demand"
 |}
        name);
@@ -1272,8 +1275,9 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
          meta;
        check bool "manual mode does not spontaneously launch" false (Atomic.get runner_ready);
        KSS.supervise_keepalive
-         ~intent:Masc.Keeper_activation_readiness.Requested_work
-         ~publish_lifecycle ~launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta;
+         ~publish_lifecycle ~launch_supervised_fiber ~proactive_warmup_sec:0 ctx
+         { meta with activation_mode = Masc.Keeper_activation_mode.On_demand };
+       check bool "on_demand mode restores the owner" true (Atomic.get runner_ready);
        let executor_started_in_time =
          wait_until
            ~clock

@@ -483,7 +483,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Check the release body fits before tagging
+      - name: Check the release body and its date before tagging
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -500,8 +500,13 @@ jobs:
           test -n "$prev"
           printf '**Full changelog**: https://github.com/%s/compare/%s...v%s\n' \
             "${GITHUB_REPOSITORY}" "$prev" "$ver" > compare-link.md
+          # The tag is cut on this same frozen head, so its committer date in
+          # UTC is the day the release will carry. The heading was written
+          # before that was known (#37425).
+          tag_day="$(TZ=UTC git log -1 --date=format-local:%Y-%m-%d --format=%cd HEAD)"
+          test -n "$tag_day"
           python3 scripts/ci/changelog-section.py "$ver" CHANGELOG.md /dev/null \
-            --append compare-link.md --max-chars 125000
+            --append compare-link.md --max-chars 125000 --expect-date "$tag_day"
 
   release:
     needs: build

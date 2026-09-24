@@ -42,7 +42,9 @@ val validate_paths :
     When [requires_existing_dir] is false (or omitted and [sandbox] is an
     endpoint-owned target such as [Micro_vm] or [Ssh]), [cwd] is validated for
     lexical boundary containment without requiring the directory to physically
-    exist on the host. *)
+    exist on the host. When [sandbox] is an [Ssh] target, a path within one of
+    its endpoint's [allowed_paths] is also accepted; every other target (and
+    an omitted [sandbox]) keeps the default workdir + [/tmp] boundary. *)
 
 val dispatch :
   ?allow_pipes:bool ->

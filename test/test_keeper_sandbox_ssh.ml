@@ -127,6 +127,7 @@ let endpoint : Exec_ssh_endpoint.t =
   ; env_allowlist = [ "LANG"; "PATH" ]
   ; capabilities = []
   ; private_home = false
+  ; allowed_paths = []
   }
 ;;
 
@@ -380,6 +381,7 @@ remote_endpoint = "build-box"
          ; env_allowlist = [ "LANG" ]
          ; capabilities = []
          ; private_home = false
+         ; allowed_paths = []
          });
   let ssh_bin, _ = make_stub ~dir:base_path ~mode:"exit3" in
   let meta =

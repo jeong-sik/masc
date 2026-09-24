@@ -35,7 +35,7 @@ type t =
   | Open_patch_modal
       (** [/patch] or [/review] — open the patch review overlay. *)
   | Toggle_cost
-      (** [/cost] — show or hide each Keeper's 24h cost and tokens and the fleet total on the Overview Team block. *)
+      (** [/cost] — show or hide each Keeper's cost and tokens and the fleet total on the Overview Team block. *)
   | Open_link_preview of string option
       (** [/preview [url]] — open the OpenGraph preview overlay for a web link. *)
   | Open_links_list

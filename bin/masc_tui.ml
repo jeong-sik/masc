@@ -9847,8 +9847,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          unread and the next refresh fills it. *)
       state.overview_spend <- Overview_spend_unread;
       notice ~kind:Notice_reply
-        (if state.cost_visible then "24h cost on the Overview Team block: shown"
-         else "24h cost on the Overview Team block: hidden")
+        (if state.cost_visible then "Cost on the Overview Team block: shown"
+         else "Cost on the Overview Team block: hidden")
   | Masc_tui_command.Open_link_preview url_opt ->
       Buffer.clear state.msg_input;
       let all_urls = Masc_tui_types.conversation_urls state in
@@ -10591,8 +10591,10 @@ let apply_repository_pulls_load state = function
    spend drawn after the reading that said so stopped arriving would be a
    number nobody observed. *)
 let apply_keeper_spend_load state result =
-  (* A reply asked for before [/cost] hid the spend would come back as a
-     number nobody observed since once it is shown again. *)
+  (* A reply that lands while [/cost] hides the spend is not drawn and not
+     kept: kept, it would come back when the spend is shown again. A reply
+     asked for before a hide and landing after the next show is applied; it
+     is still a reading the server just made. *)
   if state.cost_visible then
     state.overview_spend <- Masc_tui_keeper_spend.reading_of_load result
 

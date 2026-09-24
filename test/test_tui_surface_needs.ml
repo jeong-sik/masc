@@ -196,6 +196,14 @@ let test_only_a_shown_cost_is_fetched () =
     (shown Types.Overview).Types.needs_keeper_spend;
   check bool "the overview does not while it is hidden" false
     (needs Types.Overview).Types.needs_keeper_spend;
+  check bool "a full refresh on the overview asks while it is shown" true
+    (Types.full_refresh_needs ~scoped_refresh_inflight:false
+       ~keeper_pane_drawn:false ~cost_shown:true Types.Overview)
+      .Types.needs_keeper_spend;
+  check bool "and does not while it is hidden" false
+    (Types.full_refresh_needs ~scoped_refresh_inflight:false
+       ~keeper_pane_drawn:false ~cost_shown:false Types.Overview)
+      .Types.needs_keeper_spend;
   List.iter
     (fun (label, surface) ->
       check bool (label ^ " does not, shown or not") false

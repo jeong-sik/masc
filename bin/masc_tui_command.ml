@@ -108,7 +108,7 @@ let catalog =
   ; { word = "cost"
     ; aliases = []
     ; args = ""
-    ; summary = "show or hide each Keeper's 24h cost and tokens and the fleet total on the Overview Team block"
+    ; summary = "show or hide each Keeper's cost and tokens and the fleet total on the Overview Team block"
     }
   ; { word = "changes"
     ; aliases = []

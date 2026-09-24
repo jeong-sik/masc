@@ -231,6 +231,70 @@ let read_scene ~tabs ~call ~tab_id ~max_chars ~view ~scope =
   with_tab_id tab_id "a scene" scene
 ;;
 
+(* A guard only reads the page, so however it fails, nothing took effect. *)
+let send_guard call request =
+  Result.map_error (fun failure -> Browser_lane.Rejected_before_effect (failure_message failure)) (call request)
+;;
+
+(* The interaction script reports a refusal in its answer, and whether the
+   action had started when it was refused. *)
+let interaction_receipt ~tab_id = function
+  | `Assoc fields ->
+    (match List.assoc_opt "interactionFailure" fields with
+     | Some (`Assoc failure) ->
+       let message =
+         match List.assoc_opt "message" failure with
+         | Some (`String message) -> message
+         | Some _ | None -> "the interaction was refused without a message"
+       in
+       (match List.assoc_opt "effectStarted" failure with
+        | Some (`Bool false) -> Error (Browser_lane.Rejected_before_effect message)
+        | Some _ | None -> Error (Browser_lane.Refused message))
+     | Some _ | None -> Ok (`Assoc (("tabId", `Int tab_id) :: fields)))
+  | _ -> Error (malformed "page.evaluate" "an interaction receipt")
+;;
+
+let viewport_x (viewport : Browser_lane.Pointer.viewport) (point : Browser_lane.Pointer.point) = point.x *. viewport.width
+let viewport_y (viewport : Browser_lane.Pointer.viewport) (point : Browser_lane.Pointer.point) = point.y *. viewport.height
+
+(* A pointer action is native input, as on the automation lane: the guard
+   checks the page is the one observed, the browser takes the input, and the
+   receipt reads where the page is afterwards. *)
+let pointer ~call ~tab_id ~page_id ~args ~name input =
+  let* before = evaluate ~send:(send_guard call) ~args page_id Browser_interaction.pointer_guard_script in
+  let* url_before = string_field ~method_:"page.evaluate" "url" before in
+  let* _ = send call input in
+  let* after = evaluate ~send:(send_after_effect call) page_id Browser_interaction.pointer_receipt_script in
+  match after with
+  | `Assoc fields ->
+    Ok (`Assoc (("tabId", `Int tab_id) :: ("urlBefore", `String url_before) :: ("action", `String name) :: fields))
+  | _ -> Error (malformed "page.evaluate" "a pointer receipt")
+;;
+
+let interact ~tabs ~call ~tab_id ~expected_url action =
+  let* page_id = page_of ~tabs tab_id in
+  let args = Browser_lane.interaction_args ~tab_id ~expected_url action in
+  match (action : Browser_lane.interaction) with
+  | Browser_lane.Activate_tab -> Error (Browser_lane.Rejected_before_effect "activate_tab requires live lane")
+  | Browser_lane.Click_at { point; viewport } ->
+    pointer ~call ~tab_id ~page_id ~args ~name:"click_at"
+      (Wire.Page_click { page_id; x = viewport_x viewport point; y = viewport_y viewport point })
+  | Browser_lane.Scroll_at { point; viewport; x; y } ->
+    pointer ~call ~tab_id ~page_id ~args ~name:"scroll_at"
+      (Wire.Page_scroll
+         { page_id; x = viewport_x viewport point; y = viewport_y viewport point
+         ; delta_x = float_of_int x; delta_y = float_of_int y })
+  | Browser_lane.Drag { from; to_; viewport } ->
+    pointer ~call ~tab_id ~page_id ~args ~name:"drag"
+      (Wire.Page_drag_and_drop
+         { page_id; from_x = viewport_x viewport from; from_y = viewport_y viewport from
+         ; to_x = viewport_x viewport to_; to_y = viewport_y viewport to_ })
+  | Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Scroll _ | Browser_lane.Follow_link _
+  | Browser_lane.Click_node _ | Browser_lane.Fill_node _ ->
+    let* receipt = evaluate ~send:(send call) ~args page_id Browser_interaction.script in
+    interaction_receipt ~tab_id receipt
+;;
+
 let sentence ~tabs ~call ~tab_id to_call =
   let* page_id = page_of ~tabs tab_id in
   let request = to_call page_id in
@@ -249,6 +313,7 @@ let execute ~tabs ~call verb =
     | Browser_lane.Page_read { tab_id; max_chars } -> read_text ~tabs ~call ~tab_id ~max_chars
     | Browser_lane.Page_elements { tab_id } -> read_elements ~tabs ~call ~tab_id
     | Browser_lane.Page_scene { tab_id; max_chars; view; scope } -> read_scene ~tabs ~call ~tab_id ~max_chars ~view ~scope
+    | Browser_lane.Page_interact { tab_id; expected_url; action } -> interact ~tabs ~call ~tab_id ~expected_url action
     | Browser_lane.Page_instruct { tab_id; instruction } ->
       sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Act { page_id; instruction })
     | Browser_lane.Page_locate { tab_id; instruction } ->
@@ -256,8 +321,8 @@ let execute ~tabs ~call verb =
     | Browser_lane.Page_extract { tab_id; instruction; schema } ->
       sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Extract { page_id; instruction; schema })
     | Browser_lane.Session_open _ | Browser_lane.Session_close | Browser_lane.Session_status
-    | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_interact _
-    | Browser_lane.Page_act _ | Browser_lane.Page_context _ ->
+    | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_act _
+    | Browser_lane.Page_context _ ->
       Error
         (Browser_lane.Rejected_before_effect
            ("the Stagehand page executor does not serve " ^ Browser_lane.verb_to_string verb))

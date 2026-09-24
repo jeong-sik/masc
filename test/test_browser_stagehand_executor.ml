@@ -19,11 +19,12 @@ type fake =
   ; mutable scroll_y : int
   ; mutable scrolls_while_capturing : bool
   ; mutable failing : Wire.call -> Session.call_failure option
+  ; mutable evaluated : Yojson.Safe.t option  (* what a page script answers, when set *)
   ; mutable sent : Wire.call list
   }
 
 let fake pages ~active =
-  { pages; active; scroll_y = 0; scrolls_while_capturing = false; failing = (fun _ -> None); sent = [] }
+  { pages; active; scroll_y = 0; scrolls_while_capturing = false; failing = (fun _ -> None); evaluated = None; sent = [] }
 ;;
 
 let page_ref page = `Assoc [ "page_id", `String page.page_id; "url", `String page.url ]
@@ -43,10 +44,13 @@ let call fake request =
      | Wire.Context_active_page ->
        Ok (match fake.active with Some page_id -> page_ref (find fake page_id) | None -> `Null)
      | Wire.Page_evaluate { page_id; _ } ->
+       (match fake.evaluated with
+        | Some value -> Ok (`Assoc [ "value", `String (to_s value) ])
+        | None ->
        let page = find fake page_id in
        Ok
          (`Assoc
-           [ "value", `String (to_s (`Assoc [ "url", `String page.url; "title", `String page.title; "viewport", viewport fake ])) ])
+           [ "value", `String (to_s (`Assoc [ "url", `String page.url; "title", `String page.title; "viewport", viewport fake ])) ]))
      | Wire.Page_screenshot _ ->
        if fake.scrolls_while_capturing then fake.scroll_y <- fake.scroll_y + 1;
        Ok (`Assoc [ "data", `String png ])
@@ -55,6 +59,7 @@ let call fake request =
        Ok (`Assoc [ "page", `Assoc [ "page_id", `String page_id; "url", `String url ]; "response", `Null ])
      | Wire.Act _ | Wire.Observe _ | Wire.Extract _ ->
        Ok (`Assoc [ "data", `Assoc [ "success", `Bool true ]; "metadata", `Assoc [ "cache", `Assoc [] ] ])
+     | Wire.Page_click _ | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ -> Ok (`Assoc [ "ok", `Bool true ])
      | Wire.Init _ | Wire.Close -> failf "the executor sent %s" (Wire.method_name request))
 ;;
 
@@ -218,6 +223,47 @@ let test_reads_run_the_page_scripts () =
   check int "and sends nothing" 0 (List.length fake.sent)
 ;;
 
+let point = { Lane.Pointer.x = 0.5; y = 0.25 }
+let observed_viewport = { Lane.Pointer.document_id = "d1"; width = 800.; height = 600.; scroll_x = 0.; scroll_y = 0. }
+
+let test_interactions () =
+  let tabs = Executor.Tabs.create () and fake = fake [ shop () ] ~active:(Some "P2") in
+  ignore (listed tabs fake);
+  let expected_url = Some "http://127.0.0.1:1/shop" in
+  let click = Lane.Click "#submit" in
+  fake.sent <- [];
+  let receipt = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { tab_id = 0; expected_url; action = click })) in
+  (match fake.sent with
+   | [ Wire.Page_evaluate { expression; _ } ] ->
+     check string "the automation lane's interaction script"
+       (Executor.evaluate_expression ~body:Masc.Browser_interaction.script
+          ~args:(Lane.interaction_args ~tab_id:0 ~expected_url click))
+       expression
+   | _ -> fail "one page.evaluate");
+  check int "the receipt names its tab" 0 Yojson.Safe.Util.(member "tabId" receipt |> to_int);
+  fake.evaluated <- Some (`Assoc [ "interactionFailure", `Assoc [ "message", `String "no element"; "effectStarted", `Bool false ] ]);
+  check bool "a refusal before the click started is before effect" true
+    (rejected_before_effect (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { tab_id = 0; expected_url; action = click })));
+  fake.evaluated <- None;
+  fake.sent <- [];
+  let clicked =
+    served (Executor.execute ~tabs ~call:(call fake)
+      (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport } }))
+  in
+  (match List.rev fake.sent with
+   | [ Wire.Page_evaluate _; Wire.Page_click { page_id = "P2"; x = 400.; y = 150. }; Wire.Page_evaluate _ ] -> ()
+   | sent -> failf "guard, native click at the viewport point, receipt; sent %s"
+               (String.concat ", " (List.map Wire.method_name sent)));
+  check string "the receipt names the action" "click_at" Yojson.Safe.Util.(member "action" clicked |> to_string);
+  fake.sent <- [];
+  fake.failing <- (function Wire.Page_evaluate _ -> Some (Session.Rejected { code = -32603; message = "page_url_changed" }) | _ -> None);
+  check bool "a guard that refused is before effect" true
+    (rejected_before_effect (Executor.execute ~tabs ~call:(call fake)
+       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport } })));
+  check bool "and nothing was clicked" true
+    (List.for_all (function Wire.Page_click _ -> false | _ -> true) fake.sent)
+;;
+
 let test_unserved_verbs () =
   let tabs = Executor.Tabs.create () and fake = fake [ blank ] ~active:None in
   List.iter
@@ -247,6 +293,7 @@ let () =
     ];
     "sentences", [ test_case "each sentence verb sends one Stagehand call" `Quick test_sentence_verbs ];
     "reads", [ test_case "reads run the page scripts" `Quick test_reads_run_the_page_scripts ];
+    "interactions", [ test_case "scripts and native pointer input" `Quick test_interactions ];
     "refusals", [ test_case "an unserved verb sends nothing" `Quick test_unserved_verbs ];
     "evaluate", [ test_case "the expression calls its body" `Quick test_evaluate_expression ];
   ]

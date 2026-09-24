@@ -234,7 +234,8 @@ let on_cdp_event t = function
 let is_init = function
   | Wire.Init _ -> true
   | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages | Wire.Context_active_page
-  | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_evaluate _ -> false
+  | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_evaluate _ | Wire.Page_click _ | Wire.Page_scroll _
+  | Wire.Page_drag_and_drop _ -> false
 ;;
 
 let send_call t link call =

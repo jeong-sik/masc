@@ -305,7 +305,12 @@ open Alcotest
    BrowserRead's lane enum names stagehand, whose backend now serves text,
    element and scene reads with the automation lane's page scripts. No
    headroom. *)
-let ceiling_bytes = 123_098
+(* 2026-09-24: +8 rendered bytes (the renderer replay, not a CI reading):
+   BrowserInteract's lane enum names stagehand (+12), whose backend now runs
+   the same interaction and pointer scripts, with native input through
+   Stagehand's page.click, page.scroll and page.drag_and_drop; its
+   description says "browser tab" for "Firefox/Zen tab" (-4). No headroom. *)
+let ceiling_bytes = 123_106
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

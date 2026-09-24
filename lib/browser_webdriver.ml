@@ -430,7 +430,7 @@ let execute_unlocked t = function
               | None -> Error (Protocol "pointer cleanup did not run")) in
           let* _ = applied in
           let* _ = released in
-          let* after = script t session "return {url:location.href,title:document.title,scrollX,scrollY};" [] in
+          let* after = script t session Browser_interaction.pointer_receipt_script [] in
           let* url_before = string_field "url" before in
           (match after with
            | `Assoc fields -> Ok (`Assoc (("urlBefore",`String url_before) ::

@@ -1,12 +1,12 @@
 name = "masc_browser_interact"
 description = """
-Interact with an explicit Firefox/Zen tab; no arbitrary JavaScript. Read again after success or failure before retrying: page handlers can change external state. click/fill require one visible inspected element; fill targets text inputs/textarea and sends input/change without Enter or submit. scroll_at scrolls the pane under the point. drag uses trusted automation pointers. follow_link bypasses click handlers for observed same-tab HTTP(S) HTML/SVG anchors (_self/_top/_parent); rejects downloads, new-window targets, noreferrer and explicit referrerpolicy. destinationUrl is intent, not loaded-page evidence. activate_tab is live-only (extension >=0.6.0): verifies active=true without window focus or navigation."""
+Interact with an explicit browser tab; no arbitrary JavaScript. Read again after success or failure before retrying: page handlers can change external state. click/fill require one visible inspected element; fill targets text inputs/textarea and sends input/change without Enter or submit. scroll_at scrolls the pane under the point. drag uses trusted automation pointers. follow_link bypasses click handlers for observed same-tab HTTP(S) HTML/SVG anchors (_self/_top/_parent); rejects downloads, new-window targets, noreferrer and explicit referrerpolicy. destinationUrl is intent, not loaded-page evidence. activate_tab is live-only (extension >=0.6.0): verifies active=true without window focus or navigation."""
 additional_properties = false
 
 [[params]]
 name = "lane"
 type = "string"
-enum = ["live", "automation"]
+enum = ["live", "automation", "stagehand"]
 default = "live"
 
 [[params]]

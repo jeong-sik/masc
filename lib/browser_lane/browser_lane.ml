@@ -191,13 +191,14 @@ let verb_allowed_on_automation = function
 
 (* What the Stagehand backend serves once its executor is installed
    (RFC-browser-lane-stagehand §7 step 7): its session, tabs, navigation,
-   screenshots, text, element and scene reads, and the three sentence verbs.
-   Frames, dialogs, downloads, the idle document observer, interaction and
+   screenshots, text, element and scene reads, interaction, and the three
+   sentence verbs. Frames, dialogs, downloads, the idle document observer and
    actions are not served. *)
 let verb_allowed_on_stagehand = function
   | Session_open _ | Session_close | Session_status | Tabs_list | Page_goto _ | Page_capture _
-  | Page_read _ | Page_elements _ | Page_scene _ | Page_instruct _ | Page_locate _ | Page_extract _ -> true
-  | Page_document _ | Page_context _ | Page_downloads _ | Page_interact _ | Page_act _ -> false
+  | Page_read _ | Page_elements _ | Page_scene _ | Page_interact _ | Page_instruct _ | Page_locate _
+  | Page_extract _ -> true
+  | Page_document _ | Page_context _ | Page_downloads _ | Page_act _ -> false
 ;;
 
 let verb_allowed (lane : Lane_name.t) verb =

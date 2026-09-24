@@ -289,3 +289,6 @@ if (!expected || Object.keys(current).some(key => current[key] !== expected[key]
   throw new Error('observed_viewport_changed');
 return {url:location.href,title:document.title,scrollX,scrollY};
 |js}
+
+(* What a pointer action reports once the browser has taken it. *)
+let pointer_receipt_script = "return {url:location.href,title:document.title,scrollX,scrollY};"

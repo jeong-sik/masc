@@ -70,7 +70,8 @@ let with_backend ?(configure = ignore) f =
        | exception (Eio.Cancel.Cancelled _ as exn) ->
          behaviour.act_cancelled <- true;
          raise exn)
-    | Wire.Init _ | Wire.Observe _ | Wire.Extract _ | Wire.Page_goto _ | Wire.Page_screenshot _ ->
+    | Wire.Init _ | Wire.Observe _ | Wire.Extract _ | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_click _
+    | Wire.Page_scroll _ | Wire.Page_drag_and_drop _ ->
       failf "the backend sent %s" (Wire.method_name request)
   in
   let backend = Backend.create ~sw ~clock ~open_session ~call ~pid:(fun _ -> 42) ~log:ignore in

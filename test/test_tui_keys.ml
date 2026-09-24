@@ -232,7 +232,7 @@ let test_lanes_footer_opens_standalone_runs () =
        One item for Lane Add-ons, not two. The row carried "o:Lane Add-ons"
        and "A:add-ons" as separate items reading as separate destinations,
        and the dispatch had always been one arm. *)
-    "j/k:move  o / A:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  s:slots  Esc:overview  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  o / A:Lane Add-ons  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  s:slots  Esc:dashboard  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -273,7 +273,7 @@ let test_harness_footer_links_to_overview_task () =
    which asserts each state drops the other's key, and for Harness by the PTY
    walk, which reads the drawn row. *)
   check str "Harness names its task link"
-    "j/k:move  v:next Planning tab  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:verdict  Left / Esc:back  y / x:agree / overrule  Y:copy task  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Work tab  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:verdict  Left / Esc:back  y / x:agree / overrule  Y:copy task  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints ~detail_open:false Harness)
 
 let test_schedules_footer_names_write_and_read_controls () =
@@ -458,7 +458,7 @@ let test_schedule_update_form_preserves_exact_editable_definition () =
    can drift to any footer at all without a test noticing. *)
 let test_tools_footer_carries_the_keeper_axis () =
   check str "tools names the effective Keeper switch"
-    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [ / ]:Keeper  c / C:new Skill  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [ / ]:Keeper  c / C:new Skill  e:edit Skill  Esc:system  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Tools)
 
 let test_resources_footer_steps_through_detail () =
@@ -623,7 +623,7 @@ let test_verification_footer_carries_the_verdict_keys () =
      the other list -- the store keeps every submission, so the history holds
      rows whose task finished weeks ago -- and [< / >] pages that history. *)
   check str "verification names detail, approve, and reject"
-    "j/k:move  v:next Planning tab  h:queue / history  < / >:newer / older  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a / x:approve / reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Work tab  h:queue / history  < / >:newer / older  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a / x:approve / reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints ~detail_open:false Verification)
 
 let test_fusion_footer_pins_the_shared_list_projection () =
@@ -815,7 +815,7 @@ let test_every_detail_surface_steps_through_its_list () =
 
 let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
-    "j/k:move  t:Goals / Tasks  v:next Planning tab  f:filter  s:sort  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  a:confirm proof  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  t:Goals / Tasks  v:next Work tab  f:filter  s:sort  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  a:confirm proof  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints ~detail_open:false Planning)
 
 let test_board_footer_names_reversible_hearth_navigation () =
@@ -1613,7 +1613,7 @@ let test_config_footer_names_child_hops () =
      meets, and [test_every_config_pane_answers_once] is what holds them to
      one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / keeper voice  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  A:activity  L:logs  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / keeper voice  o:assets  Esc:dashboard  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -3034,7 +3034,7 @@ let () =
             test_activity_footer_keeps_filter_before_evidence
         ; Alcotest.test_case "Logs is an Activity child" `Quick
             test_logs_is_an_activity_child
-        ; Alcotest.test_case "Metrics is an Overview child" `Quick
+        ; Alcotest.test_case "Usage is a main destination" `Quick
             test_metrics_is_an_overview_child
         ; Alcotest.test_case "Browser reader belongs to Config" `Quick
             test_browser_lanes_highlight_config

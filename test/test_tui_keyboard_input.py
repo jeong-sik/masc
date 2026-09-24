@@ -1892,7 +1892,7 @@ def tui_executable(path: str) -> str:
 
     The launcher shell reports a missing file and stops itself, as it does
     after any exit. Without this check the harness sees a live process and
-    waits 30s for "MASC Overview" on a screen that is never drawn, and the
+    waits 30s for "MASC Dashboard" on a screen that is never drawn, and the
     real cause sits at the end of the timeout message.
     """
     executable = os.path.abspath(path)
@@ -2045,7 +2045,7 @@ def run_terminal_scenario(
                     process,
                     master_fd,
                     output,
-                    b"MASC Overview",
+                    b"MASC Dashboard",
                     start=0,
                     timeout=30.0,
                 )
@@ -2166,7 +2166,7 @@ def navigate_with_arrows_and_quit(
     # That the letters became draft text is the claim above. Leave the pane,
     # then move to Overview where system events are visible.
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
-    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
     # The same claim for the command palette, which is the other place a
     # printable key is text rather than a command. The quit key used to name
     # three fields and let the rest through, so a typed "q" armed the exit and
@@ -2183,7 +2183,7 @@ def navigate_with_arrows_and_quit(
     )
     if b"press again to quit" in CSI_RE.sub(b"", palette):
         raise AssertionError("a q typed into the palette armed the exit")
-    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
     send_and_wait(
         process,
         master_fd,
@@ -2193,7 +2193,7 @@ def navigate_with_arrows_and_quit(
     )
     # A different key cancels the arm and still performs its surface action.
     tab_until(process, master_fd, output, b"MASC Keepers")
-    tab_until(process, master_fd, output, b"MASC Overview")
+    tab_until(process, master_fd, output, b"MASC Dashboard")
     # Arm once more, then Ctrl-C must withdraw q's separate confirmation. Both
     # notices are events, so waiting for them also synchronizes the signal path.
     send_and_wait(
@@ -2266,7 +2266,7 @@ def acting_pane_ctrl_l_cycle_interaction(
         output,
         rows=30,
         columns=ACTING_PANE_CYCLE_COLUMNS,
-        needle=b"MASC Overview",
+        needle=b"MASC Dashboard",
     )
     drain_until_quiet(process, master_fd, output, cap=4.0)
 
@@ -2305,7 +2305,7 @@ def keeper_runtime_phase_and_identity_interaction(
         output,
         rows=30,
         columns=KEEPER_RUNTIME_COLUMN_COLUMNS,
-        needle=b"MASC Overview",
+        needle=b"MASC Dashboard",
     )
     send_and_wait(
         process,
@@ -2364,7 +2364,7 @@ def keeper_long_runtime_identity_interaction(
         output,
         rows=30,
         columns=KEEPER_RUNTIME_COLUMN_COLUMNS,
-        needle=b"MASC Overview",
+        needle=b"MASC Dashboard",
     )
     # Both keepers run the same provider subscription, so their ids differ
     # only in the variant suffix after a 51-character shared prefix. What
@@ -3057,7 +3057,7 @@ def first_install_waits_for_its_workspace_interaction(
     notice's opening.
     """
     wait_for_output(
-        process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
+        process, master_fd, output, b"MASC Dashboard", start=0, timeout=30.0
     )
     send_and_wait(process, master_fd, output, b"m", b"TUI session")
     drain_until_quiet(process, master_fd, output)
@@ -3107,7 +3107,7 @@ def failed_mint_is_marked_as_an_error_interaction(
     needle is the mark and the notice's opening.
     """
     wait_for_output(
-        process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
+        process, master_fd, output, b"MASC Dashboard", start=0, timeout=30.0
     )
     send_and_wait(process, master_fd, output, b"m", b"TUI session")
     drain_until_quiet(process, master_fd, output)
@@ -3547,17 +3547,17 @@ def repair_after_console_diagnostic(
         process,
         master_fd,
         output,
-        b"MASC Overview",
+        b"MASC Dashboard",
         start=redraw_start,
         timeout=3.0,
     )
-    overview_start = output.find(b"MASC Overview", redraw_start)
+    overview_start = output.find(b"MASC Dashboard", redraw_start)
     wait_for_output(
         process,
         master_fd,
         output,
         FRAME_END,
-        start=overview_start + len(b"MASC Overview"),
+        start=overview_start + len(b"MASC Dashboard"),
         timeout=3.0,
     )
     os.write(master_fd, b"q")
@@ -3570,22 +3570,7 @@ def assert_row_budgeted_surfaces(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    wait_for_output(
-        process,
-        master_fd,
-        output,
-        b"attention-6",
-        start=0,
-        timeout=10.0,
-    )
-    wait_for_output(
-        process,
-        master_fd,
-        output,
-        b"5 todo",
-        start=0,
-        timeout=3.0,
-    )
+    wait_for_output(process, master_fd, output, b"MASC Dashboard", start=0, timeout=10.0)
 
     overview = resize_and_wait(
         process,
@@ -3593,33 +3578,33 @@ def assert_row_budgeted_surfaces(
         output,
         rows=16,
         columns=100,
-        needle=b"MASC Overview",
+        needle=b"MASC Dashboard",
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    # At 16 rows the Attention panel holds three of the six items. The
-    # smallest surface the TUI draws is 15 rows, where it drops the composer
-    # and keeps the same three, so three is the tightest this panel gets. The
-    # budget checked here is that the panel stops where its rows stop: the
-    # third item is the last one drawn and the fourth is not. GOALS is served
-    # after the panel and the one held task row, so at this height it gets no
-    # row (4 spare rows: 3 attention + 1 task) and the count is unchanged.
-    for expected in (b"attention-1", b"attention-3", b"5 todo", b"q:quit"):
+    # The compact Dashboard gives its first rows to health, measured Goals,
+    # and durable Work. Attention follows those sections when room permits.
+    for expected in (b"MASC Dashboard", b"Health:", b"Goals", b"q:quit"):
         if expected not in overview:
-            raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
-    if b"attention-4" in overview:
-        raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
+            raise AssertionError(f"compact Dashboard omitted {expected!r}: {overview!r}")
+    if b"attention-4" in overview or b"attention-6" in overview:
+        raise AssertionError(f"compact Dashboard exceeded its attention limit: {overview!r}")
 
-    resize_and_wait(
+    expanded = resize_and_wait(
         process,
         master_fd,
         output,
         rows=30,
         columns=100,
-        needle=b"MASC Overview",
+        needle=b"MASC Dashboard",
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
+    for expected in (b"Work", b"Needs you", b"attention-1", b"attention-2"):
+        if expected not in expanded:
+            raise AssertionError(f"expanded Dashboard omitted {expected!r}: {expanded!r}")
+    if b"attention-3" in expanded:
+        raise AssertionError(f"Dashboard displayed more than two attention rows: {expanded!r}")
     tab_until(process, master_fd, output, b"MASC Keepers")
     tab_until(process, master_fd, output, b"MASC Board")
     send_and_wait(process, master_fd, output, b"\r", b"comment-5")
@@ -3730,7 +3715,7 @@ def keeper_ask_answer_interaction(
             output,
             rows=40,
             columns=180,
-            needle=b"MASC Overview",
+            needle=b"MASC Dashboard",
             final_cursor=b"\x1b[?25l",
         )
         tab_until(process, master_fd, output, b"MASC Keepers")
@@ -3974,7 +3959,7 @@ def blocked_gate_detail_interaction() -> Interaction:
             output,
             rows=40,
             columns=100,
-            needle=b"MASC Overview",
+            needle=b"MASC Dashboard",
         )
         tab_until(process, master_fd, output, b"MASC Approvals")
         wait_for_output(
@@ -4034,7 +4019,7 @@ def concealed_input_detail_interaction() -> Interaction:
             output,
             rows=40,
             columns=100,
-            needle=b"MASC Overview",
+            needle=b"MASC Dashboard",
         )
         tab_until(process, master_fd, output, b"MASC Approvals")
         # The row names the operation the producer sent, verbatim: the decoder
@@ -4127,7 +4112,7 @@ def escaped_question_detail_interaction() -> Interaction:
             output,
             rows=40,
             columns=100,
-            needle=b"MASC Overview",
+            needle=b"MASC Dashboard",
         )
         tab_until(process, master_fd, output, b"MASC Approvals")
         wait_for_output(
@@ -4330,7 +4315,7 @@ def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction
                 f"Planning refresh opened a different goal detail: {detail!r}"
             )
         copy_reference(process, master_fd, output, goal_reference)
-        listing = send_and_wait(process, master_fd, output, b"\x1b[D", b"MASC Planning")
+        listing = send_and_wait(process, master_fd, output, b"\x1b[D", b"MASC Work")
         assert_planning_goal_selected(listing, b"plan-beta-29424")
         os.write(master_fd, b"q")
 
@@ -4362,7 +4347,7 @@ def planning_resize_budget_interaction(
             output,
             rows=terminal_rows,
             columns=columns,
-            needle=b"MASC Planning",
+            needle=b"MASC Work",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
@@ -4395,7 +4380,7 @@ def planning_resize_budget_interaction(
         assert_planning_goal_selected(restored, b"plan-alpha-29424")
 
     mode_prefix = re.search(
-        rb" MASC Planning[^\r\n]*?filter:active", CSI_RE.sub(b"", frame)
+        rb" MASC Work[^\r\n]*?filter:active", CSI_RE.sub(b"", frame)
     )
     if mode_prefix is None:
         raise AssertionError(f"Planning wide header omitted its modes: {frame!r}")
@@ -4423,7 +4408,7 @@ def planning_resize_budget_interaction(
             output,
             rows=24,
             columns=columns,
-            needle=b"MASC Planning",
+            needle=b"MASC Work",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
@@ -4438,7 +4423,7 @@ def planning_resize_budget_interaction(
             (
                 text
                 for _, text in sorted(screen_rows(narrow).items())
-                if b"MASC Planning" in text
+                if b"MASC Work" in text
             ),
             None,
         )
@@ -5065,8 +5050,9 @@ def board_detail_authority_interaction(
                 raise AssertionError(f"Board A detail did not become ready: {detail!r}")
 
             late_list.release.set()
-            tab_until(process, master_fd, output, b"MASC Planning")
-            tab_until(process, master_fd, output, b"MASC Activity")
+            tab_until(process, master_fd, output, b"MASC Work")
+            tab_until(process, master_fd, output, b"MASC System")
+            send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
             tab_until(process, master_fd, output, b"late-list-applied")
             tab_until(process, master_fd, output, b"MASC Keepers")
             board = tab_until(
@@ -6016,7 +6002,7 @@ def keeper_chat_error_detail_interaction() -> Interaction:
         _base_path: str,
     ) -> None:
         resize_and_wait(
-            process, master_fd, output, rows=24, columns=100, needle=b"MASC Overview"
+            process, master_fd, output, rows=24, columns=100, needle=b"MASC Dashboard"
         )
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
@@ -6193,7 +6179,7 @@ class AtomicChatFixture:
 
 
 def open_atomic_chat(process: subprocess.Popen[bytes], master_fd: int, output: bytearray) -> None:
-    resize_and_wait(process, master_fd, output, rows=40, columns=120, needle=b"MASC Overview")
+    resize_and_wait(process, master_fd, output, rows=40, columns=120, needle=b"MASC Dashboard")
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
     # Establish the detail return target used by the scenario's Escape checks.
@@ -6372,7 +6358,7 @@ def quit_names_waiting_messages_interaction(fixture: AtomicChatFixture) -> Inter
                 raise AssertionError("pending control input was already sent to the server")
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
-            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
             send_and_wait(process, master_fd, output, b"q", b"q: 1 unsent message is dropped")
             if fixture.received:
                 raise AssertionError(f"navigation dispatched input before control acknowledgement: {fixture.received!r}")
@@ -7822,7 +7808,7 @@ def context_inspector_interaction() -> Interaction:
         _base_path: str,
     ) -> None:
         resize_and_wait(
-            process, master_fd, output, rows=50, columns=140, needle=b"MASC Overview"
+            process, master_fd, output, rows=50, columns=140, needle=b"MASC Dashboard"
         )
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
@@ -8084,7 +8070,7 @@ def chat_visibility_modes_interaction(
             output,
             rows=30,
             columns=180,
-            needle=b"MASC Overview",
+            needle=b"MASC Dashboard",
         )
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         # Keep the roster cursor on beta, then open alpha through the palette.
@@ -8558,12 +8544,12 @@ def skills_usage_clarity_interaction(
             output,
             rows=30,
             columns=160,
-            needle=b"MASC Overview",
+            needle=b"MASC Dashboard",
         )
         # Tools hangs off Config under [t] now, so the walk goes to the
         # parent stop and hops from there.
-        tab_until(process, master_fd, output, b"MASC Config")
-        send_and_wait(process, master_fd, output, b"t", b"MASC Config / Tools")
+        tab_until(process, master_fd, output, b"MASC System")
+        send_and_wait(process, master_fd, output, b"t", b"MASC System / Tools")
         usage = send_and_wait(
             process,
             master_fd,
@@ -8630,9 +8616,9 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
         fixtures["/api/v1/skills"] = lambda: (200, bad_payload) if fail_reads.is_set() else good
 
         def interact(process, master_fd, _slave_fd, output, _base_path):
-            resize_and_wait(process, master_fd, output, rows=30, columns=160, needle=b"MASC Overview")
-            tab_until(process, master_fd, output, b"MASC Config")
-            send_and_wait(process, master_fd, output, b"t", b"MASC Config / Tools")
+            resize_and_wait(process, master_fd, output, rows=30, columns=160, needle=b"MASC Dashboard")
+            tab_until(process, master_fd, output, b"MASC System")
+            send_and_wait(process, master_fd, output, b"t", b"MASC System / Tools")
             frame = send_and_wait(
                 process, master_fd, output, b"p" * 3,
                 b"Skill catalog read failed:" if initial_error else b"1 of 2 catalog Skills observed",
@@ -8726,8 +8712,8 @@ def run_tools_request_identity_regression(executable: str) -> None:
                     raise AssertionError(f"stale Tools response replaced the current view: {screen!r}")
 
         try:
-            resize_and_wait(process, master_fd, output, rows=30, columns=120, needle=b"MASC Overview")
-            tab_until(process, master_fd, output, b"MASC Config")
+            resize_and_wait(process, master_fd, output, rows=30, columns=120, needle=b"MASC Dashboard")
+            tab_until(process, master_fd, output, b"MASC System")
             os.write(master_fd, b"t")
             await_event(alpha_late.requested, "alpha Tools request did not start")
             send_and_wait(process, master_fd, output, b"]", b"keeper_beta_current")
@@ -8824,8 +8810,8 @@ def run_tools_purpose_regression(executable: str) -> None:
     fixtures["/api/v1/async-requests"] = lambda: (200, async_payload)
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
-        resize_and_wait(process, master_fd, output, rows=30, columns=120, needle=b"MASC Overview")
-        tab_until(process, master_fd, output, b"MASC Config")
+        resize_and_wait(process, master_fd, output, rows=30, columns=120, needle=b"MASC Dashboard")
+        tab_until(process, master_fd, output, b"MASC System")
         send_and_wait(process, master_fd, output, b"t", b"keeper_status")
 
         def require(*labels: str) -> None:
@@ -8906,7 +8892,7 @@ def run_tools_purpose_regression(executable: str) -> None:
         send_and_wait(process, master_fd, output, b"p", b"keeper_status")
         # The footer is the frame's last row, so wait for the frame to finish
         # rather than for its title: the key is read from that row below.
-        resize_and_wait(process, master_fd, output, rows=30, columns=90, needle=b"MASC Config / Tools",
+        resize_and_wait(process, master_fd, output, rows=30, columns=90, needle=b"MASC System / Tools",
                         final_cursor=b"\x1b[?25l")
         # The strip names the panes; the key that walks them is the footer's
         # "p:section" (#35638). The strip used to say it again as "p:다음 탭".
@@ -9036,7 +9022,7 @@ def live_markdown_interaction(
         output,
         rows=80,
         columns=90,
-        needle=b"MASC Overview",
+        needle=b"MASC Dashboard",
     )
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
@@ -9282,7 +9268,7 @@ def viewport_gap_interaction(
         output,
         rows=15,
         columns=100,
-        needle=b"MASC Overview",
+        needle=b"MASC Dashboard",
     )
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
@@ -9412,7 +9398,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             output,
             rows=30,
             columns=ROSTER_BESIDE_CHAT_COLUMNS,
-            needle=b"MASC Overview",
+            needle=b"MASC Dashboard",
         )
         send_and_wait(
             process,
@@ -9695,7 +9681,7 @@ def verification_unread_interaction(gate: GatedHttpResponse) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Planning")
+        tab_until(process, master_fd, output, b"MASC Work")
         unread = send_and_wait(
             process, master_fd, output, b"v", b"Task Review"
         )
@@ -9721,7 +9707,7 @@ def verification_unread_interaction(gate: GatedHttpResponse) -> Interaction:
         # The title and the count are asserted apart: a style reset may sit
         # between them once surface titles carry their own styling.
         if (
-            b"MASC Planning" not in loaded
+            b"MASC Work" not in loaded
             or b"Task Review" not in loaded
             or b"(0 of 0)" not in loaded
         ):
@@ -9743,7 +9729,7 @@ def planning_review_hierarchy_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        goals = tab_until(process, master_fd, output, b"MASC Planning")
+        goals = tab_until(process, master_fd, output, b"MASC Work")
         for needle in (
             b"\xe2\x96\xb8Goals",
             b"Task Review",
@@ -9759,7 +9745,7 @@ def planning_review_hierarchy_interaction() -> Interaction:
         )
         wait_for_output(process, master_fd, output, b"task-901", start=0, timeout=3.0)
         plain_review = CSI_RE.sub(b"", review)
-        if b"MASC Planning" not in plain_review:
+        if b"MASC Work" not in plain_review:
             raise AssertionError(f"Task Review lost its Planning parent: {plain_review!r}")
         # The badge says the queue holds two; a page holding both says
         # nothing more. It used to read "Task Review·2 (2 of 2)".
@@ -9833,7 +9819,7 @@ def planning_activity_actor_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Planning")
+        tab_until(process, master_fd, output, b"MASC Work")
         detail = send_and_wait(
             process, master_fd, output, b"\r", b"completed by beta"
         )
@@ -10276,7 +10262,7 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Planning")
+        tab_until(process, master_fd, output, b"MASC Work")
         send_and_wait(process, master_fd, output, b"v", b"Task Review")
         wait_for_output(
             process, master_fd, output, b"task-901", start=0, timeout=3.0
@@ -10357,7 +10343,7 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         # visible trace is asserted there, not on the Verification frame. The
         # block lists the newest line last; a tall frame keeps every retained
         # line on screen, and the resize redraws the whole frame.
-        tab_until(process, master_fd, output, b"MASC Overview")
+        tab_until(process, master_fd, output, b"MASC Dashboard")
         send_and_wait(process, master_fd, output, b"m", b"TUI session")
         resize_and_wait(
             process,
@@ -11602,7 +11588,7 @@ def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
     def interact(process: subprocess.Popen[bytes], master_fd: int,
                  _slave_fd: int, output: bytearray, _base_path: str) -> None:
         resize_and_wait(process, master_fd, output, rows=38, columns=150,
-                        needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+                        needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
         drain_until_quiet(process, master_fd, output)
         completed = bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)])
         if screen_row_of(screen_rows(completed), b"[Recent]") < 0:
@@ -11623,7 +11609,7 @@ def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
             )
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         # Config: p walks the panes; voice is the seventh and was the one cut.
-        tab_until(process, master_fd, output, b"MASC Config")
+        tab_until(process, master_fd, output, b"MASC System")
         for pane in (b"models", b"params", b"prompts", b"presets", b"themes", b"voice"):
             send_and_wait(process, master_fd, output, b"p", b"\xe2\x96\xb8" + pane)
         os.write(master_fd, b"q")
@@ -11654,13 +11640,14 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
         # Overview shows it is there to be kept off: the tab strip is not
         # the thing that hides it.
         resize_and_wait(process, master_fd, output, rows=38, columns=150,
-                        needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+                        needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
         drain_until_quiet(process, master_fd, output)
         if pane_row(output) < 0:
             raise AssertionError(
                 f"the acting pane did not open on Overview at 150 columns: {screen_text(bytes(output))!r}"
             )
-        tab_until(process, master_fd, output, b"MASC Activity")
+        tab_until(process, master_fd, output, b"MASC System")
+        send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
         for key, tab in ((b"2", b"\xe2\x96\xb8Logs"), (b"1", b"\xe2\x96\xb8Events"),
                          (b"2", b"\xe2\x96\xb8Logs")):
             send_and_wait(process, master_fd, output, key, tab)
@@ -11698,7 +11685,8 @@ def enter_outside_changes_interaction(
         raise AssertionError(
             f"Changes did not draw the fixture row as a list: {populated_plain!r}"
         )
-    acting = tab_until(process, master_fd, output, b"MASC Activity")
+    tab_until(process, master_fd, output, b"MASC System")
+    acting = send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
     if b"MASC Activity" not in acting:
         raise AssertionError(f"did not reach Activity: {acting!r}")
     # System logs hang off Activity under [l]; Esc walks back to the parent.
@@ -12137,7 +12125,7 @@ def config_navigation_interaction() -> Interaction:
         output: bytearray,
         base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Config")
+        tab_until(process, master_fd, output, b"MASC System")
         wait_for_output(
             process,
             master_fd,
@@ -12472,7 +12460,7 @@ def runtime_surface_interaction(
         try:
             # Runtime is a Config child. Verify the parent before opening it;
             # keep [9] bare so the probe request is observed after [start].
-            tab_until(process, master_fd, output, b"MASC Config")
+            tab_until(process, master_fd, output, b"MASC System")
             # DETAIL is what is left of the row after the five fixed columns,
             # and at the harness's hundred that is eighteen cells -- enough
             # for "[unassigned] \xc2\xb7 si\xe2\x80\xa6" and no more. #36120 put the
@@ -12489,7 +12477,7 @@ def runtime_surface_interaction(
                 output,
                 rows=30,
                 columns=131,
-                needle=b"MASC Config",
+                needle=b"MASC System",
                 controls=(FULL_REDRAW,),
             )
             read_available(master_fd, output)
@@ -12531,7 +12519,7 @@ def runtime_surface_interaction(
                 "utf-8"
             )
             for needle in (
-                "MASC Config / Runtime",
+                "MASC System / Runtime",
                 "LANE",
                 "CANDIDATE",
                 "PROVIDER / MODEL",
@@ -12603,7 +12591,7 @@ def runtime_surface_interaction(
                 master_fd,
                 output,
                 b"\r",
-                b"MASC Config / Runtime detail",
+                b"MASC System / Runtime detail",
             )
             lane_detail_plain = CSI_RE.sub(b"", lane_detail)
             for needle in (
@@ -12648,7 +12636,7 @@ def runtime_surface_interaction(
             lane_screen = screen_text(bytes(output))
             if b"1/2 runtime-a" not in lane_screen:
                 raise AssertionError("Runtime list lost the selected lane candidate")
-            if b"MASC Config / Runtime detail" in lane_screen:
+            if b"MASC System / Runtime detail" in lane_screen:
                 raise AssertionError("Runtime left arrow did not return to the lane list")
 
             send_and_wait(
@@ -12674,7 +12662,7 @@ def runtime_surface_interaction(
                 master_fd,
                 output,
                 b"\r",
-                b"MASC Config / Runtime detail",
+                b"MASC System / Runtime detail",
             )
             catalog_detail_plain = CSI_RE.sub(b"", catalog_detail)
             for needle in (
@@ -12713,7 +12701,7 @@ def runtime_surface_interaction(
                 output,
                 rows=20,
                 columns=100,
-                needle=b"MASC Config / Runtime",
+                needle=b"MASC System / Runtime",
                 controls=(FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
@@ -12723,7 +12711,7 @@ def runtime_surface_interaction(
                 output,
                 rows=30,
                 columns=100,
-                needle=b"MASC Config / Runtime",
+                needle=b"MASC System / Runtime",
                 controls=(FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
@@ -13284,7 +13272,7 @@ def fusion_list_detail_interaction(
     ) -> None:
         # Task Verdicts belongs to Planning; Tab cycles top-level families,
         # whereas v selects the three Planning tabs without skipping coverage.
-        palette_go(process, master_fd, output, b"go planning", b"MASC Planning")
+        palette_go(process, master_fd, output, b"go planning", b"MASC Work")
         send_and_wait(process, master_fd, output, b"v", b"Task Review")
         send_and_wait(process, master_fd, output, b"v", b"automatic Gate rulings")
         # One full repaint, because the pane redraws only the rows that change
@@ -13803,8 +13791,9 @@ def run_observer_reconnect_regression(executable: str) -> None:
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
-            resize_and_wait(process, master_fd, output, rows=38, columns=150, needle=b"MASC Overview")
-            send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
+            resize_and_wait(process, master_fd, output, rows=38, columns=150, needle=b"MASC Dashboard")
+            tab_until(process, master_fd, output, b"MASC System")
+            send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
             wait_for_output(process, master_fd, output, b"feed: live 1", start=0, timeout=10)
             send_and_wait(process, master_fd, output, b"f", b"scope actions")
             send_and_wait(process, master_fd, output, b"\r", b"Tool use ID: before-disconnect")
@@ -13923,8 +13912,9 @@ def run_acting_call_evidence_regression(executable: str) -> None:
 
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
-            resize_and_wait(process, master_fd, output, rows=35, columns=140, needle=b"MASC Overview")
-            send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
+            resize_and_wait(process, master_fd, output, rows=35, columns=140, needle=b"MASC Dashboard")
+            tab_until(process, master_fd, output, b"MASC System")
+            send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
             wait_for_output(process, master_fd, output, b"feed: live 2", start=0, timeout=10)
             # A folded turn is never silently opened as one of its calls.
             aggregate_start = len(output)
@@ -14008,7 +13998,8 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         # selects. The row is on Activity's status line.
         read_available(master_fd, output)
         activity_start = len(output)
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
+        tab_until(process, master_fd, output, b"MASC System")
+        send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
         wait_for_output(
             process, master_fd, output, b"feed: closed", start=0, timeout=10.0
         )
@@ -14114,11 +14105,12 @@ def task_dispatch_interaction(requests: HttpRequests) -> Interaction:
     ) -> None:
         # The closed feed row says the MCP session was opened; it is on
         # Activity's status line, and the composer is read on the Overview.
-        send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
+        tab_until(process, master_fd, output, b"MASC System")
+        send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
         wait_for_output(
             process, master_fd, output, b"feed: closed", start=0, timeout=10.0
         )
-        tab_until(process, master_fd, output, b"MASC Overview")
+        tab_until(process, master_fd, output, b"MASC Dashboard")
         send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
         send_and_wait(process, master_fd, output, b"/task Lanes surface", b"/task Lanes surface")
         os.write(master_fd, b"\r")
@@ -14273,7 +14265,7 @@ def repository_pulls_fixture() -> HttpResponse:
     )
 
 
-def pull_requests_on_overview_interaction() -> Interaction:
+def pull_requests_absent_from_dashboard_interaction() -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
         master_fd: int,
@@ -14281,8 +14273,13 @@ def pull_requests_on_overview_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        for needle in (b"1 conflicting", b"1 not by a Keeper", b"#11"):
-            wait_for_output(process, master_fd, output, needle, start=0, timeout=10.0)
+        frame = resize_and_wait(
+            process, master_fd, output, rows=30, columns=120,
+            needle=b"MASC Dashboard", controls=(FULL_REDRAW,),
+        )
+        for old_pr_row in (b"1 conflicting", b"1 not by a Keeper", b"#11"):
+            if old_pr_row in frame:
+                raise AssertionError(f"Dashboard still draws PR detail {old_pr_row!r}: {frame!r}")
         # The harness confirms the exit that this first press arms.
         os.write(master_fd, b"q")
 
@@ -14301,19 +14298,12 @@ def unread_keeper_counted_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"Keepers: 1 (1 unreadable)",
+            b"Keepers: 1 listed (1 state unreadable)",
             start=0,
             timeout=10.0,
         )
-        # The Team block names the same Keeper, with why its row was unread.
-        wait_for_output(
-            process,
-            master_fd,
-            output,
-            b"k-unread",
-            start=0,
-            timeout=10.0,
-        )
+        # The first screen preserves the count and the missing-state evidence.
+        # Individual rows belong on Keepers.
         # The harness confirms the exit that this first press arms.
         os.write(master_fd, b"q")
 
@@ -14356,14 +14346,17 @@ def paused_apart_from_stopped_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        # Each count in the Team title is the Keepers on the line it names.
-        for needle in (
-            b"1 idle \xc2\xb7 1 no phase \xc2\xb7 2 paused \xc2\xb7 1 stopped",
-            b"? no phase: k-unknown",
-            b"paused: k-flagged, k-halted",
-            b"stopped: k-stopped",
-        ):
-            wait_for_output(process, master_fd, output, needle, start=0, timeout=10.0)
+        # The first screen counts listed Keepers without guessing state from
+        # recent tasks or folding paused/stopped into a synthetic idle count.
+        wait_for_output(
+            process, master_fd, output, b"Keepers: 5 listed", start=0, timeout=10.0
+        )
+        frame = resize_and_wait(
+            process, master_fd, output, rows=30, columns=120,
+            needle=b"MASC Dashboard", controls=(FULL_REDRAW,),
+        )
+        if b" idle " in frame or b"k-unknown" in frame:
+            raise AssertionError(f"Dashboard invented a Keeper state row: {frame!r}")
         # The harness confirms the exit that this first press arms.
         os.write(master_fd, b"q")
 
@@ -14510,7 +14503,7 @@ def flow_control_is_off_interaction() -> Interaction:
         base_path: str,
     ) -> None:
         wait_for_output(
-            process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
+            process, master_fd, output, b"MASC Dashboard", start=0, timeout=30.0
         )
         attributes = termios.tcgetattr(slave_fd)
         if attributes[0] & termios.IXON:
@@ -14950,8 +14943,8 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
-        description="Pull requests on Overview",
-        interact=pull_requests_on_overview_interaction(),
+        description="PR details absent from Dashboard",
+        interact=pull_requests_absent_from_dashboard_interaction(),
         http_fixtures={
             "/api/v1/dashboard/briefing": pull_requests_briefing(),
             "/api/v1/repositories/pulls": repository_pulls_fixture(),
@@ -15617,7 +15610,7 @@ def run_browser_client_picker_regression(executable: str) -> None:
         send_and_wait(process, master_fd, output, b"\r", b"Zen selected page")
         if reads[-1] != {"lane": "live", "clientId": zen}:
             raise AssertionError("explicit reconnect carried the stale tab ID")
-        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
         os.write(master_fd, b"q")
 
     run_terminal_scenario(executable, description="Browser client pinning and disconnected selection",
@@ -15749,7 +15742,7 @@ def run_browser_scene_regression(executable: str) -> None:
         assert scrolls[-1]["y"] == 600 and scene_viewports[-1]["scrollY"] == 600
         press_and_await(b"K", scrolled(len(scrolls), len(scene_viewports)), "a scroll and its re-read")
         assert scrolls[-1]["y"] == -600 and scene_viewports[-1]["scrollY"] == 0
-        send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
+        send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")
         os.write(master, b"q")
 
     run_terminal_scenario(executable, description="Browser scene text, selection and observed click refresh",
@@ -15853,7 +15846,7 @@ def run_browser_viewport_regression(executable: str, *, cell_geometry: bool = Tr
             assert row in visible, f"async image dismissal did not restore {row!r}"
         assert b"Esc: back" not in visible, "viewport footer remained after async dismissal"
         assert len(captures) == 6
-        send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
+        send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")
         os.write(master, b"q")
 
     try:
@@ -15928,7 +15921,7 @@ def run_browser_pointer_regression(executable: str) -> None:
         assert actions[1]["to"] == {"x":0.09,"y":0.18}, actions[1]["to"]
         assert len(captures)==3
         send_and_wait(process, master, output, b"\x1b", b"pointer fixture")
-        send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
+        send_and_wait(process, master, output, b"\x1b", b"MASC Dashboard")
         os.write(master,b"q")
 
     run_terminal_scenario(executable, description="Browser screenshot mouse click and drag routing",
@@ -16030,7 +16023,7 @@ def run_browser_viewport_cadence_regression(executable: str, *, follow_navigatio
         # leaving the surface would independently suppress a stale overlay.
         assert b"CLOSED FRAME" not in output[start:], "late cadence reopened the overlay"
         assert len(actions)==1 and len(captures)==5
-        send_and_wait(process,master,output,b"\x1b",b"MASC Overview")
+        send_and_wait(process,master,output,b"\x1b",b"MASC Dashboard")
         os.write(master,b"q")
 
     try:
@@ -16142,7 +16135,7 @@ def run_browser_screenshot_regression(executable: str) -> None:
         if requests[-1] != {"lane": "automation", "tabId": 1}:
             raise AssertionError("closed-tab screenshot silently changed target")
         send_and_wait(process, master_fd, output, b"r", b"second page body")
-        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
         os.write(master_fd, b"q")
 
     try:
@@ -16266,7 +16259,7 @@ def open_the_voice_pane(
     strip rather than by a fixed count: a pane inserted ahead of voice would
     otherwise leave this pressing one short.
     """
-    tab_until(process, master_fd, output, b"MASC Config")
+    tab_until(process, master_fd, output, b"MASC System")
     for _ in range(8):
         read_available(master_fd, output)
         start = len(output)
@@ -16671,7 +16664,7 @@ def mermaid_chat_interaction(
     # run_terminal_scenario already opens the pty at 30x100, so resizing to
     # that size draws nothing and a wait on the first screen starves.
     wait_for_output(
-        process, master_fd, output, b"MASC Overview", start=0, timeout=5.0
+        process, master_fd, output, b"MASC Dashboard", start=0, timeout=5.0
     )
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
@@ -17163,12 +17156,12 @@ def resources_detail_interaction() -> Interaction:
     ) -> None:
         # Resources hangs off Config under [s]; the listing row proves
         # the surface arrived loaded through the hop.
-        tab_until(process, master_fd, output, b"MASC Config")
+        tab_until(process, master_fd, output, b"MASC System")
         send_and_wait(process, master_fd, output, b"s", b"Event Log (JSON)")
         drain_until_quiet(process, master_fd, output)
         assert_pane_surface_title_over_gap(
             bytes(output),
-            b"MASC Config / Resources",
+            b"MASC System / Resources",
             b"\xe2\x96\xb8 Resources",
         )
         detail = send_and_wait(
@@ -17528,7 +17521,7 @@ def run_theme_scheme_regression(executable: str) -> None:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Config")
+        tab_until(process, master_fd, output, b"MASC System")
         # [p] cycles the Config panes and themes is the last of them, so the
         # walk stops on the header rather than counting presses.
         for _ in range(8):
@@ -17566,7 +17559,7 @@ def run_theme_scheme_regression(executable: str) -> None:
 
         # Back to Overview, then arm the quit the harness confirms with its
         # own second press.
-        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
         send_and_wait(
             process, master_fd, output, b"q", b"q: press again to quit"
         )
@@ -17687,7 +17680,7 @@ def msx_spectator_interaction(
     if watching.find(MSX_LEFT_HALF) > watching.find(MSX_RIGHT_HALF):
         raise AssertionError("the halves were drawn in the wrong order")
 
-    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
     os.write(master_fd, b"q")
 
 
@@ -17729,7 +17722,7 @@ def msx_size_interaction(
     wait_for_output(process, master_fd, output, b"+/-: 87%", start=up_from,
                     timeout=5.0)
 
-    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
     os.write(master_fd, b"q")
 
 
@@ -17813,14 +17806,14 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
         resized = bytes(output[start:end])
         assert b"d=I,i=32" in resized, "resize retained the old placement"
         assert b"f=24" in resized, "resize did not place pixels again"
-        exited = key(b"\x1b", b"MASC Overview")
+        exited = key(b"\x1b", b"MASC Dashboard")
         assert b"d=I,i=32" in exited, "exit left the image behind"
         key(b":go msx\r", b"watch split.rom")
         reopened = key(b"\r", b"F6: save quick")
         assert b"f=24" in reopened, "reopening reused a deleted image"
         print(f"MSX PTY wire: first={len(first)} steady_three_polls={len(steady)} "
               f"replacement={len(replacement)} bytes", flush=True)
-        key(b"\x1b", b"MASC Overview")
+        key(b"\x1b", b"MASC Dashboard")
         os.write(master, b"q")
 
     run_terminal_scenario(
@@ -17909,7 +17902,7 @@ def run_msx_background_poll_regression(executable: str) -> None:
             os.kill(process.pid, signal.SIGWINCH)
             await_marker(b"F8: disk", start)
             assert not pending.completed.is_set(), "terminal resize waited for the HTTP response"
-            key(b"\x1b", b"MASC Overview")
+            key(b"\x1b", b"MASC Dashboard")
             assert not pending.completed.is_set(), "Esc waited for the HTTP response"
             observe_for(0.8)  # More than two 0.3-second spectator poll intervals.
             assert len(calls) == 1, f"pending/closed view issued more ticks: {len(calls)}"
@@ -17953,13 +17946,13 @@ def run_msx_background_poll_regression(executable: str) -> None:
             assert all(pixels == expected_pixels for pixels in repaints), "failure repaint changed cached RGB"
             assert f"frame {expected_frame} ".encode() in failure_output, "failure lost cached frame identity"
             assert b"frame 999 " not in failure_output, "failure resurrected stale response"
-            key(b"\x1b", b"MASC Overview")
+            key(b"\x1b", b"MASC Dashboard")
             before_get = len(get_frames)
             key(b":go msx\r", b"watch split.rom")
             assert len(get_frames) > before_get, "failure recovery skipped fresh GET"
             assert len(calls) == 2, "menu entry advanced the machine"
             key(b"\x1b", b"F8: disk")
-            key(b"\x1b", b"MASC Overview")
+            key(b"\x1b", b"MASC Dashboard")
             os.write(master, b"q")
             print(json.dumps({"result": "PASS", "tick_calls": len(calls),
                 "fresh_gets": len(get_frames), "pending_resize_and_escape": True,
@@ -18030,7 +18023,7 @@ def run_msx_palette_regression(executable: str) -> None:
         )
         # Esc hands the terminal back to the presenter, whose frame ends the
         # normal way, so the plain helper serves from here on.
-        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
         send_and_wait(
             process, master_fd, output, b"q", b"q: press again to quit"
         )
@@ -18108,9 +18101,9 @@ def run_held_back_override_regression(executable: str) -> None:
             output,
             rows=30,
             columns=HELD_BACK_TITLE_COLUMNS,
-            needle=b"MASC Overview",
+            needle=b"MASC Dashboard",
         )
-        tab_until(process, master_fd, output, b"MASC Config")
+        tab_until(process, master_fd, output, b"MASC System")
         for _ in range(8):
             if b"MASC \xed\x94\x84\xeb\xa1\xac\xed\x94\x84\xed\x8a\xb8" in bytes(output):
                 break
@@ -18151,7 +18144,7 @@ def run_held_back_override_regression(executable: str) -> None:
                 "how to put it back"
             )
 
-        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
         send_and_wait(
             process, master_fd, output, b"q", b"q: press again to quit"
         )
@@ -18274,7 +18267,7 @@ def run_fusion_history_regression(executable: str) -> None:
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Fusion")
         send_and_wait(process, master_fd, output, b"\r", b"HISTORICAL BOARD EVIDENCE")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Fusion")
-        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Dashboard")
         send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
 
     run_terminal_scenario(

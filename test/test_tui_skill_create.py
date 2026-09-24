@@ -101,7 +101,7 @@ def run_case(
             ]
             if len(rows) != 1:
                 raise AssertionError(f"expected one diagnostic footer: {rows!r}")
-            for pinned in (b"Esc:config", b"q:quit"):
+            for pinned in (b"Esc:system", b"q:quit"):
                 if pinned not in rows[0]:
                     raise AssertionError(f"diagnostic hid {pinned!r}: {rows[0]!r}")
             if diagnostic_preview is not None:

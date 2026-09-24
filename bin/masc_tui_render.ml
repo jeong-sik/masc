@@ -272,8 +272,11 @@ let dashboard_keeper_line (state : state) =
   match state.overview with
   | None -> "Keepers: not observed"
   | Some overview ->
-      Printf.sprintf "Keepers: %d reported · individual state in Keepers"
-        (List.length overview.ov_keeper_rows)
+      let unreadable = overview.ov_keeper_liveness.klc_unreadable in
+      Printf.sprintf "Keepers: %d listed%s · individual state in Keepers"
+        overview.ov_keepers
+        (if unreadable = 0 then ""
+         else Printf.sprintf " (%d state unreadable)" unreadable)
 
 let dashboard_work_lines (state : state) =
   match state.task_flow with
@@ -6291,11 +6294,11 @@ let render_clients (state : state) =
     match state.clients_surface with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Config / Runtime / Clients") (title_missing_reading ~error:state.clients_surface_error) timestamp
+          (screen_title " MASC System / Runtime / Clients") (title_missing_reading ~error:state.clients_surface_error) timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d attached)  %s  %s"
-          (screen_title " MASC Config / Runtime / Clients") shown timestamp
+          (screen_title " MASC System / Runtime / Clients") shown timestamp
           (connection_badge state)
   in
   box_top buf cols;
@@ -11525,7 +11528,7 @@ let render_runtime_detail (state : state) target =
   in
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  %s  %s" (screen_title " MASC Config / Runtime detail")
+    (Printf.sprintf "%s  %s  %s" (screen_title " MASC System / Runtime detail")
        (Terminal_text.single_line target_label) (connection_badge state));
   box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (cols - 8)) in
@@ -11585,7 +11588,7 @@ let render_runtime (state : state) =
     match state.runtime_surface with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Config / Runtime") (title_missing_reading ~error:state.runtime_surface_error) timestamp
+          (screen_title " MASC System / Runtime") (title_missing_reading ~error:state.runtime_surface_error) timestamp
           (connection_badge state)
     | Some snapshot ->
         let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
@@ -11614,11 +11617,11 @@ let render_runtime (state : state) =
         in
         let lanes_active = state.runtime_mode = Masc_tui_types.Runtime_lanes in
         Printf.sprintf "%s  %s  %s%s  %s  %s"
-          (screen_title " MASC Config / Runtime")
+          (screen_title " MASC System / Runtime")
           (tab_strip
              ~width:
                (tab_strip_width ~cols
-                  ~before:(screen_title " MASC Config / Runtime" ^ tab_strip_gap)
+                  ~before:(screen_title " MASC System / Runtime" ^ tab_strip_gap)
                   ~after:
                     (Printf.sprintf "  %s%s  %s  %s" probe_status probe_read
                        timestamp (connection_badge state)))
@@ -12035,7 +12038,7 @@ let render_tools (state : state) =
   in
   let header =
     Printf.sprintf "%s  %s  %s"
-      (screen_title " MASC Config / Tools") timestamp
+      (screen_title " MASC System / Tools") timestamp
       (connection_badge state)
   in
   box_top buf cols;
@@ -14922,7 +14925,7 @@ let runtime_config_status_scroll_limit state ~terminal_rows ~cols =
 let render_runtime_config_status state =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"config-status"
-    ~title:(screen_title " MASC Config / runtime.toml status")
+    ~title:(screen_title " MASC System / runtime.toml status")
     ~hints:"j/k:scroll  PgUp/PgDn:page  v/Esc:source  r:reload"
     ~body:(fun ~budget c ->
       let lines = runtime_config_status_lines state ~cols in

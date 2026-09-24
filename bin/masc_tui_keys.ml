@@ -55,9 +55,9 @@ let config_bindings =
   ; b Navigate "9" "Runtime"
       ~help:"runtime status, lane routing, probes and connected clients", None
   ; b Navigate "s" "resources"
-      ~help:"the MCP resource catalog, off the ring under Config", None
+      ~help:"the MCP resource catalog, off the ring under System", None
   ; b Navigate "t" "tools"
-      ~help:"the tool catalog, receipts, and usage, off the ring under Config", None
+      ~help:"the tool catalog, receipts, and usage, off the ring under System", None
   ; b Act "e" "edit"
       ~help:"runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
       Some [ Config_runtime; Config_models; Config_prompts; Config_voice ]
@@ -106,7 +106,7 @@ let config_bindings =
       ~help:"on prompts, switch between the read-only runtime assets and \
              the registry you can override",
       Some [ Config_prompts ]
-  ; b Act "Esc" "overview", None
+  ; b Act "Esc" "dashboard", None
   ; b Meta "r" "reload", None
   ; b Meta "Tab" "next", None
   ; b Meta "q" "quit", None
@@ -342,7 +342,7 @@ let for_surface = function
          (masc_tui.ml guards the close on acting_detail) and otherwise
          leaves the surface, so two rows read as two bindings. *)
       ; b Act "Esc" "back"
-          ~help:"close event evidence; from the list, back to Overview"
+          ~help:"close event evidence; from the list, back to Dashboard"
       (* One row per action. g and G reach the ends Home and End reach, and
          l the tab 2 opens; a row for each spent two of the footer's places
          on actions it already showed, and at 120 columns the fitter dropped
@@ -369,7 +369,7 @@ let for_surface = function
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
         ; b Search "n / N" "next / previous match"
-        ; b Act "Esc" "overview"
+        ; b Act "Esc" "dashboard"
         ]
       @ row_list_jumps @ listing_meta
   | Keepers Keeper_detail ->
@@ -484,7 +484,7 @@ let for_surface = function
              left out, and the lane needs one slot across the two"
       ; b Navigate "p" "runtime"
           ~help:"open the Runtime surface"
-      ; b Act "Esc" "overview" ~help:"back to Overview"
+      ; b Act "Esc" "dashboard" ~help:"back to Dashboard"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching standalone lane; the run list \
                  and a run's detail carry no searchable rows"
@@ -562,7 +562,7 @@ let for_surface = function
       [ b Navigate "j/k" "move"
       ; b Navigate "t" "Goals / Tasks"
           ~help:"switch between Goals and the active task list"
-      ; b Navigate "v" "next Planning tab"
+      ; b Navigate "v" "next Work tab"
           ~help:"Goals, then the two task surfaces: Task Review and \
                  Task Verdicts. Not stages of one flow"
       ; b Act "Right / Enter" "detail" ~detail:List_only
@@ -601,7 +601,7 @@ let for_surface = function
       @ row_list_edges @ listing_meta
   | Verification ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the evidence"
-      ; b Navigate "v" "next Planning tab"
+      ; b Navigate "v" "next Work tab"
           ~help:"on to Task Verdicts, then back to Goals"
       ; b Navigate "h" "queue / history"
           ~help:"the queue is what a task is still waiting on; the history is \
@@ -631,7 +631,7 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Harness ->
       [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
-      ; b Navigate "v" "next Planning tab" ~help:"back round to Goals"
+      ; b Navigate "v" "next Work tab" ~help:"back round to Goals"
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Right / Enter" "verdict" ~detail:List_only
           ~help:"open the full evaluator verdict"
@@ -678,7 +678,7 @@ let for_surface = function
           ~help:"jump the cursor to a matching run id, Keeper or preset; an \
                  open run's detail carries no searchable rows"
       ; b Search "n / N" "next / previous match"
-      ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
+      ; b Act "Esc" "back" ~help:"leave detail, or return to Dashboard"
       ]
       @ row_list_edges @ listing_meta
   | Memory ->
@@ -690,7 +690,7 @@ let for_surface = function
       ; b Act "s" "sort"
           ~help:"cycle sort keepers (facts, size, delta, state, name)"
       ; b Act "Esc" "clear / back"
-          ~help:"clear the filter, or return to Overview"
+          ~help:"clear the filter, or return to Dashboard"
       ; b Search "/" "filter"
           ~help:"show only keepers whose id or state matches"
       ; b Search "n / N" "next / previous match"
@@ -705,7 +705,7 @@ let for_surface = function
           ~help:"show the selected repository's current working-tree changes"
       ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"
       ; b Act "Left / Esc" "back"
-          ~help:"leave Git changes, or return to Overview"
+          ~help:"leave Git changes, or return to Dashboard"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching repository, or to a changed \
                  path while Git changes is open"
@@ -765,7 +765,7 @@ let for_surface = function
           ~help:"the first or last resource, or the ends of the text when it                  is focused"
       ; b Act "Enter" "read" ~help:"read the selected resource"
       ; b Act "Esc" "back"
-          ~help:"the text hands back to the list; the list leaves for Config"
+          ~help:"the text hands back to the list; the list leaves for System"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching resource name; the list has to                  be focused for there to be a cursor to land"
       ; b Search "n / N" "next / previous match"
@@ -840,7 +840,7 @@ let for_surface = function
                  instruction Skill, C starts a composition Skill"
       ; b Act "e" "edit Skill"
           ~help:"open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish"
-      ; b Act "Esc" "config" ~help:"back to the Config surface it hangs off"
+      ; b Act "Esc" "system" ~help:"back to the System surface it hangs off"
       ]
       @ listing_meta
   | System_logs ->

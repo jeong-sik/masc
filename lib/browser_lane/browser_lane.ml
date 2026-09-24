@@ -282,6 +282,11 @@ let route_lane_name = function
   | Stagehand_route -> Lane_name.Stagehand
 ;;
 
+let route_lane_name = function
+  | Automation_route -> Lane_name.Automation
+  | Live_route _ -> Lane_name.Live
+;;
+
 (* Why a live request names no browser to send its command to. Each case has
    a different next step: a browser has to connect, or the caller has to
    choose one of several. No command is dispatched in any of them. *)

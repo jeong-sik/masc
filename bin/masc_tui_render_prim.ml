@@ -1399,15 +1399,48 @@ let listing_rows_below_the_body = 3
    [None] draws no row as selected.
    [focused] says whether the arrow keys are pointed here, which is a
    different question from which row is open. *)
-let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~labels
-    ~selection =
+(* What a row draws before its label when the cursor is on it. The fold below
+   measures this instead of counting its cells here, so the two cannot drift
+   apart, and the mark is the one the rest of the file draws rather than a
+   second spelling of its bytes. *)
+let sidebar_caret_lead = " " ^ Masc_tui_theme.Glyph.current_entry ^ " "
+
+(* Every row folds to the room the widest lead leaves, so the fold does not
+   move when the cursor does. *)
+let sidebar_row_lead_cells = Message_layout.display_width sidebar_caret_lead
+
+(* How many rows an index is holding, and how many the surface holds. Three
+   surfaces draw a server page beside a detail -- the Board's fifty posts,
+   the Schedules page, the Task Review page -- and each one's index said the
+   page size alone: a board of a hundred and seven posts drew "(50)" with no
+   second number anywhere near it, so the fifty-seven the page does not carry
+   were invisible. Equal counts say it once: a page that carries everything
+   has no difference to report. *)
+let list_count_text ~loaded ~holding =
+  match holding with
+  | Some holding when holding > loaded -> Printf.sprintf "(%d of %d)" loaded holding
+  | Some _ | None -> Printf.sprintf "(%d)" loaded
+
+(* [holding] is what the surface holds when that is more than this index was
+   given: the Board's own header reads "(50 of 198)" one keypress away, and
+   this row read "(50)", which is a count of the whole board to anyone who
+   did not just come from that header. Both spell it through
+   [list_count_text], so the two cannot disagree.
+
+   Asked of every caller rather than defaulted: a list that is filtered
+   rather than paged has nothing more to hold, and passing [None] says so
+   where leaving it out could not be told from forgetting. *)
+let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
+    ~labels ~selection =
   framed_top buf cols;
   (* Focus wears a caret, not a key list: which keys work is the footer's
      sentence; which pane hears them is this one glyph. *)
   framed_line buf cols
     ((if focused then Ansi.bold else Ansi.dim)
-     ^ Printf.sprintf " %s%s (%d)" (if focused then "\xe2\x96\xb8 " else "") title
-         (List.length labels)
+     ^ Printf.sprintf " %s%s %s"
+         (if focused then Masc_tui_theme.Glyph.current_entry ^ " " else "")
+         title
+         (list_count_text ~loaded:(List.length labels) ~holding)
      ^ Ansi.reset);
   framed_divider buf cols;
   let content_height = max 0 (rows - framed_chrome_rows) in
@@ -1423,8 +1456,23 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~labels
     | Some label ->
       (* A separate name for the sanitized text. Shadowing [label] left four
          uses that read as raw ones to anything checking by name, the reader
-         included. *)
-      let drawn = Terminal_text.single_line label in
+         included.
+
+         Folded from the middle, the way a table folds a name: the frame
+         cuts a tail, and a reader's index is a column of names whose ends
+         are what part them. Measured on the live Board, 50 posts: a tail cut
+         left nine rows in three groups a reader could not tell apart -- four
+         read "#verification Approved task...", three "#verification Verify:
+         wkbl ..." -- and folding from the middle leaves all fifty distinct.
+
+         Every row folds to the same room whether or not the cursor is on it.
+         The caret takes two cells more than the plain lead, so a label
+         fitted to the wider room re-folded as the cursor passed over it. *)
+      let drawn =
+        Message_layout.fit_middle
+          (max 1 (framed_inner_width cols - sidebar_row_lead_cells))
+          (Terminal_text.single_line label)
+      in
       framed_line buf cols
         (if Option.equal Int.equal selection (Some (first + i)) then
            if focused then
@@ -1433,14 +1481,16 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~labels
                  (max 0 (cols - 5 - Message_layout.display_width drawn))
                  ' '
              ^ Ansi.reset
-           else Ansi.bold ^ " \xe2\x96\xb8 " ^ drawn ^ Ansi.reset
+           else Ansi.bold ^ sidebar_caret_lead ^ drawn ^ Ansi.reset
          else " " ^ drawn)
     | None -> framed_empty buf cols
   done;
   framed_bottom buf cols
 
-let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
-  write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~labels
+(* The same index for a list whose open row is always in it. *)
+let write_list_sidebar buf ~rows ~cols ~title ~focused ~holding ~labels
+    ~selected =
+  write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding ~labels
     ~selection:(Some selected)
 
 
@@ -1689,18 +1739,22 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
    | Some Ask_projection.Draft_skipped ->
        box_line buf cols (Printf.sprintf "      %sskipped%s" Ansi.dim Ansi.reset)
    | Some (Ask_projection.Draft_chose _) | None -> ());
-  let slot = Ask_projection.free_text_slot question in
+  let ask_id = row.Masc.Tui_decode.ar_id in
+  let slot = Ask_projection.free_text_slot ~ask_id question in
   let aft_hint = Ask_projection.free_text_hint slot in
   (
-      (* The editor belongs to one question, and the slot it holds names
-         which. Matching on that rather than on the cursor means a snapshot
-         arriving mid-sentence cannot move the typing onto another row. *)
+      (* The editor belongs to one question of one ask, and the slot it holds
+         names both. Matching on that rather than on the cursor means a
+         snapshot arriving mid-sentence cannot move the typing onto another
+         row -- nor onto another ask's question of the same id, since
+         masc_ask numbers every ask from q1. *)
       let editing_here =
         match state.ask_text_entry with
         | Some entry
-          when String.equal
-                 (Ask_projection.free_text_question_id entry.ate_slot)
-                 question.Masc.Tui_decode.aq_id ->
+          when String.equal (Ask_projection.free_text_ask_id entry.ate_slot) ask_id
+               && String.equal
+                    (Ask_projection.free_text_question_id entry.ate_slot)
+                    question.Masc.Tui_decode.aq_id ->
             Some entry
         | Some _ | None -> None
       in
@@ -1856,20 +1910,6 @@ let bracketed ~max_cells text =
     else Message_layout.fit_middle max_cells text
   in
   "[" ^ text ^ "]"
-
-(* How many posts the Board list is holding, and how many the board holds.
-
-   The listing is one server page of fifty. A board with a hundred and seven
-   posts drew "(50)" beside its name with no second number anywhere near it,
-   so the page size read as the board's size and the fifty-seven posts the
-   page does not carry were invisible. The census counts the whole board, or
-   the narrowed hearth when one is being read, so the difference is a fact
-   this row can state. Equal counts say it once: a page that carries
-   everything has no difference to report. *)
-let board_list_count_text ~loaded ~holding =
-  match holding with
-  | Some holding when holding > loaded -> Printf.sprintf "(%d of %d)" loaded holding
-  | Some _ | None -> Printf.sprintf "(%d)" loaded
 
 (* The Board reader's title row: the screen, which post, its hearth, its score
    and its replies. The id is folded at the list's ID column. Replies read "💬3"
@@ -2344,7 +2384,7 @@ let system_log_level_style : Masc.Tui_decode.system_log_level -> string = functi
 
 let system_log_category_text (entry : Masc.Tui_decode.system_log_entry) =
   match entry.sl_category with
-  | None -> "-"
+  | None -> Masc_tui_theme.Glyph.no_value
   | Some category -> category
 
 
@@ -2415,7 +2455,7 @@ let fusion_run_duration ~now run =
 
 
 let fusion_run_age ~now run =
-  Option.value ~default:"\xe2\x80\x94"
+  Option.value ~default:Masc_tui_theme.Glyph.no_value
     (Message_layout.age_text ~now ~since:run.fur_started_at)
 
 
@@ -3237,6 +3277,10 @@ let context_next_request_lines ?(show_scale_note = false) ~cols ~scale
   @ [ "" ]
 
 
+(* The width of a token figure in the recent-turns rows. "1.2M" and the
+   no-value mark both sit in it, so the rows line up on the same column. *)
+let token_cell_width = 7
+
 let context_composition_lines ~cols ~turn_back
     ~(forecast : (Masc_tui_context_inspector.forecast, string) result)
     (selection : Masc_tui_context_inspector.selection) =
@@ -3702,19 +3746,25 @@ let context_composition_lines ~cols ~turn_back
           ]
       | _, Some input ->
           fact
-            (Printf.sprintf "%s #%-4d %s  in %-7s  cache read %-7s  out %s"
+            (* fit_width, not %-7s: the cells hold the no-value mark, which is
+               three bytes and one column, and byte padding would end the row
+               two cells short of where the unset ones end. *)
+            (Printf.sprintf "%s #%-4d %s  in %s  cache read %s  out %s"
                (if index = turn_back then Masc_tui_theme.Glyph.current_entry else " ")
                recent.turn ts
-               (Inspector.format_tokens input)
-               (match recent.cache_read with
-                 | Some tokens -> Inspector.format_tokens tokens
-                 | None -> "-")
+               (Message_layout.fit_width (Inspector.format_tokens input)
+                  token_cell_width)
+               (Message_layout.fit_width
+                  (match recent.cache_read with
+                   | Some tokens -> Inspector.format_tokens tokens
+                   | None -> Masc_tui_theme.Glyph.no_value)
+                  token_cell_width)
                (* The request's own output when reported; otherwise the
                   client turn's, marked so it is not read as one request's. *)
                (match recent.output_tokens, recent.turn_output_tokens with
                  | Some tokens, _ -> Inspector.format_tokens tokens
                  | None, Some tokens -> "turn " ^ Inspector.format_tokens tokens
-                 | None, None -> "-"))
+                 | None, None -> Masc_tui_theme.Glyph.no_value))
       | _, None ->
           [ (if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " ")
             ^ Ansi.dim
@@ -3740,7 +3790,7 @@ let context_composition_lines ~cols ~turn_back
           let latest_tokens =
             match selection.Inspector.recent with
             | { input_tokens = Some n; _ } :: _ -> Inspector.format_tokens n
-            | _ -> "-"
+            | _ -> Masc_tui_theme.Glyph.no_value
           in
           [ Printf.sprintf "  %sVelocity:%s %s  %s(%d turns recorded)  ·  latest %s tokens%s"
               Ansi.dim Ansi.reset

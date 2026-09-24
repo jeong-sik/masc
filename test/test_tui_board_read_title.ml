@@ -38,17 +38,82 @@ let test_a_bracketed_value_is_never_padded_inside () =
 let test_a_page_says_what_the_board_holds () =
   Alcotest.(check string) "the page, then the board"
     "(50 of 107)"
-    (Masc_tui_render_prim.board_list_count_text ~loaded:50 ~holding:(Some 107))
+    (Masc_tui_render_prim.list_count_text ~loaded:50 ~holding:(Some 107))
 
 let test_a_page_that_carries_everything_says_it_once () =
   Alcotest.(check string) "no difference to report" "(41)"
-    (Masc_tui_render_prim.board_list_count_text ~loaded:41 ~holding:(Some 41))
+    (Masc_tui_render_prim.list_count_text ~loaded:41 ~holding:(Some 41))
 
 (* Before the census answers there is no second number to give, and the count
    of what is on screen is still true. *)
 let test_an_uncounted_board_keeps_the_page_count () =
   Alcotest.(check string) "the page alone" "(50)"
-    (Masc_tui_render_prim.board_list_count_text ~loaded:50 ~holding:None)
+    (Masc_tui_render_prim.list_count_text ~loaded:50 ~holding:None)
+
+(* The reader's index says the same pair its list header does. It read "(50)"
+   one keypress after a header that read "(50 of 198)", so the page size read
+   as the board's size to anyone who had not just seen the header. A surface
+   with nothing more to hold is unchanged. *)
+let sidebar_title ~holding labels =
+  let buf = Buffer.create 256 in
+  Masc_tui_render_prim.write_list_sidebar buf ~rows:10 ~cols:40 ~title:"Board"
+    ~focused:false ~holding ~labels ~selected:0;
+  Buffer.contents buf
+;;
+
+let holds needle text =
+  let n = String.length needle and h = String.length text in
+  let rec walk i =
+    i + n <= h && (String.equal (String.sub text i n) needle || walk (i + 1))
+  in
+  walk 0
+;;
+
+let test_the_index_says_what_the_board_holds () =
+  let labels = [ "one"; "two"; "three" ] in
+  Alcotest.(check bool) "the page, then the board" true
+    (holds "Board (3 of 9)" (sidebar_title ~holding:(Some 9) labels));
+  Alcotest.(check bool) "a list with nothing more to hold keeps its own count"
+    true
+    (holds "Board (3)" (sidebar_title ~holding:None labels));
+  Alcotest.(check bool) "a page that carries everything says it once" true
+    (holds "Board (3)" (sidebar_title ~holding:(Some 3) labels))
+;;
+
+(* Which surfaces pass a count, and which say they have none. The rows above
+   are the helper's own; these say the three paged surfaces reach it with the
+   number their own header draws, and that the filtered ones answer [None]
+   rather than leaving the question open.
+
+   [render.ml] links into no test (task-550), so this reads the source. A
+   Schedules snapshot drawn through the surface would be the better proof and
+   is not available here. *)
+let render = "bin/masc_tui_render.ml"
+
+let passes ~binding =
+  Ast_grep.count_applications_with_labelled_argument_in_value_binding
+    ~module_path:render ~binding_name:binding ~callee:"write_list_sidebar"
+    ~label:"holding"
+
+let reads ~binding ~field =
+  Ast_grep.count_field_accesses_outside_calls_in_value_binding
+    ~module_path:render ~binding_name:binding ~callees:[] ~fields:[ field ]
+
+let test_a_paged_index_is_given_the_count_its_own_header_draws () =
+  Alcotest.(check int) "the Board index asks the census" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_board_list" ~callee:"board_holding");
+  Alcotest.(check int) "the Schedules index is given the request count" 1
+    (reads ~binding:"render_schedule_detail" ~field:"scs_request_count");
+  Alcotest.(check int) "the Task Review index is given its page total" 1
+    (reads ~binding:"render_verification_detail" ~field:"vs_total");
+  List.iter
+    (fun binding ->
+      Alcotest.(check int)
+        (binding ^ " states what it holds")
+        1 (passes ~binding))
+    [ "render_schedule_detail"; "render_verification_detail" ]
+;;
 
 let () =
   Alcotest.run "tui_board_read_title"
@@ -65,5 +130,10 @@ let () =
             test_a_page_that_carries_everything_says_it_once
         ; Alcotest.test_case "an uncounted board keeps the page count" `Quick
             test_an_uncounted_board_keeps_the_page_count
+        ; Alcotest.test_case "the index says what the board holds" `Quick
+            test_the_index_says_what_the_board_holds
+        ; Alcotest.test_case
+            "a paged index is given the count its header draws" `Quick
+            test_a_paged_index_is_given_the_count_its_own_header_draws
         ] )
     ]

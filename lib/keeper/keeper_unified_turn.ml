@@ -438,6 +438,15 @@ let continuation_channel_of_wake = function
 ;;
 
 
+(* The walk dispatches a deferred suffix verbatim and otherwise the lane of
+   the keeper's assignment ([Keeper_turn_driver.run_named]); the
+   briefing is sized over the same list, read through the same function. *)
+let briefing_candidates_for_turn ~deferred_runtime_lane ~assigned_route =
+  match deferred_runtime_lane with
+  | Some hint ->
+    Deferred_candidates (Keeper_turn_driver.deferred_runtime_ids hint)
+  | None -> Lane_of_route assigned_route
+
 let run_keeper_cycle
       ~(before_dispatch_authority : unit -> (unit, string) result)
       ~(execution_path : Keeper_unified_metrics_decision.execution_path)
@@ -799,21 +808,11 @@ let run_keeper_cycle
                      (Keeper_playground_checkouts.scan_error_to_string scan_error);
                    []
                in
-               (* The briefing is pinned, so it is bounded here rather than
-                  left to the model input projection, which can only cut the
-                  conversation window. Sized from the runtime's own declared
-                  input ceiling: a runtime that declares none gets no bound,
-                  the same answer its projection gives it. Rotation to a larger
-                  lane only makes this conservative. *)
                let context_budget_bytes =
-                 (* [effective_runtime_id] is a routing label; the ceiling is
-                    declared by a binding, so resolve the lane's entry
-                    candidate before asking for one. *)
-                 Option.bind
-                   (Runtime.entry_runtime_id_of_route effective_runtime_id)
-                   Runtime.max_prompt_bytes_of_runtime_id
-                 |> Option.map (fun cap ->
-                   cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
+                 world_state_briefing_budget_bytes
+                   (briefing_candidates_for_turn
+                      ~deferred_runtime_lane
+                      ~assigned_route:(Keeper_meta_contract.runtime_id_of_meta meta))
                in
                let render_prompt observation =
                  Keeper_unified_prompt.build_prompt

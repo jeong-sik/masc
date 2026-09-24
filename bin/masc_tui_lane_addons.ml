@@ -469,6 +469,38 @@ let move_lane view delta =
            | None -> view
            | Some (row_cursor, _) -> {view with row_cursor;scroll=0;document_key=None})
   | _ -> view
+(* Nothing asked for yet, so the operator's next step is to ask. The status
+   row and the body under it both say this. *)
+let no_reading_yet_text = "No reading yet · r:refresh"
+
+(* What the body says while the view holds no reading. It used to say
+   [no_reading_yet_text] under a status row reading "Reading · nothing held
+   yet", telling the operator to press [r] for a read already on its way; the
+   list screens said "Refreshing…" over a first read that refreshes nothing. *)
+let unread_body_text ~failed_note (view : t) =
+  match view.error, view.loading with
+  | Some _, (true | false) -> failed_note
+  | None, true -> "Reading…"
+  | None, false -> no_reading_yet_text
+
+(* What the status row says about the reading. Kept whole here rather than
+   inside the row it draws, so a view can be asked what the row would say.
+
+   The row used to match on [loading] alone, so a read in flight claimed a
+   previous reading whatever the view held: a first read said one remained
+   visible while the rows under it said "No reading yet" in the same frame. *)
+let status_text (view : t) =
+  match view.loading, view.snapshot, view.error with
+  | _, Some _, Some error -> "Error: " ^ error ^ " · previous reading retained"
+  | true, Some _, None -> "Refreshing · previous reading remains visible"
+  (* A read that failed and is being tried again holds nothing either, and
+     the failure is the part an operator can act on. *)
+  | true, None, Some error -> "Load failed: " ^ error ^ " · reading again"
+  | true, None, None -> "Reading · nothing held yet"
+  | false, None, Some error -> "Load failed: " ^ error
+  | false, None, None -> no_reading_yet_text
+  | false, Some _, _ -> "Recorded observations · r:refresh"
+
 let visual_lines ?(failed_note = "") ~height ~width view =
   let clean = Masc.Tui_decode.sanitize_terminal_text in
   let fit size text = Masc_tui_message_layout.fit_width (clean text) (max 0 size) in
@@ -482,12 +514,15 @@ let visual_lines ?(failed_note = "") ~height ~width view =
   let tabs = line ~tone:Accent (String.concat " " (List.map (fun (focus,label) ->
     if view.focus=focus then "[" ^ label ^ "]" else label)
     [Timeline,"1:Time";Connections,"2:Links";Configurations,"3:TOML";Instances,"4:Workers";Rows,"5:Rows"])) in
-  let status = match view.loading, view.snapshot, view.error with
-    | _, Some _, Some error -> [line ~tone:Attention ("Error: " ^ error ^ " · previous reading retained")]
-    | true, _, _ -> [line ~tone:Dim "Refreshing · previous reading remains visible"]
-    | false, None, Some error -> wrap ~tone:Attention ("Load failed: " ^ error)
-    | false, None, None -> [line ~tone:Dim "No reading yet · r:refresh"]
-    | false, Some _, _ -> [line ~tone:Dim "Recorded observations · r:refresh"] in
+  let status =
+    let text = status_text view in
+    match view.error, view.snapshot with
+    (* A failure with nothing behind it is the row's whole message, so it
+       wraps rather than being cut to one line. *)
+    | Some _, None -> wrap ~tone:Attention text
+    | Some _, Some _ -> [line ~tone:Attention text]
+    | None, (Some _ | None) -> [line ~tone:Dim text]
+  in
   let notifications =
     (match view.draft with None -> [] | Some draft -> wrap ((if view.naming then "New TOML filename: " else ":") ^ draft))
     @ (match selected_document view with None -> [] | Some document -> List.concat_map wrap (Document.summary document))
@@ -498,9 +533,7 @@ let visual_lines ?(failed_note = "") ~height ~width view =
       let content = match view.snapshot with
       | None ->
           [line ~tone:(if Option.is_some view.error then Attention else Dim)
-             (if Option.is_some view.error then
-                failed_note
-              else "No reading yet · r:refresh")]
+             (unread_body_text ~failed_note view)]
       | Some snapshot ->
         match view.focus with
         | Timeline ->
@@ -605,6 +638,7 @@ let visual_lines ?(failed_note = "") ~height ~width view =
                   | Masc.Lane_addon_sources.Lane_output {installation_id;output_id;_} -> installation_id ^ "/" ^ Option.value ~default:"*" output_id
                   | Masc.Lane_addon_sources.Snapshot_file {id;_}
                   | Masc.Lane_addon_sources.Msx_capture {id}
+                  | Masc.Lane_addon_sources.Dos_capture {id}
                   | Masc.Lane_addon_sources.Browser_document {id;_} -> id) sources) in
             let columns ~active:_ a b c =
               let column = max 1 ((width-6)/3) in
@@ -629,6 +663,7 @@ let visual_lines ?(failed_note = "") ~height ~width view =
                       let id, origin = match source with
                         | S.Snapshot_file {id;path} -> id, "file " ^ path
                         | S.Msx_capture {id} -> id, "MSX capture"
+                        | S.Dos_capture {id} -> id, "DOS capture"
                         | S.Browser_document {id;selection;tab_id;target_id;environment;_} ->
                             let lane = S.browser_selection_lane selection in
                             id,Printf.sprintf "browser %s · tab %d · %s · %s" lane tab_id environment target_id
@@ -697,9 +732,7 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
     (* Nothing has been read yet, which is not the same as nothing installed:
        both of these lines said "No Add-ons installed." while the read was
        still on its way or had never been asked for. *)
-    | None -> [if view.loading then "Refreshing…"
-        else if Option.is_some view.error then failed_note
-        else "No reading yet · r:refresh"]
+    | None -> [unread_body_text ~failed_note view]
     | Some snapshot ->
         let summary = [Printf.sprintf "%d instances · %d lanes · %d observations · %d evidence selected"
           (List.length snapshot.instances)

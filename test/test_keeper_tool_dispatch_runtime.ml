@@ -533,7 +533,7 @@ let test_surface_read_rejects_duplicate_dispatch_fields () =
         (Some "policy_rejection") (failure_class (run (`Assoc [ "surface", `String " " ]))))
 
 let test_discord_surface_read_rest_failure_causes () =
-  let module Rest = Masc.Discord_rest_client in
+  let module Rest = Discord_rest_client in
   let check_failure label error expected_code expected_class =
     let result = Masc.Keeper_tool_in_process_runtime.discord_rest_error error in
     let code =

@@ -40,6 +40,11 @@ type pinned = private
   }
 (** Only {!parse} and {!promote} make one, so a [pinned] is always valid. *)
 
+val is_reference : string -> bool
+(** Whether a string is a [repository:tag] {!pinned} accepts. A caller that
+    hands a reference to an image store's CLI checks it first, so a value
+    shaped like a flag never reaches that argv. *)
+
 type promotion =
   { current : pinned
   ; previous : pinned option  (** What [current] replaced, kept for a rollback. *)

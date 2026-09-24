@@ -119,6 +119,8 @@ let valid_reference value =
     && tag_start tag.[0]
     && String.for_all tag_char tag
 
+let is_reference = valid_reference
+
 let table ~path = function
   | Otoml.TomlTable fields | Otoml.TomlInlineTable fields -> Ok fields
   | _ -> Error (Expected_table { path })

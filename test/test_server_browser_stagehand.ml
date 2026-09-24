@@ -89,6 +89,153 @@ let test_failure_stops_child_before_same_switch_retry () =
   check bool "server profile was safe to recreate" false (Sys.file_exists stale)
 ;;
 
+(* A damaged owner record may still name a live browser. Losing the record
+   and emptying its profile would make that browser impossible to recover. *)
+let test_malformed_owner_record_blocks_profile_reset () =
+  let masc_root = Filename.temp_dir "masc-stagehand-owner-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree masc_root)
+  @@ fun () ->
+  let profile = Process.server_profile ~masc_root in
+  let record = Process.owner_record_path ~masc_root in
+  Fs_compat.mkdir_p profile;
+  Out_channel.with_open_text record (fun output -> output_string output "{broken owner record");
+  let marker = Filename.concat profile "must-survive" in
+  Out_channel.with_open_text marker (fun output -> output_string output "profile in use");
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let config : Masc.Browser_configuration.stagehand =
+    { chrome = Filename.concat masc_root "missing-chromium"; extension = masc_root; profile = None }
+  in
+  (match
+     Stagehand.open_ ~sw ~env ~masc_root ~config ~headless:true
+       ~model:(fun _ -> fail "the model is not called") ~log:(fun _ -> ())
+   with
+   | Error detail ->
+     check bool "the record is the refusal" true
+       (String.starts_with ~prefix:"malformed stagehand owner record" detail)
+   | Ok _ -> fail "a malformed owner record must block a new browser");
+  check bool "the owner record remains for repair" true (Sys.file_exists record);
+  check bool "the previous browser profile is untouched" true (Sys.file_exists marker)
+;;
+
+(* A live PID with a different command is not proof that the old browser's
+   profile is safe to erase. Keep the record for an operator to inspect. *)
+let test_unmatched_live_pid_blocks_profile_reset () =
+  let masc_root = Filename.temp_dir "masc-stagehand-live-pid-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree masc_root)
+  @@ fun () ->
+  let profile = Process.server_profile ~masc_root in
+  let record = Process.owner_record_path ~masc_root in
+  Fs_compat.mkdir_p profile;
+  let chrome = Filename.concat masc_root "missing-chromium" in
+  let owner : Process.owner = { pid = Unix.getpid (); chrome; profile } in
+  Out_channel.with_open_text record (fun output ->
+    output_string output (Process.owner_to_string owner));
+  let marker = Filename.concat profile "must-survive" in
+  Out_channel.with_open_text marker (fun output -> output_string output "profile in use");
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let config : Masc.Browser_configuration.stagehand =
+    { chrome; extension = masc_root; profile = None }
+  in
+  (match
+     Stagehand.open_ ~sw ~env ~masc_root ~config ~headless:true
+       ~model:(fun _ -> fail "the model is not called") ~log:(fun _ -> ())
+   with
+   | Error detail ->
+     check bool "the refusal identifies the live recorded PID" true
+       (String.starts_with
+          ~prefix:(Printf.sprintf "recorded Chromium pid %d" (Unix.getpid ()))
+          detail)
+   | Ok _ -> fail "an unmatched live PID must block a new browser");
+  check bool "the unmatched PID record remains" true (Sys.file_exists record);
+  check bool "the previous browser profile remains" true (Sys.file_exists marker)
+;;
+
+(* A process group can outlive the leader recorded as its PGID. Leader ESRCH
+   alone cannot authorize clearing the record or its still-used profile. *)
+let test_dead_leader_with_live_group_blocks_profile_reset () =
+  let ready_read, ready_write = Unix.pipe () in
+  let leader =
+    match Unix.fork () with
+    | 0 ->
+      Unix.close ready_read;
+      (try
+         ignore (Unix.setsid ());
+         (match Unix.fork () with
+          | 0 ->
+            Unix.close ready_write;
+            Unix.sleep 60;
+            Unix._exit 0
+          | _ ->
+            let ready = Bytes.of_string "R" in
+            ignore (Unix.write ready_write ready 0 1);
+            Unix.close ready_write;
+            Unix._exit 0)
+       with _ -> Unix._exit 1)
+    | pid -> pid
+  in
+  Unix.close ready_write;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close ready_read;
+      (try Unix.kill (-leader) Sys.sigkill with
+       | Unix.Unix_error (Unix.ESRCH, _, _) -> ()))
+  @@ fun () ->
+  let ready = Bytes.create 1 in
+  let count = Unix.read ready_read ready 0 1 in
+  ignore (Unix.waitpid [] leader);
+  check int "the orphan group was created" 1 count;
+  (match Unix.kill leader 0 with
+   | () -> fail "the group leader should have exited"
+   | exception Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+  let masc_root = Filename.temp_dir "masc-stagehand-orphan-group-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree masc_root)
+  @@ fun () ->
+  let profile = Process.server_profile ~masc_root in
+  let record = Process.owner_record_path ~masc_root in
+  Fs_compat.mkdir_p profile;
+  let chrome = Filename.concat masc_root "missing-chromium" in
+  let owner : Process.owner = { pid = leader; chrome; profile } in
+  Out_channel.with_open_text record (fun output ->
+    output_string output (Process.owner_to_string owner));
+  let marker = Filename.concat profile "must-survive" in
+  Out_channel.with_open_text marker (fun output -> output_string output "profile in use");
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let config : Masc.Browser_configuration.stagehand =
+    { chrome; extension = masc_root; profile = None }
+  in
+  (match
+     Stagehand.open_ ~sw ~env ~masc_root ~config ~headless:true
+       ~model:(fun _ -> fail "the model is not called") ~log:(fun _ -> ())
+   with
+   | Error detail ->
+     check bool "the live group is the refusal" true
+       (String.starts_with
+          ~prefix:(Printf.sprintf "recorded Chromium group %d is still alive" leader)
+          detail)
+   | Ok _ -> fail "a live orphan group must block a new browser");
+  check bool "the orphan group owner record remains" true (Sys.file_exists record);
+  check bool "the orphan group profile remains" true (Sys.file_exists marker)
+;;
+
 let () =
   run "server_browser_stagehand"
-    [ "lifetime", [ test_case "failed open stops Chromium before same-switch retry" `Quick test_failure_stops_child_before_same_switch_retry ] ]
+    [ "lifetime"
+    , [ test_case "failed open stops Chromium before same-switch retry" `Quick
+          test_failure_stops_child_before_same_switch_retry
+      ; test_case "malformed owner record blocks profile reset" `Quick
+          test_malformed_owner_record_blocks_profile_reset
+      ; test_case "unmatched live PID blocks profile reset" `Quick
+          test_unmatched_live_pid_blocks_profile_reset
+      ; test_case "dead leader with live group blocks profile reset" `Quick
+          test_dead_leader_with_live_group_blocks_profile_reset
+      ]
+    ]

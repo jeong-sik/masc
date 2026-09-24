@@ -6326,6 +6326,116 @@ let decode_planning_snapshot json =
   let* pl_generated_at = required_string_field json "generated_at" in
   Ok { pl_goals; pl_rollup; pl_backlog; pl_goal_history; pl_generated_at }
 
+type overview_goal = {
+  og_id : string;
+  og_title : string;
+  og_phase : Goal_phase.t;
+  og_priority : int;
+  og_due_date : string option;
+  og_task_count : int;
+  og_task_done_count : int;
+  og_stagnation_seconds : int option;
+  og_task_ids : string list;
+}
+
+type overview_goals_error =
+  | Overview_goal_phase_unknown of { goal_id : string; phase : string }
+  | Overview_goals_source_unavailable of string
+  | Overview_goals_malformed of string
+
+let overview_goals_error_to_string = function
+  | Overview_goal_phase_unknown { goal_id; phase } ->
+      Printf.sprintf "goal %s has a phase this build does not know: %S" goal_id
+        phase
+  | Overview_goals_source_unavailable reason -> reason
+  | Overview_goals_malformed detail -> detail
+
+let decode_overview_goal_items decode items =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest -> (
+        match decode item with
+        | Ok decoded -> loop (decoded :: acc) rest
+        | Error _ as error -> error)
+  in
+  loop [] items
+
+(* One tree node and every goal under it, parent first. A child goal is a goal
+   in its own right, so the Overview reads the forest flat. *)
+let rec decode_overview_goal_node json =
+  let malformed result =
+    Result.map_error (fun detail -> Overview_goals_malformed detail) result
+  in
+  let* og_id = malformed (required_string_field json "id") in
+  let* og_title = malformed (required_string_field json "title") in
+  let* raw_phase = malformed (required_string_field json "phase") in
+  let* og_phase =
+    match Goal_phase.parse raw_phase with
+    | Some phase -> Ok phase
+    | None ->
+        Error (Overview_goal_phase_unknown { goal_id = og_id; phase = raw_phase })
+  in
+  let* og_priority = malformed (required_int_field json "priority") in
+  let* og_due_date = malformed (optional_string_field json "due_date") in
+  let* og_task_count = malformed (required_int_field json "task_count") in
+  let* og_task_done_count =
+    malformed (required_int_field json "task_done_count")
+  in
+  let* og_stagnation_seconds =
+    malformed (required_nullable_int_field json "stagnation_seconds")
+  in
+  let* tasks_json = malformed (required_list_field json "tasks") in
+  let* og_task_ids =
+    decode_overview_goal_items
+      (fun task -> malformed (required_string_field task "id"))
+      tasks_json
+  in
+  let* children_json = malformed (required_list_field json "children") in
+  let* children =
+    decode_overview_goal_items decode_overview_goal_node children_json
+  in
+  Ok
+    ({ og_id
+     ; og_title
+     ; og_phase
+     ; og_priority
+     ; og_due_date
+     ; og_task_count
+     ; og_task_done_count
+     ; og_stagnation_seconds
+     ; og_task_ids
+     }
+    :: List.concat children)
+
+let decode_overview_goals json =
+  let* () =
+    match decode_goal_source_failure json with
+    | Ok (Some failure) ->
+        Error
+          (Overview_goals_source_unavailable
+             (goal_source_failure_to_string failure))
+    | Ok None -> Ok ()
+    | Error detail -> Error (Overview_goals_malformed detail)
+  in
+  let* tree_json =
+    match Json_util.assoc_member_opt "tree" json with
+    | None -> Error (Overview_goals_malformed "missing required field 'tree'")
+    (* The server nulls the tree when it cannot read the approval queue it
+       joins onto each goal, and says why in [approval_queue_state]. *)
+    | Some `Null ->
+        Error
+          (Overview_goals_source_unavailable
+             ("the server sent no goal tree: approval_queue_state="
+             ^ Yojson.Safe.to_string (member "approval_queue_state" json)))
+    | Some (`List items) -> Ok items
+    | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _) ->
+        Result.map_error
+          (fun detail -> Overview_goals_malformed detail)
+          (required_list_field json "tree")
+  in
+  let* nodes = decode_overview_goal_items decode_overview_goal_node tree_json in
+  Ok (List.concat nodes)
+
 let decode_keeper_runtime json =
   let* kr_name = required_string_field json "name" in
   let* raw_health = required_string_field json "health" in

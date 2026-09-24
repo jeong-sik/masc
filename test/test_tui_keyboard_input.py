@@ -241,6 +241,8 @@ def test_http_endpoint(
                 fixture = fleet_safety_fixture()
             elif path_only in fixtures:
                 fixture = fixtures[path_only]
+            elif path_only == DASHBOARD_GOALS_PATH:
+                fixture = empty_goals_fixture()
             else:
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
@@ -1173,6 +1175,38 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
         "agent_briefs": [],
         "keepers_unread": [],
     }
+
+
+DASHBOARD_GOALS_PATH = "/api/v1/dashboard/goals"
+
+
+def empty_goals_fixture() -> HttpResponse:
+    """A goal tree with no goals, the shape the server sends for a workspace
+    that has none.
+
+    The Overview reads it for its GOALS section. Unmocked, the 503 sentinel
+    would draw "goals unavailable" in every Overview scenario instead of the
+    section a scenario actually meets. A scenario that is about goals keys
+    this path itself.
+    """
+    return (200, {
+        "generated_at": "2026-09-23T00:00:00Z",
+        "tree": [],
+        "summary": {
+            "total_goals": 0,
+            "active_goals": 0,
+            "phase_counts": {
+                "executing": 0,
+                "verifying": 0,
+                "awaiting_confirmation": 0,
+                "completed": 0,
+                "dropped": 0,
+            },
+            "total_tasks": 0,
+            "done_tasks": 0,
+            "pending_approvals": 0,
+        },
+    })
 
 
 def fleet_safety_fixture() -> HttpResponse:
@@ -3515,7 +3549,9 @@ def assert_row_budgeted_surfaces(
     # smallest surface the TUI draws is 15 rows, where it drops the composer
     # and keeps the same three, so three is the tightest this panel gets. The
     # budget checked here is that the panel stops where its rows stop: the
-    # third item is the last one drawn and the fourth is not.
+    # third item is the last one drawn and the fourth is not. GOALS is served
+    # after the panel and the one held task row, so at this height it gets no
+    # row (4 spare rows: 3 attention + 1 task) and the count is unchanged.
     for expected in (b"attention-1", b"attention-3", b"task-1", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")

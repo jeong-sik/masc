@@ -2023,6 +2023,63 @@ let test_absorbed_chain_follows_a_revised_claim () =
        found)
 ;;
 
+(* The events sidecar grows with every search, so a search whose absorbed rows
+   all reach a current claim does not read it. A sidecar that cannot be read
+   then costs that search nothing. *)
+let test_absorbed_search_reads_events_only_for_a_stopped_chain () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "absorbed-events-unread" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let current = fact "hotel holds the release notes" in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ current ];
+  let absorbed = fact "india deploys on monday" in
+  (match
+     Masc.Keeper_memory_absorbed.append_all
+       ~keepers_dir
+       ~keeper_id:meta.name
+       [ { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
+         ; trace_id = "absorbing-pass"
+         ; memory_id = id absorbed
+         ; into = id current
+         ; fact = absorbed
+         }
+       ]
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
+  (* A directory where the sidecar file should be: reading it fails. *)
+  Unix.mkdir
+    (Masc.Keeper_memory_os_events.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
+    0o755;
+  let search () =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:
+        (`Assoc
+            [ "query", `String "deploys"; "source", `String "absorbed"; "limit", `Int 10 ])
+    |> Yojson.Safe.from_string
+  in
+  let found =
+    match search () |> json_field "matches" with
+    | `List items -> items
+    | _ -> Alcotest.fail "matches is a list"
+  in
+  Alcotest.(check (list (pair string bool)))
+    "a chain that reaches a current claim does not need the events sidecar"
+    [ "india deploys on monday", true ]
+    (List.map
+       (fun matched ->
+          string_field "text" matched, json_field "into_current" matched = `Bool true)
+       found)
+;;
+
 (* A keeper asks in several words, and a claim rarely holds them as one run of
    text. A claim answers when it holds the whole query or every word of it, in
    any order. The whole-query answers come first, so a search the substring
@@ -2836,6 +2893,10 @@ let () =
             "absorbed chain follows a revised claim"
             `Quick
             test_absorbed_chain_follows_a_revised_claim
+        ; Alcotest.test_case
+            "absorbed search reads events only for a stopped chain"
+            `Quick
+            test_absorbed_search_reads_events_only_for_a_stopped_chain
         ; Alcotest.test_case
             "a query of several words is answered"
             `Quick

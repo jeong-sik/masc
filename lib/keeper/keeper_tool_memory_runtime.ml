@@ -264,32 +264,6 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~que
   with
   | Error detail -> Error (Absorbed_read_failed detail)
   | Ok lines ->
-    match
-      Domain_pool_ref.submit_io_or_inline (fun () ->
-        Keeper_memory_os_events.read ~keepers_dir ~keeper_id)
-    with
-    | Error error ->
-      Error (Events_read_failed (Keeper_memory_os_events.file_read_error_to_string error))
-    | Ok event_lines ->
-    let revised_to, unreadable_events =
-      List.fold_left
-        (fun (revised_to, unreadable) (line, decoded) ->
-           match decoded with
-           | Ok
-               { Keeper_memory_os_events.memory_id
-               ; kind = Keeper_memory_os_events.Revised { superseded_by }
-               ; _
-               } -> StringMap.add memory_id superseded_by revised_to, unreadable
-           | Ok
-               { Keeper_memory_os_events.kind =
-                   Keeper_memory_os_events.(Retrieved _ | Retracted)
-               ; _
-               } -> revised_to, unreadable
-           | Error error -> revised_to, (line, error) :: unreadable)
-        (StringMap.empty, [])
-        event_lines
-    in
-    let unreadable_events = List.rev unreadable_events in
     let rows, unreadable =
       List.partition_map
         (fun (line, decoded) ->
@@ -318,7 +292,7 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~que
         StringMap.empty
         absorbed
     in
-    let rec chain_end ~passed id =
+    let rec chain_end ~revised_to ~passed id =
       if StringSet.mem id current_ids
       then id
       else (
@@ -331,13 +305,53 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~que
         match next with
         | None -> id
         | Some next when StringSet.mem next passed -> id
-        | Some next -> chain_end ~passed next)
+        | Some next -> chain_end ~revised_to ~passed next)
     in
-    let resolve (row : Keeper_memory_absorbed.record) =
-      let into = chain_end ~passed:(StringSet.singleton row.memory_id) row.into in
+    let resolve ~revised_to (row : Keeper_memory_absorbed.record) =
+      let into =
+        chain_end ~revised_to ~passed:(StringSet.singleton row.memory_id) row.into
+      in
       { row; into; into_current = StringSet.mem into current_ids }
     in
-    let resolved = List.map resolve absorbed in
+    (* The events sidecar grows with every search ([Retrieved] rows), so it
+       is read only when a chain of absorbed rows alone stops short of a
+       current claim; only then can a [Revised] step move it. *)
+    let by_rows = List.map (resolve ~revised_to:StringMap.empty) absorbed in
+    let followed =
+      if List.for_all (fun (m : absorbed_match) -> m.into_current) by_rows
+      then Ok (by_rows, [])
+      else (
+        match
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            Keeper_memory_os_events.read ~keepers_dir ~keeper_id)
+        with
+        | Error error ->
+          Error
+            (Events_read_failed (Keeper_memory_os_events.file_read_error_to_string error))
+        | Ok event_lines ->
+          let revised_to, unreadable_events =
+            List.fold_left
+              (fun (revised_to, unreadable) (line, decoded) ->
+                 match decoded with
+                 | Ok
+                     { Keeper_memory_os_events.memory_id
+                     ; kind = Keeper_memory_os_events.Revised { superseded_by }
+                     ; _
+                     } -> StringMap.add memory_id superseded_by revised_to, unreadable
+                 | Ok
+                     { Keeper_memory_os_events.kind =
+                         Keeper_memory_os_events.(Retrieved _ | Retracted)
+                     ; _
+                     } -> revised_to, unreadable
+                 | Error error -> revised_to, (line, error) :: unreadable)
+              (StringMap.empty, [])
+              event_lines
+          in
+          Ok (List.map (resolve ~revised_to) absorbed, List.rev unreadable_events))
+    in
+    match followed with
+    | Error _ as error -> error
+    | Ok (resolved, unreadable_events) ->
     let last_write : (string * string, int) Hashtbl.t = Hashtbl.create 64 in
     List.iteri
       (fun index (m : absorbed_match) ->

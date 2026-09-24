@@ -44,7 +44,23 @@ let refusal_of_rejection rejection =
   }
 ;;
 
-let caller_refusal message = { failure_class = Tool_result.Policy_rejection; message }
+type caller_cwd_refusal =
+  | Missing_cwd of { cwd : string; read_hint : string option }
+  | Cwd_is_file of { cwd : string }
+
+let caller_refusal reason =
+  let message =
+    match reason with
+    | Missing_cwd { cwd; read_hint = None } ->
+      Printf.sprintf "cwd_not_directory: %s (directory does not exist)" cwd
+    | Missing_cwd { cwd; read_hint = Some hint } ->
+      Printf.sprintf
+        "cwd_not_directory: %s (directory does not exist; Read will not create cwd);%s"
+        cwd hint
+    | Cwd_is_file { cwd } ->
+      Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd
+  in
+  { failure_class = Tool_result.Policy_rejection; message }
 
 let project_root_of_config (config : Workspace.config) : string =
   let base = config.base_path in

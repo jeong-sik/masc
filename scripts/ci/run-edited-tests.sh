@@ -1327,6 +1327,29 @@ self_test() {
   # and the suites after it are named, a build the budget cuts off names every
   # suite, and a suite that does not link is the build's failure. The scope
   # and stanza readers are stubbed; their own self-tests cover them.
+  # The bound a call was given is not in the dune command -- "timeout" wraps
+  # it -- so a fixture that reads only the dune calls cannot tell 600s from
+  # 202s, which is the whole of task-1678. This shim records the bound and
+  # then runs the real thing, so an expectation can name both.
+  write_stand_in_timeout() {
+    # The real one, resolved before the stand-in shadows it. Writing
+    # "timeout" into the body would make the shim call itself: the fixture
+    # puts its own bin first on PATH, which is the whole point of it.
+    local real
+    real=$(command -v timeout) || {
+      echo "self-test: no timeout(1) to stand in front of" >&2
+      return 1
+    }
+    cat > "$1" <<FAKE
+#!/usr/bin/env bash
+if [ -n "\${FAKE_DUNE_BOUNDS_FILE:-}" ]; then
+  printf '%s\n' "\$1" >> "\${FAKE_DUNE_BOUNDS_FILE}"
+fi
+exec ${real} "\$@"
+FAKE
+    chmod +x "$1"
+  }
+
   write_stand_in_dune() {
     cat > "$1" <<'FAKE'
 #!/usr/bin/env bash
@@ -1377,12 +1400,22 @@ FAKE
     trap 'rm -rf "${work}"' EXIT
     mkdir -p "${work}/bin" "${work}/root"
     write_stand_in_dune "${work}/bin/dune"
+    # Only where a bound is being read. The shim costs a fork and an exec on
+    # every timeout(1) call, and the cases budgeted at two or three seconds
+    # measure a wall clock: standing it in front of all of them turned two
+    # of those green cases red, and not the same two on each run.
+    if [ -n "${RUNNER_DUNE_BOUNDS_FILE:-}" ]; then
+      write_stand_in_timeout "${work}/bin/timeout"
+    fi
     printf 'print("run")\n' > "${work}/scope.py"
     : > "${work}/reader.py"
     PATH="${work}/bin:${PATH}"
     export FAKE_DUNE_BUILD_SECONDS="${build_seconds}"
     if [ -n "${RUNNER_DUNE_CALLS_FILE:-}" ]; then
       export FAKE_DUNE_CALLS_FILE="${RUNNER_DUNE_CALLS_FILE}"
+    fi
+    if [ -n "${RUNNER_DUNE_BOUNDS_FILE:-}" ]; then
+      export FAKE_DUNE_BOUNDS_FILE="${RUNNER_DUNE_BOUNDS_FILE}"
     fi
     scope_tool="${work}/scope.py"
     stanza_reader="${work}/reader.py"
@@ -1418,20 +1451,43 @@ FAKE
       failures=$((failures + 1))
     fi
   }
+  # [RUNNER_WANT_FIRST_BOUND] is the seconds the first dune call was given.
+  # The bound rides "timeout", not the dune command, so a fixture that reads
+  # the calls alone cannot tell a custom 600s bound from the 202s remainder
+  # task-1678 shrank it to. Set in the environment rather than taken as an
+  # argument, the way this file's other fixture knobs are, so the callers
+  # that check no bound keep their argument list.
   runner_calls_check() {
     local label="$1" want_calls="$2"
+    local want_first_bound="${RUNNER_WANT_FIRST_BOUND:-}"
     shift 2
-    local calls got recorded_call
+    local calls bounds got recorded_call recorded_bounds
     calls=$(mktemp)
-    got=$(RUNNER_DUNE_CALLS_FILE="${calls}" runner_failures "$@")
+    bounds=$(mktemp)
+    if [ -n "${want_first_bound}" ]; then
+      got=$(RUNNER_DUNE_CALLS_FILE="${calls}" RUNNER_DUNE_BOUNDS_FILE="${bounds}" \
+        runner_failures "$@")
+    else
+      got=$(RUNNER_DUNE_CALLS_FILE="${calls}" runner_failures "$@")
+    fi
     recorded_call=$(cat "${calls}")
-    rm -f "${calls}"
-    if [ -z "${got}" ] && [ "${recorded_call}" = "${want_calls}" ]; then
+    # Only the first bound is pinned. The phases after it are given what the
+    # budget has left, which is wall-clock and not a fixture's to state.
+    recorded_bounds=$(head -1 "${bounds}")
+    rm -f "${calls}" "${bounds}"
+    if [ -z "${got}" ] && [ "${recorded_call}" = "${want_calls}" ] \
+      && { [ -z "${want_first_bound}" ] \
+           || [ "${recorded_bounds}" = "${want_first_bound}" ]; }
+    then
       echo "ok   ${label}"
     else
       echo "FAIL ${label}"
       echo "     want: no failures, dune calls in order: ${want_calls}"
+      [ -n "${want_first_bound}" ] \
+        && echo "     want first bound: ${want_first_bound}s"
       echo "     got:  ${got:-<nothing>}, dune invocation(s): ${recorded_call:-<nothing>}"
+      [ -n "${want_first_bound}" ] \
+        && echo "     got first bound:  ${recorded_bounds:-<nothing>}"
       failures=$((failures + 1))
     fi
   }
@@ -1464,17 +1520,24 @@ FAKE
   # (202s/221s in run 35685267067) and its bound shrank to that. It must run
   # first, at its own bound, with everything else fitted into what is left.
   #
-  # Assert the calls themselves: the custom-bound Python rule runs before
-  # linked suites and is not run again by the ordinary Python phase. This
-  # checks the order without making a loaded runner prove it by sleeping
-  # close to a wall-clock budget (#38615). Removing the custom-bound phase
-  # reverses these calls; running the rule twice adds a third call. The hook
-  # and this fixture go together when #36343 removes the custom bound.
+  # Assert the calls themselves, and the bound the first one was given: the
+  # custom-bound Python rule runs before linked suites, is not run again by
+  # the ordinary Python phase, and reaches its own 600s rather than whatever
+  # the remainder happens to be. This checks both without making a loaded
+  # runner prove it by sleeping close to a wall-clock budget (#38615).
+  #
+  # Removing the custom-bound phase reverses these calls; running the rule
+  # twice adds a third call; giving it the remainder instead of its own bound
+  # -- which is task-1678 itself, 202s/221s in run 35685267067 -- changes the
+  # first bound. The budget is wide enough that the bound is not capped by
+  # it, so the two numbers are told apart. The hook and this fixture go
+  # together when #36343 removes the custom bound.
   MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py" \
   FAKE_DUNE_SUITE_SECONDS=0 \
+  RUNNER_WANT_FIRST_BOUND=600 \
     runner_calls_check "a custom-bound walk runs once before linked suites" \
       $'@test/runtest-test_slow_py\ntest/test_slow_one.exe' \
-      0 30 test_slow_one test/test_slow_py.py
+      0 900 test_slow_one test/test_slow_py.py
   MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py" \
     runner_check "an exhausted budget names the walk and the linked suite" \
       "test/test_slow_py (not run: the step budget ran out);test/test_slow_one (not built: the step budget ran out);" \

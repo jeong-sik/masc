@@ -212,32 +212,49 @@ let test_a_long_journal_names_each_tail_row_by_its_offset () =
 
 (* Drop reasons are the librarian's own account of what it forgot. They ride
    the journal line and nothing else stores them, so losing them in the
-   projection loses them entirely. *)
+   projection loses them entirely. The line names what its commit removed, so
+   the dropped memory is stored first and the commit leaves it out. *)
 let test_drop_reasons_survive_the_projection () =
   with_keepers_dir (fun keepers_dir ->
-    let fact : Types.fact =
-      Types.observed ~claim:"kept" ~category:Fact ~now:1_700_000_000.0
+    let observed claim : Types.fact =
+      Types.observed ~claim ~category:Fact ~now:1_700_000_000.0
         ~origin:{ kind = Authored; trace_id = "" }
+    in
+    let kept = observed "kept" in
+    let forgotten = observed "forgotten" in
+    let seeded =
+      match
+        Current.replace
+          ~keepers_dir
+          ~keeper_id:keeper
+          ~expected_revision:None
+          ~now:1_700_000_000.0
+          ~source:{ kind = Explicit_write; trace_id = "trace-seed" }
+          ~facts:[ kept; forgotten ]
+          ()
+      with
+      | Ok snapshot -> snapshot
+      | Error reason -> Alcotest.failf "seed failed: %s" reason
     in
     match
       Current.replace
         ~keepers_dir
         ~keeper_id:keeper
         ~dropped_statements:
-          [ { memory_id = "sha256:" ^ String.make 64 'a'
+          [ { memory_id = Types.memory_id forgotten
             ; reason = "superseded by the openssl decision"
             }
           ]
-        ~expected_revision:None
-        ~now:1_700_000_000.0
+        ~expected_revision:(Some seeded.revision)
+        ~now:1_700_000_001.0
         ~source:{ kind = Librarian; trace_id = "trace-a" }
-        ~facts:[ fact ]
+        ~facts:[ kept ]
         ()
     with
     | Error reason -> Alcotest.failf "replace failed: %s" reason
     | Ok _ ->
-      (match read_json ~keepers_dir with
-       | [ line ] ->
+      (match List.rev (read_json ~keepers_dir) with
+       | line :: _ ->
          let dropped = U.to_list (field line "dropped") in
          Alcotest.(check int) "one drop statement" 1 (List.length dropped);
          (match dropped with
@@ -246,7 +263,7 @@ let test_drop_reasons_survive_the_projection () =
               "superseded by the openssl decision"
               (U.to_string (field statement "reason"))
           | _ -> Alcotest.fail "expected one statement")
-       | lines -> Alcotest.failf "expected one line, got %d" (List.length lines)))
+       | [] -> Alcotest.fail "expected journal lines"))
 ;;
 
 (* A pass that started and was cancelled before it could commit used to leave

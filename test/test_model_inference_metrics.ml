@@ -101,7 +101,7 @@ let runtime_lane_label_for_test model_key =
 let success_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
     ?(cache_read_tokens=0) ?(cache_creation_tokens=0)
     ?(latency_ms=500) ?prompt_per_second ?peak_memory_gb
-    ?provider ?provider_kind ?usage_trust ?(usage_anomaly_reasons=[])
+    ?provider_kind ?usage_trust ?(usage_anomaly_reasons=[])
     ?(cost_usd=0.01) ?(tools_used=[]) () =
   let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ?identity_seed ~model ~ts ()
@@ -113,10 +113,6 @@ let success_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=
     @
     (match peak_memory_gb with
      | Some v -> [("peak_memory_gb", `Float v)]
-     | None -> [])
-    @
-    (match provider with
-     | Some v -> [("provider", `String v)]
      | None -> [])
     @
     (match provider_kind with
@@ -160,7 +156,7 @@ let success_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=
   ]
 
 let cost_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
-    ?(latency_ms=500) ?tokens_per_second ?provider
+    ?(latency_ms=500) ?tokens_per_second
     ?(provider_kind="ollama") () =
   let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ?identity_seed ~model ~ts ()
@@ -168,11 +164,6 @@ let cost_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
   let tok_fields =
     match tokens_per_second with
     | Some v -> [("tokens_per_second", `Float v)]
-    | None -> []
-  in
-  let provider_fields =
-    match provider with
-    | Some value -> [ ("provider", `String value) ]
     | None -> []
   in
   `Assoc ([
@@ -191,18 +182,14 @@ let cost_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
     ("keeper_turn_id", `Int keeper_turn_id);
     ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
     ("request_latency_ms", `Int latency_ms);
-  ] @ provider_fields @ tok_fields)
+  ] @ tok_fields)
 
-let error_entry ~runtime_id ~ts ?provider () =
+let error_entry ~runtime_id ~ts () =
   `Assoc [
     ("ts_unix", `Float ts);
     ("tool_call_count", `Int 0);
     ("tools_used", `List []);
     ("telemetry", `Assoc [
-      ("provider",
-        match provider with
-        | Some v -> `String v
-        | None -> `Null);
       ("runtime_id", `String runtime_id);
       ("error_category", `String "timeout");
       ("outcome", `String "error");
@@ -211,7 +198,7 @@ let error_entry ~runtime_id ~ts ?provider () =
     ]);
   ]
 
-let success_entry_without_usage ~model ~ts ?provider
+let success_entry_without_usage ~model ~ts
     ?(telemetry_reported = false)
     ?(coverage_reason = "missing_usage_and_inference")
     ?(coverage_stage = "agent_core")
@@ -220,11 +207,6 @@ let success_entry_without_usage ~model ~ts ?provider
     () =
   let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model ~ts ()
-  in
-  let extra_fields =
-    match provider with
-    | Some value -> [ ("provider", `String value) ]
-    | None -> []
   in
   let diag_fields =
     [ ("usage_reported", `Bool false)
@@ -252,7 +234,7 @@ let success_entry_without_usage ~model ~ts ?provider
       ("outcome", `String "success");
       ("turn_count", `Int 1);
       ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
-    ] @ extra_fields @ diag_fields));
+    ] @ diag_fields));
   ]
 
 let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
@@ -412,11 +394,11 @@ let test_single_model_success () =
     write_decisions path [
       success_entry ~model:"claude-sonnet" ~ts:(ts -. 10.0)
         ~input_tokens:200 ~output_tokens:100 ~latency_ms:1000
-        ~provider:"claude" ~cost_usd:0.005
+        ~cost_usd:0.005
         ~tools_used:["shell"; "read"] ();
       success_entry ~model:"claude-sonnet" ~ts:(ts -. 5.0)
         ~input_tokens:150 ~output_tokens:80 ~latency_ms:800
-        ~provider:"claude" ~cost_usd:0.003 ~tools_used:["shell"] ();
+        ~cost_usd:0.003 ~tools_used:["shell"] ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 2 agg.total_entries;
@@ -424,7 +406,6 @@ let test_single_model_success () =
     check int "models" 1 (List.length agg.models);
     let s = List.hd agg.models in
     check string "model_id" "claude-sonnet" s.model_id;
-    check (option string) "provider" None s.provider;
     check int "entry_count" 2 s.entry_count;
     check int "success_count" 2 s.success_count;
     check int "error_count" 0 s.error_count;
@@ -455,9 +436,6 @@ let test_provider_kind_is_not_reconstructed () =
     check int "total_entries" 1 agg.total_entries;
     let s = List.hd agg.models in
     check string "model stays bare" "kimi-k2.6" s.model_id;
-    check (option string) "provider not reconstructed" None s.provider;
-    let recent = List.hd s.recent_entries in
-    check (option string) "recent provider not reconstructed" None recent.re_provider;
     ())
 
 let test_usage_labels_never_suppress_raw_aggregates () =
@@ -530,7 +508,6 @@ let test_error_turns_counted () =
       s.model_id = "local_only (runtime)") agg.models in
     check bool "error model found" true (Option.is_some error_model);
     let em = Option.get error_model in
-    check (option string) "error provider unresolved" None em.provider;
     check int "error_count" 1 em.error_count;
     check int "success_count" 0 em.success_count;
     check (option (float 0.001)) "error model latency unknown" None em.avg_latency_ms;
@@ -632,8 +609,6 @@ let test_json_roundtrip () =
     let m = List.hd models in
     check string "model id redacted" (runtime_lane_label_for_test "test-model")
       (m |> member "model_id" |> to_string);
-    check bool "provider redacted -> null" true
-      (match m |> member "provider" with `Null -> true | _ -> false);
     check int "success_count" 1 (m |> member "success_count" |> to_int);
     check int "usage_sample_count" 1
       (m |> member "usage_sample_count" |> to_int);
@@ -674,8 +649,6 @@ let test_prompt_tps_and_peak_memory_aggregates () =
     check (float 0.001) "max peak mem" 20.25
       (Option.value ~default:0.0 s.max_peak_memory_gb);
     let first_recent = List.hd s.recent_entries in
-    check (option string) "recent provider derived"
-      None first_recent.re_provider;
     check (float 0.001) "recent prompt tok/s" 1500.0
       (Option.value ~default:0.0 first_recent.re_prompt_tok_per_sec);
     check (float 0.001) "recent peak memory" 20.25
@@ -688,8 +661,6 @@ let test_prompt_tps_and_peak_memory_aggregates () =
     check (float 0.001) "max peak mem json" 20.25
       (m |> member "max_peak_memory_gb" |> to_float);
     let recent = m |> member "recent_entries" |> to_list |> List.hd in
-    check bool "recent provider null" true
-      (match recent |> member "provider" with `Null -> true | _ -> false);
     check (float 0.001) "recent prompt json" 1500.0
       (recent |> member "prompt_tok_per_sec" |> to_float);
     check (float 0.001) "recent peak mem json" 20.25
@@ -701,8 +672,7 @@ let test_missing_usage_serializes_unknowns () =
     let path = make_keeper_dir base "missing_usage" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry_without_usage ~model:"kimi-for-coding" ~ts:(ts -. 5.0)
-        ~provider:"kimi_cli" ();
+      success_entry_without_usage ~model:"kimi-for-coding" ~ts:(ts -. 5.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
@@ -744,7 +714,6 @@ let test_coverage_diagnostics_survive_aggregation () =
     write_decisions path [
       success_entry_without_usage ~model:"glm-coding:glm-5"
         ~ts:(ts -. 5.0)
-        ~provider:"glm-coding"
         ~turn_lane:"text_only"
         ~stop_reason:"completed"
         ();
@@ -1100,15 +1069,15 @@ let test_cost_latency_json_composes_axes_and_percentiles () =
     let path = make_keeper_dir base "cost_latency" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry ~model:"claude-sonnet" ~provider:"anthropic"
+      success_entry ~model:"claude-sonnet"
         ~ts:(ts -. 30.0)
         ~input_tokens:100 ~output_tokens:50 ~latency_ms:100
         ~cost_usd:0.03 ();
-      success_entry ~model:"claude-sonnet" ~provider:"anthropic"
+      success_entry ~model:"claude-sonnet"
         ~ts:(ts -. 20.0)
         ~input_tokens:10 ~output_tokens:5 ~latency_ms:200
         ~cost_usd:0.02 ();
-      success_entry ~model:"gpt" ~provider:"openai"
+      success_entry ~model:"gpt"
         ~ts:(ts -. 10.0)
         ~input_tokens:20 ~output_tokens:10 ~latency_ms:1000
         ~cost_usd:0.01 ();
@@ -1216,7 +1185,6 @@ let test_cost_latency_json_preserves_missing_latency_as_null () =
           ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
           ("usage_reported", `Bool true);
           ("telemetry_reported", `Bool false);
-          ("provider", `String "local");
           ("input_tokens", `Int 100);
           ("output_tokens", `Int 50);
           ("cost_usd", `Float 0.01);
@@ -1456,11 +1424,10 @@ let test_buckets_with_compute () =
    below do not depend on the jsonl parser, and stay robust to future
    changes in the decisions.jsonl shape. *)
 
-let zero_model_stats (model_id : string) ~provider ~entry_count
+let zero_model_stats (model_id : string) ~entry_count
     : M.model_stats =
   {
     model_id;
-    provider;
     entry_count;
     avg_tok_per_sec = None;
     p50_tok_per_sec = None;
@@ -1524,7 +1491,7 @@ let test_prompt_feedback_redacts_provider_model_identity () =
   let raw_model = "openrouter:secret-model" in
   let lane = runtime_lane_label_for_test raw_model in
   let stats =
-    { (zero_model_stats raw_model ~provider:(Some "openrouter") ~entry_count:10)
+    { (zero_model_stats raw_model ~entry_count:10)
       with success_count = 7
          ; error_count = 3
          ; p95_latency_ms = Some 130_000.0
@@ -1556,7 +1523,7 @@ let test_prompt_feedback_redacts_provider_model_identity () =
 let test_prompt_feedback_is_cost_independent () =
   let render total_cost_usd =
     let stats =
-      { (zero_model_stats "runtime:test" ~provider:None ~entry_count:1) with
+      { (zero_model_stats "runtime:test" ~entry_count:1) with
         total_cost_usd
       }
     in
@@ -1585,7 +1552,6 @@ let test_prompt_feedback_is_cost_independent () =
 let test_usage_signal_uses_tokens_not_cost () =
   let entry : Model_inference_metrics_entry.raw_entry =
     { model = "runtime"
-    ; provider = None
     ; inference_identity = None
     ; ts_unix = 0.0
     ; outcome = "success"

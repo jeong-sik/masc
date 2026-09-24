@@ -174,6 +174,7 @@ let endpoint : Exec_ssh_endpoint.t =
   ; env_allowlist = []
   ; capabilities = []
   ; private_home = false
+  ; allowed_paths = []
   }
 ;;
 

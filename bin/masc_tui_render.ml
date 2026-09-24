@@ -3520,18 +3520,19 @@ let render_planning_list (state : state) =
             holds for the roster and the reading panes. The chrome is zero
             here because [content_height] above has already taken it. *)
          let list_rows =
-           (* [content_height] has a floor of one row, and a frame too short
-              for the selected goal's line and the footer leaves this at zero
-              or less. The list draws nothing there rather than taking the
-              row those two were counted for. *)
+           (* A short frame may leave no list row at all. When it leaves one
+              row for several goals, use that row to say how many goals are
+              hidden; the selected goal still has its detail row below. *)
            if content_height <= 0 then 0
+           else if content_height = 1 && count > 1 then 0
            else
              Masc_tui_scroll.content_height ~rows:content_height ~chrome:0
                ~count ~preview_keep:None ~overflow_takes_row:true
          in
-         let overflowing = list_rows < content_height in
+         let overflowing = content_height > 0 && count > list_rows in
          let scroll_offset =
-           if state.planning_cursor >= list_rows then
+           if list_rows = 0 then 0
+           else if state.planning_cursor >= list_rows then
              state.planning_cursor - list_rows + 1
            else 0
          in

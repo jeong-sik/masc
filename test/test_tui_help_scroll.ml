@@ -81,10 +81,13 @@ let test_content_height_leaves_room_for_the_frame () =
   check_int "a viewport smaller than the frame still draws one row" 1
     (Masc_tui_frame.content_height ~rows:2)
 
-(* What the key handler and the drawing both do now. *)
+(* What the key handler and the drawing both do now: the frame's body, less
+   the "[lines a-b/n]" row when the sheet overflows it. *)
 let viewport ~cols ~rows lines =
-  ( List.length (Masc_tui_help.sheet ~cols lines)
-  , Masc_tui_frame.content_height ~rows )
+  let count = List.length (Masc_tui_help.sheet ~cols lines) in
+  ( count
+  , Masc_tui_scroll.content_height ~rows ~chrome:Masc_tui_frame.chrome_rows
+      ~count ~preview_keep:None ~overflow_takes_row:true )
 
 let test_holding_j_does_not_bank_presses () =
   let count, height = viewport ~cols:120 ~rows:30 (sectioned ~sections:4 ~rows:18) in

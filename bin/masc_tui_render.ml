@@ -15886,15 +15886,31 @@ let render_context_inspector state =
             |> List.iter c.push
           end)
 
-(* What the help overlay can show right now: the rows its sheet folds to at
-   this width, and the height it draws them in. The key handler bounds its
-   step against this, so a press that the frame cannot spend is not taken. *)
-(* The sheet's rows and the viewport that shows them. One answer for the two
-   readers -- the keypress that bounds the scroll and the frame that draws it
-   -- so [G] cannot land the scroll a row past what the frame is showing.
+(* The height an overlay shows [count] rows in, for the overlays that say
+   which of their lines are showing: one row comes off when they overflow,
+   because the "[lines a-b/n]" row is drawn inside the same body.
+   [Masc_tui_scroll.content_height] owns that rule; the frame supplies the
+   chrome. *)
+let overlay_window_height ~rows ~count =
+  Masc_tui_scroll.content_height ~rows ~chrome:framed_chrome_rows ~count
+    ~preview_keep:None ~overflow_takes_row:true
 
-   A sheet longer than its viewport spends one of its rows saying which lines
-   these are, so that row comes off the height both readers use. *)
+(* The "[lines a-b/n]" row an overflowing overlay draws under its rows, or
+   nothing when every row fits. The row's height is the one
+   [overlay_window_height] took off. *)
+let overlay_window_row ~scroll ~height count =
+  if count > height then
+    Some
+      (Theme.recede ()
+      ^ Printf.sprintf "  [lines %s]"
+          (Masc_tui_scroll.window_text ~scroll ~height count)
+      ^ Ansi.reset)
+  else None
+
+(* The sheet's rows and the viewport that shows them, at this width. One
+   answer for the two readers -- the keypress that bounds the scroll and the
+   frame that draws it -- so [G] cannot land the scroll a row past what the
+   frame is showing, and a press the frame cannot spend is not taken. *)
 let help_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -15904,8 +15920,7 @@ let help_viewport (state : state) =
       (Masc_tui_help.sheet ~header ~cols
          (help_lines ~width:(Masc_tui_help.line_cells ~cols) state))
   in
-  let height = framed_content_height ~rows in
-  (count, if count > height then max 1 (height - 1) else height)
+  (count, overlay_window_height ~rows ~count)
 
 (* The [:] palette: a typed filter over every jump the strip and roster
    offer. The list is the same [palette_matches] the Enter key resolves, so
@@ -16135,8 +16150,7 @@ let keeper_deletions_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let count = List.length (keeper_deletions_lines state ~cols) in
-  let height = framed_content_height ~rows in
-  (count, if count > height then max 1 (height - 1) else height)
+  (count, overlay_window_height ~rows ~count)
 
 (* The deletion record overlay drew its rows and closed the box under them,
    with nothing filling the rows between: on a short record the footer stood in
@@ -16166,12 +16180,7 @@ let render_keeper_deletions (state : state) =
          past every height: at 44 rows it ended mid-object on "kind":
          "delivered", and the footer named the scroll keys without saying how
          far they had to go. *)
-      if count > height then
-        c.push
-          (Theme.recede ()
-          ^ Printf.sprintf "  [lines %s]"
-              (Masc_tui_scroll.window_text ~scroll ~height count)
-          ^ Ansi.reset))
+      Option.iter c.push (overlay_window_row ~scroll ~height count))
 
 (* The cheat sheet, through the overlay contract. It drew its box and its rows
    by hand and closed the box under the last row, so a sheet shorter than the
@@ -16214,12 +16223,7 @@ let render_help (state : state) =
       (* Which of them these are. The sheet is longer than any terminal --
          at 150x78 the later sections are still off screen -- so a reader
          pressing [j] had no way of telling a page from a hundred. *)
-      if count > height then
-        c.push
-          (Theme.recede ()
-          ^ Printf.sprintf "  [lines %s]"
-              (Masc_tui_scroll.window_text ~scroll ~height count)
-          ^ Ansi.reset))
+      Option.iter c.push (overlay_window_row ~scroll ~height count))
 
 (* Rows the agenda panel can show, and how many it has. The keypress bounds
    the scroll from the same pair the frame draws with -- the shape
@@ -16244,8 +16248,7 @@ let agenda_viewport (state : state) =
   let terminal_rows, _cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let count = List.length (agenda_lines state) in
-  let height = framed_content_height ~rows in
-  (count, if count > height then max 1 (height - 1) else height)
+  (count, overlay_window_height ~rows ~count)
 
 let answering_viewport (state : state) =
   let terminal_rows, _cols = get_terminal_size () in
@@ -16395,12 +16398,7 @@ let render_agenda (state : state) =
          rows and 100 columns, the panel drew sixteen of its twenty coming
          rows and neither of the two sections under them, and nothing said
          "Waiting on you" and "Stuck on you" were there. *)
-      if count > height then
-        c.push
-          (Theme.recede ()
-          ^ Printf.sprintf "  [lines %s]"
-              (Masc_tui_scroll.window_text ~scroll ~height count)
-          ^ Ansi.reset))
+      Option.iter c.push (overlay_window_row ~scroll ~height count))
 ;;
 
 let render_terminal_too_small state ~rows ~cols =

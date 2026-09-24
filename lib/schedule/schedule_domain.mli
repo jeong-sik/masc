@@ -131,6 +131,22 @@ val modify_allowed : schedule_status -> bool
     [false], and the TUI asks the same function before it opens the editor,
     so the rule is written once. *)
 val validate_recurrence : recurrence -> (recurrence, string) result
+
+type interval_below_runner_tick =
+  { interval_sec : int
+  ; runner_tick_sec : float
+  }
+
+val interval_fires_as_declared :
+  runner_tick_sec:float ->
+  stored:recurrence option ->
+  recurrence ->
+  (unit, interval_below_runner_tick) result
+(** Whether the schedule runner, which looks once every [runner_tick_sec],
+    fires [recurrence] as often as it declares. Refuses an [Interval] shorter
+    than the tick, unless [stored] is the row being modified and carries the
+    same interval. [validate_recurrence] does not apply this, so a stored row
+    below the tick keeps loading and fires once per tick. *)
 val first_due_after : now:float -> recurrence -> float option
 (** Compute the first due time for calendar recurrences that do not need an
     explicit [due_at] anchor. Returns [None] for [One_shot] and [Interval]. *)

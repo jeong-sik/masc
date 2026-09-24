@@ -1,6 +1,11 @@
 open Alcotest
 open Masc
 
+(* Fixture tick for create and modify: the runner's floor tick, below every
+   interval these fixtures declare, so the runner-tick check never refuses one
+   of them. *)
+let runner_tick_sec = 1.0
+
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -180,7 +185,7 @@ let check_refusal label expected result =
 
 let create_service_exn config ~schedule_id ~due_at ~payload ?recurrence () =
   match
-    Schedule_service.create config ~now:100.0 ~schedule_id ~requested_at:100.0
+    Schedule_service.create config ~runner_tick_sec ~now:100.0 ~schedule_id ~requested_at:100.0
       ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent")
       ~due_at ~payload ~source:Schedule_domain.Operator_request ?recurrence ()
@@ -1109,7 +1114,7 @@ let test_the_current_second_is_not_past () =
   with_config
   @@ fun config ->
   let create ~schedule_id ~due_at =
-    Schedule_service.create config ~now:1_000.9 ~schedule_id
+    Schedule_service.create config ~runner_tick_sec ~now:1_000.9 ~schedule_id
       ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent")
       ~due_at ~payload:(keeper_wake_payload "now") ~source:Schedule_domain.Operator_request ()
@@ -1190,7 +1195,7 @@ let test_list_reads_the_owner_it_is_asked_for () =
   @@ fun config ->
   let create schedule_id ~scheduled_by ~wakes =
     match
-      Schedule_service.create config ~now:100.0 ~schedule_id
+      Schedule_service.create config ~runner_tick_sec ~now:100.0 ~schedule_id
         ~requested_by:(human "operator")
         ~scheduled_by:(automated scheduled_by)
         ~due_at:200.0

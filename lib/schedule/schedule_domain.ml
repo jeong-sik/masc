@@ -266,16 +266,45 @@ let int_field name fields =
   | Error err -> Error (name ^ ": " ^ err)
 ;;
 
-(* One rule for every path that holds a recurrence: the decoder
-   ([recurrence_of_yojson] -> [schedule_request_of_yojson] -> [Schedule_store])
-   and [create_request] (create and modify) both call [validate_recurrence], so
-   a stored schedule and a newly requested one accept the same intervals. How
-   often an interval can actually fire is set by the schedule runner's tick,
-   not by this check. *)
+(* Structural validity only. The decoder ([recurrence_of_yojson] ->
+   [schedule_request_of_yojson] -> [Schedule_store]) and [create_request]
+   share it, so a stored row loads whenever its interval is positive. Whether
+   the runner can fire an interval as often as it says is a separate question,
+   asked on create and modify by [interval_fires_as_declared]. *)
 let validate_interval interval_sec =
   if interval_sec <= 0
   then Error "recurrence.interval_sec must be positive"
   else Ok interval_sec
+;;
+
+type interval_below_runner_tick =
+  { interval_sec : int
+  ; runner_tick_sec : float
+  }
+
+(* The schedule runner looks for due schedules once per tick and fires a due
+   schedule at most once per look ([next_due_after] skips the ticks it
+   missed). An interval shorter than the tick therefore fires once per tick,
+   not once per interval, and the stored interval would say something the
+   runner never does. Create and modify refuse it.
+
+   A modify that carries the stored interval back unchanged is not asked: the
+   row already exists, fires once per tick whatever it says, and refusing the
+   edit would only stop its payload or due time from being changed. The
+   decoder does not ask either, so such a row keeps loading. *)
+let interval_fires_as_declared ~runner_tick_sec ~stored recurrence =
+  match recurrence with
+  | One_shot | Daily _ | Cron _ -> Ok ()
+  | Interval { interval_sec } ->
+    let unchanged =
+      match stored with
+      | Some (Interval { interval_sec = stored_interval_sec }) ->
+        Int.equal stored_interval_sec interval_sec
+      | Some (One_shot | Daily _ | Cron _) | None -> false
+    in
+    if unchanged || Float.compare (float_of_int interval_sec) runner_tick_sec >= 0
+    then Ok ()
+    else Error { interval_sec; runner_tick_sec }
 ;;
 
 (* Daily recurrence intentionally uses fixed offsets only. This keeps dispatch

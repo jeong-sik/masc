@@ -45,6 +45,14 @@ type store_error =
       (** {!update_request} refused a replacement whose due time differs from
           the stored one at whole-second resolution and is before [now], the
           updating call's clock cut to the whole second. *)
+  | Interval_below_runner_tick of
+      { schedule_id : string
+      ; below : Schedule_domain.interval_below_runner_tick
+      }
+      (** {!insert_request} or {!update_request} refused an [Interval] shorter
+          than the schedule runner tick. An update that keeps the stored
+          interval is not refused. See
+          {!Schedule_domain.interval_fires_as_declared}. *)
   | Running_wake_absent of { schedule_id : string }
       (** A [Running] request has no wake record at all to settle or
           recover. *)
@@ -134,12 +142,14 @@ val terminal_wakes_retained_per_schedule : int
 
 val insert_request :
   Workspace_utils.config ->
+  runner_tick_sec:float ->
   Schedule_domain.schedule_request ->
   (Schedule_domain.schedule_request, store_error) result
 
 val update_request :
   Workspace_utils.config ->
   now:float ->
+  runner_tick_sec:float ->
   Schedule_domain.schedule_request ->
   (Schedule_domain.schedule_request, store_error) result
 (** Atomically replaces an existing [Scheduled] or [Due] request. The caller

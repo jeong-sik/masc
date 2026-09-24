@@ -1,5 +1,10 @@
 open Alcotest
 
+(* Fixture tick for create and modify: the runner's floor tick, below every
+   interval these fixtures declare, so the runner-tick check never refuses one
+   of them. *)
+let runner_tick_sec = 1.0
+
 let temp_dir () =
   let path = Filename.temp_file "schedule_prune_test" "" in
   Sys.remove path;
@@ -46,6 +51,7 @@ let create_schedule config schedule_id =
   match
     Schedule_service.create
       config
+      ~runner_tick_sec
       ~now:100.0
       ~schedule_id
       ~requested_at:100.0

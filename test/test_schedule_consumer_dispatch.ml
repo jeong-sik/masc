@@ -12,6 +12,11 @@ module Keeper_registry_event_queue = struct
   ;;
 end
 
+(* Fixture tick for create and modify: the runner's floor tick, below every
+   interval these fixtures declare, so the runner-tick check never refuses one
+   of them. *)
+let runner_tick_sec = 1.0
+
 let () = Mirage_crypto_rng_unix.use_default ()
 
 let temp_dir () =
@@ -374,7 +379,7 @@ let test_keeper_wake_receipt_decoder_rejects_noncanonical_shapes () =
 
 let create_board_schedule config =
   match
-    Schedule_service.create config ~now:100.0 ~schedule_id:"board-sched-1"
+    Schedule_service.create config ~runner_tick_sec ~now:100.0 ~schedule_id:"board-sched-1"
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
       ~payload:board_post_payload ~source:Schedule_domain.Operator_request ()
@@ -386,7 +391,7 @@ let create_board_schedule config =
 
 let create_keeper_wake_schedule ?recurrence config =
   match
-    Schedule_service.create config ~now:100.0 ~schedule_id:"keeper-wake-sched-1"
+    Schedule_service.create config ~runner_tick_sec ~now:100.0 ~schedule_id:"keeper-wake-sched-1"
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
       ~payload:keeper_wake_payload ~source:Schedule_domain.Operator_request
@@ -401,6 +406,7 @@ let create_routed_keeper_wake_schedule ?recurrence config channel =
   match
     Schedule_service.create
       config
+      ~runner_tick_sec
       ~now:100.0
       ~schedule_id:"keeper-wake-routed-sched-1"
       ~requested_at:100.0
@@ -421,6 +427,7 @@ let create_named_keeper_wake_schedule ?recurrence config ~schedule_id ~keeper_na
   match
     Schedule_service.create
       config
+      ~runner_tick_sec
       ~now:100.0
       ~schedule_id
       ~requested_at:100.0
@@ -439,7 +446,7 @@ let create_named_keeper_wake_schedule ?recurrence config ~schedule_id ~keeper_na
 
 let create_unsupported_schedule config =
   match
-    Schedule_service.create config ~now:100.0 ~schedule_id:"unsupported-live-sched"
+    Schedule_service.create config ~runner_tick_sec ~now:100.0 ~schedule_id:"unsupported-live-sched"
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
       ~payload:unsupported_payload ~source:Schedule_domain.Operator_request ()
@@ -461,7 +468,7 @@ let create_invalid_keeper_wake_schedule config =
       ]
   in
   match
-    Schedule_service.create config ~now:100.0 ~schedule_id:"invalid-keeper-wake-sched"
+    Schedule_service.create config ~runner_tick_sec ~now:100.0 ~schedule_id:"invalid-keeper-wake-sched"
       ~requested_at:100.0 ~requested_by:(human "operator")
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
       ~payload ~source:Schedule_domain.Operator_request ()

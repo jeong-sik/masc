@@ -29,6 +29,10 @@ type store_error =
       ; due_at : float
       ; now : float
       }
+  | Interval_below_runner_tick of
+      { schedule_id : string
+      ; below : Schedule_domain.interval_below_runner_tick
+      }
   | Running_wake_absent of { schedule_id : string }
   | Running_wake_settled of
       { schedule_id : string
@@ -141,6 +145,16 @@ let store_error_to_string = function
       (Time_codec.rfc3339_of_unix due_at)
       (Time_codec.rfc3339_of_unix stored_due_at)
       (Time_codec.rfc3339_of_unix now)
+  | Interval_below_runner_tick
+      { schedule_id; below = { interval_sec; runner_tick_sec } } ->
+    Printf.sprintf
+      "schedule %s: recurrence.interval_sec %d is shorter than the schedule \
+       runner tick (%gs, MASC_SCHEDULE_RUNNER_INTERVAL_SEC); the runner would \
+       fire it once per tick, not every %d seconds"
+      schedule_id
+      interval_sec
+      runner_tick_sec
+      interval_sec
   | Running_wake_absent { schedule_id } ->
     Printf.sprintf "running schedule %s has no wake record" schedule_id
   | Running_wake_settled { schedule_id; wake } ->
@@ -751,13 +765,20 @@ let validate_initial_request (request : Schedule_domain.schedule_request) =
            "new requests must start scheduled")
 ;;
 
-let insert_request config (request : Schedule_domain.schedule_request) =
+let interval_fires_as_declared ~runner_tick_sec ~stored (request : schedule_request) =
+  Schedule_domain.interval_fires_as_declared ~runner_tick_sec ~stored request.recurrence
+  |> Result.map_error (fun below ->
+    Interval_below_runner_tick { schedule_id = request.schedule_id; below })
+;;
+
+let insert_request config ~runner_tick_sec (request : Schedule_domain.schedule_request) =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state request.schedule_id with
     | Some _ -> Error Schedule_already_exists
     | None ->
       let* () = validate_initial_request request in
+      let* () = interval_fires_as_declared ~runner_tick_sec ~stored:None request in
       let schedules = request :: state.schedules in
       let next_state =
         bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes
@@ -792,7 +813,7 @@ let changed_due_not_past ~now ~(current : schedule_request) (request : schedule_
          })
 ;;
 
-let update_request config ~now (request : Schedule_domain.schedule_request) =
+let update_request config ~now ~runner_tick_sec (request : Schedule_domain.schedule_request) =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
     let* state = load_for_mutation config in
     match find_schedule state request.schedule_id with
@@ -802,6 +823,10 @@ let update_request config ~now (request : Schedule_domain.schedule_request) =
       then (
         let* () = validate_initial_request request in
         let* () = changed_due_not_past ~now ~current request in
+        let* () =
+          interval_fires_as_declared ~runner_tick_sec
+            ~stored:(Some current.recurrence) request
+        in
         let schedules = replace_schedule state.schedules request in
         let next_state = bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes in
         let* () = write_state config next_state in

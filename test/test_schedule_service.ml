@@ -2,6 +2,11 @@ open Alcotest
 open Schedule_domain
 open Schedule_service
 
+(* Fixture tick for create and modify: the runner's floor tick, below every
+   interval these fixtures declare, so the runner-tick check never refuses one
+   of them. *)
+let runner_tick_sec = 1.0
+
 let temp_dir () =
   let path = Filename.temp_file "schedule_service_test" "" in
   Sys.remove path;
@@ -55,7 +60,7 @@ let create_ok
   config
   =
   match
-    create config ~now:100.0 ?schedule_id ~requested_at:100.0
+    create config ~runner_tick_sec ~now:100.0 ?schedule_id ~requested_at:100.0
       ~requested_by:(human "requester") ~scheduled_by:(human "scheduler")
       ~due_at:200.0 ~payload:(payload_json ()) ~source:Operator_request ()
   with

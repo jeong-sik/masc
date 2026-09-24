@@ -1,5 +1,10 @@
 module Types = Masc_domain
 
+(* Fixture tick for create and modify: the runner's floor tick, below every
+   interval these fixtures declare, so the runner-tick check never refuses one
+   of them. *)
+let runner_tick_sec = 1.0
+
 let () = Mirage_crypto_rng_unix.use_default ()
 
 module Lib = Masc
@@ -1805,7 +1810,7 @@ let test_schedule_exact_lookup_carries_the_wake_history () =
     | Ok request -> request
     | Error msg -> fail msg
   in
-  (match Schedule_store.insert_request config request with
+  (match Schedule_store.insert_request config ~runner_tick_sec request with
    | Ok _ -> ()
    | Error _ -> fail "the fixture schedule could not be inserted");
   let occurrence now =
@@ -1880,7 +1885,7 @@ let test_schedule_page_can_be_scoped_to_one_target () =
         ()
     with
     | Ok request ->
-      (match Schedule_store.insert_request config request with
+      (match Schedule_store.insert_request config ~runner_tick_sec request with
        | Ok _ -> ()
        | Error _ -> fail ("could not insert " ^ schedule_id))
     | Error msg -> fail msg
@@ -1960,7 +1965,7 @@ let test_schedule_page_counts_retained_wakes () =
         ()
     with
     | Ok request ->
-      (match Schedule_store.insert_request config request with
+      (match Schedule_store.insert_request config ~runner_tick_sec request with
        | Ok _ -> ()
        | Error _ -> fail ("could not insert " ^ schedule_id))
     | Error msg -> fail msg

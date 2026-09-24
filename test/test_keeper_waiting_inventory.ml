@@ -10,6 +10,11 @@ module Keeper_types_profile = Masc.Keeper_types_profile
 module Otel_metric_store = Masc.Otel_metric_store
 module Server_keeper_waiting_inventory = Masc.Server_keeper_waiting_inventory
 
+(* Fixture tick for create and modify: the runner's floor tick, below every
+   interval these fixtures declare, so the runner-tick check never refuses one
+   of them. *)
+let runner_tick_sec = 1.0
+
 let () = ignore Operator_tool.force_link
 
 let temp_dir () =
@@ -176,6 +181,7 @@ let create_schedule_exn config ~schedule_id ~scheduled_by =
   match
     Schedule_service.create
       config
+      ~runner_tick_sec
       ~now:100.0
       ~schedule_id
       ~requested_at:100.0

@@ -225,7 +225,10 @@ let connect ~sw ~net ~clock ~url ~max_message ~command_deadline_s ~on_event =
       let released, release = Eio.Promise.create () in
       let t =
         create
-          ~send:(fun frame -> Option.iter (fun wsd -> Endpoint.Wsd.send_text wsd frame) !wsd)
+          ~send:(fun frame ->
+            match !wsd with
+            | Some wsd -> Endpoint.Wsd.send_text wsd frame
+            | None -> invalid_arg "CDP websocket was not opened")
           ~close:(fun () -> Eio.Promise.resolve release ())
           ~clock ~command_deadline_s ~on_event
       in

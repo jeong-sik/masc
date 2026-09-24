@@ -437,11 +437,19 @@ let test_delete_keeps_package_with_other_files () =
   Unix.mkdir references_dir 0o700;
   let note = Filename.concat references_dir "note.md" in
   write_file note "kept";
-  (match delete_package_directory ~base_path ~reference ~refresh with
+  let package_directory = delete_package_directory ~base_path ~reference ~refresh in
+  (match package_directory with
    | Editor.Package_directory_kept_non_empty -> ()
    | Package_directory_removed -> fail "a folder with other files was removed"
    | Package_directory_removed_unsynced detail -> fail detail
    | Package_directory_remove_failed detail -> fail detail);
+  (* The same rendering goes into the delete response and the audit row. *)
+  check
+    string
+    "rendered kind"
+    "kept_non_empty"
+    Yojson.Safe.Util.(
+      Editor.package_directory_to_yojson package_directory |> member "kind" |> to_string);
   check bool "SKILL.md moved out" false (Sys.file_exists skill_path);
   check string "other file untouched" "kept" (read_file note)
 ;;

@@ -1017,7 +1017,18 @@ let audit_skill_write state agent_name ~reference ~source_text ~status ~outcome 
     ()
 ;;
 
-let audit_skill_delete state agent_name ~reference ~status ~recovery ~outcome =
+(* [package_directory] is kept in the audit row because a later create for
+   the same id answers [package_already_exists] when the folder stayed, and
+   the WARN log line that also says so rotates away. *)
+let audit_skill_delete
+      state
+      agent_name
+      ~reference
+      ~status
+      ~recovery
+      ~package_directory
+      ~outcome
+  =
   try
     Audit_log.log_action
       (Mcp_server.workspace_config state)
@@ -1028,11 +1039,17 @@ let audit_skill_delete state agent_name ~reference ~status ~recovery ~outcome =
           ([ "reference", Skill_reference.to_yojson reference
            ; "status", `String status
            ]
-           @ match recovery with
+           @ (match recovery with
+              | None -> []
+              | Some (recovery_id, disposition) ->
+                [ "recovery_id", `String recovery_id
+                ; "recovery_disposition", `String disposition
+                ])
+           @ match package_directory with
              | None -> []
-             | Some (recovery_id, disposition) ->
-               [ "recovery_id", `String recovery_id
-               ; "recovery_disposition", `String disposition
+             | Some package_directory ->
+               [ ( "package_directory"
+                 , Server_skill_editor.package_directory_to_yojson package_directory )
                ]))
       ~outcome
       ()
@@ -2319,26 +2336,29 @@ let add_routes ~sw ~clock router =
                     audit_skill_delete state agent_name ~reference
                       ~status:(Server_skill_editor.error_code error)
                       ~recovery:(skill_error_recovery error)
+                      ~package_directory:None
                       ~outcome:
                         (Audit_log.Failure (Server_skill_editor.error_to_string error));
                     respond_skill_editor_error ~request:req reqd error
                   | Ok outcome ->
-                    let status, audit_outcome, recovery_id, disposition =
+                    let status, audit_outcome, recovery_id, disposition, package_directory =
                       match outcome with
                       | Server_skill_editor.Deleted_and_published
-                          { recovery_id; disposition; _ } ->
+                          { recovery_id; disposition; package_directory; _ } ->
                         ( "deleted_and_published"
                         , Audit_log.Success
                         , recovery_id
-                        , disposition )
+                        , disposition
+                        , package_directory )
                       | Deleted_but_unpublished
-                          { reason; recovery_id; disposition; _ } ->
+                          { reason; recovery_id; disposition; package_directory; _ } ->
                         ( "deleted_but_unpublished"
                         , Audit_log.Failure
                             (Server_skill_editor.delete_unpublished_reason_to_string
                                reason)
                         , recovery_id
-                        , disposition )
+                        , disposition
+                        , package_directory )
                     in
                     audit_skill_delete state agent_name ~reference ~status
                       ~recovery:
@@ -2346,6 +2366,7 @@ let add_routes ~sw ~clock router =
                            ( recovery_id
                            , Server_skill_editor.recovery_disposition_to_string
                                disposition ))
+                      ~package_directory:(Some package_directory)
                       ~outcome:audit_outcome;
                     Http.Response.json_value
                       ~compress:true

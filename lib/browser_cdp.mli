@@ -16,9 +16,15 @@ type target_kind =
   | Service_worker
   | Other_kind of string  (** Any other CDP target type, kept by name. *)
 
+type target_info = { target_id : string; kind : target_kind; url : string }
+
+(** One CDP [TargetInfo] object, as [Target.getTargets] lists it and
+    [Target.targetCreated] carries it. *)
+val target_info_of_json : Yojson.Safe.t -> (target_info, string) result
+
 type event =
   | Binding_called of { session : session_id option; name : string; payload : string }
-  | Target_created of { target_id : string; kind : target_kind; url : string }
+  | Target_created of target_info
   | Target_detached of { session : session_id }
   | Target_destroyed of { target_id : string }
   | Malformed_event of { method_ : string; detail : string }

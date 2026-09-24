@@ -1,9 +1,11 @@
 type session_id = string
 type target_kind = Page | Service_worker | Other_kind of string
 
+type target_info = { target_id : string; kind : target_kind; url : string }
+
 type event =
   | Binding_called of { session : session_id option; name : string; payload : string }
-  | Target_created of { target_id : string; kind : target_kind; url : string }
+  | Target_created of target_info
   | Target_detached of { session : session_id }
   | Target_destroyed of { target_id : string }
   | Malformed_event of { method_ : string; detail : string }
@@ -57,6 +59,13 @@ let target_kind_of = function
   | other -> Other_kind other
 ;;
 
+let target_info_of_json info =
+  let* target_id = string_field "targetId" info in
+  let* kind = string_field "type" info in
+  let* url = string_field "url" info in
+  Ok { target_id; kind = target_kind_of kind; url }
+;;
+
 let event_of ~method_ ~session params =
   let with_params read =
     match params with
@@ -73,10 +82,8 @@ let event_of ~method_ ~session params =
     | "Target.targetCreated" ->
       with_params (fun params ->
         let* info = Option.to_result ~none:"targetInfo is missing" (field "targetInfo" params) in
-        let* target_id = string_field "targetId" info in
-        let* kind = string_field "type" info in
-        let* url = string_field "url" info in
-        Ok (Target_created { target_id; kind = target_kind_of kind; url }))
+        let* target = target_info_of_json info in
+        Ok (Target_created target))
     | "Target.detachedFromTarget" ->
       with_params (fun params ->
         let* detached = string_field "sessionId" params in

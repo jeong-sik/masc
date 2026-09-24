@@ -34,6 +34,7 @@ import { ideContextFocus, type IdeContextFocus } from './ide-state'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { ideReplayUntilMs } from './ide-replay-state'
 import { IdeFindPanel, ideFindReveal } from './ide-editor-find'
+import { findMatchExt, setFindMatch } from './ide-editor-find-highlight'
 import {
   BlameTimeline,
   LayerOverlaySummary,
@@ -321,6 +322,7 @@ function CodeMirrorEditor({
           lang,
           lspExtension({ filePath: mountFilePath }),
           contextFocusLineExt(),
+          findMatchExt(),
           EditorView.updateListener.of((update) => {
             // Publish the human selection as 1-based line numbers for the
             // surfaces that talk about "these lines" (interject).
@@ -443,7 +445,12 @@ function CodeMirrorEditor({
   const appliedRevealSeq = useRef<number | null>(null)
   useEffect(() => {
     const view = editorRef.current
-    if (!view || !ready || findReveal === null) return
+    if (!view || !ready) return
+    if (findReveal === null) {
+      appliedRevealSeq.current = null
+      view.dispatch({ effects: setFindMatch.of(null) })
+      return
+    }
     if (appliedRevealSeq.current === findReveal.seq) return
     if (findReveal.filePath !== documentStore.document().file_path) return
     if (findReveal.line < 1 || findReveal.line > view.state.doc.lines) return
@@ -453,7 +460,7 @@ function CodeMirrorEditor({
     appliedRevealSeq.current = findReveal.seq
     view.dispatch({
       selection: { anchor: from, head: to },
-      effects: [EditorView.scrollIntoView(from, { y: 'center' })],
+      effects: [setFindMatch.of({ from, to }), EditorView.scrollIntoView(from, { y: 'center' })],
       annotations: Transaction.userEvent.of(FIND_REVEAL_USER_EVENT),
     })
   }, [documentStore, findReveal, ready])

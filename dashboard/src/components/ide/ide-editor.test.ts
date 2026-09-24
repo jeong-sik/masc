@@ -266,6 +266,9 @@ describe('IdeEditor', () => {
     fireEvent.click(rows[1]!)
     await waitFor(() => expect(selectedText()).toBe('3:runtime'))
 
+    // The theme hides the native selection, so the match carries a mark.
+    expect(container.querySelector('.cm-masc-find-match')?.textContent).toBe('runtime')
+
     fireEvent.keyDown(input, { key: 'Escape' })
     expect(closed).toBe(1)
     container.remove()

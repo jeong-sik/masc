@@ -203,6 +203,9 @@ let handle_message t payload =
   | Ok (Wire.Response { id = Wire.String_id id; _ }) ->
     t.log (Malformed_message ("a response to id " ^ id ^ ", which masc never sends"))
   | Ok (Wire.Request (Wire.Llm_generate { id; params })) -> answer_model t id params
+  | Ok (Wire.Request (Wire.Invalid_params { id; detail })) ->
+    t.log (Malformed_message detail);
+    fork t (fun () -> send_reply t id (Error { Wire.code = Wire.invalid_params; message = detail }))
   | Ok (Wire.Request (Wire.Unsupported_request { id; method_ })) ->
     t.log (Unsupported_request { method_ });
     fork t (fun () ->

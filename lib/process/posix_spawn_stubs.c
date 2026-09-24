@@ -159,8 +159,9 @@ static value spawn_process(value v_executable, value v_argv, value v_env,
            report (2026-09-15).
          - A child left in the parent's group takes input typed for the
            terminal's foreground job when the parent is that job. When the
-           parent is a background job, the read stops the parent's whole
-           group unless SIGTTIN is ignored (Terminal_stop).
+           parent is a background job, the read can stop the parent's whole
+           group. Explicit /dev/tty access needs the separate server-session
+           design in RFC-0470.
          A child that must read the terminal is started with
          Unix.create_process in the foreground group, as the installer's
          prerequisite runner does. */

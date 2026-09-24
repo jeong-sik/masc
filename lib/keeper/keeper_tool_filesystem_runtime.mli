@@ -175,6 +175,17 @@ module For_testing : sig
     :  created_directory_fault
     -> (unit -> 'a)
     -> 'a
+
+  (** Pure. The Read window cut from a body whose first byte is file line
+      [first_line], projected to the returned content and [next_offset]. *)
+  val slice_read_window
+    :  start_line:int
+    -> max_lines:int option
+    -> first_line:int
+    -> max_bytes:int
+    -> scan_complete:bool
+    -> string
+    -> (string * int option, [ `Offset_beyond_scan ]) result
 end
 
 val read_sandbox_raw_prefix :

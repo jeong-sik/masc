@@ -2597,6 +2597,30 @@ let test_gc_preserves_awaiting_verification () =
       (List.mem 900 (Workspace.read_archive_task_ids config)))
 ;;
 
+(* Age is counted from when a task ended. A task opened long ago and
+   finished just now is one of today's completions: archiving it by its
+   creation time dropped it from the Overview's done counts, which read the
+   live backlog. *)
+let test_gc_ages_a_task_by_when_it_ended () =
+  with_test_env (fun config ->
+    let now = Masc_domain.iso8601_of_unix_seconds (Time_compat.now ()) in
+    let done_at completed_at =
+      Masc_domain.Done { assignee = "claude"; completed_at; notes = None }
+    in
+    let fresh =
+      gc_make_task ~id:"task-910" ~created_at:gc_ancient_ts ~status:(done_at now)
+    in
+    let stale =
+      gc_make_task ~id:"task-911" ~created_at:gc_ancient_ts ~status:(done_at gc_ancient_ts)
+    in
+    write_tasks config [ fresh; stale ];
+    let _ = Workspace.gc config ~days:7 () in
+    Alcotest.(check bool) "an old task finished now stays live" true
+      (gc_backlog_has config "task-910");
+    Alcotest.(check bool) "a task that ended long ago is archived" true
+      (List.mem 911 (Workspace.read_archive_task_ids config)))
+;;
+
 (* Self-healing: a non-terminal task stranded in the archive (the pre-fix
    symptom) is pulled back into the live backlog on the next GC pass. *)
 let test_gc_restores_orphaned_nonterminal_from_archive () =
@@ -3521,6 +3545,10 @@ let () =
             "preserves awaiting_verification"
             `Quick
             test_gc_preserves_awaiting_verification
+        ; Alcotest.test_case
+            "ages a task by when it ended"
+            `Quick
+            test_gc_ages_a_task_by_when_it_ended
         ; Alcotest.test_case
             "restores orphaned non-terminal from archive"
             `Quick

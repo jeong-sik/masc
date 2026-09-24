@@ -149,17 +149,9 @@ val assignment_walk_order : now:float -> string -> (walk_order, assignment_refus
     orders it: {!assignment_walk_order}'s head and its rest. *)
 val assignment_walk_rest : now:float -> string -> walk_rest
 
-(** Whether a wakeup may end a failure wait: a capacity release is MASC's own
-    envelope and may; a path release is a provider's rest and may not
-    (#34653). *)
-type failure_wait =
-  | Capacity_release
-  | Path_release
-
 (** The next dispatch after a failed turn (RFC-provider-path-rest §3.1),
     shared by the heartbeat cycle and the chat lane's deferred retry.
-    Capacity backpressure waits for its own rest. A deferred suffix dispatches
-    now when its walk head serves, else waits as {!deferred_lane_rest} says.
+    A deferred suffix dispatches now when its walk head serves, else waits as {!deferred_lane_rest} says.
     Without a suffix a rate limit or quota waits for the later of the failed
     path's rest and {!assignment_walk_rest}; [waiting_on] then names the
     assignment or the resting head. Every other failure without a suffix is
@@ -169,7 +161,6 @@ type next_dispatch =
   | Wait_until of
       { release_at : float
       ; waiting_on : string
-      ; wait : failure_wait
       }
 
 val next_dispatch_after_failure :
@@ -243,6 +234,7 @@ val run_named :
   base_path:string ->
   goal:string ->
   ?goal_blocks:Agent_core.Types.content_block list ->
+  ?goal_metadata:Agent_core.Types.metadata ->
   ?session_id:string ->
   system_prompt:string ->
   ?tools:Agent_core.Tool.t list ->
@@ -368,6 +360,14 @@ type attempt_inference_policy =
   }
 
 module For_testing : sig
+  val provider_attempt_dispatch :
+    request_serialized:bool ->
+    (Runtime_agent.run_result, Agent_core.Error.t) result -> Keeper_attempt_dispatch.t
+  (** [Rejected_before_dispatch] when no request of the attempt was serialized
+      for sending and it ended with a refusal the pipeline's route stage makes
+      before sending ([Attempt_rejected], [InputCapacity], [ContextOverflow],
+      [InvalidConfig]); [Dispatched] otherwise. *)
+
   val run_result_answered : Runtime_agent.run_result -> bool
   (** Whether a successful attempt heard from its candidate: [false] for an
       attempt that yielded before any provider turn completed, which clears no
@@ -486,6 +486,7 @@ module For_testing : sig
       Keeper_runtime_manifest.event_kind ->
       unit) ->
     goal_blocks:Agent_core.Types.content_block list option ->
+    goal_metadata:Agent_core.Types.metadata ->
     initial_messages:Agent_core.Types.message list ->
     agent_core_checkpoint:Agent_core.Checkpoint.t option ->
     runtime_id:string ->

@@ -2476,6 +2476,36 @@ let test_a_span_fits_a_six_cell_column () =
         (Layout.display_width text <= 6))
     [ 59.; 3599.; day -. 1.; (100. *. day) -. 1.; 99_999. *. day ]
 
+(* How long something took. The Standalone lanes table drew its P50 as raw
+   seconds -- "415.9s" for a seven-minute reading -- in the same frame where
+   its own detail block said "2m11s". Below a minute the tenths are what a
+   reader compares; past it they are noise. *)
+let test_a_duration_keeps_the_tenths_only_while_they_are_read () =
+  let reads = check (option string) in
+  reads "under a second, whole milliseconds" (Some "32ms") (Layout.elapsed_text 0.032);
+  reads "under a minute, tenths" (Some "16.2s") (Layout.elapsed_text 16.23);
+  reads "a seven-minute p50 is minutes" (Some "6m55s") (Layout.elapsed_text 415.9);
+  reads "an hour-long run is hours" (Some "1h02m") (Layout.elapsed_text 3723.);
+  reads "no time at all is still a reading" (Some "0ms") (Layout.elapsed_text 0.);
+  (* A server clock that disagreed with itself, not an instant call: "0ms"
+     would say the call took no time. It reads as nothing, as a backwards
+     [age_text] does, and the caller draws its own missing-value cell. *)
+  reads "a duration from the future is nothing, not a countdown" None
+    (Layout.elapsed_text (-4.))
+
+(* Each rung reads the value rounded to that rung's own precision, so no
+   reading steps backwards as the duration grows. *)
+let test_a_duration_does_not_step_back_at_a_rung () =
+  let reads = check (option string) in
+  reads "a second's worth of milliseconds is a second" (Some "1.0s")
+    (Layout.elapsed_text 0.9999);
+  reads "just under a second stays milliseconds" (Some "999ms")
+    (Layout.elapsed_text 0.9994);
+  reads "tenths that round up to a minute are a minute" (Some "1m00s")
+    (Layout.elapsed_text 59.96);
+  reads "and the tenth below it is still seconds" (Some "59.9s")
+    (Layout.elapsed_text 59.94)
+
 (* task-1516: a turn block's span clock rides in the body, folded in before
    wrapping. It must consume body budget like any other word -- no row of the
    block may exceed the budget every row around it obeys, the rows must keep
@@ -2864,5 +2894,9 @@ let () =
             test_a_span_fits_a_six_cell_column
         ; test_case "compact count reads at a glance" `Quick
             test_compact_count_reads_at_a_glance
+        ; test_case "a duration keeps the tenths only while they are read" `Quick
+            test_a_duration_keeps_the_tenths_only_while_they_are_read
+        ; test_case "a duration does not step back at a rung" `Quick
+            test_a_duration_does_not_step_back_at_a_rung
         ] )
     ]

@@ -299,6 +299,7 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     'task_id',
     'goal_id',
     'goal_ids',
+    'phase',
     'summary_status',
     'exact_attempt',
     'summary_attempt_disposition',
@@ -325,6 +326,14 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     || typeof sequence !== 'number'
     || sequence <= 0
   ) return null
+  const phase = (() => {
+    const p = raw.phase
+    if (p === 'queued' || p === 'judging' || p === 'human_required' || p === 'blocked') {
+      return p
+    }
+    return null
+  })()
+  if (!phase) return null
   const summaryStatus = normalizeHitlSummaryStatus(raw.summary_status)
   const exactAttempt = normalizeKeeperExactAttempt(raw.exact_attempt)
   const disposition =
@@ -408,6 +417,7 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     goal_ids: asStringList(raw.goal_ids),
     input: raw.input,
     input_preview: asNullableString(raw.input_preview),
+    phase,
     summary_status: summaryStatus,
     exact_attempt: exactAttempt,
     summary_attempt_disposition: disposition,

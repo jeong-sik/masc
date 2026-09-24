@@ -530,7 +530,7 @@ let skill_editor_error_status = function
   | Package_already_exists ->
     `Conflict
   | Snapshot_not_registered | Snapshot_uninitialized | Reference_not_current
-  | Source_not_ready | Source_file_missing ->
+  | Source_not_ready _ | Source_file_missing ->
     `Not_found
   | Invalid_workspace | Source_read_failed | Write_failed _ | Quarantine_failed _ ->
     `Internal_server_error
@@ -567,7 +567,7 @@ let runtime_route_lane_to_string = function
   | Runtime_default -> "default"
   | Runtime_media_failover -> "media_failover"
   | Runtime_named_lane lane_id -> lane_id
-  | Runtime_exact_lane lane -> exact_route_prefix ^ Runtime.exact_lane_id lane
+  | Runtime_exact_lane lane -> exact_route_prefix ^ Standalone_lane.to_id lane
 
 (* Which name space a route string belongs to, before anything is resolved.
    Creating or renaming a lane asks only this: the name must land in the
@@ -591,21 +591,21 @@ let route_name_space = function
    [`Missing] for anything else, so a typo is refused with the name it could
    not find. An exact-output lane name never reaches that resolver: the prefix
    names which name space the rest of the string belongs to, and the name must
-   be one of the exact lanes the server runs ({!Runtime.exact_lane_of_id}), so
+   be one of the exact lanes the server runs ({!Standalone_lane.of_id}), so
    a typo is refused here instead of becoming a table nothing reads. *)
 let parse_runtime_route_lane lane =
   match route_name_space lane with
   | Default_route -> Ok Runtime_default
   | Media_failover_route -> Ok Runtime_media_failover
   | Exact_route name ->
-    (match Runtime.exact_lane_of_id name with
+    (match Standalone_lane.of_id name with
      | Some exact -> Ok (Runtime_exact_lane exact)
      | None ->
        Error
          (Printf.sprintf
             "unknown exact-output lane: %s (expected one of %s)"
             name
-            (String.concat ", " (List.map Runtime.exact_lane_id Runtime.all_exact_lanes))))
+            (String.concat ", " (List.map Standalone_lane.to_id Standalone_lane.all))))
   | Lane_route ->
     (match Runtime.resolve_assignment lane with
      | `Lane _ -> Ok (Runtime_named_lane lane)
@@ -1017,23 +1017,61 @@ let audit_skill_write state agent_name ~reference ~source_text ~status ~outcome 
     ()
 ;;
 
-let audit_skill_delete state agent_name ~reference ~status ~recovery ~outcome =
+(* [package_directory] is kept in the audit row because a later create for
+   the same id answers [package_already_exists] when the folder stayed, and
+   the WARN log line that also says so rotates away. *)
+let skill_delete_audit_details ~reference ~status ~recovery ~package_directory =
+  `Assoc
+    ([ "reference", Skill_reference.to_yojson reference
+     ; "status", `String status
+     ]
+     @ (match recovery with
+        | None -> []
+        | Some (recovery_id, disposition) ->
+          [ "recovery_id", `String recovery_id
+          ; "recovery_disposition", `String disposition
+          ])
+     @ match package_directory with
+       | None -> []
+       | Some package_directory ->
+         [ ( "package_directory"
+           , Server_skill_editor.package_directory_to_yojson package_directory )
+         ])
+;;
+
+(* The row for a delete that went through is read off the outcome here, not in
+   the handler, so a field the outcome carries cannot be dropped on the way to
+   the audit. *)
+let skill_delete_audit_of_outcome outcome =
+  let recovery recovery_id disposition =
+    Some (recovery_id, Server_skill_editor.recovery_disposition_to_string disposition)
+  in
+  match outcome with
+  | Server_skill_editor.Deleted_and_published
+      { reference; recovery_id; disposition; package_directory; _ } ->
+    ( Audit_log.Success
+    , skill_delete_audit_details
+        ~reference
+        ~status:"deleted_and_published"
+        ~recovery:(recovery recovery_id disposition)
+        ~package_directory:(Some package_directory) )
+  | Deleted_but_unpublished
+      { reference; reason; recovery_id; disposition; package_directory } ->
+    ( Audit_log.Failure (Server_skill_editor.delete_unpublished_reason_to_string reason)
+    , skill_delete_audit_details
+        ~reference
+        ~status:"deleted_but_unpublished"
+        ~recovery:(recovery recovery_id disposition)
+        ~package_directory:(Some package_directory) )
+;;
+
+let audit_skill_delete state agent_name ~details ~outcome =
   try
     Audit_log.log_action
       (Mcp_server.workspace_config state)
       ~agent_id:agent_name
       ~action:(Audit_log.Custom "skill_delete")
-      ~details:
-        (`Assoc
-          ([ "reference", Skill_reference.to_yojson reference
-           ; "status", `String status
-           ]
-           @ match recovery with
-             | None -> []
-             | Some (recovery_id, disposition) ->
-               [ "recovery_id", `String recovery_id
-               ; "recovery_disposition", `String disposition
-               ]))
+      ~details
       ~outcome
       ()
   with
@@ -1336,7 +1374,7 @@ module For_testing = struct
   let lane_string = function
     | Runtime_default -> "default"
     | Runtime_media_failover -> "media_failover"
-    | Runtime_exact_lane exact -> exact_route_prefix ^ Runtime.exact_lane_id exact
+    | Runtime_exact_lane exact -> exact_route_prefix ^ Standalone_lane.to_id exact
     | Runtime_named_lane id -> id
 
   let parse_runtime_route_body body =
@@ -1355,12 +1393,12 @@ module For_testing = struct
     | Ok (Runtime_route_lane_renamed (lane_id, new_lane_id)) ->
         Ok (lane_id, "rename", [ new_lane_id ])
     | Ok (Runtime_route_exact_slot_appended (exact, runtime_id)) ->
-        Ok (exact_route_prefix ^ Runtime.exact_lane_id exact, "append", [ runtime_id ])
+        Ok (exact_route_prefix ^ Standalone_lane.to_id exact, "append", [ runtime_id ])
     | Ok (Runtime_route_exact_slot_dropped (exact, runtime_id)) ->
-        Ok (exact_route_prefix ^ Runtime.exact_lane_id exact, "drop", [ runtime_id ])
+        Ok (exact_route_prefix ^ Standalone_lane.to_id exact, "drop", [ runtime_id ])
     | Ok (Runtime_route_exact_slot_moved (exact, runtime_id, move)) ->
         Ok
-          ( exact_route_prefix ^ Runtime.exact_lane_id exact
+          ( exact_route_prefix ^ Standalone_lane.to_id exact
           , "move"
           , [ runtime_id
             ; (match move with
@@ -1380,6 +1418,7 @@ module For_testing = struct
   let handle_runtime_routing_post = handle_runtime_routing_post
   let fusion_run_detail_response = fusion_run_detail_response
   let fusion_run_list_response = fusion_run_list_response
+  let skill_delete_audit_of_outcome = skill_delete_audit_of_outcome
 end
 
 (* One keeper held to a higher bar than the workspace. Its own handler
@@ -2316,37 +2355,18 @@ let add_routes ~sw ~clock router =
                  Eio.Cancel.protect (fun () ->
                   match result with
                   | Error error ->
-                    audit_skill_delete state agent_name ~reference
-                      ~status:(Server_skill_editor.error_code error)
-                      ~recovery:(skill_error_recovery error)
+                    audit_skill_delete state agent_name
+                      ~details:
+                        (skill_delete_audit_details ~reference
+                           ~status:(Server_skill_editor.error_code error)
+                           ~recovery:(skill_error_recovery error)
+                           ~package_directory:None)
                       ~outcome:
                         (Audit_log.Failure (Server_skill_editor.error_to_string error));
                     respond_skill_editor_error ~request:req reqd error
                   | Ok outcome ->
-                    let status, audit_outcome, recovery_id, disposition =
-                      match outcome with
-                      | Server_skill_editor.Deleted_and_published
-                          { recovery_id; disposition; _ } ->
-                        ( "deleted_and_published"
-                        , Audit_log.Success
-                        , recovery_id
-                        , disposition )
-                      | Deleted_but_unpublished
-                          { reason; recovery_id; disposition; _ } ->
-                        ( "deleted_but_unpublished"
-                        , Audit_log.Failure
-                            (Server_skill_editor.delete_unpublished_reason_to_string
-                               reason)
-                        , recovery_id
-                        , disposition )
-                    in
-                    audit_skill_delete state agent_name ~reference ~status
-                      ~recovery:
-                        (Some
-                           ( recovery_id
-                           , Server_skill_editor.recovery_disposition_to_string
-                               disposition ))
-                      ~outcome:audit_outcome;
+                    let audit_outcome, details = skill_delete_audit_of_outcome outcome in
+                    audit_skill_delete state agent_name ~details ~outcome:audit_outcome;
                     Http.Response.json_value
                       ~compress:true
                       ~request:req

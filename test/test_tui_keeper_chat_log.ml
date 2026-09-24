@@ -23,6 +23,8 @@ let occurrence_to_string (o : Live.tool_occurrence) =
     (Option.value ~default:"-" o.provider_message_id)
     (Option.value ~default:"-" o.tool_call_id)
 
+let token_count = function Some value -> string_of_int value | None -> "none"
+
 let delta_to_string : Live.delta -> string = function
   | Live.Batch_bound {operation_id; execution_id} -> Printf.sprintf "batch(%s,%s)" operation_id execution_id
   | Live.Run_started -> "run_started"
@@ -31,6 +33,17 @@ let delta_to_string : Live.delta -> string = function
         (Option.value ~default:"none" runtime_id)
         (match attempt_index with Some i -> string_of_int i | None -> "none")
   | Live.Stream_model_started { model } -> Printf.sprintf "stream_model_started(%s)" model
+  | Live.Stream_details { usage; stop_reason } ->
+      Printf.sprintf "stream_details(%s,stop=%s)"
+        (match usage with
+         | None -> "no usage"
+         | Some usage ->
+             Printf.sprintf "in=%s,out=%s,cache_read=%s,cache_write=%s"
+               (token_count usage.Live.input_tokens)
+               (token_count usage.Live.output_tokens)
+               (token_count usage.Live.cache_read_input_tokens)
+               (token_count usage.Live.cache_creation_input_tokens))
+        (Option.value ~default:"none" stop_reason)
   | Live.Text text -> "text(" ^ text ^ ")"
   | Live.Thinking text -> "thinking(" ^ text ^ ")"
   | Live.Tool_started { occurrence; tool_name } ->
@@ -262,8 +275,8 @@ let occurrence_anon : E.tool_stream_occurrence =
 
 (* Every constructor the server projects to a frame the live view ignores, or
    to no frame at all, plus a tool trio without provider ids. Absent here:
-   [Agent_core_media_delta] (its source kind lives in agent_core, which this
-   test does not link) and [Event_error] (terminal; see [failed_turn]). *)
+   [Agent_core_media_delta] (no renderer draws its URL yet, TUI or dashboard)
+   and [Event_error] (terminal; see [failed_turn]). *)
 let golden : E.keeper_chat_event list =
   [ E.Run_started { run_id = "run-golden"; thread_id = "keeper:keeper.one" }
   ; E.Batch_bound
@@ -322,6 +335,19 @@ let golden : E.keeper_chat_event list =
       }
   ; E.Text_message_end
   ; E.Agent_core_stream_message_delta { stop_reason = None; usage = None }
+    (* Both facts the delta can carry, so the golden comparison says the
+       journal and the wire read them the same way rather than agreeing on an
+       event that carries nothing. *)
+  ; E.Agent_core_stream_message_delta
+      { stop_reason = Some Agent_core.Types.MaxTokens
+      ; usage =
+          Some
+            { Agent_core.Types.input_tokens = Some 1200
+            ; output_tokens = Some 340
+            ; cache_creation_input_tokens = None
+            ; cache_read_input_tokens = Some 900
+            }
+      }
   ; E.Agent_core_stream_message_stop
   ; E.Run_finished { run_id = "run-golden" }
   ]
@@ -670,6 +696,39 @@ let test_a_journal_page_fills_the_log_like_the_wire_does () =
   check int "same attempt" (Log.attempt from_wire) (Log.attempt from_journal);
   check bool "the wire's attempt advanced past the retry" true (Log.attempt from_wire = 1)
 
+(* A reason that is only whitespace is not a reason. The live arm drops it
+   rather than drawing [stopped: ] with nothing after it, so the replay arm
+   drops it too: a reloaded turn and a watched one have to say the same thing
+   about the same bytes. Asked here of [delta_of_journaled] directly, because
+   the golden journal never carries a blank reason -- without these two the
+   trim could go back to a plain [Option.map] and every other case in this
+   file would still pass. *)
+let test_a_blank_reason_is_not_a_reason () =
+  let delta stop_reason usage =
+    Log.delta_of_journaled (E.Agent_core_stream_message_delta { stop_reason; usage })
+  in
+  (match delta (Some (Agent_core.Types.Unknown "")) None with
+   | None -> ()
+   | Some other ->
+       failf "a delta whose only fact was a blank reason became a row: %s"
+         (delta_to_string other));
+  match
+    delta
+      (Some (Agent_core.Types.Unknown "  "))
+      (Some
+         { Agent_core.Types.input_tokens = Some 7
+         ; output_tokens = None
+         ; cache_creation_input_tokens = None
+         ; cache_read_input_tokens = None
+         })
+  with
+  | Some (Live.Stream_details { usage = Some usage; stop_reason = None }) ->
+      check (option int) "the counters the same delta carried are kept" (Some 7)
+        usage.Live.input_tokens
+  | other ->
+      failf "a blank reason survived beside the counters: %s"
+        (match other with None -> "no row" | Some delta -> delta_to_string delta)
+
 let () =
   run "tui keeper chat log"
     [ ( "log"
@@ -681,6 +740,8 @@ let () =
             test_attempt_advances_on_runtime_attempt_started
         ; test_case "commit is idempotent and bumps once" `Quick
             test_commit_is_idempotent_and_bumps_once
+        ; test_case "a blank reason is not a reason" `Quick
+            test_a_blank_reason_is_not_a_reason
         ] )
     ; ( "v2 page"
       , [ test_case "decode events page" `Quick test_decode_events_page

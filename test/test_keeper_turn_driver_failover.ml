@@ -180,6 +180,98 @@ max-concurrent = 1
 max-concurrent = 1
 |}
 
+(* The head declares a large prompt ceiling, the fallback a small one, and a
+   third binding declares none. [roomy] and [tight] are the declared
+   ceilings the briefing-budget tests read back. Both declare through a
+   Claude Code provider, which reads [max-prompt-bytes]. [unread] is the
+   smallest number in the file, declared on a model bound through an HTTP
+   provider that never reads it, so no lane minimum may pick it. *)
+let roomy_max_prompt_bytes = 1_048_576
+let tight_max_prompt_bytes = 131_072
+let unread_max_prompt_bytes = 65_536
+
+let runtime_toml_with_uneven_prompt_ceilings =
+  Printf.sprintf
+    {|
+[runtime]
+default = "primary.roomy_model"
+
+[runtime.lanes.uneven]
+candidates = [ "primary.roomy_model", "fallback.tight_model" ]
+
+[runtime.lanes.undeclared_head]
+candidates = [ "open.open_model", "fallback.tight_model" ]
+
+[runtime.lanes.undeclared_only]
+candidates = [ "open.open_model" ]
+
+[runtime.lanes.three_deep]
+candidates = [ "open.open_model", "primary.roomy_model", "fallback.tight_model" ]
+
+[runtime.lanes.unread_declaration]
+candidates = [ "primary.roomy_model", "open.unread_model" ]
+
+[providers.primary]
+display-name = "Primary Provider"
+protocol = "claude-code"
+command = "/fixture-must-not-run-a-model"
+is-non-interactive = true
+
+[providers.fallback]
+display-name = "Fallback Provider"
+protocol = "claude-code"
+command = "/fixture-must-not-run-a-model"
+is-non-interactive = true
+
+[providers.open]
+display-name = "Open Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:3"
+
+[models.roomy_model]
+api-name = "roomy-model"
+max-context = 200000
+max-prompt-bytes = %d
+tools-support = true
+streaming = true
+
+[models.tight_model]
+api-name = "tight-model"
+max-context = 200000
+max-prompt-bytes = %d
+tools-support = true
+streaming = true
+
+[models.open_model]
+api-name = "open-model"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[models.unread_model]
+api-name = "unread-model"
+max-context = 200000
+max-prompt-bytes = %d
+tools-support = true
+streaming = true
+
+[primary.roomy_model]
+is-default = true
+max-concurrent = 1
+
+[fallback.tight_model]
+max-concurrent = 1
+
+[open.open_model]
+max-concurrent = 1
+
+[open.unread_model]
+max-concurrent = 1
+|}
+    roomy_max_prompt_bytes
+    tight_max_prompt_bytes
+    unread_max_prompt_bytes
+
 let runtime_toml_quota_lane_with_shared_credential shared_credential =
   Printf.sprintf
     {|
@@ -616,6 +708,104 @@ let test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens () =
       "the lane name itself names no binding, which is why this exists"
       true
       (Option.is_none (Runtime.get_runtime_by_id "resilient")))
+
+(* The briefing is rendered before the lane walk picks a candidate, and a
+   failed head is demoted behind its siblings, so the fallback can serve the
+   turn. Its budget must fit the smallest ceiling the lane declares, not the
+   head's: sized from the head, the fallback receives a briefing no cut of
+   history can bring under its own ceiling. *)
+let briefing_share_of cap =
+  cap * Masc.Keeper_config.keeper_context_briefing_share_percent () / 100
+
+module Budget = Masc.Keeper_turn_runtime_budget
+
+let briefing_budget_of_route route =
+  Budget.world_state_briefing_budget_bytes (Budget.Lane_of_route route)
+
+let test_briefing_budget_fits_the_smallest_lane_ceiling () =
+  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
+    Alcotest.(check (option int))
+      "the lane's smallest declared ceiling"
+      (Some tight_max_prompt_bytes)
+      (Runtime.smallest_max_prompt_bytes_of_route "uneven");
+    match briefing_budget_of_route "uneven" with
+    | None -> Alcotest.fail "a lane whose candidates declare ceilings is bounded"
+    | Some budget ->
+      Alcotest.(check int)
+        "the briefing is a share of the fallback's ceiling"
+        (briefing_share_of tight_max_prompt_bytes)
+        budget)
+
+(* A candidate that declares no ceiling has none in any admission path. It
+   adds no bound, and it must not erase the bound a sibling declares. *)
+let test_briefing_budget_an_undeclared_candidate_adds_no_bound () =
+  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
+    Alcotest.(check (option int))
+      "an undeclared head does not erase the fallback's ceiling"
+      (Some (briefing_share_of tight_max_prompt_bytes))
+      (briefing_budget_of_route "undeclared_head");
+    Alcotest.(check (option int))
+      "a lane whose candidates declare none gets no bound"
+      None
+      (briefing_budget_of_route "undeclared_only");
+    Alcotest.(check (option int))
+      "a bare runtime route is bounded by its own ceiling"
+      (Some (briefing_share_of roomy_max_prompt_bytes))
+      (briefing_budget_of_route "primary.roomy_model");
+    Alcotest.(check (option int))
+      "a route that names nothing gets no bound"
+      None
+      (briefing_budget_of_route "no-such-route"))
+
+(* Lane [open (none); roomy; tight]. The undeclared head failed and the
+   deferred hint names roomy next with tight after it. The walk dispatches
+   both, so the briefing must fit tight, not only the next candidate. *)
+let test_briefing_budget_spans_the_whole_deferred_suffix () =
+  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
+    let hint =
+      Driver.restore_deferred_runtime_lane
+        ~assignment_id:"three_deep"
+        ~failed_runtime_id:"open.open_model"
+        ~next_runtime_id:"primary.roomy_model"
+        ~later_runtime_ids:[ "fallback.tight_model" ]
+        ~failure:(Agent_core.Error.Internal "head refused")
+    in
+    let candidates =
+      Masc.Keeper_unified_turn.briefing_candidates_for_turn
+        ~deferred_runtime_lane:(Some hint)
+        ~assigned_route:"three_deep"
+    in
+    Alcotest.(check (option int))
+      "the briefing fits the last candidate of the deferred walk"
+      (Some (briefing_share_of tight_max_prompt_bytes))
+      (Budget.world_state_briefing_budget_bytes candidates);
+    Alcotest.(check (option int))
+      "without a hint the whole lane of the assignment bounds it"
+      (Some (briefing_share_of tight_max_prompt_bytes))
+      (Budget.world_state_briefing_budget_bytes
+         (Masc.Keeper_unified_turn.briefing_candidates_for_turn
+            ~deferred_runtime_lane:None
+            ~assigned_route:"three_deep")))
+
+(* Only Claude Code and Antigravity read [max-prompt-bytes]. A number declared
+   on an HTTP candidate bounds nothing that provider checks, so it must not
+   become the lane's minimum: counted, it would shrink every turn's briefing
+   even while the Claude Code head serves. Two reading candidates still give
+   their minimum ([uneven]). *)
+let test_briefing_budget_ignores_a_ceiling_its_runtime_does_not_read () =
+  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
+    Alcotest.(check (option int))
+      "the HTTP declaration does not become the lane minimum"
+      (Some roomy_max_prompt_bytes)
+      (Runtime.smallest_max_prompt_bytes_of_route "unread_declaration");
+    Alcotest.(check (option int))
+      "a lone HTTP declaration bounds nothing"
+      None
+      (Runtime.smallest_max_prompt_bytes_of_runtime_ids [ "open.unread_model" ]);
+    Alcotest.(check (option int))
+      "two reading candidates give their minimum"
+      (Some tight_max_prompt_bytes)
+      (Runtime.smallest_max_prompt_bytes_of_route "uneven"))
 
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
@@ -1078,7 +1268,7 @@ let test_attempt_input_is_projected_per_runtime () =
           ~project_images
           ~keeper_name:"per-attempt-projection"
           ~emit_runtime_manifest:(emit_manifest_collector events)
-          ~goal_blocks:(Some [ Agent_core.Types.Text "describe"; image ])
+          ~goal_blocks:(Some [ Agent_core.Types.Text "describe"; image ]) ~goal_metadata:[]
           ~initial_messages:history
           ~agent_core_checkpoint:None
           ~runtime_id
@@ -1161,7 +1351,7 @@ let test_media_rows_keep_their_fields_in_the_public_view () =
            ~project_images
            ~keeper_name:"media-row-public-view"
            ~emit_runtime_manifest:(emit_manifest_collector events)
-           ~goal_blocks:(Some [ Agent_core.Types.Text "describe"; synthetic_image () ])
+           ~goal_blocks:(Some [ Agent_core.Types.Text "describe"; synthetic_image () ]) ~goal_metadata:[]
            ~initial_messages:[]
            ~agent_core_checkpoint:None
            ~runtime_id
@@ -1233,7 +1423,7 @@ let test_image_fallback_checkpoint_keeps_canonical_prefix () =
       Driver.For_testing.project_input_for_attempt
         ~project_images ~keeper_name:"image-checkpoint"
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-        ~goal_blocks ~initial_messages:history
+        ~goal_blocks ~goal_metadata:[] ~initial_messages:history
         ~agent_core_checkpoint:(Some checkpoint) ~runtime_id (runtime runtime_id)
     in
     let history_only = project ~goal_blocks:None "primary.text_model" in
@@ -1285,15 +1475,23 @@ let test_current_image_checkpoint_survives_text_fallback () =
             | Agent_core.Types.Image _ -> Agent_core.Types.Text "[image reading: blue circle]"
             | block -> block) blocks
       ; delegated_images = image_count_in_blocks blocks } in
+    (* RFC-0468 §3.2: AGENT_CORE stamps the input speaker on the dispatched
+       User message. The restored canonical input must carry the same entry,
+       or the replay prefix would no longer equal what was persisted. *)
+    let goal_metadata =
+      Masc.Keeper_input_speaker.metadata
+        (Masc.Keeper_input_speaker.Person Masc.Keeper_input_speaker.Owner) in
     let text_view = Driver.For_testing.project_input_for_attempt
         ~project_images ~keeper_name:"current-image-checkpoint"
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-        ~goal_blocks:(Some canonical_blocks) ~initial_messages:history
+        ~goal_blocks:(Some canonical_blocks) ~goal_metadata ~initial_messages:history
         ~agent_core_checkpoint:(Some checkpoint)
         ~runtime_id:"primary.text_model" (runtime "primary.text_model") in
-    let projected_input = Agent_core.Types.user_msg_blocks
+    let projected_input = Agent_core.Types.make_message ~metadata:goal_metadata
+        ~role:Agent_core.Types.User
         (Option.get text_view.Driver.attempt_goal_blocks) in
-    let canonical_input = Agent_core.Types.user_msg_blocks canonical_blocks in
+    let canonical_input = Agent_core.Types.make_message ~metadata:goal_metadata
+        ~role:Agent_core.Types.User canonical_blocks in
     let dispatch_prefix =
       (Option.get text_view.Driver.attempt_agent_core_checkpoint).messages in
     let suffix =
@@ -1363,7 +1561,7 @@ let test_current_image_checkpoint_survives_text_fallback () =
     let native_view = Driver.For_testing.project_input_for_attempt
         ~project_images ~keeper_name:"current-image-checkpoint"
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-        ~goal_blocks:(Some [ Agent_core.Types.Text "inspect the earlier picture again" ])
+        ~goal_blocks:(Some [ Agent_core.Types.Text "inspect the earlier picture again" ]) ~goal_metadata:[]
         ~initial_messages:reloaded.messages ~agent_core_checkpoint:(Some reloaded)
         ~runtime_id:"lanevision.vision_model" (runtime "lanevision.vision_model") in
     Alcotest.(check bool) "fresh native turn recovers the persisted canonical image blocks"
@@ -2725,11 +2923,8 @@ let rate_limited_route =
 let describe_dispatch ~now = function
   | None -> "no provider wait"
   | Some (Driver.Dispatch_now { runtime_id }) -> "dispatch " ^ runtime_id
-  | Some (Driver.Wait_until { release_at; waiting_on; wait }) ->
-    Printf.sprintf "wait %.0fs for %s (%s)" (release_at -. now) waiting_on
-      (match wait with
-       | Driver.Capacity_release -> "capacity"
-       | Driver.Path_release -> "path")
+  | Some (Driver.Wait_until { release_at; waiting_on }) ->
+    Printf.sprintf "wait %.0fs for %s" (release_at -. now) waiting_on
 ;;
 
 let failed_attempt_of runtime_id =
@@ -2749,6 +2944,7 @@ let attempt_failure : Runtime_candidate_backpressure.attempt_failure option Alco
          (match failure with
           | None -> "none"
           | Some Runtime_candidate_backpressure.Server_error -> "server_error"
+          | Some Runtime_candidate_backpressure.Provider_capacity -> "provider_capacity"
           | Some Runtime_candidate_backpressure.Network_transient -> "network_transient"
           | Some Runtime_candidate_backpressure.Provider_timeout -> "provider_timeout"))
     ( = )
@@ -2816,6 +3012,53 @@ let test_failed_attempts_demote_until_the_candidate_answers () =
       Alcotest.(check (list string)) "the answered candidate returns to its declared place"
         ["shared_a.test_model"; "other.test_model"; "shared_b.test_model"]
         (backpressure_order ids)))
+;;
+
+(* #38061: a head that answers HTTP 529 every turn is a provider out of
+   capacity, the same fact a 503 is. The turn walks on to the next candidate,
+   the head leaves failed-attempt evidence, and the next walk starts from the
+   candidate that answered. Before, the route called a 529 MASC's own
+   capacity: no evidence was kept and every turn led with the same head. *)
+let test_a_529_head_is_demoted_and_the_walk_moves_on () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let head = "shared_a.test_model" and next = "shared_b.test_model" in
+      let ids = [ head; next; "other.test_model" ] in
+      let attempts = ref [] in
+      let result =
+        walk_once
+          (fun runtime_id ->
+             attempts := runtime_id :: !attempts;
+             if String.equal runtime_id head
+             then Error (Agent_core.Error.Api (Agent_core.Retry.Overloaded { message = "overloaded" }))
+             else Ok ())
+          ids
+      in
+      (match result with
+       | Ok () -> ()
+       | Error error -> Alcotest.failf "the walk did not move on: %s" (Agent_core.Error.to_string error));
+      Alcotest.(check (list string)) "the turn walks from the 529 head to the next candidate"
+        [ head; next ] (List.rev !attempts);
+      Alcotest.check attempt_failure "the 529 head keeps failed-attempt evidence"
+        (Some Runtime_candidate_backpressure.Provider_capacity) (failed_attempt_of head);
+      Alcotest.(check (list string)) "the next walk leads with the candidate that answered"
+        [ next; "other.test_model"; head ]
+        (backpressure_order ids);
+      let now = Unix.gettimeofday () in
+      (match Driver.path_rest ~now head with
+       | Driver.Path_serving -> ()
+       | Driver.Path_resting _ -> Alcotest.fail "a 529 made the path rest instead of demoting it");
+      let overloaded_route =
+        Keeper_runtime_failure_route.route_of_error
+          ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+          (Agent_core.Error.Api (Agent_core.Retry.Overloaded { message = "overloaded" }))
+      in
+      Alcotest.(check string) "a 529 on the last candidate keeps the cadence, not a capacity wait"
+        "no provider wait"
+        (describe_dispatch ~now
+           (Driver.next_dispatch_after_failure ~now ~route:overloaded_route
+              ~assignment_id:"quota_lane" None))))
 ;;
 
 (* An attributed empty completion is still an answer from the candidate. It
@@ -2929,6 +3172,11 @@ let test_only_the_candidates_own_failures_are_evidence () =
         (Some Runtime_candidate_backpressure.Network_transient)
         (one "shared_b.test_model" (retryable_network_error "connection refused"));
       reset_quota_lane_rests ();
+      Alcotest.check attempt_failure "a provider overload (HTTP 529)"
+        (Some Runtime_candidate_backpressure.Provider_capacity)
+        (one "shared_a.test_model"
+           (Agent_core.Error.Api (Agent_core.Retry.Overloaded { message = "overloaded" })));
+      reset_quota_lane_rests ();
       Alcotest.check attempt_failure "a provider that sent no first token"
         (Some Runtime_candidate_backpressure.Provider_timeout)
         (one "shared_a.test_model"
@@ -2955,8 +3203,6 @@ let test_only_the_candidates_own_failures_are_evidence () =
         , Agent_core.Error.Api
             (Agent_core.Retry.Timeout
                { message = "capacity"; phase = Some Llm_provider.Http_client.Capacity_backpressure })
-        ; "provider overload is MASC-side capacity"
-        , Agent_core.Error.Api (Agent_core.Retry.Overloaded { message = "overloaded" })
         ; "a model the provider does not serve"
         , Agent_core.Error.Api (Agent_core.Retry.NotFound { message = "no such model" })
         ; "a context overflow is the turn's input"
@@ -3134,24 +3380,18 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
           ; deferred_runtime_lane = Some (quota_lane_suffix both_shared)
           }
       in
-      let waits_without_serving_a_wakeup =
+      let waits_for_the_path =
         match decision with
         | Some
             (Masc.Keeper_heartbeat_loop.Wait_for_path_release
-               { wake_policy = Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration
-               ; release_at = _
-               ; waiting_on = _
-               }) ->
+               { release_at = _; waiting_on = _ }) ->
           true
-        | Some
-            (Masc.Keeper_heartbeat_loop.Wait_for_path_release
-               { wake_policy = Masc.Keeper_keepalive_signal.Interrupt_on_wakeup; _ })
         | Some (Masc.Keeper_heartbeat_loop.Continue_on_deferred_lane _)
         | None ->
           false
       in
-      Alcotest.(check bool) "a failed cycle whose walk head rests waits without serving a wakeup"
-        true waits_without_serving_a_wakeup))
+      Alcotest.(check bool) "a failed cycle whose walk head rests waits for the path"
+        true waits_for_the_path))
 ;;
 
 (* A failure without a suffix used every path the input may take. Its wait
@@ -3170,7 +3410,7 @@ let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
              ~now ~route:rate_limited_route ~assignment_id:"quota_lane" None)
       in
       Alcotest.(check string) "a serving fresh walk head waits only for the failed path"
-        (Printf.sprintf "wait %.0fs for quota_lane (path)" floor_sec)
+        (Printf.sprintf "wait %.0fs for quota_lane" floor_sec)
         (decide ());
       Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 600.);
@@ -3180,14 +3420,14 @@ let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
         ~resets_at:(now +. 900.);
       Alcotest.(check string) "a resting fresh walk head extends the wait to its release"
-        "wait 600s for shared_a.test_model (path)"
+        "wait 600s for shared_a.test_model"
         (decide ())))
 ;;
 
 (* RFC-provider-path-rest §3.4: the chat lane's deferred retry reads the same
    next dispatch as the heartbeat. A suffix whose walk head serves is claimable
-   at once; a resting head holds the retry until its release; capacity
-   backpressure holds it for its own rest whatever the suffix is. *)
+   at once; a resting head holds the retry until its release; a provider's
+   capacity refusal is walked like a server error (#38061). *)
 let test_a_chat_retry_follows_the_shared_next_dispatch () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
@@ -3222,8 +3462,8 @@ let test_a_chat_retry_follows_the_shared_next_dispatch () =
       Alcotest.(check string) "a resting walk head holds the retry until its release"
         "claimable in 300s"
         (not_before (quota_lane_suffix ~failure:rate_limited [ "shared_a.test_model" ]));
-      Alcotest.(check string) "capacity backpressure holds the retry for its own rest"
-        "claimable in 5s"
+      Alcotest.(check string) "a provider's capacity refusal walks to a serving suffix head"
+        "claimable now"
         (not_before (quota_lane_suffix ~failure:capacity [ "other.test_model" ]))))
 ;;
 
@@ -4686,7 +4926,7 @@ let test_a_same_path_suffix_waits_only_for_a_recorded_rest () =
       Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate path) ~retry_after:(Some 120.);
       Alcotest.(check string) "a stated 429 rest holds the same path until it ends"
-        ("wait 120s for " ^ path ^ " (path)")
+        ("wait 120s for " ^ path)
         (next ~route:rate_limited_route bad_gateway)))
 ;;
 
@@ -4713,6 +4953,28 @@ let test_deferred_hint_refs_are_not_shared () =
     "second owner remains independent"
     true
     (Option.is_some !second)
+
+let test_deferred_hint_is_dropped_when_assignment_changes () =
+  let failure = retryable_network_error "checkpoint failure" in
+  let hint =
+    Driver.For_testing.make_deferred_runtime_lane
+      ~assignment_id:"lane.one"
+      ~failed_runtime_id:"runtime.a"
+      ~next_runtime_id:"runtime.b"
+      ~later_runtime_ids:[]
+      ~failure
+  in
+  let hint_ref = ref (Some hint) in
+  let for_assignment =
+    Masc.Keeper_heartbeat_loop.For_testing.deferred_runtime_lane_for_assignment
+  in
+  Alcotest.(check bool) "same assignment keeps its hint" true
+    (Option.is_some (for_assignment hint_ref ~assignment_id:"lane.one"));
+  Alcotest.(check bool) "hint survives a matching read" true
+    (Option.is_some !hint_ref);
+  Alcotest.(check bool) "changed assignment gets no hint" true
+    (Option.is_none (for_assignment hint_ref ~assignment_id:"lane.two"));
+  Alcotest.(check bool) "stale hint is cleared" true (Option.is_none !hint_ref)
 
 let rec remove_tree path =
   match Unix.lstat path with
@@ -4956,6 +5218,60 @@ let test_exhausted_access_errors_rotate_and_deterministic_requests_remain_termin
     | Ok _ -> Alcotest.fail "exhausted lane unexpectedly succeeded") cases
 ;;
 
+
+(* The pipeline answers a request it refused to send with [Attempt_rejected].
+   Only when no request of the attempt was serialized for sending did no
+   provider see it; a refusal after an earlier request went out, and every
+   provider answer, stay dispatched. *)
+let test_a_pipeline_refusal_is_not_a_dispatched_attempt () =
+  let dispatch = Driver.For_testing.provider_attempt_dispatch in
+  let pipeline_refusal =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message = "output reservation unknown"
+         ; reason = Llm_provider.Retry.Attempt_rejected
+         })
+  in
+  let provider_refusal =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message = "bad parameter"
+         ; reason = Llm_provider.Retry.Unknown_invalid_request
+         })
+  in
+  Alcotest.check dispatch_disposition "refused before any request went out"
+    Masc.Keeper_attempt_dispatch.Rejected_before_dispatch
+    (dispatch ~request_serialized:false (Error pipeline_refusal));
+  Alcotest.check dispatch_disposition "refused after an earlier request went out"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch ~request_serialized:true (Error pipeline_refusal));
+  Alcotest.check dispatch_disposition "a provider's refusal"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch ~request_serialized:true (Error provider_refusal));
+  Alcotest.check dispatch_disposition "a network failure after sending"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch ~request_serialized:true (Error (retryable_network_error "reset")));
+  let window_counted_locally =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.ContextOverflow { message = "window"; limit = None })
+  in
+  Alcotest.check dispatch_disposition "a window the pipeline counted before sending"
+    Masc.Keeper_attempt_dispatch.Rejected_before_dispatch
+    (dispatch ~request_serialized:false (Error window_counted_locally));
+  Alcotest.check dispatch_disposition "the same window refused by the provider"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch ~request_serialized:true (Error window_counted_locally));
+  Alcotest.check dispatch_disposition "no declared context limit"
+    Masc.Keeper_attempt_dispatch.Rejected_before_dispatch
+    (dispatch ~request_serialized:false
+       (Error
+          (Agent_core.Error.Config
+             (Agent_core.Error.InvalidConfig { field = "max_context"; detail = "none" }))));
+  Alcotest.check dispatch_disposition "a transport failure with no request serialized"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch ~request_serialized:false (Error (retryable_network_error "count")))
+;;
+
 let () =
   Alcotest.run
     "keeper_turn_driver_failover"
@@ -4990,6 +5306,22 @@ let () =
             "entry_runtime_id_of_route resolves a route to the binding it opens"
             `Quick
             test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens;
+          Alcotest.test_case
+            "the briefing budget fits the smallest lane ceiling"
+            `Quick
+            test_briefing_budget_fits_the_smallest_lane_ceiling;
+          Alcotest.test_case
+            "an undeclared candidate adds no bound and erases none"
+            `Quick
+            test_briefing_budget_an_undeclared_candidate_adds_no_bound;
+          Alcotest.test_case
+            "the briefing budget spans the whole deferred suffix"
+            `Quick
+            test_briefing_budget_spans_the_whole_deferred_suffix;
+          Alcotest.test_case
+            "the briefing budget ignores a ceiling its runtime does not read"
+            `Quick
+            test_briefing_budget_ignores_a_ceiling_its_runtime_does_not_read;
           Alcotest.test_case
             "a bare runtime assignment walks only itself"
             `Quick
@@ -5138,6 +5470,8 @@ let () =
             test_rate_limit_order_never_excludes_and_success_clears;
           Alcotest.test_case "failed attempts demote until the candidate answers" `Quick
             test_failed_attempts_demote_until_the_candidate_answers;
+          Alcotest.test_case "a 529 head is demoted and the walk moves on (#38061)" `Quick
+            test_a_529_head_is_demoted_and_the_walk_moves_on;
           Alcotest.test_case
             "an empty completion clears stale unavailability evidence"
             `Quick
@@ -5293,6 +5627,10 @@ let () =
             `Quick
             test_deferred_hint_refs_are_not_shared;
           Alcotest.test_case
+            "deferred hint is dropped when the assignment changes"
+            `Quick
+            test_deferred_hint_is_dropped_when_assignment_changes;
+          Alcotest.test_case
             "deferred hint survives restart and settles durably"
             `Quick
             test_deferred_hint_survives_store_restart_and_clears_after_settlement;
@@ -5318,5 +5656,9 @@ let () =
             "initial lane exhaustion cannot escape declared candidates"
             `Quick
             test_initial_lane_exhaustion_cannot_escape_declared_candidates;
+          Alcotest.test_case
+            "a pipeline refusal is not a dispatched attempt"
+            `Quick
+            test_a_pipeline_refusal_is_not_a_dispatched_attempt;
         ] );
     ]

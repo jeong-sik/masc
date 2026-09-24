@@ -970,29 +970,6 @@ let rec start_keepalive
     Eio_context.run_on_owner_domain (fun () ->
       start_keepalive ~proactive_warmup_sec ?lifecycle_token ?intake_token ctx m)
   else
-    (* A Keeper lane is server-owned, even when its creation or restart is
-       requested by a tool running inside another Keeper's turn.  In production
-       the root switch is installed once by server bootstrap.  A standalone/test
-       runtime without that global binding makes [ctx.sw] the explicit owner and
-       must therefore pass a switch that outlives the lane; a turn- or lane-scoped
-       context is not a valid launch owner. *)
-    let lane_parent_sw =
-      match Eio_context.get_root_switch_opt () with
-      | Some root_sw -> root_sw
-      | None ->
-        (* #26622/#26587: no server root switch is installed, so this call
-           is trusting [ctx.sw] to already be a switch that outlives the
-           lane -- true for standalone/test bootstrap, a bug for any other
-           caller. Nothing here can tell the two apart by type, so make the
-           substitution observable instead of silent. *)
-        Log.Keeper.warn
-          "%s: start_keepalive has no server root switch installed; using \
-           ctx.sw as the lane's parent switch. This is expected only for \
-           standalone/test bootstrap -- any other caller has a switch that \
-           does not outlive the lane."
-          m.name;
-        ctx.sw
-    in
   let lifecycle_state =
     Keeper_lifecycle_admission.state
       ~paused:m.paused
@@ -1373,8 +1350,8 @@ let rec start_keepalive
             then record_stopped "manual stop"
             else record_lane_exception exn
         in
-        (* Lane cleanup is declared outside [run] because [Keeper_lane.fork]
-           invokes it only after the child-owning switch and all children
+        (* Lane cleanup is declared outside [run] because
+           [Keeper_lane.fork_server_owned] invokes it only after the child-owning switch and all children
            finish. *)
         let cleanup_tracking outcome =
           let lifecycle_result =
@@ -1438,8 +1415,7 @@ let rec start_keepalive
         in
         publish_keeper_started ~live_meta;
         (match
-           Keeper_lane.fork
-             ~sw:lane_parent_sw
+           Keeper_lane.fork_server_owned
              reg.lane
              ~run:(fun lane_sw ->
         Eio.Switch.run ~name:("keeper " ^ live_meta.name) @@ fun _ ->

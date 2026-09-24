@@ -53,6 +53,9 @@ type recent_turn =
             about this turn. *)
   ; cache_read : int option
   ; output_tokens : int option
+  ; turn_output_tokens : int option
+        (** The whole client turn's output when the runtime reports it apart
+            from the request figures above ({!Turn_record.t.turn_output_tokens}). *)
   ; scope : Runtime_usage_scope.t
   }
 

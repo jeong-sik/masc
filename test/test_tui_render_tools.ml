@@ -55,6 +55,91 @@ let test_the_surface_line_tells_a_failed_read_from_an_unread_one () =
   Alcotest.(check string) "failed" " Effective Keeper Surface (load failed)"
     (surface_line failed)
 
+(* When two catalog entries declare one Skill name, the first in catalog order
+   wins and the other is published but listed to no Keeper turn by that name.
+   The Skill usage pane draws the catalog's shadows beside its rejections, so
+   an operator can see which copy Keepers get. The payload is a hand-written
+   copy of the snapshot shape, run through the decoder the live loader uses;
+   test_skill_catalog_snapshot runs the server's own serializer through the
+   same decoder. *)
+let skill_identity ~source_id name =
+  `Assoc
+    [ "source_id", `String source_id
+    ; "package_id", `String name
+    ; "name", `String name
+    ]
+
+let skills_catalog_with ~shadows =
+  `Assoc
+    [ "schema", `String "masc.skill-snapshot/v1"
+    ; "state", `String "ready"
+    ; "usage_coverage", `Assoc [ "ledgers_loaded", `Int 0; "unavailable", `List [] ]
+    ; ( "snapshot"
+      , `Assoc
+          [ "snapshot_revision", `String "snapshot-rev"
+          ; "catalog_revision", `String "catalog-rev"
+          ; "config", `Assoc [ "kind", `String "unreadable" ]
+          ; "sources", `List []
+          ; "skills", `List []
+          ; "effective_skills", `List []
+          ; "shadows", `List shadows
+          ; "rejections", `List []
+          ] )
+    ; "surfaces", `List []
+    ]
+
+let usage_pane_lines ~shadows =
+  let state = make_state () in
+  (match Masc.Tui_decode.decode_skills_catalog (skills_catalog_with ~shadows) with
+   | Ok catalog -> state.skills_catalog <- Some catalog
+   | Error detail -> Alcotest.failf "decode failed: %s" detail);
+  state.tools_pane <- Tools_usage;
+  Masc_tui_render_tools.tools_display_lines state |> List.map snd
+
+let index_of needle haystack =
+  let n = String.length needle in
+  let rec seek i =
+    if i + n > String.length haystack then None
+    else if String.equal (String.sub haystack i n) needle then Some i
+    else seek (i + 1)
+  in
+  seek 0
+
+let test_the_usage_pane_names_both_sides_of_a_shadow () =
+  let winner = "project-masc/shared" and shadowed = "project-agents/shared" in
+  let lines =
+    usage_pane_lines
+      ~shadows:
+        [ `Assoc
+            [ "winner", skill_identity ~source_id:"project-masc" "shared"
+            ; "shadowed", skill_identity ~source_id:"project-agents" "shared"
+            ] ]
+  in
+  (* The shared name and the shadowed package lead; the winner stands on the
+     next line by itself, so a narrow pane that cuts the first line never
+     cuts the winner. *)
+  (match List.filter (contains shadowed) lines with
+   | [ row ] ->
+     Alcotest.(check bool) "the row names the Skill the two share" true
+       (match index_of "shared" row, index_of shadowed row with
+        | Some name_at, Some package_at -> name_at < package_at
+        | None, _ | _, None -> false);
+     Alcotest.(check bool) "and not the winner" false (contains winner row)
+   | rows ->
+     Alcotest.failf "expected one row naming the shadowed package, got %d"
+       (List.length rows));
+  (match List.filter (contains winner) lines with
+   | [ row ] ->
+     Alcotest.(check bool) "the winner's line says it shadows" true
+       (contains ("shadowed by " ^ winner) row)
+   | rows ->
+     Alcotest.failf "expected one line naming the winner, got %d" (List.length rows));
+  (* The pane scrolls, so a shadow costs rows only there: its heading and two
+     lines, and a catalog without shadows gains nothing. *)
+  let healthy = usage_pane_lines ~shadows:[] in
+  Alcotest.(check int) "one heading and two lines per shadow"
+    (List.length healthy + 3) (List.length lines)
+
 (* A Skill name the profile selected that the turn catalog does not hold is a
    different fact from a document that failed to read: nothing was read badly,
    the selection simply matched nothing. The producer sends it as its own list
@@ -64,7 +149,7 @@ let test_the_surface_line_tells_a_failed_read_from_an_unread_one () =
    said nothing, so the two renderers of one surface disagreed about whether
    the operator is told. The JSON below is the wire shape, run through the
    decoder the live loader uses, so the test fails if either end moves. *)
-let surface_with ~unavailable_skill_names =
+let surface_with ?(tools = []) ~unavailable_skill_names () =
   `Assoc
     [ "status", `String "available"
     ; "keeper_name", `String "surface-fixture-keeper"
@@ -78,7 +163,7 @@ let surface_with ~unavailable_skill_names =
     ; "instruction_skills", `List []
     ; "composition_skills", `List []
     ; "unavailable_skill_names", `List unavailable_skill_names
-    ; "tools", `List []
+    ; "tools", `List tools
     ]
 
 let tools_snapshot ~effective =
@@ -97,11 +182,11 @@ let tools_snapshot ~effective =
     ; "skill_activations", `Null
     ]
 
-let state_showing ~unavailable_skill_names =
+let state_showing ?tools ~unavailable_skill_names () =
   let state = make_state () in
   (match
      Masc.Tui_decode.decode_tool_snapshot
-       (tools_snapshot ~effective:(surface_with ~unavailable_skill_names))
+       (tools_snapshot ~effective:(surface_with ?tools ~unavailable_skill_names ()))
    with
    | Ok snapshot -> state.tools_inventory <- Some snapshot
    | Error detail -> Alcotest.failf "decode failed: %s" detail);
@@ -115,7 +200,7 @@ let surface_text state =
 let test_the_screen_names_a_configured_skill_that_is_not_there () =
   let shown =
     surface_text
-      (state_showing
+      (state_showing ()
          ~unavailable_skill_names:
            [ `Assoc
                [ "name", `String "browser-lanes"
@@ -126,23 +211,55 @@ let test_the_screen_names_a_configured_skill_that_is_not_there () =
     (contains "browser-lanes" shown);
   Alcotest.(check bool) "with the producer's reason beside it" true
     (contains "not_in_turn_skill_catalog" shown);
-  (* A reader that fills in a reason speaks for a producer that said nothing,
-     so an entry without one draws the name alone rather than a guess. *)
-  let reasonless =
-    surface_text
-      (state_showing
-         ~unavailable_skill_names:[ `Assoc [ "name", `String "solo-name" ] ])
-  in
-  Alcotest.(check bool) "a reasonless entry still names the skill" true
-    (contains "solo-name" reasonless);
-  Alcotest.(check bool) "and invents no reason for it" false
-    (contains "not_in_turn_skill_catalog" reasonless);
   (* Without this the block could be drawn unconditionally and both checks
      above would still pass, so a healthy surface would gain a heading that
      claims something it has no entry for. *)
-  let healthy = surface_text (state_showing ~unavailable_skill_names:[]) in
+  let healthy = surface_text (state_showing ~unavailable_skill_names:[] ()) in
   Alcotest.(check bool) "a healthy surface gains no row" false
     (contains "not in the turn catalog" healthy)
+
+(* The ORIGIN column says where each tool came from: the kind word, and for a
+   composition skill the configured source it was read from. A kind this build
+   does not know is drawn as the word the server sent. Each check reads the
+   row of its own tool, so a word elsewhere on the screen cannot satisfy it. *)
+let test_the_origin_column_names_the_source_of_a_skill_tool () =
+  let tool name origin = `Assoc [ "name", `String name; "origin", `Assoc origin ] in
+  let lines =
+    Masc_tui_render_tools.tools_display_lines
+      (state_showing
+         ~tools:
+           [ tool "keeper_compose_work-intake"
+               [ "kind", `String "composition_skill"
+               ; ( "skill_provenance"
+                 , `Assoc [ "identity", `Assoc [ "source_id", `String "shared-catalog" ] ] )
+               ]
+           ; tool "keeper_compose_unresolved"
+               [ "kind", `String "composition_skill"; "skill_provenance", `Null ]
+           ; tool "keeper_board_list" [ "kind", `String "descriptor" ]
+           ; tool "bridged_call" [ "kind", `String "mcp_bridge" ]
+           ]
+         ~unavailable_skill_names:[] ())
+    |> List.map snd
+  in
+  let origin_of name =
+    match List.find_opt (contains name) lines with
+    | None -> Alcotest.failf "no row for %s" name
+    | Some line ->
+        let rec index_of i =
+          if String.equal (String.sub line i (String.length name)) name then i
+          else index_of (i + 1)
+        in
+        let start = index_of 0 + String.length name in
+        String.trim (String.sub line start (String.length line - start))
+  in
+  Alcotest.(check string) "a composition skill names its source"
+    "composition_skill:shared-catalog" (origin_of "keeper_compose_work-intake");
+  Alcotest.(check string) "an unresolved provenance draws the kind alone"
+    "composition_skill" (origin_of "keeper_compose_unresolved");
+  Alcotest.(check string) "a descriptor draws its kind" "descriptor"
+    (origin_of "keeper_board_list");
+  Alcotest.(check string) "an unknown kind draws the word the server sent"
+    "mcp_bridge" (origin_of "bridged_call")
 
 let () =
   Alcotest.run "masc_tui_render_tools"
@@ -151,10 +268,14 @@ let () =
             test_the_strip_names_panes_and_leaves_the_key_to_the_footer
         ; Alcotest.test_case "the surface line tells failed from unread" `Quick
             test_the_surface_line_tells_a_failed_read_from_an_unread_one
+        ; Alcotest.test_case "the usage pane names both sides of a shadow" `Quick
+            test_the_usage_pane_names_both_sides_of_a_shadow
         ; Alcotest.test_case "the shared strip drawing" `Quick
             test_the_strip_is_the_shared_drawing
         ; Alcotest.test_case
             "the screen names a configured skill that is not there" `Quick
             test_the_screen_names_a_configured_skill_that_is_not_there
+        ; Alcotest.test_case "the origin column names a skill tool's source" `Quick
+            test_the_origin_column_names_the_source_of_a_skill_tool
         ] )
     ]

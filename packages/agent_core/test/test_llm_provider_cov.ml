@@ -551,6 +551,82 @@ let test_message_to_json_tool () =
   Alcotest.(check string) "tool -> user" "user" (json |> member "role" |> to_string)
 ;;
 
+(* RFC-0468 §3.2: the input speaker rides on User messages as host
+   attribution. A provider must receive the same bytes with or without it,
+   including the tool-result follow-up merge that only folds a User message
+   whose metadata does not change what the provider sees. *)
+let speaker_conversation ~stamp =
+  let speaker =
+    Types.Input_speaker.entry (`Assoc [ "kind", `String "owner" ])
+  in
+  let user text =
+    Types.make_message
+      ~metadata:(if stamp then [ speaker ] else [])
+      ~role:User
+      [ Text text ]
+  in
+  [ user "look up the time"
+  ; Types.make_message
+      ~role:Assistant
+      [ ToolUse { id = "tu1"; name = "get_time"; input = `Assoc [] } ]
+  ; Types.make_message
+      ~role:Tool
+      [ ToolResult
+          { tool_use_id = "tu1"
+          ; content = "12:00"
+          ; outcome = Tool_succeeded
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  ; user "and tomorrow?"
+  ]
+;;
+
+let test_input_speaker_keeps_followup_mergeable () =
+  let speaker = Types.Input_speaker.entry (`Assoc [ "kind", `String "owner" ]) in
+  let boundary = Types.Conversation_metadata.run_boundary_entry in
+  Alcotest.(check bool)
+    "speaker alone"
+    true
+    (Types.Conversation_metadata.is_mergeable_followup [ speaker ]);
+  Alcotest.(check bool)
+    "speaker with run boundary"
+    true
+    (Types.Conversation_metadata.is_mergeable_followup [ boundary; speaker ]);
+  Alcotest.(check bool)
+    "repeated speaker is not attribution the host wrote"
+    false
+    (Types.Conversation_metadata.is_mergeable_followup [ speaker; speaker ]);
+  Alcotest.(check bool)
+    "another key still keeps the message separate"
+    false
+    (Types.Conversation_metadata.is_mergeable_followup [ speaker; "other", `Bool true ]);
+  let merged ~stamp =
+    Api_common.merge_tool_result_followup_user_messages (speaker_conversation ~stamp)
+  in
+  Alcotest.(check int)
+    "same message count with and without the speaker"
+    (List.length (merged ~stamp:false))
+    (List.length (merged ~stamp:true))
+;;
+
+let test_input_speaker_does_not_reach_provider_bytes () =
+  let build name kind request_path to_body =
+    let config = make_config ~kind ~request_path () in
+    Alcotest.(check string)
+      (name ^ " request bytes")
+      (to_body ~config ~messages:(speaker_conversation ~stamp:false))
+      (to_body ~config ~messages:(speaker_conversation ~stamp:true))
+  in
+  build "anthropic" Provider_config.Anthropic "/v1/messages" (fun ~config ~messages ->
+    Backend_anthropic.build_request ~config ~messages ());
+  build "openai chat" Provider_config.OpenAI_compat "/v1/chat/completions"
+    (fun ~config ~messages -> Backend_openai.build_request ~config ~messages ());
+  build "gemini" Provider_config.Gemini "/v1beta/models" (fun ~config ~messages ->
+    Backend_gemini.build_request ~config ~messages ())
+;;
+
 let test_tool_result_followup_merge_preserves_internal_metadata () =
   let tool_result =
     Types.make_message
@@ -1731,6 +1807,14 @@ let () =
             "tool follow-up internal metadata"
             `Quick
             test_tool_result_followup_merge_preserves_internal_metadata
+        ; Alcotest.test_case
+            "input speaker keeps a follow-up mergeable"
+            `Quick
+            test_input_speaker_keeps_followup_mergeable
+        ; Alcotest.test_case
+            "input speaker does not reach provider bytes"
+            `Quick
+            test_input_speaker_does_not_reach_provider_bytes
         ] )
     ; ( "backend_gemini.contents_of_messages"
       , [ Alcotest.test_case "user" `Quick test_contents_of_messages_user

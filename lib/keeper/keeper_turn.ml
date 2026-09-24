@@ -425,6 +425,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
    reaching this function. *)
 let run_keeper_invocation_turn_admitted_inner
       ~operation_id
+      ~(input_speaker : Keeper_input_speaker.t)
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -597,10 +598,9 @@ let run_keeper_invocation_turn_admitted_inner
          the same (trace_id, total_turns + 1) snapshot the Turn_record writer
          stamps (keeper_agent_run.ml:250-251 receives this very meta via the
          run_turn call below). Threaded into reply_json; never re-derived at
-         the reply seam from updated_meta, whose trace_id is post-lifecycle and
-         is rotated on handoff turns (keeper_rollover) — re-derivation would
-         yield a different join key than the Turn_record for the same turn
-         (RFC §7.2 mint-once, thread down). *)
+         the reply seam from updated_meta, whose total_turns already counts
+         this turn — re-derivation would yield a different join key than the
+         Turn_record for the same turn (RFC §7.2 mint-once, thread down). *)
       let turn_ref =
         Ids.Turn_ref.make
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -827,6 +827,11 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~user_message:(match official_checkpoint_resume with
                                       | Some _ -> Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id
                                       | None -> message)
+		                                ~input_speaker:(match official_checkpoint_resume with
+                                      | Some _ ->
+                                        Keeper_input_speaker.Host_prompt
+                                          Keeper_input_speaker.Official_client_resume
+                                      | None -> input_speaker)
 		                                ~turn_kind:Turn_record.Direct
                                 ~repetition_execution
 		                                ~skill_snapshot
@@ -1087,6 +1092,7 @@ let run_keeper_invocation_turn_admitted_inner
    autonomous lane's turn cleanup does. *)
 let run_keeper_invocation_turn_admitted
       ~operation_id
+      ~input_speaker
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -1129,6 +1135,7 @@ let run_keeper_invocation_turn_admitted
   match
     run_keeper_invocation_turn_admitted_inner
       ~operation_id
+      ~input_speaker
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -1152,6 +1159,7 @@ let run_keeper_invocation_turn_admitted
 let handle_keeper_msg_admitted
       ~operation_id
       ~admission_token:_
+      ~input_speaker
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -1167,6 +1175,7 @@ let handle_keeper_msg_admitted
   in
   run_keeper_invocation_turn_admitted
     ~operation_id
+    ~input_speaker
     ?on_text_delta
     ?on_event
     ?on_tool_stream_observation

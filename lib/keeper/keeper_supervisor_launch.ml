@@ -94,30 +94,9 @@ let launch_supervised_fiber_body
       in
       Keeper_registry_event_queue.enqueue
         ?intake_token ~base_path meta.name bootstrap_signal);
-    let lane_parent_sw =
-      match Eio_context.get_root_switch_opt () with
-      | Some root_sw -> root_sw
-      | None ->
-        (* #26622/#26587: sibling of the same fallback in
-           [Keeper_keepalive.start_keepalive]. No server root switch is
-           installed, so this trusts [ctx.sw] (the supervisor sweep's own
-           context) to already outlive the lane -- true in production
-           (the supervisor loop's context is server-owned) and in
-           standalone/test bootstrap, a bug for any turn-scoped caller.
-           Make the substitution observable instead of silent. *)
-        Log.Keeper.warn
-          "%s: launch_supervised_fiber has no server root switch installed; \
-           using ctx.sw as the lane's parent switch. This is expected only \
-           for the supervisor's own server-owned context or standalone/test \
-           bootstrap -- any turn-scoped caller has a switch that does not \
-           outlive the lane."
-          meta.name;
-        ctx.sw
-    in
     let fork_body body =
       match
-        Keeper_lane.fork
-          ~sw:lane_parent_sw
+        Keeper_lane.fork_server_owned
           reg.lane
           ~run:body
           ~cleanup:(fun _ ->
@@ -129,10 +108,11 @@ let launch_supervised_fiber_body
       with
       | Ok () -> Ok ()
       | Error error ->
-        (* Fork was rejected (parent switch already cancelling, or
-           [claim_start] refused): no keepalive fiber is running. Resolve the
-           registry crash path — [Keeper_lane.fork] already settled the lane
-           exit for [Fork_failed] — publish [Crashed] under the same
+        (* Fork was rejected (root switch already cancelling, no root switch
+           installed, or [claim_start] refused): no keepalive fiber is running.
+           Resolve the registry crash path — [Keeper_lane.fork_server_owned]
+           already settled the lane exit for [Fork_failed] and
+           [Server_root_switch_unavailable] — publish [Crashed] under the same
            dedupe guard the launch gate uses, and propagate an error so the
            caller suppresses the Started/Running lifecycle for a keeper whose
            lane was never forked (mirrors [prepare_fiber_launch]'s rejection
@@ -670,7 +650,7 @@ let launch_supervised_fiber
          (Keeper_lane.start_error_to_string lane_error));
     Error err
   | Ok _ ->
-    (* Propagate the fork outcome: a rejected [Keeper_lane.fork] returns
+    (* Propagate the fork outcome: a rejected [Keeper_lane.fork_server_owned] returns
        [Error] here so the caller suppresses the Started/Running lifecycle
        for a keeper whose lane was never forked. *)
     launch_supervised_fiber_body

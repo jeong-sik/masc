@@ -253,7 +253,11 @@ let failed_call_glyph = Acting.glyph_text Acting.Failure
 let detail_indent_cells = mark_cells + dispatch_cells + gap_cells
 let detail_label_cells = 4
 
-let age_text ~now at = Acting.elapsed_text (Float.max 0. (now -. at) *. 1000.)
+(* An age clamps a backwards clock to "0ms", where
+   [Masc_tui_message_layout.age_text] draws nothing; that and a NaN clock
+   are #38663. *)
+let age_text ~now at = Layout.clamped_elapsed_text (now -. at)
+
 let last_event_text ~now at = "last event " ^ age_text ~now at
 
 let compact_count = Masc_tui_message_layout.compact_count
@@ -741,9 +745,10 @@ let rail_span = function
 (* A call's age in the wide pane, at the row's end, in the pane's own age
    wording ({!age_text}): the facts row under an opened call and the focus
    header spell ages that way, and a row and its own detail must not say
-   one age two ways. Padded to six cells, so the ages and the durations
-   before them line up down the list through ninety-nine minutes; an older
-   age widens its own row rather than losing digits to a cut. *)
+   one age two ways. Six cells hold every age the ladder draws below a
+   hundred thousand days, so the ages and the durations before them line up
+   down the whole list. A two-hour call used to spell "120m05s" and widen its
+   own row past the ones around it. *)
 let age_min_cells = 6
 
 (* How many calls a row stands for, after its name: [\xc3\x975]. A run of one
@@ -756,17 +761,24 @@ let run_badge run =
 (* What the run took. Each call's own duration, newest first, for a reader
    comparing them; on a pane too narrow for that, their sum, which is the
    one figure a run has. A call the feed gave no duration is left out of the
-   list and out of the sum: the pane does not invent one. *)
+   list and out of the sum: the pane does not invent one. A duration the
+   ladder has no spelling for -- a negative one -- is left out the same way,
+   so it neither shows in the list nor takes from the sum. *)
 let run_durations run =
-  List.filter_map (fun (tool : Acting.chunk_tool) -> tool.Acting.ct_duration_ms) run
+  List.filter_map
+    (fun (tool : Acting.chunk_tool) ->
+      Option.bind tool.Acting.ct_duration_ms (fun ms ->
+          Option.map (fun text -> (ms, text)) (Acting.elapsed_text ms)))
+    run
 
 let run_duration_texts run =
   match run_durations run with
   | [] -> []
   | durations ->
-      [ String.concat " " (List.map Acting.elapsed_text durations)
-      ; Acting.elapsed_text (List.fold_left ( +. ) 0. durations)
-      ]
+      String.concat " " (List.map snd durations)
+      :: Option.to_list
+           (Acting.elapsed_text
+              (List.fold_left (fun sum (ms, _) -> sum +. ms) 0. durations))
 
 let tool_line ~cols ~now ~state ~place ~run (chunk : Acting.chunk)
     (tool : Acting.chunk_tool) =
@@ -808,8 +820,8 @@ let tool_line ~cols ~now ~state ~place ~run (chunk : Acting.chunk)
     (* The feed does not carry a receipt clock for every folded call. An
        unknown duration stays blank; the record header owns the event age. *)
     | [] | [ _ ] -> (
-        match tool.Acting.ct_duration_ms with
-        | Some ms -> [ Acting.elapsed_text ms ]
+        match Option.bind tool.Acting.ct_duration_ms Acting.elapsed_text with
+        | Some text -> [ text ]
         | None -> [ "" ])
   in
   let duration_text =

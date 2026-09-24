@@ -11,7 +11,6 @@ module Keeper_selection = Masc_tui_keeper_selection
 module Repository_pulls = Masc_tui_repository_pulls
 module Context_state = Masc_tui_context_state
 module Metrics_tail = Masc_tui_metrics_tail
-module Render_schedule = Masc_tui_render_schedule
 
 open Masc_tui_types
 open Tui_decode
@@ -117,6 +116,36 @@ let load_keepers (base_path : string) : keeper list * string option =
       ( List.sort (fun a b -> String.compare a.k_name b.k_name) (keepers @ declarations)
       , summarize_errors "keeper metadata read failed" errors )
 
+(* The tasks [masc_gc] moved out of the backlog, for the flow's windows.
+   The archive is megabytes and only a GC rewrites it, so it is parsed again
+   only when its size or modification time changed. A row that does not
+   decode is counted and named, not dropped quietly. *)
+let archive_seen : (float * int * (Masc_domain.task list * int)) option ref = ref None
+
+let read_archived_tasks config : (Masc_domain.task list * int, string) result =
+  let path = Workspace_utils_paths_backend.archive_path config in
+  match Unix.stat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ([], 0)
+  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+  | { Unix.st_mtime; st_size; _ } ->
+    (match !archive_seen with
+     | Some (mtime, size, read) when Float.equal mtime st_mtime && size = st_size -> Ok read
+     | Some _ | None ->
+       (match Safe_ops.read_json_file_safe path with
+        | Error error -> Error error
+        | Ok json ->
+          let read =
+            List.fold_right
+              (fun entry (tasks, undecoded) ->
+                match Masc_domain.task_of_yojson entry with
+                | Ok task -> task :: tasks, undecoded
+                | Error _ -> tasks, undecoded + 1)
+              (Workspace_task_id.archive_entries_of_json json) ([], 0)
+          in
+          archive_seen := Some (st_mtime, st_size, read);
+          Ok read))
+;;
+
 (** Load tasks from the canonical workspace backlog: the active rows for the
     Overview list, plus the full domain rows the detail view reads. Terminal
     tasks remain available in Planning rollups and the detail view but do not
@@ -159,13 +188,26 @@ let load_active_tasks (base_path : string) :
           ( (fun task_id -> Workspace_goal_index.goals_for_task index ~task_id)
           , None )
       in
+      let archived, archive_error =
+        match read_archived_tasks config with
+        | Ok (tasks, 0) -> tasks, None
+        | Ok (tasks, undecoded) ->
+          ( tasks
+          , Some
+              (Printf.sprintf "%d archived tasks could not be read; the day bars miss them"
+                 undecoded) )
+        | Error error ->
+          report (Workspace_utils_paths_backend.archive_path config) error;
+          [], Some ("task archive unavailable, the day bars miss archived tasks: " ^ error)
+      in
       ( Tui_decode.active_tasks_of_domain ~goals_for_task
           observation.observed_backlog.tasks
       , observation.observed_backlog.tasks
-      , (match recovery_error, goal_link_error with
-         | Some recovery, _ -> Some recovery
-         | None, other -> other)
-      , Some (Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ())
+      , (match recovery_error, goal_link_error, archive_error with
+         | Some recovery, _, _ -> Some recovery
+         | None, Some goal_links, _ -> Some goal_links
+         | None, None, archive -> archive)
+      , Some (Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived
                 observation.observed_backlog.tasks)
       (* Projected here rather than on a render frame: resolving whether an
          assignee has a Keeper queue reads the registry and the meta store, and
@@ -409,28 +451,27 @@ let clear_local_workspace (state : state) =
   state.local_workspace <- Local_workspace_unread
 ;;
 
-(** Add event to the event log *)
+(** Add an event to the TUI session log, which Metrics draws. *)
 let add_event (state : state) event_type content =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let ev = { timestamp; event_type; content } in
-  let events = ev :: (List.filteri (fun i _ -> i < 10) state.events) in
-  state.overview_event_scroll <-
-    Render_schedule.overview_event_offset_after_prepend
-      ~retained_count:(List.length events)
-      state.overview_event_scroll;
-  state.events <- events
+  state.events <- ev :: List.filteri (fun i _ -> i < 10) state.events
 
 (* An outcome the operator pressed a key for, rather than something that
-   happened on its own. It goes to the event log like any other event, and to
-   the footer, because the log is drawn by Overview alone: the operator who
-   pressed [a] on Workspace stood on the one surface that could not show them
-   whether the registration landed, the declaration was refused, or the
-   editor never started. *)
+   happened on its own. It goes to the session log like any other event, and
+   to the footer, because the log is drawn by Metrics alone: the operator who
+   pressed [a] on Workspace reads on Workspace whether the registration
+   landed, the declaration was refused, or the editor never started. Every
+   call site that answers a key or a command, or finishes the request one
+   started, uses this; [add_event] alone is for what happened on its own --
+   the feed, a failed poll, the server's lifecycle. The footer copy is one
+   line: a server's reason can carry newlines. *)
 let report_action (state : state) event_type content =
   add_event state event_type content;
-  state.last_action <- Some (content, Unix.gettimeofday ())
+  state.last_action <-
+    Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
 
 (** HTTP JSON decoding helpers. These intentionally fail closed for the TUI
     dashboard surfaces: an empty list means the API really returned an empty
@@ -1072,6 +1113,22 @@ let load_runtime_resolved ~(host : string) ~(port : int) :
   | Error err -> Error ("runtime catalogue load failed: " ^ err)
   | Ok json -> Tui_decode.decode_runtime_resolved_full json
 
+(** One read of [/api/v1/runtime/resolved] for the Overview: the runtime rows
+    and the provider usage windows. The two decode apart, and a failed fetch
+    fails both with one reason. *)
+let load_overview_runtime_resolved ~(host : string) ~(port : int) :
+    (Tui_decode.runtime_option list, string) result
+    * (Tui_decode.provider_usage_windows, string) result =
+  match fetch_runtime_resolved ~host ~port with
+  | Error err ->
+      let reason = "runtime catalogue load failed: " ^ err in
+      (Error reason, Error reason)
+  | Ok json ->
+      ( Result.map
+          (fun (options, _lanes, _assignments) -> options)
+          (Tui_decode.decode_runtime_resolved_full json)
+      , Tui_decode.decode_provider_usage_windows json )
+
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
   rsl_probe : (Tui_decode.runtime_probe_snapshot, string) result;
@@ -1240,6 +1297,17 @@ let load_repository_pulls ~(host : string) ~(port : int) :
   | Error err -> Error ("pull requests load failed: " ^ err)
   | Ok json -> Repository_pulls.decode_reading json
 
+(* The Overview's GOALS section. A phase this build does not know refuses the
+   whole reading: a goal dropped from the list, or drawn under a phase it is
+   not in, would answer "is work moving a goal" about a different fleet. *)
+let load_overview_goals ~(host : string) ~(port : int) :
+    (Tui_decode.overview_goal list, string) result =
+  match Masc_tui_http.fetch_dashboard_goals ~host ~port with
+  | Error err -> Error ("goals load failed: " ^ err)
+  | Ok json ->
+      Result.map_error Tui_decode.overview_goals_error_to_string
+        (Tui_decode.decode_overview_goals json)
+
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
     (overview_snapshot, string) result =
@@ -1268,8 +1336,6 @@ let load_overview ~(host : string) ~(port : int) :
         let* workspace_health = required_string_field summary "workspace_health" in
         decode_workspace_health workspace_health
       in
-      let* ov_cluster = required_string_field summary "cluster" in
-      let* ov_project = required_string_field summary "project" in
       (* Counted from the lists the briefing carries. The summary object
          holds workspace_health, cluster, and project and nothing else --
          [lib/dashboard/dashboard_briefing.ml] writes no count into it -- so
@@ -1308,8 +1374,6 @@ let load_overview ~(host : string) ~(port : int) :
       Ok
         {
           ov_workspace_health;
-          ov_cluster;
-          ov_project;
           ov_keepers;
           ov_keeper_liveness;
           ov_keeper_rows;
@@ -1639,7 +1703,7 @@ let restore_preset ~(host : string) ~(port : int) ~(name : string)
    started has no row, so the roster shows nine keepers whether the tenth is
    absent by design or blocked. *)
 let load_fleet_safety ~(host : string) ~(port : int) :
-    (Tui_decode.fleet_safety, string) result =
+    (Tui_decode.fleet_safety_reading, string) result =
   match fetch_fleet_safety ~host ~port with
   | Error err -> Error ("fleet safety load failed: " ^ err)
   | Ok json -> Tui_decode.decode_fleet_safety json

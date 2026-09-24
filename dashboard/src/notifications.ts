@@ -28,18 +28,15 @@ import type { SSEEvent } from './types'
  *  TypeScript's assertExhaustive fails the build otherwise (mirrors the
  *  OCaml FSM-sparse-match guard; see software-development.md). */
 export type NotifyEventKind =
-  | 'keeper_handoff'
   | 'approval:pending'
   | 'agent_core:agent_failed'
 
 export const NOTIFY_EVENT_KINDS: readonly NotifyEventKind[] = [
-  'keeper_handoff',
   'approval:pending',
   'agent_core:agent_failed',
 ]
 
 export const NOTIFY_EVENT_LABELS: Record<NotifyEventKind, string> = {
-  keeper_handoff: 'Keeper handoff',
   'approval:pending': 'HITL approval pending',
   'agent_core:agent_failed': 'Agent Core agent run failed',
 }
@@ -47,7 +44,6 @@ export const NOTIFY_EVENT_LABELS: Record<NotifyEventKind, string> = {
 function toNotifyEventKind(rawType: string): NotifyEventKind | null {
   const type = normalizeSSEDispatchType(rawType)
   switch (type) {
-    case 'keeper_handoff':
     case 'approval:pending':
     case 'agent_core:agent_failed':
       return type
@@ -108,7 +104,6 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 const NOTIFY_RULES_STORAGE_KEY = 'dashboard:notify:rules-v1'
 
 const DEFAULT_NOTIFY_RULES: Record<NotifyEventKind, boolean> = {
-  keeper_handoff: true,
   'approval:pending': true,
   'agent_core:agent_failed': true,
 }
@@ -120,10 +115,6 @@ function decodeNotifyRules(raw: string): Record<NotifyEventKind, boolean> {
   }
   const record = parsed as Record<string, unknown>
   return {
-    keeper_handoff:
-      typeof record.keeper_handoff === 'boolean'
-        ? record.keeper_handoff
-        : DEFAULT_NOTIFY_RULES.keeper_handoff,
     'approval:pending':
       typeof record['approval:pending'] === 'boolean'
         ? record['approval:pending']
@@ -160,10 +151,6 @@ interface NotifyContent {
   identity: string
 }
 
-function keeperIdentity(event: SSEEvent): string {
-  return event.name ?? event.agent ?? event.keeper_name ?? 'keeper'
-}
-
 function describeAgentFailed(event: SSEEvent): NotifyContent {
   const parsed = parseAgentCorePayload('agent_core:agent_failed', event.payload)
   if (!parsed.success || parsed.data.kind !== 'agent_failed') {
@@ -183,12 +170,6 @@ function describeAgentFailed(event: SSEEvent): NotifyContent {
 
 function describeNotifyEvent(kind: NotifyEventKind, event: SSEEvent): NotifyContent {
   switch (kind) {
-    case 'keeper_handoff':
-      return {
-        title: NOTIFY_EVENT_LABELS.keeper_handoff,
-        body: `${keeperIdentity(event)} — gen ${event.from_generation ?? '?'} → ${event.to_generation ?? '?'}`,
-        identity: keeperIdentity(event),
-      }
     case 'approval:pending':
       return {
         title: NOTIFY_EVENT_LABELS['approval:pending'],

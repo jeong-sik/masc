@@ -1889,9 +1889,12 @@ let persist_pre_tool_rejects ~session_dir ~session_id rejects =
              | Keeper_checkpoint_store.Not_found -> "not found"
              | Keeper_checkpoint_store.Superseded_version { expected; got } ->
                Printf.sprintf "version %d superseded by %d" got expected
+             | Keeper_checkpoint_store.Newer_version _ as newer ->
+               Keeper_checkpoint_store.checkpoint_load_error_to_string newer
              | Keeper_checkpoint_store.Store_error detail
              | Keeper_checkpoint_store.Parse_error detail
              | Keeper_checkpoint_store.Io_error detail
+             | Keeper_checkpoint_store.Read_failed { detail; _ }
              | Keeper_checkpoint_store.Agent_core_error detail -> detail))
      | Ok checkpoint ->
        let roundtrip { call_id; tool_name; input; detail } =

@@ -248,7 +248,7 @@ let warn_rejected_exact_output_slots registry =
            slot.position
            slot.slot_id
        | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name }
-         when String.equal slot.lane_id Runtime.verifier_exact_lane_id ->
+         when String.equal slot.lane_id (Standalone_lane.to_id Standalone_lane.Verifier) ->
          (* verifier_exact admits slots here, and judgement then admits each
             id as a configured direct runtime
             (Runtime.verifier_exact_slot_admission) and dispatches that id
@@ -327,21 +327,21 @@ let report_verifier_exact_lane_admission () =
        refuses admission. *)
     Log.Server.info
       "exact_output: lane %S cannot judge: %s"
-      Runtime.verifier_exact_lane_id
+      (Standalone_lane.to_id Standalone_lane.Verifier)
       detail
   | Ok (lane : Runtime.verifier_exact_lane_slots) ->
     List.iter
       (fun (rejection : Runtime.verifier_slot_rejection) ->
          Log.Server.warn
            "exact_output: lane %S %s; the lane runs its remaining slots without it"
-           Runtime.verifier_exact_lane_id
+           (Standalone_lane.to_id Standalone_lane.Verifier)
            (Runtime.verifier_slot_rejection_to_string rejection))
       lane.Runtime.slot_rejections;
     (match lane.Runtime.admitted_catalog_slot_ids, lane.Runtime.admitted_cli_slot_ids with
      | [], [] ->
        Log.Server.error
          "exact_output: lane %S can judge through none of its %d declared slot(s); completion review refuses admission until runtime.toml names a slot it can judge"
-         Runtime.verifier_exact_lane_id
+         (Standalone_lane.to_id Standalone_lane.Verifier)
          (List.length lane.Runtime.slot_rejections)
      | [], _ :: _ | _ :: _, _ -> ())
 ;;
@@ -369,15 +369,11 @@ let warn_rejected_exact_output_bindings resolver_snapshot =
     (Exact_output.resolver_rejected_target_bindings resolver_snapshot)
 ;;
 
-let warn_optional_exact_output_lane registry ~lane_id ~feature =
-  let supports_cli =
-    match Runtime.exact_lane_of_id lane_id with
-    | Some lane -> Runtime.exact_lane_supports_cli_tail lane
-    | None -> true
-  in
+let warn_optional_exact_output_lane registry ~(lane : Runtime.exact_lane) ~feature =
+  let lane_id = Standalone_lane.to_id lane in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
   | Ok { selected_slots = _ :: _; _ } -> ()
-  | Ok { cli_slots = _ :: _; _ } when supports_cli -> ()
+  | Ok { cli_slots = _ :: _; _ } when Runtime.exact_lane_supports_cli_tail lane -> ()
   | Ok { selected_slots = []; _ }
   | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
     Log.Server.warn
@@ -396,8 +392,8 @@ let warn_optional_exact_output_lane registry ~lane_id ~feature =
    prompt is named once here, at boot, and not only in each refused
    llm.generate. *)
 let warn_browser_stagehand_lane registry =
-  let lane_id = Runtime.exact_lane_id Runtime.Browser_stagehand in
-  warn_optional_exact_output_lane registry ~lane_id ~feature:"the Stagehand browser lane";
+  let lane_id = Standalone_lane.to_id Standalone_lane.Browser_stagehand in
+  warn_optional_exact_output_lane registry ~lane:Runtime.Browser_stagehand ~feature:"the Stagehand browser lane";
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
   | Error
       ( Runtime_exact_output_registry.Exact_lane_unconfigured _
@@ -532,11 +528,11 @@ let configure_exact_output_registry ?config_root () =
          catalog_description;
        warn_optional_exact_output_lane
          registry
-         ~lane_id:"librarian_exact"
+         ~lane:Runtime.Librarian
          ~feature:"librarian";
        warn_optional_exact_output_lane
          registry
-         ~lane_id:Runtime.verifier_exact_lane_id
+         ~lane:Runtime.Verifier
          ~feature:"completion authority";
        warn_browser_stagehand_lane registry)
 ;;
@@ -1660,7 +1656,7 @@ let resume_model_configuration () =
                      the publication report. *)
                   Log.Server.warn
                     "exact_output: completion authority starts on a short lane %S: %s"
-                    Runtime.verifier_exact_lane_id
+                    (Standalone_lane.to_id Standalone_lane.Verifier)
                     (String.concat
                        "; "
                        (List.map
@@ -1671,7 +1667,7 @@ let resume_model_configuration () =
                   Log.Server.warn
                     "exact_output: completion authority stays off because lane %S \
                      has no dispatchable slot: %s"
-                    Runtime.verifier_exact_lane_id
+                    (Standalone_lane.to_id Standalone_lane.Verifier)
                     detail;
                   false)
           in

@@ -229,15 +229,14 @@ describe('toolSubject', () => {
       .toBe('git fetch origin')
   })
 
-  // Execute takes argv or a shell line, and the fleet writes the line. Without
-  // `script` the row fell through to the whole-object rendering.
+  // Execute takes argv or a shell line, and the fleet writes the line.
   it('renders a shell line as the line that ran', () => {
-    expect(toolSubject({ script: 'rg -n prompt_fingerprint lib/ | head -20', cwd: '.' }))
+    expect(toolSubject({ command: 'rg -n prompt_fingerprint lib/ | head -20', cwd: '.' }))
       .toBe('rg -n prompt_fingerprint lib/ | head -20')
   })
 
-  it('reads argv before script', () => {
-    expect(toolSubject({ argv: ['git', 'status'], script: 'git status' })).toBe('git status')
+  it('reads argv before command', () => {
+    expect(toolSubject({ argv: ['git', 'status'], command: 'git status' })).toBe('git status')
   })
 
   it('prefers the path for a file call', () => {

@@ -86,9 +86,12 @@ let test_detail_names_the_use_record () =
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
     ; mf_events =
-        { mfe_retrieved_count = 4
-        ; mfe_retrieved_distinct_days = 2
-        ; mfe_last_retrieved_at = Some (Unix.gettimeofday () -. 7200.0)
+        { mfe_retrieval =
+            Decode.Retrieved
+              { count = 4
+              ; distinct_days = 2
+              ; last_at = Unix.gettimeofday () -. 7200.0
+              }
         ; mfe_retracted_count = 1
         ; mfe_revised_from = [ "mem-0" ]
         }
@@ -101,10 +104,47 @@ let test_detail_names_the_use_record () =
   match List.find_opt (fun line -> contains "History:" line) lines with
   | None -> fail "the detail has no History line"
   | Some line ->
-    check bool "retrieval count and days" true (contains "Retrieved 4 · 2 days" line);
+    check bool "retrieval count and days" true (contains "Retrieved 4 on 2 days" line);
     check bool "last retrieval as an age" true (contains "last 2h" line);
     check bool "past retractions and predecessors" true
       (contains "Retracted 1 · Revised from 1" line)
+;;
+
+(* A fact nobody has read draws "Never retrieved" once, with no count, day
+   count or clock beside it: the day count and the clock are computed from
+   the count, so a zero count has nothing more to say.
+
+   The two counts after it keep their zeros: they are measured, and a hidden
+   measured zero reads as "not measured". *)
+let test_a_fact_nobody_read_says_so_once () =
+  let fact : Decode.memory_fact =
+    { mf_claim = "the deploy needs assets"
+    ; mf_category = Cat.Lesson
+    ; mf_origin = "authored"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_memory_id = "mem-2"
+    ; mf_events =
+        { mfe_retrieval = Decode.Never_retrieved
+        ; mfe_retracted_count = 0
+        ; mfe_revised_from = []
+        }
+    }
+  in
+  let lines =
+    Render_memory.memory_fact_detail_lines ~cols:120 (Types.Memory_row_fact fact)
+    |> List.map Masc_tui_theme.strip_sgr
+  in
+  match List.find_opt (fun line -> contains "History:" line) lines with
+  | None -> fail "the detail has no History line"
+  | Some line ->
+    check bool "the unread reading is one clause" true
+      (contains "Never retrieved" line);
+    check bool "it does not also count to zero" false (contains "Retrieved 0" line);
+    check bool "nor spell a day count" false (contains "0 days" line);
+    check bool "nor a clock" false (contains "last never" line);
+    check bool "the measured zeros stay" true
+      (contains "Retracted 0 · Revised from 0" line)
 ;;
 
 let test_detail_lines () =
@@ -325,6 +365,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
       ; mlh_continuity_unread_atoms = Some 0
       ; mlh_last_success_at = None
       ; mlh_last_failure_kind = None
+      ; mlh_stalled = None
       }
   ; mkh_librarian_failures = 0
   ; mkh_vision_ingest_errors = 0
@@ -586,7 +627,10 @@ let test_render_memory_body_with_keepers () =
   check bool "the read position sits beside the cut" true
     (contains "read to atom 11, 6 atoms past the cut" text);
   check bool "prepared context names observation boundary" true (contains "Request prepared (not provider success)" text);
-  check bool "serialized request bytes shown" true (contains "2048 request bytes" text);
+  (* As a size, through the ladder every other size on this TUI reads. One
+     live block drew "446558 request bytes"; 2048 bytes is 2.0 KB. *)
+  check bool "the request size reads as a size" true (contains "2.0 KB" text);
+  check bool "and not as a digit count" false (contains "2048" text);
   check bool "an absorbed front names the position and says nothing summarizes it" true
     (contains "absorbed to atom 3" text && contains "no summary" text);
   check bool "selected row was called" true !selected_called;
@@ -662,6 +706,64 @@ let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
     (contains "1 keeper not measured" both);
   check bool "and a count that is not one keeps the plural" true
     (contains "3 atoms behind" both)
+;;
+
+(* RFC librarian-lifecycle §4.10: the Librarian_stalled gap prints on its
+   own row under the Librarian line, as the atoms it covers, and a keeper with
+   no gap prints nothing for it. *)
+let test_the_librarian_line_names_a_stalled_gap () =
+  let with_beta stalled =
+    { fleet_health with
+      Decode.mhs_keepers =
+        List.map
+          (fun (keeper : Decode.memory_keeper_health) ->
+             if String.equal keeper.mkh_keeper_id "beta"
+             then
+               { keeper with
+                 mkh_librarian = { keeper.mkh_librarian with Decode.mlh_stalled = Some stalled } }
+             else keeper)
+          fleet_health.mhs_keepers }
+  in
+  let render ?(stalled = Decode.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 })
+      cursor =
+    let state = make_state () in
+    state.memory_health <- Some (with_beta stalled);
+    state.memory_health_cursor <- cursor;
+    let lines = ref [] in
+    Render_memory.render_memory_body ~cols:100 ~budget:20 state
+      ~push:(fun line -> lines := line :: !lines)
+      ~push_styled:(fun ~style:_ line -> lines := line :: !lines)
+      ~push_selected:(fun line -> lines := line :: !lines)
+      ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    String.concat "\n" (List.rev !lines)
+  in
+  let row = "Librarian stalled · atoms 2-7 are in neither the request nor memory" in
+  check bool "the stalled keeper names the atoms its requests skip" true
+    (contains row (render 1));
+  check bool "a keeper with no gap prints none" false (contains "Librarian stalled" (render 0));
+  (* The row is its own line, and at the 100 columns the PTY harness opens it
+     fits whole: the frame cuts long lines, and a cut atom number is a wrong
+     one. *)
+  check bool "the row fits the frame at 100 columns" true
+    (List.exists
+       (fun line -> contains row line && String.length line <= 96)
+       (String.split_on_char '\n' (render 1)));
+  check bool "a gap of one atom names that atom, not a range" true
+    (contains "Librarian stalled · atom 5 is in neither the request nor memory"
+       (render ~stalled:(Decode.Stalled_gap { mls_gap_start_atom = 5; mls_gap_end_atom = 6 }) 1));
+  (* A file the gap is read from that did not read is drawn, and drawn as
+     not measured: a silent row would read as no gap. *)
+  let unmeasured =
+    render
+      ~stalled:
+        (Decode.Stalled_unmeasured
+           { mls_cause = Decode.Stall_read_position_unreadable; mls_detail = "bad \027[31mjson" })
+      1
+  in
+  check bool "an unreadable read position is drawn as not measured" true
+    (contains "Librarian stalled · not measured, read position unreadable" unmeasured);
+  check bool "the reader's message is escaped" false (contains "\027[31m" unmeasured)
 ;;
 
 (* #36497. The fleet header is the block above the sort row, and it used to be
@@ -1739,6 +1841,8 @@ let () =
         ; test_case "invalidation_row" `Quick test_invalidation_row_line
         ; test_case "rows_and_header_share_one_grid" `Quick test_rows_and_header_share_one_grid
         ; test_case "detail_names_the_use_record" `Quick test_detail_names_the_use_record
+        ; test_case "a fact nobody read says so once" `Quick
+            test_a_fact_nobody_read_says_so_once
         ] )
     ; ( "detail_lines"
       , [ test_case "detail_lines_bounded" `Quick test_detail_lines
@@ -1759,6 +1863,8 @@ let () =
             test_the_fact_filter_bar_names_the_query_it_counted
         ; test_case "the librarian line says when the continuity lag is unknown" `Quick
             test_the_librarian_line_says_when_the_continuity_lag_is_unknown
+        ; test_case "the librarian line names a stalled gap" `Quick
+            test_the_librarian_line_names_a_stalled_gap
         ; test_case "the fleet header fits the frame it is drawn in" `Quick
             test_the_fleet_header_fits_the_frame_it_is_drawn_in
         ; test_case "the header keeps each count with the phrase that dates it"

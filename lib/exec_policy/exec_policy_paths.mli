@@ -7,6 +7,16 @@ val is_within_dir : dir:string -> string -> bool
     arguments must already have come through {!resolve_path}: this compares
     text, so an unresolved [..] or a symlink would walk out of [dir] without
     the comparison noticing. *)
+val extra_root_path :
+  ?workdir:string -> extra_roots:string list -> string -> string option
+(** [Some p] when [path] lies within one of [extra_roots] (an ssh endpoint's
+    declared [allowed_paths]), [p] being the path's lexical normal form;
+    [None] otherwise, and always [None] for [[]]. Both sides are normalized
+    lexically, never through the host filesystem, because the roots name
+    another machine's paths. This is the one judgement of "under a declared
+    endpoint root": Execute's {!validate_path} and the remote keeper's file
+    reads both ask it. *)
+
 val validate_path :
   ?workdir:string -> extra_roots:string list -> string -> bool
 (** Resolve symlinks and validate only objective cwd/host-sandbox containment.

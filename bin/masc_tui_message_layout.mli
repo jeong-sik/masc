@@ -457,6 +457,11 @@ val fit_width : string -> int -> string
     For a fixed column whose head carries the meaning. Where both ends carry
     -- an identifier, an address -- use {!fit_middle}. *)
 
+val pad_left : string -> int -> string
+(** [pad_left text width] right-aligns [text] in [width] cells, cutting it
+    with {!fit_width} when it does not fit. Printf's ["%*s"] counts bytes,
+    which leaves a cell holding a multi-byte mark short of its column. *)
+
 val fit_middle : int -> string -> string
 
 val role_label_mark_cells : ?column:int -> style:style -> unit -> int
@@ -736,6 +741,18 @@ val span_text : float -> string
     One ladder. Two callers used to keep their own, with different ceilings,
     and the one that stopped at minutes drew [12045m] for a nine-day-old
     Fusion run. *)
+
+val elapsed_text : float -> string option
+(** How long something took, in seconds: [32ms], [1.2s], then {!span_text}
+    from a minute up -- [6m55s], [1h02m], [8d15h]. The tenths stay only while
+    a reader is comparing them; past a minute they are noise and the ladder
+    takes over. A negative duration is [None], as a backwards {!age_text} is:
+    a clock that disagreed with itself, not a call that took no time. *)
+
+val clamped_elapsed_text : float -> string
+(** {!elapsed_text}'s ladder with a negative duration read as zero, [0ms].
+    Only for a caller that clamps on purpose; anything drawing a duration it
+    was handed uses {!elapsed_text}, which says nothing for a negative. *)
 
 val age_text : now:float -> since:float -> string option
 (** How long something has been outstanding, as {!span_text}.

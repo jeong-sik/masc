@@ -71,8 +71,9 @@ Keeper 가 보낸 메시지 10건 × 받은 Keeper = 70쌍을 원문으로 판�
 ### 3.2 출력: 참조 하나
 
 - `new_claims` 의 각 claim 에 `heard_in` 을 더한다. 값은 `u…`/`o…` 참조 하나나 `null` 이다.
-- 파서는 참조를 호스트가 붙인 발화자로 바꾼다. 입력에 없는 참조는 claim 전체를 거절한다
-  (`m…` 과 같은 규칙).
+- 파서는 참조를 호스트가 붙인 발화자로 바꾼다. 입력에 없는 참조는 답 전체를 거절한다. `m…` 도
+  그렇다(`keeper_librarian.ml:191` 주석, `Supersedes_unknown_memory_id`·`Claim_schema_mismatch`).
+  `fact_of_json` 은 입력 맥락이 없으므로 `by_surrogate` 같은 번역 단계가 따로 필요하다.
 - 모델은 발화자 이름을 쓰지 않는다. 그래서 발화자를 지어낼 수 없다.
 
 ### 3.3 저장: 들은 곳
@@ -93,7 +94,7 @@ type observation =
 ### 3.4 recall
 
 - recall 이 기억을 보여 줄 때 `heard_from=keeper:e-masc-the-leader` 처럼 출처를 같이 보인다.
-  `basis.board` 를 보이는 자리와 같은 곳이다.
+  지금 `basis=observed board=p-… comment=…` 를 보이는 자리(`keeper_memory_os_render.ml:9-15`)다.
 - Keeper 는 그 기억을 누구에게서 들었는지 문장을 믿지 않고도 안다.
 
 ## 4. 바꾸지 않는 것
@@ -136,3 +137,30 @@ type observation =
 라이브:
 - RFC-0468 §9 와 같은 방법으로 Keeper 발화자 메시지와 새 기억을 짝지어 원문으로 판정한다.
   메시지에서 온 기억 중 `Heard` 가 붙은 비율과, `Heard` 와 문장의 행위자가 어긋나는 수를 센다.
+
+## 8. 적대적 리뷰 뒤 조건 (2026-09-24)
+
+이 RFC 는 아래를 풀기 전까지 구현하지 않는다.
+
+1. **누락이 보여야 한다.** `heard_in: null` 을 `Transcript` 로 저장하면 "자기 턴"과 "발화자를
+   빠뜨림"이 같은 값이 된다. 2.2 의 누락 3건이 그대로 가려진다. `heard_in` 을 필수로 하고 자기 턴을
+   뜻하는 값을 따로 두거나, `null` 을 `Transcript` 와 다른 값으로 저장해야 한다.
+2. **발화자 모델이 둘이다.** `Keeper_counterpart_observation.authority`(`user_id` 가 없는 `Keeper`
+   허용)와 `Keeper_input_speaker.t` 가 다르다. `o…` 를 저장 타입으로 바꾸는 규칙이 필요하다. 같은
+   발화가 대화와 counterpart 에 둘 다 있으면 참조도 둘이 된다.
+3. **참조가 가리키는 발화자가 없을 수 있다.** `speaker=unknown`·`invalid`·`duplicate` 줄과, Ask 답을
+   여럿 담은 깨우기 메시지다. 깨우기 메시지를 `Heard (Host_prompt …)` 로 두면 실제로 말한 사람(Ask
+   답한 사람)을 가린다. 문장보다 구조가 더 틀리게 된다.
+4. **저장 타입.** `Keeper_input_speaker.t` 는 메시지 metadata 용이고 `Keeper_ask`·`Agent_core` 에
+   기댄다. 영구 기억에 넣으면 그 변형이 바뀔 때마다 기억을 hard cut 해야 한다(#38548 항목 2 가 바로
+   그런 변경이다). `External.user_name` 같은 자유 글도 recall 로 들어간다. Memory OS 가 가진 좁은
+   타입이 낫다.
+5. **병합 규칙.** `merge_observation`(`keeper_memory_os_current.ml:1172`)은 출처 하나만 남긴다.
+   여러 Keeper 에게서 들은 claim 은 처음 출처만 남는다. 이걸 의도로 적을지 정한다. 반복을 확신으로
+   세지 않는다는 장점이 있다.
+6. **어느 회차가 참조를 싣나.** counterpart 는 기억 회차만 받는다. continuity·working_context 회차와
+   `previous_working_state`(문장)에서 온 claim 은 참조가 없다.
+7. **먼저 확인할 것.** 커밋 저널 항목은 trace 를 갖고(`keeper_librarian.ml:461-464` 의
+   `origin.trace_id` 주석), 메시지 metadata 에는 발화자가 있다. 새 칸 없이 나중에 발화자를 복원할 수
+   있으면 이 RFC 는 필요 없다. durable truth 가 망가진다고 말하기 전에 이 길을 배제해야 한다.
+8. **근거가 작다.** 메시지 10건, 기억 28개다. 일주일 뒤 같은 방법으로 다시 판정해 누락률을 본다.

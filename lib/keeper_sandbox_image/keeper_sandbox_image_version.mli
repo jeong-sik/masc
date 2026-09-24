@@ -29,8 +29,7 @@ val base_embedded : recipe
 
 type load_error =
   | Invalid_name of string
-      (** Not a directory name this layout uses: empty, or a character other
-          than [a-z], [0-9] and [-], or a leading [-]. *)
+      (** Not words of [a-z] and [0-9] joined by single [-]. *)
   | Recipe_missing of { path : string }
   | Source_file_outside_source of { path : string }
       (** A recipe Dockerfile or its [inputs] manifest resolves outside the
@@ -48,6 +47,10 @@ type load_error =
   | Context_unwritable of { path : string; detail : string }
 
 val load_error_to_string : load_error -> string
+
+val valid_name : string -> bool
+(** The shared recipe and catalog image name rule: lowercase letter and
+    digit words joined by single dashes. *)
 
 val load : source:string -> name:string -> (recipe, load_error) result
 (** Read [<source>/sandbox-images/<name>/Dockerfile] and the files its

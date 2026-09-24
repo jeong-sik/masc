@@ -557,6 +557,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
              List.iter log_schedule_dispatch result.dispatches;
              List.iter log_schedule_hold_started
                (Schedule_runner.newly_held ~previous:previously_held result.held);
+             Server_schedule_consumers.resume_fenced_owners
+               (Mcp_server.workspace_config state)
+               result.held;
              if result.Schedule_runner.emitted <> []
                 || result.rescheduled > 0
                 || result.dispatches <> []

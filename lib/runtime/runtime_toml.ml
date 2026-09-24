@@ -1310,6 +1310,7 @@ let exec_ssh_endpoint_keys =
   ; "env_allowlist"
   ; "capabilities"
   ; "private_home"
+  ; "allowed_paths"
   ]
 ;;
 
@@ -1370,6 +1371,63 @@ let exec_ssh_port_field ~(path : string) (tbl : Otoml.t)
   | Ok port -> Ok port
 ;;
 
+(* One [allowed_paths] entry names an endpoint-side root that Execute path
+   checks compare lexically (the endpoint may be another machine, so the host
+   cannot resolve it). The entry must therefore already be in the form the
+   comparison needs: absolute, with no empty, [.] or [..] segment (so no
+   trailing or doubled '/'), and not [/] itself, which would lift the
+   boundary entirely. *)
+let exec_ssh_allowed_path_error (value : string) : string option =
+  if String.equal value "" || not (Char.equal value.[0] '/')
+  then Some "must be absolute"
+  else if String.equal value "/"
+  then Some "must not be the filesystem root"
+  else (
+    let segments =
+      String.split_on_char '/' (String.sub value 1 (String.length value - 1))
+    in
+    if
+      List.exists
+        (fun segment ->
+           String.equal segment ""
+           || String.equal segment "."
+           || String.equal segment "..")
+        segments
+    then Some "must be normalized (no empty, '.' or '..' segment, no trailing '/')"
+    else None)
+;;
+
+let exec_ssh_allowed_paths_field ~(path : string) (tbl : Otoml.t)
+  : (string list, parse_error list) result
+  =
+  match
+    typed_find
+      "an array of strings"
+      path
+      tbl
+      "allowed_paths"
+      (Otoml.get_array Otoml.get_string)
+  with
+  | Error _ as err -> err
+  | Ok None -> Ok []
+  | Ok (Some values) ->
+    let entry_errors =
+      List.concat
+        (List.mapi
+           (fun index value ->
+              match exec_ssh_allowed_path_error value with
+              | None -> []
+              | Some reason ->
+                error
+                  (Printf.sprintf "%s.allowed_paths[%d]" path index)
+                  (Printf.sprintf "allowed_paths entry %s, got %S" reason value))
+           values)
+    in
+    (match entry_errors with
+     | [] -> Ok values
+     | _ :: _ -> Error entry_errors)
+;;
+
 (** Parse one [\[exec.ssh.endpoints.<name>\]] table. Every key must be one of
     {!exec_ssh_endpoint_keys}; any other key fails the load so a misspelled
     knob is never silently dropped. [host], [user], and [remote_root] are
@@ -1380,7 +1438,8 @@ let exec_ssh_port_field ~(path : string) (tbl : Otoml.t)
     resolve here, where the endpoint name is in scope, to base-relative paths
     with the name substituted (see {!Exec_ssh_endpoint}). Unknown
     [capabilities] values warn-and-ignore per the spec table — they are
-    Phase 2 reservations, not Phase 1 knobs. *)
+    Phase 2 reservations, not Phase 1 knobs. Each [allowed_paths] entry must
+    be absolute and normalized and not [/]; any other entry fails the load. *)
 let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
   : (Exec_ssh_endpoint.t, parse_error list) result
   =
@@ -1444,6 +1503,7 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
   let private_home_result =
     typed_find_or "a boolean" path tbl "private_home" Otoml.get_boolean ~default:false
   in
+  let allowed_paths_result = exec_ssh_allowed_paths_field ~path tbl in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let field_errors =
     errs host_result
@@ -1458,6 +1518,7 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
     @ errs env_allowlist_result
     @ errs capabilities_result
     @ errs private_home_result
+    @ errs allowed_paths_result
   in
   match unknown_key_errors with
   | _ :: _ -> Error (unknown_key_errors @ field_errors)
@@ -1474,7 +1535,8 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
        , max_concurrent_sessions_result
        , env_allowlist_result
        , capabilities_result
-       , private_home_result )
+       , private_home_result
+       , allowed_paths_result )
      with
      | ( Ok host
        , Ok user
@@ -1487,7 +1549,8 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
        , Ok max_concurrent_sessions
        , Ok env_allowlist
        , Ok declared_capabilities
-       , Ok private_home ) ->
+       , Ok private_home
+       , Ok allowed_paths ) ->
        let capabilities =
          List.filter
            (fun capability ->
@@ -1526,6 +1589,7 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
          ; env_allowlist
          ; capabilities
          ; private_home
+         ; allowed_paths
          }
      (* [field_errors] is non-empty exactly when some field result is [Error],
         so this arm always carries at least one error. *)

@@ -125,6 +125,7 @@ let write_runtime_toml ~base_path =
            ; env_allowlist = []
            ; capabilities = []
            ; private_home = false
+           ; allowed_paths = []
            }))
 ;;
 

@@ -20,7 +20,7 @@
   `verifier_unreconciled` field is required, and an older server does not
   send it, so a TUI from this release refuses its planning snapshot and the
   Goals view does not load (#38509).
-- Apple-container microVM Keepers now create a build volume at boot (default size 128g, set with `MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE`). If the volume cannot be created, the Keeper refuses to boot. Anything left under `_build` does not survive a restart (#38563).
+- Apple-container microVM Keepers now create a build volume at boot (default size 128g, set with `MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE`). If the volume cannot be created, the Keeper refuses to boot. A `_build` linked to the volume is emptied at every boot. A `_build` that is already a real directory in the checkout is left in place and is not reclaimed; delete it to move that Keeper onto the volume (#38563).
 - A `Blocked` shutdown record already on disk at a released stage (`Task_discovery`, `Record_persist`, `Meta_update`, `Pending_confirm_cleanup`) no longer holds the admission fence: the Keeper boots again on the next start and the shutdown is retried. Records at every other stage keep the fence as before (#38569).
 - A Keeper whose TOML says `sandbox_profile = "docker"` or `"microvm"` must
   also name its image in `sandbox_image`. One that names none no longer boots
@@ -175,7 +175,7 @@
   comment count with an empty page that names the count, instead of refusing
   it and suggesting a re-read from offset 0. An offset past the end is still
   refused (#38549).
-- microVM Keepers on the Apple container backend keep build output (`_build`) on a separate build volume (`masc-keeper-build-<keeper>`) that is deleted and re-created at every boot, so that disk space comes back (#38563).
+- microVM Keepers on the Apple container backend keep build output (`_build`) on a separate build volume (`masc-keeper-build-<keeper>`) that is deleted and re-created at every boot, so that disk space comes back. A checkout whose `_build` is already a real directory keeps it and does not use the volume (#38563).
 - `masc_ask` no longer takes `question_id` or `choice_id`. The handler numbers
   questions `q1, q2, ...` and each question's choices `c1, c2, ...` by
   position. The ids only pair an answer with its question inside one ask, and

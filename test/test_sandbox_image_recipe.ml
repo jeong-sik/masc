@@ -145,7 +145,8 @@ let test_nobody_named_the_image_says_so () =
            .Env_config_sandbox.Runtime.source)
 
 let () =
-  run "Sandbox image recipe"
+  (* The recipe path is this test's input, not an Alcotest subcommand. *)
+  run ~argv:[| Sys.argv.(0) |] "Sandbox image recipe"
     [ ( "dockerfile"
       , [ test_case "installs bash" `Quick test_recipe_installs_bash
         ; test_case "installs ripgrep" `Quick test_recipe_installs_ripgrep

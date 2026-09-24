@@ -139,6 +139,27 @@ let test_calculate_kpis_empty () =
   check bool "no fabricated latency" false (contains output "0.82")
 ;;
 
+(* The fleet row reads "N configured · M unpaused", and the difference is
+   what a reader takes for how many are paused. A declared keeper is not
+   paused -- [Tui_decode.keeper_of_declaration] writes [k_paused = false] and
+   is the only place a keeper with that origin is built -- so it belongs on
+   the unpaused side. The count used to skip it, which put it inside the
+   difference and over-counted the paused ones by the number declared. *)
+let make_declared_keeper name : Decode.keeper =
+  { (make_keeper name) with k_origin = Decode.Declared_keeper [] }
+;;
+
+let test_a_declared_keeper_is_not_counted_as_paused () =
+  let state = make_state () in
+  state.keepers <-
+    [ make_keeper "persisted"
+    ; make_keeper ~paused:true "stopped"
+    ; make_declared_keeper "declared" ];
+  let kpis = Render_metrics.calculate_kpis state in
+  check int "three are configured" 3 kpis.total_keepers;
+  check int "two of them are not paused" 2 kpis.unpaused_keepers
+;;
+
 let test_calculate_kpis_populated () =
   let state = make_state () in
   state.keepers <- [ make_keeper "running"; make_keeper ~paused:true "idle" ];
@@ -933,6 +954,8 @@ let () =
     [ ( "kpis"
       , [ test_case "calculate_kpis_empty" `Quick test_calculate_kpis_empty
         ; test_case "calculate_kpis_populated" `Quick test_calculate_kpis_populated
+        ; test_case "a declared keeper is not counted as paused" `Quick
+            test_a_declared_keeper_is_not_counted_as_paused
         ; test_case "retained task outcomes and observation scope" `Quick test_retained_task_outcomes
         ; test_case "assignee work and daily flow" `Quick test_assignee_work_and_daily_flow
         ; test_case "assignee rows capped" `Quick test_assignee_rows_capped

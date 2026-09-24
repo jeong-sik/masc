@@ -117,9 +117,16 @@ let calculate_kpis (state : state) =
     | None, _ | _, Some _ -> None
   in
   { total_keepers = List.length state.keepers;
-    unpaused_keepers = List.fold_left
-      (fun count (keeper : keeper) -> count + (match keeper.k_origin with Tui_decode.Declared_keeper _ -> 0 | Persisted_keeper -> if keeper.k_paused then 0 else 1))
-      0 state.keepers;
+    (* Off [k_paused] alone. The count used to skip a declared keeper as
+       well, so the row said "N configured · M unpaused" with the declared
+       ones inside the difference -- and the difference is the number a
+       reader takes for how many are paused. A declared keeper is not paused:
+       [Tui_decode.keeper_of_declaration] writes [k_paused = false], and it
+       is the only place a keeper with that origin is built. *)
+    unpaused_keepers =
+      List.fold_left
+        (fun count (keeper : keeper) -> if keeper.k_paused then count else count + 1)
+        0 state.keepers;
     turns;
     tasks = Option.map (fun flow -> flow.Task_flow.current) state.task_flow;
     gate_pending_count = Option.map List.length (current_value (gate_observation state));

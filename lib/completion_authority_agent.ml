@@ -10,7 +10,7 @@ open Result.Syntax
 (* RFC-0361 D7(b): fixed authority identity — every judgement carries the
    same actor string (the [verifier_exact] lane id) so verdicts aggregate by
    actor; run identity stays with the per-review [verification_id]. *)
-let authority_actor = Runtime.verifier_exact_lane_id
+let authority_actor = Standalone_lane.to_id Standalone_lane.Verifier
 
 (* How many operator-disagreement examples ride along in the judge's prompt.
    Few-shot selection puts false positives first, so the examples that cost

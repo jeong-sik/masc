@@ -684,15 +684,21 @@ let schedule_signal_rows_and_errors config limit =
 
 (* The runner's own hold, read from the same [held] list [/health] reports.
    A held occurrence has no signal and no wake yet, so nothing else on the row
-   can say the schedule is waiting for its target to take the previous one. *)
+   can say the schedule is waiting for its target to take the previous one.
+   [observed_at] is when the successful tick that saw it decided to hold it.
+   Ticks that fail keep the list without looking again, so this says when the
+   hold was last known to stand; whether it is still being checked is the
+   page's [schedule_runner.status] (#38411). *)
 let schedule_runner_hold_dashboard_json = function
   | None -> `Null
-  | Some (signal : Schedule_runner.wake_signal) ->
+  | Some ({ signal; observed_at } : Schedule_runner_status.held_occurrence) ->
     `Assoc
       [ ( "occurrence_id"
         , `String (Schedule_occurrence_id.to_string signal.occurrence_id) )
       ; "due_at", `Float signal.due_at
       ; "due_at_iso", unix_iso_json signal.due_at
+      ; "observed_at", `Float observed_at
+      ; "observed_at_iso", unix_iso_json observed_at
       ]
 ;;
 
@@ -977,7 +983,21 @@ let schedule_wake_counts_json
     ]
 ;;
 
-let schedule_request_rows_dashboard_json ~config ~now state request_rows =
+(* The runner's status word, the one [/health] writes in its [schedule_runner]
+   object, with the same threshold. Only the word: the rest of that object is
+   the whole fleet's -- every target's held occurrences and every tick's totals
+   -- and a page scoped to one target must not carry it (#38411). *)
+let schedule_runner_dashboard_json ~now runner_status =
+  `Assoc
+    [ "schema", `String "masc.dashboard.scheduled_automation.schedule_runner.v1"
+    ; ( "status"
+      , `String
+          (Schedule_contract_values.runner_status_to_string
+             (Server_schedule_runner_policy.status ~now runner_status)) )
+    ]
+;;
+
+let schedule_request_rows_dashboard_json ~config ~now ~runner_status state request_rows =
   let request_rows_with_wakes =
     List.map
       (fun (request : Schedule_domain.schedule_request) ->
@@ -994,7 +1014,6 @@ let schedule_request_rows_dashboard_json ~config ~now state request_rows =
       ~config
       (List.map snd request_rows_with_wakes)
   in
-  let runner_status = Schedule_runner_status.snapshot () in
   List.map
     (fun (request, last_wake) ->
        schedule_request_dashboard_json
@@ -1021,6 +1040,9 @@ let scheduled_automation_dashboard_json
   =
   (* Read-only projection; the schedule store remains the status SSOT. *)
   let now = Unix.gettimeofday () in
+  (* One read of the runner for the whole page, so each row's hold and the
+     runner status beside the rows describe the same tick. *)
+  let runner_status = Schedule_runner_status.snapshot () in
   let request_limit =
     match payload_target with
     | Some _ -> schedule_projection_target_request_limit
@@ -1065,6 +1087,8 @@ let scheduled_automation_dashboard_json
     ; ( "payload_target_selector"
       , match payload_target with None -> `Null | Some target -> `String target )
     ; "generated_at", `String (Masc_domain.now_iso ())
+      (* A row's [runner_hold] is only as current as this says. *)
+    ; "schedule_runner", schedule_runner_dashboard_json ~now runner_status
     ; "signal_source", `String "schedule_runner_signals"
     ; "signal_count", `Int (List.length signal_rows)
     ; "signal_limit", `Int schedule_signal_projection_limit
@@ -1123,7 +1147,12 @@ let scheduled_automation_dashboard_json
     in
     let request_rows = take request_limit sorted in
     let request_jsons =
-      schedule_request_rows_dashboard_json ~config ~now state request_rows
+      schedule_request_rows_dashboard_json
+        ~config
+        ~now
+        ~runner_status
+        state
+        request_rows
     in
     `Assoc
       (base_fields_for (signal_rows_for schedules)
@@ -1206,6 +1235,7 @@ let scheduled_automation_exact_lookup_json config ~now ~schedule_id:raw_schedule
             schedule_request_rows_dashboard_json
               ~config
               ~now
+              ~runner_status:(Schedule_runner_status.snapshot ())
               state
               [ request ]
           in

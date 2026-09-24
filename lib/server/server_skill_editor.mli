@@ -66,6 +66,15 @@ type create_outcome =
       { preview : preview
       ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
       }
+  | Created_but_shadowed of
+      { preview : preview
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      ; winner : Skill_catalog_snapshot.identity
+      }
+      (** Written and published, but [winner] declares the same name earlier
+          in catalog order. The catalog keeps the new package as its shadow:
+          turns that list Skills by name see [winner], and only a Task that
+          pins the new package's exact reference gets it. *)
   | Created_but_unpublished of
       { preview : preview
       ; reason : string

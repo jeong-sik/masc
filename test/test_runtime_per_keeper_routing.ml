@@ -918,7 +918,7 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
   | Ok config ->
     Alcotest.(check (option string)) "selected default" (Some runtime_id) config.default_runtime_id;
     List.iter (fun exact_lane ->
-      let id = Runtime.exact_lane_id exact_lane in
+      let id = Standalone_lane.to_id exact_lane in
       let is_verifier =
         match exact_lane with
         | Runtime.Verifier -> true
@@ -950,7 +950,12 @@ let check_first_run_lanes path runtime_id ~cli ~judges =
       | Some lane, Some (expected_http, expected_cli) ->
         Alcotest.(check (list string)) (id ^ " HTTP slots") expected_http lane.slot_ids;
         Alcotest.(check (list string)) (id ^ " CLI slots") expected_cli lane.cli_slot_ids)
-      (List.filter (function Runtime.Workspace_curator -> false | _ -> true) Runtime.all_exact_lanes);
+      (List.filter
+         (function
+           | Runtime.Workspace_curator -> false
+           | Runtime.Librarian | Runtime.Hitl_auto_judge | Runtime.Board_attention
+           | Runtime.Verifier -> true)
+         Standalone_lane.all);
     Alcotest.(check bool) "shared-memory curator is explicitly configured" false
       (List.exists (fun (lane : Runtime_schema.exact_output_lane_decl) ->
          String.equal lane.id "workspace_curator_exact") config.exact_output_lane_decls)

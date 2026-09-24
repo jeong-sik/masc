@@ -13,19 +13,22 @@ type agent_core_tool_projector =
   (Yojson.Safe.t -> Tool_result.result) ->
   Agent_core.Tool.t
 
-let transport_error_kind_of_exception = function
-  | End_of_file -> Some Llm_provider.Http_client.End_of_file
-  | Eio.Time.Timeout -> Some Llm_provider.Http_client.Timeout
-  | Unix.Unix_error (code, _, _) ->
-    Some (Llm_provider.Http_client.classify_unix_error code)
-  (* [Eio.Io] also carries file-system errors, so an Eio error no arm names
-     stays [None] (not known to be transport) rather than [Some Unknown]. *)
-  | Eio.Io (err, _) ->
-    Llm_provider.Http_client.(classify_eio_error err |> known_network_error_kind)
-  | Tls_eio.Tls_alert _ | Tls_eio.Tls_failure _ ->
-    Some Llm_provider.Http_client.Tls_error
-  | Sys_error _ | Failure _ -> Some Llm_provider.Http_client.Unknown
-  | _ -> None
+(* The runner reads a caught exception exactly as the HTTP client does. An
+   exception the client does not treat as transport, or a Unix/Eio error it
+   cannot name ([Unknown]; both also carry file-system errors), is [None]:
+   not known to be a transport failure. *)
+let transport_error_kind_of_exception exn =
+  match Llm_provider.Http_client.classify_network_exn exn with
+  | Some (Llm_provider.Http_client.NetworkError { kind; _ }) ->
+    Llm_provider.Http_client.known_network_error_kind kind
+  | Some (Llm_provider.Http_client.TimeoutError _) ->
+    Some Llm_provider.Http_client.Timeout
+  | Some
+      ( Llm_provider.Http_client.HttpError _
+      | Llm_provider.Http_client.AcceptRejected _
+      | Llm_provider.Http_client.ProviderTerminal _
+      | Llm_provider.Http_client.ProviderFailure _ )
+  | None -> None
 ;;
 
 (* ================================================================ *)

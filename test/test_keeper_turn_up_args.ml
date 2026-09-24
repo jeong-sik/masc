@@ -79,6 +79,17 @@ let rec rm_rf path =
    process-global Eio fs (the persist round-trip below), later contexts can
    materialize files under their base, and an empty-dir-only cleanup fails the
    wrong test. *)
+(* A docker keeper's [sandbox_image] has to resolve through the host catalog
+   before it is admitted, so every context carries one with the names the
+   cases use. *)
+let catalog_images =
+  [ "base", "masc-sandbox-base:test"
+  ; "custom", "masc-sandbox-custom:t1"
+  ; "requested", "masc-sandbox-requested:t2"
+  ; "documents", "masc-sandbox-documents:t1"
+  ; "reports", "masc-sandbox-reports:t1"
+  ]
+
 let with_test_context f =
   let base = Filename.temp_file "keeper-turn-up-args-" "" in
   Sys.remove base;
@@ -88,6 +99,7 @@ let with_test_context f =
     (fun () ->
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:base catalog_images;
       let ctx : _ Keeper_types_profile.context =
         { config = Workspace.default_config base
         ; agent_name = "test-agent"
@@ -111,7 +123,7 @@ let with_test_context f =
    [docker info] on every case. [None] is what the real probe answers when
    the preflight master switch is off. The cases that pin the probe itself
    pass their own. *)
-let no_daemon_in_this_suite ?image:_ ~timeout_sec:_ () = None
+let no_daemon_in_this_suite ~image:_ ~timeout_sec:_ () = None
 
 let parse_stating_a_profile ctx json =
   let json =
@@ -119,7 +131,7 @@ let parse_stating_a_profile ctx json =
     | `Assoc fields when not (List.mem_assoc "sandbox_profile" fields) ->
       let image =
         if List.mem_assoc "sandbox_image" fields then []
-        else [ "sandbox_image", `String "masc-sandbox:general" ]
+        else [ "sandbox_image", `String "base" ]
       in
       `Assoc (fields @ ("sandbox_profile", `String "docker") :: image)
     | other -> other
@@ -186,7 +198,7 @@ remote_root = "/srv/masc/playground"
        parsed.remote_endpoint_opt);
   (match
      parse
-       [ "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
+       [ "sandbox_profile", `String "docker" ; "sandbox_image", `String "base"
        ; "remote_endpoint", `String "fixture"
        ]
    with
@@ -245,6 +257,7 @@ let with_persisting_context f =
       Eio_main.run @@ fun env ->
       if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
       Eio.Switch.run @@ fun sw ->
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:base catalog_images;
       let ctx : _ Keeper_types_profile.context =
         { config = Workspace.default_config base
         ; agent_name = "test-agent"
@@ -345,7 +358,7 @@ remote_root = "/srv/masc/playground"
     parse_or_fail
       (`Assoc
          [ "name", `String name
-         ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
+         ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "base"
          ; "remote_endpoint", `Null
          ])
   in
@@ -405,7 +418,7 @@ let test_microvm_backend_persistence_round_trip () =
       (`Assoc
          [ "name", `String name
          ; "instructions", `String "fixture instructions"
-         ; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "masc-sandbox:general"
+         ; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "base"
          ; "microvm_backend", `String "nerdctl_kata"
          ])
   in
@@ -413,14 +426,14 @@ let test_microvm_backend_persistence_round_trip () =
     { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm; microvm_backend = create.profile_defaults.microvm_backend };
   check (option string) "backend persisted" (Some "nerdctl_kata") (read_back ());
   let omitted = parse_or_fail (`Assoc
-      [ "name", `String name; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "masc-sandbox:general"
+      [ "name", `String name; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "base"
       ; "instructions", `String "updated instructions" ]) in
   persist omitted
     { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm;
                      microvm_backend = omitted.profile_defaults.microvm_backend };
   check (option string) "omitted backend survives update" (Some "nerdctl_kata") (read_back ());
   let changed = parse_or_fail (`Assoc
-      [ "name", `String name; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "masc-sandbox:general"
+      [ "name", `String name; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "base"
       ; "microvm_backend", `String "apple_container" ]) in
   persist changed
     { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm;
@@ -430,7 +443,7 @@ let test_microvm_backend_persistence_round_trip () =
     parse_or_fail
       (`Assoc
          [ "name", `String name
-         ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
+         ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "base"
          ; "microvm_backend", `Null
          ])
   in
@@ -2306,7 +2319,7 @@ let test_the_creation_stem_network_mode_is_not_a_mode () =
 
 let preflight_fixture ~ok : Keeper_sandbox_runtime.docker_preflight =
   { ok
-  ; image = "masc-keeper-sandbox:local"
+  ; image = Some "masc-sandbox-base:test"
   ; docker_runtime_ok = ok
   ; docker_runtime_error =
       (if ok
@@ -2331,7 +2344,7 @@ let docker_args ~profile =
   `Assoc
     [ "name", `String "preflight-fixture"
     ; "sandbox_profile", `String profile
-    ; "sandbox_image", `String "masc-sandbox:general"
+    ; "sandbox_image", `String "base"
     ]
 ;;
 
@@ -2343,7 +2356,7 @@ let test_a_docker_keeper_naming_no_image_is_refused () =
   with_test_context
   @@ fun ctx ->
   let probes = ref 0 in
-  let docker_preflight ?image:_ ~timeout_sec:_ () =
+  let docker_preflight ~image:_ ~timeout_sec:_ () =
     incr probes;
     None
   in
@@ -2369,7 +2382,7 @@ let test_docker_profile_is_refused_when_its_preflight_fails () =
   with_test_context
   @@ fun ctx ->
   let probes = ref 0 in
-  let docker_preflight ?image:_ ~timeout_sec:_ () =
+  let docker_preflight ~image:_ ~timeout_sec:_ () =
     incr probes;
     Some (preflight_fixture ~ok:false)
   in
@@ -2392,7 +2405,7 @@ let test_docker_profile_is_admitted_when_its_preflight_passes () =
   with_test_context
   @@ fun ctx ->
   let probes = ref 0 in
-  let docker_preflight ?image:_ ~timeout_sec:_ () =
+  let docker_preflight ~image:_ ~timeout_sec:_ () =
     incr probes;
     Some (preflight_fixture ~ok:true)
   in
@@ -2411,7 +2424,7 @@ let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
   with_test_context
   @@ fun ctx ->
   let probes = ref 0 in
-  let switched_off ?image:_ ~timeout_sec:_ () =
+  let switched_off ~image:_ ~timeout_sec:_ () =
     incr probes;
     None
   in
@@ -2422,7 +2435,7 @@ let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
        "docker with the preflight switched off must be admitted: %s"
        (Keeper_types_profile.tool_result_body result));
   check int "docker consulted the probe" 1 !probes;
-  let failing ?image:_ ~timeout_sec:_ () =
+  let failing ~image:_ ~timeout_sec:_ () =
     incr probes;
     Some (preflight_fixture ~ok:false)
   in
@@ -2433,6 +2446,30 @@ let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
        "microvm must not be judged by the docker preflight: %s"
        (Keeper_types_profile.tool_result_body result));
   check int "microvm never consulted the probe" 1 !probes
+;;
+
+(* The name has to mean a build on this host before a docker keeper is
+   admitted, and that is not the preflight's to switch off: reading the
+   catalog probes no daemon. The refusal is the catalog's, with the names it
+   has. *)
+let test_a_docker_keeper_whose_image_the_catalog_lacks_is_refused () =
+  with_test_context
+  @@ fun ctx ->
+  let switched_off ~image:_ ~timeout_sec:_ () = None in
+  match
+    Keeper_turn_up_args.parse ~docker_preflight:switched_off ctx
+      (`Assoc
+        [ "name", `String "unbuilt"
+        ; "sandbox_profile", `String "docker"
+        ; "sandbox_image", `String "rust"
+        ])
+  with
+  | Ok _ -> fail "a docker keeper naming an image the catalog lacks was admitted"
+  | Error result ->
+    let body = Keeper_types_profile.tool_result_body result in
+    check bool "the refusal is the catalog's" true
+      (contains "sandbox_image \"rust\" is not in the image catalog" body);
+    check bool "and lists what it has" true (contains "base, custom" body)
 ;;
 
 let test_docker_preflight_receives_sandbox_image_from_profile_defaults () =
@@ -2450,15 +2487,15 @@ let test_docker_preflight_receives_sandbox_image_from_profile_defaults () =
 [keeper]
 instructions = "Exercise the declared custom sandbox image."
 sandbox_profile = "docker"
-sandbox_image = "masc-keeper-sandbox:custom-tag"
+sandbox_image = "custom"
 network_mode = "none"
 |}
   in
   Out_channel.with_open_bin toml_path (fun oc ->
     Out_channel.output_string oc toml_content);
   let probed_image = ref None in
-  let docker_preflight ?image ~timeout_sec:_ () =
-    probed_image := image;
+  let docker_preflight ~image ~timeout_sec:_ () =
+    probed_image := Result.to_option image;
     Some (preflight_fixture ~ok:true)
   in
   let args =
@@ -2469,23 +2506,23 @@ network_mode = "none"
   in
   match Keeper_turn_up_args.parse ~docker_preflight ctx args with
   | Ok parsed ->
-    check (option string) "probed image matches keeper TOML sandbox_image"
-      (Some "masc-keeper-sandbox:custom-tag")
+    check (option string) "the preflight probes the build the TOML's name resolves to"
+      (Some "masc-sandbox-custom:t1")
       !probed_image;
-    check (option string) "parsed profile_defaults retains sandbox_image"
-      (Some "masc-keeper-sandbox:custom-tag")
+    check (option string) "parsed profile_defaults keeps the name"
+      (Some "custom")
       parsed.profile_defaults.sandbox_image;
     (match Keeper_turn_up_args.parse ~docker_preflight ctx
        (`Assoc ["name", `String keeper_name; "sandbox_profile", `String "docker";
-                "sandbox_image", `String "requested-image:v2"]) with
+                "sandbox_image", `String "requested"]) with
      | Ok parsed ->
        check (option string) "explicit image is preflighted instead of old TOML"
-         (Some "requested-image:v2") !probed_image;
+         (Some "masc-sandbox-requested:t2") !probed_image;
        check (option string) "requested image materializes"
-         (Some "requested-image:v2") parsed.profile_defaults.sandbox_image
+         (Some "requested") parsed.profile_defaults.sandbox_image
      | Error result -> fail (Keeper_types_profile.tool_result_body result));
-    let failing_docker_preflight ?image ~timeout_sec:_ () =
-      probed_image := image;
+    let failing_docker_preflight ~image ~timeout_sec:_ () =
+      probed_image := Result.to_option image;
       Some (preflight_fixture ~ok:false)
     in
     (match Keeper_turn_up_args.parse ~docker_preflight:failing_docker_preflight ctx args with
@@ -2624,7 +2661,7 @@ let test_parse_rejects_unknown_keys () =
           [ "name", `String "unknown-args-fixture"
           (* The tool schema defaults this to "docker"; [parse] is called
              directly here, so the fixture states what the schema would. *)
-          ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
+          ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "base"
           ; "instructions", `String "still fine"
           ])
    with
@@ -2658,13 +2695,13 @@ let test_sandbox_image_persistence () =
       ~base_path:ctx.config.base_path name with
     | Ok defaults -> defaults.sandbox_image
     | Error e -> fail (Keeper_types_profile.keeper_toml_load_error_to_string e) in
-  check (option string) "image set on disk" (Some "registry.example/documents:v1")
+  check (option string) "image set on disk" (Some "documents")
     (apply ["instructions", `String "image fixture instructions";
-            "sandbox_image", `String "registry.example/documents:v1"]);
-  check (option string) "omission retains image" (Some "registry.example/documents:v1")
+            "sandbox_image", `String "documents"]);
+  check (option string) "omission retains image" (Some "documents")
     (apply ["instructions", `String "new instructions"]);
-  check (option string) "image replacement materializes" (Some "registry.example/documents:v2")
-    (apply ["sandbox_image", `String "registry.example/documents:v2"]);
+  check (option string) "image replacement materializes" (Some "reports")
+    (apply ["sandbox_image", `String "reports"]);
   (* A docker Keeper cannot drop its image (#37523): the explicit clear is
      refused before anything is written, and the stored image stays. *)
   (match parse_stating_a_profile ctx
@@ -2679,7 +2716,7 @@ let test_sandbox_image_persistence () =
      ~base_path:ctx.config.base_path name with
    | Ok defaults ->
      check (option string) "refused clear keeps the stored image"
-       (Some "registry.example/documents:v2") defaults.sandbox_image
+       (Some "reports") defaults.sandbox_image
    | Error e -> fail (Keeper_types_profile.keeper_toml_load_error_to_string e));
   List.iter (fun image ->
     match parse_stating_a_profile ctx (`Assoc ["name", `String name; "sandbox_image", image]) with
@@ -2773,6 +2810,9 @@ let () =
             `Quick
             test_docker_preflight_is_consulted_only_for_the_docker_profile
         ; test_case
+            "a docker keeper whose image the catalog lacks is refused"
+            `Quick
+            test_a_docker_keeper_whose_image_the_catalog_lacks_is_refused        ; test_case
             "docker preflight receives sandbox_image from profile defaults"
             `Quick
             test_docker_preflight_receives_sandbox_image_from_profile_defaults

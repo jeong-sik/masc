@@ -115,45 +115,6 @@ let test_context_directory_argv_names_the_recipe_and_its_directory () =
        ~tag:Keeper_sandbox_image.default_tag ~dockerfile:"/tmp/ctx/Dockerfile"
        ~context:"/tmp/ctx" ())
 
-(* A Keeper that names no image gets the general one, under Docker and under
-   microVM alike -- both guest paths read this same default
-   (keeper_sandbox_factory.resolve_guest). The Keepers that want MASC's own
-   development image name it; this is what the rest get. *)
-let test_runtime_default_is_the_general_image () =
-  (* Read the env the same way the resolver does rather than assume it is
-     unset: a host with an override is a correct configuration, not a failing
-     test, and the override winning is the other half of the contract. *)
-  match Sys.getenv_opt "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" with
-  | Some override when String.trim override <> "" ->
-    check string "an override wins over the default" override
-      (Env_config_sandbox.Runtime.docker_image ())
-  | _ ->
-    check string "unset env resolves to the general tag"
-      Keeper_sandbox_image.default_tag
-      (Env_config_sandbox.Runtime.docker_image ())
-
-(* The third answer, and the one that went unnoticed on 2026-09-09: eight of a
-   workspace's twenty-one Keepers had declared no image and no override was
-   set, so all eight ran on the general one, which carries no language
-   toolchain, in a fleet that all works on MASC. The tag alone reads the same
-   whether a Keeper chose it or nobody did. Only a host that leaves the name
-   unset can see [Built_in], which is this file rather than
-   test_env_config_sandbox.ml. *)
-let test_nobody_named_the_image_says_so () =
-  match Sys.getenv_opt "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" with
-  | Some override when String.trim override <> "" ->
-    check string "an override names itself"
-      "workspace_env"
-      (Env_config_sandbox.Runtime.image_source_to_string
-         (Env_config_sandbox.Runtime.resolve_image None)
-           .Env_config_sandbox.Runtime.source)
-  | _ ->
-    check string "nobody named it"
-      "built_in"
-      (Env_config_sandbox.Runtime.image_source_to_string
-         (Env_config_sandbox.Runtime.resolve_image None)
-           .Env_config_sandbox.Runtime.source)
-
 let () =
   run "Sandbox image recipe"
     [ ( "dockerfile"
@@ -177,11 +138,5 @@ let () =
             test_each_runtime_says_how_it_takes_the_recipe
         ; test_case "a directory context names the recipe and its directory"
             `Quick test_context_directory_argv_names_the_recipe_and_its_directory
-        ] )
-    ; ( "runtime default"
-      , [ test_case "is the general image" `Quick
-            test_runtime_default_is_the_general_image
-        ; test_case "says which of the three named it" `Quick
-            test_nobody_named_the_image_says_so
         ] )
     ]

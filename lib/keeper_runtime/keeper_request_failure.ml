@@ -163,6 +163,7 @@ let provider_network_summary ~provider ~kind ~detail =
   | Llm_provider.Http_client.Timeout -> who ^ " did not respond in time"
   | Llm_provider.Http_client.Local_resource_exhaustion ->
     "Local network resources are exhausted; fewer requests at once are needed"
+  | Llm_provider.Http_client.Connection_reset -> who ^ " reset the connection"
   | Llm_provider.Http_client.End_of_file -> who ^ " closed the connection"
   | Llm_provider.Http_client.Unknown -> detail_speaks "could not be reached"
 ;;

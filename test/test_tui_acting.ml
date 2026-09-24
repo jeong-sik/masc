@@ -734,7 +734,15 @@ let test_a_return_with_no_start_held_has_no_duration () =
        completed);
   check string "the row then shows the tool alone"
     "\xe2\x9c\x93 analyst returned | read_file"
-    (text (Acting.row_of_event ~at:100. ~duration_ms:None (Observer.Agent_core completed)))
+    (text (Acting.row_of_event ~at:100. ~duration_ms:None (Observer.Agent_core completed)));
+  (* A negative duration is a clock that disagreed with itself. The row it
+     leaves is the row a missing one leaves, not "read_file \xc2\xb7 0ms" and
+     not a dash the missing row does not draw. *)
+  check string "a negative duration reads as no duration"
+    "\xe2\x9c\x93 analyst returned | read_file"
+    (text
+       (Acting.row_of_event ~at:100. ~duration_ms:(Some (-4.))
+          (Observer.Agent_core completed)))
 
 let test_keeper_rows_say_what_the_keeper_did () =
   check string "a settlement carries tokens, cost, and calls"
@@ -814,9 +822,12 @@ let test_a_lane_named_event_is_attributed_by_its_trace () =
     (Acting.keeper_of_event ~traces (heartbeat "bandleader"))
 
 let test_elapsed_text_picks_a_unit () =
-  check (list string) "ms, seconds, minutes"
-    [ "32ms"; "1.2s"; "2m05s" ]
-    (List.map Acting.elapsed_text [ 32.; 1200.; 125_000. ])
+  check (list (option string)) "ms, seconds, minutes"
+    [ Some "32ms"; Some "1.2s"; Some "2m05s" ]
+    (List.map Acting.elapsed_text [ 32.; 1200.; 125_000. ]);
+  (* A feed clock that disagreed with itself is not an instant call. *)
+  check (option string) "a negative duration has no spelling, not 0ms" None
+    (Acting.elapsed_text (-4.))
 
 (* The feed used to render keeper_skill and keeper_compose_* as anonymous
    "call"/"returned" rows, so skill use was invisible in the chat-side surfaces

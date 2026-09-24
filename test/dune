@@ -147,6 +147,12 @@
    masc.msx_lane masc.masc_compression masc.multimodal masc.tool_types))
 
 (test
+ (name test_dos_vision)
+ (modules test_dos_vision)
+ (libraries alcotest unix yojson fs_compat masc masc_test_deps
+   masc.dos_lane masc.multimodal masc.tool_types))
+
+(test
  (name test_sse_observer_epoch)
  (modules test_sse_observer_epoch)
  (libraries alcotest masc masc.sse_wire masc_test_deps eio))
@@ -252,6 +258,7 @@
   test_keeper_librarian_context
   test_keeper_librarian_context_recall
   test_surface_ref
+  test_keeper_input_speaker
   test_inference_inflight_observation
   test_audit_projection
   test_keeper_turn_outcome
@@ -610,6 +617,7 @@
   test_keeper_librarian_context_recall
   test_keeper_skill_catalog
   test_surface_ref
+  test_keeper_input_speaker
   test_inference_inflight_observation
   test_audit_projection
   test_keeper_turn_outcome
@@ -1978,7 +1986,10 @@
   terminal_size
   masc.jsonl_writer
   decompress.de
-  decompress.gz))
+  decompress.gz)
+ ;; The schedule lookup found answer is pinned to the fixture the Dashboard
+ ;; decoder test reads (#38510).
+ (deps ../dashboard/src/api/fixtures/scheduled-automation-lookup-found.json))
 
 (test
  (name test_server_runtime_bootstrap)
@@ -1997,6 +2008,8 @@
 ; their (test)/(tests) stanzas under @test/runtest.
 (rule
  (alias runtest-dashboard-http-behavior-contracts)
+ ;; The found-lookup case reads the fixture the Dashboard decoder test reads.
+ (deps ../dashboard/src/api/fixtures/scheduled-automation-lookup-found.json)
  (action
   (progn
    (run %{exe:test_dashboard_http_core.exe} test "dashboard behavior contracts")
@@ -2798,6 +2811,9 @@
 
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)
+(include stanzas/test_provider_usage_windows.inc)
+
+(include stanzas/test_tui_overview_providers.inc)
 
 (include stanzas/test_keeper_surface_status.inc)
 
@@ -2871,6 +2887,8 @@
 
 (include stanzas/test_local_review_script.inc)
 
+(include stanzas/test_review_approve_guard.inc)
+
 (include stanzas/test_masc_dirname_ssot.inc)
 
 (include stanzas/test_masc_error_dashboard_auth_code.inc)
@@ -2936,6 +2954,7 @@
 
 (include stanzas/test_keeper_shutdown_reconciliation_settlement.inc)
 (include stanzas/test_keeper_shutdown_blocked_purge_release.inc)
+(include stanzas/test_keeper_shutdown_fence_stage.inc)
 
 (include stanzas/test_keeper_shutdown_ownerless_admission_release.inc)
 (include stanzas/test_keeper_shutdown_reconciliation_http.inc)
@@ -3610,6 +3629,11 @@
  (libraries alcotest masc_tui_task_selection masc.masc_types))
 
 (test
+ (name test_tui_overview_tasks)
+ (modules test_tui_overview_tasks)
+ (libraries alcotest masc masc.masc_types masc_tui_overview_tasks))
+
+(test
  (name test_tui_keeper_chat_transcript)
  (modules test_tui_keeper_chat_transcript)
  (libraries
@@ -3627,10 +3651,14 @@
  (modules test_tui_keeper_chat_log)
  ; The golden case runs the server's own AG-UI projection and SSE encoder over
  ; a journal, so the wire the TUI decodes is the real one, not a fixture.
+ ; agent_core is named for the stop reason and the mid-stream counters a
+ ; message delta carries; it is already in this test's link closure through
+ ; masc.
  (libraries
   alcotest
   fmt
   masc
+  masc.agent_core
   masc.masc_types
   masc.keeper_chat_operations
   masc.ag_ui
@@ -3935,6 +3963,13 @@
   unix))
 
 (test
+ (name test_tui_duration_spelling)
+ (modules test_tui_duration_spelling)
+ (libraries alcotest ast_grep masc_tui_message_layout)
+ (deps
+  (source_tree ../bin)))
+
+(test
  (name test_tui_message_layout)
  (modules test_tui_message_layout)
  (libraries
@@ -4206,6 +4241,19 @@
   masc_types
   masc_tui_types
   masc_tui_overview_team))
+
+(test
+ (name test_tui_overview_goals)
+ (modules test_tui_overview_goals)
+ (libraries
+  alcotest
+  masc
+  masc.masc_goal
+  masc_types
+  masc_tui_types
+  masc_tui_overview_goals
+  unix
+  yojson))
 
 (test
  (name test_tui_render_metrics)
@@ -5550,7 +5598,7 @@
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_code_lexer.inc)
 (include stanzas/test_tui_overview_pulse.inc)
-(include stanzas/test_tui_overview_transport_row.inc)
+(include stanzas/test_tui_overview_transport_item.inc)
 (include stanzas/test_tui_schedules_empty_row_names_its_key.inc)
 (include stanzas/test_tui_activity_title_dot_belongs_to_the_strip.inc)
 (include stanzas/test_tui_feed_row_counts_events.inc)
@@ -5653,6 +5701,7 @@
  (modules test_skill_catalog_snapshot)
  (libraries
   alcotest
+  masc
   masc.skill_snapshot
   masc.skill_reference
   masc.skill_config
@@ -5879,8 +5928,8 @@
  (libraries alcotest masc_tui_board_kind_mark masc_tui_types))
 
 (test
- (name test_tui_overview_event_mark)
- (modules test_tui_overview_event_mark)
+ (name test_tui_session_event_mark)
+ (modules test_tui_session_event_mark)
  (libraries alcotest masc_tui_types))
 
 (test
@@ -6932,3 +6981,13 @@
 (include stanzas/test_keeper_librarian_capacity_callback.inc)
 
 (include stanzas/test_deployment_store_directories.inc)
+
+(test
+ (name test_tui_fusion_summary_rows)
+ (modules test_tui_fusion_summary_rows)
+ ; The Fusion list is drawn in the executable, which no test can link, so the
+ ; two wiring assertions are read through Ast_grep. The source is a dep:
+ ; without it the test reads a cached verdict and stays green while the wiring
+ ; it asserts is gone.
+ (deps %{workspace_root}/bin/masc_tui_render.ml)
+ (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))

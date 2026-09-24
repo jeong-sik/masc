@@ -71,26 +71,81 @@ type create_outcome =
       ; reason : string
       }
 
+(** What happened to the package folder after its [SKILL.md] was quarantined.
+    A folder left behind makes [create] answer [Package_already_exists] for
+    the same package id, so the delete says whether it is gone. *)
+type package_directory =
+  | Package_directory_removed
+  | Package_directory_kept_non_empty
+      (** Other files (for example [references/]) are still in the folder,
+          so it stays. *)
+  | Package_directory_removed_unsynced of string
+      (** The folder is gone, but syncing its parent failed, so a crash may
+          bring it back. *)
+  | Package_directory_remove_failed of string
+
 type delete_outcome =
   | Deleted_and_published of
       { reference : Skill_reference.t
       ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
       ; recovery_id : string
       ; disposition : recovery_disposition
+      ; package_directory : package_directory
       }
   | Deleted_but_unpublished of
       { reference : Skill_reference.t
       ; reason : delete_unpublished_reason
       ; recovery_id : string
       ; disposition : recovery_disposition
+      ; package_directory : package_directory
       }
+
+(** Why a source could not take the request. Each case carries what was
+    looked at (source id, catalog position, or resolved folder), so the caller
+    can tell a missing folder from a declaration that never reached the
+    catalog. *)
+type source_not_ready =
+  | Source_not_in_catalog of { source_id : string }
+      (** The published catalog snapshot has no source with this id, for
+          example because runtime.toml does not declare it. *)
+  | Source_index_out_of_range of { index : int }
+      (** A catalog entry points at a source position the same snapshot does
+          not have. *)
+  | Source_root_missing of { resolved_path : string }
+  | Source_root_not_directory of
+      { resolved_path : string
+      ; kind : Unix.file_kind
+      }
+  | Source_root_unavailable of
+      { resolved_path : string
+      ; operation : Skill_catalog_snapshot.source_operation
+      ; detail : string
+      }
+  | Source_root_unresolved of Skill_source_config.resolution
+  | Source_root_create_failed of
+      { resolved_path : string
+      ; detail : string
+      }
+      (** The declared folder was missing and making it raised. *)
+  | Source_root_refresh_failed of
+      { resolved_path : string
+      ; detail : string
+      }
+      (** The folder was made, but the catalog refresh that would let a
+          package land in it failed. *)
+  | Source_root_moved of
+      { before : string
+      ; after : string
+      }
+      (** The source resolved to a different folder under the write lock. *)
+  | Recovery_directory_missing of { path : string }
 
 type error =
   | Invalid_workspace
   | Snapshot_not_registered
   | Snapshot_uninitialized
   | Reference_not_current
-  | Source_not_ready
+  | Source_not_ready of source_not_ready
   | Source_file_missing
   | Source_read_failed
   | Source_path_rejected of path_rejection
@@ -167,6 +222,7 @@ val preview_to_yojson : preview -> Yojson.Safe.t
 val save_outcome_to_yojson : save_outcome -> Yojson.Safe.t
 val writable_source_to_yojson : writable_source -> Yojson.Safe.t
 val create_outcome_to_yojson : create_outcome -> Yojson.Safe.t
+val package_directory_to_yojson : package_directory -> Yojson.Safe.t
 val delete_outcome_to_yojson : delete_outcome -> Yojson.Safe.t
 val error_to_yojson : error -> Yojson.Safe.t
 

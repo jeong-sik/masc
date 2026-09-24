@@ -18,8 +18,8 @@ type runtime_attempt_error =
   ; error : Agent_core.Error.t
   }
 
-(** Immutable per-turn accumulator that replaces the casual [ref] cells
-    previously threaded through [run_keeper_cycle] and the retry loop. *)
+(** Immutable per-turn accumulator threaded through [run_keeper_cycle] and
+    the retry loop. *)
 type turn_state =
   { cycle_completed : bool
   ; manifest_seq : int
@@ -189,17 +189,6 @@ let registry_failure_reason_of_internal_error ~detail = function
          ; agent_core_timeout = None
          ; reason = Some (registry_reason_of_internal_reason reason)
          })
-  | Keeper_internal_error.Capacity_backpressure { detail = capacity_detail; _ } ->
-    Some
-      (Keeper_registry.Provider_runtime_error
-         { code = "capacity_backpressure"
-         ; detail = capacity_detail
-         ; provider_id = None
-         ; http_status = None
-         ; runtime_id = None
-         ; agent_core_timeout = None
-         ; reason = None
-         })
   | Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Accept_rejected _
       (* Typed [Internal_*] variants are not runtime-exhaustion reasons; they
@@ -225,14 +214,9 @@ let registry_failure_reason_of_raw_error ~detail raw_error =
     (registry_failure_reason_of_internal_error ~detail)
 ;;
 
-(* Exhaustive match on [Keeper_turn_disposition.t].
-   Pre-fix this used [String.starts_with ~prefix:"api_error_"] on the
-   wire form of [terminal_reason.code]; that substring guard depended
-   on agent-core error wires being routed through [Unknown { raw_error = _ }]
-   because [normalize_code] no longer collapsed them to "provider_error".
-   With [of_failure] now emitting [Provider_error (Agent_core_error _)] typed
-   for the agent-core error fallback, this routing reduces to a clean variant
-   match — no substring classifier left in this function. *)
+(* Exhaustive match on [Keeper_turn_disposition.t]. [of_failure] emits
+   [Provider_error (Agent_core_error _)] for the agent-core error fallback,
+   so this routing is a variant match with no substring classifier. *)
 let registry_failure_reason_of_terminal_reason
       ?core_error
       (terminal_reason : Keeper_turn_terminal.t)

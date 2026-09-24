@@ -141,7 +141,26 @@ export function decodeScheduledAutomationLookup(
   }
   switch (record.status) {
     case 'found':
-      exactFields(record, ['schema', 'source', 'generated_at', 'status', 'schedule_id', 'request'], 'envelope')
+      // The wake history rides the exact lookup (#32273). This surface does
+      // not draw it, but the envelope is read with an exact key list, and
+      // leaving these three out refused every found answer (#38510).
+      exactFields(
+        record,
+        [
+          'schema',
+          'source',
+          'generated_at',
+          'status',
+          'schedule_id',
+          'request',
+          'wakes',
+          'wake_count',
+          'wake_retention_per_schedule',
+        ],
+        'envelope',
+      )
+      // Named, not read: nothing here draws the wakes, so their values are no
+      // reason to refuse the lookup.
       return { status: 'found', scheduleId, request: parseLookupRequest(record.request, scheduleId) }
     case 'not_found':
       exactFields(record, ['schema', 'source', 'generated_at', 'status', 'schedule_id'], 'envelope')

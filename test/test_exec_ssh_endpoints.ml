@@ -63,6 +63,8 @@ let test_parse_minimal_endpoint () =
       endpoint.Exec_ssh_endpoint.env_allowlist;
     check (list string) "capabilities default" []
       endpoint.Exec_ssh_endpoint.capabilities;
+    check (list string) "allowed_paths default" []
+      endpoint.Exec_ssh_endpoint.allowed_paths;
     check bool "unknown name absent" true
       (Option.is_none (Runtime_schema.exec_ssh_endpoint cfg "nope"))
 
@@ -135,6 +137,7 @@ let test_roundtrip_full_fields () =
       ; env_allowlist = [ "PATH"; "HOME" ]
       ; capabilities = [ "kvm" ]
       ; private_home = true
+      ; allowed_paths = [ "/app"; "/srv/data" ]
       }
   in
   match parse_cfg (Exec_ssh_endpoint.to_toml endpoint) with
@@ -159,6 +162,7 @@ let test_roundtrip_defaults () =
       ; env_allowlist = []
       ; capabilities = []
       ; private_home = false
+      ; allowed_paths = []
       }
   in
   match parse_cfg (Exec_ssh_endpoint.to_toml endpoint) with
@@ -185,6 +189,7 @@ let test_roundtrip_no_stray_name_field () =
       ; env_allowlist = []
       ; capabilities = []
       ; private_home = false
+      ; allowed_paths = []
       }
   in
   let text = Exec_ssh_endpoint.to_toml endpoint in
@@ -339,6 +344,54 @@ remote_root = "srv/masc"
     check bool "names the key" true (contains "remote_root" rendered);
     check bool "names absolute" true (contains "absolute" rendered)
 
+(* [allowed_paths] names extra endpoint-side roots Execute may name. The path
+   check compares them lexically, so each entry must already be absolute and
+   normalized, and [/] would lift the boundary entirely; any other entry is a
+   load error naming the entry. *)
+let test_allowed_paths_parse () =
+  (match parse_cfg (endpoint_toml "dev" {|allowed_paths = ["/app", "/srv/data"]|}) with
+   | Error errors -> fail (render_errors errors)
+   | Ok cfg ->
+     let endpoint = endpoint_exn cfg "dev" in
+     check (list string) "declared roots kept in order" [ "/app"; "/srv/data" ]
+       endpoint.Exec_ssh_endpoint.allowed_paths;
+     (match parse_cfg (Exec_ssh_endpoint.to_toml endpoint) with
+      | Error errors -> fail (render_errors errors)
+      | Ok cfg ->
+        check bool "encoded endpoint loads back equal" true
+          (Exec_ssh_endpoint.equal endpoint (endpoint_exn cfg "dev"))));
+  let reject value expected =
+    match
+      parse_cfg (endpoint_toml "dev" (Printf.sprintf "allowed_paths = [%S]" value))
+    with
+    | Ok _ -> failf "allowed_paths entry %S must be rejected" value
+    | Error errors ->
+      let rendered = render_errors errors in
+      check bool "names the entry" true (contains "allowed_paths[0]" rendered);
+      check bool ("names why " ^ value) true (contains expected rendered)
+  in
+  reject "app" "absolute";
+  reject "" "absolute";
+  reject "/" "filesystem root";
+  reject "/app/../etc" "normalized";
+  reject "/app/./work" "normalized";
+  reject "/app/" "normalized";
+  reject "//app" "normalized";
+  (* The fixture's remote_root is /srv/masc/playground: a root equal to it or
+     above it would let every keeper on the endpoint name the others' areas. *)
+  reject "/srv/masc/playground" "remote_root";
+  reject "/srv/masc" "remote_root";
+  reject "/srv" "remote_root";
+  (match
+     parse_cfg (endpoint_toml "dev" {|allowed_paths = ["/srv/masc/playground2"]|})
+   with
+   | Error errors -> fail (render_errors errors)
+   | Ok _ -> ());
+  match parse_cfg (endpoint_toml "dev" "allowed_paths = \"/app\"") with
+  | Ok _ -> fail "a bare string is not an array of roots"
+  | Error errors ->
+    check bool "names the key" true (contains "allowed_paths" (render_errors errors))
+
 let test_absent_section_is_empty_registry () =
   match parse_cfg "" with
   | Error errors -> fail (render_errors errors)
@@ -374,6 +427,7 @@ let () =
         ; test_case "relative remote_root rejected" `Quick
             test_relative_remote_root_rejected
         ; test_case "port bounds" `Quick test_port_bounds
+        ; test_case "allowed_paths parse" `Quick test_allowed_paths_parse
         ] )
     ; ( "capabilities"
       , [ test_case "unknown warn-and-ignore" `Quick

@@ -743,6 +743,7 @@ let profile_defaults ?backend ?(profile = Masc.Keeper_types_profile.Micro_vm) ()
   { Masc.Keeper_types_profile.empty_keeper_profile_defaults with
     manifest_path = Some ".masc/config/keepers/probe.toml"
   ; sandbox_profile = Some profile
+  ; sandbox_image = Some "masc-sandbox:general"
   ; microvm_backend = backend
   }
 ;;

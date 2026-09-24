@@ -343,7 +343,6 @@ let tool_failure_total () =
       TurnUpUpdateFailures;
       ExecutionReceiptFailures;
       ToolExecuteFailures;
-      RolloverFailures;
     ]
 
 (** Keepers section: real-time FSM phase from Keeper_registry.

@@ -1469,6 +1469,33 @@ max-concurrent = 1
        resolution.status = Masc.Keeper_usage_resolution.Exact
        && Option.is_some resolution.delta
      | None -> false);
+  (* The trade the re-baseline makes, pinned so it reads as a choice and not
+     a bug: if the lower value had been a transient frame, the next turn
+     that climbs past the old peak is charged from the lower cursor. Here
+     4_500 -> 9_500 adds +5_000, once, where keeping the old peak would have
+     counted nothing until 9_000 was passed. *)
+  let past_peak_usage =
+    { climbing_usage with input_tokens = 9_500; output_tokens = 950 }
+  in
+  let past_peak =
+    reactive_success
+      ~prior:climbing
+      ~usage:past_peak_usage
+      ~usage_scope:Runtime_usage_scope.Conversation_cumulative
+      ~usage_basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Masc.Keeper_usage_resolution.Resumed
+           })
+      ~last_outcome:KMC.Proactive_unknown
+      ~last_reason:"cumulative usage past the old peak"
+      ()
+  in
+  check
+    "climbing past the old peak is charged from the re-baselined cursor"
+    (past_peak.runtime.usage.total_input_tokens = 14_600
+     && past_peak.runtime.usage.total_output_tokens = 1_470);
   let cost_regressed_usage =
     { resumed_usage with cost_usd = Some 11.0 }
     |> Masc.Keeper_usage_resolution.sample_of_api_usage

@@ -550,10 +550,11 @@ let make_tool_bundle_for_descriptors_with_policy
 
      Two sources, one answer. An attached tool is held back by default: a
      Keeper is handed its services' entire lists, 145 tools and 142,257 bytes
-     on the Keeper the RFC measured. A built-in is held back when its own
-     [config/tools/<name>.toml] declares [defer_loading = true] -- of 89
-     built-ins on one Keeper, 33 went a whole day uncalled, 21,601 bytes
-     charged to every request of every turn.
+     on the Keeper the RFC measured. A built-in is held back when it declares
+     [defer_loading = true]: a descriptor or the Skill reader in its own
+     [config/tools/<name>.toml], a Skill composition in its composition
+     block -- of 89 built-ins on one Keeper, 33 went a whole day uncalled,
+     21,601 bytes charged to every request of every turn.
 
      The listing does not record which source a tool came from, and the model
      is not told. Holding a tool back is a property of the tool. *)

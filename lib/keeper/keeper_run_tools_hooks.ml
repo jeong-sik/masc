@@ -70,6 +70,9 @@ type ctx =
   ; agent_cell : Agent_core.Agent.t option ref
   ; agent_name : string
   ; all_tool_names : string list
+  ; deferred_tool_names : string list
+        (** Built tools held back from the request until [keeper_tool_search]
+            names them. Empty when the turn places no listing. *)
   ; compute_tool_surface :
       turn:int -> current_tool_choice:Agent_core.Types.tool_choice option -> unit ->
       string list * turn_lane
@@ -406,6 +409,7 @@ let assemble_hooks
   let built_tools = ctx.tools in
   let turn_agent_cell = ctx.agent_cell in
   let all_tool_names = ctx.all_tool_names in
+  let deferred_tool_names = ctx.deferred_tool_names in
   let initial_schema_filter, initial_turn_lane =
     compute_tool_surface
       ~turn:(start_turn_count + 1)
@@ -816,13 +820,39 @@ let assemble_hooks
                  with
                  | [] -> ()
                  | compositions ->
+                   (* A deferred composition is built but not on the request:
+                      naming it as on this turn sent the model straight to a
+                      call Agent Core refuses. *)
+                   let deferred, on_turn =
+                     List.partition
+                       (fun name -> List.mem name deferred_tool_names)
+                       compositions
+                   in
+                   let on_turn_line =
+                     match on_turn with
+                     | [] -> []
+                     | _ ->
+                       [ Printf.sprintf
+                           "[Skills] %d composition tools on this turn — each is \
+                            one call whose reads run in parallel: %s"
+                           (List.length on_turn)
+                           (String.concat ", " on_turn)
+                       ]
+                   in
+                   let deferred_line =
+                     match deferred with
+                     | [] -> []
+                     | _ ->
+                       [ Printf.sprintf
+                           "[Skills] %d more composition tools load by name \
+                            through keeper_tool_search: %s"
+                           (List.length deferred)
+                           (String.concat ", " deferred)
+                       ]
+                   in
                    record_block
                      Prompt_block_id.Skill_compositions
-                     (Printf.sprintf
-                        "[Skills] %d composition tools on this turn — each is \
-                         one call whose reads run in parallel: %s"
-                        (List.length compositions)
-                        (String.concat ", " compositions)));
+                     (String.concat "\n" (on_turn_line @ deferred_line)));
                 let schema_filter, computed_turn_lane =
                   compute_tool_surface
                     ~turn

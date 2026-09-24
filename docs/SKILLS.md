@@ -187,6 +187,11 @@ name = "query"
 - input template 의 `kind` 는 `literal` / `output` / `param` / `object` / `array` 다.
 - `execution = "inline"` 은 결과를 그 자리에서 돌려주고, `"async"` 는 durable broker 로
   넘긴 뒤 `keeper_composition_status` / `keeper_composition_cancel` 로 조회·취소한다.
+- `defer_loading = true` 를 적으면 Agent Core 요청에 스키마를 싣지 않고
+  `keeper_tool_search` 목록에 이름만 올린다. 모델이 그 이름을 넘기면 그 턴에 스키마가 붙는다.
+  지연 목록은 description 첫 줄(80바이트까지)로 도구를 소개하므로, 첫 줄을 그 안에 드는
+  완결된 문장으로 쓴다. 이 선언은 Skill 블록에만 둔다. `config/tools/` 에 같은 이름의 파일을
+  만들어도 composition 에는 읽히지 않는다.
 - 노드가 실패하면 호출 전체가 실패하고 `cause` 에 그 노드가 실린다. 그 뒤 batch 는 돌지
   않는다. 성공하면 `actions` 에 노드마다 `node_id` 와 결과가 실린다.
 

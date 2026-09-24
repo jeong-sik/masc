@@ -16,9 +16,10 @@
 
 composition은 `keeper_skill`의 Available instruction 목록에서 읽는 문서가 아니라
 `keeper_compose_<name>` 형태로 노출되는 호출 도구다. 현재 도구 목록에서 정확한
-이름과 입력 스키마를 확인하고 호출한다. 사이트별 판단 규칙은 사이트 참조 파일에서
-필요할 때 읽는다. 도구가 없으면 composition 지원을 가정하거나 `keeper_skill`로
-composition을 읽으려 하지 않는다.
+이름과 입력 스키마를 확인하고 호출한다. 도구 목록에 없고 `keeper_tool_search` 가
+이름만 나열하면, 그 이름을 `keeper_tool_search` 에 넘겨 불러온 뒤 스키마를 확인한다.
+사이트별 판단 규칙은 사이트 참조 파일에서 필요할 때 읽는다. 두 곳 어디에도 없으면
+composition 지원을 가정하거나 `keeper_skill`로 composition을 읽으려 하지 않는다.
 
 관측한 automation 탭에서 이미 아는 HTTP(S) URL로 이동해 바로 읽을 때는
 `keeper_compose_browser-navigate-read`를 사용할 수 있다. 이동 결과의 실제 URL을
@@ -36,8 +37,8 @@ SPA 채널 내용 전환을 증명하지 않는다. 링크가 새 탭을 열 수
 아직 관측되지 않으면 미확인으로 남겨 다음 관측에서 판단한다. 관측 실패 때문에
 이미 적용된 클릭을 재실행하지 않는다.
 
-관측된 같은 탭 HTTP(S) 링크를 따라갈 때 현재 도구 목록에 있는
-`keeper_compose_browser-live-follow-read`로 목적지를 바로 읽을 수 있다. 보이는 본문은
+관측된 같은 탭 HTTP(S) 링크를 따라갈 때 도구 목록에 있거나 `keeper_tool_search` 로
+불러온 `keeper_compose_browser-live-follow-read`로 목적지를 바로 읽을 수 있다. 보이는 본문은
 `mode=scene`, 영역을 먼저 골라야 하는 화면은 `mode=regions`로 읽는다. 본문이 요청한
 내용을 충족하면 추가 영역 읽기를 관례적으로 실행하지 않는다. 이 도구는 실제 href를
 검증하고 직접 이동하므로 클릭 핸들러를 실행하지 않는다. 새 창 대상·다운로드는

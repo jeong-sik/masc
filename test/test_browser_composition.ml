@@ -54,8 +54,17 @@ let test_follow_output_contract () =
    them. Measured 2026-09-18..24: 2 and 14 turns used them, while their 1,980
    and 1,583 byte schemas rode every request. *)
 let test_is_deferred skill_name () =
+  let entry = skill_entry skill_name in
   check bool "declared defer_loading = true" true
-    ((skill_entry skill_name).Catalog.loading = Tool_definition_toml.Deferrable)
+    (entry.Catalog.loading = Tool_definition_toml.Deferrable);
+  (* A deferred tool is picked from keeper_tool_search by its one-line
+     summary, so the first line is a whole sentence the cut leaves alone. *)
+  match entry.Catalog.description with
+  | None -> fail "a deferred composition needs a description to be picked by"
+  | Some description ->
+    let first_line = List.hd (String.split_on_char '\n' description) in
+    check string "the summary is the whole first line" first_line
+      (Masc.Keeper_identity_tool_search.summary_of description)
 
 type navigation_case = Navigated | Navigation_failed | Read_failed | Invalid_receipt
 type observation = Regions | Content

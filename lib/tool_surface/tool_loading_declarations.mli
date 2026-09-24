@@ -3,6 +3,9 @@
 
     The declaration lives in each tool's own [config/tools/<name>.toml], next
     to the description and parameters it governs, as [defer_loading = true].
+    A Skill composition declares it in its own composition block instead
+    ([Keeper_tool_composition_catalog.entry.loading]), where its description lives;
+    this module answers only for tool files.
     This module only reads them; it holds no list of its own. That is the
     difference from the per-Keeper tool groups PR #31728 removed: nobody has
     to keep a roster in sync, and a tool that changes its mind changes one

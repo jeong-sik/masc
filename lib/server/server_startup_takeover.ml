@@ -490,11 +490,11 @@ type holder_identity =
    [Same_process] lets the takeover signal it; every other answer leaves the
    holder alone, because a signal sent on a guess can kill an unrelated
    process the kernel gave the number to. *)
-let holder_identity { pid; started } =
+let holder_identity ~started_for_pid { pid; started } =
   match started with
   | None -> Identity_unrecorded
   | Some recorded ->
-    (match process_started pid with
+    (match started_for_pid pid with
      | None -> Identity_unreadable
      | Some current ->
        if String.equal recorded current
@@ -723,7 +723,8 @@ let read_takeover_breadcrumb
           { breadcrumb_path = path; reason = "truncated while reading" })
 ;;
 
-let acquire_pid_lock
+let acquire_pid_lock_with_start_reader
+      ~started_for_pid
       ?lock_path
       ?(probe_timeout_sec = 3.0)
       ?(term_timeout_sec = 1.0)
@@ -745,7 +746,7 @@ let acquire_pid_lock
           if probe_liveness ~timeout_sec:probe_timeout_sec port
           then Already_running { pid }
           else (
-            match holder_identity_refusal pid (holder_identity record) with
+            match holder_identity_refusal pid (holder_identity ~started_for_pid record) with
             | Some refusal ->
               Log.legacy_stderr
                 ~level:Log.Error
@@ -767,28 +768,41 @@ let acquire_pid_lock
               ~target_pid:pid
               ~signal_name:"SIGTERM";
             Safe_ops.protect ~default:() (fun () -> Unix.kill pid Sys.sigterm);
-            if
-              not (wait_for_pid_exit ~poll_interval_sec ~timeout_sec:term_timeout_sec pid)
-            then (
-              Log.legacy_stderr
-                ~level:Log.Warn
-                ~module_name:"Server"
-                (Printf.sprintf "[WARN] PID %d did not exit; sending SIGKILL" pid);
-              write_takeover_breadcrumb
-                ~lock_path:path
-                ~port
-                ~target_pid:pid
-                ~signal_name:"SIGKILL";
-              Safe_ops.protect ~default:() (fun () -> Unix.kill pid Sys.sigkill);
-              if not (wait_for_pid_exit ~poll_interval_sec ~timeout_sec:kill_wait_sec pid)
-              then
+            if wait_for_pid_exit ~poll_interval_sec ~timeout_sec:term_timeout_sec pid
+            then Acquired
+            else
+              (* The TERM target may have exited and its PID been reused
+                 while we waited. Refuse escalation unless the recorded start
+                 token still names this process. *)
+              match holder_identity_refusal pid (holder_identity ~started_for_pid record) with
+              | Some refusal ->
+                Log.legacy_stderr
+                  ~level:Log.Error
+                  ~module_name:"Server"
+                  (Printf.sprintf
+                     "[FATAL] %s after SIGTERM wait; refusing SIGKILL (lock %s)"
+                     refusal path);
+                Already_running { pid }
+              | None ->
                 Log.legacy_stderr
                   ~level:Log.Warn
                   ~module_name:"Server"
-                  (Printf.sprintf
-                     "[WARN] PID %d still appears alive after SIGKILL escalation"
-                     pid));
-            Acquired))
+                  (Printf.sprintf "[WARN] PID %d did not exit; sending SIGKILL" pid);
+                write_takeover_breadcrumb
+                  ~lock_path:path
+                  ~port
+                  ~target_pid:pid
+                  ~signal_name:"SIGKILL";
+                Safe_ops.protect ~default:() (fun () -> Unix.kill pid Sys.sigkill);
+                if not (wait_for_pid_exit ~poll_interval_sec ~timeout_sec:kill_wait_sec pid)
+                then
+                  Log.legacy_stderr
+                    ~level:Log.Warn
+                    ~module_name:"Server"
+                    (Printf.sprintf
+                       "[WARN] PID %d still appears alive after SIGKILL escalation"
+                       pid);
+                Acquired))
         | Zombie ->
           Log.legacy_stderr
             ~level:Log.Warn
@@ -817,6 +831,28 @@ let acquire_pid_lock
   | Already_running _ as result -> result
   | Acquired -> claim_pid_file path
 ;;
+
+let acquire_pid_lock
+      ?lock_path
+      ?(probe_timeout_sec = 3.0)
+      ?(term_timeout_sec = 1.0)
+      ?(kill_wait_sec = 0.5)
+      ?(poll_interval_sec = 0.1)
+      port
+  =
+  acquire_pid_lock_with_start_reader
+    ~started_for_pid:process_started
+    ?lock_path
+    ~probe_timeout_sec
+    ~term_timeout_sec
+    ~kill_wait_sec
+    ~poll_interval_sec
+    port
+;;
+
+module For_testing = struct
+  let acquire_pid_lock_with_start_reader = acquire_pid_lock_with_start_reader
+end
 
 let release_base_path_lease lease =
   Mutex.protect base_path_lease_mu (fun () ->

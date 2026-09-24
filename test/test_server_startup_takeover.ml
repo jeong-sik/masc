@@ -180,6 +180,31 @@ let with_forever_process ?argv0 ~ignore_sigterm f =
   let pid = spawn_forever_process ?argv0 ~ignore_sigterm () in
   Fun.protect ~finally:(fun () -> stop_process pid) (fun () -> f pid)
 
+let with_ready_term_ignoring_process f =
+  let reader, writer = Unix.pipe () in
+  match Unix.fork () with
+  | 0 ->
+      Unix.close reader;
+      Sys.set_signal Sys.sigterm Sys.Signal_ignore;
+      ignore (Unix.write_substring writer "r" 0 1);
+      Unix.close writer;
+      while true do
+        ignore (Unix.select [] [] [] 1.0)
+      done
+  | pid ->
+      Fun.protect
+        ~finally:(fun () ->
+          close_quietly reader;
+          close_quietly writer;
+          stop_process pid)
+        (fun () ->
+          Unix.close writer;
+          let ready = Bytes.create 1 in
+          Alcotest.(check int) "TERM-ignoring child is ready" 1
+            (Unix.read reader ready 0 1);
+          Unix.close reader;
+          f pid)
+
 let lock_path dir =
   Filename.concat dir "masc.pid"
 
@@ -421,6 +446,50 @@ let test_escalates_sigkill_for_unresponsive_holder () =
                 (pid_from_file path)
           | Server_startup_takeover.Already_running _ ->
               Alcotest.fail "unresponsive holder should be reclaimed"))
+
+(* Model a PID being reused during the TERM grace without depending on the
+   kernel's PID allocator. The first start-token read identifies the real,
+   TERM-ignoring child; the second reports a different incarnation. The real
+   signal path must stop before SIGKILL and leave the lock unclaimed. *)
+let test_refuses_sigkill_after_start_token_changes () =
+  with_temp_dir "startup-takeover-reused-pid" (fun dir ->
+      with_ready_term_ignoring_process (fun pid ->
+          let path = lock_path dir in
+          write_holder_lock path pid;
+          let started =
+            match Server_startup_takeover.process_started pid with
+            | Some value -> value
+            | None -> Alcotest.fail "fixture start token disappeared"
+          in
+          let reads = ref 0 in
+          let started_for_pid observed_pid =
+            Alcotest.(check int) "identity read targets the lock PID" pid observed_pid;
+            incr reads;
+            if !reads = 1 then Some started else Some ("reused:" ^ started)
+          in
+          let port = find_free_port () in
+          (match
+             Server_startup_takeover.For_testing.acquire_pid_lock_with_start_reader
+               ~started_for_pid ~lock_path:path ~probe_timeout_sec:0.1
+               ~term_timeout_sec:0.0 ~poll_interval_sec:0.01 port
+           with
+           | Server_startup_takeover.Already_running { pid = blocked_pid } ->
+               Alcotest.(check int) "reused PID blocks takeover" pid blocked_pid
+           | Server_startup_takeover.Acquired ->
+               Alcotest.fail "a changed start token must block escalation");
+          Alcotest.(check int) "identity rechecked after TERM grace" 2 !reads;
+          Alcotest.(check bool) "TERM-ignoring child was not SIGKILLed" true
+            (process_alive pid);
+          Alcotest.(check int) "lock still names the original PID" pid
+            (pid_from_file path);
+          match Server_startup_takeover.read_takeover_breadcrumb ~lock_path:path () with
+          | Server_startup_takeover.Breadcrumb_found { payload; _ } ->
+              Alcotest.(check bool) "only SIGTERM was recorded" true
+                (match Yojson.Safe.from_string payload with
+                 | `Assoc fields ->
+                     List.assoc_opt "signal" fields = Some (`String "SIGTERM")
+                 | _ -> false)
+          | _ -> Alcotest.fail "SIGTERM breadcrumb missing"))
 
 let test_breadcrumb_round_trip_and_freshness () =
   with_temp_dir "startup-takeover-breadcrumb" (fun dir ->
@@ -1408,6 +1477,8 @@ let () =
             `Quick test_refuses_live_holder_without_recorded_start;
           Alcotest.test_case "unresponsive holder escalates to sigkill" `Quick
             test_escalates_sigkill_for_unresponsive_holder;
+          Alcotest.test_case "changed start token prevents sigkill escalation"
+            `Quick test_refuses_sigkill_after_start_token_changes;
           Alcotest.test_case "breadcrumb round-trips and ages out" `Quick
             test_breadcrumb_round_trip_and_freshness;
           Alcotest.test_case "takeover kill leaves a breadcrumb" `Quick

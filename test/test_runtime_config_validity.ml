@@ -1309,6 +1309,24 @@ let test_lane_rejects_unknown_key () =
          errors)
   | Ok _ -> fail "unknown lane key must fail config parsing"
 
+(* A misspelt [tools_support = true] loaded as a model with tool support off:
+   the parser read [tools-support], found nothing, defaulted it to false, and
+   dropped the unread key. The keeper then ran that model with no tools. *)
+let test_model_rejects_unknown_key () =
+  let config =
+    "[models.sample]\n\
+     api-name = \"sample-model\"\n\
+     tools_support = true\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Error errors ->
+    check bool "unknown model key is named" true
+      (List.exists
+         (fun (error : Runtime_toml.parse_error) ->
+            String.equal error.path "models.sample.tools_support")
+         errors)
+  | Ok _ -> fail "unknown model key must fail config parsing"
+
 (* A [models.X].max-context above the model's catalog window resolves to the
    catalog number with source Override_clamped_by_capability: the declaration
    is clamped away and reaches nothing. Two shipped runtimes carried one, and
@@ -5620,6 +5638,8 @@ let () =
             test_exact_output_lane_rejects_unknown_key;
           test_case "lane rejects unknown keys" `Quick
             test_lane_rejects_unknown_key;
+          test_case "model rejects unknown keys" `Quick
+            test_model_rejects_unknown_key;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
           test_case "seed capability keys the catalog row decides agree with it" `Quick

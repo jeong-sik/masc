@@ -1831,7 +1831,7 @@ type http_scoped_surface_results = {
   http_board_hearths: ((string * int) list, string) result option;
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;
-  http_fleet_safety: (Tui_decode.fleet_safety, string) result option;
+  http_fleet_safety: (Tui_decode.fleet_safety_reading, string) result option;
   (* [None] on surfaces that do not show it: the roster costs a request and
      only the Keepers surface reads it, so leaving it out keeps whatever the
      last Keepers refresh observed rather than dropping it. *)
@@ -6676,8 +6676,17 @@ let row_list (state : state) : row_list option =
   | Overview
     when state.task_focus = Right_pane
          && Option.is_none (task_detail_on_screen state) ->
-      windowed ~count:(List.length state.tasks) ~cursor:state.task_cursor
-        (fun index -> state.task_cursor <- index)
+      (* The row list is positional; the selection is an id, placed by the
+         row it is on now. With nothing selected, movement starts from the
+         first row, the way j/k does. *)
+      windowed ~count:(List.length (Masc_tui_overview_tasks.rows state.tasks))
+        ~cursor:
+          (Option.value ~default:0
+             (Masc_tui_overview_tasks.selected_index state.tasks
+                ~selected:state.task_selected_id))
+        (fun index ->
+          state.task_selected_id <-
+            Masc_tui_overview_tasks.id_at state.tasks index)
   (* Under the Actions and Everything filters the ring is read by a cursor,
      not by a scroll: [render_acting] recomputes the scroll from
      [acting_cursor] every frame and reports both back, so a key that moved
@@ -8938,7 +8947,8 @@ let selected_surface_reference state =
        | None ->
            Option.map
              (fun (row : Tui_decode.task) -> Link.reference Task row.id)
-             (List.nth_opt state.tasks state.task_cursor))
+             (Masc_tui_overview_tasks.selected_task state.tasks
+                ~selected:state.task_selected_id))
   | Keepers _ ->
       Option.map
         (fun (keeper : Tui_decode.keeper) -> Link.reference Keeper keeper.k_name)
@@ -10542,8 +10552,8 @@ let launch_system_logs_load state ~mailbox =
   | None -> run_load ()
 
 let apply_fleet_safety_load state = function
-  | Ok fleet ->
-      state.fleet_safety <- Some fleet;
+  | Ok reading ->
+      state.fleet_safety <- Some reading;
       state.fleet_safety_error <- None
   | Error err ->
       (* The last good reading is dropped: a stale fleet line is worse than an
@@ -19765,6 +19775,7 @@ and is loaded on demand through keeper_skill.
                          state.task_detail_id <- Some task_id;
                          state.task_detail_scroll <- 0;
                          state.task_history <- None;
+                         state.task_selected_id <- Some task_id;
                          launch_task_history_load state
                            ~mailbox:async_messages task_id))
             | _ -> ())
@@ -20101,15 +20112,7 @@ and is loaded on demand through keeper_skill.
                      state.task_history <- None;
                      launch_task_history_load state ~mailbox:async_messages
                        task_id;
-                     let rec index_of i = function
-                       | [] -> None
-                       | (t : Masc_tui_types.task) :: rest ->
-                           if String.equal t.id task_id then Some i
-                           else index_of (i + 1) rest
-                     in
-                     (match index_of 0 state.tasks with
-                      | Some index -> state.task_cursor <- index
-                      | None -> ())
+                     state.task_selected_id <- Some task_id
                  | Some (_, Masc_tui_types.Palette_board_hearth hearth) ->
                      state.board_hearth <- hearth;
                      state.board_cursor <- 0;
@@ -22040,6 +22043,7 @@ and is loaded on demand through keeper_skill.
                  | Overview, Some task_id ->
                      state.task_detail_id <- Some task_id;
                      state.task_history <- None;
+                     state.task_selected_id <- Some task_id;
                      launch_task_history_load state ~mailbox:async_messages
                        task_id
                  | Planning, Some goal_id ->
@@ -23153,9 +23157,11 @@ and is loaded on demand through keeper_skill.
             | Overview ->
                 if Option.is_some state.task_detail_id then
                   state.task_detail_scroll <- Masc_tui_types.scroll_down_from state.task_detail_scroll ~by:1
-                else if state.task_focus = Right_pane
-                        && state.task_cursor < List.length state.tasks - 1 then
-                  state.task_cursor <- state.task_cursor + 1
+                else if state.task_focus = Right_pane then
+                  state.task_selected_id <-
+                    Masc_tui_overview_tasks.step state.tasks
+                      ~selected:state.task_selected_id
+                      Masc_tui_overview_tasks.Next
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
@@ -23504,8 +23510,11 @@ and is loaded on demand through keeper_skill.
                   if state.task_detail_scroll > 0 then
                     state.task_detail_scroll <- state.task_detail_scroll - 1
                 end
-                else if state.task_focus = Right_pane && state.task_cursor > 0
-                then state.task_cursor <- state.task_cursor - 1
+                else if state.task_focus = Right_pane then
+                  state.task_selected_id <-
+                    Masc_tui_overview_tasks.step state.tasks
+                      ~selected:state.task_selected_id
+                      Masc_tui_overview_tasks.Previous
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
@@ -23844,7 +23853,10 @@ and is loaded on demand through keeper_skill.
                 (* Only under task focus: Enter while the events own j/k would
                    open whatever row the cursor happens to rest on. *)
                 if state.task_focus = Right_pane then
-                  (match List.nth_opt state.tasks state.task_cursor with
+                  (match
+                     Masc_tui_overview_tasks.selected_task state.tasks
+                       ~selected:state.task_selected_id
+                   with
                    | Some task ->
                        state.task_detail_id <- Some task.id;
                        state.task_detail_scroll <- 0;
@@ -24259,22 +24271,12 @@ and is loaded on demand through keeper_skill.
                  state.task_detail_scroll <- 0;
                  state.task_history <- None;
                  launch_task_history_load state ~mailbox:async_messages tid;
-                 let rec index_of i = function
-                   | [] -> None
-                   | (t : Masc_tui_types.task) :: rest ->
-                       if String.equal t.id tid then Some i
-                       else index_of (i + 1) rest
-                 in
-                 (match index_of 0 state.tasks with
-                  | Some idx ->
-                      state.task_cursor <- idx;
-                      state.task_focus <- Right_pane
-                  | None ->
-                      state.task_focus <- Right_pane)
+                 state.task_selected_id <- Some tid;
+                 state.task_focus <- Right_pane
              | None ->
                  state.task_detail_id <- None;
                  state.task_focus <- Right_pane;
-                 state.task_cursor <- 0)
+                 state.task_selected_id <- None)
         | Some "t" | Some "T" ->
            (* Focus the Overview task panel. The list is always on screen, but
               j/k move nothing until the operator asks for tasks. *)
@@ -24286,7 +24288,7 @@ and is loaded on demand through keeper_skill.
                   (match state.task_focus with
                    | Left_pane -> Right_pane
                    | Right_pane -> Left_pane);
-                if state.task_focus = Left_pane then state.task_cursor <- 0
+                if state.task_focus = Left_pane then state.task_selected_id <- None
             | Keepers (Keeper_list | Keeper_detail) ->
                 (* Tool calls, from the roster and from detail, the way logs
                    are: the keeper under the cursor is the one asked about. *)

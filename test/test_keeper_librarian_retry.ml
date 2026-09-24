@@ -1084,6 +1084,83 @@ let test_a_selection_without_the_dropped_field_rejects () =
   | Ok _ -> fail "selection without dropped field accepted"
 ;;
 
+(* The pending-input organization is judged apart from the Memory decision
+   (#38422): an answer that leaves it out or gets it wrong keeps its drop, and
+   only the organization is set aside. *)
+let test_a_working_context_slip_keeps_the_memory_decision () =
+  let memory_answer working_contexts =
+    `Assoc
+      (working_contexts
+       @ [ Librarian.wire_field_new_claims, `List []
+         ; Librarian.wire_field_dropped, `List [ dropped_json "m2" ]
+         ])
+  in
+  let organization label working_contexts =
+    match parse (memory_answer working_contexts) with
+    | Error error ->
+      failf "%s: the Memory answer was refused: %s" label
+        (Librarian.parse_error_to_string error)
+    | Ok selection ->
+      check (list string) (label ^ ": the drop of B stands") [ current_b_id ]
+        (List.map (fun (d : Memory.dropped_statement) -> d.memory_id) selection.dropped);
+      selection.working_contexts
+  in
+  (match organization "empty" [ "working_contexts", `List [] ] with
+   | Librarian.Working_contexts_organized [] -> ()
+   | Librarian.Working_contexts_organized _ -> fail "an empty organization gained pockets"
+   | Librarian.Working_contexts_missing | Librarian.Working_contexts_invalid _ ->
+     fail "a valid empty organization was not taken");
+  (match organization "invalid" [ "working_contexts", `String "not a list" ] with
+   | Librarian.Working_contexts_invalid detail ->
+     check string "the selector's reason" "working context requires an array" detail
+   | Librarian.Working_contexts_organized _ | Librarian.Working_contexts_missing ->
+     fail "an invalid organization was not reported as invalid");
+  match organization "missing" [] with
+  | Librarian.Working_contexts_missing -> ()
+  | Librarian.Working_contexts_organized _ | Librarian.Working_contexts_invalid _ ->
+    fail "an absent organization was not reported as missing"
+;;
+
+(* The working state belongs to a continuity pass. A Memory answer's parse
+   does not read it, so a blank or non-text value cannot refuse the Memory
+   decision; the continuity reader alone requires nonblank text. *)
+let test_only_a_continuity_pass_reads_the_working_state () =
+  let memory_answer working_state =
+    `Assoc
+      [ "working_contexts", `List []
+      ; Librarian.wire_field_new_claims, `List []
+      ; Librarian.wire_field_dropped, `List [ dropped_json "m2" ]
+      ; Librarian.wire_field_working_state, working_state
+      ]
+  in
+  List.iter
+    (fun (label, working_state) ->
+       match parse (memory_answer working_state) with
+       | Ok selection ->
+         check (list string) (label ^ ": the drop of B stands") [ current_b_id ]
+           (List.map (fun (d : Memory.dropped_statement) -> d.memory_id) selection.dropped)
+       | Error error ->
+         failf "%s: the Memory answer was refused: %s" label
+           (Librarian.parse_error_to_string error))
+    [ "blank", `String ""; "non-text", `Int 5; "null", `Null ];
+  List.iter
+    (fun (label, answer) ->
+       match Librarian.continuity_working_state_of_json_result answer with
+       | Error (Librarian.Working_state_invalid _) -> ()
+       | Error error ->
+         failf "%s: wrong continuity refusal: %s" label
+           (Librarian.parse_error_to_string error)
+       | Ok text -> failf "%s: continuity accepted %S" label text)
+    [ "blank", memory_answer (`String " ")
+    ; "null", memory_answer `Null
+    ; "missing", `Assoc [ Librarian.wire_field_new_claims, `List [] ]
+    ];
+  match Librarian.continuity_working_state_of_json_result (memory_answer (`String "s")) with
+  | Ok text -> check string "a continuity pass keeps its state" "s" text
+  | Error error ->
+    failf "a nonblank working state was refused: %s" (Librarian.parse_error_to_string error)
+;;
+
 let test_dropped_statements_validate () =
   (match
      parse (selection_json ~dropped:[ dropped_json "missing" ] ())
@@ -2123,6 +2200,10 @@ let () =
             test_a_memory_superseded_by_a_restatement_the_keeper_retracted_stays_current
         ; test_case "selection without dropped field rejects" `Quick
             test_a_selection_without_the_dropped_field_rejects
+        ; test_case "a working-context slip keeps the Memory decision" `Quick
+            test_a_working_context_slip_keeps_the_memory_decision
+        ; test_case "only a continuity pass reads the working state" `Quick
+            test_only_a_continuity_pass_reads_the_working_state
         ; test_case "dropped statements validate" `Quick
             test_dropped_statements_validate
         ; test_case "strict JSON boundary" `Quick test_strict_json_boundary

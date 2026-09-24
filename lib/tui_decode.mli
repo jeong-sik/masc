@@ -43,12 +43,22 @@ type keeper = {
 }
 
 val escape_invisible : string -> string
-(** Draw bidi controls and zero-width characters (U+061C, U+200B-U+200F,
-    U+202A-U+202E, U+2066-U+2069, U+FEFF) as their own [\uXXXX] escape text.
-    A terminal draws them as nothing, so without this the glyphs an operator
-    reads can differ from the bytes an approval hash covers (Trojan Source,
-    CVE-2021-42574). {!sanitize_terminal_text} and the Keeper chat boundary
-    both route through here, so the rule lives in one place. *)
+(** Draw bidi controls, zero-width characters and tag characters (U+061C,
+    U+200B-U+200F, U+202A-U+202E, U+2066-U+2069, U+FEFF, U+E0000-U+E007F) as
+    their own escape text: [\uXXXX] inside the basic plane and [\UXXXXXXXX]
+    above it, since the tag block needs five digits. A terminal draws them as
+    nothing, so without this the glyphs an operator reads can differ from the
+    bytes an approval hash covers (Trojan Source, CVE-2021-42574; spelling
+    ASCII in tag characters is the same trick without the bidi). Two
+    exceptions are characters a reader can see the effect of, and each is
+    admitted by its neighbours rather than by a list: a zero-width joiner
+    between two pictographs (UAX #29 GB11), and a subdivision flag -- U+1F3F4,
+    three to seven tag characters in the lowercase-and-digit shape UTS #51
+    gives a subdivision code, then the terminator U+E007F -- which is kept
+    whole or escaped whole. Tag characters outside that shape are drawn even
+    behind a flag: the wider grammar spells sentences, and a flag is all a
+    reader would see of them. {!sanitize_terminal_text} and the Keeper chat
+    boundary both route through here, so the rule lives in one place. *)
 
 val sanitize_terminal_text : string -> string
 (** Escape C0, DEL, raw C1 bytes, UTF-8 encoded C1 code points, malformed
@@ -2236,6 +2246,15 @@ type fleet_safety = {
     alive, its durable demand is not admissible. Collapsing the two reads a
     live fleet as a stopped one. *)
 
+type fleet_safety_reading =
+  | Fleet_measured of fleet_safety
+  | Fleet_not_measured of { status : string }
+      (** The health snapshot has no fleet reading and nothing failed: it is
+          being rebuilt, at boot and again after a change invalidates it.
+          [status] is the placeholder's word (["warming"]). Kept apart from a
+          reading: zero counts would draw an idle fleet the server never
+          measured. *)
+
 type server_gc_health = {
   sgc_heap_words : int;
   sgc_live_words : int;
@@ -2864,11 +2883,19 @@ val decode_overview_goals :
     server order. Goals of every phase are returned; which ones a surface
     draws is the surface's decision. *)
 
-val decode_fleet_safety : Yojson.Safe.t -> (fleet_safety, string) result
+val decode_fleet_safety :
+  Yojson.Safe.t -> (fleet_safety_reading, string) result
 (** Reads the [keeper_fleet_safety] section out of a [/health?full=1] body.
     A body without the section is an error rather than an empty reading: an
     absent section and a healthy fleet are different facts, and rendering the
-    second for the first is how a blocked keeper stays invisible. *)
+    second for the first is how a blocked keeper stays invisible.
+
+    A section carrying [schema = Keeper_fleet_blocker.reading_schema] is a
+    reading, and every field of {!fleet_safety} is required: a missing count
+    is an error, not zero. A section without [schema] is the health
+    snapshot's placeholder: {!Fleet_not_measured} when it carries no
+    [error], and an error with the server's reason when it does (the refresh
+    timed out or the scan raised). *)
 val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :

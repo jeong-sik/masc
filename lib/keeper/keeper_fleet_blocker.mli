@@ -28,3 +28,9 @@ val wire_name : t -> string
 
 val of_wire_name : string -> t option
 (** [None] for a name this build does not know -- a newer server's reason. *)
+
+val reading_schema : string
+(** The [schema] the fleet scan writes on its section of [/health?full=1].
+    The terminal client reads a section as a fleet reading only when it
+    carries this value; without it the section is the health snapshot's
+    placeholder, which carries no counts. *)

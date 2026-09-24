@@ -131,7 +131,7 @@ type observation =
 단위 테스트(구조만):
 - 입력의 사람 쪽 발화와 counterpart 항목마다 참조가 한 번씩 붙는다.
 - `heard_in` 이 입력 참조를 가리키면 그 발화자가 `Heard` 로 저장된다.
-- 없는 참조는 claim 을 거절한다. `null` 은 `Transcript` 다.
+- 없는 참조는 답 전체를 거절한다. `null` 의 저장값은 §8 조건 1 에 따른다.
 - recall 렌더에 `heard_from` 이 나온다.
 
 라이브:

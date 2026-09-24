@@ -11654,6 +11654,12 @@ def run_keeper_runtime_picker_filter_regression(executable: str) -> None:
         expect_selected(process, master_fd, output, b"runtime-e")
         os.write(master_fd, b"\x1b[H")
         expect_selected(process, master_fd, output, b"primary")
+        # One wheel notch is one row: the shared list steps on the wheel, and
+        # nothing else here moves the picker a second time.
+        os.write(master_fd, b"\x1b[<65;5;5M")
+        expect_selected(process, master_fd, output, b"degraded")
+        os.write(master_fd, b"\x1b[<64;5;5M")
+        expect_selected(process, master_fd, output, b"primary")
 
         send_and_wait(process, master_fd, output, b"/",
                       b"filter: " + filter_cursor + b" 8 of 8")

@@ -120,6 +120,14 @@ let test_unbound_keys_are_not_the_lists () =
   Alcotest.(check bool) "x inside one is text" true (bound (run [ "/" ]) "x");
   Alcotest.(check bool) "a control key is never text" false (bound (run [ "/" ]) "\001")
 
+(* A wheel notch over the open picker steps it, with or without a filter:
+   a notch it does not take reaches the list under it, and Enter then writes
+   to a lane other than the highlighted one. *)
+let test_the_wheel_steps_the_list () =
+  check_under "down a notch" (Some "openai.gpt") (run [ "wheel-down" ]);
+  check_under "and back" (Some "anthropic.claude") (run [ "wheel-down"; "wheel-up" ]);
+  check_under "inside a filter too" (Some "openai.o4") (run [ "/"; "o"; "p"; "e"; "wheel-down" ])
+
 let test_backspace_on_an_empty_filter_keeps_the_cursor () =
   check_under "the cursor stays on the third row" (Some "ollama.qwen")
     (run [ "/"; "down"; "down"; "\127" ])
@@ -167,6 +175,7 @@ let () =
             test_esc_clears_the_filter_then_closes;
           Alcotest.test_case "unbound keys are not the list's" `Quick
             test_unbound_keys_are_not_the_lists;
+          Alcotest.test_case "the wheel steps the list" `Quick test_the_wheel_steps_the_list;
           Alcotest.test_case "backspace on an empty filter keeps the cursor" `Quick
             test_backspace_on_an_empty_filter_keeps_the_cursor;
           Alcotest.test_case "a paste types the whole text" `Quick

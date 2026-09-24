@@ -41,7 +41,9 @@ val action_of_key : close_keys:string list -> t -> string -> action option
 (** The action a key names in this list, or [None] when the key is not the
     list's. While a filter is being typed, every printable character is
     [Type], so [j], [k], [/] and the picker's [close_keys] are text there.
-    Outside a filter, [j]/[k] and the arrows step, [PgUp]/[PgDn] move a page,
+    Outside a filter, [j]/[k], the arrows and the wheel step (the wheel and
+    arrows step inside one too, so no notch reaches the list under the
+    picker), [PgUp]/[PgDn] move a page,
     [Home]/[End] jump, [/] opens the filter and [close_keys] close. *)
 
 type 'a outcome =

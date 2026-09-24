@@ -1242,9 +1242,11 @@ def fleet_safety_fixture() -> HttpResponse:
     unreliable" event, which is correct behaviour but adds a row to scenarios
     that are counting the event list. Every field the TUI reads is here,
     with the schema that marks a reading: the TUI requires each one, because
-    a missing observation must not become a zero count.
+    a missing observation must not become a zero count. The snapshot beside
+    it says the reading is current; without it the TUI refuses the reading,
+    because a stale snapshot serves a past one.
     """
-    return (200, {"keeper_fleet_safety": {
+    return (200, {"full_health_snapshot": {"status": "ready"}, "keeper_fleet_safety": {
         "schema": "masc.keeper_fleet_operator.v1",
         "status": "ok",
         "blocker": None,

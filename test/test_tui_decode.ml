@@ -1431,12 +1431,23 @@ let test_decode_planning_snapshot_rejects_running_alias () =
        (Tui_decode.decode_planning_snapshot
           (planning_snapshot_json ~running_key:"running" ())))
 
+(* Server_routes_http_runtime.full_health_snapshot_metadata right after a
+   refresh, trimmed to the fields the TUI reads. *)
+let ready_health_snapshot =
+  `Assoc
+    [ "status", `String "ready"
+    ; "computed_at_unix", `Float 1_000.0
+    ; "stale_reason", `Null
+    ]
+
 (* The shape the server actually sent while a keeper was failing to start,
    trimmed to the fields the TUI reads. *)
 let fleet_safety_json ?(missing = true)
-    ?(blocker = "reaction_capacity_below_target") () =
+    ?(blocker = "reaction_capacity_below_target")
+    ?(snapshot = ready_health_snapshot) () =
   `Assoc
-    [ ( "keeper_fleet_safety"
+    [ "full_health_snapshot", snapshot
+    ; ( "keeper_fleet_safety"
       , `Assoc
           ([ "schema", `String "masc.keeper_fleet_operator.v1"
            ; "status", `String "degraded"
@@ -1474,7 +1485,7 @@ let fleet_safety_json ?(missing = true)
     ]
 
 let measured = function
-  | Ok (Tui_decode.Fleet_measured fleet) -> fleet
+  | Ok (Tui_decode.Fleet_measured { fleet; freshness = _ }) -> fleet
   | Ok (Tui_decode.Fleet_not_measured _) ->
       Alcotest.fail "a fleet reading decoded as not measured"
   | Error err -> Alcotest.fail err
@@ -1534,18 +1545,96 @@ let test_decode_fleet_safety_carries_both_name_lists () =
    zero would draw an idle fleet nobody measured. [schema] is left out of the
    walk because without it the section is the server's placeholder. *)
 let test_decode_fleet_safety_requires_every_field () =
-  let section = Yojson.Safe.Util.member "keeper_fleet_safety" (fleet_safety_json ()) in
-  match section with
+  let body = fleet_safety_json () in
+  let with_section fields =
+    `Assoc
+      [ "full_health_snapshot", Yojson.Safe.Util.member "full_health_snapshot" body
+      ; "keeper_fleet_safety", `Assoc fields
+      ]
+  in
+  match Yojson.Safe.Util.member "keeper_fleet_safety" body with
   | `Assoc fields ->
+    (* The body rebuilt whole decodes, so each refusal below is the one
+       missing field's and not the rebuild's. *)
+    Alcotest.(check bool) "the rebuilt body decodes" true
+      (Result.is_ok (Tui_decode.decode_fleet_safety (with_section fields)));
     List.iter
       (fun (field, _) ->
         if not (String.equal field "schema") then
-          let json =
-            `Assoc [ "keeper_fleet_safety", `Assoc (List.remove_assoc field fields) ]
-          in
           Alcotest.(check bool) ("missing observation is not zero: " ^ field) true
-            (Result.is_error (Tui_decode.decode_fleet_safety json)))
+            (Result.is_error
+               (Tui_decode.decode_fleet_safety
+                  (with_section (List.remove_assoc field fields)))))
       fields
+  | _ -> Alcotest.fail "fleet fixture must be an object"
+
+(* The fleet section does not say how current it is; the full_health_snapshot
+   beside it in the same body does. A stale snapshot keeps serving the last
+   reading it measured, so the reading carries when that was and why, and a
+   body without the snapshot is refused rather than drawn as the present
+   (#38499). *)
+let test_decode_fleet_safety_reads_how_current_the_reading_is () =
+  let freshness snapshot =
+    match Tui_decode.decode_fleet_safety (fleet_safety_json ~snapshot ()) with
+    | Ok (Tui_decode.Fleet_measured { freshness; fleet = _ }) -> Ok freshness
+    | Ok (Tui_decode.Fleet_not_measured _) ->
+        Alcotest.fail "a reading decoded as not measured"
+    | Error err -> Error err
+  in
+  let stale ?(computed_at = `Float 1_000.0)
+      ?(reason = `String "last_good_refresh_timeout") () =
+    `Assoc
+      [ "status", `String "stale"
+      ; "computed_at_unix", computed_at
+      ; "stale_reason", reason
+      ]
+  in
+  (match freshness ready_health_snapshot with
+   | Ok Tui_decode.Fleet_current -> ()
+   | Ok (Tui_decode.Fleet_last_good _ | Tui_decode.Unrecognised_snapshot_status _) ->
+       Alcotest.fail "a ready snapshot's reading decoded as not current"
+   | Error err -> Alcotest.fail err);
+  (match freshness (stale ()) with
+   | Ok (Tui_decode.Fleet_last_good { measured_at_unix; stale_reason }) ->
+       Alcotest.(check (float 0.)) "when it was measured" 1_000.0 measured_at_unix;
+       Alcotest.(check string) "why it is stale" "last_good_refresh_timeout"
+         stale_reason
+   | Ok (Tui_decode.Fleet_current | Tui_decode.Unrecognised_snapshot_status _) ->
+       Alcotest.fail "a stale snapshot's reading decoded as not stale"
+   | Error err -> Alcotest.fail err);
+  (match freshness (`Assoc [ "status", `String "rebuilding" ]) with
+   | Ok (Tui_decode.Unrecognised_snapshot_status word) ->
+       Alcotest.(check string) "the word as sent" "rebuilding" word
+   | Ok (Tui_decode.Fleet_current | Tui_decode.Fleet_last_good _) ->
+       Alcotest.fail "an unknown snapshot word decoded as a known one"
+   | Error err -> Alcotest.fail err);
+  let refused what snapshot =
+    Alcotest.(check bool) what true (Result.is_error (freshness snapshot))
+  in
+  refused "a stale snapshot without its time" (stale ~computed_at:`Null ());
+  refused "a stale snapshot without its reason" (stale ~reason:`Null ());
+  refused "a stale snapshot whose time is not a number"
+    (stale ~computed_at:(`Float Float.nan) ());
+  (* Its age would overflow the integer the span is counted in. *)
+  refused "a stale snapshot measured before 1970" (stale ~computed_at:(`Float (-1e300)) ());
+  (* The edge itself: one second before 1970 is refused, 1970 is a time. *)
+  refused "a stale snapshot measured one second before 1970"
+    (stale ~computed_at:(`Float (-1.0)) ());
+  (match freshness (stale ~computed_at:(`Float 0.0) ()) with
+   | Ok (Tui_decode.Fleet_last_good { measured_at_unix; stale_reason = _ }) ->
+       Alcotest.(check (float 0.)) "1970 is a time" 0.0 measured_at_unix
+   | Ok (Tui_decode.Fleet_current | Tui_decode.Unrecognised_snapshot_status _) ->
+       Alcotest.fail "a stale snapshot measured at 1970 decoded as not stale"
+   | Error err -> Alcotest.fail err);
+  refused "a stale snapshot missing the time key"
+    (`Assoc [ "status", `String "stale"; "stale_reason", `String "ttl_expired" ]);
+  refused "a snapshot without a status" (`Assoc [ "computed_at_unix", `Float 1.0 ]);
+  match fleet_safety_json () with
+  | `Assoc fields ->
+      Alcotest.(check bool) "a reading without the snapshot" true
+        (Result.is_error
+           (Tui_decode.decode_fleet_safety
+              (`Assoc (List.remove_assoc "full_health_snapshot" fields))))
   | _ -> Alcotest.fail "fleet fixture must be an object"
 
 (* Server_routes_http_runtime.full_health_component_placeholder is what the
@@ -11908,6 +11997,8 @@ let () =
           test_decode_fleet_safety_carries_the_scan_shortfall;
         Alcotest.test_case "every field is required" `Quick
           test_decode_fleet_safety_requires_every_field;
+        Alcotest.test_case "the snapshot says how current the reading is" `Quick
+          test_decode_fleet_safety_reads_how_current_the_reading_is;
         Alcotest.test_case "the placeholder reads as not measured" `Quick
           test_decode_fleet_safety_reads_the_placeholder_as_not_measured;
         Alcotest.test_case "an unknown blocker is kept by name" `Quick

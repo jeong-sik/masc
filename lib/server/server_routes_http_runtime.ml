@@ -1252,12 +1252,13 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
       ("last_good_available", `Bool (Option.fold ~none:false ~some:(fun s -> s.last_good_available) snapshot));
       ("section_timings", section_timings_json);
       (* [stale_since_ts] is the wall-clock of the FIRST failure of
-         the current outage; null when the snapshot is fresh.
-         Consumers should prefer this over [computed_at_unix] for
-         "how long stale?" reasoning under partial-degradation, since
-         [computed_at_unix] under an error now points at the failure
-         time of the latest refresh attempt, not the last good
-         data. *)
+         the current outage; null when the snapshot is fresh. It
+         answers "how long has it been stale?". [computed_at_unix]
+         answers "when was what is served measured?": a failure keeps
+         the last good snapshot's [computed_at]
+         ([mark_full_health_snapshot_failure_locked]), so under partial
+         degradation it is the last good refresh's time, not the failed
+         attempt's. *)
       ("stale_since_ts", stale_since_ts);
     ]
 

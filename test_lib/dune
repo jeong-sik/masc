@@ -13,5 +13,13 @@
 
 (library
  (name ast_grep)
+ (modules ast_grep)
  (wrapped false)
  (libraries compiler-libs.common))
+
+; The TUI drawing scan the source-reading suites share. Its own library so a
+; suite that only reads bin/ does not link the AST helper as well.
+(library
+ (name tui_source)
+ (modules tui_source)
+ (wrapped false))

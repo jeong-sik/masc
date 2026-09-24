@@ -688,6 +688,14 @@ let log_exact_error (entry : pending_approval) operation detail =
     detail
 ;;
 
+let log_cli_slot_failure (entry : pending_approval) failure =
+  Log.Keeper.warn
+    ~keeper_name:entry.keeper_name
+    "HITL exact-output approval_id=%s: %s"
+    entry.id
+    (Keeper_lane_cli_oneshot.failure_to_string failure)
+;;
+
 (* Five distinct outcomes settle as the same [Exact_flow_execution_failed]
    quarantine cause - attempt-allocation failure, measurement-allocation failure,
    candidate exhaustion, provider execution failure and provenance mismatch - and
@@ -1282,10 +1290,11 @@ let try_cli_slots
               the entry settles through the ordinary quarantine transition
               under the identity that actually failed. *)
            record_outcome Cli_slots_exhausted;
-           log_exact_error
-             entry
-             "cli lane-slot walk"
-             (Keeper_lane_cli_oneshot.failure_to_string failure);
+           Log.Keeper.warn
+             ~keeper_name:entry.keeper_name
+             "HITL exact-output CLI candidates exhausted approval_id=%s last_slot=%s"
+             entry.id
+             identity.slot_id;
            quarantine_identity
              ~queue_ops
              entry
@@ -1377,10 +1386,7 @@ let try_cli_slots
                    ()
                with
                | Error failure ->
-                 log_exact_error
-                   entry
-                   "cli slot execution"
-                   (Keeper_lane_cli_oneshot.failure_to_string failure);
+                 log_cli_slot_failure entry failure;
                  walk
                    ~bound:(Some identity)
                    ~released_entry_binding
@@ -1394,14 +1400,15 @@ let try_cli_slots
                       output
                   with
                   | Error detail ->
-                    log_exact_error entry "cli domain validation" detail;
+                    let failure =
+                      Keeper_lane_cli_oneshot.Invalid_domain_output
+                        { runtime_id; detail }
+                    in
+                    log_cli_slot_failure entry failure;
                     walk
                       ~bound:(Some identity)
                       ~released_entry_binding
-                      ~last_cli_failure:
-                        (Some
-                           (Keeper_lane_cli_oneshot.Invalid_json_output
-                              { runtime_id; detail }))
+                      ~last_cli_failure:(Some failure)
                       rest
                   | Ok summary ->
                     (match complete_exact_attempt queue_ops entry identity summary with

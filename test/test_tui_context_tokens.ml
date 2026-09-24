@@ -134,13 +134,14 @@ let forecast_success : Masc_tui_context_inspector.forecast =
       ]
   }
 
-let context_pane_lines ?(tab = Masc_tui_context_inspector.Composition) reading =
+let context_pane_lines ?(cols = 140)
+    ?(tab = Masc_tui_context_inspector.Composition) reading =
   let state =
     Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
   in
   state.context_inspector_tab <- tab;
   state.context_inspector_reading <- Some ("alpha", reading);
-  match Masc_tui_render_prim.context_inspector_content_lines ~cols:140 state with
+  match Masc_tui_render_prim.context_inspector_content_lines ~cols state with
   | Masc_tui_render_prim.Plain (rows, _) -> rows
   | Masc_tui_render_prim.Split _ ->
       Alcotest.fail "the composition tab must render one pane"
@@ -225,6 +226,60 @@ let test_missing_exact_input_names_the_cause_once () =
     (says "Exact input unavailable: no turn on this page recorded an exact input composition" rows);
   Alcotest.(check bool) "no second unavailable label" false
     (says "provider-input unavailable" rows)
+
+let test_independent_source_failures_remain_visible () =
+  let turn = record ~wire:(Some 4096) ~scope:per_request () in
+  let input : Masc_tui_context_inspector.provider_input =
+    { trace_id = turn.trace_id
+    ; absolute_turn = turn.absolute_turn
+    ; turn_ref = turn.turn_ref
+    ; runtime_profile = turn.runtime_profile
+    ; captured_at = turn.ts
+    ; wire =
+        Llm_provider.Request_wire_observer.observation
+          ~capture_id:(Some "context-failure-test") ~provider:"fixture"
+          ~model:"fixture" ~http_codec:"openai_chat" ~stream:false
+          ~body:"serialized request"
+    ; items = []
+    }
+  in
+  let base_selection = selection turn in
+  let response_failed =
+    Masc_tui_context_inspector.Turn_read
+      { selection = base_selection
+      ; provider_input = Ok input
+      ; response = Error "chat history page request failed: disconnected"
+      ; forecast = Ok forecast_success
+      }
+  in
+  let response_rows =
+    context_pane_lines ~cols:80 ~tab:Masc_tui_context_inspector.Exact_input
+      response_failed
+  in
+  Alcotest.(check bool) "response evidence keeps its band" true
+    (says "RESPONSE" response_rows);
+  Alcotest.(check bool) "response band keeps its source error" true
+    (says "chat history page request failed: disconnected" response_rows);
+  Alcotest.(check int) "response cause is one row" 1
+    (List.length (List.filter (contains "disconnected") response_rows));
+  let input_failed =
+    Masc_tui_context_inspector.Turn_read
+      { selection = base_selection
+      ; provider_input = Error "provider-input request failed: disconnected"
+      ; response = Error "chat history page request failed: disconnected"
+      ; forecast = Ok forecast_success
+      }
+  in
+  let map_rows =
+    context_pane_lines ~cols:80 ~tab:Masc_tui_context_inspector.Input_map
+      input_failed
+  in
+  Alcotest.(check bool) "map retains the missing join" true
+    (says "NO EXACT INPUT JOIN" map_rows);
+  Alcotest.(check bool) "map names the provider-input cause" true
+    (says "provider-input request failed: disconnected" map_rows);
+  Alcotest.(check int) "provider-input cause is one row" 1
+    (List.length (List.filter (contains "disconnected") map_rows))
 
 (* 8,192 schema bytes at 18,000 tokens over 560,513 wire bytes is 263 tokens. *)
 let test_rows_read_at_this_turns_ratio () =
@@ -502,6 +557,8 @@ let () =
             `Quick test_whole_request_failure_is_one_reading
         ; Alcotest.test_case "missing exact input names cause once"
             `Quick test_missing_exact_input_names_the_cause_once
+        ; Alcotest.test_case "independent source failures stay visible"
+            `Quick test_independent_source_failures_remain_visible
         ] )
     ; ( "serialized request"
       , [ Alcotest.test_case "the band leads with the provider's count" `Quick

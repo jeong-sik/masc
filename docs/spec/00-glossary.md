@@ -633,7 +633,9 @@ status: reference
 : DOS Lane 기계의 시간을 움직일 수 있는 한 사람. 핫시트 게임에서 여러 Keeper
   가 한 키보드를 번갈아 쓰기 때문에 있다. 쥔 사람만 load·eject·step·press·click·
   type 을 하고, 다른 사람은 거절되지만 화면은 볼 수 있다. `masc_dos_pass` 로
-  넘기면 보드 글이 다음 사람을 @멘션해 깨운다.
+  넘기면 보드 글이 다음 사람을 @멘션해 깨운다. 쥔 Keeper 가 멈추면(일시정지·정지·
+  충돌·오프라인) 다음 사람이 움직일 때 풀린다. 이름은 부르는 쪽이 스스로 대는 값이라
+  권한 검사가 아니라 차례를 정하는 장치다.
   → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli)
 
 **Lane Add-on**

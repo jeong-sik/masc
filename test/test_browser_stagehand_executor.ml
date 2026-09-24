@@ -145,7 +145,16 @@ let test_capture_passes_the_surface () =
   match captured with
   | Ok data ->
     check string "source" "stagehand" Yojson.Safe.Util.(member "source" data |> to_string);
-    check string "url" "http://127.0.0.1:1/shop" Yojson.Safe.Util.(member "url" data |> to_string)
+    check string "url" "http://127.0.0.1:1/shop" Yojson.Safe.Util.(member "url" data |> to_string);
+    let scene_reads =
+      List.filter
+        (function
+          | Wire.Page_evaluate { expression; _ } ->
+            String.length expression > String.length Masc.Browser_scene_script.runtime
+          | _ -> false)
+        fake.sent
+    in
+    check int "only the two capture reads carry scene runtime" 2 (List.length scene_reads)
   | Error failure -> fail (Masc.Browser_surface.failure_message failure)
 ;;
 
@@ -194,8 +203,12 @@ let test_unserved_verbs () =
 let test_evaluate_expression () =
   let args = `Assoc [ "mode", `String "viewport" ] in
   let expression = Executor.evaluate_expression ~body:"return 1;" ~args in
+  let with_scene = Executor.evaluate_expression ~with_scene:true ~body:"return 1;" ~args in
   check bool "called at once with its arguments as a JSON literal" true
-    (String.ends_with ~suffix:("(" ^ to_s args ^ ")") expression)
+    (String.ends_with ~suffix:("(" ^ to_s args ^ ")") expression);
+  check int "scene runtime is added only when requested"
+    (String.length expression + String.length Masc.Browser_scene_script.runtime)
+    (String.length with_scene)
 ;;
 
 let () =

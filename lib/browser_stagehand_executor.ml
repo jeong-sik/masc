@@ -83,13 +83,16 @@ let active_of = function
   | json -> Result.map Option.some (page_id_of ~method_:"context.active_page" json)
 ;;
 
-let evaluate_expression ~body ~args =
+let evaluate_expression ?(with_scene = false) ~body ~args =
+  let runtime = if with_scene then Browser_scene_script.runtime else "" in
   Printf.sprintf "(function(args) { %s\nreturn JSON.stringify((function(){ %s }).call(null, args)); })(%s)"
-    Browser_scene_script.runtime body (Yojson.Safe.to_string args)
+    runtime body (Yojson.Safe.to_string args)
 ;;
 
-let evaluate ~send page_id body =
-  let* reply = send (Wire.Page_evaluate { page_id; expression = evaluate_expression ~body ~args:`Null }) in
+let evaluate ?(with_scene = false) ~send page_id body =
+  let* reply =
+    send (Wire.Page_evaluate { page_id; expression = evaluate_expression ~with_scene ~body ~args:`Null })
+  in
   match field "value" reply with
   | Some (`String encoded) ->
     (match Yojson.Safe.from_string encoded with
@@ -172,10 +175,12 @@ let goto ~tabs ~call ~url ~tab_id =
 let capture ~tabs ~call ~tab_id =
   let send = send call in
   let* page_id = page_of ~tabs tab_id in
-  let* (before, viewport) = Result.bind (evaluate ~send page_id observation_body) observation_of in
+  let* (before, viewport) = Result.bind (evaluate ~with_scene:true ~send page_id observation_body) observation_of in
   let* shot = send (Wire.Page_screenshot { page_id }) in
   let* data = string_field ~method_:"page.screenshot" "data" shot in
-  let* (after, viewport_after) = Result.bind (evaluate ~send page_id observation_body) observation_of in
+  let* (after, viewport_after) =
+    Result.bind (evaluate ~with_scene:true ~send page_id observation_body) observation_of
+  in
   if String.equal before.url after.url && Yojson.Safe.equal viewport viewport_after then
     Ok
       (`Assoc

@@ -23,11 +23,10 @@ type call =
 
 val failure_message : Browser_stagehand_session.call_failure -> string
 
-(** A [page.evaluate] expression that defines the scene runtime, runs [body]
-    as a function called with [args], and answers its result as a JSON
-    string. The BiDi peer runs the same page scripts this way, so a page reads
-    the same on every lane. *)
-val evaluate_expression : body:string -> args:Yojson.Safe.t -> string
+(** A [page.evaluate] expression that runs [body] with [args] and answers its
+    result as a JSON string. [with_scene] adds the scene runtime only for a
+    body that calls [browserScene]; tab summaries do not need it. *)
+val evaluate_expression : ?with_scene:bool -> body:string -> args:Yojson.Safe.t -> string
 
 (** Serves [Tabs_list], [Page_goto], [Page_capture] and the sentence verbs.
     Every other verb, sessions included, is refused before any call: the

@@ -137,9 +137,14 @@ type save_error =
       (** Another writer changed the file after [expected] was read. Nothing
           was written. *)
   | Unwritable of { path : string; detail : string }
+  | Saved_but_unlock_failed of { path : string; detail : string }
+      (** The new catalog was written. Lock release failed afterward; inspect
+          the file before retrying, particularly before another rollback. *)
 
 val save_error_to_string : save_error -> string
 
 val save : config_root:string -> expected:snapshot -> t -> (unit, save_error) result
 (** Replace the file with {!to_toml} atomically (fsync, then rename), but
-    only if it still holds what [expected] read. *)
+    only if it still holds what [expected] read. A process lock covers the
+    comparison and replacement, so concurrent writers cannot both pass the
+    same expected snapshot. *)

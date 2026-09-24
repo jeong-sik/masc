@@ -274,6 +274,62 @@ let test_a_stale_writer_writes_nothing () =
       check (option string) "the stale change is absent" None (current loaded "base" apple)
     | Error e -> fail (load_error_to_string e))
 
+let test_concurrent_saves_do_not_both_accept_the_same_snapshot () =
+  with_dir (fun config_root ->
+    write_catalog config_root promoted_ocaml;
+    let first, _ = for_change "first" ~config_root ~shipped:None in
+    let second, stale_expected = for_change "second" ~config_root ~shipped:None in
+    let first_next = changed "rollback" (rollback first ~name:"ocaml" ~store:apple) in
+    let second_next =
+      changed "promote"
+        (promote second ~name:"base" ~store:apple
+           ~reference:"masc-sandbox:general" ~digest:(digest 'f'))
+    in
+    let path = Filename.concat config_root file_name in
+    let lock_path = path ^ ".lock" in
+    let finished = Atomic.make false in
+    let held = File_lock_eio.with_durable_lock_observed ~lock_path (fun () ->
+      let writer = Domain.spawn (fun () ->
+        let outcome = save ~config_root ~expected:stale_expected second_next in
+        Atomic.set finished true;
+        outcome)
+      in
+      let deadline = Unix.gettimeofday () +. 5.0 in
+      let rec await_writer () =
+        let waiting = File_lock_eio.For_testing.holders_and_waiters ~lock_path >= 2 in
+        if waiting || Atomic.get finished || Unix.gettimeofday () >= deadline
+        then waiting
+        else (Domain.cpu_relax (); await_writer ())
+      in
+      let waited_for_lock = await_writer () in
+      let finished_before_first_write = Atomic.get finished in
+      let first_write = Fs_compat.save_file_atomic_strict path (to_toml first_next) in
+      writer, waited_for_lock, finished_before_first_write, first_write)
+    in
+    let writer, waited_for_lock, finished_before_first_write, first_write =
+      match held with
+      | File_lock_eio.Lock_not_acquired error ->
+        fail (File_lock_eio.durable_lock_error_to_string error)
+      | File_lock_eio.Body_completed { value; release_error = None } -> value
+      | File_lock_eio.Body_completed { release_error = Some error; _ } ->
+        fail (File_lock_eio.durable_lock_error_to_string error)
+    in
+    let second_write = Domain.join writer in
+    (match first_write with Ok () -> () | Error detail -> fail detail);
+    check bool "second writer waited for the transaction lock" true waited_for_lock;
+    check bool "second writer had not passed the stale check" false finished_before_first_write;
+    (match second_write with
+     | Error (Changed_since_read _) -> ()
+     | Ok () -> fail "both writers accepted the same snapshot"
+     | Error e -> fail (save_error_to_string e));
+    match load ~config_root with
+    | Ok loaded ->
+      check (option string) "first writer remains current" (Some ocaml_before)
+        (current loaded "ocaml" apple);
+      check (option string) "stale promotion was not written" None
+        (current loaded "base" apple)
+    | Error e -> fail (load_error_to_string e))
+
 (* The copy the binary carries names images and promotes nothing: builds are
    the host's to record. *)
 let rec find_source_root dir hops =
@@ -327,5 +383,7 @@ let () =
         ; test_case "a host without a catalog starts from the shipped one" `Quick
             test_a_host_without_a_catalog_starts_from_the_shipped_one
         ; test_case "a stale writer writes nothing" `Quick test_a_stale_writer_writes_nothing
+        ; test_case "concurrent saves serialize compare and replace" `Quick
+            test_concurrent_saves_do_not_both_accept_the_same_snapshot
         ] )
     ]

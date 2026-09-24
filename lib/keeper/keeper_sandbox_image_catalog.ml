@@ -360,6 +360,7 @@ let to_toml t =
 type save_error =
   | Changed_since_read of { path : string }
   | Unwritable of { path : string; detail : string }
+  | Saved_but_unlock_failed of { path : string; detail : string }
 
 let save_error_to_string = function
   | Changed_since_read { path } ->
@@ -367,17 +368,35 @@ let save_error_to_string = function
       "%s changed after it was read; nothing was written, run the command again"
       path
   | Unwritable { path; detail } -> Printf.sprintf "cannot write %s: %s" path detail
+  | Saved_but_unlock_failed { path; detail } ->
+    Printf.sprintf
+      "%s was written, but its transaction lock could not be released: %s; inspect the catalog before retrying"
+      path detail
 
-(* Compare-and-swap on the bytes: a second writer that read the same file
-   first finds it changed and writes nothing, rather than both writing and
-   one change vanishing. The check and the rename are not one atomic step;
-   the window between them is one fsync long. *)
+(* The lock serializes the compare and atomic replacement across processes.
+   A writer may calculate a change from an older snapshot outside the lock;
+   once it acquires the lock, the byte comparison rejects that stale change. *)
 let save ~config_root ~expected t =
   let path = catalog_path ~config_root in
-  match read_snapshot path with
-  | Error detail -> Error (Unwritable { path; detail })
-  | Ok current when current <> expected -> Error (Changed_since_read { path })
-  | Ok _ ->
-    Result.map_error
-      (fun detail -> Unwritable { path; detail })
-      (Fs_compat.save_file_atomic_strict path (to_toml t))
+  let lock_path = path ^ ".lock" in
+  let save_under_lock () =
+    match read_snapshot path with
+    | Error detail -> Error (Unwritable { path; detail })
+    | Ok current when current <> expected -> Error (Changed_since_read { path })
+    | Ok _ ->
+      Result.map_error
+        (fun detail -> Unwritable { path; detail })
+        (Fs_compat.save_file_atomic_strict path (to_toml t))
+  in
+  match File_lock_eio.with_durable_lock_observed ~lock_path save_under_lock with
+  | File_lock_eio.Lock_not_acquired error ->
+    Error (Unwritable { path; detail = File_lock_eio.durable_lock_error_to_string error })
+  | File_lock_eio.Body_completed { value; release_error = None } -> value
+  | File_lock_eio.Body_completed { value = Ok (); release_error = Some error } ->
+    Error (Saved_but_unlock_failed
+             { path; detail = File_lock_eio.durable_lock_error_to_string error })
+  | File_lock_eio.Body_completed { value = Error primary; release_error = Some error } ->
+    Log.Misc.error
+      "sandbox image catalog lock release failed after save refusal: %s"
+      (File_lock_eio.durable_lock_error_to_string error);
+    Error primary

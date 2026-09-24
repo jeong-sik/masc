@@ -1868,11 +1868,13 @@ let exact_output_resolver_catalog ~exact_output_lane_decls runtimes =
 ;;
 
 let load_exact_output_resolver_snapshot catalog =
+  (* The resolver reads base-URL environment names through the config
+     boundary, the same reader the runtime bindings resolve against. *)
   let io : Agent_core.Exact_output.resolver_io =
     { getenv =
         (fun name ->
-          try Ok (Sys.getenv_opt name) with
-          | Sys_error _ | Invalid_argument _ -> Error ())
+          try Ok (Env_config_core.raw_value_opt name) with
+          | Invalid_argument _ -> Error ())
     }
   in
   Agent_core.Exact_output.load_resolver_snapshot

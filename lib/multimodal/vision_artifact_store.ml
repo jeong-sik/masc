@@ -43,20 +43,14 @@ let get_env_positive_int name default =
       match int_of_string_opt (String.trim s) with
       | Some n when n > 0 -> n
       | Some _ | None ->
-          Printf.eprintf
-            "[vision:warn] invalid %s=%S: must be a positive integer, using default %d
-%!"
-            name s default;
+          Log.Keeper.warn "vision: invalid %s=%S: must be a positive integer, using default %d" name s default;
           default
 
 let resolved_max_entries ?max_entries () =
   match max_entries with
   | Some n when n >= 0 -> n
   | Some _ ->
-      Printf.eprintf
-        "[vision:warn] invalid max_entries: must be non-negative, using default %d
-%!"
-        default_max_entries;
+      Log.Keeper.warn "vision: invalid max_entries: must be non-negative, using default %d" default_max_entries;
       default_max_entries
   | None -> get_env_positive_int "MASC_VISION_MAX_ARTIFACTS_PER_KEEPER" default_max_entries
 
@@ -64,10 +58,7 @@ let resolved_max_bytes ?max_bytes () =
   match max_bytes with
   | Some b when b >= 0 -> b
   | Some _ ->
-      Printf.eprintf
-        "[vision:warn] invalid max_bytes: must be non-negative, using default %d
-%!"
-        default_max_bytes;
+      Log.Keeper.warn "vision: invalid max_bytes: must be non-negative, using default %d" default_max_bytes;
       default_max_bytes
   | None -> get_env_positive_int "MASC_VISION_MAX_BYTES_PER_KEEPER" default_max_bytes
 
@@ -193,13 +184,9 @@ let store ?(auto_prune = true) ~dir (raw : string) : (handle, string) result =
             match prune ~dir () with
             | Ok { deleted_count; reclaimed_bytes; remaining_count; remaining_bytes } ->
                 if deleted_count > 0 then
-                  Printf.eprintf
-                    "[vision:info] prune %s: deleted %d frames (%d bytes), %d remaining (%d bytes)
-%!"
-                    dir deleted_count reclaimed_bytes remaining_count remaining_bytes
+                  Log.Keeper.info "vision: prune %s: deleted %d frames (%d bytes), %d remaining (%d bytes)" dir deleted_count reclaimed_bytes remaining_count remaining_bytes
             | Error err ->
-                Printf.eprintf "[vision:warn] prune %s failed: %s
-%!" dir err
+                Log.Keeper.warn "vision: prune %s failed: %s" dir err
           end;
           Ok h
       | Error msg -> Error (Printf.sprintf "Vision_artifact_store.store: %s" msg)

@@ -52,8 +52,6 @@ type merge_state = Merge_clean | Merge_conflicting | Merge_unknown
 type pull_request = {
   repo_slug : string;         (* owner/repo *)
   number : int;
-  title : string;
-  head_branch : string;
   draft : bool;
   checks : check_state;       (* PR head 커밋(commits(last:1))의 statusCheckRollup.state 를 디코드 경계에서 한 번 변환 *)
   review : review_state;      (* reviewDecision 을 같은 방식으로 *)
@@ -61,7 +59,6 @@ type pull_request = {
   last_commit_author : string option;
     (* 부모가 하나인 커밋 중 가장 최근 것의 author.name (§2.1).
        읽는 창 안에 그런 커밋이 없거나 author 이름이 없으면 None *)
-  updated_at : float;
 }
 
 type repository_pulls =

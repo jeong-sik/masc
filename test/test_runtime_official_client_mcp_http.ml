@@ -7,7 +7,7 @@ type response =
 
 let config_fields bridge =
   let open Yojson.Safe.Util in
-  let config = Runtime_official_client_mcp_http.mcp_config_json bridge in
+  let config = Runtime_official_client_mcp_http.mcp_config_json bridge ~eager_tools:[] in
   let server = config |> member "mcpServers" |> member "masc" in
   let endpoint = server |> member "url" |> to_string in
   let authorization =
@@ -706,6 +706,42 @@ let test_structured_text_is_sanitized_before_it_reaches_the_client () =
     [Llm_provider.Utf8_sanitize.sanitize raw] content
 ;;
 
+(* A tool the config does not declare eager is listed to the model by name
+   only, and the schema file it is told to read sits behind a masc home's
+   read_file deny. Every name passed in comes back declared eager, and a
+   name not passed is not declared. *)
+let test_config_declares_the_given_tools_eager () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let bridge =
+    Runtime_official_client_mcp_http.start
+      ~sw
+      ~net:env#net
+      ~secure_random:env#secure_random
+      ~server_name:"masc"
+      ~tool_specs:(fun () -> [])
+      ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ -> None)
+      ()
+  in
+  let open Yojson.Safe.Util in
+  let tools =
+    Runtime_official_client_mcp_http.mcp_config_json
+      bridge
+      ~eager_tools:[ "masc_ask"; "Read" ]
+    |> member "mcpServers"
+    |> member "masc"
+    |> member "tools"
+  in
+  check (list string) "one entry per given tool" [ "masc_ask"; "Read" ] (keys tools);
+  List.iter
+    (fun name ->
+      check bool (name ^ " is eager") true (tools |> member name |> member "eager" |> to_bool))
+    [ "masc_ask"; "Read" ];
+  check bool "a tool not given is not declared" true (tools |> member "Execute" = `Null)
+;;
+
 let () =
   run
     "runtime_official_client_mcp_http"
@@ -727,6 +763,8 @@ let () =
               ~expected:["valid Base64"] ())
         ; test_case "structured text is sanitized before it reaches the client"
             `Quick test_structured_text_is_sanitized_before_it_reaches_the_client
+        ; test_case "the config declares the given tools eager" `Quick
+            test_config_declares_the_given_tools_eager
         ] )
     ; ( "effect boundary"
       , [ test_case "turn cancellation reaches active callback without poisoning dispatch" `Quick

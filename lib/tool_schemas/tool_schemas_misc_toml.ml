@@ -45,6 +45,7 @@ let dos_press = schema_of_name "masc_dos_press"
 let dos_click = schema_of_name "masc_dos_click"
 let dos_type = schema_of_name "masc_dos_type"
 let dos_peek = schema_of_name "masc_dos_peek"
+let dos_pass = schema_of_name "masc_dos_pass"
 
 let lane_attach = schema_of_name "masc_lane_attach"
 let lane_declaration_read = schema_of_name "masc_lane_declaration_read"

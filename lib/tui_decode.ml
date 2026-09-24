@@ -219,6 +219,11 @@ type standalone_lanes_snapshot = {
   sls_lanes : standalone_lane list;
 }
 
+type standalone_lane_answer = {
+  sla_output_meaning : string;
+  sla_evidence : string;
+}
+
 type keeper_secret_status =
   | Secret_ready
   | Secret_empty
@@ -492,6 +497,11 @@ type goal_proof =
   | Proof_stale of string option
   | Proof_unreadable of string option
 
+type verifier_unreconciled = {
+  vu_step : Goal_reconcile_step.t;
+  vu_detail : string;
+}
+
 type planning_goal = {
   pg_id : string;
   pg_title : string;
@@ -501,6 +511,7 @@ type planning_goal = {
   pg_metric : string option;
   pg_target_value : string option;
   pg_proof : goal_proof;
+  pg_verifier_unreconciled : verifier_unreconciled option;
   pg_last_review_note : string option;
   (* RFC 3339 server timestamps. Optional because an older server build may
      not emit them; the TUI renders what is there rather than refusing the
@@ -619,8 +630,16 @@ type fleet_safety = {
   fs_active_task_owner_scan_error_count : int;
 }
 
+type fleet_reading_freshness =
+  | Fleet_current
+  | Fleet_last_good of { measured_at_unix : float; stale_reason : string }
+  | Unrecognised_snapshot_status of string
+
 type fleet_safety_reading =
-  | Fleet_measured of fleet_safety
+  | Fleet_measured of
+      { fleet : fleet_safety
+      ; freshness : fleet_reading_freshness
+      }
   | Fleet_not_measured of { status : string }
 
 type log_kind =
@@ -1171,6 +1190,13 @@ let preview_line text =
   sanitize_terminal_text (Buffer.contents output)
 ;;
 
+let short_timestamp_of_unix_for_terminal ~localtime unix_seconds =
+  let tm = localtime unix_seconds in
+  Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
+    tm.Unix.tm_sec
+;;
+
 (* The date and time beside a record, in the zone the operator's terminal is
    in. It sliced the first nineteen bytes of the server's RFC 3339 string, which
    kept a UTC reading and dropped the [Z] that said so -- "2026-08-22T00:03:00"
@@ -1180,11 +1206,7 @@ let preview_line text =
 let short_timestamp_for_terminal ~localtime text =
   sanitize_terminal_text
     (match Time_codec.parse_rfc3339_opt text with
-     | Some unix_seconds ->
-         let tm = localtime unix_seconds in
-         Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900)
-           (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
-           tm.Unix.tm_sec
+     | Some unix_seconds -> short_timestamp_of_unix_for_terminal ~localtime unix_seconds
      | None ->
          if String.length text > 19 then String.sub text 0 19
          else if String.length text = 0 then "(never)"
@@ -2070,6 +2092,24 @@ let decode_goal_proof json =
     Proof_unreadable (Some "no verification block on the goal")
 ;;
 
+(* Required and nullable: the server writes [null] for every goal the latest
+   verifier scan settled, so a missing key is a wire mismatch, not a goal the
+   verifier is fine with. *)
+let decode_verifier_unreconciled json =
+  match Json_util.assoc_member_opt "verifier_unreconciled" json with
+  | None -> Error "missing required field 'verifier_unreconciled'"
+  | Some `Null -> Ok None
+  | Some (`Assoc _ as blocked) ->
+    let* raw_step = required_string_field blocked "step" in
+    let* vu_detail = required_string_field blocked "detail" in
+    (match Goal_reconcile_step.of_string raw_step with
+     | Some vu_step -> Ok (Some { vu_step; vu_detail })
+     | None -> Error (Printf.sprintf "unknown verifier reconcile step %S" raw_step))
+  | Some other ->
+    Error
+      (Printf.sprintf "field 'verifier_unreconciled' must be an object or null (received %s)"
+         (Json_util.kind_name other))
+
 let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_title = required_string_field json "title" in
@@ -2088,6 +2128,7 @@ let decode_planning_goal json =
   let* pg_created_at = optional_string_field json "created_at" in
   let* pg_updated_at = optional_string_field json "updated_at" in
   let pg_proof = decode_goal_proof (member "verification" json) in
+  let* pg_verifier_unreconciled = decode_verifier_unreconciled json in
   Ok
     {
       pg_id;
@@ -2098,6 +2139,7 @@ let decode_planning_goal json =
       pg_metric;
       pg_target_value;
       pg_proof;
+      pg_verifier_unreconciled;
       pg_last_review_note;
       pg_last_review_at;
       pg_created_at;
@@ -2814,6 +2856,28 @@ type memory_librarian_failure_kind =
   | Failure_lane_cancelled
   | Failure_unhandled_exception
 
+(* RFC librarian-lifecycle §4.10: the atoms the Keeper's requests skip
+   because the Librarian stands behind the start the provider last
+   accepted. [mls_gap_end_atom] is that start; the gap ends just before it.
+   [Stalled_unmeasured] is a file the gap is read from that did not read:
+   neither "no gap" nor a gap. *)
+type memory_librarian_stall_cause =
+  | Stall_meta_unreadable
+  | Stall_turn_records_unreadable
+  | Stall_turn_boundary_refused
+  | Stall_snapshot_unreadable
+  | Stall_read_position_unreadable
+
+type memory_librarian_stalled =
+  | Stalled_gap of {
+      mls_gap_start_atom : int;
+      mls_gap_end_atom : int;
+    }
+  | Stalled_unmeasured of {
+      mls_cause : memory_librarian_stall_cause;
+      mls_detail : string;
+    }
+
 (* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
    standing, and what its last pass and its journal say. [None] in a field is
    "not measured", which the header prints as such; it is not zero. *)
@@ -2825,6 +2889,7 @@ type memory_librarian_health = {
   mlh_continuity_unread_atoms : int option;
   mlh_last_success_at : float option;
   mlh_last_failure_kind : memory_librarian_failure_kind option;
+  mlh_stalled : memory_librarian_stalled option;
 }
 
 type memory_context_frontier = {
@@ -5409,6 +5474,7 @@ let decode_memory_librarian_health keeper_json =
       ; "continuity_unread_atoms"
       ; "last_success_at"
       ; "last_failure_kind"
+      ; "stalled"
       ]
       json
   in
@@ -5430,6 +5496,41 @@ let decode_memory_librarian_health keeper_json =
   let* mlh_last_failure_kind =
     required_nullable_string_field json "last_failure_kind"
     |> Fun.flip Result.bind decode_memory_librarian_failure_kind
+  in
+  let* mlh_stalled =
+    match member "stalled" json with
+    | `Null -> Ok None
+    | stalled ->
+      let* kind = required_string_field stalled "kind" in
+      (match kind with
+       | "gap" ->
+         let* () =
+           require_exact_object_fields
+             "librarian stalled gap" [ "kind"; "gap_start_atom"; "gap_end_atom" ] stalled
+         in
+         let* mls_gap_start_atom = required_int_field stalled "gap_start_atom" in
+         let* mls_gap_end_atom = required_int_field stalled "gap_end_atom" in
+         if mls_gap_start_atom >= 0 && mls_gap_end_atom > mls_gap_start_atom
+         then Ok (Some (Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }))
+         else Error "librarian stalled gap must end after it starts"
+       | "unmeasured" ->
+         let* () =
+           require_exact_object_fields
+             "librarian stalled unmeasured" [ "kind"; "cause"; "detail" ] stalled
+         in
+         let* cause = required_string_field stalled "cause" in
+         let* mls_cause =
+           match cause with
+           | "meta_unreadable" -> Ok Stall_meta_unreadable
+           | "turn_records_unreadable" -> Ok Stall_turn_records_unreadable
+           | "turn_boundary_refused" -> Ok Stall_turn_boundary_refused
+           | "snapshot_unreadable" -> Ok Stall_snapshot_unreadable
+           | "read_position_unreadable" -> Ok Stall_read_position_unreadable
+           | other -> Error ("unknown librarian stalled cause: " ^ other)
+         in
+         let* mls_detail = required_string_field stalled "detail" in
+         Ok (Some (Stalled_unmeasured { mls_cause; mls_detail }))
+       | other -> Error ("unknown librarian stalled kind: " ^ other))
   in
   let* () =
     if List.for_all
@@ -5455,6 +5556,7 @@ let decode_memory_librarian_health keeper_json =
     ; mlh_continuity_unread_atoms
     ; mlh_last_success_at
     ; mlh_last_failure_kind
+    ; mlh_stalled
     }
 
 let decode_memory_alert json =
@@ -6955,6 +7057,63 @@ let standalone_lane_configuration_phrase = function
   | Lane_unconfigured -> "not configured"
   | Lane_registry_unavailable -> "registry unreadable"
 
+(* The lane detail's last two lines. They used to be picked by comparing the
+   id with each lane's spelling in turn, and Workspace curator had no branch,
+   so it drew the sentence meant for a lane this TUI does not know. The id is
+   now read into the lane once and every lane has its own arm. *)
+let standalone_lane_answer (lane : standalone_lane) =
+  let structured_output_without_ledger =
+    "Evidence: structured-output generation, not a MASC tool loop; the run \
+     retains exact Input/Output, outcome, and selected slot, so no tool-call \
+     ledger exists."
+  in
+  match Standalone_lane.of_id lane.sl_lane_id with
+  | Some Standalone_lane.Board_attention ->
+    { sla_output_meaning = "Output meaning: the accepted candidate judgment JSON."
+    ; sla_evidence =
+        "Evidence: structured-output generation, not a MASC tool loop; the run \
+         retains exact Input/Output and outcome. HTTP/CLI attribution uses \
+         selected slot; Vendor System One provenance stays in Output."
+    }
+  | Some Standalone_lane.Hitl_auto_judge ->
+    { sla_output_meaning =
+        "Output meaning: the validated and durably settled approval-context \
+         judgment summary."
+    ; sla_evidence = structured_output_without_ledger
+    }
+  | Some Standalone_lane.Librarian ->
+    { sla_output_meaning =
+        "Output meaning: selected memory facts plus committed snapshot metadata."
+    ; sla_evidence = structured_output_without_ledger
+    }
+  | Some Standalone_lane.Workspace_curator ->
+    { sla_output_meaning =
+        "Output meaning: the id of the proposal it published, with shared claims \
+         and conflicts that each cite source ids, and the sources it excluded \
+         with reasons."
+    ; sla_evidence =
+        "Evidence: structured-output generation over admitted catalog slots only \
+         (CLI tails are refused), not a MASC tool loop; the run retains the exact \
+         memory inventory and rendered prompt as Input, the proposal as Output, \
+         outcome, and selected slot."
+    }
+  | Some Standalone_lane.Verifier ->
+    { sla_output_meaning =
+        "Output meaning: Task completion or Goal proof verdict, reason, and \
+         evaluator runtime."
+    ; sla_evidence =
+        "Evidence: Verifier review records also retain MASC tool observations; \
+         open a run to inspect inputs, dispositions, excerpts, duration, and \
+         truncation."
+    }
+  | None ->
+    { sla_output_meaning = "Output meaning: open a retained run for its exact result."
+    ; sla_evidence =
+        Printf.sprintf
+          "Evidence: unknown lane id: %s; this TUI has no evidence contract for it."
+          (sanitize_terminal_text lane.sl_lane_id)
+    }
+
 let standalone_lane_status_of_string = function
   | "running" -> Ok Standalone_running
   | "idle" -> Ok Standalone_idle
@@ -7024,14 +7183,17 @@ let decode_standalone_lane json =
     standalone_lane_configuration_of_string configuration_state
   in
   let* sl_jev =
-    if
-      String.equal sl_lane_id
-        (Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention)
-    then
+    match Standalone_lane.of_id sl_lane_id with
+    | Some Standalone_lane.Board_attention ->
       let* jev = required_object_field json "jev" in
       let* decoded = decode_standalone_lane_jev jev in
       Ok (Some decoded)
-    else Ok None
+    | Some
+        ( Standalone_lane.Librarian
+        | Standalone_lane.Hitl_auto_judge
+        | Standalone_lane.Workspace_curator
+        | Standalone_lane.Verifier )
+    | None -> Ok None
   in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
@@ -7148,12 +7310,9 @@ let decode_standalone_lanes_snapshot json =
   let* items = required_list_field json "lanes" in
   let* sls_lanes = decode_list "lanes" decode_standalone_lane items in
   let expected_lane_ids =
-    (* The registry owns the exact-lane spellings; only the verifier lane
-       lives outside it. Spelling them here again was the drift the
-       lane_key export exists to close. *)
-    Runtime.verifier_exact_lane_id
-    :: List.map Exact_lane_run_registry.lane_key Exact_lane_run_registry.all_lanes
-    |> List.sort String.compare
+    (* [Standalone_lane] spells every lane id; spelling them here again is
+       how a list drifts when a lane is added or renamed. *)
+    List.map Standalone_lane.to_id Standalone_lane.all |> List.sort String.compare
   in
   let observed_lane_ids =
     sls_lanes |> List.map (fun lane -> lane.sl_lane_id) |> List.sort String.compare
@@ -9369,7 +9528,7 @@ let decode_librarian_run_page json =
         if
           String.equal
             lane
-            (Exact_lane_run_registry.lane_key Exact_lane_run_registry.Librarian)
+            (Standalone_lane.to_id Standalone_lane.Librarian)
         then
           let* run_id = required_string_field run "run_id" in
           Ok (Some run_id)
@@ -9620,7 +9779,7 @@ let decode_lane_run_skill_evidence run =
 
 let decode_lane_run_gate_judgment ~lane ~status ~output =
   let hitl_lane =
-    Exact_lane_run_registry.lane_key Exact_lane_run_registry.Hitl_auto_judge
+    Standalone_lane.to_id Standalone_lane.Hitl_auto_judge
   in
   if not (String.equal lane hitl_lane)
   then Ok Lane_run_not_gate_judgment
@@ -9831,22 +9990,17 @@ let decode_lane_run_detail json =
                   | Exact_lane_run_registry.Unavailable _) -> Ok None
   in
   let* lrd_answer_source =
-    (* The lane key is read into the registry's lane once; the answer-source
-       rule below is about the Board-attention lane, and a key no registered
-       lane spells is not that lane. *)
-    let lane =
-      List.find_opt
-        (fun lane ->
-          String.equal (Exact_lane_run_registry.lane_key lane) summary.lrs_lane)
-        Exact_lane_run_registry.all_lanes
-    in
+    (* The lane key is read into the lane once; the answer-source rule below
+       is about the Board-attention lane, and a key no lane spells is not
+       that lane. *)
     let is_board_attention =
-      match lane with
-      | Some Exact_lane_run_registry.Board_attention -> true
+      match Standalone_lane.of_id summary.lrs_lane with
+      | Some Standalone_lane.Board_attention -> true
       | Some
-          ( Exact_lane_run_registry.Librarian
-          | Exact_lane_run_registry.Hitl_auto_judge
-          | Exact_lane_run_registry.Workspace_curator )
+          ( Standalone_lane.Librarian
+          | Standalone_lane.Hitl_auto_judge
+          | Standalone_lane.Workspace_curator
+          | Standalone_lane.Verifier )
       | None ->
         false
     in
@@ -9933,7 +10087,7 @@ let decode_lane_run_detail json =
     | Some (Exact_lane_run_registry.Not_loaded
            | Exact_lane_run_registry.Unavailable _)
       when String.equal summary.lrs_lane
-        (Exact_lane_run_registry.lane_key Exact_lane_run_registry.Hitl_auto_judge) ->
+        (Standalone_lane.to_id Standalone_lane.Hitl_auto_judge) ->
       Ok Lane_run_gate_judgment_unavailable
     | _ ->
       decode_lane_run_gate_judgment ~lane:summary.lrs_lane
@@ -10071,11 +10225,44 @@ let decode_fleet_placeholder section =
          (if timed_out then ", refresh timed out" else "")
          error)
 
+(* Server_routes_http_runtime.full_health_snapshot_metadata: every full body
+   carries it beside the sections, and its [status] says whether they are the
+   latest refresh. A [stale] snapshot keeps serving the last reading it
+   measured -- after a refresh timed out or raised, or when none has run
+   within the time to live -- so the fleet it carries is a past one (#38499).
+   The server always writes [computed_at_unix] and [stale_reason], and a
+   stale snapshot fills both. A time before 1970 is refused with the rest that
+   are not times: the age drawn from it would overflow the integer it is
+   counted in. *)
+let decode_fleet_reading_freshness json =
+  let* snapshot = required_object_field json "full_health_snapshot" in
+  let* status = required_string_field snapshot "status" in
+  match status with
+  | "ready" -> Ok Fleet_current
+  | "stale" -> (
+    let* computed_at = required_nullable_float_field snapshot "computed_at_unix" in
+    let* stale_reason = required_nullable_string_field snapshot "stale_reason" in
+    match computed_at, stale_reason with
+    | Some measured_at_unix, Some stale_reason
+      when Float.is_finite measured_at_unix && measured_at_unix >= 0.0 ->
+      Ok (Fleet_last_good { measured_at_unix; stale_reason })
+    | Some measured_at_unix, Some _ ->
+      Error
+        (Printf.sprintf "full_health_snapshot computed_at_unix %g is not a time"
+           measured_at_unix)
+    | None, _ | _, None ->
+      Error
+        "a stale full_health_snapshot must say when its reading was measured \
+         (computed_at_unix) and why it is stale (stale_reason)")
+  | other -> Ok (Unrecognised_snapshot_status other)
+
 let decode_fleet_safety json =
   let* section = required_object_field json "keeper_fleet_safety" in
   match Json_util.assoc_member_opt "schema" section with
   | Some (`String schema) when String.equal schema Keeper_fleet_blocker.reading_schema ->
-    Result.map (fun fleet -> Fleet_measured fleet) (decode_fleet_safety_reading section)
+    let* fleet = decode_fleet_safety_reading section in
+    let* freshness = decode_fleet_reading_freshness json in
+    Ok (Fleet_measured { fleet; freshness })
   | Some (`String schema) ->
     Error
       (Printf.sprintf "keeper_fleet_safety schema %S is not %S" schema
@@ -11751,14 +11938,90 @@ let decode_async_request_observation json =
 type schedule_runner_hold =
   { srh_occurrence_id : string
   ; srh_due_at_iso : string
+  ; srh_observed_at : float
   }
 
+(* 9999-12-31T23:59:59Z. The hold's time is drawn through [Unix.localtime],
+   which fails with EOVERFLOW far above this (from 1e17 on macOS, measured),
+   and the Schedules render has no handler for that. A time the wire can carry
+   but no clock on the screen can mean is refused here, where it is read. *)
+let latest_drawable_unix_seconds = 253_402_300_799.0
+
+(* The server writes [runner_hold] on every row, [null] when nothing is held.
+   A row without the key is a server that does not say, and reading it as
+   [null] would draw a held schedule as a free one (#38413). *)
 let decode_schedule_runner_hold row =
-  match member "runner_hold" row with
+  let* hold = required_member row "runner_hold" in
+  match hold with
   | `Null -> Ok None
-  | `Assoc _ as hold ->
+  | `Assoc _ ->
     let* srh_occurrence_id = required_string_field hold "occurrence_id" in
     let* srh_due_at_iso = required_string_field hold "due_at_iso" in
-    Ok (Some { srh_occurrence_id; srh_due_at_iso })
+    let* observed_at = required_nullable_float_field hold "observed_at" in
+    let* srh_observed_at =
+      match observed_at with
+      | Some time
+        when Float.is_finite time && time >= 0.0 && time <= latest_drawable_unix_seconds
+        -> Ok time
+      | Some _ | None ->
+        Error "runner_hold observed_at must be a time from 1970 to the end of year 9999"
+    in
+    Ok (Some { srh_occurrence_id; srh_due_at_iso; srh_observed_at })
   | bad -> field_type_error "runner_hold" "an object or null" bad
+;;
+
+type schedule_runner_status =
+  | Runner_status of Schedule_contract_values.runner_status
+  | Runner_unrecognised of string
+
+(* The object and its word are required. A word this build does not know is
+   kept as itself rather than refused: refusing it failed the whole list --
+   Schedules, a Keeper's Automation tab and the agenda -- over one word. *)
+let decode_schedule_runner_status snapshot =
+  let* runner = required_object_field snapshot "schedule_runner" in
+  let* word = required_string_field runner "status" in
+  match Schedule_contract_values.runner_status_of_string word with
+  | Ok status -> Ok (Runner_status status)
+  | Error _ -> Ok (Runner_unrecognised word)
+;;
+
+type schedule_list_freshness =
+  | List_latest
+  | List_kept
+
+type schedule_hold_reading =
+  | Hold_current
+  | Hold_as_of of float
+
+(* Only the latest answer from a runner whose status is [ok] -- its newest
+   tick succeeded, recently and without failures -- vouches for a hold now.
+   [stale] and a failed tick mean the list is from an earlier tick. [degraded]
+   can also mean the newest tick read the list and then dispatched with
+   failures, so the list is the newest one while the runner says it is not
+   healthy. [running] has not finished a new read; [not_started] has made none;
+   a word this build does not know says nothing. A list kept after a failed
+   reload is an earlier answer whatever its runner said then. In all of these
+   the hold is drawn at the time it was read (#38411). *)
+let schedule_hold_reading
+      ~(freshness : schedule_list_freshness)
+      ~(runner : schedule_runner_status)
+      hold
+  =
+  match freshness, runner with
+  | List_latest, Runner_status Schedule_contract_values.Runner_ok -> Hold_current
+  | ( List_latest
+    , Runner_status
+        ( Schedule_contract_values.Runner_not_started
+        | Schedule_contract_values.Runner_running
+        | Schedule_contract_values.Runner_stale
+        | Schedule_contract_values.Runner_degraded ) )
+  | List_latest, Runner_unrecognised _
+  | ( List_kept
+    , Runner_status
+        ( Schedule_contract_values.Runner_ok
+        | Schedule_contract_values.Runner_not_started
+        | Schedule_contract_values.Runner_running
+        | Schedule_contract_values.Runner_stale
+        | Schedule_contract_values.Runner_degraded ) )
+  | List_kept, Runner_unrecognised _ -> Hold_as_of hold.srh_observed_at
 ;;

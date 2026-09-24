@@ -2,7 +2,7 @@
 
 module Exact_output = Agent_core.Exact_output
 
-let exact_lane_id = "librarian_exact"
+let exact_lane_id = Standalone_lane.to_id Standalone_lane.Librarian
 
 let input_trace_id (inp : Keeper_librarian.input) =
   Ids.Turn_ref.trace_id inp.turn_ref

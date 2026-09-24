@@ -1637,6 +1637,7 @@ let test_corrupt_snapshot_is_a_dependency_failure () =
       ~meta
       ~ctx_work:(empty_ctx ())
       ~args:(`Assoc [ "query", `String "anything"; "source", `String "current" ])
+      ()
   in
   check_failure_class "corrupt store" Tool_result.Dependency_unavailable execution;
   let response =
@@ -2549,6 +2550,7 @@ let test_an_unreadable_absorbed_store_leaves_all_its_current_facts () =
       ~meta
       ~ctx_work:(empty_ctx ())
       ~args:(`Assoc [ "query", `String "deploy"; "source", `String source ])
+      ()
   in
   let absorbed = search "absorbed" in
   check_failure_class "absorbed alone" Tool_result.Dependency_unavailable absorbed;
@@ -2786,13 +2788,11 @@ let test_search_records_a_retrieval_per_ordinary_match () =
     Alcotest.(check (list int))
       "both lines count the current facts searched"
       [ 3; 3 ]
-      [ int_field "total_candidates" hit_line; int_field "total_candidates" miss_line ];
-    Alcotest.(check (list string))
-      "both lines name the turn, so searches per turn can be counted"
-      [ Keeper_id.Trace_id.to_string meta.runtime.trace_id
-      ; Keeper_id.Trace_id.to_string meta.runtime.trace_id
-      ]
-      [ string_field "trace_id" hit_line; string_field "trace_id" miss_line ]
+      [ int_field "durable_candidates" hit_line; int_field "durable_candidates" miss_line ];
+    Alcotest.(check bool) "the miss read every store" false
+      (match json_field "read_errors" miss_line with
+       | `Bool value -> value
+       | _ -> Alcotest.fail "expected bool field: read_errors")
   | _ -> Alcotest.fail "expected one decision-log line per search"
 ;;
 

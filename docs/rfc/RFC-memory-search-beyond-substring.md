@@ -56,7 +56,7 @@ Keeper 가 기억을 찾는 유일한 도구는 `keeper_memory_search` 다
   `record_memory_events`).
 - 검색마다 결정 로그(`<keeper>.decisions.jsonl`)에 `event = "memory_search"` 한 줄이 남는다: query, source,
   `match_count`, `matched_memory_ids`. 0건 query 도 여기 남는다.
-- 없는 것: 후보 수(`total_candidates`)가 로그에 없고, 검색 결과를 세는 OTel 카운터가 없고, 로그를 모아
+- 없는 것: 몇 개 중에서 찾았는지(후보 수)가 로그에 없고, 검색 결과를 세는 OTel 카운터가 없고, 로그를 모아
   0건 비율과 "0건 뒤 다른 말로 다시 찾은" 사례를 뽑는 도구가 없다. 개선 효과를 재려면 이것부터 있어야 한다(§3.0).
 
 ## 2. absorb gate 의 상수와 휴리스틱
@@ -94,9 +94,11 @@ claim 하나로 묶을 때, 원문 문장마다 판정 모델(TypeSafe Jev)에�
 
 ### 3.0 단계 0 — 먼저 잰다 (권장 첫 PR)
 
-- 결정 로그의 `memory_search` 줄에 `total_candidates` 와 `trace_id`(턴당 검색 횟수를 세기 위해)를 더하고, 검색마다
-  `masc_keeper_memory_search_total{source, outcome}` 카운터를 올린다(outcome: `matched` | `no_match` |
-  `store_unavailable`).
+- 결정 로그의 `memory_search` 줄에 `durable_candidates`(검색한 durable 기억·흡수 행 수, history 는 세지 않는다),
+  `read_errors`, `turn_ref`(`<trace_id>#<absolute_turn>`, RFC-0233 §7. `trace_id` 는 Keeper 실행 식별자라 턴을
+  가르지 못한다)를 더하고, 검색마다 `masc_keeper_memory_search_total{source, outcome}` 카운터를 올린다(outcome:
+  `matched` | `no_match` | `no_match_partial_read` | `store_unavailable`). 일부 저장소를 못 읽은 0건은 순위
+  개선으로 답할 수 없으므로 `no_match` 와 따로 세고 재생 세트에서 뺀다.
 - `scripts/memory-search-miss-report.py`: 결정 로그를 읽어 Keeper·source 별 0건 비율을 내고, 0건 query 와
   "같은 Keeper 가 0건 뒤 다른 query 로 다시 찾아 맞힌" 쌍을 JSONL **재생 세트**로 뽑는다. 재검색 쌍은 "찾았어야
   했는데 첫 표현으로 못 찾은" 사례의 가장 값싼 증거다. 이 세트가 이후 단계의 합격선이다(단계별로 같은 세트에서
@@ -141,7 +143,7 @@ lexical 은 "다른 말로 쓴 같은 뜻"을 원리적으로 못 찾는다. 임
   (조용히 빈 결과로 떨어지지 않게, `failure_keeps_evidence`).
 - 호출 모드: `no_match` 이거나 후보가 `limit` 을 넘을 때만 판정을 부르는 안과, 항상 부르는 안이 있다.
   비용은 constitution 상 문제가 아니지만 **지연**은 턴 안에서 쌓인다. Keeper 는 한 턴에 검색을 여러 번 부를 수
-  있고 로컬 모델 판정은 초 단위일 수 있다. 그래서 단계 0 이 턴당 검색 횟수를 재고(결정 로그의 `trace_id`),
+  있고 로컬 모델 판정은 초 단위일 수 있다. 그래서 단계 0 이 턴당 검색 횟수를 재고(결정 로그의 `turn_ref`),
   그 분포와 판정 한 번의 지연을 곱해서 항상/조건부를 고른다.
 
 ### 3.3 단계 3 — 연상 (선택)

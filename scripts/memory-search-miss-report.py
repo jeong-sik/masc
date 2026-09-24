@@ -3,8 +3,9 @@
 
 Reads every ``<keeper>.decisions.jsonl`` (and its rotations ``.1``, ``.2`` ...)
 in a keepers runtime directory, keeps the ``event = "memory_search"`` lines,
-and prints per Keeper and source how many searches found nothing, and per
-Keeper how many searches a turn (``trace_id``) makes.
+and prints per Keeper and source how many searches found nothing (a miss
+while some store could not be read is counted apart), and per
+Keeper how many searches a turn (``turn_ref``) makes.
 
 With ``--replay-out`` it also writes the replay set of
 RFC-memory-search-beyond-substring section 3.0: one JSON line per search that
@@ -69,29 +70,39 @@ def read_searches(keepers_dir: Path):
     return searches, unreadable
 
 
+def partial_read(row):
+    """A search that could not read some store or history file.
+
+    Its miss is not one better ranking can answer, so it is counted apart and
+    left out of the replay set.
+    """
+    return row.get("read_errors") is True
+
+
 def summary(searches):
-    table = defaultdict(lambda: [0, 0])
+    table = defaultdict(lambda: [0, 0, 0])
     for keeper, rows in searches.items():
         for row in rows:
             cell = table[(keeper, row.get("source", "?"))]
             cell[0] += 1
             if row["match_count"] == 0:
-                cell[1] += 1
+                cell[2 if partial_read(row) else 1] += 1
     return table
 
 
 def searches_per_turn(searches):
-    """Searches grouped by the turn (trace_id) that made them, per Keeper.
+    """Searches grouped by the turn (turn_ref) that made them, per Keeper.
 
-    Lines written before the decision log carried trace_id are not counted.
+    Lines without turn_ref (older lines, calls outside a Keeper turn) are not
+    counted.
     """
     per_keeper = {}
     for keeper, rows in searches.items():
         turns = defaultdict(int)
         for row in rows:
-            trace_id = row.get("trace_id")
-            if isinstance(trace_id, str) and trace_id:
-                turns[trace_id] += 1
+            turn_ref = row.get("turn_ref")
+            if isinstance(turn_ref, str) and turn_ref:
+                turns[turn_ref] += 1
         if turns:
             per_keeper[keeper] = sorted(turns.values())
     return per_keeper
@@ -100,7 +111,7 @@ def searches_per_turn(searches):
 def replay_rows(searches):
     for keeper, rows in searches.items():
         for index, row in enumerate(rows):
-            if row["match_count"] != 0:
+            if row["match_count"] != 0 or partial_read(row):
                 continue
             following = rows[index + 1] if index + 1 < len(rows) else None
             followed_by_hit = following is not None and following["match_count"] > 0
@@ -109,7 +120,7 @@ def replay_rows(searches):
                 "ts_unix": row.get("ts_unix"),
                 "query": row.get("query"),
                 "source": row.get("source"),
-                "total_candidates": row.get("total_candidates"),
+                "durable_candidates": row.get("durable_candidates"),
                 "next_search": (
                     {
                         "ts_unix": following.get("ts_unix"),
@@ -137,12 +148,15 @@ def main():
     table = summary(searches)
     total = sum(cell[0] for cell in table.values())
     misses = sum(cell[1] for cell in table.values())
+    partial = sum(cell[2] for cell in table.values())
 
-    print(f"{'keeper':<40} {'source':<10} {'searches':>9} {'no_match':>9} {'share':>7}")
-    for (keeper, source), (count, miss) in sorted(table.items()):
-        print(f"{keeper:<40} {source:<10} {count:>9} {miss:>9} {miss / count:>7.1%}")
+    header = f"{'keeper':<40} {'source':<10} {'searches':>9} {'no_match':>9} {'share':>7} {'partial':>8}"
+    print(header)
+    for (keeper, source), (count, miss, part) in sorted(table.items()):
+        print(f"{keeper:<40} {source:<10} {count:>9} {miss:>9} {miss / count:>7.1%} {part:>8}")
     if total:
-        print(f"{'all':<40} {'':<10} {total:>9} {misses:>9} {misses / total:>7.1%}")
+        print(f"{'all':<40} {'':<10} {total:>9} {misses:>9} {misses / total:>7.1%} {partial:>8}")
+        print("partial = found nothing while a store could not be read (not in the replay set)")
     else:
         print("no memory_search lines found")
     per_turn = searches_per_turn(searches)

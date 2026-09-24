@@ -300,12 +300,26 @@ let handle_in_process ctx descriptor args =
   | Tool_workspace_memory_read ->
     Some (Keeper_workspace_memory_read.handle ~base_path:ctx.config.base_path ~args)
   | Tool_memory_search ->
+    (* The outer turn's number reaches a tool only in the turn-local causal
+       evidence the Gate also reads; the search takes it from there to name
+       its turn in the decision log. *)
+    let turn_ref =
+      Option.bind ctx.gate_context (fun capture ->
+        Option.map
+          (fun absolute_turn ->
+             Ids.Turn_ref.make
+               ~trace_id:(Keeper_id.Trace_id.to_string ctx.meta.runtime.trace_id)
+               ~absolute_turn)
+          (capture ()).Keeper_gate.turn_id)
+    in
     Some
       (Keeper_tool_memory_runtime.keeper_memory_search_with_outcome
+         ?turn_ref
          ~config:ctx.config
          ~meta:ctx.meta
          ~ctx_work:ctx.ctx_work
-         ~args)
+         ~args
+         ())
   | Tool_memory_retract ->
     Some
       (Keeper_tool_in_process_runtime.handle_memory_retract_with_outcome

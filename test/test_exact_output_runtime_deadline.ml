@@ -451,11 +451,45 @@ let test_save_over_a_file_that_already_breaks_the_registry_keeps_it () =
    | Error detail -> failf "a save over an already broken file was refused: %s" detail);
   check string "the save reaches the file" next (Fs_compat.load_file path);
   let after = Registry.current () |> require_ok "registry after the save" in
-  check bool "the published registry is kept" true (before == after)
+  check bool "the published registry is kept" true (before == after);
+  (* Health says the kept registry no longer matches the file, and that the
+     next boot will publish none, until a commit replaces it. *)
+  let open Yojson.Safe.Util in
+  let health () =
+    Runtime.startup_degradation_to_yojson
+      ~exact_slots:(Runtime.exact_slot_degradation ())
+      ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
+      (Runtime.startup_degradation ())
+  in
+  let kept = health () in
+  check string "a kept registry makes health degraded" "degraded"
+    (kept |> member "status" |> to_string);
+  check bool "operator action is required" true
+    (kept |> member "operator_action_required" |> to_bool);
+  check bool "the reasons name the stale registry" true
+    (List.mem (`String "exact_output_registry_stale")
+       (kept |> member "operator_action_reasons" |> to_list));
+  check bool "the stale registry is described" true
+    (kept |> member "exact_output_registry_stale" <> `Null);
+  (match
+     save (runtime_toml ~bindings:[ "probe"; "other" ] ~connect:None ~body:(Some 91.5) ())
+   with
+   | Ok receipt ->
+     (match receipt.Runtime.exact_output_registry with
+      | Runtime.Exact_output_registry_replaced _ -> ()
+      | Runtime.Exact_output_registry_unpublished | Runtime.Exact_output_registry_kept _ ->
+        fail "the fixing save did not replace the registry")
+   | Error detail -> failf "the fixing save was refused: %s" detail);
+  let fixed = health () in
+  check string "a replacing commit clears the stale registry" "ok"
+    (fixed |> member "status" |> to_string);
+  check bool "no stale registry is described" true
+    (fixed |> member "exact_output_registry_stale" = `Null)
 
 let degradation_status () =
   Runtime.startup_degradation_to_yojson
     ~exact_slots:(Runtime.exact_slot_degradation ())
+    ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
     (Runtime.startup_degradation ())
   |> Yojson.Safe.Util.member "status"
   |> Yojson.Safe.Util.to_string

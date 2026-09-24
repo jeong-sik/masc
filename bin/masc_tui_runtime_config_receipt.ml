@@ -241,9 +241,16 @@ let decode_exact_output_registry = function
        let* () = exact_fields [ "status"; "requires_restart" ] fields in
        Ok Exact_output_registry_unpublished
      | "kept", false ->
-       let* () = exact_fields [ "status"; "requires_restart"; "reason" ] fields in
+       let* () =
+         exact_fields
+           [ "status"; "requires_restart"; "next_boot_publishes"; "reason" ]
+           fields
+       in
+       let* next_boot_publishes = bool_field "next_boot_publishes" fields in
        let* reason = string_field "reason" fields in
-       Ok (Exact_output_registry_kept { reason })
+       if next_boot_publishes
+       then Error "a kept exact-output registry cannot be published at the next boot"
+       else Ok (Exact_output_registry_kept { reason })
      | ("applied" | "unpublished" | "kept"), _ ->
        Error "exact-output registry status disagrees with requires_restart"
      | _ -> Error "invalid exact-output registry application status")
@@ -433,7 +440,7 @@ let summary receipt =
     | Exact_output_registry_applied Targets_replacement_catalog ->
       "exact-registry-applied/replacement-catalog"
     | Exact_output_registry_unpublished -> "exact-registry-unpublished"
-    | Exact_output_registry_kept _ -> "exact-registry-kept"
+    | Exact_output_registry_kept _ -> "exact-registry-kept/next-boot-unpublished"
   in
   Printf.sprintf
     "commit=%s %s %s %s %s%s %s"

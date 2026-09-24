@@ -45,7 +45,8 @@ let exact_output_registry ?(status = "applied") ?(requires_restart = false) ?ext
     match extra, status with
     | Some extra, _ -> extra
     | None, "applied" -> [ "targets", `String "runtime_bindings" ]
-    | None, "kept" -> [ "reason", `String "catalog read failed" ]
+    | None, "kept" ->
+      [ "next_boot_publishes", `Bool false; "reason", `String "catalog read failed" ]
     | None, _ -> []
   in
   `Assoc ([ "status", `String status; "requires_restart", `Bool requires_restart ] @ extra)
@@ -180,7 +181,15 @@ let test_exact_output_registry_and_lock_warnings () =
    | Receipt.Exact_output_registry_applied _ | Receipt.Exact_output_registry_unpublished ->
      fail "kept registry changed variant");
   check bool "summary names the kept registry" true
-    (String.ends_with ~suffix:"exact-registry-kept" (Receipt.summary kept));
+    (String.ends_with ~suffix:"exact-registry-kept/next-boot-unpublished" (Receipt.summary kept));
+  rejected
+    (receipt
+       ~exact:
+         (exact_output_registry
+            ~status:"kept"
+            ~extra:[ "next_boot_publishes", `Bool true; "reason", `String "x" ]
+            ())
+       ());
   rejected (receipt ~exact:(exact_output_registry ~status:"kept" ~extra:[] ()) ());
   rejected
     (receipt

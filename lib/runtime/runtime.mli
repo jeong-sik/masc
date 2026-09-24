@@ -89,7 +89,18 @@ type exact_output_registry_application =
       (** The committed text does not rebuild the registry and neither did
           the file it replaced, so the fault predates the commit. The
           published registry stays as it was and no longer describes the
-          file. *)
+          file, and the file on disk publishes no registry at the next boot.
+          {!exact_output_registry_stale} records it for health until a
+          commit replaces the registry. *)
+
+(** The registry a config commit kept because neither the committed text nor
+    the file it replaced rebuilds one. It keeps serving, but the file on disk
+    publishes no registry at the next boot. *)
+type exact_output_registry_stale =
+  { stale_reason : Runtime_exact_output_registry.publication_error
+  ; stale_since_commit : config_commit_order
+        (** The first commit that kept it; later kept commits do not move it. *)
+  }
 
 type config_commit_receipt = private
   { observation : config_observation
@@ -393,6 +404,7 @@ val strict_init_error_to_string : strict_init_error -> string
 val startup_degradation_to_string : startup_degradation -> string
 val startup_degradation_to_yojson :
   exact_slots:exact_slot_degradation ->
+  exact_registry_stale:exact_output_registry_stale option ->
   startup_degradation option ->
   Yojson.Safe.t
 (** The one startup report health, the runtime inventory and the dashboard
@@ -469,8 +481,10 @@ val report_exact_output_registry : Runtime_exact_output_registry.t -> unit
     rejected lane slots (a slot rule 3 left out is counted, not diagnosed
     again), [verifier_exact] slots that cannot judge, and the optional lanes
     with nothing admitted. Boot runs it after publishing and every config
-    commit runs it after replacing or keeping the registry. The rule-3 slots
-    and lanes themselves are named by {!warn_exact_slot_degradation}. *)
+    commit that replaces the registry runs it when what it reports changed
+    (a kept registry's rejected slots are listed, not diagnosed, because it
+    was built from an earlier text). The rule-3 slots and lanes themselves
+    are named by {!warn_exact_slot_degradation}. *)
 
 val warn_exact_slot_degradation : exact_slot_degradation -> unit
 (** One WARN per exact slot rule 3 leaves out and one per lane it empties.
@@ -550,6 +564,12 @@ val get_runtimes : unit -> t list
 val get_runtime_ids : unit -> string list
 val startup_degradation : unit -> startup_degradation option
 val startup_degraded : unit -> bool
+
+val exact_output_registry_stale : unit -> exact_output_registry_stale option
+(** [Some] from a config commit that kept the exact-output registry until a
+    commit replaces it, leaves none published, or boot publishes one. The
+    startup report lists it as [exact_output_registry_stale] and names
+    [exact_output_registry_stale] in its reasons. *)
 
 val exact_slot_degradation : unit -> exact_slot_degradation
 (** The gaps of the loaded file and the lanes they empty. *)

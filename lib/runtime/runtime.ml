@@ -136,6 +136,15 @@ type exact_output_registry_application =
   | Exact_output_registry_kept of
       { reason : Runtime_exact_output_registry.publication_error }
 
+(* The registry a config commit kept because neither the committed text nor
+   the file it replaced rebuilds one. It keeps serving, but the file on disk
+   now publishes no registry at the next boot, so health reports it until a
+   later commit replaces the registry. *)
+type exact_output_registry_stale =
+  { stale_reason : Runtime_exact_output_registry.publication_error
+  ; stale_since_commit : config_commit_order
+  }
+
 type config_commit_receipt =
   { observation : config_observation
   ; durability : config_durability
@@ -884,9 +893,38 @@ let missing_catalog_model_to_yojson (entry : missing_catalog_model) =
    when it is one of them. *)
 let catalog_degradation_reason = "missing_agent_core_catalog_models"
 let exact_slot_degradation_reason = "exact_slot_body_deadline_absent"
+let exact_registry_stale_reason = "exact_output_registry_stale"
+
+(* Set by a config commit that keeps the registry, cleared by one that
+   replaces it or leaves none published, and by a boot publication. *)
+let exact_output_registry_stale_ref : exact_output_registry_stale option Atomic.t =
+  Atomic.make None
+
+let exact_output_registry_stale () = Atomic.get exact_output_registry_stale_ref
+
+let exact_output_registry_stale_message (stale : exact_output_registry_stale) =
+  Printf.sprintf
+    "the exact-output registry kept since config commit %s no longer matches \
+     runtime.toml, and the file on disk publishes no registry at the next boot: %s"
+    (config_commit_order_to_string stale.stale_since_commit)
+    (Runtime_exact_output_registry.publication_error_to_string stale.stale_reason)
+;;
+
+let exact_output_registry_stale_to_yojson = function
+  | None -> `Null
+  | Some (stale : exact_output_registry_stale) ->
+    `Assoc
+      [ ( "reason"
+        , `String (Runtime_exact_output_registry.publication_error_to_string stale.stale_reason) )
+      ; ( "kept_since_commit"
+        , `String (config_commit_order_to_string stale.stale_since_commit) )
+      ; "message", `String (exact_output_registry_stale_message stale)
+      ]
+;;
 
 let startup_degradation_to_yojson
     ~(exact_slots : exact_slot_degradation)
+    ~(exact_registry_stale : exact_output_registry_stale option)
     (degradation : startup_degradation option)
   =
   let gaps_json =
@@ -918,7 +956,30 @@ let startup_degradation_to_yojson
     let json = `List (List.map (fun reason -> `String reason) reasons) in
     [ "status_reasons", json; "operator_action_reasons", json ]
   in
-  match degradation, exact_slots.gaps with
+  let exact_json =
+    gaps_json
+    @ [ "exact_output_registry_stale", exact_output_registry_stale_to_yojson exact_registry_stale ]
+  in
+  (* Each exact-output cause present, in the order its reason is listed:
+     (reason, message, next action). *)
+  let exact_parts =
+    (match exact_slots.gaps with
+     | [] -> []
+     | _ :: _ -> [ exact_slot_degradation_reason, gaps_message, gaps_next_action ])
+    @
+    match exact_registry_stale with
+    | None -> []
+    | Some stale ->
+      [ ( exact_registry_stale_reason
+        , exact_output_registry_stale_message stale
+        , "Fix runtime.toml so it rebuilds the exact-output registry and save it; \
+           a restart before that leaves exact output unavailable." )
+      ]
+  in
+  let reasons parts = List.map (fun (reason, _, _) -> reason) parts in
+  let messages parts = List.map (fun (_, message, _) -> message) parts in
+  let next_actions parts = List.map (fun (_, _, next_action) -> next_action) parts in
+  match degradation, exact_parts with
   | None, [] ->
     `Assoc
       ([ "schema", `String "masc.runtime_startup_degradation.v1"
@@ -930,34 +991,26 @@ let startup_degradation_to_yojson
        ; "disabled_runtime_ids", `List []
        ]
        @ reasons_json []
-       @ gaps_json)
-  | None, _ :: _ ->
+       @ exact_json)
+  | None, ((terminal_reason, _, _) :: _ as parts) ->
     `Assoc
       ([ "schema", `String "masc.runtime_startup_degradation.v1"
        ; "status", `String "degraded"
        ; "degraded", `Bool true
        ; "operator_action_required", `Bool true
-       ; "terminal_reason", `String exact_slot_degradation_reason
-       ; "message", `String gaps_message
+       ; "terminal_reason", `String terminal_reason
+       ; "message", `String (String.concat "; " (messages parts))
        ; "missing_catalog_model_count", `Int 0
        ; "disabled_runtime_ids", `List []
        ]
-       @ reasons_json [ exact_slot_degradation_reason ]
-       @ gaps_json
-       @ [ "next_action", `String gaps_next_action ])
-  | Some degradation, gaps ->
+       @ reasons_json (reasons parts)
+       @ exact_json
+       @ [ "next_action", `String (String.concat " " (next_actions parts)) ])
+  | Some degradation, parts ->
     let catalog_message = startup_degradation_to_string degradation in
     let catalog_next_action =
       "Inspect the unavailable configured runtime IDs and their capability catalog entries. \
        Explicit Keeper assignments remain unchanged and unavailable assignments cannot dispatch."
-    in
-    let message, next_action, reasons =
-      match gaps with
-      | [] -> catalog_message, catalog_next_action, [ catalog_degradation_reason ]
-      | _ :: _ ->
-        ( catalog_message ^ "; " ^ gaps_message
-        , catalog_next_action ^ " " ^ gaps_next_action
-        , [ catalog_degradation_reason; exact_slot_degradation_reason ] )
     in
     `Assoc
       ([ "schema", `String "masc.runtime_startup_degradation.v1"
@@ -965,7 +1018,7 @@ let startup_degradation_to_yojson
        ; "degraded", `Bool true
        ; "operator_action_required", `Bool true
        ; "terminal_reason", `String catalog_degradation_reason
-       ; "message", `String message
+       ; "message", `String (String.concat "; " (catalog_message :: messages parts))
        ; "config_path", `String degradation.report.config_path
        ; "configured_default_runtime_id"
          , `String degradation.configured_default_runtime_id
@@ -980,9 +1033,9 @@ let startup_degradation_to_yojson
          , `List (List.map unavailable_assignment_to_yojson degradation.unavailable_assignments)
          )
        ]
-       @ reasons_json reasons
-       @ gaps_json
-       @ [ "next_action", `String next_action ])
+       @ reasons_json (catalog_degradation_reason :: reasons parts)
+       @ exact_json
+       @ [ "next_action", `String (String.concat " " (catalog_next_action :: next_actions parts)) ])
 ;;
 
 let capabilities_for_runtime (rt : t) =
@@ -1892,7 +1945,9 @@ let publish_exact_output_registry ?required_lane_ids ?excused_lane_ids ~lanes re
       ~lanes
       resolver_snapshot
   with
-  | Ok registry -> Ok registry
+  | Ok registry ->
+    Atomic.set exact_output_registry_stale_ref None;
+    Ok registry
   | Error error ->
     Error (Runtime_exact_output_registry.publication_error_to_string error)
 ;;
@@ -3616,7 +3671,8 @@ let exact_output_registry_application_to_string = function
   | Exact_output_registry_unpublished ->
     "unpublished; exact lanes stay unavailable until a restart publishes one"
   | Exact_output_registry_kept { reason } ->
-    "kept as published; neither this text nor the file it replaced rebuilds it: "
+    "kept as published; neither this text nor the file it replaced rebuilds it, \
+     so the file on disk publishes no registry at the next boot: "
     ^ Runtime_exact_output_registry.publication_error_to_string reason
 ;;
 
@@ -3636,6 +3692,37 @@ let report_published_after_commit ~path =
       (Runtime_exact_output_registry.publication_error_to_string error)
 ;;
 
+(* The registry a kept commit leaves serving was built from an earlier text,
+   so its rejected slots are listed, not diagnosed: the diagnosis reads the
+   committed text's runtimes and gaps, which that registry was not built
+   from. *)
+let report_kept_registry ~path =
+  warn_exact_slot_degradation (exact_slot_degradation ());
+  match Runtime_exact_output_registry.current () with
+  | Ok registry ->
+    let rejected = Runtime_exact_output_registry.rejected_slots registry in
+    Log.Misc.warn
+      "exact_output: the kept registry, built from a text earlier than %s, leaves out %d slot(s)%s; they are not diagnosed against the committed text"
+      path
+      (List.length rejected)
+      (match rejected with
+       | [] -> ""
+       | _ :: _ ->
+         " ("
+         ^ String.concat
+             ", "
+             (List.map
+                (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
+                   slot.lane_id ^ "/" ^ slot.slot_id)
+                rejected)
+         ^ ")")
+  | Error error ->
+    Log.Misc.warn
+      "exact_output: the kept registry after committing %s cannot be reported: %s"
+      path
+      (Runtime_exact_output_registry.publication_error_to_string error)
+;;
+
 let report_exact_output_commit ~path application =
   match application with
   | Exact_output_registry_replaced _ -> report_published_after_commit ~path
@@ -3651,7 +3738,69 @@ let report_exact_output_commit ~path application =
       "exact_output: %s committed; registry %s"
       path
       (exact_output_registry_application_to_string application);
-    report_published_after_commit ~path
+    report_kept_registry ~path
+;;
+
+(* What the exact-output reports are about: the published registry's rejected
+   slots and bindings, the loaded text's gaps and emptied lanes, and the stale
+   reason. A commit logs the reports only when this changed, so a keeper
+   assignment save does not repeat the whole per-slot report. *)
+let exact_output_report_view () =
+  let registry =
+    match Runtime_exact_output_registry.current () with
+    | Ok registry ->
+      Some
+        ( List.sort
+            compare
+            (List.map
+               (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
+                  slot.lane_id, slot.slot_id)
+               (Runtime_exact_output_registry.rejected_slots registry))
+        , List.sort
+            String.compare
+            (List.map
+               (fun (binding : Agent_core.Exact_output.rejected_target_binding) ->
+                  binding.target_ref)
+               (Runtime_exact_output_registry.rejected_target_bindings registry)) )
+    | Error (_ : Runtime_exact_output_registry.publication_error) -> None
+  in
+  let degradation = exact_slot_degradation () in
+  ( registry
+  , List.sort
+      compare
+      (List.map
+         (fun (gap : exact_slot_body_deadline_gap) -> gap.lane_id, gap.slot_id, gap.provider_id)
+         degradation.gaps)
+  , List.sort String.compare degradation.emptied_lane_ids
+  , Option.map
+      (fun (stale : exact_output_registry_stale) -> stale.stale_reason)
+      (exact_output_registry_stale ()) )
+;;
+
+(* After a commit's write is visible: record whether the registry now serving
+   is stale, then report when anything the reports are about changed. A kept
+   registry stays stale since the first commit that kept it. *)
+let record_exact_output_commit ~path ~previous_view (receipt : config_commit_receipt) =
+  let application = receipt.exact_output_registry in
+  Atomic.set
+    exact_output_registry_stale_ref
+    (match application with
+     | Exact_output_registry_kept { reason } ->
+       let stale_since_commit =
+         match exact_output_registry_stale () with
+         | Some previous -> previous.stale_since_commit
+         | None -> receipt.order
+       in
+       Some { stale_reason = reason; stale_since_commit }
+     | Exact_output_registry_replaced _ | Exact_output_registry_unpublished -> None);
+  if exact_output_report_view () <> previous_view
+  then report_exact_output_commit ~path application
+  else
+    Log.Misc.debug
+      "exact_output: %s committed; registry %s; nothing it leaves out changed"
+      path
+      (exact_output_registry_application_to_string application);
+  receipt
 ;;
 
 let commit_runtime_config_text
@@ -3663,6 +3812,8 @@ let commit_runtime_config_text
   let* loaded, exact_output_lanes, startup_degradation, declared_media_failover =
     validate_save_text ~config_path:path content
   in
+  let previous_view = exact_output_report_view () in
+  let committed = record_exact_output_commit ~path ~previous_view in
   let publish_runtimes () =
     set_loaded
       ?startup_degradation
@@ -3678,10 +3829,6 @@ let commit_runtime_config_text
   match plan with
   | Commit_without_registry ->
     let exact_output_registry = Exact_output_registry_unpublished in
-    let committed receipt =
-      report_exact_output_commit ~path exact_output_registry;
-      receipt
-    in
     (match replace_file path content with
      | Ok () ->
        publish_runtimes ();
@@ -3705,10 +3852,6 @@ let commit_runtime_config_text
             failure
           |> Result.map committed))
   | Commit_with_registry (prepared_replacement, exact_output_registry) ->
-    let committed receipt =
-      report_exact_output_commit ~path exact_output_registry;
-      receipt
-    in
     (match
        Runtime_exact_output_registry.transact_replacement
          prepared_replacement

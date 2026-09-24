@@ -3733,6 +3733,7 @@ let gaps_after_boot_load content =
     ( Runtime.exact_slot_body_deadline_gaps ()
     , Runtime.startup_degradation_to_yojson
         ~exact_slots:(Runtime.exact_slot_degradation ())
+        ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
         (Runtime.startup_degradation ()) ))
 ;;
 
@@ -3902,7 +3903,7 @@ let test_catalog_and_gap_degradation_name_both_reasons () =
     ; emptied_lane_ids = [ "librarian_exact" ]
     }
   in
-  let json = Runtime.startup_degradation_to_yojson ~exact_slots (Some degradation) in
+  let json = Runtime.startup_degradation_to_yojson ~exact_slots ~exact_registry_stale:None (Some degradation) in
   let open Yojson.Safe.Util in
   check string "terminal_reason keeps the catalog" "missing_agent_core_catalog_models"
     (json |> member "terminal_reason" |> to_string);
@@ -4636,6 +4637,7 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          let json =
            Runtime.startup_degradation_to_yojson
          ~exact_slots:(Runtime.exact_slot_degradation ())
+         ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
          (Runtime.startup_degradation ())
          in
          let rendered = Yojson.Safe.to_string json in

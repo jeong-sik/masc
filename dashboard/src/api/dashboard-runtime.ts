@@ -271,6 +271,23 @@ export interface DashboardRuntimeStartupUnavailableAssignment {
   runtime_id: string
 }
 
+// One exact-output slot left out because its provider declares no
+// exact-body-timeout-s (runtime startup report, #38779).
+export interface DashboardRuntimeStartupExactSlotGap {
+  lane_id: string
+  slot_id: string
+  provider_id: string
+  message: string | null
+}
+
+// The exact-output registry a config commit kept: it keeps serving, but the
+// file on disk publishes none at the next boot.
+export interface DashboardRuntimeStartupExactRegistryStale {
+  reason: string
+  kept_since_commit: string
+  message: string | null
+}
+
 export interface DashboardRuntimeStartupDegradation {
   schema?: string | null
   status?: string | null
@@ -284,6 +301,10 @@ export interface DashboardRuntimeStartupDegradation {
   missing_catalog_models: DashboardRuntimeStartupMissingCatalogModel[]
   disabled_runtime_ids: string[]
   unavailable_assignments: DashboardRuntimeStartupUnavailableAssignment[]
+  status_reasons?: string[]
+  exact_slot_body_deadline_gaps?: DashboardRuntimeStartupExactSlotGap[]
+  exact_lanes_emptied_by_body_deadline_gaps?: string[]
+  exact_output_registry_stale?: DashboardRuntimeStartupExactRegistryStale | null
   next_action?: string | null
 }
 
@@ -752,6 +773,30 @@ function decodeRuntimeStartupUnavailableAssignment(raw: unknown): DashboardRunti
   }
 }
 
+function decodeRuntimeStartupExactSlotGap(raw: unknown): DashboardRuntimeStartupExactSlotGap | null {
+  if (!isRecord(raw)) return null
+  const laneId = asString(raw.lane_id)
+  const slotId = asString(raw.slot_id)
+  const providerId = asString(raw.provider_id)
+  if (!laneId || !slotId || !providerId) return null
+  return {
+    lane_id: laneId,
+    slot_id: slotId,
+    provider_id: providerId,
+    message: asNullableString(raw.message),
+  }
+}
+
+function decodeRuntimeStartupExactRegistryStale(
+  raw: unknown,
+): DashboardRuntimeStartupExactRegistryStale | null {
+  if (!isRecord(raw)) return null
+  const reason = asString(raw.reason)
+  const keptSinceCommit = asString(raw.kept_since_commit)
+  if (!reason || !keptSinceCommit) return null
+  return { reason, kept_since_commit: keptSinceCommit, message: asNullableString(raw.message) }
+}
+
 function decodeRuntimeStartupDegradation(raw: unknown): DashboardRuntimeStartupDegradation | null {
   if (!isRecord(raw)) return null
   return {
@@ -771,6 +816,16 @@ function decodeRuntimeStartupDegradation(raw: unknown): DashboardRuntimeStartupD
     unavailable_assignments: asRecordArray(raw.unavailable_assignments)
       .map(decodeRuntimeStartupUnavailableAssignment)
       .filter((item): item is DashboardRuntimeStartupUnavailableAssignment => item !== null),
+    status_reasons: asStringArray(raw.status_reasons),
+    exact_slot_body_deadline_gaps: asRecordArray(raw.exact_slot_body_deadline_gaps)
+      .map(decodeRuntimeStartupExactSlotGap)
+      .filter((item): item is DashboardRuntimeStartupExactSlotGap => item !== null),
+    exact_lanes_emptied_by_body_deadline_gaps: asStringArray(
+      raw.exact_lanes_emptied_by_body_deadline_gaps,
+    ),
+    exact_output_registry_stale: decodeRuntimeStartupExactRegistryStale(
+      raw.exact_output_registry_stale,
+    ),
     next_action: asNullableString(raw.next_action),
   }
 }
@@ -1071,7 +1126,9 @@ export interface CommittedRuntimeConfigKeeperOverlayApplication
 //   exact-body-timeout-s do not reach them.
 // - `unpublished`: none was published, so exact lanes wait for a restart.
 // - `kept`: neither the committed text nor the file it replaced rebuilds the
-//   registry, so the published one stays; `reason` says why.
+//   registry, so the published one stays; `reason` says why, and
+//   `next_boot_publishes: false` says the file on disk publishes none at the
+//   next boot.
 export type CommittedRuntimeExactOutputRegistryApplication =
   | {
       status: 'applied'
@@ -1079,7 +1136,7 @@ export type CommittedRuntimeExactOutputRegistryApplication =
       targets: 'runtime_bindings' | 'replacement_catalog'
     }
   | { status: 'unpublished'; requires_restart: true }
-  | { status: 'kept'; requires_restart: false; reason: string }
+  | { status: 'kept'; requires_restart: false; next_boot_publishes: false; reason: string }
 
 export interface CommittedRuntimeConfigApplication extends RuntimeConfigApplication {
   operation: string
@@ -1978,12 +2035,15 @@ function decodeCommittedRuntimeExactOutputRegistry(
     return { status: 'unpublished', requires_restart: true }
   }
   if (
-    hasExactKeys(raw, ['status', 'requires_restart', 'reason'])
+    hasExactKeys(raw, ['status', 'requires_restart', 'next_boot_publishes', 'reason'])
     && raw.status === 'kept'
     && raw.requires_restart === false
+    && raw.next_boot_publishes === false
   ) {
     const reason = asString(raw.reason)
-    return reason ? { status: 'kept', requires_restart: false, reason } : undefined
+    return reason
+      ? { status: 'kept', requires_restart: false, next_boot_publishes: false, reason }
+      : undefined
   }
   return undefined
 }

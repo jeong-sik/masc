@@ -374,10 +374,13 @@ let exact_output_registry_application_json
   | Runtime.Exact_output_registry_unpublished ->
     `Assoc [ "status", `String "unpublished"; "requires_restart", `Bool true ]
   | Runtime.Exact_output_registry_kept { reason } ->
-    (* A restart would not help: boot rebuilds from the same file. *)
+    (* A restart would not help: boot rebuilds from the same file, which
+       publishes no registry, so exact output would be unavailable until the
+       file is fixed. [next_boot_publishes] says so. *)
     `Assoc
       [ "status", `String "kept"
       ; "requires_restart", `Bool false
+      ; "next_boot_publishes", `Bool false
       ; ( "reason"
         , `String (Runtime_exact_output_registry.publication_error_to_string reason) )
       ]

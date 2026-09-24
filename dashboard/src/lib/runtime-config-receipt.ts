@@ -37,7 +37,7 @@ function exactOutputRegistryApplicationNotice(
     case 'unpublished':
       return 'Exact registry 미게시 · 재시작 필요'
     case 'kept':
-      return `Exact registry 이전 상태 유지 (${application.reason})`
+      return `Exact registry 이전 상태 유지 · 지금 파일로는 다음 부팅 때 게시되지 않음 (${application.reason})`
   }
 }
 

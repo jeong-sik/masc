@@ -2136,6 +2136,7 @@ let runtime_inventory_json () =
     ; ( "startup_degradation"
       , Runtime.startup_degradation_to_yojson
          ~exact_slots:(Runtime.exact_slot_degradation ())
+         ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
          (Runtime.startup_degradation ()) )
     ; ( "summary"
       , `Assoc

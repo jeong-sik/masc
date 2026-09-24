@@ -299,6 +299,7 @@ let make_health_probe_fields ?timing ?(listener = "http/1.1") ?full_health_url
       ("runtime_startup_degradation",
        Runtime.startup_degradation_to_yojson
          ~exact_slots:(Runtime.exact_slot_degradation ())
+         ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
          (Runtime.startup_degradation ()));
       ("dashboard_surface",
        measure_health_phase timing Server_timing.Health_dashboard_surface
@@ -523,6 +524,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   let runtime_startup_degradation_json =
     Runtime.startup_degradation_to_yojson
          ~exact_slots:(Runtime.exact_slot_degradation ())
+         ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
          (Runtime.startup_degradation ())
   in
   let keeper_config_operator_action_required = keeper_config_schema_blocking in

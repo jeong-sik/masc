@@ -135,6 +135,7 @@ let run ~config_path ~scenario_path ~runtime_ids =
                 ; "config_revision", `String (Runtime.config_source_revision_to_string observation.source_revision)
                 ; "startup_degradation", Runtime.startup_degradation_to_yojson
                     ~exact_slots:(Runtime.exact_slot_degradation ())
+                    ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
                     degradation
                 ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
                 ; "system_prompt", `String scenario.system_prompt

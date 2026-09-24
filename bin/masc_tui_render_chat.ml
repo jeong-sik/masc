@@ -2863,10 +2863,29 @@ let render_keeper_message (state : state) =
        same at three seconds and at thirteen minutes. It changes the text of
        a row, never how many there are, so the row budget is untouched. *)
     let now = Unix.gettimeofday () in
-    let sending_age entry =
-      match Message_layout.age_text ~now ~since:entry.sent_at with
+    let sending_age group =
+      match Message_layout.age_text ~now ~since:group.Masc_tui_types.representative.sent_at with
       | None -> ""
       | Some age -> " · " ^ age
+    in
+    let batch_label group =
+      if group.Masc_tui_types.count = 1 then ""
+      else Printf.sprintf "%d messages in one turn · " group.count
+    in
+    let group_activity group =
+      if group.Masc_tui_types.reconciling_count > 0 then
+        if group.count = 1 then "reconciling"
+        else Printf.sprintf "reconciling %d stream(s)" group.reconciling_count
+      else
+        let transcript = group.representative.log.tl_transcript in
+        if Keeper_chat_transcript.awaiting_continuation transcript then
+          "awaiting continuation"
+        else
+          match Keeper_chat_transcript.phase transcript with
+          | Keeper_chat_transcript.Waiting -> "waiting to start"
+          | Keeper_chat_transcript.Working -> "running"
+          | Keeper_chat_transcript.Stream_ended -> "finishing"
+          | Keeper_chat_transcript.Stream_failed _ -> "failed"
     in
     (* The request the live transcript is already drawing says everything this
        row would: its phase, its age, and the tools it is in. Drawing both put
@@ -2881,37 +2900,36 @@ let render_keeper_message (state : state) =
        and the status area gained a blank line (#37741). *)
     (match
        List.partition
-         (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
+         (fun group -> String.equal group.Masc_tui_types.representative.sent_request.keeper_name keeper_name)
          (Masc_tui_types.keeper_message_inflight_drawn state)
      with
      | mine, others ->
          List.iter
-           (fun entry ->
-             let activity =
-               match entry.phase with
-               | Turn_streaming ->
-                 if Keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript
-                 then "awaiting continuation" else "sending"
-               | Turn_reconciling -> "reconciling"
-             in
+           (fun group ->
+             let entry = group.Masc_tui_types.representative in
              box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-               (Printf.sprintf "  (%s %s%s…)" activity
-                  (Keeper_chat.compact_request_id entry.sent_request.request_id)
-                  (sending_age entry)))
+               (Printf.sprintf "  (%s%s %s%s…)" (batch_label group) (group_activity group)
+                  (Keeper_chat.compact_request_id
+                     (Masc_tui_types.turn_log_execution_id entry.log))
+                  (sending_age group)))
            mine;
          List.iter
-           (fun entry ->
+           (fun group ->
+             let entry = group.Masc_tui_types.representative in
              (* The row names the way to stop it. Esc and /interrupt both
                 read [msg_live], which is this pane's turn and not this one,
                 and the key that would put that keeper on screen is refused
                 while any request is in flight -- so an operator reading
                 this row had no key at all (#33852). *)
              box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-               (Printf.sprintf "  (also sending to %s: %s%s -- /interrupt %s)"
+               (Printf.sprintf "  (%s: %s%s %s%s -- /interrupt %s)"
                   (Keeper_chat.terminal_safe_text
                      entry.sent_request.keeper_name)
-                  (Keeper_chat.compact_request_id entry.sent_request.request_id)
-                  (sending_age entry)
+                  (batch_label group)
+                  (group_activity group)
+                  (Keeper_chat.compact_request_id
+                     (Masc_tui_types.turn_log_execution_id entry.log))
+                  (sending_age group)
                   (Keeper_chat.terminal_safe_text
                      entry.sent_request.keeper_name)))
            others);

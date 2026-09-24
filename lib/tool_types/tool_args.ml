@@ -137,14 +137,13 @@ let error_result ?tool_name ?start_time msg =
     ~start_time
     msg
 
-(** [Tool_result.result] error with machine-readable error code.
-    [~failure_class] defaults to [Runtime_failure]; pass it explicitly when
-    the caller-input rejection is a [Policy_rejection] or [Workflow_rejection]
-    so the typed envelope is used without losing the failure classification. *)
+(** [Tool_result.result] error with machine-readable error code. The caller
+    names [~failure_class]: whether the caller can correct the call is a
+    fact only the producer holds (#27742). *)
 let error_result_typed
       ?tool_name
       ?start_time
-      ?(failure_class = Tool_result.Runtime_failure)
+      ~failure_class
       ~code
       msg
   =

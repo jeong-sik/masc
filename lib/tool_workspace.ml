@@ -410,6 +410,7 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
      error_result_typed
        ~tool_name
        ~start_time
+       ~failure_class:Tool_result.Runtime_failure
        ~code:Internal_error
        message
    | Ok (snapshot, recovered_from, observation_failures) ->

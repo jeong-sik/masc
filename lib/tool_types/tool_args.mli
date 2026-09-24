@@ -110,7 +110,7 @@ val error_result : ?tool_name:string -> ?start_time:float -> string -> Tool_resu
 val error_result_typed :
   ?tool_name:string ->
   ?start_time:float ->
-  ?failure_class:Tool_result.tool_failure_class ->
+  failure_class:Tool_result.tool_failure_class ->
   code:error_code ->
   string ->
   Tool_result.result

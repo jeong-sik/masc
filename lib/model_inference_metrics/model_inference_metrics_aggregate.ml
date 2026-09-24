@@ -101,14 +101,8 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
            let on_count = count_if (fun x -> x) xs in
            Some (float_of_int on_count /. float_of_int total)
        in
-       let provider =
-         match List.find_map (fun e -> e.provider) entries with
-         | Some _ as p -> p
-        | None -> None
-       in
        let stats =
          { model_id
-         ; provider
          ; entry_count = n
          ; avg_tok_per_sec = average_opt tok_vals
          ; p50_tok_per_sec = percentile_opt tok_vals 50.0
@@ -178,7 +172,6 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
              |> take 5
              |> List.map (fun e ->
                { re_ts_unix = e.ts_unix
-               ; re_provider = e.provider
                ; re_outcome = e.outcome
                ; re_stop_reason = e.stop_reason
                ; re_turn_lane = e.turn_lane

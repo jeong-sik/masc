@@ -86,7 +86,7 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
   transient_runtime_retry: '일시적 런타임 재시도',
   internal_error: '내부 오류',
   cancelled: '취소됨',
-  transcript_corruption: '도구 호출 기록이 끊김 - 재기동 때 자동 복구',
+  transcript_corruption: '도구 호출 기록이 깨짐 - checkpoint purge 로 고쳐야 함',
   official_client_recovery_required: '공식 클라이언트 세션 복구 필요',
   provider_attempt_effect_fenced: 'Provider 효과 결과 확인 필요',
   tool_correction_lost: '도구 교정 유실 - 거절 응답이 전달되지 못함',

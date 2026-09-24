@@ -750,6 +750,25 @@ let model_list_protocol io =
   page 3 None [] []
 ;;
 
+(* [account/rateLimits/read] after account admission: the account's usage
+   windows without a thread or a turn, so an account the router no longer
+   picks (because it is spent) can still say when it resets. Reset-credit
+   details are a separate backend lookup this read has no use for. *)
+let rate_limits_read_protocol io =
+  let* _ = probe_protocol io in
+  let stage = "account/rateLimits/read" in
+  send_request
+    io
+    ~id:3
+    ~method_:stage
+    ~params:(`Assoc [ "excludeResetCreditDetails", `Bool true ]);
+  let* response = await_response io ~id:3 ~method_:stage in
+  match Runtime_provider_usage_window.decode_codex_rate_limits_read response with
+  | Ok report -> Ok report
+  | Error error ->
+    protocol_error stage (Runtime_provider_usage_window.decode_error_to_string error)
+;;
+
 let parse_thread_response ~stage result =
   let* fields = assoc_at stage result in
   let* thread_json = required_member stage "thread" fields in
@@ -2043,6 +2062,10 @@ let probe_subscription ~mgr ~clock ~cwd config =
 
 let list_models ~mgr ~clock ~cwd config =
   probe_metadata ~mgr ~clock ~cwd config model_list_protocol
+;;
+
+let read_rate_limits ~mgr ~clock ~cwd config =
+  probe_metadata ~mgr ~clock ~cwd config rate_limits_read_protocol
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd

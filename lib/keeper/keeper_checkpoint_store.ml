@@ -231,18 +231,26 @@ let delete_agent_core_history_files ~(session_dir : string) ~(snapshot_ids : str
 (* Delta Checkpoint Shadow-Apply removed: Agent_core.Checkpoint.delta
    type was removed upstream. Functions had zero callers. *)
 
+type checkpoint_read_failure =
+  | Os_error of Unix.error
+  | Changed_while_read
+  | Read_raised
+
 type checkpoint_load_error =
   | Not_found
   | Store_error of string
   | Parse_error of string
   (** A canonical this binary recognises as an earlier [checkpoint_version].
       Apart from [Parse_error] because the two need opposite answers: a
-      superseded canonical is replaceable, a corrupt one is not. A canonical
-      from a *later* version stays [Parse_error] -- it means an older binary is
-      reading a newer workspace, and overwriting it would destroy history the
-      newer binary can still read. *)
+      superseded canonical is replaceable, a corrupt one is not. *)
   | Superseded_version of { expected : int; got : int }
+  (** A canonical a *later* [checkpoint_version] wrote: an older binary is
+      reading a newer workspace. Nothing here replaces or deletes it, because
+      the newer binary can still read it. Only a writer that bumped the
+      version is told apart this way (#38680). *)
+  | Newer_version of { expected : int; got : int }
   | Io_error of string
+  | Read_failed of { cause : checkpoint_read_failure; detail : string }
   (** Catch-all for agent-core errors outside the Io / Serialization families
       (Api / Agent / Mcp / Config / Orchestration / Internal).
       Distinct from Io_error so observers can tell a local
@@ -280,6 +288,11 @@ let classify_core_error (e : Agent_core.Error.t) : checkpoint_load_error =
   | Serialization (JsonParseError r) -> Parse_error r.detail
   | Serialization (VersionMismatch r) when r.got < r.expected ->
       Superseded_version { expected = r.expected; got = r.got }
+  (* Only a writer that bumped [checkpoint_version] reaches this arm; a codec
+     change shipped without a bump fails later in the decode, as a
+     [JsonParseError] or [UnknownVariant] (#38680). *)
+  | Serialization (VersionMismatch r) when r.got > r.expected ->
+      Newer_version { expected = r.expected; got = r.got }
   | Serialization (VersionMismatch r) ->
       Parse_error (sprintf "version mismatch: expected %d, got %d" r.expected r.got)
   | Serialization (UnknownVariant r) ->
@@ -306,7 +319,16 @@ let read_checkpoint_bytes ~(session_dir : string) path : (string, checkpoint_loa
   | Ok (Some bytes) -> Ok bytes
   | Ok None -> Error Not_found
   | Error error ->
-    Error (Io_error (Fs_compat.owned_regular_file_read_error_to_string error))
+    let detail = Fs_compat.owned_regular_file_read_error_to_string error in
+    (match error.failure with
+     | Fs_compat.Ownership_boundary_rejected _ | Fs_compat.Path_is_not_regular_file _ ->
+       Error (Io_error detail)
+     | Fs_compat.Filesystem_identity_changed _ ->
+       Error (Read_failed { cause = Changed_while_read; detail })
+     | Fs_compat.Owned_file_operation_failed { cause = Unix.Unix_error (errno, _, _); _ } ->
+       Error (Read_failed { cause = Os_error errno; detail })
+     | Fs_compat.Owned_file_operation_failed _ ->
+       Error (Read_failed { cause = Read_raised; detail }))
 
 let load_agent_core_history_file ~(session_dir : string) ~(snapshot_id : string) :
     (Agent_core.Checkpoint.t, checkpoint_load_error) result =
@@ -452,7 +474,9 @@ let load_agent_core ~(session_dir : string) ~(session_id : string) :
          | Error e -> Error (classify_core_error e))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn -> Error (Io_error (Printexc.to_string exn))
+    | Unix.Unix_error (errno, _, _) as exn ->
+      Error (Read_failed { cause = Os_error errno; detail = Printexc.to_string exn })
+    | exn -> Error (Read_failed { cause = Read_raised; detail = Printexc.to_string exn })
 
 (** Message count of the canonical checkpoint. Answered from the canonical
     summary while the file on disk is the one the summary was taken from;
@@ -540,9 +564,14 @@ let checkpoint_load_error_to_string = function
   | Superseded_version { expected; got } ->
     Printf.sprintf
       "checkpoint version %d is superseded by %d" got expected
+  | Newer_version { expected; got } ->
+    Printf.sprintf
+      "checkpoint version %d was written by a later binary; this one reads %d"
+      got expected
   | Store_error detail
   | Parse_error detail
   | Io_error detail
+  | Read_failed { detail; _ }
   | Agent_core_error detail -> detail
 
 let save_agent_core_error_to_string = function
@@ -732,6 +761,116 @@ let known_watermark ~canonical_path
     |> Result.map
          (Option.map (fun (existing : Agent_core.Checkpoint.t) ->
             { session_id = existing.session_id; turn_count = existing.turn_count }))
+
+(* ── Judging and removing an undecodable canonical ([masc_keeper_clear]) ─
+   A canonical no turn can decode fails every turn (#37089), and nothing the
+   store writes may replace it. The operator's clear deletes it, so the next
+   turn starts from no checkpoint.
+
+   Only bytes that were read and then rejected by the decoder for their
+   content are removed. A read that returned no bytes (an OS failure, a file
+   that changed during the read, a path that is not a regular file inside the
+   owned chain, a session id that is not a path segment) says nothing about
+   the content. A canonical a build that bumped [checkpoint_version] wrote is
+   readable by that build. Both stay. A later build that changed the codec
+   without a bump is not told apart from damage and is removed (#38680). The step that stopped decides this, not the
+   [checkpoint_load_error] label: other readers in this module report OS
+   failures as [Io_error]. *)
+
+type canonical_judgement =
+  | Judged_absent
+  | Judged_decoded of Agent_core.Checkpoint.t
+  | Judged_superseded of { expected : int; got : int }
+  | Judged_newer of { expected : int; got : int }
+  | Judged_undecodable of checkpoint_load_error
+  | Judged_inconclusive of checkpoint_load_error
+
+(* The read and the decode [load_agent_core] takes, one step at a time so the
+   step that stopped is known. *)
+let judge_canonical ~(session_dir : string) ~(session_id : string) : canonical_judgement =
+  let raised cause exn =
+    Judged_inconclusive (Read_failed { cause; detail = Printexc.to_string exn })
+  in
+  if not (leaf_is_real_segment session_id) then
+    Judged_inconclusive (Store_error "session_id is not a real path segment")
+  else
+    let path = agent_core_checkpoint_path ~session_dir ~session_id in
+    match read_checkpoint_bytes ~session_dir path with
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception (Unix.Unix_error (errno, _, _) as exn) -> raised (Os_error errno) exn
+    | exception exn -> raised Read_raised exn
+    | Error Not_found -> Judged_absent
+    | Error error -> Judged_inconclusive error
+    | Ok bytes ->
+      (match decode_checkpoint_off_scheduler bytes with
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | exception exn -> raised Read_raised exn
+       | Ok checkpoint -> Judged_decoded checkpoint
+       | Error core_error ->
+         (match classify_core_error core_error with
+          | Superseded_version { expected; got } -> Judged_superseded { expected; got }
+          | Newer_version { expected; got } -> Judged_newer { expected; got }
+          | (Parse_error _ | Store_error _) as undecodable -> Judged_undecodable undecodable
+          (* The decoder failed for a reason that is not the content. *)
+          | (Not_found | Io_error _ | Read_failed _ | Agent_core_error _) as error ->
+            Judged_inconclusive error))
+
+type undecodable_removal_outcome =
+  | Removed of { undecodable : checkpoint_load_error }
+  | Canonical_absent
+  | Canonical_loadable
+
+type undecodable_removal_error =
+  | Removal_refused of checkpoint_load_error
+  | Removal_failed of string
+  | Removal_durability_unknown of string
+
+let undecodable_removal_error_to_string = function
+  | Removal_refused error ->
+    "the checkpoint was not removed, because reading it again did not show bytes whose content fails to decode: "
+    ^ checkpoint_load_error_to_string error
+  | Removal_failed detail -> "the undecodable checkpoint was not removed: " ^ detail
+  | Removal_durability_unknown detail ->
+    "the undecodable checkpoint was removed, but the directory sync failed: " ^ detail
+
+let remove_undecodable_canonical ~(session_dir : string) ~(session_id : string)
+  : (undecodable_removal_outcome, undecodable_removal_error) result =
+  if not (leaf_is_real_segment session_id) then
+    Error (Removal_failed "session_id is not a real path segment")
+  else
+    let locked =
+      with_session_lock ~session_dir (fun session_dir ->
+        let remove undecodable =
+          let canonical_path = agent_core_checkpoint_path ~session_dir ~session_id in
+          let unlink_and_sync () =
+            Unix.unlink canonical_path;
+            match Keeper_fs_durable_directory.fsync_directory session_dir with
+            | () -> Ok (Removed { undecodable })
+            | exception ((Unix.Unix_error _ | Fun.Finally_raised _) as exn) ->
+              Error (Removal_durability_unknown (Printexc.to_string exn))
+          in
+          match
+            Eio_guard.run_in_systhread ~label:"keeper.checkpoint.remove-undecodable"
+              unlink_and_sync
+          with
+          | result -> result
+          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+          | exception (Unix.Unix_error _ as exn) ->
+            Error (Removal_failed (Printexc.to_string exn))
+        in
+        match judge_canonical ~session_dir ~session_id with
+        | Judged_absent -> Ok Canonical_absent
+        (* A turn starts from the first, and replaces the second on its first
+           save. *)
+        | Judged_decoded _ | Judged_superseded _ -> Ok Canonical_loadable
+        | Judged_newer { expected; got } ->
+          Error (Removal_refused (Newer_version { expected; got }))
+        | Judged_inconclusive error -> Error (Removal_refused error)
+        | Judged_undecodable undecodable -> remove undecodable)
+    in
+    match locked with
+    | Ok result -> result
+    | Error detail -> Error (Removal_failed detail)
 
 type checkpoint_identity_error =
   | Session_id_invalid of string

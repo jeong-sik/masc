@@ -34,10 +34,15 @@ let make_workflow_err ~tool_name ~start_time message =
 let route_of ~tool_name ~start_time args =
   match args with
   | `Assoc fields ->
-    (match List.assoc_opt "lane" fields with
-     | None | Some (`String "live") -> Ok (Browser_lane.Live_route None)
-     | Some (`String "automation") -> Ok Browser_lane.Automation_route
-     | _ -> Error (make_input_err ~tool_name ~start_time "lane must be live or automation"))
+    let lane = match List.assoc_opt "lane" fields with
+      | None -> Some Browser_lane.Lane_name.Live
+      | Some (`String raw) -> Browser_lane.Lane_name.of_wire raw
+      | Some _ -> None in
+    (match lane with
+     | Some Browser_lane.Lane_name.Live -> Ok (Browser_lane.Live_route None)
+     | Some Browser_lane.Lane_name.Automation -> Ok Browser_lane.Automation_route
+     | None ->
+       Error (make_input_err ~tool_name ~start_time ("lane must be " ^ Browser_lane.Lane_name.expected)))
   | _ -> Error (make_input_err ~tool_name ~start_time "browser arguments must be an object")
 ;;
 
@@ -308,7 +313,8 @@ let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
   let pre_error detail =
     make_workflow_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect in
   let args = match args with
-    | `Assoc fields when not (List.mem_assoc "lane" fields) -> `Assoc (("lane",`String "automation") :: fields)
+    | `Assoc fields when not (List.mem_assoc "lane" fields) ->
+      `Assoc (("lane", `String Browser_lane.Lane_name.(to_wire Automation)) :: fields)
     | _ -> args in
   match route_of ~tool_name ~start_time args, Browser_lane.Action.parse args with
   | Error error, _ -> error, Tool_result.Proven_pre_effect

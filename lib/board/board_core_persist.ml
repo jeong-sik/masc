@@ -394,15 +394,37 @@ let posts_jsonl_unlocked ?replacement store =
     store.posts;
   Buffer.contents buf
 ;;
-let save_posts_jsonl_result content =
-  try
-    ensure_masc_dir ();
-    let path = persist_path () in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> Ok ()
-    | Error msg -> persist_io_error ~where:"rewrite_posts" msg
-  with
-  | Sys_error msg -> persist_io_error ~where:"rewrite_posts" msg
+(* A snapshot replaces the whole file with what memory holds. The loader reads
+   every line and keeps each row it can decode, but a line it cannot decode
+   never reaches memory, so the rewrite would delete that line: the only
+   evidence of the damage, possibly a row from a newer schema (#38595). Every
+   posts and comments snapshot write goes through the two functions below,
+   which refuse while the load that filled memory was partial. Appends do not
+   come here and never delete a row. *)
+let refuse_partial_snapshot ~where ~file load_result =
+  match load_result with
+  | Ok () -> Ok ()
+  | Error detail ->
+    persist_io_error ~where
+      (Printf.sprintf
+         "%s has a line the loader could not read (%s); a rewrite from memory would \
+          drop that line, so the file is left as it is until it loads fully (fix \
+          or remove that line, then restart)"
+         file detail)
+;;
+
+let save_posts_snapshot store content =
+  match refuse_partial_snapshot ~where:"rewrite_posts" ~file:"posts" store.posts_load_result with
+  | Error _ as refused -> refused
+  | Ok () ->
+    (try
+       ensure_masc_dir ();
+       let path = persist_path () in
+       match Fs_compat.save_file_atomic path content with
+       | Ok () -> Ok ()
+       | Error msg -> persist_io_error ~where:"rewrite_posts" msg
+     with
+     | Sys_error msg -> persist_io_error ~where:"rewrite_posts" msg)
 ;;
 (* The only caller rewrites the snapshot to drop an orphan row an aborted
    append left on disk. Dropping the write's Error meant a failed rewrite left
@@ -413,7 +435,7 @@ let save_posts_jsonl_result content =
 let rewrite_posts store =
   with_persist_lock store (fun () ->
     let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
-    match save_posts_jsonl_result content with
+    match save_posts_snapshot store content with
     | Ok () -> ()
     | Error _ ->
       with_lock store (fun () ->
@@ -431,21 +453,35 @@ let comments_jsonl_unlocked store =
     store.comments;
   Buffer.contents buf
 ;;
-let save_comments_jsonl content =
-  try
-    ensure_masc_dir ();
-    match Fs_compat.save_file_atomic (comments_path ()) content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_comments" msg
+let save_comments_snapshot store content =
+  match
+    refuse_partial_snapshot ~where:"rewrite_comments" ~file:"comments"
+      store.comments_load_result
   with
-  | Sys_error msg -> record_persist_error ~where:"rewrite_comments" msg
+  | Error _ as refused -> refused
+  | Ok () ->
+    (try
+       ensure_masc_dir ();
+       match Fs_compat.save_file_atomic (comments_path ()) content with
+       | Ok () -> Ok ()
+       | Error msg -> persist_io_error ~where:"rewrite_comments" msg
+     with
+     | Sys_error msg -> persist_io_error ~where:"rewrite_comments" msg)
 ;;
 (* Snapshot capture and write share the persist lock, so a waiting rewrite
-   cannot overwrite a newer committed snapshot. *)
+   cannot overwrite a newer committed snapshot. A refused or failed write stays
+   scheduled for the next flush, as [rewrite_posts] does. *)
 let rewrite_comments store =
   with_persist_lock store (fun () ->
     let content = with_lock store (fun () -> comments_jsonl_unlocked store) in
-    save_comments_jsonl content)
+    match save_comments_snapshot store content with
+    | Ok () -> ()
+    | Error _ ->
+      with_lock store (fun () ->
+        store.dirty_comments <- true;
+        Hashtbl.iter
+          (fun key _ -> Hashtbl.replace store.dirty_comment_ids key ())
+          store.comments))
 ;;
 let reactions_jsonl_unlocked store =
   let buf = Buffer.create 4096 in
@@ -905,7 +941,7 @@ let update_post_with_outcome
                   }
                 in
                 let snapshot = posts_jsonl_unlocked ~replacement:updated store in
-                match save_posts_jsonl_result snapshot with
+                match save_posts_snapshot store snapshot with
                 | Error _ as error -> error
                 | Ok () ->
                   Hashtbl.replace store.posts key updated;

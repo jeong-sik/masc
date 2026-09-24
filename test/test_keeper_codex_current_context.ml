@@ -54,7 +54,7 @@ for line in sys.stdin:
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(reject_context = false) ?(overflow_resume = false) test =
+let with_fixture ?(reject_context = false) ?(overflow_resume = false) ?max_prompt_bytes test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Eio_context.set_env env;
   Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
@@ -79,10 +79,13 @@ is-non-interactive = true
 [models.context]
 api-name = "context-fixture"
 max-context = 400000
-[codex.context]
+%s[codex.context]
 [runtime]
 default = "codex.context"
-|} command);
+|} command
+    (match max_prompt_bytes with
+     | None -> ""
+     | Some bytes -> Printf.sprintf "max-prompt-bytes = %d\n" bytes));
   Runtime.init_default ~config_path |> require;
   let config = match Runtime.get_runtime_by_id "codex.context" with
     | Some {execution=Runtime_execution.Codex_app_server config;_} -> config
@@ -277,7 +280,143 @@ let test_resumed_context_overflow_shrinks_configuration () =
         (snapshot |> member "original_vendor_turn" |> member "turn_id" |> text)) resumes
   | _ -> fail "expected exactly one context-capacity retry on the same vendor thread"
 
+(* #37353. 64 messages of about 4 KiB: roughly 262 KiB of history, well under
+   the app-server's 10 MiB string limit, so the fixture can cross a declared
+   limit without building a 10 MiB request. *)
+let large_history = List.init 64 (fun index -> Agent_core.Types.user_msg
+  (Printf.sprintf "%d:%s" index (String.make 4096 'x')))
+
+let declared_limit = 65_536
+
+(* One settled native thread, then a Resume carrying [large_history]. Returns
+   the Resume attempt and the requests it wrote. [start] and [resume] are the
+   fixture's [run] already applied, so its optional arguments stay known. *)
+let resume_large_history ~capture ~start ~resume =
+  let first = start () in
+  successful first;
+  let settled = Option.get first.Keeper_codex_runtime.settled_session in
+  let session_id, turn_id = match settled.Keeper_official_client_session_store.phase with
+    | Settled turn -> turn.session_id, turn.turn_id | _ -> fail "initial turn not settled" in
+  let operation_id = Keeper_chat_operation.Operation_id.of_string "prompt-limit-original" |> require in
+  let seed = match Keeper_semantic_execution.create
+      ~id:(Keeper_execution_scope_id.direct_operation operation_id)
+      ~input:(`String "original operation") ~sources:[] ~now:1. with
+    | Ok value -> value | Error error -> fail (Keeper_semantic_execution.error_to_string error) in
+  let checkpoint : Keeper_semantic_execution.official_client_checkpoint =
+    {client_kind=settled.client_kind;runtime_id=settled.runtime_id;session_id;turn_id;
+     tool_surface_sha256=settled.tool_surface_sha256;frame=seed.frame} in
+  let before = List.length (read_requests capture) in
+  let attempt = resume checkpoint in
+  attempt, read_requests capture |> List.filteri (fun index _ -> index >= before)
+
+let params_of method_ rows =
+  List.filter (fun row -> member "method" row = `String method_) rows
+  |> List.map (member "params")
+
+let snapshot_of_instructions instructions =
+  instructions |> String.split_on_char '\n' |> List.rev |> List.hd |> Yojson.Safe.from_string
+
+let turn_input params = params |> member "input" |> items |> List.hd |> member "text" |> text
+
+(* Two fixtures live under different temporary roots; anything that names the
+   root is compared with the root taken out. *)
+let without_root ~capture value =
+  let root = Filename.dirname capture in
+  let root_length = String.length root in
+  let buffer = Buffer.create (String.length value) in
+  let rec copy index =
+    if index >= String.length value then ()
+    else if index + root_length <= String.length value
+         && String.equal (String.sub value index root_length) root
+    then (Buffer.add_string buffer "<root>"; copy (index + root_length))
+    else (Buffer.add_char buffer value.[index]; copy (index + 1))
+  in
+  copy 0;
+  Buffer.contents buffer
+
+let test_declared_limit_windows_resume_before_send () =
+  (* (a) The limit is applied to the first attempt. Before #37353 the Resume
+     went out whole and only a provider refusal narrowed it -- a refusal that
+     arrives after a tool has run cannot be retried. *)
+  with_fixture ~max_prompt_bytes:declared_limit @@ fun ~run ~capture ~reports:_ ->
+  let attempt, rows = resume_large_history ~capture
+    ~start:(fun () -> run ~instructions:"Keeper instructions" ~world:"world" ())
+    ~resume:(fun checkpoint -> run ~initial_messages:large_history
+      ~official_client_continuation:checkpoint ~official_client_original_turn:checkpoint
+      ~instructions:"Keeper instructions" ~world:"world" ()) in
+  successful attempt;
+  (match params_of "thread/resume" rows, params_of "turn/start" rows with
+   | [resume], [turn] ->
+     let instructions = resume |> member "developerInstructions" |> text in
+     let goal = turn_input turn in
+     check bool "developerInstructions and goal fit the declared limit" true
+       (String.length instructions + String.length goal <= declared_limit);
+     let snapshot = snapshot_of_instructions instructions in
+     let kept = snapshot |> member "messages" |> items in
+     check bool "older history was cut before sending" true
+       (kept <> [] && List.length kept < 64);
+     check bool "the newest message survives the cut" true
+       (String_util.contains_substring instructions "63:xxxx");
+     check int "provenance still names the whole source" 64
+       (snapshot |> member "source_message_count" |> Yojson.Safe.Util.to_int)
+   | resumes, turns ->
+     fail (Printf.sprintf
+       "expected one windowed Resume and no overflow retry, saw %d resumes and %d turns"
+       (List.length resumes) (List.length turns)))
+
+let test_declared_limit_windows_start () =
+  (* A Start injects its history as thread items instead of a snapshot; the
+     same declared limit bounds it. *)
+  with_fixture ~max_prompt_bytes:declared_limit @@ fun ~run ~capture ~reports:_ ->
+  successful (run ~initial_messages:large_history ~instructions:"Keeper instructions" ~world:"world" ());
+  match params_of "thread/inject_items" (read_requests capture) with
+  | [injected] ->
+    let injected = injected |> member "items" |> items in
+    check bool "older history was cut before the thread was seeded" true
+      (injected <> [] && List.length injected < 64);
+    check bool "the newest message is seeded" true
+      (String_util.contains_substring
+         (Yojson.Safe.to_string (List.nth injected (List.length injected - 1))) "63:xxxx")
+  | rows -> fail (Printf.sprintf "expected one inject_items request, saw %d" (List.length rows))
+
+let resume_wire ~max_prompt_bytes =
+  with_fixture ?max_prompt_bytes @@ fun ~run ~capture ~reports:_ ->
+  let attempt, rows = resume_large_history ~capture
+    ~start:(fun () -> run ~instructions:"Keeper instructions" ~world:"world" ())
+    ~resume:(fun checkpoint -> run ~initial_messages:large_history
+      ~official_client_continuation:checkpoint ~official_client_original_turn:checkpoint
+      ~instructions:"Keeper instructions" ~world:"world" ()) in
+  successful attempt;
+  match params_of "thread/resume" rows, params_of "turn/start" rows with
+  | [resume], [turn] ->
+    let instructions = resume |> member "developerInstructions" |> text in
+    instructions,
+    [ without_root ~capture instructions; without_root ~capture (turn_input turn) ]
+  | resumes, turns ->
+    fail (Printf.sprintf "expected one Resume, saw %d resumes and %d turns"
+      (List.length resumes) (List.length turns))
+
+let test_undeclared_limit_sends_whole_history () =
+  (* (c) The operator's decision (ask7a9c2dbf75c6a2fa): nothing declared, no
+     limit. The Resume carries every message, as it did before #37353. *)
+  let instructions, _ = resume_wire ~max_prompt_bytes:None in
+  let kept = snapshot_of_instructions instructions |> member "messages" |> items in
+  check int "nothing declared: every message is carried" 64 (List.length kept)
+
+let test_declared_limit_above_history_changes_nothing () =
+  (* (b) A limit the history fits under sends exactly what an undeclared lane
+     sends. *)
+  let _, undeclared = resume_wire ~max_prompt_bytes:None in
+  let _, declared = resume_wire ~max_prompt_bytes:(Some 10_000_000) in
+  check (list string) "a limit above the history leaves the request unchanged"
+    undeclared declared
+
+
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "a declared prompt limit windows a Resume before it is sent" `Quick test_declared_limit_windows_resume_before_send;
+  test_case "a declared prompt limit windows a Start" `Quick test_declared_limit_windows_start;
+  test_case "no declared prompt limit sends the whole history" `Quick test_undeclared_limit_sends_whole_history;
+  test_case "a prompt limit above the history changes nothing" `Quick test_declared_limit_above_history_changes_nothing;
   test_case "resumed context overflow shrinks replacement configuration" `Quick test_resumed_context_overflow_shrinks_configuration;
   test_case "cooperative native resume does not replay original input" `Quick test_cooperative_resume_sends_only_remaining_work_instruction;
   test_case "a resumed native thread is not written to per turn" `Quick test_resume_persists_no_per_turn_context;

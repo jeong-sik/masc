@@ -28,10 +28,6 @@ val core_termination_semantics
 
 val core_termination_semantics_to_string : core_termination_semantics -> string
 
-(** Snake_case wire label for a provider network error kind; rendered by
-    {!Llm_provider.Http_client.network_error_kind_to_string}. *)
-val network_error_kind_to_wire : Llm_provider.Http_client.network_error_kind -> string
-
 (** Snake_case wire label for the disposition carried by a closed terminal
     tool effect: ["proven_pre_effect"], ["proven_post_effect"] or
     ["effect_outcome_unknown"]. *)

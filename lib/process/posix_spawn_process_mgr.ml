@@ -4,7 +4,7 @@ external posix_spawn
   :  string
   -> string array
   -> string array
-  -> (string option * bool)
+  -> string option
   -> (int * Unix.file_descr) list
   -> int
   = "masc_posix_spawn"
@@ -177,7 +177,7 @@ module Impl = struct
         @@ fun unix_fds ->
         List.iter2 apply_blocking unix_fds modes;
         Eio.Private.Trace.with_span "spawn" (fun () ->
-          posix_spawn executable (Array.of_list args) env (cwd, Option.is_some group) (List.combine child_fds unix_fds))
+          posix_spawn executable (Array.of_list args) env cwd (List.combine child_fds unix_fds))
       in
       let t = { pid; exit_status; lock = Stdlib.Mutex.create (); group } in
       let hook =

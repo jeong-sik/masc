@@ -1,5 +1,5 @@
 external spawnp :
-  string -> string array -> string array -> (string option * bool) ->
+  string -> string array -> string array -> string option ->
   (int * Unix.file_descr) list -> int = "masc_posix_spawnp"
 
 external exited_without_reaping : int -> bool = "masc_process_exited_without_reaping"
@@ -21,7 +21,7 @@ let spawn t executable argv env stdin_fd stdout_fd stderr_fd = locked t (fun () 
   (match t.state with
    | Unstarted -> ()
    | Owned | Reaped _ | Lost -> invalid_arg "foreground owner already started");
-  t.pid <- spawnp executable (Array.of_list argv) env (None, true)
+  t.pid <- spawnp executable (Array.of_list argv) env None
       [ 0, stdin_fd; 1, stdout_fd; 2, stderr_fd ];
   t.state <- Owned)
 

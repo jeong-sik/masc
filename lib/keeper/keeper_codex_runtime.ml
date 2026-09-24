@@ -883,8 +883,14 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       |> List.filter (fun text -> String.trim text <> "")
       |> String.concat "\n\n"
     in
-    let source_snapshot_sha256 = `List (List.map Keeper_official_client_context_codec.to_json initial_messages)
-      |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+    (* History can contain large tool results. Encoding and hashing it is CPU
+       work over immutable messages; keeping it on the owner domain stalls
+       HTTP, SSE and every other Keeper sharing that scheduler. *)
+    let source_snapshot_sha256 =
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        `List (List.map Keeper_official_client_context_codec.to_json initial_messages)
+        |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex)
+    in
     let* prepared =
       match declared_max_prompt_bytes with
       | None -> Ok prepared
@@ -951,45 +957,49 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~model_id:config.model
         ~requested:prepared.reasoning_effort
     in
-    let* developer_messages, history = project_messages prepared.messages in
-    (* Full canonical context is data, not a guessed unseen suffix. Resume
-       replaces this configuration on the existing vendor thread; it never
-       appends native tool calls into the vendor execution stream. *)
-    let snapshot_messages =
-      List.filter (fun message -> not (Host.is_composed_system_context message))
-        prepared.messages in
-    let canonical_snapshot =
-      `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages) in
-    let snapshot_sha256 = canonical_snapshot |> Yojson.Safe.to_string
-      |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
-    let external_context = match thread_mode with
-      | Runtime_codex_app_server.Start -> []
-      | Runtime_codex_app_server.Resume _ ->
-        resume_external_context
-          ~snapshot_sha256
-          ~source_snapshot_sha256
-          ~source_message_count:(List.length initial_messages)
-          ~canonical_snapshot
-          ~official_client_continuation
-          ~official_client_original_turn
-    in
-    let context_frontier : Keeper_official_client_session_store.context_frontier =
-      { snapshot_sha256; message_count = List.length snapshot_messages;
-        delivery = (match thread_mode with
-          | Runtime_codex_app_server.Start -> Prepared_start_context
-          | Runtime_codex_app_server.Resume _ -> Replaced_configuration);
-        acknowledged_turn = None } in
-    (* [None] here means "send no developerInstructions": [optional_field]
-       omits the member and the app-server runs the thread on Codex's own
-       default instructions. The probe and fusion callers build [None] on
-       purpose and do not pass through here. This composition always carries
-       [prepared.system_prompt], which [Host.prepare_turn] refused when blank,
-       so the joined text is never empty. A check on the joined text could
-       not see a blank keeper prompt behind the posture note this lane
-       appends (#33165). *)
-    let composed_developer_instructions =
-      compose_developer_instructions ~developer_messages ~external_context
-      |> String.trim
+    let* history, context_frontier, composed_developer_instructions =
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        let* developer_messages, history = project_messages prepared.messages in
+        (* Full canonical context is data, not a guessed unseen suffix. Resume
+           replaces this configuration on the existing vendor thread; it never
+           appends native tool calls into the vendor execution stream. *)
+        let snapshot_messages =
+          List.filter (fun message -> not (Host.is_composed_system_context message))
+            prepared.messages in
+        let canonical_snapshot =
+          `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages) in
+        let snapshot_sha256 = canonical_snapshot |> Yojson.Safe.to_string
+          |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+        let external_context = match thread_mode with
+          | Runtime_codex_app_server.Start -> []
+          | Runtime_codex_app_server.Resume _ ->
+            resume_external_context
+              ~snapshot_sha256
+              ~source_snapshot_sha256
+              ~source_message_count:(List.length initial_messages)
+              ~canonical_snapshot
+              ~official_client_continuation
+              ~official_client_original_turn
+        in
+        let context_frontier : Keeper_official_client_session_store.context_frontier =
+          { snapshot_sha256; message_count = List.length snapshot_messages;
+            delivery = (match thread_mode with
+              | Runtime_codex_app_server.Start -> Prepared_start_context
+              | Runtime_codex_app_server.Resume _ -> Replaced_configuration);
+            acknowledged_turn = None } in
+        (* [None] here means "send no developerInstructions": [optional_field]
+           omits the member and the app-server runs the thread on Codex's own
+           default instructions. The probe and fusion callers build [None] on
+           purpose and do not pass through here. This composition always carries
+           [prepared.system_prompt], which [Host.prepare_turn] refused when blank,
+           so the joined text is never empty. A check on the joined text could
+           not see a blank keeper prompt behind the posture note this lane
+           appends (#33165). *)
+        let composed_developer_instructions =
+          compose_developer_instructions ~developer_messages ~external_context
+          |> String.trim
+        in
+        Ok (history, context_frontier, composed_developer_instructions))
     in
     let developer_instructions = Some composed_developer_instructions in
     (* The window already fits; this is the account checked once more before

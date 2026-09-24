@@ -54,8 +54,16 @@ for line in sys.stdin:
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(reject_context = false) ?(overflow_resume = false) ?max_prompt_bytes test =
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?max_prompt_bytes test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let previous_pool = Domain_pool_ref.get () in
+  Eio.Switch.on_release sw (fun () ->
+    match previous_pool with
+    | None -> Domain_pool_ref.clear_for_tests ()
+    | Some pool -> Domain_pool_ref.set pool);
+  if worker_pool then
+    Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 env#domain_mgr)
+  else Domain_pool_ref.clear_for_tests ();
   Eio_context.set_env env;
   Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
   Masc_test_deps.init_eio_clock ~sw env;
@@ -115,10 +123,10 @@ let successful attempt = match attempt.Keeper_codex_runtime.result with
   | Ok _ -> ()
   | Error error -> fail (Agent_core.Error.to_string error)
 
-let test_resume_persists_no_per_turn_context () =
+let test_resume_persists_no_per_turn_context ?(worker_pool = false) () =
   (* Current instructions and observation frames replace configuration; only
      actual initial conversation rows are injected into persistent history. *)
-  with_fixture @@ fun ~run ~capture ~reports ->
+  with_fixture ~worker_pool @@ fun ~run ~capture ~reports ->
   successful (run ~instructions:"Keeper revision 1: publish the first artifact."
     ~world:"World State: task-001 done; goal awaiting confirmation." ());
   let first_requests = read_requests capture in
@@ -139,6 +147,17 @@ let test_resume_persists_no_per_turn_context () =
     (params "turn/start" resumed |> member "input" |> items |> List.hd |> member "text" |> text);
   let instructions rows method_ = params method_ rows |> member "developerInstructions" |> text in
   let resumed_instructions = instructions resumed "thread/resume" in
+  let snapshot = resumed_instructions |> String.split_on_char '\n'
+    |> List.rev |> List.hd |> Yojson.Safe.from_string in
+  let digest json = Yojson.Safe.to_string json
+    |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+  check string "snapshot digest identifies the transmitted message bytes"
+    (digest (member "messages" snapshot))
+    (snapshot |> member "snapshot_sha256" |> text);
+  check string "source digest identifies the original conversation"
+    (digest (`List [Keeper_official_client_context_codec.to_json
+      (Agent_core.Types.user_msg "Previous completed work")]))
+    (snapshot |> member "source_snapshot_sha256" |> text);
   check bool "resume carries current instructions" true
     (String.starts_with ~prefix:"Keeper revision 2:" resumed_instructions);
   check bool "resume carries current world frame" true
@@ -419,5 +438,6 @@ let () = run "Keeper current Codex context" ["native requests",[
   test_case "a prompt limit above the history changes nothing" `Quick test_declared_limit_above_history_changes_nothing;
   test_case "resumed context overflow shrinks replacement configuration" `Quick test_resumed_context_overflow_shrinks_configuration;
   test_case "cooperative native resume does not replay original input" `Quick test_cooperative_resume_sends_only_remaining_work_instruction;
-  test_case "a resumed native thread is not written to per turn" `Quick test_resume_persists_no_per_turn_context;
+  test_case "a resumed native thread is not written to per turn" `Quick (test_resume_persists_no_per_turn_context ~worker_pool:false);
+  test_case "pooled context encoding preserves fresh and resumed requests" `Quick (test_resume_persists_no_per_turn_context ~worker_pool:true);
   test_case "context injection must be acknowledged before model turn" `Quick test_rejected_context_never_submits_turn]]

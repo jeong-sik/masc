@@ -20,6 +20,8 @@ type attach_error =
   | Service_worker_absent
   | Malformed_reply of { method_ : string; detail : string }
       (** A CDP reply without the field the next step needs. *)
+  | Runtime_not_ready
+      (** The runtime's receiver or marker did not appear within [worker_wait_s]. *)
   | Runtime_marker of string
   | Runtime_incompatible of { found : string; supported : int }
   | Init_failed of call_failure
@@ -58,7 +60,8 @@ type t
 
 (** [create ~sw ~clock ~worker_wait_s ~model ~log] is an unattached session.
     Fibers that answer the extension run on [sw]. [worker_wait_s] bounds the
-    wait for the extension's service worker to appear after loading. *)
+    wait for the extension's service worker to appear after loading, and then
+    the wait for its runtime to be ready. *)
 val create :
   sw:Eio.Switch.t
   -> clock:_ Eio.Time.clock

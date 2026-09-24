@@ -63,6 +63,7 @@ let attach_error_message = function
   | Session.Extension_id_mismatch { expected; loaded } ->
     Printf.sprintf "Chrome loaded the extension as %s, not %s, so its origin is not the allowed one" loaded expected
   | Session.Service_worker_absent -> "the extension's service worker never appeared"
+  | Session.Runtime_not_ready -> "the Stagehand runtime was not ready in its service worker"
   | Session.Malformed_reply { method_; detail } -> Printf.sprintf "%s answered without what attach needs: %s" method_ detail
   | Session.Runtime_marker detail -> "the Stagehand runtime marker is unreadable: " ^ detail
   | Session.Runtime_incompatible { found; supported } ->

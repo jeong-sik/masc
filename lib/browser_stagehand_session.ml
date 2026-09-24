@@ -6,6 +6,7 @@ type attach_error =
   | Extension_id_mismatch of { expected : string; loaded : string }
   | Service_worker_absent
   | Malformed_reply of { method_ : string; detail : string }
+  | Runtime_not_ready
   | Runtime_marker of string
   | Runtime_incompatible of { found : string; supported : int }
   | Init_failed of call_failure
@@ -323,18 +324,17 @@ let find_worker cdp ~extension_id =
   | Some _ | None -> Error (Malformed_reply { method_ = "Target.getTargets"; detail = "targetInfos is not a list" })
 ;;
 
-(* Looked for after the extension loaded, so a worker of an earlier load that
-   the new one replaces is gone by the time one is found, unless it restarts
-   in between, which then fails attach instead of attaching to it. *)
-let await_worker t cdp ~extension_id =
+(* Runs [step] every [worker_poll_s] until it finds what it looks for, for at
+   most [worker_wait_s]; [absent] is the answer when the wait runs out. *)
+let poll_within_wait t ~absent step =
   Watched_work.run
     ~watcher:(fun () ->
       t.sleep t.worker_wait_s;
-      Error Service_worker_absent)
+      Error absent)
     (fun () ->
       let rec poll () =
-        match find_worker cdp ~extension_id with
-        | Ok (Some target_id) -> Ok target_id
+        match step () with
+        | Ok (Some found) -> Ok found
         | Ok None ->
           t.sleep worker_poll_s;
           poll ()
@@ -343,18 +343,41 @@ let await_worker t cdp ~extension_id =
       poll ())
 ;;
 
-let initialise t link ~browser_cdp_url =
+(* Looked for after the extension loaded, so a worker of an earlier load that
+   the new one replaces is gone by the time one is found, unless it restarts
+   in between, which then fails attach instead of attaching to it. *)
+let await_worker t cdp ~extension_id =
+  poll_within_wait t ~absent:Service_worker_absent (fun () -> find_worker cdp ~extension_id)
+;;
+
+let exception_text details =
+  match Option.bind (field "exception" details) (field "description"), field "text" details with
+  | Some (`String description), _ -> description
+  | (Some _ | None), Some (`String text) -> text
+  | (Some _ | None), (Some _ | None) -> "without a description"
+;;
+
+(* One look at the runtime. A check that threw is reported as such: its
+   result is then an empty object, which read as a marker would name a
+   missing field instead of the cause. *)
+let runtime_readiness link () =
   let* evaluated =
     cdp_step
       (Browser_cdp.command link.cdp ~session:link.worker "Runtime.evaluate"
-         (`Assoc [ "expression", `String Wire.readiness_expression; "awaitPromise", `Bool true; "returnByValue", `Bool true ]))
+         (`Assoc [ "expression", `String Wire.readiness_expression; "returnByValue", `Bool true ]))
   in
-  let* marker_json =
-    match Option.bind (field "result" evaluated) (field "value") with
-    | Some value -> Ok value
-    | None -> Error (Runtime_marker "the readiness check returned no value")
-  in
-  let* marker = Result.map_error (fun detail -> Runtime_marker detail) (Wire.marker_of_json marker_json) in
+  match field "exceptionDetails" evaluated, Option.bind (field "result" evaluated) (field "value") with
+  | Some details, (Some _ | None) -> Error (Runtime_marker ("the readiness check threw: " ^ exception_text details))
+  | None, None -> Error (Runtime_marker "the readiness check returned no value")
+  | None, Some value ->
+    (match Wire.readiness_of_json value with
+     | Ok (Wire.Ready marker) -> Ok (Some marker)
+     | Ok Wire.Not_ready -> Ok None
+     | Error detail -> Error (Runtime_marker detail))
+;;
+
+let initialise t link ~browser_cdp_url =
+  let* marker = poll_within_wait t ~absent:Runtime_not_ready (runtime_readiness link) in
   let* major = Result.map_error (fun detail -> Runtime_marker detail) (Wire.protocol_major marker) in
   let* () =
     if major = Wire.supported_protocol_major then Ok ()

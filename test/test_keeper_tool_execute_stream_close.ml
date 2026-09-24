@@ -101,6 +101,7 @@ let make_meta ~name () =
   | Ok meta ->
     { meta with
       sandbox_profile = Keeper_types_profile_sandbox.Docker
+    ; sandbox_image = Some "base"
     ; always_allow = Some true
     }
   | Error e -> Alcotest.fail e
@@ -116,6 +117,8 @@ let setup f =
   ensure_dir config_dir;
   let config = Workspace.default_config base in
   ensure_dir (Workspace.keepers_runtime_dir config);
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base
+    [ "base", Masc_test_deps.live_sandbox_image_tag ];
   let meta = make_meta ~name:"stream-close-keeper" () in
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
   Fun.protect

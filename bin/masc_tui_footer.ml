@@ -288,6 +288,10 @@ let ordered_conflicts items =
 let more_key = "?"
 let cut_marker = "\xe2\x80\xa6" ^ more_key
 
+let with_position_and_marker ~mark_omission position hints =
+  let positioned = with_position position hints in
+  if mark_omission then positioned ^ "  " ^ cut_marker else positioned
+
 (* Hints are "key:action" items separated by two spaces. When even an empty
    status tail leaves the row too wide, whole items drop from the back and
    {!cut_marker} ends the row -- a reader sees "later keys omitted, press
@@ -495,12 +499,13 @@ let drawable_conflicts ?literal_prefix ~max_cells ~hints conflicts =
 (* What fits with this conflict set kept whole: the status facts give way in
    [omission_order], then the keys give way as whole items. [None] when even the
    keys that cannot be dropped will not fit beside these conflicts. *)
-let rec fit_with_conflicts ?literal_prefix ?position ~max_cells ~conflicts ~hints
-    ~omissions statuses =
+let rec fit_with_conflicts ?literal_prefix ?position ~mark_omission ~max_cells
+    ~conflicts ~hints ~omissions statuses =
   let leading =
     String.concat "  "
       (List.map (fun item -> item.text) conflicts
-       @ Option.to_list literal_prefix @ [ with_position position hints ])
+       @ Option.to_list literal_prefix
+       @ [ with_position_and_marker ~mark_omission position hints ])
   in
   let rendered = body leading statuses in
   if Masc_tui_message_layout.display_width rendered <= max_cells then
@@ -509,12 +514,12 @@ let rec fit_with_conflicts ?literal_prefix ?position ~max_cells ~conflicts ~hint
     match statuses, omissions with
     | [], _ -> drop_hint_items ?literal_prefix ?position ~max_cells ~conflicts hints
     | _, retention :: rest ->
-      fit_with_conflicts ?literal_prefix ?position ~max_cells ~conflicts ~hints
-        ~omissions:rest
+      fit_with_conflicts ?literal_prefix ?position ~mark_omission ~max_cells
+        ~conflicts ~hints ~omissions:rest
         (List.filter (fun status -> status.retention <> retention) statuses)
     | _, [] ->
-      fit_with_conflicts ?literal_prefix ?position ~max_cells ~conflicts ~hints
-        ~omissions:[] []
+      fit_with_conflicts ?literal_prefix ?position ~mark_omission ~max_cells
+        ~conflicts ~hints ~omissions:[] []
 
 (* Dropping a notice hands its cells back to everything that gave way for it,
    the status facts included, so each conflict set is fitted from the whole
@@ -535,15 +540,15 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
     let prefix = match action_text with
       | None -> literal_prefix
       | Some action -> prefix_with_action action in
-    fit_with_conflicts ?literal_prefix:prefix ?position ~max_cells ~conflicts ~hints
-      ~omissions statuses
+    fit_with_conflicts ?literal_prefix:prefix ?position ~mark_omission:false
+      ~max_cells ~conflicts ~hints ~omissions statuses
   in
   match complete with
   | Some fitted -> fitted
   | None ->
-  let displayed_prefix, displayed_hints =
+  let displayed_prefix, mark_omission =
     match action_text with
-    | None | Some "" -> literal_prefix, hints
+    | None | Some "" -> literal_prefix, false
     | Some action ->
       let shown, mark_omission =
           (* Existing warnings, search status and pinned keys keep their
@@ -568,10 +573,10 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
       let prefix = prefix_with_action shown in
       (* Mark a wholly omitted action when the marker itself fits; a marker
          must not displace the warning or its pinned keys either. *)
-      prefix, (if mark_omission then hints ^ "  " ^ cut_marker else hints)
+      prefix, mark_omission
   in
   match fit_with_conflicts ?literal_prefix:displayed_prefix ?position ~max_cells
-          ~conflicts ~hints:displayed_hints ~omissions statuses with
+          ~mark_omission ~conflicts ~hints ~omissions statuses with
   | Some fitted -> fitted
   | None ->
     (match conflicts with
@@ -588,8 +593,8 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
           and the marker says the row was cut. *)
        let rendered =
          body
-           (with_position position
-              (with_literal_prefix displayed_prefix displayed_hints))
+           (with_position_and_marker ~mark_omission position
+              (with_literal_prefix displayed_prefix hints))
            []
        in
        let room = max_cells - Masc_tui_message_layout.display_width more_key in

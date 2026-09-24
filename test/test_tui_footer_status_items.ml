@@ -720,6 +720,21 @@ let test_a_wide_row_draws_its_position_whole () =
     (contains ~needle:"1-22/119" line)
 ;;
 
+(* When a transient action cannot fit at all, its omission marker still
+   belongs after the scroll position, just as it does when a key is dropped. *)
+let test_an_omitted_action_marks_after_the_position () =
+  let expected_body = "  q:quit  4-25/119  \xe2\x80\xa6?" in
+  let width = Masc_tui_message_layout.display_width expected_body in
+  let line =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:width ~port:0
+      ~hints:"q:quit" ~position:"4-25/119"
+      ~action_text:(String.make 100 'x') ()
+  in
+  check_string "action omission follows scroll position"
+    (expected_body ^ "\n") line;
+  check_at_most_cells "omission stays in width" width line
+;;
+
 let test_the_cut_keeps_the_way_out () =
   let hints =
     "j/k:roster move  Enter:send / open  Ctrl-J:newline  Ctrl-G:next keeper  \
@@ -1338,6 +1353,8 @@ let tests =
           `Quick test_a_row_without_a_position_is_not_shortened_for_one
       ; Alcotest.test_case "a wide row draws its position whole" `Quick
           test_a_wide_row_draws_its_position_whole
+      ; Alcotest.test_case "an omitted action marks after the position" `Quick
+          test_an_omitted_action_marks_after_the_position
       ; Alcotest.test_case "the cut keeps the key that opens a row" `Quick
           test_the_cut_keeps_the_key_that_opens_a_row
       ; Alcotest.test_case "a compound leave key is the same door" `Quick

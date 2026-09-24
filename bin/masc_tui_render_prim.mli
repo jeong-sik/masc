@@ -130,7 +130,9 @@ val footer_line :
 (** [position] is where a scrolling surface stands in what it is scrolling.
     It is separate from [hints] because the fitter gives up key items from
     the back, and a position is the one item on the row that [?] cannot
-    recover; kept with the keys that cannot be dropped. *)
+    recover; kept with the keys that cannot be dropped. Use the footer when
+    the detail has no spare content row; list panes with a window-reading row
+    keep their position in the body. *)
 
 val keeper_split_threshold_cols : int
 

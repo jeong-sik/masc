@@ -319,7 +319,7 @@ let make_tool_bundle_for_descriptors_with_policy
      exactly one projected Tool.schema.name is model-visible.
      the descriptor-owned typed translation reshapes the LLM's payload before dispatch;
      [descriptor.input_schema] provides the LLM-facing schema. *)
-  let descriptor_tools =
+  let descriptor_tools_with_loading =
     List.concat_map
       (fun (descriptor : Keeper_tool_descriptor.t) ->
          let internal = descriptor.internal_name in
@@ -415,7 +415,7 @@ let make_tool_bundle_for_descriptors_with_policy
                        ~input)
                    ()
              in
-             Tool_bridge.agent_core_tool_of_masc_with_execution_env
+             ( Tool_bridge.agent_core_tool_of_masc_with_execution_env
                ?descriptor:agent_core_descriptor
                ~base_path:config.base_path
                ~model_projection:(model_projection_for_call descriptor)
@@ -431,9 +431,16 @@ let make_tool_bundle_for_descriptors_with_policy
                    ?agent_core_invocation:
                      (Agent_core.Tool.Execution_env.invocation execution_env)
                    ~result_projection:(model_projection_for_call descriptor ())
-                   input)))
+                   input)
+             (* A descriptor's [defer_loading] lives in the TOML named for its
+                internal name, while the model may know the tool by a public
+                name ([BrowserRead] for [masc_browser_read]). Taken here, where
+                the descriptor is in hand, rather than looked up again by the
+                model name, which answered Always_loaded for every such tool. *)
+             , Keeper_tool_descriptor.declared_loading descriptor )))
       descriptors
   in
+  let descriptor_tools = List.map fst descriptor_tools_with_loading in
   let composition_tools =
     let instruction_skills =
       Keeper_tool_composition_surface.instruction_skills_of_catalog skill_catalog
@@ -550,19 +557,6 @@ let make_tool_bundle_for_descriptors_with_policy
 
      The listing does not record which source a tool came from, and the model
      is not told. Holding a tool back is a property of the tool. *)
-  (* A descriptor's declaration sits in the TOML named for its internal name,
-     while the model may know the tool by a public name ([BrowserRead] for
-     [masc_browser_read]). Asked by the model name, the declaration table
-     missed every such tool and answered Always_loaded. *)
-  let descriptor_loading =
-    List.concat_map
-      (fun (descriptor : Keeper_tool_descriptor.t) ->
-         let loading = Keeper_tool_descriptor.declared_loading descriptor in
-         List.map
-           (fun model_name -> model_name, loading)
-           (Keeper_tool_descriptor.keeper_model_names descriptor))
-      descriptors
-  in
   let deferrable = function
     | Tool_definition_toml.Deferrable -> true
     | Tool_definition_toml.Always_loaded -> false
@@ -574,14 +568,10 @@ let make_tool_bundle_for_descriptors_with_policy
        is either read wherever it can be written or it is a trap. A
        composition tool is declared under its own model-visible name. *)
     let deferred_descriptors, loaded_descriptors =
-      List.partition
-        (fun (tool : Agent_core.Tool.t) ->
-           match List.assoc_opt tool.Agent_core.Tool.schema.name descriptor_loading with
-           | Some loading -> deferrable loading
-           | None ->
-             deferrable
-               (Tool_loading_declarations.loading_of_tool tool.Agent_core.Tool.schema.name))
-        descriptor_tools
+      let deferred, loaded =
+        List.partition (fun (_, loading) -> deferrable loading) descriptor_tools_with_loading
+      in
+      List.map fst deferred, List.map fst loaded
     in
     let deferred_compositions, loaded_compositions =
       List.partition

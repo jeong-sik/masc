@@ -3441,15 +3441,15 @@ let context_composition_lines ~cols ~turn_back
            (Inspector.format_tokens tokens)
            (Inspector.format_tokens window)
            (if tokens > window then " (over the reported window)" else ""))
-    | Some tokens, None ->
+    | Some tokens, (None | Some _) ->
       fact
         (Printf.sprintf "Client reports active context %s tokens; provider window unavailable"
            (Inspector.format_tokens tokens))
-    | None, Some window ->
+    | None, Some window when window > 0 ->
       fact
         (Printf.sprintf "Client reports a %s-token model window; active context unavailable"
            (Inspector.format_tokens window))
-    | None, None -> []
+    | None, (None | Some _) -> []
   in
   let cache_lines =
     let parts =

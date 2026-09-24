@@ -2593,9 +2593,11 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_identifiers ~module_path:render_path ~binding:"planning_proof_detail"
     ~callees:sanitizer_calls [ "evidence"; "reason"; "detail" ];
   (* The goal detail's verdict block, note and timeline all wrap through this
-     one helper; it escapes before it wraps. *)
+     one helper. It splits the text on LF (not drawn) and escapes each line
+     before it wraps. *)
   check_identifiers ~module_path:"bin/masc_tui_planning_detail.ml" ~binding:"wrapped"
-    ~callees:[ "Tui_decode.sanitize_terminal_text" ] [ "text" ];
+    ~callees:[ "Tui_decode.sanitize_terminal_text"; "String.split_on_char" ]
+    [ "text"; "line" ];
   check int "the goal detail heads a stuck goal with the verifier's reason" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"planning_detail_pane"

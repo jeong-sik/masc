@@ -126,6 +126,31 @@ let test_verdict_and_note_reach_the_pane_escaped () =
           String.length text >= n && String.sub text 0 n = needle)
        (texts rows))
 
+(* Escaping the note whole turned its line break into a printed "\x0A" and
+   the two lines into one run. Each line is escaped on its own instead. *)
+let test_a_note_with_a_newline_draws_two_lines () =
+  let rows =
+    Detail.body ~width:60 Proof.Proof_idle (Some "first line\nsecond\x1b[2J line")
+  in
+  let texts = texts rows in
+  check_bool "the first line is its own row" true (List.mem "first line" texts);
+  check_bool "the second line is its own row, escaped" true
+    (List.mem "second\\x1B[2J line" texts);
+  check_bool "no line break is printed as an escape" true
+    (List.for_all
+       (fun text ->
+          let needle = "\\x0A" in
+          let n = String.length needle in
+          let rec found i =
+            i + n <= String.length text && (String.sub text i n = needle || found (i + 1))
+          in
+          not (found 0))
+       texts);
+  check_bool "no raw control byte reaches the pane" true
+    (List.for_all
+       (fun text -> String.for_all (fun c -> Char.code c >= 0x20 && c <> '\x7f') text)
+       texts)
+
 let test_a_narrow_pane_still_produces_rows () =
   let rows = Detail.body ~width:0 (Proof.Proof_refuted (Some "why")) None in
   check_bool "width 0 does not loop or vanish" true (rows <> [])
@@ -310,6 +335,8 @@ let () =
             test_a_stuck_goal_says_which_step_and_why
         ; Alcotest.test_case "verdict and note reach the pane escaped" `Quick
             test_verdict_and_note_reach_the_pane_escaped
+        ; Alcotest.test_case "a note with a newline draws two lines" `Quick
+            test_a_note_with_a_newline_draws_two_lines
         ; Alcotest.test_case "a narrow pane still produces rows" `Quick
             test_a_narrow_pane_still_produces_rows
         ; Alcotest.test_case "a timestamp value never starts at the colon" `Quick

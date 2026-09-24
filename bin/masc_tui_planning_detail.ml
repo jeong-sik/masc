@@ -20,10 +20,13 @@ type line =
   }
 
 (* Every row this module wraps is wire text: a judge's reason, a keeper's
-   note, a timeline event, a store error. It is escaped before it is wrapped,
-   so a control byte in any of them reaches the pane as its escape. *)
+   note, a timeline event, a store error. It is split on LF first and each
+   line escaped on its own, so a control byte reaches the pane as its escape
+   while a line break stays a new row instead of a printed "\x0A". *)
 let wrapped ~width tone text =
-  Message_layout.wrap_words ~max_cells:width (Tui_decode.sanitize_terminal_text text)
+  String.split_on_char '\n' text
+  |> List.concat_map (fun line ->
+       Message_layout.wrap_words ~max_cells:width (Tui_decode.sanitize_terminal_text line))
   |> List.map (fun row -> { tone; text = row })
 
 type confirmation = {

@@ -318,7 +318,8 @@ let recording_dynamic_tool ~(schema : Masc_domain.tool_schema) ~seen =
   { Runtime_official_client_tool.name = schema.name
   ; description = schema.description
   ; input_schema = schema.input_schema
-  ; call =
+  ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
       (fun ~call_id:_ _arguments ->
         seen := schema.name :: !seen;
         { Runtime_official_client_tool.success = true

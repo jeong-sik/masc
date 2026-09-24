@@ -25,22 +25,31 @@ type ordinary_admission =
   | Static of Tool_contract.execution_mode
   | Concurrent_when of (Yojson.Safe.t -> bool)
 
+type call_effect = Read_only | Effect_possible
+
 type descriptor =
-  | Ordinary_descriptor of ordinary_admission
+  | Ordinary_descriptor of
+      { admission : ordinary_admission
+      ; call_effect : Yojson.Safe.t -> call_effect
+      }
   | Terminal_descriptor of Tool_contract.failure_effect_disposition
 
-let ordinary_descriptor execution_mode = Ordinary_descriptor (Static execution_mode)
+let ordinary_descriptor ?(call_effect = fun _ -> Effect_possible) execution_mode =
+  Ordinary_descriptor { admission = Static execution_mode; call_effect }
 
 let ordinary_descriptor_concurrent_when proves_read_only =
-  Ordinary_descriptor (Concurrent_when proves_read_only)
+  Ordinary_descriptor
+    { admission = Concurrent_when proves_read_only
+    ; call_effect = (fun _ -> Effect_possible)
+    }
 ;;
 
 let terminal_descriptor failure_effect = Terminal_descriptor failure_effect
 
 let descriptor_execution_mode descriptor ~input =
   match descriptor with
-  | Ordinary_descriptor (Static execution_mode) -> execution_mode
-  | Ordinary_descriptor (Concurrent_when proves_read_only) ->
+  | Ordinary_descriptor { admission = Static execution_mode; _ } -> execution_mode
+  | Ordinary_descriptor { admission = Concurrent_when proves_read_only; _ } ->
     if proves_read_only input then Tool_contract.Concurrent else Tool_contract.Serial
   | Terminal_descriptor _ -> Tool_contract.Serial
 ;;
@@ -109,6 +118,12 @@ let execute ?context ?invocation tool input =
 
 let descriptor tool = tool.descriptor
 
+let call_effect tool input =
+  match tool.descriptor with
+  | Some (Ordinary_descriptor { call_effect; _ }) -> call_effect input
+  | Some (Terminal_descriptor _) | None -> Effect_possible
+;;
+
 let execution_mode tool ~input =
   Option.fold
     ~none:Tool_contract.Serial
@@ -129,8 +144,8 @@ let descriptor_to_yojson = function
     `Assoc
       [ ( "execution_mode"
         , match descriptor with
-          | Ordinary_descriptor (Concurrent_when _) -> `String "concurrent_when_read_only"
-          | Ordinary_descriptor (Static execution_mode) ->
+          | Ordinary_descriptor { admission = Concurrent_when _; _ } -> `String "concurrent_when_read_only"
+          | Ordinary_descriptor { admission = Static execution_mode; _ } ->
             Tool_contract.execution_mode_to_yojson execution_mode
           | Terminal_descriptor _ ->
             Tool_contract.execution_mode_to_yojson Tool_contract.Serial )

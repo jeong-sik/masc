@@ -148,6 +148,7 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   { name : string
   ; description : string
   ; input_schema : Yojson.Safe.t
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
@@ -597,7 +598,7 @@ let send_dynamic_tool_response io ~id (result : dynamic_tool_result) =
        ])
 ;;
 
-let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count
+let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count ~tool_effect_attempted
     ~on_stream_event ~id params =
   let stage = "item/tool/call" in
   let* fields = assoc_at stage params in
@@ -620,6 +621,9 @@ let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count
       emit_stream_event
         on_stream_event
         (Dynamic_tool_started { call_id; tool_name; arguments });
+      (match tool.call_effect arguments with
+       | Agent_core.Tool.Read_only -> ()
+       | Agent_core.Tool.Effect_possible -> tool_effect_attempted := true);
       let result =
         try tool.call ~call_id arguments with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -802,16 +806,19 @@ let agent_message_of_item ~stage item =
   | None -> protocol_error stage "item is missing type"
 ;;
 
-(* The item vocabulary this tree acts on. [Unmodelled_item] is a type the
-   app-server announced that nothing here branches on, an item of the model
-   stream as far as this loop is concerned; rejecting it would end the turn on
-   a protocol addition. *)
+(* Model items and host-owned dynamic calls do not prove a native effect.
+   Every other item remains effect-possible, including protocol additions.
+   The installed 0.156.1 ThreadItem schema also names collabAgentToolCall and
+   imageGeneration: treating an unmodelled type as model text would authorize
+   replay after those actions. Unknown items are observed, not rejected. *)
 type item_kind =
   | Command_execution
   | File_change
   | Mcp_tool_call
   | Sleep
-  | Unmodelled_item
+  | Model_item
+  | Dynamic_tool_item
+  | Unclassified_item of string
 
 let item_kind_of_item ~stage item =
   let* fields = assoc_at stage item in
@@ -820,7 +827,10 @@ let item_kind_of_item ~stage item =
   | Some (`String "fileChange") -> Ok File_change
   | Some (`String "mcpToolCall") -> Ok Mcp_tool_call
   | Some (`String "sleep") -> Ok Sleep
-  | Some (`String _) -> Ok Unmodelled_item
+  | Some (`String ("userMessage" | "agentMessage" | "plan" | "reasoning"
+                  | "contextCompaction")) -> Ok Model_item
+  | Some (`String "dynamicToolCall") -> Ok Dynamic_tool_item
+  | Some (`String kind) -> Ok (Unclassified_item kind)
   | Some _ -> protocol_error stage "item type must be a string"
   | None -> protocol_error stage "item is missing type"
 ;;
@@ -865,7 +875,8 @@ let tool_item_of_item ~stage item =
         ; origin = Runtime_native_tools.Mcp_wrapper
         })
   | Sleep -> tool_item ~observation:(fun _ -> None)
-  | Unmodelled_item -> Ok None
+  | Model_item | Dynamic_tool_item -> Ok None
+  | Unclassified_item kind -> tool_item ~observation:(built_in kind)
 ;;
 
 let active_turn_item ~stage ~thread_id ~turn_id params =
@@ -1006,7 +1017,7 @@ let turn_error ~tool_effect_attempted fields =
 ;;
 
 let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
-    ~tool_effect_attempted params =
+    ~tool_calls_observed ~tool_effect_attempted params =
   let stage = "turn/completed" in
   let* fields = assoc_at stage params in
   let* terminal_thread_id = required_string stage "threadId" fields in
@@ -1044,7 +1055,7 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
         in
         (match text with
          | Some text -> Ok text
-         | None when tool_effect_attempted -> Ok ""
+         | None when tool_calls_observed -> Ok ""
          | None -> protocol_error stage "completed turn has no assistant message")
       | other -> protocol_error stage (Printf.sprintf "unknown turn status %S" other)
 ;;
@@ -1162,7 +1173,7 @@ let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id par
     Ok ())
 ;;
 
-let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final
+let rec await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~thread_id ~turn_id ~seen_final
     ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event =
   let* message = io.receive () in
   match message with
@@ -1175,7 +1186,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~tools
         ~thread_id
         ~turn_id
-        ~tool_call_count
+        ~tool_call_count ~tool_effect_attempted
         ~on_stream_event
         ~id
         params
@@ -1183,7 +1194,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~tool_effect_attempted
       ~thread_id
       ~turn_id
       ~seen_final
@@ -1193,7 +1204,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~on_stream_event
   | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
     let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
-    await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id
+    await_turn_terminal io ~tools ~tool_call_count ~tool_effect_attempted ~thread_id ~turn_id
       ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
@@ -1212,7 +1223,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~tool_effect_attempted
       ~thread_id
       ~turn_id
       ~seen_final
@@ -1226,7 +1237,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~tool_effect_attempted
       ~thread_id
       ~turn_id
       ~seen_final
@@ -1245,7 +1256,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~tool_effect_attempted
       ~thread_id
       ~turn_id
       ~seen_final
@@ -1268,6 +1279,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       | Some { call_id; observation } ->
         Option.iter
           (fun observation ->
+             tool_effect_attempted := true;
              emit_stream_event on_stream_event (Native_tool_started observation))
           observation;
         (* Every receive until this item completes waits under no idle
@@ -1277,7 +1289,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         :: List.filter (fun open_id -> not (String.equal open_id call_id)) open_tool_call_ids
     in
     await_turn_terminal
-      io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final ~seen_fallback
+      io ~tools ~tool_call_count ~tool_effect_attempted ~thread_id ~turn_id ~seen_final ~seen_fallback
       ~seen_usage ~open_tool_call_ids ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
@@ -1291,6 +1303,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       | Some { call_id; observation } ->
         Option.iter
           (fun observation ->
+             tool_effect_attempted := true;
              emit_stream_event on_stream_event (Native_tool_finished observation))
           observation;
         let still_open =
@@ -1311,7 +1324,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~tool_effect_attempted
       ~thread_id
       ~turn_id
       ~seen_final
@@ -1335,7 +1348,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       await_turn_terminal
         io
         ~tools
-        ~tool_call_count
+        ~tool_call_count ~tool_effect_attempted
         ~thread_id
         ~turn_id
         ~seen_final
@@ -1349,7 +1362,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       let* message = required_string stage "message" error_fields in
       Error
         (turn_error_of_fields
-           ~tool_effect_attempted:(!tool_call_count > 0)
+           ~tool_effect_attempted:!tool_effect_attempted
            ~message
            error_fields)
   | Notification { method_ = "turn/completed"; params } ->
@@ -1359,7 +1372,8 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~turn_id
         ~seen_final
         ~seen_fallback
-        ~tool_effect_attempted:(!tool_call_count > 0)
+        ~tool_calls_observed:(!tool_call_count > 0)
+        ~tool_effect_attempted:!tool_effect_attempted
         params
     in
     Ok (text, seen_usage)
@@ -1373,7 +1387,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~tool_effect_attempted
       ~thread_id
       ~turn_id
       ~seen_final
@@ -1394,7 +1408,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~tool_effect_attempted
       ~thread_id
       ~turn_id
       ~seen_final
@@ -1409,7 +1423,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     await_turn_terminal
       io
       ~tools
-      ~tool_call_count
+      ~tool_call_count ~tool_effect_attempted
       ~thread_id
       ~turn_id
       ~seen_final
@@ -1635,11 +1649,12 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
   in
   emit_stream_event on_stream_event (Turn_started { turn_id; model });
   let tool_call_count = ref 0 in
+  let tool_effect_attempted = ref false in
   let* text, usage =
     await_turn_terminal
       io
       ~tools:dynamic_tools
-      ~tool_call_count
+      ~tool_call_count ~tool_effect_attempted
       ~thread_id
       ~turn_id
       ~seen_final:None

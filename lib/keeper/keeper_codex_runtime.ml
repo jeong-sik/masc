@@ -262,7 +262,9 @@ let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_comple
            code. The handler may commit and then raise or be cancelled, so
            observing only its returned value would reopen a duplicate-effect
            window. *)
-        observe_effect_attempted ();
+        (match tool.call_effect input with
+         | Agent_core.Tool.Read_only -> ()
+         | Agent_core.Tool.Effect_possible -> observe_effect_attempted ());
         let result = tool.call ~call_id input in
         (* This is evidence that the handler returned a successful tool result,
            which is sufficient to accept a tool-only provider terminal. It is
@@ -1310,9 +1312,21 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     let turn_result =
       try
-        let on_stream_event =
+        let observe_stream =
           codex_stream_callback
           ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event
+        in
+        let on_stream_event event =
+          (* Native actions do not carry a MASC tool producer's read-only
+             contract. Keep their effects fenced, including a completed item
+             whose start was not observed. *)
+          (match event with
+           | Runtime_codex_app_server.Native_tool_started _
+           | Native_tool_finished _ -> observe_effect_attempted ()
+           | Turn_started _ | Text_delta _ | Dynamic_tool_started _
+           | Dynamic_tool_finished _ | Elicitation_cancelled _
+           | Usage_windows_reported _ | Turn_finished _ -> ());
+          Option.iter (fun observe -> observe event) observe_stream
         in
         (match
        Runtime_codex_app_server.run_turn
@@ -1324,7 +1338,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          ~thread_mode
          ~history
          ~developer_context
-         ?on_stream_event
+         ~on_stream_event
          ~on_thread_ready:(fun ~thread_id ->
            update_session "active transition" (fun expected ->
              Keeper_official_client_session_store.mark_active
@@ -1689,6 +1703,9 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
             previous_capacity_bytes
             capacity_bytes)
       ~attempt:(fun ~capacity:capacity_bytes ->
+        (* A read in an abandoned attempt cannot certify a tool-only answer
+           from the next one. Effect evidence remains cumulative. *)
+        Atomic.set successful_tool_completion No_successful_tool_completion;
         run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~official_client_continuation ~official_client_original_turn
           ~required_native_posture
           ~runtime_id

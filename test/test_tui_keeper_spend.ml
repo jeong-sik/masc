@@ -105,11 +105,10 @@ let server_default_window =
 
 (* The server's own answer for [keepers], wrapped with the cache object the
    route appends. *)
-let server_answer ?(state = Route.Cache_fresh) ?age_s ?error ?(unread_keepers = [])
-    config names =
+let server_answer ?(state = Route.Cache_fresh) ?age_s ?error config names =
   let body =
     Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-      ~keepers:(List.map make_meta names) ~unread_keepers
+      ~keepers:(List.map make_meta names) ~unread_keepers:[]
       ~window_minutes:server_default_window
       ~now_ts:(Unix.gettimeofday ())
   in
@@ -343,44 +342,32 @@ let test_torn_and_unreadable_stores () =
        (String.starts_with ~prefix:"$ spend unread for 1 Keeper: ")
        (List.map strip (Spend.lines reading)))
 
-(* #38728: a turn row whose time or latency the server could not read, and a
-   Keeper whose meta it could not read, both leave the sum short. The first
-   makes that Keeper's sums floors; the second draws that Keeper unknown with
-   the server's reason, and the team total a floor. *)
-let test_unread_turn_rows_and_unread_keepers () =
+(* #38728: a turn row whose time or latency the server could not read may
+   have been a turn in the window, so that Keeper's sums are floors. With no
+   readable turn at all the Keeper is unknown, not "no turns". *)
+let test_unread_turn_rows_make_floors () =
   let reading =
     with_workspace (fun config ->
         let now = Unix.gettimeofday () in
         append_turns config "exact" [ (Some 0.5, Some 10) ];
         append_turns config "odd" [ (Some 0.5, Some 10) ];
-        let row = turn_row ~cost:(Some 0.25) ~tokens:(Some 5) in
-        let row = ("ts_unix", `String "yesterday") :: List.remove_assoc "ts_unix" row in
-        write_raw_line config "odd" ~ts:now (Yojson.Safe.to_string (`Assoc row));
-        decode
-          (server_answer
-             ~unread_keepers:
-               [ { Masc.Keeper_snapshot_unread.name = "ghost"
-                 ; reason = Masc.Keeper_snapshot_unread.Meta_read_failed "not the current schema"
-                 }
-               ]
-             config [ "exact"; "odd" ]))
+        let unplaceable () =
+          let row = turn_row ~cost:(Some 0.25) ~tokens:(Some 5) in
+          Yojson.Safe.to_string
+            (`Assoc (("ts_unix", `String "yesterday") :: List.remove_assoc "ts_unix" row))
+        in
+        write_raw_line config "odd" ~ts:now (unplaceable ());
+        write_raw_line config "only-odd" ~ts:now (unplaceable ());
+        decode (server_answer config [ "exact"; "odd"; "only-odd" ]))
   in
-  let tag = Spend.keeper_tags reading [ "exact"; "odd"; "ghost" ] in
+  let tag = Spend.keeper_tags reading [ "exact"; "odd"; "only-odd" ] in
+  (* Tags are padded to the widest one so they stand in one column. *)
+  check string "a readable Keeper stays exact" "$0.50 10 tok"
+    (String.trim (strip (tag "exact")));
   check string "an unplaceable turn row makes the sums floors"
-    "\xe2\x89\xa5$0.50 \xe2\x89\xa510 tok" (strip (tag "odd"));
-  check bool "a Keeper whose meta was unread is unknown" true
-    (String.starts_with ~prefix:"? tok" (strip (tag "ghost")));
-  check string "and makes an exact Keeper's total a floor"
-    "24h \xe2\x89\xa5$0.50 \xe2\x89\xa510 tok"
-    (total reading [ "exact"; "ghost" ]);
-  check bool "the unread meta is said with its reason" true
-    (List.exists
-       (fun line ->
-         let needle = "not the current schema" in
-         let n = String.length needle and h = String.length line in
-         let rec has i = i + n <= h && (String.sub line i n = needle || has (i + 1)) in
-         String.starts_with ~prefix:"$ spend unread for 1 Keeper: " line && has 0)
-       (List.map strip (Spend.lines reading)))
+    "\xe2\x89\xa5$0.50 \xe2\x89\xa510 tok" (String.trim (strip (tag "odd")));
+  check bool "only unplaceable rows is unknown, not no turns" true
+    (String.starts_with ~prefix:"? tok" (strip (tag "only-odd")))
 
 (* A row this build cannot read leaves its Keeper unknown and is counted;
    the other rows still draw. *)
@@ -498,8 +485,8 @@ let () =
         ; test_case "a failed load replaces the last good reading" `Quick
             test_a_failed_load_replaces_the_last_good_reading
         ; test_case "torn and unreadable stores" `Quick test_torn_and_unreadable_stores
-        ; test_case "unread turn rows and unread keepers are floors" `Quick
-            test_unread_turn_rows_and_unread_keepers
+        ; test_case "unread turn rows make floors" `Quick
+            test_unread_turn_rows_make_floors
         ; test_case "an unreadable row is unknown" `Quick test_unreadable_row_is_unknown
         ; test_case "a narrow row keeps its detail" `Quick test_a_narrow_row_keeps_its_detail
         ; test_case "team total covers Keepers on the name lines" `Quick

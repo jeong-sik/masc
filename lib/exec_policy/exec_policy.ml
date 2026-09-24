@@ -271,11 +271,11 @@ let existing_sibling_dirs_hint ?workdir path =
    argv-operand pass runs even when [workdir] is [None]: plain argv
    children carry no cwd field of their own, so before this pass their
    destinations were never judged at all (the gap task-634 reports). *)
-let validate_shell_ir_paths ?(requires_existing_dir = true) ?workdir shell_ir =
+let validate_shell_ir_paths ?(requires_existing_dir = true) ?workdir ~extra_roots shell_ir =
   let validate_path_value ~requires_existing_dir value =
     if String.equal value "/dev/null"
     then Ok ()
-    else if not (validate_path ?workdir value)
+    else if not (validate_path ?workdir ~extra_roots value)
     then
       Error
         (Keeper_path_check_error.(

@@ -55,9 +55,24 @@ let resolve_path ?base_dir path =
 let is_within_dir ~dir path =
   path = dir || String.starts_with ~prefix:(dir ^ "/") path
 
+(** Whether [path] lies within one of [extra_roots]. The roots are
+    endpoint-side paths (an ssh endpoint's [allowed_paths]) that may not
+    exist on this host, so both sides are normalized lexically: resolving
+    them with the host's [Unix.realpath] would judge another machine's
+    filesystem by this one. *)
+let is_within_extra_root ?workdir ~extra_roots path =
+  match extra_roots with
+  | [] -> false
+  | _ :: _ ->
+      let lexical = normalize_path ?base_dir:workdir path in
+      List.exists
+        (fun root -> is_within_dir ~dir:(normalize_path root) lexical)
+        extra_roots
+
 (** Path allowlist. When workdir is set, restrict to workdir + /tmp only.
     When unset, allow /tmp, cwd subtree, and the documented sandbox workspace
-    root from [Host_config.sandbox_workspace_root].
+    root from [Host_config.sandbox_workspace_root]. In both cases a path
+    within one of [extra_roots] is also allowed.
 
     RFC-0084 §1.5 host-config-cleanup-E — replaces the ad-hoc
     [home/me] literal join with the typed
@@ -67,16 +82,19 @@ let is_within_dir ~dir path =
     surfaces a documented fallback ([/tmp/masc-fleet]) which is allowed.
     This aligns the Fleet worker with the same SSOT that other keeper
     sandbox surfaces will migrate to in later cleanup PRs. *)
-let validate_path ?workdir path =
+let validate_path ?workdir ~extra_roots path =
   let resolved = resolve_path ?base_dir:workdir path in
-  match workdir with
-  | Some wd ->
-      let resolved_wd = resolve_path wd in
-      is_within_dir ~dir:(resolve_path "/tmp") resolved
-      || is_within_dir ~dir:resolved_wd resolved
-  | None ->
-      let cfg = Host_config.host () in
-      let cwd = Config_dir_resolver.current_working_dir () in
-      is_within_dir ~dir:(resolve_path "/tmp") resolved
-      || is_within_dir ~dir:(resolve_path cwd) resolved
-      || is_within_dir ~dir:(resolve_path cfg.sandbox_workspace_root) resolved
+  let within_default_boundary =
+    match workdir with
+    | Some wd ->
+        let resolved_wd = resolve_path wd in
+        is_within_dir ~dir:(resolve_path "/tmp") resolved
+        || is_within_dir ~dir:resolved_wd resolved
+    | None ->
+        let cfg = Host_config.host () in
+        let cwd = Config_dir_resolver.current_working_dir () in
+        is_within_dir ~dir:(resolve_path "/tmp") resolved
+        || is_within_dir ~dir:(resolve_path cwd) resolved
+        || is_within_dir ~dir:(resolve_path cfg.sandbox_workspace_root) resolved
+  in
+  within_default_boundary || is_within_extra_root ?workdir ~extra_roots path

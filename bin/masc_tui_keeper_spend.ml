@@ -106,10 +106,10 @@ let decode_reading json =
   let* cache = required_object_field json "cache" in
   let* cache_state = required_string_field cache "state" in
   let* last_error = optional_string_field cache "last_error" in
-  match Masc.Dashboard_cache_wire.of_string cache_state with
-  | Some Masc.Dashboard_cache_wire.Cache_fresh ->
+  match Dashboard_cache_wire.of_string cache_state with
+  | Some Dashboard_cache_wire.Cache_fresh ->
       decode_rows json ~freshness:Spend_fresh
-  | Some Masc.Dashboard_cache_wire.Cache_stale_refreshing ->
+  | Some Dashboard_cache_wire.Cache_stale_refreshing ->
       let* age_s =
         match Yojson.Safe.Util.member "age_s" cache with
         | `Float age_s when Float.is_finite age_s && age_s >= 0.0 -> Ok age_s
@@ -117,7 +117,7 @@ let decode_reading json =
         | _ -> Error "a stale keeper-costs answer carries no age_s"
       in
       decode_rows json ~freshness:(Spend_stale { age_s; last_error })
-  | Some Masc.Dashboard_cache_wire.Cache_warming -> (
+  | Some Dashboard_cache_wire.Cache_warming -> (
       (* The placeholder's rows are empty whatever the workspace spent. With
          an error, the server tried and failed to add it up. *)
       match last_error with

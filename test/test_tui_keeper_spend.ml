@@ -8,7 +8,7 @@
 
 open Alcotest
 module Route = Server_routes_http_routes_provider_runs
-module Cache_wire = Masc.Dashboard_cache_wire
+module Cache_wire = Dashboard_cache_wire
 module Spend = Masc_tui_keeper_spend
 module Keeper_metrics_record = Masc.Keeper_metrics_record
 module Keeper_types_support = Masc.Keeper_types_support

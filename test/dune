@@ -4250,6 +4250,7 @@
   alcotest
   masc_test_deps
   masc.jsonl_writer
+  masc.dashboard_utils
   masc.server
   masc_tui_types
   masc_tui_message_layout

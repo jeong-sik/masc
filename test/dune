@@ -6239,7 +6239,18 @@
  (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
   (run python3 %{dep:test_tui_keyboard_input.py}
-   %{dep:../bin/masc_tui.exe} fusion-history)))
+  %{dep:../bin/masc_tui.exe} fusion-history)))
+
+(rule
+ (alias runtest-test_tui_keyboard_input-dashboard-usage)
+ (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe} dashboard-usage)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-dashboard-usage)))
 
 (alias
  (name runtest)

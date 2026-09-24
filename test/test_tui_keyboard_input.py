@@ -18292,6 +18292,103 @@ class ScenarioFamily:
     runs: tuple[Callable[[str], None], ...]
 
 
+def dashboard_usage_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    wait_for_output(process, master_fd, output, b"MASC Dashboard", start=0, timeout=30.0)
+    dashboard = unwrapped(screen_text(bytes(output)))
+    if b"Goals" not in dashboard or b"Work" not in dashboard:
+        raise AssertionError(f"Dashboard summary missing: {dashboard!r}")
+    send_and_wait(process, master_fd, output, b"\t", b"MASC Work")
+    send_and_wait(process, master_fd, output, b"t", b"MASC Work / Tasks")
+    usage = tab_until(process, master_fd, output, b"MASC Usage")
+    if b"MASC Usage" not in usage:
+        raise AssertionError(f"Usage is not on the main ring: {usage!r}")
+    wait_for_output(
+        process, master_fd, output, b"Quota scope trend", start=0, timeout=10.0
+    )
+    plain = unwrapped(screen_text(bytes(output)))
+    if b"UTC days reported" not in plain or b"Keeper usage" not in plain:
+        raise AssertionError(f"Usage evidence and coverage missing: {plain!r}")
+    send_and_wait(process, master_fd, output, b"w", b"7 UTC days")
+    system = tab_until(process, master_fd, output, b"MASC System")
+    if b"MASC System" not in system:
+        raise AssertionError(f"System is not on the main ring: {system!r}")
+    send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
+    os.write(master_fd, b"q")
+
+
+def run_dashboard_usage_regression(executable: str) -> None:
+    now = time.time()
+    scope = "provider:fixture"
+    scope_id = hashlib.md5(scope.encode()).hexdigest()
+    status, runtime = runtime_resolved_response()
+    assert status == 200 and isinstance(runtime, dict)
+    runtime["provider_usage_windows"] = [
+        {
+            "scope": scope,
+            "providers": ["fixture"],
+            "state": "reported",
+            "windows": [
+                {
+                    "limit_id": None,
+                    "window": {"kind": "five_hour"},
+                    "utilization": {"unit": "fraction", "value": 0.4},
+                    "resets_at": None,
+                    "observed_at": now,
+                    "source": "fixture",
+                }
+            ],
+        }
+    ]
+    run_terminal_scenario(
+        executable,
+        description="Dashboard, Work, Usage and System navigation",
+        interact=dashboard_usage_interaction,
+        refresh=1.0,
+        http_fixtures={
+            RUNTIME_RESOLVED_PATH: (200, runtime),
+            "/api/v1/dashboard/provider-usage-history?days=14": (
+                200,
+                {
+                    "days": 14,
+                    "generated_at": now,
+                    "sampling": "latest_provider_report_per_utc_day",
+                    "points": [
+                        {
+                            "scope_id": scope_id,
+                            "kind": "five_hour",
+                            "limit_id": None,
+                            "unit": "fraction",
+                            "value": 0.4,
+                            "observed_at": now,
+                            "source": "fixture",
+                            "resets_at": None,
+                        }
+                    ],
+                },
+            ),
+            "/api/v1/dashboard/provider-usage-history?days=7": (
+                200,
+                {
+                    "days": 7,
+                    "generated_at": now,
+                    "sampling": "latest_provider_report_per_utc_day",
+                    "points": [],
+                },
+            ),
+            "/api/v1/dashboard/keeper-costs?window=1440": (
+                200,
+                {"keepers": [], "window_minutes": 1440, "generated_at": now},
+            ),
+        },
+    )
+
+
 KEYBOARD_FAMILY = ScenarioFamily(
     "keyboard", "keyboard PTY regression", (run_keyboard_regression,)
 )
@@ -18303,6 +18400,7 @@ KEYBOARD_FAMILY = ScenarioFamily(
 # family, or a rule off runtest that its exception list does not name.
 SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     KEYBOARD_FAMILY,
+    ScenarioFamily("dashboard-usage", "Dashboard and Usage regression", (run_dashboard_usage_regression,)),
     ScenarioFamily("fusion-history", "historical Fusion inspection", (run_fusion_history_regression,)),
     ScenarioFamily("cli-base-path", "CLI base-path regression", (run_cli_base_path_regression,)),
     ScenarioFamily("send-on-stop", "send_on_stop regression", (run_send_on_stop_regression,)),

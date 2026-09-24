@@ -8,7 +8,7 @@
  (name keeper_sandbox_image)
  (public_name masc.keeper_sandbox_image)
  (wrapped false)
- (libraries digestif unix)
+ (libraries digestif unix masc.fs_compat)
  (modules
   keeper_sandbox_image
   keeper_sandbox_image_base_recipe

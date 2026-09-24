@@ -167,7 +167,9 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 
 Alternatively, `scripts/install-local-build.sh` builds and copies `masc`,
 `masc-tui` and `masc-browser-host` into `~/.local/bin` in one step; run it in a
-shell where `eval "$(opam env)"` has been applied.
+shell where `eval "$(opam env)"` has been applied. It also reinstalls every
+registered Firefox browser-lane host from the new build and stops the host
+processes those workspaces started; the extension reconnects to the new copy.
 
 `./quickstart.sh` seeds a workspace under `~/masc-quickstart`, starts the
 server, and writes an MCP bearer to `.masc/config/mcp-client.env`. It starts

@@ -156,7 +156,9 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 ```
 
 대신 `scripts/install-local-build.sh`를 쓰면 `masc`, `masc-tui`, `masc-browser-host`를
-한 번에 빌드해 `~/.local/bin`에 복사합니다. `eval "$(opam env)"`를 적용한 셸에서 실행하세요.
+한 번에 빌드해 `~/.local/bin`에 복사합니다. `eval "$(opam env)"`를 적용한 셸에서 실행하세요. 이 스크립트는 등록된
+Firefox browser-lane host도 새 빌드로 다시 설치하고, 그 작업 공간에서 실행 중인 host 프로세스를
+종료합니다. 확장은 새 사본으로 다시 연결합니다.
 
 `./quickstart.sh`는 `~/masc-quickstart` 아래에 작업 공간을 만들고, 서버를
 띄우고, MCP bearer를 `.masc/config/mcp-client.env`에 씁니다. Keeper는 띄우지

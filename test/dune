@@ -2622,7 +2622,7 @@
 
 (include stanzas/test_env_config_keeper_admission_bounds.inc)
 
-(include stanzas/test_schedule_domain_admission_split.inc)
+(include stanzas/test_schedule_interval_one_rule.inc)
 
 (include stanzas/test_env_config_nonneg.inc)
 

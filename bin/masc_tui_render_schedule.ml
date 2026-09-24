@@ -1312,6 +1312,18 @@ let board_age_text ~now = function
   | Some at -> Masc_tui_message_layout.span_text (now -. at)
   | None -> "\xe2\x80\x94"
 
+(* A list pane's row label: what the row is about, then the reading that
+   parts it from its neighbours. The pane folds a label from the middle and
+   keeps its tail, so the parting reading goes last -- in front it folds away
+   whenever the neighbours share an opening, which is the ordinary case for a
+   column of rows that are alike enough to need parting at all.
+
+   The full-width list rows put the same reading first, where nothing folds.
+   These two orders are not a disagreement: one draws in the room it has, the
+   other in the room a fold leaves. *)
+let sidebar_row_label ~about ~apart =
+  if apart = "" then about else about ^ "  " ^ apart
+
 let board_title_width ~inner_width =
   (* The header word does not move the column: [board_age_width] is fixed and
      both words fit it, so any of them measures the same named width. *)

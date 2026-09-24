@@ -1012,6 +1012,25 @@ let test_the_board_age_column_reads_the_sort_once () =
    Each binding is checked twice: the key it no longer opens, and a key it
    still does, so a renamed binding cannot make this pass by matching
    nothing. *)
+(* The Approvals index drew the tool alone. A queue holds one row per held
+   call: on 2026-09-23 an operator cleared eighteen through this TUI in seven
+   seconds and seventeen were [tool_execute], from seven Keepers. The label
+   itself is tested in test_tui_render_schedule; this says the pane reaches
+   it, and that each of the three row kinds hands over its own asker. *)
+let test_an_approval_row_says_who_asked () =
+  Alcotest.(check int) "the label is built through the shared one" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"approval_sidebar_label"
+       ~callee:"Render_schedule.sidebar_row_label");
+  List.iter
+    (fun field_name ->
+      Alcotest.(check int)
+        (field_name ^ " reaches the label") 1
+        (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+           ~binding_name:"approval_sidebar_label" ~field_name))
+    [ "kta_keeper"; "gp_keeper"; "ap_actor" ]
+;;
+
 let test_the_loader_stops_opening_keys_no_screen_draws () =
   let decode = "lib/tui_decode.ml" in
   let dropped =
@@ -1067,6 +1086,8 @@ let () =
             `Quick test_the_summary_row_does_not_count_the_panel_below_it
         ; Alcotest.test_case "the load stops reading a field no screen draws"
             `Quick test_the_overview_load_stops_reading_a_field_no_screen_draws
+        ; Alcotest.test_case "an approval row says who asked" `Quick
+            test_an_approval_row_says_who_asked
         ; Alcotest.test_case "the loader stops opening keys no screen draws"
             `Quick test_the_loader_stops_opening_keys_no_screen_draws
         ; Alcotest.test_case "the schedule counts read the shared status list"

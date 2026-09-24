@@ -62,13 +62,15 @@ val parse_max_context_override :
     runs [docker_preflight] (daemon, image, hardening) and is refused under
     {!Keeper_sandbox_runtime.docker_preflight_failed_label} when it fails.
     [docker_preflight] defaults to {!Keeper_sandbox_runtime.docker_preflight}
-    with the [Io] shell-timeout bucket; [None] from it means the preflight
-    master switch is off and admission proceeds. Both preflights run on
+    with the [Io] shell-timeout bucket, and is handed the Keeper's
+    [sandbox_image] as the host catalog resolves it; [None] from it means the
+    preflight master switch is off and admission proceeds, except that a
+    name the catalog cannot resolve is refused either way. Both preflights run on
     every call, creation and update alike: a redeclared keeper whose sandbox
     is unreachable is refused the same way a new one is. The test suite has
     no daemon and passes its own probe. *)
 val parse :
-  ?docker_preflight:(?image:string -> timeout_sec:float -> unit -> Keeper_sandbox_runtime.docker_preflight option) ->
+  ?docker_preflight:(image:(string, string) result -> timeout_sec:float -> unit -> Keeper_sandbox_runtime.docker_preflight option) ->
   _ context ->
   Yojson.Safe.t ->
   (parsed_args, tool_result) result

@@ -67,11 +67,13 @@ let store_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   | Keeper_types_profile_sandbox.Micro_vm, Some backend -> Some (Catalog.Microvm backend)
   | Keeper_types_profile_sandbox.Micro_vm, None | Keeper_types_profile_sandbox.Remote_ssh, _ -> None
 
+let resolve_in_workspace ~base_path ~store declared =
+  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+  resolve
+    ~config_root:resolution.Config_dir_resolver.config_root.Config_dir_resolver.path
+    ~store declared
+
 let for_keeper ~base_path (meta : Keeper_meta_contract.keeper_meta) =
   match store_of_meta meta with
   | None -> Error (No_image_store { keeper = meta.name; sandbox_profile = meta.sandbox_profile })
-  | Some store ->
-    let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
-    resolve
-      ~config_root:resolution.Config_dir_resolver.config_root.Config_dir_resolver.path
-      ~store meta.sandbox_image
+  | Some store -> resolve_in_workspace ~base_path ~store meta.sandbox_image

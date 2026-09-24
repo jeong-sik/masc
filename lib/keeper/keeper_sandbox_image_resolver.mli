@@ -34,11 +34,18 @@ val resolve :
     [<config_root>/sandbox-images.toml] and returns the build promoted for
     [declared] on [store]. *)
 
+val resolve_in_workspace :
+  base_path:string ->
+  store:Keeper_sandbox_image_catalog.store ->
+  string option ->
+  (Keeper_sandbox_image_catalog.pinned, error) result
+(** {!resolve} in the config root the server resolves for [base_path], so
+    [MASC_CONFIG_DIR] counts. *)
+
 val for_keeper :
   base_path:string ->
   Keeper_meta_contract.keeper_meta ->
   (Keeper_sandbox_image_catalog.pinned, error) result
-(** {!resolve} for a Keeper: the config root is the one the server resolves
-    for [base_path] (so [MASC_CONFIG_DIR] counts), and the store is Docker's
-    for [sandbox_profile = "docker"] and the Keeper's [microvm_backend] for
-    [microvm]. *)
+(** {!resolve_in_workspace} for a Keeper's own [sandbox_image]: the store is
+    Docker's for [sandbox_profile = "docker"] and the Keeper's
+    [microvm_backend] for [microvm]. *)

@@ -397,6 +397,8 @@ let image_unresolved_message error =
   "sandbox_image_unresolved: " ^ Keeper_sandbox_image_resolver.error_to_string error
 ;;
 
+let image t = t.image
+
 let docker_container_name_for_image (t : t) ~image =
   Keeper_sandbox_container_name.make
     (Keeper_sandbox_container_name.Docker_persistent

@@ -2383,14 +2383,14 @@ let keeper_create_sandbox_profile =
 let keeper_create_sandbox_image =
   let doc =
     Printf.sprintf
-      "Image the keeper's container runs in. Required with --sandbox-profile \
-       docker or microvm: the server refuses a keeper that names none rather \
-       than choosing one for it. %s is the general image and carries no \
-       language toolchain; a keeper that builds code names an image that \
-       does."
-      Keeper_sandbox_image.default_tag
+      "Name of the image the keeper's container runs in, from the host's image \
+       catalog (sandbox-images.toml). Required with --sandbox-profile docker \
+       or microvm: the server refuses a keeper that names none rather than \
+       choosing one for it. %s carries no language toolchain; a keeper that \
+       builds code names an image that does."
+      Keeper_sandbox_image_version.(base_embedded.name)
   in
-  Arg.(value & opt (some string) None & info [ "sandbox-image" ] ~docv:"IMAGE" ~doc)
+  Arg.(value & opt (some string) None & info [ "sandbox-image" ] ~docv:"NAME" ~doc)
 
 let keeper_create_network_mode =
   (* Spellings and behaviour both come from the typed owner through

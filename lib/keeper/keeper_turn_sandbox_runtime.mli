@@ -27,6 +27,12 @@ val create :
 
 val host_root : t -> string
 
+val image : t -> (string, Keeper_sandbox_image_resolver.error) result
+(** The image this runtime's turn resolved, given to {!create}. *)
+
+val image_unresolved_message : Keeper_sandbox_image_resolver.error -> string
+(** The refusal a start gives when the turn's image did not resolve. *)
+
 val github_identity_secret_files : t -> string list
 (** Credential files of the microvm identity snapshots already bound to this
     runtime, including retained snapshots. Reads the in-memory binding only:

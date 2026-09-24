@@ -87,6 +87,7 @@ let event_of ~method_ ~session params =
 
 type t =
   { send : string -> unit
+  ; close : unit -> unit
   ; sleep : float -> unit
   ; command_deadline_s : float
   ; on_event : event -> unit
@@ -95,8 +96,9 @@ type t =
   ; mutable lost : string option
   }
 
-let create ~send ~clock ~command_deadline_s ~on_event =
+let create ~send ~close ~clock ~command_deadline_s ~on_event =
   { send
+  ; close
   ; sleep = Eio.Time.sleep clock
   ; command_deadline_s
   ; on_event
@@ -116,6 +118,7 @@ let lost t reason =
     let waiting = Hashtbl.fold (fun _ resolver acc -> resolver :: acc) t.pending [] in
     Hashtbl.reset t.pending;
     List.iter (fun resolver -> Eio.Promise.resolve resolver (Error (Connection_lost reason))) waiting;
+    t.close ();
     t.on_event (Connection_ended { reason })
 ;;
 
@@ -146,15 +149,23 @@ let command t ?session method_ params =
     let reply, resolver = Eio.Promise.create () in
     Hashtbl.replace t.pending id resolver;
     t.send (encode_command ~id ?session method_ params);
-    (* A reply that arrived as the deadline passed is the reply. Without one,
-       the connection ends rather than write the next command behind a
-       command whose outcome is unknown. *)
-    Watched_work.run
-      ~watcher:(fun () ->
-        t.sleep t.command_deadline_s;
-        lost t deadline_exceeded;
-        Error (Connection_lost deadline_exceeded))
-      (fun () -> Eio.Promise.await reply)
+    (* The deadline ends the connection only for a command still waiting: a
+       reply that arrived as the deadline passed is the reply, and the
+       connection stays. Without one, the connection ends rather than write
+       the next command behind a command whose outcome is unknown. *)
+    (match
+       Watched_work.run
+         ~watcher:(fun () ->
+           t.sleep t.command_deadline_s;
+           if Hashtbl.mem t.pending id then lost t deadline_exceeded;
+           Eio.Promise.await reply)
+         (fun () -> Eio.Promise.await reply)
+     with
+     | result -> result
+     | exception (Eio.Cancel.Cancelled _ as exn) ->
+       (* A caller that leaves with its command out leaves its outcome unknown. *)
+       if Hashtbl.mem t.pending id then lost t "a command's caller was cancelled";
+       raise exn)
 ;;
 
 module Endpoint = Ws_direct_core.Endpoint
@@ -170,41 +181,70 @@ let endpoint_of url =
   | _ -> Error "CDP websocket must be a loopback ws URL with an explicit port"
 ;;
 
+exception Released
+
 let connect ~sw ~net ~clock ~url ~max_message ~command_deadline_s ~on_event =
   let* host, port, resource = endpoint_of url in
   Crypto_rng.ensure_default ();
-  let* addr =
-    match Eio.Net.getaddrinfo_stream net host ~service:(string_of_int port) with
-    | first :: _ -> Ok first
-    | [] -> Error "CDP loopback address unavailable"
-  in
-  let wsd = ref None in
-  let send frame = Option.iter (fun wsd -> Endpoint.Wsd.send_text wsd frame) !wsd in
-  let t = create ~send ~clock ~command_deadline_s ~on_event in
-  Eio.Switch.on_release sw (fun () -> lost t "CDP connection owner released");
-  let on_message (message : Message.t) =
-    match message.kind with
-    | Message.Text -> receive t (Bigstringaf.to_string message.payload)
-    | Message.Binary -> lost t "unexpected binary CDP frame"
-  in
-  let builder _ =
-    Endpoint.handlers ~on_message
-      ~on_close:(fun ~code:_ ~reason:_ -> lost t "CDP websocket closed")
-      ~on_error:(fun detail -> lost t ("CDP websocket error: " ^ detail))
-      ~on_eof:(fun () -> lost t "CDP websocket EOF")
-      ()
-  in
   let authority = (if host = "::1" then "[::1]" else host) ^ ":" ^ string_of_int port in
-  (* ws-direct reports a refused upgrade, or a head that did not arrive in its
-     window, as [Failure]; a refused TCP connect is [Eio.Io]. Both are this
-     connection's error. *)
-  match
-    (let flow = Eio.Net.connect ~sw net addr in
-     Ws_direct_eio.Client.connect ~sw ~clock ~host:authority ~resource ~max_message flow builder)
-  with
-  | opened ->
-    wsd := Some opened;
-    Ok t
-  | exception Failure detail -> Error ("CDP connection: " ^ detail)
-  | exception (Eio.Io _ as exn) -> Error ("CDP connection: " ^ Printexc.to_string exn)
+  (* Opens the socket and ws-direct's driver fibers on [inner]. Failures are
+     this connection's error: ws-direct reports a refused upgrade or a late
+     head as [Failure], a peer that closes during the upgrade as
+     [End_of_file], and a refused lookup or connect is [Eio.Io]. *)
+  let open_on inner =
+    match Eio.Net.getaddrinfo_stream net host ~service:(string_of_int port) with
+    | exception (Eio.Io _ as exn) -> Error ("CDP address lookup: " ^ Printexc.to_string exn)
+    | [] -> Error "CDP loopback address unavailable"
+    | addr :: _ ->
+      let wsd = ref None in
+      let released, release = Eio.Promise.create () in
+      let t =
+        create
+          ~send:(fun frame -> Option.iter (fun wsd -> Endpoint.Wsd.send_text wsd frame) !wsd)
+          ~close:(fun () -> Eio.Promise.resolve release ())
+          ~clock ~command_deadline_s ~on_event
+      in
+      let on_message (message : Message.t) =
+        match message.kind with
+        | Message.Text -> receive t (Bigstringaf.to_string message.payload)
+        | Message.Binary -> lost t "unexpected binary CDP frame"
+      in
+      let builder _ =
+        Endpoint.handlers ~on_message
+          ~on_close:(fun ~code:_ ~reason:_ -> lost t "CDP websocket closed")
+          ~on_error:(fun detail -> lost t ("CDP websocket error: " ^ detail))
+          ~on_eof:(fun () -> lost t "CDP websocket EOF")
+          ()
+      in
+      (match Eio.Net.connect ~sw:inner net addr with
+       | exception (Eio.Io _ as exn) -> Error ("CDP connection: " ^ Printexc.to_string exn)
+       | flow ->
+         (match Ws_direct_eio.Client.connect ~sw:inner ~clock ~host:authority ~resource ~max_message flow builder with
+          | opened ->
+            wsd := Some opened;
+            Ok (t, released)
+          | exception Failure detail -> Error ("CDP connection: " ^ detail)
+          | exception End_of_file -> Error "CDP connection: closed during the upgrade"
+          | exception (Eio.Io _ as exn) -> Error ("CDP connection: " ^ Printexc.to_string exn)))
+  in
+  let opened, open_ = Eio.Promise.create () in
+  (* The socket lives on a switch of its own under a daemon of the owner's.
+     [lost] ends that switch, and so does the owner's main work finishing, so
+     neither waits for Chrome to close its end. A failed open ends it at
+     once, closing the socket. *)
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    (try
+       Eio.Switch.run (fun inner ->
+         match open_on inner with
+         | Error detail -> Eio.Promise.resolve open_ (Error detail)
+         | Ok (t, released) ->
+           Eio.Promise.resolve open_ (Ok t);
+           Eio.Promise.await released;
+           Eio.Switch.fail inner Released)
+     with
+     | Released -> ());
+    `Stop_daemon);
+  let* t = Eio.Promise.await opened in
+  Eio.Switch.on_release sw (fun () -> lost t "CDP connection owner released");
+  Ok t
 ;;

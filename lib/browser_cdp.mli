@@ -4,8 +4,9 @@
     Unlike {!Browser_bidi_peer.with_connection}, the connection outlives any
     single call: it is owned by the switch it was opened on, and CDP events are
     the point of it, not noise. [Runtime.bindingCalled] carries every message
-    the Stagehand extension sends to the host. Ending the owner's switch ends
-    the connection. *)
+    the Stagehand extension sends to the host. The socket runs under a daemon
+    of the owner's switch, so the owner's work finishing, or the connection
+    ending, closes it without waiting for Chrome to close its end. *)
 
 type session_id = string
 (** A flat-mode CDP session ([Target.attachToTarget] with [flatten: true]). *)
@@ -54,12 +55,16 @@ val event_of : method_:string -> session:session_id option -> Yojson.Safe.t -> e
 type t
 
 (** A connection over [send]. Frames the transport receives go to {!receive};
-    the transport ending goes to {!lost}. A command with no reply after
-    [command_deadline_s] ends the connection, because a later command would be
-    written behind one whose outcome is unknown. [on_event] runs on the fiber
-    that delivered the frame and must not block. *)
+    the transport ending goes to {!lost}, which calls [close] once so the
+    transport can let go. A command still without a reply after
+    [command_deadline_s], or whose caller is cancelled while it is out, ends
+    the connection, because a later command would be written behind one whose
+    outcome is unknown. [on_event] runs on whichever fiber delivered the frame
+    or ended the connection (the reader, a deadline, a cancelled caller, the
+    owner's release) and must not block. *)
 val create :
   send:(string -> unit)
+  -> close:(unit -> unit)
   -> clock:_ Eio.Time.clock
   -> command_deadline_s:float
   -> on_event:(event -> unit)

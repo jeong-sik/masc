@@ -29,6 +29,7 @@ module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Overview_team = Masc_tui_overview_team
 module Overview_goals = Masc_tui_overview_goals
+module Overview_providers = Masc_tui_overview_providers
 module Repository_pulls = Masc_tui_repository_pulls
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
@@ -322,67 +323,18 @@ let overview_team (state : state) =
         (Overview_team.project ~keepers:overview.ov_keeper_rows
            ~tasks:state.tasks ~attention:overview.ov_attention_items)
 
-(* The quota windows the runtime catalogue reports shut, as one line under
-   the Team block's stuck rows: a shut window is usually why the Keepers under it
-   are stuck, and when it reopens is what the operator waits on. Nothing is
-   drawn while every window is open or before the first read -- a line saying
-   "all open" on every frame would be texture. A failed read says so. *)
-(* A failed quota read is said, but as a detail line: it explains no stuck
-   row, so it takes only rows the Overview had spare. *)
-let overview_quota_unread_line (state : state) =
-  match state.overview_quota with
-  | Quota_failed err ->
-      Some
-        (Printf.sprintf "%squota windows unread: %s%s" Ansi.dim
-           (Terminal_text.single_line err) Ansi.reset)
-  | Quota_unread | Quota_read _ -> None
-
-let overview_quota_line (state : state) ~now =
-  match state.overview_quota with
-  | Quota_unread | Quota_failed _ -> None
-  | Quota_read options -> (
-      match Overview_team.shut_windows options with
-      | [] -> None
-      | windows ->
-          let window_text (window : Overview_team.shut_window) =
-            let scope =
-              match window.sw_scope with
-              | Some scope -> Terminal_text.single_line scope
-              | None -> "unscoped"
-            in
-            let reopen =
-              match window.sw_resets_at with
-              | None -> "reopening time not reported"
-              | Some at when at <= now -> "reopen due, not yet re-read"
-              | Some at ->
-                  let tm = Unix.gmtime at in
-                  Printf.sprintf "reopens %02d:%02dZ, in %s" tm.Unix.tm_hour
-                    tm.Unix.tm_min
-                    (keeper_lane_idle_text (int_of_float (at -. now)))
-            in
-            Printf.sprintf "%s%s%s (%d runtime%s) %s" (Theme.warn ()) scope
-              Ansi.reset window.sw_runtimes
-              (if window.sw_runtimes = 1 then "" else "s")
-              reopen
-          in
-          Some
-            (Printf.sprintf "%s\xe2\x8f\xb8%s quota shut: %s" (Theme.warn ())
-               Ansi.reset
-               (String.concat " \xc2\xb7 " (List.map window_text windows))))
-
 let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
 
-(* Lines under the Team block that explain no Keeper row: an unread quota
-   and the pull request summary. *)
-let overview_team_detail_lines (state : state) =
-  Option.to_list (overview_quota_unread_line state) @ overview_pulls_lines state
+(* Lines under the Team block that explain no Keeper row: the pull request
+   summary. *)
+let overview_team_detail_lines (state : state) = overview_pulls_lines state
 
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the name lines and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~quota_line ~detail_lines ~pr_tag_of_keeper =
+    ~detail_lines ~pr_tag_of_keeper =
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -483,7 +435,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
   (* Detail lines come last: the layout gives them only rows nothing else
      wanted, so a short viewport cuts them before any Keeper. *)
   let rows =
-    List.map keeper_line stuck @ Option.to_list quota_line
+    List.map keeper_line stuck
     @ List.map keeper_line others
     @ names_line "?" "no phase" team.no_phase
     @ names_line off_glyph "paused" team.paused
@@ -567,6 +519,13 @@ let overview_attention (state : state) =
   | None -> []
   | Some overview -> overview.ov_attention_items
 
+(* The Providers section, drawn between the Attention panel and the Team
+   block. *)
+let overview_providers_section (state : state) ~cols =
+  Overview_providers.section ~providers:state.overview_providers
+    ~runtimes:state.overview_quota ~now:(Unix.gettimeofday ())
+    ~width:(framed_inner_width cols)
+
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
 let overview_layout (state : state) ~terminal_rows =
   let all_attention = overview_attention state in
@@ -574,16 +533,19 @@ let overview_layout (state : state) ~terminal_rows =
   let team_count =
     match overview_team state with
     | None -> 0
-    | Some team ->
-        Overview_team.drawn_rows team
-        + Option.fold ~none:0 ~some:(fun _ -> 1)
-            (overview_quota_line state ~now:(Unix.gettimeofday ()))
+    | Some team -> Overview_team.drawn_rows team
+  in
+  let providers_count =
+    match overview_providers_section state ~cols:(snd (get_terminal_size ())) with
+    | None -> 0
+    | Some section -> List.length section.Overview_providers.lines
   in
   let allocate attention_items =
     Render_schedule.allocate_overview ~terminal_rows
       ~attention_count:(List.length attention_items)
       ~goal_count:(Overview_goals.wanted_rows state.overview_goals)
       ~team_count
+      ~providers_count
       ~task_count:
         (Overview_tasks.line_count state.tasks
            (Overview_tasks.backlog state.tasks_domain))
@@ -850,6 +812,18 @@ let render_overview (state : state) =
 
   box_divider buf cols;
 
+  (* Providers section: each provider account's usage windows, as reported.
+     Drawn above Team, whose stuck Keepers a shut account explains. *)
+  (match overview_providers_section state ~cols with
+   | Some section when row_budget.providers_rows > 0 ->
+       Buffer.add_string buf (fit_width section.Overview_providers.title cols ^ "\n");
+       List.iter (box_line buf cols)
+         (List.filteri
+            (fun index _ -> index < row_budget.providers_rows)
+            section.Overview_providers.lines);
+       box_divider buf cols
+   | Some _ | None -> ());
+
   (* Team block: who is doing what, who is stuck. The allocation gave it
      [team_rows] rows plus its title and closing divider, or nothing. *)
   (match overview_team state with
@@ -857,7 +831,6 @@ let render_overview (state : state) =
        let title, lines =
          overview_team_lines team ~team_rows:row_budget.team_rows
            ~flow:state.task_flow ~cols
-           ~quota_line:(overview_quota_line state ~now:(Unix.gettimeofday ()))
            ~detail_lines:(overview_team_detail_lines state)
            ~pr_tag_of_keeper:(Repository_pulls.keeper_tag state.overview_pulls)
        in
@@ -2371,9 +2344,22 @@ let board_hearth_census_line ~cols (state : state) =
          to fit beside it, which is a different question from the one the row
          asks. *)
       let banded = Magnitude.of_counts census in
-      let entry (name, count, band) =
+      (* Each hearth's text is made printable once, here, and the budget below
+         and [entry] both read that one string. Measured as it arrived, a name
+         with a control byte in it counts that byte as no cells, and the row
+         draws it as a four-cell escape. The name as it arrived stays beside
+         the text for the selection check, since [board_hearth] holds it in
+         that form. *)
+      let hearths =
+        List.map
+          (fun (name, count, band) ->
+             ( name
+             , Printf.sprintf "%s %d" (Terminal_text.single_line name) count
+             , band ))
+          banded
+      in
+      let entry (name, text, band) =
         let selected = Option.equal String.equal state.board_hearth (Some name) in
-        let text = Printf.sprintf "%s %d" (Terminal_text.single_line name) count in
         (* Selection wins over size: which hearth is being read is a different
            axis from how big it is, and the reverse block says the first
            without leaving the second unsaid -- the count is in the text. *)
@@ -2396,31 +2382,49 @@ let board_hearth_census_line ~cols (state : state) =
         Printf.sprintf "   %s" (Masc_tui_message_layout.count_noun total "post")
       in
       let dropped_note count = Printf.sprintf "%s+%d" census_separator count in
-      (* Room for the widest note the row could end on: any hearth but the
-         first may be the one that does not fit. *)
-      let room =
-        max 8
-          (framed_inner_width cols - cells lead - cells tail
-          - cells (dropped_note (List.length census)))
+      let room = framed_inner_width cols - cells lead - cells tail in
+      (* The hearths that fit in [budget] cells, in census order, and how many
+         are left over. *)
+      let take budget =
+        let rec go kept used = function
+          | [] -> (List.rev kept, 0)
+          | ((_, text, _) as hearth) :: rest ->
+              let width =
+                cells text + if kept = [] then 0 else cells census_separator
+              in
+              if used + width > budget then (List.rev kept, 1 + List.length rest)
+              else go (hearth :: kept) (used + width) rest
+        in
+        go [] 0 hearths
       in
-      let rec take kept used = function
-        | [] -> (List.rev kept, 0)
-        | ((name, count, _) as banded_entry) :: rest ->
-            let width =
-              cells (Printf.sprintf "%s %d" name count)
-              + if kept = [] then 0 else cells census_separator
-            in
-            if used + width > room then (List.rev kept, 1 + List.length rest)
-            else take (banded_entry :: kept) (used + width) rest
+      (* The note is drawn only when a hearth is dropped, so it takes room only
+         then. Setting it aside before filling would, at a width that holds
+         every hearth but not the note as well, drop the last hearth and draw
+         "+1" for a hearth that had room.
+
+         So the first pass sets nothing aside. A pass that drops hearths runs
+         again with room for the note that drop needs. Dropping more can add a
+         digit to the count, and a pass whose note is wider than what it set
+         aside runs once more with that width. Each pass sets aside more than
+         the one before, and no note is wider than the one for the whole
+         census, so this ends. *)
+      let rec fit ~note_cells =
+        match take (room - note_cells) with
+        | kept, 0 -> (kept, None)
+        | kept, dropped ->
+            let note = dropped_note dropped in
+            if cells note <= note_cells then (kept, Some note)
+            else fit ~note_cells:(cells note)
       in
-      let kept, dropped = take [] 0 banded in
+      let kept, note = fit ~note_cells:0 in
       let shown =
         List.map entry kept
         |> String.concat (Ansi.dim ^ census_separator ^ Ansi.reset)
       in
       Printf.sprintf "  %s%s%s %s%s%s" Ansi.dim label Ansi.reset shown
-        (if dropped = 0 then ""
-         else Printf.sprintf "%s%s%s" Ansi.dim (dropped_note dropped) Ansi.reset)
+        (match note with
+         | None -> ""
+         | Some note -> Printf.sprintf "%s%s%s" Ansi.dim note Ansi.reset)
         (Printf.sprintf "%s%s%s" Ansi.dim tail Ansi.reset)
 
 let render_board_list (state : state) =

@@ -15,13 +15,15 @@ type output_admission_error =
   | Global_admission_not_allowed
   | Invalid_connect_timeout of float
   | Invalid_body_timeout of float
-  | Missing_deadline
+  | Missing_deadline of { provider_id : string option }
       (** No body timeout is declared. The body timeout is the only budget
           that bounds the whole request; the connect timeout ends when the
           response headers arrive. Without it a provider that sends headers
           and then stalls the body hangs the request for the life of the
           connection -- measured at 13.3h on an exact-output lane (#36979).
-          A connect timeout alone does not satisfy this rule. *)
+          A connect timeout alone does not satisfy this rule. [provider_id]
+          is the config's own, carried so the refusal can name the provider
+          whose declaration is missing; [None] when the config names none. *)
   | Caller_supplied_header_not_allowed of string
   | Unsupported_image_input
   | Unsupported_document_input
@@ -163,7 +165,7 @@ let[@warning "-32"] rejection_name = function
   | Global_admission_not_allowed -> "global_admission_not_allowed"
   | Invalid_connect_timeout _ -> "invalid_connect_timeout"
   | Invalid_body_timeout _ -> "invalid_body_timeout"
-  | Missing_deadline -> "missing_deadline"
+  | Missing_deadline _ -> "missing_deadline"
   | Caller_supplied_header_not_allowed name ->
     "caller_supplied_header_not_allowed:" ^ name
   | Unsupported_image_input -> "unsupported_image_input"
@@ -476,7 +478,8 @@ let preflight
       in
       let* () =
         require_body_deadline ~body_timeout_s:request.body_timeout_s
-        |> Result.map_error (fun `Missing_deadline -> Missing_deadline)
+        |> Result.map_error (fun `Missing_deadline ->
+          Missing_deadline { provider_id = config.provider_id })
       in
       if not (contract_is_supported config capabilities)
     then
@@ -765,7 +768,7 @@ let%test "exact preflight refuses a connect-only wire" =
     preflight ~config:(deadline_fixture_config ()) ~messages:[Types.user_msg "Hello"]
       ~body_timeout_s:None ~anthropic_thinking_control:None
   with
-  | Error Missing_deadline -> true
+  | Error (Missing_deadline _) -> true
   | Error e -> failwith ("connect-only preflight hit another rejection: " ^ rejection_name e)
   | Ok _ -> false
 ;;

@@ -404,6 +404,15 @@ let instruct_timeout_sec =
   +. default_timeout_sec
 ;;
 
+type instruct_action = Act | Observe | Extract
+
+let instruct_action = function
+  | Some (`String "act") -> Ok Act
+  | Some (`String "observe") -> Ok Observe
+  | Some (`String "extract") -> Ok Extract
+  | Some _ | None -> Error "action must be one of: act, observe, extract"
+;;
+
 let instruct_verb fields =
   let ( let* ) = Result.bind in
   let* instruction =
@@ -427,13 +436,13 @@ let instruct_verb fields =
        | exception Yojson.Json_error detail -> Error ("schema is not JSON: " ^ detail))
     | Some _ -> Error "schema must be JSON Schema text"
   in
-  match List.assoc_opt "action" fields, instruction, schema with
-  | Some (`String "act"), Some instruction, None -> Ok (Browser_lane.Page_instruct { tab_id; instruction })
-  | Some (`String "observe"), instruction, None -> Ok (Browser_lane.Page_locate { tab_id; instruction })
-  | Some (`String "extract"), Some instruction, schema -> Ok (Browser_lane.Page_extract { tab_id; instruction; schema })
-  | Some (`String ("act" | "extract")), None, _ -> Error "act and extract need an instruction"
-  | Some (`String ("act" | "observe")), _, Some _ -> Error "schema is for extract only"
-  | (Some _ | None), _, _ -> Error "action must be one of: act, observe, extract"
+  let* action = instruct_action (List.assoc_opt "action" fields) in
+  match action, instruction, schema with
+  | Act, Some instruction, None -> Ok (Browser_lane.Page_instruct { tab_id; instruction })
+  | Observe, instruction, None -> Ok (Browser_lane.Page_locate { tab_id; instruction })
+  | Extract, Some instruction, schema -> Ok (Browser_lane.Page_extract { tab_id; instruction; schema })
+  | (Act | Extract), None, _ -> Error "act and extract need an instruction"
+  | (Act | Observe), _, Some _ -> Error "schema is for extract only"
 ;;
 
 (* The Stagehand lane only: the sentence verbs are refused everywhere else. *)
@@ -454,7 +463,17 @@ let handle_instruct_with_phase ~tool_name ~start_time args =
            Tool_result.Effect_outcome_unknown
        in
        answer_to_result ~lane:Browser_lane.Lane_name.Stagehand ~tool_name ~start_time answer, phase)
-  | `Assoc _ -> refused_as_input "unknown browser instruct argument"
+  | `Assoc fields ->
+    let unknown =
+      List.filter_map
+        (fun (key, _) -> if List.mem key instruct_arguments then None else Some key)
+        fields
+    in
+    let hint =
+      if List.mem "lane" unknown then "; BrowserInstruct is stagehand only and takes no lane"
+      else ""
+    in
+    refused_as_input ("unknown browser instruct argument: " ^ String.concat ", " unknown ^ hint)
   | _ -> refused_as_input "browser arguments must be an object"
 ;;
 

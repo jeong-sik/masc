@@ -5,14 +5,12 @@
     the callback exits. *)
 val max_file_bytes : int
 
-(** Why staging stopped. A path the caller named that the Keeper's read
-    authority refuses carries that refusal's class. Everything after the paths
-    resolved -- a missing file, a file over [max_file_bytes] (refused here),
-    a failed read, the lease -- comes back through
-    [Browser_lane.Upload_lease.with_staged_files] as one string, which loses
-    which it was, so it is not claimed as the caller's to correct. *)
+(** Why staging stopped. A path refused by read authority carries its class;
+    an oversized file is a caller-correctable pre-effect refusal. Backend read
+    and snapshot failures are not claimed as the caller's to correct. *)
 type staging_error =
   | Path_refused of Keeper_alerting_path.path_refusal
+  | File_too_large of string
   | Staging_failed of string
 
 val with_staged_paths :

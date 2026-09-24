@@ -183,8 +183,8 @@ let test_docker_keeper_rg_invalid_type_surfaces_stderr () =
   (
     let file_path = Filename.concat playground "demo.ml" in
     ignore (Fs_compat.save_file_atomic file_path "let run_named = true\n");
-    let raw =
-      Keeper_workspace_ops.handle_tool_search_files
+    let execution =
+      Keeper_workspace_ops.handle_tool_search_files_with_outcome
         ~turn_sandbox_factory:None
         ~config
         ~meta
@@ -197,6 +197,10 @@ let test_docker_keeper_rg_invalid_type_surfaces_stderr () =
               ("type", `String "mli");
             ])
     in
+    let raw = execution.raw_output in
+    (match execution.disposition with
+     | Tool_result.Failed Tool_result.Policy_rejection -> ()
+     | _ -> Alcotest.failf "unknown rg type should be caller-correctable: %s" raw);
     Alcotest.(check (option bool)) "invalid rg type makes the call fail"
       (Some false)
       (parse_bool_field raw "ok");

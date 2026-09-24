@@ -174,6 +174,7 @@ let test_provider_refusals_name_their_cause () =
     ; "provider_overloaded"
     ; "provider_auth_refused"
     ; "provider_auth_refused"
+    ; "model_not_found"
     ]
     (List.map
        code_of
@@ -182,6 +183,7 @@ let test_provider_refusals_name_their_cause () =
        ; api (Llm_provider.Retry.Overloaded { message = "busy" })
        ; api (Llm_provider.Retry.AuthError { message = "bad key" })
        ; api (Llm_provider.Retry.AuthorizationError { message = "no access" })
+       ; api (Llm_provider.Retry.NotFound { message = "no such model" })
        ]);
   let throttled =
     api (Llm_provider.Retry.RateLimited { retry_after = Some 30.; message = "slow down" })

@@ -35,6 +35,9 @@ type failure =
       (** The provider refused the credential (HTTP 401/403). *)
   | Provider_unreachable of string
       (** The transport could not reach the provider. *)
+  | Model_not_found of string
+      (** The endpoint does not serve the selected model (HTTP 404 family):
+          a mistyped id or a model the endpoint does not list. *)
   | Provider_rejected of string
       (** The provider or client refused the verification request, carrying
           its own account of the refusal. Both a wire refusal and a request
@@ -75,7 +78,8 @@ val failure_of_agent_core_error : Agent_core.Error.t -> failure
 (** The verification failure for a refused Agent Core run, read from the
     error's typed route ([Keeper_runtime_failure_route.route_of_error]), so a
     rate limit, an exhausted quota, an overloaded provider, a refused
-    credential and an unreachable endpoint each keep their own code. A route
+    credential, an unreachable endpoint and a model the endpoint does not serve
+    each keep their own code. A route
     with none of those causes stays [Provider_rejected]. *)
 
 type unmeasured =

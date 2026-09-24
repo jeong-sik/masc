@@ -83,6 +83,8 @@ FAILURE_CAUSES = {
     'quota_exhausted': ('Usage limit or quota used up (not a short rate limit)', 'fail',
                         'A plan usage window can take hours or days to reopen, and a balance needs '
                         'billing. Exclude this connection or configure later.'),
+    'model_not_found': ('Model not found (not a rate limit)', 'fail',
+                        'Check the model name against the endpoint\'s model list, then choose connections again.'),
     'provider_auth_refused': ('Credential refused (not a rate limit)', 'fail',
                               'Check the API key variable or sign in again, then retry.'),
     'missing_credential': ('Credential missing (not a rate limit)', 'fail',

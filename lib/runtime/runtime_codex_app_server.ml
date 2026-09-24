@@ -1851,19 +1851,28 @@ let with_spawned_client ~mgr ~clock ~cwd config run =
     in
     let receive_phase = ref Awaiting_admission in
     let send json =
-      let payload = Yojson.Safe.to_string json in
-      (* The child decodes stdin as UTF-8 and exits on an invalid sequence,
-         which loses every in-flight turn and leaves the producer unnamed.
-         Refuse the write instead: the child survives and the field is named. *)
-      if not (String_util.is_valid_utf8 payload)
-      then
-        failwith
-          (Printf.sprintf
-             "codex app-server stdin: refusing invalid UTF-8 payload (field %s)"
-             (Option.value (invalid_utf8_field json) ~default:"<unknown>"));
       with_idle_timeout clock
         (Runtime_wall_clock.cap_window wall_clock (Some config.admission_timeout_s))
         (fun () ->
+          (* Encoding and its worker queue wait share the write's admission
+             and wall-clock bounds. Await the immutable payload before the
+             owner writes, preserving protocol order and callback ownership. *)
+          let payload =
+            Domain_pool_ref.submit_cpu_or_inline (fun () ->
+              let payload = Yojson.Safe.to_string json in
+              (* The child decodes stdin as UTF-8 and exits on an invalid sequence,
+                 which loses every in-flight turn and leaves the producer unnamed.
+                 Refuse the write instead: the child survives and the field is named. *)
+              if not (String_util.is_valid_utf8 payload)
+              then
+                failwith
+                  (Printf.sprintf
+                     "codex app-server stdin: refusing invalid UTF-8 payload (field %s)"
+                     (match invalid_utf8_field json with
+                      | Some field -> field
+                      | None -> "<unknown>"));
+              payload)
+          in
           Eio.Flow.copy_string payload stdin_w;
           Eio.Flow.copy_string "\n" stdin_w)
     in

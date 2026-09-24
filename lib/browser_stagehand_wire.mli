@@ -34,7 +34,8 @@ type readiness = Not_ready | Ready of marker
 (** The value {!readiness_expression} evaluates to. *)
 val readiness_of_json : Yojson.Safe.t -> (readiness, string) result
 
-(** The leading number of the marker's [protocol_version], digits only. *)
+(** The leading number of the marker's [protocol_version], digits only.
+    [Error] when there is none, or when it does not fit an [int]. *)
 val protocol_major : marker -> (int, string) result
 
 (** Chrome's id for an unpacked extension whose directory has this real path:
@@ -63,14 +64,24 @@ type extension_notification =
 
 type incoming =
   | Response of { id : id; result : (Yojson.Safe.t, rpc_error) result }
+  | Malformed_response of { id : id; detail : string }
+      (** A response whose id is readable but whose body is not one result
+          or one well-formed error: the call it answers has ended with no
+          answer to read. *)
   | Request of extension_request
   | Notification of extension_notification
 
 (** One message the extension sent through {!send_to_host_binding}. *)
 val decode : string -> (incoming, string) result
 
+(** [stagehand.init], sent once per session before any {!call}. *)
+type init = { client_version : string; browser_cdp_url : string }
+
+val init_method : string
+val encode_init : id:int -> init -> string
+
+(** The calls an attached session sends. *)
 type call =
-  | Init of { client_version : string; browser_cdp_url : string }
   | Close
   | Act of { page_id : string; instruction : string }
   | Observe of { page_id : string; instruction : string option }

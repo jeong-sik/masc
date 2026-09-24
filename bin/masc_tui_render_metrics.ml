@@ -95,7 +95,7 @@ let observation_detail_with ~current observation =
   | Unavailable detail ->
       observation_name observation ^ ": " ^ Terminal_text.single_line detail
   | Stale detail ->
-      observation_name observation ^ ": previous reading, refresh failed: "
+      observation_name observation ^ ": previous reading; "
       ^ Terminal_text.single_line detail
 
 let observation_detail observation =
@@ -494,7 +494,7 @@ let render_section_resources ~cols (state : state) =
   in
   let turn_lines = match state.keeper_turns_observed_at, state.keeper_turns_error with
     | _, Some error ->
-      [ "    Current turn observation failed: " ^ error
+      [ "    " ^ Terminal_text.single_line error
       ; "    Previous rows are not counted as current running turns." ]
     | None, None -> [ "    Current turns have not been observed yet." ]
     | Some observed_at, None ->

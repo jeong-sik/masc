@@ -1210,9 +1210,12 @@ let load_keeper_tool_approvals ~(host : string) ~(port : int) :
 (** Load which keepers are mid-turn right now (the "answering now" badge). *)
 let load_keeper_turns ~(host : string) ~(port : int) :
     (Tui_decode.keeper_turn_row list, string) result =
-  match fetch_keeper_turns ~host ~port with
-  | Error err -> Error ("keeper turns load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_keeper_turns json
+  let result =
+    match fetch_keeper_turns ~host ~port with
+    | Error err -> Error err
+    | Ok json -> Tui_decode.decode_keeper_turns json
+  in
+  Result.map_error (fun err -> "keeper turns load failed: " ^ err) result
 
 (** Load the durable Gate: pending approvals and both lane modes. *)
 let load_dashboard_gate ~(host : string) ~(port : int) :

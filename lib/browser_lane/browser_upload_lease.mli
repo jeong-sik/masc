@@ -9,9 +9,15 @@ val claim : owner:owner -> paths:string list -> unit
 val release_owner : owner -> unit
 (** Release only after confirmed session teardown or invalid-session evidence.
     Transport failure/cancellation is not teardown evidence. *)
+type 'read_error staging_error =
+  | Read_failed of 'read_error
+  | Snapshot_failed of string
+
 val with_staged_files :
-  files:(string * (unit -> (string, string) result)) list ->
-  (string list -> 'a) -> ('a, string) result
+  files:(string * (unit -> (string, 'read_error) result)) list ->
+  (string list -> 'a) -> ('a, 'read_error staging_error) result
 (** Each pair supplies a basename and an authorized byte reader. Unclaimed
-    snapshots are removed when the callback exits. Claimed snapshots survive
-    callback success, failure and cancellation until their owner is released. *)
+    snapshots are removed when the callback exits. Reader errors retain their
+    source type; snapshot errors carry this module's message. Claimed snapshots
+    survive callback success, failure and cancellation until their owner is
+    released. *)

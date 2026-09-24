@@ -1309,6 +1309,36 @@ let test_undeclared_endpoint_root_stays_refused () =
     Alcotest.(check bool) "Read names the refusal" true
       (String.starts_with ~prefix:"path_outside_sandbox" message)
 
+(* The keeper names no remote_endpoint, so whether /app is a declared root
+   cannot be known. That is the operator's to fix and leads the refusal; the
+   tree's own path_outside_sandbox follows it rather than being dropped. *)
+let test_unresolved_endpoint_leads_and_keeps_the_tree_refusal () =
+  let base, config, meta = setup_config "remote-unresolved" in
+  let meta = { meta with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh } in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let keepers_dir = Filename.concat base ".masc/config/keepers" in
+  ensure_dir keepers_dir;
+  write_file (Filename.concat keepers_dir "remote-unresolved.toml")
+    {|[keeper]
+instructions = "remote read test"
+sandbox_profile = "remote_ssh"
+|};
+  let contains ~needle hay =
+    let n = String.length needle in
+    let rec from i = i + n <= String.length hay && (String.sub hay i n = needle || from (i + 1)) in
+    from 0
+  in
+  match
+    Masc.Keeper_tool_filesystem_runtime.read_sandbox_bytes ~config ~meta
+      ~path:"/app/drift_monitor/windowing.py" ~max_bytes:4096 ()
+  with
+  | Ok _ -> Alcotest.fail "a path no endpoint could declare was read"
+  | Error message ->
+    Alcotest.(check bool) "the endpoint error leads" false
+      (String.starts_with ~prefix:"path_outside_sandbox" message);
+    Alcotest.(check bool) "the tree refusal follows" true
+      (contains ~needle:"(the keeper's tree also refused the path: path_outside_sandbox" message)
+
 let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =
   let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> [ "/app" ]) in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -2903,6 +2933,8 @@ let run_tests ~clock () =
             test_declared_endpoint_root_maps_as_itself;
           Alcotest.test_case "undeclared endpoint root stays refused" `Quick
             test_undeclared_endpoint_root_stays_refused;
+          Alcotest.test_case "unresolved endpoint leads and keeps the tree refusal" `Quick
+            test_unresolved_endpoint_leads_and_keeps_the_tree_refusal;
           Alcotest.test_case "own tree translates even under a declared root" `Quick
             test_own_tree_translates_even_under_a_declared_root;
           Alcotest.test_case "read of a declared path asks the endpoint for that path"

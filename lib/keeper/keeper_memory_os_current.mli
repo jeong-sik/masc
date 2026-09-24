@@ -405,9 +405,10 @@ val replace
     quarantine, because a caller cannot have read a revision from a file that
     does not decode.
 
-    [dropped_statements], when present, is the writer's own account of every
-    drop in this commit (the librarian's totality output) and is recorded on
-    the journal line only — the snapshot codec never stores it. Omission
+    [dropped_statements], when present, is the writer's own account of the
+    drops in this commit (the librarian's totality output). The journal line
+    keeps a statement only for a memory the locked snapshot held and the
+    committed one does not; the snapshot codec never stores them. Omission
     means the writer makes no drop-reason statements, not that nothing was
     dropped. *)
 

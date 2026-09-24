@@ -575,17 +575,14 @@ let generation_dispatch_fact_of_receipt receipt =
   else No_generation_dispatch
 ;;
 
-let flow_execution_error_generation_dispatch = function
-  | Flow_attempt_already_started _
-  | Flow_attempt_start_failed _
-  | Flow_measurement_start_failed _
-  | Flow_before_measurement_dispatch_callback_failed _
-  | Flow_measurement_terminal_callback_failed _
-  | Flow_before_dispatch_callback_failed _
-  | Flow_before_advance_callback_failed _
-  | Flow_candidates_exhausted _ -> No_generation_dispatch
-  | Flow_exact_execution_failed { cause; _ } ->
-    generation_dispatch_fact_of_receipt cause.receipt
+let flow_evidence_generation_dispatch (evidence : flow_evidence) =
+  if
+    List.exists
+      (fun (attempt : flow_attempt_snapshot) ->
+         Generation_receipt.snapshot_generation_dispatched attempt.receipt)
+      evidence.attempts
+  then Generation_dispatch_started
+  else No_generation_dispatch
 ;;
 
 let receipt_http_status = Generation_receipt.http_status
@@ -1705,6 +1702,17 @@ let execution_error_cause ~http_status ~dispatch = function
     (match http_status with
      | Some http_status -> Provider_response_refused { http_status; refusal = Context_overflow }
      | None -> Completion_failed { error; dispatch })
+  (* An empty answer the provider stopped at its window is the same refusal in
+     another shape. [Retry.overflow_of_empty_completion] is the one rule for
+     which empty answers those are. *)
+  | Exec.Provider_error
+      (Http_client.ProviderFailure
+         { kind = Http_client.Empty_completion { stop_reason }; message } as error) ->
+    (match Retry.overflow_of_empty_completion ~stop_reason ~message, http_status with
+     | Some overflow, Some http_status ->
+       Provider_response_refused
+         { http_status; refusal = provider_refusal_of_api_error overflow }
+     | Some _, None | None, (Some _ | None) -> Completion_failed { error; dispatch })
   (* Other transport, provider parsing or observer failures remain distinct
      from an owned body deadline, even when their receipt has headers. The
      typed transport error travels with the cause so a consumer can tell a
@@ -1816,6 +1824,33 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
 let execution_failure_may_advance (error : execution_error) =
   match error.cause, receipt_phase error.receipt with
   | Completion_failed _, Before_dispatch -> receipt_dispatch_count error.receipt = 0
+  (* The request went out and this binding did not answer within its own
+     deadline. How long a binding takes is a property of the binding, as its
+     quota is: the successor carries its own deadline and may serve the same
+     input. Exact requests have no tools and no domain validator ran, so the
+     one unanswered dispatch is the only thing left behind, and the receipt
+     keeps it as a fact. On the Librarian lane (2026-09-23) 51 of 85 failed
+     runs ended this way at the first slot, and their successors were never
+     tried. *)
+  | Completion_failed { error = Http_client.TimeoutError { phase; _ }; _ }, Dispatch_started ->
+    (match phase with
+     (* [post_sync_once] ends a sent request that has no response headers
+        with one of these two: the header deadline ([connect_timeout_s]) or
+        the total deadline ([body_timeout_s]) when it is the earlier one. *)
+     | Http_client.Http_operation | Http_client.Wall_clock ->
+       receipt_dispatch_count error.receipt = 1
+     (* The exact transport does not produce these after dispatch. One that
+        starts to needs its own argument that the successor may serve the
+        same input. *)
+     | Http_client.Queue
+     | Http_client.First_token
+     | Http_client.Capacity_backpressure
+     | Http_client.Non_streaming_body
+     | Http_client.Stream_body
+     | Http_client.Stream_idle _
+     | Http_client.Provider_step
+     | Http_client.Cli_stdout_idle
+     | Http_client.Unknown_timeout -> false)
   | Response_body_deadline_exceeded, Response_received ->
     (* No domain validator ran for this incomplete response. Advance through
        the caller's existing settlement callback, retaining the dispatched
@@ -1858,6 +1893,16 @@ let execution_failure_may_advance (error : execution_error) =
        and response as evidence; an interrupted/unknown dispatch is not this
        case, and neither is a status whose refusal body was not received. *)
     receipt_dispatch_count error.receipt = 1
+  | Provider_response_refused { refusal = Context_overflow; _ }, Response_received ->
+    (* The provider refused this input as larger than its window, before
+       generating: a typed overflow, or an empty answer stopped at the window.
+       A window is a property of the binding, as its quota and its deadline
+       are: the successor carries its own and may take the same input. When every candidate refuses, the walk ends on the last refusal
+       and the caller still reads the size from every advance it made. On the
+       Librarian lane (2026-09-22) 105 passes ended here at glm-5.3-flash
+       ("Prompt exceeds max length") and never reached the lane's declared
+       Claude CLI slot. *)
+    receipt_dispatch_count error.receipt = 1
   | Invalid_json_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
   (* The response arrived and terminated, but this binding routed the whole
@@ -1871,10 +1916,10 @@ let execution_failure_may_advance (error : execution_error) =
   | Missing_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
   (* The remaining refusals do not advance, as before this classification
-     existed ([Payment_required] was promoted above: the successor bills a
-     different account). Promoting any other one
-     needs its own argument about whether the successor can serve the same
-     input, which this change does not make. *)
+     existed ([Payment_required] and [Context_overflow] were promoted above:
+     the successor bills a different account, or carries its own window).
+     Promoting any other one needs its own argument about whether the
+     successor can serve the same input. *)
   | ( Provider_response_refused
         { refusal =
             ( Auth_failed
@@ -1882,7 +1927,6 @@ let execution_failure_may_advance (error : execution_error) =
             | Invalid_request
             | Refusal_body_not_received
             | Not_found
-            | Context_overflow
             | Input_capacity
             | Network_error
             | Timeout )
@@ -1898,7 +1942,8 @@ let execution_failure_may_advance (error : execution_error) =
             | Rate_limited
             | Overloaded
             | Server_error
-            | Payment_required )
+            | Payment_required
+            | Context_overflow )
         ; _
         }
     , (Not_started | Before_dispatch | Dispatch_started | Terminal) )

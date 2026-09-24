@@ -258,6 +258,103 @@ let test_terminal_text_is_idempotent_and_single_line () =
   Alcotest.(check string) "sanitization is idempotent" once
     (Tui_decode.sanitize_terminal_text once)
 
+let test_terminal_text_escapes_invisible_codepoints () =
+  (* #38445: a terminal draws bidi controls and zero-width characters as
+     nothing, so the glyphs an operator reads can differ from the bytes an
+     approval hash covers (Trojan Source, CVE-2021-42574). *)
+  let contains_substring hay needle =
+    let n = String.length needle and h = String.length hay in
+    let rec scan i =
+      i + n <= h && (String.sub hay i n = needle || scan (i + 1))
+    in
+    n = 0 || scan 0
+  in
+  let rlo = "\xe2\x80\xae" in
+  let escaped = Tui_decode.sanitize_terminal_text ("a" ^ rlo ^ "b") in
+  Alcotest.(check string) "the bidi override is drawn as its escape text"
+    "a\\u202Eb" escaped;
+  Alcotest.(check bool) "the raw RLO bytes are gone" false
+    (contains_substring escaped rlo);
+  Alcotest.(check string) "escape_invisible is the one rule" "a\\u202Eb"
+    (Tui_decode.escape_invisible ("a" ^ rlo ^ "b"));
+  List.iter
+    (fun (label, bytes, expected) ->
+       Alcotest.(check string) label expected
+         (Tui_decode.escape_invisible bytes))
+    [ "ALM", "\xd8\x9c", "\\u061C"
+    ; "ZWSP", "\xe2\x80\x8b", "\\u200B"
+    ; "ZWNJ", "\xe2\x80\x8c", "\\u200C"
+    ; "ZWJ", "\xe2\x80\x8d", "\\u200D"
+    ; "LRM", "\xe2\x80\x8e", "\\u200E"
+    ; "RLM", "\xe2\x80\x8f", "\\u200F"
+    ; "LRE", "\xe2\x80\xaa", "\\u202A"
+    ; "RLE", "\xe2\x80\xab", "\\u202B"
+    ; "PDF", "\xe2\x80\xac", "\\u202C"
+    ; "LRO", "\xe2\x80\xad", "\\u202D"
+    ; "RLO", "\xe2\x80\xae", "\\u202E"
+    ; "LRI", "\xe2\x81\xa6", "\\u2066"
+    ; "RLI", "\xe2\x81\xa7", "\\u2067"
+    ; "FSI", "\xe2\x81\xa8", "\\u2068"
+    ; "PDI", "\xe2\x81\xa9", "\\u2069"
+    ; "BOM", "\xef\xbb\xbf", "\\uFEFF"
+    ];
+  Alcotest.(check string) "an ordinary string is unchanged" "café"
+    (Tui_decode.escape_invisible "café");
+  Alcotest.(check string) "the escape is idempotent" "a\\u202Eb"
+    (Tui_decode.escape_invisible
+       (Tui_decode.escape_invisible ("a" ^ rlo ^ "b")))
+
+(* #38485 review: the first cut escaped every ZWJ, and the ZWJ an operator
+   types most often is the one inside an emoji. UAX #29 GB11 is the rule this
+   screen follows: between two pictographs the joiner stays, anywhere else it
+   is drawn as its escape like the other invisibles. *)
+let test_terminal_text_keeps_the_joiner_inside_an_emoji () =
+  let zwj = "\xe2\x80\x8d" in
+  let zwsp = "\xe2\x80\x8b" in
+  let shrug = "\xf0\x9f\xa4\xb7" (* U+1F937 *) in
+  let male = "\xe2\x99\x82" (* U+2642 *) in
+  let vs16 = "\xef\xb8\x8f" (* U+FE0F *) in
+  let person = "\xf0\x9f\xa7\x91" (* U+1F9D1 *) in
+  let skin_tone = "\xf0\x9f\x8f\xbd" (* U+1F3FD *) in
+  let laptop = "\xf0\x9f\x92\xbb" (* U+1F4BB *) in
+  let man = "\xf0\x9f\x91\xa8" and woman = "\xf0\x9f\x91\xa9" in
+  let girl = "\xf0\x9f\x91\xa7" in
+  let keeps label text =
+    Alcotest.(check string) label text (Tui_decode.escape_invisible text)
+  in
+  keeps "the shrugging man keeps its joiner" (shrug ^ zwj ^ male ^ vs16);
+  keeps "a skin tone before the joiner does not end the emoji"
+    (person ^ skin_tone ^ zwj ^ laptop);
+  keeps "both joiners of a family survive"
+    (man ^ zwj ^ woman ^ zwj ^ girl);
+  keeps "an emoji inside a sentence is untouched"
+    ("배포 끝났어요 " ^ shrug ^ zwj ^ male ^ vs16 ^ " 확인 부탁해요");
+  (* The dividing inputs: each side of the joiner is asked separately, so a
+     rule that only looked left, or only right, or let every joiner through
+     fails here. *)
+  Alcotest.(check string) "a joiner between letters is still escaped"
+    ("a\\u200Db") (Tui_decode.escape_invisible ("a" ^ zwj ^ "b"));
+  Alcotest.(check string) "a joiner after an emoji but before a letter is escaped"
+    (shrug ^ "\\u200Da")
+    (Tui_decode.escape_invisible (shrug ^ zwj ^ "a"));
+  Alcotest.(check string) "a joiner before an emoji but after a letter is escaped"
+    ("a\\u200D" ^ shrug)
+    (Tui_decode.escape_invisible ("a" ^ zwj ^ shrug));
+  (* A joiner that was escaped is text now, so the next one is not inside an
+     emoji either: carrying the state through an escaped joiner would let the
+     second one through raw. *)
+  Alcotest.(check string) "a doubled joiner does not smuggle one through"
+    (shrug ^ "\\u200D\\u200D" ^ laptop)
+    (Tui_decode.escape_invisible (shrug ^ zwj ^ zwj ^ laptop));
+  Alcotest.(check string) "only the joiner is spared, not every zero width"
+    (shrug ^ "\\u200B" ^ laptop)
+    (Tui_decode.escape_invisible (shrug ^ zwsp ^ laptop));
+  (* The sanitizer the screens call has to agree with the rule, or the rule
+     is only true of a function nothing draws through. *)
+  Alcotest.(check string) "the terminal sanitizer keeps it too"
+    (shrug ^ zwj ^ male ^ vs16)
+    (Tui_decode.sanitize_terminal_text (shrug ^ zwj ^ male ^ vs16))
+
 let test_preview_line_marks_breaks_and_escapes_the_rest () =
   let mark = "\xe2\x8f\x8e" in
   Alcotest.(check string) "a break is one return mark" ("a" ^ mark ^ "b")
@@ -11194,6 +11291,10 @@ let () =
           test_terminal_text_preserves_printable_utf8
       ; Alcotest.test_case "escapes malformed UTF-8 bytes" `Quick
           test_terminal_text_escapes_malformed_utf8_bytes
+      ; Alcotest.test_case "escapes invisible codepoints" `Quick
+          test_terminal_text_escapes_invisible_codepoints
+      ; Alcotest.test_case "keeps the joiner inside an emoji" `Quick
+          test_terminal_text_keeps_the_joiner_inside_an_emoji
       ; Alcotest.test_case "is idempotent and single-line" `Quick
           test_terminal_text_is_idempotent_and_single_line
       ; Alcotest.test_case "preview marks breaks and escapes the rest" `Quick

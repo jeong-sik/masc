@@ -303,6 +303,12 @@ val read_librarian_front
 
 val carried_start_front_to_string : carried_start_front -> string
 
+val warn_if_sent_on_unknown_start : keeper_name:string -> carried_start_front -> unit
+(** {!Keeper_carried_front.warn_range_opens_on_newest_atom} when the range a
+    lane sent opened on an unknown turn start. Called where the lane reports
+    the front it sent, so a Claude Code resume, which sends no range, says
+    nothing; composing a range logs nothing. *)
+
 val continuity_observation_input
   :  trace_id:string
   -> continuity:Keeper_turn_driver_try_provider.continuity option
@@ -569,17 +575,17 @@ val host_stop_result :
   turn_id:string ->
   turns_used:int ->
   latency_ms:int option ->
-  usage:Agent_core.Types.api_usage option ->
+  request_context:Runtime_observation.request_context option ->
   host_stop ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
 (** Build the provider-neutral checkpoint terminal after an official-client
     adapter stops its vendor-owned loop. The external client session is the
     durable continuation owner, so no Agent Core checkpoint is synthesized.
 
-    [usage] is what the adapter could measure before the stop: Claude Code
-    uses the newest assistant request's usage, since the result frame that
-    carries a turn total never arrives after a host stop. [Some] marks the
-    observation [Per_request]; [None] leaves the scope unavailable.
+    The turn's spend is not observed: no adapter has a terminal usage frame
+    after a host stop, so the response carries no usage and the scope is
+    unavailable. [request_context] is the context the newest request
+    occupied when the adapter saw one (Claude Code's assistant frames).
 
     Non-failed stops carry a one-attempt runtime observation (masc#31312):
     the vendor loop did run to reach this boundary, and a [None] observation

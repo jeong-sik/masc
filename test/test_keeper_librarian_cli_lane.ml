@@ -359,6 +359,40 @@ let test_invalid_provider_response_does_not_run_cli ?(requires_token_measurement
       (Runtime.For_testing.classified_error_kind error = Current.Exact_execution_failure)
 ;;
 
+(* The first slot sends its request and is refused with a 5xx, which advances
+   the walk; the second cannot connect, so the walk ends on a slot that sent
+   nothing. The walk still sent a request, and the failure line says so: it
+   read the slot that ended the walk only and wrote "none" (#38450). *)
+let test_a_walk_that_sent_before_it_failed_reports_the_send () =
+  with_eio @@ fun ~sw ~net ~clock ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  let refusing =
+    Fixture.start_server ~sw ~net ~clock
+      (Fixture.Reply_with (fun _ _ -> `Internal_server_error, "{}"))
+  in
+  ignore
+    (Fixture.publish_registry
+       ~lane_id:"librarian_exact"
+       ~slot_ids:[ "librarian-sent-then-refused"; "librarian-never-connected" ]
+       (Fixture.resolver_snapshot
+          ~source:"librarian walk sent before it failed"
+          [ { Fixture.id = "librarian-sent-then-refused"; base_url = refusing.base_url }
+          ; { Fixture.id = "librarian-never-connected"; base_url = "http://127.0.0.1:1" }
+          ])
+      : Runtime_exact_output_registry.t);
+  let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    fail "no CLI slot is declared, so none may run"
+  in
+  let result = execute ~net ~clock ~base_path ~runner in
+  check int "the first slot's request reached its server" 1 (Fixture.post_count refusing);
+  match result with
+  | Ok _ -> fail "a walk whose slots all failed must not succeed"
+  | Error error ->
+    let detail = Runtime.For_testing.classified_error_detail error in
+    check bool ("the walk's send is reported: " ^ detail) true
+      (Astring.String.is_infix ~affix:"outward_effect=started" detail)
+;;
+
 let test_failure_reaches_journal
       ~cli_only
       ~cli_slot_ids
@@ -622,6 +656,8 @@ let () =
             test_domain_failure_kind_survives_failed_cli_slot
         ; test_case "an invalid provider response does not run CLI" `Quick
             (fun () -> test_invalid_provider_response_does_not_run_cli ())
+        ; test_case "a walk that sent before it failed reports the send" `Quick
+            test_a_walk_that_sent_before_it_failed_reports_the_send
         ; test_case "a dispatched measurement failure does not run CLI" `Quick
             (fun () ->
               test_invalid_provider_response_does_not_run_cli

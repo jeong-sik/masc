@@ -51,7 +51,7 @@ def run(executable: str) -> None:
     fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"cluster-a", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
         # The scenario opens at a hundred columns, and resizing to the size
         # the terminal already has sends no SIGWINCH -- so that width is read

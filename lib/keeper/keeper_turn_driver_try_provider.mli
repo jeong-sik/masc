@@ -94,9 +94,11 @@ val turn_start :
     keeper-context-window-in-tokens §13.4): {!completed_history_end} read from
     the keeper's turn-boundary store, [Turn_boundary 0] when the history has
     no completed turn. A store this process cannot read, or a boundary the
-    history in hand does not match, is logged and answered
-    [Turn_boundary_unknown]: the request then opens on the newest atom alone
-    and its origin says so, rather than on the whole history. *)
+    history in hand does not match, is answered [Turn_boundary_unknown]: a
+    request it decides then opens on the newest atom alone and its origin says
+    so, rather than on the whole history. Reading it logs nothing; the request
+    whose range it opens warns
+    ({!Keeper_carried_front.warn_range_opens_on_newest_atom}). *)
 
 val prepare_continuity :
   trace_id:string ->

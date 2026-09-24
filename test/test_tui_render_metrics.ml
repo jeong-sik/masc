@@ -140,12 +140,13 @@ let test_calculate_kpis_empty () =
   check bool "no fabricated latency" false (contains output "0.82")
 ;;
 
-(* The fleet row reads "N configured · M unpaused", and the difference is
-   what a reader takes for how many are paused. A declared keeper is not
+(* The fleet row draws how many keepers are configured and how many are
+   paused. It used to draw the unpaused ones and leave the reader to
+   subtract, and the subtraction is where the bug was: the count skipped a
+   declared keeper as well as a paused one, so every declared keeper sat
+   inside the difference a reader reads as paused. A declared keeper is not
    paused -- [Tui_decode.keeper_of_declaration] writes [k_paused = false] and
-   is the only place a keeper with that origin is built -- so it belongs on
-   the unpaused side. The count used to skip it, which put it inside the
-   difference and over-counted the paused ones by the number declared. *)
+   is the only place a keeper with that origin is built. *)
 let make_declared_keeper name : Decode.keeper =
   { (make_keeper name) with k_origin = Decode.Declared_keeper [] }
 ;;
@@ -158,7 +159,7 @@ let test_a_declared_keeper_is_not_counted_as_paused () =
     ; make_declared_keeper "declared" ];
   let kpis = Render_metrics.calculate_kpis state in
   check int "three are configured" 3 kpis.total_keepers;
-  check int "two of them are not paused" 2 kpis.unpaused_keepers
+  check int "one of them is paused" 1 kpis.paused_keepers
 ;;
 
 let test_calculate_kpis_populated () =
@@ -171,7 +172,7 @@ let test_calculate_kpis_populated () =
       { Decode.ktr_chat_control_token = None; ktr_keeper_name = "unknown"; ktr_state = Keeper_turn_unavailable "owner unavailable" } ];
   state.keeper_turns_observed_at <- Some 100.;
   let kpis = Render_metrics.calculate_kpis state in
-  check int "unpaused is a configuration count" 1 kpis.unpaused_keepers;
+  check int "paused is a configuration count" 1 kpis.paused_keepers;
   let turns = Option.get kpis.turns in
   check int "only actual running owners count as running" 1 turns.running;
   check int "idle is distinct" 1 turns.idle;
@@ -454,7 +455,7 @@ let test_pulse_roster_waits_for_the_local_read () =
   state.local_workspace <- Types.Local_workspace_read;
   state.keepers <- [ make_keeper "alpha"; make_keeper ~paused:true "beta" ];
   check bool "a read roster is counted" true
-    (contains (pulse ()) "2 configured · 1 unpaused")
+    (contains (pulse ()) "2 configured · 1 paused")
 ;;
 
 let test_section_pills_line () =

@@ -1418,7 +1418,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
-    ~event_bus ~raw_trace ~on_event ~config () =
+    ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.claude_code) () =
   let quota_scope =
     Runtime_quota_window.scope_of_claude_code_home
       (Runtime_claude_code.effective_account_home config.account_home)

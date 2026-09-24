@@ -94,8 +94,10 @@ let scope_to_string = function
   | Credential_env name -> "env:" ^ name
   | Credential_file path -> "file:" ^ path
   | Official_client_home (client, home) -> "official:" ^ client ^ ":home:" ^ home
-  | Official_client_default (client, home) ->
-    "official:" ^ client ^ ":default:" ^ Option.value home ~default:"home-unset"
+  | Official_client_default (client, Some home) ->
+    "official:" ^ client ^ ":default:" ^ home
+  | Official_client_default (client, None) ->
+    "official:" ^ client ^ ":default:home-unset"
 
 let scope_equal left right =
   match left, right with

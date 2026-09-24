@@ -1621,7 +1621,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
-    ~event_bus ~raw_trace ~on_event ~config () =
+    ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.codex_app_server) () =
   let quota_scope =
     Runtime_quota_window.scope_of_codex_home
       (Runtime_codex_app_server.effective_account_home config.account_home)

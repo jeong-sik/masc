@@ -7,11 +7,9 @@ import {
   isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
   parseRuntimeTomlEnvironment,
-  parseRuntimeTomlExactLanes,
   runtimeTomlImpactSummary,
   setRuntimeTomlBindingField,
   setRuntimeTomlDefault,
-  setRuntimeTomlExactLaneSlots,
   setRuntimeTomlKey,
   setRuntimeTomlModelField,
   setRuntimeTomlProviderCredential,
@@ -46,50 +44,6 @@ keep-alive = "10m"
 `
 
 describe('runtime TOML dashboard editing helpers', () => {
-  it('edits a multiline exact lane without losing its CLI tail or another section', () => {
-    const source = `${sourceText}\n[runtime.exact_output_lanes.librarian_exact]\nslots = [\n  "runpod_mtp.qwen",\n  "openai.gpt",\n]\ncli_slots = ["codex_subscription.luna"]\nmax_output_tokens = 8192\n\n[runtime.exact_output_lanes.verifier_exact]\ncli_slots = ["codex_subscription.luna"]\n`
-    const lanes = parseRuntimeTomlExactLanes(source)
-    expect(lanes.find(lane => lane.id === 'librarian_exact')).toMatchObject({
-      slots: ['runpod_mtp.qwen', 'openai.gpt'], cliSlots: ['codex_subscription.luna'], error: null,
-    })
-    const edited = setRuntimeTomlExactLaneSlots(source, 'librarian_exact', 'slots', ['openai.gpt', 'runpod_mtp.qwen'])
-    expect(parseRuntimeTomlExactLanes(edited).find(lane => lane.id === 'librarian_exact')?.slots)
-      .toEqual(['openai.gpt', 'runpod_mtp.qwen'])
-    expect(edited).toContain('cli_slots = ["codex_subscription.luna"]')
-    expect(edited).toContain('[runtime.exact_output_lanes.verifier_exact]\ncli_slots = ["codex_subscription.luna"]')
-    expect(() => setRuntimeTomlExactLaneSlots(edited, 'librarian_exact', 'slots', [])).not.toThrow()
-    expect(() => setRuntimeTomlExactLaneSlots(edited, 'librarian_exact', 'cli_slots', [])).not.toThrow()
-    expect(() => setRuntimeTomlExactLaneSlots(
-      setRuntimeTomlExactLaneSlots(edited, 'librarian_exact', 'slots', []),
-      'librarian_exact', 'cli_slots', [],
-    )).toThrow('at least one slot')
-  })
-
-  it('refuses to edit an exact lane whose array cannot be read', () => {
-    const source = `${sourceText}\n[runtime.exact_output_lanes.librarian_exact]\nslots = [unquoted]\n`
-    expect(parseRuntimeTomlExactLanes(source)[0]?.error).toContain('quoted runtime id')
-    expect(() => setRuntimeTomlExactLaneSlots(source, 'librarian_exact', 'slots', ['runpod_mtp.qwen']))
-      .toThrow('Cannot edit exact lane')
-  })
-
-  it('keeps inline candidate comments in the raw editor', () => {
-    const source = `${sourceText}\n[runtime.exact_output_lanes.librarian_exact]\nslots = [\n  "runpod_mtp.qwen", # primary\n  "openai.gpt",\n]\n`
-    expect(parseRuntimeTomlExactLanes(source)[0]?.error).toContain('contains comments')
-    expect(() => setRuntimeTomlExactLaneSlots(source, 'librarian_exact', 'slots', ['openai.gpt']))
-      .toThrow('Cannot edit exact lane')
-    expect(source).toContain('# primary')
-  })
-
-  it('still exposes HTTP candidates when only the CLI array has comments', () => {
-    const source = `${sourceText}\n[runtime.exact_output_lanes.librarian_exact]\nslots = ["runpod_mtp.qwen"]\ncli_slots = [\n  "codex_subscription.luna", # quota fallback\n]\n`
-    const lane = parseRuntimeTomlExactLanes(source)[0]
-    expect(lane?.slots).toEqual(['runpod_mtp.qwen'])
-    expect(lane?.cliSlots).toEqual([])
-    expect(lane?.error).toContain('cli_slots contains comments')
-    expect(() => setRuntimeTomlExactLaneSlots(source, 'librarian_exact', 'slots', ['runpod_mtp.qwen']))
-      .toThrow('Cannot edit exact lane')
-  })
-
   it('projects provider, model, and binding fields from runtime.toml source', () => {
     const environment = parseRuntimeTomlEnvironment(sourceText)
 

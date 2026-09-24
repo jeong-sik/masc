@@ -5,12 +5,19 @@ import { Copy, RefreshCcw, RotateCcw, Save } from 'lucide-preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   fetchRuntimeTomlConfig,
+  fetchRuntimeResolved,
+  fetchStandaloneLanes,
   patchRuntimeAssignment,
+  patchRuntimeExactSlot,
   patchRuntimeRouting,
   saveRuntimeTomlConfig,
   type CommittedRuntimeTomlConfig,
   type RuntimeTomlConfig,
   type RuntimeRoutingLane,
+  type RuntimeExactSlotAction,
+  type RuntimeExactSlotDirection,
+  type RuntimeResolution,
+  type StandaloneLaneSnapshotRow,
 } from '../api/dashboard'
 import { errorToString } from '../lib/format-string'
 import {
@@ -19,7 +26,6 @@ import {
   enabledRuntimeIds,
   parseRuntimeTomlEnvironment,
   runtimeTomlImpactSummary,
-  setRuntimeTomlExactLaneSlots,
   setRuntimeTomlBindingField,
   setRuntimeTomlModelField,
   setRuntimeTomlProviderCredential,
@@ -192,6 +198,22 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   const [notice, setNotice] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [section, setSection] = useState<RuntimeSectionId>('routing')
+  const [exactLanes, setExactLanes] = useState<StandaloneLaneSnapshotRow[] | null>(null)
+  const [laneRuntimes, setLaneRuntimes] = useState<RuntimeResolution[] | null>(null)
+  const [exactLaneError, setExactLaneError] = useState<string | null>(null)
+
+  const refreshExactLanes = useCallback(async () => {
+    try {
+      const [snapshot, resolved] = await Promise.all([fetchStandaloneLanes(), fetchRuntimeResolved()])
+      setExactLanes(snapshot.lanes)
+      setLaneRuntimes(resolved.runtimes)
+      setExactLaneError(null)
+    } catch (err: unknown) {
+      setExactLanes(null)
+      setLaneRuntimes(null)
+      setExactLaneError(errorToString(err))
+    }
+  }, [])
 
   useEffect(() => {
     if (!onClose) return undefined
@@ -212,6 +234,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     setDraft(saved.source_text)
     const applicationNotice = runtimeConfigCommitReceiptNotice(saved)
     await resumeSavedModelSetup()
+    await refreshExactLanes()
     try {
       await refreshRuntimeConfigConsumers()
       setNotice(applicationNotice)
@@ -232,11 +255,12 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       setConfig(next)
       setDraft(next.source_text)
       setLoadState('loaded')
+      await refreshExactLanes()
     } catch (err: unknown) {
       setError(errorToString(err))
       setLoadState('idle')
     }
-  }, [])
+  }, [refreshExactLanes])
 
   useEffect(() => {
     void refresh()
@@ -328,14 +352,19 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     setError(null)
   }
 
-  function handleExactLaneSlotsChange(laneId: string, kind: 'slots' | 'cli_slots', slots: string[]) {
-    if (saving || loadState !== 'loaded') return
+  async function handleExactSlotAction(laneId: string, action: RuntimeExactSlotAction,
+    runtimeId: string, direction?: RuntimeExactSlotDirection) {
+    if (saving || loadState !== 'loaded' || dirty) return
+    setSaving(true)
+    setError(null)
+    setNotice(null)
     try {
-      setDraft(setRuntimeTomlExactLaneSlots(draft, laneId, kind, slots))
-      setNotice(null)
-      setError(null)
+      const saved = await patchRuntimeExactSlot(laneId, action, runtimeId, direction)
+      await adoptSavedRuntimeConfig(saved)
     } catch (err: unknown) {
       setError(errorToString(err))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -780,9 +809,14 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
             </div>
 
             <div class=${section === 'lanes' ? '' : 'hidden'} data-testid="runtime-toml-lanes">
-              <${RuntimeExactLaneEditor} sourceText=${draft} disabled=${saving || loadState !== 'loaded'}
-                onSlotsChange=${handleExactLaneSlotsChange}
-                onDeadlineChange=${handleExactBodyDeadlineChange} />
+              ${exactLaneError ? html`<p role="alert">Lane 투영을 읽지 못했습니다: ${exactLaneError}</p>` : null}
+              ${exactLanes && laneRuntimes ? html`<${RuntimeExactLaneEditor}
+                sourceText=${draft} lanes=${exactLanes} runtimes=${laneRuntimes}
+                slotsDisabled=${saving || loadState !== 'loaded' || dirty}
+                deadlineDisabled=${saving || loadState !== 'loaded'}
+                onSlotAction=${(laneId: string, action: RuntimeExactSlotAction, runtimeId: string,
+                  direction?: RuntimeExactSlotDirection) => { void handleExactSlotAction(laneId, action, runtimeId, direction) }}
+                onDeadlineChange=${handleExactBodyDeadlineChange} />` : null}
             </div>
 
             <div class=${tomlActive ? 'flex flex-col gap-3' : 'hidden'} data-testid="runtime-toml-section">

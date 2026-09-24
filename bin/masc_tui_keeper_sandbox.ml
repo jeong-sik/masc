@@ -389,7 +389,15 @@ let container_lines ~width containers =
          row of its own, where an operator can read it whole to paste into
          docker. *)
       wrapped_rows ~width ~label:"State" ~tone
-        (Printf.sprintf "%s · %s" state container.status)
+        (* One word where the two agree. [running] is this reading of the
+           bool the projection sends; [status] is the runtime's own word,
+           and they are different facts -- a stopped container can say
+           "exited (0)" where this says "stopped". But they agree whenever
+           the runtime spells its state the way this does: on the live
+           fleet all fourteen drawn containers read "running · running",
+           the same word twice. *)
+        (if String.equal state container.status then state
+         else Printf.sprintf "%s · %s" state container.status)
       @ wrapped_rows ~width ~label:"Name" ~tone:`Muted container.name
       @ (match compute with
          | None -> []

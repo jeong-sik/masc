@@ -1776,8 +1776,9 @@ let schedule_lookup_dashboard_fixture =
    wake history to it without touching the Dashboard, and from then on every
    found answer was refused there as carrying unknown keys (#38510). The
    Dashboard decoder test reads the shared fixture; this pins the fixture to
-   what the server writes, key by key and kind by kind, so the next key the
-   server adds fails here before it reaches an operator. *)
+   what the server writes, every key at every depth and the kind of every
+   value, so the next key the server adds fails here before it reaches an
+   operator. *)
 let test_schedule_exact_lookup_found_matches_the_dashboard_fixture () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let schedule_id = "sched-dashboard-fixture" in
@@ -1824,16 +1825,24 @@ let test_schedule_exact_lookup_found_matches_the_dashboard_fixture () =
       ~schedule_id
   in
   let fixture = Yojson.Safe.from_file schedule_lookup_dashboard_fixture in
-  let shape label = function
+  (* Every key at every depth with the kind of its value. Values differ run to
+     run (the instance id), so they are not compared; a list is walked by
+     index, and both sides hold the one wake this setup produces. *)
+  let rec shape path json =
+    let here = [ path, Json_util.kind_name json ] in
+    match json with
     | `Assoc fields ->
-      List.sort compare (List.map (fun (key, value) -> key, Json_util.kind_name value) fields)
-    | other -> failf "%s is not an object: %s" label (Json_util.kind_name other)
+      here
+      @ List.concat_map (fun (key, value) -> shape (path ^ "." ^ key) value) fields
+    | `List items ->
+      here @ List.concat (List.mapi (fun index item -> shape (Printf.sprintf "%s[%d]" path index) item) items)
+    | _ -> here
   in
   check
     (list (pair string string))
-    "the found envelope's keys and their kinds"
-    (shape "the server's answer" body)
-    (shape "the Dashboard fixture" fixture)
+    "the found answer's keys and kinds at every depth"
+    (List.sort compare (shape "$" body))
+    (List.sort compare (shape "$" fixture))
 
 (* The exact lookup is where a schedule's past is read, because the aggregate
    sends one wake per row and 20 rows of 323. Until this projection carried the

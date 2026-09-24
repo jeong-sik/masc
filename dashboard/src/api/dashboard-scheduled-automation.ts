@@ -159,12 +159,8 @@ export function decodeScheduledAutomationLookup(
         ],
         'envelope',
       )
-      if (!Array.isArray(record.wakes)) {
-        throw new Error('Invalid scheduled-automation lookup response: wakes must be a list')
-      }
-      if (countOrNull(record.wake_count) === null || countOrNull(record.wake_retention_per_schedule) === null) {
-        throw new Error('Invalid scheduled-automation lookup response: wake counts must be non-negative integers')
-      }
+      // Named, not read: nothing here draws the wakes, so their values are no
+      // reason to refuse the lookup.
       return { status: 'found', scheduleId, request: parseLookupRequest(record.request, scheduleId) }
     case 'not_found':
       exactFields(record, ['schema', 'source', 'generated_at', 'status', 'schedule_id'], 'envelope')

@@ -2000,6 +2000,8 @@
 ; their (test)/(tests) stanzas under @test/runtest.
 (rule
  (alias runtest-dashboard-http-behavior-contracts)
+ ;; The found-lookup case reads the fixture the Dashboard decoder test reads.
+ (deps ../dashboard/src/api/fixtures/scheduled-automation-lookup-found.json)
  (action
   (progn
    (run %{exe:test_dashboard_http_core.exe} test "dashboard behavior contracts")

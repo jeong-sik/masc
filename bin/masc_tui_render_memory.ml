@@ -159,6 +159,11 @@ let clause_rows ~cols clauses =
     [ indent ^ first; fold ^ last ]
   | rows -> List.map (fun row -> indent ^ row) rows
 
+type memory_context_projection =
+  { rows : string list
+  ; stalled_row : (int * string) option
+  }
+
 let memory_context_lines ~cols (k : memory_keeper_health) =
   let current_line =
     Printf.sprintf "  %s · %s · snapshot r%d · recall %s tok · updated %s"
@@ -354,12 +359,19 @@ let memory_context_lines ~cols (k : memory_keeper_health) =
      costs a value rather than the meaning of the ones before it, and
      breaking every row would double the block at the widths a terminal is
      likely to have. *)
-  [ current_line; facts_line; source_line ]
-  @ clause_rows ~cols librarian_clauses
-  @ librarian_stalled_lines
-  @ librarian_cause_lines @ context_lines
-  @ (vision_line :: read_error_lines)
-  @ List.concat_map (fun sentence -> clause_rows ~cols [ sentence ]) alert_lines
+  let librarian_rows = clause_rows ~cols librarian_clauses in
+  { rows =
+      [ current_line; facts_line; source_line ]
+      @ librarian_rows
+      @ librarian_stalled_lines
+      @ librarian_cause_lines @ context_lines
+      @ (vision_line :: read_error_lines)
+      @ List.concat_map (fun sentence -> clause_rows ~cols [ sentence ]) alert_lines
+  ; stalled_row =
+      Option.map
+        (fun row -> 3 + List.length librarian_rows, row)
+        (List.hd_opt librarian_stalled_lines)
+  }
 
 type memory_state = Masc_tui_types.memory_state =
   | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current
@@ -794,6 +806,30 @@ let fold_memory_rows ~subject ~max_rows rows =
     @ [ note ]
     @ List.filteri (fun index _ -> index >= count - trailing) rows
 
+(* A stalled gap is the actionable reading in the selected Keeper's block.
+   Keep its typed row when the body budget folds the surrounding detail; the
+   generic first/last fold could otherwise hide it in the middle. *)
+let fold_memory_context_rows ~max_rows context =
+  let rows = context.rows in
+  let count = List.length rows in
+  match context.stalled_row with
+  | None -> fold_memory_rows ~subject:"Keeper detail" ~max_rows rows
+  | Some _ when count <= max_rows -> rows
+  | Some _ when max_rows <= 1 ->
+    fold_memory_rows ~subject:"Keeper detail" ~max_rows rows
+  | Some (stalled_index, stalled_row) ->
+    let extra = max_rows - 2 in
+    let before = min stalled_index (extra / 2) in
+    let after = min (count - stalled_index - 1) (extra - before) in
+    let before = min stalled_index (extra - after) in
+    let hidden = count - before - after - 1 in
+    let note =
+      Printf.sprintf "  … %d Keeper detail rows hidden; enlarge terminal" hidden
+    in
+    List.filteri (fun index _ -> index < before) rows
+    @ [ note; stalled_row ]
+    @ List.filteri (fun index _ -> index >= count - after) rows
+
 let memory_refused_keeper_lines (state : state) =
   match state.memory_health with
   | Some { mhs_refused_keepers = []; _ } | None -> []
@@ -822,7 +858,7 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   let cursor = Option.value cursor ~default:state.memory_health_cursor in
   let context =
     match List.nth_opt keepers (max 0 (min cursor (List.length keepers - 1))) with
-    | None -> []
+    | None -> { rows = []; stalled_row = None }
     | Some keeper -> memory_context_lines ~cols keeper
   in
   let all_refused = memory_refused_keeper_lines state in
@@ -835,12 +871,19 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   (* Reserve a visible count when decoding rejected rows. The rejection
      block spends any additional room after the summary and before detail. *)
   let refused_min = if all_refused = [] then 0 else 1 in
+  (* Preserve an omission count and the stalled-gap row, plus their divider,
+     before the fleet summary and rejected rows spend the remaining body. *)
+  let context_reserve =
+    if Option.is_some context.stalled_row then 3 else 0
+  in
   let header =
     memory_fleet_header_rows ~cols state
     |> fold_memory_rows ~subject:"Memory summary"
-         ~max_rows:(max 0 (budget - fixed_rows - list_rows - refused_min))
+         ~max_rows:(max 0 (budget - fixed_rows - list_rows - refused_min - context_reserve))
   in
-  let refused_available = max 0 (budget - fixed_rows - list_rows - List.length header) in
+  let refused_available =
+    max 0 (budget - fixed_rows - list_rows - List.length header - context_reserve)
+  in
   let refused =
     fold_memory_rows ~subject:"rejected Keeper"
       ~max_rows:(if refused_available > 1 then refused_available - 1 else refused_available)
@@ -852,10 +895,9 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
     let available =
       budget - fixed_rows - list_rows - List.length header - refused_spent
     in
-    if context = [] || available <= 1 then []
+    if context.rows = [] || available <= 1 then []
     else
-      fold_memory_rows ~subject:"Keeper detail"
-        ~max_rows:(available - 1) context
+      fold_memory_context_rows ~max_rows:(available - 1) context
   in
   { header; refused; refused_divider; context }
 

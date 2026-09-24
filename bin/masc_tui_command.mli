@@ -34,10 +34,8 @@ type t =
       (** [/diff] — open Git working-tree changes and diff for the workspace. *)
   | Open_patch_modal
       (** [/patch] or [/review] — open the patch review overlay. *)
-  | Toggle_burn_hud
-      (** [/burn] or [/cost] — show or hide the fleet's 24h cost and each Keeper's token total in the tab row. *)
   | Toggle_team_cost
-      (** [/team-cost] — show or hide the fleet's 24h cost on the Overview Team line. *)
+      (** [/team-cost] or [/cost] — show or hide the fleet's 24h cost on the Overview Team line. *)
   | Open_link_preview of string option
       (** [/preview [url]] — open the OpenGraph preview overlay for a web link. *)
   | Open_links_list

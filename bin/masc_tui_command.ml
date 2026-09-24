@@ -12,7 +12,6 @@ type t =
   | Open_settings
   | Open_diff
   | Open_patch_modal
-  | Toggle_burn_hud
   | Toggle_team_cost
   | Open_link_preview of string option
   | Open_links_list
@@ -106,13 +105,8 @@ let catalog =
     ; args = ""
     ; summary = "open the patch review for pending code changes"
     }
-  ; { word = "burn"
-    ; aliases = [ "cost" ]
-    ; args = ""
-    ; summary = "show or hide the fleet's 24h cost and each Keeper's token total in the tab row"
-    }
   ; { word = "team-cost"
-    ; aliases = []
+    ; aliases = [ "cost" ]
     ; args = ""
     ; summary = "show or hide the fleet's 24h cost on the Overview Team line"
     }
@@ -330,8 +324,7 @@ let parse text =
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff
     | "patch", _ | "review", _ -> Open_patch_modal
-    | "burn", _ | "cost", _ -> Toggle_burn_hud
-    | "team-cost", _ -> Toggle_team_cost
+    | "team-cost", _ | "cost", _ -> Toggle_team_cost
     | "preview", arg ->
         let trimmed = String.trim arg in
         if String.equal trimmed "" then Open_link_preview None

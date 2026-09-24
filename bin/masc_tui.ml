@@ -9840,26 +9840,13 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.patch_modal_path <- Some target_path;
       launch_repository_changes_diff_load state ~mailbox
         ~scope:Tui_decode.Repository_change_project ~path:target_path
-  | Masc_tui_command.Toggle_burn_hud ->
-      Buffer.clear state.msg_input;
-      state.burn_hud_visible <- not state.burn_hud_visible;
-      (* The tab row draws keeper-costs' 24h reading, which is fetched only
-         while something shows it; once nothing does, a reading kept from
-         before would come back as a sum nobody observed since. *)
-      if not (state.burn_hud_visible || state.overview_cost_visible) then
-        state.overview_cost <- Cost_unread;
-      notice ~kind:Notice_reply
-        (if state.burn_hud_visible then "Fleet 24h cost in the tab row: shown"
-         else "Fleet 24h cost in the tab row: hidden")
   | Masc_tui_command.Toggle_team_cost ->
       Buffer.clear state.msg_input;
       state.overview_cost_visible <- not state.overview_cost_visible;
-      (* Once nothing shows it the cost stops being read, so a reading kept
-         from before would come back as a sum nobody observed since. Shown
-         again, it starts unread and the next refresh fills it. [/burn] reads
-         the same, so while it is shown the reading stays. *)
-      if not (state.burn_hud_visible || state.overview_cost_visible) then
-        state.overview_cost <- Cost_unread;
+      (* Hidden, the cost stops being read, so a reading kept from before
+         would come back as a sum nobody observed since. Shown again, it
+         starts unread and the next refresh fills it. *)
+      state.overview_cost <- Cost_unread;
       notice ~kind:Notice_reply
         (if state.overview_cost_visible then
            "Fleet 24h cost on the Overview Team line: shown"
@@ -10611,12 +10598,12 @@ let apply_overview_goals_load state = function
 
 (* A failed read replaces the last good one, as the goals reading does: a cost
    drawn after the read that summed it stopped arriving would be a sum nobody
-   observed this refresh. A reply that lands after both [/burn] and
-   [/team-cost] were hidden was asked for before; kept, it would come back as
-   a sum nobody observed since when either is shown again, so it is dropped
-   and the reading stays unread. *)
+   observed this refresh. A reply that lands after [/team-cost] hid the cost
+   was asked for before; kept, it would come back as a sum nobody observed
+   since when the cost is shown again, so it is dropped and the reading
+   stays unread. *)
 let apply_overview_cost_load state result =
-  if state.burn_hud_visible || state.overview_cost_visible then
+  if state.overview_cost_visible then
     match result with
     | Ok costs -> state.overview_cost <- Cost_read costs
     | Error err -> state.overview_cost <- Cost_failed err
@@ -11257,7 +11244,6 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
         ~overview_cost_shown:state.overview_cost_visible
-        ~burn_hud_shown:state.burn_hud_visible
         state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not
@@ -12851,7 +12837,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
-        | Masc_tui_command.Toggle_burn_hud | Masc_tui_command.Toggle_team_cost
+        | Masc_tui_command.Toggle_team_cost
         | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
          | Masc_tui_command.Show_acting_pane_tab _
@@ -16807,7 +16793,6 @@ let main
       (Masc_tui_types.surface_needs
          ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state))
          ~overview_cost_shown:state.overview_cost_visible
-         ~burn_hud_shown:state.burn_hud_visible
          state.view)
   in
   let input_reader = create_input_reader () in
@@ -25302,7 +25287,6 @@ and is loaded on demand through keeper_skill.
           ~keeper_pane_drawn:
             (not (Masc_tui_render.acting_pane_suppressed state))
           ~overview_cost_shown:state.overview_cost_visible
-          ~burn_hud_shown:state.burn_hud_visible
           state.view
       in
       if

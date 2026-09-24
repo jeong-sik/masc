@@ -1445,16 +1445,22 @@ let official_client_dispatch ~provider_config_transform =
   | None -> Keeper_attempt_dispatch.Dispatched
 
 (* The agent_core pipeline answers a request it refused to send with
-   [Attempt_rejected] (a missing output ceiling, an invalid prepared request):
-   no provider saw it, so the attempt is not attributed to this runtime. Any
-   other outcome came back from the provider. *)
-let provider_attempt_dispatch = function
-  | Error
-      (Agent_core.Error.Api
-         (Llm_provider.Retry.InvalidRequest
-            { reason = Llm_provider.Retry.Attempt_rejected; _ })) ->
+   [Attempt_rejected] (a missing output ceiling, an invalid prepared request).
+   One attempt can send several requests, and a later one can be refused after
+   an earlier one reached the provider, so the refusal alone does not say that
+   no provider saw this attempt. The pre-dispatch serialization observer fires
+   after those checks, just before a request leaves: when it never fired and
+   the attempt ended with that refusal, no request was sent. Every other
+   outcome is attributed to the runtime, as before. *)
+let provider_attempt_dispatch ~request_serialized result =
+  match request_serialized, result with
+  | ( false
+    , Error
+        (Agent_core.Error.Api
+           (Llm_provider.Retry.InvalidRequest
+              { reason = Llm_provider.Retry.Attempt_rejected; _ })) ) ->
     Keeper_attempt_dispatch.Rejected_before_dispatch
-  | Ok _ | Error _ -> Keeper_attempt_dispatch.Dispatched
+  | (true | false), (Ok _ | Error _) -> Keeper_attempt_dispatch.Dispatched
 
 let run_named
     ?(input_policy = Keeper_input_policy.default)
@@ -2587,6 +2593,15 @@ let run_named
                reaches the real provider boundary; only the resulting typed error
                may drive fallback. *)
             let name = Printf.sprintf "agent_core-%s" attempt_runtime_id in
+          let request_serialized = ref false in
+          let on_request_wire_observation =
+            Some
+              (fun ~runtime_id ~body_bytes ~serialized ->
+                 request_serialized := true;
+                 Option.iter
+                   (fun observe -> observe ~runtime_id ~body_bytes ~serialized)
+                   on_request_wire_observation)
+          in
           let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
@@ -2738,7 +2753,8 @@ let run_named
           ( selected_runtime_result runtime ~lane_attempt_index:idx outcomes.turn_result
           , outcomes.checkpoint_after
           , Keeper_provider_attempt_effect.No_effect_observed
-          , provider_attempt_dispatch outcomes.turn_result ))))
+          , provider_attempt_dispatch ~request_serialized:!request_serialized
+              outcomes.turn_result ))))
        )))
     attempt_candidates
 

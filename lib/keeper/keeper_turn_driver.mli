@@ -361,9 +361,11 @@ type attempt_inference_policy =
 
 module For_testing : sig
   val provider_attempt_dispatch :
+    request_serialized:bool ->
     (Runtime_agent.run_result, Agent_core.Error.t) result -> Keeper_attempt_dispatch.t
-  (** [Rejected_before_dispatch] for the pipeline's own [Attempt_rejected];
-      [Dispatched] for every other outcome. *)
+  (** [Rejected_before_dispatch] when no request of the attempt was serialized
+      for sending and it ended with the pipeline's own [Attempt_rejected];
+      [Dispatched] otherwise. *)
 
   val run_result_answered : Runtime_agent.run_result -> bool
   (** Whether a successful attempt heard from its candidate: [false] for an

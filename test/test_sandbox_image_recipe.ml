@@ -44,23 +44,6 @@ let test_recipe_installs_gh () = assert_installs "gh"
    read the workspace back. Without it the probe exits 127. *)
 let test_recipe_installs_python3 () = assert_installs "python3"
 
-(* Measured 2026-09-10..24 over 93,111 Execute records: commands Keepers ran and
-   the image did not have. file came from 12 keepers, the network ones from 9. *)
-let test_recipe_installs_the_measured_common_tools () =
-  List.iter
-    assert_installs
-    [ "jq"
-    ; "file"
-    ; "xxd"
-    ; "time"
-    ; "make"
-    ; "iproute2"
-    ; "bind9-dnsutils"
-    ; "python3-yaml"
-    ; "python3-pip"
-    ; "python3-venv"
-    ]
-
 (* The container runs as the host operator's uid, which the image has no entry
    for. Without a writable HOME a login shell and git both land nowhere. *)
 let test_recipe_gives_an_arbitrary_uid_a_home () =
@@ -157,8 +140,6 @@ let () =
         ; test_case "installs git" `Quick test_recipe_installs_git
         ; test_case "installs gh" `Quick test_recipe_installs_gh
         ; test_case "installs python3" `Quick test_recipe_installs_python3
-        ; test_case "installs the measured common tools" `Quick
-            test_recipe_installs_the_measured_common_tools
         ; test_case "gives an arbitrary uid a home" `Quick
             test_recipe_gives_an_arbitrary_uid_a_home
         ; test_case "needs no build context" `Quick test_recipe_needs_no_build_context

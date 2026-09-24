@@ -2598,6 +2598,28 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     [ "pg_id"; "pg_title"; "pg_due_date"; "pg_metric"; "pg_target_value" ];
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
     [ "pg_id" ];
+  (* The verifier's reason for skipping a Verifying goal comes off the wire
+     from the goal store's error text. *)
+  check_fields "planning_proof_detail" [ "vu_detail" ];
+  (* The judge's evidence, its refusal reason and a ledger read error are the
+     verdict's own wire text, bound by the pattern rather than read as a
+     field, so they are named as identifiers. *)
+  check_identifiers ~module_path:render_path ~binding:"planning_proof_detail"
+    ~callees:sanitizer_calls [ "evidence"; "reason"; "detail" ];
+  (* The goal detail's verdict block, note and timeline all wrap through this
+     one helper. It splits the text on LF (not drawn) and escapes each line
+     before it wraps. *)
+  check_identifiers ~module_path:"bin/masc_tui_planning_detail.ml" ~binding:"wrapped"
+    ~callees:[ "Tui_decode.sanitize_terminal_text"; "String.split_on_char" ]
+    [ "text"; "line" ];
+  check int "the goal detail heads a stuck goal with the verifier's reason" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"planning_detail_pane"
+       ~callee:"Planning_detail.unreconciled_lines");
+  check int "the Verifying next step comes from the tested sentence" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"planning_next_step"
+       ~callee:"Planning_detail.verifying_next_step");
   check_fields "render_keeper_list" [ "keepers_error" ];
   (* The Memory pane draws from its own file. The guard reaches other files
      by name -- the primitives and the chat pane each have entries -- but no

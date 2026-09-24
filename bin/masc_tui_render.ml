@@ -3129,6 +3129,13 @@ let planning_stage_rail (phase : Goal_phase.t) =
       ]
 ;;
 
+let planning_detail_tone (tone : Planning_detail.tone) =
+  match tone with
+  | Planning_detail.Proven -> (Theme.ok ())
+  | Planning_detail.Refused -> (Theme.bad ())
+  | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
+  | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
+
 (* What moves this goal next, in one sentence, from the pair the operator can
    see separately but had to combine themselves: the phase and the judge's
    last word. [executing] with a refusal on the ledger is a different
@@ -3144,8 +3151,8 @@ let planning_next_step (goal : planning_goal) =
     ( Ansi.dim
     , "work the linked tasks, then [c] to submit it for verification" )
   | Goal_phase.Verifying, _ ->
-    ( (Theme.warn ())
-    , "with the completion judge - [c] re-arms the request; [o] takes it back, [x] drops it" )
+    let tone, text = Planning_detail.verifying_next_step goal.pg_verifier_unreconciled in
+    (planning_detail_tone tone, text)
   | Goal_phase.Awaiting_confirmation, _ ->
     (Theme.warn (), "proof passed - [a] reads the proof for your final confirmation")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
@@ -3156,18 +3163,30 @@ let planning_next_step (goal : planning_goal) =
    reason is a colour and nothing else; the reason is what the judge produced
    and the only thing that says what to do next. *)
 let planning_proof_detail (goal : planning_goal) =
+  match goal.pg_verifier_unreconciled with
+  | Some blocked ->
+    (* The judge's last word is not what holds this goal: the latest verifier
+       scan could not settle it, and only this line says why. *)
+    Some
+      ( Theme.bad ()
+      , Printf.sprintf "%s: %s"
+          (Planning_detail.unreconciled_heading blocked.vu_step)
+          (Terminal_text.single_line blocked.vu_detail) )
+  | None ->
   match goal.pg_proof with
   | Tui_decode.Proof_proven None -> Some ((Theme.ok ()), "proven")
-  | Tui_decode.Proof_proven (Some evidence) -> Some ((Theme.ok ()), "proven: " ^ evidence)
+  | Tui_decode.Proof_proven (Some evidence) ->
+      Some ((Theme.ok ()), "proven: " ^ Terminal_text.single_line evidence)
   | Tui_decode.Proof_refuted None -> Some ((Theme.bad ()), "refused")
-  | Tui_decode.Proof_refuted (Some reason) -> Some ((Theme.bad ()), "refused: " ^ reason)
+  | Tui_decode.Proof_refuted (Some reason) ->
+      Some ((Theme.bad ()), "refused: " ^ Terminal_text.single_line reason)
   | Tui_decode.Proof_pending -> Some ((Theme.warn ()), "waiting for the completion judge")
   | Tui_decode.Proof_stale _ ->
       Some ((Theme.warn ()), "criterion changed; previous proof is historical")
   | Tui_decode.Proof_unreadable None ->
       Some ((Theme.warn ()), "verification ledger unreadable")
   | Tui_decode.Proof_unreadable (Some detail) ->
-      Some ((Theme.warn ()), "verification ledger unreadable: " ^ detail)
+      Some ((Theme.warn ()), "verification ledger unreadable: " ^ Terminal_text.single_line detail)
   | Tui_decode.Proof_idle ->
       (* Nothing from the judge. A keeper's own note is the next best thing the
          row has to say, and it is what the operator wrote there to be read. *)
@@ -3572,13 +3591,6 @@ let render_planning_list (state : state) =
    next-step sentence is a row of its own. Counted here, drawn below. *)
 let planning_detail_fixed_rows = 12
 
-let planning_detail_tone (tone : Planning_detail.tone) =
-  match tone with
-  | Planning_detail.Proven -> (Theme.ok ())
-  | Planning_detail.Refused -> (Theme.bad ())
-  | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
-  | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
-
 let planning_detail_pane (state : state)
     ~(armed : Goal_phase.Public_action.t option) ~confirmation ~rows ~cols
     (goal : planning_goal) buf =
@@ -3718,7 +3730,11 @@ let planning_detail_pane (state : state)
          Masc_tui_message_layout.wrap_words ~max_cells:(cols - 6)
            (Terminal_text.single_line detail)
          |> List.map (fun text -> { Planning_detail.tone = Unreadable; text })
-     | `Inspect Absent -> Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note)
+     | `Inspect Absent ->
+         (match goal.pg_verifier_unreconciled with
+          | Some blocked -> Planning_detail.unreconciled_lines ~width:(cols - 6) blocked
+          | None -> [])
+         @ Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note)
     @ Planning_detail.timeline ~width:(cols - 6) ~goal_id:goal.pg_id
         state.goal_timeline
   in

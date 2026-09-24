@@ -1445,6 +1445,7 @@ def planning_goal(goal_id: str, title: str) -> dict[str, object]:
         "metric": f"metric-{goal_id}",
         "target_value": "100%",
         "verification": {"completion": {"state": "idle"}},
+        "verifier_unreconciled": None,
     }
 
 

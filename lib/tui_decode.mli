@@ -122,6 +122,14 @@ type goal_proof =
           as an unreviewed goal, and showing it as "not reviewed" would
           disguise corruption as quiet. *)
 
+type verifier_unreconciled = {
+  vu_step : Goal_reconcile_step.t;
+  vu_detail : string;
+}
+(** The latest verifier scan could not settle this Verifying goal. It stays
+    Verifying until [request_complete] retries it or a later scan settles it,
+    or the operator takes it back or drops it. *)
+
 type planning_goal = {
   pg_id : string;
   pg_title : string;
@@ -131,6 +139,7 @@ type planning_goal = {
   pg_metric : string option;
   pg_target_value : string option;
   pg_proof : goal_proof;
+  pg_verifier_unreconciled : verifier_unreconciled option;
   pg_last_review_note : string option;
       (** What a keeper or operator wrote at the last transition. Free text,
           unlike {!pg_proof}, which is the judge's. *)

@@ -1055,6 +1055,12 @@ let test_one_unreconcilable_goal_does_not_stop_the_scan () =
      check (list string) "the scan names the one goal it could not reconcile"
        [ bad_goal_id ]
        (List.map (fun (failure : Agent.reconcile_failure) -> failure.failed_goal_id)
+          unreconciled);
+     check (list string) "it names the re-arm step as the one that failed"
+       [ "rearm_proof" ]
+       (List.map
+          (fun (failure : Agent.reconcile_failure) ->
+             Goal_reconcile_step.to_string failure.step)
           unreconciled)
    | Error failure -> fail (Agent.scan_failure_to_string failure));
   with_lane_and_reviewer
@@ -1065,9 +1071,100 @@ let test_one_unreconcilable_goal_does_not_stop_the_scan () =
   check string "the healthy goal is drained past the bad one" "awaiting_confirmation"
     (stored_phase config good_goal_id);
   check string "the bad goal stays verifying" "verifying" (stored_phase config bad_goal_id);
-  match (ledger_record config bad_goal_id).completion with
-  | Goal_verification.Human_confirmed _ -> ()
-  | _ -> fail "the scan rewrote the unreconcilable goal's ledger row"
+  (match (ledger_record config bad_goal_id).completion with
+   | Goal_verification.Human_confirmed _ -> ()
+   | _ -> fail "the scan rewrote the unreconcilable goal's ledger row");
+  (* The drain above is the scan the operator's Goal row is derived from. *)
+  let projection goal_id =
+    match Goal_store.find_goal config ~goal_id with
+    | Goal_store.Goal_found goal -> Goal_verification_agent.unreconciled_to_yojson goal
+    | Goal_store.Goal_absent -> fail ("goal not found: " ^ goal_id)
+    | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u)
+  in
+  (match projection bad_goal_id with
+   | `Assoc fields ->
+     check (option string) "the Goal row names the failed step" (Some "rearm_proof")
+       (match List.assoc_opt "step" fields with Some (`String s) -> Some s | _ -> None);
+     check bool "the Goal row carries the store's reason" true
+       (match List.assoc_opt "detail" fields with
+        | Some (`String detail) -> String.trim detail <> ""
+        | _ -> false)
+   | _ -> fail "the unreconcilable goal is missing from the Goal row projection");
+  check bool "the drained goal carries no unreconciled reason" true
+    (projection good_goal_id = `Null);
+  ignore (must_succeed "drop" (transition ctx bad_goal_id "drop"));
+  check bool "a goal the operator dropped no longer reads as stuck" true
+    (projection bad_goal_id = `Null)
+;;
+
+(* The stuck list is derived from the latest scan, not accumulated. A goal
+   the first scan could not re-arm (its criterion is already human-confirmed)
+   gets a new criterion and is submitted again; the next scan finds it
+   pending, the review defers, and the goal is still Verifying -- so only replacement, not the phase filter, can
+   take it off the row. The server's planning row is checked on both sides. *)
+let test_a_clean_scan_replaces_the_unreconciled_list () =
+  with_workspace
+  @@ fun config ->
+  let goal_id =
+    set_up_committed_proof_crash
+      config
+      ~outcome:Goal_verification.Proven
+      ~evidence:"proven before the phase write"
+  in
+  let proven =
+    match (ledger_record config goal_id).completion with
+    | Goal_verification.Proof_proven verdict -> verdict
+    | _ -> fail "test setup: the goal needs a proven ledger row"
+  in
+  (match
+     Goal_verification.record_human_confirmation config ~goal_id proven
+       ~operator_id:"operator"
+   with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  let planning_row () =
+    match Server_dashboard_http.dashboard_planning_http_json ~config with
+    | `Assoc fields ->
+      (match List.assoc_opt "goals" fields with
+       | Some (`List goals) ->
+         (match
+            List.find_opt
+              (function
+                | `Assoc goal -> List.assoc_opt "id" goal = Some (`String goal_id)
+                | _ -> false)
+              goals
+          with
+          | Some (`Assoc goal) ->
+            (match List.assoc_opt "verifier_unreconciled" goal with
+             | Some value -> value
+             | None -> fail "the planning row has no verifier_unreconciled key")
+          | _ -> fail "the goal is missing from the planning rows")
+       | _ -> fail "the planning snapshot has no goals list")
+    | _ -> fail "the planning snapshot is not an object"
+  in
+  let deferring_drain () =
+    with_lane_and_reviewer
+      ~slots:(fun () -> Ok [ "verifier-a" ])
+      ~reviewer:(recording_reviewer (ref []) [ "verifier-a", Stub_unavailable ])
+      (fun () -> drain config)
+  in
+  deferring_drain ();
+  (match planning_row () with
+   | `Assoc fields ->
+     check bool "the server row names the re-arm step" true
+       (List.assoc_opt "step" fields = Some (`String "rearm_proof"))
+   | _ -> fail "the stuck goal is not marked on the server's planning row");
+  (match Goal_store.upsert_goal config ~id:goal_id ~target_value:"4" () with
+   | Ok _ -> ()
+   | Error e -> fail (Goal_store.write_error_to_string e));
+  (* The edit takes the request back to Executing; submitting again puts the
+     goal in Verifying under a criterion nobody has confirmed. *)
+  ignore
+    (must_succeed "request_complete"
+       (transition (workspace_ctx config) goal_id "request_complete"));
+  deferring_drain ();
+  check string "the goal is still verifying" "verifying" (stored_phase config goal_id);
+  check bool "the clean scan took it off the planning row" true (planning_row () = `Null)
 ;;
 
 let test_superseded_review_keeps_the_evaluated_original_criterion () =
@@ -1466,6 +1563,10 @@ let () =
             "one unreconcilable goal does not stop the scan"
             `Quick
             test_one_unreconcilable_goal_does_not_stop_the_scan
+        ; test_case
+            "a clean scan replaces the unreconciled list"
+            `Quick
+            test_a_clean_scan_replaces_the_unreconciled_list
         ; test_case "verifying goal with a missing request is rearmed and drained"
             `Quick
             test_verifying_goal_with_a_missing_request_is_rearmed_and_drained

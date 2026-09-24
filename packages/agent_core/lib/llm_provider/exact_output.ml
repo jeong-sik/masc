@@ -575,19 +575,6 @@ let generation_dispatch_fact_of_receipt receipt =
   else No_generation_dispatch
 ;;
 
-let flow_execution_error_generation_dispatch = function
-  | Flow_attempt_already_started _
-  | Flow_attempt_start_failed _
-  | Flow_measurement_start_failed _
-  | Flow_before_measurement_dispatch_callback_failed _
-  | Flow_measurement_terminal_callback_failed _
-  | Flow_before_dispatch_callback_failed _
-  | Flow_before_advance_callback_failed _
-  | Flow_candidates_exhausted _ -> No_generation_dispatch
-  | Flow_exact_execution_failed { cause; _ } ->
-    generation_dispatch_fact_of_receipt cause.receipt
-;;
-
 let flow_evidence_generation_dispatch (evidence : flow_evidence) =
   if
     List.exists

@@ -879,21 +879,14 @@ val flow_execution_terminal_kind
     typed advancement rule used between candidates; callers never recover the
     distinction from an error string or receipt phase. *)
 
-(** Closed fact for the invocation returning the error: whether its one outward
-    completion dispatch began. This does not claim provider acceptance, response
-    receipt, billing, retryability, failover eligibility, or any Pricing
-    decision. *)
-val flow_execution_error_generation_dispatch
-  :  'callback_error flow_execution_error
-  -> generation_dispatch_fact
-
 (** Whether any candidate the flow reached began its one outward completion
-    dispatch. {!flow_execution_error_generation_dispatch} answers for the
-    invocation that returned the error only, so a candidate that dispatched
-    and then failed over to its successor is invisible to it; it counts here.
-    Every attempt the evidence holds is its latest published copy, so the
-    attempt that ended the flow counts too. The same non-claims hold: no
-    provider acceptance, response receipt, billing or retryability. *)
+    (generation) dispatch. It answers for the whole walk: a candidate that
+    dispatched and then failed over to its successor counts, and so does the
+    attempt that ended the flow, because every attempt the evidence holds is
+    its latest published copy. A token-count measurement is a separate
+    outward call and is not counted here; its fact is on
+    [measurement_receipt_snapshot]. This does not claim provider acceptance,
+    response receipt, billing or retryability. *)
 val flow_evidence_generation_dispatch : flow_evidence -> generation_dispatch_fact
 
 (** Point-in-time evidence for one affine declared-order flow. The candidate

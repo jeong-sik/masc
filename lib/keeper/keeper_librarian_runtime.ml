@@ -659,10 +659,10 @@ let fit_continuity ~capacity ~base_path ~keeper_id ~input prepared =
     if memory_fits then pass_fits (Continuity_state_pass continuity) else Ok false)
 ;;
 
-(* Whether the walk sent anything, over every slot it visited. The error's
-   own fact answers for the slot that ended the walk only: a slot that sent
-   its request, failed and advanced was reported as "none" whenever the last
-   slot failed before sending (#38450). *)
+(* Whether the walk sent a generation request, over every slot it visited.
+   Reading the slot that ended the walk only reported "none" for a walk whose
+   earlier slot sent its request, failed and advanced (#38450). A token-count
+   measurement is not a generation request and is not counted. *)
 let exact_execution_error ~semantic_rejections error =
   let outward_effect =
     let evidence, _ = flow_evidence_and_final_verdict error in

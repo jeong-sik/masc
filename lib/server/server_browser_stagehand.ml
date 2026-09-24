@@ -71,7 +71,7 @@ let attach_error_message = function
 ;;
 
 let process_command pid =
-  match Process_eio.run_argv_with_status [ "ps"; "-p"; string_of_int pid; "-o"; "command=" ] with
+  match Process_eio.run_argv_with_status [ "ps"; "-ww"; "-p"; string_of_int pid; "-o"; "command=" ] with
   | Unix.WEXITED 0, output -> (match String.trim output with "" -> None | command -> Some command)
   | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None
 ;;

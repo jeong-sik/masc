@@ -28,12 +28,17 @@ let current_b = fact ~claim:"drop B"
 let current_a_id = Memory.memory_id current_a
 let current_b_id = Memory.memory_id current_b
 
+(* Spelled nowhere else in the fixture, so its count in a rendered prompt is
+   the count of the host-data slot. *)
+let librarian_subject_keeper = "librarian-subject-keeper"
+
 let input () : Librarian.input =
   { turn_ref =
       Ids.Turn_ref.make
         ~trace_id:"trace-selection"
         ~absolute_turn:7
   ; goal_context = Masc.Keeper_librarian.No_task
+  ; keeper_id = Masc_test_deps.keeper_id_fixture librarian_subject_keeper
   ; keeper_instructions = "You are the retry-test keeper."
   ; current =
       Some
@@ -1231,6 +1236,85 @@ let test_prompt_carries_keeper_instructions () =
     (List.assoc "keeper_instructions" (Librarian.prompt_variables blank))
 ;;
 
+(* RFC-0468 §3.2: each User message's header names the speaker the host
+   stamped when it created the message. A message from before the speaker
+   existed says unknown, and a broken entry says it is broken. *)
+let test_conversation_headers_carry_the_stamped_speaker () =
+  let module S = Masc.Keeper_input_speaker in
+  let user ?speaker text =
+    Agent_core.Types.make_message
+      ?metadata:(Option.map S.metadata speaker)
+      ~role:Agent_core.Types.User
+      [ Agent_core.Types.Text text ]
+  in
+  let beta =
+    match Masc.Keeper_identity.Keeper_id.of_string "beta" with
+    | Some id -> id
+    | None -> fail "keeper id fixture"
+  in
+  let messages =
+    [ user
+        ~speaker:(S.Host_prompt (S.Autonomous_wake { answered_asks = [ S.Owner ] }))
+        "wake"
+    ; Agent_core.Types.assistant_msg "on it"
+    ; user ~speaker:(S.Person (S.Keeper beta)) "please review"
+    ; user ~speaker:(S.Person S.Owner) "stop merging"
+    ; user "from an old checkpoint"
+    ]
+  in
+  let history =
+    List.assoc "conversation_history"
+      (Librarian.prompt_variables { (input ()) with messages })
+  in
+  List.iter
+    (fun header ->
+       check bool header true (String_util.contains_substring history header))
+    [ "[turn=0 role=user speaker=host:autonomous_wake(answered_asks=owner)] wake"
+    ; "[turn=1 role=assistant] on it"
+    ; "[turn=2 role=user speaker=keeper:\"beta\"] please review"
+    ; "[turn=3 role=user speaker=owner] stop merging"
+    ; "[turn=4 role=user speaker=unknown] from an old checkpoint"
+    ];
+  (* A broken entry is shown as broken and the pass goes on, so one broken
+     message never holds the Librarian on the same range. *)
+  let broken =
+    Agent_core.Types.make_message
+      ~metadata:[ Agent_core.Types.Input_speaker.entry (`String "owner") ]
+      ~role:Agent_core.Types.User
+      [ Agent_core.Types.Text "broken" ]
+  in
+  let repeated =
+    Agent_core.Types.make_message
+      ~metadata:(S.metadata (S.Person S.Owner) @ S.metadata (S.Person S.Owner))
+      ~role:Agent_core.Types.User
+      [ Agent_core.Types.Text "repeated" ]
+  in
+  let broken_input = { (input ()) with messages = [ broken; repeated ] } in
+  let history =
+    List.assoc "conversation_history" (Librarian.prompt_variables broken_input)
+  in
+  check bool "an undecodable entry renders as invalid" true
+    (String_util.contains_substring history "[turn=0 role=user speaker=invalid(");
+  check bool "a repeated entry renders as duplicate" true
+    (String_util.contains_substring history "[turn=1 role=user speaker=duplicate] repeated");
+  match Runtime.messages_for_librarian broken_input with
+  | Error detail -> failf "the pass could not build its request: %s" detail
+  | Ok messages ->
+    check bool "the pass request carries the whole conversation" true
+      (List.exists
+         (fun (message : Agent_core.Types.message) ->
+            List.exists
+              (function
+                | Agent_core.Types.Text text ->
+                  String_util.contains_substring text "speaker=duplicate] repeated"
+                | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+                | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
+                | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+                | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> false)
+              message.content)
+         messages)
+;;
+
 let user_text_of_messages messages =
   messages
   |> List.filter_map (fun (m : Agent_core.Types.message) ->
@@ -1591,6 +1675,50 @@ let test_rendered_prompt_is_the_template_with_every_slot_filled () =
     check int "the librarian receives one message" 1 (List.length messages);
     check string "the message is the template with each slot filled" expected
       (user_text_of_messages messages)
+;;
+
+(* RFC-0468 §3.1: every librarian prompt names the Keeper it curates for, as
+   host data. Structure only, no prose: each pass supplies the id, each
+   template has the slot, and the rendered prompt carries the id once, on a
+   line of its own. *)
+let occurrences ~needle text =
+  let step = String.length needle in
+  let rec count from acc =
+    match String_util.find_substring ~pos:from text needle with
+    | None -> acc
+    | Some at -> count (at + step) (acc + 1)
+  in
+  count 0 0
+;;
+
+let test_every_librarian_prompt_names_its_keeper () =
+  let input = input () in
+  let rule = "working contexts rule fixture" in
+  List.iter
+    (fun (key, variables) ->
+       check (option string) (key ^ " supplies the Keeper id")
+         (Some librarian_subject_keeper)
+         (List.assoc_opt "keeper_id" variables);
+       check bool (key ^ " has a keeper_id slot") true
+         (List.mem "keeper_id" (template_slot_names (Prompt_registry.get_prompt key)));
+       match
+         Prompt_registry.render_prompt_template key
+           (("working_contexts_rule", rule) :: variables)
+       with
+       | Error detail -> failf "%s render failed: %s" key detail
+       | Ok rendered ->
+         check int (key ^ " carries the Keeper id once") 1
+           (occurrences ~needle:librarian_subject_keeper rendered);
+         check bool (key ^ " carries it on a line of its own") true
+           (List.exists
+              (fun line -> String.equal (String.trim line) librarian_subject_keeper)
+              (String.split_on_char '\n' rendered)))
+    [ Prompt_names.librarian, Librarian.prompt_variables input
+    ; ( Prompt_names.librarian_continuity
+      , Librarian.continuity_prompt_variables input ~continuity:`Null )
+    ; ( Prompt_names.librarian_working_context
+      , Librarian.working_context_prompt_variables input )
+    ]
 ;;
 
 let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
@@ -2010,6 +2138,8 @@ let () =
             test_prompt_contains_exact_current_selection
         ; test_case "prompt carries Keeper instructions" `Quick
             test_prompt_carries_keeper_instructions
+        ; test_case "conversation headers carry the stamped speaker" `Quick
+            test_conversation_headers_carry_the_stamped_speaker
         ; test_case "prompt carries typed tool observations without payloads" `Quick
             test_prompt_carries_typed_tool_observations_without_payloads
         ; test_case "durable speaker attribution reaches counterpart observations" `Quick
@@ -2020,6 +2150,8 @@ let () =
             test_prompt_omits_tool_result_payload_and_has_one_message
         ; test_case "repo template renders Keeper instructions" `Quick
             test_repo_template_renders_keeper_instructions
+        ; test_case "every librarian prompt names its Keeper" `Quick
+            test_every_librarian_prompt_names_its_keeper
         ; test_case "goal criteria reach the librarian model input" `Quick
             test_repo_template_carries_goal_criteria
         ; test_case "rendered prompt is the template with every slot filled" `Quick

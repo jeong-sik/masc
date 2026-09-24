@@ -1571,6 +1571,7 @@ let test_absorbed_search_preserves_board_basis source =
   let input : Librarian.input =
     { turn_ref = Ids.Turn_ref.make ~trace_id:"absorb-board-sources" ~absolute_turn:8
     ; goal_context = Librarian.No_task
+    ; keeper_id = Masc_test_deps.keeper_id_fixture meta.name
     ; keeper_instructions = "Preserve useful observations."
     ; current = Some { Librarian.facts = original }
     ; working_context = Masc.Keeper_librarian_context.empty

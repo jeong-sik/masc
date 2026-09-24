@@ -271,7 +271,7 @@ let terminal_safe_text ?(preserve_newlines = false) text =
     end
   in
   loop 0;
-  Buffer.contents output
+  Masc.Tui_decode.escape_invisible (Buffer.contents output)
 
 let bounded value =
   if String.length value <= 240 then value
@@ -387,9 +387,10 @@ let refused_reader_remedy ~credential_sent reason =
 
 let reconciliation_failure_detail ~credential_sent error =
   match error with
-  | Http_error { body; _ } when reader_unauthenticated error ->
-      refused_reader_remedy ~credential_sent
-        (Masc_tui_credential.server_reason_of_body body)
+  | Http_error { body; _ } when reader_unauthenticated error -> (
+      match Masc_tui_credential.server_reason_of_body body with
+      | Some reason -> refused_reader_remedy ~credential_sent reason
+      | None -> error_to_string error |> terminal_safe_text)
   | Http_error _ | Transport_error _ | Protocol_error _ ->
       error_to_string error |> terminal_safe_text
 

@@ -482,8 +482,7 @@ let test_http_client_does_not_own_tui_env_contract () =
 (* The Overview's Attention panel writes two cells of indent ahead of every
    row it draws. Its empty and unread notes stand in for rows, and they are
    written for a body that indents them itself -- pasted in whole, a note sat
-   two cells right of the rows it replaces and of the title above them, while
-   the Events panel beside it put its title and its rows on one column. *)
+   two cells right of the rows it replaces and of the title above them. *)
 let test_the_attention_note_starts_where_its_rows_do () =
   check int "the note carries no indent of its own" 0
     (Ast_grep.count_exact_string_literals_in_value_binding
@@ -1051,7 +1050,7 @@ let test_operator_approvals_use_current_contract () =
   check bool "the approvals meta row draws both its times in one zone" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_approvals"
+       ~binding_name:"approval_metadata_lines"
        ~callee:"Terminal_text.short_timestamp"
      >= 2);
   check bool "approval renderer measures its name column" true
@@ -1074,7 +1073,7 @@ let test_operator_approvals_use_current_contract () =
   check int "approval payload uses its terminal projection" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_approvals"
+       ~binding_name:"approval_metadata_lines"
        ~callee:
          "Masc_tui_operator_projection.approval_payload_for_terminal");
   check int "approval payload projection serializes once" 1
@@ -1680,33 +1679,6 @@ let test_planning_refresh_reconciles_navigation_identity () =
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:main_path ~binding_name:"main"
        ~callees:[ "planning_visible_goals" ] ~fields:[ "pl_goals" ])
-;;
-
-let test_overview_events_use_scroll_projection () =
-  check int "overview renders one bounded event window" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_overview"
-       ~callee:"Render_schedule.project_overview_event_window");
-  check int "event prepend preserves one manual anchor" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_loader.ml"
-       ~binding_name:"add_event"
-       ~callee:"Render_schedule.overview_event_offset_after_prepend");
-  check int "overview older input is bounded once" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"main"
-       ~callee:"Render_schedule.scroll_overview_events_older");
-  check int "overview newer input is bounded once" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"main"
-       ~callee:"Render_schedule.scroll_overview_events_newer");
-  check int "both overview input directions use current layout" 2
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"main" ~callee:"overview_layout")
 ;;
 
 let test_render_loop_uses_monotonic_dirty_schedule () =
@@ -2416,8 +2388,13 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* Most of the drawing is still the godfile, so that is the default; the
      rows every surface shares are drawn by the primitives and name their
      own file. *)
+  (* [unsanitised_arguments] names the arguments a listed call does not
+     escape. [box_wrapped_field buf cols ~head ~style body] reads [body] line
+     by line through [Message_layout.wrap_body ~sanitize] and concatenates
+     [head] raw, so without naming [head] the call would cover a wire field
+     put straight into it. *)
   let check_fields ?(module_path = render_path) ?(non_rendering_calls = [])
-      binding fields =
+      ?(unsanitised_arguments = []) binding fields =
     check_binding module_path binding;
     let allowed_calls = sanitizer_calls @ non_rendering_calls in
     List.iter
@@ -2430,9 +2407,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
         if total = 0 then
           failf "%s no longer accesses expected untrusted field %s" binding field;
         let outside =
-          Ast_grep.count_field_accesses_outside_calls_in_value_binding
-            ~module_path ~binding_name:binding
-            ~callees:allowed_calls ~fields:[ field ]
+          Ast_grep.count_field_accesses_outside_sanitised_calls_in_value_binding
+            ~module_path ~binding_name:binding ~callees:allowed_calls
+            ~unsanitised_arguments ~fields:[ field ]
         in
         if outside <> 0 then
           failf
@@ -2462,23 +2439,44 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
             outside identifier)
       identifiers
   in
+  (* The ask pane draws what a Keeper wrote, and none of its fields were on
+     this list. They are safe today because every one of them goes through
+     [box_wrapped_field], which escapes the body it wraps -- but the head it
+     concatenates is raw, so the pane is exactly where the argument-level
+     exemption has to be stated rather than assumed (#38275). *)
+  check_fields ~module_path:"bin/masc_tui_render_prim.ml"
+    (* [String.equal]: the chosen-choice test reads an id to compare it, which
+       is not drawing it. *)
+    ~non_rendering_calls:[ "box_wrapped_field"; "String.equal" ]
+    ~unsanitised_arguments:[ ("box_wrapped_field", [ "head" ]) ]
+    "draw_ask_question"
+    [ "ar_keeper"; "aq_prompt"; "ac_id"; "ac_label" ];
+  (* The description is matched out of its option before it is drawn, so what
+     reaches the row is the bound name rather than the field. *)
+  check_identifiers ~module_path:"bin/masc_tui_render_prim.ml"
+    ~binding:"draw_ask_question"
+    ~callees:(sanitizer_calls @ [ "box_wrapped_field" ])
+    [ "description" ];
+  (* The context is matched out of its option the same way, so the guard is
+     on the name the row draws. *)
+  check_binding "bin/masc_tui_render_prim.ml" "draw_ask_context";
+  check_identifiers ~module_path:"bin/masc_tui_render_prim.ml"
+    ~binding:"draw_ask_context"
+    ~callees:(sanitizer_calls @ [ "box_wrapped_field" ])
+    [ "context" ];
   check_fields "task_line" [ "id"; "title" ];
   check_identifiers ~module_path:render_path ~binding:"task_line"
     ~callees:sanitizer_calls [ "name" ];
   check_fields "render_overview"
     [ "workspace"
     ; "overview_error"
-    ; "ov_cluster"
-    ; "ov_project"
     ; "ai_summary"
-    ; "content"
-      (* [th_primary_path] and [th_queue_pressure] left this list because they
-         left the category. Both are closed variants now, rendered through
-         [Transport_metrics.*_kind_to_string], so the renderer has no arbitrary
-         text to sanitize -- the type removed what the sanitizer was for. Asking
-         for the call here would ask the renderer to sanitize a constructor. *)
     ];
   check_fields "overview_layout" [ "tasks_error" ];
+  (* The TUI session block prints event text this process wrote from
+     server answers and editor output. *)
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    "render_section_fleet" [ "content" ];
   (* The Team block prints Keeper names and task text that producers wrote. *)
   (* pr_tag_of_keeper looks the name up; it does not draw it. *)
   check_fields ~non_rendering_calls:[ "pr_tag_of_keeper" ] "overview_team_lines"
@@ -2491,6 +2489,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      summary both moved into [approval_detail_line], and the guard follows
      the field rather than the surface's name. *)
   check_fields "approval_detail_line" [ "ap_summary" ];
+  (* The same move again, for the same reason: the two rows under the queue
+     became [approval_metadata_lines] so the row could be measured against the
+     frame and could say how tall it is (#36333). The four fields it draws
+     followed it, and the guard follows the field. *)
+  check_fields "approval_metadata_lines"
+    [ "ap_expires_at"; "ap_payload"; "ap_trace_id"; "ap_created_at" ];
   check_fields "render_approvals"
     [ "aps_actor_filter"
     ; "approvals_error"
@@ -2498,10 +2502,6 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "ap_actor"
     ; "ap_action_type"
     ; "ap_target_type"
-    ; "ap_expires_at"
-    ; "ap_payload"
-    ; "ap_trace_id"
-    ; "ap_created_at"
     ];
   check_fields "render_board_list"
     [ "board_list_error"; "bp_id"; "bp_author"; "bp_title" ];
@@ -3065,10 +3065,6 @@ let () =
           "scoped surface refresh preserves connection status"
           `Quick
           test_scoped_surface_refresh_does_not_own_connection_status;
-        test_case
-          "overview events use bounded scroll projection"
-          `Quick
-          test_overview_events_use_scroll_projection;
         test_case
           "render loop uses monotonic dirty scheduling"
           `Quick

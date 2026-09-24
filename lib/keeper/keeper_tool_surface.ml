@@ -617,6 +617,7 @@ let dispatch_keeper_msg_stream_admitted
       ?continuation_channel
       ctx
       ~message
+      ~input_speaker
   =
   let name = Keeper_tool_name.(to_string Keeper_msg) in
   let ctx = resolve_ctx ctx ~name in
@@ -624,6 +625,7 @@ let dispatch_keeper_msg_stream_admitted
     handle_keeper_msg_stream_admitted
       ~operation_id
       ~admission_token
+      ~input_speaker
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation

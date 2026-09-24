@@ -141,6 +141,7 @@ let test_delivery_appends_once_before_wake () =
       ~config
       ~base_path:config.base_path
       ~is_running:(fun _ -> true)
+      ~is_registered_keeper:(fun _ -> false)
       ~wakeup:(fun _ -> incr wakes)
       delivery
   in
@@ -166,6 +167,7 @@ let test_stopped_keeper_persists_without_wake () =
       ~config
       ~base_path:config.base_path
       ~is_running:(fun _ -> false)
+      ~is_registered_keeper:(fun _ -> false)
       ~wakeup:(fun _ -> incr wakes)
       (delivery ~target ~request_id ~seq:2 ~content:"persist while stopped")
   in
@@ -197,6 +199,7 @@ let test_configured_mention_alias_resolves_and_stamps_feed_target () =
       ~config
       ~base_path:config.base_path
       ~is_running:(String.equal keeper_name)
+      ~is_registered_keeper:(fun _ -> false)
       ~wakeup:(fun _ -> ())
       (delivery
          ~target:delivery_target
@@ -230,6 +233,7 @@ let test_canonical_delivery_stamps_configured_feed_target () =
        ~config
        ~base_path:config.base_path
        ~is_running:(fun _ -> false)
+       ~is_registered_keeper:(fun _ -> false)
        ~wakeup:(fun _ -> ())
        (delivery ~target:keeper_name ~request_id ~seq:5 ~content:"canonical delivery"));
   match delivery_message ~base_path:config.base_path ~keeper_name ~request_id with
@@ -281,6 +285,7 @@ let test_delivery_enqueues_linear_queue_entry () =
       ~config
       ~base_path:config.base_path
       ~is_running:(fun _ -> true)
+      ~is_registered_keeper:(fun _ -> false)
       ~wakeup:(fun _ -> ())
       (delivery ~target ~request_id ~seq:6 ~content:"drain me")
   in
@@ -314,6 +319,7 @@ let test_stopped_keeper_keeps_queue_entry () =
        ~config
        ~base_path:config.base_path
        ~is_running:(fun _ -> false)
+       ~is_registered_keeper:(fun _ -> false)
        ~wakeup:(fun _ -> fail "a stopped Keeper must not be woken")
        (delivery ~target ~request_id ~seq:7 ~content:"queued while stopped"));
   check int "stopped Keeper still holds the queue entry" 1
@@ -398,6 +404,7 @@ let test_fleet_projection_preserves_the_mention_row () =
        ~config
        ~base_path:config.base_path
        ~is_running:(fun _ -> true)
+       ~is_registered_keeper:(fun _ -> false)
        ~wakeup:(fun _ -> ())
        (delivery ~target ~request_id ~seq:41 ~content:"@alpha please review"));
   Broadcast_wakeup.project_workspace_message_to_fleet
@@ -420,6 +427,90 @@ let test_fleet_projection_preserves_the_mention_row () =
   | None -> fail "mention row disappeared after the fleet pass"
   | Some message ->
     check bool "mention stamp survived the fleet pass" true (message.mentions <> [])
+;;
+
+let speaker_of_row ~base_path ~keeper_name ~request_id =
+  match delivery_message ~base_path ~keeper_name ~request_id with
+  | None -> fail "delivery row was not persisted"
+  | Some message ->
+    (match message.speaker with
+     | None -> fail "delivery row carries no speaker"
+     | Some speaker -> speaker)
+;;
+
+(* RFC-0468 §3.2: a broadcast from a registered Keeper reaches the other
+   Keepers as that Keeper, with its id, not as an anonymous external author. *)
+let test_fleet_projection_from_a_keeper_is_keeper_speech () =
+  with_workspace @@ fun config ->
+  let request_id = "wmsg-00fleet0000000006" in
+  List.iter (persist_meta config) [ "beta"; "alpha" ];
+  Broadcast_wakeup.project_workspace_message_to_fleet
+    ~base_path:config.base_path
+    ~registered_keepers:(fun () -> [ "beta", "beta"; "alpha", "alpha" ])
+    (fleet_delivery ~request_id ~from_agent:"beta" ~content:"task-209 is mine");
+  let speaker =
+    speaker_of_row ~base_path:config.base_path ~keeper_name:"alpha" ~request_id
+  in
+  check (option string) "keeper speaker id" (Some "beta") speaker.speaker_id;
+  check bool "keeper authority" true
+    (speaker.speaker_authority = Keeper_chat_store.Keeper);
+  (* The row read back from the store is what the Librarian's counterpart
+     observations are built from. *)
+  match delivery_message ~base_path:config.base_path ~keeper_name:"alpha" ~request_id with
+  | None -> fail "delivery row disappeared"
+  | Some message ->
+    (match Keeper_counterpart_observation.of_chat_message message with
+     | None -> fail "a Keeper's line produced no counterpart observation"
+     | Some observation ->
+       check (option string) "observation names the Keeper" (Some "beta")
+         observation.user_id;
+       check string "observation authority" "keeper"
+         (Keeper_counterpart_observation.authority_to_string observation.authority);
+       check bool "observation authority is typed Keeper" true
+         (observation.authority = Keeper_counterpart_observation.Keeper))
+;;
+
+(* An author the registry does not hold stays external, even when its name
+   has the same shape as a Keeper id. *)
+let test_fleet_projection_from_an_unregistered_author_is_external () =
+  with_workspace @@ fun config ->
+  let request_id = "wmsg-00fleet0000000007" in
+  List.iter (persist_meta config) [ "alpha" ];
+  Broadcast_wakeup.project_workspace_message_to_fleet
+    ~base_path:config.base_path
+    ~registered_keepers:(fun () -> [ "alpha", "alpha" ])
+    (fleet_delivery ~request_id ~from_agent:"external-agent" ~content:"hello");
+  let speaker =
+    speaker_of_row ~base_path:config.base_path ~keeper_name:"alpha" ~request_id
+  in
+  check (option string) "external speaker id" (Some "external-agent")
+    speaker.speaker_id;
+  check bool "external authority" true
+    (speaker.speaker_authority = Keeper_chat_store.External)
+;;
+
+(* The mention path records the same sender the same way. *)
+let test_mention_from_a_keeper_is_keeper_speech () =
+  with_workspace @@ fun config ->
+  let target = "alpha" in
+  let request_id = "wmsg-00fleet0000000008" in
+  List.iter (persist_meta config) [ "beta"; target ];
+  ignore
+    (Broadcast_wakeup.deliver_broadcast_mention
+       ~config
+       ~base_path:config.base_path
+       ~is_running:(fun _ -> true)
+       ~is_registered_keeper:(String.equal "beta")
+       ~wakeup:(fun _ -> ())
+       { (delivery ~target ~request_id ~seq:42 ~content:"@alpha please review")
+         with Workspace_broadcast.from_agent = "beta"
+       });
+  let speaker =
+    speaker_of_row ~base_path:config.base_path ~keeper_name:target ~request_id
+  in
+  check (option string) "keeper speaker id" (Some "beta") speaker.speaker_id;
+  check bool "keeper authority" true
+    (speaker.speaker_authority = Keeper_chat_store.Keeper)
 ;;
 
 (* The task FSM announces every claim/start/release through the same
@@ -581,6 +672,12 @@ let () =
             test_fleet_projection_adds_no_queue_entry
         ; test_case "fleet projection preserves the mention row" `Quick
             test_fleet_projection_preserves_the_mention_row
+        ; test_case "a Keeper's broadcast is Keeper speech" `Quick
+            test_fleet_projection_from_a_keeper_is_keeper_speech
+        ; test_case "an unregistered author stays external" `Quick
+            test_fleet_projection_from_an_unregistered_author_is_external
+        ; test_case "a Keeper's mention is Keeper speech" `Quick
+            test_mention_from_a_keeper_is_keeper_speech
         ; test_case "a system record is not projected" `Quick
             test_system_record_is_not_projected
         ; test_case "an undeclared broadcast is a system record" `Quick

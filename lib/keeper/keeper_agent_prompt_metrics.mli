@@ -1,11 +1,12 @@
 (** Prompt metrics for keeper Agent.run turns. *)
 
 (** Structured prompt result from [build_turn_prompt] callback.
-    [system_prompt] holds hard constraints; [dynamic_context]
-    holds soft context injected through AGENT_CORE [extra_system_context]. *)
+    [dynamic_context] holds soft context injected through AGENT_CORE
+    [extra_system_context]. The system prompt is not part of it: every turn
+    sends the base prompt {!Keeper_run_context.prepare_run_context} built, so
+    a callback cannot substitute a second render (#38354). *)
 type turn_prompt =
-  { system_prompt : string
-  ; dynamic_context : string
+  { dynamic_context : string
   ; dynamic_context_for_tools : (Agent_core.Tool.t list -> string) option
       (** Optional transmission view, evaluated only after the actual offered
           tool surface is known. [dynamic_context] remains the full source. *)

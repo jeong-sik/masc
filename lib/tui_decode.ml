@@ -75,16 +75,15 @@ let keeper_phase_is_running : keeper_phase -> bool = function
   | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting ->
       false
 
-type keeper_phase_band = Phase_stuck | Phase_alive | Phase_parked
+type keeper_phase_band = Phase_stuck | Phase_alive | Phase_paused | Phase_stopped
 
 let keeper_phase_band : keeper_phase -> keeper_phase_band = function
   | Keeper_state_machine.Failing | Keeper_state_machine.Crashed -> Phase_stuck
   | Keeper_state_machine.Running | Keeper_state_machine.Draining
   | Keeper_state_machine.Restarting ->
       Phase_alive
-  | Keeper_state_machine.Paused | Keeper_state_machine.Stopped
-  | Keeper_state_machine.Offline ->
-      Phase_parked
+  | Keeper_state_machine.Paused -> Phase_paused
+  | Keeper_state_machine.Stopped | Keeper_state_machine.Offline -> Phase_stopped
 
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
 
@@ -883,6 +882,91 @@ let decode_task json =
   let* task = Masc_domain.task_of_yojson json in
   Ok (task_of_domain task)
 
+(* #38445: a terminal draws bidi controls and zero-width characters as
+   nothing, so the glyphs an operator reads can differ from the bytes the
+   approval hash covers (Trojan Source, CVE-2021-42574). Both terminal
+   sanitizers route those codepoints through here, so the rule lives in one
+   place: the codepoint is drawn as its own escape text, never dropped. *)
+let is_invisible_codepoint code =
+  code = 0x061C
+  || (code >= 0x200B && code <= 0x200F)
+  || (code >= 0x202A && code <= 0x202E)
+  || (code >= 0x2066 && code <= 0x2069)
+  || code = 0xFEFF
+;;
+
+let zero_width_joiner = 0x200D
+let variation_selector_15 = 0xFE0E
+let variation_selector_16 = 0xFE0F
+
+(* The one ZWJ that is not hiding anything: the one holding an emoji
+   together. [Masc_tui_message_layout] already reads it that way when it
+   measures a cluster ("a family joined by ZWJ"), and escaping it everywhere
+   drew 🤷‍♂️ as six ASCII characters on the screen and put them back in the
+   input line on recall. UAX #29 GB11 is the line: a ZWJ between two
+   pictographs joins them and stays; every other ZWJ joins nothing a reader
+   can see, so it is drawn as its escape with the rest of the invisibles.
+   The scalars below sit inside a cluster without ending it -- the two
+   presentation selectors and the skin tones -- so a joined ZWJ is still
+   recognised after them (🧑🏽‍💻). *)
+let continues_pictograph scalar =
+  let code = Uchar.to_int scalar in
+  code = variation_selector_15
+  || code = variation_selector_16
+  || Uucp.Emoji.is_emoji_modifier scalar
+
+let scalar_at text index =
+  if index >= String.length text
+  then None
+  else (
+    let decoded = String.get_utf_8_uchar text index in
+    if Uchar.utf_decode_is_valid decoded
+    then Some (Uchar.utf_decode_uchar decoded)
+    else None)
+
+let opens_pictograph text index =
+  match scalar_at text index with
+  | Some scalar -> Uucp.Emoji.is_extended_pictographic scalar
+  | None -> false
+
+let escape_invisible text =
+  let output = Buffer.create (String.length text) in
+  let length = String.length text in
+  let rec walk index ~after_pictograph =
+    if index < length
+    then (
+      let decoded = String.get_utf_8_uchar text index in
+      let step = Uchar.utf_decode_length decoded in
+      let scalar = Uchar.utf_decode_uchar decoded in
+      let valid = Uchar.utf_decode_is_valid decoded in
+      let code = Uchar.to_int scalar in
+      let joins_two_pictographs =
+        valid
+        && code = zero_width_joiner
+        && after_pictograph
+        && opens_pictograph text (index + step)
+      in
+      if valid && is_invisible_codepoint code && not joins_two_pictographs
+      then Buffer.add_string output (Printf.sprintf "\\u%04X" code)
+      else Buffer.add_substring output text index step;
+      let after_pictograph =
+        if not valid
+        then false
+        else if Uucp.Emoji.is_extended_pictographic scalar
+        then true
+        (* Only a joiner that actually joined carries the state: an escaped
+           one has been written out as text, so what follows it no longer sits
+           inside an emoji and a second joiner cannot ride through on it. *)
+        else if continues_pictograph scalar || joins_two_pictographs
+        then after_pictograph
+        else false
+      in
+      walk (index + step) ~after_pictograph)
+  in
+  walk 0 ~after_pictograph:false;
+  Buffer.contents output
+;;
+
 let sanitize_terminal_text text =
   let escaped_byte byte = Printf.sprintf "\\x%02X" byte in
   let escaped_codepoint byte = Printf.sprintf "\\u00%02X" byte in
@@ -963,7 +1047,7 @@ let sanitize_terminal_text text =
           append (index + 1))
   in
   append 0;
-  Buffer.contents output
+  escape_invisible (Buffer.contents output)
 ;;
 
 (* One row of a text that has rows. The terminal boundary escapes control
@@ -7467,6 +7551,23 @@ let decode_tool_approval_mode_overrides json =
   in
   loop [] items
 
+(* The detail pane is where an operator reads the request whole, so the input
+   arrives there as it was stored. A row whose input is not an object has no
+   keys to show; it carries the server's flattened preview under a label that
+   says so, because sitting that possibly-truncated wall under "input"
+   promised a whole it never was. *)
+type gate_input_rows =
+  | Rows of (string * string) list
+      (** One field per key of the stored input object: the key is the label,
+          the value is what the producer stored -- strings whole, every other
+          value as compact JSON. The order is the producer's, because a
+          producer that leads with the field the operator reads is making a
+          statement the serializer must not rearrange. *)
+  | Flattened of string option
+      (** The server's flattened preview, and the fact that this detail
+          cannot draw the input per key. [None] means the server recorded no
+          preview either; the pane says so rather than drawing nothing. *)
+
 type gate_pending_phase =
   | Gate_queued
   | Gate_judging
@@ -7479,6 +7580,14 @@ type gate_pending = {
   gp_operation : string;
   gp_display_tool : string;
   gp_input_preview : string option;
+      (** The one-line summary the queue row and the approvals payload line
+          show. A [tool_execute] row leads with the command it would run;
+          every other operation keeps the server's flattened preview. *)
+  gp_input_rows : gate_input_rows;
+      (** The detail pane's copy of the input, uncut. [Rows] is one field per
+          key of the stored input object -- strings whole, other values as
+          compact JSON. [Flattened] says this input never was an object, so
+          the pane draws the server preview under a label that names it. *)
   gp_execution_cwd : string option;
   gp_execution_sandbox : string option;
   gp_waiting_s : float option;
@@ -7625,6 +7734,48 @@ let gate_execution_site ~operation envelope =
   then (None, None)
   else match envelope with Some envelope -> execute_gate_site envelope | None -> (None, None)
 
+(* The server's preview is what the wire carries, cut at 200 bytes. The
+   detail pane used to sit that wall under the label "input" and call it the
+   input; a [tool_execute] row whose command could not be assembled fell into
+   it silently. Both rows keep the preview for their one-line summaries. The
+   detail pane draws [gp_input_rows] instead, which is the whole stored input,
+   one field per key, in the order the producer wrote it. *)
+let gate_input_rows ~operation ~server_preview envelope =
+  let object_keys json =
+    match json with
+    | `Assoc args ->
+      let field (key, value) =
+        let text =
+          match value with
+          | `String text -> text
+          | other -> Yojson.Safe.to_string other
+        in
+        (key, text)
+      in
+      Some (Rows (List.map field args))
+    | _ -> None
+  in
+  let input_rows =
+    if String.equal operation Keeper_tool_execute_runtime.gate_operation then
+      (* The command arguments are the input; the envelope's outer keys are
+         the envelope. Where it would run is already a pane row of its own,
+         and the schema URN is not something an operator decides on. *)
+      match envelope with
+      | Some args -> object_keys (member "input" args)
+      | None -> None
+    else
+      match envelope with
+      | Some json -> object_keys json
+      | None -> None
+  in
+  let flattened = server_preview in
+  match input_rows with
+  | Some rows -> rows
+  | None -> Flattened flattened
+
+(* The row keeps its one-line summary: a queue line is a queue line, and
+   there the command must still lead. The detail is where the input is read
+   whole, and that is [gp_input_rows]. *)
 let gate_input_preview ~operation ~server_preview envelope =
   if not (String.equal operation Keeper_tool_execute_runtime.gate_operation)
   then server_preview
@@ -7742,6 +7893,9 @@ let decode_gate_pending json =
       gp_display_tool = gate_display_tool ~operation:gp_operation input;
       gp_input_preview =
         gate_input_preview ~operation:gp_operation
+          ~server_preview:gp_input_preview input;
+      gp_input_rows =
+        gate_input_rows ~operation:gp_operation
           ~server_preview:gp_input_preview input;
       gp_execution_cwd = fst (gate_execution_site ~operation:gp_operation input);
       gp_execution_sandbox =

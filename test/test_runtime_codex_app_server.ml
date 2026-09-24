@@ -2711,13 +2711,16 @@ let test_account_home_does_not_apply_readiness_overrides () =
         output_string output "#!/bin/sh\nset -eu\n";
         output_string output "[ \"$CODEX_HOME\" = /tmp/codex-account-one ] || exit 75\n";
         output_string output "[ -z \"${OPENAI_API_KEY:-}\" ] || exit 76\n";
+        output_string output "[ -z \"${AWS_ACCESS_KEY_ID:-}\" ] || exit 80\n";
         output_string output "case \"$*\" in *'cli_auth_credentials_store'*) exit 77;; esac\n";
         output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
         close_out output;
         Unix.chmod wrapper 0o700;
-        match run_fixture ~account_home:"/tmp/codex-account-one" wrapper with
-        | Ok _ -> ()
-        | Error error -> fail (Runtime_codex_app_server.error_to_string error)))
+        Masc_test_deps.with_process_env "OPENAI_API_KEY" (Some "fixture-host-key") (fun () ->
+          Masc_test_deps.with_process_env "AWS_ACCESS_KEY_ID" (Some "fixture-host-aws-key") (fun () ->
+            match run_fixture ~account_home:"/tmp/codex-account-one" wrapper with
+            | Ok _ -> ()
+            | Error error -> fail (Runtime_codex_app_server.error_to_string error)))))
 ;;
 
 let test_account_home_passes_its_declared_provider_key () =
@@ -2726,13 +2729,18 @@ let test_account_home_passes_its_declared_provider_key () =
   Unix.mkdir home 0o700;
   let config_path = Filename.concat home "config.toml" in
   let previous = Sys.getenv_opt "OPENAI_API_KEY" in
+  let previous_aws = Sys.getenv_opt "AWS_ACCESS_KEY_ID" in
   Unix.putenv "OPENAI_API_KEY" "fixture-selected-key";
+  Unix.putenv "AWS_ACCESS_KEY_ID" "fixture-selected-aws-key";
   Fun.protect ~finally:(fun () ->
     Unix.putenv "OPENAI_API_KEY" (Option.value previous ~default:"");
+    Unix.putenv "AWS_ACCESS_KEY_ID" (Option.value previous_aws ~default:"");
     Sys.remove config_path;
     Unix.rmdir home) (fun () ->
     let output = open_out_bin config_path in
-    output_string output "[model_providers.selected]\nenv_key = \"OPENAI_API_KEY\"\n";
+    output_string output
+      "[model_providers.selected]\nenv_key = \"OPENAI_API_KEY\"\n\
+       [model_providers.bedrock]\nenv_key = \"AWS_ACCESS_KEY_ID\"\n";
     close_out output;
     with_fixture
       [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
@@ -2743,6 +2751,8 @@ let test_account_home_passes_its_declared_provider_key () =
           output_string output "#!/bin/sh\nset -eu\n";
           output_string output ("[ \"$CODEX_HOME\" = " ^ shell_quote home ^ " ] || exit 78\n");
           output_string output "[ \"$OPENAI_API_KEY\" = fixture-selected-key ] || exit 79\n";
+          output_string output
+            "[ \"$AWS_ACCESS_KEY_ID\" = fixture-selected-aws-key ] || exit 81\n";
           output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
           close_out output;
           Unix.chmod wrapper 0o700;

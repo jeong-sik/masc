@@ -1692,6 +1692,15 @@ let child_environment_key_allowed = function
   | _ -> false
 ;;
 
+let account_override_environment_key = function
+  | "OPENAI_API_KEY" | "OPENAI_BASE_URL" | "CODEX_API_KEY" | "CODEX_ACCESS_TOKEN"
+  | "AWS_ACCESS_KEY_ID" | "AWS_SECRET_ACCESS_KEY" | "AWS_SESSION_TOKEN"
+  | "AWS_REGION" | "AWS_DEFAULT_REGION" | "AWS_PROFILE"
+  | "AWS_CONFIG_FILE" | "AWS_SHARED_CREDENTIALS_FILE" | "AWS_BEARER_TOKEN_BEDROCK" ->
+    true
+  | _ -> false
+;;
+
 let resolved_codex_home () =
   let home = match Sys.getenv_opt "CODEX_HOME" with
     | Some path when path <> "" -> Some path
@@ -1753,9 +1762,7 @@ let client_environment account_home =
     && (match account_home with
         | None -> true
         | Some _ ->
-          not (List.mem name
-            [ "OPENAI_API_KEY"; "OPENAI_BASE_URL"; "CODEX_API_KEY"; "CODEX_ACCESS_TOKEN" ])
-          || List.mem name configured)
+          not (account_override_environment_key name) || List.mem name configured)
     && (child_environment_key_allowed name || List.mem name configured))
   |> fun entries ->
     Option.fold ~none:entries ~some:(fun path -> ("CODEX_HOME=" ^ path) :: entries) home

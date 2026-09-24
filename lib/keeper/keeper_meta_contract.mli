@@ -88,11 +88,6 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
   | Session_conflict
       (** The provider session lease is owned by another process. This remains
           terminal for automatic retry and is never inferred from message text. *)
-  | Capacity_exhausted
-      (** Typed surface for capacity-induced runtime exhaustion.
-          Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
-          through to [Other_detail message], losing auto-recovery eligibility
-          and triggering the harsher failure policy. *)
   | Other_detail of string
 
 type blocker_class =

@@ -9806,6 +9806,13 @@ def planning_review_hierarchy_interaction() -> Interaction:
         # and the last row here is the footer. The screen drew no key hints at
         # all, at every terminal height. "y / x" is this surface's own pair, so
         # a row left over from another screen cannot stand in for it.
+        #
+        # The ledger block is what makes the head nine rows, and it rides the
+        # refresh rather than the first paint: without this wait the screen
+        # under assertion is the six-row head, where the old constant was
+        # right and the footer was never lost.
+        wait_for_output(process, master_fd, output, b"12 ruled", start=0,
+                        timeout=20.0)
         drain_until_quiet(process, master_fd, output)
         rows = screen_rows(
             bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
@@ -10237,6 +10244,41 @@ def verification_request_row(task_id: str) -> dict[str, object]:
     }
 
 
+HARNESS_HEALTH_PATH = "/api/v1/dashboard/harness-health"
+
+
+def harness_health_snapshot() -> dict[str, object]:
+    """A ruled ledger, which is what makes Task Verdicts draw its full head.
+
+    With no calibration the ledger block is empty and the head is six rows;
+    with one it is nine, and the surface's row arithmetic has to hold for
+    both. The block is where that arithmetic went wrong (masc_tui_render.ml,
+    render_harness_list).
+    """
+    return {
+        "recent_verdicts": [
+            {
+                "task_id": "task-901",
+                "task_title": "a ruled task",
+                "agent_name": "alpha",
+                "gate": "structured_tool",
+                "verdict": "approve",
+                "evaluator_runtime": "claude_code.claude-sonnet-5",
+                "timestamp": 1787766400.0,
+                "notes_hash": "d0d0",
+            }
+        ],
+        "calibration": {
+            "total_verdicts": 12,
+            "approve_count": 8,
+            "reject_count": 4,
+            "labeled_count": 0,
+            "gate_distribution": {"fallback": 7, "structured_tool": 5},
+        },
+        "overview": {"evaluator_status": "healthy"},
+    }
+
+
 def verification_verdict_fixtures() -> HttpFixtures:
     rows = [
         verification_request_row("task-901"),
@@ -10244,6 +10286,7 @@ def verification_verdict_fixtures() -> HttpFixtures:
     ]
     return {
         VERIFICATION_QUEUE_PATH: (200, verification_snapshot(rows)),
+        HARNESS_HEALTH_PATH: (200, harness_health_snapshot()),
         VERIFICATION_VERDICT_PATH: (
             200,
             {"ok": True, "message": "verdict recorded for task-901", "noop": False},

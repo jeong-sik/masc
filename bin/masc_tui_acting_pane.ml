@@ -253,7 +253,15 @@ let failed_call_glyph = Acting.glyph_text Acting.Failure
 let detail_indent_cells = mark_cells + dispatch_cells + gap_cells
 let detail_label_cells = 4
 
-let age_text ~now at = Acting.elapsed_text (Float.max 0. (now -. at) *. 1000.)
+(* The clamp leaves nothing negative, so the ladder spells every age this
+   passes it and the [None] arm does not come back. The clamp itself draws a
+   backwards clock as "0ms", where [Masc_tui_message_layout.age_text] draws
+   nothing; that is #38663. *)
+let age_text ~now at =
+  match Acting.elapsed_text (Float.max 0. (now -. at) *. 1000.) with
+  | Some text -> text
+  | None -> ""
+
 let last_event_text ~now at = "last event " ^ age_text ~now at
 
 let compact_count n =
@@ -762,17 +770,24 @@ let run_badge run =
 (* What the run took. Each call's own duration, newest first, for a reader
    comparing them; on a pane too narrow for that, their sum, which is the
    one figure a run has. A call the feed gave no duration is left out of the
-   list and out of the sum: the pane does not invent one. *)
+   list and out of the sum: the pane does not invent one. A duration the
+   ladder has no spelling for -- a negative one -- is left out the same way,
+   so it neither shows in the list nor takes from the sum. *)
 let run_durations run =
-  List.filter_map (fun (tool : Acting.chunk_tool) -> tool.Acting.ct_duration_ms) run
+  List.filter_map
+    (fun (tool : Acting.chunk_tool) ->
+      Option.bind tool.Acting.ct_duration_ms (fun ms ->
+          Option.map (fun text -> (ms, text)) (Acting.elapsed_text ms)))
+    run
 
 let run_duration_texts run =
   match run_durations run with
   | [] -> []
   | durations ->
-      [ String.concat " " (List.map Acting.elapsed_text durations)
-      ; Acting.elapsed_text (List.fold_left ( +. ) 0. durations)
-      ]
+      String.concat " " (List.map snd durations)
+      :: Option.to_list
+           (Acting.elapsed_text
+              (List.fold_left (fun sum (ms, _) -> sum +. ms) 0. durations))
 
 let tool_line ~cols ~now ~state ~place ~run (chunk : Acting.chunk)
     (tool : Acting.chunk_tool) =
@@ -814,8 +829,8 @@ let tool_line ~cols ~now ~state ~place ~run (chunk : Acting.chunk)
     (* The feed does not carry a receipt clock for every folded call. An
        unknown duration stays blank; the record header owns the event age. *)
     | [] | [ _ ] -> (
-        match tool.Acting.ct_duration_ms with
-        | Some ms -> [ Acting.elapsed_text ms ]
+        match Option.bind tool.Acting.ct_duration_ms Acting.elapsed_text with
+        | Some text -> [ text ]
         | None -> [ "" ])
   in
   let duration_text =

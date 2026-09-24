@@ -12518,8 +12518,8 @@ let render_keeper_calls (state : state) =
              ("?", Ansi.reset)
          in
          let duration =
-           match call.kc_duration_ms with
-           | Some ms -> Masc_tui_acting.elapsed_text ms
+           match Option.bind call.kc_duration_ms Masc_tui_acting.elapsed_text with
+           | Some text -> text
            | None -> "-"
          in
          let turn =

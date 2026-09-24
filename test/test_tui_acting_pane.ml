@@ -1502,6 +1502,37 @@ let test_a_narrow_run_says_its_total () =
   check bool "the sum stands for the durations" true (contains "12.0s" run);
   check bool "the list of them is gone" false (contains "274ms" run)
 
+(* A negative duration is a clock that disagreed with itself. The run leaves
+   it out of the list and out of the sum, as it does a call with no duration:
+   summed, these five read "7.7s" -- the negative taken from the real 11.7s. *)
+let backwards_run_input () =
+  let other =
+    runner_call ~at:900. ~duration_ms:5. ~id:"read"
+      ~disposition:(Ok Masc.Tui_decode.Keeper_call_completed)
+      ~input:"{\"path\":\"lib/a.ml\"}" ~output:"12 lines" "Read"
+  in
+  let calls =
+    List.map
+      (fun (index, duration) ->
+        runner_call ~at:(950. +. float_of_int index) ~duration_ms:duration
+          ~id:(Printf.sprintf "exec-%d" index)
+          ~disposition:(Ok Masc.Tui_decode.Keeper_call_completed)
+          ~input:"{\"cmd\":\"ls\"}" "Execute")
+      [ 0, 2700.; 1, -4000.; 2, 1400.; 3, 2900.; 4, 4700. ]
+  in
+  { (runner_input ()) with Pane.chunks = chunks [ "runner" ] (entries (other :: calls)) }
+
+let test_a_backwards_duration_is_left_out_of_the_run () =
+  let wide =
+    run_row (Pane.lines ~rows ~cols:Pane.wide_pane_cols ~scroll:0 (backwards_run_input ()))
+  in
+  check bool ("the list skips it: " ^ wide) true (contains "2.7s 1.4s 2.9s 4.7s" wide);
+  let narrow =
+    run_row (Pane.lines ~rows ~cols:narrow_run_cols ~scroll:0 (backwards_run_input ()))
+  in
+  check bool ("the sum leaves it out: " ^ narrow) true (contains "11.7s" narrow);
+  check bool "and is not taken from" false (contains "7.7s" narrow)
+
 let test_the_call_row_marks_a_batch_and_a_deferral () =
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 (runner_input ())).Pane.rows in
   check bool "a serial completed call wears no mark" true
@@ -2034,6 +2065,8 @@ let () =
             test_a_run_of_one_tool_is_one_counted_row
         ; test_case "a narrow run says its total" `Quick
             test_a_narrow_run_says_its_total
+        ; test_case "a backwards duration is left out of the run" `Quick
+            test_a_backwards_duration_is_left_out_of_the_run
         ; test_case "an opened call draws its facts and previews" `Quick
             test_an_opened_call_draws_its_facts_and_previews
         ; test_case "an opened wire call says what it does not carry" `Quick

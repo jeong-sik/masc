@@ -18,7 +18,9 @@ type 'session opener =
 
 type 'session t
 
-(** A backend serving requests on fibers of [sw] until [sw] ends. [call]
+(** A backend serving requests on fibers of [sw] until [sw] ends. Its
+    fibers are daemons: when the rest of [sw] is done, an open session is
+    released and its browser stopped rather than holding [sw] open. [call]
     sends one Stagehand call on a session. [log] receives every session
     event. *)
 val create :

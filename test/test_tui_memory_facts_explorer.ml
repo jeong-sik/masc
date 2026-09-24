@@ -14,11 +14,9 @@ let make_fact ?(category = Cat.Fact) ?(origin = "chat") ?(first = 100.0)
   ; mf_events = events
   }
 
-let used ?(retrieved = 0) ?(days = 0) ?last ?(retracted = 0) ?(revised_from = []) () :
+let retrieved ~count ~days ~last ?(retracted = 0) ?(revised_from = []) () :
   Decode.memory_fact_events =
-  { mfe_retrieved_count = retrieved
-  ; mfe_retrieved_distinct_days = days
-  ; mfe_last_retrieved_at = last
+  { mfe_retrieval = Decode.Retrieved { count; distinct_days = days; last_at = last }
   ; mfe_retracted_count = retracted
   ; mfe_revised_from = revised_from
   }
@@ -209,8 +207,8 @@ let test_sorting_orders () =
    record, stay last in their own recency order. *)
 let test_use_based_sorting () =
   let state = make_state () in
-  let often = make_fact ~last:100.0 ~claim:"often" ~events:(used ~retrieved:5 ~days:3 ~last:1_000.0 ()) "1" in
-  let latest = make_fact ~last:900.0 ~claim:"latest" ~events:(used ~retrieved:2 ~days:1 ~last:5_000.0 ()) "2" in
+  let often = make_fact ~last:100.0 ~claim:"often" ~events:(retrieved ~count:5 ~days:3 ~last:1_000.0 ()) "1" in
+  let latest = make_fact ~last:900.0 ~claim:"latest" ~events:(retrieved ~count:2 ~days:1 ~last:5_000.0 ()) "2" in
   let never = make_fact ~last:800.0 ~claim:"never" "3" in
   state.memory_facts <-
     Some (make_snapshot ~ordinary_facts:[ never; often; latest ]

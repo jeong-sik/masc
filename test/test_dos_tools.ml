@@ -94,6 +94,13 @@ let mouse_click_com =
    \xcd\x20"
 ;;
 
+(* Ask INT 33h function 0 whether a mouse is there, keep the answer at
+   offset 0x200 of the program's segment, and exit. AX comes back FFFF with a
+   mouse and 0000 without one -- the check a game makes once, at start.
+
+   org 0x100: mov ax,0 / int 33h / mov [0x200],ax / int 20h *)
+let mouse_probe_com = "\xb8\x00\x00\xcd\x33\xa3\x00\x02\xcd\x20"
+
 let rec mkdir_p dir =
   if not (Sys.file_exists dir) then begin
     mkdir_p (Filename.dirname dir);
@@ -194,7 +201,10 @@ let test_press_reaches_the_guest_and_the_ledger () =
 let test_click_reaches_the_guest_and_the_ledger () =
   with_workspace (fun base_path ->
     install_program ~base_path "mouse.com" mouse_click_com;
-    boot ~base_path "mouse.com";
+    ignore
+      (dispatch ~base_path "masc_dos_load"
+         [ ("program", `String "mouse.com"); ("mouse", `Bool true) ]
+       : Tool_result.result);
     let result =
       dispatch ~base_path ~agent:"vincent" "masc_dos_click"
         [ ("x", `Int 1); ("y", `Int 1); ("steps", `Int 1_000) ]
@@ -214,6 +224,57 @@ let test_click_reaches_the_guest_and_the_ledger () =
         entry.Dos_lane.key_name
     | entries ->
       fail (Printf.sprintf "expected one ledger entry, got %d" (List.length entries)))
+;;
+
+(* What the guest's INT 33h answered, read back from where mouse_probe_com
+   kept it. A COM program's segment is its PSP, which the observation names. *)
+let probed_mouse_word ~base_path load_result =
+  let psp = int_of_string ("0x" ^ string_field "psp" load_result) in
+  let address = Printf.sprintf "%05x" ((psp * 16) + 0x200) in
+  string_field "hex"
+    (dispatch ~base_path "masc_dos_peek" [ ("address", `String address); ("length", `Int 2) ])
+;;
+
+(* The declaration is what the guest sees. Without it the core reports no
+   mouse, which is right for a program that does not use one; with it the same
+   program finds one. A later load without the declaration has none again: the
+   mouse belongs to the machine, not to the workspace. *)
+let test_load_declares_the_mouse_to_the_guest () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "probe.com" mouse_probe_com;
+    let with_mouse =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "probe.com"); ("mouse", `Bool true) ]
+    in
+    check bool "the probe ran to its exit" true (bool_field "exited" with_mouse);
+    check string "INT 33h reports a mouse" "ffff" (probed_mouse_word ~base_path with_mouse);
+    let without = load ~base_path "probe.com" in
+    check bool "the probe ran to its exit again" true (bool_field "exited" without);
+    check string "a reload without the declaration has none" "0000"
+      (probed_mouse_word ~base_path without))
+;;
+
+(* A click on a machine whose guest was told there is no mouse would move a
+   cursor nothing reads. It is refused, says how to get a mouse, and leaves
+   the ledger and the machine where they were. *)
+let test_click_without_a_declared_mouse_is_refused () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "mouse.com" mouse_click_com;
+    let loaded = load ~base_path "mouse.com" in
+    let steps_before = int_field "steps" loaded in
+    let result =
+      dispatch ~base_path "masc_dos_click" [ ("x", `Int 1); ("y", `Int 1) ]
+    in
+    check bool "the click is refused" false (is_completed result);
+    check bool "and names the declaration to make" true
+      (contains "mouse=true" (Tool_result.message result));
+    (match Dos_lane.click ~who:"dos-test" ~x:1 ~y:1 ~buttons:1 ~steps:1_000 with
+     | Error Dos_lane.No_mouse -> ()
+     | Error e -> fail ("expected No_mouse, got " ^ Dos_lane.error_to_string e)
+     | Ok _ -> fail "a click without a mouse succeeded");
+    check int "nothing reached the ledger" 0 (List.length (Dos_lane.ledger ()));
+    check int "and the machine did not run" steps_before
+      (int_field "steps" (dispatch ~base_path "masc_dos_screen" [])))
 ;;
 
 (* The machine reads a program into guest memory and masc_dos_peek reads guest
@@ -354,7 +415,7 @@ let test_two_names_that_differ_only_in_case_are_refused () =
         ~saves_dir:(Filename.concat base_path "saves")
         ~program_name:"game.com" ~program_bytes:hello_com
         ~files:[ ("GAME.COM", hello_com); ("DATA.DAT", "upper"); ("data.dat", "lower") ]
-        ~announce:(fun () -> incr announced)
+        ~mouse:false ~announce:(fun () -> incr announced)
     in
     check bool "the load is refused" true (Result.is_error result);
     check int "and nothing was announced" 0 !announced)
@@ -561,6 +622,10 @@ let () =
         ; test_case "press" `Quick test_press_reaches_the_guest_and_the_ledger
         ; test_case "click reaches the guest" `Quick
             test_click_reaches_the_guest_and_the_ledger
+        ; test_case "load declares the mouse" `Quick
+            test_load_declares_the_mouse_to_the_guest
+        ; test_case "click without a mouse" `Quick
+            test_click_without_a_declared_mouse_is_refused
         ; test_case "inventory only" `Quick test_only_inventory_names_resolve
         ; test_case "linked out" `Quick test_a_link_out_of_the_inventory_is_refused
         ; test_case "boot inside a directory" `Quick

@@ -293,7 +293,13 @@ open Alcotest
    whole sentence that fits. What it bought: those four schemas, 8,370 bytes,
    leave every Agent Core request that has not used them (5,047 requests on
    2026-09-23). No headroom. *)
-let ceiling_bytes = 122_275
+(* 2026-09-24: +228 rendered bytes, computed from the two edits (not a CI
+   reading). masc_dos_load takes mouse (+152) and masc_dos_click says a
+   machine loaded without it refuses the click (+76) (#38709). What it bought:
+   a DOS program that checks INT 33h at start finds the mouse a Keeper clicks
+   with, and a click the guest cannot see fails instead of reporting success.
+   Both tools declare defer_loading = true. No headroom. *)
+let ceiling_bytes = 122_503
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

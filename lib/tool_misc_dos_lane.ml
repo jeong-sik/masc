@@ -55,7 +55,7 @@ let of_lane ?(extra = []) ~tool_name ~start_time
     Tool_result.make_ok ~tool_name ~start_time
       ~data:(`Assoc (observation_fields o @ extra))
       ()
-  | Error ((Dos_lane.No_machine | Dos_lane.Invalid_request _) as e) ->
+  | Error ((Dos_lane.No_machine | Dos_lane.Invalid_request _ | Dos_lane.No_mouse) as e) ->
     reject ~tool_name ~start_time (Dos_lane.error_to_string e)
   | Error (Dos_lane.Unreadable _ as e) ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
@@ -290,6 +290,7 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
          Dos_lane.load ~ledger_dir:(dos_dir ~base_path)
            ~saves_dir:(saves_dir ~base_path (String.trim name)) ~program_name ~program_bytes
            ~files
+           ~mouse:(get_bool args "mouse" false)
            ~announce:(fun () ->
              relay_to_board ~author:agent_name
                (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name))

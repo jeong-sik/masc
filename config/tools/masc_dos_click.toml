@@ -10,7 +10,8 @@ Coordinates are frame pixels and must land inside the frame; a graphics \
 mode's size is in the masc_dos_screen observation. A program that polls the \
 mouse instead of asking the BIOS for keys never settles; its clicks read as \
 settled false with the budget spent, which is the expected shape for a game \
-driven this way. The action is recorded in the ledger like a key."""
+driven this way. The action is recorded in the ledger like a key. A machine \
+loaded without mouse=true has no mouse, and the click is refused."""
 additional_properties = false
 
 defer_loading = true

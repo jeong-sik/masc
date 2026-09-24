@@ -26,11 +26,15 @@ type error =
   | No_machine
   | Invalid_request of string
   | Unreadable of string
+  | No_mouse
 
 let error_to_string = function
   | No_machine -> "no DOS machine is loaded: call masc_dos_load first"
   | Invalid_request message -> message
   | Unreadable message -> message
+  | No_mouse ->
+    "this DOS machine has no mouse: call masc_dos_load again with mouse=true if the \
+     program uses one"
 ;;
 
 (* The core runs about 24 million instructions a second on this hardware
@@ -72,6 +76,7 @@ type machine = {
   ledger_path : string;
   mutable entries : entry list;  (* newest first *)
   saves_dir : string;
+  mouse : bool;  (* declared at load; the guest's INT 33h agrees with it *)
   kept : (string, string) Hashtbl.t;
       (* DOS name -> the contents last known to be on disk, either in the
          inventory or in [saves_dir]. A file whose mounted contents differ
@@ -357,7 +362,7 @@ let is_mz image =
   String.length image >= 2 && Char.equal image.[0] 'M' && Char.equal image.[1] 'Z'
 ;;
 
-let load ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announce =
+let load ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~mouse ~announce =
   locked (fun () ->
     match with_saves ~saves_dir files with
     | Error e -> Error e
@@ -373,6 +378,8 @@ let load ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announce =
                 earlier later))
       | None -> begin
         let m = Dos_machine.create () in
+        (* Before the boot run: a program checks for a mouse once, at start. *)
+        if mouse then Dos_machine.attach_mouse m;
         List.iter (fun (name, contents) -> Dos_machine.mount_file m name contents) files;
         (* The image's own bytes choose the loader, not its name: an MZ header is
            a relocatable EXE, anything else is a flat COM at 0x100. A misnamed
@@ -388,7 +395,15 @@ let load ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announce =
           (fun (name, contents) -> Hashtbl.replace kept (String.uppercase_ascii name) contents)
           files;
         let st =
-          { m; steps = 0; program = program_name; ledger_path; entries = []; saves_dir; kept }
+          { m
+          ; steps = 0
+          ; program = program_name
+          ; ledger_path
+          ; entries = []
+          ; saves_dir
+          ; mouse
+          ; kept
+          }
         in
         state := Some st;
         announce ();
@@ -508,7 +523,8 @@ let press ~who ~keys ~steps =
 let click ~who ~x ~y ~buttons ~steps =
   with_machine (fun st ->
     let width, height = Dos_machine.frame_dims st.m in
-    if x < 0 || y < 0 || x >= width || y >= height then
+    if not st.mouse then Error No_mouse
+    else if x < 0 || y < 0 || x >= width || y >= height then
       Error
         (Invalid_request
            (Printf.sprintf "click must land inside the %dx%d frame, got (%d,%d)"

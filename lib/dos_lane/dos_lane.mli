@@ -23,10 +23,10 @@
     BIOS ring buffer, so there is no hold or release — a key is put in the
     ring and the guest takes it out. {!press} therefore names no hold time.
 
-    Every key is appended to a ledger as (step, who, key). The same program
-    and the same ledger reproduce the same run: the core reads no clock and
-    no randomness — its date, timer ticks and video retrace all come from
-    the instruction counter. *)
+    Every key is appended to a ledger as (step, who, key). The same program,
+    the same mouse declaration and the same ledger reproduce the same run:
+    the core reads no clock and no randomness — its date, timer ticks and
+    video retrace all come from the instruction counter. *)
 
 type observation = {
   steps : int;  (** instructions executed since load *)
@@ -74,6 +74,9 @@ type error =
   | Unreadable of string
       (** a file that is there and will not read. A path that does not exist
           is [Invalid_request] — the caller named it. *)
+  | No_mouse
+      (** a click on a machine loaded without a mouse. The guest's INT 33h
+          says there is none, so the click would reach nothing. *)
 
 val error_to_string : error -> string
 
@@ -124,6 +127,7 @@ val load :
   program_name:string ->
   program_bytes:string ->
   files:(string * string) list ->
+  mouse:bool ->
   announce:(unit -> unit) ->
   (observation * ran, error) result
 (** Creates the workspace machine, replacing any previous one. The loader is
@@ -150,7 +154,13 @@ val load :
     [announce] runs while the machine's lock is still held, right after this
     machine becomes the workspace's. Announcements therefore reach whoever
     reads them in the order the machines actually changed. It must not call
-    back into this module — the lock is not reentrant. *)
+    back into this module — the lock is not reentrant.
+
+    [mouse] attaches a mouse to this machine before it boots, so INT 33h
+    function 0 reports one. Without it the guest sees none, which is the
+    core's default: a program that finds a mouse it does not use may wait for
+    a cursor that never comes. The declaration belongs to this machine; a
+    later load without it has no mouse. *)
 
 val eject : announce:(unit -> unit) -> unit -> (unit, error) result
 (** Drops the workspace machine. [announce] runs under the same lock as
@@ -195,7 +205,10 @@ val click :
     than asking the BIOS for keys never reaches {!settled}; its clicks read
     as [settled = false] with the budget spent, which is the expected shape
     for a game driven this way. The action is appended to the ledger like a
-    key, so a replay reproduces it. *)
+    key, so a replay reproduces it.
+
+    A machine loaded without [mouse] refuses with [No_mouse] before anything
+    moves or reaches the ledger. *)
 
 val type_text :
   who:string -> text:string -> steps:int -> (observation * ran, error) result

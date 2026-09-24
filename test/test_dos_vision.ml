@@ -46,7 +46,7 @@ let test_keeper_screen_carries_the_frame () =
       (match
          Dos_lane.load ~ledger_dir:(Filename.concat base "dos")
            ~saves_dir:(Filename.concat base "saves") ~program_name:"HELLO.COM"
-           ~program_bytes:hello_com ~files:[] ~announce:ignore
+           ~program_bytes:hello_com ~files:[] ~mouse:false ~announce:ignore
        with
        | Ok _ -> ()
        | Error e -> fail (Dos_lane.error_to_string e));

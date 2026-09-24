@@ -142,12 +142,13 @@ let test_load_refusals () =
     ; "sandbox-images/self/inputs", "Dockerfile\n"
     ]
     (fun source ->
-       let inputs_of name = Filename.concat (Filename.concat (Filename.concat source "sandbox-images") name) "inputs" in
+       let root = Unix.realpath source in
+       let inputs_of name = Filename.concat (Filename.concat (Filename.concat root "sandbox-images") name) "inputs" in
        expect_error "bad name" (V.Invalid_name "Base") (V.load ~source ~name:"Base");
        expect_error "leading dash" (V.Invalid_name "-x") (V.load ~source ~name:"-x");
        expect_error "no recipe"
          (V.Recipe_missing
-            { path = Filename.concat (Filename.concat (Filename.concat source "sandbox-images") "nope") "Dockerfile" })
+            { path = Filename.concat (Filename.concat (Filename.concat root "sandbox-images") "nope") "Dockerfile" })
          (V.load ~source ~name:"nope");
        expect_error "climbs out"
          (V.Input_path_rejected { listed_in = inputs_of "up"; path = "../outside" })
@@ -170,10 +171,49 @@ let test_load_refuses_a_link_out_of_the_checkout () =
       ]
       (fun source ->
          Unix.symlink secret (Filename.concat source "link");
-         let inputs = Filename.concat (Filename.concat (Filename.concat source "sandbox-images") "leak") "inputs" in
+         let inputs = Filename.concat (Filename.concat (Filename.concat (Unix.realpath source) "sandbox-images") "leak") "inputs" in
          expect_error "link out"
            (V.Input_outside_source { listed_in = inputs; path = "link" })
            (V.load ~source ~name:"leak")))
+
+let test_load_refuses_recipe_files_linked_outside_checkout () =
+  with_source
+    [ "outside/Dockerfile", "FROM scratch\n"
+    ; "outside/inputs", "file.txt\n"
+    ]
+    (fun outer ->
+      with_source [ "sandbox-images/leak/inputs", "" ] (fun source ->
+        let recipe = Filename.concat source "sandbox-images/leak/Dockerfile" in
+        Unix.symlink (Filename.concat outer "outside/Dockerfile") recipe;
+        let actual = Filename.concat (Unix.realpath source) "sandbox-images/leak/Dockerfile" in
+        expect_error "Dockerfile link out"
+          (V.Source_file_outside_source { path = actual })
+          (V.load ~source ~name:"leak"));
+      with_source [ "sandbox-images/leak/Dockerfile", "FROM scratch\n" ] (fun source ->
+        let manifest = Filename.concat source "sandbox-images/leak/inputs" in
+        Unix.symlink (Filename.concat outer "outside/inputs") manifest;
+        let actual = Filename.concat (Unix.realpath source) "sandbox-images/leak/inputs" in
+        expect_error "inputs manifest link out"
+          (V.Source_file_outside_source { path = actual })
+          (V.load ~source ~name:"leak")))
+
+let test_load_keeps_links_to_files_inside_checkout () =
+  with_source
+    [ "sandbox-images/inside/inputs", "linked-input\n"
+    ; "recipe-template", "FROM scratch\n"
+    ; "input-template", "content"
+    ]
+    (fun source ->
+      Unix.symlink (Filename.concat source "recipe-template")
+        (Filename.concat source "sandbox-images/inside/Dockerfile");
+      Unix.symlink (Filename.concat source "input-template")
+        (Filename.concat source "linked-input");
+      match V.load ~source ~name:"inside" with
+      | Ok recipe ->
+        check string "the recipe's in-checkout link" "FROM scratch\n" recipe.dockerfile;
+        check (list string) "the listed input's in-checkout link" [ "content" ]
+          (List.map (fun (input : V.input) -> input.contents) recipe.inputs)
+      | Error error -> fail (V.load_error_to_string error))
 
 let test_write_context_places_inputs () =
   let r = recipe ~dockerfile:"FROM scratch\n" ~inputs:[ input "scripts/x.sh" "echo" ] "t" in
@@ -242,6 +282,10 @@ let () =
         ; test_case "refusals are typed" `Quick test_load_refusals
         ; test_case "a link out of the checkout is refused" `Quick
             test_load_refuses_a_link_out_of_the_checkout
+        ; test_case "recipe and manifest links out of the checkout are refused" `Quick
+            test_load_refuses_recipe_files_linked_outside_checkout
+        ; test_case "links to files inside the checkout still load" `Quick
+            test_load_keeps_links_to_files_inside_checkout
         ; test_case "write_context places nested inputs" `Quick test_write_context_places_inputs
         ; test_case "repository recipes list their COPY sources" `Quick
             test_repository_recipes_list_their_copy_sources

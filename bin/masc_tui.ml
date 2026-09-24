@@ -1817,6 +1817,11 @@ type approval_observation = {
   ao_result: (approval_snapshot, string) result;
 }
 
+type keeper_spend_reply =
+  { asked_at_generation : int
+  ; reply : (overview_spend_reading, string) result
+  }
+
 type http_scoped_surface_results = {
   http_transport: (Tui_decode.transport_health, string) result option;
   http_approvals: approval_observation option;
@@ -1846,7 +1851,7 @@ type http_scoped_surface_results = {
   http_repository_pulls:
     (overview_pulls_reading, string) result
     option;
-  http_keeper_spend: (int * (overview_spend_reading, string) result) option;
+  http_keeper_spend: keeper_spend_reply option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Tui_decode.overview_goal list, string) result option;
 }
@@ -10861,9 +10866,12 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   let http_keeper_spend =
     when_needed needs.needs_keeper_spend (fun () ->
         match Masc_tui_loader.load_keeper_spend ~host ~port with
-        | result -> (cost_generation, result)
+        | reply -> { asked_at_generation = cost_generation; reply }
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-        | exception exn -> (cost_generation, Error (Printexc.to_string exn)))
+        | exception exn ->
+            { asked_at_generation = cost_generation
+            ; reply = Error (Printexc.to_string exn)
+            })
   in
   let http_overview_goals =
     when_needed needs.needs_overview_goals (fun () ->
@@ -10933,7 +10941,8 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_runtime_quota_load state) results.http_runtime_quota;
   Option.iter (apply_repository_pulls_load state) results.http_repository_pulls;
   Option.iter
-    (fun (generation, result) -> apply_keeper_spend_load state ~generation result)
+    (fun { asked_at_generation; reply } ->
+       apply_keeper_spend_load state ~generation:asked_at_generation reply)
     results.http_keeper_spend;
   Option.iter (apply_overview_goals_load state) results.http_overview_goals
 

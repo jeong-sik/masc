@@ -294,7 +294,7 @@ let dashboard_work_lines (state : state) =
           (fun (day : Masc_tui_task_flow.day) -> float_of_int day.d_completed)
           flow.daily
       in
-      [ Printf.sprintf " Work  · 24h: %d created · %d done · %d cancelled"
+      [ Printf.sprintf " Work  · 24h: %d created · %d currently done · %d currently cancelled"
           recent.created recent.completed recent.cancelled
       ; Printf.sprintf "   Open: %d working · %d awaiting verification · %d claimed · %d todo"
           current.in_progress current.awaiting_verification current.claimed

@@ -7,7 +7,7 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0439", "lane-addon-v0"]
-implementation_prs: []
+implementation_prs: ["#38733", "#38730"]
 ---
 
 # RFC — 기계 화면은 Lane 라우트 하나로 본다
@@ -32,22 +32,27 @@ implementation_prs: []
   - 기계가 가진 **변경 카운터**가 `N` 이고 incarnation 이 `I` 이면 "그대로"만 답한다. 하나라도
     다르면 화면과 카운터, incarnation 을 답한다. 카운터는 서버가 재시작하면 0 부터 다시 세므로
     카운터만으로는 두 화면을 가를 수 없다. `since` 와 `incarnation` 은 같이 오거나 같이 빠진다.
-  - 화면·카운터·incarnation 은 한 번에 읽는다(`capture_with_identity` 처럼).
-  - 기계 lock 은 `Eio_unix.run_in_systhread` 안에서만 잡는다.
+  - "그대로" 판정은 기계 lock 을 잡지 않는다. 카운터와 incarnation 은 lock 없이 읽는 값
+    (`Atomic.t`)으로 두고, 기계가 바뀔 때 lock 안에서 갱신한다. DOS 실행은 lock 을 최대 4M
+    걸음(약 170ms) 쥐므로, lock 을 기다리면 몇 바이트짜리 응답이 제일 비싼 경로가 된다.
+  - 다를 때만 `Eio_unix.run_in_systhread` 안에서 lock 을 잡고 화면·카운터·incarnation 을 한 번에
+    읽는다(`capture_with_identity` 처럼).
   - store 에 아무것도 쓰지 않는다. 관측과 그 화면 evidence 는 지금 그대로다
     (`msx-observer`·`frame-progress`·Keeper evidence 가 인용한다).
-  - 인증을 요구한다. 로그인 없이 열지 않는다.
+  - 인증을 요구한다. `/api/v1/msx/frame` 과 달리 `is_public_read_path` 에 넣지 않는다.
 - **변경 카운터**는 기계가 무엇이든 실행하면 오른다. 도구, 사람의 조작, tick, load, restore,
-  그리고 fault 로 끝난 실행도 포함한다. Lane 관측 seq 를 쓰지 않는다. seq 는 worker 가 관측에
+  그리고 fault 로 끝난 실행도 포함한다. 실행을 시도할 때마다 오르는 별도 값이다. DOS 의
+  `steps` 에서 파생하지 않는다. `steps` 는 0 걸음 fault 에서 오르지 않는다. Lane 관측 seq 도 쓰지 않는다. seq 는 worker 가 관측에
   성공할 때만 오르므로(`commit_output`), worker 가 실패하거나 죽으면 멈춘다.
 - 보는 데 패키지 설치나 worker 는 필요 없다.
-- TUI 는 `live?since=N&incarnation=I` 를 되풀이한다. "그대로"는 몇 바이트다.
+- TUI 는 렌더 tick(`Render_schedule`) 한 번에 `live?since=N&incarnation=I` 를 한 번 부른다.
+  새 주기 상수를 만들지 않는다. "그대로"는 몇 바이트다.
 
 ### 2.2 사람의 조작도 알림을 낸다
 
 - 사람 경로(`/api/v1/msx/press` 등)가 끝나면 도구와 같은 활동(`Msx_changed`)을 한 번 낸다.
-- 알림은 root domain 에서 낸다. 다른 domain 에서 끝난 조작은 결과를 root domain 으로 넘겨
-  알린다. 조용히 버리지 않는다.
+- 알림은 root domain 에서 낸다. 넘기는 일은 호출자마다 하지 않고 `notify_activity` 안에서
+  한다. 어느 domain 에서 불러도 root 로 넘어간다. 조용히 버리지 않는다.
 - 도구 경로는 지금처럼 `activity_of_misc_operation` 이 낸다. 한 조작에 알림은 한 번이다.
 - `tick` 은 frame 마다 알림을 내지 않는다(§4).
 
@@ -74,8 +79,8 @@ implementation_prs: []
 
 | 단계 | 내용 | 증거 |
 |---|---|---|
-| 1 | 기계 변경 카운터, `live` 라우트 | 단위: fault 로 끝난 실행 뒤 카운터가 오른다. `since` 가 같으면 "그대로". store 에 쓴 바이트 0. 인증 없으면 거절 |
-| 2 | 사람 경로 알림 | 단위: `/api/v1/msx/press` 한 번에 `Msx_changed` 한 번. 도구 한 번에도 한 번 |
+| 1 | 기계 변경 카운터, `live` 라우트 | 단위: fault 로 끝난 실행 뒤 카운터가 오른다. `since`·`incarnation` 이 같으면 "그대로". 같은 프로그램을 두 번 load 하고 이전 값을 보내면 "그대로"가 아니다. store 에 쓴 바이트 0. 인증 없으면 거절 |
+| 2 | 사람 경로 알림 | 단위: root 가 아닌 domain 에서 부른 `notify_activity` 가 알림을 낸다. `/api/v1/msx/press` 한 번에 `Msx_changed` 한 번. 도구 한 번에도 한 번 |
 | 3 | TUI 가 `live` 로 그린다. `/api/v1/msx/frame` 을 지운다 | PTY: DOS 도구 한 번 → 그림이 바뀐다. 안 바뀌면 "그대로"만 온다. `rg '/api/v1/(msx|dos)/frame' bin lib` 결과 0 |
 
 #38439 는 Draft 로 둔다. TUI 그리기(`masc_tui_machine_view`)는 전역 상태 모듈이므로 3 단계에서

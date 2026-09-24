@@ -83,12 +83,40 @@ type delete_outcome =
       ; disposition : recovery_disposition
       }
 
+type source_not_ready =
+  | Source_not_in_catalog of { source_id : string }
+  | Source_index_out_of_range of { index : int }
+  | Source_root_missing of { resolved_path : string }
+  | Source_root_not_directory of
+      { resolved_path : string
+      ; kind : Unix.file_kind
+      }
+  | Source_root_unavailable of
+      { resolved_path : string
+      ; operation : Skill_catalog_snapshot.source_operation
+      ; detail : string
+      }
+  | Source_root_unresolved of Skill_source_config.resolution
+  | Source_root_create_failed of
+      { resolved_path : string
+      ; detail : string
+      }
+  | Source_root_refresh_failed of
+      { resolved_path : string
+      ; detail : string
+      }
+  | Source_root_moved of
+      { before : string
+      ; after : string
+      }
+  | Recovery_directory_missing of { path : string }
+
 type error =
   | Invalid_workspace
   | Snapshot_not_registered
   | Snapshot_uninitialized
   | Reference_not_current
-  | Source_not_ready
+  | Source_not_ready of source_not_ready
   | Source_file_missing
   | Source_read_failed
   | Source_path_rejected of path_rejection
@@ -176,12 +204,107 @@ let recovery_cause_to_yojson = function
       ]
 ;;
 
+let source_not_ready_of_observation = function
+  | Skill_catalog_snapshot.Source_ready { resolved_path; _ } -> Ok resolved_path
+  | Source_missing { resolved_path } -> Error (Source_root_missing { resolved_path })
+  | Source_not_directory { resolved_path; kind } ->
+    Error (Source_root_not_directory { resolved_path; kind })
+  | Source_unavailable { resolved_path; operation; detail } ->
+    Error (Source_root_unavailable { resolved_path; operation; detail })
+  | Source_unresolved resolution -> Error (Source_root_unresolved resolution)
+;;
+
+let resolution_to_string = function
+  | Skill_source_config.Resolved path -> "resolved to " ^ path
+  | Anchor_unavailable anchor ->
+    Printf.sprintf "anchor %s is unavailable" (Skill_source_config.anchor_to_string anchor)
+  | Anchor_invalid { anchor; rejection } ->
+    Printf.sprintf
+      "anchor %s is invalid: %s"
+      (Skill_source_config.anchor_to_string anchor)
+      (Skill_source_config.anchor_rejection_to_string rejection)
+  | Path_rejected rejection ->
+    "path rejected: " ^ Skill_source_config.path_rejection_to_string rejection
+;;
+
+let source_not_ready_kind = function
+  | Source_not_in_catalog _ -> "not_in_catalog"
+  | Source_index_out_of_range _ -> "index_out_of_range"
+  | Source_root_missing _ -> "missing"
+  | Source_root_not_directory _ -> "not_directory"
+  | Source_root_unavailable _ -> "unavailable"
+  | Source_root_unresolved _ -> "unresolved"
+  | Source_root_create_failed _ -> "create_failed"
+  | Source_root_refresh_failed _ -> "refresh_failed"
+  | Source_root_moved _ -> "moved"
+  | Recovery_directory_missing _ -> "recovery_directory_missing"
+;;
+
+let source_not_ready_to_string = function
+  | Source_not_in_catalog { source_id } ->
+    "the published Skill catalog has no source " ^ source_id
+  | Source_index_out_of_range { index } ->
+    Printf.sprintf "the catalog entry points at source #%d, which the snapshot does not have" index
+  | Source_root_missing { resolved_path } -> "folder does not exist: " ^ resolved_path
+  | Source_root_not_directory { resolved_path; kind } ->
+    Printf.sprintf
+      "%s is a %s, not a folder"
+      resolved_path
+      (Fs_compat.file_kind_to_string kind)
+  | Source_root_unavailable { resolved_path; operation; detail } ->
+    Printf.sprintf
+      "%s failed on %s: %s"
+      (Skill_catalog_snapshot.source_operation_to_string operation)
+      resolved_path
+      detail
+  | Source_root_unresolved resolution ->
+    "source path could not be resolved: " ^ resolution_to_string resolution
+  | Source_root_create_failed { resolved_path; detail } ->
+    Printf.sprintf "creating folder %s failed: %s" resolved_path detail
+  | Source_root_refresh_failed { resolved_path; detail } ->
+    Printf.sprintf
+      "folder %s was created but the catalog refresh failed: %s"
+      resolved_path
+      detail
+  | Source_root_moved { before; after } ->
+    Printf.sprintf "source folder moved from %s to %s during the write" before after
+  | Recovery_directory_missing { path } -> "recovery folder does not exist: " ^ path
+;;
+
+let source_not_ready_to_yojson reason =
+  `Assoc
+    (("kind", `String (source_not_ready_kind reason))
+     ::
+     (match reason with
+      | Source_not_in_catalog { source_id } -> [ "source_id", `String source_id ]
+      | Source_index_out_of_range { index } -> [ "index", `Int index ]
+      | Source_root_missing { resolved_path } -> [ "resolved_path", `String resolved_path ]
+      | Source_root_not_directory { resolved_path; kind } ->
+        [ "resolved_path", `String resolved_path
+        ; "file_kind", `String (Fs_compat.file_kind_to_string kind)
+        ]
+      | Source_root_unavailable { resolved_path; operation; detail } ->
+        [ "resolved_path", `String resolved_path
+        ; ( "operation"
+          , `String (Skill_catalog_snapshot.source_operation_to_string operation) )
+        ; "detail", `String detail
+        ]
+      | Source_root_unresolved resolution ->
+        [ "detail", `String (resolution_to_string resolution) ]
+      | Source_root_create_failed { resolved_path; detail }
+      | Source_root_refresh_failed { resolved_path; detail } ->
+        [ "resolved_path", `String resolved_path; "detail", `String detail ]
+      | Source_root_moved { before; after } ->
+        [ "before", `String before; "after", `String after ]
+      | Recovery_directory_missing { path } -> [ "path", `String path ]))
+;;
+
 let error_code = function
   | Invalid_workspace -> "invalid_workspace"
   | Snapshot_not_registered -> "snapshot_not_registered"
   | Snapshot_uninitialized -> "snapshot_uninitialized"
   | Reference_not_current -> "reference_not_current"
-  | Source_not_ready -> "source_not_ready"
+  | Source_not_ready _ -> "source_not_ready"
   | Source_file_missing -> "source_file_missing"
   | Source_read_failed -> "source_read_failed"
   | Source_path_rejected _ -> "source_path_rejected"
@@ -202,7 +325,8 @@ let error_to_string = function
   | Snapshot_not_registered -> "Skill snapshot workspace is not registered"
   | Snapshot_uninitialized -> "Skill snapshot has not been published"
   | Reference_not_current -> "Skill reference is not current"
-  | Source_not_ready -> "Skill source is not ready"
+  | Source_not_ready reason ->
+    "Skill source is not ready: " ^ source_not_ready_to_string reason
   | Source_file_missing -> "SKILL.md is missing"
   | Source_read_failed -> "SKILL.md could not be read safely"
   | Source_path_rejected rejection ->
@@ -254,7 +378,7 @@ let error_recovery = function
       } ->
     Some (recovery_id, disposition)
   | Invalid_workspace | Snapshot_not_registered | Snapshot_uninitialized
-  | Reference_not_current | Source_not_ready | Source_file_missing
+  | Reference_not_current | Source_not_ready _ | Source_file_missing
   | Source_read_failed | Source_path_rejected _ | Source_read_only
   | Confirmation_required | Package_already_exists | Invalid_package_id _
   | Revision_conflict _ | Source_too_large _ | Validation_failed _
@@ -283,16 +407,12 @@ let resolve_target ~base_path reference =
   let* source_scan =
     match List.nth_opt (Skill_catalog_snapshot.sources snapshot) entry.source_index with
     | Some source -> Ok source
-    | None -> Error Source_not_ready
+    | None ->
+      Error (Source_not_ready (Source_index_out_of_range { index = entry.source_index }))
   in
   let* source_root =
-    match source_scan.observation with
-    | Skill_catalog_snapshot.Source_ready { resolved_path; _ } -> Ok resolved_path
-    | Source_missing _
-    | Source_not_directory _
-    | Source_unavailable _
-    | Source_unresolved _ ->
-      Error Source_not_ready
+    source_not_ready_of_observation source_scan.observation
+    |> Result.map_error (fun reason -> Source_not_ready reason)
   in
   let access =
     match source_scan.source.source.access with
@@ -463,13 +583,8 @@ let save ~base_path ~reference ~source_text ~refresh =
 ;;
 
 let ready_source_root source_scan =
-  match source_scan.Skill_catalog_snapshot.observation with
-  | Skill_catalog_snapshot.Source_ready { resolved_path; _ } -> Ok resolved_path
-  | Source_missing _
-  | Source_not_directory _
-  | Source_unavailable _
-  | Source_unresolved _ ->
-    Error Source_not_ready
+  source_not_ready_of_observation source_scan.Skill_catalog_snapshot.observation
+  |> Result.map_error (fun reason -> Source_not_ready reason)
 ;;
 
 let writable_sources ~base_path =
@@ -493,7 +608,7 @@ let find_writable_source snapshot source_id =
       (Skill_source_config.source_id_to_string source_scan.source.source.id)
       source_id_text)
   |> function
-  | None -> Error Source_not_ready
+  | None -> Error (Source_not_ready (Source_not_in_catalog { source_id = source_id_text }))
   | Some source_scan ->
     (match source_scan.source.source.access with
      | Skill_source_config.Read_only -> Error Source_read_only
@@ -559,11 +674,10 @@ let with_missing_source_root_created ~base_path ~refresh snapshot source_id =
   | Some resolved_path ->
     let not_ready reason =
       Log.Dashboard.warn
-        "skill source %s at %s cannot take a package: %s"
+        "skill source %s cannot take a package: %s"
         source_id_text
-        resolved_path
-        reason;
-      Error Source_not_ready
+        (source_not_ready_to_string reason);
+      Error (Source_not_ready reason)
     in
     (* Each folder that did not exist is fsynced through its parent, as the
        package directory is below, so a crash cannot drop the new source
@@ -584,10 +698,12 @@ let with_missing_source_root_created ~base_path ~refresh snapshot source_id =
        Eio_guard.check_if_ready ()
      with
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-     | exception exn -> not_ready ("creating the folder failed: " ^ Printexc.to_string exn)
+     | exception exn ->
+       not_ready
+         (Source_root_create_failed { resolved_path; detail = Printexc.to_string exn })
      | () ->
        (match refresh () with
-        | Error reason -> not_ready ("catalog refresh after creating the folder failed: " ^ reason)
+        | Error detail -> not_ready (Source_root_refresh_failed { resolved_path; detail })
         | Ok (_ : Skill_catalog_snapshot_service.publication) -> current_snapshot ~base_path))
 ;;
 
@@ -602,7 +718,7 @@ let create ~base_path ~source_id ~package_id ~source_text ~refresh =
     let* latest = current_snapshot ~base_path in
     let* latest_root = find_writable_source latest source_id in
     if not (String.equal source_root latest_root)
-    then Error Source_not_ready
+    then Error (Source_not_ready (Source_root_moved { before = source_root; after = latest_root }))
     else
       let* () =
         (* fsync_directory is a blocking primitive whose contract is
@@ -709,7 +825,8 @@ let inspect_private_recovery_root ~source_root recovery_root =
   match Fs_compat.inspect_owned_directory_chain ~ownership_root:source_root recovery_root with
   | Error rejection ->
     Error (Source_path_rejected (path_rejection_of_owned_directory rejection))
-  | Ok Fs_compat.Owned_directory_missing -> Error Source_not_ready
+  | Ok Fs_compat.Owned_directory_missing ->
+    Error (Source_not_ready (Recovery_directory_missing { path = recovery_root }))
   | Ok (Owned_directory stat) ->
     if stat.Unix.st_uid = Unix.geteuid () && stat.st_perm land 0o077 = 0
     then Ok recovery_root
@@ -1232,6 +1349,7 @@ let error_to_yojson error =
          ]
        | Source_path_rejected rejection ->
          [ "path_rejection", `String (path_rejection_to_string rejection) ]
+       | Source_not_ready reason -> [ "reason", source_not_ready_to_yojson reason ]
        | Quarantine_failed
            { candidate_moved; recovery_id; disposition; cause } ->
          [ "candidate_moved", `Bool candidate_moved
@@ -1258,7 +1376,7 @@ let error_to_yojson error =
          ; "cause", recovery_cause_to_yojson cause
          ]
        | Invalid_workspace | Snapshot_not_registered | Snapshot_uninitialized
-       | Reference_not_current | Source_not_ready | Source_file_missing
+       | Reference_not_current | Source_file_missing
        | Source_read_failed | Source_read_only
        | Confirmation_required | Package_already_exists | Invalid_package_id _
        | Source_too_large _ | Validation_failed _ | Write_failed _ ->

@@ -8,7 +8,7 @@ let cause_of_editor_error : Server_skill_editor.error -> Publish.refusal_cause =
   | Server_skill_editor.Invalid_workspace
   | Snapshot_not_registered
   | Snapshot_uninitialized
-  | Source_not_ready
+  | Source_not_ready _
   | Source_file_missing
   | Source_read_failed
   | Source_path_rejected _

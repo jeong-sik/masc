@@ -2393,7 +2393,17 @@ let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   ; Detail_sandbox, [ "o"; "d/m/s"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
-  ; Detail_github, [ "L"; "P"; "1"; "2" ]
+  ; ( Detail_github
+      (* The paragraph above is the contract, and it says "one digit per
+         login scope". Spelling the digits out froze them at the two scopes
+         that existed when it was written; the server's list grew to five and
+         this row did not move, so the table it guards was the thing that
+         drifted. The row counts the scopes the way the binding counts them,
+         so a scope added to the server's list is a key here too. *)
+    , "L" :: "P"
+      :: List.mapi
+           (fun index _ -> string_of_int (index + 1))
+           Masc.Keeper_github_identity.all_login_scopes )
   ; Detail_identity, [ "arrows+enter"; "T"; "A"; "/"; "R" ]
   ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u"; "U U" ]
   ; Detail_automation, []

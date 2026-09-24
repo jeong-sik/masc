@@ -147,8 +147,8 @@ val append_comment : comment -> (unit, board_error) result
 (** Atomically replaces {!persist_path} with [content], a snapshot of
     [store.posts]. Every posts snapshot write goes through here. Refused with
     [Io_error] while [store.posts_load_result] is [Error]: memory then holds
-    only the rows read before the one that failed, and the rewrite would
-    delete that row and every row after it (#38595). *)
+    every row the loader could decode but not the line it could not, and the
+    rewrite would delete that line (#38595). *)
 val save_posts_snapshot : store -> string -> (unit, board_error) result
 
 (** {!save_posts_snapshot} for {!comments_path}, guarded by

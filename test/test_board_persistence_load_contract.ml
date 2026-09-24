@@ -180,10 +180,11 @@ let test_source_failure_clears_only_after_successful_reload () =
       Alcotest.(check bool) "missing file is legitimate" true (load store = Ok 0)) loaders)
 ;;
 
-(* #38595: a load that stopped at a damaged row leaves memory with only the
-   rows before it. A snapshot from that memory used to replace the file and
-   delete the damaged row and every row after it. Every snapshot write -- the
-   flush, the direct save, and a delete -- now leaves both files as they are. *)
+(* #38595: a load that meets a damaged line keeps every row it can decode,
+   before and after that line, but not the line itself. A snapshot from that
+   memory used to replace the file and delete the damaged line. Every snapshot
+   write -- the flush, the direct save, and a delete -- now leaves both files
+   as they are. *)
 let test_partial_load_never_rewrites_the_file () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -232,6 +233,11 @@ let test_partial_load_never_rewrites_the_file () =
     (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_posts store));
   Alcotest.(check bool) "comments load reports the damage" true
     (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_comments store));
+  Alcotest.(check bool) "posts after the damaged line are still served" true
+    (Result.is_ok (Board_core.get_post store ~post_id:(Board.Post_id.to_string after.id)));
+  Alcotest.(check bool) "comments after the damaged line are still served" true
+    (Result.is_ok
+       (Board_core.get_comment store ~comment_id:(Board.Comment_id.to_string c_after.id)));
   let unchanged label =
     Alcotest.(check string) (label ^ ": posts file untouched") posts_on_disk (read posts_path);
     Alcotest.(check string) (label ^ ": comments file untouched") comments_on_disk

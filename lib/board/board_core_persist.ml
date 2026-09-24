@@ -394,9 +394,10 @@ let posts_jsonl_unlocked ?replacement store =
     store.posts;
   Buffer.contents buf
 ;;
-(* A snapshot replaces the whole file with what memory holds. When the load
-   stopped at a row it could not decode, memory holds only the rows before it,
-   so the rewrite would delete that row and every row after it (#38595). Every
+(* A snapshot replaces the whole file with what memory holds. The loader reads
+   every line and keeps each row it can decode, but a line it cannot decode
+   never reaches memory, so the rewrite would delete that line: the only
+   evidence of the damage, possibly a row from a newer schema (#38595). Every
    posts and comments snapshot write goes through the two functions below,
    which refuse while the load that filled memory was partial. Appends do not
    come here and never delete a row. *)
@@ -406,8 +407,9 @@ let refuse_partial_snapshot ~where ~file load_result =
   | Error detail ->
     persist_io_error ~where
       (Printf.sprintf
-         "%s did not load fully (%s); rewriting it from memory would delete the \
-          rows after the one that failed, so it is left as it is"
+         "%s has a line the loader could not read (%s); a rewrite from memory would \
+          drop that line, so the file is left as it is until it loads fully (fix \
+          or remove that line, then restart)"
          file detail)
 ;;
 

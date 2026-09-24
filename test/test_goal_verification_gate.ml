@@ -1153,8 +1153,7 @@ let test_stale_proof_request_cannot_consume_revised_criterion () =
 
 (* A criterion edit takes a Verifying goal back to Executing. That move goes
    into goal_events.jsonl like every other phase move, naming the phase it
-   left and why; before, an edit could take a goal out of Verifying -- or out
-   of a human-confirmed Completed -- and leave no phase record at all. *)
+   left and why. *)
 let goal_phase_events config =
   let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
   if not (Sys.file_exists path) then []

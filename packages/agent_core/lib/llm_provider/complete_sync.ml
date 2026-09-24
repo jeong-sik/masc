@@ -191,9 +191,7 @@ let parse_sync_response
         | Backend_glm.Glm_quota_exceeded ->
           (* Arrears, an exhausted package or an expired plan (1113, 1304,
              1308-1311, 1313) do not clear on their own the way a rate
-             limit does. As a synthetic 429 they read as RateLimited and the
-             path was rested for the rate-limit floor and retried every
-             minute; typed, they reach the hard-quota route. The envelope
+             limit does, so they take the hard-quota route. The envelope
              carries no reset time. *)
           Error
             (Http_client.ProviderFailure
@@ -310,12 +308,12 @@ let%test "sync: an unreadable response is a provider parse failure" =
 ;;
 
 (* Arrears, an exhausted package or an expired plan arrive as the typed
-   hard-quota failure, not as a synthetic 429 the retry classifier reads as a
-   rate limit. A real GLM rate limit (1305) keeps the 429. *)
+   hard-quota failure. A GLM rate limit (1305) stays an HTTP 429. *)
 let%test "glm quota exhaustion is a typed hard quota" =
   let glm_sync_error body =
     parse_sync_response
-      ~http_codec:Provider_http_codec.Glm_chat
+      ~http_codec:(Provider_http_codec.of_config
+         (Provider_config.make ~kind:Provider_config.Glm ~model_id:"m" ~base_url:"u" ()))
       ~provider_kind:Provider_config.Glm
       body
   in
@@ -335,7 +333,8 @@ let%test "glm quota exhaustion is a typed hard quota" =
 let%test "glm rate limit stays an http 429" =
   match
     parse_sync_response
-      ~http_codec:Provider_http_codec.Glm_chat
+      ~http_codec:(Provider_http_codec.of_config
+         (Provider_config.make ~kind:Provider_config.Glm ~model_id:"m" ~base_url:"u" ()))
       ~provider_kind:Provider_config.Glm
       {|{"error":{"code":"1305","message":"too many requests"}}|}
   with

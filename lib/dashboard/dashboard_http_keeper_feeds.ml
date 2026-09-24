@@ -313,8 +313,8 @@ let keeper_decisions_json
         in
         (* Usage, stop reason and error category are written inside the turn
            row's [telemetry] object (Keeper_unified_metrics_decision), not at
-           the top level. Reading them at the top level left every row null
-           (#31729). Rows without a [telemetry] object carry none of them. *)
+           the top level. Rows without a [telemetry] object carry none of
+           them. *)
         let telemetry =
           match m "telemetry" json with
           | `Assoc _ as telemetry -> telemetry

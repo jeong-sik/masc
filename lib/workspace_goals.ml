@@ -372,9 +372,9 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
              name, which is why "how many goals were opened" and "what were they"
              had no answer (#35359). Phase transitions already emit; this closes
              the other end of the same ledger. The payload is the goal as created
-             so its title outlives its row in the store. An update emits nothing:
-             the question is when a goal began, and a later edit is not a second
-             beginning. *)
+             so its title outlives its row in the store. An update is not a second
+             beginning and emits no goal_created; only an update that moves the
+             phase records a goal_phase event. *)
           (match action with
            | `created ->
              emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_created"
@@ -383,8 +383,8 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
              (* An edit to the success criterion takes a Verifying,
                 Awaiting_confirmation or Completed goal back to Executing
                 (Goal_store.upsert_goal). That is a phase move like any
-                other, so it enters the same ledger; without it a confirmed
-                goal could leave Completed with no record of when or who. *)
+                other, so it enters the same ledger with the phase it left and
+                who moved it. *)
              if previous_phase <> goal.phase then
                emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_phase"
                  ~payload:

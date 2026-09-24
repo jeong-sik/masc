@@ -1309,9 +1309,8 @@ let test_lane_rejects_unknown_key () =
          errors)
   | Ok _ -> fail "unknown lane key must fail config parsing"
 
-(* A misspelt [tools_support = true] loaded as a model with tool support off:
-   the parser read [tools-support], found nothing, defaulted it to false, and
-   dropped the unread key. The keeper then ran that model with no tools. *)
+(* A misspelt [tools_support = true] is not [tools-support]; loading it as a
+   model without tool support would give the keeper no tools. *)
 let test_model_rejects_unknown_key () =
   let config =
     "[models.sample]\n\
@@ -4585,13 +4584,9 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        endpoint = \"http://localhost:11434\"\n\
        \n\
        [models.chat]\n\
-       provider = \"local\"\n\
-       provider-model-id = \"chat\"\n\
        max-context = 1024\n\
        \n\
        [models.libr]\n\
-       provider = \"local\"\n\
-       provider-model-id = \"libr\"\n\
        max-context = 1024\n\
        \n\
        [local.chat]\n\

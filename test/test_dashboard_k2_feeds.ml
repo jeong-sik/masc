@@ -267,8 +267,7 @@ let test_decisions_json_terminal_reason_duration_fallback () =
 ;;
 
 (* The turn row as Keeper_unified_metrics_decision writes it: usage, stop
-   reason and error category sit inside [telemetry], never at the top level.
-   The feed read them at the top level and answered null for every turn
+   reason and error category sit inside [telemetry], never at the top level
    (#31729). *)
 let test_decisions_json_reads_turn_telemetry () =
   with_config

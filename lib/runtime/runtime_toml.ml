@@ -1157,9 +1157,9 @@ let sampling_capability_errors
     top_k_errors @ min_p_errors
 ;;
 
-(* Every key [parse_model] reads. A key outside this list used to be dropped
-   without a word, so a misspelt [tools_support = true] loaded as a model with
-   no tool support and the keeper ran with an empty tool list. *)
+(* Every key [parse_model] reads. Any other key fails the load: a misspelt
+   [tools_support = true] would otherwise load as a model without tool
+   support and the keeper would run with an empty tool list. *)
 let model_keys =
   [ "api-name"
   ; "model-name"

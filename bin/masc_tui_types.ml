@@ -5190,6 +5190,11 @@ type state = {
      by id. An index into the rows would name another task after a poll
      drops a finished one. *)
   mutable task_focus: Masc_tui_overview_tasks.focus;
+  (* What the last backlog read said about the rows. [tasks] holds the same
+     rows when they were read and [] otherwise; this says which of the two
+     an empty [tasks] is. [tasks_error] stays what the Tasks section prints,
+     including notes (backup recovery, goal links) on rows that were read. *)
+  mutable task_rows: Masc_tui_overview_tasks.rows_reading;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
@@ -7596,6 +7601,7 @@ let create_state
   task_flow = None;
   operator_stalled = None;
   task_focus = Masc_tui_overview_tasks.No_task_focus;
+  task_rows = Masc_tui_overview_tasks.Rows_unread;
   help_open = false;
   keeper_deletions_open = false;
   keeper_deletions_loading = false;

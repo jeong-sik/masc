@@ -118,6 +118,20 @@ val reconcile : Masc.Tui_decode.task list -> focus -> focus * string option
     and its id returned, once, so the caller can say so; the focus stays on
     the list. [None] when nothing changed. *)
 
+(** What the last backlog read said about the rows. A failed read is not
+    an empty list: the rows it would have held are unknown, not gone. *)
+type rows_reading =
+  | Rows_unread  (** No read yet, or the workspace changed under the TUI. *)
+  | Rows_read of Masc.Tui_decode.task list
+      (** The active rows. A read recovered from a backup, or one whose goal
+          links could not be read, still read its rows. *)
+  | Rows_unavailable of string  (** The backlog could not be read. *)
+
+val after_read : rows_reading -> focus -> focus * string option
+(** {!reconcile} against rows that were read. An unread or unavailable
+    reading keeps the focus and its choice as they are and says nothing: the
+    chosen task did not leave, the read did not look. *)
+
 type opening =
   | Open of Masc.Tui_decode.task
   | No_held_task  (** The list has no row. *)

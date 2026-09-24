@@ -735,19 +735,12 @@ let render_overview (state : state) =
   let attention_items, tasks_error, row_budget =
     overview_layout state ~terminal_rows:rows
   in
-  (* The same reading the Tasks section below decides "unread" from
-     ([local_rows_page]): an error first, then whether the workspace was read.
-     Before the first read [state.tasks] is [] with no error, and counting it
-     would draw "0 of 0" over a section that says it has not loaded. *)
-  let goal_tasks =
-    match tasks_error, state.local_workspace with
-    | Some reason, (Local_workspace_unread | Local_workspace_read) ->
-        Overview_goals.Tasks_failed reason
-    | None, Local_workspace_unread -> Overview_goals.Tasks_unread
-    | None, Local_workspace_read -> Overview_goals.Tasks_read state.tasks
-  in
+  (* The rows reading, not [state.tasks]: before the first read that list is
+     [] with no error, and counting it would draw "0 of 0" over a section that
+     says it has not loaded. A note on rows that were read (backup recovery,
+     goal links) stays in the Tasks section below; GOALS counts the rows. *)
   Overview_goals.draw buf ~cols ~rows:row_budget.goal_rows
-    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime ~tasks:goal_tasks
+    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime ~tasks:state.task_rows
     state.overview_goals;
   (* The panel spans the band the rest of the screen's rows cover: one cell of
      margin on each side of the frame. *)

@@ -186,6 +186,16 @@ let reconcile tasks focus =
       | Some _ -> (focus, None)
       | None -> (Task_focus { selected = None }, Some task_id))
 
+type rows_reading =
+  | Rows_unread
+  | Rows_read of Tui_decode.task list
+  | Rows_unavailable of string
+
+let after_read reading focus =
+  match reading with
+  | Rows_unread | Rows_unavailable _ -> (focus, None)
+  | Rows_read rows -> reconcile rows focus
+
 type opening = Open of Tui_decode.task | No_held_task | No_selection
 
 let opening tasks focus =

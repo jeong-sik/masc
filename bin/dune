@@ -1555,6 +1555,7 @@
  (modules masc_tui_overview_goals)
  (libraries
   masc
+  masc_tui_overview_tasks
   masc.masc_goal
   masc_types
   masc_tui_types

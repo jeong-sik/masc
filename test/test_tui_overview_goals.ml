@@ -11,6 +11,7 @@
 
 open Alcotest
 module Goals = Masc_tui_overview_goals
+module Tasks = Masc_tui_overview_tasks
 module Types = Masc_tui_types
 module Tui_decode = Masc.Tui_decode
 
@@ -259,7 +260,7 @@ let contains ~sub text =
 
 let draw ?(rows = 10) ?(tasks = live_tasks) reading =
   Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows
-    ~tasks:(Goals.Tasks_read tasks) reading
+    ~tasks:(Tasks.Rows_read tasks) reading
   |> List.map strip_ansi
 
 let find_row ~sub rows =
@@ -322,7 +323,7 @@ let test_an_unread_backlog_is_not_a_zero () =
   let goals = decode_fixture () in
   let rows =
     Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows:10
-      ~tasks:(Goals.Tasks_failed "backlog.json unreadable") (Types.Goals_read goals)
+      ~tasks:(Tasks.Rows_unavailable "backlog.json unreadable") (Types.Goals_read goals)
     |> List.map strip_ansi
   in
   check bool "the headline names the unread backlog" true
@@ -335,7 +336,7 @@ let test_a_backlog_not_read_yet_is_not_a_zero () =
   let goals = decode_fixture () in
   let rows =
     Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows:10
-      ~tasks:Goals.Tasks_unread (Types.Goals_read goals)
+      ~tasks:Tasks.Rows_unread (Types.Goals_read goals)
     |> List.map strip_ansi
   in
   check bool "the headline says active work is unread" true
@@ -352,7 +353,7 @@ let test_the_countdown_uses_the_operator_calendar () =
   let kst now = Unix.gmtime (now +. (9. *. 3600.)) in
   let rows =
     Goals.lines ~now:just_after_kst_midnight ~localtime:kst ~inner_width:120
-      ~rows:10 ~tasks:(Goals.Tasks_read live_tasks) (Types.Goals_read goals)
+      ~rows:10 ~tasks:(Tasks.Rows_read live_tasks) (Types.Goals_read goals)
     |> List.map strip_ansi
   in
   check bool "the countdown is from the local date" true

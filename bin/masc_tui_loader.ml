@@ -121,7 +121,7 @@ let load_keepers (base_path : string) : keeper list * string option =
     tasks remain available in Planning rollups and the detail view but do not
     occupy the Overview list. *)
 let load_active_tasks (base_path : string) :
-    task list
+    Masc_tui_overview_tasks.rows_reading
     * Masc_domain.task list
     * string option
     * Masc_tui_task_flow.t option
@@ -131,7 +131,12 @@ let load_active_tasks (base_path : string) :
   match Workspace_backlog.read_backlog_observation_with_source_r config with
   | Error err ->
       report path err;
-      [], [], Some ("task backlog unavailable: " ^ err), None, None
+      let reason = "task backlog unavailable: " ^ err in
+      ( Masc_tui_overview_tasks.Rows_unavailable reason
+      , []
+      , Some reason
+      , None
+      , None )
   | Ok observation ->
       let recovery_error =
         match observation.recovered_from with
@@ -158,8 +163,9 @@ let load_active_tasks (base_path : string) :
           ( (fun task_id -> Workspace_goal_index.goals_for_task index ~task_id)
           , None )
       in
-      ( Tui_decode.active_tasks_of_domain ~goals_for_task
-          observation.observed_backlog.tasks
+      ( Masc_tui_overview_tasks.Rows_read
+          (Tui_decode.active_tasks_of_domain ~goals_for_task
+             observation.observed_backlog.tasks)
       , observation.observed_backlog.tasks
       , (match recovery_error, goal_link_error with
          | Some recovery, _ -> Some recovery
@@ -282,23 +288,33 @@ let load_from_masc_dir (state : state) (base_path : string) =
   (* Load tasks from their single durable source. The domain rows land first:
      a detail view open across this refresh keeps its row even when the task
      just turned terminal, because the projection below drops exactly those. *)
-  let tasks, tasks_domain, tasks_error, task_flow, operator_stalled =
+  let rows, tasks_domain, tasks_error, task_flow, operator_stalled =
     load_active_tasks base_path
   in
   state.tasks_domain <- tasks_domain;
-  state.tasks <- tasks;
+  state.task_rows <- rows;
+  state.tasks <-
+    (match rows with
+     | Masc_tui_overview_tasks.Rows_read tasks -> tasks
+     | Masc_tui_overview_tasks.Rows_unread
+     | Masc_tui_overview_tasks.Rows_unavailable _ -> []);
   state.tasks_error <- tasks_error;
-  (* A chosen task that left the held rows (finished, or back to Todo) is
-     dropped here, where the rows change, and said once: a highlight that
-     vanished while Enter and Ctrl-] still named the task was the defect. *)
+  (* A chosen task that left rows that were read (finished, or back to Todo)
+     is dropped here, where the rows change, and said once. A failed read
+     keeps the choice: it did not look, so nothing left. With that task's
+     detail open the detail still shows it, so the footer says nothing that
+     the screen contradicts. *)
   (let focus, left =
-     Masc_tui_overview_tasks.reconcile tasks state.task_focus
+     Masc_tui_overview_tasks.after_read rows state.task_focus
    in
    state.task_focus <- focus;
    Option.iter
      (fun task_id ->
-       report_action state "system"
-         (Printf.sprintf "%s left the held tasks; nothing is chosen" task_id))
+       if not (Option.equal String.equal state.task_detail_id (Some task_id))
+       then
+         report_action state "system"
+           (Printf.sprintf "%s left the held tasks; nothing is chosen"
+              task_id))
      left);
   state.task_flow <- task_flow;
   state.operator_stalled <- operator_stalled;
@@ -430,6 +446,7 @@ let clear_local_workspace (state : state) =
   state.tasks <- [];
   state.tasks_domain <- [];
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
+  state.task_rows <- Masc_tui_overview_tasks.Rows_unread;
   state.task_flow <- None;
   state.operator_stalled <- None;
   state.tasks_error <- None;

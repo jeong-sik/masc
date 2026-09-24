@@ -264,6 +264,36 @@ let test_a_task_that_leaves_the_rows_is_dropped_once () =
     (focus_state kept);
   check (option string) "and nothing is said" None unchanged
 
+(* The loader's path: [after_read] is what it applies to the focus on every
+   tasks load. A failed read is not an empty list, so the choice survives it
+   and the next good read finds the task where it was. *)
+let test_a_failed_read_keeps_the_choice () =
+  let chosen = Tasks.land_on tasks ~task_id:"task-1700" in
+  let after_failure, said =
+    Tasks.after_read (Tasks.Rows_unavailable "task backlog unavailable: x")
+      chosen
+  in
+  check focus_pair "the failed read keeps the choice" (true, Some "task-1700")
+    (focus_state after_failure);
+  check (option string) "and posts no notice" None said;
+  let after_good, said_again =
+    Tasks.after_read (Tasks.Rows_read tasks) after_failure
+  in
+  check focus_pair "the next good read still has it" (true, Some "task-1700")
+    (focus_state after_good);
+  check (option string) "still no notice" None said_again;
+  let _, unread = Tasks.after_read Tasks.Rows_unread chosen in
+  check (option string) "an unread reading says nothing either" None unread
+
+let test_a_good_read_without_the_task_drops_it () =
+  let chosen = Tasks.land_on tasks ~task_id:"task-1700" in
+  let focus, said =
+    Tasks.after_read (Tasks.Rows_read (after_poll_without "task-1700")) chosen
+  in
+  check focus_pair "read rows without it drop the choice" (true, None)
+    (focus_state focus);
+  check (option string) "and name it once" (Some "task-1700") said
+
 let () =
   run "tui_overview_tasks"
     [ ( "overview tasks",
@@ -290,5 +320,9 @@ let () =
             test_enter_says_why_nothing_opens
         ; test_case "a task that leaves the rows is dropped once" `Quick
             test_a_task_that_leaves_the_rows_is_dropped_once
+        ; test_case "a failed read keeps the choice" `Quick
+            test_a_failed_read_keeps_the_choice
+        ; test_case "a good read without the task drops it" `Quick
+            test_a_good_read_without_the_task_drops_it
         ] )
     ]

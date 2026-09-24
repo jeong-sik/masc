@@ -35,7 +35,11 @@ let model_answer =
     ]
 ;;
 
-type act_behaviour = Ask_the_model | Ask_the_model_without_params | Hold
+type act_behaviour = Ask_the_model | Ask_the_model_without_params | Hold | Answer_malformed
+
+(* How the fake browser answers the [Runtime.evaluate] that delivers the next
+   message to the extension. *)
+type delivery = Deliver | Hold_delivery | Receiver_throws
 
 type fake =
   { inbox : string Eio.Stream.t
@@ -45,11 +49,16 @@ type fake =
   ; mutable marker : Yojson.Safe.t
   ; mutable looks_before_ready : int
   ; mutable readiness_throws : bool
-  ; mutable hold_init : bool
+  ; mutable readiness_answer_after_s : float
+  ; mutable init_answers : bool
+  ; mutable next_delivery : delivery
+  ; mutable held_delivery : (unit -> unit) option
+  ; mutable answers_refused : bool
   ; mutable act : act_behaviour
   ; mutable held_act : Yojson.Safe.t option
   ; mutable waiting_on_model : (Yojson.Safe.t * Yojson.Safe.t) option
   ; mutable answers_from_host : Yojson.Safe.t list
+  ; later : float -> (unit -> unit) -> unit
   }
 
 let to_masc fake frame = Eio.Stream.add fake.inbox frame
@@ -73,7 +82,7 @@ let extension_receives fake message =
   let member = Yojson.Safe.Util.member in
   match member "method" message, member "id" message with
   | `String "stagehand.init", id ->
-    if not fake.hold_init then
+    if fake.init_answers then
       to_host fake (rpc_result id (obj [ "initialized", `Bool true; "pages", `List [ obj [ "page_id", str "P"; "url", str "about:blank" ] ] ]))
   | `String "stagehand.act", id ->
     (match fake.act with
@@ -83,7 +92,8 @@ let extension_receives fake message =
        to_host fake (rpc_request "g1" "llm.generate" (obj [ "messages", `List [] ]))
      | Ask_the_model_without_params ->
        fake.waiting_on_model <- Some (str "g1", id);
-       to_host fake (rpc_request_without_params "g1" "llm.generate"))
+       to_host fake (rpc_request_without_params "g1" "llm.generate")
+     | Answer_malformed -> to_host fake (obj [ "jsonrpc", str "2.0"; "id", id ]))
   | `String "page.goto", id -> to_host fake (rpc_result id (obj [ "page", obj [ "page_id", str "P" ] ]))
   | `Null, id ->
     fake.answers_from_host <- message :: fake.answers_from_host;
@@ -151,6 +161,7 @@ let browser_receives fake frame =
   let json = Yojson.Safe.from_string frame in
   let id = member "id" json |> to_int and params = member "params" json in
   let answer result = to_masc fake (to_s (obj [ "id", `Int id; "result", result ])) in
+  let refuse message = to_masc fake (to_s (obj [ "id", `Int id; "error", obj [ "code", `Int (-32000); "message", str message ] ])) in
   match member "method" json |> to_string with
   | "Runtime.enable" | "Runtime.addBinding" -> answer (obj [])
   | "Extensions.loadUnpacked" ->
@@ -161,12 +172,30 @@ let browser_receives fake frame =
   | "Target.attachToTarget" -> answer (obj [ "sessionId", str worker ])
   | "Runtime.evaluate" ->
     let expression = member "expression" params |> to_string in
-    if String.equal expression Wire.readiness_expression then answer (readiness fake)
+    if String.equal expression Wire.readiness_expression then (
+      let look = readiness fake in
+      if fake.readiness_answer_after_s > 0. then fake.later fake.readiness_answer_after_s (fun () -> answer look)
+      else answer look)
     else (
       match delivered expression with
+      | Some message when fake.answers_refused && Yojson.Safe.Util.member "method" message = `Null ->
+        refuse "Execution context was destroyed."
       | Some message ->
-        answer (obj [ "result", obj [ "type", str "boolean"; "value", `Bool true ] ]);
-        extension_receives fake message
+        let deliver () =
+          answer (obj [ "result", obj [ "type", str "boolean"; "value", `Bool true ] ]);
+          extension_receives fake message
+        in
+        let how = fake.next_delivery in
+        fake.next_delivery <- Deliver;
+        (match how with
+         | Deliver -> deliver ()
+         | Hold_delivery -> fake.held_delivery <- Some deliver
+         | Receiver_throws ->
+           answer
+             (obj
+                [ "result", obj [ "type", str "object" ]
+                ; "exceptionDetails", obj [ "text", str "Uncaught"; "exception", obj [ "description", str "SyntaxError: Unexpected end of JSON input" ] ]
+                ]))
       | None -> failf "unexpected expression %s" expression)
   | other -> failf "the fake browser got %s" other
 ;;
@@ -194,11 +223,21 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
     ; marker = marker "2.0.0"
     ; looks_before_ready = 0
     ; readiness_throws = false
-    ; hold_init = false
+    ; readiness_answer_after_s = 0.
+    ; init_answers = true
+    ; next_delivery = Deliver
+    ; held_delivery = None
+    ; answers_refused = false
     ; act = Ask_the_model
     ; held_act = None
     ; waiting_on_model = None
     ; answers_from_host = []
+    ; later =
+        (fun seconds k ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+            Eio.Time.sleep clock seconds;
+            k ();
+            `Stop_daemon))
     }
   in
   configure fake;
@@ -207,8 +246,9 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
     incr model_calls;
     answer params
   in
-  let session = Session.create ~sw ~clock ~worker_wait_s:deadline_s ~init_answer_s:deadline_s
-      ~model ~log:(fun event -> events := event :: !events) in
+  let session =
+    Session.create ~sw ~clock ~worker_wait_s:deadline_s ~init_answer_s:deadline_s ~model ~log:(fun event -> events := event :: !events)
+  in
   let cdp =
     Cdp.create ~send:(browser_receives fake) ~close:ignore ~clock ~command_deadline_s:deadline_s
       ~on_event:(Session.on_cdp_event session)
@@ -263,12 +303,73 @@ let cancel_waiting_caller h call =
 
 exception Model_bug
 
+let calls_refused_after_failed_attach h =
+  match Session.call h.session goto with
+  | Error (Session.Connection_gone _) -> ()
+  | _ -> fail "a session whose attach failed takes no calls"
+;;
+
+let connection_ended h = logged h (function Session.Connection_ended _ -> true | _ -> false)
+
 let test_attach () =
   with_session
   @@ fun h ->
+  (match attach h with
+   | Ok init -> check bool "init reports its pages" true (Yojson.Safe.Util.member "pages" init <> `Null)
+   | Error _ -> fail "attach against a matching extension");
+  check bool "the runtime version is logged" true
+    (logged h (function Session.Runtime_ready { runtime_version = "1.0.2"; _ } -> true | _ -> false))
+;;
+
+let test_attach_once () =
+  with_session
+  @@ fun h ->
+  attached h;
+  (match attach h with
+   | Error Session.Already_attached -> ()
+   | _ -> fail "a second attach is refused");
+  goto_succeeds h
+;;
+
+(* The attach is cancelled while it waits for the runtime: the session ends,
+   and is not attached again. *)
+let test_cancelled_attach () =
+  with_session ~configure:(fun fake -> fake.looks_before_ready <- max_int)
+  @@ fun h ->
+  (try
+     Eio.Switch.run (fun caller ->
+       Eio.Fiber.fork ~sw:caller (fun () -> ignore (attach h));
+       h.settle ();
+       Eio.Switch.fail caller Exit)
+   with
+   | Exit -> ());
+  calls_refused_after_failed_attach h;
   match attach h with
-  | Ok init -> check bool "init reports its pages" true (Yojson.Safe.Util.member "pages" init <> `Null)
-  | Error _ -> fail "attach against a matching extension"
+  | Error Session.Already_attached -> ()
+  | _ -> fail "a session whose attach was cancelled is not attached again"
+;;
+
+let test_init_unanswered () =
+  with_session ~configure:(fun fake -> fake.init_answers <- false)
+  @@ fun h ->
+  (match attach h with
+   | Error (Session.Init_unanswered seconds) -> check (float 0.) "the init deadline" deadline_s seconds
+   | _ -> fail "an init that never answers ends attach");
+  calls_refused_after_failed_attach h
+;;
+
+(* Each look at the runtime takes longer than the rest of the wait: the wait
+   runs out between looks, and no look is cut off, which would end the
+   connection. *)
+let test_wait_runs_out_between_looks () =
+  with_session ~configure:(fun fake ->
+    fake.looks_before_ready <- max_int;
+    fake.readiness_answer_after_s <- deadline_s *. 0.6)
+  @@ fun h ->
+  (match attach h with
+   | Error Session.Runtime_not_ready -> ()
+   | _ -> fail "a runtime not ready within the wait is refused");
+  check bool "the connection is intact" false (connection_ended h)
 ;;
 
 let test_worker_found_after_loading () =
@@ -285,21 +386,6 @@ let test_runtime_ready_after_a_few_looks () =
   match attach h with
   | Ok _ -> check int "every early look was answered" 0 h.fake.looks_before_ready
   | Error _ -> fail "a runtime whose marker comes after its receiver is waited for"
-;;
-
-let calls_refused_after_failed_attach h =
-  match Session.call h.session goto with
-  | Error (Session.Connection_gone _) -> ()
-  | _ -> fail "a session whose attach failed takes no calls"
-;;
-
-let test_init_without_an_answer () =
-  with_session ~configure:(fun fake -> fake.hold_init <- true)
-  @@ fun h ->
-  (match attach h with
-   | Error (Session.Init_unanswered seconds) -> check (float 0.001) "init answer deadline" deadline_s seconds
-   | _ -> fail "an unanswered init must return a typed timeout");
-  calls_refused_after_failed_attach h
 ;;
 
 let test_attach_refusals () =
@@ -474,6 +560,69 @@ let test_worker_detached () =
   | _ -> fail "later calls are refused"
 ;;
 
+(* The caller is cancelled while its call is being delivered: the delivery
+   completes, so the call is abandoned rather than cut off mid-command, which
+   would end the connection. *)
+let test_cancelled_during_delivery () =
+  with_session ~configure:(fun fake -> fake.act <- Hold)
+  @@ fun h ->
+  attached h;
+  h.fake.next_delivery <- Hold_delivery;
+  Eio.Fiber.both
+    (fun () -> cancel_waiting_caller h act)
+    (fun () ->
+      h.settle ();
+      h.settle ();
+      match h.fake.held_delivery with
+      | Some deliver -> deliver ()
+      | None -> fail "the act was not being delivered");
+  (match Session.call h.session goto with
+   | Error Session.Abandoned_call_pending -> ()
+   | _ -> fail "the delivered act is abandoned, and a new call waits for it");
+  check bool "the connection is intact" false (connection_ended h);
+  to_host h.fake (rpc_result (Option.get h.fake.held_act) (obj [ "success", `Bool true ]));
+  h.settle ();
+  goto_succeeds h
+;;
+
+let test_receiver_threw () =
+  with_session
+  @@ fun h ->
+  attached h;
+  h.fake.next_delivery <- Receiver_throws;
+  (match Session.call h.session goto with
+   | Error (Session.Lost detail) ->
+     check string "the thrown cause" "the extension's receiver threw: SyntaxError: Unexpected end of JSON input" detail
+   | _ -> fail "a call whose receiver threw may have taken effect");
+  goto_succeeds h
+;;
+
+let test_malformed_response () =
+  with_session ~configure:(fun fake -> fake.act <- Answer_malformed)
+  @@ fun h ->
+  attached h;
+  (match Session.call h.session act with
+   | Error (Session.Lost _) -> ()
+   | _ -> fail "a response without a result or an error loses its call");
+  goto_succeeds h
+;;
+
+(* The model's answer cannot be delivered: the extension would wait for it,
+   and the act with it, so the session ends. *)
+let test_answer_not_delivered () =
+  with_session
+  @@ fun h ->
+  attached h;
+  h.fake.answers_refused <- true;
+  (match Session.call h.session act with
+   | Error (Session.Lost _) -> ()
+   | _ -> fail "the act whose model answer was not delivered is lost");
+  check bool "the failed answer is logged" true (logged h (function Session.Reply_not_delivered _ -> true | _ -> false));
+  match Session.call h.session goto with
+  | Error (Session.Connection_gone _) -> ()
+  | _ -> fail "the session ended"
+;;
+
 let test_unsupported_request () =
   with_session
   @@ fun h ->
@@ -488,7 +637,9 @@ let test_unsupported_request () =
 let test_protocol_major () =
   let major version = Wire.protocol_major { Wire.protocol_version = version; runtime_version = "1" } in
   check (result int string) "2.0.0" (Ok 2) (major "2.0.0");
-  List.iter (fun version -> check bool version true (Result.is_error (major version))) [ "0x2.0.0"; "+2.0.0"; "2_0.0"; ""; "v2" ];
+  List.iter
+    (fun version -> check bool version true (Result.is_error (major version)))
+    [ "0x2.0.0"; "+2.0.0"; "2_0.0"; ""; "v2"; "99999999999999999999.0.0" ];
   check string "the version masc sends" "2.0.0" Wire.protocol_version
 ;;
 
@@ -503,18 +654,32 @@ let test_readiness_of_json () =
   check bool "an answer of another shape" true (Result.is_error (Wire.readiness_of_json (obj [])))
 ;;
 
+let test_decode () =
+  let decoded json = Wire.decode (to_s json) in
+  (match decoded (obj [ "jsonrpc", str "2.0"; "id", str "g1"; "method", str "llm.generate"; "params", `Null ]) with
+   | Ok (Wire.Request (Wire.Invalid_params { id = Wire.String_id "g1"; _ })) -> ()
+   | _ -> fail "null params are no params");
+  match decoded (obj [ "jsonrpc", str "2.0"; "id", `Int 4; "error", obj [ "message", str "no code" ] ]) with
+  | Ok (Wire.Malformed_response { id = Wire.Int_id 4; _ }) -> ()
+  | _ -> fail "a response with a readable id and an unreadable body keeps its id"
+;;
+
 let () =
   run "browser_stagehand_session" [
     "wire", [
       test_case "protocol major is digits only" `Quick test_protocol_major;
       test_case "readiness needs the receiver and the marker" `Quick test_readiness_of_json;
+      test_case "null params and malformed responses" `Quick test_decode;
     ];
     "attach", [
       test_case "a matching extension attaches" `Quick test_attach;
       test_case "a worker listed after loading is found" `Quick test_worker_found_after_loading;
       test_case "a runtime ready a few looks later is waited for" `Quick test_runtime_ready_after_a_few_looks;
-      test_case "an unanswered init ends attach" `Quick test_init_without_an_answer;
       test_case "a failed attach ends the session" `Quick test_attach_refusals;
+      test_case "a session attaches once" `Quick test_attach_once;
+      test_case "a cancelled attach ends the session" `Quick test_cancelled_attach;
+      test_case "an unanswered init ends the session" `Quick test_init_unanswered;
+      test_case "the runtime wait runs out between looks" `Quick test_wait_runs_out_between_looks;
     ];
     "calls", [
       test_case "act asks the model" `Quick test_act_uses_the_model;
@@ -528,6 +693,10 @@ let () =
       test_case "a model that raises refuses only its request" `Quick test_model_that_raises;
       test_case "a detached worker loses the call" `Quick test_worker_detached;
       test_case "an unsupported request is refused by name" `Quick test_unsupported_request;
+      test_case "a caller cancelled during delivery abandons the call" `Quick test_cancelled_during_delivery;
+      test_case "a receiver that threw loses the call" `Quick test_receiver_threw;
+      test_case "a malformed response loses the call" `Quick test_malformed_response;
+      test_case "an undelivered model answer ends the session" `Quick test_answer_not_delivered;
     ];
   ]
 ;;

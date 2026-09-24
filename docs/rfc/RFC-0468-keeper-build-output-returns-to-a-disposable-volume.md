@@ -21,6 +21,16 @@ status: Draft
   path in `lib/keeper/keeper_turn_sandbox_runtime.ml`,
   `test/test_keeper_sandbox_microvm.ml`. Same files RFC-0399 touched and
   RFC-0400 §C's "RFC-0399 `_build` link machinery... deleted" removed from.
+- Backend scope: `Backend.Apple_container` only. Checked against the current
+  code (`apple_volume_create_argv` vs `msb_volume_create_argv` vs
+  `ensure_nerdctl_work_volume`): only Apple takes a sized volume — msb's dir
+  volume rejects `-s` and nerdctl has no size flag at all, both already
+  documented in-repo as "RFC-0400's size ceiling has no msb spelling, the
+  way it has no nerdctl one." Those two back their named volumes with a host
+  directory, not a sparse VM disk image, so `rm -rf` inside the guest already
+  returns host space immediately for them — the problem this RFC exists to
+  fix does not occur there. A build-only volume for msb/nerdctl would be
+  solving nothing measured; left out rather than added speculatively.
 
 ## Problem (measured)
 

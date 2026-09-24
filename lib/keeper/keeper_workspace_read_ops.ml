@@ -38,6 +38,8 @@ let validate_rg_inputs ~pattern:_ ~file_type =
 
 type read_target_result =
   | Read_target of string
+  | Declared_read_target of string
+    (* An endpoint path under the endpoint's declared roots (#38593). *)
   | Read_target_error of string
 
 let try_handle_with_outcome
@@ -58,30 +60,31 @@ let try_handle_with_outcome
          e)
   in
   let read_target () =
-    (* A path under the endpoint's declared roots (#38593) is the endpoint's
-       own name, not one in the keeper's host tree, so the host resolver and
-       containment check do not apply to it; the backend reads it as itself.
-       [path] and [cwd] are read from [args] exactly as
-       [resolve_tool_read_path] reads them. *)
-    let arg key = Safe_ops.json_string ~default:"" key args |> String.trim in
-    let cwd =
-      match arg "cwd" with
-      | "" -> None
-      | cwd -> Some cwd
+    let keeper_tree_target =
+      match Keeper_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
+      | Error e -> Error e
+      | Ok target -> Result.map (fun () -> target) (containment_check target)
     in
-    match
-      Keeper_sandbox_remote_lane.declared_endpoint_path_of_args
-        ~config ~meta ~path:(arg "path") ~cwd
-    with
-    | Error e -> Read_target_error e
-    | Ok (Some endpoint_path) -> Read_target endpoint_path
-    | Ok None ->
-      (match Keeper_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
-       | Error e -> Read_target_error e
-       | Ok target ->
-         (match containment_check target with
-          | Error msg -> Read_target_error msg
-          | Ok () -> Read_target target))
+    match keeper_tree_target with
+    | Ok target -> Read_target target
+    | Error refusal ->
+      (* Only what the keeper's own tree refused may be a path under the
+         endpoint's declared roots (#38593): the endpoint's own name, which
+         the backend reads as itself. [path] and [cwd] are read from [args]
+         exactly as [resolve_tool_read_path] reads them. *)
+      let arg key = Safe_ops.json_string ~default:"" key args |> String.trim in
+      let cwd =
+        match arg "cwd" with
+        | "" -> None
+        | cwd -> Some cwd
+      in
+      (match
+         Keeper_sandbox_remote_lane.declared_endpoint_path_of_args
+           ~config ~meta ~path:(arg "path") ~cwd
+       with
+       | Ok (Some endpoint_path) -> Declared_read_target endpoint_path
+       | Ok None -> Read_target_error refusal
+       | Error e -> Read_target_error e)
   in
   (* TEL-OK: read-op adapter delegates to Keeper_tooling.Execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)
@@ -185,12 +188,9 @@ let try_handle_with_outcome
              ~class_:Tool_result.Policy_rejection
              (error_json ~fields:[ "op", `String op ] msg)
          | Ok () -> (
-           match read_target () with
-           | Read_target_error e -> path_error e
-           | Read_target target ->
-             let limit = shell_readonly_limit args in
-             let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
-             if Keeper_sandbox_read_runner.should_route_read ~meta then
+           let limit = shell_readonly_limit args in
+           let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
+           let rg_in_sandbox target =
                let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
                let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
                let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
@@ -235,6 +235,14 @@ let try_handle_with_outcome
                   if is_ok
                   then Keeper_tool_execution.success_data payload
                   else Keeper_tool_execution.failure (Yojson.Safe.to_string payload))
+           in
+           match read_target () with
+           | Read_target_error e -> path_error e
+           (* A declared endpoint path names the endpoint's file, so it is
+              searched only there; the host rg below never sees one. *)
+           | Declared_read_target target -> rg_in_sandbox target
+           | Read_target target ->
+             if Keeper_sandbox_read_runner.should_route_read ~meta then rg_in_sandbox target
            else
              let rg_available = Keeper_tool_execute_path.shell_command_available "rg" in
              if not rg_available then

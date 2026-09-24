@@ -316,18 +316,8 @@ let resolve_read_file_target
       (Read_path_error
          (Keeper_alerting_path.rejection_to_user_message Keeper_alerting_path.Path_required))
   else (
-    let* declared =
-      Keeper_sandbox_remote_lane.declared_endpoint_path_of_args
-        ~config ~meta ~path:raw_path ~cwd
-      |> Result.map_error (fun e -> Read_path_error e)
-    in
-    match declared with
-    | Some endpoint_path -> Ok (Declared_endpoint_file endpoint_path)
-    | None ->
-      let* cwd_abs =
-        resolve_read_file_cwd ~config ~meta ~cwd
-        |> Result.map_error (fun e -> Read_path_error e)
-      in
+    let keeper_tree =
+      let* cwd_abs = resolve_read_file_cwd ~config ~meta ~cwd in
       let candidate =
         if Filename.is_relative raw_path then Filename.concat cwd_abs raw_path else raw_path
       in
@@ -336,8 +326,20 @@ let resolve_read_file_target
         ~meta
         ~raw_for_error:raw_path
         ~projected_path:candidate
-      |> Result.map (fun path -> Keeper_tree_file path)
-      |> Result.map_error (fun error -> Read_path_error error))
+    in
+    match keeper_tree with
+    | Ok path -> Ok (Keeper_tree_file path)
+    | Error refusal ->
+      (* Only what the keeper's own tree refused may be a path under the
+         endpoint's declared roots (#38593). Everything the tree accepts keeps
+         the meaning it had, however a declared root is spelled. *)
+      (match
+         Keeper_sandbox_remote_lane.declared_endpoint_path_of_args
+           ~config ~meta ~path:raw_path ~cwd
+       with
+       | Ok (Some endpoint_path) -> Ok (Declared_endpoint_file endpoint_path)
+       | Ok None -> Error (Read_path_error refusal)
+       | Error e -> Error (Read_path_error e)))
 ;;
 
 type read_file_attempt =
@@ -498,6 +500,16 @@ let handle_read_file_with_outcome
                   ~scan_complete
                   body))
          else (
+           match read_target with
+           (* An endpoint path is the endpoint's file; this host never holds
+              it, so a keeper whose reads are not routed cannot read one. *)
+           | Declared_endpoint_file endpoint_path ->
+             Error
+               (Printf.sprintf
+                  "declared_endpoint_path_needs_remote_lane: %s is an endpoint path and \
+                   this keeper's reads do not go through its endpoint"
+                  endpoint_path)
+           | Keeper_tree_file target ->
            match Safe_ops.read_file_result target with
            | Error (Safe_ops.File_not_found _ as err) ->
              Ok

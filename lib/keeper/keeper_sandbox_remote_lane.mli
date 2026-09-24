@@ -63,13 +63,16 @@ val declared_endpoint_path :
   meta:Keeper_meta_contract.keeper_meta ->
   string ->
   (string option, string) result
-(** [Ok (Some p)] when an OpenSSH keeper names an absolute path outside its
-    own host bookkeeping tree that lies under one of its endpoint's declared
-    roots ([allowed_paths], {!Exec_policy_paths.extra_root_path}); [p] is the
-    endpoint path, lexically normalized, to read as itself. [Ok None] for a
-    relative path, a path in the keeper's own tree, a path under no declared
-    root, and every Docker or Micro_vm keeper (neither declares roots).
-    [Error] when the keeper's endpoint cannot be resolved. *)
+(** [Ok (Some p)] when an OpenSSH keeper names an absolute path that lies
+    under one of its endpoint's declared roots ([allowed_paths],
+    {!Exec_policy_paths.extra_root_path}); [p] is the endpoint path,
+    lexically normalized, to read as itself. [Ok None] for a relative path, a
+    path under no declared root, and every Docker or Micro_vm keeper (neither
+    declares roots). [Error] when the keeper's endpoint cannot be resolved.
+
+    It does not look at the keeper's own host bookkeeping tree. Ask it only
+    for a path that tree refused: a name the tree accepts must keep meaning
+    the keeper's own file, whatever a declared root's spelling covers. *)
 
 val declared_endpoint_path_of_args :
   config:Workspace.config ->

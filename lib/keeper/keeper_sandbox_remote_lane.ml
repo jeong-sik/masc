@@ -115,29 +115,21 @@ let workspace_root ~(config : Workspace.config) ~(meta : keeper_meta) =
    endpoint paths outside the keeper's tree that its commands may use, such
    as a Terminal-Bench task's /app. A file read there names the endpoint's own
    file, so it reaches the endpoint as itself instead of through the host
-   bookkeeping namespace. The keeper's own tree keeps its meaning first: a
-   host bookkeeping name is never read as an endpoint path, whatever a
-   declared root's spelling covers. *)
+   bookkeeping namespace. This does not look at the keeper's tree: callers ask
+   it only for a path the tree refused, so a name the tree accepts keeps its
+   meaning whatever a declared root's spelling covers. *)
 let declared_endpoint_path ~(config : Workspace.config) ~(meta : keeper_meta) path =
   match meta.sandbox_profile with
   | Docker | Micro_vm -> Ok None
   | Remote_ssh ->
     if Filename.is_relative path
     then Ok None
-    else (
-      let own_tree =
-        Keeper_remote_path.normalize_remote
-          (Keeper_sandbox.host_root_abs_of_meta ~config meta)
+    else
+      let* endpoint =
+        Keeper_sandbox_ssh.resolve_endpoint
+          ~base_path:config.base_path ~keeper_name:meta.name
       in
-      if Exec_policy_paths.is_within_dir ~dir:own_tree
-           (Keeper_remote_path.normalize_remote path)
-      then Ok None
-      else
-        let* endpoint =
-          Keeper_sandbox_ssh.resolve_endpoint
-            ~base_path:config.base_path ~keeper_name:meta.name
-        in
-        Ok (Exec_policy_paths.extra_root_path ~extra_roots:endpoint.allowed_paths path))
+      Ok (Exec_policy_paths.extra_root_path ~extra_roots:endpoint.allowed_paths path)
 ;;
 
 (* A file tool names a path with [path] and an optional [cwd]. Only an

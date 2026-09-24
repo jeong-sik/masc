@@ -1214,6 +1214,7 @@ exit 2\n"
    bookkeeping check with path_outside_sandbox. *)
 let remote_reader_with_allowed_paths ~allowed_paths =
   let base, config, meta = setup_config "remote-reader" in
+  let allowed_paths = allowed_paths base in
   let meta = { meta with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh } in
   let keepers_dir = Filename.concat base ".masc/config/keepers" in
   ensure_dir keepers_dir;
@@ -1244,15 +1245,31 @@ remote_endpoint = "fixture"
   base, config, meta
 
 (* The shim's stdin is the framed request; keep it so the test can read the
-   argv the endpoint was asked to run. *)
+   argv the endpoint was asked to run. The runner holds stdin open until the
+   child exits, so the frame is read by its own length -- an 8-byte big-endian
+   prefix L, then L bytes -- never to EOF. The probe that precedes each
+   dispatch runs this same script; it keeps nothing, or it would overwrite
+   the frame. *)
 let fake_ssh_recording_script ~frame_path =
+  let quoted suffix = Filename.quote (frame_path ^ suffix) in
   Printf.sprintf
     {|#!/bin/sh
-cat > %s
+case "$*" in
+  *--probe*) ;;
+  *)
+    dd bs=1 count=8 of=%s 2>/dev/null
+    len=0
+    for byte in $(od -An -tu1 %s); do len=$((len * 256 + byte)); done
+    dd bs=1 count="$len" of=%s 2>/dev/null
+    cat %s %s > %s
+    ;;
+esac
+cat >/dev/null 2>/dev/null &
 printf 'remote-file-content'
 printf '%%s' '%s' >&2
 exit 0
 |}
+    (quoted ".len") (quoted ".len") (quoted ".body") (quoted ".len") (quoted ".body")
     (Filename.quote frame_path)
     (Exec_ssh_protocol.render_trailer
        { v = Exec_ssh_protocol.newest
@@ -1264,7 +1281,7 @@ exit 0
        })
 
 let test_declared_endpoint_root_maps_as_itself () =
-  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:[ "/app" ] in
+  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> [ "/app" ]) in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let map host_path =
     Keeper_sandbox_read_backend.container_path_of_host ~config ~meta ~host_path
@@ -1282,8 +1299,29 @@ let test_declared_endpoint_root_maps_as_itself () =
          (Result.is_error (map host_path)))
     [ "/app/../etc/passwd"; "/application/x"; "/etc/passwd" ]
 
+(* A declared root may cover the keeper's own bookkeeping tree. The tree
+   keeps its meaning: its names still translate to the keeper's endpoint
+   workspace, and only what the tree refused is read as an endpoint path. *)
+let test_own_tree_translates_even_under_a_declared_root () =
+  let base, config, meta =
+    remote_reader_with_allowed_paths ~allowed_paths:(fun base ->
+      [ Masc.Keeper_remote_path.normalize_remote base ])
+  in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let map host_path =
+    Keeper_sandbox_read_backend.container_path_of_host ~config ~meta ~host_path
+  in
+  let own = Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "notes.md" in
+  let elsewhere =
+    Filename.concat (Masc.Keeper_remote_path.normalize_remote base) "elsewhere/x.txt"
+  in
+  Alcotest.(check (result string string)) "the keeper's own file still translates"
+    (Ok "/srv/masc/playground/remote-reader/notes.md") (map own);
+  Alcotest.(check (result string string)) "the declared root is live for other paths"
+    (Ok elsewhere) (map elsewhere)
+
 let test_undeclared_endpoint_root_stays_refused () =
-  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:[] in
+  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> []) in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Alcotest.(check bool) "without allowed_paths /app is outside the keeper" true
     (Result.is_error
@@ -1299,7 +1337,7 @@ let test_undeclared_endpoint_root_stays_refused () =
       (String.starts_with ~prefix:"path_outside_sandbox" message)
 
 let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =
-  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:[ "/app" ] in
+  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> [ "/app" ]) in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
   let read ?cwd ~path () =
@@ -2901,6 +2939,8 @@ let run_tests ~clock () =
             test_declared_endpoint_root_maps_as_itself;
           Alcotest.test_case "undeclared endpoint root stays refused" `Quick
             test_undeclared_endpoint_root_stays_refused;
+          Alcotest.test_case "own tree translates even under a declared root" `Quick
+            test_own_tree_translates_even_under_a_declared_root;
           Alcotest.test_case "read of a declared path asks the endpoint for that path"
             `Quick test_read_of_a_declared_path_asks_the_endpoint_for_that_path;
         ] );

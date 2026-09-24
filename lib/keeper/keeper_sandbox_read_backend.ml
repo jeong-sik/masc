@@ -42,18 +42,25 @@ let container_path_of_host ~(config : Workspace.config) ~(meta : keeper_meta) ~h
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
   | Endpoint_owned ->
     let ( let* ) = Result.bind in
-    (* A path under the endpoint's declared roots is already the endpoint's
-       own path (#38593) and is read as itself; every other path is a name in
-       the keeper's bookkeeping tree and translates as before. *)
-    let* declared = Keeper_sandbox_remote_lane.declared_endpoint_path ~config ~meta host_path in
-    (match declared with
-     | Some endpoint_path -> Ok endpoint_path
-     | None ->
-       let* remote_workspace_root =
-         Keeper_sandbox_remote_lane.workspace_root ~config ~meta
-       in
+    let* remote_workspace_root =
+      Keeper_sandbox_remote_lane.workspace_root ~config ~meta
+    in
+    (match
        Keeper_remote_path.host_to_remote ~base_path:config.base_path
-         ~remote_workspace_root ~keeper:meta.name host_path)
+         ~remote_workspace_root ~keeper:meta.name host_path
+     with
+     | Ok _ as in_keeper_tree -> in_keeper_tree
+     | Error refusal ->
+       (* Only what the keeper's own tree refused may be a path under the
+          endpoint's declared roots (#38593): the endpoint's own name, read as
+          itself. A name in the tree always translates, however a declared
+          root is spelled. *)
+       let* declared =
+         Keeper_sandbox_remote_lane.declared_endpoint_path ~config ~meta host_path
+       in
+       (match declared with
+        | Some endpoint_path -> Ok endpoint_path
+        | None -> Error refusal))
   | Shared_mount ->
     let host_root = host_playground_root ~config ~meta in
     let host_norm =

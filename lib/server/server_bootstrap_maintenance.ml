@@ -150,9 +150,11 @@ let run_schedule_runner_tick ~clock config ~previously_held =
           result;
         record_schedule_runner_tick_outcome "ok";
         List.iter log_schedule_dispatch result.dispatches;
-        List.iter log_schedule_hold_started
-          (Schedule_runner.newly_held ~previous:previously_held result.held);
-        Server_schedule_consumers.resume_fenced_owners config result.held;
+        let newly_held =
+          Schedule_runner.newly_held ~previous:previously_held result.held
+        in
+        List.iter log_schedule_hold_started newly_held;
+        Server_schedule_consumers.resume_fenced_owners config ~newly_held result.held;
         if result.Schedule_runner.emitted <> []
            || result.rescheduled > 0
            || result.dispatches <> []

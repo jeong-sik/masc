@@ -1505,13 +1505,18 @@ let target_intake_fence_hold config (request : Schedule_domain.schedule_request)
    again. The fence is read again here rather than parsed back from the hold,
    so the ask goes to whoever holds it now. It rides on the tick that already
    found the hold, so it adds no clock of its own (RFC-0433). *)
-let resume_fenced_owners config (held : Schedule_runner.held list) =
+let fenced_targets (held : Schedule_runner.held list) =
   held
   |> List.filter_map (fun ({ reason; _ } : Schedule_runner.held) ->
     match reason with
     | Schedule_runner.Target_intake_fenced { target; _ } -> Some target
     | Schedule_runner.Previous_occurrence_unconsumed -> None)
   |> List.sort_uniq String.compare
+;;
+
+let resume_fenced_owners config ~newly_held held =
+  let newly_fenced_targets = fenced_targets newly_held in
+  fenced_targets held
   |> List.iter (fun keeper_name ->
     match
       Keeper_shutdown_intake_fence.shutdown_operation_id
@@ -1521,9 +1526,18 @@ let resume_fenced_owners config (held : Schedule_runner.held list) =
     | None -> ()
     | Some operation_id ->
       (match
-         Keeper_shutdown_runtime.redrive_finalization ~config ~keeper_name ~operation_id
+       Keeper_shutdown_runtime.redrive_finalization ~config ~keeper_name ~operation_id
        with
-       | Ok () -> ()
+       | Ok ( Keeper_shutdown_runtime.Redrive_started
+            | Keeper_shutdown_runtime.Redrive_already_active ) -> ()
+       | Ok (Keeper_shutdown_runtime.Redrive_not_in_process phase) ->
+         if List.mem keeper_name newly_fenced_targets
+         then
+           Log.Keeper.warn
+             "held schedule cannot resume its fence owner in this process: keeper=%s operation=%s phase=%s"
+             keeper_name
+             (Keeper_shutdown_types.Operation_id.to_string operation_id)
+             (Keeper_shutdown_types.phase_to_string phase)
        | Error error ->
          Log.Keeper.warn
            "held schedule could not ask its fence owner to resume: keeper=%s operation=%s error=%s"

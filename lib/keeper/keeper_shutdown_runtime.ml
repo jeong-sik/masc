@@ -910,6 +910,11 @@ type redrive_error =
   | Redrive_load_failed of Keeper_shutdown_store.error
   | Redrive_start_rejected of worker_start_error
 
+type redrive_outcome =
+  | Redrive_started
+  | Redrive_already_active
+  | Redrive_not_in_process of Keeper_shutdown_types.phase
+
 let redrive_error_to_string = function
   | Redrive_load_failed error -> Keeper_shutdown_store.error_to_string error
   | Redrive_start_rejected error ->
@@ -928,10 +933,12 @@ let rec redrive_finalization ~config ~keeper_name ~operation_id =
     (* Checked before claiming as well as after: a phase the walk refuses
        must not hold the claim, or boot recovery of that operation, running
        beside the first tick, finds it taken and gives up. *)
-    | Ok operation when Option.is_none (redrive_walk ~config operation) -> Ok ()
+    | Ok operation when Option.is_none (redrive_walk ~config operation) ->
+      Ok (Redrive_not_in_process operation.phase)
     | Ok operation ->
       (match fork_claimed ~config ~run:(redrive_claimed ~config) operation with
-       | Worker_started | Worker_already_active -> Ok ()
+       | Worker_started -> Ok Redrive_started
+       | Worker_already_active -> Ok Redrive_already_active
        | Worker_start_rejected error -> Error (Redrive_start_rejected error))
 ;;
 

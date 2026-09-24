@@ -1539,7 +1539,8 @@ let test_fenced_purge_settles_on_the_first_tick_after_its_blocker_is_repaired ()
          Eio.Switch.run (fun sw ->
            Keeper_process_switch.set sw;
            let result = tick_ok config ~now in
-           Server_schedule_consumers.resume_fenced_owners config result.held;
+           Server_schedule_consumers.resume_fenced_owners config
+             ~newly_held:result.held result.held;
            result)
        in
        let fence () =
@@ -1637,7 +1638,8 @@ let test_delivered_purge_releases_only_its_own_fence () =
     Eio.Switch.run (fun sw ->
       Keeper_process_switch.set sw;
       let result = tick_ok config ~now in
-      Server_schedule_consumers.resume_fenced_owners config result.held;
+      Server_schedule_consumers.resume_fenced_owners config
+        ~newly_held:result.held result.held;
       result)
   in
   Fun.protect
@@ -1664,9 +1666,10 @@ let test_delivered_purge_releases_only_its_own_fence () =
          (create_named_keeper_wake_schedule config ~schedule_id:"delivered-other"
             ~keeper_name:other
           : Schedule_domain.schedule_request);
-       ignore
-         (fenced_purge_operation ~completion:delivered config ~keeper_name:other other_meta
-          : Keeper_shutdown_types.t);
+       let other_operation =
+         fenced_purge_operation ~completion:delivered config ~keeper_name:other
+           other_meta
+       in
        let newer = Keeper_shutdown_types.Operation_id.generate () in
        (match
           Keeper_owner_registry.begin_shutdown ~base_path ~keeper_name:other
@@ -1674,6 +1677,16 @@ let test_delivered_purge_releases_only_its_own_fence () =
         with
         | Ok _ -> ()
         | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+       (match
+          Keeper_shutdown_runtime.redrive_finalization ~config ~keeper_name:other
+            ~operation_id:other_operation.operation_id
+        with
+        | Ok
+            (Keeper_shutdown_runtime.Redrive_not_in_process
+              (Keeper_shutdown_types.Finalized _)) -> ()
+        | Ok _ -> fail "a delivered purge with another fence owner was reported as walked"
+        | Error error ->
+          fail (Keeper_shutdown_runtime.redrive_error_to_string error));
        let first = tick 201.0 in
        check int "both fenced schedules are held" 2 (List.length first.held);
        check (option string) "the delivered purge releases its own fence" None

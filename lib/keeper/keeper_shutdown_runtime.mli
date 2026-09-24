@@ -94,19 +94,23 @@ type redrive_error =
 
 val redrive_error_to_string : redrive_error -> string
 
+type redrive_outcome =
+  | Redrive_started
+  | Redrive_already_active
+  | Redrive_not_in_process of Keeper_shutdown_types.phase
+
 (** Walk a stopped operation again inside the running process (#34642).
     Called when intake is observed refused by this operation's fence, so a
     finalization that stopped on something since repaired settles without a
     restart. Runs on the process switch under the same claim as the submit
-    worker and boot recovery; [Ok ()] also covers a walk already in progress.
-    Only phases that need no registry entry are walked; the rest are left
-    for their operator action or boot recovery. A walk that fails again
-    leaves the operation in the phase it was in. *)
+    worker and boot recovery. [Redrive_not_in_process] names the durable phase
+    left for operator action or boot recovery; it must not be reported as a
+    started walk. A walk that fails again leaves the operation in its phase. *)
 val redrive_finalization :
   config:Workspace.config ->
   keeper_name:string ->
   operation_id:Keeper_shutdown_types.Operation_id.t ->
-  (unit, redrive_error) result
+  (redrive_outcome, redrive_error) result
 
 module For_testing : sig
   val persist_unhandled_failure :

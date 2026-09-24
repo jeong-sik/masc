@@ -608,28 +608,20 @@ let count_noun ?plural count singular =
   in
   Printf.sprintf "%d %s" count noun
 
-(* A figure a reader reads at a glance rather than counts the digits of. The
-   Acting pane already spelled its token counts this way while the feed rows
-   beside it spelled the same figures out: one live turn drew "in 411465 out
-   3" on Activity while the pane's own block drew "411.5k" for the same
-   reading. Six digits in a detail column are read as a length, not a number.
-
-   Thousands keep a tenth; the tenth is what parts 73.9k from 73.2k, and a
-   whole-thousand rounding would draw them alike. *)
+(* A token figure a reader reads at a glance rather than counts digit by
+   digit. Thousands keep a tenth so nearby readings such as 73.9k and 73.2k
+   remain distinct. *)
 let thousand = 1_000
 let million = 1_000_000
 
-(* At most six characters, which is the cell every "\xe2\x89\x88%6s tok" column
-   reserves. A figure changes rung as soon as the previous format would round
+(* Up to 99,994,999,999 the figure fits the six-character "\xe2\x89\x88%6s tok"
+   column. A figure changes rung as soon as the previous format would round
    it to a seventh character: 999,950 reads "1.00M" rather than "1000.0k",
    99,995,000 reads "100.0M" rather than "100.00M", and 999,950,000 reads
    "1.00B" rather than "1000.0M".
 
-   One ladder, because four spelled the same figure four ways: this one drew
-   "1.0M" for 1,048,576 where the context inspector drew "1.05M" beside it,
-   and the same screen carried both. The inspector's rungs are the ones kept
-   -- they are the only set whose boundaries were worked out against the
-   column width they have to fit. *)
+   The boundaries match the precision each column reserves, so two views of
+   the same token count do not disagree near a rounding threshold. *)
 let rung_billion = 999_950_000
 let rung_hundred_million = 99_995_000
 let rung_million = 999_950

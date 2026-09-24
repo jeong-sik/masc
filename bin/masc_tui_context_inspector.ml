@@ -587,9 +587,7 @@ let input_map_rows (record : Turn_record.t) provider_input =
            })
         components
 
-(* The rungs this column was measured for now live beside every other figure
-   the screen reads at a glance: four ladders spelled the same count four
-   ways and two of them shared a screen. *)
+(* Keep the inspector's token readings on the shared column precision. *)
 let format_tokens = Masc_tui_message_layout.compact_count
 
 let forecast_schema = "masc.keeper.next-request-forecast.v5"

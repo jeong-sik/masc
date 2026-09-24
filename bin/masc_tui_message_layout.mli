@@ -440,12 +440,11 @@ val compact_count : int -> string
 (** A figure read at a glance rather than counted digit by digit:
     [compact_count 411465] is ["411.5k"], [compact_count 358] is ["358"].
 
-    At most six characters, which is the cell every "≈%6s tok" column
-    reserves. Each rung changes where the format below it would round past
-    that: 999,950 reads ["1.00M"] rather than ["1000.0k"]. Four ladders
-    spelled the same count four ways and two of them shared a screen, so
-    this is the one every surface asks -- {!Masc_tui_context_inspector}'s
-    [format_tokens] is this function under its own name. *)
+    Through 99,994,999,999 the result fits the six-character "≈%6s tok"
+    column. Larger counts widen. Each rung changes where the format below
+    it would round past that column: 999,950 reads ["1.00M"] rather than
+    ["1000.0k"]. {!Masc_tui_context_inspector}'s [format_tokens] delegates
+    to this function. *)
 
 val cut_mark : string
 (** What a cut leaves behind in place of the text it dropped.

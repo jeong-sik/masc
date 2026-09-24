@@ -10315,11 +10315,32 @@ let approvals_questions_reading (state : state) =
 let approvals_surface_pending (state : state) =
   List.length (approval_items state) + approvals_open_question_count state
 
+(* Whether every list the count is taken over was read. The count is a
+   reading of what is waiting only when all three came back: the confirm
+   queue, the held calls, and the questions. The surface's own title already
+   parts the two -- it says "confirm queue unread", "held calls stale",
+   "questions unread" beside the number -- and the strip asked the number
+   alone. *)
+let approvals_reading_current (state : state) =
+  Option.is_some state.approval_snapshot
+  && Option.is_none state.keeper_tool_approvals_error
+  && (match approvals_questions_reading state with
+      | Questions_current -> true
+      | Questions_unread | Questions_stale -> false)
+
 let is_surface_active (state : state) (s : surface) =
   match s with
   | Metrics -> false
   | Approvals ->
-      state.view = Approvals || approvals_surface_pending state > 0
+      (* An entry that disappears says "nothing is waiting", which is the one
+         thing the strip cannot say when it could not look. With the server
+         unreachable every other surface drew "(load failed)" and this one
+         left the ring, so the screen that holds the operator's decisions was
+         the only one that read as settled. The entry stands until a reading
+         says the lists are empty. *)
+      state.view = Approvals
+      || approvals_surface_pending state > 0
+      || not (approvals_reading_current state)
   | _ -> true
 ;;
 

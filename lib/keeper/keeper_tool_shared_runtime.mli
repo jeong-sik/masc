@@ -67,8 +67,9 @@ val safe_is_dir : string -> bool
     Keeper's tree (RFC-0427 A-1). [Endpoint_decides] for a tree the endpoint
     owns: the host path is bookkeeping, so the host is not asked and the
     endpoint reports a missing directory when the tool runs there. The other
-    three are the host's answer for a shared-mount tree. Every file tool that
-    checks a cwd asks here. *)
+    three are the host's answer for a shared-mount tree. The Keeper cwd
+    resolvers of Execute, Read and the search tools ask here; the verifier's
+    owned-root Read checks its own host root. *)
 type cwd_existence =
   | Endpoint_decides
   | Host_directory

@@ -570,9 +570,13 @@ let test_cwd_existence_asks_whoever_holds_the_tree () =
    the week to 2026-09-24, told that "no repository is materialized" -- the
    host playground scan answering for a checkout that existed in the guest.
    A docker keeper, whose tree is this host's, still hears the checkouts
-   that exist. *)
+   that exist. Read projects a relative cwd into the playground; the search
+   resolver takes host coordinates only (test_relative_cwd_is_not_rewritten),
+   so it is asked with the absolute form. *)
 let test_read_cwds_follow_the_tree () =
-  let masc_cwd = `Assoc [ ("cwd", `String "masc") ] in
+  let search_cwd playground =
+    `Assoc [ ("cwd", `String (Filename.concat playground "masc")) ]
+  in
   (setup ~keeper_name:"glossary-maniac" ~sandbox:Keeper_types_profile_sandbox.Micro_vm
    @@ fun ~base:_ ~config ~meta ~playground ->
    let guest_only = Filename.concat playground "masc" in
@@ -583,18 +587,22 @@ let test_read_cwds_follow_the_tree () =
    (match Keeper_tool_filesystem_runtime.resolve_read_file_cwd ~config ~meta ~cwd:(Some "masc") with
     | Error e -> Alcotest.fail ("Read refused a guest-only cwd on the host: " ^ e)
     | Ok cwd -> names_the_guest_checkout "Read keeps the path for the endpoint" cwd);
-   (match Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args:masc_cwd with
+   (match
+      Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args:(search_cwd playground)
+    with
     | Error e -> Alcotest.fail ("search refused a guest-only cwd on the host: " ^ e)
     | Ok cwd -> names_the_guest_checkout "search keeps the path for the endpoint" cwd);
    Alcotest.(check bool) "nothing was created" false (Sys.file_exists guest_only));
   setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
-  @@ fun ~base:_ ~config ~meta ~playground:_ ->
+  @@ fun ~base:_ ~config ~meta ~playground ->
   (match Keeper_tool_filesystem_runtime.resolve_read_file_cwd ~config ~meta ~cwd:(Some "masc") with
    | Ok cwd -> Alcotest.fail ("a shared-mount tree's missing Read cwd resolved: " ^ cwd)
    | Error e ->
      Alcotest.(check bool) "Read still says nothing is materialized" true
        (String_util.contains_substring e "no repository is materialized"));
-  match Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args:masc_cwd with
+  match
+    Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args:(search_cwd playground)
+  with
   | Ok cwd -> Alcotest.fail ("a shared-mount tree's missing search cwd resolved: " ^ cwd)
   | Error e ->
     Alcotest.(check bool) "search still hears the directory is missing" true

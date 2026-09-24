@@ -95,6 +95,13 @@ val save_agent_core_classified_with_encoding_memo :
 val with_session_lock :
   session_dir:string -> (string -> 'a) -> ('a, string) result
 
+(** Why reading the bytes failed, when the failure says nothing about what
+    the file holds. *)
+type checkpoint_read_failure =
+  | Os_error of Unix.error  (** An open, stat or read syscall failed. *)
+  | Changed_while_read  (** The file or its directory changed during the read. *)
+  | Read_raised  (** The read or decode raised an exception. *)
+
 (** Load failure classification used by callers to distinguish
     cold-start absence from real I/O / parse / agent-core errors. *)
 type checkpoint_load_error =
@@ -103,12 +110,28 @@ type checkpoint_load_error =
   | Parse_error of string
   (** A canonical this binary recognises as an earlier [checkpoint_version].
       Apart from [Parse_error] because the two need opposite answers: a
-      superseded canonical is replaceable, a corrupt one is not. A canonical
-      from a later version stays [Parse_error] -- that means an older binary is
-      reading a newer workspace, and replacing it would destroy history the
-      newer binary can still read. *)
+      superseded canonical is replaceable, a corrupt one is not. *)
   | Superseded_version of { expected : int; got : int }
+  (** A canonical a later [checkpoint_version] wrote: an older binary is
+      reading a newer workspace. Nothing here replaces or deletes it, because
+      the newer binary can still read it. The codec checks the version before
+      it decodes anything else, so a later build's file lands here whenever
+      that build bumped [checkpoint_version]. A codec change shipped without
+      a bump reads as [Parse_error] instead, and the clear deletes it
+      (#38680). *)
+  | Newer_version of { expected : int; got : int }
   | Io_error of string
+      (** From {!load_agent_core}: the path is not a regular file, or lies
+          outside the owned directory chain, so nothing was read. Elsewhere it
+          also carries OS read failures: the canonical read under a save or a
+          retained-reference lookup, an exception in
+          {!load_agent_core_history_file}, and {!classify_core_error} of an
+          agent-core [FileOpFailed]. Only from {!load_agent_core} does it mean
+          the path, not the read, is at fault. *)
+  | Read_failed of { cause : checkpoint_read_failure; detail : string }
+      (** The owned-file read behind {!load_agent_core} and
+          {!load_agent_core_history_file} failed itself; the same bytes may
+          read fine next time. The other readers report this as [Io_error]. *)
   | Agent_core_error of string
 
 val checkpoint_load_error_to_string : checkpoint_load_error -> string
@@ -162,6 +185,67 @@ val canonical_byte_count :
   session_dir:string ->
   session_id:string ->
   (int option, checkpoint_load_error) result
+
+(** How far the read and decode {!load_agent_core} takes got on the
+    canonical, one step at a time. *)
+type canonical_judgement =
+  | Judged_absent
+  | Judged_decoded of Agent_core.Checkpoint.t
+  | Judged_superseded of { expected : int; got : int }
+      (** An earlier version wrote it; a turn replaces it. *)
+  | Judged_newer of { expected : int; got : int }
+      (** A build that bumped [checkpoint_version] wrote it; that build can
+          still read it. A later build that changed the codec without a bump
+          is [Judged_undecodable] instead (#38680). *)
+  | Judged_undecodable of checkpoint_load_error
+      (** The bytes were read and the decoder rejected their content
+          ([Parse_error] or [Store_error]). *)
+  | Judged_inconclusive of checkpoint_load_error
+      (** No bytes were judged: the session id is not a path segment, the read
+          returned no bytes or raised, or the decoder failed for a reason that
+          is not the content. *)
+
+(** Judge the canonical without a lock. {!remove_undecodable_canonical}
+    judges again under the session lock before it deletes anything. *)
+val judge_canonical : session_dir:string -> session_id:string -> canonical_judgement
+
+(** What {!remove_undecodable_canonical} found under the session lock. *)
+type undecodable_removal_outcome =
+  | Removed of { undecodable : checkpoint_load_error }
+      (** The canonical was [Judged_undecodable] and was deleted.
+          [undecodable] is the decoder's error. *)
+  | Canonical_absent
+  | Canonical_loadable
+      (** The canonical decodes, or was written by an earlier version: a
+          turn can start from it, so nothing was removed. *)
+
+type undecodable_removal_error =
+  | Removal_refused of checkpoint_load_error
+      (** The canonical was [Judged_newer] (carried as [Newer_version]) or
+          [Judged_inconclusive]; it stays. *)
+  | Removal_failed of string
+      (** The lock or the unlink failed; the canonical stays. *)
+  | Removal_durability_unknown of string
+      (** The unlink happened, but the directory sync that makes it durable
+          failed. *)
+
+val undecodable_removal_error_to_string : undecodable_removal_error -> string
+
+(** Delete a canonical checkpoint that {!judge_canonical} finds
+    [Judged_undecodable], for the operator's [masc_keeper_clear]. The
+    judgement and the unlink run under the session lock the writers take;
+    nothing else is deleted.
+
+    A copy of the bytes survives only as far as the history window keeps
+    one: a save hardlinks the canonical it installs into the window, so with
+    [keeper.checkpoint_history_retained] above 0 the entries still in the
+    window share the canonical's inode (and so any change made to it in
+    place); with 0 nothing is kept, and bytes no save installed were never
+    linked. *)
+val remove_undecodable_canonical :
+  session_dir:string ->
+  session_id:string ->
+  (undecodable_removal_outcome, undecodable_removal_error) result
 
 type checkpoint_identity_error =
   | Session_id_invalid of string

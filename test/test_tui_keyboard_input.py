@@ -1624,6 +1624,9 @@ def approval_selection_http_fixtures() -> tuple[
     # decides against. This scenario is about selection, so it answers the
     # poll with the honest empty queue.
     fixtures["/api/v1/keepers/tool-approvals"] = (200, {"pending": []})
+    # The questions poll is the same: left unanswered, the header says
+    # ", questions unread" beside the count.
+    fixtures[KEEPER_ASKS_PATH] = (200, {"keeper": None, "open_count": 0, "asks": []})
     return fixtures, initial_items, approval_new
 
 
@@ -14235,15 +14238,12 @@ def pull_request_row(number: int, keeper: str | None, mergeable: str) -> dict[st
     return {
         "repo_slug": "jeong-sik/masc",
         "number": number,
-        "title": f"pull {number}",
-        "head_branch": f"fix/{number}",
         "draft": False,
         "checks": "passing",
         "review": "waiting",
         "mergeable": mergeable,
         "author": keeper if keeper is not None else "someone-else",
         "keeper": keeper,
-        "updated_at": "2026-09-23T00:00:00Z",
     }
 
 

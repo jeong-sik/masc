@@ -40,8 +40,13 @@ type catalog_fixture =
   ; enable_thinking : bool option
   }
 
+(* Plan admission refuses an exact target without a body deadline, so every
+   fixture target declares one unless a test passes [None]. Long enough that
+   no non-stalling fixture reaches it. *)
+let fixture_body_timeout_s = 30.0
+
 let catalog_entry
-      ?body_timeout_s
+      ?(body_timeout_s = Some fixture_body_timeout_s)
       ?(connect_timeout_s = Some 30.0)
       ?(serving_constraint = false)
       ?(serving_accepted_through_tokens = 524298)
@@ -3726,7 +3731,7 @@ let test_body_deadline_advances_after_settlement ~http_status ~settle () =
       ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
-      [ catalog_entry ~body_timeout_s:1.0 ~id:first_id ~base_url ~native:true ~json:true ()
+      [ catalog_entry ~body_timeout_s:(Some 1.0) ~id:first_id ~base_url ~native:true ~json:true ()
       ; catalog_entry ~id:next_id ~base_url ~native:true ~json:true () ]
     @@ fun snapshot ->
     let flow = start_flow (frozen_flow snapshot [first_id; next_id]) in
@@ -3792,7 +3797,7 @@ let test_stalled_server_refusal_body_does_not_advance () =
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry
-          ~body_timeout_s:0.05
+          ~body_timeout_s:(Some 0.05)
           ~id:refused_id
           ~base_url
           ~native:true
@@ -4081,23 +4086,25 @@ let test_all_semantic_rejections_return_nonempty_ordered_exhaustion () =
   | Ok _ | Error _ -> fail "semantic exhaustion lost its typed nonempty trace"
 ;;
 
-let test_missing_deadline_rejects_every_candidate_before_dispatch () =
-  (* Neither a connect nor a body budget is declared: the measurement
-     transport would arm no deadline at all, so admission must reject the
-     plan before any request leaves, for every candidate in the flow. *)
+let test_missing_deadline_rejects_every_candidate_before_dispatch ~connect_timeout_s () =
+  (* No body budget is declared. The connect budget, when present, ends at the
+     response headers, so the body would be read with no deadline; admission
+     must reject the plan before any request leaves, for every candidate. *)
   let result, posts =
     with_server ~response:(openai_response {|{"name":"unused"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry
-          ~connect_timeout_s:None
+          ~connect_timeout_s
+          ~body_timeout_s:None
           ~id:"no-deadline-a"
           ~base_url
           ~native:true
           ~json:true
           ()
       ; catalog_entry
-          ~connect_timeout_s:None
+          ~connect_timeout_s
+          ~body_timeout_s:None
           ~id:"no-deadline-b"
           ~base_url
           ~native:true
@@ -4332,7 +4339,7 @@ let test_structural_predispatch_failure_does_not_advance () =
           ~kind:"anthropic"
           ~request_path:"/v1/messages"
           ~serving_constraint:true
-          ~body_timeout_s:1.0
+          ~body_timeout_s:(Some 1.0)
           ~id:"clock-a"
           ~base_url
           ~native:true
@@ -4661,7 +4668,13 @@ let () =
         ; test_case
             "missing deadline rejects every candidate before dispatch"
             `Quick
-            test_missing_deadline_rejects_every_candidate_before_dispatch
+            (test_missing_deadline_rejects_every_candidate_before_dispatch
+               ~connect_timeout_s:None)
+        ; test_case
+            "connect-only deadline rejects every candidate before dispatch"
+            `Quick
+            (test_missing_deadline_rejects_every_candidate_before_dispatch
+               ~connect_timeout_s:(Some 30.0))
         ; test_case
             "admission and semantic rejections share one declared walk"
             `Quick

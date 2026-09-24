@@ -70,10 +70,15 @@ type catalog_fixture =
   ; connect_timeout_s : float option
   }
 
+(* Plan admission refuses an exact target without a body deadline, so every
+   fixture target declares one unless a test passes [None]. Long enough that
+   no non-stalling fixture reaches it. *)
+let fixture_body_timeout_s = 30.0
+
 let catalog_entry
       ?base_url_env
       ?(api_key_env = "")
-      ?body_timeout_s
+      ?(body_timeout_s = Some fixture_body_timeout_s)
       ?(connect_timeout_s = Some 30.0)
       ~id
       ~kind
@@ -499,7 +504,7 @@ let test_deepseek_catalog_is_json_only_before_dispatch () =
             ~connect_timeout_s:30.0
             ()
       ; credential = EO.Credential_resolved (Secret.of_string "deepseek-fixture-key")
-      ; body_timeout_s = None
+      ; body_timeout_s = Some fixture_body_timeout_s
       }
     ]
   in
@@ -983,7 +988,7 @@ let test_public_receipt_phase_matrix () =
         ~base_url
         ~request_path:"/v1/chat/completions"
         ~capabilities:(capabilities ~native:true ~json:true)
-        ~body_timeout_s:1.0
+        ~body_timeout_s:(Some 1.0)
         ()
     in
     with_catalog [ entry ]

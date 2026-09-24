@@ -26,6 +26,11 @@ let require_ok label = function
 (* thinking-support with no declared effort: this wire carries the thinking
    state in the effort field, so the request cannot be built and the provider
    config refuses it before dispatch (#37326 pins the same shape). *)
+(* Plan admission refuses an Exact target without a body deadline
+   (Missing_deadline), so the fixture provider declares one. No request
+   leaves the process, so the value only has to be positive and finite. *)
+let exact_body_timeout_s = 180.0
+
 let runtime_toml =
   Printf.sprintf
     {|[runtime]
@@ -35,6 +40,7 @@ default = "openrouter.probe"
 protocol = "openai-compatible-http"
 endpoint = "https://openrouter.ai/api/v1"
 connect-timeout-s = 180.0
+exact-body-timeout-s = %.1f
 [providers.openrouter.credentials]
 type = "env"
 key = "OPENROUTER_API_KEY"
@@ -54,6 +60,7 @@ thinking-support = true
           (List.sort_uniq
              String.compare
              (lane_id :: Server_runtime_bootstrap.mandatory_exact_output_lane_ids))))
+    exact_body_timeout_s
 ;;
 
 let with_admitted_slot f =

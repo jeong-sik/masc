@@ -18,6 +18,11 @@ let fixture_wait_seconds = 30.0
    [fixture_wait_seconds] bounds the test's side. *)
 let fixture_post_connect_timeout_seconds = 30.0
 
+(* Default [body_timeout_s] for every fixture target. Plan admission refuses
+   an exact target without one (Missing_deadline): the connect deadline ends
+   at the response headers, so only this bounds a body that stalls. *)
+let fixture_post_body_timeout_seconds = 30.0
+
 type server_behavior =
   | Reply of string
   | Stream_reply of string
@@ -157,7 +162,7 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
 
 let target_fixture_toml
       ~connect_timeout_s
-      ?body_timeout_s
+      ~body_timeout_s
       ?enable_thinking
       ~requires_token_measurement
       ~supports_response_format_json
@@ -169,10 +174,7 @@ let target_fixture_toml
   let provider_id = Printf.sprintf "masc-exact-fixture-provider-%d" index in
   let model_id = Printf.sprintf "masc-exact-fixture-model-%d" index in
   let timeout = Printf.sprintf "connect_timeout_s = %.6g\n" connect_timeout_s in
-  let body_timeout =
-    Option.fold ~none:""
-      ~some:(Printf.sprintf "body_timeout_s = %.6g\n") body_timeout_s
-  in
+  let body_timeout = Printf.sprintf "body_timeout_s = %.6g\n" body_timeout_s in
   let enable_thinking_line =
     Option.fold
       ~none:""
@@ -247,6 +249,10 @@ let resolver_snapshot
     List.assoc_opt id connect_timeouts
     |> Option.value ~default:fixture_post_connect_timeout_seconds
   in
+  let body_timeout_for id =
+    List.assoc_opt id body_timeouts
+    |> Option.value ~default:fixture_post_body_timeout_seconds
+  in
   let enable_thinking_for id = List.assoc_opt id enable_thinkings in
   let api_key_env_for id =
     List.assoc_opt id api_key_envs |> Option.value ~default:api_key_env
@@ -258,7 +264,7 @@ let resolver_snapshot
         |> List.mapi (fun index fixture ->
             target_fixture_toml
               ~connect_timeout_s:(timeout_for fixture.id)
-              ?body_timeout_s:(List.assoc_opt fixture.id body_timeouts)
+              ~body_timeout_s:(body_timeout_for fixture.id)
               ?enable_thinking:(enable_thinking_for fixture.id)
               ~requires_token_measurement
               ~supports_response_format_json

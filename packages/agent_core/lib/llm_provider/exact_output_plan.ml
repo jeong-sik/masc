@@ -16,13 +16,12 @@ type output_admission_error =
   | Invalid_connect_timeout of float
   | Invalid_body_timeout of float
   | Missing_deadline
-      (** Neither a connect nor a body timeout is declared. The measurement
-          transport arms no deadline in this state, so a provider that holds
-          the connection open without completing its response hangs the
-          request for the life of the connection — measured at 13.3h on an
-          exact-output lane whose provider section declared no
-          [connect-timeout-s] (#36979). At least one of the two budgets must
-          be declared. *)
+      (** No body timeout is declared. The body timeout is the only budget
+          that bounds the whole request; the connect timeout ends when the
+          response headers arrive. Without it a provider that sends headers
+          and then stalls the body hangs the request for the life of the
+          connection -- measured at 13.3h on an exact-output lane (#36979).
+          A connect timeout alone does not satisfy this rule. *)
   | Caller_supplied_header_not_allowed of string
   | Unsupported_image_input
   | Unsupported_document_input
@@ -130,31 +129,25 @@ let%test "timeout validation preserves the invalid value" =
   | Ok () -> false
 ;;
 
-(* Each [validate_timeout] accepts [None] on its own because either budget
-   bounds its declared phase: on the non-streaming path the connect deadline
-   ends when the response headers arrive, while the body deadline is a total
-   request ceiling. Both absent is the one combination that leaves the wire
-   with no deadline at all. *)
-let validate_deadline_coverage
-      ~connect_timeout_s
-      ~body_timeout_s
-      : (unit, [ `Missing_deadline ]) result
-  =
-  match connect_timeout_s, body_timeout_s with
-  | None, None -> Error `Missing_deadline
-  | _ -> Ok ()
+(* Each [validate_timeout] accepts [None] on its own; this rule decides which
+   absence is refused. The connect deadline ends when the response headers
+   arrive, so a connect-only wire still reads the body with no deadline. The
+   body deadline is a total request ceiling, so it is the one budget every
+   exact wire must carry. *)
+let require_body_deadline ~body_timeout_s : (unit, [ `Missing_deadline ]) result =
+  match body_timeout_s with
+  | Some (_ : float) -> Ok ()
+  | None -> Error `Missing_deadline
 ;;
 
-let%test "deadline coverage rejects only the both-absent case" =
-  match
-    validate_deadline_coverage ~connect_timeout_s:None ~body_timeout_s:(Some 1.0)
-  with
+let%test "body deadline rule admits a declared body budget" =
+  match require_body_deadline ~body_timeout_s:(Some 1.0) with
   | Ok () -> true
   | Error `Missing_deadline -> false
 ;;
 
-let%test "deadline coverage rejects when no budget is declared" =
-  match validate_deadline_coverage ~connect_timeout_s:None ~body_timeout_s:None with
+let%test "body deadline rule refuses a missing body budget" =
+  match require_body_deadline ~body_timeout_s:None with
   | Error `Missing_deadline -> true
   | Ok () -> false
 ;;
@@ -482,9 +475,7 @@ let preflight
           request.body_timeout_s
       in
       let* () =
-        validate_deadline_coverage
-          ~connect_timeout_s:config.connect_timeout_s
-          ~body_timeout_s:request.body_timeout_s
+        require_body_deadline ~body_timeout_s:request.body_timeout_s
         |> Result.map_error (fun `Missing_deadline -> Missing_deadline)
       in
       if not (contract_is_supported config capabilities)
@@ -756,18 +747,52 @@ let%test "canonical fingerprint is sensitive to the frozen response codec" =
        agent_core_plan_v2_anthropic_fingerprint
 ;;
 
+(* Fixture budgets for the inline preflight tests. No request is sent, so the
+   values only need to be positive and finite. *)
+let[@warning "-32"] fixture_connect_timeout_s = 30.0
+let[@warning "-32"] fixture_body_timeout_s = 60.0
+
+let[@warning "-32"] deadline_fixture_config () =
+  Provider_config.make ~kind:OpenAI_compat ~model_id:"fixture"
+    ~base_url:"https://example.test" ~max_tokens:16
+    ~connect_timeout_s:fixture_connect_timeout_s
+    ~model_capabilities_override:Capabilities.default_capabilities
+    ~auth_scheme:Bearer_token ()
+;;
+
+let%test "exact preflight refuses a connect-only wire" =
+  match
+    preflight ~config:(deadline_fixture_config ()) ~messages:[Types.user_msg "Hello"]
+      ~body_timeout_s:None ~anthropic_thinking_control:None
+  with
+  | Error Missing_deadline -> true
+  | Error e -> failwith ("connect-only preflight hit another rejection: " ^ rejection_name e)
+  | Ok _ -> false
+;;
+
+let%test "exact preflight admits a connect and body wire" =
+  match
+    preflight ~config:(deadline_fixture_config ()) ~messages:[Types.user_msg "Hello"]
+      ~body_timeout_s:(Some fixture_body_timeout_s) ~anthropic_thinking_control:None
+  with
+  | Error e -> failwith ("preflight unexpectedly rejected: " ^ rejection_name e)
+  | Ok admitted ->
+    preflight_connect_timeout_s admitted = Some fixture_connect_timeout_s
+    && preflight_body_timeout_s admitted = Some fixture_body_timeout_s
+;;
+
 let%test "exact preflight freezes refreshed credentials until a new plan is prepared" =
   let token = ref "first-fixture-token" in
   let calls = ref 0 in
   let config = Provider_config.make ~kind:OpenAI_compat ~model_id:"fixture"
     ~base_url:"https://example.test" ~max_tokens:16
-    ~connect_timeout_s:30.0
+    ~connect_timeout_s:fixture_connect_timeout_s
     ~model_capabilities_override:Capabilities.default_capabilities
     ~auth_scheme:Bearer_token
     ~credential_source:(Refreshable_credential (fun () ->
       incr calls; Ok (Secret.of_string !token))) () in
   let prepare () = preflight ~config ~messages:[Types.user_msg "Hello"]
-    ~body_timeout_s:None ~anthropic_thinking_control:None in
+    ~body_timeout_s:(Some fixture_body_timeout_s) ~anthropic_thinking_control:None in
   match prepare () with
   | Error e -> failwith ("preflight unexpectedly rejected: " ^ rejection_name e)
   | Ok first ->
@@ -787,12 +812,12 @@ let%test "exact preflight still rejects genuinely caller-supplied headers" =
     let config =
       Provider_config.make ~kind:OpenAI_compat ~model_id:"fixture"
         ~base_url:"https://example.test" ~max_tokens:16
-        ~connect_timeout_s:30.0
+        ~connect_timeout_s:fixture_connect_timeout_s
         ~model_capabilities_override:Capabilities.default_capabilities
         ~auth_scheme:Bearer_token ~headers () in
     match
       preflight ~config ~messages:[Types.user_msg "Hello"]
-        ~body_timeout_s:None ~anthropic_thinking_control:None
+        ~body_timeout_s:(Some fixture_body_timeout_s) ~anthropic_thinking_control:None
     with
     | Error (Caller_supplied_header_not_allowed reported) ->
       expected_err = Some reported

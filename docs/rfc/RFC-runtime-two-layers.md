@@ -164,12 +164,12 @@ goo-yang-bong = "librarian_exact"
 |---|---|---|
 | 1 | 레인 슬롯이 선언된 바인딩을 가리키지 않음 → 레인·슬롯 이름을 댄다 | 있다. `validate_lanes`(`runtime.ml:665`)가 `Lane_candidate_unresolved` 로 거절한다 |
 | 2 | 바인딩이 카탈로그의 provider·모델 쌍을 가리키지 않고 능력 표도 없음 → 쌍을 댄다 | 있다. 부팅 때 `missing_runtime_model_capabilities`(`runtime.ml:1068`)가 찾는다. 서버는 그 바인딩을 빼고 degraded 로 뜬다(`init_default_degraded_report`, `runtime.ml:1565`) |
-| 3 | exact-output 레인 슬롯이 가리키는 provider 가 `connect-timeout-s`·`exact-body-timeout-s` 둘 다 선언하지 않음 → 레인·슬롯·provider 이름을 댄다 | 없다. 요청마다 `Missing_deadline` 으로 거절된다. body-only 선언도 적법하다 |
+| 3 | exact-output 레인 슬롯이 가리키는 provider 가 `exact-body-timeout-s` 를 선언하지 않음 → 레인·슬롯·provider 이름을 댄다 | 없다. 요청마다 `Missing_deadline` 으로 거절된다. `connect-timeout-s` 만 있어도 거절된다 |
 | 4 | 바인딩의 `max-context` 가 카탈로그 값보다 큼 → 낮추기만 가능 | 없다. 지금은 조용히 카탈로그 값으로 깎는다(`Override_clamped_by_capability`, `runtime.ml:932`). `RFC-keeper-context-window-in-tokens` §13.8의 clamp 제거안은 이 규칙이 대체한다. 그 절의 overlay 8행은 카탈로그가 참값을 가지면 사라지고, 근거로 든 1,048,576 / 1,000,000은 둘 다 카탈로그 상한보다 낮은 값이라 이 규칙을 통과한다. |
 
-**규칙 3 이 exact-output 슬롯에만 걸리는 이유.** exact-output 슬롯의 타깃은 바인딩에서 만들어진다. bootstrap은 provider의 `connect-timeout-s`와 `exact-body-timeout-s`를 각각 `connect_timeout_s`·`body_timeout_s`로 바꾸지 않고 넘긴다(`server_runtime_bootstrap.ml`). connect 마감은 응답 헤더가 오면 끝나고, body 마감은 연결·헤더·본문을 합친 요청 전체 상한이다. 따라서 body-only 선언은 적법하지만 connect-only 선언은 본문을 무제한으로 남긴다. 두 마감이 다 없으면 plan admission이 `Missing_deadline`으로 거절하고(`exact_output_plan.ml`), HTTP 클라이언트는 선언하지 않은 단계를 무제한으로 둔다. 본문 상한이 없는 요청은 실패하지 않고 기다리기만 해서 failover가 뛰지 않을 수 있다(#36979: curator 최대 13.3시간).
+**규칙 3 이 exact-output 슬롯에만 걸리는 이유.** exact-output 슬롯의 타깃은 바인딩에서 만들어진다. bootstrap은 provider의 `connect-timeout-s`와 `exact-body-timeout-s`를 각각 `connect_timeout_s`·`body_timeout_s`로 바꾸지 않고 넘긴다(`server_runtime_bootstrap.ml`). connect 마감은 응답 헤더가 오면 끝나고, body 마감은 연결·헤더·본문을 합친 요청 전체 상한이다. connect 마감만 있으면 본문을 마감 없이 읽는다. 그래서 plan admission은 body 마감이 없으면 connect 마감이 있어도 `Missing_deadline`으로 거절한다(`exact_output_plan.ml`). 본문 상한이 없는 요청은 실패하지 않고 기다리기만 해서 failover가 뛰지 않을 수 있다(#36979: curator 최대 13.3시간).
 
-일반 keeper 턴은 다르다. 이 키들이 없어도 별도의 턴 예산이 있어 합법이므로 모든 provider에 강제하면 계약과 부딪힌다. 씨앗 `config/runtime.toml`의 exact-output 슬롯이 가리키는 `glm-coding`·`ollama_cloud`는 현재 `connect-timeout-s`만 선언하므로, 새 키를 배포 설정에 적용하기 전까지는 Exact 본문이 무제한이다. 그러므로 위 예시처럼 Exact 슬롯 provider에 `exact-body-timeout-s`를 선언하고, 대시보드의 `exact_body_timeout_s`로 실제 적용을 확인해야 본문 정지가 없어졌다고 말할 수 있다.
+일반 keeper 턴은 다르다. 이 키들이 없어도 별도의 턴 예산이 있어 합법이므로 모든 provider에 강제하면 계약과 부딪힌다. 씨앗 `config/runtime.toml`의 exact-output 슬롯이 가리키는 `glm-coding`·`ollama_cloud`는 `exact-body-timeout-s = 1200.0`을 선언한다. 배포 설정의 Exact 슬롯 provider도 이 키를 선언해야 한다. 없으면 그 슬롯은 요청마다 거절된다. 대시보드의 `exact_body_timeout_s`로 실제 적용을 확인한다.
 
 `AGENT_CORE_MODEL_CATALOG` 로 카탈로그를 통째로 바꾼 배포는 타깃을 그 파일의 `[[targets]]` 에서 읽는다(`server_runtime_bootstrap.ml:441`). 그 경로의 마감은 그 행의 `connect_timeout_s`·`body_timeout_s` 다.
 

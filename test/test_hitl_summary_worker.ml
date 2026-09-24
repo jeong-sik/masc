@@ -1178,8 +1178,10 @@ let prompt_only_snapshot base_url =
        id = \"hitl-incapable\"\n\
        provider_ref = \"hitl-incapable-provider\"\n\
        model_id = \"hitl-incapable-model\"\n\
-       connect_timeout_s = 30.0\n"
+       connect_timeout_s = 30.0\n\
+       body_timeout_s = %.6g\n"
       base_url
+      F.fixture_post_body_timeout_seconds
   in
   let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
   match

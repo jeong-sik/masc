@@ -177,23 +177,25 @@ endpoint = "https://ollama.com/v1"
 # default: omit it and no connect budget applies. Key spelling is mirrored by
 # `Runtime_schema.connect_timeout_s_key`.
 connect-timeout-s = 600.0
-# Providers may separately declare `exact-body-timeout-s` as a positive finite
-# float in seconds. This is the caller-owned total HTTP request deadline for
-# Exact-output lanes: connection, response headers and the full response body.
-# It does not change connect-timeout-s or ordinary Keeper per-call deadlines.
-# Omission remains None; no value is inferred from the connect deadline. A
-# connect-only declaration still leaves an Exact response body unbounded.
+# `exact-body-timeout-s` is a positive finite float in seconds: the total
+# HTTP request deadline for Exact-output lanes -- connection, response
+# headers and the full response body. It does not change connect-timeout-s
+# or ordinary Keeper per-call deadlines, and no value is inferred from the
+# connect deadline. Every HTTP provider an Exact-output lane names must
+# declare it: connect-timeout-s ends at the response headers, so a plan
+# without a body deadline is refused at admission (Missing_deadline, #36979).
 # Bootstrap applies it to AGENT_CORE targets derived from these bindings.
 # The deployment operator owns the value in the resolved runtime.toml's
 # [providers.<id>] table. Saving that file does not rebuild existing Exact
 # targets: the value takes effect when server bootstrap rebuilds the registry.
-# This seed intentionally supplies no numeric body deadline.
 # Each visited Exact candidate retains its own deadline. Their HTTP wait can
 # accumulate across sequential candidates; this is not a deadline for the
 # whole Librarian pass, its CLI tail, or Memory processing.
 # AGENT_CORE_MODEL_CATALOG replacements keep their own target body_timeout_s;
 # this key does not set an official-client CLI timeout.
-
+# 1200 s is the operator's chosen value; it matches the glm-coding
+# connect-timeout-s below, which was sized from measured exact-output calls.
+exact-body-timeout-s = 1200.0
 [providers.ollama_cloud.healthcheck]
 path = "/models"
 
@@ -217,14 +219,18 @@ key = "DEEPSEEK_API_KEY"
 display-name = "GLM Coding Plan"
 protocol = "openai-compatible-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
-# Exact-output lanes lead with this provider, and a plan whose wire carries
-# no connect and no body budget is now rejected at admission (Missing_deadline,
-# #36979): with both absent the measurement transport arms no deadline and a
-# provider that holds the connection open hangs the request for the life of
-# the connection — measured at up to 13.3h on wkbl's curator lane. The value
-# keeps headroom over the slowest healthy exact-output call observed on this
-# endpoint (973s, wkbl 2026-09-13~16); narrow it per deployment.
+# Exact-output lanes lead with this provider. connect-timeout-s bounds only
+# the phase before the response headers; a provider that sends headers and
+# then holds the body open is bounded by exact-body-timeout-s below, not by
+# this key -- measured at up to 13.3h on wkbl's curator lane without it
+# (#36979). The value keeps headroom over the slowest healthy exact-output
+# call observed on this endpoint (973s, wkbl 2026-09-13~16); narrow it per
+# deployment.
 connect-timeout-s = 1200.0
+# 1200 s is the operator's chosen value for the whole Exact-output request;
+# it matches the measured connect-timeout-s above. See the ollama_cloud
+# comment for what the key bounds.
+exact-body-timeout-s = 1200.0
 
 [providers.glm-coding.healthcheck]
 path = "/models"

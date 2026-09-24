@@ -71,7 +71,8 @@ def main():
     parser.add_argument('--target-ms', type=float, default=0.1)
     parser.add_argument('--interval', type=float, default=0,
                         help='seconds between sample rounds; recorded in evidence')
-    parser.add_argument('--accept-encoding', choices=('identity', 'gzip'), default='gzip')
+    parser.add_argument('--accept-encoding', choices=('identity', 'gzip'),
+                        help='defaults to identity with --agent-name (TUI-shaped), gzip otherwise')
     parser.add_argument('--concurrent', action='store_true',
                         help='start sampled GETs and MCP ping together on separate persistent connections')
     parser.add_argument('--token-env', default='MCP_TOKEN')
@@ -103,7 +104,8 @@ def main():
                        else http.client.HTTPConnection)
     connection = connection_type(url.hostname, url.port, timeout=args.timeout)
     token = os.environ.get(args.token_env)
-    headers = {'Accept-Encoding': args.accept_encoding}
+    accept_encoding = args.accept_encoding or ('identity' if args.agent_name else 'gzip')
+    headers = {'Accept-Encoding': accept_encoding}
     if token:
         headers['Authorization'] = 'Bearer ' + token
     if args.agent_name:
@@ -273,7 +275,7 @@ def main():
         'base_url': args.base_url, 'target_ms': args.target_ms,
         'credential_supplied': bool(token), 'agent_name': args.agent_name,
         'interval_s': args.interval,
-        'accept_encoding': args.accept_encoding,
+        'accept_encoding': accept_encoding,
         'concurrent': args.concurrent,
         'scope': ('concurrent request rounds on separate connections; not objective readiness'
                   if args.concurrent else 'sequential HTTP roundtrip including transfer; no injected load; not objective readiness'),

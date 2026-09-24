@@ -159,10 +159,13 @@ class ResponseLatencyProbeTest(unittest.TestCase):
                 worker.join(timeout=2)
 
     def test_credential_owner_accompanies_bearer_on_get_mcp_and_cleanup(self):
-        evidence = self.run_probe([{'loaded': True}], mcp_session=True,
+        evidence = self.run_probe([{'loaded': True}], compressed=True, mcp_session=True,
             credential=('probe 한글', 'synthetic-probe-secret'),
             extra_args=('--agent-name', 'probe 한글', '--path', TOOLS))
         self.assertEqual(evidence['agent_name'], 'probe 한글')
+        self.assertEqual(evidence['accept_encoding'], 'identity')
+        self.assertTrue(all(row['content_encoding'] is None
+                            for row in evidence['samples'] if row['label'] == TOOLS))
         self.assertEqual(evidence['summary'][TOOLS]['valid'], 2)
         self.assertEqual(evidence['summary']['mcp_ping']['valid'], 2)
 

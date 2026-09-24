@@ -5,7 +5,8 @@
 #   1. --head is a 40-hex SHA and --slot is exactly "SLOT: #<pr> head <same sha>"
 #   2. the PR is open, not draft, base == main, and its head is still that SHA
 #   3. every check-run on that SHA is completed+success (none -> refuse)
-#   4. every GitHub Actions workflow run for that SHA is completed+success
+#   4. the newest run of every GitHub Actions workflow for that SHA is
+#      completed+success
 #      (a queued workflow has no check-runs yet; this catches it)
 #   5. the body file is non-empty (no evidence-free approvals)
 # Skips (exit 0, no write) if this account already APPROVED that exact SHA.
@@ -89,9 +90,15 @@ done <<<"$runs"
 [ "$n_runs" -gt 0 ] || refuse "no check-runs on ${head} (empty is not green)"
 
 # ---- 4. workflow runs on this exact SHA (catches queued workflows) ----
-wf="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [.name, .status, (.conclusion // "none"), (.id|tostring)] | @tsv')" || exit 1
+# One SHA can carry several runs of one workflow: a run cancelled by a
+# concurrency group, or a failed run followed by a reopen or a dispatch that
+# passed. Only the newest run of each workflow says what that workflow thinks
+# of this SHA now, as the check-runs API already answers per check name.
+# sort+awk rather than an associative array: lanes may run bash 3.2.
+wf="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [(.workflow_id|tostring), (.run_number|tostring), .name, .status, (.conclusion // "none"), (.id|tostring)] | @tsv')" || exit 1
+wf="$(printf '%s\n' "$wf" | sort -t "$(printf '\t')" -k1,1 -k2,2nr | awk -F '\t' 'NF && !seen[$1]++')"
 wf_ids=()
-while IFS=$'\t' read -r name status concl id; do
+while IFS=$'\t' read -r _wid _num name status concl id; do
   [ -n "${name:-}" ] || continue
   wf_ids+=("$id")
   if [ "$status" != "completed" ] || [ "$concl" != "success" ]; then

@@ -4623,6 +4623,9 @@ let test_production_keeper_reports_codex_token_usage () =
                       context.cache_creation_input_tokens
                   | None -> fail "Codex did not record the request context")
                | None -> fail "production turn recorded no runtime observation");
+              (* Main already records these values through the response-usage
+                 path. Once request_context is present, the other TurnRecord
+                 branch must preserve the same per-request output count. *)
               let records =
                 Keeper_types_support.keeper_turn_record_store
                   (Workspace.default_config base_path) "codex-production-fixture"

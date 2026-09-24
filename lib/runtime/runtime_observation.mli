@@ -24,11 +24,10 @@ type request_context = {
   cache_read_input_tokens : int;
 }
 (** Input side of the newest provider request of the turn: how much of the
-    context window that request occupied. A runtime that reports the turn's
-    spend and the request's occupancy as two different counts (Claude Code's
-    result frame vs. its assistant frames) carries the occupancy here, and
-    the spend in the response usage under [usage_scope]. There is no output
-    side: a request's output count seen mid-stream is not its final count. *)
+    context window that request occupied. Claude Code reports this separately
+    from its turn spend; Codex's [tokenUsage.last] supplies the same per-request
+    input count as its current response usage. Output accounting stays in the
+    response usage under [usage_scope], since this type only holds input. *)
 
 type runtime_observation = {
   runtime_id : string;
@@ -43,8 +42,7 @@ type runtime_observation = {
   streaming_inter_chunk_avg_ms : float option;
   usage_scope : Runtime_usage_scope.t;
   request_context : request_context option;
-      (** [None] when the runtime reports no occupancy apart from its
-          response usage. *)
+      (** [None] when the runtime reports no per-request input count. *)
 }
 (** Per-turn runtime execution snapshot.  [attempts] is
     in chronological order (the internal capture stores

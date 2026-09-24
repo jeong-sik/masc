@@ -23,6 +23,8 @@ let occurrence_to_string (o : Live.tool_occurrence) =
     (Option.value ~default:"-" o.provider_message_id)
     (Option.value ~default:"-" o.tool_call_id)
 
+let token_count = function Some value -> string_of_int value | None -> "none"
+
 let delta_to_string : Live.delta -> string = function
   | Live.Batch_bound {operation_id; execution_id} -> Printf.sprintf "batch(%s,%s)" operation_id execution_id
   | Live.Run_started -> "run_started"
@@ -31,6 +33,12 @@ let delta_to_string : Live.delta -> string = function
         (Option.value ~default:"none" runtime_id)
         (match attempt_index with Some i -> string_of_int i | None -> "none")
   | Live.Stream_model_started { model } -> Printf.sprintf "stream_model_started(%s)" model
+  | Live.Stream_usage usage ->
+      Printf.sprintf "stream_usage(in=%s,out=%s,cache_read=%s,cache_write=%s)"
+        (token_count usage.Live.input_tokens)
+        (token_count usage.Live.output_tokens)
+        (token_count usage.Live.cache_read_input_tokens)
+        (token_count usage.Live.cache_creation_input_tokens)
   | Live.Text text -> "text(" ^ text ^ ")"
   | Live.Thinking text -> "thinking(" ^ text ^ ")"
   | Live.Tool_started { occurrence; tool_name } ->

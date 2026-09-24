@@ -62,7 +62,7 @@ let snapshot t =
       }))
 ;;
 
-let mcp_config_json t =
+let mcp_config_json t ~eager_tools =
   `Assoc
     [ ( "mcpServers"
       , `Assoc
@@ -72,6 +72,11 @@ let mcp_config_json t =
                 ; ( "headers"
                   , `Assoc
                       [ "Authorization", `String ("Bearer " ^ t.authorization) ] )
+                ; ( "tools"
+                  , `Assoc
+                      (List.map
+                         (fun name -> name, `Assoc [ "eager", `Bool true ])
+                         eager_tools) )
                 ] )
           ] )
     ]

@@ -13,6 +13,7 @@ type utilization =
 type source =
   | Claude_code_rate_limit_event
   | Codex_account_rate_limits_updated
+  | Codex_account_rate_limits_read
 
 type window =
   { limit_id : string option
@@ -43,6 +44,7 @@ let decode_error_to_string = function
 let source_to_string = function
   | Claude_code_rate_limit_event -> "claude_code.rate_limit_event"
   | Codex_account_rate_limits_updated -> "codex.account_rate_limits_updated"
+  | Codex_account_rate_limits_read -> "codex.account_rate_limits_read"
 ;;
 
 let ( let* ) = Result.bind
@@ -161,19 +163,53 @@ let codex_window ~path ~limit_id ~slot fields =
          })
 ;;
 
+(* One [RateLimitSnapshot]: the [rateLimits] of an update or a read, or one
+   bucket of a read's [rateLimitsByLimitId]. *)
+let codex_snapshot ?keyed_by ~path snapshot =
+  let* snapshot_fields = fields_at ~path snapshot in
+  let* stated = optional_string ~path "limitId" snapshot_fields in
+  (* A bucket of [rateLimitsByLimitId] is keyed by its limit id, so the key
+     names it when the snapshot itself does not. *)
+  let limit_id = match stated with Some _ -> stated | None -> keyed_by in
+  let* primary = codex_window ~path ~limit_id ~slot:"primary" snapshot_fields in
+  let* secondary = codex_window ~path ~limit_id ~slot:"secondary" snapshot_fields in
+  Ok (List.filter_map Fun.id [ primary; secondary ])
+;;
+
 let decode_codex_rate_limits_updated params =
   let path = "account/rateLimits/updated" in
   let* fields = fields_at ~path params in
   let* snapshot = required ~path "rateLimits" fields in
-  let path = member_path path "rateLimits" in
-  let* snapshot_fields = fields_at ~path snapshot in
-  let* limit_id = optional_string ~path "limitId" snapshot_fields in
-  let* primary = codex_window ~path ~limit_id ~slot:"primary" snapshot_fields in
-  let* secondary = codex_window ~path ~limit_id ~slot:"secondary" snapshot_fields in
-  Ok
-    { source = Codex_account_rate_limits_updated
-    ; windows = List.filter_map Fun.id [ primary; secondary ]
-    }
+  let* windows = codex_snapshot ~path:(member_path path "rateLimits") snapshot in
+  Ok { source = Codex_account_rate_limits_updated; windows }
+;;
+
+(* The read answers with both views of the same account. The per-limit map
+   carries every metered limit; the single [rateLimits] mirrors one of them
+   for older clients, so it is read only when the map is absent or null. *)
+let decode_codex_rate_limits_read response =
+  let path = "account/rateLimits/read" in
+  let* fields = fields_at ~path response in
+  let* windows =
+    match List.assoc_opt "rateLimitsByLimitId" fields with
+    | Some (`Assoc buckets) ->
+      let path = member_path path "rateLimitsByLimitId" in
+      let* per_bucket =
+        map_result
+          (fun (key, snapshot) ->
+             codex_snapshot ~keyed_by:key ~path:(member_path path key) snapshot)
+          buckets
+      in
+      Ok (List.concat per_bucket)
+    | None | Some `Null ->
+      let* snapshot = required ~path "rateLimits" fields in
+      codex_snapshot ~path:(member_path path "rateLimits") snapshot
+    | Some _ ->
+      Error
+        (Wrong_type
+           { path = member_path path "rateLimitsByLimitId"; expected = "an object or null" })
+  in
+  Ok { source = Codex_account_rate_limits_read; windows }
 ;;
 
 type recorded =

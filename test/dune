@@ -1978,7 +1978,10 @@
   terminal_size
   masc.jsonl_writer
   decompress.de
-  decompress.gz))
+  decompress.gz)
+ ;; The schedule lookup found answer is pinned to the fixture the Dashboard
+ ;; decoder test reads (#38510).
+ (deps ../dashboard/src/api/fixtures/scheduled-automation-lookup-found.json))
 
 (test
  (name test_server_runtime_bootstrap)

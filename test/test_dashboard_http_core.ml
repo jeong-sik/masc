@@ -1769,6 +1769,72 @@ let test_schedule_exact_lookup_rejects_blank_id () =
     (Some (Masc_domain.iso8601_of_unix_seconds now))
     (field "generated_at")
 
+let schedule_lookup_dashboard_fixture =
+  "../dashboard/src/api/fixtures/scheduled-automation-lookup-found.json"
+
+(* The Dashboard reads this envelope with an exact key list. #32273 added the
+   wake history to it without touching the Dashboard, and from then on every
+   found answer was refused there as carrying unknown keys (#38510). The
+   Dashboard decoder test reads the shared fixture; this pins the fixture to
+   what the server writes, key by key and kind by kind, so the next key the
+   server adds fails here before it reaches an operator. *)
+let test_schedule_exact_lookup_found_matches_the_dashboard_fixture () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let schedule_id = "sched-dashboard-fixture" in
+  let actor id =
+    { Schedule_domain.id; kind = Schedule_domain.Human_operator; display_name = None }
+  in
+  let request =
+    match
+      Schedule_domain.create_request
+        ~schedule_id
+        ~requested_by:(actor "requester")
+        ~scheduled_by:(actor "scheduler")
+        ~requested_at:100.0
+        ~due_at:200.0
+        ~payload:
+          (`Assoc
+            [ "kind", `String "consumer.note"
+            ; "body", `Assoc [ "text", `String "dashboard fixture" ]
+            ])
+        ~source:Schedule_domain.Operator_request
+        ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+        ()
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  (match Schedule_store.insert_request config request with
+   | Ok _ -> ()
+   | Error _ -> fail "the fixture schedule could not be inserted");
+  (match Schedule_store.refresh_due config ~now:201.0
+    ~retention_days:Schedule_store.terminal_schedule_retention_days with
+   | Ok _ -> ()
+   | Error _ -> fail "refresh_due refused the fixture");
+  (match Schedule_store.start_due_candidate config ~now:202.0 ~schedule_id with
+   | Ok _ -> ()
+   | Error _ -> fail "start_due_candidate refused the fixture");
+  (match Schedule_store.accept_running config ~now:203.0 ~schedule_id () with
+   | Ok _ -> ()
+   | Error _ -> fail "accept_running refused the fixture");
+  let body =
+    Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json
+      config
+      ~now:400.0
+      ~schedule_id
+  in
+  let fixture = Yojson.Safe.from_file schedule_lookup_dashboard_fixture in
+  let shape label = function
+    | `Assoc fields ->
+      List.sort compare (List.map (fun (key, value) -> key, Json_util.kind_name value) fields)
+    | other -> failf "%s is not an object: %s" label (Json_util.kind_name other)
+  in
+  check
+    (list (pair string string))
+    "the found envelope's keys and their kinds"
+    (shape "the server's answer" body)
+    (shape "the Dashboard fixture" fixture)
+
 (* The exact lookup is where a schedule's past is read, because the aggregate
    sends one wake per row and 20 rows of 323. Until this projection carried the
    list, one attempt of the up-to-32 the store keeps was all an operator could
@@ -6678,6 +6744,8 @@ let () =
             test_scheduled_automation_reads_its_cache_key;
           test_case "schedule exact lookup carries the wake history" `Quick
             test_schedule_exact_lookup_carries_the_wake_history;
+          test_case "schedule exact lookup found matches the Dashboard fixture" `Quick
+            test_schedule_exact_lookup_found_matches_the_dashboard_fixture;
           test_case "schedule page can be scoped to one target" `Quick
             test_schedule_page_can_be_scoped_to_one_target;
           test_case "schedule page counts retained wakes" `Quick

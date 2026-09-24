@@ -157,8 +157,7 @@ const SUBJECT_MAX_CHARS = 72
 
 const SUBJECT_KEYS = [
   'argv',        // Execute: ['git', 'fetch', 'origin']
-  'script',      // Execute: the command line a shell ran
-  'command',
+  'command',     // Execute: the command line a shell ran
   'cmd',
   'file_path',   // Read / Edit / Write
   'pattern',     // Grep — what it looked for, before where it looked

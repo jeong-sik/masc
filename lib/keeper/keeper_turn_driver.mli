@@ -116,6 +116,32 @@ type walk_rest =
       ; resting_runtime_id : string
       }
 
+(** Who a walk runs for (RFC-0458 §3.4 rule 5).
+    [Fleet_keeper_turn recorder]: a fleet Keeper's turn. It comes back every
+    cycle, so a failure it sees names it as the recorder.
+    [One_shot_walk]: a walk no cycle repeats, such as a completion review. It
+    records no failed-attempt mark (timeout, 5xx, 529, network): a mark naming it
+    would have no one to retry it, and would hold the candidate behind for
+    every Keeper until something else dispatched it and got an answer. Its
+    429 and 402 evidence is recorded as any walk's. An answer it receives
+    still clears the candidate's evidence, whoever recorded it. *)
+type walk_owner =
+  | Fleet_keeper_turn of Runtime_candidate_backpressure.recorder
+  | One_shot_walk
+
+(** Whose walk orders the lane (RFC-0458 §3.4, 2026-09-23).
+    [Fresh_walk_by recorder]: a fleet Keeper's turn without a deferred
+    suffix. A failed attempt that Keeper recorded does not demote its
+    candidate, so its next cycle dispatches the first such candidate again
+    (normally the head) and the answer renews or clears the mark; without this
+    the fallback kept answering and the head never came back until restart
+    (#38174). Failed attempts other Keepers recorded still demote.
+    [Every_mark_demotes]: a failed turn's deferred suffix, a rotation inside a
+    walk, or a one-shot walk. Every failed attempt demotes. *)
+type walk_start =
+  | Fresh_walk_by of Runtime_candidate_backpressure.recorder
+  | Every_mark_demotes
+
 (** A deferred suffix in the order the next turn walks it. *)
 val deferred_lane_rest : now:float -> deferred_runtime_lane -> walk_rest
 
@@ -143,7 +169,8 @@ type assignment_refusal =
       (** The configured identity has no capability catalog entry. *)
 
 val assignment_refusal_to_string : assignment_refusal -> string
-val assignment_walk_order : now:float -> string -> (walk_order, assignment_refusal) result
+val assignment_walk_order :
+  now:float -> walk:walk_start -> string -> (walk_order, assignment_refusal) result
 
 (** A fresh walk of an assignment, ordered as a turn without a deferred suffix
     orders it: {!assignment_walk_order}'s head and its rest. *)
@@ -230,6 +257,7 @@ val run_named :
   ?input_policy:Keeper_input_policy.t ->
   runtime_id:string ->
   ?keeper_name:string ->
+  walk_owner:walk_owner ->
   ?pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
   goal:string ->
@@ -437,6 +465,7 @@ module For_testing : sig
 
   val modality_reroute_candidates :
     now:float ->
+    walk:walk_start ->
     deferred_runtime_lane:deferred_runtime_lane option ->
     first_candidate:Runtime.t ->
     remaining_runtimes:Runtime.t list ->
@@ -524,6 +553,7 @@ module For_testing : sig
     ?model_of:('candidate -> string option) ->
     ?candidate_backpressure_of:('candidate -> Runtime_candidate_backpressure.candidate option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
+    walk_owner:walk_owner ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->
     emit_runtime_manifest:

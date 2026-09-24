@@ -68,3 +68,14 @@ val disabled : Fusion_policy.t
     - 필드 타입 불일치 → [Error [Toml_type_error _]].
     여러 에러는 누적되어 한 번에 반환된다. *)
 val of_toml : Otoml.t -> (Fusion_policy.t, config_error list) result
+
+(** 전체 runtime.toml 에서 [fusion] preset 의 자리만 읽는다: (preset 이름, 자리 종류,
+    적힌 경로 이름). preset 순서대로, preset 안에서는
+    {!Fusion_policy.preset_seat_routes} 순서다. 경로 이름은 적힌 그대로다(trim 안 함).
+
+    {!of_toml} 과 같은 함수로 값을 읽지만 preset 을 검증하지 않는다. 그래서 다른
+    preset 의 [min_answered] 가 범위 밖이거나 두 panel 문법이 같이 있어도 자리는
+    읽힌다(두 문법이 같이 있으면 둘 다 자리로 센다). [fusion] 이나 [presets] 가 없으면
+    [Ok []]. 값의 TOML 타입이 틀리면 [Error (Toml_type_error _)]. *)
+val seat_routes_of_toml :
+  Otoml.t -> ((string * Fusion_policy.seat_kind * string) list, config_error) result

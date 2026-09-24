@@ -70,14 +70,20 @@ val toggle_choice :
 
 type free_text_slot
 
-val free_text_slot : Masc.Tui_decode.ask_question -> free_text_slot
+val free_text_slot : ask_id:string -> Masc.Tui_decode.ask_question -> free_text_slot
 (** Every question offers an operator-written alternative. The slot binds the
-    editor to the question id, including questions that only offered choices. *)
+    editor to the ask and the question, including questions that only offered
+    choices. Both, because a question id is unique only inside its ask:
+    masc_ask numbers every ask's questions from [q1]. *)
 
 val alternative_position : Masc.Tui_decode.ask_question -> int option
 (** The next digit after the choices when it fits in 1-9; otherwise use [t]. *)
 
 val free_text_hint : free_text_slot -> string option
+
+val free_text_ask_id : free_text_slot -> string
+(** Which ask the slot writes to. A snapshot can move the cursor to another ask
+    while the operator types; the text still belongs to this one. *)
 
 val free_text_question_id : free_text_slot -> string
 (** Which question the slot writes to. The editor holds a slot while the
@@ -87,7 +93,8 @@ val free_text_question_id : free_text_slot -> string
 
 val set_text : draft -> slot:free_text_slot -> text:string -> draft
 (** Blank text clears the response instead of recording it: the domain rejects
-    a blank write, and an editor emptied by backspaces means unanswered. *)
+    a blank write, and an editor emptied by backspaces means unanswered. A
+    draft for another ask than the slot's comes back unchanged. *)
 
 val skip : draft -> question:Masc.Tui_decode.ask_question -> draft
 val clear : draft -> question:Masc.Tui_decode.ask_question -> draft

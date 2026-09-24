@@ -48,7 +48,7 @@ def test_aggregate_rows(tmp_path, monkeypatch, capsys):
     row1 = lines[1].split(",")
     assert row1[:5] == ["arm-b-20260910-1200", "fix-git", "fix-git__Abc123", "1", "1234"]
     assert row1[5:9] == ["100", "50", "10", "0.01"]
-    assert row1[9:] == ["17", "2", "Succeeded", "", "", "", "", "", "", "", ""]
+    assert row1[9:] == ["17", "2", "Succeeded", "", "", "", "", "", "", "", "", "", ""]
     row2 = lines[2].split(",")
     assert row2[2] == "fix-git__Def456" and row2[3] == "0"
 
@@ -103,7 +103,7 @@ def test_a_missing_measurement_stays_blank(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["aggregate.py", str(jobs)])
     aggregate.main()
     row = capsys.readouterr().out.strip().splitlines()[1].split(",")
-    assert row[4:] == [""] * 16
+    assert row[4:] == [""] * 18
 
 
 def test_unpriced_keeper_rows_reach_the_table(tmp_path, monkeypatch, capsys):
@@ -218,5 +218,25 @@ def test_a_row_names_its_candidate_order_and_who_answered(tmp_path, monkeypatch,
     assert walked["turns_unanswered"] == "1"
     single = rows["fix-git__Def456"]
     assert single["candidates"] == "claude.claude-fable-5-1"
+    # Tool failures were not measured on either trial: blank, not zero.
+    assert walked["failed_tool_calls"] == "" and walked["failed_by_tool"] == ""
     # Measured and nothing answered: the count says so, the blank does not.
     assert single["answered_by"] == "" and single["turns_unanswered"] == "0"
+
+
+def test_a_row_names_the_tools_that_failed(tmp_path, monkeypatch, capsys):
+    import csv
+    jobs = tmp_path / "jobs"
+    make_trial(jobs, "arm-b/fix-git__Tool01", trial_name="fix-git__Tool01",
+               agent_result={"metadata": {
+                   "failed_tool_calls": 3,
+                   "tool_outcomes": [
+                       {"tool": "Execute", "calls": 9, "failed": 2},
+                       {"tool": "Read", "calls": 4, "failed": 1},
+                       {"tool": "Grep", "calls": 2, "failed": 0}]}})
+    monkeypatch.setattr(sys, "argv", ["aggregate.py", str(jobs)])
+    aggregate.main()
+    [row] = list(csv.DictReader(capsys.readouterr().out.splitlines()))
+    assert row["failed_tool_calls"] == "3"
+    # Tools with no failure are left out; the order is the helper's.
+    assert row["failed_by_tool"] == "Execute=2;Read=1"

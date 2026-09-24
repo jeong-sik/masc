@@ -92,9 +92,15 @@ let active_of = function
 
 type page_runtime = Scene_runtime | No_runtime
 
+(* The body's result goes back as a JSON string, and a throw as an object
+   carrying its message: Stagehand words an uncaught throw by its CDP text,
+   which is "Uncaught" for every throw, so the page script's reason
+   (page_url_changed, scene_document_changed, ...) would not reach the
+   caller. A string and an object cannot be mistaken for each other. *)
 let evaluate_expression ~runtime ~body ~args =
   let runtime = match runtime with Scene_runtime -> Browser_scene_script.runtime | No_runtime -> "" in
-  Printf.sprintf "(function(args) { %s\nreturn JSON.stringify((function(){ %s }).call(null, args)); })(%s)"
+  Printf.sprintf
+    "(function(args) { %s\ntry { return JSON.stringify((function(){ %s }).call(null, args)); } catch (e) { return {thrown: String(e !== null && typeof e === 'object' && 'message' in e ? e.message : e)}; } })(%s)"
     runtime body (Yojson.Safe.to_string args)
 ;;
 
@@ -105,6 +111,9 @@ let evaluate ~runtime ~send page_id body =
     (match Yojson.Safe.from_string encoded with
      | json -> Ok json
      | exception Yojson.Json_error _ -> Error (malformed "page.evaluate" "a JSON result"))
+  (* The reason passes through as the automation lane passes it. Whether it
+     came before or after the verb's effect is the caller's to say. *)
+  | Some (`Assoc [ "thrown", `String reason ]) -> Error (Browser_lane.Refused reason)
   | Some _ | None -> Error (malformed "page.evaluate" "the script's JSON string")
 ;;
 

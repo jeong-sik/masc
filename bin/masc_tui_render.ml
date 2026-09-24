@@ -329,11 +329,33 @@ let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview
    summary. *)
 let overview_team_detail_lines (state : state) = overview_pulls_lines state
 
+(* The fleet's cost as the Team title prints it, longest first; the title
+   takes the first that fits. The words are [Overview_team.cost_words]'s; a
+   failed read's reason is the one wire string among them. *)
+let overview_cost_tails (cost : overview_cost_reading) =
+  let words = Overview_team.cost_words cost in
+  let lead =
+    match words.tone with
+    | Overview_team.Cost_plain -> words.lead
+    | Overview_team.Cost_muted ->
+        Printf.sprintf "%s%s%s" Ansi.dim words.lead Ansi.reset
+    | Overview_team.Cost_warn ->
+        Printf.sprintf "%s%s%s" (Theme.warn ()) words.lead Ansi.reset
+  in
+  match words.details with
+  | [] -> [ "   " ^ lead ]
+  | details ->
+      [ Printf.sprintf "   %s %s\xc2\xb7 %s%s" lead Ansi.dim
+          (Terminal_text.single_line (String.concat " \xc2\xb7 " details))
+          Ansi.reset
+      ; "   " ^ lead
+      ]
+
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the name lines and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
-let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
+let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cost ~cols
     ~detail_lines ~pr_tag_of_keeper =
   let name_cells =
     List.fold_left
@@ -499,11 +521,21 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
             ; spark
             ])
   in
+  (* The cost comes before the completion bars and outlasts them: the bars
+     shed first, then the cost's detail, then the cost. *)
+  let candidates =
+    List.concat_map
+      (fun cost_tail ->
+        List.map (fun tail -> cost_tail ^ tail) tails @ [ cost_tail ])
+      (match cost with
+       | Some cost -> overview_cost_tails cost
+       | None -> [ "" ])
+  in
   let title =
     match
       List.find_opt
         (fun tail -> Message_layout.display_width (head ^ tail) <= cols)
-        tails
+        candidates
     with
     | Some tail -> head ^ tail
     | None -> head
@@ -830,7 +862,11 @@ let render_overview (state : state) =
    | Some team when row_budget.team_rows > 0 ->
        let title, lines =
          overview_team_lines team ~team_rows:row_budget.team_rows
-           ~flow:state.task_flow ~cols
+           ~flow:state.task_flow
+           ~cost:
+             (if state.overview_cost_visible then Some state.overview_cost
+              else None)
+           ~cols
            ~detail_lines:(overview_team_detail_lines state)
            ~pr_tag_of_keeper:(Repository_pulls.keeper_tag state.overview_pulls)
        in

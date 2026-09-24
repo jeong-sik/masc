@@ -1452,6 +1452,14 @@ let fetch_dashboard_goals ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/goals"
 
+(** GET /api/v1/dashboard/keeper-costs -- per-Keeper cost sums over the last
+    [window_minutes]. *)
+let fetch_keeper_costs ~(host : string) ~(port : int) ~(window_minutes : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/dashboard/keeper-costs?window=%d" window_minutes)
+
 let fetch_runtime_resolved ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/runtime/resolved"

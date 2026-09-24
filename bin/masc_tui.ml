@@ -1848,6 +1848,8 @@ type http_scoped_surface_results = {
     option;
   (* [None] off the Overview, the one surface that draws the GOALS section. *)
   http_overview_goals: (Tui_decode.overview_goal list, string) result option;
+  (* [None] off the Overview, the one surface that draws the fleet's cost. *)
+  http_overview_cost: (Tui_decode.keeper_costs, string) result option;
 }
 
 type http_surface_results = {
@@ -9845,6 +9847,17 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       let cost = Masc_tui_types.fleet_total_cost_usd state in
       notice ~kind:Notice_reply
         (Printf.sprintf "Fleet cost in the tab row: %s ($%.4f so far)" status_str cost)
+  | Masc_tui_command.Toggle_team_cost ->
+      Buffer.clear state.msg_input;
+      state.overview_cost_visible <- not state.overview_cost_visible;
+      (* Hidden, the cost stops being read, so a reading kept from before
+         would come back as a sum nobody observed since. Shown again, it
+         starts unread and the next refresh fills it. *)
+      state.overview_cost <- Cost_unread;
+      notice ~kind:Notice_reply
+        (if state.overview_cost_visible then
+           "Fleet 24h cost on the Overview Team line: shown"
+         else "Fleet 24h cost on the Overview Team line: hidden")
   | Masc_tui_command.Open_link_preview url_opt ->
       Buffer.clear state.msg_input;
       let all_urls = Masc_tui_types.conversation_urls state in
@@ -10590,6 +10603,13 @@ let apply_overview_goals_load state = function
   | Ok goals -> state.overview_goals <- Goals_read goals
   | Error err -> state.overview_goals <- Goals_failed err
 
+(* A failed read replaces the last good one, as the goals reading does: a cost
+   drawn after the read that summed it stopped arriving would be a sum nobody
+   observed this refresh. *)
+let apply_overview_cost_load state = function
+  | Ok costs -> state.overview_cost <- Cost_read costs
+  | Error err -> state.overview_cost <- Cost_failed err
+
 let apply_keeper_roster_load state = function
   | Ok roster ->
       state.keeper_roster <- roster;
@@ -10844,6 +10864,13 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
   in
+  let http_overview_cost =
+    when_needed needs.needs_overview_cost (fun () ->
+        match Masc_tui_loader.load_overview_cost ~host ~port with
+        | result -> result
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn -> Error (Printexc.to_string exn))
+  in
   { http_transport
   ; http_approvals
   ; http_asks
@@ -10856,6 +10883,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   ; http_runtime_quota
   ; http_repository_pulls
   ; http_overview_goals
+  ; http_overview_cost
   }
 
 let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
@@ -10902,7 +10930,8 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   Option.iter (apply_runtime_quota_load state) results.http_runtime_quota;
   Option.iter (apply_repository_pulls_load state) results.http_repository_pulls;
-  Option.iter (apply_overview_goals_load state) results.http_overview_goals
+  Option.iter (apply_overview_goals_load state) results.http_overview_goals;
+  Option.iter (apply_overview_cost_load state) results.http_overview_cost
 
 (* This is a current reading, not a last-known cache. A failed probe makes
    the projection unread; every following refresh asks again, so a same-port
@@ -11216,6 +11245,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         ~scoped_refresh_inflight:!scoped_refresh_inflight
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
+        ~overview_cost_shown:state.overview_cost_visible
         state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not
@@ -12795,7 +12825,8 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
-        | Masc_tui_command.Toggle_burn_hud | Masc_tui_command.Open_changes
+        | Masc_tui_command.Toggle_burn_hud | Masc_tui_command.Toggle_team_cost
+        | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
          | Masc_tui_command.Show_acting_pane_tab _
          | Masc_tui_command.Acting_pane_tab_unknown _
@@ -16749,6 +16780,7 @@ let main
     ref
       (Masc_tui_types.surface_needs
          ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state))
+         ~overview_cost_shown:state.overview_cost_visible
          state.view)
   in
   let input_reader = create_input_reader () in
@@ -25206,6 +25238,7 @@ and is loaded on demand through keeper_skill.
         Masc_tui_types.surface_needs
           ~keeper_pane_drawn:
             (not (Masc_tui_render.acting_pane_suppressed state))
+          ~overview_cost_shown:state.overview_cost_visible
           state.view
       in
       if

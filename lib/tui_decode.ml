@@ -11762,3 +11762,134 @@ let decode_schedule_runner_hold row =
     Ok (Some { srh_occurrence_id; srh_due_at_iso })
   | bad -> field_type_error "runner_hold" "an object or null" bad
 ;;
+
+(* [GET /api/v1/dashboard/keeper-costs]. The cost sum is [null] exactly when
+   no sample reported a price, and the reply says so twice: the sum and
+   [cost_reported_samples]. Both are read, and a reply where they disagree is
+   refused rather than one of them believed. *)
+type keeper_cost_sum =
+  | Cost_reported of { usd : float; samples : int }
+  | Cost_not_reported
+
+type keeper_cost_metrics_read =
+  | Metrics_read of { malformed_rows : int }
+  | Metrics_read_failed of { reason : string }
+
+type keeper_cost_row = {
+  kc_keeper_name : string;
+  kc_cost : keeper_cost_sum;
+  kc_unreported_samples : int;
+  kc_unread_samples : int;
+  kc_metrics_read : keeper_cost_metrics_read;
+}
+
+type keeper_costs_cache =
+  | Keeper_costs_fresh
+  | Keeper_costs_stale of { last_error : string option }
+  | Keeper_costs_warming of { last_error : string option }
+
+type keeper_costs = {
+  kcs_window_minutes : int;
+  kcs_keepers : keeper_cost_row list;
+  kcs_cache : keeper_costs_cache;
+}
+
+let decode_keeper_cost_metrics_read json =
+  let* read = required_object_field json "metrics_read" in
+  let* state = required_string_field read "state" in
+  match state with
+  | "read" ->
+      let* malformed_rows = required_nonnegative_int_field read "malformed_rows" in
+      Ok (Metrics_read { malformed_rows })
+  | "failed" ->
+      let* reason = required_string_field read "reason" in
+      Ok (Metrics_read_failed { reason })
+  | other -> Error (Printf.sprintf "metrics_read has unknown state %S" other)
+
+let decode_keeper_cost_row json =
+  let* kc_keeper_name = required_string_field json "keeper_name" in
+  let* sum = required_nullable_float_field json "total_cost_usd" in
+  let* reported = required_nonnegative_int_field json "cost_reported_samples" in
+  let* kc_cost =
+    match sum, reported with
+    | Some usd, samples when samples > 0 -> Ok (Cost_reported { usd; samples })
+    | None, 0 -> Ok Cost_not_reported
+    | Some _, _ ->
+        Error
+          (Printf.sprintf
+             "keeper %S has a cost sum but no reported sample" kc_keeper_name)
+    | None, samples ->
+        Error
+          (Printf.sprintf
+             "keeper %S has no cost sum beside %d reported samples"
+             kc_keeper_name samples)
+  in
+  let* kc_unreported_samples =
+    required_nonnegative_int_field json "cost_unreported_samples"
+  in
+  let* kc_unread_samples = required_nonnegative_int_field json "cost_unread_samples" in
+  let* kc_metrics_read = decode_keeper_cost_metrics_read json in
+  Ok
+    { kc_keeper_name
+    ; kc_cost
+    ; kc_unreported_samples
+    ; kc_unread_samples
+    ; kc_metrics_read
+    }
+
+let decode_keeper_costs_cache json =
+  let* cache = required_object_field json "cache" in
+  let* state = required_string_field cache "state" in
+  let* last_error = optional_string_field cache "last_error" in
+  match state with
+  | "fresh" -> Ok Keeper_costs_fresh
+  | "stale_refreshing" -> Ok (Keeper_costs_stale { last_error })
+  | "warming" -> Ok (Keeper_costs_warming { last_error })
+  | other -> Error (Printf.sprintf "cache has unknown state %S" other)
+
+let decode_keeper_costs json =
+  let* kcs_window_minutes = required_int_field json "window_minutes" in
+  let* items = required_list_field json "keepers" in
+  let* kcs_keepers = decode_list "keepers" decode_keeper_cost_row items in
+  let* kcs_cache = decode_keeper_costs_cache json in
+  Ok { kcs_window_minutes; kcs_keepers; kcs_cache }
+
+type fleet_cost = {
+  fc_usd : float option;
+  fc_priced_turns : int;
+  fc_unpriced_turns : int;
+  fc_malformed_rows : int;
+  fc_unread_keepers : int;
+}
+
+let fleet_cost_of_keeper_costs (costs : keeper_costs) =
+  List.fold_left
+    (fun acc row ->
+      let acc =
+        match row.kc_cost with
+        | Cost_not_reported -> acc
+        | Cost_reported { usd; samples } ->
+            { acc with
+              fc_usd = Some (Option.value acc.fc_usd ~default:0.0 +. usd)
+            ; fc_priced_turns = acc.fc_priced_turns + samples
+            }
+      in
+      let acc =
+        { acc with
+          fc_unpriced_turns =
+            acc.fc_unpriced_turns + row.kc_unreported_samples
+            + row.kc_unread_samples
+        }
+      in
+      match row.kc_metrics_read with
+      | Metrics_read { malformed_rows } ->
+          { acc with fc_malformed_rows = acc.fc_malformed_rows + malformed_rows }
+      | Metrics_read_failed { reason = _ } ->
+          { acc with fc_unread_keepers = acc.fc_unread_keepers + 1 })
+    { fc_usd = None
+    ; fc_priced_turns = 0
+    ; fc_unpriced_turns = 0
+    ; fc_malformed_rows = 0
+    ; fc_unread_keepers = 0
+    }
+    costs.kcs_keepers

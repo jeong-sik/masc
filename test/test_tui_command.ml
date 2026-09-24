@@ -13,6 +13,7 @@ let describe = function
   | Command.Open_diff -> "open-diff"
   | Command.Open_patch_modal -> "open-patch-modal"
   | Command.Toggle_burn_hud -> "toggle-burn-hud"
+  | Command.Toggle_team_cost -> "toggle-team-cost"
   | Command.Open_link_preview None -> "open-link-preview"
   | Command.Open_link_preview (Some u) -> "open-link-preview:" ^ u
   | Command.Open_links_list -> "open-links-list"
@@ -140,6 +141,7 @@ let test_pane_commands_parse_by_word () =
     ; "open-patch-modal"
     ; "toggle-burn-hud"
     ; "toggle-burn-hud"
+    ; "toggle-team-cost"
     ; "open-link-preview"
     ; "open-link-preview:https://github.com/jeong-sik/masc"
     ; "open-links-list"
@@ -210,6 +212,7 @@ let test_pane_commands_parse_by_word () =
        ; "/review"
        ; "/burn"
        ; "/cost"
+       ; "/team-cost"
        ; "/preview"
        ; "/preview https://github.com/jeong-sik/masc"
        ; "/links"
@@ -523,7 +526,8 @@ let test_a_lone_slash_lists_everything () =
      | Command.No_command | Command.Chosen _ | Command.Unknown_command _ -> 0)
 
 let test_a_prefix_narrows_the_list () =
-  check string "t narrows to four" "candidates:task,thinking,tools,telemetry" (hint "/t");
+  check string "t narrows to five" "candidates:task,team-cost,thinking,tools,telemetry"
+    (hint "/t");
   check string "th narrows to one" "candidates:thinking" (hint "/th")
 
 (* [parse] does no prefix matching, so a half-typed word is not a command yet.

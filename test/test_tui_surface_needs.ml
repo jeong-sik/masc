@@ -14,7 +14,7 @@ module Types = Masc_tui_types
    cases ask what the surface itself fetches, so they ask with the pane
    down. [test_the_keeper_pane_asks_for_the_roster_wherever_it_is_drawn]
    asks the other way. *)
-let needs surface = Types.surface_needs ~keeper_pane_drawn:false surface
+let needs surface = Types.surface_needs ~keeper_pane_drawn:false ~overview_cost_shown:false surface
 
 let test_only_the_chat_pane_asks_for_chat_history () =
   check bool "the chat pane asks for it" true
@@ -58,12 +58,12 @@ let test_the_keeper_pane_asks_for_the_roster_wherever_it_is_drawn () =
       check bool
         (label ^ " does not fetch the roster for itself")
         false
-        (Types.surface_needs ~keeper_pane_drawn:false surface)
+        (Types.surface_needs ~keeper_pane_drawn:false ~overview_cost_shown:false surface)
           .Types.needs_keeper_roster;
       check bool
         (label ^ " fetches it while the pane draws it")
         true
-        (Types.surface_needs ~keeper_pane_drawn:true surface)
+        (Types.surface_needs ~keeper_pane_drawn:true ~overview_cost_shown:false surface)
           .Types.needs_keeper_roster)
     [ ("approvals", Types.Approvals)
     ; ("board", Types.Board)
@@ -72,8 +72,8 @@ let test_the_keeper_pane_asks_for_the_roster_wherever_it_is_drawn () =
     ; ("memory", Types.Memory)
     ];
   (* And the pane changes nothing else: a surface asks for what it draws. *)
-  let board_without = Types.surface_needs ~keeper_pane_drawn:false Types.Board in
-  let board_with = Types.surface_needs ~keeper_pane_drawn:true Types.Board in
+  let board_without = Types.surface_needs ~keeper_pane_drawn:false ~overview_cost_shown:false Types.Board in
+  let board_with = Types.surface_needs ~keeper_pane_drawn:true ~overview_cost_shown:false Types.Board in
   check bool "the board still asks for the board" true
     board_with.Types.needs_board;
   check bool "and for nothing else the pane does not draw" true
@@ -105,6 +105,7 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
       ; delta.needs_runtime_quota
       ; delta.needs_repository_pulls
       ; delta.needs_overview_goals
+      ; delta.needs_overview_cost
       ]
       |> List.fold_left (fun total wanted -> if wanted then total + 1 else total) 0
     in
@@ -127,11 +128,11 @@ let test_equal_needs_have_no_delta () =
 let test_full_refresh_omits_scoped_datasets_while_their_owner_is_running () =
   let concurrent =
     Types.full_refresh_needs ~scoped_refresh_inflight:true
-      ~keeper_pane_drawn:true Types.Board
+      ~keeper_pane_drawn:true ~overview_cost_shown:false Types.Board
   in
   let alone =
     Types.full_refresh_needs ~scoped_refresh_inflight:false
-      ~keeper_pane_drawn:true Types.Board
+      ~keeper_pane_drawn:true ~overview_cost_shown:false Types.Board
   in
   check bool "concurrent full refresh is global-only" false
     (Types.surface_needs_any concurrent);
@@ -168,6 +169,27 @@ let test_authoritative_refresh_waits_for_both_owners_then_runs_once () =
     (cadence = Types.No_scoped_followup)
 ;;
 
+(* The fleet's cost is read for the Overview's Team title, only while
+   [/team-cost] shows it, and nowhere else: keeper-costs reads every day file
+   of every Keeper's metrics, so a hidden cost costs no request. *)
+let test_only_a_shown_overview_cost_is_fetched () =
+  let shown surface =
+    Types.surface_needs ~keeper_pane_drawn:false ~overview_cost_shown:true surface
+  in
+  check bool "the overview asks for it while it is shown" true
+    (shown Types.Overview).Types.needs_overview_cost;
+  check bool "the overview does not while it is hidden" false
+    (needs Types.Overview).Types.needs_overview_cost;
+  List.iter
+    (fun (label, surface) ->
+      check bool (label ^ " does not, shown or not") false
+        (shown surface).Types.needs_overview_cost)
+    [ ("planning", Types.Planning)
+    ; ("metrics", Types.Metrics)
+    ; ("the keeper list", Types.Keepers Types.Keeper_list)
+    ]
+;;
+
 (* The goal tree is read for the Overview's GOALS section and nowhere else;
    Planning reads its own planning payload. *)
 let test_only_the_overview_asks_for_the_goal_tree () =
@@ -191,6 +213,8 @@ let () =
             test_only_the_chat_pane_asks_for_chat_history
         ; test_case "only the overview asks for the goal tree" `Quick
             test_only_the_overview_asks_for_the_goal_tree
+        ; test_case "only a shown overview cost is fetched" `Quick
+            test_only_a_shown_overview_cost_is_fetched
         ; test_case "every keeper sub-mode asks for the roster" `Quick
             test_every_keeper_sub_mode_still_asks_for_the_roster
         ; test_case "the keeper pane asks for the roster wherever it is drawn"

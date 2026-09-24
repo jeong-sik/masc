@@ -226,3 +226,63 @@ let phase_word (keeper : Types.overview_keeper) =
   | Types.Keeper_phase phase -> Tui_decode.keeper_phase_to_string phase
   | Types.Keeper_phase_unreadable word -> word
   | Types.Keeper_phase_absent -> "no phase"
+
+type cost_tone = Cost_plain | Cost_muted | Cost_warn
+
+type cost_words = { lead : string; details : string list; tone : cost_tone }
+
+let cost_window_label minutes =
+  if minutes mod 60 = 0 then Printf.sprintf "%dh" (minutes / 60)
+  else Printf.sprintf "%dm" minutes
+
+let cost_words (cost : Types.overview_cost_reading) =
+  let plural count noun =
+    Printf.sprintf "%d %s%s" count noun (if count = 1 then "" else "s")
+  in
+  match cost with
+  | Types.Cost_unread ->
+      { lead = "cost not read yet"; details = []; tone = Cost_muted }
+  | Types.Cost_failed reason ->
+      { lead = "cost unavailable"; details = [ reason ]; tone = Cost_warn }
+  | Types.Cost_read { kcs_cache = Tui_decode.Keeper_costs_warming { last_error }; _ }
+    ->
+      let details =
+        match last_error with
+        | Some _ -> [ "last server read failed" ]
+        | None -> []
+      in
+      { lead = "cost not read yet"; details; tone = Cost_muted }
+  | Types.Cost_read
+      ({ kcs_cache = Tui_decode.Keeper_costs_fresh | Tui_decode.Keeper_costs_stale _
+       ; _
+       } as costs) ->
+      let fleet = Tui_decode.fleet_cost_of_keeper_costs costs in
+      let window = cost_window_label costs.kcs_window_minutes in
+      let shortfalls =
+        List.filter_map
+          (fun (count, text) -> if count > 0 then Some text else None)
+          [ ( fleet.fc_unpriced_turns
+            , plural fleet.fc_unpriced_turns "turn" ^ " unpriced" )
+          ; ( fleet.fc_malformed_rows
+            , plural fleet.fc_malformed_rows "row" ^ " unreadable" )
+          ; ( fleet.fc_unread_keepers
+            , plural fleet.fc_unread_keepers "keeper" ^ " unread" )
+          ]
+      in
+      let refresh_failed =
+        match costs.kcs_cache with
+        | Tui_decode.Keeper_costs_stale { last_error = Some _ } ->
+            [ "last refresh failed" ]
+        | Tui_decode.Keeper_costs_stale { last_error = None }
+        | Tui_decode.Keeper_costs_fresh | Tui_decode.Keeper_costs_warming _ ->
+            []
+      in
+      let lead, tone =
+        match fleet.fc_usd, shortfalls with
+        | None, [] -> (Printf.sprintf "no turns in %s" window, Cost_muted)
+        | None, _ :: _ -> (Printf.sprintf "cost unknown %s" window, Cost_plain)
+        | Some usd, [] -> (Printf.sprintf "$%.2f %s" usd window, Cost_plain)
+        | Some usd, _ :: _ ->
+            (Printf.sprintf "at least $%.2f %s" usd window, Cost_plain)
+      in
+      { lead; details = shortfalls @ refresh_failed; tone }

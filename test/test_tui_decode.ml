@@ -11207,6 +11207,123 @@ let test_tool_approval_mode_unknown_word_fails () =
          in
          contains "alpha" && contains "manual")
 
+(* [GET /api/v1/dashboard/keeper-costs] as the Team block reads it. A cost
+   no sample reported is unknown, never $0; a sum and a sample count that
+   disagree refuse the reply; the warming placeholder is not a fleet. *)
+let keeper_cost_row ?(sum = `Float 1.5) ?(reported = 3) ?(unreported = 0)
+    ?(unread = 0)
+    ?(metrics_read = `Assoc [ "state", `String "read"; "malformed_rows", `Int 0 ])
+    name =
+  `Assoc
+    [ "keeper_name", `String name
+    ; "total_cost_usd", sum
+    ; "cost_reported_samples", `Int reported
+    ; "cost_unreported_samples", `Int unreported
+    ; "cost_unread_samples", `Int unread
+    ; "total_input_tokens", `Null
+    ; "total_output_tokens", `Null
+    ; "total_tokens", `Null
+    ; "tokens_reported_samples", `Int 0
+    ; "tokens_unreported_samples", `Int 0
+    ; "tokens_unread_samples", `Int 0
+    ; "p50_latency_ms", `Null
+    ; "p95_latency_ms", `Null
+    ; "sample_count", `Int (reported + unreported + unread)
+    ; "metrics_read", metrics_read
+    ]
+
+let keeper_costs_reply ?(cache = `Assoc [ "state", `String "fresh"; "generated_at", `Float 1.0 ])
+    keepers =
+  `Assoc
+    [ "keepers", `List keepers
+    ; "window_minutes", `Int 1440
+    ; "generated_at", `Float 1.0
+    ; "cache", cache
+    ]
+
+let decode_keeper_costs_ok json =
+  match Tui_decode.decode_keeper_costs json with
+  | Ok costs -> costs
+  | Error err -> Alcotest.fail ("keeper costs refused: " ^ err)
+
+let test_keeper_costs_null_sum_is_not_reported () =
+  let costs =
+    decode_keeper_costs_ok
+      (keeper_costs_reply
+         [ keeper_cost_row ~sum:`Null ~reported:0 ~unreported:4 "subscription" ])
+  in
+  match costs.kcs_keepers with
+  | [ { kc_cost = Tui_decode.Cost_not_reported; kc_unreported_samples; _ } ] ->
+      Alcotest.(check int) "unpriced turns" 4 kc_unreported_samples;
+      let fleet = Tui_decode.fleet_cost_of_keeper_costs costs in
+      Alcotest.(check (option (float 0.0))) "no fleet sum" None fleet.fc_usd;
+      Alcotest.(check int) "fleet unpriced turns" 4 fleet.fc_unpriced_turns
+  | _ -> Alcotest.fail "a null sum decoded as a reported cost"
+
+let test_keeper_costs_refuses_a_sum_that_disagrees_with_its_count () =
+  let refused label row =
+    match Tui_decode.decode_keeper_costs (keeper_costs_reply [ row ]) with
+    | Ok _ -> Alcotest.fail (label ^ " was accepted")
+    | Error _ -> ()
+  in
+  refused "a null sum beside reported samples"
+    (keeper_cost_row ~sum:`Null ~reported:2 "a");
+  refused "a sum beside no reported sample"
+    (keeper_cost_row ~sum:(`Float 0.0) ~reported:0 "b");
+  refused "a missing unread count"
+    (match keeper_cost_row "c" with
+     | `Assoc fields ->
+         `Assoc (List.remove_assoc "cost_unread_samples" fields)
+     | other -> other);
+  refused "an unknown metrics_read state"
+    (keeper_cost_row ~metrics_read:(`Assoc [ "state", `String "partial" ]) "d");
+  match
+    Tui_decode.decode_keeper_costs
+      (keeper_costs_reply ~cache:(`Assoc [ "state", `String "cold" ]) [])
+  with
+  | Ok _ -> Alcotest.fail "an unknown cache state was accepted"
+  | Error _ -> ()
+
+let test_keeper_costs_fleet_sum_counts_every_shortfall () =
+  let costs =
+    decode_keeper_costs_ok
+      (keeper_costs_reply
+         [ keeper_cost_row ~sum:(`Float 1.25) ~reported:2 ~unreported:1 "a"
+         ; keeper_cost_row ~sum:(`Float 0.5) ~reported:1 ~unread:2
+             ~metrics_read:(`Assoc [ "state", `String "read"; "malformed_rows", `Int 3 ])
+             "b"
+         ; keeper_cost_row ~sum:`Null ~reported:0
+             ~metrics_read:
+               (`Assoc [ "state", `String "failed"; "reason", `String "EACCES" ])
+             "c"
+         ])
+  in
+  let fleet = Tui_decode.fleet_cost_of_keeper_costs costs in
+  Alcotest.(check (option (float 0.0001))) "reported sums add" (Some 1.75) fleet.fc_usd;
+  Alcotest.(check int) "priced turns" 3 fleet.fc_priced_turns;
+  Alcotest.(check int) "unreported and unread turns" 3 fleet.fc_unpriced_turns;
+  Alcotest.(check int) "malformed rows" 3 fleet.fc_malformed_rows;
+  Alcotest.(check int) "unread keepers" 1 fleet.fc_unread_keepers
+
+let test_keeper_costs_warming_placeholder_is_kept_apart () =
+  let costs =
+    decode_keeper_costs_ok
+      (keeper_costs_reply
+         ~cache:
+           (`Assoc
+             [ "state", `String "warming"
+             ; "generated_at", `Float 1.0
+             ; "last_error", `String "boom"
+             ])
+         [])
+  in
+  match costs.kcs_cache with
+  | Tui_decode.Keeper_costs_warming { last_error = Some "boom" } -> ()
+  | Tui_decode.Keeper_costs_warming { last_error = _ } ->
+      Alcotest.fail "the warming reply lost its last error"
+  | Tui_decode.Keeper_costs_fresh | Tui_decode.Keeper_costs_stale _ ->
+      Alcotest.fail "the warming placeholder decoded as a computed reply"
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_tool_approval_mode_overrides",
@@ -11972,6 +12089,16 @@ let () =
           test_decode_schedule_runner_hold_reads_a_held_row
       ; Alcotest.test_case "reads not held and refuses bad shapes" `Quick
           test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes
+      ] );
+    ( "keeper costs"
+    , [ Alcotest.test_case "a null sum is not reported" `Quick
+          test_keeper_costs_null_sum_is_not_reported
+      ; Alcotest.test_case "a sum that disagrees with its count is refused" `Quick
+          test_keeper_costs_refuses_a_sum_that_disagrees_with_its_count
+      ; Alcotest.test_case "the fleet sum counts every shortfall" `Quick
+          test_keeper_costs_fleet_sum_counts_every_shortfall
+      ; Alcotest.test_case "the warming placeholder is kept apart" `Quick
+          test_keeper_costs_warming_placeholder_is_kept_apart
       ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert

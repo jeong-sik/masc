@@ -3503,3 +3503,63 @@ val decode_schedule_runner_hold :
   Yojson.Safe.t -> (schedule_runner_hold option, string) result
 (** Reads a schedule row's [runner_hold]. [null] or an absent field is a
     schedule the runner is not holding; an object must carry both fields. *)
+
+(** A Keeper's cost over the window, as [GET /api/v1/dashboard/keeper-costs]
+    reports it. [Cost_not_reported] is a Keeper none of whose samples carried
+    a price (subscription runtimes report none): its cost is unknown, not
+    zero. *)
+type keeper_cost_sum =
+  | Cost_reported of { usd : float; samples : int }
+      (** The sum over the [samples] that reported a price. *)
+  | Cost_not_reported
+
+(** Whether the server read the Keeper's whole metrics window. A failed read
+    zeroes that Keeper's counts on the server, so its row says nothing about
+    what it spent. *)
+type keeper_cost_metrics_read =
+  | Metrics_read of { malformed_rows : int }
+      (** Read. [malformed_rows] were not JSON; any of them may have been a
+          turn, so a sum beside a non-zero count is a floor. *)
+  | Metrics_read_failed of { reason : string }
+
+type keeper_cost_row = {
+  kc_keeper_name : string;
+  kc_cost : keeper_cost_sum;
+  kc_unreported_samples : int;  (** Turns that sent [null] for their cost. *)
+  kc_unread_samples : int;  (** Turns whose cost could not be read. *)
+  kc_metrics_read : keeper_cost_metrics_read;
+}
+
+(** The reply's [cache.state]. A warming reply is the server's placeholder:
+    its empty Keeper list is not an answer about the fleet. *)
+type keeper_costs_cache =
+  | Keeper_costs_fresh
+  | Keeper_costs_stale of { last_error : string option }
+      (** An older computed reply while a refresh runs; [last_error] is the
+          refresh that failed before it, if one did. *)
+  | Keeper_costs_warming of { last_error : string option }
+
+type keeper_costs = {
+  kcs_window_minutes : int;
+  kcs_keepers : keeper_cost_row list;
+  kcs_cache : keeper_costs_cache;
+}
+
+val decode_keeper_costs : Yojson.Safe.t -> (keeper_costs, string) result
+(** Every field is required. A sum and a reported-sample count that disagree
+    ([null] beside a non-zero count, or a number beside zero) refuse the
+    reply, as does a [metrics_read.state] or [cache.state] this build does
+    not know. *)
+
+(** The fleet's cost over the window: the Keepers' reported sums added up,
+    and everything that makes that sum a floor. *)
+type fleet_cost = {
+  fc_usd : float option;
+      (** [None] when no Keeper reported a price: the cost is unknown. *)
+  fc_priced_turns : int;
+  fc_unpriced_turns : int;  (** Unreported plus unread samples. *)
+  fc_malformed_rows : int;
+  fc_unread_keepers : int;  (** Keepers whose metrics could not be read. *)
+}
+
+val fleet_cost_of_keeper_costs : keeper_costs -> fleet_cost

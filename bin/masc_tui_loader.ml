@@ -1308,6 +1308,28 @@ let load_overview_goals ~(host : string) ~(port : int) :
       Result.map_error Tui_decode.overview_goals_error_to_string
         (Tui_decode.decode_overview_goals json)
 
+(* The window the Team block's cost covers: the last day, the same span as
+   its [done 24h] count. The server refuses a longer window. *)
+let overview_cost_window_minutes = 24 * 60
+
+(* The Team block's cost. A reply for a window other than the one asked for
+   is refused: its sum would be drawn under the wrong span. *)
+let load_overview_cost ~(host : string) ~(port : int) :
+    (Tui_decode.keeper_costs, string) result =
+  match
+    Masc_tui_http.fetch_keeper_costs ~host ~port
+      ~window_minutes:overview_cost_window_minutes
+  with
+  | Error err -> Error ("keeper costs load failed: " ^ err)
+  | Ok json -> (
+      match Tui_decode.decode_keeper_costs json with
+      | Error err -> Error ("keeper costs unreadable: " ^ err)
+      | Ok costs when costs.kcs_window_minutes <> overview_cost_window_minutes ->
+          Error
+            (Printf.sprintf "keeper costs answered a %d-minute window, asked %d"
+               costs.kcs_window_minutes overview_cost_window_minutes)
+      | Ok costs -> Ok costs)
+
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
     (overview_snapshot, string) result =

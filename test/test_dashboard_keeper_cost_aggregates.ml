@@ -238,6 +238,43 @@ let test_all_unreported_cost_leaves_total_unknown () =
           ^ Yojson.Safe.to_string other));
   check int "tokens are still counted" 3000 (int_field "total_tokens" aggregate)
 
+(* The TUI Team block reads this endpoint through [Tui_decode]. A keeper row
+   the encoder writes decodes to the same reading: the reported sum and its
+   sample count, and the turns that sent no price counted apart. The [cache]
+   field is the route's, added here the way the route adds it. *)
+let test_the_tui_decoder_reads_the_encoders_row () =
+  let ts = Unix.gettimeofday () -. 1.0 in
+  let aggregate =
+    run_keeper_aggregate ~prefix:"keeper_cost_tui_decode"
+      ~keeper_name:"mixed-keeper"
+      [
+        turn_row ~ts ~cost:(`Float 0.25) ~latency_ms:100 ~total_tokens:10;
+        turn_row ~ts ~cost:`Null ~latency_ms:200 ~total_tokens:1000;
+      ]
+  in
+  let reply =
+    `Assoc
+      [ "keepers", `List [ aggregate ]
+      ; "window_minutes", `Int 60
+      ; "generated_at", `Float ts
+      ; "cache", `Assoc [ "state", `String "fresh"; "generated_at", `Float ts ]
+      ]
+  in
+  match Masc.Tui_decode.decode_keeper_costs reply with
+  | Error err -> fail ("the TUI decoder refused the encoder's reply: " ^ err)
+  | Ok costs -> (
+      match costs.kcs_keepers with
+      | [ row ] ->
+          (match row.kc_cost with
+           | Masc.Tui_decode.Cost_reported { usd; samples } ->
+               check (float 0.0001) "reported sum" 0.25 usd;
+               check int "reported samples" 1 samples
+           | Masc.Tui_decode.Cost_not_reported ->
+               fail "a reported cost decoded as not reported");
+          check int "unreported samples" 1 row.kc_unreported_samples;
+          check int "unread samples" 0 row.kc_unread_samples
+      | rows -> failf "expected one keeper row, got %d" (List.length rows))
+
 let row_with ~ts ~latency_ms ~cost ~usage =
   Keeper_metrics_record.fields Keeper_metrics_record.Turn
   @ [ ("ts_unix", `Float ts); ("channel", `String "turn"); ("latency_ms", `Int latency_ms) ]
@@ -579,5 +616,7 @@ let () =
             test_int_cost_is_reported_and_missing_cost_is_unread;
           test_case "unreadable usage is unread" `Quick
             test_unreadable_usage_is_unread;
+          test_case "the TUI decoder reads the encoder's row" `Quick
+            test_the_tui_decoder_reads_the_encoders_row;
         ] );
     ]

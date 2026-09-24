@@ -1991,6 +1991,14 @@ type overview_providers_reading =
   | Providers_read of Tui_decode.provider_usage_windows
   | Providers_failed of string
 
+(** The Team block's reading of [GET /api/v1/dashboard/keeper-costs]. A failed
+    read and one not made yet are each drawn as what they are, never as a
+    cost. *)
+type overview_cost_reading =
+  | Cost_unread
+  | Cost_read of Tui_decode.keeper_costs
+  | Cost_failed of string
+
 (** One open pull request as [GET /api/v1/repositories/pulls] reports it
     (RFC-0465). The check and review words are parsed at decode; a word this
     build cannot name makes the row undecodable rather than a default. *)
@@ -2900,6 +2908,7 @@ type surface_needs = {
   needs_runtime_quota : bool;
   needs_repository_pulls : bool;
   needs_overview_goals : bool;
+  needs_overview_cost : bool;
 }
 
 let nothing =
@@ -2915,6 +2924,7 @@ let nothing =
     needs_runtime_quota = false;
     needs_repository_pulls = false;
     needs_overview_goals = false;
+    needs_overview_cost = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -2928,22 +2938,34 @@ let nothing =
    Read from the surface alone, its marks were the unread dash on every
    screen but Keepers and Metrics, under a count taken from the event feed
    instead of the roster. The roster is 8.4 KB and answers in about a
-   millisecond, which is what makes this affordable where planning is not. *)
-let rec surface_needs ~keeper_pane_drawn surface =
+   millisecond, which is what makes this affordable where planning is not.
+
+   [overview_cost_shown] is the other one: the Team title draws the fleet's
+   cost only after [/team-cost], and keeper-costs reads every day file of
+   every Keeper's metrics in its window, so a surface that could draw it asks
+   for it only while it is shown. *)
+let rec surface_needs ~keeper_pane_drawn ~overview_cost_shown surface =
   let needs = surface_needs_of_surface surface in
-  if keeper_pane_drawn then { needs with needs_keeper_roster = true }
-  else needs
+  let needs =
+    if keeper_pane_drawn then { needs with needs_keeper_roster = true }
+    else needs
+  in
+  { needs with
+    needs_overview_cost = needs.needs_overview_cost && overview_cost_shown
+  }
 
 and surface_needs_of_surface : surface -> surface_needs = function
   (* The Providers section draws each account's usage windows from the
      runtime catalogue. Only this surface draws them. The goal tree is read
-     only here too: the GOALS section is its reader. *)
+     only here too: the GOALS section is its reader, and so is the fleet's
+     cost, which the Team block's title draws while [/team-cost] shows it. *)
   | Overview ->
       { nothing with
         needs_transport = true
       ; needs_runtime_quota = true
       ; needs_repository_pulls = true
       ; needs_overview_goals = true
+      ; needs_overview_cost = true
       }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -3008,13 +3030,16 @@ let surface_needs_delta ~previous ~next =
       next.needs_repository_pulls && not previous.needs_repository_pulls
   ; needs_overview_goals =
       next.needs_overview_goals && not previous.needs_overview_goals
+  ; needs_overview_cost =
+      next.needs_overview_cost && not previous.needs_overview_cost
   }
 
 let surface_needs_any needs = needs <> nothing
 
-let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn surface =
+let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn
+    ~overview_cost_shown surface =
   if scoped_refresh_inflight then nothing
-  else surface_needs ~keeper_pane_drawn surface
+  else surface_needs ~keeper_pane_drawn ~overview_cost_shown surface
 
 type full_refresh_intent = Cadence | Revalidate
 
@@ -5677,6 +5702,11 @@ type state = {
   mutable overview_providers: overview_providers_reading;
   mutable overview_pulls: overview_pulls_reading;
   mutable overview_goals: overview_goals_reading;
+  mutable overview_cost: overview_cost_reading;
+  (* [/team-cost]: off until the operator asks. keeper-costs reads every day
+     file of every Keeper's metrics in the window on each refresh, so a hidden
+     cost is not fetched at all. Process-only, like [burn_hud_visible]. *)
+  mutable overview_cost_visible: bool;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
@@ -7813,6 +7843,8 @@ let create_state
   overview_providers = Providers_unread;
   overview_pulls = Overview_pulls_unread;
   overview_goals = Goals_unread;
+  overview_cost = Cost_unread;
+  overview_cost_visible = false;
   runtime_lanes = [];
   runtime_assignments = [];
   runtime_catalog_error = None;

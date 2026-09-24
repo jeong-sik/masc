@@ -2487,6 +2487,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* pr_tag_of_keeper looks the name up; it does not draw it. *)
   check_fields ~non_rendering_calls:[ "pr_tag_of_keeper" ] "overview_team_lines"
     [ "okp_name"; "id"; "title" ];
+  (* The Team title's cost clauses carry a failed read's reason, which is
+     server text. *)
+  check_identifiers ~module_path:render_path ~binding:"overview_cost_tails"
+    ~callees:sanitizer_calls [ "details" ];
   (* The pull request lines print repository ids and failure text the server
      relayed from GitHub. *)
   check_fields ~module_path:"bin/masc_tui_repository_pulls.ml" "lines"

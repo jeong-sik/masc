@@ -104,3 +104,26 @@ val settle :
 val phase_word : Masc_tui_types.overview_keeper -> string
 (** The phase as the row prints it: the lifecycle word, the unreadable wire
     word as it came, or ["no phase"] when the briefing wrote none. *)
+
+(** How the Team title draws the fleet's cost. *)
+type cost_tone = Cost_plain | Cost_muted | Cost_warn
+
+type cost_words = {
+  lead : string;
+      (** The sum and its window (["$12.34 24h"]), or what stands in its
+          place. *)
+  details : string list;
+      (** Why [lead] is a floor or stale, one clause each, or the failed
+          read's reason. Drawn after [lead]; the first thing a narrow title
+          drops. *)
+  tone : cost_tone;
+}
+
+val cost_words : Masc_tui_types.overview_cost_reading -> cost_words
+(** The fleet's cost over the window keeper-costs answered for. A sum is
+    ["at least $N"] whenever a turn had no price, a metrics row was not JSON
+    or a Keeper's metrics could not be read, and [details] counts each. With
+    no priced turn the cost is ["cost unknown"] -- subscription runtimes
+    report no price -- and never [$0.00]; with no turn at all, and every
+    Keeper read, it is ["no turns in <window>"]. A read not made yet, the
+    server's warming placeholder and a failed read each say so. *)

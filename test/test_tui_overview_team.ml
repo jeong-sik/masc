@@ -342,6 +342,67 @@ let test_paused_stopped_and_no_phase_are_counted_apart () =
   check int "no-phase count" 1 (Team.count team Team.No_phase);
   check int "one row per name line" 3 (Team.drawn_rows team)
 
+(* The Team title's cost (RFC-0464 §3 row 4). A sum with any turn that had
+   no price is a floor and says so; no priced turn is unknown, never $0.00;
+   a read not made, the warming placeholder and a failed read say what they
+   are. *)
+let cost_row ?(unreported = 0) ?(unread = 0)
+    ?(read = Tui_decode.Metrics_read { malformed_rows = 0 }) name cost :
+    Tui_decode.keeper_cost_row =
+  { kc_keeper_name = name
+  ; kc_cost = cost
+  ; kc_unreported_samples = unreported
+  ; kc_unread_samples = unread
+  ; kc_metrics_read = read
+  }
+
+let costs ?(cache = Tui_decode.Keeper_costs_fresh) keepers =
+  Types.Cost_read
+    { Tui_decode.kcs_window_minutes = 24 * 60; kcs_keepers = keepers; kcs_cache = cache }
+
+let check_words label ~lead ~details reading =
+  let words = Team.cost_words reading in
+  check string (label ^ ": lead") lead words.Team.lead;
+  check (list string) (label ^ ": details") details words.details
+
+let test_cost_words_say_what_the_sum_is () =
+  check_words "every turn priced" ~lead:"$1.75 24h" ~details:[]
+    (costs
+       [ cost_row "a" (Tui_decode.Cost_reported { usd = 1.25; samples = 2 })
+       ; cost_row "b" (Tui_decode.Cost_reported { usd = 0.5; samples = 1 })
+       ]);
+  check_words "some turns unpriced" ~lead:"at least $1.25 24h"
+    ~details:[ "3 turns unpriced" ]
+    (costs
+       [ cost_row ~unreported:2 ~unread:1 "a"
+           (Tui_decode.Cost_reported { usd = 1.25; samples = 2 })
+       ]);
+  check_words "a keeper unread, a row unreadable" ~lead:"at least $1.25 24h"
+    ~details:[ "1 row unreadable"; "1 keeper unread" ]
+    (costs
+       [ cost_row ~read:(Tui_decode.Metrics_read { malformed_rows = 1 }) "a"
+           (Tui_decode.Cost_reported { usd = 1.25; samples = 2 })
+       ; cost_row ~read:(Tui_decode.Metrics_read_failed { reason = "EACCES" }) "b"
+           Tui_decode.Cost_not_reported
+       ]);
+  check_words "no priced turn" ~lead:"cost unknown 24h"
+    ~details:[ "4 turns unpriced" ]
+    (costs [ cost_row ~unreported:4 "a" Tui_decode.Cost_not_reported ]);
+  check_words "no turn at all" ~lead:"no turns in 24h" ~details:[]
+    (costs [ cost_row "a" Tui_decode.Cost_not_reported ]);
+  check_words "a stale reply whose refresh failed" ~lead:"$0.50 24h"
+    ~details:[ "last refresh failed" ]
+    (costs
+       ~cache:(Tui_decode.Keeper_costs_stale { last_error = Some "boom" })
+       [ cost_row "a" (Tui_decode.Cost_reported { usd = 0.5; samples = 1 }) ])
+
+let test_cost_words_never_draw_an_unread_cost () =
+  check_words "not read yet" ~lead:"cost not read yet" ~details:[] Types.Cost_unread;
+  check_words "failed read" ~lead:"cost unavailable" ~details:[ "503" ]
+    (Types.Cost_failed "503");
+  check_words "warming placeholder" ~lead:"cost not read yet" ~details:[]
+    (costs ~cache:(Tui_decode.Keeper_costs_warming { last_error = None }) [])
+
 let () =
   run "tui_overview_team"
     [ ( "team"
@@ -374,5 +435,9 @@ let () =
             test_paused_stopped_and_no_phase_are_counted_apart
         ; test_case "an info item is not a blocker" `Quick
             test_an_info_item_is_not_a_blocker
+        ; test_case "cost words say what the sum is" `Quick
+            test_cost_words_say_what_the_sum_is
+        ; test_case "cost words never draw an unread cost" `Quick
+            test_cost_words_never_draw_an_unread_cost
         ] )
     ]

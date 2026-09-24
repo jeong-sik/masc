@@ -107,6 +107,9 @@ status: reference
   점수가 아니라 이 무리와 이름이다. 막힌 줄의 설명은 그 Keeper 를 `Attention_keeper` 로
   가리키는 info 가 아닌 첫 Attention 문장을 그대로 싣는다. Keeper 가 아닌
   담당자(MCP client 등)가 잡은 Task 는 "held outside the fleet" 한 줄로 센다.
+  `/team-cost` 로 켜면 제목 줄에 최근 24시간 fleet 비용(`/api/v1/dashboard/keeper-costs`)을
+  싣는다. 가격 없는 턴이 있으면 `at least $N` 과 그 수를, 가격이 하나도 없으면
+  `cost unknown` 을 쓴다. 기본은 꺼져 있고, 꺼져 있으면 읽지도 않는다.
   → [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli), RFC-0464
 
 **Attention (Overview Attention 패널)**

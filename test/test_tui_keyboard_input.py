@@ -14352,6 +14352,98 @@ def paused_apart_from_stopped_interaction() -> Interaction:
     return interact
 
 
+KEEPER_COSTS_PATH = "/api/v1/dashboard/keeper-costs"
+
+
+def keeper_costs_fixture(reads: list[str]) -> Callable[[], HttpResponse]:
+    # One Keeper priced two turns and left one unpriced; a subscription
+    # Keeper priced none. The sum is a floor and the title must say so.
+    # [reads] records each request, so a scenario can tell a hidden cost was
+    # never fetched.
+    def row(name: str, total: float | None, reported: int, unreported: int) -> dict[str, object]:
+        return {
+            "keeper_name": name,
+            "total_cost_usd": total,
+            "cost_reported_samples": reported,
+            "cost_unreported_samples": unreported,
+            "cost_unread_samples": 0,
+            "metrics_read": {"state": "read", "malformed_rows": 0},
+        }
+
+    def respond() -> HttpResponse:
+        reads.append(KEEPER_COSTS_PATH)
+        return (
+            200,
+            {
+                "keepers": [
+                    row("k-running", 1.75, 2, 1),
+                    row("k-flagged", None, 0, 2),
+                ],
+                "window_minutes": 1440,
+                "generated_at": 1.0,
+                "cache": {"state": "fresh", "generated_at": 1.0},
+            },
+        )
+
+    return respond
+
+
+def team_cost_interaction(reads: list[str]) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # Off by default: the Team title has its counts and no cost, and the
+        # cost endpoint was never asked.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"1 idle \xc2\xb7 1 no phase \xc2\xb7 2 paused \xc2\xb7 1 stopped",
+            start=0,
+            timeout=10.0,
+        )
+        if reads:
+            raise AssertionError(f"a hidden cost was fetched {len(reads)} time(s)")
+        drawn = screen_text(bytes(output))
+        for word in (b"at least $", b"cost unknown", b"cost not read yet", b"cost unavailable"):
+            if word in drawn:
+                raise AssertionError(f"a hidden cost was drawn: {word!r}")
+        # /team-cost from a chat composer turns it on.
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+        send_and_wait(process, master_fd, output, b"/team-cost", composer_showing(b"/team-cost"))
+        send_and_wait(process, master_fd, output, b"\r", b"Team line: shown")
+        # Back on the Overview the fleet's 24h cost rides the Team title, after
+        # the band counts, as a floor with the turns that had no price.
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"at least $1.75 24h",
+            start=0,
+            timeout=10.0,
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"3 turns unpriced",
+            start=0,
+            timeout=10.0,
+        )
+        # The harness confirms the exit that this first press arms.
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def attention_drawn_once_interaction() -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -14953,6 +15045,17 @@ def run_keyboard_regression(executable: str) -> None:
         interact=paused_apart_from_stopped_interaction(),
         http_fixtures={
             "/api/v1/dashboard/briefing": paused_and_stopped_briefing(),
+        },
+    )
+    team_cost_reads: list[str] = []
+    run_terminal_scenario(
+        executable,
+        description="Team cost on Overview",
+        interact=team_cost_interaction(team_cost_reads),
+        http_fixtures={
+            "/health?full=1": fleet_safety_fixture(),
+            "/api/v1/dashboard/briefing": paused_and_stopped_briefing(),
+            KEEPER_COSTS_PATH: keeper_costs_fixture(team_cost_reads),
         },
     )
     composer_requests: HttpRequests = []

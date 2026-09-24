@@ -70,10 +70,12 @@ type id = Int_id of int | String_id of string
 type rpc_error = { code : int; message : string }
 
 let method_not_found = -32601
+let invalid_params = -32602
 let host_refused = -32000
 
 type extension_request =
   | Llm_generate of { id : id; params : Yojson.Safe.t }
+  | Invalid_params of { id : id; detail : string }
   | Unsupported_request of { id : id; method_ : string }
 
 type extension_notification =
@@ -88,9 +90,9 @@ type incoming =
 
 let request_of ~id method_ params =
   match method_, params with
-  | "llm.generate", Some params -> Ok (Llm_generate { id; params })
-  | "llm.generate", None -> Error "llm.generate without params"
-  | _, (Some _ | None) -> Ok (Unsupported_request { id; method_ })
+  | "llm.generate", Some params -> Llm_generate { id; params }
+  | "llm.generate", None -> Invalid_params { id; detail = "llm.generate without params" }
+  | _, (Some _ | None) -> Unsupported_request { id; method_ }
 ;;
 
 let notification_of method_ params =
@@ -112,7 +114,7 @@ let decode payload =
     in
     let params = field "params" json in
     (match field "method" json, id with
-     | Some (`String method_), Some id -> Result.map (fun request -> Request request) (request_of ~id method_ params)
+     | Some (`String method_), Some id -> Ok (Request (request_of ~id method_ params))
      | Some (`String method_), None -> Ok (Notification (notification_of method_ params))
      | None, Some id ->
        (match field "result" json, field "error" json with

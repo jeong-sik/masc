@@ -46,11 +46,13 @@ type rpc_error = { code : int; message : string }
 
 (** JSON-RPC codes masc answers with. *)
 val method_not_found : int
+val invalid_params : int
 
 val host_refused : int
 
 type extension_request =
   | Llm_generate of { id : id; params : Yojson.Safe.t }
+  | Invalid_params of { id : id; detail : string }
   | Unsupported_request of { id : id; method_ : string }
 
 (** A notification's [params], when it has any. *)

@@ -9839,13 +9839,16 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.patch_modal_path <- Some target_path;
       launch_repository_changes_diff_load state ~mailbox
         ~scope:Tui_decode.Repository_change_project ~path:target_path
-  | Masc_tui_command.Toggle_burn_hud ->
+  | Masc_tui_command.Toggle_cost ->
       Buffer.clear state.msg_input;
-      state.burn_hud_visible <- not state.burn_hud_visible;
-      let status_str = if state.burn_hud_visible then "shown" else "hidden" in
-      let cost = Masc_tui_types.fleet_total_cost_usd state in
+      state.cost_visible <- not state.cost_visible;
+      (* Hidden, spend stops being read, so a reading kept from before would
+         come back as a number nobody observed since. Shown again, it starts
+         unread and the next refresh fills it. *)
+      state.overview_spend <- Overview_spend_unread;
       notice ~kind:Notice_reply
-        (Printf.sprintf "Fleet cost in the tab row: %s ($%.4f so far)" status_str cost)
+        (if state.cost_visible then "24h cost on the Overview Team block: shown"
+         else "24h cost on the Overview Team block: hidden")
   | Masc_tui_command.Open_link_preview url_opt ->
       Buffer.clear state.msg_input;
       let all_urls = Masc_tui_types.conversation_urls state in
@@ -10588,7 +10591,10 @@ let apply_repository_pulls_load state = function
    spend drawn after the reading that said so stopped arriving would be a
    number nobody observed. *)
 let apply_keeper_spend_load state result =
-  state.overview_spend <- Masc_tui_keeper_spend.reading_of_load result
+  (* A reply asked for before [/cost] hid the spend would come back as a
+     number nobody observed since once it is shown again. *)
+  if state.cost_visible then
+    state.overview_spend <- Masc_tui_keeper_spend.reading_of_load result
 
 (* A failed read replaces the last good one, as the quota reading does: goals
    drawn after the read that listed them stopped arriving would be rows nobody
@@ -11232,6 +11238,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         ~scoped_refresh_inflight:!scoped_refresh_inflight
         ~keeper_pane_drawn:
           (not (Masc_tui_render.acting_pane_suppressed state))
+        ~cost_shown:state.cost_visible
         state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not
@@ -12825,7 +12832,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
-        | Masc_tui_command.Toggle_burn_hud | Masc_tui_command.Open_changes
+        | Masc_tui_command.Toggle_cost | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
          | Masc_tui_command.Show_acting_pane_tab _
          | Masc_tui_command.Acting_pane_tab_unknown _
@@ -16779,6 +16786,7 @@ let main
     ref
       (Masc_tui_types.surface_needs
          ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state))
+         ~cost_shown:state.cost_visible
          state.view)
   in
   let input_reader = create_input_reader () in
@@ -25272,6 +25280,7 @@ and is loaded on demand through keeper_skill.
         Masc_tui_types.surface_needs
           ~keeper_pane_drawn:
             (not (Masc_tui_render.acting_pane_suppressed state))
+          ~cost_shown:state.cost_visible
           state.view
       in
       if

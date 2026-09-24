@@ -2972,11 +2972,17 @@ let nothing =
    Read from the surface alone, its marks were the unread dash on every
    screen but Keepers and Metrics, under a count taken from the event feed
    instead of the roster. The roster is 8.4 KB and answers in about a
-   millisecond, which is what makes this affordable where planning is not. *)
-let rec surface_needs ~keeper_pane_drawn surface =
+   millisecond, which is what makes this affordable where planning is not.
+
+   [cost_shown] is the other one: the Team block draws spend only after
+   [/cost], so the Overview asks for keeper-costs only while it is shown. *)
+let rec surface_needs ~keeper_pane_drawn ~cost_shown surface =
   let needs = surface_needs_of_surface surface in
-  if keeper_pane_drawn then { needs with needs_keeper_roster = true }
-  else needs
+  let needs =
+    if keeper_pane_drawn then { needs with needs_keeper_roster = true }
+    else needs
+  in
+  { needs with needs_keeper_spend = needs.needs_keeper_spend && cost_shown }
 
 and surface_needs_of_surface : surface -> surface_needs = function
   (* The Providers section draws each account's usage windows from the
@@ -3059,9 +3065,10 @@ let surface_needs_delta ~previous ~next =
 
 let surface_needs_any needs = needs <> nothing
 
-let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn surface =
+let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn ~cost_shown
+    surface =
   if scoped_refresh_inflight then nothing
-  else surface_needs ~keeper_pane_drawn surface
+  else surface_needs ~keeper_pane_drawn ~cost_shown surface
 
 type full_refresh_intent = Cadence | Revalidate
 
@@ -6136,8 +6143,11 @@ type state = {
   mutable link_modal_links: string list;
   mutable link_modal_cursor: int;
   mutable link_previews_mode: [ `Rich | `Compact | `Off ];
-  (* Real-time Token Burn Velocity and Financial HUD *)
-  mutable burn_hud_visible: bool;
+  (* [/cost]: whether the Team block draws each Keeper's spend and the
+     fleet total. Off until the operator asks, and process-only: keeper-costs
+     rereads every day file of every Keeper's metrics whenever its server
+     cache expires, so a hidden spend is not fetched at all. *)
+  mutable cost_visible: bool;
   (* Code surface: one directory level at a time through the lazy /children
      route; the file arrives whole and is lexed once at load. *)
   mutable code_dir: string;
@@ -8103,7 +8113,7 @@ let create_state
   link_modal_links = [];
   link_modal_cursor = 0;
   link_previews_mode = `Rich;
-  burn_hud_visible = false;
+  cost_visible = false;
   code_dir = "";
   code_listing = Masc_tui_fetched.initial;
   code_cursor = 0;
@@ -10407,37 +10417,6 @@ let visible_surface_ring_index (state : state) (view : surface) =
     | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
   in
   find 0 ring
-;;
-
-let braille_sparkline values =
-  if values = [] then "⣀⡠⠤⠶"
-  else
-    let max_v = List.fold_left max 0.0001 values in
-    let levels = [| " "; "⡀"; "⣀"; "⣄"; "⣤"; "⣦"; "⣶"; "⣷"; "⣿" |] in
-    let glyphs =
-      List.map
-        (fun v ->
-          let ratio = max 0.0 (min 1.0 (v /. max_v)) in
-          let idx = min 8 (int_of_float (ratio *. 8.0)) in
-          levels.(idx))
-        values
-    in
-    String.concat "" glyphs
-;;
-
-let fleet_token_sparkline (state : state) =
-  let tokens =
-    List.map (fun (k : keeper) -> float_of_int k.k_total_tokens) state.keepers
-  in
-  braille_sparkline tokens
-;;
-
-(* The header's `$` reading. It is the same sum the Runtime authority row
-   says, so it comes from the same fold: a rule about what counts (dropping
-   cancelled turns, say) that lands in only one of them would compile. *)
-let fleet_total_cost_usd (state : state) =
-  let _, _, cost = aggregate_keeper_stats state.keepers in
-  cost
 ;;
 
 let conversation_urls (state : state) : string list =

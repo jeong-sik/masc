@@ -14336,7 +14336,38 @@ def stuck_keeper_costs_fixture() -> HttpResponse:
     return (status, body)
 
 
-def narrow_stuck_row_keeps_its_cause_interaction() -> Interaction:
+def counted(fixture: HttpResponse, reads: list[str]) -> Callable[[], HttpResponse]:
+    """[fixture], noting each request in [reads]."""
+    def respond() -> HttpResponse:
+        reads.append("read")
+        return fixture
+
+    return respond
+
+
+def show_cost(
+    process: subprocess.Popen[bytes], master_fd: int, output: bytearray, reads: list[str]
+) -> None:
+    """Turn spend on with /cost, typed in a Keeper's chat, and come back to the
+    Overview. Spend is off until asked for, and a hidden spend is not fetched:
+    by the time the Team block is drawn, the refresh that drew it has asked
+    for everything the Overview needs, and keeper-costs is not among it."""
+    wait_for_output(process, master_fd, output, b"MASC Overview", start=0, timeout=10.0)
+    wait_for_output(process, master_fd, output, b"Team", start=0, timeout=10.0)
+    if reads:
+        raise AssertionError(f"keeper-costs was read {len(reads)} time(s) before /cost")
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    select_keeper_row(process, master_fd, output, b"alpha")
+    send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+    if reads:
+        raise AssertionError(f"keeper-costs was read {len(reads)} time(s) before /cost")
+    send_and_wait(process, master_fd, output, b"/cost", composer_showing(b"/cost"))
+    send_and_wait(process, master_fd, output, b"\r", b"Team block: shown")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+
+
+def narrow_stuck_row_keeps_its_cause_interaction(reads: list[str]) -> Interaction:
     # The spend tag sits at the right of a Team row and only where the row
     # fits whole: at 56 columns a stuck Keeper's row keeps its cause, which
     # the attention panel no longer draws, and drops the spend.
@@ -14347,6 +14378,7 @@ def narrow_stuck_row_keeps_its_cause_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        show_cost(process, master_fd, output, reads)
         wait_for_output(process, master_fd, output, b"1.2M tok", start=0, timeout=10.0)
         frame = resize_and_wait(
             process,
@@ -14426,7 +14458,7 @@ def team_title_line(frame: bytes) -> bytes:
     raise AssertionError(f"no Team title in the frame: {frame!r}")
 
 
-def spend_title_interaction() -> Interaction:
+def spend_title_interaction(reads: list[str]) -> Interaction:
     # The title's total covers the stopped Keeper too ($1.00 + $2.00), and a
     # title too narrow for the total sheds it whole but keeps its age.
     def interact(
@@ -14436,6 +14468,7 @@ def spend_title_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        show_cost(process, master_fd, output, reads)
         wait_for_output(process, master_fd, output, b"12m old", start=0, timeout=10.0)
         wide = team_title_line(
             resize_and_wait(
@@ -14470,7 +14503,7 @@ def spend_title_interaction() -> Interaction:
     return interact
 
 
-def pull_requests_on_overview_interaction() -> Interaction:
+def pull_requests_on_overview_interaction(reads: list[str]) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
         master_fd: int,
@@ -14478,6 +14511,7 @@ def pull_requests_on_overview_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        show_cost(process, master_fd, output, reads)
         for needle in (
             b"1 conflicting",
             b"1 not by a Keeper",
@@ -15154,32 +15188,35 @@ def run_keyboard_regression(executable: str) -> None:
             "/api/v1/dashboard/briefing": duplicated_attention_briefing(),
         },
     )
+    cost_reads: list[str] = []
     run_terminal_scenario(
         executable,
         description="Pull requests on Overview",
-        interact=pull_requests_on_overview_interaction(),
+        interact=pull_requests_on_overview_interaction(cost_reads),
         http_fixtures={
             "/api/v1/dashboard/briefing": pull_requests_briefing(),
             "/api/v1/repositories/pulls": repository_pulls_fixture(),
-            "/api/v1/dashboard/keeper-costs": keeper_costs_fixture(),
+            "/api/v1/dashboard/keeper-costs": counted(keeper_costs_fixture(), cost_reads),
         },
     )
+    cost_reads: list[str] = []
     run_terminal_scenario(
         executable,
         description="Team spend title",
-        interact=spend_title_interaction(),
+        interact=spend_title_interaction(cost_reads),
         http_fixtures={
             "/api/v1/dashboard/briefing": spend_title_briefing(),
-            "/api/v1/dashboard/keeper-costs": spend_title_costs_fixture(),
+            "/api/v1/dashboard/keeper-costs": counted(spend_title_costs_fixture(), cost_reads),
         },
     )
+    cost_reads: list[str] = []
     run_terminal_scenario(
         executable,
         description="Narrow stuck row keeps its cause",
-        interact=narrow_stuck_row_keeps_its_cause_interaction(),
+        interact=narrow_stuck_row_keeps_its_cause_interaction(cost_reads),
         http_fixtures={
             "/api/v1/dashboard/briefing": stuck_keeper_briefing(),
-            "/api/v1/dashboard/keeper-costs": stuck_keeper_costs_fixture(),
+            "/api/v1/dashboard/keeper-costs": counted(stuck_keeper_costs_fixture(), cost_reads),
         },
     )
     run_terminal_scenario(

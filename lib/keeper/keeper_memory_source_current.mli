@@ -43,8 +43,9 @@ type projection =
   ; facts : fact list
   ; invalidations : invalidation list
   ; unverified_paths : string list
-      (** Facts kept this time without a re-read ([Source_io_failed]); a
-          recall renders them as unverified. *)
+      (** Facts kept this time without a re-read: the one whose read got no
+          answer ([Source_io_failed]) and every fact after it in the pass,
+          which is not asked. A recall renders them as unverified. *)
   }
 
 (** Why a source file could not be read. All but [Source_io_failed] are the
@@ -118,7 +119,9 @@ val upsert_file_fact :
     changed, missing or unusable is atomically removed and replaced by a
     pending invalidation; one that could not be read at all
     ([Source_io_failed], e.g. a stopped guest) keeps its fact as last
-    verified. Invalidations
+    verified, and the pass asks no further source: the facts after it are
+    kept the same way, unverified, instead of each waiting out the read
+    timeout under this store's lock. Invalidations
     survive subsequent turns until [upsert_file_fact] recreates that path.
     Revalidation takes only the source-store lock: its invalidation rendering
     is strictly shorter than the fact it replaces, so it cannot overcommit the

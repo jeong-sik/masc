@@ -465,12 +465,12 @@ let update_locked ?clock ~keepers_dir ~keeper_id ~on_commit build =
         let+ snapshot = parse path content in
         Some snapshot
     in
-    let* next, changed = build previous in
+    let* next, changed, outcome = build previous in
     if changed then (
       let+ snapshot = save_snapshot path next in
       on_commit snapshot;
-      snapshot)
-    else Ok next)
+      snapshot, outcome)
+    else Ok (next, outcome))
 ;;
 
 let with_commit_notification ~keepers_dir ~keeper_id write =
@@ -567,18 +567,41 @@ let upsert_file_fact
           ; facts
           ; invalidations
           }
-        , true ))))
+        , true
+        , () ))))
+      |> Result.map fst
       |> Result.map_error (fun detail -> Store_write_failed detail)
+;;
+
+(* Whether a revalidation pass still asks its sources. The first read that
+   gets no answer ([Source_io_failed]) ends the asking for the rest of the
+   pass: every further read would wait out the same read timeout while this
+   store's lock is held, at the start of the turn. A fact that is not asked
+   ends exactly where a fact whose read failed ends -- kept, not
+   invalidated, and reported unverified. *)
+type revalidation_asking =
+  | Asking
+  | Stopped_after_unanswered_read
+
+type revalidation_step =
+  { asking : revalidation_asking
+  ; kept_rev : fact list
+  ; unverified_rev : string list
+  ; invalidated_rev : invalidation list
+  }
+
+let keep_unverified step fact =
+  { step with
+    kept_rev = fact :: step.kept_rev
+  ; unverified_rev = fact.source.path :: step.unverified_rev
+  }
 ;;
 
 let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
   if not (finite_nonnegative now)
   then Error "source-bound memory timestamp must be finite and non-negative"
   else
-    (* Paths whose fact was kept without a re-read. Reset at the top of the
-       locked step so a repeated step cannot count a path twice. *)
-    let unverified = ref [] in
-    let+ snapshot =
+    let+ snapshot, unverified_paths =
       with_commit_notification
         ~keepers_dir ~keeper_id:meta.Keeper_meta_contract.name (fun on_commit ->
       update_locked
@@ -588,7 +611,6 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
         ~on_commit
         (function
         | None ->
-          unverified := [];
           Ok
             ( { revision = 1
               ; updated_at = now
@@ -596,59 +618,70 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
               ; facts = []
               ; invalidations = []
               }
-            , false )
+            , false
+            , [] )
         | Some previous ->
-          unverified := [];
-          let facts_rev, newly_invalidated_rev =
+          let step =
             List.fold_left
-              (fun (facts, invalidations) fact ->
-                 match read_source ~config ~meta ~source_path:fact.source.path with
-                 | Ok content when String.equal (sha256 content) fact.source.sha256 ->
-                   fact :: facts, invalidations
-                 | Ok _ ->
-                   Log.Keeper.warn
-                     "source-bound memory invalidated keeper=%s source=%S reason=source_changed"
-                     meta.Keeper_meta_contract.name
-                     fact.source.path;
-                   ( facts
-                   , { source_path = fact.source.path
-                     ; invalidated_at = now
-                     ; reason = Source_changed
-                     }
-                     :: invalidations )
-                 | Error (Source_io_failed _) ->
-                   (* Not being able to ask is not an answer. A stopped guest
-                      or a timed-out endpoint keeps the fact as it was last
-                      verified; only a source that answered as changed,
-                      missing or unusable invalidates it. The recall marks
-                      it, so the model can tell it from a re-read fact. *)
-                   unverified := fact.source.path :: !unverified;
-                   fact :: facts, invalidations
-                 | Error failure ->
-                   Log.Keeper.warn
-                     "source-bound memory invalidated keeper=%s source=%S reason=source_unavailable detail=%s"
-                     meta.Keeper_meta_contract.name
-                     fact.source.path
-                     (source_read_failure_to_string failure);
-                   ( facts
-                   , { source_path = fact.source.path
-                     ; invalidated_at = now
-                     ; reason = Source_unavailable
-                     }
-                     :: invalidations ))
-              ([], [])
+              (fun step fact ->
+                 match step.asking with
+                 | Stopped_after_unanswered_read -> keep_unverified step fact
+                 | Asking ->
+                   (match read_source ~config ~meta ~source_path:fact.source.path with
+                    | Ok content when String.equal (sha256 content) fact.source.sha256 ->
+                      { step with kept_rev = fact :: step.kept_rev }
+                    | Ok _ ->
+                      Log.Keeper.warn
+                        "source-bound memory invalidated keeper=%s source=%S reason=source_changed"
+                        meta.Keeper_meta_contract.name
+                        fact.source.path;
+                      { step with
+                        invalidated_rev =
+                          { source_path = fact.source.path
+                          ; invalidated_at = now
+                          ; reason = Source_changed
+                          }
+                          :: step.invalidated_rev
+                      }
+                    | Error (Source_io_failed _) ->
+                      (* Not being able to ask is not an answer. A stopped
+                         guest or a timed-out endpoint keeps the fact as it
+                         was last verified; only a source that answered as
+                         changed, missing or unusable invalidates it. The
+                         recall marks it, so the model can tell it from a
+                         re-read fact. *)
+                      { (keep_unverified step fact) with
+                        asking = Stopped_after_unanswered_read
+                      }
+                    | Error failure ->
+                      Log.Keeper.warn
+                        "source-bound memory invalidated keeper=%s source=%S reason=source_unavailable detail=%s"
+                        meta.Keeper_meta_contract.name
+                        fact.source.path
+                        (source_read_failure_to_string failure);
+                      { step with
+                        invalidated_rev =
+                          { source_path = fact.source.path
+                          ; invalidated_at = now
+                          ; reason = Source_unavailable
+                          }
+                          :: step.invalidated_rev
+                      }))
+              { asking = Asking; kept_rev = []; unverified_rev = []; invalidated_rev = [] }
               previous.facts
           in
-          if !unverified <> []
-          then
-            Log.Keeper.warn
-              "source-bound memory kept %d fact(s) unverified keeper=%s: source unreadable"
-              (List.length !unverified)
-              meta.Keeper_meta_contract.name;
-          let facts = List.rev facts_rev in
-          let newly_invalidated = List.rev newly_invalidated_rev in
+          let unverified = List.rev step.unverified_rev in
+          (match step.asking with
+           | Asking -> ()
+           | Stopped_after_unanswered_read ->
+             Log.Keeper.warn
+               "source-bound memory kept %d fact(s) unverified keeper=%s: a source read got no answer, the rest of the pass was not asked"
+               (List.length unverified)
+               meta.Keeper_meta_contract.name);
+          let facts = List.rev step.kept_rev in
+          let newly_invalidated = List.rev step.invalidated_rev in
           if newly_invalidated = []
-          then Ok (previous, false)
+          then Ok (previous, false, unverified)
           else
             let invalidated_paths =
               List.fold_left
@@ -669,19 +702,15 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
                 ; facts
                 ; invalidations = retained_invalidations @ newly_invalidated
                 }
-              , true )))
+              , true
+              , unverified )))
     in
-    let snapshot =
-      if snapshot.facts = [] && snapshot.invalidations = []
-      then None
-      else Some snapshot
-    in
-    match snapshot with
-    | None -> { snapshot = None; facts = []; invalidations = []; unverified_paths = [] }
-    | Some snapshot ->
+    if snapshot.facts = [] && snapshot.invalidations = []
+    then { snapshot = None; facts = []; invalidations = []; unverified_paths = [] }
+    else
       { snapshot = Some snapshot
       ; facts = snapshot.facts
       ; invalidations = snapshot.invalidations
-      ; unverified_paths = List.rev !unverified
+      ; unverified_paths
       }
 ;;

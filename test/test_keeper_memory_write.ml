@@ -958,6 +958,82 @@ let test_unreadable_source_keeps_its_fact_marked_unverified () =
       projection.Source.unverified_paths
 ;;
 
+(* After one source gets no answer, the pass asks no further source. The
+   second source changed on disk, so a read of it would invalidate its fact;
+   it is kept instead, unverified like the unreadable one, which shows it was
+   not read. Once the first source is readable again, the same pass reads
+   every source and the change is caught. *)
+let test_unanswered_source_read_stops_the_pass () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_temp_dir
+  @@ fun base_path ->
+  let module Source = Masc.Keeper_memory_source_current in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "source-unanswered-pass" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Fs_compat.mkdir_p sandbox_root;
+  let write_source path content =
+    match Fs_compat.save_file_atomic (Filename.concat sandbox_root path) content with
+    | Ok () -> ()
+    | Error detail -> Alcotest.fail detail
+  in
+  let record_fact path =
+    match
+      Source.upsert_file_fact
+        ~config ~meta ~keepers_dir ~now:100.0 ~claim:("claim about " ^ path)
+        ~source_path:path ()
+    with
+    | Ok _ -> ()
+    | Error (Source.Source_read_failed failure) ->
+      Alcotest.fail (Source.source_read_failure_to_string failure)
+    | Error (Source.Store_write_failed detail) -> Alcotest.fail detail
+  in
+  let unreadable = "unreadable.txt" in
+  let changed = "changed.txt" in
+  let unchanged = "unchanged.txt" in
+  List.iter
+    (fun path ->
+       write_source path "value\n";
+       record_fact path)
+    [ unreadable; changed; unchanged ];
+  write_source changed "another value\n";
+  let unreadable_host = Filename.concat sandbox_root unreadable in
+  Unix.chmod unreadable_host 0o000;
+  let stopped =
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod unreadable_host 0o600)
+      (fun () -> Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
+  in
+  (match stopped with
+   | Error detail -> Alcotest.fail detail
+   | Ok projection ->
+     Alcotest.(check int) "every fact is kept" 3 (List.length projection.Source.facts);
+     Alcotest.(check int)
+       "the changed source was not read, so nothing is invalidated"
+       0
+       (List.length projection.Source.invalidations);
+     Alcotest.(check (list string))
+       "the facts after the unanswered read are unverified too"
+       [ unreadable; changed; unchanged ]
+       projection.Source.unverified_paths);
+  match Source.revalidate ~config ~meta ~keepers_dir ~now:300.0 () with
+  | Error detail -> Alcotest.fail detail
+  | Ok projection ->
+    Alcotest.(check (list string))
+      "a pass that gets every answer leaves nothing unverified"
+      []
+      projection.Source.unverified_paths;
+    Alcotest.(check (list string))
+      "and invalidates the changed source"
+      [ changed ]
+      (List.map
+         (fun (invalidation : Source.invalidation) -> invalidation.source_path)
+         projection.Source.invalidations)
+;;
+
 let test_source_bound_write_is_not_gated_by_recall_size () =
   with_temp_dir
   @@ fun base_path ->
@@ -2879,6 +2955,10 @@ let () =
             "an unreadable source keeps its fact, marked unverified"
             `Quick
             test_unreadable_source_keeps_its_fact_marked_unverified
+        ; Alcotest.test_case
+            "an unanswered source read stops the pass, the rest unverified"
+            `Quick
+            test_unanswered_source_read_stops_the_pass
         ] )
     ]
 ;;

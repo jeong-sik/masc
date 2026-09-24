@@ -472,6 +472,34 @@ jobs:
           overwrite: ${{ inputs.candidate_verification == true }}
           path: dist/*
 
+  release-body:
+    # The RC is the last run before the tag, and a tag push cannot be taken
+    # back. So the RC measures the exact body the tag push would publish and
+    # goes red when GitHub would cut it, before any tag exists.
+    if: inputs.candidate_verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check the release body fits before tagging
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver="$(sed -n 's/^(version \(.*\))$/\1/p' dune-project)"
+          test -n "$ver"
+          # Only exit 0 (the tag is there) skips. No tag (2) and a failed
+          # lookup (128) both fall through to the check.
+          if git ls-remote --exit-code --tags origin "refs/tags/v$ver" >/dev/null; then
+            echo "v$ver is already tagged; this RC publishes no body, so there is none to check."
+            exit 0
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="v$ver" -f target_commitish="${GITHUB_SHA}" --jq .body > generated-notes.md
+          python3 scripts/ci/changelog-section.py "$ver" CHANGELOG.md /dev/null \
+            --append generated-notes.md --max-chars 125000
+
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -557,9 +585,19 @@ jobs:
 
       - name: Assemble the release body from the changelog
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !inputs.candidate_verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # GitHub keeps the first 125,000 characters of a release body and drops
+        # the rest without an error (v0.37.0 lost 47,240). The generated PR list
+        # is appended here, not by the action, so the body measured is the body
+        # stored. The gate is the release-body job on the RC; this is the last
+        # line of defence once the tag exists.
         run: |
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="${GITHUB_REF_NAME}" --jq .body > generated-notes.md
           python3 scripts/ci/changelog-section.py \
-            "${GITHUB_REF_NAME#v}" CHANGELOG.md release-body.md
+            "${GITHUB_REF_NAME#v}" CHANGELOG.md release-body.md \
+            --append generated-notes.md --max-chars 125000
           head -40 release-body.md
 
       - name: Create Release
@@ -568,4 +606,5 @@ jobs:
         with:
           files: release-assets/*
           body_path: release-body.md
-          generate_release_notes: true
+          # The list is already inside release-body.md and counted there.
+          generate_release_notes: false

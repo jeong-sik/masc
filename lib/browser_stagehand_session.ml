@@ -9,6 +9,7 @@ type attach_error =
   | Runtime_not_ready
   | Runtime_marker of string
   | Runtime_incompatible of { found : string; supported : int }
+  | Init_unanswered of float
   | Init_failed of call_failure
   | Cdp of Browser_cdp.failure
 
@@ -20,6 +21,7 @@ and call_failure =
   | Not_delivered of string
   | Rejected of Wire.rpc_error
   | Lost of string
+  | Answer_unreceived of float
 
 type event =
   | Model_request_refused of { reason : string }
@@ -53,6 +55,7 @@ type t =
   { sw : Eio.Switch.t
   ; sleep : float -> unit
   ; worker_wait_s : float
+  ; init_answer_s : float
   ; model : model
   ; log : event -> unit
   ; slot : Eio.Semaphore.t
@@ -66,10 +69,11 @@ type t =
    appeared within half a second in the runs of 2026-09-24. *)
 let worker_poll_s = 0.1
 
-let create ~sw ~clock ~worker_wait_s ~model ~log =
+let create ~sw ~clock ~worker_wait_s ~init_answer_s ~model ~log =
   { sw
   ; sleep = Eio.Time.sleep clock
   ; worker_wait_s
+  ; init_answer_s
   ; model
   ; log
   ; slot = Eio.Semaphore.make 1
@@ -251,24 +255,40 @@ let send_call t link call =
     t.calls <- Idle;
     Eio.Promise.resolve end_call ()
   in
+  let abandon () =
+    Hashtbl.remove t.pending id;
+    t.calls <- Abandoned { id; call };
+    Eio.Promise.resolve end_call ()
+  in
   match
     (match deliver link (Wire.encode_call ~id call) with
-     | Error (Refused_delivery detail) -> Error (Not_delivered detail)
-     | Error (Delivery_unknown detail) -> Error (Lost detail)
-     | Ok () -> Eio.Promise.await reply)
+     | Error (Refused_delivery detail) -> `Answered (Error (Not_delivered detail))
+     | Error (Delivery_unknown detail) -> `Answered (Error (Lost detail))
+     | Ok () ->
+       (match call with
+        | Wire.Init _ ->
+          Watched_work.run
+            ~watcher:(fun () ->
+              t.sleep t.init_answer_s;
+              `Init_timed_out)
+            (fun () -> `Answered (Eio.Promise.await reply))
+        | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages | Wire.Context_active_page
+        | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_evaluate _ ->
+          `Answered (Eio.Promise.await reply)))
   with
-  | result ->
+  | `Answered result ->
     finish ();
     result
+  | `Init_timed_out ->
+    (match Eio.Promise.peek reply with
+     | Some result -> finish (); result
+     | None -> abandon (); Error (Answer_unreceived t.init_answer_s))
   | exception (Eio.Cancel.Cancelled _ as exn) ->
     (* A reply that arrived in the pass the caller was cancelled settled the
        call; only a call still without one is abandoned. *)
     (match Eio.Promise.peek reply with
      | Some _ -> finish ()
-     | None ->
-       Hashtbl.remove t.pending id;
-       t.calls <- Abandoned { id; call };
-       Eio.Promise.resolve end_call ());
+     | None -> abandon ());
     raise exn
   | exception exn ->
     finish ();
@@ -383,8 +403,11 @@ let initialise t link ~browser_cdp_url =
     if major = Wire.supported_protocol_major then Ok ()
     else Error (Runtime_incompatible { found = marker.protocol_version; supported = Wire.supported_protocol_major })
   in
-  Result.map_error (fun failure -> Init_failed failure)
-    (call t (Wire.Init { client_version = Build_version.current; browser_cdp_url }))
+  (* [send_call] starts this deadline only after CDP confirmed delivery. *)
+  match call t (Wire.Init { client_version = Build_version.current; browser_cdp_url }) with
+  | Ok init -> Ok init
+  | Error (Answer_unreceived seconds) -> Error (Init_unanswered seconds)
+  | Error failure -> Error (Init_failed failure)
 ;;
 
 let attach_steps t cdp ~extension_dir ~browser_cdp_url =

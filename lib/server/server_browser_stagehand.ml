@@ -25,10 +25,6 @@ let service_worker_wait_s = 20.
    session opening for good. *)
 let init_answer_s = 30.
 
-(* Attach is bounded by the waits it is made of: the service worker, the
-   longest CDP command (the readiness wait), and the init answer. *)
-let attach_deadline_s = service_worker_wait_s +. cdp_command_deadline_s +. init_answer_s
-
 (* ws-direct's own default. A screenshot of a long page is the largest
    frame the connection carries. *)
 let max_message_bytes = 64 * 1024 * 1024
@@ -55,6 +51,7 @@ let call_failure_message = function
   | Session.Not_delivered detail -> "not delivered: " ^ detail
   | Session.Rejected { code; message } -> Printf.sprintf "the extension refused (%d): %s" code message
   | Session.Lost detail -> "lost: " ^ detail
+  | Session.Answer_unreceived seconds -> Printf.sprintf "no answer within %.0f s" seconds
 ;;
 
 let attach_error_message = function
@@ -68,6 +65,7 @@ let attach_error_message = function
   | Session.Runtime_marker detail -> "the Stagehand runtime marker is unreadable: " ^ detail
   | Session.Runtime_incompatible { found; supported } ->
     Printf.sprintf "the Stagehand runtime speaks protocol %s; masc speaks major %d" found supported
+  | Session.Init_unanswered seconds -> Printf.sprintf "stagehand.init did not answer within %.0f s" seconds
   | Session.Init_failed failure -> "stagehand.init failed: " ^ call_failure_message failure
   | Session.Cdp failure -> "a CDP command failed: " ^ failure_message failure
 ;;
@@ -100,6 +98,19 @@ let stop_left_behind ~masc_root =
 (* For the three exceptions a file or process step raises: [Eio.Io],
    [Unix.Unix_error] and [Sys_error]. *)
 let io_error what exn = Error (Printf.sprintf "%s: %s" what (Printexc.to_string exn))
+
+(* A failed attempt can be retried on the same switch. Keep an older attempt's
+   release hook from deleting a later attempt's record. *)
+let remove_record_if_owned ~record_path ~pid =
+  if Sys.file_exists record_path then
+    match Safe_ops.read_file_safe record_path with
+    | Ok text ->
+      (match Process.owner_of_string text with
+       | Ok owner when owner.pid = pid ->
+         Safe_ops.remove_file_logged ~context:"browser-lane stagehand record" record_path
+       | Ok _ | Error _ -> ())
+    | Error detail -> Log.Server.warn "browser-lane: cannot check stagehand record %s: %s" record_path detail
+;;
 
 (* An operator-owned profile keeps its logins; only the port file of an
    earlier run is removed, so the new port is not confused with it. The
@@ -152,10 +163,13 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
   in
   let extension_id = Browser_stagehand_wire.extension_id_of_real_path extension_dir in
   let* profile = prepare_profile ~masc_root config in
+  let started_pid = ref None in
   (* Registered before the spawn, so it runs after the spawn's own release
      has stopped the browser's process group. *)
   Eio.Switch.on_release sw (fun () ->
-    if Sys.file_exists record_path then Safe_ops.remove_file_logged ~context:"browser-lane stagehand record" record_path);
+    match !started_pid with
+    | Some pid -> remove_record_if_owned ~record_path ~pid
+    | None -> ());
   let* process =
     match
       Fs_compat.mkdir_p lane;
@@ -171,25 +185,33 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
     | exception ((Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn) -> io_error "Chromium did not start" exn
   in
   let pid = Eio.Process.pid process in
-  let* () =
-    Result.map_error
-      (fun detail -> Printf.sprintf "cannot record Chromium pid %d in %s: %s" pid record_path detail)
-      (Fs_compat.save_file_atomic record_path
-         (Process.owner_to_string { Process.pid; chrome = config.chrome; profile }))
+  started_pid := Some pid;
+  let stop_failed () =
+    Eio.Cancel.protect (fun () ->
+      Eio.Process.signal process Sys.sigterm;
+      ignore (Eio.Process.await process);
+      remove_record_if_owned ~record_path ~pid;
+      started_pid := None)
   in
-  let* port, path = await_devtools_endpoint ~clock ~profile ~process in
-  let url = Process.browser_ws_url ~port ~path in
-  let session = Session.create ~sw ~clock ~worker_wait_s:service_worker_wait_s ~model ~log in
-  let* cdp =
-    Browser_cdp.connect ~sw ~net:(Eio.Stdenv.net env) ~clock ~url ~max_message:max_message_bytes
-      ~command_deadline_s:cdp_command_deadline_s ~on_event:(Session.on_cdp_event session)
+  let open_started () =
+    let* () =
+      Result.map_error
+        (fun detail -> Printf.sprintf "cannot record Chromium pid %d in %s: %s" pid record_path detail)
+        (Fs_compat.save_file_atomic record_path
+           (Process.owner_to_string { Process.pid; chrome = config.chrome; profile }))
+    in
+    let* port, path = await_devtools_endpoint ~clock ~profile ~process in
+    let url = Process.browser_ws_url ~port ~path in
+    let session = Session.create ~sw ~clock ~worker_wait_s:service_worker_wait_s ~init_answer_s ~model ~log in
+    let* cdp =
+      Browser_cdp.connect ~sw ~net:(Eio.Stdenv.net env) ~clock ~url ~max_message:max_message_bytes
+        ~command_deadline_s:cdp_command_deadline_s ~on_event:(Session.on_cdp_event session)
+    in
+    let* init = Result.map_error attach_error_message (Session.attach session cdp ~extension_dir ~browser_cdp_url:url) in
+    Ok ({ session; pid }, init)
   in
-  let* init =
-    Watched_work.run
-      ~watcher:(fun () ->
-        Eio.Time.sleep clock attach_deadline_s;
-        Error (Printf.sprintf "Stagehand did not finish attaching within %.0f s" attach_deadline_s))
-      (fun () -> Result.map_error attach_error_message (Session.attach session cdp ~extension_dir ~browser_cdp_url:url))
-  in
-  Ok ({ session; pid }, init)
+  match open_started () with
+  | Ok _ as opened -> opened
+  | Error _ as failed -> stop_failed (); failed
+  | exception exn -> stop_failed (); raise exn
 ;;

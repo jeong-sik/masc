@@ -9,8 +9,9 @@ type t
     [stagehand.init], whose result it returns with the session.
 
     The browser, its connection and the session's fibers live on [sw]:
-    releasing [sw] stops the browser and removes its record. On [Error] the
-    browser may already be running, so the caller releases [sw]. A profile the
+    releasing [sw] stops the browser and removes its record. On [Error] after
+    launch, this function stops the Chromium process group and removes its
+    record before returning, so the same switch may retry. A profile the
     operator configured is kept; otherwise the server's own profile is emptied
     first. The profile directory is made owner-only. *)
 val open_ :

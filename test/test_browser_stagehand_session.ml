@@ -45,6 +45,7 @@ type fake =
   ; mutable marker : Yojson.Safe.t
   ; mutable looks_before_ready : int
   ; mutable readiness_throws : bool
+  ; mutable hold_init : bool
   ; mutable act : act_behaviour
   ; mutable held_act : Yojson.Safe.t option
   ; mutable waiting_on_model : (Yojson.Safe.t * Yojson.Safe.t) option
@@ -71,7 +72,8 @@ let extension_receives fake message =
   let member = Yojson.Safe.Util.member in
   match member "method" message, member "id" message with
   | `String "stagehand.init", id ->
-    to_host fake (rpc_result id (obj [ "initialized", `Bool true; "pages", `List [ obj [ "page_id", str "P"; "url", str "about:blank" ] ] ]))
+    if not fake.hold_init then
+      to_host fake (rpc_result id (obj [ "initialized", `Bool true; "pages", `List [ obj [ "page_id", str "P"; "url", str "about:blank" ] ] ]))
   | `String "stagehand.act", id ->
     (match fake.act with
      | Hold -> fake.held_act <- Some id
@@ -188,6 +190,7 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
     ; marker = marker "2.0.0"
     ; looks_before_ready = 0
     ; readiness_throws = false
+    ; hold_init = false
     ; act = Ask_the_model
     ; held_act = None
     ; waiting_on_model = None
@@ -200,7 +203,8 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
     incr model_calls;
     answer params
   in
-  let session = Session.create ~sw ~clock ~worker_wait_s:deadline_s ~model ~log:(fun event -> events := event :: !events) in
+  let session = Session.create ~sw ~clock ~worker_wait_s:deadline_s ~init_answer_s:deadline_s
+      ~model ~log:(fun event -> events := event :: !events) in
   let cdp =
     Cdp.create ~send:(browser_receives fake) ~close:ignore ~clock ~command_deadline_s:deadline_s
       ~on_event:(Session.on_cdp_event session)
@@ -283,6 +287,15 @@ let calls_refused_after_failed_attach h =
   match Session.call h.session goto with
   | Error (Session.Connection_gone _) -> ()
   | _ -> fail "a session whose attach failed takes no calls"
+;;
+
+let test_init_without_an_answer () =
+  with_session ~configure:(fun fake -> fake.hold_init <- true)
+  @@ fun h ->
+  (match attach h with
+   | Error (Session.Init_unanswered seconds) -> check (float 0.001) "init answer deadline" deadline_s seconds
+   | _ -> fail "an unanswered init must return a typed timeout");
+  calls_refused_after_failed_attach h
 ;;
 
 let test_attach_refusals () =
@@ -464,6 +477,7 @@ let () =
       test_case "a matching extension attaches" `Quick test_attach;
       test_case "a worker listed after loading is found" `Quick test_worker_found_after_loading;
       test_case "a runtime ready a few looks later is waited for" `Quick test_runtime_ready_after_a_few_looks;
+      test_case "an unanswered init ends attach" `Quick test_init_without_an_answer;
       test_case "a failed attach ends the session" `Quick test_attach_refusals;
     ];
     "calls", [

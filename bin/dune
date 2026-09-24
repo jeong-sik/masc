@@ -921,7 +921,8 @@
 (library
  (name masc_tui_layout)
  (wrapped false)
- (modules masc_tui_layout))
+ (modules masc_tui_layout)
+ (libraries masc_tui_message_layout))
 
 (library
  (name masc_tui_render_schedule)

@@ -1079,17 +1079,8 @@ let test_the_loader_stops_opening_keys_no_screen_draws () =
     still_read
 ;;
 
-(* The keeper detail's Automation rows drew a status, a recurrence and a
-   summary, and a Keeper's store keeps every request it ever took. On the
-   live roster code-reviewer holds 91 rows: twenty of them share one status
-   and one summary, ten more share another. Twenty identical lines say the
-   same thing twenty times and tell a reader nothing about which is which.
-
-   [sch_requested_at_iso] is on every row and was drawn nowhere. The three
-   that read "#36319 리뷰 등기 (dispatch 결과 확인 후)" were asked for at
-   13:39:53, 13:43:50 and 13:45:04 on 2026-09-14, so the clock is what parts
-   them. It is drawn with the terminal's own short timestamp, the helper the
-   other row clocks read, rather than a format of its own. *)
+(* The request clock distinguishes repeated Automation rows. The renderer
+   reads the persisted field and uses the terminal's shared projection. *)
 let test_an_automation_row_says_when_it_was_asked_for () =
   Alcotest.(check int) "the row reads the request clock" 1
     (Ast_grep.count_field_reads_in_value_binding ~module_path:render
@@ -1099,26 +1090,13 @@ let test_an_automation_row_says_when_it_was_asked_for () =
        ~binding_name:"automation_lines" ~callee:"Terminal_text.short_timestamp")
 ;;
 
-(* The two wire values beside the clock sat in [%-12s] and [%-18s]. Printf
-   pads such a column to its width and never cuts it, so a longer value pushes
-   everything after it to the right on that row alone. Measured on the live
-   fleet's 676 schedule requests: geek-scout's "daily 09:25:00 +09:00" is 21
-   cells and polisher's "cron 0 */2 * * * UTC" is 20, both in the 18-cell
-   recurrence column. [%-Ns] also counts bytes, so any non-ASCII value would
-   miss its width even inside the column.
-
-   Every cell is now held to a width measured in cells: the status to the
-   widest word the schedule contract names, the clock to the shape the format
-   answers in, the recurrence to the widest summary the page holds. *)
+(* The renderer delegates the variable width to the pure schedule-row layout.
+   It keeps the request clock and the payload summary beside each other when
+   a long recurrence needs a continuation. *)
 let test_the_automation_row_cuts_the_columns_it_draws () =
-  Alcotest.(check int) "the three fixed cells are held to a width" 3
+  Alcotest.(check int) "the row uses the width-aware layout" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"automation_lines" ~callee:"fit_width");
-  (* The column is measured over the rows the frame draws, so a page of short
-     summaries draws no wider than it needs and no summary is ever cut. *)
-  Alcotest.(check int) "and the recurrence width is measured over the page" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"automation_lines" ~callee:"List.fold_left");
+       ~binding_name:"automation_lines" ~callee:"Layout.automation_schedule_lines");
   (* The clock width is read off the format. A number typed here would drift
      from it the first time the format changed. *)
   Alcotest.(check int) "the clock width is read off the format" 1
@@ -1140,43 +1118,38 @@ let has_substring haystack needle =
   let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
   n = 0 || scan 0
 
-(* The column is measured over the page and has no ceiling, so every summary
-   on a page is drawn whole -- including the two the live fleet holds that
-   reach past eighteen cells. A ceiling would be today's measurement, and one
-   summary past it puts the cut back on a clock, where the middle fold keeps
-   a third of the room at the head and the hour is what goes. *)
-let longest_live_recurrences =
-  [ "daily 09:25:00 +09:00"; "cron 0 */2 * * * UTC" ]
-
-let test_the_measured_column_draws_every_summary_whole () =
-  let widest =
-    List.fold_left
-      (fun widest summary ->
-         max widest (Masc_tui_message_layout.display_width summary))
-      0 longest_live_recurrences
+(* A valid comma-list cron is much wider than one_shot. At eighty columns it
+   must not make the one_shot row's payload disappear; its own full expression
+   remains visible on a continuation. These are the exact pre-box layout
+   lines, so their cell widths prove the frame will not cut them. *)
+let test_one_long_cron_does_not_hide_any_schedule_identity () =
+  let inner_width = Masc_tui_frame.inner_width ~cols:80 in
+  let cron = "cron 0,5,10,15,20,25,30,35,40,45,50,55 * * * * UTC" in
+  let row status requested_clock recurrence summary : Masc_tui_layout.automation_schedule_row =
+    { status; requested_clock; recurrence; summary }
   in
-  List.iter
-    (fun summary ->
-       let drawn = Masc_tui_message_layout.fit_width summary widest in
-       Alcotest.(check bool)
-         (Printf.sprintf "%s is drawn whole" summary)
-         true
-         (has_substring drawn summary);
-       Alcotest.(check int)
-         (Printf.sprintf "%s fills the column" summary)
-         widest
-         (Masc_tui_message_layout.display_width drawn))
-    longest_live_recurrences
-;;
-
-(* And the shorter rows are padded into the same column rather than left to
-   shift the summary beside them. *)
-let test_a_short_summary_is_padded_to_the_column () =
-  let drawn = Masc_tui_message_layout.fit_width "daily" 21 in
-  Alcotest.(check int) "padded to the column" 21
-    (Masc_tui_message_layout.display_width drawn);
-  Alcotest.(check bool) "and nothing was cut" false
-    (has_substring drawn "\xe2\x80\xa6")
+  let lines =
+    Masc_tui_layout.automation_schedule_lines ~inner_width
+      ~status_cells:9 ~clock_cells:19
+      [ row "scheduled" "2026-09-24 03:55:20" cron "#38891 full cron task"
+      ; row "cancelled" "2026-09-14 22:43:50" "one_shot" "#36319 review registration"
+      ]
+  in
+  let painted =
+    List.map (fun line -> Masc_tui_message_layout.fit_width line inner_width) lines
+  in
+  Alcotest.(check int) "eighty columns has a 76-cell box content" 76 inner_width;
+  Alcotest.(check int) "one continuation only for the long cron" 3
+    (List.length lines);
+  Alcotest.(check bool) "cron row retains its payload" true
+    (has_substring (List.nth painted 0) "#38891 full cron task");
+  Alcotest.(check bool) "continuation retains the full recurrence" true
+    (has_substring (List.nth painted 1) cron);
+  Alcotest.(check bool) "one_shot row retains its payload" true
+    (has_substring (List.nth painted 2) "#36319 review registration");
+  List.iter (fun line ->
+    Alcotest.(check int) "the painted line fills the actual box content" inner_width
+      (Masc_tui_message_layout.display_width line)) painted
 ;;
 
 (* Three lists draw a Fusion run's start: the Fusion list, the run detail and
@@ -1288,10 +1261,8 @@ let () =
             `Quick test_an_automation_row_says_when_it_was_asked_for
         ; Alcotest.test_case "the automation row cuts the columns it draws"
             `Quick test_the_automation_row_cuts_the_columns_it_draws
-        ; Alcotest.test_case "the measured column draws every summary whole"
-            `Quick test_the_measured_column_draws_every_summary_whole
-        ; Alcotest.test_case "a short summary is padded to the column" `Quick
-            test_a_short_summary_is_padded_to_the_column
+        ; Alcotest.test_case "one long cron cannot hide schedule identities"
+            `Quick test_one_long_cron_does_not_hide_any_schedule_identity
         ; Alcotest.test_case
             "the Tasks list pane says which task each row is" `Quick
             test_the_tasks_list_pane_says_which_task_each_row_is

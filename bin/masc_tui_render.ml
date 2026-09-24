@@ -7869,24 +7869,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
             ^ Terminal_text.single_line err ^ Ansi.reset ]
       | _, Some (keeper_name, snapshot) when String.equal keeper_name k.k_name ->
           let rows = snapshot.scs_rows in
-          (* The column is as wide as the widest summary this page holds, and
-             no wider: it pads the shorter rows into line and cuts nothing.
-
-             There is no ceiling. A ceiling would be today's measurement --
-             of 676 live requests the longest is 21 cells -- and one summary
-             past it puts the cut back on a clock, where the middle fold
-             keeps a third of the room at the head and the hour is what goes.
-             A clock missing its hour or its zone is a wrong reading. The
-             column beside it carries the payload summary, which the detail
-             shows in full, so that is where a narrow row gives way. *)
-          let recurrence_cells =
-            List.fold_left
-              (fun widest (row : schedule_row) ->
-                 max widest
-                   (Message_layout.display_width
-                      (Terminal_text.single_line row.sch_recurrence_summary)))
-              0 rows
-          in
           if not (String.equal snapshot.scs_status "ok") then
             [ (Theme.bad ())
               ^ (match snapshot.scs_read_error with
@@ -7930,29 +7912,25 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                    ^ Ansi.reset
                  ; ""
                  ])
-            @ List.map
+            @ Layout.automation_schedule_lines ~inner_width:inner
+                ~status_cells:schedule_status_word_cells
+                ~clock_cells:schedule_requested_clock_cells
+                (List.map
                 (fun (row : schedule_row) ->
-                   (* When it was asked for, beside what it asks. A Keeper's
-                      store keeps every request it ever took, and the same
-                      one-shot is asked for again and again: on the live
-                      roster code-reviewer holds 91 rows, 20 of them the same
-                      status and the same summary. Without the clock those 20
-                      are one line drawn twenty times, and the three that read
-                      "#36319 리뷰 등기 (dispatch 결과 확인 후)" were asked for
-                      at 13:39:53, 13:43:50 and 13:45:04 on the same day. *)
-                   Printf.sprintf "  %s %s  %s %s"
-                     (fit_width
-                        (Terminal_text.single_line row.sch_status)
-                        schedule_status_word_cells)
-                     (fit_width
-                        (Terminal_text.short_timestamp row.sch_requested_at_iso)
-                        schedule_requested_clock_cells)
-                     (fit_width
-                        (Terminal_text.single_line row.sch_recurrence_summary)
-                        recurrence_cells)
-                     (Terminal_text.single_line
-                        (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))
-                rows
+                   (* The requested clock disambiguates repeated one-shot
+                      requests. The pure layout keeps each payload summary in
+                      the main row; a long recurrence gets a continuation
+                      rather than consuming every row's summary space. *)
+                   ({ Layout.status = Terminal_text.single_line row.sch_status
+                    ; requested_clock =
+                        Terminal_text.short_timestamp row.sch_requested_at_iso
+                    ; recurrence =
+                        Terminal_text.single_line row.sch_recurrence_summary
+                    ; summary =
+                        Terminal_text.single_line
+                          (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)
+                    } : Layout.automation_schedule_row))
+                rows)
       | _, _ ->
           [ Ansi.dim ^ "  (loading this Keeper's schedules…)" ^ Ansi.reset ]
     in

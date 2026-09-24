@@ -2536,6 +2536,21 @@ let parse_exact_output_lanes (toml : Otoml.t)
       (List.map
          (fun (id, value) ->
             match value with
+            (* A table under a name no lane has would parse, publish, and then
+               never be read: the standalone-lane projection draws one row per
+               [Standalone_lane.t], so a misspelt lane vanished from every
+               surface while the real lane read as unconfigured. *)
+            | (Otoml.TomlTable _ | Otoml.TomlInlineTable _)
+              when Option.is_none (Standalone_lane.of_id id) ->
+              Error
+                (error
+                   (Printf.sprintf "runtime.exact_output_lanes.%s" id)
+                   (Printf.sprintf
+                      "unknown exact-output lane %S; expected one of %s"
+                      id
+                      (String.concat
+                         ", "
+                         (List.map Standalone_lane.to_id Standalone_lane.all))))
             | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
               parse_exact_output_lane ~id value
             | _ ->

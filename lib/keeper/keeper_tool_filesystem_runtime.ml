@@ -1518,7 +1518,7 @@ let write_call_summary ~requested_target =
 let gate_operation = Keeper_gate.filesystem_write_gate_operation
 
 let file_write_gate_input
-      ~gate_effect
+      ~effect_json
       ~requested_target
       ~content
       ?content_source
@@ -1542,7 +1542,7 @@ let file_write_gate_input
     | Some value -> [ name, `Int value ]
   in
   `Assoc
-    ([ "effect", Keeper_alerting_path.path_effect_to_yojson gate_effect
+    ([ "effect", effect_json
      ; "requested_target", `String requested_target
      ]
      @ Keeper_write_content.fields (match content_source with
@@ -1578,6 +1578,46 @@ let decide_file_write
     ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
     ; continuation_channel
     }
+;;
+
+(* The Gate effect names what the write does to the file. A host write
+   carries a pinned capability ([Keeper_alerting_path.path_effect]); an
+   endpoint's file has none this host can pin, so a write under a declared
+   root names the endpoint and its path. The operation is spelled as for a
+   host write, and [fs_write_mode_of_gate_effect_operation] reads it back, so
+   an approved endpoint write replays as the same mode. *)
+let path_effect_operation_of_write_mode = function
+  | Overwrite -> Keeper_alerting_path.Atomic_replace_entry
+  | Append -> Keeper_alerting_path.Append_pinned_resource
+  | Patch -> Keeper_alerting_path.Patch_then_atomic_replace_entry
+;;
+
+(* A write to a path under an endpoint's declared roots (#38593) is outside
+   the keeper's tree, so it takes the Gate decision a host write outside the
+   playground takes, with the same operation and the same input shape. *)
+let declared_root_writes ~config ~meta ?continuation_channel ?gate_context ?gate_grant () =
+  Keeper_tool_filesystem_remote_write.Authorize_declared_roots
+    (fun ~endpoint ~requested_target ~mode ~content_source ~content ~patch ->
+      let effect_json =
+        `Assoc
+          [ ( "operation"
+            , `String
+                (Keeper_alerting_path.path_effect_operation_to_string
+                   (path_effect_operation_of_write_mode mode)) )
+          ; "endpoint", `String endpoint
+          ; "endpoint_path", `String requested_target
+          ]
+      in
+      let input =
+        match patch with
+        | None ->
+          file_write_gate_input ~effect_json ~requested_target ~content ~content_source ()
+        | Some { Keeper_tool_filesystem_remote_write.old_string; new_string; replace_all } ->
+          file_write_gate_input ~effect_json ~requested_target ~content ~old_string
+            ~new_string ~replace_all ()
+      in
+      decide_file_write ~config ~meta ?continuation_channel ?gate_context ?gate_grant
+        ~requested_target ~input ())
 ;;
 
 let confined_write_is_keeper_playground
@@ -2401,6 +2441,9 @@ let handle_file_write_content_with_outcome
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
   | Keeper_types_profile_sandbox.Endpoint_owned ->
     Keeper_tool_filesystem_remote_write.handle
+      ~declared_root_writes:
+        (declared_root_writes ~config ~meta ?continuation_channel ?gate_context
+           ?gate_grant ())
       ~turn_sandbox_factory
       ~config
       ~meta
@@ -2554,7 +2597,7 @@ let handle_file_write_content_with_outcome
     let mode_label = fs_write_mode_to_string mode in
     let input =
       file_write_gate_input
-        ~gate_effect
+        ~effect_json:(Keeper_alerting_path.path_effect_to_yojson gate_effect)
         ~requested_target:target
         ~content_source
         ~content:(content ())
@@ -2925,7 +2968,7 @@ let handle_file_write_content_with_outcome
                   match operation with
                   | Keeper_tool_patch.Replace { old_string; new_string; replace_all } ->
                     file_write_gate_input
-                      ~gate_effect
+                      ~effect_json:(Keeper_alerting_path.path_effect_to_yojson gate_effect)
                       ~requested_target:target
                       ~content:updated
                       ~old_string
@@ -2934,7 +2977,7 @@ let handle_file_write_content_with_outcome
                       ()
                   | Keeper_tool_patch.Insert_before_line { line; text } ->
                     file_write_gate_input
-                      ~gate_effect
+                      ~effect_json:(Keeper_alerting_path.path_effect_to_yojson gate_effect)
                       ~requested_target:target
                       ~content:updated
                       ~insert_before_line:line
@@ -3254,7 +3297,11 @@ let handle_file_write_with_outcome ~turn_sandbox_factory ~config ~(meta : Keeper
     ~publication_recovery ?continuation_channel ?gate_context ?gate_grant ~args () =
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
   | Keeper_types_profile_sandbox.Endpoint_owned ->
-    Keeper_tool_filesystem_remote_write.handle ~turn_sandbox_factory ~config ~meta ~args
+    Keeper_tool_filesystem_remote_write.handle
+      ~declared_root_writes:
+        (declared_root_writes ~config ~meta ?continuation_channel ?gate_context
+           ?gate_grant ())
+      ~turn_sandbox_factory ~config ~meta ~args
   | Keeper_types_profile_sandbox.Shared_mount ->
   match Keeper_write_content.of_args args with
   | Error error -> Keeper_write_content.failure error

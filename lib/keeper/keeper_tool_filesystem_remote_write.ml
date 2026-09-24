@@ -11,11 +11,13 @@
     What stays the same as the host handler: the path is resolved and jailed
     in the keeper's host namespace first (the same
     [resolve_keeper_confined_write_path]), the same modes, the same patch, the
-    same evidence, the same per-path lease. What differs: there is no Gate
-    decision, because the jail admits only the keeper's own playground and
-    such writes are internal (the host handler authorizes those without the
-    Gate as well); and there is no publication-recovery journal, because the
-    replace is [mktemp] + [mv] on the endpoint's own filesystem.
+    same evidence, the same per-path lease. A write in the keeper's own tree is
+    internal and takes no Gate decision, as on the host. A path the tree
+    refuses may be under one of the endpoint's declared roots; the caller
+    decides through [declared_root_writes] whether it is written and which
+    Gate decides it, as the host handler decides a write outside the
+    playground. There is no publication-recovery journal, because the replace
+    is [mktemp] + [mv] on the endpoint's own filesystem.
 
     Failures are typed by the payload's exit code, which the scripts choose,
     never by reading its stderr. *)
@@ -93,7 +95,47 @@ let success_payload ~target ~(meta : keeper_meta) fields : Yojson.Safe.t =
        @ [ "via", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile) ])
 ;;
 
+type patch_request =
+  { old_string : string
+  ; new_string : string
+  ; replace_all : bool
+  }
+
+type declared_root_writes =
+  | Refuse_declared_roots
+  | Authorize_declared_roots of
+      (endpoint:string
+       -> requested_target:string
+       -> mode:Keeper_tool_write_mode.t
+       -> content_source:Keeper_write_content.t
+       -> content:string
+       -> patch:patch_request option
+       -> Keeper_gate.decision)
+
+(* Where a remote write lands. A name in the keeper's tree is internal and
+   needs no decision; an endpoint path under a declared root is outside the
+   tree, so the caller's Gate decides it the way it decides a host write
+   outside the playground. *)
+type remote_target =
+  | Keeper_tree_target of
+      { target : string
+      ; remote_path : string
+      }
+  | Declared_root_target of
+      { endpoint_path : string
+      ; authorize :
+          endpoint:string
+          -> requested_target:string
+          -> mode:Keeper_tool_write_mode.t
+          -> content_source:Keeper_write_content.t
+          -> content:string
+          -> patch:patch_request option
+          -> Keeper_gate.decision
+      }
+
 let handle_content_with_endpoint
+      ~declared_root_writes
+      ~content_source
       ~content
       ~(endpoint : Keeper_sandbox_remote.t)
       ~(config : Workspace.config)
@@ -122,147 +164,212 @@ let handle_content_with_endpoint
         | Keeper_tool_write_mode.Overwrite -> Keeper_alerting_path.Lexical_entry
         | Append | Patch -> Keeper_alerting_path.Follow_referent
       in
-      (match
-         resolve_keeper_confined_write_path ~config ~meta ~endpoint:confined_endpoint ~raw_path:path
-       with
-       | Error (refusal : Keeper_alerting_path.path_refusal) ->
-         Keeper_tool_execution.failure
-           ~class_:refusal.failure_class
-           (error_json refusal.message)
-       | Ok confined ->
-         let target = Keeper_alerting_path.confined_host_path confined in
-         if not (confined_is_keeper_playground ~config ~meta confined)
-         then
-           failure ~class_:Tool_result.Policy_rejection ~target
-             (Printf.sprintf
-                "remote lane writes stay inside the keeper playground; %s resolves under %s"
-                target
-                (Keeper_alerting_path.confined_root confined))
-         else
-           let keeper_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
-           (match
-              Keeper_remote_path.host_to_remote
-                ~base_path:config.base_path
-                ~remote_workspace_root:(Keeper_sandbox_remote.workspace_root endpoint)
-                ~keeper:meta.name
-                target
-            with
-            | Error message -> failure ~class_:Tool_result.Policy_rejection ~target message
-            | Ok remote_path ->
-              (* [extra_fields] carries the patch operation fields the Edit
-                 output schema advertises — the endpoint lane emits them from
-                 the same apply_patch application the evidence comes from, so
-                 an [/occurrences] reference is answered on both lanes, not
-                 only on the host one. *)
-              let write ~content_mode ~mode_label ~body ~extra_fields ~evidence =
-                let status, _stdout, stderr =
-                  Masc_exec.Sandbox_target.status_tuple
-                    (run ~endpoint ~cwd:keeper_root
-                       ~argv:(write_argv ~mode:content_mode ~remote_path)
-                       ~stdin:body)
-                in
-                match status with
-                | Unix.WEXITED 0 ->
-                  Log.Keeper.info
-                    "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d via=remote"
-                    meta.name target mode_label (String.length body);
-                  let execution =
-                    Keeper_tool_execution.success_data
-                      (success_payload ~target ~meta
-                         ([ "mode", `String mode_label
-                          ; "bytes_written", `Int (String.length body)
-                          ]
-                         @ extra_fields))
-                  in
-                  (match evidence with
-                   | Some evidence -> Keeper_tool_execution.with_file_change_evidence evidence execution
-                   | None -> execution)
-                | status ->
-                  failure ~class_:Tool_result.Runtime_failure ~target
-                    (Printf.sprintf
-                       "remote write failed (%s) on endpoint %s: %s"
-                       (describe_status status)
-                       (Keeper_sandbox_remote.name endpoint)
-                       (Exec_policy.truncate_for_log stderr))
-              in
-              Keeper_external_resource_lease.with_lease
-                (Keeper_external_resource_lease.File_path target)
-                (fun () ->
-                  match mode with
-                  | Overwrite ->
-                    write ~content_mode:Replace_whole ~mode_label:"overwrite" ~body:(content ())
-                      ~extra_fields:[]
-                      ~evidence:(Some (Keeper_file_change_evidence.written (content ())))
-                  | Append ->
-                    write ~content_mode:Append_tail ~mode_label:"append" ~body:(content ())
-                      ~extra_fields:[] ~evidence:None
-                  | Patch ->
-                    let old_string = Safe_ops.json_string ~default:"" "old_string" args in
-                    let new_string = Safe_ops.json_string ~default:"" "new_string" args in
-                    let replace_all = Safe_ops.json_bool ~default:false "replace_all" args in
-                    if old_string = ""
-                    then
-                      Keeper_tool_execution.failure
-                        ~class_:Tool_result.Policy_rejection
-                        (error_json
-                           (Keeper_tool_filesystem_guidance.patch_requires_old_string_text
-                              ()))
-                    else
-                      let status, current, stderr =
-                        Masc_exec.Sandbox_target.status_tuple
-                          (run ~endpoint ~cwd:keeper_root
-                             ~argv:(read_source_argv ~remote_path) ~stdin:"")
-                      in
-                      (match status with
-                       | Unix.WEXITED 0 ->
-                         (match
-                            Keeper_tool_patch.apply_patch ~old_string ~new_string ~replace_all current
-                          with
-                          | Error message ->
-                            failure ~class_:Tool_result.Workflow_rejection ~target message
-                          | Ok application when String.equal current application.updated ->
-                            Keeper_tool_execution.success_data
-                              (success_payload ~target ~meta
-                                 [ "mode", `String "patch"; "changed", `Bool false
-                                 ; "occurrences", `Int application.occurrence_count
-                                 ; "replace_all", `Bool replace_all
-                                 ; "bytes_written", `Int 0 ])
-                          | Ok application ->
-                            write ~content_mode:Replace_whole ~mode_label:"patch"
-                              ~body:application.updated
-                              ~extra_fields:
-                                [ "changed", `Bool true
-                                ; "occurrences", `Int application.occurrence_count
-                                ; "replace_all", `Bool replace_all
-                                ]
-                              ~evidence:(Some (Keeper_tool_patch.file_change_evidence application)))
-                       | Unix.WEXITED code when code = patch_source_missing_exit ->
-                         failure ~class_:Tool_result.Workflow_rejection ~target
-                           (Keeper_tool_filesystem_guidance.patch_target_missing_text ())
-                       | status ->
-                         failure ~class_:Tool_result.Runtime_failure ~target
-                           (Printf.sprintf
-                              "remote read of the patch source failed (%s) on endpoint %s: %s"
-                              (describe_status status)
-                              (Keeper_sandbox_remote.name endpoint)
-                              (Exec_policy.truncate_for_log stderr))))))
+      let keeper_tree =
+        match
+          resolve_keeper_confined_write_path ~config ~meta ~endpoint:confined_endpoint ~raw_path:path
+        with
+        | Error (refusal : Keeper_alerting_path.path_refusal) ->
+          Error
+            (Keeper_tool_execution.failure
+               ~class_:refusal.failure_class
+               (error_json refusal.message))
+        | Ok confined ->
+          let target = Keeper_alerting_path.confined_host_path confined in
+          if not (confined_is_keeper_playground ~config ~meta confined)
+          then
+            Error
+              (failure ~class_:Tool_result.Policy_rejection ~target
+                 (Printf.sprintf
+                    "remote lane writes stay inside the keeper playground; %s resolves under %s"
+                    target
+                    (Keeper_alerting_path.confined_root confined)))
+          else
+            (match
+               Keeper_remote_path.host_to_remote
+                 ~base_path:config.base_path
+                 ~remote_workspace_root:(Keeper_sandbox_remote.workspace_root endpoint)
+                 ~keeper:meta.name
+                 target
+             with
+             | Error message -> Error (failure ~class_:Tool_result.Policy_rejection ~target message)
+             | Ok remote_path -> Ok (Keeper_tree_target { target; remote_path }))
+      in
+      (* Only what the keeper's own tree refused may be a path under the
+         endpoint's declared roots (#38593), as for Read: a name the tree
+         accepts keeps meaning the keeper's own file. *)
+      let resolved =
+        match keeper_tree, declared_root_writes with
+        | (Ok _ as tree_target), _ -> tree_target
+        | (Error _ as refused), Refuse_declared_roots -> refused
+        | (Error _ as refused), Authorize_declared_roots authorize ->
+          (match Keeper_sandbox_remote_lane.declared_endpoint_path ~config ~meta path with
+           | Ok (Some endpoint_path) -> Ok (Declared_root_target { endpoint_path; authorize })
+           | Ok None -> refused
+           | Error message ->
+             Error (failure ~class_:Tool_result.Runtime_failure ~target:path message))
+      in
+      (match resolved with
+       | Error refused -> refused
+       | Ok remote_target ->
+         let target, remote_path =
+           match remote_target with
+           | Keeper_tree_target { target; remote_path } -> target, remote_path
+           | Declared_root_target { endpoint_path; _ } -> endpoint_path, endpoint_path
+         in
+         let keeper_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+         (* [extra_fields] carries the patch operation fields the Edit output
+            schema advertises — the endpoint lane emits them from the same
+            apply_patch application the evidence comes from, so an
+            [/occurrences] reference is answered on both lanes, not only on the
+            host one. *)
+         let write ~content_mode ~mode_label ~body ~extra_fields ~evidence ~patch =
+           let run_write () =
+             let status, _stdout, stderr =
+               Masc_exec.Sandbox_target.status_tuple
+                 (run ~endpoint ~cwd:keeper_root
+                    ~argv:(write_argv ~mode:content_mode ~remote_path)
+                    ~stdin:body)
+             in
+             match status with
+             | Unix.WEXITED 0 ->
+               Log.Keeper.info
+                 "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d via=remote"
+                 meta.name target mode_label (String.length body);
+               let execution =
+                 Keeper_tool_execution.success_data
+                   (success_payload ~target ~meta
+                      ([ "mode", `String mode_label
+                       ; "bytes_written", `Int (String.length body)
+                       ]
+                      @ extra_fields))
+               in
+               (match evidence with
+                | Some evidence -> Keeper_tool_execution.with_file_change_evidence evidence execution
+                | None -> execution)
+             | status ->
+               failure ~class_:Tool_result.Runtime_failure ~target
+                 (Printf.sprintf
+                    "remote write failed (%s) on endpoint %s: %s"
+                    (describe_status status)
+                    (Keeper_sandbox_remote.name endpoint)
+                    (Exec_policy.truncate_for_log stderr))
+           in
+           match remote_target with
+           | Keeper_tree_target _ -> run_write ()
+           | Declared_root_target { authorize; _ } ->
+             (match
+                authorize
+                  ~endpoint:(Keeper_sandbox_remote.name endpoint)
+                  ~requested_target:target
+                  ~mode
+                  ~content_source
+                  ~content:body
+                  ~patch
+              with
+              | Keeper_gate.Allow authorization ->
+                Keeper_tool_execution.with_gate_authorization authorization (run_write ())
+              | Keeper_gate.Deferred { operation; approval_id; reason; audit_receipts } ->
+                Keeper_gate_deferred_payload.create
+                  ~operation
+                  ~approval_id
+                  ~reason
+                  ~audit_receipts
+                  ~context:(`Assoc [ "path", `String target ])
+                  ()
+                |> Keeper_gate_deferred_payload.to_execution
+              | Keeper_gate.Unavailable reason ->
+                Keeper_tool_execution.failure
+                  ~class_:Tool_result.Dependency_unavailable
+                  (error_json
+                     ~fields:
+                       [ "path", `String target
+                       ; "error", `String "gate_unavailable"
+                       ; "gate_reason", `String (Keeper_gate.unavailable_reason_to_string reason)
+                       ]
+                     (Keeper_tool_filesystem_guidance.text
+                        Keeper_tool_filesystem_guidance.Gate_record_unavailable)))
+         in
+         Keeper_external_resource_lease.with_lease
+           (Keeper_external_resource_lease.File_path target)
+           (fun () ->
+             match mode with
+             | Overwrite ->
+               write ~content_mode:Replace_whole ~mode_label:"overwrite" ~body:(content ())
+                 ~extra_fields:[]
+                 ~evidence:(Some (Keeper_file_change_evidence.written (content ())))
+                 ~patch:None
+             | Append ->
+               write ~content_mode:Append_tail ~mode_label:"append" ~body:(content ())
+                 ~extra_fields:[] ~evidence:None ~patch:None
+             | Patch ->
+               let old_string = Safe_ops.json_string ~default:"" "old_string" args in
+               let new_string = Safe_ops.json_string ~default:"" "new_string" args in
+               let replace_all = Safe_ops.json_bool ~default:false "replace_all" args in
+               if old_string = ""
+               then
+                 Keeper_tool_execution.failure
+                   ~class_:Tool_result.Policy_rejection
+                   (error_json
+                      (Keeper_tool_filesystem_guidance.patch_requires_old_string_text ()))
+               else
+                 let status, current, stderr =
+                   Masc_exec.Sandbox_target.status_tuple
+                     (run ~endpoint ~cwd:keeper_root
+                        ~argv:(read_source_argv ~remote_path) ~stdin:"")
+                 in
+                 (match status with
+                  | Unix.WEXITED 0 ->
+                    (match
+                       Keeper_tool_patch.apply_patch ~old_string ~new_string ~replace_all current
+                     with
+                     | Error message ->
+                       failure ~class_:Tool_result.Workflow_rejection ~target message
+                     | Ok application when String.equal current application.updated ->
+                       Keeper_tool_execution.success_data
+                         (success_payload ~target ~meta
+                            [ "mode", `String "patch"; "changed", `Bool false
+                            ; "occurrences", `Int application.occurrence_count
+                            ; "replace_all", `Bool replace_all
+                            ; "bytes_written", `Int 0 ])
+                     | Ok application ->
+                       write ~content_mode:Replace_whole ~mode_label:"patch"
+                         ~body:application.updated
+                         ~extra_fields:
+                           [ "changed", `Bool true
+                           ; "occurrences", `Int application.occurrence_count
+                           ; "replace_all", `Bool replace_all
+                           ]
+                         ~evidence:(Some (Keeper_tool_patch.file_change_evidence application))
+                         ~patch:(Some { old_string; new_string; replace_all }))
+                  | Unix.WEXITED code when code = patch_source_missing_exit ->
+                    failure ~class_:Tool_result.Workflow_rejection ~target
+                      (Keeper_tool_filesystem_guidance.patch_target_missing_text ())
+                  | status ->
+                    failure ~class_:Tool_result.Runtime_failure ~target
+                      (Printf.sprintf
+                         "remote read of the patch source failed (%s) on endpoint %s: %s"
+                         (describe_status status)
+                         (Keeper_sandbox_remote.name endpoint)
+                         (Exec_policy.truncate_for_log stderr)))))
 ;;
 
-let handle_with_endpoint ~endpoint ~config ~meta ~args =
+let handle_with_endpoint ~declared_root_writes ~endpoint ~config ~meta ~args =
   match Keeper_write_content.of_args args with
   | Error error -> Keeper_write_content.failure error
   | Ok source ->
     (match Keeper_write_content.bytes ~config source with
      | Error error -> Keeper_write_content.failure error
-     | Ok content -> handle_content_with_endpoint ~content ~endpoint ~config ~meta ~args)
+     | Ok content ->
+       handle_content_with_endpoint ~declared_root_writes ~content_source:source ~content
+         ~endpoint ~config ~meta ~args)
 ;;
 
-let handle ~turn_sandbox_factory ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
+let handle ~declared_root_writes ~turn_sandbox_factory ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
   let cwd = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   match Keeper_sandbox_remote_lane.endpoint ?turn_sandbox_factory ~config ~meta ~cwd () with
   | Error message ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Dependency_unavailable
       (error_json ~fields:[ "path", `String (Safe_ops.json_string ~default:"" "path" args) ] message)
-  | Ok endpoint -> handle_with_endpoint ~endpoint ~config ~meta ~args
+  | Ok endpoint -> handle_with_endpoint ~declared_root_writes ~endpoint ~config ~meta ~args
 ;;

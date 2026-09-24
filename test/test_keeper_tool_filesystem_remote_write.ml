@@ -174,8 +174,9 @@ remote_endpoint = "build-box"
 ;;
 
 let handle f args =
-  Keeper_tool_filesystem_remote_write.handle_with_endpoint ~endpoint:f.endpoint
-    ~config:f.config ~meta:f.meta ~args:(`Assoc args)
+  Keeper_tool_filesystem_remote_write.handle_with_endpoint
+    ~declared_root_writes:Keeper_tool_filesystem_remote_write.Refuse_declared_roots
+    ~endpoint:f.endpoint ~config:f.config ~meta:f.meta ~args:(`Assoc args)
 ;;
 
 let write_frame f =
@@ -330,6 +331,157 @@ let test_jail_and_mode_are_enforced_before_any_payload () =
   check bool "no payload was sent" false (Sys.file_exists (f.frame_path ^ ".write"))
 ;;
 
+(* #38593: a path the keeper's tree refuses may be under the endpoint's
+   declared roots ([allowed_paths]). The endpoint here declares /app. *)
+let declare_roots f roots =
+  save
+    (Filename.concat f.config.Workspace.base_path ".masc/config/runtime.toml")
+    (Exec_ssh_endpoint.to_toml
+       Exec_ssh_endpoint.
+         { name = "build-box"
+         ; host = "build-box.invalid"
+         ; user = "masc"
+         ; port = default_port
+         ; identity_file = default_identity_file ~name:"build-box"
+         ; known_hosts_file = default_known_hosts_file ~name:"build-box"
+         ; remote_root = "/srv/masc/playground"
+         ; connect_timeout_sec = 1
+         ; max_concurrent_sessions = 2
+         ; env_allowlist = []
+         ; capabilities = []
+         ; private_home = false
+         ; allowed_paths = roots
+         })
+;;
+
+(* Runs the handler with a Gate that answers [decision] and records what it
+   was asked: endpoint, target, mode, bytes, and whether it was a patch. *)
+let handle_declared f ~decision args =
+  let asked = ref [] in
+  let authorize ~endpoint ~requested_target ~mode ~content_source:_ ~content ~patch =
+    asked :=
+      ( endpoint
+      , requested_target
+      , Keeper_tool_write_mode.to_string mode
+      , content
+      , Option.is_some patch )
+      :: !asked;
+    decision
+  in
+  let result =
+    Keeper_tool_filesystem_remote_write.handle_with_endpoint
+      ~declared_root_writes:
+        (Keeper_tool_filesystem_remote_write.Authorize_declared_roots authorize)
+      ~endpoint:f.endpoint ~config:f.config ~meta:f.meta ~args:(`Assoc args)
+  in
+  result, List.rev !asked
+;;
+
+let allow =
+  Keeper_gate.Allow { Keeper_gate.source = Keeper_gate.Keeper_always_allow; audit_receipts = [] }
+;;
+
+let asked_testable = Alcotest.(list (pair (pair string string) (pair string (pair string bool))))
+
+let asked_as_pairs asked =
+  List.map
+    (fun (endpoint, target, mode, content, patched) ->
+      (endpoint, target), (mode, (content, patched)))
+    asked
+;;
+
+let nothing_written f = not (Sys.file_exists (f.frame_path ^ ".write"))
+
+let test_declared_root_write_lands_when_the_gate_allows () =
+  with_eio @@ fun () ->
+  let f = fixture ~mode:"ok" in
+  declare_roots f [ "/app" ];
+  let result, asked =
+    handle_declared f ~decision:allow
+      [ "path", `String "/app/out.txt"; "mode", `String "overwrite"; "content", `String "done\n" ]
+  in
+  check bool "completed" true (completed result);
+  check bool "the path is the endpoint's" true (member "path" result = `String "/app/out.txt");
+  check bool "the authorization travels with the result" true (Option.is_some result.metadata);
+  check asked_testable "the Gate was asked once, with the endpoint path and bytes"
+    [ (Keeper_sandbox_remote.name f.endpoint, "/app/out.txt"), ("overwrite", ("done\n", false)) ]
+    (asked_as_pairs asked);
+  let request, stdin = write_frame f in
+  check (list string) "written at the endpoint path as itself"
+    (Keeper_tool_filesystem_remote_write.write_argv ~mode:Replace_whole ~remote_path:"/app/out.txt")
+    request.argv;
+  check string "content" "done\n" stdin
+;;
+
+let test_declared_root_write_waits_when_the_gate_defers () =
+  with_eio @@ fun () ->
+  let f = fixture ~mode:"ok" in
+  declare_roots f [ "/app" ];
+  let deferred =
+    Keeper_gate.Deferred
+      { operation = Keeper_gate.filesystem_write_gate_operation
+      ; approval_id = "approval-1"
+      ; reason = Keeper_gate.Human_requested
+      ; audit_receipts = []
+      }
+  in
+  let result, asked =
+    handle_declared f ~decision:deferred
+      [ "path", `String "/app/out.txt"; "mode", `String "overwrite"; "content", `String "done\n" ]
+  in
+  check bool "deferred" true
+    (match result.disposition with
+     | Tool_result.Deferred () -> true
+     | Tool_result.Completed () | Tool_result.Failed _ -> false);
+  check int "asked once" 1 (List.length asked);
+  check bool "nothing written" true (nothing_written f)
+;;
+
+let test_undeclared_path_is_refused_without_asking () =
+  with_eio @@ fun () ->
+  let f = fixture ~mode:"ok" in
+  declare_roots f [ "/app" ];
+  let result, asked =
+    handle_declared f ~decision:allow
+      [ "path", `String "/etc/cron.d/x"; "mode", `String "overwrite"; "content", `String "x" ]
+  in
+  check bool "the caller's path is refused" true (failed_as Tool_result.Policy_rejection result);
+  check int "the Gate is not asked" 0 (List.length asked);
+  check bool "nothing written" true (nothing_written f)
+;;
+
+let test_refused_declared_roots_keep_the_playground_jail () =
+  with_eio @@ fun () ->
+  let f = fixture ~mode:"ok" in
+  declare_roots f [ "/app" ];
+  let result =
+    handle f [ "path", `String "/app/out.txt"; "mode", `String "overwrite"; "content", `String "x" ]
+  in
+  check bool "refused" true (failed_as Tool_result.Policy_rejection result);
+  check bool "nothing written" true (nothing_written f)
+;;
+
+let test_declared_root_patch_asks_with_the_patched_body () =
+  with_eio @@ fun () ->
+  let f = fixture ~mode:"ok" in
+  declare_roots f [ "/app" ];
+  save (f.frame_path ^ ".source") "a = 1\nb = 1\n";
+  let result, asked =
+    handle_declared f ~decision:allow
+      [ "path", `String "/app/conf.py"; "mode", `String "patch"
+      ; "old_string", `String "a = 1"; "new_string", `String "a = 2" ]
+  in
+  check bool "completed" true (completed result);
+  check asked_testable "the Gate sees the patched file"
+    [ (Keeper_sandbox_remote.name f.endpoint, "/app/conf.py"), ("patch", ("a = 2\nb = 1\n", true)) ]
+    (asked_as_pairs asked);
+  let request, stdin = write_frame f in
+  check (list string) "replaced at the endpoint path"
+    (Keeper_tool_filesystem_remote_write.write_argv ~mode:Replace_whole ~remote_path:"/app/conf.py")
+    request.argv;
+  check string "patched body" "a = 2\nb = 1\n" stdin
+;;
+
 let () =
   if Array.length Sys.argv > 1 && String.equal Sys.argv.(1) "--remote-write-stub"
   then stub_main ()
@@ -343,6 +495,16 @@ let () =
           ; test_case "patch arguments recover and I/O stays runtime" `Quick test_remote_patch_arguments_recover_but_write_failure_stays_runtime
           ; test_case "identical remote patch does not write" `Quick test_identical_remote_patch_does_not_write
           ; test_case "patch reads then replaces" `Quick test_patch_reads_then_replaces
+          ; test_case "declared root write lands when the Gate allows" `Quick
+              test_declared_root_write_lands_when_the_gate_allows
+          ; test_case "declared root write waits when the Gate defers" `Quick
+              test_declared_root_write_waits_when_the_gate_defers
+          ; test_case "undeclared path is refused without asking" `Quick
+              test_undeclared_path_is_refused_without_asking
+          ; test_case "refused declared roots keep the playground jail" `Quick
+              test_refused_declared_roots_keep_the_playground_jail
+          ; test_case "declared root patch asks with the patched body" `Quick
+              test_declared_root_patch_asks_with_the_patched_body
           ; test_case "patch without a source is a workflow rejection" `Quick
               test_patch_without_a_source_is_a_workflow_rejection
           ; test_case "endpoint failure is a runtime failure" `Quick

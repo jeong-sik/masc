@@ -1,11 +1,12 @@
 (** The build a Keeper's container starts from.
 
     A Keeper's [sandbox_image] is a name in this host's image catalog
-    ({!Keeper_sandbox_image_catalog}). The name is looked up in the catalog
-    file each time a container is about to start, so a
-    [masc sandbox-image promote] reaches the next container a Keeper starts.
-    Nothing caches the answer, and a catalog that cannot be read refuses the
-    start: there is no image to fall back to that anyone chose.
+    ({!Keeper_sandbox_image_catalog}). {!resolve} reads the catalog file on
+    every call and keeps nothing, so a [masc sandbox-image promote] reaches
+    the next caller that asks. A caller that starts and later stops a
+    container resolves once for that decision and keeps the answer, so the
+    two never look at different builds. A catalog that cannot be read is a
+    refusal: there is no image to fall back to that anyone chose.
 
     RFC keeper-sandbox-images-have-versions (#38699) §2.4. *)
 

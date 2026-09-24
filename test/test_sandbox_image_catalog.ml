@@ -376,6 +376,12 @@ let test_a_keeper_that_cannot_start_says_why () =
     let ocaml_on_docker = refusal "ocaml" ~store:Docker_daemon (Some "ocaml") in
     mentions "ocaml" ocaml_on_docker "--recipe ocaml --source <checkout>`";
     omits "docker takes no runtime flag" ocaml_on_docker "--runtime";
+    let ocaml_on_msb =
+      refusal "ocaml on microsandbox" ~store:(Microvm Keeper_microvm_backend.Microsandbox)
+        (Some "ocaml")
+    in
+    mentions "both flags" ocaml_on_msb "--recipe ocaml --source <checkout> --runtime microsandbox`";
+    mentions "both flags" ocaml_on_msb "promote ocaml <tag> --runtime microsandbox`";
     write_catalog config_root "[images.base]\nsurprise = 1\n";
     match refused_start "malformed" ~config_root ~store:apple (Some "base") with
     | Resolver.Catalog_unreadable (Invalid _) -> ()

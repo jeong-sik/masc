@@ -1,0 +1,9 @@
+# Codex context preparation and server scheduler, 2026-09-24
+
+A read-only macOS sample of the running server captured 3596 samples of the main thread over a requested five-second window. In the sampled call tree, 1922 are under `Yojson.Safe.iter2_aux`, including 1737 under `write_string`; `Keeper_codex_runtime.resume_external_context` and the official-client context codec also appear. The excerpt retains original line numbers. Sampling is incomplete attribution: it does not establish that every JSON sample belongs to Codex context preparation.
+
+The raw local sample SHA-256 is `d45acf5b906b98811a1f3c2d9066b4469890af57bfa9f4a99a4209fb6721de46`. The sample was taken from the running `masc` listener PID 47896, without restart or configuration change. The earlier runtime baseline is in PR #38794 and reports scheduler p99 286.115292ms and max 2039.853ms in one observation window; it is not a candidate comparison.
+
+Source inspection finds full source-context JSON encoding/hashing and prepared-history encoding, canonical snapshot hashing, resume envelope encoding and developer-text composition executed directly on the calling domain. These operations read immutable messages and configuration. Move them into the existing CPU domain pool, returning completed history, context frontier and developer instructions. Hooks, model-input projection policy, store claims and transport effects keep their existing ownership and order.
+
+Validation added: the production adapter's Start/Resume fixture runs both with no pool and with a one-domain pool; transmitted source and snapshot hashes are checked against actual JSON bytes. Static formatting/diff checks run locally. Compile and behavioral tests must execute in CI under the repository constitution. Candidate request latency, scheduler distribution, cancellation under load and sustained runtime performance remain unverified; no 0.1ms completion or measured speedup is claimed.

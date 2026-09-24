@@ -1093,9 +1093,19 @@ let test_an_automation_row_says_when_it_was_asked_for () =
    widest word the schedule contract names, the recurrence to a declared
    budget. *)
 let test_the_automation_row_cuts_the_columns_it_draws () =
-  Alcotest.(check int) "both wire cells are cut to a width" 2
+  Alcotest.(check int) "the status cell is cut to a width" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"automation_lines" ~callee:"fit_width");
+  (* The recurrence cell is folded rather than cut: see the case below. *)
+  Alcotest.(check int) "the recurrence cell is folded in the middle" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"automation_lines" ~callee:"Message_layout.fit_middle");
+  (* The column is measured over the rows the frame draws, so a page whose
+     summaries all fit loses nothing. Without the fold the ceiling was the
+     width, whatever the page held. *)
+  Alcotest.(check int) "and its width is measured over the page" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"automation_lines" ~callee:"List.fold_left");
   Alcotest.(check int) "and no column is padded by Printf" 0
     (Ast_grep.count_string_literals_containing_in_value_binding
        ~module_path:render ~binding_name:"automation_lines" ~needle:"%-");
@@ -1104,6 +1114,35 @@ let test_the_automation_row_cuts_the_columns_it_draws () =
   Alcotest.(check int) "the status width is read off the contract" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"schedule_status_word_cells" ~callee:"List.fold_left")
+;;
+
+let has_substring haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
+  n = 0 || scan 0
+
+(* The two summaries that reach past the column both carry their meaning at
+   the tail: "daily 09:25:00 +09:00" and "cron 0 */2 * * * UTC". Cut at the
+   end they lose the zone, and 09:25 with no zone is nine hours from 09:25
+   with one -- a wrong reading where the fold gives an incomplete one.
+
+   Swept over the widths the column can be measured to rather than pinned at
+   today's ceiling: the ceiling is a layout choice and this property is not.*)
+let test_a_folded_recurrence_keeps_its_zone () =
+  List.iter
+    (fun (summary, tail) ->
+       for column = 10 to 20 do
+         let drawn = Masc_tui_message_layout.fit_middle column summary in
+         Alcotest.(check bool)
+           (Printf.sprintf "%s at %d cells keeps %s" summary column tail)
+           true
+           (has_substring drawn tail);
+         Alcotest.(check int)
+           (Printf.sprintf "%s at %d cells fills the column" summary column)
+           column
+           (Masc_tui_message_layout.display_width drawn)
+       done)
+    [ "daily 09:25:00 +09:00", "+09:00"; "cron 0 */2 * * * UTC", "UTC" ]
 ;;
 
 (* Three lists draw a Fusion run's start: the Fusion list, the run detail and
@@ -1215,6 +1254,8 @@ let () =
             `Quick test_an_automation_row_says_when_it_was_asked_for
         ; Alcotest.test_case "the automation row cuts the columns it draws"
             `Quick test_the_automation_row_cuts_the_columns_it_draws
+        ; Alcotest.test_case "a folded recurrence keeps its zone" `Quick
+            test_a_folded_recurrence_keeps_its_zone
         ; Alcotest.test_case "every Fusion run list reads one clock" `Quick
             test_every_fusion_run_list_reads_one_clock
         ] )

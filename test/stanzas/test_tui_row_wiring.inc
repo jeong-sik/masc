@@ -9,4 +9,4 @@
   %{workspace_root}/bin/masc_tui_loader.ml
   %{workspace_root}/bin/masc_tui_ansi.ml
   (glob_files %{workspace_root}/bin/masc_tui_render*.ml))
- (libraries alcotest ast_grep))
+ (libraries alcotest ast_grep masc_tui_message_layout))

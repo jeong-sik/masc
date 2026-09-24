@@ -3514,7 +3514,23 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                  ~code
                  ()));
          finish ());
-      Eio.Promise.await finished))
+      (* A queued operation has no journal events until its Keeper gets the
+         slot. Keep the HTTP stream alive during that silence, so a healthy
+         queue does not become a 180-second transport timeout in the TUI.
+         This SSE comment proves only that this connection is alive; it does
+         not claim the operation or provider made progress. Use the shared
+         server SSE cadence and stop the heartbeat as soon as a terminal
+         event or failed write resolves [finished]. *)
+      let rec heartbeat () =
+        Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s;
+        if Option.is_none (Eio.Promise.peek finished) then
+          if keeper_stream_send_raw writer mutex closed ": keepalive\n\n"
+          then heartbeat ()
+          else finish ()
+      in
+      Eio.Fiber.first
+        (fun () -> Eio.Promise.await finished)
+        heartbeat))
 
 (** Build routes for MCP server *)
 

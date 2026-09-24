@@ -1048,23 +1048,31 @@ let test_one_call_cancels_every_pending_occurrence_of_a_schedule () =
    | [] -> ()
    | _ :: _ ->
      fail "a cancellation receipt stayed in the outbox; the keeper's next ack would be refused");
-  let cancelled =
-    List.filter_map
-      (function
-        | Keeper_event_queue_state.Current_receipt
-            { transition = Keeper_event_queue_state.Cancel_accepted cancellation; _ } ->
-          Some cancellation.source.post_id
-        | Keeper_event_queue_state.Projected_witness
-            { post_id; kind = Keeper_event_queue_state.Projected_cancel _; _ } ->
-          Some post_id
-        | Keeper_event_queue_state.Current_receipt _
-        | Keeper_event_queue_state.Projected_witness _ -> None)
-      (Keeper_event_queue_state.projected_dispositions state)
-    |> List.sort String.compare
-  in
-  check (list string) "each occurrence left its own durable cancellation"
-    [ "piled-occurrence-1"; "piled-occurrence-2" ]
-    cancelled;
+  (* #38527: un-re-askable cancellation receipts no longer stay in the
+     projected-dispositions list -- the reaction ledger each projection
+     wrote is where a cancelled occurrence stays answerable, so each
+     occurrence's own cancellation is asserted there. *)
+  List.iter
+    (fun occurrence_id ->
+       match
+         Keeper_reaction_ledger.event_queue_reaction_evidence_result
+           ~base_path
+           ~keeper_name
+           ~stimulus_id:occurrence_id
+       with
+       | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+         check bool
+           (Printf.sprintf "occurrence %s left its own durable cancellation"
+              occurrence_id)
+           true
+           evidence.event_queue_cancelled_seen
+       | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+         fail "cancellation evidence was quarantined"
+       | Error error ->
+         fail
+           (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+              error))
+    [ "piled-occurrence-1"; "piled-occurrence-2" ];
   (* Nothing of the schedule is pending any more, so a second call has
      nothing to cancel and refuses nothing. *)
   match
@@ -1697,6 +1705,94 @@ let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
     (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
 ;;
 
+(* #38527: projected dispositions no longer remember a consumed occurrence,
+   so a retried dispatch must not run it twice. The enqueue committed, the
+   keeper consumed and ACKed the occurrence, the ACK projection dropped its
+   receipt, and a later receipt displaced it from last_transition -- the
+   index answers Absent, and the reaction ledger the ACK projection wrote
+   must answer "already delivered" so the retry accepts without enqueueing. *)
+let test_consumed_occurrence_retry_does_not_enqueue_again () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let keeper_dir =
+    Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
+      keeper_name
+  in
+  mkdir_p keeper_dir;
+  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname ledger_dir);
+  write_empty_file ledger_dir;
+  ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
+  let request = create_keeper_wake_schedule config in
+  let failed = tick_ok config ~now:201.0 in
+  let occurrence_id = single_occurrence_id failed in
+  check string "ledger damage makes the first dispatch retryable" "failed"
+    (Schedule_runner.dispatch_status_to_string (List.hd failed.dispatches).status);
+  Sys.remove ledger_dir;
+  mkdir_p ledger_dir;
+  let ack_of_selection selection operation_id =
+    match
+      Keeper_registry_event_queue.ack_pending_source_terminal_result
+        ~base_path
+        keeper_name
+        ~acked_at:201.5
+        ~source_terminal:
+          Keeper_registry_event_queue.
+            { source = selection.Keeper_event_queue_state.source
+            ; source_incarnation = selection.Keeper_event_queue_state.admitted_revision
+            ; operator_operation_id = operation_id
+            ; source_receipt = Keeper_event_queue_state.Turn_completed
+            }
+    with
+    | Ok (Keeper_registry_event_queue.Acked _) -> ()
+    | Ok (Keeper_registry_event_queue.Already_acked _) -> ()
+    | Ok (Keeper_registry_event_queue.Ack_committed_followup_failed { detail; _ })
+      -> failf "ack follow-up failed: %s" detail
+    | Error detail -> failf "ack failed: %s" detail
+  in
+  ack_of_selection (pending_selection_exn ~base_path ~keeper_name) "consumed-ack";
+  let displacing : Keeper_event_queue.stimulus =
+    { post_id = "displacing-source"
+    ; urgency = Keeper_event_queue.Normal
+    ; arrived_at = 202.0
+    ; payload = Keeper_event_queue.Bootstrap
+    }
+  in
+  Keeper_event_queue_persistence.persist
+    ~base_path
+    ~keeper_name
+    (Keeper_event_queue.enqueue Keeper_event_queue.empty displacing);
+  ack_of_selection
+    (pending_selection_exn ~base_path ~keeper_name)
+    "displacing-ack";
+  let retried = tick_ok config ~now:203.0 in
+  (match List.hd retried.dispatches with
+   | { status = Schedule_runner.Dispatch_succeeded; _ } -> ()
+   | dispatch ->
+     failf "the retry after consumption must accept, got %s"
+       (Schedule_runner.dispatch_status_to_string dispatch.status));
+  check int "a consumed occurrence is not enqueued again" 0
+    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
+     |> Keeper_event_queue.length);
+  (match
+     Keeper_reaction_ledger.event_queue_delivery_seen_for_source_result
+       ~base_path
+       ~keeper_name
+       ~post_id:occurrence_id
+       ~stimulus_kind:Keeper_reaction_ledger.Schedule_due
+   with
+   | Ok true -> ()
+   | Ok false -> fail "the ledger must answer delivered for the consumed occurrence"
+   | Error error ->
+     fail
+       (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+          error));
+  ignore request
+;;
+
 let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
   with_workspace
   @@ fun config ->
@@ -1952,21 +2048,31 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
           { detail; _ }) ->
      fail detail
    | Error detail -> fail detail);
-  let compact_state =
-    match Keeper_registry_event_queue.durable_state_result ~base_path keeper_name with
-    | Ok state -> state
-    | Error detail -> fail detail
-  in
+  (* #38527: the older terminal's compact witness no longer stays in the
+     queue's list -- the ledger row the projection wrote answers for it,
+     with the terminal kind and the source it acknowledged. *)
   (match
-     Keeper_event_queue_state.projected_dispositions compact_state
-     |> List.find_opt (function
-       | Keeper_event_queue_state.Projected_witness witness ->
-         String.equal witness.post_id stimulus_id
-       | Keeper_event_queue_state.Current_receipt _ -> false)
+     Keeper_reaction_ledger.event_queue_reaction_evidence_result
+       ~base_path
+       ~keeper_name
+       ~stimulus_id
    with
-   | Some (Keeper_event_queue_state.Projected_witness _) -> ()
-   | Some (Keeper_event_queue_state.Current_receipt _) | None ->
-     fail "older schedule terminal did not become a compact witness");
+   | Ok
+       (Keeper_reaction_ledger.Evidence_complete
+          { event_queue_ack_terminal =
+              Some
+                (Keeper_reaction_ledger.Ack_turn_attempt_terminal
+                   "terminal before schedule retry")
+          ; _
+          }) -> ()
+   | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
+     fail "older schedule terminal did not reach the ledger"
+   | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+     fail "older schedule terminal evidence was quarantined"
+   | Error error ->
+     fail
+       (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+          error));
   let conflicting_wake, conflicting_stimulus =
     match original_stimulus.payload with
     | Keeper_event_queue.Schedule_due wake ->
@@ -2010,7 +2116,10 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
        Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string);
      check string "terminal retry needs no activation" "not_required"
        Yojson.Safe.Util.(detail |> member "activation_status" |> to_string)
-   | _ -> fail "terminal retry did not preserve the failed disposition");
+   | dispatch ->
+     failf "terminal retry did not preserve the failed disposition: %s / %s"
+       (Schedule_runner.dispatch_status_to_string dispatch.status)
+       (match dispatch.error with Some e -> e | None -> "-"));
   check int "terminal retry enqueues no second occurrence" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.length);
@@ -3374,6 +3483,8 @@ let () =
             test_projection_failure_keeps_spent_replay_queued
         ; test_case "rejection projection precedes turn intake" `Quick
             test_rejected_resolution_projection_precedes_turn_intake
+        ; test_case "consumed occurrence retry does not enqueue again" `Quick
+            test_consumed_occurrence_retry_does_not_enqueue_again
         ; test_case "unconsumed grant replay stays actionable" `Quick
             test_unconsumed_grant_replay_stays_actionable
         ] )

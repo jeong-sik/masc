@@ -349,13 +349,16 @@ val terminalize_pending_turn_completed_result :
 
 val project_transition_outbox_result :
   append_before_retire:(outbox_entry -> (unit, string) result) ->
+  retain_previous:(transition_receipt -> bool) ->
   base_path:string ->
   keeper_name:string ->
   (unit, string) result
 (** Read the single pending transition under the canonical lane identity,
     invoke the supplied ledger append, and retire only after that append
-    succeeds. Raw outbox entries and the retirement primitive are not exported
-    independently. *)
+    succeeds. [retain_previous] decides, once at this retirement, whether the
+    prior receipt enters the projected-dispositions list or is dropped
+    (#38527). Raw outbox entries and the retirement primitive are not
+    exported independently. *)
 
 val persist :
   base_path:string -> keeper_name:string -> Keeper_event_queue.t -> unit

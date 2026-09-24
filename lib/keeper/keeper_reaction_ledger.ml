@@ -455,6 +455,32 @@ let after_ledger_append_hook :
 
 let after_ledger_append_hook_mutex = Stdlib.Mutex.create ()
 
+(* #38527: the retention predicate for a retiring transition's prior receipt.
+   A durable paused-work disposition receipt keyed by the same operation id is
+   the standing asker that can still re-ask it by
+   [prior_disposition_by_operation_id]; anything else (every turn-completion
+   ack, every superseded-occurrence cancellation) has no asker and is dropped.
+   One existence stat per transition, under the owner lock, in the same layer
+   that already owns the outbox append -- the reaction ledger this module
+   writes is where a dropped receipt's delivery stays answerable. *)
+let transition_prior_receipt_has_standing_asker
+      ~base_path
+      ~keeper_name
+      (receipt : Keeper_event_queue_state.transition_receipt)
+  =
+  let operator_operation_id =
+    match receipt.transition with
+    | Keeper_event_queue_state.Cancel_accepted cancellation ->
+        cancellation.operator_operation_id
+    | Transfer_accepted transfer -> transfer.operator_operation_id
+    | Ack_source_terminal terminal -> terminal.operator_operation_id
+  in
+  Keeper_paused_work_disposition_receipt.durable_receipt_exists
+    ~masc_root:(Common.masc_dir_from_base_path ~base_path)
+    ~keeper_name
+    ~operator_operation_id
+;;
+
 let project_event_queue_transition_outbox_result
       ~base_path
       ~keeper_name
@@ -462,6 +488,9 @@ let project_event_queue_transition_outbox_result
   =
   let ( let* ) = Result.bind in
   Keeper_event_queue_persistence.project_transition_outbox_result
+    ~retain_previous:(transition_prior_receipt_has_standing_asker
+                       ~base_path
+                       ~keeper_name)
     ~append_before_retire:(fun
         (entry : Keeper_event_queue_state.outbox_entry)
       ->
@@ -956,6 +985,15 @@ let decode_current_row ~keeper_name row =
   | _ -> Error Unknown_record_kind
 ;;
 
+(* #38527: what an ACK row's transition receipt acknowledged -- the fact a
+   re-presented occurrence is answered with. Set from the first ACK row for
+   the identity; [None] until one is seen. *)
+type event_queue_ack_terminal =
+  | Ack_turn_completed
+  | Ack_turn_attempt_terminal of string
+  | Ack_fusion_terminal
+  | Ack_hitl_terminal
+
 type event_queue_reaction_evidence =
   { keeper_name : string
   ; stimulus_id : string
@@ -963,7 +1001,14 @@ type event_queue_reaction_evidence =
   ; turn_started_seen : bool
   ; turn_finished_seen : bool
   ; event_queue_ack_seen : bool
+  ; event_queue_ack_terminal : event_queue_ack_terminal option
+  ; event_queue_ack_source_ref : string option
+  ; event_queue_ack_source_arrived_at : float option
+  ; event_queue_ack_source_urgency : Keeper_event_queue.urgency option
   ; event_queue_cancelled_seen : bool
+  ; event_queue_cancelled_source_ref : string option
+  ; event_queue_cancelled_source_arrived_at : float option
+  ; event_queue_cancelled_source_urgency : Keeper_event_queue.urgency option
   ; stimulus_recorded_at : float option
   ; turn_started_recorded_at : float option
   ; turn_finished_recorded_at : float option
@@ -1003,7 +1048,14 @@ type event_queue_reaction_evidence_accumulator =
   ; mutable turn_started_seen : bool
   ; mutable turn_finished_seen : bool
   ; mutable event_queue_ack_seen : bool
+  ; mutable event_queue_ack_terminal : event_queue_ack_terminal option
+  ; mutable event_queue_ack_source_ref : string option
+  ; mutable event_queue_ack_source_arrived_at : float option
+  ; mutable event_queue_ack_source_urgency : Keeper_event_queue.urgency option
   ; mutable event_queue_cancelled_seen : bool
+  ; mutable event_queue_cancelled_source_ref : string option
+  ; mutable event_queue_cancelled_source_arrived_at : float option
+  ; mutable event_queue_cancelled_source_urgency : Keeper_event_queue.urgency option
   ; mutable stimulus_recorded_at : float option
   ; mutable turn_started_recorded_at : float option
   ; mutable turn_finished_recorded_at : float option
@@ -1021,7 +1073,14 @@ let empty_event_queue_reaction_evidence_accumulator () =
   ; turn_started_seen = false
   ; turn_finished_seen = false
   ; event_queue_ack_seen = false
+  ; event_queue_ack_terminal = None
+  ; event_queue_ack_source_ref = None
+  ; event_queue_ack_source_arrived_at = None
+  ; event_queue_ack_source_urgency = None
   ; event_queue_cancelled_seen = false
+  ; event_queue_cancelled_source_ref = None
+  ; event_queue_cancelled_source_arrived_at = None
+  ; event_queue_cancelled_source_urgency = None
   ; stimulus_recorded_at = None
   ; turn_started_recorded_at = None
   ; turn_finished_recorded_at = None
@@ -1079,10 +1138,78 @@ let note_event_queue_reaction_evidence_row ~keeper_name accumulator row =
          accumulator.turn_finished_seen <- true;
          accumulator.turn_finished_recorded_at
            <- max_recorded_at accumulator.turn_finished_recorded_at recorded_at
+       | Current_reaction
+           { reaction_kind = Event_queue_ack
+           ; transition_receipt = Some receipt
+           ; _
+           } ->
+         accumulator.event_queue_ack_seen <- true;
+         accumulator.event_queue_ack_recorded_at
+           <- max_recorded_at accumulator.event_queue_ack_recorded_at recorded_at;
+         (match accumulator.event_queue_ack_terminal with
+          | Some _ -> () (* the first ACK row names the original terminal *)
+          | None ->
+            accumulator.event_queue_ack_terminal
+            <- (match receipt.transition with
+                | Ack_source_terminal { source_receipt; _ } ->
+                  Some
+                    (match source_receipt with
+                     | Turn_completed -> Ack_turn_completed
+                     | Turn_attempt_terminal { detail } ->
+                       Ack_turn_attempt_terminal detail
+                     | Fusion_terminal _ -> Ack_fusion_terminal
+                     | Hitl_terminal _ -> Ack_hitl_terminal)
+                | Cancel_accepted _ | Transfer_accepted _ -> None);
+            accumulator.event_queue_ack_source_ref
+            <- (match receipt.transition with
+                | Ack_source_terminal _ ->
+                  Some
+                    (Keeper_event_queue_state.source_snapshot_ref
+                       (Keeper_event_queue_state.transition_source
+                          receipt.transition))
+                | Cancel_accepted _ | Transfer_accepted _ -> None);
+            accumulator.event_queue_ack_source_arrived_at
+            <- (match receipt.transition with
+                | Ack_source_terminal _ ->
+                  Some
+                    (Keeper_event_queue_state.transition_source
+                       receipt.transition)
+                       .Keeper_event_queue.arrived_at
+                | Cancel_accepted _ | Transfer_accepted _ -> None);
+            accumulator.event_queue_ack_source_urgency
+            <- (match receipt.transition with
+                | Ack_source_terminal _ ->
+                  Some
+                    (Keeper_event_queue_state.transition_source
+                       receipt.transition)
+                       .Keeper_event_queue.urgency
+                | Cancel_accepted _ | Transfer_accepted _ -> None))
        | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
          accumulator.event_queue_ack_seen <- true;
          accumulator.event_queue_ack_recorded_at
            <- max_recorded_at accumulator.event_queue_ack_recorded_at recorded_at
+       | Current_reaction
+           { reaction_kind = Event_queue_cancelled
+           ; transition_receipt = Some receipt
+           ; _
+           } ->
+         accumulator.event_queue_cancelled_seen <- true;
+         accumulator.event_queue_cancelled_recorded_at
+           <- max_recorded_at
+                accumulator.event_queue_cancelled_recorded_at
+                recorded_at;
+         (match accumulator.event_queue_cancelled_source_ref with
+          | Some _ -> () (* the first cancellation row names the source *)
+          | None ->
+            (match receipt.transition with
+             | Cancel_accepted { source; _ } ->
+               accumulator.event_queue_cancelled_source_ref
+               <- Some (Keeper_event_queue_state.source_snapshot_ref source);
+               accumulator.event_queue_cancelled_source_arrived_at
+               <- Some source.Keeper_event_queue.arrived_at;
+               accumulator.event_queue_cancelled_source_urgency
+               <- Some source.Keeper_event_queue.urgency
+             | _ -> ()))
        | Current_reaction { reaction_kind = Event_queue_cancelled; _ } ->
          accumulator.event_queue_cancelled_seen <- true;
          accumulator.event_queue_cancelled_recorded_at
@@ -1103,7 +1230,18 @@ let event_queue_reaction_evidence_of_accumulator
     ; turn_started_seen = accumulator.turn_started_seen
     ; turn_finished_seen = accumulator.turn_finished_seen
     ; event_queue_ack_seen = accumulator.event_queue_ack_seen
+    ; event_queue_ack_terminal = accumulator.event_queue_ack_terminal
+    ; event_queue_ack_source_ref = accumulator.event_queue_ack_source_ref
+    ; event_queue_ack_source_arrived_at =
+        accumulator.event_queue_ack_source_arrived_at
+    ; event_queue_ack_source_urgency = accumulator.event_queue_ack_source_urgency
     ; event_queue_cancelled_seen = accumulator.event_queue_cancelled_seen
+    ; event_queue_cancelled_source_ref =
+        accumulator.event_queue_cancelled_source_ref
+    ; event_queue_cancelled_source_arrived_at =
+        accumulator.event_queue_cancelled_source_arrived_at
+    ; event_queue_cancelled_source_urgency =
+        accumulator.event_queue_cancelled_source_urgency
     ; stimulus_recorded_at = accumulator.stimulus_recorded_at
     ; turn_started_recorded_at = accumulator.turn_started_recorded_at
     ; turn_finished_recorded_at = accumulator.turn_finished_recorded_at

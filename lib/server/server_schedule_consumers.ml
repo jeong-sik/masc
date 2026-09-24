@@ -943,7 +943,76 @@ let rec resolve_durable_occurrence
   else
     let* index = owner_index_result cache ~read_state ~base_path keeper_name in
     match Hashtbl.find_opt index occurrence_id with
-    | None -> Ok (Absent_at keeper_name)
+    | None -> (
+      (* #38527: projected dispositions no longer remember every consumed
+         occurrence, so an index miss is no longer proof it never ran. The
+         reaction ledger the ACK or cancellation projection wrote is where a
+         delivered occurrence stays answerable: its first terminal row's
+         receipt names the disposition this resolves to, and the source that
+         row acknowledged rebuilds the compact source the exact-source check
+         verifies -- a re-presented source whose digest differs is refused
+         there, not answered. A ledger this query cannot read or attribute
+         stays an absence: the dispatch replays through the enqueue path,
+         the way the ledger module documents for its evidence queries. The
+         batch seam keeps per-identity cursors, so a retried dispatch re-reads
+         only what the ledger gained. *)
+      match
+        Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
+          ~base_path
+          ~keeper_name
+          ~stimulus_ids:[ occurrence_id ]
+      with
+      | Ok
+          [ ( _
+            , Keeper_reaction_ledger.Evidence_complete
+                { event_queue_cancelled_seen = true
+                ; event_queue_cancelled_source_ref = Some source_ref
+                ; event_queue_cancelled_source_arrived_at = Some arrived_at
+                ; event_queue_cancelled_source_urgency = Some urgency
+                ; _
+                }
+            ) ] ->
+        Ok
+          (Terminal_cancelled_at
+             ( keeper_name
+             , Compact_schedule_source
+                 { post_id = occurrence_id
+                 ; urgency
+                 ; arrived_at
+                 ; source_ref
+                 }
+             , "ledger cancellation"
+             , Terminal_evidence_recorded ))
+      | Ok
+          [ ( _
+            , Keeper_reaction_ledger.Evidence_complete
+                { event_queue_ack_terminal = Some terminal
+                ; event_queue_ack_source_ref = Some source_ref
+                ; event_queue_ack_source_arrived_at = Some arrived_at
+                ; event_queue_ack_source_urgency = Some urgency
+                ; _
+                }
+            ) ] ->
+        let source =
+          Compact_schedule_source
+            { post_id = occurrence_id
+            ; urgency
+            ; arrived_at
+            ; source_ref
+            }
+        in
+        (match terminal with
+         | Keeper_reaction_ledger.Ack_turn_completed
+         | Ack_fusion_terminal
+         | Ack_hitl_terminal ->
+           Ok
+             (Terminal_completed_at
+                (keeper_name, source, Terminal_evidence_recorded))
+         | Keeper_reaction_ledger.Ack_turn_attempt_terminal detail ->
+           Ok
+             (Terminal_failed_at
+                (keeper_name, source, detail, Terminal_evidence_recorded)))
+      | _ -> Ok (Absent_at keeper_name))
     | Some { source; state = Pending; _ } -> Ok (Pending_at (keeper_name, source))
     | Some { source; state = Terminally_completed evidence; _ } ->
       Ok (Terminal_completed_at (keeper_name, source, evidence))

@@ -442,6 +442,7 @@ let test_later_identical_source_transfers_as_new_incarnation () =
   check_applied ~expected_target:Transaction.Enqueued first.projection;
   Persistence.project_transition_outbox_result
     ~append_before_retire:(fun _entry -> Ok ())
+    ~retain_previous:(fun _ -> true)
     ~base_path
     ~keeper_name:from_keeper
   |> require_ok "project first source transfer";

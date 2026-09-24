@@ -2,7 +2,7 @@
 
    This module owns structured read/list/search operations so
    the Grep facade stays as the public dispatcher instead of reabsorbing
-   read-backend, path-resolution, and host Shell IR details. *)
+   read-backend and path-resolution details. *)
 
 open Keeper_types
 open Keeper_meta_contract

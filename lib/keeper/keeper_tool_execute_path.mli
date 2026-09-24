@@ -53,4 +53,3 @@ val resolve_tool_read_path :
   (string, Keeper_alerting_path.path_refusal) result
 (** Resolve the [path] arg exactly against the selected cwd and objective
     allowed-root containment. No path correction or rewriting is applied. *)
-

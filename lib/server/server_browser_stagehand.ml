@@ -333,7 +333,7 @@ let start ~sw ~env =
   let base_path = Config_dir_resolver.base_path_or_cwd () in
   let masc_root = Config_dir_resolver.masc_root ~base_path in
   Eio.Fiber.fork ~sw (fun () ->
-    stop_left_behind ~masc_root;
+    stop_left_behind ~clock:(Eio.Stdenv.clock env) ~masc_root;
     match Server_browser_configuration.load () with
     | Error detail -> Log.Server.error "browser-lane: %s" detail
     | Ok { Browser_configuration.stagehand = None; _ } ->

@@ -282,7 +282,7 @@ let warn_range_opens_on_newest_atom ~keeper_name ~reason =
 
 let warn_if_origin_is_unknown_start ~keeper_name = function
   | Turn_start_unknown { reason } -> warn_range_opens_on_newest_atom ~keeper_name ~reason
-  | Carried _ | Librarian_snapshot _ | Librarian_progress _ | Turn_start _ -> ()
+  | Carried _ | Librarian_snapshot _ | Librarian_progress _ | Past_librarian_point _ | Turn_start _ -> ()
 ;;
 
 let halve ~first_atom ~atom_count =

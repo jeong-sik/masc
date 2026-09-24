@@ -19,6 +19,16 @@ let cdp_command_deadline_s = 30.
    in those runs. *)
 let service_worker_wait_s = 20.
 
+(* stagehand.init answered 0.6 s after the marker on Chrome Canary 156 and
+   5.1 s on a cold Chrome for Testing 154 (2026-09-24). Its JSON-RPC reply has
+   no deadline of its own, so a runtime that never answers would leave the
+   session opening for good. *)
+let init_answer_s = 30.
+
+(* Attach is bounded by the waits it is made of: the service worker, the
+   longest CDP command (the readiness wait), and the init answer. *)
+let attach_deadline_s = service_worker_wait_s +. cdp_command_deadline_s +. init_answer_s
+
 (* ws-direct's own default. A screenshot of a long page is the largest
    frame the connection carries. *)
 let max_message_bytes = 64 * 1024 * 1024
@@ -174,7 +184,11 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
       ~command_deadline_s:cdp_command_deadline_s ~on_event:(Session.on_cdp_event session)
   in
   let* init =
-    Result.map_error attach_error_message (Session.attach session cdp ~extension_dir ~browser_cdp_url:url)
+    Watched_work.run
+      ~watcher:(fun () ->
+        Eio.Time.sleep clock attach_deadline_s;
+        Error (Printf.sprintf "Stagehand did not finish attaching within %.0f s" attach_deadline_s))
+      (fun () -> Result.map_error attach_error_message (Session.attach session cdp ~extension_dir ~browser_cdp_url:url))
   in
   Ok ({ session; pid }, init)
 ;;

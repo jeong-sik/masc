@@ -450,8 +450,8 @@ let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
     ; "ollama-http:endpoint:http_provider:optional:false::"
     ; "gemini-http:endpoint:http_provider:optional:false::"
     ; "vertex-gemini:endpoint:http_provider:optional:false::"
-    ; "codex-app-server:command:official_client:forbidden:true::"
-    ; "claude-code:command:official_client:forbidden:true::"
+    ; "codex-app-server:command:official_client:forbidden:true:account-home:"
+    ; "claude-code:command:official_client:forbidden:true:account-home:"
     ; "antigravity-cli:command:official_client:file_required:true:agent,effort,timeout-s:timeout-s"
     ]
     (List.map render Runtime_toml.editor_protocols)

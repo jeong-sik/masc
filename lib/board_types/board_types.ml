@@ -424,7 +424,9 @@ module Comment_page = struct
       }
     in
     let prefix count = List.filteri (fun index _ -> index < count) after_offset in
-    if request.offset > 0 && request.offset >= total
+    (* [total] is the end of the thread, a place to ask again later; only
+       an offset past it names nothing. *)
+    if request.offset > total
     then Offset_out_of_range { requested = request.offset; total }
     else (
       let most = min request.limit available in
@@ -502,7 +504,16 @@ module Comment_page = struct
 
     let line position =
       match position.returned, position.next_offset with
-      | 0, _ -> "[no comments]"
+      | 0, _ ->
+        (match position.total with
+         | 0 -> "[no comments]"
+         | total ->
+           Printf.sprintf
+             "[no comments from offset %d: the thread has %d. Newer comments will \
+              start at comment_offset=%d.]"
+             position.offset
+             total
+             position.offset)
       | returned, Some next ->
         Printf.sprintf
           "[comments %d-%d of %d. Read the rest with comment_offset=%d.]"

@@ -296,10 +296,12 @@ module Comment_page : sig
         { requested : int
         ; total : int
         }
-        (** [requested] names no comment. Offset [0] of an empty thread is a
-            [Page] with no items; every other offset at or past [total] is
-            this case, so an empty page is never mistaken for a thread that
-            lost its comments. *)
+        (** [requested] is past the end of the thread. Offset [total] is the
+            end itself, where the next comment will land: a [Page] with no
+            items, whose {!Position.line} names [total] and that offset, so it
+            is never mistaken for a thread that lost its comments. A reader
+            that finished a thread asks there to learn whether anything new
+            arrived. Nothing past it is clamped to it. *)
 
   val select : ?fits:('a page -> bool) -> request -> 'a list -> 'a t
   (** Items from [offset], at most [limit] of them: the longest page [fits]
@@ -332,8 +334,10 @@ module Comment_page : sig
 
     val line : t -> string
     (** The one line a text page carries, naming the range it holds and the
-        [comment_offset] that continues it. Every text rendering of a page
-        uses this printer, so the sentence cannot drift between surfaces. *)
+        [comment_offset] that continues it. A page at the end of a non-empty
+        thread names the thread's size and the offset newer comments will
+        start at. Every text rendering of a page uses this printer, so the
+        sentence cannot drift between surfaces. *)
 
     val metadata_key : string
     (** ["masc.comment_page"]. *)

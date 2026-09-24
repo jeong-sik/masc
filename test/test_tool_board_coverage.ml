@@ -1609,10 +1609,27 @@ let test_post_get_comment_pages_carry_their_range () =
     ~returned:5
     ~total:105
     ~next_offset:None;
+  (* A reader that finished the thread asks at its end to learn whether
+     anything new arrived. That is a page, not a failure: it names the
+     thread's size and where newer comments will start, so it cannot read as
+     a thread that lost its comments. Past the end is still refused. *)
+  let end_page = read ~label:"end of the thread" [ "comment_offset", `Int 105 ] in
+  check_page
+    ~label:"the end of the thread"
+    end_page
+    ~offset:105
+    ~returned:0
+    ~total:105
+    ~next_offset:None;
+  Alcotest.(check bool) "the end page names the thread's size and where newer comments start"
+    true
+    (contains end_page.body "the thread has 105. Newer comments will start at comment_offset=105.");
+  Alcotest.(check bool) "the end page does not say the thread has no comments" false
+    (contains end_page.body "No comments.");
   check_get_rejected
-    ~label:"offset at the end"
+    ~label:"offset past the end"
     post_id
-    [ "comment_offset", `Int 105 ]
+    [ "comment_offset", `Int 106 ]
     "the thread now has 105 comments, at offsets 0-104";
   check_get_rejected
     ~label:"negative offset"

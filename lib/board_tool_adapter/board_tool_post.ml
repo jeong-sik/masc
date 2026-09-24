@@ -327,10 +327,13 @@ let handle_post_list ~tool_name ~start_time args : Tool_result.result =
    metadata instead, so a caller continuing the read never parses the text.
    The size is measured on that text, the same bytes the boundary compares.
    [comment_limit] stays an upper bound a caller can ask for. *)
-let render_thread ~post_block ~comment_lines =
-  match comment_lines with
-  | [] -> Printf.sprintf "%s\n\nNo comments." post_block
-  | _ :: _ ->
+let render_thread ~post_block ~total ~comment_lines =
+  match comment_lines, total with
+  | [], 0 -> Printf.sprintf "%s\n\nNo comments." post_block
+  (* The end of a thread that has comments: the position line already says
+     none are newer and where they will start. *)
+  | [], _ -> post_block
+  | _ :: _, _ ->
     Printf.sprintf "%s\n\n**Comments**:\n%s" post_block (String.concat "\n" comment_lines)
 ;;
 
@@ -409,6 +412,7 @@ let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.r
            (Board.Comment_page.Position.line position)
            (render_thread
               ~post_block
+              ~total:page.Board.Comment_page.total
               ~comment_lines:
                 (Board_tool_format.format_comment_tree
                    ~viewer_vote_of

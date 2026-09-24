@@ -27,8 +27,8 @@ type = "integer"
 minimum = 0
 default = 0
 description = """
-Zero-based offset into the comment thread (default: 0). An \
-offset past the last comment is rejected."""
+Zero-based comment offset (default: 0). The comment count shows \
+newer comments; past it is rejected."""
 
 # minimum/maximum/default and the numbers inside the description mirror
 # Board_types.Limits (default_comment_page_limit / max_comment_page_limit);

@@ -871,6 +871,7 @@ function applyRuntimeLaneCandidateEdit(
 
 type RuntimeLaneCard = {
   id: string
+  resolved: boolean
   // What /api/v1/runtime/resolved walks: declared candidates the catalog admitted.
   resolvedRuntimeIds: readonly string[]
   // What runtime.toml declares, or null when the file was not read or the lane
@@ -889,6 +890,12 @@ function runtimeLaneReadOnlyReason(
 ): string | null {
   if (runtimeLaneNameReserved(lane.id)) {
     return 'routing API 가 이 이름을 다른 경로로 읽어 레인 편집을 보낼 수 없습니다. runtime.toml 섹션에서 직접 고치세요.'
+  }
+  if (!lane.resolved) {
+    return '현재 런타임 해석 결과에 없는 레인입니다. routing API 로 편집할 수 없어 runtime.toml 섹션에서 고쳐야 합니다.'
+  }
+  if (lane.declared !== null && lane.declared.some(id => !lane.resolvedRuntimeIds.includes(id))) {
+    return '카탈로그에서 빠진 후보가 있습니다. routing API 는 이런 후보를 보존한 저장을 거절하므로 runtime.toml 섹션에서 고쳐야 합니다.'
   }
   if (lane.declared !== null) return null
   if (source.status === 'loading') return 'runtime.toml 을 읽는 중입니다. 선언된 후보를 확인한 뒤 편집할 수 있습니다.'
@@ -946,7 +953,7 @@ function RuntimeLaneEditor({
             <span class="rt-fo-rank mono">${index === 0 ? '1차' : `${index + 1}`}</span>
             <span class="rt-fo-id mono">${runtimeId}</span>
             ${unavailable
-              ? html`<span class="rt-fo-cap" data-testid=${`runtime-lane-${lane.id}-unavailable-${runtimeId}`} title="runtime.toml 에 선언됐지만 catalog 에 없어 이 레인이 건너뜁니다">catalog 없음</span>`
+              ? html`<span class="rt-fo-cap" data-testid=${`runtime-lane-${lane.id}-unavailable-${runtimeId}`} title="runtime.toml 에만 남은 후보입니다. 현재 routing API 에서는 이 레인을 저장할 수 없습니다">catalog 없음</span>`
               : null}
             ${editable
               ? html`
@@ -1647,11 +1654,11 @@ export function SettingsSurface() {
     return () => { active = false }
   }, [])
 
-  async function reloadRuntimeTomlSourceSnapshot(): Promise<string | null> {
+  async function reloadRuntimeTomlSourceSnapshot(): Promise<{ sourceText: string; sourceRevision: string } | null> {
     try {
       const config = await fetchRuntimeTomlConfig()
       setRuntimeTomlSource({ status: 'ready', sourceText: config.source_text })
-      return config.source_text
+      return { sourceText: config.source_text, sourceRevision: config.source_revision }
     } catch (err) {
       setRuntimeTomlSource({ status: 'error', message: errorToString(err) })
       return null
@@ -1785,14 +1792,16 @@ export function SettingsSurface() {
   // be read, the edit is refused rather than sent from the resolved order.
   async function runtimeLaneEditOf(lane: string, write: RuntimeLaneWrite): Promise<RuntimeLaneEdit | string> {
     if (write.kind === 'lane') return write.edit
-    const sourceText = await reloadRuntimeTomlSourceSnapshot()
-    if (sourceText === null) return 'runtime.toml 을 읽지 못해 후보 편집을 보내지 않았습니다'
-    const declared = declaredRuntimeLaneCandidates(sourceText, lane)
+    const source = await reloadRuntimeTomlSourceSnapshot()
+    if (source === null) return 'runtime.toml 을 읽지 못해 후보 편집을 보내지 않았습니다'
+    const declared = declaredRuntimeLaneCandidates(source.sourceText, lane)
     if (declared === null) {
       return `runtime.toml 에서 ${runtimeLaneTableLabel(lane)} 의 candidates 를 읽지 못해 후보 편집을 보내지 않았습니다`
     }
     const next = applyRuntimeLaneCandidateEdit(declared, write.edit)
-    return typeof next === 'string' ? next : { action: 'set', runtimeIds: next }
+    return typeof next === 'string' ? next : {
+      action: 'set', runtimeIds: next, expectedSourceRevision: source.sourceRevision,
+    }
   }
 
   async function applyRuntimeLaneWrite(lane: string, write: RuntimeLaneWrite): Promise<boolean> {
@@ -1862,12 +1871,13 @@ export function SettingsSurface() {
   const runtimeLaneCards: RuntimeLaneCard[] = [
     ...runtimeLanes.map(lane => ({
       id: lane.id,
+      resolved: true,
       resolvedRuntimeIds: lane.runtime_ids,
       declared: runtimeTomlSourceText === null ? null : declaredRuntimeLaneCandidates(runtimeTomlSourceText, lane.id),
     })),
     ...(runtimeTomlSourceText === null ? [] : declaredRuntimeLaneIds(runtimeTomlSourceText))
       .filter(id => !runtimeLanes.some(lane => lane.id === id))
-      .map(id => ({ id, resolvedRuntimeIds: [], declared: declaredRuntimeLaneCandidates(runtimeTomlSourceText!, id) })),
+      .map(id => ({ id, resolved: false, resolvedRuntimeIds: [], declared: declaredRuntimeLaneCandidates(runtimeTomlSourceText!, id) })),
   ]
   const runtimeSelectOptions = runtimeSelectOptionsFromResolved(runtimeResolved?.runtimes ?? [])
   const runtimeRoutingDisabled =
@@ -2152,7 +2162,7 @@ export function SettingsSurface() {
                     <div class="settings-runtime-section" data-testid="runtime-lanes-section">
                       <div class="set-sub-h">Runtime lanes (${runtimeLaneCards.length})</div>
                       <div class="set-hint" data-testid="runtime-lanes-hint" style=${{ marginBottom: '8px' }}>
-                        lane 별 후보 체인 — 위에서부터 순서대로 시도합니다. 편집은 runtime.toml 의 <span class="mono">${'[runtime.lanes.<id>]'}</span> 에 바로 저장되고, 이름 변경은 이 레인을 가리키는 배정·default·Fusion seat 도 함께 고칩니다. catalog 없음 후보는 파일에 남아 있지만 이 레인이 건너뜁니다.
+                        lane 별 후보 체인 — 위에서부터 순서대로 시도합니다. 편집은 runtime.toml 의 <span class="mono">${'[runtime.lanes.<id>]'}</span> 에 바로 저장되고, 이름 변경은 이 레인을 가리키는 배정·default·Fusion seat 도 함께 고칩니다. 파일에만 남은 후보나 레인은 routing API 가 저장할 수 없어 읽기 전용으로 보여 줍니다.
                       </div>
                       ${runtimeLaneCards.map(lane => html`
                         <${RuntimeLaneEditor}

@@ -1284,6 +1284,34 @@ let test_lane_candidates_replace_rather_than_append () =
         (Runtime_lane.ordered_candidates lane))
 ;;
 
+let test_lane_set_revision_refuses_an_intervening_write () =
+  with_runtime_file (fun path ->
+    let revision () =
+      match Runtime.load_config_observation ~runtime_config_path:path () with
+      | Ok observed -> Runtime.config_source_revision_to_string observed.source_revision
+      | Error detail -> Alcotest.fail detail
+    in
+    let first_revision = revision () in
+    let write expected ids =
+      Runtime.set_runtime_lane_candidates ~runtime_config_path:path
+        ~expected_source_revision:expected ~lane_id:"coding" ~runtime_ids:ids ()
+    in
+    (match write first_revision [ "openai.gpt" ] with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail);
+    let after_first = Fs_compat.load_file path in
+    (match write first_revision [ "openai.small" ] with
+     | Ok _ -> Alcotest.fail "stale whole-order write overwrote another writer"
+     | Error detail ->
+       Alcotest.(check string) "stale source revision is a conflict"
+         Runtime.runtime_config_revision_conflict_message detail);
+    Alcotest.(check string) "stale write leaves the file intact" after_first
+      (Fs_compat.load_file path);
+    (match write (revision ()) [ "openai.small" ] with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail))
+;;
+
 (* The routing API's exact/ prefix names [runtime.exact_output_lanes.<name>]
    walk orders; the writer is the same SSOT path the conversation-lane picker
    uses, so the Runtime screen can edit both lane kinds the same way. *)
@@ -3685,6 +3713,10 @@ let () =
             "a second write replaces the ladder"
             `Quick
             test_lane_candidates_replace_rather_than_append
+        ; Alcotest.test_case
+            "a stale lane source revision cannot replace another write"
+            `Quick
+            test_lane_set_revision_refuses_an_intervening_write
         ; Alcotest.test_case
             "an exact-output lane writes its walk order"
             `Quick

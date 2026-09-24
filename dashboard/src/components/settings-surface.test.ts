@@ -1501,11 +1501,15 @@ describe('SettingsSurface', () => {
     const cands = [...laneCoding.querySelectorAll('.rt-fo-chain .rt-fo-cand')]
     expect(cands.map(c => c.querySelector('.rt-fo-id')?.textContent)).toEqual(['rt-a', 'rt-x', 'rt-b'])
     expect(cands.map(c => c.getAttribute('data-unavailable'))).toEqual([null, 'true', null])
+    expect(q('runtime-lane-coding-read-only')?.textContent).toContain('카탈로그에서 빠진 후보')
+    expect(laneCoding.querySelector('button, select, input')).toBeNull()
     expect(cands[0]!.querySelector('.rt-fo-rank')?.textContent).toBe('1차')
     expect(q('runtime-lane-vision.fast')?.querySelector('.rt-fo-lane-id')?.textContent)
       .toBe('[runtime.lanes."vision.fast"]')
     // Every candidate dropped: absent from the projection, still in the file.
     expect(q('runtime-lane-ghost-unavailable-rt-z')).not.toBeNull()
+    expect(q('runtime-lane-ghost-read-only')?.textContent).toContain('런타임 해석 결과에 없는')
+    expect(q('runtime-lane-ghost')?.querySelector('button, select, input')).toBeNull()
     // Not its own table: shown, read-only, with the reason.
     expect(q('runtime-lane-inline-lane-read-only')?.textContent).toContain('읽기 전용')
     expect(q('runtime-lane-inline-lane')?.querySelector('button, select, input')).toBeNull()
@@ -1513,8 +1517,8 @@ describe('SettingsSurface', () => {
     expect((q('runtime-lane-vision.fast-remove-rt-c') as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('routing section applies candidate edits to the declared order so catalog-dropped candidates stay', async () => {
-    const lanes = useLaneFile([['coding', ['rt-a', 'rt-x', 'rt-b']]])
+  it('routing section sends a source revision with a complete declared lane order', async () => {
+    const lanes = useLaneFile([['coding', ['rt-a', 'rt-b']]])
     stubRuntimeResolved(makeRuntimeResolved({
       lanes: [{ id: 'coding', declared: true, runtime_ids: ['rt-a', 'rt-b'] }],
     }))
@@ -1527,7 +1531,7 @@ describe('SettingsSurface', () => {
 
     await fireEvent.click(q('runtime-lane-coding-down-rt-a')!)
     await waitFor(() => {
-      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-x', 'rt-a', 'rt-b'] })
+      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-b', 'rt-a'], expectedSourceRevision: 'runtime-source-revision' })
       expect(q('runtime-lane-message')?.textContent).toContain('runtime.toml lane set (coding) 저장됨')
     })
     // Success refreshes the resolved projection like the default routing patch,
@@ -1538,7 +1542,7 @@ describe('SettingsSurface', () => {
 
     await fireEvent.click(q('runtime-lane-coding-remove-rt-b')!)
     await waitFor(() => {
-      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-x', 'rt-a'] })
+      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-a'], expectedSourceRevision: 'runtime-source-revision' })
       expect(q('runtime-lane-saving')).toBeNull()
     })
 
@@ -1550,9 +1554,9 @@ describe('SettingsSurface', () => {
     expect(Array.from(add.options).map(option => option.value)).toEqual(['', 'rt-b', 'rt-c'])
     await fireEvent.input(add, { target: { value: 'rt-c' } })
     await waitFor(() => {
-      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-x', 'rt-a', 'rt-c'] })
+      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-a', 'rt-c'], expectedSourceRevision: 'runtime-source-revision' })
     })
-    expect(lanes.get('coding')).toEqual(['rt-x', 'rt-a', 'rt-c'])
+    expect(lanes.get('coding')).toEqual(['rt-a', 'rt-c'])
   })
 
   it('routing section refuses a candidate edit when the declared order cannot be read', async () => {
@@ -1623,7 +1627,7 @@ describe('SettingsSurface', () => {
       expect(message?.textContent).toContain('저장됨')
       expect(message?.textContent).toContain('대시보드 런타임 갱신 실패: resolved runtime unavailable')
     })
-    expect(apiMock.patchRuntimeLane).toHaveBeenCalledWith('coding', { action: 'set', runtimeIds: ['rt-b', 'rt-a'] })
+    expect(apiMock.patchRuntimeLane).toHaveBeenCalledWith('coding', { action: 'set', runtimeIds: ['rt-b', 'rt-a'], expectedSourceRevision: 'runtime-source-revision' })
   })
 
   it('routing section renames with Enter, cancels with Escape, deletes, and creates lanes', async () => {

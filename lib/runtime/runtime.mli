@@ -107,6 +107,7 @@ val config_observation : path:string -> string -> config_observation
 (** Pure source identity used inside callers' locked config edits. *)
 
 val config_source_revision_to_string : config_source_revision -> string
+val runtime_config_revision_conflict_message : string
 val config_commit_order_to_string : config_commit_order -> string
 val compare_config_commit_order : config_commit_order -> config_commit_order -> int
 val config_lock_warning_to_yojson : config_lock_warning -> Yojson.Safe.t
@@ -925,6 +926,7 @@ val set_runtime_media_failover :
 
 val set_runtime_lane_candidates :
   ?runtime_config_path:string ->
+  ?expected_source_revision:string ->
   lane_id:string ->
   runtime_ids:string list ->
   unit ->
@@ -935,7 +937,9 @@ val set_runtime_lane_candidates :
     the lane table when the id has none — a runtime whose lane was synthesized
     ([self]) becomes a declared lane the first time an operator adds a
     candidate to it. An empty [runtime_ids] is rejected: a lane that resolves to
-    nothing is not the same edit as removing the lane. *)
+    nothing is not the same edit as removing the lane. When
+    [expected_source_revision] is supplied, the file's source revision is
+    compared while holding the write lock before replacing the whole order. *)
 
 val create_runtime_lane :
   ?runtime_config_path:string ->

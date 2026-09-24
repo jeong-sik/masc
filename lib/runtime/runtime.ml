@@ -167,6 +167,9 @@ type 'a config_lock_receipt =
   }
 
 let config_source_revision_to_string (Config_source_revision revision) = revision
+let runtime_config_revision_conflict_message =
+  "runtime.toml changed since the lane candidates were read; reload before editing"
+;;
 let config_commit_order_to_string (Config_commit_order order) = Int64.to_string order
 let compare_config_commit_order (Config_commit_order left) (Config_commit_order right) =
   Int64.compare left right
@@ -3599,11 +3602,17 @@ let write_lane_candidates ~content ~lane_id ~runtime_ids =
     ~values:runtime_ids
 ;;
 
-let set_runtime_lane_candidates ?runtime_config_path ~lane_id ~runtime_ids () =
+let set_runtime_lane_candidates ?runtime_config_path ?expected_source_revision ~lane_id ~runtime_ids () =
   let* lane_id = validated_lane_id lane_id in
   let* runtime_ids = validated_lane_candidates runtime_ids in
   edit_runtime_lanes ?runtime_config_path (fun ~content _config ->
-    Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
+    match expected_source_revision with
+    | Some expected when
+        not (String.equal expected
+               (config_source_revision_to_string
+                  (config_observation ~path:"" content).source_revision)) ->
+      Error runtime_config_revision_conflict_message
+    | Some _ | None -> Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
 ;;
 
 (* A lane shadows the runtime of the same id: [resolve_assignment] reads lanes

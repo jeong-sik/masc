@@ -2178,7 +2178,7 @@ export async function patchRuntimeMediaFailover(
 // `set` sends the whole order: the endpoint's contract is the lane's order,
 // not a delta, and an empty order is refused (removing the lane is `remove`).
 export type RuntimeLaneEdit =
-  | { action: 'set'; runtimeIds: readonly string[] }
+  | { action: 'set'; runtimeIds: readonly string[]; expectedSourceRevision: string }
   | { action: 'create'; runtimeIds: readonly string[] }
   | { action: 'remove' }
   | { action: 'rename'; to: string }
@@ -2189,6 +2189,10 @@ function runtimeLaneEditBody(
 ): Record<string, unknown> {
   switch (edit.action) {
     case 'set':
+      return {
+        lane, action: 'set', runtime_ids: [...edit.runtimeIds],
+        expected_source_revision: edit.expectedSourceRevision,
+      }
     case 'create':
       return { lane, action: edit.action, runtime_ids: [...edit.runtimeIds] }
     case 'remove':

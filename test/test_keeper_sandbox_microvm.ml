@@ -452,9 +452,19 @@ let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
 
 let test_guest_target_follows_the_factory_contract () =
   with_eio_fs @@ fun () ->
-  let base = temp_dir "guest_target_contract_" in
-  let config = Masc.Workspace.default_config base in
   let resolve (meta : Masc.Keeper_meta_contract.keeper_meta) =
+    let base = temp_dir "guest_target_contract_" in
+    let config = Masc.Workspace.default_config base in
+    let store =
+      match meta.sandbox_profile with
+      | Profile.Micro_vm ->
+        Masc.Keeper_sandbox_image_catalog.Microvm Backend.Apple_container
+      | Profile.Docker -> Masc.Keeper_sandbox_image_catalog.Docker_daemon
+      | Profile.Remote_ssh -> Alcotest.fail "expected a guest profile"
+    in
+    Masc_test_deps.write_sandbox_image_catalog ~store ~base_path:base
+      [ "base", "alpine:test" ];
+    let meta = { meta with sandbox_image = Some "base" } in
     let factory = Masc.Keeper_sandbox_factory.create ~config ~meta () in
     let result =
       match

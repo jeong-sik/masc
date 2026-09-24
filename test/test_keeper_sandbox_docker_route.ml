@@ -715,9 +715,16 @@ let test_execute_rejects_factory_profile_drift_in_every_direction () =
 
 
 
-let test_execute_routes_through_docker () =
+let test_execute_without_catalog_image_fails_before_docker () =
+  with_fake_docker
+    "#!/bin/sh\n\
+     printf '%s\\n' \"$*\" >> \"$MASC_KEEPER_TEST_DOCKER_LOG\"\n\
+     exit 2\n"
+  @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
     Keeper_tool_execute_runtime.handle_tool_execute ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
@@ -726,10 +733,12 @@ let test_execute_routes_through_docker () =
   in
   Alcotest.(check (option bool)) "Docker request did not run on Host" None
     (parse_bool_field raw "ok");
-  Alcotest.(check bool) "missing Docker image is explicit" true
-    (response_mentions raw "error" "sandbox_image_unresolved");
+  if not (response_mentions raw "error" "sandbox_image") then
+    Alcotest.failf "missing Docker image was not reported: %s" raw;
   Alcotest.(check (option string)) "no local fallback" None
-    (parse_string_field raw "sandbox_fallback")
+    (parse_string_field raw "sandbox_fallback");
+  Alcotest.(check bool) "Docker not started for an unresolved image" false
+    (Sys.file_exists log_path)
 
 let test_execute_legacy_skips_docker () =
   setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
@@ -2504,8 +2513,8 @@ let () =
             "docker tool execute ops route through docker"
             `Quick test_readonly_ops_route_through_docker;
           Alcotest.test_case
-            "docker Execute routes through docker"
-            `Quick test_execute_routes_through_docker;
+            "docker Execute refuses an unresolved image before startup"
+            `Quick test_execute_without_catalog_image_fails_before_docker;
           Alcotest.test_case
             "docker Execute git cmd routes through docker"
             `Quick test_execute_git_routes_through_docker;

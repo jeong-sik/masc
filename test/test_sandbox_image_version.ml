@@ -229,8 +229,17 @@ let test_write_context_places_inputs () =
 
 (* The repository's own recipes: every COPY source is a listed input, so the
    build context carries it and its bytes are in the tag. *)
+let source_has_recipe_and_inputs dir =
+  List.for_all
+    (fun path -> Sys.file_exists (Filename.concat dir path))
+    [ "sandbox-images/ocaml/Dockerfile"
+    ; "masc.opam"
+    ; "masc.opam.locked"
+    ; "scripts/opam-pin-from-lock.sh"
+    ]
+
 let rec find_source_root dir hops =
-  if Sys.file_exists (Filename.concat dir "sandbox-images/ocaml/Dockerfile") then Some dir
+  if source_has_recipe_and_inputs dir then Some dir
   else if hops = 0 then None
   else
     let parent = Filename.dirname dir in
@@ -249,8 +258,13 @@ let copy_sources dockerfile =
   |> List.concat
 
 let test_repository_recipes_list_their_copy_sources () =
-  match find_source_root (Sys.getcwd ()) 8 with
-  | None -> fail ("sandbox-images/ not found above " ^ Sys.getcwd ())
+  let source =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root when source_has_recipe_and_inputs root -> Some root
+    | Some _ | None -> find_source_root (Sys.getcwd ()) 8
+  in
+  match source with
+  | None -> fail ("sandbox image recipes and inputs not found above " ^ Sys.getcwd ())
   | Some source ->
     List.iter
       (fun name ->

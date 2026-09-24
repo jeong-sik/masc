@@ -555,7 +555,8 @@ let declare_fixture_keeper ~base_path ~sandbox_profile name =
    the host's image catalog, so a fixture that reaches a container start
    promotes one for its workspace, at the config root the runtime resolves
    for that base path. Names are the ones the binary ships ([base], [ocaml]);
-   each [(name, reference)] is promoted in Docker's store with
+   each [(name, reference)] is promoted in the selected store (Docker by
+   default) with
    {!sandbox_image_test_digest}, which nothing checks against a store. Any
    builds the workspace had are replaced. *)
 let sandbox_image_test_digest = "sha256:" ^ String.make 64 '0'
@@ -565,7 +566,9 @@ let sandbox_image_test_digest = "sha256:" ^ String.make 64 '0'
    [masc sandbox-image --tag masc-sandbox:general]. *)
 let live_sandbox_image_tag = "masc-sandbox:general"
 
-let write_sandbox_image_catalog ~base_path images =
+let write_sandbox_image_catalog
+    ?(store = Masc.Keeper_sandbox_image_catalog.Docker_daemon)
+    ~base_path images =
   let module Catalog = Masc.Keeper_sandbox_image_catalog in
   let or_fail to_string = function
     | Ok value -> value
@@ -586,7 +589,7 @@ let write_sandbox_image_catalog ~base_path images =
   let catalog =
     List.fold_left
       (fun catalog (name, reference) ->
-        Catalog.promote catalog ~name ~store:Catalog.Docker_daemon ~reference
+        Catalog.promote catalog ~name ~store ~reference
           ~digest:sandbox_image_test_digest
         |> or_fail Catalog.change_error_to_string)
       catalog images

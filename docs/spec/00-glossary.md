@@ -1076,7 +1076,7 @@ status: reference
 **PR Attribution (PR 귀속)**
 : 열린 GitHub Pull Request를 작업한 Keeper와 잇는 표시 규칙(RFC-0465).
   `GET /api/v1/repositories/pulls`가 PR의 `author`(머지 커밋을 건너뛴 최신 단일
-  부모 커밋의 작성자 이름, #38277)와 지속된 Keeper 이름(`keepers_listed`)을 대조해
+  부모 커밋의 작성자 이름, #38277)와 저장된 Keeper 이름 목록(`Keepers_listed`)을 대조해
   일치하는 Keeper에게 귀속한다(`keeper`). 샌드박스 런타임은 실행 환경의
   `GIT_AUTHOR_NAME`과 `GIT_COMMITTER_NAME`에 그 Keeper 이름을 넣어 커밋에
   작성자가 남도록 보장한다(#38253). Keeper 목록 조회가 실패하면(`Keepers_list_failed`)
@@ -1331,9 +1331,8 @@ status: reference
 
 **Turn Start (턴 시작 위치)**
 : 씨앗도 흡수 지점도 없을 때 이번 요청이 어디서 시작하는가를 정한 값
-  (`Keeper_carried_front.turn_start`). 닫힌 둘이고 wire `kind`가 이름이다 —
-  `Turn_boundary { end_atom }`(`turn_boundary`), `Turn_boundary_unknown { reason }`
-  (`turn_boundary_unknown`). `Turn_boundary`는 이 History에서 마지막으로 끝난 turn의
+  (`Keeper_carried_front.turn_start`). 닫힌 둘이다 — `Turn_boundary { end_atom }`,
+  `Turn_boundary_unknown { reason }`. `Turn_boundary`는 이 History에서 마지막으로 끝난 turn의
   경계이고, 그 경계를 지금 History와 digest로 맞춰 본 값만 쓴다. 끝난 turn이 없는
   History에서는 0이라 갖고 있는 전부를 싣는다(새 Keeper의 짧은 History). 경계
   저장소를 못 읽었거나 어떤 경계도 지금 History와 맞지 않으면
@@ -1375,11 +1374,8 @@ status: reference
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli),
   `RFC-librarian-lifecycle` §4.6
 
-**Generation**
-: 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.
-
 **Trace ID**
-: 현재 Keeper generation의 실행 식별자. Checkpoint의 `session_id` 필드와
+: Keeper를 만들 때 한 번 정하는 실행 식별자. Checkpoint의 `session_id` 필드와
   `Turn_ref`의 trace id가 이 값이다.
 
 **Memory OS**

@@ -482,8 +482,7 @@ let test_http_client_does_not_own_tui_env_contract () =
 (* The Overview's Attention panel writes two cells of indent ahead of every
    row it draws. Its empty and unread notes stand in for rows, and they are
    written for a body that indents them itself -- pasted in whole, a note sat
-   two cells right of the rows it replaces and of the title above them, while
-   the Events panel beside it put its title and its rows on one column. *)
+   two cells right of the rows it replaces and of the title above them. *)
 let test_the_attention_note_starts_where_its_rows_do () =
   check int "the note carries no indent of its own" 0
     (Ast_grep.count_exact_string_literals_in_value_binding
@@ -1682,33 +1681,6 @@ let test_planning_refresh_reconciles_navigation_identity () =
        ~callees:[ "planning_visible_goals" ] ~fields:[ "pl_goals" ])
 ;;
 
-let test_overview_events_use_scroll_projection () =
-  check int "overview renders one bounded event window" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_overview"
-       ~callee:"Render_schedule.project_overview_event_window");
-  check int "event prepend preserves one manual anchor" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_loader.ml"
-       ~binding_name:"add_event"
-       ~callee:"Render_schedule.overview_event_offset_after_prepend");
-  check int "overview older input is bounded once" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"main"
-       ~callee:"Render_schedule.scroll_overview_events_older");
-  check int "overview newer input is bounded once" 1
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"main"
-       ~callee:"Render_schedule.scroll_overview_events_newer");
-  check int "both overview input directions use current layout" 2
-    (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui.ml"
-       ~binding_name:"main" ~callee:"overview_layout")
-;;
-
 let test_render_loop_uses_monotonic_dirty_schedule () =
   let main_path = "bin/masc_tui.ml" in
   check bool "main loop reads a monotonic clock" true
@@ -2504,17 +2476,13 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields "render_overview"
     [ "workspace"
     ; "overview_error"
-    ; "ov_cluster"
-    ; "ov_project"
     ; "ai_summary"
-    ; "content"
-      (* [th_primary_path] and [th_queue_pressure] left this list because they
-         left the category. Both are closed variants now, rendered through
-         [Transport_metrics.*_kind_to_string], so the renderer has no arbitrary
-         text to sanitize -- the type removed what the sanitizer was for. Asking
-         for the call here would ask the renderer to sanitize a constructor. *)
     ];
   check_fields "overview_layout" [ "tasks_error" ];
+  (* The TUI session block prints event text this process wrote from
+     server answers and editor output. *)
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    "render_section_fleet" [ "content" ];
   (* The Team block prints Keeper names and task text that producers wrote. *)
   (* pr_tag_of_keeper looks the name up; it does not draw it. *)
   check_fields ~non_rendering_calls:[ "pr_tag_of_keeper" ] "overview_team_lines"
@@ -3125,10 +3093,6 @@ let () =
           "scoped surface refresh preserves connection status"
           `Quick
           test_scoped_surface_refresh_does_not_own_connection_status;
-        test_case
-          "overview events use bounded scroll projection"
-          `Quick
-          test_overview_events_use_scroll_projection;
         test_case
           "render loop uses monotonic dirty scheduling"
           `Quick

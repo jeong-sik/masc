@@ -24,6 +24,7 @@ let write
       ~raw_trace_run_ref
       ~sampling
       ~usage
+      ~turn_output_tokens
       ~execution_ids
       ~blocks
       ~input_components
@@ -55,6 +56,7 @@ let write
     ; raw_trace_run_ref
     ; sampling
     ; usage
+    ; turn_output_tokens
     ; ts = Time_compat.now ()
     }
   in

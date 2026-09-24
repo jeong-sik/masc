@@ -1359,6 +1359,7 @@
   masc_tui_ansi
   masc_tui_chart
   masc_tui_context_inspector
+  masc_tui_render_schedule
   masc_tui_rows
   masc_tui_scroll
   masc_tui_theme

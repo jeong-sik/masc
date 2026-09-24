@@ -25041,6 +25041,9 @@ and is loaded on demand through keeper_skill.
               && Option.is_some state.slot_editor ->
            (match Masc_tui_types.slot_editor_cursor_row state with
             | Some { sr_kind = `Http; sr_slot; _ } ->
+              (* Runtime_toml keeps provider ids dot-free and Runtime ids are
+                 provider.model. The catalogue's ro_provider is a display
+                 name, so it cannot name a [providers.<id>] table. *)
               (match String.index_opt sr_slot '.' with
                | Some boundary when boundary > 0 ->
                  let provider = String.sub sr_slot 0 boundary in

@@ -520,6 +520,15 @@ def run_exact_slot_editor(executable: str) -> None:
     fixtures[h.RUNTIME_PROBE_FORCE_PATH] = h.runtime_probe_response(fresh=True)
     fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
     fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
+    status, config = h.standalone_lane_runtime_config_response()
+    fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (
+        status,
+        {
+            **config,
+            "source_text": config["source_text"]
+            + "\n\n[providers.glm-coding]\nexact-body-timeout-s = 1200\n",
+        },
+    )
 
     def interact(process, fd, _slave, output, _base):
         h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
@@ -538,12 +547,19 @@ def run_exact_slot_editor(executable: str) -> None:
                         b"> 11  CLI  codex_subscription.fixture-10")
         h.send_and_wait(process, fd, output, b"k" * 10,
                         b"> 1  HTTP glm-coding.glm-5-turbo")
+        mark = mark_output(fd, output)
         h.send_and_wait(process, fd, output, b"a",
                         b"adding a candidate to librarian_exact")
+        h.wait_for_output(process, fd, output,
+                          "j/k move · Enter append · e cancel".encode(),
+                          start=mark, timeout=5)
         # The picker owns focus; d must not jump to the underlying HTTP slot.
         os.write(fd, b"d")
         h.send_and_wait(process, fd, output, b"e",
                         b"> 1  HTTP glm-coding.glm-5-turbo")
+        h.send_and_wait(process, fd, output, b"d", b"[providers.glm-coding]")
+        h.wait_for_output(process, fd, output, b"exact-body-timeout-s = 1200",
+                          start=mark, timeout=5)
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

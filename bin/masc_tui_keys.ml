@@ -478,9 +478,6 @@ let for_surface = function
           ~help:"edit HTTP and CLI slots together: a adds, x drops, J/K \
                  reorders within each transport group, d opens the selected HTTP \
                  provider where exact-body-timeout-s lives; HTTP runs before CLI"
-      ; b Navigate "d" "HTTP provider"
-          ~help:"with the slot editor open, jump to the selected HTTP slot's \
-                 [providers.<id>] table to set exact-body-timeout-s"
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)

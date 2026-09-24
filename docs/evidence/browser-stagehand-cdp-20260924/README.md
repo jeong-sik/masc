@@ -8,6 +8,8 @@ extension service worker, and JSON-RPC through `Runtime.addBinding` /
 ## Environment
 
 - Browser: Google Chrome Canary `Chrome/156.0.8071.0`, `--headless=new`, fresh profile.
+  Repeated the same evening on Chrome for Testing `Chrome/154.0.8037.57` (unbranded,
+  from `npx @puppeteer/browsers install chrome@stable`): `run-chrome-for-testing-154.txt`.
 - Extension: `dist/extension` from `@browserbasehq/stagehand@4.1.0` (npm `latest` on
   2026-09-24). Runtime marker: `protocolVersion 2.0.0`, runtime `1.0.2`.
 - Client: `spike.mjs`, Node's built-in `WebSocket`. No npm dependency is imported.
@@ -29,6 +31,13 @@ its own websocket to that URL. Chrome checks that socket's
 The id is computed before launch from the extension directory's real path
 (SHA-256, first 32 hex digits, `0-f` mapped to `a-p`). Both runs log that it
 matches the id `Extensions.loadUnpacked` returned.
+
+## Chrome for Testing 154 (`run-chrome-for-testing-154.txt`, `ORIGINS=extension`)
+
+The whole flow passes with only the extension's origin allowed: `Extensions.loadUnpacked`
+over the debugging websocket returns the computed id, and `extract`, `act` (the page
+reports the click) and `page.screenshot` answer. `stagehand.init` took 5.1 s on this
+first launch of a fresh download, against 0.6 s on Canary above.
 
 ## What was measured (`run.txt`, `ORIGINS=extension`)
 

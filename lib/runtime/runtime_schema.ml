@@ -322,7 +322,7 @@ type model_spec =
         bytes-per-token constant with nothing to justify it, and a wrong
         constant either truncates silently or overflows silently.
 
-        Only Claude Code and Antigravity runtimes read it
+        Only Claude Code, Antigravity and Codex runtimes read it
         ([api_format_reads_max_prompt_bytes]). Declared on a model bound
         through any other provider, it bounds nothing and no reader counts it.
 

@@ -806,11 +806,11 @@ let test_briefing_budget_spans_the_whole_deferred_suffix () =
             ~deferred_runtime_lane:None
             ~assigned_route:"three_deep")))
 
-(* Only Claude Code and Antigravity read [max-prompt-bytes]. A number declared
-   on an HTTP candidate bounds nothing that provider checks, so it must not
-   become the lane's minimum: counted, it would shrink every turn's briefing
-   even while the Claude Code head serves. Two reading candidates still give
-   their minimum ([uneven]). *)
+(* Only Claude Code, Antigravity and Codex read [max-prompt-bytes]. A number
+   declared on an HTTP candidate bounds nothing that provider checks, so it
+   must not become the lane's minimum: counted, it would shrink every turn's
+   briefing even while the Claude Code head serves. Two reading candidates
+   still give their minimum ([uneven]). *)
 let test_briefing_budget_ignores_a_ceiling_its_runtime_does_not_read () =
   with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
     Alcotest.(check (option int))

@@ -104,7 +104,13 @@ let unbounded_model_input_capacity_bytes = max_int
    unbounded, [measure_model_input_message_bytes], the cut made inside
    [Host.prepare_turn]. That is the operator's decision (ask7a9c2dbf75c6a2fa);
    window RFC §4.1 records it as the Codex exception to "refuse at
-   admission". *)
+   admission".
+
+   The vendor states its limit as a string length in characters
+   ([string_above_max_length], 10485760); this window counts bytes
+   ([String.length]). A UTF-8 string has at least as many bytes as
+   characters, so a byte window at the declared number always fits the
+   character limit: it can cut short, never over. *)
 let starting_capacity_of_declared_prompt_limit = function
   | Some bytes -> bytes
   | None -> unbounded_model_input_capacity_bytes

@@ -122,6 +122,14 @@ type goal_proof =
           as an unreviewed goal, and showing it as "not reviewed" would
           disguise corruption as quiet. *)
 
+type verifier_unreconciled = {
+  vu_step : Goal_reconcile_step.t;
+  vu_detail : string;
+}
+(** The latest verifier scan could not settle this Verifying goal. It stays
+    Verifying until [request_complete] retries it or a later scan settles it,
+    or the operator takes it back or drops it. *)
+
 type planning_goal = {
   pg_id : string;
   pg_title : string;
@@ -131,6 +139,7 @@ type planning_goal = {
   pg_metric : string option;
   pg_target_value : string option;
   pg_proof : goal_proof;
+  pg_verifier_unreconciled : verifier_unreconciled option;
   pg_last_review_note : string option;
       (** What a keeper or operator wrote at the last transition. Free text,
           unlike {!pg_proof}, which is the judge's. *)
@@ -1018,6 +1027,28 @@ type memory_librarian_failure_kind =
     endings that carry none. *)
 val memory_librarian_pass_end_cause : memory_librarian_pass_end -> string option
 
+(** RFC librarian-lifecycle §4.10: the atoms the Keeper's requests skip
+   because the Librarian stands behind the start the provider last
+   accepted. [mls_gap_end_atom] is that start; the gap ends just before it.
+   [Stalled_unmeasured] is a file the gap is read from that did not read:
+   neither "no gap" nor a gap. *)
+type memory_librarian_stall_cause =
+  | Stall_meta_unreadable
+  | Stall_turn_records_unreadable
+  | Stall_turn_boundary_refused
+  | Stall_snapshot_unreadable
+  | Stall_read_position_unreadable
+
+type memory_librarian_stalled =
+  | Stalled_gap of {
+      mls_gap_start_atom : int;
+      mls_gap_end_atom : int;
+    }
+  | Stalled_unmeasured of {
+      mls_cause : memory_librarian_stall_cause;
+      mls_detail : string;
+    }
+
 (* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
    standing, and what its last pass and its journal say. [None] in a field is
    "not measured", which the header prints as such; it is not zero. *)
@@ -1034,6 +1065,9 @@ type memory_librarian_health = {
           another trace -- and is not the same as caught up. *)
   mlh_last_success_at : float option;
   mlh_last_failure_kind : memory_librarian_failure_kind option;
+  mlh_stalled : memory_librarian_stalled option;
+      (** [None] while the Librarian point is at or past the start the
+          provider last accepted, or when there is no accepted start yet. *)
 }
 
 type memory_context_frontier = {
@@ -1586,6 +1620,18 @@ val standalone_lane_status_to_string : standalone_lane_status -> string
     the state needs one. The caller writes no noun of its own. *)
 val standalone_lane_configuration_phrase :
   standalone_lane_configuration -> string
+
+(** The lane detail's last two lines: what a retained run's Output holds, and
+    what the run record keeps. *)
+type standalone_lane_answer = {
+  sla_output_meaning : string;
+  sla_evidence : string;
+}
+
+val standalone_lane_answer : standalone_lane -> standalone_lane_answer
+(** Reads [sl_lane_id] as a {!Standalone_lane.t} once, and every lane has its
+    own pair. An id no lane has gets a pair that names the id, escaped for the
+    terminal. *)
 val decode_standalone_lanes_snapshot :
   Yojson.Safe.t -> (standalone_lanes_snapshot, string) result
 

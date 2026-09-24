@@ -1593,7 +1593,6 @@ max-concurrent = 4
 [models.kimi-for-coding]
 api-name = "kimi-for-coding"
 max-context = 262144
-max-prompt-bytes = 262144
 tools-support = true
 streaming = true
 

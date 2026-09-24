@@ -824,6 +824,7 @@ let planning_goal_json id phase priority =
     ; "title", `String ("Goal " ^ id)
     ; "phase", `String phase
     ; "priority", `Int priority
+    ; "verifier_unreconciled", `Null
     ]
 
 (* The ledger rows as the server actually joins them, taken from a live
@@ -867,6 +868,9 @@ let decoded_proof ?verification ?last_review_note ?(extra = []) () =
     ; "phase", `String "executing"
     ; "priority", `Int 1
     ]
+    @ (if List.mem_assoc "verifier_unreconciled" extra
+       then []
+       else [ "verifier_unreconciled", `Null ])
     @ (match verification with None -> [] | Some v -> [ "verification", v ])
     @ (match last_review_note with
        | None -> []
@@ -996,6 +1000,55 @@ let test_planning_goal_separates_unreadable_from_unreviewed () =
      with
      | Tui_decode.Proof_unreadable _ -> true
      | _ -> false)
+;;
+
+(* A Verifying goal the latest verifier scan could not settle: the row carries which
+   step failed and why, so the operator can see it is stuck rather than
+   waiting. *)
+let test_planning_goal_carries_the_verifier_unreconciled_reason () =
+  let goal =
+    decoded_proof
+      ~extra:
+        [ ( "verifier_unreconciled"
+          , `Assoc
+              [ "step", `String "rearm_proof"
+              ; "detail", `String "criterion already proven"
+              ] )
+        ]
+      ()
+  in
+  match goal.Tui_decode.pg_verifier_unreconciled with
+  | Some { Tui_decode.vu_step = Goal_reconcile_step.Rearm_proof; vu_detail } ->
+    Alcotest.(check string) "the reason is decoded" "criterion already proven" vu_detail
+  | Some { Tui_decode.vu_step = Goal_reconcile_step.Reconcile_proof; _ } ->
+    Alcotest.fail "the step was decoded as the wrong one"
+  | None -> Alcotest.fail "the unreconciled reason was dropped"
+;;
+
+let test_planning_goal_without_the_verifier_field_is_refused () =
+  let goal_json =
+    `Assoc
+      [ "id", `String "goal-x"; "title", `String "Goal x"
+      ; "phase", `String "verifying"; "priority", `Int 1 ]
+  in
+  let snapshot =
+    `Assoc
+      [ "goals", `List [ goal_json ]
+      ; ( "rollup"
+        , `Assoc
+            [ "active_count", `Int 0; "verifying_count", `Int 1
+            ; "awaiting_confirmation_count", `Int 0; "done_count", `Int 0
+            ; "dropped_count", `Int 0 ] )
+      ; ( "task_backlog"
+        , `Assoc
+            [ "todo", `Int 0; "claimed", `Int 0; "in_progress", `Int 0
+            ; "awaiting_verification", `Int 0; "done", `Int 0; "cancelled", `Int 0 ] )
+      ; "goal_history", `Assoc [ "unlisted", `List [] ]
+      ; "generated_at", `String "2026-09-24T00:00:00Z"
+      ]
+  in
+  Alcotest.(check bool) "a missing key is a wire mismatch, not a settled goal" true
+    (Result.is_error (Tui_decode.decode_planning_snapshot snapshot))
 ;;
 
 (* With no verdict the keeper's own note is what the row has to say. *)
@@ -4203,6 +4256,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("continuity_unread_atoms", `Int 0)
             ; ("last_success_at", `Null)
             ; ("last_failure_kind", `Null)
+            ; ("stalled", `Null)
             ] )
       ; ("librarian_failures", `Int failures)
       ; ("vision_ingest_errors", `Int (if id = "healthy" then 3 else 0))
@@ -4480,6 +4534,48 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   Alcotest.(check bool) "a negative continuity lag is refused" true
     (memory_health_rejects (
        (with_continuity_totals ~behind:(-1) ~unmeasured:0 (with_continuity (`Int (-1))))));
+  (* RFC librarian-lifecycle §4.10: the Librarian_stalled gap is the row's
+     own reading, from the Librarian point to the accepted start. A gap that
+     does not end after it starts is no gap and is refused. *)
+  let with_stalled value =
+    map_keeper 0 (fun keeper -> match keeper with
+      | `Assoc fields -> `Assoc (List.map (fun (key, current) -> key,
+          if key = "librarian" then replace_field "stalled" value current else current) fields)
+      | _ -> keeper) json in
+  let gap start_atom end_atom =
+    `Assoc
+      [ "kind", `String "gap"; "gap_start_atom", `Int start_atom; "gap_end_atom", `Int end_atom ]
+  in
+  let stalled_of payload =
+    match Tui_decode.decode_memory_health_snapshot (with_stalled payload) with
+    | Ok snapshot -> (List.hd snapshot.mhs_keepers).mkh_librarian.mlh_stalled
+    | Error detail -> Alcotest.fail detail
+  in
+  (match stalled_of (gap 2 8) with
+   | Some (Tui_decode.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 }) -> ()
+   | _ -> Alcotest.fail "the gap (2, 8) must decode as that gap");
+  Alcotest.(check bool) "an empty gap is refused" true
+    (memory_health_rejects (with_stalled (gap 8 8)));
+  Alcotest.(check bool) "a gap with a field this build does not know is refused" true
+    (memory_health_rejects
+       (with_stalled
+          (`Assoc
+             [ "kind", `String "gap"; "gap_start_atom", `Int 2; "gap_end_atom", `Int 8
+             ; "bytes", `Int 1 ])));
+  (* A file the gap is read from that did not read decodes as its own state,
+     not as no gap. *)
+  let unmeasured cause =
+    `Assoc [ "kind", `String "unmeasured"; "cause", `String cause; "detail", `String "bad" ]
+  in
+  (match stalled_of (unmeasured "turn_records_unreadable") with
+   | Some
+       (Tui_decode.Stalled_unmeasured
+          { mls_cause = Tui_decode.Stall_turn_records_unreadable; mls_detail = "bad" }) -> ()
+   | _ -> Alcotest.fail "an unreadable turn record must decode as unmeasured, not as no gap");
+  Alcotest.(check bool) "a cause this build does not know is refused" true
+    (memory_health_rejects (with_stalled (unmeasured "disk_on_fire")));
+  Alcotest.(check bool) "a kind this build does not know is refused" true
+    (memory_health_rejects (with_stalled (`Assoc [ "kind", `String "maybe" ])));
   let mismatched_totals =
     match json with
     | `Assoc fields ->
@@ -4506,6 +4602,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("continuity_unread_atoms", `Int 0)
             ; ("last_success_at", `Null)
             ; ("last_failure_kind", `Null)
+            ; ("stalled", `Null)
             ]))
       json
   in
@@ -4523,6 +4620,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("continuity_unread_atoms", `Int 0)
             ; ("last_success_at", `Null)
             ; ("last_failure_kind", `Null)
+            ; ("stalled", `Null)
             ]))
       json
   in
@@ -4692,6 +4790,7 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
                     ; ("continuity_unread_atoms", `Int 0)
                     ; ("last_success_at", `Null)
                     ; ("last_failure_kind", `Null)
+                    ; ("stalled", `Null)
                     ] )
               ; ("librarian_failures", `Int 4)
               ; ("vision_ingest_errors", `Int 0)
@@ -4823,6 +4922,7 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
                       ; ("continuity_unread_atoms", `Int 0)
                       ; ("last_success_at", `Null)
                       ; ("last_failure_kind", `Null)
+                      ; ("stalled", `Null)
                       ] )
                 ; ("librarian_failures", `Int 0)
                 ; ("vision_ingest_errors", `Int 0)
@@ -5610,6 +5710,67 @@ let test_a_lane_configuration_clause_carries_its_own_subject () =
     ; Tui_decode.Lane_unconfigured
     ; Tui_decode.Lane_registry_unavailable
     ]
+
+(* The lane detail's last two lines belong to the lane. They used to be picked
+   by comparing the id with four lanes' spellings, and Workspace curator, with
+   no branch, drew the words meant for a lane the TUI does not know. Read
+   through the decoder, as the Lanes screen reads them. *)
+let test_every_lane_draws_its_own_answer () =
+  let snapshot =
+    `Assoc
+      [ "schema", `String "masc.standalone_llm_lanes.v2"
+      ; "generated_at", `String "2026-08-27T00:00:00Z"
+      ; "observed_at_unix", `Float 20.
+      ; "observation_only", `Bool true
+      ; "exact_run_projection_count", `Int 1
+      ; "exact_run_source_total", `Int 1
+      ; "exact_run_projection_truncated", `Bool false
+      ; ( "lanes"
+        , `List
+            (List.map
+               (fun lane ->
+                 let id = Standalone_lane.to_id lane in
+                 standalone_lane_json id id)
+               Standalone_lane.all) )
+      ]
+  in
+  match Tui_decode.decode_standalone_lanes_snapshot snapshot with
+  | Error detail -> Alcotest.failf "the five-lane snapshot did not decode: %s" detail
+  | Ok decoded ->
+    let lanes = decoded.Tui_decode.sls_lanes in
+    let known = List.map Tui_decode.standalone_lane_answer lanes in
+    let unknown_id id =
+      match lanes with
+      | lane :: _ -> Tui_decode.standalone_lane_answer { lane with sl_lane_id = id }
+      | [] -> Alcotest.fail "the snapshot decoded no lane"
+    in
+    let unknown = unknown_id "retired_lane_exact" in
+    let pair (answer : Tui_decode.standalone_lane_answer) =
+      answer.sla_output_meaning, answer.sla_evidence
+    in
+    Alcotest.(check int) "five lanes, five different answers"
+      (List.length Standalone_lane.all)
+      (List.length (List.sort_uniq compare (List.map pair known)));
+    List.iter2
+      (fun (lane : Tui_decode.standalone_lane) answer ->
+        Alcotest.(check bool)
+          (lane.sl_lane_id ^ " is not drawn as an unknown lane")
+          false
+          (String.equal answer.Tui_decode.sla_output_meaning
+             unknown.sla_output_meaning))
+      lanes known;
+    (* Both lines keep the heads the lane detail is read by. *)
+    List.iter
+      (fun (answer : Tui_decode.standalone_lane_answer) ->
+        Alcotest.(check bool) "the first line says what Output means" true
+          (String.starts_with ~prefix:"Output meaning: " answer.sla_output_meaning);
+        Alcotest.(check bool) "the second line says what the record keeps" true
+          (String.starts_with ~prefix:"Evidence: " answer.sla_evidence))
+      (unknown :: known);
+    Alcotest.(check bool) "an unknown lane names its id" true
+      (String_util.contains_substring unknown.sla_evidence "retired_lane_exact");
+    Alcotest.(check bool) "and the id is escaped for the terminal" false
+      (String.contains (unknown_id "retired\027[31m").sla_evidence '\027')
 
 (* The start of the newest run. The fixture has carried it since this suite
    was written and the decoder read it into an underscore, so the field
@@ -9035,9 +9196,9 @@ let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
             [ `Assoc
                 [ "run_id", `String "vrf-9"
                 ; "run_kind", `String "task_verification"
-                ; "lane", `String Runtime.verifier_exact_lane_id
+                ; "lane", `String (Standalone_lane.to_id Standalone_lane.Verifier)
                 ; "subject_id", `String "task-9"
-                ; "actor", `String Runtime.verifier_exact_lane_id
+                ; "actor", `String (Standalone_lane.to_id Standalone_lane.Verifier)
                 ; "started_at", `Float 100.
                 ; "status", `String "rejected"
                 ; "elapsed_s", `Float 3.
@@ -9045,7 +9206,7 @@ let test_decode_verifier_lane_summary_keeps_subject_and_verdict () =
                 ] ] )
       ]
   in
-  match Tui_decode.decode_lane_run_page ~lane:Runtime.verifier_exact_lane_id listing with
+  match Tui_decode.decode_lane_run_page ~lane:(Standalone_lane.to_id Standalone_lane.Verifier) listing with
   | Error detail -> Alcotest.fail detail
   | Ok page ->
     (match page.Tui_decode.lrpg_runs with
@@ -9330,10 +9491,10 @@ let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
         , `Assoc
             [ "run_id", `String "vrf-9"
             ; "run_kind", `String "task_verification"
-            ; "lane", `String Runtime.verifier_exact_lane_id
+            ; "lane", `String (Standalone_lane.to_id Standalone_lane.Verifier)
             ; "subject_id", `String "task-9"
             ; "payload_availability", lane_payload_availability ~running:false ~output:true
-            ; "actor", `String Runtime.verifier_exact_lane_id
+            ; "actor", `String (Standalone_lane.to_id Standalone_lane.Verifier)
             ; "started_at", `Float 100.
             ; "status", `String "approved"
             ; "elapsed_s", `Float 3.
@@ -9422,7 +9583,7 @@ let test_goal_run_decision_uses_evaluated_verdict_independently_of_settlement ()
       let replaced = [ "run_kind"; "lane"; "status"; "output" ] in
       `Assoc [ "run", `Assoc
         ([ "run_kind", `String "goal_verification";
-           "lane", `String Runtime.verifier_exact_lane_id;
+           "lane", `String (Standalone_lane.to_id Standalone_lane.Verifier);
            "status", `String status;
            "output", `Assoc ([ "tools", `List [] ] @ verdict) ]
          @ List.filter (fun (key, _) -> not (List.mem key replaced)) fields) ]
@@ -11391,6 +11552,8 @@ let () =
           test_decode_standalone_lane_configuration_is_a_closed_set;
         Alcotest.test_case "a lane configuration clause carries its subject"
           `Quick test_a_lane_configuration_clause_carries_its_own_subject;
+        Alcotest.test_case "every lane draws its own answer" `Quick
+          test_every_lane_draws_its_own_answer;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
         Alcotest.test_case "memory fact refuses an unknown category" `Quick
@@ -11618,6 +11781,10 @@ let () =
           test_planning_goal_carries_the_judge_verdict;
         Alcotest.test_case "unreadable is not unreviewed" `Quick
           test_planning_goal_separates_unreadable_from_unreviewed;
+        Alcotest.test_case "carries the verifier unreconciled reason" `Quick
+          test_planning_goal_carries_the_verifier_unreconciled_reason;
+        Alcotest.test_case "refuses a goal without the verifier field" `Quick
+          test_planning_goal_without_the_verifier_field_is_refused;
         Alcotest.test_case "keeps the last review note" `Quick
           test_planning_goal_keeps_the_last_review_note;
         Alcotest.test_case "keeps the server timestamps" `Quick

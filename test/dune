@@ -1287,6 +1287,14 @@
   %{workspace_root}/lib/keeper/keeper_turn.ml)
  (libraries alcotest ast_grep masc_test_deps))
 
+; #38500: the turn hands the prompt builder a briefing budget sized over the
+; candidates its walk may dispatch.
+(test
+ (name test_keeper_briefing_budget_wiring)
+ (modules test_keeper_briefing_budget_wiring)
+ (deps %{workspace_root}/lib/keeper/keeper_unified_turn.ml)
+ (libraries alcotest ast_grep))
+
 ; masc#28983: what a finished process's status means for the answer, asked
 ; without starting one. The dispatch-site half needs the source, hence ast_grep.
 
@@ -3961,6 +3969,13 @@
   masc_tui_message_layout
   masc_tui_types
   unix))
+
+(test
+ (name test_tui_duration_spelling)
+ (modules test_tui_duration_spelling)
+ (libraries alcotest ast_grep masc_tui_message_layout)
+ (deps
+  (source_tree ../bin)))
 
 (test
  (name test_tui_message_layout)

@@ -1220,6 +1220,10 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
          the row the cursor last rested on would be a different task. *)
       write_list_sidebar_selection left_buf ~rows ~cols:left_cols
         ~title:"Tasks" ~focused:false
+        (* [Overview_tasks.rows] drops what is done, cancelled or still todo.
+           A filter is not a page: what it left out is a different kind of
+           row, not more of these, so there is no second number to draw. *)
+        ~holding:None
         ~labels:
           (List.map
              (fun (row : Tui_decode.task) ->
@@ -1398,7 +1402,10 @@ let render_approval_detail (state : state) (row : approval_row) =
       let right_buf = Buffer.create 4096 in
       (* Not "Asks": this surface already calls a Keeper's question to a human
          an ask, and these rows are the confirmations waiting on an operator. *)
+      (* The actor filter hides entries rather than paging past them, and
+         the surface's own title already carries "hidden N". *)
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Approvals"
+        ~holding:None
         ~focused:false
         ~labels:(List.map approval_sidebar_label (approval_items state))
         ~selected:state.approval_cursor;
@@ -1416,18 +1423,40 @@ let render_approval_detail (state : state) (row : approval_row) =
   finish_surface state ~clamped:(Approval_detail_scroll !scroll)
     ~surface_key:"approval-detail" ~rows:terminal_rows ~cols buf
 
-(* One line for an ask the cursor is not on: who is waiting and how much they
-   asked. What the operator needs from a folded ask is that it exists and can
-   be reached; the choices belong to the one they are on. *)
-let ask_summary_line ~(row : Masc.Tui_decode.ask_row) =
+(* Six cells hold [Message_layout.span_text]'s widest reading ("99d23h"), the
+   same cell the Board and Keeper roster ages take. *)
+let ask_age_cells = 6
+
+(* One line for an ask the cursor is not on: who is waiting, how long, and
+   how much they asked. What the operator needs from a folded ask is that it
+   exists and can be reached; the choices belong to the one they are on.
+
+   The age is here because a keeper can have more than one ask open, and
+   without it the rows for them are the same line twice. Measured on the live
+   Approvals screen: e-masc-the-leader held two, three hours apart, and both
+   read "e-masc-the-lead...  1 question waiting". It is also the reading an
+   operator picks the next ask by -- [ar_asked_at] was decoded and drawn
+   nowhere. *)
+let ask_summary_line ~now ~(row : Masc.Tui_decode.ask_row) =
   let count = List.length row.Masc.Tui_decode.ar_questions in
-  Printf.sprintf " %s%s  %d question%s waiting%s" Ansi.dim
+  Printf.sprintf " %s%s  %s  %d question%s waiting%s" Ansi.dim
     (fit_width (Terminal_text.single_line row.Masc.Tui_decode.ar_keeper) 16)
+    (fit_width
+       (* [age_text], not a subtraction into [span_text]: the two ends are
+          named, so the difference cannot be taken the wrong way round, and a
+          clock that has moved backwards says nothing rather than drawing
+          every row as "0s" -- which is the same two-rows-alike this column
+          exists to end. *)
+       (Option.value ~default:""
+          (Message_layout.age_text ~now
+             ~since:row.Masc.Tui_decode.ar_asked_at))
+       ask_age_cells)
     count
     (if count = 1 then "" else "s")
     Ansi.reset
 
 let draw_ask_questions buf cols (state : state) ~budget =
+  let now = Unix.gettimeofday () in
   (* Questions Keepers put to a human sit under the approval queue rather than
      in it. Nothing is held waiting on them -- the Keeper that asked kept
      working -- so they are not a queue of blocked calls, but an operator
@@ -1517,7 +1546,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
             (fun index row ->
               if index <> cursor && !printed < plan.Ask_layout.summaries_shown
               then begin
-                box_line buf cols (ask_summary_line ~row);
+                box_line buf cols (ask_summary_line ~now ~row);
                 incr printed
               end)
             rows;
@@ -2328,6 +2357,22 @@ let board_heading_with_tail ~cols head tail =
    with, so the two cannot drift apart. *)
 let census_separator = "  \xc2\xb7  "
 
+(* What the board holds behind this page: the census over the whole board, or
+   over the hearth being read when one is narrowed, since the listing itself
+   is narrowed server-side. A hearth the census has not counted leaves the
+   page to speak for itself.
+
+   The list's title and the reader's index both state it, so it is read once
+   here rather than derived twice. *)
+let board_holding (state : state) =
+  match state.board_hearth with
+  | Some hearth -> List.assoc_opt hearth state.board_hearths
+  | None -> (
+      match state.board_hearths with
+      | [] -> None
+      | census ->
+          Some (List.fold_left (fun sum (_, count) -> sum + count) 0 census))
+
 let board_hearth_census_line ~cols (state : state) =
   match state.board_hearths with
   | [] ->
@@ -2466,24 +2511,12 @@ let render_board_list (state : state) =
      read that failed, "(0)" read as a board with nothing on it. A count
      already on screen stays when a later refresh fails: those posts are
      still the last reading. *)
-  (* What the board holds behind this page: the census over the whole board,
-     or over the hearth being read when one is narrowed, since the listing
-     itself is narrowed server-side. A hearth the census has not counted
-     leaves the page to speak for itself. *)
-  let holding =
-    match state.board_hearth with
-    | Some hearth -> List.assoc_opt hearth state.board_hearths
-    | None ->
-        (match state.board_hearths with
-         | [] -> None
-         | census ->
-             Some (List.fold_left (fun sum (_, count) -> sum + count) 0 census))
-  in
+  let holding = board_holding state in
   let header = Printf.sprintf "%s %s%s  %s  %s"
     (screen_title " MASC Board")
     (match state.board_posts, board_list_page state ~error:board_list_error with
      | _ :: _, _ | [], Page_empty ->
-         board_list_count_text ~loaded:count ~holding
+         list_count_text ~loaded:count ~holding
      | [], (Page_unread | Page_failed) ->
          title_missing_reading ~error:board_list_error)
     hearth timestamp
@@ -3063,6 +3096,7 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
   in
   write_list_sidebar buf ~rows ~cols ~title:"Board"
     ~focused:(state.board_focus = Left_pane)
+    ~holding:(board_holding state)
     ~labels:(List.map format_sidebar_post state.board_posts)
     ~selected
 
@@ -3132,6 +3166,13 @@ let planning_stage_rail (phase : Goal_phase.t) =
       ]
 ;;
 
+let planning_detail_tone (tone : Planning_detail.tone) =
+  match tone with
+  | Planning_detail.Proven -> (Theme.ok ())
+  | Planning_detail.Refused -> (Theme.bad ())
+  | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
+  | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
+
 (* What moves this goal next, in one sentence, from the pair the operator can
    see separately but had to combine themselves: the phase and the judge's
    last word. [executing] with a refusal on the ledger is a different
@@ -3147,8 +3188,8 @@ let planning_next_step (goal : planning_goal) =
     ( Ansi.dim
     , "work the linked tasks, then [c] to submit it for verification" )
   | Goal_phase.Verifying, _ ->
-    ( (Theme.warn ())
-    , "with the completion judge - [c] re-arms the request; [o] takes it back, [x] drops it" )
+    let tone, text = Planning_detail.verifying_next_step goal.pg_verifier_unreconciled in
+    (planning_detail_tone tone, text)
   | Goal_phase.Awaiting_confirmation, _ ->
     (Theme.warn (), "proof passed - [a] reads the proof for your final confirmation")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
@@ -3159,18 +3200,30 @@ let planning_next_step (goal : planning_goal) =
    reason is a colour and nothing else; the reason is what the judge produced
    and the only thing that says what to do next. *)
 let planning_proof_detail (goal : planning_goal) =
+  match goal.pg_verifier_unreconciled with
+  | Some blocked ->
+    (* The judge's last word is not what holds this goal: the latest verifier
+       scan could not settle it, and only this line says why. *)
+    Some
+      ( Theme.bad ()
+      , Printf.sprintf "%s: %s"
+          (Planning_detail.unreconciled_heading blocked.vu_step)
+          (Terminal_text.single_line blocked.vu_detail) )
+  | None ->
   match goal.pg_proof with
   | Tui_decode.Proof_proven None -> Some ((Theme.ok ()), "proven")
-  | Tui_decode.Proof_proven (Some evidence) -> Some ((Theme.ok ()), "proven: " ^ evidence)
+  | Tui_decode.Proof_proven (Some evidence) ->
+      Some ((Theme.ok ()), "proven: " ^ Terminal_text.single_line evidence)
   | Tui_decode.Proof_refuted None -> Some ((Theme.bad ()), "refused")
-  | Tui_decode.Proof_refuted (Some reason) -> Some ((Theme.bad ()), "refused: " ^ reason)
+  | Tui_decode.Proof_refuted (Some reason) ->
+      Some ((Theme.bad ()), "refused: " ^ Terminal_text.single_line reason)
   | Tui_decode.Proof_pending -> Some ((Theme.warn ()), "waiting for the completion judge")
   | Tui_decode.Proof_stale _ ->
       Some ((Theme.warn ()), "criterion changed; previous proof is historical")
   | Tui_decode.Proof_unreadable None ->
       Some ((Theme.warn ()), "verification ledger unreadable")
   | Tui_decode.Proof_unreadable (Some detail) ->
-      Some ((Theme.warn ()), "verification ledger unreadable: " ^ detail)
+      Some ((Theme.warn ()), "verification ledger unreadable: " ^ Terminal_text.single_line detail)
   | Tui_decode.Proof_idle ->
       (* Nothing from the judge. A keeper's own note is the next best thing the
          row has to say, and it is what the operator wrote there to be read. *)
@@ -3575,13 +3628,6 @@ let render_planning_list (state : state) =
    next-step sentence is a row of its own. Counted here, drawn below. *)
 let planning_detail_fixed_rows = 12
 
-let planning_detail_tone (tone : Planning_detail.tone) =
-  match tone with
-  | Planning_detail.Proven -> (Theme.ok ())
-  | Planning_detail.Refused -> (Theme.bad ())
-  | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
-  | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
-
 let planning_detail_pane (state : state)
     ~(armed : Goal_phase.Public_action.t option) ~confirmation ~rows ~cols
     (goal : planning_goal) buf =
@@ -3721,7 +3767,11 @@ let planning_detail_pane (state : state)
          Masc_tui_message_layout.wrap_words ~max_cells:(cols - 6)
            (Terminal_text.single_line detail)
          |> List.map (fun text -> { Planning_detail.tone = Unreadable; text })
-     | `Inspect Absent -> Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note)
+     | `Inspect Absent ->
+         (match goal.pg_verifier_unreconciled with
+          | Some blocked -> Planning_detail.unreconciled_lines ~width:(cols - 6) blocked
+          | None -> [])
+         @ Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note)
     @ Planning_detail.timeline ~width:(cols - 6) ~goal_id:goal.pg_id
         state.goal_timeline
   in
@@ -3851,7 +3901,10 @@ let render_planning_detail (state : state)
         Printf.sprintf "%s P%d %s" phase_badge row.pg_priority
           (Terminal_text.single_line row.pg_title)
       in
+      (* The goal filter narrows to a phase; the goals it leaves out are on
+         the other side of a filter, not behind a page boundary. *)
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Planning"
+        ~holding:None
         ~focused:false
         ~labels:(List.map format_sidebar_goal goals)
         ~selected;
@@ -4560,7 +4613,11 @@ let render_schedule_detail (state : state) (row : schedule_row) =
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Schedules"
-        ~focused:false ~labels ~selected:state.schedule_cursor;
+        ~focused:false
+        ~holding:
+          (Option.bind state.schedules (fun snapshot ->
+               snapshot.scs_request_count))
+        ~labels ~selected:state.schedule_cursor;
       let answer =
         schedule_detail_pane state ~rows ~cols:(cols - left_cols) row
           right_buf
@@ -5279,7 +5336,10 @@ let standalone_lane_row ~now ~frame ~(columns : Lane_table.columns) width
   let p50 =
     match lane.sl_p50_elapsed_s with
     | None -> "—"
-    | Some seconds -> Printf.sprintf "%.1fs" seconds
+    | Some seconds -> (
+        match Message_layout.elapsed_text seconds with
+        | Some text -> text
+        | None -> "—")
   in
   let prefix = standalone_lane_status_style lane.sl_status in
   let line =
@@ -5335,27 +5395,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
     Option.value ~default:"No consumer purpose reported by this server."
       lane.sl_purpose
   in
-  let exact_lane which =
-    Masc.Exact_lane_run_registry.lane_key which
-    |> String.equal lane.sl_lane_id
-  in
-  let output_meaning, evidence_contract =
-    if exact_lane Masc.Exact_lane_run_registry.Board_attention then
-      ( "Output meaning: the accepted candidate judgment JSON."
-      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output and outcome. HTTP/CLI attribution uses selected slot; Vendor System One provenance stays in Output." )
-    else if exact_lane Masc.Exact_lane_run_registry.Hitl_auto_judge then
-      ( "Output meaning: the validated and durably settled approval-context judgment summary."
-      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
-    else if exact_lane Masc.Exact_lane_run_registry.Librarian then
-      ( "Output meaning: selected memory facts plus committed snapshot metadata."
-      , "Evidence: structured-output generation, not a MASC tool loop; the run retains exact Input/Output, outcome, and selected slot, so no tool-call ledger exists." )
-    else if String.equal lane.sl_lane_id Runtime.verifier_exact_lane_id then
-      ( "Output meaning: Task completion or Goal proof verdict, reason, and evaluator runtime."
-      , "Evidence: Verifier review records also retain MASC tool observations; open a run to inspect inputs, dispositions, excerpts, duration, and truncation." )
-    else
-      ( "Output meaning: open a retained run for its exact result."
-      , "Evidence: this server did not report a known standalone-lane evidence contract." )
-  in
+  let answer = Tui_decode.standalone_lane_answer lane in
   (* Three facts the server has always sent and nothing drew.
 
      [required] is the one that changes what an operator does about a lane
@@ -5420,13 +5460,16 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
         float_of_int lane.sl_succeeded_count /. float_of_int total *. 100.0
       in
       let p50_str =
-        (* One decimal, the way the P50 column above draws the same
-           [sl_p50_elapsed_s]: the row read "8.0s" and this line "8.00s" of
-           one number on one screen, which leaves the reader deciding whether
-           they are the same figure. The column is the constrained one -- six
-           cells -- so the detail follows it rather than the other way. *)
+        (* The P50 column above draws the same [sl_p50_elapsed_s] through
+           the same ladder. The two used to differ -- "8.0s" in the row,
+           "8.00s" here -- which left the reader deciding whether they were
+           one figure. A reading the ladder has no spelling for leaves the
+           clause out, as a missing one does. *)
         match lane.sl_p50_elapsed_s with
-        | Some s -> Printf.sprintf " · p50 latency %.1fs" s
+        | Some s -> (
+            match Message_layout.elapsed_text s with
+            | Some text -> Printf.sprintf " · p50 latency %s" text
+            | None -> "")
         | None -> ""
       in
       Printf.sprintf "Runs: %d retained (%d ok / %d fail / %d cancel) · %.1f%% success%s"
@@ -5488,8 +5531,8 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
      Keeper columns and the Memory ST words already made. What stays here is
      what this lane answers: the section it configures is on the Config row
      above, and the evidence line below says what its runs retain. *)
-  @ wrap Ansi.reset output_meaning
-  @ wrap Ansi.dim evidence_contract
+  @ wrap Ansi.reset answer.sla_output_meaning
+  @ wrap Ansi.dim answer.sla_evidence
 
 let rec take_rows remaining acc = function
   | _ when remaining <= 0 -> List.rev acc
@@ -5871,8 +5914,14 @@ let render_lane_run_list (state : state) ~lane_id =
   box_line buf cols header;
   box_divider buf cols;
   let identity_heading =
-    if String.equal lane_id Runtime.verifier_exact_lane_id then "SUBJECT"
-    else "ACTOR"
+    match Standalone_lane.of_id lane_id with
+    | Some Standalone_lane.Verifier -> "SUBJECT"
+    | Some
+        ( Standalone_lane.Librarian
+        | Standalone_lane.Hitl_auto_judge
+        | Standalone_lane.Board_attention
+        | Standalone_lane.Workspace_curator )
+    | None -> "ACTOR"
   in
   (* The run id takes what the named columns leave; it used to run off the
      header with no end while the row cut it at twelve. *)
@@ -5922,7 +5971,10 @@ let render_lane_run_list (state : state) ~lane_id =
           let elapsed =
             match run.lrs_elapsed_s with
             | None -> "—"
-            | Some seconds -> Printf.sprintf "%.1fs" seconds
+            | Some seconds -> (
+                match Message_layout.elapsed_text seconds with
+                | Some text -> text
+                | None -> "—")
           in
           let line =
             "  "
@@ -6225,7 +6277,10 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
   let elapsed =
     match detail.lrd_elapsed_s with
     | None -> ""
-    | Some seconds -> Printf.sprintf "  ·  %.1fs" seconds
+    | Some seconds -> (
+        match Message_layout.elapsed_text seconds with
+        | Some text -> Printf.sprintf "  ·  %s" text
+        | None -> "")
   in
   let slot =
     match detail.lrd_answer_source, detail.lrd_selected_slot with
@@ -7793,12 +7848,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           "  Fusion runs · j/k:select · Enter:open · same IDs as Fusion" ::
           (if runs = [] then ["  No retained Fusion runs for this Keeper"]
            else List.mapi (fun index (run : Tui_decode.fusion_run) ->
-             let tm = Unix.localtime run.fur_started_at in
-             Printf.sprintf "%s %04d-%02d-%02d %02d:%02d · %s · %s · %s"
+             (* The clock the Fusion list and the run detail already draw for
+                this field, rather than a second copy of its format: three
+                lists show a run's start, and a copy is one that stops
+                following when the other two change. *)
+             Printf.sprintf "%s %s · %s · %s · %s"
                (if Option.fold ~none:false ~some:(fun (cursor, _) -> index = cursor)
                      (selected_keeper_run state) then ">" else " ")
-               (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-               tm.Unix.tm_hour tm.Unix.tm_min
+               (fusion_run_clock run)
                (Tui_decode.fusion_run_status_to_string run.fur_status)
                (Terminal_text.single_line run.fur_preset)
                (Terminal_text.single_line run.fur_run_id)) runs)
@@ -7894,6 +7951,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                          "may change .github/workflows, which run with repo secrets"
                      | Masc.Keeper_github_identity.Write_packages ->
                          "may publish GitHub Packages, ghcr.io images among them"
+                     | Masc.Keeper_github_identity.Read_packages ->
+                         "may download GitHub Packages, ghcr.io images among them"
+                     | Masc.Keeper_github_identity.Project ->
+                         "may read and change Projects (v2) the account can reach"
+                     | Masc.Keeper_github_identity.Write_repo_hook ->
+                         "may add repo webhooks, which post repo events to any URL"
                    in
                    Printf.sprintf "  %d %s %s %s— %s%s" (index + 1)
                      (if ticked then "[x]" else "[ ]")
@@ -8965,8 +9028,16 @@ let render_verification_detail (state : state) request =
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
+      (* One server page: the list screen next door draws "history 1-50 of
+         664" off the same snapshot, and this index drew "(50)". *)
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Task Review"
-        ~focused:false ~labels ~selected:state.verification_cursor;
+        ~focused:false
+        ~holding:
+          (Option.map
+             (fun (snapshot : Tui_decode.verification_snapshot) ->
+               snapshot.Tui_decode.vs_total)
+             state.verification)
+        ~labels ~selected:state.verification_cursor;
       let answer =
         verification_detail_pane state ~rows ~cols:(cols - left_cols) request
           right_buf
@@ -9429,8 +9500,10 @@ let render_harness_detail (state : state) verdict =
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
+      (* The harness snapshot carries its verdicts whole; there is no page
+         behind them. *)
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Verdicts"
-        ~focused:false ~labels ~selected:state.harness_cursor;
+        ~focused:false ~holding:None ~labels ~selected:state.harness_cursor;
       let answer =
         harness_detail_pane state ~rows ~cols:(cols - left_cols) verdict
           right_buf
@@ -10342,8 +10415,9 @@ let render_fusion_detail (state : state) run_id =
          refreshed inventory omits it. The sidebar's index API uses -1 for
          no matching row; the domain selection stays optional. *)
       let selected = Option.value (fusion_detail_entry_index state) ~default:(-1) in
+      (* The retained inventory is the whole list; nothing is held back. *)
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Fusion"
-        ~focused:false ~labels ~selected;
+        ~focused:false ~holding:None ~labels ~selected;
       let answer =
         fusion_detail_pane state ~rows ~cols:(cols - left_cols) run_id
           right_buf
@@ -12604,8 +12678,8 @@ let render_keeper_calls (state : state) =
              ("?", Ansi.reset)
          in
          let duration =
-           match call.kc_duration_ms with
-           | Some ms -> Masc_tui_acting.elapsed_text ms
+           match Option.bind call.kc_duration_ms Masc_tui_acting.elapsed_text with
+           | Some text -> text
            | None -> "-"
          in
          let turn =
@@ -12828,8 +12902,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Other _ ->
           None
     in
-    let row = Acting.row_of_entry ~duration_ms entry in
-    { row with Acting.keeper = Acting.keeper_of_event ~traces event }
+    Acting.keeper_row_of_entry ~traces ~duration_ms entry
   in
   (* [Turns] folds the whole ring into per-turn rows; the flat filters keep
      the page-lazy pairing above. *)
@@ -12900,23 +12973,19 @@ let render_acting (state : state) =
     ("  " ^ Acting.filter_explanation state.acting_filter);
   box_divider buf cols;
   (* Measured over every row the filter keeps, not the page on screen, so the
-     columns do not move while a reader scrolls. This walks the list once and
-     builds a row per entry; what the note above avoids for the page is the
-     pairing, which is quadratic, and measuring needs neither the pairing nor
-     the duration it finds -- those reach the detail column, and the two
-     columns measured here are the keeper and the label. *)
+     columns do not move while a reader scrolls. Only the two named columns
+     are measured, so this asks the event for its keeper and its label rather
+     than building a row: a row carries the detail sentence too, and spelling
+     one per kept entry on every frame is work the screen never shows. The
+     chunked list is already built, so its rows are read as they are. *)
   let table_columns =
     let measured =
       match chunked with
-      | Some rows -> rows
+      | Some rows -> List.map Acting.measured_of_row rows
       | None ->
           List.map
             (fun (entry, _older) ->
-              let row = Acting.row_of_entry ~duration_ms:None entry in
-              { row with
-                Acting.keeper =
-                  Acting.keeper_of_event ~traces entry.Acting.ae_event
-              })
+              Acting.measured_of_event ~traces entry.Acting.ae_event)
             visible
     in
     Acting.columns ~inner_width:(framed_inner_width cols) measured

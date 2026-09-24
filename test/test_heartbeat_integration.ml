@@ -1317,16 +1317,36 @@ let test_direct_stop_ignores_a_dead_librarian_executor () =
 
 (* A schedule wake to a Keeper whose fiber is not running is accepted into its
    durable queue and nothing on the schedule side wakes the fiber (#38523).
-   The occurrence is served because a freshly launched lane runs its first
-   cycle, which reads the queue, before its first sleep. The launch clears the
-   wakeup flag ([Keeper_registry.prepare_fiber_launch]) and this test never
-   sets it, so the only way the queued wake can start a turn inside the
-   deadline is that first cycle. A lane that slept before its first cycle
-   would wait a keepalive interval, which the deadline stays well under. *)
+   Property: a launched lane serves an already-queued Schedule_due in its
+   first cycle after warmup, without any wakeup. While warmup has not elapsed
+   a cycle reads nothing ([run_keepalive_unified_turn] returns before intake),
+   and the lane sleeps until the initial cadence boundary, which is the
+   warmup itself ([Initial_due warmup]).
+
+   The launch clears the wakeup flag ([Keeper_registry.prepare_fiber_launch])
+   and this test never sets it. The lane runs with a nonzero warmup, and the
+   test requires that no turn has started at half the warmup and that one has
+   started before [first_cycle_deadline_sec]. That fails for:
+   - a lane that ignores warmup and dispatches at once;
+   - a lane that serves the queue only after a wakeup;
+   - a lane that waits a full keepalive interval before the first cycle that
+     reads the queue (for example one that consumes the initial cadence
+     boundary during a warmup cycle).
+   It does not tell "cycle, then sleep" from "sleep [periodic_remaining], then
+   cycle": with [Initial_due warmup] both serve the wake at the warmup
+   boundary, so the two orders are the same at this boundary.
+
+   The warmup check compares the wall clock ([Time_compat.now]) with the
+   monotonic cadence clock; a wall clock step backwards during the test could
+   defer the first reading cycle by an interval. *)
+let fresh_lane_warmup_sec = 2
+(* Must stay below one keepalive interval (checked) so a lane that sleeps a
+   full cadence fails, and far above the warmup so a cycle's own work on a
+   slow runner does not fail the test. *)
 let first_cycle_deadline_sec = 30.0
 let first_cycle_poll_interval_sec = 0.05
 
-let test_fresh_lane_takes_queued_schedule_wake_in_first_cycle () =
+let test_fresh_lane_serves_queued_schedule_wake_after_warmup () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   R.For_testing.clear ();
@@ -1419,32 +1439,61 @@ let test_fresh_lane_takes_queued_schedule_wake_in_first_cycle () =
       in
       check bool "no turn has started before the lane launches" false
         (turn_started ());
-      (match Masc.Keeper_keepalive.start_keepalive ctx meta with
+      let warmup = Float.of_int fresh_lane_warmup_sec in
+      (* Taken before the launch: the lane's own warmup starts no earlier, so
+         its warmup ends no earlier than [launched_at +. warmup]. *)
+      let launched_at = Eio.Time.now ctx.clock in
+      (match
+         Masc.Keeper_keepalive.start_keepalive
+           ~proactive_warmup_sec:fresh_lane_warmup_sec
+           ctx
+           meta
+       with
        | Masc.Keeper_keepalive.Keepalive_started _ -> ()
        | outcome ->
          failf
            "fresh lane failed to start: %s"
            (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
-      let launched_at = Eio.Time.now ctx.clock in
+      let mid_warmup = launched_at +. (warmup /. 2.0) in
+      Eio.Time.sleep ctx.clock
+        (Float.max 0.0 (mid_warmup -. Eio.Time.now ctx.clock));
+      let observed_at = Eio.Time.now ctx.clock in
+      let started_mid_warmup = turn_started () in
+      if observed_at -. launched_at >= warmup
+      then
+        failf
+          "the mid-warmup observation came %.2fs after launch, past the %ds \
+           warmup; it cannot show the warmup was respected"
+          (observed_at -. launched_at)
+          fresh_lane_warmup_sec;
+      check bool "no turn starts while the warmup has not elapsed" false
+        started_mid_warmup;
       let rec await_first_turn () =
         if turn_started ()
         then ()
         else if Eio.Time.now ctx.clock -. launched_at >= first_cycle_deadline_sec
         then
           failf
-            "the queued schedule wake started no turn within %.0fs of launch; \
-             the lane did not read its queue before sleeping"
+            "the queued schedule wake started no turn within %.0fs of launch \
+             (warmup %ds, no wakeup); the lane did not read its queue in its \
+             first cycle after warmup"
             first_cycle_deadline_sec
+            fresh_lane_warmup_sec
         else (
           Eio.Time.sleep ctx.clock first_cycle_poll_interval_sec;
           await_first_turn ())
       in
       await_first_turn ();
-      ignore
-        (Masc.Keeper_keepalive.stop_keepalive_and_await
-           ~base_path:config.base_path
-           keeper_name
-          : Masc.Keeper_keepalive.joined_stop_result))
+      match
+        Masc.Keeper_keepalive.stop_keepalive_and_await
+          ~base_path:config.base_path
+          keeper_name
+      with
+      | Masc.Keeper_keepalive.Keeper_not_registered ->
+        fail "fresh lane disappeared before joined stop"
+      | Masc.Keeper_keepalive.Keeper_joined { terminal = `Stopped; _ } -> ()
+      | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
+        fail ("fresh lane crashed instead of stopping: " ^ reason))
 
 let test_keeper_lane_join_waits_for_children_and_cleanup () =
   Eio_main.run @@ fun _env ->
@@ -5722,8 +5771,8 @@ let () =
         test_direct_start_rolls_back_when_the_launch_owner_is_already_cancelled;
       test_case "stop ignores a dead Librarian executor" `Quick
         test_direct_stop_ignores_a_dead_librarian_executor;
-      test_case "fresh lane takes a queued schedule wake in its first cycle" `Quick
-        test_fresh_lane_takes_queued_schedule_wake_in_first_cycle;
+      test_case "fresh lane serves a queued schedule wake right after warmup" `Quick
+        test_fresh_lane_serves_queued_schedule_wake_after_warmup;
       test_case "lane join waits for children and cleanup" `Quick
         test_keeper_lane_join_waits_for_children_and_cleanup;
       test_case "lane join surfaces cleanup failure" `Quick

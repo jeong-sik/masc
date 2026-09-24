@@ -318,6 +318,41 @@ let missing_required_sandbox_profile_error ~keeper_name
     manifest_hint
 ;;
 
+(* #37523. A profile that runs a container has to name the image it runs in,
+   the same way it has to name the profile. Filling the gap with the general
+   image looked like the safe answer, but that image carries no language
+   toolchain, and in 2026-09 five Keepers whose instructions ran pnpm or dune
+   came up on it and met `command not found` in their first turn. Nothing
+   upstream of the turn said the image had been chosen for them. A Keeper
+   that wants the general image writes its tag; that is a choice on record
+   rather than a default nobody made. Remote_ssh runs on a host, not from an
+   image, so it is not asked. *)
+let missing_required_sandbox_image_error ~keeper_name
+    (sandbox_profile : Keeper_types_profile.sandbox_profile)
+    (defaults : Keeper_types_profile.keeper_profile_defaults) =
+  match sandbox_profile with
+  | Remote_ssh -> None
+  | Docker | Micro_vm ->
+    (match Option.map String.trim defaults.sandbox_image with
+     | Some tag when not (String.equal tag "") -> None
+     | Some _ | None ->
+       let manifest_hint =
+         match defaults.manifest_path with
+         | Some path -> Printf.sprintf " (loaded from %s)" path
+         | None -> ""
+       in
+       Some
+         (Printf.sprintf
+            "keeper %s rejected: sandbox_image is required for sandbox_profile \
+             %S%s. Add e.g. `sandbox_image = \"%s\"` to the keeper TOML; that \
+             image has no language toolchain, so a Keeper that builds code \
+             names an image that carries one."
+            keeper_name
+            (Keeper_types_profile.sandbox_profile_to_string sandbox_profile)
+            manifest_hint
+            Keeper_sandbox_image.default_tag))
+;;
+
 let effective_meta_of_profile_defaults
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) : (keeper_meta, string) result =
@@ -376,6 +411,12 @@ let effective_meta_of_profile_defaults
            meta.name
            (String.concat ", " Keeper_microvm_backend.valid_strings))
   | Ok sandbox_profile ->
+    match
+      missing_required_sandbox_image_error ~keeper_name:meta.name
+        sandbox_profile defaults
+    with
+    | Some reason -> Error reason
+    | None ->
       let default_network_mode =
         if has_profile_source then default_network_mode_for_profile sandbox_profile
         else meta.network_mode

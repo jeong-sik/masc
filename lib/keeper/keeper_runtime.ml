@@ -16,6 +16,7 @@ type boot_meta_failure_cause =
   | Meta_read_error
   | Config_invalid
   | Sandbox_profile_required
+  | Sandbox_image_required
   | Materialization_failed
 
 let boot_meta_failure_cause_label = function
@@ -23,6 +24,7 @@ let boot_meta_failure_cause_label = function
   | Meta_read_error -> "meta_read_error"
   | Config_invalid -> "config_invalid"
   | Sandbox_profile_required -> "sandbox_profile_required"
+  | Sandbox_image_required -> "sandbox_image_required"
   | Materialization_failed -> "materialization_failed"
 
 type boot_meta_error = {
@@ -235,6 +237,18 @@ let sandbox_profile_required_boot_error ~keeper_name ~manifest_path =
   Log.Keeper.warn "%s" msg;
   boot_meta_error Sandbox_profile_required msg
 
+(* #37523: the image rule itself lives in
+   [Keeper_meta_contract.missing_required_sandbox_image_error] so boot and
+   keeper-up refuse the same shapes with the same words. *)
+let sandbox_image_required_boot_error ~keeper_name sandbox_profile defaults =
+  match
+    missing_required_sandbox_image_error ~keeper_name sandbox_profile defaults
+  with
+  | None -> None
+  | Some msg ->
+    Log.Keeper.warn "%s" msg;
+    Some (boot_meta_error Sandbox_image_required msg)
+
 let effective_declarative_runtime_id
     (_defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
@@ -358,6 +372,12 @@ let ensure_keeper_meta_with_cause config name =
     (match target_sandbox_profile_result with
      | Error e -> Error e
      | Ok target_sandbox_profile ->
+    match
+      sandbox_image_required_boot_error ~keeper_name:meta.name
+        target_sandbox_profile defaults
+    with
+    | Some e -> Error e
+    | None ->
     let target_sandbox_image =
       apply_default_opt defaults.sandbox_image meta.sandbox_image in
     let target_network_mode =
@@ -495,7 +515,13 @@ let declarative_materialization_defaults config name =
   | Error error -> Error (profile_defaults_boot_error ~keeper_name:name error)
   | Ok defaults -> (
       match defaults.sandbox_profile with
-      | Some _ -> Ok defaults
+      | Some sandbox_profile -> (
+          match
+            sandbox_image_required_boot_error ~keeper_name:name sandbox_profile
+              defaults
+          with
+          | Some e -> Error e
+          | None -> Ok defaults)
       | None ->
           Error
             (sandbox_profile_required_boot_error

@@ -265,6 +265,17 @@ val missing_required_sandbox_profile_error :
 (** Error text shared by effective-meta reconcile and keeper-up parsing when a
     declarative keeper profile omits the required [sandbox_profile]. *)
 
+val missing_required_sandbox_image_error :
+  keeper_name:string ->
+  Keeper_types_profile.sandbox_profile ->
+  Keeper_types_profile.keeper_profile_defaults ->
+  string option
+(** [Some reason] when [sandbox_profile] runs a container ([docker],
+    [microvm]) and [defaults.sandbox_image] is absent or blank; [None]
+    otherwise. [remote_ssh] runs no image and is never asked. Shared by both
+    boot reconciles and keeper-up parsing, so a Keeper cannot boot or be
+    created on an image nobody named (#37523). *)
+
 val runtime_id_of_meta : keeper_meta -> string
 (** Runtime id selected for keeper dispatch. Uses the keeper profile [model]
     when present; otherwise falls back to the configured default runtime id. *)

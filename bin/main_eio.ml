@@ -2379,6 +2379,18 @@ let keeper_create_sandbox_profile =
   in
   Arg.(value & opt string "" & info [ "sandbox-profile" ] ~docv:"PROFILE" ~doc)
 
+let keeper_create_sandbox_image =
+  let doc =
+    Printf.sprintf
+      "Image the keeper's container runs in. Required with --sandbox-profile \
+       docker or microvm: the server refuses a keeper that names none rather \
+       than choosing one for it. %s is the general image and carries no \
+       language toolchain; a keeper that builds code names an image that \
+       does."
+      Keeper_sandbox_image.default_tag
+  in
+  Arg.(value & opt (some string) None & info [ "sandbox-image" ] ~docv:"IMAGE" ~doc)
+
 let keeper_create_network_mode =
   (* Spellings and behaviour both come from the typed owner through
      [Masc_cli_keeper_create.network_mode_behaviours], so a mode the owner
@@ -2506,6 +2518,7 @@ let keeper_create_flags_term =
         name
         instructions
         sandbox_profile
+        sandbox_image
         network_mode
         microvm_backend
         remote_endpoint
@@ -2534,6 +2547,7 @@ let keeper_create_flags_term =
         { name
         ; instructions
         ; sandbox_profile
+        ; sandbox_image
         ; network_mode
         ; microvm_backend
         ; remote_endpoint
@@ -2551,6 +2565,7 @@ let keeper_create_flags_term =
     $ keeper_create_name
     $ keeper_create_instructions
     $ keeper_create_sandbox_profile
+    $ keeper_create_sandbox_image
     $ keeper_create_network_mode
     $ keeper_create_microvm_backend
     $ keeper_create_remote_endpoint
@@ -2569,6 +2584,7 @@ let keeper_create_flags_are_absent (flags : Masc_cli_keeper_create.flags) =
   String.equal (String.trim flags.name) ""
   && String.equal (String.trim flags.instructions) ""
   && String.equal (String.trim flags.sandbox_profile) ""
+  && Option.is_none flags.sandbox_image
   && Option.is_none flags.network_mode
   && Option.is_none flags.microvm_backend
   && Option.is_none flags.remote_endpoint

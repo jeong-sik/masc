@@ -466,7 +466,8 @@ def run(args):
                     try:
                         creation = command([binary, 'keeper-create', '--base-path', str(base),
                             '--host', '127.0.0.1', '--port', str(port), '--agent', 'first-turn-admin',
-                            '--name', keeper, '--sandbox-profile', profile, '--network-mode', 'none',
+                            '--name', keeper, '--sandbox-profile', profile, '--sandbox-image', args.image,
+                            '--network-mode', 'none',
                             *(['--microvm-backend', 'nerdctl_kata'] if args.backend == 'nerdctl_kata' else []),
                             '--no-skills', '--activation-mode', 'manual', '--instructions',
                             'Execute the isolated first-turn proof and report its actual result.'], env)
@@ -475,7 +476,8 @@ def run(args):
                         # into a passing acceptance by silently bypassing it.
                         try:
                             direct = request(url + '/api/v1/keepers/' + keeper + '/up', token,
-                                {'name': keeper, 'sandbox_profile': profile, 'network_mode': 'none',
+                                {'name': keeper, 'sandbox_profile': profile, 'sandbox_image': args.image,
+                                 'network_mode': 'none',
                                  **({'microvm_backend': 'nerdctl_kata'} if args.backend == 'nerdctl_kata' else {}),
                                  'skills': {'names': []}, 'activation_mode': 'manual', 'instructions': 'Isolated first-turn proof.'}, timeout=15)
                             (output / 'direct-up-diagnostic.json').write_bytes(direct)

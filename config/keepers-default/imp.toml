@@ -8,6 +8,7 @@
 [keeper]
 activation_mode = "manual"
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 network_mode = "inherit"
 
 instructions = """

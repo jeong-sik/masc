@@ -188,6 +188,7 @@ max-concurrent = 1
    provider that never reads it, so no lane minimum may pick it. *)
 let roomy_max_prompt_bytes = 1_048_576
 let tight_max_prompt_bytes = 131_072
+let codex_max_prompt_bytes = 262_144
 let unread_max_prompt_bytes = 65_536
 
 let runtime_toml_with_uneven_prompt_ceilings =
@@ -211,6 +212,9 @@ candidates = [ "open.open_model", "primary.roomy_model", "fallback.tight_model" 
 [runtime.lanes.unread_declaration]
 candidates = [ "primary.roomy_model", "open.unread_model" ]
 
+[runtime.lanes.codex_declared]
+candidates = [ "primary.roomy_model", "codex.codex_model" ]
+
 [providers.primary]
 display-name = "Primary Provider"
 protocol = "claude-code"
@@ -227,6 +231,12 @@ is-non-interactive = true
 display-name = "Open Provider"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:3"
+
+[providers.codex]
+display-name = "Codex Provider"
+protocol = "codex-app-server"
+command = "/fixture-must-not-run-a-model"
+is-non-interactive = true
 
 [models.roomy_model]
 api-name = "roomy-model"
@@ -255,6 +265,11 @@ max-prompt-bytes = %d
 tools-support = true
 streaming = true
 
+[models.codex_model]
+api-name = "codex-model"
+max-context = 400000
+max-prompt-bytes = %d
+
 [primary.roomy_model]
 is-default = true
 max-concurrent = 1
@@ -267,10 +282,14 @@ max-concurrent = 1
 
 [open.unread_model]
 max-concurrent = 1
+
+[codex.codex_model]
+max-concurrent = 1
 |}
     roomy_max_prompt_bytes
     tight_max_prompt_bytes
     unread_max_prompt_bytes
+    codex_max_prompt_bytes
 
 let runtime_toml_quota_lane_with_shared_credential shared_credential =
   Printf.sprintf
@@ -787,11 +806,11 @@ let test_briefing_budget_spans_the_whole_deferred_suffix () =
             ~deferred_runtime_lane:None
             ~assigned_route:"three_deep")))
 
-(* Only Claude Code and Antigravity read [max-prompt-bytes]. A number declared
-   on an HTTP candidate bounds nothing that provider checks, so it must not
-   become the lane's minimum: counted, it would shrink every turn's briefing
-   even while the Claude Code head serves. Two reading candidates still give
-   their minimum ([uneven]). *)
+(* Only Claude Code, Antigravity and Codex read [max-prompt-bytes]. A number
+   declared on an HTTP candidate bounds nothing that provider checks, so it
+   must not become the lane's minimum: counted, it would shrink every turn's
+   briefing even while the Claude Code head serves. Two reading candidates
+   still give their minimum ([uneven]). *)
 let test_briefing_budget_ignores_a_ceiling_its_runtime_does_not_read () =
   with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
     Alcotest.(check (option int))
@@ -806,6 +825,21 @@ let test_briefing_budget_ignores_a_ceiling_its_runtime_does_not_read () =
       "two reading candidates give their minimum"
       (Some tight_max_prompt_bytes)
       (Runtime.smallest_max_prompt_bytes_of_route "uneven"))
+
+(* Codex reads [max-prompt-bytes] since #37353: a declared limit windows its
+   first attempt. The declaration is therefore a real ceiling and must be the
+   lane's minimum when it is the smallest; left out, the Codex fallback would
+   receive a briefing larger than its own window (the defect #38500 fixed). *)
+let test_briefing_budget_counts_a_declared_codex_ceiling () =
+  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
+    Alcotest.(check (option int))
+      "a declared Codex ceiling below the Claude Code head is the lane minimum"
+      (Some codex_max_prompt_bytes)
+      (Runtime.smallest_max_prompt_bytes_of_route "codex_declared");
+    Alcotest.(check (option int))
+      "a lone Codex declaration bounds its own route"
+      (Some codex_max_prompt_bytes)
+      (Runtime.smallest_max_prompt_bytes_of_runtime_ids [ "codex.codex_model" ]))
 
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
@@ -5322,6 +5356,10 @@ let () =
             "the briefing budget ignores a ceiling its runtime does not read"
             `Quick
             test_briefing_budget_ignores_a_ceiling_its_runtime_does_not_read;
+          Alcotest.test_case
+            "briefing budget counts a declared Codex ceiling"
+            `Quick
+            test_briefing_budget_counts_a_declared_codex_ceiling;
           Alcotest.test_case
             "a bare runtime assignment walks only itself"
             `Quick

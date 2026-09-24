@@ -6,3 +6,7 @@ val decode_body : string -> (Yojson.Safe.t, string) result
 val decode_slice_query : (string * string) list -> (Yojson.Safe.t, string) result
 
 val decode_inspect_query : (string * string) list -> (Yojson.Safe.t, string) result
+
+val decode_live_query : (string * string) list ->
+  (Lane_addon_sources.live_reader * int option, string) result
+(** [source_kind] and optional [since] for [GET /api/v1/lane-addons/live]. *)

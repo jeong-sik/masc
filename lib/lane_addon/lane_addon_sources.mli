@@ -15,6 +15,19 @@ type source =
 val parse : Yojson.Safe.t -> (source list, string) result
 (** Typed source bindings shared by acquisition and read-only presentation. *)
 val validate : Yojson.Safe.t -> (unit, string) result
+type kind = Snapshot_file_kind | Msx_capture_kind | Dos_capture_kind
+  | Lane_output_kind | Browser_document_kind
+val kind_of_string : string -> kind option
+(** The wire name of a source kind, as a binding's ["kind"] spells it. *)
+type live_reader = Msx_screen | Dos_screen
+(** The machine whose current screen a source can show. *)
+val live_screen_of_kind : kind -> live_reader option
+(** [Some] for [msx_capture] and [dos_capture], the kinds that stand for a
+    machine with a screen; [None] for file, Lane output and browser kinds. *)
+val screen_image_fields : width:int -> height:int -> rgb:string ->
+  (string * Yojson.Safe.t) list
+(** The picture fields every screen capture carries:
+    [format] ("rgb8"), [width], [height] and [rgb_base64]. *)
 type activity = Tool_completed | Msx_changed | Dos_changed | Browser_changed
 type refresh_interest
 val refresh_interest : Yojson.Safe.t -> (refresh_interest, string) result

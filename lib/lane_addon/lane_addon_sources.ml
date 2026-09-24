@@ -21,19 +21,32 @@ type source =
   | Lane_output of { id : string; installation_id : string; output_id : string option }
   | Browser_document of { id : string; selection : browser_selection;
       tab_id : int; target_id : string; environment : string; request_id : string }
+type kind = Snapshot_file_kind | Msx_capture_kind | Dos_capture_kind
+  | Lane_output_kind | Browser_document_kind
+(* The one table of source kind names on the wire. *)
+let kind_of_string = function
+  | "snapshot_file" -> Some Snapshot_file_kind
+  | "msx_capture" -> Some Msx_capture_kind
+  | "dos_capture" -> Some Dos_capture_kind
+  | "lane_output" -> Some Lane_output_kind
+  | "browser_document" -> Some Browser_document_kind
+  | _unknown_name -> None
 let text fields key = match List.assoc_opt key fields with
   | Some (`String value) when String.trim value <> "" -> Ok value
   | _ -> Error (key ^ " requires a non-blank string")
 let parse_source = function
   | `Assoc fields ->
       let* id = text fields "source_id" in
-      (match List.assoc_opt "kind" fields with
-       | Some (`String "snapshot_file") -> let* path = text fields "path" in
+      let kind = match List.assoc_opt "kind" fields with
+        | Some (`String name) -> kind_of_string name
+        | Some _ | None -> None in
+      (match kind with
+       | Some Snapshot_file_kind -> let* path = text fields "path" in
            if Filename.is_relative path then Error "snapshot_file path must be absolute"
            else Ok (Snapshot_file {id;path})
-       | Some (`String "msx_capture") -> Ok (Msx_capture {id})
-       | Some (`String "dos_capture") -> Ok (Dos_capture {id})
-       | Some (`String "lane_output") ->
+       | Some Msx_capture_kind -> Ok (Msx_capture {id})
+       | Some Dos_capture_kind -> Ok (Dos_capture {id})
+       | Some Lane_output_kind ->
            let names = List.map fst fields in
            let* () = if List.length names <> List.length (List.sort_uniq String.compare names)
              || List.exists (fun name -> not (List.mem name
@@ -46,7 +59,7 @@ let parse_source = function
            (match List.assoc_opt "selection" fields with
             | Some (`String "latest_completed") -> Ok (Lane_output {id;installation_id;output_id})
             | _ -> Error "lane_output selection must be latest_completed")
-       | Some (`String "browser_document") ->
+       | Some Browser_document_kind ->
            let* client_id = match List.assoc_opt "client_id" fields with
              | None | Some `Null -> Ok None
              | Some (`String value) ->
@@ -69,7 +82,7 @@ let parse_source = function
            let* environment = text fields "environment" in
            let* request_id = text fields "request_id" in
            Ok (Browser_document {id;selection;tab_id;target_id;environment;request_id})
-       | _ -> Error "unknown observation source kind")
+       | None -> Error "unknown observation source kind")
   | _ -> Error "source requires an object"
 let parse = function
   | `Assoc fields ->
@@ -82,6 +95,17 @@ let parse = function
   | _ -> Error "binding requires an object"
 let source_id = function Snapshot_file {id;_} | Msx_capture {id} | Dos_capture {id}
   | Lane_output {id;_} | Browser_document {id;_} -> id
+type live_reader = Msx_screen | Dos_screen
+(* Every kind is listed: a kind added to [kind] has to say whether it has a
+   current screen before this compiles. *)
+let live_screen_of_kind = function
+  | Msx_capture_kind -> Some Msx_screen
+  | Dos_capture_kind -> Some Dos_screen
+  | Snapshot_file_kind | Lane_output_kind | Browser_document_kind -> None
+let rgb8_format = "rgb8"
+let screen_image_fields ~width ~height ~rgb =
+  ["format", `String rgb8_format; "width", `Int width; "height", `Int height;
+   "rgb_base64", `String (Base64.encode_string rgb)]
 type activity = Tool_completed | Msx_changed | Dos_changed | Browser_changed
 type refresh_interest = source list
 let refresh_interest = parse
@@ -195,8 +219,8 @@ let msx_capture ~store ~id =
     |> Result.map_error Msx_lane.error_to_string in
   let frame = capture.Msx_lane.frame in
   let observed_at = Time_compat.now () in
-  let image = `Assoc ["format", `String "rgb8"; "width", `Int frame.Msx_lane.width;
-    "height", `Int frame.Msx_lane.height; "rgb_base64", `String (Base64.encode_string frame.Msx_lane.rgb)] in
+  let image = `Assoc (screen_image_fields ~width:frame.Msx_lane.width
+    ~height:frame.Msx_lane.height ~rgb:frame.Msx_lane.rgb) in
   let* screen = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store (Yojson.Safe.to_string image)) in
   let* ledger = Eio_unix.run_in_systhread (fun () ->
     Lane_addon_store.retain_jsonl store ~history:capture.Msx_lane.incarnation
@@ -221,8 +245,8 @@ let dos_capture ~store ~id =
     |> Result.map_error Dos_lane.error_to_string in
   let frame = capture.Dos_lane.frame in
   let observed_at = Time_compat.now () in
-  let image = `Assoc ["format", `String "rgb8"; "width", `Int frame.Dos_lane.width;
-    "height", `Int frame.Dos_lane.height; "rgb_base64", `String (Base64.encode_string frame.Dos_lane.rgb)] in
+  let image = `Assoc (screen_image_fields ~width:frame.Dos_lane.width
+    ~height:frame.Dos_lane.height ~rgb:frame.Dos_lane.rgb) in
   let* screen = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store (Yojson.Safe.to_string image)) in
   let* ledger = Eio_unix.run_in_systhread (fun () ->
     Lane_addon_store.retain_jsonl store ~history:capture.Dos_lane.incarnation

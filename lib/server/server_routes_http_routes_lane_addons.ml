@@ -121,6 +121,40 @@ let get_action request reqd =
       dispatch state Runtime.Action_status args in
     respond request reqd result) request reqd
 
+(* A counter is written in plain decimal digits; [int_of_string] alone would
+   also take a sign, a [0x] prefix or underscores. *)
+let decode_counter value =
+  let digits = value <> "" && String.for_all (function '0' .. '9' -> true | _ -> false) value in
+  match digits, int_of_string_opt value with
+  | true, Some counter -> Ok counter
+  | true, None | false, _ -> Error "since must be a nonnegative integer counter"
+
+let decode_live_query fields =
+  let* reader, since = match List.sort (fun (a, _) (b, _) -> String.compare a b) fields with
+    | ["source_kind", kind] -> Ok (kind, None)
+    | ["since", since; "source_kind", kind] -> Ok (kind, Some since)
+    | _ -> Error "live takes one source_kind and at most one since" in
+  let* reader = Lane_addon_live.reader_of_kind reader in
+  let* since = match since with
+    | None -> Ok None
+    | Some value -> Result.map Option.some (decode_counter value) in
+  Ok (reader, since)
+
+(* Read-only spectating; no Lane instance is involved. A bad query is 400.
+   The machine capture runs through [Lane_addon_live.default_capture], which
+   takes the machine lock on a system thread, never on this request fiber. *)
+let get_live request reqd =
+  with_read_auth (fun _state _request reqd ->
+    match decode_live_query (query_fields request) with
+    | Error detail ->
+        respond_json_value_with_cors ~status:`Bad_request request reqd (error_json detail)
+    | Ok (reader, since) ->
+        match Lane_addon_live.read ~reader ~since ~capture:Lane_addon_live.default_capture with
+        | Ok json -> respond_json_value_with_cors request reqd json
+        | Error error ->
+            respond_json_value_with_cors ~status:`Internal_server_error request reqd
+              (error_json (Lane_addon_live.error_to_string error))) request reqd
+
 let post ~operation ~tool_name request reqd =
   with_tool_actor_auth ~tool_name (fun state caller _request reqd ->
     Http.Request.read_body_async reqd (fun body ->
@@ -187,6 +221,7 @@ let add_routes ~sw ~clock router =
   |> Http.Router.post "/api/v1/lane-addons/declaration" save_declaration
   |> Http.Router.get "/api/v1/lane-addons" get_inspect
   |> Http.Router.get "/api/v1/lane-addons/slice" get_slice
+  |> Http.Router.get "/api/v1/lane-addons/live" get_live
   |> Http.Router.get "/api/v1/lane-addons/actions" get_action
   |> Http.Router.post "/api/v1/lane-addons/actions" (post ~operation:Runtime.Act ~tool_name:"masc_lane_act")
   |> Http.Router.post "/api/v1/lane-addons/attach" (post ~operation:Runtime.Attach ~tool_name:"masc_lane_attach")

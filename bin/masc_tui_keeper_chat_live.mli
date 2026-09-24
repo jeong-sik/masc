@@ -54,7 +54,8 @@ type stream_usage =
   ; cache_read_input_tokens : int option
   ; cache_creation_input_tokens : int option
   }
-(** Cumulative token counters a turn reported mid-stream. A field the provider
+(** Token counters a provider request reported mid-stream. They are cumulative
+    inside that one request, not across the turn. A field the provider
     did not report stays [None]: the screen has to be able to say "not
     reported" rather than draw a zero it was never told. *)
 
@@ -76,7 +77,7 @@ type delta =
           the prior attempt while retaining tool evidence. *)
   | Stream_model_started of { model : string }
   | Stream_usage of stream_usage
-      (** Token counters the provider reported for the turn so far. *)
+      (** Token counters the provider reported for the request in flight. *)
   | Text of string  (** Assistant text to append. *)
   | Thinking of string  (** Reasoning text to append. *)
   | Tool_started of

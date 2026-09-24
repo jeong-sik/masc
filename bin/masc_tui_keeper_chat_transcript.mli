@@ -384,7 +384,7 @@ val runtime_identity_text :
     supply the turn identity. *)
 
 val stream_usage_text : keeper_name:string -> t option -> string option
-(** The token counters the matching turn reported mid-stream, as clauses
+(** The token counters the request now streaming reported so far, as clauses
     ([tokens: in 1200 · out 340]). Counters the provider did not report are
     left out rather than drawn as zero, and [None] means nothing was reported
     at all, so the row is unchanged from before this was measured. Another

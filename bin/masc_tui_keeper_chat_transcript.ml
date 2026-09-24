@@ -234,10 +234,11 @@ type t =
            model observed without a runtime is shown as a model, never as the
            runtime. Reset per attempt with the runtime. *)
   ; mutable observed_usage : Live.stream_usage option
-        (* The token counters the provider last reported for this turn. They
-           are cumulative, so the latest report replaces the one before it
-           rather than adding to it. Reset per attempt with the runtime: a new
-           attempt counts its own tokens from the start. *)
+        (* The token counters the provider last reported for the request now
+           streaming. They are cumulative inside one request, so the latest
+           report replaces the one before it rather than adding to it. Reset
+           when the next request starts ([Stream_model_started]) and per
+           attempt with the runtime. *)
   ; mutable model_signal : model_signal option
         (* The last thing the model side sent in this attempt, and when.
            Tool calls carry their own pending state; this covers the stretches

@@ -822,8 +822,8 @@ let keeper_message_identity ~max_cells state keeper_name =
              Printf.sprintf "%s%s \xc2\xb7 %s \xc2\xb7 " status Ansi.dim
                (Tui_decode.keeper_phase_to_string row.kr_phase)
            in
-           (* What the turn has spent so far, in the same clause shape as the
-              rest of the row. It is an addition to this row, never a claim on
+           (* What the request now streaming has spent so far, in the same
+              clause shape as the rest of the row. It is an addition to this row, never a claim on
               it: the counters are drawn whole or not at all, so they can
               neither cut the runtime id nor arrive as a half-written number
               that reads as a smaller bill than the real one. *)

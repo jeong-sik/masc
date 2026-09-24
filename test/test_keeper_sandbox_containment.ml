@@ -75,13 +75,17 @@ let test_docker_keeper_blocks_outside () =
   with
   | Ok () ->
       Alcotest.fail "expected containment to block /etc/passwd for acme-sandbox"
-  | Error msg ->
+  | Error refusal ->
+      let msg = refusal.Keeper_alerting_path.message in
       Alcotest.(check bool) "error is objective containment rejection"
         true
         (let needle = "path_outside_sandbox:" in
          let len = String.length needle in
          String.length msg >= len
-         && String.sub msg 0 len = needle)
+         && String.sub msg 0 len = needle);
+      Alcotest.(check string) "a path outside the roots is the caller's to correct"
+        "policy_rejection"
+        (Tool_result.tool_failure_class_to_string refusal.failure_class)
 
 let test_docker_keeper_allows_inside_playground () =
   with_tmp_base @@ fun base ->

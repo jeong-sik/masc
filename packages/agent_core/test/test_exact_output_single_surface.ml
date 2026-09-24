@@ -16,7 +16,13 @@ let _preserve_public_sync_transport_receipt_surface
 ;;
 
 let _preserve_public_success_surface
-      ({ call_id = _; receipt = _; output = _; provenance = _; raw_response = _ } :
+      ({ call_id = _
+       ; receipt = _
+       ; output = _
+       ; provenance = _
+       ; raw_response = _
+       ; usage = _
+       } :
         EO.success)
   =
   ()
@@ -847,6 +853,114 @@ let test_no_measure_one_post_and_wire_authority () =
     ~path:"/v1/messages"
     ~response:(anthropic_response {|[{"type":"text","text":"{\"name\":\"accepted\"}"}]|})
     (fun _provenance _body -> ())
+;;
+
+(* A recorded provider body per wire goes through the whole exact execution,
+   and the success carries the usage that body reported, or [None] when the
+   body reported none. A JSON-mode target gets its output from the JSON the
+   provider returned; a target without JSON mode (and every Anthropic target)
+   gets it by parsing the answer text. Both build a success, so both are
+   run. *)
+let test_success_carries_the_usage_the_wire_reported () =
+  let api_usage = testable Types.pp_api_usage ( = ) in
+  let run ~id ~kind ~path ~json_mode ~response expected =
+    let result, completion_posts, _, _ =
+      with_server ~response
+      @@ fun ~sw:_ ~net ~clock ~base_url ->
+      let entry =
+        catalog_entry
+          ~id
+          ~kind
+          ~base_url
+          ~request_path:path
+          ~capabilities:(capabilities ~native:false ~json:json_mode)
+          ()
+      in
+      with_catalog [ entry ]
+      @@ fun snapshot -> execute_once ~net ~clock (attempt (flow snapshot id EO.Json_syntax))
+    in
+    check int (id ^ " completion posts") 1 completion_posts;
+    match result with
+    | Ok (success : EO.success) ->
+      check
+        bool
+        (id ^ " output")
+        true
+        (success.output = `Assoc [ "name", `String "accepted" ]);
+      check (option api_usage) (id ^ " usage") expected success.usage
+    | Error _ -> fail (id ^ " exact execution failed")
+  in
+  let usage ~input ~output ~cache_creation ~cache_read : Types.api_usage =
+    { input_tokens = input
+    ; output_tokens = output
+    ; cache_creation_input_tokens = cache_creation
+    ; cache_read_input_tokens = cache_read
+    ; cost_usd = None
+    }
+  in
+  let openai_body usage_field =
+    Printf.sprintf
+      {|{"id":"resp-usage","model":"surface","choices":[{"index":0,"message":{"role":"assistant","content":"{\"name\":\"accepted\"}"},"finish_reason":"stop"}]%s}|}
+      usage_field
+  in
+  let anthropic_body usage_field =
+    Printf.sprintf
+      {|{"id":"msg-usage","type":"message","role":"assistant","model":"surface","content":[{"type":"text","text":"{\"name\":\"accepted\"}"}],"stop_reason":"end_turn","stop_sequence":null%s}|}
+      usage_field
+  in
+  let openai_usage =
+    {|,"usage":{"prompt_tokens":120,"completion_tokens":7,"total_tokens":127,"prompt_tokens_details":{"cached_tokens":100}}|}
+  in
+  let openai_expected =
+    Some (usage ~input:120 ~output:7 ~cache_creation:0 ~cache_read:100)
+  in
+  run
+    ~id:"openai-usage-json-mode"
+    ~kind:Provider_config.OpenAI_compat
+    ~path:"/v1/chat/completions"
+    ~json_mode:true
+    ~response:(openai_body openai_usage)
+    openai_expected;
+  run
+    ~id:"openai-usage-text"
+    ~kind:Provider_config.OpenAI_compat
+    ~path:"/v1/chat/completions"
+    ~json_mode:false
+    ~response:(openai_body openai_usage)
+    openai_expected;
+  (* The Messages wire reports input exclusive of the cache counts; the
+     success carries the inclusive total, 20 + 30 + 50. *)
+  run
+    ~id:"anthropic-usage"
+    ~kind:Provider_config.Anthropic
+    ~path:"/v1/messages"
+    ~json_mode:false
+    ~response:
+      (anthropic_body
+         {|,"usage":{"input_tokens":20,"output_tokens":9,"cache_creation_input_tokens":30,"cache_read_input_tokens":50}|})
+    (Some (usage ~input:100 ~output:9 ~cache_creation:30 ~cache_read:50));
+  run
+    ~id:"ollama-usage"
+    ~kind:Provider_config.Ollama
+    ~path:"/api/chat"
+    ~json_mode:true
+    ~response:
+      {|{"model":"surface","created_at":"2026-07-22T00:00:00Z","message":{"role":"assistant","content":"{\"name\":\"accepted\"}"},"done":true,"done_reason":"stop","prompt_eval_count":33,"eval_count":4}|}
+    (Some (usage ~input:33 ~output:4 ~cache_creation:0 ~cache_read:0));
+  run
+    ~id:"openai-no-usage"
+    ~kind:Provider_config.OpenAI_compat
+    ~path:"/v1/chat/completions"
+    ~json_mode:true
+    ~response:(openai_body "")
+    None;
+  run
+    ~id:"anthropic-no-usage"
+    ~kind:Provider_config.Anthropic
+    ~path:"/v1/messages"
+    ~json_mode:false
+    ~response:(anthropic_body "")
+    None
 ;;
 
 let test_provider_trace_fingerprint_anchors_normalized_headers_and_body () =
@@ -2136,6 +2250,10 @@ let () =
             "no measure and one post"
             `Quick
             test_no_measure_one_post_and_wire_authority
+        ; test_case
+            "success carries the usage the wire reported"
+            `Quick
+            test_success_carries_the_usage_the_wire_reported
         ; test_case
             "provider trace fingerprint"
             `Quick

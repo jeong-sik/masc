@@ -664,8 +664,20 @@ let test_json_conditional_tag_is_weak_and_body_derived () =
    exercised here against a real [Server_connection] rather than inferred from
    the branch that builds it. *)
 
-let serve_json_over_wire ?if_none_match ?(headers = []) ?(respond = fun ~request body reqd -> Response.json ~request body reqd) body =
-  Eio_main.run (fun _env ->
+let with_http_worker_pool env sw f =
+  let previous = Domain_pool_ref.get () in
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Eio.Switch.on_release sw (fun () ->
+    match previous with
+    | None -> Domain_pool_ref.clear_for_tests ()
+    | Some pool -> Domain_pool_ref.set pool);
+  Domain_pool_ref.set pool;
+  Executor_pool_ref.For_testing.with_pool (Domain_pool.executor_pool pool) f
+;;
+
+let serve_json_over_wire ?(worker_pool = false) ?if_none_match ?(headers = []) ?(respond = fun ~request body reqd -> Response.json ~request body reqd) body =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let run () =
     let response_buf = Buffer.create 1024 in
     let conn =
       Httpun.Server_connection.create (fun reqd ->
@@ -719,7 +731,9 @@ let serve_json_over_wire ?if_none_match ?(headers = []) ?(respond = fun ~request
       | `Yield | `Close _ -> ()
     in
     flush ();
-    Buffer.contents response_buf)
+    Buffer.contents response_buf
+    in
+    if worker_pool then with_http_worker_pool env sw run else run ()))
 ;;
 
 let response_header response name =
@@ -1005,10 +1019,9 @@ let test_json_lazy_preserves_extra_headers_and_matches_wildcard () =
       (response_header response "x-custom"))
 ;;
 
-let test_json_worker_yields_to_caller () =
+let test_json_worker_yields_to_caller ~queued respond () =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-    let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
-    Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    with_http_worker_pool env sw (fun () ->
       let occupied, occupied_u = Eio.Promise.create () in
       let release, release_u = Eio.Promise.create () in
       let blocker_done, blocker_done_u = Eio.Promise.create () in
@@ -1033,11 +1046,11 @@ let test_json_worker_yields_to_caller () =
       let completed, completed_u = Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun () ->
         Eio.Promise.resolve started_u ();
-        Response.json_value_on_cpu (`Assoc ["data", `String (String.make 20000 'x')]) reqd;
+        respond reqd;
         Eio.Promise.resolve completed_u ());
       Eio.Promise.await started;
       Eio.Fiber.yield ();
-      Alcotest.(check bool) "encoding waits for worker while caller can run" false
+      Alcotest.(check bool) "only codec work waits for the occupied worker" (not queued)
         (Eio.Promise.is_resolved completed);
       Eio.Promise.resolve release_u ();
       Eio.Promise.await completed;
@@ -1048,10 +1061,9 @@ let test_json_worker_yields_to_caller () =
       end)))
 ;;
 
-let test_json_worker_cancelled_before_write () =
+let test_json_worker_cancelled_before_write respond () =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-    let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
-    Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    with_http_worker_pool env sw (fun () ->
       let occupied, occupied_u = Eio.Promise.create () in
       let release, release_u = Eio.Promise.create () in
       let blocker_done, blocker_done_u = Eio.Promise.create () in
@@ -1079,8 +1091,7 @@ let test_json_worker_cancelled_before_write () =
             try
               Eio.Cancel.sub (fun cancellation ->
                 Eio.Promise.resolve context_u cancellation;
-                Response.json_value_on_cpu
-                  (`Assoc ["data", `String (String.make 20000 'x')]) reqd);
+                respond reqd);
               false
             with Eio.Cancel.Cancelled _ -> true
           in
@@ -1107,32 +1118,85 @@ let test_json_worker_cancelled_before_write () =
       end)))
 ;;
 
+let worker_json_body = Yojson.Safe.to_string
+  (`Assoc ["data", `String (String.make 20000 'x' ^ " 끝단")])
+
+let worker_json_responders =
+  [ "value", (fun reqd ->
+      Response.json_value_on_cpu (Yojson.Safe.from_string worker_json_body) reqd)
+  ; "string", (fun reqd -> Response.json worker_json_body reqd)
+  ; "lazy", (fun reqd ->
+      let owner = Domain.self () in
+      Response.json_lazy ~etag:(Response.weak_etag_value worker_json_body)
+        (fun () ->
+          Alcotest.(check bool) "lazy body stays on owner domain" true
+            (owner = Domain.self ());
+          worker_json_body) reqd)
+  ; "HTML", (fun reqd ->
+      Response.html_cached ~etag:"snapshot"
+        ~request:(Httpun.Reqd.request reqd) worker_json_body reqd)
+  ]
+
 let test_json_worker_wire_parity () =
-  let respond ~request body reqd =
-    Response.json_value_on_cpu ~request (Yojson.Safe.from_string body) reqd
-  in
-  let body = Yojson.Safe.to_string (`Assoc ["auth", `String "operator";
-    "description", `String (String.make 20000 'x')]) in
-  List.iter (fun encoding ->
-    let headers = ["accept-encoding", encoding; "origin", "http://localhost"] in
-    let direct = serve_json_over_wire ~headers body in
-    let worker = serve_json_over_wire ~headers ~respond body in
-    Alcotest.(check string) (encoding ^ " complete wire response") direct worker;
-    let etag = Response.weak_etag_value body in
-    Alcotest.(check string) (encoding ^ " conditional response")
-      (serve_json_over_wire ~headers ~if_none_match:etag body)
-      (serve_json_over_wire ~headers ~if_none_match:etag ~respond body))
-    ["identity"; "gzip"; "zstd"];
-  let changed = {|{"auth":"viewer","served_at":"next"}|} in
-  Alcotest.(check bool) "new request is not a cached operator response" false
-    (String.equal (serve_json_over_wire ~respond body)
-       (serve_json_over_wire ~respond changed))
+  let responders =
+    [ (fun ~request body reqd -> Response.json ~request body reqd)
+    ; (fun ~request body reqd ->
+        Response.json_lazy ~request ~etag:(Response.weak_etag_value body)
+          (fun () -> body) reqd)
+    ; (fun ~request body reqd ->
+        Response.json_value_on_cpu ~request (Yojson.Safe.from_string body) reqd)
+    ] in
+  List.iter (fun respond ->
+    List.iter (fun encoding ->
+      let headers = ["accept-encoding", encoding; "origin", "http://localhost"] in
+      let body = worker_json_body in
+      let direct = serve_json_over_wire ~headers body in
+      let worker = serve_json_over_wire ~worker_pool:true ~headers ~respond body in
+      Alcotest.(check string) (encoding ^ " complete wire response") direct worker;
+      let etag = Response.weak_etag_value body in
+      Alcotest.(check string) (encoding ^ " conditional response")
+        (serve_json_over_wire ~headers ~if_none_match:etag body)
+        (serve_json_over_wire ~worker_pool:true ~headers ~if_none_match:etag ~respond body))
+      ["identity"; "gzip"; "zstd"];
+    let changed = {|{"auth":"viewer","served_at":"next"}|} in
+    Alcotest.(check bool) "new request is not a cached operator response" false
+      (String.equal (serve_json_over_wire ~worker_pool:true ~respond worker_json_body)
+         (serve_json_over_wire ~worker_pool:true ~respond changed))) responders
+;;
+
+let worker_bypass_responders =
+  [ "tiny body", (fun reqd -> Response.json "{}" reqd)
+  ; "compression disabled", (fun reqd -> Response.json ~compress:false worker_json_body reqd)
+  ; "identity client", (fun reqd ->
+      let request = Httpun.Request.create `GET "/" in
+      Response.json ~request worker_json_body reqd)
+  ; "matching JSON validator", (fun reqd ->
+      let etag = Response.weak_etag_value worker_json_body in
+      let headers = Httpun.Headers.of_list
+        ["accept-encoding", "gzip"; "if-none-match", etag] in
+      let request = Httpun.Request.create ~headers `GET "/" in
+      Response.json ~request worker_json_body reqd)
+  ; "matching lazy validator", (fun reqd ->
+      let etag = Response.weak_etag_value worker_json_body in
+      let headers = Httpun.Headers.of_list
+        ["accept-encoding", "gzip"; "if-none-match", etag] in
+      let request = Httpun.Request.create ~headers `GET "/" in
+      Response.json_lazy ~request ~etag
+        (fun () -> Alcotest.fail "matching lazy response evaluated body") reqd)
+  ]
 ;;
 
 let response_tests =
-  [ "worker yields to caller", `Quick, test_json_worker_yields_to_caller
-  ; "cancelled queued worker never writes", `Quick, test_json_worker_cancelled_before_write
-  ; "worker JSON wire parity", `Quick, test_json_worker_wire_parity
+  List.concat_map (fun (name, respond) ->
+    [ name ^ " compression yields to caller", `Quick,
+        test_json_worker_yields_to_caller ~queued:true respond
+    ; name ^ " cancelled compression never writes", `Quick,
+        test_json_worker_cancelled_before_write respond
+    ]) worker_json_responders
+  @ List.map (fun (name, respond) ->
+      name ^ " bypasses occupied worker", `Quick,
+      test_json_worker_yields_to_caller ~queued:false respond) worker_bypass_responders
+  @ [ "worker JSON wire parity", `Quick, test_json_worker_wire_parity
   ; ( "content_headers preserve all header segments"
     , `Quick
     , test_response_content_headers_preserve_all_segments )

@@ -1,6 +1,6 @@
 let maybe_compress ?(compress = true) h2_reqd body =
   let req = H2.Reqd.request h2_reqd in
-  Http_response_payload.compress_body
+  Http_response_payload.compress_body_on_cpu
     ~compress
     ~accept_encoding:(H2.Headers.get req.headers "accept-encoding")
     body

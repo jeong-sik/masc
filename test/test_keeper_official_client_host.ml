@@ -2367,6 +2367,53 @@ let test_a_seed_without_a_librarian_position_is_unchanged () =
      | Host.Librarian_progress _ -> false)
 ;;
 
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | [] -> -1
+  | entry :: _ -> entry.Log.Ring.seq
+;;
+
+let warnings_for ~keeper_name ~since_seq =
+  Log.Ring.recent ~since_seq ~min_level:(Log.level_to_int Log.Warn) ()
+  |> List.filter (fun (entry : Log.Ring.entry) ->
+    Option.equal String.equal entry.keeper_name (Some keeper_name))
+  |> List.length
+;;
+
+(* An unknown turn start is reported by the range a lane sends, not by
+   composing one: a Claude Code resume composes a range it never sends, and
+   with a Librarian position in hand the unknown start decides nothing. *)
+let test_an_unknown_turn_start_is_reported_by_the_range_sent () =
+  let unknown = Keeper_carried_front.Turn_boundary_unknown { reason = "no end line matches" } in
+  let before_opening = latest_log_seq () in
+  let opened = start_range ~turn_start:unknown start_seed_messages in
+  check bool "nothing else chose the start" true
+    (match opened.Host.front with
+     | Host.Turn_start_unknown _ -> true
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Librarian_snapshot _
+     | Host.Librarian_progress _ -> false);
+  check int "composing the range says nothing" 0
+    (warnings_for ~keeper_name:"alpha" ~since_seq:before_opening);
+  let before_sending = latest_log_seq () in
+  Host.warn_if_sent_on_unknown_start ~keeper_name:"alpha" opened.Host.front;
+  check int "sending it is reported once" 1
+    (warnings_for ~keeper_name:"alpha" ~since_seq:before_sending);
+  let decided =
+    start_range
+      ~librarian_front:(Choice.Librarian_snapshot (absorbed_snapshot ()))
+      ~turn_start:unknown start_seed_messages
+  in
+  check bool "the Librarian position chose the start" true
+    (match decided.Host.front with
+     | Host.Librarian_snapshot _ -> true
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
+     | Host.Librarian_progress _ -> false);
+  let before_librarian = latest_log_seq () in
+  Host.warn_if_sent_on_unknown_start ~keeper_name:"alpha" decided.Host.front;
+  check int "a range the unknown start did not open is not reported" 0
+    (warnings_for ~keeper_name:"alpha" ~since_seq:before_librarian)
+;;
+
 (* The Librarian read through the last completed turn, so the position names
    the atom this request has to answer. A range always carries the newest
    atom, so the position is clamped and that turn is sent again beside the
@@ -2748,6 +2795,10 @@ let () =
             "without one the lane's own front stands"
             `Quick
             test_a_seed_without_a_librarian_position_is_unchanged
+        ; test_case
+            "an unknown turn start is reported by the range sent"
+            `Quick
+            test_an_unknown_turn_start_is_reported_by_the_range_sent
         ; test_case
             "a later lane cut wins"
             `Quick

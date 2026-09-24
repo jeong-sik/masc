@@ -14315,8 +14315,11 @@ let render_runtime_params (state : state) =
         (List.filter (fun text -> String.trim text <> "")
            [ "  " ^ type_name; bounds; row.rpr_description ])
   in
+  (* [box_line_styled] fits this row to the frame and the style covers what it
+     fits, so a fit here only padded the row past the frame and spent its last
+     cell on the cut mark. *)
   box_line_styled buf cols ~style:(Theme.recede ())
-    (fit_width (Terminal_text.single_line selected_contract) (max 1 (cols - 1)));
+    (Terminal_text.single_line selected_contract);
   box_divider buf cols;
   let editing = Option.is_some state.runtime_param_edit in
   (* Editing adds a divider and two form rows.  Spend those rows out of the
@@ -14449,8 +14452,9 @@ let render_runtime_params (state : state) =
      in
      box_divider buf cols;
      box_line buf cols
-       (Printf.sprintf "  %s%s%s %s" Ansi.bold field_label Ansi.reset
-          (fit_width draft (max 1 (cols - 12))));
+       (row_with_field ~cols
+          ~lead:(Printf.sprintf "  %s%s%s " Ansi.bold field_label Ansi.reset)
+          ~field:draft ~tail:"");
      box_line_styled buf cols ~style:(Theme.recede ())
        (Printf.sprintf "  editing %s · %s"
           (Terminal_text.single_line edit.rpe_key)
@@ -14923,13 +14927,12 @@ let render_presets (state : state) =
         in
         let mark = if armed then Theme.warn () ^ "r" ^ Ansi.reset else " " in
         let label =
-          mark ^ " "
-          ^ fit_width
-              (Terminal_text.single_line (Masc_tui_preset_text.pane_row manifest))
-              (max 4 (cols - 6))
+          row_with_field ~cols ~lead:(" " ^ mark ^ " ")
+            ~field:(Terminal_text.single_line (Masc_tui_preset_text.pane_row manifest))
+            ~tail:""
         in
-        if index = cursor then box_line buf cols (Theme.selection ^ " " ^ label ^ Ansi.reset)
-        else box_line buf cols (" " ^ label)
+        if index = cursor then box_line buf cols (Theme.selection ^ label ^ Ansi.reset)
+        else box_line buf cols label
       end)
     presets;
   for _ = 1 to list_height - !drawn do
@@ -14963,9 +14966,10 @@ let render_presets (state : state) =
   (match state.preset_save_draft with
    | Some draft ->
      box_line buf cols
-       (Theme.info () ^ "  이름: " ^ Ansi.reset
-        ^ fit_width (Terminal_text.single_line draft) (max 4 (cols - 14))
-        ^ Ansi.dim ^ "  Enter:저장  Esc:취소" ^ Ansi.reset)
+       (row_with_field ~cols
+          ~lead:(Theme.info () ^ "  이름: " ^ Ansi.reset)
+          ~field:(Terminal_text.single_line draft)
+          ~tail:(Ansi.dim ^ "  Enter:저장  Esc:취소" ^ Ansi.reset))
    | None -> ());
   box_bottom buf cols;
   Buffer.add_string buf

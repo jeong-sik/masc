@@ -10,8 +10,6 @@ let ( let* ) = Result.bind
 
 let decode_open_pull json =
   let* op_number = required_int_field json "number" in
-  let* op_title = required_string_field json "title" in
-  let* op_head_branch = required_string_field json "head_branch" in
   let* op_draft =
     match Yojson.Safe.Util.member "draft" json with
     | `Bool draft -> Ok draft
@@ -50,7 +48,7 @@ let decode_open_pull json =
     | _ -> Error "keeper is neither a string nor null"
   in
   Ok
-    { op_number; op_title; op_head_branch; op_draft; op_checks; op_review
+    { op_number; op_draft; op_checks; op_review
     ; op_mergeable; op_keeper
     }
 

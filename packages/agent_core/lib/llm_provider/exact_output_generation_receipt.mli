@@ -46,6 +46,7 @@ val record_provider_trace : t -> provider_trace -> unit
 val snapshot : t -> snapshot
 val snapshot_phase : snapshot -> effect_phase
 val snapshot_dispatch_count : snapshot -> int
+val snapshot_generation_dispatched : snapshot -> bool
 val snapshot_http_status : snapshot -> int option
 val snapshot_provider_trace : snapshot -> provider_trace option
 val snapshot_call_id : snapshot -> call_id

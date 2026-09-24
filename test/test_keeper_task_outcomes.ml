@@ -1187,7 +1187,7 @@ let test_done_submits_three_rendered_pages () =
        let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
        Fs_compat.mkdir_p keepers_dir;
        Out_channel.with_open_text (Filename.concat keepers_dir (agent_name ^ ".toml"))
-         (fun channel -> output_string channel "[keeper]\nsandbox_profile = \"docker\"\n");
+         (fun channel -> output_string channel "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n");
        let producer_root =
          Keeper_sandbox_config.host_root_abs_of_agent
            ~base_path:

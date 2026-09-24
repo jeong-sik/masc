@@ -1395,22 +1395,48 @@ let listing_rows_below_the_body = 3
    is there. Only the label -- the columns a full list carries do not fit
    thirty cells, and a truncated author reads as a different author.
 
-   [selected] indexes [labels]; the pane scrolls to keep that row drawn.
+   [selection] indexes [labels]; the pane scrolls to keep that row drawn.
+   [None] draws no row as selected.
    [focused] says whether the arrow keys are pointed here, which is a
    different question from which row is open. *)
-let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
+(* How many rows an index is holding, and how many the surface holds. Three
+   surfaces draw a server page beside a detail -- the Board's fifty posts,
+   the Schedules page, the Task Review page -- and each one's index said the
+   page size alone: a board of a hundred and seven posts drew "(50)" with no
+   second number anywhere near it, so the fifty-seven the page does not carry
+   were invisible. Equal counts say it once: a page that carries everything
+   has no difference to report. *)
+let list_count_text ~loaded ~holding =
+  match holding with
+  | Some holding when holding > loaded -> Printf.sprintf "(%d of %d)" loaded holding
+  | Some _ | None -> Printf.sprintf "(%d)" loaded
+
+(* [holding] is what the surface holds when that is more than this index was
+   given: the Board's own header reads "(50 of 198)" one keypress away, and
+   this row read "(50)", which is a count of the whole board to anyone who
+   did not just come from that header. Both spell it through
+   [list_count_text], so the two cannot disagree.
+
+   Asked of every caller rather than defaulted: a list that is filtered
+   rather than paged has nothing more to hold, and passing [None] says so
+   where leaving it out could not be told from forgetting. *)
+let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
+    ~labels ~selection =
   framed_top buf cols;
   (* Focus wears a caret, not a key list: which keys work is the footer's
      sentence; which pane hears them is this one glyph. *)
   framed_line buf cols
     ((if focused then Ansi.bold else Ansi.dim)
-     ^ Printf.sprintf " %s%s (%d)" (if focused then "\xe2\x96\xb8 " else "") title
-         (List.length labels)
+     ^ Printf.sprintf " %s%s %s" (if focused then "\xe2\x96\xb8 " else "") title
+         (list_count_text ~loaded:(List.length labels) ~holding)
      ^ Ansi.reset);
   framed_divider buf cols;
   let content_height = max 0 (rows - framed_chrome_rows) in
   let first =
-    if selected < content_height then 0 else selected - content_height + 1
+    match selection with
+    | Some selected when selected >= content_height ->
+        selected - content_height + 1
+    | Some _ | None -> 0
   in
   let labels_window = Rows.of_list ~first:first ~height:content_height labels in
   for i = 0 to content_height - 1 do
@@ -1421,7 +1447,7 @@ let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
          included. *)
       let drawn = Terminal_text.single_line label in
       framed_line buf cols
-        (if first + i = selected then
+        (if Option.equal Int.equal selection (Some (first + i)) then
            if focused then
              Theme.selection ^ " " ^ drawn
              ^ String.make
@@ -1433,6 +1459,12 @@ let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
     | None -> framed_empty buf cols
   done;
   framed_bottom buf cols
+
+(* The same index for a list whose open row is always in it. *)
+let write_list_sidebar buf ~rows ~cols ~title ~focused ~holding ~labels
+    ~selected =
+  write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding ~labels
+    ~selection:(Some selected)
 
 
 (* The row a surface draws when its load failed. Six copies wrote the sentence
@@ -1680,18 +1712,22 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
    | Some Ask_projection.Draft_skipped ->
        box_line buf cols (Printf.sprintf "      %sskipped%s" Ansi.dim Ansi.reset)
    | Some (Ask_projection.Draft_chose _) | None -> ());
-  let slot = Ask_projection.free_text_slot question in
+  let ask_id = row.Masc.Tui_decode.ar_id in
+  let slot = Ask_projection.free_text_slot ~ask_id question in
   let aft_hint = Ask_projection.free_text_hint slot in
   (
-      (* The editor belongs to one question, and the slot it holds names
-         which. Matching on that rather than on the cursor means a snapshot
-         arriving mid-sentence cannot move the typing onto another row. *)
+      (* The editor belongs to one question of one ask, and the slot it holds
+         names both. Matching on that rather than on the cursor means a
+         snapshot arriving mid-sentence cannot move the typing onto another
+         row -- nor onto another ask's question of the same id, since
+         masc_ask numbers every ask from q1. *)
       let editing_here =
         match state.ask_text_entry with
         | Some entry
-          when String.equal
-                 (Ask_projection.free_text_question_id entry.ate_slot)
-                 question.Masc.Tui_decode.aq_id ->
+          when String.equal (Ask_projection.free_text_ask_id entry.ate_slot) ask_id
+               && String.equal
+                    (Ask_projection.free_text_question_id entry.ate_slot)
+                    question.Masc.Tui_decode.aq_id ->
             Some entry
         | Some _ | None -> None
       in
@@ -1847,20 +1883,6 @@ let bracketed ~max_cells text =
     else Message_layout.fit_middle max_cells text
   in
   "[" ^ text ^ "]"
-
-(* How many posts the Board list is holding, and how many the board holds.
-
-   The listing is one server page of fifty. A board with a hundred and seven
-   posts drew "(50)" beside its name with no second number anywhere near it,
-   so the page size read as the board's size and the fifty-seven posts the
-   page does not carry were invisible. The census counts the whole board, or
-   the narrowed hearth when one is being read, so the difference is a fact
-   this row can state. Equal counts say it once: a page that carries
-   everything has no difference to report. *)
-let board_list_count_text ~loaded ~holding =
-  match holding with
-  | Some holding when holding > loaded -> Printf.sprintf "(%d of %d)" loaded holding
-  | Some _ | None -> Printf.sprintf "(%d)" loaded
 
 (* The Board reader's title row: the screen, which post, its hearth, its score
    and its replies. The id is folded at the list's ID column. Replies read "💬3"
@@ -2064,66 +2086,35 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
               if value = 0 then None else Some (counter phase glyph name value))
        |> String.concat "  ")
 
-(* The transport tail of the Overview's cluster row.
-
-   It named the path carrying the traffic in the wire's words --
-   "websocket", "grpc_subscribe", "streamable_http" -- two fields before
-   naming those same paths in the row's own ("ws", "grpc"), so one path wore
-   two spellings on one row: the guide's own example reads
-   "websocket/steady  sse 3  ws 1  grpc :8936". With SSE carrying the traffic
-   the word "sse" appeared twice, two cells apart, meaning "this is the path"
-   and then "one session".
-
-   The mark that says which of a strip of places is the current one goes on
-   the entry that path already has, so the row spends one cell instead of a
-   repeated name and loses the underscored wire tokens. Streamable HTTP has
-   no session count in the reading, so it earns an entry only while it is the
-   path in use -- otherwise the row would carry a name with nothing to say. *)
-let transport_summary (transport : Tui_decode.transport_health) =
-  let open Masc.Transport_metrics in
-  (* Two cells before every entry, the way the surface strip spaces its names,
-     and the mark takes the second of them -- so the names sit on one column
-     whether or not the path is the one in use. *)
-  let entry kind text =
-    (if transport.th_primary_path = kind then " " ^ Masc_tui_theme.Glyph.current_entry
-     else "  ")
-    ^ text
+(* The transport's own readings are on Metrics. The Overview keeps one item
+   while the outbound queue is under pressure, since that delays what every
+   other row there reports; a steady queue, or no reading, says nothing. *)
+let transport_attention_item (transport : Tui_decode.transport_health option) =
+  let item severity word : Masc_tui_types.attention_item =
+    { ai_kind = "transport_queue_pressure"
+    ; ai_severity = severity
+    ; ai_summary =
+        Printf.sprintf "transport queue pressure %s (m: Metrics)" word
+    ; ai_target =
+        Masc_tui_types.Attention_other
+          { target_type = "transport"; target_id = None }
+    ; ai_blocker_summary = None
+    ; ai_evidence_ts = None
+    }
   in
-  let websocket =
-    match transport.th_websocket_sessions with
-    | Some sessions -> Printf.sprintf "ws %d" sessions
-    | None -> "ws off"
-  in
-  let grpc =
-    match transport.th_grpc_port with
-    | Some port -> Printf.sprintf "grpc :%d" port
-    | None -> "grpc off"
-  in
-  (* No wildcard: a path added to the reading has to decide here whether the
-     row can name it. *)
-  let streamable_http =
-    match transport.th_primary_path with
-    | Streamable_http -> [ entry Streamable_http "http" ]
-    | Grpc_subscribe | Websocket | Sse -> []
-  in
-  let paths =
-    String.concat ""
-      ([ entry Sse (Printf.sprintf "sse %d" transport.th_sse_sessions)
-       ; entry Websocket websocket
-       ; entry Grpc_subscribe grpc
-       ]
-      @ streamable_http)
-  in
-  let dropped =
-    if transport.th_events_dropped = 0 then ""
-    else Printf.sprintf "  dropped %d" transport.th_events_dropped
-  in
-  (* Queue pressure and the dropped count are two readings of the same queue,
-     so they sit together at the tail rather than one of them riding a path
-     name at the head. *)
-  Printf.sprintf "%s  %s%s" paths
-    (queue_pressure_kind_to_string transport.th_queue_pressure)
-    dropped
+  match transport with
+  | None -> None
+  | Some transport -> (
+      let word =
+        Masc.Transport_metrics.queue_pressure_kind_to_string
+          transport.th_queue_pressure
+      in
+      match transport.th_queue_pressure with
+      | Masc.Transport_metrics.Steady -> None
+      | Masc.Transport_metrics.Watch ->
+          Some (item Masc_tui_types.Attention_warning word)
+      | Masc.Transport_metrics.High ->
+          Some (item Masc_tui_types.Attention_bad word))
 
 (* The Backlog counts, each with the mark its Task rows wear. Claimed had no
    mark here while a claimed Task row draws the half circle, so the one count a
@@ -3421,6 +3412,9 @@ let context_composition_lines ~cols ~turn_back
         ; Option.map
             (fun n -> "output " ^ Inspector.format_tokens n)
             record.usage.output_tokens
+        ; Option.map
+            (fun n -> "turn output " ^ Inspector.format_tokens n)
+            record.turn_output_tokens
         ]
     in
     let label =
@@ -3728,9 +3722,12 @@ let context_composition_lines ~cols ~turn_back
                (match recent.cache_read with
                  | Some tokens -> Inspector.format_tokens tokens
                  | None -> "-")
-               (match recent.output_tokens with
-                 | Some tokens -> Inspector.format_tokens tokens
-                 | None -> "-"))
+               (* The request's own output when reported; otherwise the
+                  client turn's, marked so it is not read as one request's. *)
+               (match recent.output_tokens, recent.turn_output_tokens with
+                 | Some tokens, _ -> Inspector.format_tokens tokens
+                 | None, Some tokens -> "turn " ^ Inspector.format_tokens tokens
+                 | None, None -> "-"))
       | _, None ->
           [ (if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " ")
             ^ Ansi.dim
@@ -4029,6 +4026,9 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
                 [ Option.map
                     (fun tokens -> "output " ^ Inspector.format_tokens tokens)
                     record.usage.output_tokens
+                ; Option.map
+                    (fun tokens -> "turn output " ^ Inspector.format_tokens tokens)
+                    record.turn_output_tokens
                 ; Option.map
                     (fun reason ->
                        "finish "

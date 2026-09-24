@@ -107,7 +107,6 @@ function CheckpointSummaryCard({
     <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 v2-monitoring-card">
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">${title}</span>
-        <${SnapshotBadge} tone="accent">gen ${summary.generation}</${SnapshotBadge}>
         <${SnapshotBadge} tone="neutral">${summary.message_count} msgs</${SnapshotBadge}>
         ${summary.system_prompt_present
           ? html`<${SnapshotBadge} tone="ok">system kept</${SnapshotBadge}>`
@@ -456,7 +455,6 @@ export function KeeperCheckpointPanel({
                       <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-center gap-2">
                           <span class="font-mono text-[var(--color-fg-secondary)]">${item.snapshot_id}</span>
-                          <${SnapshotBadge} tone="accent">gen ${item.generation}</${SnapshotBadge}>
                           <${SnapshotBadge} tone="neutral">${item.message_count} msgs</${SnapshotBadge}>
                           ${item.system_prompt_present
                             ? html`<${SnapshotBadge} tone="ok">system kept</${SnapshotBadge}>`

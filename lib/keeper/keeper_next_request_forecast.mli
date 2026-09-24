@@ -214,3 +214,42 @@ val assembly : wake_bytes:int -> history_atoms:int -> measured_parts -> carried 
 (** The pure layout, for tests: the slots in travel order for one carried
     range. [history_atoms] counts the wake line, as {!candidate.history_atoms}
     does, and the range always carries it as its newest atom. *)
+
+(** Why {!librarian_gap} could not measure: a file it needs did not read.
+    None of these is "no gap" or "not covered"; the payload says which one. *)
+type librarian_gap_unmeasured =
+  | Meta_unreadable of string
+  | Turn_records_unreadable of Keeper_carried_front.unreadable_records
+      (** Turn records visited before any accepted start did not decode; the
+          newest accepted start may be among them. Refused even beside a
+          seed found under them. *)
+  | Turn_boundary_refused of string
+      (** The turn-boundary store refused, so the current history
+          generation, and with it the accepted start, is unknown. *)
+  | Snapshot_unreadable of string
+  | Read_position_unreadable of Keeper_librarian_progress.read_error
+
+val librarian_gap_unmeasured_cause : librarian_gap_unmeasured -> string
+(** The wire name: [meta_unreadable], [turn_records_unreadable],
+    [turn_boundary_refused], [snapshot_unreadable],
+    [read_position_unreadable]. *)
+
+val librarian_gap_unmeasured_detail : librarian_gap_unmeasured -> string
+(** The reader's own message. *)
+
+val librarian_gap
+  :  config:Workspace.config
+  -> keeper_name:string
+  -> (Keeper_carried_front.librarian_gap option, librarian_gap_unmeasured) result
+(** {!Keeper_carried_front.librarian_gap} on this keeper's current trace,
+    from its small files only: the meta for the trace, the continuity
+    snapshot's cut and the durable read position on that trace, and the
+    newest response-observed turn record's start. The checkpoint is not
+    read. [Ok None] when there is no gap, no accepted start, or no meta yet.
+    [Error] when any of those reads fails: the meta, the turn records or the
+    turn-boundary store, and, once there is an accepted start, the snapshot
+    or the progress file. A snapshot or progress file on another trace is
+    not a failure; it covers nothing on this one. Reads no ledger and no
+    measurement held in memory. A snapshot that no longer fits the history
+    is not marked on disk, so its cut still counts as covered and the gap is
+    counted short while it remains ({!Keeper_carried_front.librarian_gap}). *)

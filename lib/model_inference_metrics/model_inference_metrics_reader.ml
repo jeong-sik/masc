@@ -135,7 +135,6 @@ let value_or ~preferred ~fallback =
 
 let merge_exact_inference decision cost =
   { model = cost.model
-  ; provider = value_or ~preferred:cost.provider ~fallback:decision.provider
   ; inference_identity = cost.inference_identity
   ; ts_unix = cost.ts_unix
   ; outcome = decision.outcome

@@ -106,24 +106,29 @@ else
   duration_ms=null
 fi
 
-# --- metrics: tool calls + duplicate calls from the tool_calls jsonl store ---
+# --- metrics: tool calls, failures per tool, duplicate calls ---
+# tool_outcomes.sh counts the ledger's tool_call rows only (a composition_run
+# row summarizes steps already recorded as calls, and a lifecycle_event row is
+# not a call) and applies the repository's failure rule.
+# null when nothing was recorded or a row could not be read, never a count
+# that silently left rows out.
 tool_log_dir="$MASC_BASE_PATH/.masc/tool_calls"
-tool_calls=0; dup_calls=0
+# shellcheck source-path=SCRIPTDIR source=tool_outcomes.sh
+source "$BENCH/driver/tool_outcomes.sh"
+outcomes_json="$(bench_tool_outcomes_json "$tool_log_dir")" || outcomes_json='null'
+if ! printf '%s' "$outcomes_json" | jq -e 'type == "object" or type == "null"' >/dev/null 2>&1; then
+  outcomes_json='null'
+fi
+dup_calls=0
 if [[ -d "$tool_log_dir" ]]; then
-  # Guarded like the usage block below: one malformed line in the jsonl store
-  # makes jq exit non-zero, and under `set -euo pipefail` an unguarded
-  # assignment aborted the script here — after the episode state was known and
-  # before result.json was written, so harbor recorded no result at all.
-  # Counted as a stream (`jq -c . | wc -l`): every entry carries multi-KB
-  # output blobs, and `jq -s` materializes all of them just to take a length.
-  # Equivalent under the same guard: verified on a synthetic store — clean
-  # N, malformed-mixed and empty all agree, pipefail keeps the 0-degrade.
-  # Invariant (measured 2026-09-14): the count must stay a stream — swapping
-  # in `jq -s 'length'` re-materializes every multi-KB blob per episode.
-  tool_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + | jq -c . | wc -l | tr -d ' ')" \
-    || tool_calls=0
+  # Guarded: one malformed line in the jsonl store makes jq exit non-zero, and
+  # under `set -euo pipefail` an unguarded assignment aborted the script here
+  # -- after the episode state was known and before result.json was written,
+  # so harbor recorded no result at all.
   dup_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + \
-    | jq -s 'group_by([.tool, ((.input // .arguments // {})|tostring)]) | map(select(length>1) | (length-1)) | add // 0')" \
+    | jq -c 'select(.record_kind == "tool_call")
+             | [.tool, ((.input // .arguments // {})|tostring)]' \
+    | jq -s 'group_by(.) | map(select(length>1) | (length-1)) | add // 0')" \
     || dup_calls=0
 fi
 
@@ -171,15 +176,25 @@ fi
 source "$BENCH/driver/endpoint_env.sh"
 left_out_json="$(bench_env_left_out_json "$BENCH/endpoint-env-left-out.tsv")" || left_out_json='[]'
 
+# --- which runtime answered each keeper turn ---
+# The candidates a trial declared are in its config; this is which of them
+# actually answered (answered_by.sh). null when nothing was recorded or a row
+# could not be read, never a partial count.
+# shellcheck source-path=SCRIPTDIR source=answered_by.sh
+source "$BENCH/driver/answered_by.sh"
+answers_json="$(bench_answered_by_json "$MASC_BASE_PATH/.masc/keepers")" || answers_json='null'
+if ! printf '%s' "$answers_json" | jq -e 'type == "object" or type == "null"' >/dev/null 2>&1; then
+  answers_json='null'
+fi
+
 # Belt-and-suspenders: --argjson needs each value to be exactly one JSON text.
 # A multi-line/invalid `final` (or a non-numeric counter) must degrade to a
 # placeholder instead of killing the episode with jq's exit 2.
 final="$(printf '%s' "$final" | jq -c 'if type=="object" then . else {} end' 2>/dev/null | tail -n 1)" || true
 [[ -n "$final" ]] || final='{}'
-[[ "$tool_calls" =~ ^[0-9]+$ ]] || tool_calls=0
 [[ "$dup_calls" =~ ^[0-9]+$ ]] || dup_calls=0
 
-echo "collect_result: state=$state interrupted=$interrupted keepers_stopped=$keepers_stopped tool_calls=$tool_calls dup=$dup_calls final_len=${#final}" >&2
+echo "collect_result: state=$state interrupted=$interrupted keepers_stopped=$keepers_stopped tool_calls=$(printf '%s' "$outcomes_json" | jq -c '.tool_calls // null') dup=$dup_calls final_len=${#final}" >&2
 
 # NOTE: pass `final` via --slurpfile, not --argjson: the select() keeps the
 # last object if the text ever holds multiple values, and a file read keeps
@@ -203,20 +218,27 @@ jq -n \
   --argjson interrupted "$interrupted" \
   --argjson keepers_stopped "$keepers_stopped" \
   --argjson duration_ms "$duration_ms" \
-  --argjson tool_calls "${tool_calls:-0}" \
+  --argjson outcomes "$outcomes_json" \
   --argjson duplicate_tool_calls "${dup_calls:-0}" \
   --argjson usage "$usage_json" \
   --argjson endpoint_env_left_out "$left_out_json" \
+  --argjson answers "$answers_json" \
   --slurpfile final_raw "$final_file" \
   '{state:$state, interrupted:$interrupted, keepers_stopped:$keepers_stopped,
     duration_ms:$duration_ms,
-    tool_calls:$tool_calls, duplicate_tool_calls:$duplicate_tool_calls,
+    tool_calls:($outcomes.tool_calls // null),
+    failed_tool_calls:($outcomes.failed_tool_calls // null),
+    tool_outcomes:($outcomes.by_tool // null),
+    duplicate_tool_calls:$duplicate_tool_calls,
     input_tokens:($usage.input_tokens // null),
     output_tokens:($usage.output_tokens // null),
     cache_tokens:($usage.cache_tokens // null),
     cache_creation_tokens:($usage.cache_creation_tokens // null),
     cache_read_tokens:($usage.cache_read_tokens // null),
     endpoint_env_left_out:$endpoint_env_left_out,
+    answered_by:($answers.answered_by // null),
+    failed_on:($answers.failed_on // null),
+    turns_unanswered:($answers.turns_unanswered // null),
     final:($final_raw | map(select(type=="object")) | last // {})}' \
   > "$tmp_result"
 if episode_reported_interrupted; then

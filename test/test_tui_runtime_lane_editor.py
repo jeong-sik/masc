@@ -2,8 +2,8 @@
 
 A new lane is named, given its first runtime, grown, reordered, trimmed and
 removed; an edit pressed while the previous write is still out is refused on
-screen; and the server's refusal to remove a lane a keeper is assigned to is
-drawn as the server wrote it. The main judgement is the body each press posts
+screen; and the server's refusal to remove a lane a keeper is assigned to, or
+a Fusion preset seat names, is drawn as the server wrote it. The main judgement is the body each press posts
 to the routing API, compared whole at the end.
 """
 import json
@@ -64,10 +64,20 @@ def commit_receipt() -> dict[str, object]:
     }
 
 
+# The Fusion seats that name a lane, as [fusion.presets.<preset>].<seat>. The
+# scenario's refused lane is also a preset's judge, the shape that broke every
+# run of that preset when the lane was removed without a word.
+FUSION_SEATS = {"primary": ["[fusion.presets.trio].judge"]}
+
+
 def in_use_refusal(lane_id: str, keepers: list[str]) -> str:
     """The sentence Runtime.remove_runtime_lane answers for a lane keepers are
-    assigned to (lane_reference_to_string in lib/runtime/runtime.ml)."""
-    sites = ", ".join(f"[runtime.assignments].{keeper}" for keeper in keepers)
+    assigned to or Fusion seats name (route_reference_to_string in
+    lib/runtime/runtime.ml): assignments first, then seats."""
+    sites = ", ".join(
+        [f"[runtime.assignments].{keeper}" for keeper in keepers]
+        + FUSION_SEATS.get(lane_id, [])
+    )
     return f'lane "{lane_id}" is in use by {sites}'
 
 
@@ -83,8 +93,8 @@ class LaneStore:
       (Runtime.append_exact_output_lane_slot). The declared slots include one
       the registry dropped, which the standalone lanes read never lists, as
       the server's registry would;
-    - remove drops the lane, and is refused while [runtime.assignments]
-      names it, with the server's sentence.
+    - remove drops the lane, and is refused while [runtime.assignments] or a
+      Fusion seat (FUSION_SEATS) names it, with the server's sentence.
 
     A lane here is exactly its candidates, as it is on the server since
     #37064: nothing appends the default runtime. The server's other checks --
@@ -211,7 +221,7 @@ class LaneStore:
                     for assignment in self.body["assignments"]
                     if assignment["resolved"] == {"kind": "lane", "id": lane_id}
                 ]
-                if assigned:
+                if assigned or lane_id in FUSION_SEATS:
                     return 400, {"error": in_use_refusal(lane_id, assigned)}
                 self.lanes.remove(declared[0])
             else:
@@ -316,8 +326,9 @@ def run(executable: str) -> None:
         if NEW_LANE.encode() in h.screen_text(bytes(output)):
             raise AssertionError(f"{NEW_LANE} is still on screen after its removal")
 
-        # A lane a keeper is assigned to is refused by the server, and the
-        # TUI draws the server's sentence as it came.
+        # A lane a keeper is assigned to and a Fusion seat names is refused by
+        # the server, and the TUI draws the server's sentence whole, the seat
+        # at its end included.
         for _ in range(3):
             press(process, fd, output, b"k")
         h.send_and_wait(

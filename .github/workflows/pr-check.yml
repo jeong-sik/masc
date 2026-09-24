@@ -12,7 +12,7 @@ name: PR check
 # label that would not resolve) is a compile error @check reports.
 #
 # Since 2026-09-06 (#33507) the @check job does not stop there. Its last step
-# links and runs the suites this pull request selects, bounded at 1080
+# links and runs the suites this pull request selects, bounded at 1800
 # seconds; the comment above that step carries the reasoning and the numbers.
 # Two things follow. The scope no longer matches the manual job's, which is
 # why ci.yml's header describes a narrower lane than this one. And this gate
@@ -192,7 +192,7 @@ jobs:
     runs-on: ubuntu-latest
     # Run 36009641291 selected 268 linked suites after a 5m40s PTY rule;
     # 151 selected suites were still unrun at the former 18-minute budget.
-    # The job's setup and build take about eight minutes before this step.
+    # The job's setup and build took about nine minutes before this step.
     timeout-minutes: 45
     permissions:
       contents: read

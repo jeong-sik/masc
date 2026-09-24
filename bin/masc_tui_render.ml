@@ -9576,24 +9576,13 @@ let render_harness_detail (state : state) verdict =
         match state.harness with
         | None -> []
         | Some snapshot ->
-          List.map
-            (fun (row : Tui_decode.harness_verdict) ->
-              (* A verdict has no id of its own on the wire. The gate does
-                 not part the pair this list holds today -- both of
-                 task-1741's are structured_tool -- and neither does the
-                 notes hash, which is SHA256 of the task title and the
-                 completion notes: a second verdict on the same submission
-                 hashes to the same value.
-
-                 When it was recorded does. It is the row's own value and it
-                 never moves, which the age it replaced did on every frame.
-                 The clock is the one the lane run rows draw, which fits: a
-                 five-digit task id and this stamp are 26 of the 27 cells the
-                 caret lead leaves. *)
-              Render_schedule.task_history_sidebar_label
-                ~task_id:row.Tui_decode.hv_task_id
-                ~apart:(Some (lane_run_clock row.Tui_decode.hv_at)))
-            snapshot.Tui_decode.hs_verdicts
+          (* A verdict has no id of its own on the wire. The notes hash is
+             shared by repeat verdicts on one submission, and a clock alone
+             can name several verdicts recorded in the same second. *)
+          snapshot.Tui_decode.hs_verdicts
+          |> List.map (fun (row : Tui_decode.harness_verdict) ->
+               row.hv_task_id, lane_run_clock row.hv_at)
+          |> Render_schedule.verdict_sidebar_labels
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in

@@ -1074,6 +1074,31 @@ let fusion_sidebar_label ~status ~time ~keeper ~run_id =
 let task_history_sidebar_label ~task_id ~apart =
   match apart with None -> task_id | Some apart -> task_id ^ "  " ^ apart
 
+let verdict_sidebar_labels rows =
+  List.mapi
+    (fun index (task_id, clock) ->
+      let same (other_id, other_clock) =
+        String.equal task_id other_id && String.equal clock other_clock
+      in
+      let siblings = List.length (List.filter same rows) in
+      let apart =
+        if siblings = 1 then clock
+        else
+          let earlier =
+            List.filteri (fun other_index row -> other_index < index && same row) rows
+            |> List.length
+          in
+          (* A second-resolution clock can name several verdicts. Keep the
+             date and minute, then number those rows within this snapshot. *)
+          let minute =
+            if String.length clock > 3 then String.sub clock 0 (String.length clock - 3)
+            else clock
+          in
+          Printf.sprintf "%s#%d" minute (earlier + 1)
+      in
+      task_history_sidebar_label ~task_id ~apart:(Some apart))
+    rows
+
 let fusion_pipeline_diagram
     ?(glyph_done = "●")
     ?(glyph_active = "◐")

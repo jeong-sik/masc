@@ -1751,6 +1751,20 @@ let test_the_parting_value_does_not_move_under_the_reader () =
      <> Schedule.task_history_sidebar_label ~task_id:"task-1663"
           ~apart:(Some second))
 
+let test_verdicts_in_the_same_second_have_distinct_labels () =
+  let labels =
+    Schedule.verdict_sidebar_labels
+      [ "task-1663", "09-25 01:12:45"
+      ; "task-1663", "09-25 01:12:45"
+      ; "task-2000", "09-25 01:12:45"
+      ]
+  in
+  check (list string) "only colliding task and clock pairs get ordinals"
+    [ "task-1663  09-25 01:12#1"
+    ; "task-1663  09-25 01:12#2"
+    ; "task-2000  09-25 01:12:45"
+    ] labels
+
 (* A row with nothing to part it keeps the id alone. The row said one thing
    before this column and still says it; a mark for "nothing here" would be a
    second vocabulary on a surface that has none. *)
@@ -2411,6 +2425,8 @@ let () =
             test_a_row_without_a_parting_value_keeps_its_id
         ; test_case "the parting value does not move under the reader" `Quick
             test_the_parting_value_does_not_move_under_the_reader
+        ; test_case "same-second verdicts have distinct labels" `Quick
+            test_verdicts_in_the_same_second_have_distinct_labels
         ; test_case "the widest row fits the list pane" `Quick
             test_the_widest_row_fits_the_list_pane
         ; test_case "fusion pipeline diagram stages" `Quick

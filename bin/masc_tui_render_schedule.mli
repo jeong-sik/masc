@@ -429,6 +429,11 @@ val task_history_sidebar_label : task_id:string -> apart:string option -> string
     than a reading of one. A row with nothing to part it keeps the id
     alone. *)
 
+val verdict_sidebar_labels : (string * string) list -> string list
+(** Task id and local clock for each Verdicts row. Rows whose displayed
+    clock is identical receive a snapshot-local ordinal, so two verdicts
+    recorded in the same second do not read as the same row. *)
+
 val fusion_pipeline_diagram :
   ?glyph_done:string ->
   ?glyph_active:string ->

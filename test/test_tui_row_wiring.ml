@@ -1018,7 +1018,11 @@ let test_both_task_history_panes_say_which_row_each_is () =
         (Ast_grep.count_calls_in_value_binding ~module_path:render
            ~binding_name
            ~callee:"Render_schedule.task_history_sidebar_label"))
-    [ "render_verification_detail"; "render_harness_detail" ];
+    [ "render_verification_detail" ];
+  Alcotest.(check int) "Verdicts builds labels through the collision-aware helper" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_harness_detail"
+       ~callee:"Render_schedule.verdict_sidebar_labels");
   Alcotest.(check int) "Task Review reads the request id" 1
     (Ast_grep.count_field_reads_in_value_binding ~module_path:render
        ~binding_name:"render_verification_detail" ~field_name:"vr_request_id");

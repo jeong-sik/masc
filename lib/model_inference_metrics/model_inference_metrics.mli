@@ -9,7 +9,6 @@
 
 type recent_entry = {
   re_ts_unix : float;
-  re_provider : string option;
   re_outcome : string;
   re_stop_reason : string option;
   re_turn_lane : string option;
@@ -69,7 +68,6 @@ type latency_bucket = {
 
 type model_stats = {
   model_id : string;
-  provider : string option;
   entry_count : int;
   avg_tok_per_sec : float option;
   p50_tok_per_sec : float option;
@@ -169,10 +167,9 @@ val aggregate_buckets :
       empty successful cost stream. *)
 
 val to_json : aggregate -> Yojson.Safe.t
-(** Serialize [aggregate] to JSON for API responses. Compatibility fields
-    named [model_id] and [provider] are public runtime-lens labels only:
-    concrete provider/model identifiers stay internal to the aggregator and
-    are not emitted. *)
+(** Serialize [aggregate] to JSON for API responses. [model_id] is a public
+    runtime-lens label only: concrete model identifiers stay internal to the
+    aggregator and are not emitted. *)
 
 val render_keeper_prompt_feedback : aggregate -> string
 (** Render a compact, redacted telemetry block for opt-in keeper prompt

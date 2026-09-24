@@ -8,6 +8,12 @@ val is_within_dir : dir:string -> string -> bool
     text, so an unresolved [..] or a symlink would walk out of [dir] without
     the comparison noticing. *)
 val validate_path :
-  ?workdir:string -> string -> bool
+  ?workdir:string -> extra_roots:string list -> string -> bool
 (** Resolve symlinks and validate only objective cwd/host-sandbox containment.
-    No caller identity or product metadata is accepted at this boundary. *)
+    No caller identity or product metadata is accepted at this boundary.
+    [extra_roots] are further allowed roots on the machine the command runs
+    on (an ssh endpoint's declared [allowed_paths]); they and the path are
+    compared lexically, without host symlink resolution. So a symlink under
+    an extra root that points elsewhere is not followed: on an endpoint that
+    is this same machine, an extra root is weaker than the workdir, which is
+    resolved. Pass [[]] for the default boundary. *)

@@ -18,6 +18,7 @@ type network_error_kind =
   | Tls_error
   | Timeout
   | Local_resource_exhaustion
+  | Connection_reset
   | End_of_file
   | Unknown
 
@@ -355,7 +356,7 @@ let%test "explicit deadline: timeout without clock is rejected" =
 
 let classify_unix_error = function
   | Unix.ECONNREFUSED -> Connection_refused
-  | Unix.ECONNRESET -> Connection_refused
+  | Unix.ECONNRESET -> Connection_reset
   | Unix.EPIPE -> End_of_file
   | Unix.ETIMEDOUT -> Timeout
   | Unix.ENETUNREACH -> Dns_failure
@@ -365,6 +366,17 @@ let classify_unix_error = function
   | unclassified_unix_error ->
     let (_ : Unix.error) = unclassified_unix_error in
     Unknown
+;;
+
+let network_error_kind_to_string = function
+  | Connection_refused -> "connection_refused"
+  | Dns_failure -> "dns_failure"
+  | Tls_error -> "tls_error"
+  | Timeout -> "timeout"
+  | Local_resource_exhaustion -> "local_resource_exhaustion"
+  | Connection_reset -> "connection_reset"
+  | End_of_file -> "end_of_file"
+  | Unknown -> "unknown"
 ;;
 
 type http_scheme =
@@ -969,6 +981,7 @@ let known_network_error_kind = function
     | Tls_error
     | Timeout
     | Local_resource_exhaustion
+    | Connection_reset
     | End_of_file ) as kind -> Some kind
 ;;
 
@@ -977,7 +990,8 @@ let known_network_error_kind = function
    This mirrors the severity ordering rather than the retry policy itself. *)
 let network_error_kind_is_non_retryable = function
   | Local_resource_exhaustion | Tls_error -> true
-  | Connection_refused | Dns_failure | Timeout | End_of_file | Unknown -> false
+  | Connection_refused | Dns_failure | Timeout | Connection_reset | End_of_file | Unknown ->
+    false
 ;;
 
 let classify_eio_backend_error = function
@@ -3537,8 +3551,8 @@ let%test "classify_unix_error: EPIPE is End_of_file" =
   classify_unix_error Unix.EPIPE = End_of_file
 ;;
 
-let%test "classify_unix_error: ECONNRESET is Connection_refused" =
-  classify_unix_error Unix.ECONNRESET = Connection_refused
+let%test "classify_unix_error: ECONNRESET is Connection_reset" =
+  classify_unix_error Unix.ECONNRESET = Connection_reset
 ;;
 
 let%test "classify_unix_error: ENETUNREACH is Dns_failure" =
@@ -3696,6 +3710,34 @@ let%test "classify_network_exn: Multiple_io falls back to first known kind" =
          ])
   with
   | Some (NetworkError { kind = End_of_file; _ }) -> true
+  | Some (HttpError _ | NetworkError _ | TimeoutError _ | AcceptRejected _)
+  | Some (ProviderTerminal _ | ProviderFailure _)
+  | None -> false
+;;
+
+let%test "classify_network_exn: Multiple_io keeps a leading reset as a known kind" =
+  match
+    classify_network_exn
+      (multiple_io_exn
+         [ Eio.Exn.X (Eio_unix.Unix_error (Unix.ECONNRESET, "read", ""))
+         ; Eio.Exn.X (Eio_unix.Unix_error (Unix.ECONNREFUSED, "connect", ""))
+         ])
+  with
+  | Some (NetworkError { kind = Connection_reset; _ }) -> true
+  | Some (HttpError _ | NetworkError _ | TimeoutError _ | AcceptRejected _)
+  | Some (ProviderTerminal _ | ProviderFailure _)
+  | None -> false
+;;
+
+let%test "classify_network_exn: Multiple_io does not prefer a reset over a refusal" =
+  match
+    classify_network_exn
+      (multiple_io_exn
+         [ Eio.Exn.X (Eio_unix.Unix_error (Unix.ECONNREFUSED, "connect", ""))
+         ; Eio.Exn.X (Eio_unix.Unix_error (Unix.ECONNRESET, "read", ""))
+         ])
+  with
+  | Some (NetworkError { kind = Connection_refused; _ }) -> true
   | Some (HttpError _ | NetworkError _ | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false

@@ -35,6 +35,7 @@ let endpoint fixture : Exec_ssh_endpoint.t =
   ; env_allowlist = [ "FOO"; "PATH" ]
   ; capabilities = []
   ; private_home = false
+  ; allowed_paths = []
   }
 ;;
 

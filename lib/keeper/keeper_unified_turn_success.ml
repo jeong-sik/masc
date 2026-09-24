@@ -624,6 +624,30 @@ let handle
          else None)
       ~observed_at:(Time_compat.now ())
   in
+  (* #32463: the cursor re-baselines on a regressed counter, so the
+     regression shows as Counter_regressed for this one turn only. The
+     activity event keeps the resolution; this line is the operator-visible
+     record of it. *)
+  (match usage_resolution.Keeper_usage_resolution.status with
+   | Keeper_usage_resolution.Counter_regressed ->
+     Log.Keeper.warn ~keeper_name:meta.name
+       "conversation usage counter went backwards (observed input=%s, \
+        previous input=%s); this turn adds no usage and the cursor \
+        re-baselines on the observed value"
+       (match usage_resolution.Keeper_usage_resolution.observation with
+        | Some sample -> string_of_int sample.Keeper_usage_resolution.input_tokens
+        | None -> "none")
+       (match lifecycle.KEC.updated_meta.runtime.usage_cursor with
+        | Some cursor ->
+          string_of_int cursor.Keeper_usage_resolution.cumulative.input_tokens
+        | None -> "none")
+   | Keeper_usage_resolution.(
+       ( Exact
+       | Usage_missing
+       | Scope_unavailable
+       | Invalid_observation
+       | Exact_cost_unavailable
+       | Baseline_missing )) -> ());
   let turn_cost = turn_cost usage_resolution in
   let updated_meta =
     KUM.update_metrics_from_result

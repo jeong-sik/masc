@@ -243,6 +243,8 @@ def test_http_endpoint(
                 fixture = fixtures[path_only]
             elif path_only == DASHBOARD_GOALS_PATH:
                 fixture = empty_goals_fixture()
+            elif path_only == RUNTIME_RESOLVED_PATH:
+                fixture = empty_runtime_resolved_fixture()
             else:
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
@@ -1209,18 +1211,62 @@ def empty_goals_fixture() -> HttpResponse:
     })
 
 
+def empty_runtime_resolved_fixture() -> HttpResponse:
+    """A runtime catalogue with no runtime, the shape the server sends for a
+    workspace that configured none.
+
+    The Overview reads it for its Providers section. Unmocked, the 503
+    sentinel would draw "providers unavailable" in every Overview scenario
+    and take its rows from the tasks. With no provider account the section
+    draws nothing. A scenario that is about runtimes keys this path itself.
+    """
+    return (200, {
+        "generated_at_iso": "2026-09-23T00:00:00Z",
+        "source": RUNTIME_RESOLVED_PATH,
+        "config_path": None,
+        "default_runtime": None,
+        "media_failover": [],
+        "media_failover_declared": [],
+        "runtimes": [],
+        "lanes": [],
+        "assignments": [],
+        "provider_usage_windows_since": 1790179140.2,
+        "provider_usage_windows": [],
+    })
+
+
 def fleet_safety_fixture() -> HttpResponse:
     """A fleet reading the TUI can decode.
 
     Without it the poll fails and the TUI records a "fleet safety data
     unreliable" event, which is correct behaviour but adds a row to scenarios
-    that are counting the event list. The current session-recovery fields
-    are explicit: a missing observation must not become a zero count.
+    that are counting the event list. Every field the TUI reads is here,
+    with the schema that marks a reading: the TUI requires each one, because
+    a missing observation must not become a zero count.
     """
     return (200, {"keeper_fleet_safety": {
+        "schema": "masc.keeper_fleet_operator.v1",
         "status": "ok",
+        "blocker": None,
+        "operator_action_required": False,
+        "bootable_keeper_count": 0,
+        "bootable_keeper_names": [],
+        "running_keeper_fiber_count": 0,
+        "running_keeper_names": [],
+        "executable_keeper_fiber_count": 0,
+        "executable_keeper_names": [],
+        "failing_keeper_fiber_count": 0,
+        "recovering_keeper_fiber_count": 0,
+        "turn_configuration_error_keeper_count": 0,
+        "turn_configuration_error_keeper_names": [],
         "official_client_recovery_required_keeper_count": 0,
         "official_client_recovery_required_keeper_names": [],
+        "paused_keeper_count": 0,
+        "target_reaction_capacity_count": 0,
+        "reaction_capacity_shortfall_count": 0,
+        "active_task_owner_without_executable_fiber_count": 0,
+        "completion_authority_pending_task_count": 0,
+        "active_task_owner_scan_error_count": 0,
     }})
 
 
@@ -3891,6 +3937,9 @@ def blocked_gate_detail_http_fixtures() -> HttpFixtures:
                     },
                     "summary_status": {"status": "failed", "reason": reason},
                     "summary_attempt_disposition": {"code": "settled"},
+                    # What the server derives from a settled attempt whose
+                    # summary failed (phase_of_disposition_and_summary).
+                    "phase": "blocked",
                 }
             ],
             "approval_queue_state": {"state": "ready"},
@@ -5689,7 +5738,8 @@ def seed_playground_workspace(base_path: str) -> None:
     all."""
     Path(base_path, ".masc", "config", "keepers").mkdir(parents=True, exist_ok=True)
     Path(base_path, ".masc", "config", "keepers", "alpha.toml").write_text(
-        '[keeper]\nsandbox_profile = "docker"\n', encoding="utf-8"
+        '[keeper]\nsandbox_profile = "docker"\nsandbox_image = "masc-sandbox:general"\n',
+        encoding="utf-8"
     )
     Path(base_path, ".masc", "playground", "docker", "alpha").mkdir(
         parents=True, exist_ok=True
@@ -8613,6 +8663,7 @@ def run_tools_request_identity_regression(executable: str) -> None:
                 "skill_snapshot_revision": "c" * 64,
                 "instruction_skills": [], "composition_skills": [], "skill_profiles": [],
                 "skill_discovery_bytes": 0, "skill_eager_body_bytes": 0, "skills_left_out": [],
+                "unavailable_skill_names": [],
                 "count": 1, "tools": [{"name": tool, "origin": {"kind": "descriptor"}}],
                 "tool_surface_sha256": None,
             },
@@ -8734,6 +8785,7 @@ def run_tools_purpose_regression(executable: str) -> None:
         "native_posture": None, "skill_snapshot_revision": "c" * 64,
         "instruction_skills": [], "composition_skills": [], "skill_profiles": [],
         "skill_discovery_bytes": 0, "skill_eager_body_bytes": 0, "skills_left_out": [],
+        "unavailable_skill_names": [],
         "count": 1, "tools": [{"name": "keeper_status", "origin": {"kind": "descriptor"}}],
         "tool_surface_sha256": None,
     }
@@ -10154,6 +10206,11 @@ def verification_request_row(task_id: str) -> dict[str, object]:
         # thing on every request ever drawn. Nothing reads them now.
         "submitted_by": "keeper-alpha",
         "created_at": "2026-08-25T14:00:00+09:00",
+        # Both keys ride every row. The awaiting view joins the backlog, so
+        # its rows always name the verdict they wait on; a completion keeps
+        # no cancellation reason.
+        "intent": "complete",
+        "cancellation_reason": None,
         "required_artifacts": ["diff"],
         "submitted_evidence": ["diff"],
     }
@@ -12316,6 +12373,9 @@ def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpRe
             # the declared list is what the editor writes back.
             "media_failover": [],
             "media_failover_declared": [],
+            # The Overview's Providers section decodes these two strictly.
+            "provider_usage_windows_since": 1790179140.2,
+            "provider_usage_windows": [],
             "runtimes": [
                 runtime_a,
                 runtime_resolved_runtime("runtime-b", "Resolved B", "model-b"),

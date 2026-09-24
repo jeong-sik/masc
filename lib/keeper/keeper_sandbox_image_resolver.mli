@@ -1,0 +1,31 @@
+(** The build a Keeper's container starts from.
+
+    A Keeper's [sandbox_image] is a name in this host's image catalog
+    ({!Keeper_sandbox_image_catalog}). The name is looked up in the catalog
+    file each time a container is about to start, so a
+    [masc sandbox-image promote] reaches the next container a Keeper starts.
+    Nothing caches the answer, and a catalog that cannot be read refuses the
+    start: there is no image to fall back to that anyone chose.
+
+    RFC keeper-sandbox-images-have-versions (#38699) §2.4. *)
+
+type error =
+  | Not_declared  (** The Keeper's [sandbox_image] is absent or blank. *)
+  | Catalog_unreadable of Keeper_sandbox_image_catalog.load_error
+  | Unknown_image of { name : string; known : string list }
+      (** The catalog has no such name. [known] lists the names it has. *)
+  | Not_built_on_host of { name : string; store : Keeper_sandbox_image_catalog.store }
+      (** The name is in the catalog, and nothing is promoted for it in the
+          store this Keeper's containers start from. *)
+
+val error_to_string : error -> string
+(** What is wrong and, where the operator can fix it, the commands to run. *)
+
+val resolve :
+  config_root:string ->
+  store:Keeper_sandbox_image_catalog.store ->
+  string option ->
+  (Keeper_sandbox_image_catalog.pinned, error) result
+(** [resolve ~config_root ~store declared] reads
+    [<config_root>/sandbox-images.toml] and returns the build promoted for
+    [declared] on [store]. *)

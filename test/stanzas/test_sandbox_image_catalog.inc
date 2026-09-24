@@ -1,6 +1,7 @@
-; The sandbox image catalog: parse, resolve, change and save. No daemon; the
-; load cases use a temporary config root. The shipped catalog and the recipe
-; directories are deps so the suite can check they name the same images.
+; The sandbox image catalog: parse, resolve, change and save, and the build a
+; Keeper's container starts from. No daemon; the load cases use a temporary
+; config root. The shipped catalog and the recipe directories are deps so the
+; suite can check they name the same images.
 
 (test
  (name test_sandbox_image_catalog)

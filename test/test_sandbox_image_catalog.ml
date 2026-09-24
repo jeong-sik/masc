@@ -312,6 +312,75 @@ let test_the_shipped_catalog_names_every_recipe () =
     in
     check (list string) "catalog names = recipe directories" recipes names
 
+(* What a Keeper's container starts from: the catalog file as it is when the
+   container starts, or a refusal that says what to do. *)
+module Resolver = Keeper_sandbox_image_resolver
+
+let starts_from label ~config_root ~store declared =
+  match Resolver.resolve ~config_root ~store declared with
+  | Ok pinned -> pinned.reference
+  | Error e -> fail (label ^ ": " ^ Resolver.error_to_string e)
+
+let refused_start label ~config_root ~store declared =
+  match Resolver.resolve ~config_root ~store declared with
+  | Ok pinned -> fail (label ^ ": started from " ^ pinned.reference)
+  | Error e -> e
+
+let contains text needle =
+  let n = String.length needle in
+  let rec at i = i + n <= String.length text && (String.equal (String.sub text i n) needle || at (i + 1)) in
+  at 0
+
+let mentions label text needle =
+  if not (contains text needle) then fail (Printf.sprintf "%s: %S does not mention %S" label text needle)
+
+let omits label text needle =
+  if contains text needle then fail (Printf.sprintf "%s: %S mentions %S" label text needle)
+
+let test_a_keeper_starts_from_the_build_promoted_now () =
+  with_dir (fun config_root ->
+    write_catalog config_root promoted_ocaml;
+    check string "promoted" ocaml_now (starts_from "first" ~config_root ~store:apple (Some "ocaml"));
+    let catalog, seen = for_change "promote" ~config_root ~shipped:None in
+    let newer = "masc-sandbox-ocaml:20260925T0800Z-5c2e7a10" in
+    saved "promote"
+      (save ~config_root ~expected:seen
+         (changed "promote"
+            (promote catalog ~name:"ocaml" ~store:apple ~reference:newer ~digest:(digest 'c'))));
+    check string "the next start reads the file again" newer
+      (starts_from "after promote" ~config_root ~store:apple (Some "ocaml")))
+
+let test_a_keeper_that_cannot_start_says_why () =
+  with_dir (fun config_root ->
+    let refusal label ~store declared =
+      Resolver.error_to_string (refused_start label ~config_root ~store declared)
+    in
+    (match refused_start "no catalog" ~config_root ~store:apple (Some "ocaml") with
+     | Resolver.Catalog_unreadable (Missing _) as e ->
+       mentions "no catalog" (Resolver.error_to_string e) "masc sandbox-image promote"
+     | e -> fail ("no catalog: " ^ Resolver.error_to_string e));
+    write_catalog config_root promoted_ocaml;
+    (match refused_start "absent" ~config_root ~store:apple None with
+     | Resolver.Not_declared -> ()
+     | e -> fail ("absent: " ^ Resolver.error_to_string e));
+    (match refused_start "blank" ~config_root ~store:apple (Some "  ") with
+     | Resolver.Not_declared -> ()
+     | e -> fail ("blank: " ^ Resolver.error_to_string e));
+    (match refused_start "rust" ~config_root ~store:apple (Some "rust") with
+     | Resolver.Unknown_image { name = "rust"; known = [ "base"; "ocaml" ] } -> ()
+     | e -> fail ("rust: " ^ Resolver.error_to_string e));
+    let base_on_apple = refusal "base" ~store:apple (Some "base") in
+    mentions "base" base_on_apple "masc sandbox-image --recipe base --runtime apple_container`";
+    mentions "base" base_on_apple "promote base <tag> --runtime apple_container`";
+    omits "base is embedded" base_on_apple "--source";
+    let ocaml_on_docker = refusal "ocaml" ~store:Docker_daemon (Some "ocaml") in
+    mentions "ocaml" ocaml_on_docker "--recipe ocaml --source <checkout>`";
+    omits "docker takes no runtime flag" ocaml_on_docker "--runtime";
+    write_catalog config_root "[images.base]\nsurprise = 1\n";
+    match refused_start "malformed" ~config_root ~store:apple (Some "base") with
+    | Resolver.Catalog_unreadable (Invalid _) -> ()
+    | e -> fail ("malformed: " ^ Resolver.error_to_string e))
+
 let () =
   run "Sandbox image catalog"
     [ ( "resolve"
@@ -347,5 +416,11 @@ let () =
         ; test_case "a host without a catalog starts from the shipped one" `Quick
             test_a_host_without_a_catalog_starts_from_the_shipped_one
         ; test_case "a stale writer writes nothing" `Quick test_a_stale_writer_writes_nothing
+        ] )
+    ; ( "a keeper's image"
+      , [ test_case "a keeper starts from the build promoted now" `Quick
+            test_a_keeper_starts_from_the_build_promoted_now
+        ; test_case "a keeper that cannot start says why" `Quick
+            test_a_keeper_that_cannot_start_says_why
         ] )
     ]

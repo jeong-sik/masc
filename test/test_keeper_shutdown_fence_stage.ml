@@ -116,6 +116,10 @@ let () =
             "destruction stages keep the fence"
             `Quick
             test_destruction_stages_keep_the_fence
+        ; test_case
+            "boot decision differs by stage alone"
+            `Quick
+            test_boot_decision_differs_by_stage_alone
         ; test_case "every stage is classified" `Quick test_every_stage_is_classified
         ] )
     ]

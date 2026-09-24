@@ -5741,23 +5741,17 @@ let render_lanes_overview (state : state) =
                  names an action the message does not. *)
               (Theme.bad ()) ^ "  "
               ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset));
-  (* Use only the body's remaining rows. At small terminal heights the matrix
-     stays complete and the detail truncates explicitly; at ordinary heights
-     the wrapped block shows every slot id without the row's [fit_width]. *)
-  (match selected_standalone_lane state with
-   | None -> ()
-   | Some lane ->
+  (* The slot editor is the active task. Give its candidate rows the space
+     normally occupied by the selected lane's read-only detail, so CLI rows
+     remain visible on an ordinary terminal. *)
+  (match state.slot_editor, selected_standalone_lane state with
+   | Some _, _ -> ()
+   | None, None -> ()
+   | None, Some lane ->
        let action_error_rows =
          (match state.lanes_action_error with None -> 0 | Some _ -> 1)
          + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
          + List.length (Masc_tui_types.runtime_lane_stale_lines state)
-         (* The slot editor's heading, its rows and its key line, counted here
-            so the lane detail below gives up the space rather than the
-            editor being drawn past the frame. *)
-         + (match state.slot_editor with
-            | None -> 0
-            | Some _ ->
-              2 + max 1 (List.length (Masc_tui_types.slot_editor_rows state)))
        in
        let available =
          max 0

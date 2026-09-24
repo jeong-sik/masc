@@ -987,12 +987,43 @@ status: reference
   출처·패키지·이름·문서 revision으로 식별한다.
   Memory OS의 Fact와 별개다. `validated_approach`나 `lesson`을 기억했다고 Skill이
   생성되지는 않는다. 현재 발행·사용 경로는 [Skills](../SKILLS.md)를 따른다.
-  `keeper_skill_validate`는 export한 문서를 정적 검증하며, 실행 성공·안전성·발행을
-  뜻하지 않는다. 입력과 발행 경계도 위 [Skills](../SKILLS.md) 문서를 따른다.
+  `keeper_skill_validate`는 export한 문서를 정적 검증(`validation = "static"`)하며,
+  실행 성공·안전성·발행을 뜻하지 않는다. 검증 판정은 정규화된 아티팩트 참조(`artifact`)가
+  아니라 검증기가 읽은 실제 바이트에서 직접 계산한 다이제스트(`source {sha256, bytes, filename}`)로
+  대상을 지칭한다 — 정규화된 아티팩트 참조가 결과에 실리면 durable result manifest 부재로
+  인해 `tool output artifact storage failed`로 실패하거나 빈 미리보기 blob으로 치환되기
+  때문이다(#37493·#38514). 입력과 발행 경계도 위 [Skills](../SKILLS.md) 문서를 따른다.
   `keeper_skill_publish`는 Keeper가 `project-agents` source에 새 Skill을 만들고
   바로 발행하는 도구다. 이미 있는 이름은 덮어쓰지 않고, 지우는 건 운영자가 한다.
   → [Keeper_skill_catalog](../../lib/keeper/keeper_skill_catalog.mli),
   [Skill_reference](../../lib/skill_reference/skill_reference.mli)
+
+**Skill Source**
+: `runtime.toml`의 `[[skills.sources]]`에 선언되어 Skill 패키지를 탐색·적재하는 디렉터리
+  경로 SSOT(`Skill_source_config.t`). 각 소스는 고유 식별자(`id`), 기준점(`anchor` —
+  `Base_path`·`User_home`·`Absolute`), 설정 경로(`configured_path`), 접근 권한
+  (`access` — `Read_only`·`Read_write`)을 소유한다. 소스 탐색과 읽기 작업은
+  `Skill_catalog_snapshot.source_operation`(`Inspect_source`·`Read_source_directory`)이
+  관찰한다.
+  - **준비 거절 사유 (`source_not_ready`)**: `keeper_skill_publish` 또는 Skill 에디터가
+    소스 폴더 결함이나 미선언으로 요청을 수행할 수 없을 때 단순 오류 문자열이 아니라
+    닫힌 열 가지 variant(`Server_skill_editor.source_not_ready`)와 해결된 경로를 구조화된
+    `reason` 객체로 반환한다 —
+    1. `Source_not_in_catalog` (`runtime.toml`에 소스 ID 미선언)
+    2. `Source_index_out_of_range` (스냅샷 범위를 벗어난 소스 인덱스)
+    3. `Source_root_missing` (해결된 디렉터리 경로 부재)
+    4. `Source_root_not_directory` (해당 경로가 디렉터리가 아님)
+    5. `Source_root_unavailable` (소스 디렉터리 검사/읽기 작업 실패)
+    6. `Source_root_unresolved` (`Skill_source_config.resolution` — 앵커 가용 불가, 잘못된 앵커, 잘못된 경로로 인한 해석 실패)
+    7. `Source_root_create_failed` (누락된 선언 폴더 자동 생성 실패)
+    8. `Source_root_refresh_failed` (폴더 생성 후 카탈로그 갱신 실패)
+    9. `Source_root_moved` (쓰기 락 획득 도중 소스 경로 변경)
+    10. `Recovery_directory_missing` (복구 디렉터리 부재)
+    누락된 폴더(`Source_root_missing`)로 인한 거절을 미선언(`Source_not_in_catalog`)으로
+    오진하여 `runtime.toml` 설정을 의심하거나 운영자에게 불필요한 질의(`masc_ask`)를 남기지
+    않아야 한다(#38381).
+  → [Skill_source_config](../../lib/skill_config/skill_source_config.mli),
+  [Server_skill_editor](../../lib/server/server_skill_editor.mli)
 
 **Instruction Skill**
 : Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.

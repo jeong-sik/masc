@@ -1018,18 +1018,19 @@ let escape_invisible text =
   let output = Buffer.create (String.length text) in
   let length = String.length text in
   (* [base]: the scalar before this one, when it was drawn and is not itself
-     ignorable. A variation selector is kept only where it picks a form a
-     reader can see: VS15/VS16 right after an emoji (the emoji form of
-     U+2764, a keycap), or an ideographic variation selector (UTS #37) right
-     after an ideograph. Any other pairing -- a selector after [a], a second
-     selector in a row, a selector with no base -- displays as the plain
-     base with nothing to show for the selector (Unicode FAQ, unsupported
-     characters), so it is drawn as its escape. *)
+     ignorable. The one selector kept is VS15/VS16 right after a text-default
+     emoji (Emoji, not Emoji_Presentation: U+2764, U+2642, a keycap digit) --
+     the pairs emoji-variation-sequences.txt registers, and the ones joined
+     emoji use. Every other selector is drawn as its escape: after a plain
+     letter, behind another selector, with no base, and also after an
+     ideograph, because this boundary cannot tell a registered IVD or
+     StandardizedVariants pair from an unregistered one, and an unregistered
+     pair displays as the bare base (Unicode FAQ, unsupported characters). *)
   let keeps_selector ~base scalar =
-    match Uchar.to_int scalar with
-    | code when code = variation_selector_15 || code = variation_selector_16 ->
-      Uucp.Emoji.is_emoji base
-    | _ -> Uucp.Id.is_ideographic base
+    let code = Uchar.to_int scalar in
+    (code = variation_selector_15 || code = variation_selector_16)
+    && Uucp.Emoji.is_emoji base
+    && not (Uucp.Emoji.is_emoji_presentation base)
   in
   let rec walk index ~after_pictograph ~base =
     if index < length

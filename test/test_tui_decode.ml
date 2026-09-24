@@ -546,9 +546,9 @@ let test_terminal_text_keeps_the_tags_that_spell_a_flag () =
 
 (* The hand-kept list stopped at the tag block. Default_Ignorable_Code_Point
    also holds the word joiner family, the Hangul fillers and the variation
-   selectors. A selector is kept only where it picks a visible form: VS16
-   after an emoji, an ideographic selector after an ideograph. After a plain
-   letter, or behind another selector, it hides bytes under one glyph. *)
+   selectors. The only selector kept is VS15/VS16 right after a text-default
+   emoji. Anywhere else -- after a letter, after an ideograph, behind another
+   selector -- it can hide bytes under one glyph, so it is drawn. *)
 let test_terminal_text_escapes_every_default_ignorable () =
   let word_joiner = "\xe2\x81\xa0" (* U+2060 *) in
   let invisible_plus = "\xe2\x81\xa4" (* U+2064 *) in
@@ -569,9 +569,12 @@ let test_terminal_text_escapes_every_default_ignorable () =
     (Tui_decode.escape_invisible ("a" ^ soft_hyphen ^ "b"));
   Alcotest.(check string) "one selector keeps the emoji form" (heart ^ vs16)
     (Tui_decode.escape_invisible (heart ^ vs16));
-  Alcotest.(check string) "one selector keeps an ideographic variant"
-    (ideograph ^ vs17)
+  Alcotest.(check string) "an ideographic selector is drawn even after an ideograph"
+    (ideograph ^ "\\U000E0100")
     (Tui_decode.escape_invisible (ideograph ^ vs17));
+  Alcotest.(check string) "VS1 after an ideograph is drawn"
+    ("\xe4\xb8\x80" ^ "\\uFE00")
+    (Tui_decode.escape_invisible ("\xe4\xb8\x80" (* U+4E00 *) ^ "\xef\xb8\x80" (* U+FE00 *)));
   Alcotest.(check string) "one ideographic selector after a letter is drawn"
     "a\\U000E0100"
     (Tui_decode.escape_invisible ("a" ^ vs17));
@@ -584,9 +587,9 @@ let test_terminal_text_escapes_every_default_ignorable () =
   Alcotest.(check string) "a run of selectors behind one letter is drawn"
     "a\\U000E0100\\U000E0101\\U000E0100"
     (Tui_decode.escape_invisible ("a" ^ vs17 ^ vs18 ^ vs17));
-  Alcotest.(check string) "a second selector behind an ideograph is drawn"
-    (ideograph ^ vs17 ^ "\\U000E0101")
-    (Tui_decode.escape_invisible (ideograph ^ vs17 ^ vs18));
+  Alcotest.(check string) "a second emoji selector is drawn"
+    (heart ^ vs16 ^ "\\uFE0F")
+    (Tui_decode.escape_invisible (heart ^ vs16 ^ vs16));
   Alcotest.(check string) "a selector with no base is drawn" "\\U000E0100"
     (Tui_decode.escape_invisible vs17)
 

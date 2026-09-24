@@ -100,7 +100,9 @@ FAILURE_CAUSES = {
 
 def failure_cause(failure):
     return FAILURE_CAUSES.get(failure.get('code'),
-                              ('Model check failed (not a rate limit)', 'fail', None))
+                              # An unlisted code (provider_rejected among them)
+                              # may still come from a limit this side cannot see.
+                              ('Model check failed', 'fail', None))
 
 
 def print_verification_reason(failure):

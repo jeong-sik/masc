@@ -672,7 +672,7 @@ report_ping_status() {
   name=$(provider_name "$idx")
   case "$status" in
     2??|3??) return 0 ;;
-    429) warn "$name: HTTP 429 -- a rate limit (wait and retry) or a used-up quota (check billing); the installer's model check names which" ;;
+    429) warn "$name: rate limit or quota (HTTP 429) -- if a retry in a minute still fails, check credits and spend limits" ;;
     401|403) warn "$name: credential refused (HTTP $status) -- not a rate limit; check ${key_var:-access to the endpoint}" ;;
     402) warn "$name: quota or balance used up (HTTP 402) -- not a rate limit; check the plan or billing" ;;
     5??) warn "$name: provider-side error (HTTP $status) -- usually temporary; retry shortly" ;;

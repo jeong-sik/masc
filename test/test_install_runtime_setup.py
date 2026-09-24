@@ -489,7 +489,7 @@ class RuntimeSetupAdapter(unittest.TestCase):
         self.assertIn('[Rate limit (temporary)] rate_limited: fixture message', throttled)
         self.assertIn('Retry the selected connections', throttled)
         self.assertIn('not a rate limit', shown('provider_auth_refused'))
-        self.assertIn('[Model check failed (not a rate limit)] provider_rejected:', shown('provider_rejected'))
+        self.assertIn('[Model check failed] provider_rejected:', shown('provider_rejected'))
         # Captured output is not a terminal, so it carries no escape codes.
         self.assertNotIn('\x1b[', throttled)
 

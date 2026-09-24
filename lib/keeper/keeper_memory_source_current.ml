@@ -51,6 +51,7 @@ type source_read_failure =
       }
   | Source_over_limit of { max_bytes : int }
   | Source_io_failed of string
+  | Source_endpoint_unanswered of string
 
 let source_read_failure_to_string = function
   | Source_path_rejected reason -> reason
@@ -64,6 +65,8 @@ let source_read_failure_to_string = function
   | Source_over_limit { max_bytes } ->
     Printf.sprintf "source_path exceeds byte limit max_bytes=%d" max_bytes
   | Source_io_failed detail -> "source_path read failed: " ^ detail
+  | Source_endpoint_unanswered detail ->
+    "source_path endpoint did not answer the read: " ^ detail
 ;;
 
 type write_error =
@@ -348,23 +351,45 @@ let read_for_keepers_dir ~keepers_dir ~keeper_id =
    the same backend Read uses; a tree shared with the host (a Docker mount)
    is read on the host as before.
 
-   The endpoint reports a missing path or a non-file by exit status, so the
-   caller's mistake (wrong path) stays apart from an endpoint that did not
-   answer without parsing its stderr. *)
+   The endpoint reports a missing path, a non-file and a file it could not
+   read by exit status. Every answer about the file is a declared exit, so
+   the caller's mistake (wrong path) and one unreadable file stay apart from
+   an endpoint that did not answer at all, without parsing its stderr. *)
 let endpoint_source_missing_exit = 3
 let endpoint_source_not_regular_exit = 4
+let endpoint_source_unreadable_exit = 5
 
 let endpoint_source_argv ~path ~max_bytes =
   [ "sh"
   ; "-c"
   ; Printf.sprintf
-      {|if [ ! -e "$1" ]; then exit %d; fi; if [ ! -f "$1" ]; then exit %d; fi; exec head -c "$2" "$1"|}
+      {|if [ ! -e "$1" ]; then exit %d; fi; if [ ! -f "$1" ]; then exit %d; fi; head -c "$2" "$1" || exit %d|}
       endpoint_source_missing_exit
       endpoint_source_not_regular_exit
+      endpoint_source_unreadable_exit
   ; "sh"
   ; path
   ; string_of_int max_bytes
   ]
+;;
+
+let endpoint_source_read_of_outcome = function
+  (* The command did not finish with one of its declared exits: the
+     transport failed, the guest is absent, the read timed out, or the
+     process was signalled. None of that is an answer about this file. *)
+  | Error detail -> Error (Source_endpoint_unanswered detail)
+  | Ok (Unix.WEXITED code, _) when code = endpoint_source_missing_exit ->
+    Error Source_missing
+  | Ok (Unix.WEXITED code, _) when code = endpoint_source_not_regular_exit ->
+    Error Source_not_a_regular_file
+  | Ok (Unix.WEXITED code, _) when code = endpoint_source_unreadable_exit ->
+    Error (Source_io_failed "the endpoint could not read source_path")
+  | Ok (Unix.WEXITED 0, content) when String.length content > max_source_bytes ->
+    Error (Source_over_limit { max_bytes = max_source_bytes })
+  | Ok (Unix.WEXITED 0, content) -> Ok content
+  | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
+    Error
+      (Source_endpoint_unanswered "endpoint source read ended outside its declared exits")
 ;;
 
 let read_endpoint_source ~config ~meta ~resolved =
@@ -377,26 +402,20 @@ let read_endpoint_source ~config ~meta ~resolved =
     (* Raw bytes: the text capture rewrites the endpoint root to the host
        path, which would hash text the file does not hold and could grow a
        file past the limit. The command bounds its own output with head -c. *)
-    (match
-       Keeper_sandbox_read_backend.run_command_with_capture
-         ~ok_exit_codes:[ 0; endpoint_source_missing_exit; endpoint_source_not_regular_exit ]
-         ~config
-         ~meta
-         ~command_argv:(endpoint_source_argv ~path ~max_bytes:fetch_bytes)
-         ~max_bytes:None
-         ~timeout_sec
-         ()
-     with
-     | Error detail -> Error (Source_io_failed detail)
-     | Ok (Unix.WEXITED code, _) when code = endpoint_source_missing_exit ->
-       Error Source_missing
-     | Ok (Unix.WEXITED code, _) when code = endpoint_source_not_regular_exit ->
-       Error Source_not_a_regular_file
-     | Ok (Unix.WEXITED 0, content) when String.length content > max_source_bytes ->
-       Error (Source_over_limit { max_bytes = max_source_bytes })
-     | Ok (Unix.WEXITED 0, content) -> Ok content
-     | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
-       Error (Source_io_failed "endpoint source read ended outside its declared exits"))
+    Keeper_sandbox_read_backend.run_command_with_capture
+      ~ok_exit_codes:
+        [ 0
+        ; endpoint_source_missing_exit
+        ; endpoint_source_not_regular_exit
+        ; endpoint_source_unreadable_exit
+        ]
+      ~config
+      ~meta
+      ~command_argv:(endpoint_source_argv ~path ~max_bytes:fetch_bytes)
+      ~max_bytes:None
+      ~timeout_sec
+      ()
+    |> endpoint_source_read_of_outcome
 ;;
 
 let read_source ~config ~meta ~source_path =
@@ -573,12 +592,14 @@ let upsert_file_fact
       |> Result.map_error (fun detail -> Store_write_failed detail)
 ;;
 
-(* Whether a revalidation pass still asks its sources. The first read that
-   gets no answer ([Source_io_failed]) ends the asking for the rest of the
-   pass: every further read would wait out the same read timeout while this
-   store's lock is held, at the start of the turn. A fact that is not asked
-   ends exactly where a fact whose read failed ends -- kept, not
-   invalidated, and reported unverified. *)
+(* Whether a revalidation pass still asks its sources. The first read the
+   endpoint does not answer ([Source_endpoint_unanswered]) ends the asking
+   for the rest of the pass: every further read goes to the same endpoint
+   and would wait out the same read timeout while this store's lock is held,
+   at the start of the turn. A fact that is not asked ends exactly where a
+   fact whose read got no answer ends -- kept, not invalidated, and reported
+   unverified. One file that cannot be read ([Source_io_failed]) says nothing
+   about the others, so the pass goes on to the next fact. *)
 type revalidation_asking =
   | Asking
   | Stopped_after_unanswered_read
@@ -643,17 +664,23 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
                           }
                           :: step.invalidated_rev
                       }
-                    | Error (Source_io_failed _) ->
-                      (* Not being able to ask is not an answer. A stopped
-                         guest or a timed-out endpoint keeps the fact as it
-                         was last verified; only a source that answered as
-                         changed, missing or unusable invalidates it. The
-                         recall marks it, so the model can tell it from a
-                         re-read fact. *)
+                    (* Not being able to read is not an answer. A file that
+                       could not be read this time, or an endpoint that did
+                       not answer, keeps the fact as it was last verified;
+                       only a source that answered as changed, missing or
+                       unusable invalidates it. The recall marks it, so the
+                       model can tell it from a re-read fact. *)
+                    | Error (Source_io_failed _) -> keep_unverified step fact
+                    | Error (Source_endpoint_unanswered _) ->
                       { (keep_unverified step fact) with
                         asking = Stopped_after_unanswered_read
                       }
-                    | Error failure ->
+                    | Error
+                        (( Source_path_rejected _
+                         | Source_missing
+                         | Source_not_a_regular_file
+                         | Source_too_large _
+                         | Source_over_limit _ ) as failure) ->
                       Log.Keeper.warn
                         "source-bound memory invalidated keeper=%s source=%S reason=source_unavailable detail=%s"
                         meta.Keeper_meta_contract.name
@@ -671,11 +698,16 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
               previous.facts
           in
           let unverified = List.rev step.unverified_rev in
-          (match step.asking with
-           | Asking -> ()
-           | Stopped_after_unanswered_read ->
+          (match step.asking, unverified with
+           | Asking, [] -> ()
+           | Asking, _ :: _ ->
              Log.Keeper.warn
-               "source-bound memory kept %d fact(s) unverified keeper=%s: a source read got no answer, the rest of the pass was not asked"
+               "source-bound memory kept %d fact(s) unverified keeper=%s: source unreadable"
+               (List.length unverified)
+               meta.Keeper_meta_contract.name
+           | Stopped_after_unanswered_read, _ ->
+             Log.Keeper.warn
+               "source-bound memory kept %d fact(s) unverified keeper=%s: the endpoint did not answer, the rest of the pass was not asked"
                (List.length unverified)
                meta.Keeper_meta_contract.name);
           let facts = List.rev step.kept_rev in

@@ -908,13 +908,24 @@ let test_endpoint_source_read_reports_by_exit_status () =
     (fst (run_endpoint_source (Filename.concat dir "absent.txt") ~max_bytes:64)
      = exit_of S.endpoint_source_missing_exit);
   Alcotest.(check bool) "a directory exits with the not-regular status" true
-    (fst (run_endpoint_source dir ~max_bytes:64) = exit_of S.endpoint_source_not_regular_exit)
+    (fst (run_endpoint_source dir ~max_bytes:64) = exit_of S.endpoint_source_not_regular_exit);
+  if Unix.geteuid () <> 0
+  then (
+    let unreadable = Filename.concat dir "unreadable.txt" in
+    Out_channel.with_open_bin unreadable (fun oc -> output_string oc "hidden\n");
+    Unix.chmod unreadable 0o000;
+    let status =
+      Fun.protect
+        ~finally:(fun () -> Unix.chmod unreadable 0o600)
+        (fun () -> fst (run_endpoint_source unreadable ~max_bytes:64))
+    in
+    Alcotest.(check bool) "an unreadable file exits with the unreadable status" true
+      (status = exit_of S.endpoint_source_unreadable_exit))
 ;;
 
 (* A source the store cannot read this time is not an answer about the
    source. The fact stays, nothing is invalidated, and the recall is told it
-   was not re-read. A permission-denied host file stands in for a stopped
-   guest: both are Source_io_failed. *)
+   was not re-read. A permission-denied host file is Source_io_failed. *)
 let test_unreadable_source_keeps_its_fact_marked_unverified () =
   if Unix.geteuid () = 0 then Alcotest.skip ();
   with_temp_dir
@@ -958,18 +969,17 @@ let test_unreadable_source_keeps_its_fact_marked_unverified () =
       projection.Source.unverified_paths
 ;;
 
-(* After one source gets no answer, the pass asks no further source. The
-   second source changed on disk, so a read of it would invalidate its fact;
-   it is kept instead, unverified like the unreadable one, which shows it was
-   not read. Once the first source is readable again, the same pass reads
-   every source and the change is caught. *)
-let test_unanswered_source_read_stops_the_pass () =
+(* One file that cannot be read says nothing about the other sources. The
+   pass goes on: the unreadable fact is kept unverified, the source that
+   changed on disk after it is read and invalidated, and the unchanged one is
+   re-verified. *)
+let test_one_unreadable_source_does_not_stop_the_pass () =
   if Unix.geteuid () = 0 then Alcotest.skip ();
   with_temp_dir
   @@ fun base_path ->
   let module Source = Masc.Keeper_memory_source_current in
   let config = Masc.Workspace.default_config base_path in
-  let meta = make_meta "source-unanswered-pass" in
+  let meta = make_meta "source-unreadable-pass" in
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
   in
@@ -1002,36 +1012,62 @@ let test_unanswered_source_read_stops_the_pass () =
   write_source changed "another value\n";
   let unreadable_host = Filename.concat sandbox_root unreadable in
   Unix.chmod unreadable_host 0o000;
-  let stopped =
+  let revalidated =
     Fun.protect
       ~finally:(fun () -> Unix.chmod unreadable_host 0o600)
       (fun () -> Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
   in
-  (match stopped with
-   | Error detail -> Alcotest.fail detail
-   | Ok projection ->
-     Alcotest.(check int) "every fact is kept" 3 (List.length projection.Source.facts);
-     Alcotest.(check int)
-       "the changed source was not read, so nothing is invalidated"
-       0
-       (List.length projection.Source.invalidations);
-     Alcotest.(check (list string))
-       "the facts after the unanswered read are unverified too"
-       [ unreadable; changed; unchanged ]
-       projection.Source.unverified_paths);
-  match Source.revalidate ~config ~meta ~keepers_dir ~now:300.0 () with
+  match revalidated with
   | Error detail -> Alcotest.fail detail
   | Ok projection ->
     Alcotest.(check (list string))
-      "a pass that gets every answer leaves nothing unverified"
-      []
-      projection.Source.unverified_paths;
+      "the unreadable and the unchanged facts are kept"
+      [ unreadable; unchanged ]
+      (List.map (fun (fact : Source.fact) -> fact.source.path) projection.Source.facts);
     Alcotest.(check (list string))
-      "and invalidates the changed source"
+      "the changed source after the unreadable one is still read and invalidated"
       [ changed ]
       (List.map
          (fun (invalidation : Source.invalidation) -> invalidation.source_path)
-         projection.Source.invalidations)
+         projection.Source.invalidations);
+    Alcotest.(check (list string))
+      "only the unreadable fact is unverified"
+      [ unreadable ]
+      projection.Source.unverified_paths
+;;
+
+(* What an endpoint run says about the source. A run that reached none of
+   the command's declared exits is the endpoint not answering, which stops
+   the revalidation pass; an unreadable file is a declared exit and is about
+   that file only. The stop itself has no seam here: an endpoint that does
+   not answer cannot be produced in this test without a new test hook. *)
+let test_endpoint_source_outcome_separates_endpoint_from_file () =
+  let module S = Masc.Keeper_memory_source_current in
+  let describe = function
+    | Ok content -> "ok:" ^ content
+    | Error (S.Source_endpoint_unanswered _) -> "endpoint_unanswered"
+    | Error (S.Source_io_failed _) -> "file_unreadable"
+    | Error S.Source_missing -> "missing"
+    | Error S.Source_not_a_regular_file -> "not_regular"
+    | Error (S.Source_over_limit _) -> "over_limit"
+    | Error (S.Source_too_large _) -> "too_large"
+    | Error (S.Source_path_rejected _) -> "path_rejected"
+  in
+  let check label expected outcome =
+    Alcotest.(check string) label expected (describe (S.endpoint_source_read_of_outcome outcome))
+  in
+  check "a transport failure is the endpoint" "endpoint_unanswered"
+    (Error "microvm_remote_read_transport_failed");
+  check "a signalled run is the endpoint" "endpoint_unanswered"
+    (Ok (Unix.WSIGNALED Sys.sigkill, ""));
+  check "an undeclared exit is the endpoint" "endpoint_unanswered"
+    (Ok (Unix.WEXITED 126, ""));
+  check "the unreadable exit is the file" "file_unreadable"
+    (Ok (Unix.WEXITED S.endpoint_source_unreadable_exit, ""));
+  check "the missing exit" "missing" (Ok (Unix.WEXITED S.endpoint_source_missing_exit, ""));
+  check "the not-regular exit" "not_regular"
+    (Ok (Unix.WEXITED S.endpoint_source_not_regular_exit, ""));
+  check "exit 0 carries the bytes" "ok:value\n" (Ok (Unix.WEXITED 0, "value\n"))
 ;;
 
 let test_source_bound_write_is_not_gated_by_recall_size () =
@@ -2956,9 +2992,13 @@ let () =
             `Quick
             test_unreadable_source_keeps_its_fact_marked_unverified
         ; Alcotest.test_case
-            "an unanswered source read stops the pass, the rest unverified"
+            "one unreadable source does not stop the pass"
             `Quick
-            test_unanswered_source_read_stops_the_pass
+            test_one_unreadable_source_does_not_stop_the_pass
+        ; Alcotest.test_case
+            "endpoint source outcome separates the endpoint from the file"
+            `Quick
+            test_endpoint_source_outcome_separates_endpoint_from_file
         ] )
     ]
 ;;

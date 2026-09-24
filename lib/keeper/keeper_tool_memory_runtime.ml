@@ -967,7 +967,9 @@ let class_of_memory_write_error_kind = function
   (* Like a retraction of an absent fact: the store moved on since the id was
      read, which a fresh search answers. *)
   | Supersedes_not_current -> Tool_result.Workflow_rejection
-  | Source_read_failed (Keeper_memory_source_current.Source_io_failed _)
+  | Source_read_failed
+      ( Keeper_memory_source_current.Source_io_failed _
+      | Keeper_memory_source_current.Source_endpoint_unanswered _ )
   | Persistence_failed (Ordinary_current | Source_bound_current) ->
     Tool_result.Dependency_unavailable
   (* The store committed and then did not show what it committed: a

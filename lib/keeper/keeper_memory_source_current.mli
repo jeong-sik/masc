@@ -43,15 +43,18 @@ type projection =
   ; facts : fact list
   ; invalidations : invalidation list
   ; unverified_paths : string list
-      (** Facts kept this time without a re-read: the one whose read got no
-          answer ([Source_io_failed]) and every fact after it in the pass,
-          which is not asked. A recall renders them as unverified. *)
+      (** Facts kept this time without a re-read: each one whose file could
+          not be read ([Source_io_failed]); the one whose endpoint did not
+          answer ([Source_endpoint_unanswered]) and every fact after it in
+          the pass, which is not asked. A recall renders them as
+          unverified. *)
   }
 
-(** Why a source file could not be read. All but [Source_io_failed] are the
-    caller's to fix -- the path, not the store, is wrong; [Source_io_failed]
-    is the filesystem or the endpoint not answering, and revalidation keeps a
-    fact it could not re-read rather than invalidating it. *)
+(** Why a source file could not be read. All but [Source_io_failed] and
+    [Source_endpoint_unanswered] are the caller's to fix -- the path, not the
+    store, is wrong. Those two are not answers about the source, and
+    revalidation keeps a fact it could not re-read rather than invalidating
+    it. *)
 type source_read_failure =
   | Source_path_rejected of string
       (** Empty, or outside the keeper's read boundary; the boundary's own reason. *)
@@ -65,17 +68,32 @@ type source_read_failure =
       (** Read inside a sandbox, which stops one byte past [max_bytes] and so
           knows the source is larger without knowing by how much. *)
   | Source_io_failed of string
+      (** This one file could not be read: a host I/O error, a path the
+          endpoint tree cannot name, or the endpoint's
+          [endpoint_source_unreadable_exit]. Other sources may still read. *)
+  | Source_endpoint_unanswered of string
+      (** The endpoint did not finish the read command with one of its
+          declared exits: transport failure, absent guest, timeout, signal.
+          Every further read in the same pass goes to the same endpoint. *)
 
 val source_read_failure_to_string : source_read_failure -> string
 
 (** The command a source read runs on an endpoint-owned tree (microVM,
     remote): at most [max_bytes] of [path], exiting
-    [endpoint_source_missing_exit] when the path does not exist and
-    [endpoint_source_not_regular_exit] when it is not a regular file. *)
+    [endpoint_source_missing_exit] when the path does not exist,
+    [endpoint_source_not_regular_exit] when it is not a regular file and
+    [endpoint_source_unreadable_exit] when reading it fails. *)
 val endpoint_source_argv : path:string -> max_bytes:int -> string list
 
 val endpoint_source_missing_exit : int
 val endpoint_source_not_regular_exit : int
+val endpoint_source_unreadable_exit : int
+
+(** What one run of [endpoint_source_argv] says about the source. [Error]
+    from the run (no declared exit reached) is [Source_endpoint_unanswered];
+    each declared exit is an answer about this one file. *)
+val endpoint_source_read_of_outcome :
+  (Unix.process_status * string, string) result -> (string, source_read_failure) result
 
 type write_error =
   | Source_read_failed of source_read_failure
@@ -117,11 +135,13 @@ val upsert_file_fact :
 (** Re-read every current source under the same sandbox resolver used by the
     write path. Unchanged facts remain current. A source that answered as
     changed, missing or unusable is atomically removed and replaced by a
-    pending invalidation; one that could not be read at all
-    ([Source_io_failed], e.g. a stopped guest) keeps its fact as last
-    verified, and the pass asks no further source: the facts after it are
-    kept the same way, unverified, instead of each waiting out the read
-    timeout under this store's lock. Invalidations
+    pending invalidation. One whose file could not be read
+    ([Source_io_failed]) keeps its fact as last verified, and the pass reads
+    the next source. One whose endpoint did not answer
+    ([Source_endpoint_unanswered], e.g. a stopped guest) keeps its fact the
+    same way, and the pass asks no further source: the facts after it are
+    kept unverified too, instead of each waiting out the read timeout under
+    this store's lock. Invalidations
     survive subsequent turns until [upsert_file_fact] recreates that path.
     Revalidation takes only the source-store lock: its invalidation rendering
     is strictly shorter than the fact it replaces, so it cannot overcommit the

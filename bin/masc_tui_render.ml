@@ -5643,9 +5643,15 @@ let render_exact_lane_provider_editor (state : state) editor =
      else
        picker.Masc_tui_types.rlp_choices
        |> List.iteri (fun offset (runtime : Tui_decode.runtime_option) ->
+            let destination =
+              match runtime.ro_exact_slot_group with
+              | Tui_decode.Exact_http_slots -> "HTTP tail"
+              | Tui_decode.Exact_cli_slots -> "CLI tail"
+            in
             box_line buf cols
-              (Printf.sprintf "  %s %s · %s / %s%s"
+              (Printf.sprintf "  %s [%s] %s · %s / %s%s"
                  (if offset = 0 then ">" else " ")
+                 destination
                  (Terminal_text.single_line runtime.ro_id)
                  (Terminal_text.single_line runtime.ro_provider)
                  (Terminal_text.single_line runtime.ro_model)

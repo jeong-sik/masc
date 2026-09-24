@@ -12356,6 +12356,7 @@ def runtime_resolved_runtime(
         "id": runtime_id,
         "provider": provider,
         "model": model,
+        "exact_slot_group": "slots",
         "effective_max_context": 200_000,
         "max_context_source": "capability",
         "max_output_tokens": 8192,

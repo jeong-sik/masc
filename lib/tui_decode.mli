@@ -832,10 +832,14 @@ type runtime_context_source =
   | Runtime_context_capability
   | Runtime_context_clamped
 
+type exact_slot_group = Exact_http_slots | Exact_cli_slots
+
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
   ro_model : string;
+  ro_exact_slot_group : exact_slot_group;
+      (** The declared list an exact-lane append writes. *)
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;

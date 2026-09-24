@@ -207,7 +207,13 @@ class LaneStore:
                 if action == "append":
                     if slot in declared or slot in declared_cli:
                         return 400, {"error": f"{slot} is already a slot of {name}"}
-                    declared.append(slot)
+                    runtime = next(
+                        (row for row in self.body["runtimes"] if row["id"] == slot), None
+                    )
+                    if runtime is not None and runtime["exact_slot_group"] == "cli_slots":
+                        declared_cli.append(slot)
+                    else:
+                        declared.append(slot)
                 elif action in ("move", "drop"):
                     source = declared if slot in declared else declared_cli
                     if slot not in source:
@@ -529,6 +535,11 @@ def run_exact(executable: str) -> None:
 def run_cli_editor(executable: str) -> None:
     """The Librarian editor reaches both arrays and explains their boundary."""
     store = LaneStore()
+    new_cli = "a-cli"
+    store.body["runtimes"].append({
+        **h.runtime_resolved_runtime(new_cli, "Official client", "model"),
+        "exact_slot_group": "cli_slots",
+    })
     librarian = store.exact_lane("librarian_exact")
     cli = ["codex_subscription.gpt-6-luna", "claude_code.claude-sonnet-5"] + [
         f"codex_subscription.extra-{index}" for index in range(8)
@@ -589,6 +600,24 @@ def run_cli_editor(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"a", b"add provider")
         h.send_and_wait(process, fd, output, b"e",
                         b"> 11/11  [CLI] codex_subscription.extra-7")
+        h.send_and_wait(process, fd, output, b"k" * 10,
+                        b"> 1/11  [HTTP]")
+        mark = mark_output(fd, output)
+        h.send_and_wait(process, fd, output, b"a", b"[CLI tail] a-cli")
+        h.wait_for_output(process, fd, output,
+                          b"[HTTP tail] runtime-a", start=mark, timeout=5.0)
+        mark = mark_output(fd, output)
+        os.write(fd, b"\r")
+        posted = wait_for_posts(2)
+        if posted[1] != {"lane": "exact/librarian_exact", "action": "append",
+                         "runtime_id": new_cli}:
+            raise AssertionError(f"CLI append posted {posted[1]!r}")
+        h.wait_for_output(process, fd, output,
+                          b"> 1/12  [HTTP]", start=mark, timeout=5.0)
+        h.send_and_wait(process, fd, output, b"j" * 11,
+                        b"> 12/12  [CLI] a-cli")
+        if store.exact_declared_cli["librarian_exact"][-1] != new_cli:
+            raise AssertionError("new official client did not append to CLI tail")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

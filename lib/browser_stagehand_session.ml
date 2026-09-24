@@ -126,12 +126,13 @@ let send_reply t id result =
 ;;
 
 (* Replies are sent from their own fibers: the fiber delivering CDP frames
-   must not wait for a CDP reply. A finished switch means the session is
-   over, so the reply is only logged. *)
+   must not wait for a CDP reply. A cancelled or finished switch means the
+   session is over: a fiber forked there would never send, so the reply is
+   logged instead. *)
 let fork t work =
-  match Eio.Fiber.fork ~sw:t.sw work with
-  | () -> ()
-  | exception Invalid_argument detail -> t.log (Reply_not_delivered ("the session is over: " ^ detail))
+  match Eio.Switch.get_error t.sw with
+  | Some error -> t.log (Reply_not_delivered ("the session is over: " ^ Printexc.to_string error))
+  | None -> Eio.Fiber.fork ~sw:t.sw work
 ;;
 
 let refusal reason = Error { Wire.code = Wire.host_refused; message = reason }

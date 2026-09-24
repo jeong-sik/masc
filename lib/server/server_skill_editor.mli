@@ -71,18 +71,30 @@ type create_outcome =
       ; reason : string
       }
 
+(** What happened to the package folder after its [SKILL.md] was quarantined.
+    A folder left behind makes [create] answer [Package_already_exists] for
+    the same package id, so the delete says whether it is gone. *)
+type package_directory =
+  | Package_directory_removed
+  | Package_directory_kept_non_empty
+      (** Other files (for example [references/]) are still in the folder,
+          so it stays. *)
+  | Package_directory_remove_failed of string
+
 type delete_outcome =
   | Deleted_and_published of
       { reference : Skill_reference.t
       ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
       ; recovery_id : string
       ; disposition : recovery_disposition
+      ; package_directory : package_directory
       }
   | Deleted_but_unpublished of
       { reference : Skill_reference.t
       ; reason : delete_unpublished_reason
       ; recovery_id : string
       ; disposition : recovery_disposition
+      ; package_directory : package_directory
       }
 
 (** Why a source could not take the request. Each case carries what was

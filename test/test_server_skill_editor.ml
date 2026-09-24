@@ -390,6 +390,60 @@ let test_delete_exact_reference_and_publish () =
    | Ok _ -> fail "published snapshot retained the deleted reference")
 ;;
 
+let delete_package_directory ~base_path ~reference ~refresh =
+  match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
+  | Ok (Editor.Deleted_and_published { package_directory; _ }) -> package_directory
+  | Ok (Deleted_but_unpublished _) -> fail "deleted Skill was not published"
+  | Error error -> fail (Editor.error_to_string error)
+;;
+
+(* #38594: delete moved SKILL.md out and left the package folder, so the same
+   package id could never be created again. *)
+let test_delete_removes_empty_package_and_id_is_reusable () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
+  let package_dir = Filename.dirname skill_path in
+  (match delete_package_directory ~base_path ~reference ~refresh with
+   | Editor.Package_directory_removed -> ()
+   | Package_directory_kept_non_empty -> fail "an empty package folder was kept"
+   | Package_directory_remove_failed detail -> fail detail);
+  check bool "package folder removed" false (Sys.file_exists package_dir);
+  let source_id =
+    match Skill_source_config.source_id_of_string "workspace" with
+    | Ok value -> value
+    | Error detail -> fail detail
+  in
+  let recreated = skill_text "Recreated." "# Recreated" in
+  (match
+     Editor.create
+       ~base_path
+       ~source_id
+       ~package_id:"sample"
+       ~source_text:recreated
+       ~refresh
+   with
+   | Ok (Editor.Created_and_published _) -> ()
+   | Ok (Created_but_unpublished _) -> fail "recreated Skill was not published"
+   | Error error -> fail ("same package id was refused: " ^ Editor.error_to_string error));
+  check string "recreated SKILL.md" recreated (read_file skill_path)
+;;
+
+let test_delete_keeps_package_with_other_files () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
+  let package_dir = Filename.dirname skill_path in
+  let references_dir = Filename.concat package_dir "references" in
+  Unix.mkdir references_dir 0o700;
+  let note = Filename.concat references_dir "note.md" in
+  write_file note "kept";
+  (match delete_package_directory ~base_path ~reference ~refresh with
+   | Editor.Package_directory_kept_non_empty -> ()
+   | Package_directory_removed -> fail "a folder with other files was removed"
+   | Package_directory_remove_failed detail -> fail detail);
+  check bool "SKILL.md moved out" false (Sys.file_exists skill_path);
+  check string "other file untouched" "kept" (read_file note)
+;;
+
 let test_delete_stale_revision_does_not_mutate () =
   with_workspace @@ fun base_path ->
   let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
@@ -973,6 +1027,10 @@ let () =
             test_create_publishes_without_host_path_input
         ; test_case "delete exact reference and publish" `Quick
             test_delete_exact_reference_and_publish
+        ; test_case "delete removes the empty package and the id is reusable" `Quick
+            test_delete_removes_empty_package_and_id_is_reusable
+        ; test_case "delete keeps a package that holds other files" `Quick
+            test_delete_keeps_package_with_other_files
         ; test_case "delete stale revision does not mutate" `Quick
             test_delete_stale_revision_does_not_mutate
         ; test_case "delete stale published revision does not mutate" `Quick

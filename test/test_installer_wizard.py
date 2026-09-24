@@ -112,13 +112,16 @@ print('init complete')
             helper = ROOT / 'scripts/install-runtime-setup.py'
             before_wizard = SCRIPT.split('# Check persisted state before init',1)[1].split('# --- 4b. first-run wizard',1)[0]
             body = ('\nDRY_RUN=0\nSEED_CONFIG=1\nexport TERM=dumb\nBASE_PATH=' + shlex.quote(str(base)) +
-                    '\nDEST=' + shlex.quote(str(binary)) + '\nfetch_bundle_asset() { cp ' +
+                    '\nDEST=' + shlex.quote(str(binary)) + '\nGUEST_SHIM=1\ninstall_guest_shim() { printf "shim=%s\\n" "$BASE_PATH"; }' +
+                    '\nfetch_bundle_asset() { cp ' +
                     shlex.quote(str(helper)) + ' "$2"; }\n# Check persisted state before init' + before_wizard +
                     '\nprintf "chosen=%s\\n" "$BASE_PATH"\n')
             result, terminal = run_shell(body,b'\n')
             self.assertEqual(result.returncode,0,terminal)
             chosen = Path(str(base) + '-new').resolve()
             self.assertIn('chosen='+str(chosen),result.stdout)
+            # The guest shim goes to the workspace the check settled on, not the old one.
+            self.assertIn('shim='+str(chosen),result.stdout)
             import json
             observed = [json.loads(line) for line in calls.read_text().splitlines()]
             self.assertEqual(observed,[['setup-preflight',str(base.resolve())],

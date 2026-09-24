@@ -109,6 +109,9 @@ die() { echo "$*" >&2; exit 1; }
 run_wizard() { touch "$BASE_PATH/wizard-ran"; }
 is_tty() { [ "$TEST_TERMINAL" = 1 ]; }
 verify_checksum() { :; }
+fetch_release_checksums() { :; }
+CHECKSUMS_AVAILABLE=1
+expected_hash() { echo fixture-hash; }
 curl() {
   local output=""
   while [ "$#" -gt 0 ]; do

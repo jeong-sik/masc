@@ -799,6 +799,8 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
             (fun front_digest ->
                { Front.first_atom; front_digest; source = Front.Turn_start_after_seed_refusal })
             (digest_at first_atom))
+        ~held_front:(fun () -> !held)
+        ~restore_front:(fun prior -> held := prior)
         ~hold_front:(fun seed -> held := Some seed)
         ~on_turn_start:(fun _ _ -> incr resent)
         ~attempt:(fun () ->
@@ -926,11 +928,11 @@ let absorbed_at ~point history =
 ;;
 
 let librarian_turn ?(refusal = overflow) ?(refuses = fun ~atoms:_ -> false)
-      ~point ~accepted ~limit ~boundary history =
+      ?(held = ref None) ~point ~accepted ~limit ~boundary history =
   let continuity = absorbed_at ~point history in
   let digest_at = Window.atom_opening_digest history in
   let atom_count = List.length history in
-  let held = ref None and last = ref None and sent = ref [] in
+  let last = ref None and sent = ref [] in
   let outcome =
     Try_provider.turn_boundary_resend_sequence
       ~same_run_retry_authorized:(fun () -> true)
@@ -941,6 +943,8 @@ let librarian_turn ?(refusal = overflow) ?(refuses = fun ~atoms:_ -> false)
           (fun front_digest ->
              { Front.first_atom; front_digest; source = Front.Turn_start_after_librarian_refusal })
           (digest_at first_atom))
+      ~held_front:(fun () -> !held)
+      ~restore_front:(fun prior -> held := prior)
       ~hold_front:(fun seed -> held := Some seed)
       ~on_turn_start:(fun _ _ -> ())
       ~attempt:(fun () ->
@@ -1025,13 +1029,41 @@ let test_an_unattributed_size_refusal_resends_from_the_boundary () =
 (* A 400 that was not about size draws the same refusal from the boundary:
    one more request, no accepted start, and the turn ends on that refusal. *)
 let test_a_refusal_not_about_size_ends_the_turn_after_one_resend () =
+  let held = ref None in
   let outcome, sent, recorded, _ =
-    librarian_turn ~refusal:unattributed_refusal ~refuses:(fun ~atoms:_ -> true)
+    librarian_turn ~held ~refusal:unattributed_refusal ~refuses:(fun ~atoms:_ -> true)
       ~point:2 ~accepted:None ~limit:100 ~boundary:8 (exchanges ~from:0 7)
   in
   check bool "the refusal is the turn's error" true (outcome = Error unattributed_refusal);
   check (list int) "one resend from the boundary, and nothing after" [ 2; 8 ] sent;
-  check bool "no accepted start is recorded" true (Option.is_none recorded)
+  check bool "no accepted start is recorded" true (Option.is_none recorded);
+  (* The front belongs to the turn: the declared-lane walk asks the next
+     candidate with it. The boundary did not answer a refusal that named no
+     size, so the next candidate must open on the range the turn started
+     with, not at the boundary a success would then record for every later
+     turn. *)
+  check bool "the boundary front is given back" true (Option.is_none !held);
+  let next_outcome, next_sent, next_recorded, _ =
+    librarian_turn ~held ~point:2 ~accepted:None ~limit:100 ~boundary:8
+      (exchanges ~from:0 7)
+  in
+  check bool "the next candidate is accepted" true (Result.is_ok next_outcome);
+  check (list int) "and opens at the Librarian point, not the boundary" [ 2 ] next_sent;
+  check (option int) "so the accepted start stays at the point" (Some 2)
+    (Option.map (fun (seed : Front.seed) -> seed.first_atom) next_recorded)
+;;
+
+(* A typed size refusal of the boundary request keeps the front: the
+   boundary is smaller than the refused range, and giving it back would send
+   the larger range again. *)
+let test_a_size_refused_boundary_keeps_the_front () =
+  let held = ref None in
+  let outcome, _, _, _ =
+    librarian_turn ~held ~point:2 ~accepted:None ~limit:3 ~boundary:8 (exchanges ~from:0 7)
+  in
+  check bool "the size refusal is the turn's error" true (outcome = Error overflow);
+  check (option int) "the boundary front stays held" (Some 8)
+    (Option.map (fun (seed : Front.seed) -> seed.first_atom) !held)
 ;;
 
 (* Rules 6 and 7: the resend carries this turn's input and never less. When
@@ -1104,6 +1136,8 @@ let () =
             test_an_unattributed_size_refusal_resends_from_the_boundary
         ; test_case "a refusal not about size ends the turn after one resend" `Quick
             test_a_refusal_not_about_size_ends_the_turn_after_one_resend
+        ; test_case "a size-refused boundary keeps the front" `Quick
+            test_a_size_refused_boundary_keeps_the_front
         ; test_case "the actual request can advance beyond the fallback ledger" `Quick
             (test_a_refused_front_survives_candidate_changes
                ~fallback_atoms:8 ~blocks:true ~warm_fallback:true)

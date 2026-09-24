@@ -2599,6 +2599,7 @@ let run_named
                    | None -> Keeper_carried_front.no_seed_read)
             ; carried_front_after_refusal = (fun () -> !refused_carried_front)
             ; hold_carried_front = (fun seed -> refused_carried_front := Some seed)
+            ; restore_carried_front = (fun prior -> refused_carried_front := prior)
             ; base_path
             ; keeper_name
             ; name

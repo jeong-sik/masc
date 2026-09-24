@@ -72,6 +72,14 @@ let test_a_partial_marker_before_the_end_is_text () =
   check string "kept as typed" "tail\x1b[20" paste.Masc_tui_paste.text
 ;;
 
+let test_interrupted_decoder_keeps_partial_marker () =
+  let decoder = Masc_tui_paste.create () in
+  String.iter (fun byte -> ignore (Masc_tui_paste.feed decoder byte))
+    "tail\x1b[20";
+  let paste = Masc_tui_paste.finish_unterminated decoder in
+  check string "kept for the draft" "tail\x1b[20" paste.Masc_tui_paste.text
+;;
+
 (* The stream ending is a terminal that went away, not a reason to lose what
    the operator already pasted. *)
 let test_an_unterminated_paste_keeps_what_arrived () =
@@ -173,6 +181,8 @@ let () =
             test_a_broken_match_returns_its_bytes
         ; test_case "a partial marker before the end is text" `Quick
             test_a_partial_marker_before_the_end_is_text
+        ; test_case "interrupted decoder keeps partial marker" `Quick
+            test_interrupted_decoder_keeps_partial_marker
         ; test_case "an unterminated paste keeps what arrived" `Quick
             test_an_unterminated_paste_keeps_what_arrived
         ] )

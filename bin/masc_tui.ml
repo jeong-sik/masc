@@ -18087,7 +18087,8 @@ and is loaded on demand through keeper_skill.
          outright. Both leave through [Break], the exit q takes, so the
          switch release that stops a server this TUI started runs for every
          way out. *)
-      (match Masc_tui_exit_signals.poll exit_signals with
+      let interrupted_paste =
+        match Masc_tui_exit_signals.poll exit_signals with
        | Masc_tui_exit_signals.Quit ->
            note_exit_reason
              (match Masc_tui_exit_signals.terminate_signal exit_signals with
@@ -18095,12 +18096,20 @@ and is loaded on demand through keeper_skill.
               | None -> Masc_tui_exit_reason.Interrupt);
            raise Break
        | Masc_tui_exit_signals.Interrupt_armed ->
-           state.quit_armed <- false;
-           report_action state "system"
-             (Masc_tui_exit_signals.quit_notice ~key:"Ctrl-C"
-                ~waiting:(Masc_tui_keeper_chat_queue.length state.msg_queued));
-           Render_schedule.request render_schedule Render_schedule.Background
-       | Masc_tui_exit_signals.Continue -> ());
+           (match input_reader.paste_decoder with
+            | Some decoder ->
+                input_reader.paste_decoder <- None;
+                Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                Some (Masc_tui_paste.finish_unterminated decoder)
+            | None ->
+                state.quit_armed <- false;
+                report_action state "system"
+                  (Masc_tui_exit_signals.quit_notice ~key:"Ctrl-C"
+                     ~waiting:(Masc_tui_keeper_chat_queue.length state.msg_queued));
+                Render_schedule.request render_schedule Render_schedule.Background;
+                None)
+       | Masc_tui_exit_signals.Continue -> None
+      in
       if
         drain_async_messages state ~base_path ~http_refresh_inflight
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
@@ -18157,13 +18166,22 @@ and is loaded on demand through keeper_skill.
           launch_msx_poll state ~mailbox:async_messages
         end
       end;
-      let input = read_input ~timeout:input_timeout input_reader () in
+      let input =
+        match interrupted_paste with
+        | Some paste -> Some (Pasted paste)
+        | None -> read_input ~timeout:input_timeout input_reader ()
+      in
       (* The footer's notice answers the last key. The next input is a new
          key, so the notice goes before anything handles it: it takes the
          room the key hints need, and a notice left standing after the
          operator moved on hid the hints of the screen they moved to. A key
          that has something to say sets its own. *)
       if Option.is_some input then state.last_action <- None;
+      Option.iter
+        (fun _ ->
+          report_action state "system"
+            "Incomplete paste restored as draft; press Enter to send")
+        interrupted_paste;
       (* SIGWINCH can arrive while [read_input] is waiting. Consume it before
          this input sees the old frame; the next loop would be one key too
          late. *)

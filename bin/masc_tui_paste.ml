@@ -60,6 +60,14 @@ let contents decoder =
   { text = newlines_normalized (Buffer.contents decoder.text);
     dropped = decoder.dropped }
 
+let finish_unterminated decoder =
+  (* A terminal can lose the end marker partway through. Those bytes still
+     belong to the draft if the operator ends the stalled paste explicitly. *)
+  if decoder.matched > 0 then
+    keep decoder (String.sub end_marker 0 decoder.matched);
+  decoder.matched <- 0;
+  contents decoder
+
 let feed decoder byte =
   let marker_length = String.length end_marker in
   if byte = end_marker.[decoder.matched] then begin
@@ -89,11 +97,7 @@ let read ~next_byte =
   done;
   match !result with
   | Some paste -> paste
-  | None ->
-      (* A finite source that ended inside a marker still contains those bytes. *)
-      if decoder.matched > 0 then
-        keep decoder (String.sub end_marker 0 decoder.matched);
-      contents decoder
+  | None -> finish_unterminated decoder
 
 (* Dragging a file onto a terminal, or copying it in Finder, pastes the path
    the way a shell would need it: every space backslash-escaped. The draft is

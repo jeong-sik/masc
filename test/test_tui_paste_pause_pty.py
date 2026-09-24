@@ -61,6 +61,50 @@ def run(executable: str) -> None:
         http_requests=requests,
     )
 
+    interrupted_requests: h.HttpRequests = []
+
+    def interrupted_interact(process, master_fd, _slave_fd, output, _base_path):
+        h.wait_for_output(process, master_fd, output, h.BRACKETED_PASTE_ON,
+                          start=0, timeout=5.0)
+        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.select_keeper_row(process, master_fd, output, b"alpha")
+        h.send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+
+        os.write(master_fd, h.PASTE_START + b"first\rsecond")
+        # A lost closing marker must not trap all later keys in paste mode.
+        # Ctrl-C ends this incomplete paste without sending either line.
+        time.sleep(0.8)
+        h.send_and_wait(
+            process, master_fd, output, b"\x03",
+            b"Incomplete paste restored as draft",
+        )
+        if any(path.endswith("/chat/stream") for path, _ in interrupted_requests):
+            raise AssertionError("incomplete paste sent before Enter")
+
+        os.write(master_fd, b"\r")
+        body = h.wait_for_http_request(
+            process, master_fd, output, interrupted_requests,
+            path="/api/v1/keepers/chat/stream",
+        )
+        message = json.loads(body).get("message")
+        if message != "first\nsecond":
+            raise AssertionError(f"incomplete paste was lost or split: {message!r}")
+        h.escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+        h.send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Ctrl-C recovers an incomplete bracketed paste as draft",
+        interact=interrupted_interact,
+        http_fixtures={
+            "/api/v1/keepers/chat/stream":
+                (503, {"error": "stop after the paste request capture"}),
+        },
+        http_requests=interrupted_requests,
+    )
+
     def editor_interact(process, master_fd, _slave_fd, output, _base_path):
         h.wait_for_output(process, master_fd, output, h.BRACKETED_PASTE_ON,
                           start=0, timeout=5.0)

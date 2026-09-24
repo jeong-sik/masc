@@ -28,6 +28,10 @@ val create : unit -> decoder
 val feed : decoder -> char -> t option
 (** Consume one byte. [None] means the closing marker has not arrived yet. *)
 
+val finish_unterminated : decoder -> t
+(** Keep all bytes received so far, including a partial closing marker, when
+    the operator explicitly ends an incomplete paste. *)
+
 val end_marker : string
 (** What closes a paste. The start marker is consumed by the escape decoder
     that dispatches here. *)

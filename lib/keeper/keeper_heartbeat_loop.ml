@@ -217,6 +217,76 @@ let deferred_runtime_lane_for_assignment hint_ref ~assignment_id =
   | None -> None
 ;;
 
+(* The loop-local hint is the in-process view of
+   [Keeper_deferred_runtime_lane_store]. The provider checkpoint the suffix
+   escapes survives a restart, so the suffix must too: without the file a
+   restarted keeper walks its assignment from the head and hands the input back
+   to the runtime whose response was just rejected. Every write to the hint goes
+   through here so the file and the ref move together. A store error is logged
+   with its path and never replaced by a fresh default; the in-process hint
+   keeps serving this process either way. *)
+module Deferred_lane_slot = struct
+  module Store = Keeper_deferred_runtime_lane_store
+
+  type t =
+    { base_path : string
+    ; keeper_name : string
+    ; hint : Keeper_turn_driver.deferred_runtime_lane option ref
+    }
+
+  let log_store_error slot ~action error =
+    Log.Keeper.warn
+      ~keeper_name:slot.keeper_name
+      "deferred runtime lane %s failed at %s: %s"
+      action
+      (Store.path_for ~base_path:slot.base_path ~keeper_name:slot.keeper_name)
+      (Store.error_to_string error)
+  ;;
+
+  let clear_durable slot =
+    match Store.clear ~base_path:slot.base_path ~keeper_name:slot.keeper_name with
+    | Ok () -> ()
+    | Error error -> log_store_error slot ~action:"clear" error
+  ;;
+
+  let restore ~base_path ~keeper_name =
+    let slot = { base_path; keeper_name; hint = ref None } in
+    (match Store.load ~base_path ~keeper_name with
+     | Ok None -> ()
+     | Ok (Some (restored : Keeper_turn_driver.deferred_runtime_lane)) ->
+       Log.Keeper.info
+         ~keeper_name
+         "restored deferred runtime lane assignment=%s failed=%s next=%s"
+         restored.assignment_id
+         restored.failed_runtime_id
+         restored.next_runtime_id;
+       slot.hint := Some restored
+     | Error error -> log_store_error slot ~action:"restore" error);
+    slot
+  ;;
+
+  let record slot hint =
+    (match
+       Store.save ~base_path:slot.base_path ~keeper_name:slot.keeper_name hint
+     with
+     | Ok () -> ()
+     | Error error -> log_store_error slot ~action:"save" error);
+    slot.hint := Some hint
+  ;;
+
+  let consume slot expected =
+    if consume_deferred_runtime_lane_hint slot.hint expected
+    then clear_durable slot
+  ;;
+
+  let for_assignment slot ~assignment_id =
+    let held = Option.is_some !(slot.hint) in
+    let current = deferred_runtime_lane_for_assignment slot.hint ~assignment_id in
+    if held && Option.is_none !(slot.hint) then clear_durable slot;
+    current
+  ;;
+end
+
 (* The next dispatch after a failed turn. The decision is
    [Keeper_turn_driver.next_dispatch_after_failure], which the chat lane's
    deferred retry also reads; this maps it onto the heartbeat's sleep. The
@@ -1275,7 +1345,9 @@ let run_heartbeat_loop
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
   let shared_context = Agent_core.Context.create () in
-  let deferred_runtime_lane_ref = ref None in
+  let deferred_runtime_lane_slot =
+    Deferred_lane_slot.restore ~base_path:ctx.config.base_path ~keeper_name:m.name
+  in
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when
      no operator has modified it.  Initialized to 0.0 so the first
@@ -1433,8 +1505,8 @@ let run_heartbeat_loop
             ~interval:(float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))
             !periodic_cadence in
         let deferred_runtime_lane =
-          deferred_runtime_lane_for_assignment
-            deferred_runtime_lane_ref
+          Deferred_lane_slot.for_assignment
+            deferred_runtime_lane_slot
             ~assignment_id:(Keeper_meta_contract.runtime_id_of_meta meta_current)
         in
         let wake = cycle_wake ~periodic_due ~deferred_runtime_lane in
@@ -1463,11 +1535,7 @@ let run_heartbeat_loop
             in
             let on_deferred_runtime_consumed () =
               Option.iter
-                (fun expected ->
-                   ignore
-                     (consume_deferred_runtime_lane_hint
-                        deferred_runtime_lane_ref
-                        expected))
+                (Deferred_lane_slot.consume deferred_runtime_lane_slot)
                 deferred_runtime_lane
             in
             let r =
@@ -1483,7 +1551,7 @@ let run_heartbeat_loop
                 ~deferred_runtime_lane
                 ~on_deferred_runtime_consumed
                 ~record_deferred_runtime_lane:
-                  (fun hint -> deferred_runtime_lane_ref := Some hint)
+                  (Deferred_lane_slot.record deferred_runtime_lane_slot)
             in
             Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
             turn_running := false;
@@ -1654,6 +1722,13 @@ module For_testing = struct
   let retain_connector_attention_sources = retain_connector_attention_sources
   let consume_deferred_runtime_lane_hint = consume_deferred_runtime_lane_hint
   let deferred_runtime_lane_for_assignment = deferred_runtime_lane_for_assignment
+  type deferred_lane_slot = Deferred_lane_slot.t
+
+  let restore_deferred_lane_slot = Deferred_lane_slot.restore
+  let record_deferred_lane = Deferred_lane_slot.record
+  let consume_deferred_lane = Deferred_lane_slot.consume
+  let deferred_lane_for_assignment = Deferred_lane_slot.for_assignment
+  let deferred_lane_hint (slot : Deferred_lane_slot.t) = !(slot.hint)
   let batch_disposition_records_continuation =
     batch_disposition_records_continuation
   ;;

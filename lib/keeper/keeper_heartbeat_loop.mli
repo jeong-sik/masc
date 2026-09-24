@@ -369,4 +369,34 @@ module For_testing : sig
     Keeper_turn_driver.deferred_runtime_lane option ref ->
     assignment_id:string ->
     Keeper_turn_driver.deferred_runtime_lane option
+
+  (** The loop's deferred hint together with its durable file
+      ({!Keeper_deferred_runtime_lane_store}). The production loop builds one
+      with {!restore_deferred_lane_slot} at start and writes the hint only
+      through the functions below, so a restart resumes the frozen suffix. *)
+  type deferred_lane_slot
+
+  (** Load the durable hint for [keeper_name]. A missing file is no hint; a
+      store error is logged with its path and also yields no hint, leaving the
+      file in place as evidence. *)
+  val restore_deferred_lane_slot :
+    base_path:string -> keeper_name:string -> deferred_lane_slot
+
+  (** Persist, then hold, the suffix a failed cycle left behind. *)
+  val record_deferred_lane :
+    deferred_lane_slot -> Keeper_turn_driver.deferred_runtime_lane -> unit
+
+  (** Clear the hint and its file when [expected] is still the held hint. *)
+  val consume_deferred_lane :
+    deferred_lane_slot -> Keeper_turn_driver.deferred_runtime_lane -> unit
+
+  (** {!deferred_runtime_lane_for_assignment}, also removing the file when the
+      held hint is dropped for a changed assignment. *)
+  val deferred_lane_for_assignment :
+    deferred_lane_slot ->
+    assignment_id:string ->
+    Keeper_turn_driver.deferred_runtime_lane option
+
+  val deferred_lane_hint :
+    deferred_lane_slot -> Keeper_turn_driver.deferred_runtime_lane option
 end

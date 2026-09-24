@@ -5068,6 +5068,52 @@ let test_deferred_hint_survives_store_restart_and_clears_after_settlement () =
       Alcotest.failf "post-clear load failed: %s" (Deferred_store.error_to_string error))
 ;;
 
+(* The heartbeat loop's own restart path: one loop records the suffix a failed
+   cycle left, a fresh loop on the same base path starts from it, and the
+   settlement or an assignment change removes the file. *)
+let test_heartbeat_restart_resumes_deferred_suffix () =
+  with_deferred_store (fun base_path ->
+    let module Loop = Masc.Keeper_heartbeat_loop.For_testing in
+    let hint =
+      Driver.For_testing.make_deferred_runtime_lane
+        ~assignment_id:"lane.restart"
+        ~failed_runtime_id:"runtime.a"
+        ~next_runtime_id:"runtime.b"
+        ~later_runtime_ids:[ "runtime.c" ]
+        ~failure:(accept_empty_no_progress_error "runtime.a")
+    in
+    let before = Loop.restore_deferred_lane_slot ~base_path ~keeper_name:"backend" in
+    Loop.record_deferred_lane before hint;
+    let after = Loop.restore_deferred_lane_slot ~base_path ~keeper_name:"backend" in
+    (match Loop.deferred_lane_for_assignment after ~assignment_id:"lane.restart" with
+     | Some restored ->
+       Alcotest.(check (list string))
+         "restarted loop starts from the frozen successor"
+         [ "runtime.b"; "runtime.c" ]
+         (Driver.deferred_runtime_ids restored);
+       Loop.consume_deferred_lane after restored
+     | None -> Alcotest.fail "restarted heartbeat lost the deferred suffix");
+    Alcotest.(check bool)
+      "consumed suffix is not restored again"
+      true
+      (Option.is_none
+         (Loop.deferred_lane_hint
+            (Loop.restore_deferred_lane_slot ~base_path ~keeper_name:"backend")));
+    Loop.record_deferred_lane after hint;
+    let reassigned = Loop.restore_deferred_lane_slot ~base_path ~keeper_name:"backend" in
+    Alcotest.(check bool)
+      "changed assignment gets no suffix"
+      true
+      (Option.is_none
+         (Loop.deferred_lane_for_assignment reassigned ~assignment_id:"lane.other"));
+    Alcotest.(check bool)
+      "dropped suffix is not restored again"
+      true
+      (Option.is_none
+         (Loop.deferred_lane_hint
+            (Loop.restore_deferred_lane_slot ~base_path ~keeper_name:"backend"))))
+;;
+
 let test_deferred_store_rejects_unknown_schema_without_fallback () =
   with_deferred_store (fun base_path ->
     let path = Deferred_store.path_for ~base_path ~keeper_name:"backend" in
@@ -5672,6 +5718,10 @@ let () =
             "deferred hint survives restart and settles durably"
             `Quick
             test_deferred_hint_survives_store_restart_and_clears_after_settlement;
+          Alcotest.test_case
+            "heartbeat restart resumes the deferred suffix"
+            `Quick
+            test_heartbeat_restart_resumes_deferred_suffix;
           Alcotest.test_case
             "deferred store rejects unknown schema"
             `Quick

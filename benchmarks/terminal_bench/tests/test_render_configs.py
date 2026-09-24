@@ -614,4 +614,3 @@ def test_the_keeper_up_instructions_are_the_profile_instructions(tmp_path):
          "bash", str(bench)],
         check=True, capture_output=True, text=True).stdout
     assert got == KEEPER_INSTRUCTIONS
-

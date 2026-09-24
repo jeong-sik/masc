@@ -56,10 +56,9 @@ let keeper_trust_json ?(include_receipt = false)
          pending approval, an unreadable approval queue, an active runtime
          blocker). The compact trust projections copy the same two fields
          from the same snapshot. *)
-      ( "operator_disposition",
-        Option.value ~default:`Null (Json_util.assoc_member_opt "operator_disposition" runtime_trust) );
-      ( "operator_disposition_reason",
-        Option.value ~default:`Null (Json_util.assoc_member_opt "operator_disposition_reason" runtime_trust) );
+      (* DET-OK: the snapshot writes both keys on every path; null is its own value for "none relayed". *)
+      ("operator_disposition", Option.value ~default:`Null (Json_util.assoc_member_opt "operator_disposition" runtime_trust));
+      ("operator_disposition_reason", Option.value ~default:`Null (Json_util.assoc_member_opt "operator_disposition_reason" runtime_trust));
       ( "completion_contract_result",
         match latest_receipt with
         (* Missing receipt field stays a UI marker; this is not a runtime

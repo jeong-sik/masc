@@ -1,15 +1,20 @@
 ---
 rfc: "0464"
 title: "Overview 는 팀 업무 보고다 — 누가 무엇을 하고, 무엇이 막혔고, 얼마나 끝냈나"
-status: Draft
+status: Superseded
 created: 2026-09-23
 author: dancer + claude
 supersedes: []
-superseded_by: null
+superseded_by: "tui-measured-operator-home"
 related: ["tui-operator-ia", "0462"]
 ---
 
 # RFC-0464: Overview 는 팀 업무 보고다
+
+2026-09-25 운영자의 실화면 검토로 첫 화면의 Team·Tasks 중복 제거와 측정 기반
+Dashboard/Work/Usage 분리가 결정됐다. 현재 결정은
+[RFC-tui-measured-operator-home](RFC-tui-measured-operator-home.md)에 있다.
+아래 내용은 당시의 초안과 기준선으로 보존한다.
 
 ## 0. 결정
 

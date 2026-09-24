@@ -174,7 +174,7 @@ row it shows.
 `NO_COLOR` (non-empty) suppresses colour; borders, markers, and the
 reverse-video selection stay. `MASC_TUI_FORCE_COLOR=1` overrides.
 
-The Config surface's Themes pane picks a bundled base16 scheme (monokai,
+The System surface's Themes pane picks a bundled base16 scheme (monokai,
 solarized, and others). Moving the cursor previews a scheme, `Esc` puts back
 whatever was in force, `Enter` keeps the pick and `x` withdraws it.
 
@@ -217,7 +217,7 @@ Reading a board post on a wide terminal keeps the post list beside it.
 then move the focused pane, while `PgUp`/`PgDn` move it by a page. The open post
 remains marked when the detail has focus.
 
-The Config surface shows `runtime.toml` as the server reads it; `e` opens
+The System surface shows `runtime.toml` as the server reads it; `e` opens
 it in `$EDITOR` and the server's preview validation gates the write. The
 Resources surface hangs off Config under `s` and lists every MCP
 resource; `Enter` reads one beside the

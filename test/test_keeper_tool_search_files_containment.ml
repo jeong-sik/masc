@@ -346,7 +346,7 @@ let test_docker_relative_repos_path_resolves_inside_playground () =
       (normalize_realpath repos)
       (normalize_realpath path)
   | Error e ->
-    Alcotest.fail ("bare repos should stay inside playground: " ^ e)
+    Alcotest.fail ("bare repos should stay inside playground: " ^ e.Keeper_alerting_path.message)
 
 let test_relative_cwd_is_not_rewritten () =
   setup ~keeper_name:"glm-coding" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -360,7 +360,7 @@ let test_relative_cwd_is_not_rewritten () =
     Alcotest.(check bool)
       "literal base-relative candidate is outside allowed roots"
       true
-      (String_util.contains_substring error "path_outside_sandbox")
+      (String_util.contains_substring error.Keeper_alerting_path.message "path_outside_sandbox")
 
 let test_execute_own_container_cwd_preserves_containment () =
   setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -381,7 +381,7 @@ let test_execute_own_container_cwd_preserves_containment () =
      Alcotest.(check bool)
        "read cwd remains exact"
        true
-       (String_util.contains_substring error "path_outside_sandbox"));
+       (String_util.contains_substring error.Keeper_alerting_path.message "path_outside_sandbox"));
   (* Execute accepts the exact cwd a previous guest call returned. Read
      retains its literal path contract, asserted above. *)
   List.iter
@@ -456,7 +456,7 @@ let test_container_file_path_is_not_rewritten () =
     Alcotest.(check bool)
       "container path remains exact"
       true
-      (String_util.contains_substring error "path_outside_sandbox")
+      (String_util.contains_substring error.Keeper_alerting_path.message "path_outside_sandbox")
 
 let test_docker_other_container_root_stays_blocked () =
   setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -471,7 +471,7 @@ let test_docker_other_container_root_stays_blocked () =
   | Ok cwd -> Alcotest.fail ("other keeper container cwd should be blocked: " ^ cwd)
   | Error e ->
     Alcotest.(check bool) "outside allowed roots" true
-      (String_util.contains_substring e "path_outside_sandbox"));
+      (String_util.contains_substring e.Keeper_alerting_path.message "path_outside_sandbox"));
   List.iter
     (fun write_enabled ->
       match Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
@@ -585,12 +585,16 @@ let test_read_cwds_follow_the_tree () =
        (String.ends_with ~suffix:(Filename.concat "glossary-maniac" "masc") cwd)
    in
    (match Keeper_tool_filesystem_runtime.resolve_read_file_cwd ~config ~meta ~cwd:(Some "masc") with
-    | Error e -> Alcotest.fail ("Read refused a guest-only cwd on the host: " ^ e)
+    | Error e ->
+      Alcotest.fail
+        ("Read refused a guest-only cwd on the host: " ^ e.Keeper_alerting_path.message)
     | Ok cwd -> names_the_guest_checkout "Read keeps the path for the endpoint" cwd);
    (match
       Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args:(search_cwd playground)
     with
-    | Error e -> Alcotest.fail ("search refused a guest-only cwd on the host: " ^ e)
+    | Error e ->
+      Alcotest.fail
+        ("search refused a guest-only cwd on the host: " ^ e.Keeper_alerting_path.message)
     | Ok cwd -> names_the_guest_checkout "search keeps the path for the endpoint" cwd);
    Alcotest.(check bool) "nothing was created" false (Sys.file_exists guest_only));
   setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -599,14 +603,20 @@ let test_read_cwds_follow_the_tree () =
    | Ok cwd -> Alcotest.fail ("a shared-mount tree's missing Read cwd resolved: " ^ cwd)
    | Error e ->
      Alcotest.(check bool) "Read still says nothing is materialized" true
-       (String_util.contains_substring e "no repository is materialized"));
+       (String_util.contains_substring
+          e.Keeper_alerting_path.message
+          "no repository is materialized");
+     Alcotest.(check bool) "the caller named the missing cwd" true
+       (e.Keeper_alerting_path.failure_class = Tool_result.Policy_rejection));
   match
     Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args:(search_cwd playground)
   with
   | Ok cwd -> Alcotest.fail ("a shared-mount tree's missing search cwd resolved: " ^ cwd)
   | Error e ->
     Alcotest.(check bool) "search still hears the directory is missing" true
-      (String_util.contains_substring e "cwd_not_directory")
+      (String_util.contains_substring e.Keeper_alerting_path.message "cwd_not_directory");
+    Alcotest.(check bool) "the caller named the missing search cwd" true
+      (e.Keeper_alerting_path.failure_class = Tool_result.Policy_rejection)
 
 (* Containment held for the read tools and did not hold for spawn: it ran
    [Eio.Process.spawn] on the host whatever profile the keeper was declared

@@ -687,7 +687,7 @@ let handle_tool_execute_typed
              opposite.
 
              Since #32662 no multi-stage call reaches here: [Argv] and
-             [Script] both lower to one [Simple]. The stage traversal is
+             [Command] both lower to one [Simple]. The stage traversal is
              {!Keeper_tooling.Shell_costume.ir_keeps_a_shell}'s answer for
              the whole [Shell_ir.t] type, and only its own tests still take
              it. Kept because the predicate is about the type, not about
@@ -1054,9 +1054,9 @@ let handle_tool_execute_with_outcome
   =
   (* No key pre-check: [Keeper_tool_execute_typed_input.of_json] is the one
      admission door, and its errors name the field that was wrong. A second
-     key list here is a copy that diverges — #29813 advertised [script] in
-     the schema while this function still refused it, so every
-     schema-conformant script call bounced before the parser could read it. *)
+     key list here is a copy that diverges from the schema, and every
+     schema-conformant call it did not know would bounce before the parser
+     could read it (#29813). *)
   handle_tool_execute_typed
     ~turn_sandbox_factory
     ~config

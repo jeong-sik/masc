@@ -4830,17 +4830,10 @@ let launch_identity_app_save state ~mailbox
             ~client_id ~client_secret ~scopes
         with
         | Error err -> Error err
-        | Ok (`Assoc pairs) -> (
-          match List.assoc_opt "error" pairs with
-          | Some (`String detail) -> Error detail
-          | Some _ | None ->
-            let count =
-              match List.assoc_opt "scopes" pairs with
-              | Some (`List rows) -> List.length rows
-              | Some _ | None -> 0
-            in
-            Ok count)
-        | Ok _ -> Error "the server answered with something unreadable"
+        | Ok json ->
+          Masc.Tui_decode.decode_oauth_client_saved json
+          |> Result.map_error (fun detail ->
+            "app recorded, but the reply could not be read: " ^ detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -6678,7 +6671,7 @@ let row_list (state : state) : row_list option =
      it. An open detail is a reading rather than a list; [reading_pane] has
      it. *)
   | Overview
-    when state.task_focus = Right_pane
+    when Masc_tui_overview_tasks.is_focused state.task_focus
          && Option.is_none (task_detail_on_screen state) ->
       (* The row list is positional; the selection is an id, placed by the
          row it is on now. With nothing selected, movement starts from the
@@ -6687,10 +6680,11 @@ let row_list (state : state) : row_list option =
         ~cursor:
           (Option.value ~default:0
              (Masc_tui_overview_tasks.selected_index state.tasks
-                ~selected:state.task_selected_id))
+                ~selected:(Masc_tui_overview_tasks.selection state.task_focus)))
         (fun index ->
-          state.task_selected_id <-
-            Masc_tui_overview_tasks.id_at state.tasks index)
+          state.task_focus <-
+            Masc_tui_overview_tasks.Task_focus
+              { selected = Masc_tui_overview_tasks.id_at state.tasks index })
   (* Under the Actions and Everything filters the ring is read by a cursor,
      not by a scroll: [render_acting] recomputes the scroll from
      [acting_cursor] every frame and reports both back, so a key that moved
@@ -8952,7 +8946,7 @@ let selected_surface_reference state =
            Option.map
              (fun (row : Tui_decode.task) -> Link.reference Task row.id)
              (Masc_tui_overview_tasks.selected_task state.tasks
-                ~selected:state.task_selected_id))
+                ~selected:(Masc_tui_overview_tasks.selection state.task_focus)))
   | Keepers _ ->
       Option.map
         (fun (keeper : Tui_decode.keeper) -> Link.reference Keeper keeper.k_name)
@@ -14447,7 +14441,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.github_token_save_status <-
              Some ((Theme.ok ()) ^ "✓ Token saved successfully" ^ Ansi.reset);
            state.github_identity_view <-
-             Some (keeper_name, Masc_tui_loader.github_identity_lines json);
+             Some
+               ( keeper_name
+               , Masc_tui_github_identity.view_lines
+                   ~sanitize:Masc.Tui_decode.sanitize_terminal_text json );
            state.github_identity_view_error <- None
        | Error detail ->
            report_action state "error" (keeper_name ^ ": github token save: " ^ detail);
@@ -19834,7 +19831,9 @@ and is loaded on demand through keeper_skill.
                          state.task_detail_id <- Some task_id;
                          state.task_detail_scroll <- 0;
                          state.task_history <- None;
-                         state.task_selected_id <- Some task_id;
+                         state.task_focus <-
+                           Masc_tui_overview_tasks.land_on state.tasks
+                             ~task_id;
                          launch_task_history_load state
                            ~mailbox:async_messages task_id))
             | _ -> ())
@@ -20171,7 +20170,8 @@ and is loaded on demand through keeper_skill.
                      state.task_history <- None;
                      launch_task_history_load state ~mailbox:async_messages
                        task_id;
-                     state.task_selected_id <- Some task_id
+                     state.task_focus <-
+                       Masc_tui_overview_tasks.land_on state.tasks ~task_id
                  | Some (_, Masc_tui_types.Palette_board_hearth hearth) ->
                      state.board_hearth <- hearth;
                      state.board_cursor <- 0;
@@ -22102,7 +22102,8 @@ and is loaded on demand through keeper_skill.
                  | Overview, Some task_id ->
                      state.task_detail_id <- Some task_id;
                      state.task_history <- None;
-                     state.task_selected_id <- Some task_id;
+                     state.task_focus <-
+                       Masc_tui_overview_tasks.land_on state.tasks ~task_id;
                      launch_task_history_load state ~mailbox:async_messages
                        task_id
                  | Planning, Some goal_id ->
@@ -22772,7 +22773,7 @@ and is loaded on demand through keeper_skill.
                   state.task_detail_id <- None;
                   state.task_detail_scroll <- 0
                 end
-                else state.task_focus <- Left_pane
+                else state.task_focus <- Masc_tui_overview_tasks.No_task_focus
             | Schedules ->
                 if Option.is_some state.schedule_detail_id then begin
                   state.schedule_detail_id <- None;
@@ -22964,7 +22965,7 @@ and is loaded on demand through keeper_skill.
                   state.task_detail_id <- None;
                   state.task_detail_scroll <- 0
                 end
-                else state.task_focus <- Left_pane
+                else state.task_focus <- Masc_tui_overview_tasks.No_task_focus
             | Schedules ->
                 state.schedule_detail_id <- None;
                 state.schedule_scroll <- 0
@@ -23216,10 +23217,9 @@ and is loaded on demand through keeper_skill.
             | Overview ->
                 if Option.is_some state.task_detail_id then
                   state.task_detail_scroll <- Masc_tui_types.scroll_down_from state.task_detail_scroll ~by:1
-                else if state.task_focus = Right_pane then
-                  state.task_selected_id <-
-                    Masc_tui_overview_tasks.step state.tasks
-                      ~selected:state.task_selected_id
+                else
+                  state.task_focus <-
+                    Masc_tui_overview_tasks.move state.tasks state.task_focus
                       Masc_tui_overview_tasks.Next
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
@@ -23569,10 +23569,9 @@ and is loaded on demand through keeper_skill.
                   if state.task_detail_scroll > 0 then
                     state.task_detail_scroll <- state.task_detail_scroll - 1
                 end
-                else if state.task_focus = Right_pane then
-                  state.task_selected_id <-
-                    Masc_tui_overview_tasks.step state.tasks
-                      ~selected:state.task_selected_id
+                else
+                  state.task_focus <-
+                    Masc_tui_overview_tasks.move state.tasks state.task_focus
                       Masc_tui_overview_tasks.Previous
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
@@ -23910,19 +23909,25 @@ and is loaded on demand through keeper_skill.
                  | None -> state.view <- Keepers Keeper_list)
             | Overview ->
                 (* Only under task focus: Enter while the events own j/k would
-                   open whatever row the cursor happens to rest on. *)
-                if state.task_focus = Right_pane then
-                  (match
-                     Masc_tui_overview_tasks.selected_task state.tasks
-                       ~selected:state.task_selected_id
-                   with
-                   | Some task ->
-                       state.task_detail_id <- Some task.id;
-                       state.task_detail_scroll <- 0;
-                       state.task_history <- None;
-                       launch_task_history_load state
-                         ~mailbox:async_messages task.id
-                   | None -> ())
+                   open whatever row the cursor happens to rest on. Under task
+                   focus with no row chosen the footer says why nothing
+                   opened. *)
+                (match
+                   Masc_tui_overview_tasks.opening state.tasks state.task_focus
+                 with
+                 | Some (Masc_tui_overview_tasks.Open task) ->
+                     state.task_detail_id <- Some task.id;
+                     state.task_detail_scroll <- 0;
+                     state.task_history <- None;
+                     launch_task_history_load state
+                       ~mailbox:async_messages task.id
+                 | Some Masc_tui_overview_tasks.No_held_task ->
+                     report_action state "system"
+                       "Enter: no task is held, so there is no row to open"
+                 | Some Masc_tui_overview_tasks.No_selection ->
+                     report_action state "system"
+                       "Enter: no task row is chosen; j/k chooses one"
+                 | None -> ())
             | Keepers Keeper_list ->
                 (match List.nth_opt state.keepers state.keeper_cursor with
                  | Some keeper ->
@@ -24330,24 +24335,23 @@ and is loaded on demand through keeper_skill.
                  state.task_detail_scroll <- 0;
                  state.task_history <- None;
                  launch_task_history_load state ~mailbox:async_messages tid;
-                 state.task_selected_id <- Some tid;
-                 state.task_focus <- Right_pane
+                 state.task_focus <-
+                   Masc_tui_overview_tasks.land_on state.tasks ~task_id:tid
              | None ->
                  state.task_detail_id <- None;
-                 state.task_focus <- Right_pane;
-                 state.task_selected_id <- None)
+                 state.task_focus <-
+                   Masc_tui_overview_tasks.focus_list state.tasks)
         | Some "t" | Some "T" ->
            (* Focus the Overview task panel. The list is always on screen, but
-              j/k move nothing until the operator asks for tasks. *)
+              j/k move nothing until the operator asks for tasks. Focus
+              lands on the first held row, so Enter opens something at once;
+              pressing [t] again lets go of the list and its choice. *)
            (match state.view with
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Overview when Option.is_none state.task_detail_id ->
                 state.task_focus <-
-                  (match state.task_focus with
-                   | Left_pane -> Right_pane
-                   | Right_pane -> Left_pane);
-                if state.task_focus = Left_pane then state.task_selected_id <- None
+                  Masc_tui_overview_tasks.toggle state.tasks state.task_focus
             | Keepers (Keeper_list | Keeper_detail) ->
                 (* Tool calls, from the roster and from detail, the way logs
                    are: the keeper under the cursor is the one asked about. *)

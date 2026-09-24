@@ -5213,7 +5213,15 @@ type state = {
      the first load answers: an empty list is a fact about the workspace and
      "not looked yet" is not. *)
   mutable operator_stalled: Masc_tui_agenda.stalled list option;
-  mutable task_focus: pane_focus;
+  (* Whether the Overview task list owns j/k and which task it has chosen,
+     by id. An index into the rows would name another task after a poll
+     drops a finished one. *)
+  mutable task_focus: Masc_tui_overview_tasks.focus;
+  (* What the last backlog read said about the rows. [tasks] holds the same
+     rows when they were read and [] otherwise; this says which of the two
+     an empty [tasks] is. [tasks_error] stays what the Tasks section prints,
+     including notes (backup recovery, goal links) on rows that were read. *)
+  mutable task_reading: Masc_tui_overview_tasks.rows_reading;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
@@ -5584,9 +5592,6 @@ type state = {
      until it is sent, and cleared with the form -- a field left filled is a
      credential sitting in the process for as long as the pane is up. *)
   mutable identity_app_form: identity_app_form option;
-  mutable task_selected_id: string option;
-      (* The Overview task row the operator chose, by id. An index into the
-         rows would name another task after a poll drops a finished one. *)
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
   mutable tasks_error: string option;
@@ -6065,6 +6070,11 @@ type state = {
   mutable memory_facts_error: string option;
   mutable memory_facts_cursor: int;
   mutable memory_facts_scroll: int;
+  (* One selected claim's wrapped rows. The cursor and renderer ask for the
+     same layout in one frame; retaining its immutable claim avoids wrapping
+     a long CJK fact twice and again on every redraw. *)
+  mutable memory_fact_claim_wrap:
+    (string * int * string list * int) option;
   mutable memory_facts_category: memory_category_filter;
   mutable memory_facts_sort: memory_sort_order;
   mutable memory_overview_sort: memory_overview_sort;
@@ -7624,7 +7634,8 @@ let create_state
   tasks_domain = [];
   task_flow = None;
   operator_stalled = None;
-  task_focus = Left_pane;
+  task_focus = Masc_tui_overview_tasks.No_task_focus;
+  task_reading = Masc_tui_overview_tasks.Rows_unread;
   help_open = false;
   keeper_deletions_open = false;
   keeper_deletions_loading = false;
@@ -7782,7 +7793,6 @@ let create_state
   identity_filter = None;
   identity_app_form = None;
   github_identity_view_error = None;
-  task_selected_id = None;
   task_detail_id = None;
   task_detail_scroll = 0;
   tasks_error = None;
@@ -8034,6 +8044,7 @@ let create_state
   memory_facts_error = None;
   memory_facts_cursor = 0;
   memory_facts_scroll = 0;
+  memory_fact_claim_wrap = None;
   memory_facts_category = Category_all;
   memory_facts_sort = Sort_recency;
   memory_overview_sort = Mem_overview_facts;
@@ -8961,6 +8972,7 @@ let memory_back (state : state) =
         state.memory_facts_error <- None;
         state.memory_facts_cursor <- 0;
         state.memory_facts_scroll <- 0;
+        state.memory_fact_claim_wrap <- None;
         state.memory_facts_category <- Category_all;
         Memory_stays
     | None -> Memory_leaves
@@ -9153,9 +9165,9 @@ let memory_fact_rows (state : state) : memory_fact_row list =
              (fun a b ->
                let key = function
                  | Memory_row_fact f ->
-                   (match f.Tui_decode.mf_events.Tui_decode.mfe_last_retrieved_at with
-                    | Some at -> (0, at)
-                    | None -> (1, f.Tui_decode.mf_last_seen))
+                   (match f.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
+                    | Tui_decode.Retrieved { last_at; _ } -> (0, last_at)
+                    | Tui_decode.Never_retrieved -> (1, f.Tui_decode.mf_last_seen))
                  | Memory_row_source_fact f -> (2, f.Tui_decode.msf_first_seen)
                  | Memory_row_invalidation f -> (2, f.Tui_decode.mi_invalidated_at)
                in
@@ -9169,7 +9181,9 @@ let memory_fact_rows (state : state) : memory_fact_row list =
                let key = function
                  | Memory_row_fact f ->
                    ( 0
-                   , f.Tui_decode.mf_events.Tui_decode.mfe_retrieved_count
+                   , (match f.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
+                      | Tui_decode.Retrieved { count; _ } -> count
+                      | Tui_decode.Never_retrieved -> 0)
                    , f.Tui_decode.mf_last_seen )
                  | Memory_row_source_fact f -> (1, 0, f.Tui_decode.msf_first_seen)
                  | Memory_row_invalidation f -> (1, 0, f.Tui_decode.mi_invalidated_at)

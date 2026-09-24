@@ -16,12 +16,14 @@ git clone https://github.com/jeong-sik/masc.git
 cd masc
 git config core.hooksPath .githooks       # pre-commit and pre-push guards
 
+opam switch create . ocaml-base-compiler.5.5.1 --no-install
+eval "$(opam env)"
 scripts/opam-pin-external-deps.sh         # pin external OCaml dependencies
-opam install . --deps-only
+opam install ./masc.opam --deps-only --locked
 
 scripts/dune-local.sh build @default      # build
 scripts/dune-local.sh exec test/test_keeper_meta_json_config_toml_only.exe
-./start-masc.sh --http                    # server from the checkout
+./start-masc.sh --http --base-path "$HOME/masc-dev"   # server from the checkout
 ```
 
 `scripts/dune-local.sh` wraps Dune for a machine where several agents build at
@@ -75,16 +77,9 @@ test/                            Alcotest suites (about 1,200 files) and fixture
   budgets or weights as Keeper control gates. `docs/constitution.xml` lists
   the rest.
 
-CI runs `ocamlformat` on the `.ml` and `.mli` files a pull request changes.
-Either command matches it:
-
-```bash
-opam exec -- dune build --root . @fmt --auto-promote   # whole tree
-opam exec -- ocamlformat -i <changed .ml/.mli files>   # just what you touched
-```
-
-`dune-project` scopes formatting to OCaml, so `dune fmt` leaves `dune` files
-alone.
+No CI job runs `ocamlformat`. `.ocamlformat` sets `disable = true` repo-wide
+until a migration RFC decides on a reformat (RFC-0010), so `dune fmt` is a
+no-op for OCaml today; match the style of the code around your change.
 
 ## Tests
 

@@ -287,6 +287,28 @@ let record_usage_windows ~keeper_name ~runtime_id report =
       runtime_id
 ;;
 
+(* A turn refused for spent usage carries no reset time
+   ([turn_failure_to_provider_error]), and the router stops picking the
+   account, so no later turn will report its windows either. The account
+   can still say when it resets without a turn, so ask it once. The read
+   outlives this turn ({!Runtime_provider_usage_read.read_codex_in_background}),
+   and the refused turn returns without waiting on it. *)
+let read_usage_after_quota_refusal ~keeper_name ~runtime_id ~clock ~cwd config =
+  match Runtime.quota_scope_of_runtime_id runtime_id with
+  | None ->
+    Log.Keeper.warn
+      ~keeper_name
+      "Codex usage not read after a quota refusal: runtime %s has no quota scope"
+      runtime_id
+  | Some scope ->
+    (match Runtime_provider_usage_read.read_codex_in_background ~clock ~cwd ~scope config with
+     | Runtime_provider_usage_read.Started | Runtime_provider_usage_read.Already_reading -> ()
+     | Runtime_provider_usage_read.No_root_switch ->
+       Log.Keeper.warn
+         ~keeper_name
+         "Codex usage not read after a quota refusal: no server root switch")
+;;
+
 (* Always installed so usage-window reports are recorded. A turn nobody
    streams, traces or observes gets only that; its other events are ignored as
    before. *)
@@ -1344,6 +1366,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
      | Error error ->
        (match error with
         | Runtime_codex_app_server.Turn_input_write_failed _ -> observe_transport_uncertain ()
+        | Runtime_codex_app_server.Turn_failed
+            { codex_error_info =
+                Some
+                  Runtime_codex_app_server.Codex_error_info.(
+                    Usage_limit_exceeded | Session_budget_exceeded)
+            ; _
+            } ->
+          read_usage_after_quota_refusal
+            ~keeper_name ~runtime_id ~clock
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+            config
         | _ -> ());
        recovery_failure :=
          recovery_failure_of_attempt ~thread_mode

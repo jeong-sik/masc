@@ -261,7 +261,8 @@ status: reference
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
 
 **Turn**
-: "turn"이 가리키는 단위는 넷이고 서로 다르다. 문맥 없이 쓰지 않는다.
+: "turn"이 붙은 용어는 넷이고 서로 다르다. 앞의 셋은 단위나 기록이고, 마지막 하나는
+  실패 원인이다. 문맥 없이 쓰지 않는다.
   - **Keeper Turn** — MASC가 하나의 Keeper 작업을 시도하는 단위. (아래 항목)
   - **agent core Turn** — 하나의 agent core Agent run 내부의 한 단계. Keeper turn과
     동일한 단위가 아니다. (아래 항목)
@@ -370,7 +371,8 @@ status: reference
   → [Observer event](../../bin/masc_tui_observer.mli), [Activity 라벨](../../bin/masc_tui_acting.ml)
 
 **Runtime Attempt**
-: Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
+: Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도. 코드는 같은 것을
+  provider attempt라고도 부른다(`Keeper_provider_attempt_effect`, `provider_attempt_outcomes`).
 
 **Failure Route (실패 경로)**
 : Keeper turn이 실패했을 때 그 실패를 타입으로 분류한 관측(`Keeper_runtime_failure_route.route`).
@@ -399,7 +401,9 @@ status: reference
     (`Keeper_model_input_demotion`, RFC-0363).
   - 후보 강등: 쉬는 중이거나 실패한 runtime 후보를 세 무리(`Not_demoted` ·
     `Failed_without_rest` · `Told_to_rest`)로 나눠 뒤로 보낸다. 배제가 아니라 순서다 —
-    맨 앞 후보가 쉬는 중이면 그 walk는 그 후보가 풀릴 때까지 기다린다
+    쉬라는 말을 들은 후보는 맨 뒤로 가므로, 모든 후보가 쉬는 중일 때만 맨 앞 후보가
+    쉬는 중이 된다. 그때 그 walk는 그 후보가 풀릴 때까지 기다린다. 실패만 한 후보는
+    기다리게 하지 않는다
     (`Keeper_turn_driver.demote_unavailable_candidates`, RFC-0458 §3.4).
   - 차단 강등: 낡은 blocker를 "이전 차단"으로 낮춰 보여준다. 감추지 않는다
     (`agent-roster.ts`).
@@ -878,6 +882,11 @@ status: reference
 **Gate**
 : 외부 효과를 설정된 방식(`Keeper_gate_mode.t`: `Always_allow`·`Auto_judge`·`Manual`,
   `Manual`은 사람이 판정)으로 판정하는 경계. pending 판정은 다른 작업을 막지 않는다.
+  **다른 것**: 채팅 창에서 도구 호출 하나를 두고 운영자에게 묻는 도구 승인
+  (`Keeper_tool_approval_mode`: `Auto`·`Yolo`)은 Gate가 아니다. 그 대기는 턴을 멈추고
+  답을 기다리며, `Yolo`로 꺼도 Gate로 가는 바깥 작업은 Gate가 따로 판정한다.
+  도구 승인의 `Auto`와 Gate의 `Auto_judge`도 다른 값이다.
+  → [Keeper_tool_approval_mode](../../lib/keeper/keeper_tool_approval_mode.mli)
 
 **HITL Delivery Occasion (HITL 전달 계기)**
 : 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값
@@ -912,6 +921,8 @@ status: reference
 : `Todo` 인 Task 를 맡는 전이. 한 에이전트는 `Claimed` 와 `InProgress` 를 합쳐 하나만
   가질 수 있고, 이 검사는 claim 할 때만 한다. Keeper 의 claim 은 곧바로 Start 를 이어
   보낸다.
+  **다른 뜻**: Memory 쪽의 `claim`은 전이가 아니라 Fact의 문장 필드다(→ Fact).
+  "새 claim"은 Librarian이 새로 적자고 낸 Fact를 말한다.
 
 **Release**
 : 맡은 쪽이 Task 를 `Todo` 로 돌려놓는 전이. Handoff Context 를 남긴다.
@@ -1067,7 +1078,8 @@ status: reference
 : 서버가 등록된 GitHub 저장소의 열린 PR 을 읽을 때 쓰는 GitHub 토큰의 주인 Keeper.
   runtime.toml `[repositories] pr_reader = "<keeper>"` 로 선언한다. 토큰은 그 Keeper 의
   `github-cli/hosts.yml` 에서 읽을 때마다 새로 읽고 복사해 두지 않는다. 선언이 없거나
-  Keeper 가 없거나 토큰이 없으면 서버는 그 이유(`Reader_not_declared`·
+  runtime.toml 을 못 읽거나 `pr_reader` 가 Keeper 이름이 아니거나 Keeper 가 없거나
+  토큰이 없으면 서버는 그 이유(`Reader_not_declared`·`Reader_declaration_invalid`·
   `Reader_keeper_missing`·`Reader_token_unavailable`)를 말하고, 다른 자격으로 대신
   읽지 않는다. 결과는 메모리에만 두고 `GET /api/v1/repositories/pulls` 로 보인다
   (RFC-0465).
@@ -1149,7 +1161,7 @@ status: reference
 
 **Transcript Tail Recovery (전사 꼬리 복구)**
 : 프로세스가 죽어 열린 채 남은 tool cycle을 부팅 때 닫는 일
-  (`Keeper_transcript_tail_recovery.recover_open_tails`). `Recovering_requests` 부팅
+  (`Keeper_transcript_tail_recovery.recover_open_tails`). `Recovering_persistence` 부팅
   단계에서 Keeper loop가 시작되기 전에 돈다. checkpoint 저장이 진행 중이던 tool
   cycle을 일부러 남겨 두므로(어느 호출이 dispatch됐는지 복구가 알 수 있게), 아무도
   닫지 않으면 provider가 매 reload마다 history를 거절해 lane이 영영 resume되지
@@ -1352,7 +1364,12 @@ status: reference
   Turn Boundary와 같은 cluster의 Keeper runtime 디렉터리에 저장한다.
   Turn Boundary 파일의 줄 번호가 아니라 값이다: trace, 읽은 Atom 수, 마지막으로
   읽은 Atom을 여는 Message의 digest. 그 파일에는 지난 History의 줄도 남아 있어서
-  줄 번호로는 지금 History 안의 자리를 말할 수 없다. 파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
+  줄 번호로는 지금 History 안의 자리를 말할 수 없다. 공식 클라이언트 턴은 Atom을 남기지
+  않으므로 그 위치만은 turn-boundary 파일의 줄 번호로 따로 적는다
+  (`librarian-official-progress.json`의 `boundary_line`,
+  [Keeper_librarian_official_progress](../../lib/keeper/keeper_librarian_official_progress.mli)).
+  turn-boundary 파일은 줄을 뒤에 붙이기만 하고 고쳐 쓰지 않으므로 이 번호는 커지기만 한다.
+  파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
   읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
   전체가 안 읽은 것으로 보인다.
   이 값도 선택한 cluster의 Turn Boundary와 History에만 의미가 있으며, 다른
@@ -1503,7 +1520,7 @@ status: reference
   atom 번호가 다시 매겨지므로 비교하지 않고 새 값으로 바꾸고, 같은 trace 안에서는 더
   좁은 값만 남는다. 끝 atom이 아니라 폭을 남기므로 커밋한 회차 다음에는 같은 자리가
   아니라 그다음 자리를 읽는다. 좁히는 것은 작은 요청이 같은 벽을 피할 수 있는 실패뿐이고,
-  그 판정은 `walk_shows_size`(`keeper_librarian_runtime.mli:47`)가 들고, 원인별 판정
+  그 판정은 `walk_shows_size`(`keeper_librarian_runtime.mli`의 `served_slot` 필드)가 들고, 원인별 판정
   규칙은 RFC-librarian-lifecycle §4.3이 정한다. 마지막 후보 하나가 아니라 후보를 차례로
   시도한 전체 결과로 판정한다. 폭은 backlog를 끝까지 읽었을 때(`Drained`)만 푼다. 좁힌 커밋 한 번은
   거절했던 범위가 이제 들어간다는 증거가 아니다. 루프

@@ -48,7 +48,7 @@ val unreadable_transports : Masc.Tui_decode.connector list -> string list
     server's words, kept for a 404 and for any other non-success. *)
 val outcome_of_status : status:int -> refusal:string -> outcome
 
-(** One Recent Events line per binding. *)
+(** One session log line per binding. *)
 val outcome_line : target * outcome -> string
 
 (** The results in the order they are reported: removed, kept, not found,

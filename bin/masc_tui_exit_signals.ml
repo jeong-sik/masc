@@ -45,8 +45,8 @@ let poll t =
     end
   else Continue
 
-(* The count comes first: the events pane cuts a notice at a few dozen
-   columns, and a count after "press again to quit" was cut off at 100. *)
+(* The count comes first: a narrow footer cuts a notice short, and a count
+   after "press again to quit" was cut off at 100 columns. *)
 let quit_notice ~key ~waiting =
   match waiting with
   | 0 -> Printf.sprintf "%s: press again to quit, or any other key to stay" key

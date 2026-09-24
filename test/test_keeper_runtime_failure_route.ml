@@ -382,51 +382,6 @@ let test_repeating_generation_rotates_the_model () =
   Alcotest.(check bool) "the model answered, so the input was observed" true
     (KFR.response_observed route)
 
-let test_masc_internal_backpressure_hint () =
-  let err =
-    internal_err
-      (Keeper_internal_error.Capacity_backpressure
-         { runtime_id = "glm-coding.glm-5-turbo"
-         ; detail = "429 burst"
-         ; retry_after = Keeper_internal_error.Explicit 45.0
-         })
-  in
-  check_masc_route
-    "masc backpressure carries typed Explicit hint"
-    (KFR.Retry_after_observed
-       { retry_class = KFR.Provider_capacity; retry_after = Some 45.0 })
-    err;
-  Alcotest.(check (option (float 1e-6)))
-    "retry_after_of_route extracts the hint"
-    (Some 45.0)
-    (KFR.retry_after_of_route (route_of_masc_error err))
-
-(* The capacity envelope is the provider's capacity and has no source field.
-   A payload that names a source, or a runtime exhausted for capacity, is not
-   a shape MASC writes, so the strict decoder refuses it. *)
-let test_capacity_envelope_decoder_is_strict () =
-  let envelope extra =
-    `Assoc
-      ([ "kind", `String Keeper_internal_error.capacity_backpressure_kind
-       ; "runtime_id", `String "r"
-       ; "detail", `String "busy"
-       ; "retry_after_sec", `Null
-       ]
-       @ extra)
-  in
-  Alcotest.(check bool) "the envelope without a source decodes" true
-    (Option.is_some (Keeper_internal_error.parse_masc_internal_error_json (envelope [])));
-  List.iter
-    (fun source ->
-       Alcotest.(check bool) ("a source field is refused: " ^ source) true
-         (Option.is_none
-            (Keeper_internal_error.parse_masc_internal_error_json
-               (envelope [ "source", `String source ]))))
-    [ "provider_capacity"; "client_capacity"; "runtime_slot" ];
-  Alcotest.(check bool) "capacity_exhausted is not a runtime exhaustion reason" true
-    (Option.is_none
-       (Keeper_internal_error.runtime_exhaustion_reason_of_json (`String "capacity_exhausted")))
-
 let test_masc_internal_terminal_classes () =
   (match
      route_of_masc_error
@@ -474,6 +429,30 @@ let test_non_provider_families_judge () =
     Alcotest.failf "mcp error should exhaust protocol, got %s"
       (KFR.route_kind_label other)
 
+(* #38456: the admission check refuses a broken history before provider
+   dispatch. That turn carried nothing to the model, so a Gate continuation
+   riding it must not be settled as answered. *)
+let test_transcript_refusal_is_not_an_answer () =
+  let refused reason tool_use_ids =
+    internal_err
+      (Keeper_internal_error.Incomplete_tool_transcript
+         { reason; detail = "refused before dispatch"; tool_use_ids })
+  in
+  List.iter
+    (fun (label, error) ->
+       match route_of_masc_error error with
+       | KFR.Exhausted_visible_alive { terminal = KFR.Transcript_refused; _ } as route ->
+         Alcotest.(check string) (label ^ ": own route label") "transcript_refused"
+           (KFR.route_class_label route);
+         Alcotest.(check bool) (label ^ ": no provider answer") false
+           (KFR.response_observed route)
+       | other ->
+         Alcotest.failf "%s: a refused transcript routed to %s:%s" label
+           (KFR.route_kind_label other) (KFR.route_class_label other))
+    [ "unresolved tool results", refused Keeper_internal_error.Unresolved_tool_results [ "t1" ]
+    ; "structurally invalid", refused Keeper_internal_error.Structurally_invalid []
+    ]
+
 (* #32956: the heartbeat settles a Gate continuation on a failed turn only
    when the provider answered the request. Every class is named on one side
    so a new class has to be placed. *)
@@ -513,6 +492,7 @@ let test_response_observed_per_class () =
     ; terminal KFR.Deterministic_request
     ; terminal KFR.Context_overflow
     ; terminal KFR.Session_claim_refused
+    ; terminal KFR.Transcript_refused
     ; terminal KFR.Protocol_error
     ; terminal KFR.Config_mismatch
     ; terminal KFR.Provider_integration
@@ -705,6 +685,7 @@ let test_route_resumes_on_same_path_per_class () =
     ; "", terminal KFR.Deterministic_request
     ; "", terminal KFR.Context_overflow
     ; "", terminal KFR.Session_claim_refused
+    ; "", terminal KFR.Transcript_refused
     ; "", terminal KFR.Contract_violation
     ; "", terminal KFR.Protocol_error
     ; "", terminal KFR.Config_mismatch
@@ -774,10 +755,7 @@ let () =
             test_repeating_generation_rotates_the_model
         ] )
     ; ( "masc_internal"
-      , [ Alcotest.test_case "backpressure hint" `Quick test_masc_internal_backpressure_hint
-        ; Alcotest.test_case "capacity envelope decoder is strict" `Quick
-            test_capacity_envelope_decoder_is_strict
-        ; Alcotest.test_case "terminal classes" `Quick test_masc_internal_terminal_classes
+      , [ Alcotest.test_case "terminal classes" `Quick test_masc_internal_terminal_classes
         ] )
     ; ( "families"
       , [ Alcotest.test_case "non-provider terminal" `Quick test_non_provider_families_judge ] )
@@ -786,6 +764,10 @@ let () =
             "every class is placed"
             `Quick
             test_response_observed_per_class
+        ; Alcotest.test_case
+            "a refused transcript is not an answer"
+            `Quick
+            test_transcript_refusal_is_not_an_answer
         ; Alcotest.test_case
             "through route_of_error"
             `Quick

@@ -853,10 +853,10 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             ~turns_used:turn_count
             ~latency_ms:
               (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
-              (* This adapter does not sum per-frame usage before a host
-                 stop yet; the antigravity stream's counts are read only from
-                 its terminal frame. *)
-            ~usage:None
+              (* The antigravity stream's counts are read only from its
+                 terminal frame, which a host stop precedes, so no request's
+                 occupancy is known here. *)
+            ~request_context:None
             stop
         in
         let* () =
@@ -936,7 +936,10 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
           let* () =
             Runtime_antigravity_home.publish_mcp_config
               home
-              (Runtime_official_client_mcp_http.mcp_config_json bridge)
+              (Runtime_official_client_mcp_http.mcp_config_json
+                 bridge
+                 ~eager_tools:
+                   (List.map (fun (tool : Host.dynamic_tool) -> tool.name) dynamic_tools))
             |> Result.map_error (fun error ->
               recovery_failure := Session_store.State_persistence_failed;
               home_error_to_core_error error)

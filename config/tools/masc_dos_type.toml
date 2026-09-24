@@ -21,7 +21,7 @@ max_length = 256
 [[params]]
 name = "steps"
 type = "integer"
-description = "Instruction budget per character. Default 1000000."
+description = "Instruction budget per character. Default 4000000."
 minimum = 1
 maximum = 4000000
-default = 1000000
+default = 4000000

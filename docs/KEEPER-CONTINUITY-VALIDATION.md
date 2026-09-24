@@ -10,7 +10,7 @@ state template.
 ## Pass Contract
 
 A run passes only when all of the following are correlated to the same Keeper,
-trace, generation, and turn identity:
+trace, and turn identity:
 
 1. the Keeper is registered and its keepalive fiber is live;
 2. the input event is durably queued or delivered to that Keeper lane;
@@ -34,15 +34,24 @@ DRY_RUN=1 scripts/harness_keeper_continuity_validation.sh
 Isolated live run:
 
 ```bash
-KEEPER_MODELS="default" scripts/harness_keeper_continuity_validation.sh
+scripts/harness_keeper_continuity_validation.sh
 ```
+
+`KEEPER_RUNTIME_NAME` names the runtime the test Keeper starts on; empty uses
+the server's default. `TARGET_PHASES` picks from `bootstrap`, `liveness`,
+`continuity` and `recovery`, joined by commas, all four by default. An unknown
+name, an empty list or a stray comma stops the run with exit 2 before it
+starts.
+
+A phase counts the Keeper as live when `masc_keeper_status` reports
+`keepalive_running`, `runtime.phase = "running"` and
+`runtime.fiber_health = "alive"`.
 
 Use an existing server:
 
 ```bash
 START_SERVER=0 \
 MCP_URL="http://127.0.0.1:8935/mcp" \
-KEEPER_MODELS="default" \
 scripts/harness_keeper_continuity_validation.sh
 ```
 

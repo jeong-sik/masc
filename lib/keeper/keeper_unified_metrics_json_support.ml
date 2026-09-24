@@ -24,36 +24,27 @@ let tool_call_detail_to_json
 
 let provider_context_json ~(meta : keeper_meta) ?executed_runtime_id
     (result : Keeper_agent_run.run_result option) =
-  match result with
-  | Some r ->
-      let observed_runtime_id =
-        match r.runtime_observation with
-        | Some observation -> Some observation.runtime_id
-        | None -> None
-      in
-      let runtime_id =
-        match observed_runtime_id with
-        | Some runtime_id -> runtime_id
-        | None -> runtime_id_of_meta meta
-      in
-      (* A run that reported an observation names its own answerer; the
-         caller's [executed_runtime_id] covers the runs that did not. *)
-      let executed_runtime_id =
-        match observed_runtime_id with
-        | Some _ as observed -> observed
-        | None -> executed_runtime_id
-      in
-      `Assoc
-        [ ("runtime_id", `String runtime_id)
-        ; ("executed_runtime_id", Json_util.string_opt_to_json executed_runtime_id)
-        ; "selected_model", `Null
-        ]
-  | None ->
-      `Assoc
-        [ ("runtime_id", `String (runtime_id_of_meta meta))
-        ; ("executed_runtime_id", Json_util.string_opt_to_json executed_runtime_id)
-        ; ("selected_model", `Null)
-        ]
+  let observed_runtime_id =
+    match result with
+    | Some r ->
+        (match r.runtime_observation with
+         | Some observation -> Some observation.runtime_id
+         | None -> None)
+    | None -> None
+  in
+  (* A run that reported an observation names its own answerer; the
+     caller's [executed_runtime_id] covers the runs that did not. Neither
+     touches [runtime_id]: that is the keeper's lane whatever came back. *)
+  let executed_runtime_id =
+    match observed_runtime_id with
+    | Some _ as observed -> observed
+    | None -> executed_runtime_id
+  in
+  `Assoc
+    [ ("runtime_id", `String (runtime_id_of_meta meta))
+    ; ("executed_runtime_id", Json_util.string_opt_to_json executed_runtime_id)
+    ; ("selected_model", `Null)
+    ]
 
 let redacted_runtime_attempt_to_json
     (attempt : Runtime_observation.runtime_attempt) : Yojson.Safe.t =

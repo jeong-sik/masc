@@ -4,6 +4,27 @@ type lane =
   | Board_attention
   | Workspace_curator
 
+let standalone_lane = function
+  | Librarian -> Standalone_lane.Librarian
+  | Hitl_auto_judge -> Standalone_lane.Hitl_auto_judge
+  | Board_attention -> Standalone_lane.Board_attention
+  | Workspace_curator -> Standalone_lane.Workspace_curator
+;;
+
+(* The one place this registry decides which lanes it records. A Verifier
+   review is recorded by Verification_run_registry or
+   Goal_verification_run_registry, each keyed by the Task or Goal it reviews,
+   so a Verifier row here would be a second record of one review. *)
+let lane_of_standalone = function
+  | Standalone_lane.Librarian -> Some Librarian
+  | Standalone_lane.Hitl_auto_judge -> Some Hitl_auto_judge
+  | Standalone_lane.Board_attention -> Some Board_attention
+  | Standalone_lane.Workspace_curator -> Some Workspace_curator
+  | Standalone_lane.Verifier -> None
+;;
+
+let lane_id lane = Standalone_lane.to_id (standalone_lane lane)
+
 type outcome =
   | Succeeded
   | Cancelled
@@ -124,25 +145,15 @@ type run =
   ; output_availability : payload_availability option
   }
 
-(* [lane_key] is exhaustive for the wire spelling. [all_lanes] is separately
-   pinned to an independent constructor oracle in test_exact_lane_run_registry;
-   replay then exercises the exported enumeration. Keep these definitions
-   adjacent. *)
-let all_lanes = [ Librarian; Hitl_auto_judge; Board_attention; Workspace_curator ]
-
-let lane_key = function
-  | Librarian -> "librarian_exact"
-  | Hitl_auto_judge -> "hitl_auto_judge"
-  | Board_attention -> "board_attention_exact"
-  | Workspace_curator -> "workspace_curator_exact"
-;;
-
-let lane_of_key = function
-  | "librarian_exact" -> Ok Librarian
-  | "hitl_auto_judge" -> Ok Hitl_auto_judge
-  | "board_attention_exact" -> Ok Board_attention
-  | "workspace_curator_exact" -> Ok Workspace_curator
-  | value -> Error (Printf.sprintf "unknown exact lane %S" value)
+let lane_of_key key =
+  match Standalone_lane.of_id key with
+  | None -> Error (Printf.sprintf "unknown exact lane %S" key)
+  | Some standalone ->
+    (match lane_of_standalone standalone with
+     | Some lane -> Ok lane
+     | None ->
+       Error
+         (Printf.sprintf "exact lane %S is recorded by the verification run registries" key))
 ;;
 
 let outcome_label = function
@@ -260,7 +271,7 @@ module Payload = struct
      compaction fires only on a capacity refusal, and under the old global
      bound the busiest lane evicted the quietest — retained_run_count = 0 for
      compaction was indistinguishable from "never ran" (lane audit W8). *)
-  let retention_group = Some (fun registration -> lane_key registration.lane)
+  let retention_group = Some (fun registration -> lane_id registration.lane)
 
   (* A value kept in a payload file is dropped from the copy the store keeps.
      The list projection reads none of it -- [projected_run_of_entry] sets both
@@ -282,7 +293,7 @@ module Payload = struct
 
   let registration_to_yojson registration =
     `Assoc
-      [ "lane", `String (lane_key registration.lane)
+      [ "lane", `String (lane_id registration.lane)
       ; "actor", `String registration.actor
       ; ( "input"
         , match registration.input with
@@ -959,7 +970,7 @@ let status_label = function
 let run_summary_fields run =
   let base =
     [ "run_id", `String run.run_id
-    ; "lane", `String (lane_key run.lane)
+    ; "lane", `String (lane_id run.lane)
     ; ( "subject_id"
       , `Null
         (* This registry has no generic subject identity. Keep absence explicit

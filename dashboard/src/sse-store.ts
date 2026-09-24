@@ -238,7 +238,6 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   // Broadcasts — emitted by lib/mcp_tool_runtime_comm.ml
   broadcast:           { target: 'execution' },
   // Keeper lifecycle (also triggers operator refresh via handler)
-  keeper_handoff:       { target: 'execution', force: true },
   keeper_phase_changed: { target: 'execution', force: true },
   // A turn-complete hook precedes the durable TurnRecord commit and does not
   // mutate the execution cache. The selected Keeper is refreshed through the
@@ -350,7 +349,7 @@ function scheduleIdeWorkspaceRefresh(): void {
 // --- Named handlers for complex events ---
 
 const KEEPER_LIFECYCLE_EVENTS = new Set([
-  'keeper_handoff', 'keeper_turn_complete',
+  'keeper_turn_complete',
   'keeper_phase_changed',
 ])
 

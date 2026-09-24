@@ -72,6 +72,14 @@ type t =
         on this endpoint may run its box as [guest_local], which lets writes
         land inside the account without the judge (RFC-0422 §3.4). Default
         [false]: a shared account keeps the judge for every write. *)
+  ; allowed_paths : string list
+    (** Extra endpoint-side roots an Execute command on this endpoint may
+        name, beyond the keeper workdir and [/tmp] (for example [/app] on a
+        Terminal-Bench task box). Each entry is absolute and normalized (no
+        empty, [.] or [..] segment, not [/]); the parser refuses anything
+        else at load. The roots are endpoint paths, so the path check
+        compares them lexically and never resolves them on the host.
+        Default [[]]. *)
   }
 [@@deriving show, eq]
 

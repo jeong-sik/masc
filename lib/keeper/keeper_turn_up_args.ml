@@ -214,16 +214,24 @@ let parse_max_context_override args =
    either makes that choice for an operator who is not reading it, which is
    how a keeper built to search the web was created unable to. The empty
    string is refused by name, so the form teaches the two spellings through
-   the rejection rather than deciding for the reader. *)
+   the rejection rather than deciding for the reader.
+
+   [sandbox_image] follows the rule, not the exception (#37523): a docker
+   keeper is refused without one, and the line the operator reads in the
+   form is the choice on record. It names the general image, which has no
+   language toolchain; a keeper that builds code edits it. *)
 let creation_stem =
-  {json|{
+  Printf.sprintf
+    {json|{
   "name": "new-keeper",
   "sandbox_profile": "docker",
+  "sandbox_image": "%s",
   "network_mode": "",
   "board_interests": [],
   "instructions": "Replace this with what this keeper is for."
 }
 |json}
+    Keeper_sandbox_image.default_tag
 ;;
 
 let known_turn_up_args =
@@ -398,7 +406,16 @@ let parse
              "invalid sandbox_profile: %S (expected: %s)"
              raw
              (String.concat ", " Keeper_types_profile.valid_sandbox_profile_strings))
-      | Some _, _, _ | None, Some _, _ -> None
+      | Some _, _, _ | None, Some _, _ ->
+        (* A stated profile that runs a container also has to name its
+           image (#37523). [profile_defaults] already carries this call's
+           [sandbox_image] patch, so the call, the TOML or the manifest can
+           each supply it; none of them is filled in for the caller. *)
+        (match effective_profile with
+         | Some profile ->
+           missing_required_sandbox_image_error ~keeper_name:name profile
+             profile_defaults
+         | None -> None)
       | None, None, None | None, None, Some _ ->
         Some
           (missing_required_sandbox_profile_error

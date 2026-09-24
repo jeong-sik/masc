@@ -4,6 +4,7 @@ activation_mode = "autonomous"
 # inside a container, docker here means Docker-in-Docker — mount the host docker
 # socket or use microvm.
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 network_mode = "inherit"
 
 instructions = """

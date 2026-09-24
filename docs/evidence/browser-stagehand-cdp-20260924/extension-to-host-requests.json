@@ -29,7 +29,7 @@
           "role": "user",
           "content": {
             "type": "text",
-            "text": "Instruction: Extract the page heading and the plan price\nDOM: [0-3] RootWebArea: spike fixture\n  [0-4] scrollable, html\n    [0-9] body\n      [0-10] heading: Order form\n      [0-12] paragraph\n        [0-13] StaticText: Plan price: 42 USD\n      [0-14] LabelText\n        [0-15] StaticText: Email\n      [0-2] textbox: Email\n      [0-18] button: Submit order"
+            "text": "Instruction: Extract the page heading and the plan price\nDOM: [0-2] RootWebArea: spike fixture\n  [0-4] scrollable, html\n    [0-9] body\n      [0-10] heading: Order form\n      [0-12] paragraph\n        [0-13] StaticText: Plan price: 42 USD\n      [0-14] LabelText\n        [0-15] StaticText: Email\n      [0-3] textbox: Email\n      [0-18] button: Submit order"
           }
         }
       ],
@@ -106,7 +106,7 @@
         "category": "extraction",
         "promptTokens": 0,
         "completionTokens": 0,
-        "inferenceTimeMs": 5
+        "inferenceTimeMs": 3
       }
     }
   },
@@ -119,7 +119,7 @@
           "role": "user",
           "content": {
             "type": "text",
-            "text": "instruction: Find the most relevant element to perform an action on given the following action: click the Submit order button.  \n  IF AND ONLY IF the action EXPLICITLY includes the word 'dropdown' and implies choosing/selecting an option from a dropdown, ignore the 'General Instructions' section, and follow the 'Dropdown Specific Instructions' section carefully.\n  \n  General Instructions: \n    Provide an action for this element such as click, fill, type, press, scrollTo, nextChunk, prevChunk, selectOptionFromDropdown, hover, doubleClick, dragAndDrop. Remember that to users, buttons and links look the same in most cases.\n    When choosing non-left click actions, provide right or middle as the argument\n    If the action is completely unrelated to a potential action to be taken on the page, or no matching element exists, set `action` to null. Do not fabricate or guess an element.\n    ONLY return one action. If multiple actions are relevant, return the most relevant one.\n    If the user is asking to scroll to a position on the page, e.g., 'halfway' or 0.75, etc, you must return the argument formatted as the correct percentage, e.g., '50%' or '75%', etc.\n    If the user is asking to scroll to the next chunk/previous chunk, choose the nextChunk/prevChunk method. No arguments are required here.\n    If the action implies a key press, e.g., 'press enter', 'press a', 'press space', etc., always choose the press method with the appropriate key as argument — e.g. 'a', 'Enter', 'Space'. Do not choose a click action on an on-screen keyboard. Capitalize the first character like 'Enter', 'Tab', 'Escape' only for special keys. \n  \n  Dropdown Specific Instructions:\n    For interacting with dropdowns, there are two specific cases that you need to handle. \n    \n    CASE 1: the element is a 'select' element. \n      - choose the selectOptionFromDropdown method,\n      - set the argument to the exact text of the option that should be selected,\n      - set twoStep to false.\n    CASE 2: the element is NOT a 'select' element:\n      - do not attempt to directly choose the element from the dropdown. You will need to click to expand the dropdown first. You will achieve this by following these instructions:\n        - choose the node that most closely corresponds to the given instruction EVEN if it is a 'StaticText' element, or otherwise does not appear to be interactable.  \n        - choose the 'click' method\n        - set twoStep to true.\n  \nAccessibility Tree: \n[0-3] RootWebArea: spike fixture\n  [0-4] scrollable, html\n    [0-9] body\n      [0-10] heading: Order form\n      [0-12] paragraph\n        [0-13] StaticText: Plan price: 42 USD\n      [0-14] LabelText\n        [0-15] StaticText: Email\n      [0-2] textbox: Email\n      [0-18] button: Submit order\n"
+            "text": "instruction: Find the most relevant element to perform an action on given the following action: click the Submit order button.  \n  IF AND ONLY IF the action EXPLICITLY includes the word 'dropdown' and implies choosing/selecting an option from a dropdown, ignore the 'General Instructions' section, and follow the 'Dropdown Specific Instructions' section carefully.\n  \n  General Instructions: \n    Provide an action for this element such as click, fill, type, press, scrollTo, nextChunk, prevChunk, selectOptionFromDropdown, hover, doubleClick, dragAndDrop. Remember that to users, buttons and links look the same in most cases.\n    When choosing non-left click actions, provide right or middle as the argument\n    If the action is completely unrelated to a potential action to be taken on the page, or no matching element exists, set `action` to null. Do not fabricate or guess an element.\n    ONLY return one action. If multiple actions are relevant, return the most relevant one.\n    If the user is asking to scroll to a position on the page, e.g., 'halfway' or 0.75, etc, you must return the argument formatted as the correct percentage, e.g., '50%' or '75%', etc.\n    If the user is asking to scroll to the next chunk/previous chunk, choose the nextChunk/prevChunk method. No arguments are required here.\n    If the action implies a key press, e.g., 'press enter', 'press a', 'press space', etc., always choose the press method with the appropriate key as argument — e.g. 'a', 'Enter', 'Space'. Do not choose a click action on an on-screen keyboard. Capitalize the first character like 'Enter', 'Tab', 'Escape' only for special keys. \n  \n  Dropdown Specific Instructions:\n    For interacting with dropdowns, there are two specific cases that you need to handle. \n    \n    CASE 1: the element is a 'select' element. \n      - choose the selectOptionFromDropdown method,\n      - set the argument to the exact text of the option that should be selected,\n      - set twoStep to false.\n    CASE 2: the element is NOT a 'select' element:\n      - do not attempt to directly choose the element from the dropdown. You will need to click to expand the dropdown first. You will achieve this by following these instructions:\n        - choose the node that most closely corresponds to the given instruction EVEN if it is a 'StaticText' element, or otherwise does not appear to be interactable.  \n        - choose the 'click' method\n        - set twoStep to true.\n  \nAccessibility Tree: \n[0-2] RootWebArea: spike fixture\n  [0-4] scrollable, html\n    [0-9] body\n      [0-10] heading: Order form\n      [0-12] paragraph\n        [0-13] StaticText: Plan price: 42 USD\n      [0-14] LabelText\n        [0-15] StaticText: Email\n      [0-3] textbox: Email\n      [0-18] button: Submit order\n"
           }
         }
       ],
@@ -210,7 +210,7 @@
         "completionTokens": 0,
         "reasoningTokens": 0,
         "cachedInputTokens": 0,
-        "inferenceTimeMs": 3
+        "inferenceTimeMs": 9
       }
     }
   }

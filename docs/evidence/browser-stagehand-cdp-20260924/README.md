@@ -14,16 +14,33 @@ extension service worker, and JSON-RPC through `Runtime.addBinding` /
 - Page: a local HTTP fixture (heading, price, email field, a button that sets
   `document.body.dataset.clicked = "yes"`).
 
-## What was measured (`run.txt`)
+## Allowed origins
+
+`stagehand.init` takes `browser_cdp_url`, and the extension's service worker opens
+its own websocket to that URL. Chrome checks that socket's
+`chrome-extension://<id>` Origin against `--remote-allow-origins`.
+
+| `ORIGINS` | Flag | Result |
+|---|---|---|
+| `none` | no `--remote-allow-origins` | `stagehand.init` fails: `CDP websocket failed to open` (`run-without-allowed-origin.txt`) |
+| `extension` | `--remote-allow-origins=chrome-extension://<id>` | whole flow passes (`run.txt`) |
+| `any` | `--remote-allow-origins=*` (Stagehand's own launcher default) | passes; used by the first runs, not recorded here |
+
+The id is computed before launch from the extension directory's real path
+(SHA-256, first 32 hex digits, `0-f` mapped to `a-p`). Both runs log that it
+matches the id `Extensions.loadUnpacked` returned.
+
+## What was measured (`run.txt`, `ORIGINS=extension`)
 
 | Step | Result |
 |---|---|
-| Launch to runtime ready | ~2.0 s |
+| Launch to runtime marker | 0.6 s here; 0.6–7.1 s over seven runs that day, the first cold run slowest |
 | `Extensions.loadUnpacked` over `--remote-debugging-port` | accepted |
 | `stagehand.init` with `model: {source: "client"}` | needs `browser_cdp_url`; then returns the initial page |
-| `page.goto` / `page.screenshot` | 135 ms / ~80 ms, `fixture.png` 1280x713 |
+| `page.goto` | 48 ms |
+| `page.screenshot` | `fixture.png` 1280x713 |
 | `stagehand.extract` | two `llm.generate` requests reach the host (the extract schema and a progress schema) |
-| `stagehand.act` | one `llm.generate` request (4834 bytes, accessibility tree with `[frame-node]` ids); answering `0-18` clicks the button, read back as `clicked = "yes"` |
+| `stagehand.act` | one `llm.generate` request (4834 bytes, accessibility tree with `[frame-node]` ids); answering `0-18` clicks the button, read back as `clicked = "yes"`; 569 ms, mostly DOM settle |
 | Cache | `metadata.cache.status = DISABLED` (local runs have no cache) |
 
 `extension-to-host-requests.json` holds every request the extension sent to the host,
@@ -45,5 +62,6 @@ JSON schema).
 
 Extract `npm pack @browserbasehq/stagehand@4.1.0` next to `spike.mjs` (it reads
 `package/dist/extension`), then run
-`CHROME_BIN=<absolute Chrome path> node spike.mjs`. It writes to `out/` and a
-throwaway `profile/` beside the script and stops Chrome on exit.
+`ORIGINS=extension CHROME_BIN=<absolute Chrome path> node spike.mjs`
+(`ORIGINS` is `none`, `extension` or `any`). It writes to `out/` and a throwaway
+`profile/` beside the script and stops Chrome on exit.

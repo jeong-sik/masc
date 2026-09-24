@@ -3,6 +3,8 @@
 // JSON-RPC through Runtime.addBinding / Runtime.evaluate, and llm.generate reaching the host.
 // The llm.generate answer is a fixed stub: this measures the wire, not model quality.
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
@@ -12,6 +14,12 @@ const EXT = path.join(SP, "package/dist/extension");
 const PROFILE = path.join(SP, "profile");
 const OUT = path.join(SP, "out");
 const BIN = process.env.CHROME_BIN;
+// Chrome names an unpacked extension after the SHA-256 of its real path (first 32 hex digits, 0-f -> a-p).
+const EXT_ID = crypto.createHash("sha256").update(fsSync.realpathSync(EXT)).digest("hex").slice(0, 32)
+  .split("").map((h) => String.fromCharCode(97 + parseInt(h, 16))).join("");
+// ORIGINS=none omits the flag; ORIGINS=extension allows only this extension; ORIGINS=any is Stagehand's default.
+const ORIGINS = process.env.ORIGINS ?? "extension";
+const originFlag = { none: [], extension: [`--remote-allow-origins=chrome-extension://${EXT_ID}`], any: ["--remote-allow-origins=*"] }[ORIGINS];
 const t0 = Date.now();
 const log = (...a) => console.log(`+${String(Date.now() - t0).padStart(5)}ms`, ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -30,7 +38,7 @@ await fs.mkdir(PROFILE, { recursive: true });
 await fs.mkdir(OUT, { recursive: true });
 const chrome = spawn(BIN, [
   "--headless=new", "--remote-debugging-port=0", `--user-data-dir=${PROFILE}`,
-  "--enable-unsafe-extension-debugging", "--remote-allow-origins=*",
+  "--enable-unsafe-extension-debugging", ...originFlag,
   "--no-first-run", "--no-default-browser-check", "--window-size=1280,800", "about:blank",
 ], { stdio: ["ignore", "ignore", "ignore"] });
 process.on("exit", () => chrome.kill("SIGTERM"));
@@ -61,7 +69,7 @@ const cdp = (method, params = {}, sessionId) => new Promise((res, rej) => {
 
 log("browser", (await cdp("Browser.getVersion")).product);
 const { id: extId } = await cdp("Extensions.loadUnpacked", { path: EXT });
-log("Extensions.loadUnpacked ->", extId);
+log("Extensions.loadUnpacked ->", extId, extId === EXT_ID ? "(matches id computed from path)" : `(computed ${EXT_ID})`, "origins:", ORIGINS);
 
 let sw;
 for (let i = 0; i < 100 && !sw; i++) {

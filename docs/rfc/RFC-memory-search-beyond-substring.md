@@ -94,7 +94,7 @@ claim 하나로 묶을 때, 원문 문장마다 판정 모델(TypeSafe Jev)에�
 
 ### 3.0 단계 0 — 먼저 잰다 (권장 첫 PR)
 
-- 결정 로그의 `memory_search` 줄에 `total_candidates` 를 더하고, 검색마다
+- 결정 로그의 `memory_search` 줄에 `total_candidates` 와 `trace_id`(턴당 검색 횟수를 세기 위해)를 더하고, 검색마다
   `masc_keeper_memory_search_total{source, outcome}` 카운터를 올린다(outcome: `matched` | `no_match` |
   `store_unavailable`).
 - `scripts/memory-search-miss-report.py`: 결정 로그를 읽어 Keeper·source 별 0건 비율을 내고, 0건 query 와
@@ -139,8 +139,10 @@ lexical 은 "다른 말로 쓴 같은 뜻"을 원리적으로 못 찾는다. 임
 - `persist_before_model_call`: 판정 요청 전에 query 를 먼저 기록한다.
 - 판정 lane 이 꺼져 있거나 실패하면 단계 1 결과를 그대로 돌려주고, 응답에 판정이 없었음을 typed 로 표시한다
   (조용히 빈 결과로 떨어지지 않게, `failure_keeps_evidence`).
-- 호출 모드: 기본은 `no_match` 이거나 후보가 `limit` 을 넘을 때만 판정을 부르는 안과, 항상 부르는 안이 있다.
-  constitution 은 비용을 문제 삼지 않으므로 "항상"이 더 단순하다. 지연이 체감되면 그때 조건부로 바꾼다.
+- 호출 모드: `no_match` 이거나 후보가 `limit` 을 넘을 때만 판정을 부르는 안과, 항상 부르는 안이 있다.
+  비용은 constitution 상 문제가 아니지만 **지연**은 턴 안에서 쌓인다. Keeper 는 한 턴에 검색을 여러 번 부를 수
+  있고 로컬 모델 판정은 초 단위일 수 있다. 그래서 단계 0 이 턴당 검색 횟수를 재고(결정 로그의 `trace_id`),
+  그 분포와 판정 한 번의 지연을 곱해서 항상/조건부를 고른다.
 
 ### 3.3 단계 3 — 연상 (선택)
 

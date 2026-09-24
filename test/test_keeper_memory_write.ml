@@ -2786,7 +2786,13 @@ let test_search_records_a_retrieval_per_ordinary_match () =
     Alcotest.(check (list int))
       "both lines count the current facts searched"
       [ 3; 3 ]
-      [ int_field "total_candidates" hit_line; int_field "total_candidates" miss_line ]
+      [ int_field "total_candidates" hit_line; int_field "total_candidates" miss_line ];
+    Alcotest.(check (list string))
+      "both lines name the turn, so searches per turn can be counted"
+      [ Keeper_id.Trace_id.to_string meta.runtime.trace_id
+      ; Keeper_id.Trace_id.to_string meta.runtime.trace_id
+      ]
+      [ string_field "trace_id" hit_line; string_field "trace_id" miss_line ]
   | _ -> Alcotest.fail "expected one decision-log line per search"
 ;;
 

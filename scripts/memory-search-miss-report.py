@@ -3,7 +3,8 @@
 
 Reads every ``<keeper>.decisions.jsonl`` (and its rotations ``.1``, ``.2`` ...)
 in a keepers runtime directory, keeps the ``event = "memory_search"`` lines,
-and prints per Keeper and source how many searches found nothing.
+and prints per Keeper and source how many searches found nothing, and per
+Keeper how many searches a turn (``trace_id``) makes.
 
 With ``--replay-out`` it also writes the replay set of
 RFC-memory-search-beyond-substring section 3.0: one JSON line per search that
@@ -79,6 +80,23 @@ def summary(searches):
     return table
 
 
+def searches_per_turn(searches):
+    """Searches grouped by the turn (trace_id) that made them, per Keeper.
+
+    Lines written before the decision log carried trace_id are not counted.
+    """
+    per_keeper = {}
+    for keeper, rows in searches.items():
+        turns = defaultdict(int)
+        for row in rows:
+            trace_id = row.get("trace_id")
+            if isinstance(trace_id, str) and trace_id:
+                turns[trace_id] += 1
+        if turns:
+            per_keeper[keeper] = sorted(turns.values())
+    return per_keeper
+
+
 def replay_rows(searches):
     for keeper, rows in searches.items():
         for index, row in enumerate(rows):
@@ -127,6 +145,14 @@ def main():
         print(f"{'all':<40} {'':<10} {total:>9} {misses:>9} {misses / total:>7.1%}")
     else:
         print("no memory_search lines found")
+    per_turn = searches_per_turn(searches)
+    if per_turn:
+        print()
+        print(f"{'keeper':<40} {'turns':>7} {'median':>7} {'p90':>5} {'max':>5}  searches per turn")
+        for keeper, counts in sorted(per_turn.items()):
+            median = counts[len(counts) // 2]
+            p90 = counts[min(len(counts) - 1, (len(counts) * 9) // 10)]
+            print(f"{keeper:<40} {len(counts):>7} {median:>7} {p90:>5} {counts[-1]:>5}")
     if unreadable:
         print(f"unreadable decision-log lines skipped: {unreadable}", file=sys.stderr)
 

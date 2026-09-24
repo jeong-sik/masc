@@ -876,6 +876,7 @@ let keeper_memory_search_with_outcome
          `Assoc
            ([ "ts_unix", `Float (Time_compat.now ())
             ; "event", `String "memory_search"
+            ; "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
             ; "query", `String query
             ; "source", `String source_label
             ; "match_count", `Int match_count

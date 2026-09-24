@@ -110,11 +110,9 @@ let try_handle_with_outcome
        with
        | Ok (Some endpoint_path) -> Declared_read_target endpoint_path
        | Ok None -> Read_target_error refusal
-       (* An endpoint that cannot be resolved is the operator's
-          configuration, not the caller's path. *)
-       | Error message ->
+       | Error endpoint_error ->
          Read_target_error
-           { Keeper_alerting_path.failure_class = Tool_result.Runtime_failure; message })
+           (Keeper_alerting_path.endpoint_unresolved ~tree_refusal:refusal ~endpoint_error))
   in
   (* TEL-OK: read-op adapter delegates to Keeper_tooling.Execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)

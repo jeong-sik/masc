@@ -17,7 +17,7 @@ val failure_class_of_rejection : keeper_path_rejection -> Tool_result.tool_failu
 
 (** A refused path as a tool reports it: the rejection's message and the
     class {!failure_class_of_rejection} gives it. *)
-type path_refusal =
+type path_refusal = private
   { failure_class : Tool_result.tool_failure_class
   ; message : string
   }
@@ -31,6 +31,13 @@ type caller_cwd_refusal =
   | Cwd_is_file of { cwd : string }
 
 val caller_refusal : caller_cwd_refusal -> path_refusal
+
+(** The keeper's tree refused a path, and the endpoint whose declared roots
+    might hold it could not be resolved. The endpoint is the operator's
+    configuration, so this is a [Runtime_failure] and its error leads the
+    message; the tree's refusal follows, since the path may be refused either
+    way. *)
+val endpoint_unresolved : tree_refusal:path_refusal -> endpoint_error:string -> path_refusal
 
 (** Project a [Workspace.config] to its project root by stripping the
     trailing [.masc] base-path component when present. *)

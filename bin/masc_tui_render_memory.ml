@@ -898,7 +898,10 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
     | [] -> []
     | lines ->
       let kept = max 0 (detail_rows - 1) in
-      if kept >= List.length lines then lines
+      (* The detail also needs its divider. With no line left after that,
+         even the folded marker would exceed the rows reserved for it. *)
+      if kept = 0 then []
+      else if kept >= List.length lines then lines
       else
         (* The last row it can draw says what is under the fold, in the
            window the list below and the other reading panes draw. *)

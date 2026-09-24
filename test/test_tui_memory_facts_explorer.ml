@@ -316,6 +316,33 @@ let test_a_short_fact_leaves_the_list_more_than_its_floor () =
     (height > Masc_tui_render_memory.memory_fact_list_floor_rows)
 ;;
 
+let test_a_tiny_viewport_never_draws_unbudgeted_detail () =
+  let state = make_state () in
+  let long =
+    make_fact ~claim:(String.concat " " (List.init 100 (fun _ -> "claim"))) "long"
+  in
+  let others =
+    List.init 30 (fun i ->
+      make_fact ~claim:(Printf.sprintf "short %d" i) (string_of_int i))
+  in
+  state.memory_facts <-
+    Some
+      (make_snapshot ~ordinary_facts:(long :: others) ~source_facts:[]
+         ~invalidations:[]);
+  List.iter
+    (fun budget ->
+      let drawn = ref 0 in
+      let row _ = incr drawn in
+      Masc_tui_render_memory.render_memory_facts_body ~cols:80 ~budget state
+        ~push:row ~push_styled:(fun ~style:_ _ -> incr drawn)
+        ~push_selected:row ~push_divider:(fun () -> incr drawn)
+        ~push_empty:(fun () -> incr drawn);
+      check bool
+        (Printf.sprintf "budget %d contains every drawn fact row" budget)
+        true (!drawn <= budget))
+    [ 10; 11; 12 ]
+;;
+
 let () =
   run "masc_tui_memory_facts_explorer"
     [ ( "navigation"
@@ -333,6 +360,8 @@ let () =
             test_a_long_fact_leaves_the_list_its_floor
         ; test_case "a short fact leaves the list more than its floor" `Quick
             test_a_short_fact_leaves_the_list_more_than_its_floor
+        ; test_case "tiny viewport keeps detail inside budget" `Quick
+            test_a_tiny_viewport_never_draws_unbudgeted_detail
         ] )
     ]
 ;;

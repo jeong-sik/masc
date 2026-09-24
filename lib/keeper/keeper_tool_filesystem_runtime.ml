@@ -369,6 +369,9 @@ let handle_read_file_with_outcome
   | Ok window, Ok target ->
     let payload_of_slice ~via ~file_bytes ~first_line ~scan_complete body =
       match slice_read_window ~window ~first_line ~max_bytes ~scan_complete body with
+      (* The sandbox streams from [window.start_line], so its body always
+         holds the window's first line and cannot reach this branch; only the
+         owned path's prefix read can (removal tracked in #38609). *)
       | Error `Offset_beyond_scan ->
         Read_failed_payload
           (error_json
@@ -428,7 +431,6 @@ let handle_read_file_with_outcome
            in
            (* The backend streams from [window.start_line], so the byte bound
               is the window's and every line of the file is reachable. *)
-           let fetch_bytes = max_bytes in
            match
              Keeper_sandbox_read_runner.read_file
                ?turn_sandbox_factory
@@ -436,7 +438,7 @@ let handle_read_file_with_outcome
                ~config
                ~meta
                ~host_path:target
-               ~max_bytes:fetch_bytes
+               ~max_bytes
                ~timeout_sec
                ()
            with
@@ -451,7 +453,7 @@ let handle_read_file_with_outcome
            | Error err ->
              Error (Keeper_sandbox_read_backend.read_error_to_string err)
            | Ok body ->
-             let scan_complete = String.length body < fetch_bytes in
+             let scan_complete = String.length body < max_bytes in
              Ok
                (payload_of_slice
                   ~via:(Some Keeper_sandbox_read_runner.backend_via)
@@ -3142,6 +3144,20 @@ module For_testing = struct
 
   let with_created_directory_fault fault f =
     Eio.Fiber.with_binding created_directory_dispatch_fault_key fault f
+  ;;
+
+  let slice_read_window ~start_line ~max_lines ~first_line ~max_bytes ~scan_complete
+      content =
+    match
+      slice_read_window
+        ~window:({ start_line; max_lines } : read_line_window)
+        ~first_line
+        ~max_bytes
+        ~scan_complete
+        content
+    with
+    | Error `Offset_beyond_scan -> Error `Offset_beyond_scan
+    | Ok (slice : read_window_slice) -> Ok (slice.window_content, slice.next_offset)
   ;;
 end
 

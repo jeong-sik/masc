@@ -420,6 +420,33 @@ let test_legacy_max_bytes_args_unchanged () =
   Alcotest.(check (option int)) "returned_lines" (Some 10) (parse_int "returned_lines" raw)
 ;;
 
+(* A sandbox Read streams from the window's first line, so the body it
+   slices does not begin at file line 1. [first_line] carries where it does
+   begin; offsets must stay file line numbers. The second case starts the
+   window one line into the body, so an off-by-one in the mapping returns
+   the wrong line instead of the same bytes. *)
+let test_window_offsets_follow_the_body_first_line () =
+  let slice = Keeper_tool_filesystem_runtime.For_testing.slice_read_window in
+  let body = "line-25000\nline-25001\nline-25002\n" in
+  let check_window name ~start_line ~max_lines ~expected_content ~expected_next =
+    match
+      slice ~start_line ~max_lines ~first_line:25_000 ~max_bytes:4096
+        ~scan_complete:false body
+    with
+    | Error `Offset_beyond_scan ->
+      Alcotest.failf "%s: window mapped past the body" name
+    | Ok (content, next_offset) ->
+      Alcotest.(check string) (name ^ " content") expected_content content;
+      Alcotest.(check (option int)) (name ^ " next_offset") expected_next next_offset
+  in
+  check_window "window at the body's first line" ~start_line:25_000
+    ~max_lines:(Some 2) ~expected_content:"line-25000\nline-25001\n"
+    ~expected_next:(Some 25_002);
+  check_window "window one line into the body" ~start_line:25_001
+    ~max_lines:(Some 1) ~expected_content:"line-25001\n"
+    ~expected_next:(Some 25_002)
+;;
+
 let () =
   Alcotest.run
     "keeper_tool_read_window"
@@ -454,6 +481,10 @@ let () =
             "legacy max_bytes args unchanged"
             `Quick
             test_legacy_max_bytes_args_unchanged
+        ; Alcotest.test_case
+            "window offsets follow the body's first line"
+            `Quick
+            test_window_offsets_follow_the_body_first_line
         ] )
     ]
 ;;

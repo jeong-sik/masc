@@ -585,7 +585,9 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                 (match
                    Runtime_antigravity_home.publish_mcp_config
                      home
-                     (Runtime_official_client_mcp_http.mcp_config_json bridge)
+                     (Runtime_official_client_mcp_http.mcp_config_json
+                        bridge
+                        ~eager_tools:[ probe_tool.name ])
                  with
                  | Error error ->
                    Error

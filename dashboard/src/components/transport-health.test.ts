@@ -382,7 +382,7 @@ describe('TransportHealthPanel', () => {
 
     vi.useFakeTimers()
     lastEvent.value = { type: 'broadcast' }
-    lastEvent.value = { type: 'keeper_handoff' }
+    lastEvent.value = { type: 'keeper_phase_changed' }
     lastEvent.value = { type: 'task_claimed' }
     await vi.advanceTimersByTimeAsync(1_199)
     expect(fetchTransportHealth).toHaveBeenCalledTimes(1)

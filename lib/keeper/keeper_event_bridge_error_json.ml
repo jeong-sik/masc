@@ -181,7 +181,7 @@ let core_api_error_fields = function
   | Agent_core.Retry.NetworkError { message; kind } ->
     [ "variant", `String "network_error"
     ; "message", `String message
-    ; "network_kind", `String (Keeper_agent_error.network_error_kind_to_wire kind)
+    ; "network_kind", `String (Llm_provider.Http_client.network_error_kind_to_string kind)
     ]
   | Agent_core.Retry.Timeout { message; phase } ->
     [ "variant", `String "timeout"
@@ -444,7 +444,7 @@ let core_provider_error_fields error =
     [ "variant", `String "network_error"
     ; "message", `String message
     ; "provider", `String provider
-    ; "network_kind", `String (Keeper_agent_error.network_error_kind_to_wire kind)
+    ; "network_kind", `String (Llm_provider.Http_client.network_error_kind_to_string kind)
     ; ( "timeout_phase"
       , match timeout_phase with
         | Some phase -> `String (Llm_provider.Http_client.timeout_phase_to_label phase)

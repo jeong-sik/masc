@@ -3,7 +3,7 @@ module Proposals = Workspace_memory_proposal
 module Exact = Agent_core.Exact_output
 module Runs = Exact_lane_run_registry
 
-let lane_id = Runs.lane_key Runs.Workspace_curator
+let lane_id = Standalone_lane.to_id Standalone_lane.Workspace_curator
 let ( let* ) = Result.bind
 
 let object_schema fields =

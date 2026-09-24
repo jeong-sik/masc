@@ -121,6 +121,26 @@ let current_keeper_meta ~(config : Workspace.config) ~(fallback_meta : keeper_me
   | Some entry -> entry.meta
   | None -> fallback_meta
 
+type briefing_candidates =
+  | Lane_of_route of string
+  | Deferred_candidates of string list
+
+(* The briefing is pinned, so it is bounded here rather than left to the
+   model input projection, which can only cut the conversation window. The
+   briefing is rendered once, before the walk picks a candidate, and a failed
+   head is demoted behind its siblings, so any candidate the walk holds can
+   serve the turn. The budget is therefore a share of the smallest ceiling
+   among exactly those candidates; see
+   {!Runtime.smallest_max_prompt_bytes_of_route} for what a candidate that
+   declares none means. Candidates that all declare none get no bound, the
+   same answer their projection gives them. *)
+let world_state_briefing_budget_bytes candidates =
+  (match candidates with
+   | Lane_of_route route -> Runtime.smallest_max_prompt_bytes_of_route route
+   | Deferred_candidates ids -> Runtime.smallest_max_prompt_bytes_of_runtime_ids ids)
+  |> Option.map (fun cap ->
+    cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
+
 let runtime_budget_logged : unit StringMap.t Atomic.t =
   Atomic.make StringMap.empty
 

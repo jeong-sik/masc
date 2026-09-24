@@ -207,6 +207,7 @@ user = "root"
 remote_root = "{remote_root}"
 port = 22
 identity_file = "/opt/masc-bench/ssh/id_ed25519"
+allowed_paths = ["/app"]
 
 [fusion]
 enabled = {fusion}
@@ -261,6 +262,7 @@ user = "root"
 remote_root = "{remote_root}"
 port = 22
 identity_file = "/opt/masc-bench/ssh/id_ed25519"
+allowed_paths = ["/app"]
 
 [fusion]
 enabled = {fusion}

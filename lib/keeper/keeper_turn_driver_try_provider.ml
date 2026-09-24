@@ -245,10 +245,11 @@ let working_state_text (snapshot : Librarian_continuity_snapshot.t) =
    checked against the boundary log, or covers bytes that have changed is one
    that does not fit, never a reason to refuse the turn (#37762). A refused
    turn also ran no Librarian round, so a snapshot whose covered bytes changed
-   was never written again. A snapshot file or a boundary log that cannot be
-   read stops the Librarian's continuity pass as well, so those stay until the
-   file is fixed; they are warnings because each names a file to fix rather
-   than a history that moved on. A covered prefix or a read position that
+   was never written again. A snapshot file that cannot be decoded is rebuilt
+   by the Librarian's next continuity pass, which replaces it on commit. A
+   snapshot file or a boundary log that cannot be read stops that pass, so
+   those stay until the file is fixed; they are warnings because each names a
+   file to fix rather than a history that moved on. A covered prefix or a read position that
    changes while the request is in flight is still refused, by
    [validate_continuity].
 
@@ -381,6 +382,7 @@ type try_provider_ctx =
        candidate that was refused, so the lane's next candidate composes
        from it instead of starting over from the turn start. *)
     hold_carried_front : Keeper_carried_front.seed -> unit
+  ; restore_carried_front : Keeper_carried_front.seed option -> unit
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -2536,11 +2538,12 @@ let eviction_retry_to_json = function
    arrives that way -- a 400 whose only size signal is its sentence, with
    no typed code (RFC librarian-lifecycle §4.10 lists the measured wires) --
    and reading the sentence
-   would be a string classifier. Today this is the same set as
-   [refusal_evicts]. It is kept separate so that this check keeps all three
-   when [refusal_evicts] narrows to the two typed size refusals (#38286).
+   would be a string classifier. [refusal_evicts] names only the two typed
+   size refusals (#38286); this check keeps the third.
    - A refusal that was not about size draws the same refusal from the
-     boundary. No accepted start is recorded, and the turn ends on it.
+     boundary. The held front is then given back ([turn_boundary_resend_sequence]),
+     so a later candidate that the declared-lane walk asks opens on the
+     original range and no accepted start at the boundary is recorded.
    - A refusal that was about size leaves a gap the Librarian still reads.
      Once it reaches the accepted start the request starts at its point
      again (rule 5), so no context is lost for good.
@@ -2590,11 +2593,21 @@ let boundary_resend_on = function
    a Librarian point, the Librarian reads past it. A refused boundary
    request, a refusal of a range that opened at or after the boundary, and
    every other error end the sequence with the error in hand. The range is
-   never halved on this path. *)
+   never halved on this path.
+
+   The front stays held only when the boundary request is accepted or is
+   refused for a typed size ([refusal_evicts]). A boundary request refused
+   for any other reason says the boundary did not answer the refusal, so
+   the front held before it comes back: without that, the later candidate
+   the walk asks opens at the boundary, its success records that boundary as
+   the accepted start, and every later turn starts there -- context cut for
+   a refusal that was never about size. *)
 let turn_boundary_resend_sequence
       ~same_run_retry_authorized
       ~(refused_range : unit -> (Keeper_carried_front.origin * int) option)
       ~(turn_start_front : unit -> Keeper_carried_front.seed option)
+      ~(held_front : unit -> Keeper_carried_front.seed option)
+      ~(restore_front : Keeper_carried_front.seed option -> unit)
       ~(hold_front : Keeper_carried_front.seed -> unit)
       ~(on_turn_start : Agent_core.Error.t -> Keeper_carried_front.seed -> unit)
       ~(attempt : unit -> ('ok, Agent_core.Error.t) result)
@@ -2615,9 +2628,14 @@ let turn_boundary_resend_sequence
        (match turn_start_front () with
         | Some (front : Keeper_carried_front.seed)
           when front.first_atom > refused_first_atom ->
+          let before = held_front () in
           hold_front front;
           on_turn_start error front;
-          attempt ()
+          (match attempt () with
+           | Ok _ as ok -> ok
+           | Error resent as refused ->
+             if not (refusal_evicts resent) then restore_front before;
+             refused)
         | Some (_ : Keeper_carried_front.seed) | None -> failed)
      | Some
          ( ( Keeper_carried_front.Carried _
@@ -2832,6 +2850,8 @@ let run_try_provider_with_carried_range_eviction
             (fun front_digest ->
                { Keeper_carried_front.first_atom; front_digest; source })
             (sent.digest_at first_atom)))
+      ~held_front:ctx.carried_front_after_refusal
+      ~restore_front:ctx.restore_carried_front
       ~hold_front:ctx.hold_carried_front
       ~on_turn_start:(fun error front ->
         on_turn_start_extra front;

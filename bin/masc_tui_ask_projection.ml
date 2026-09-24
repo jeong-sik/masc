@@ -118,14 +118,18 @@ let toggle_choice draft ~(question : Decode.ask_question)
   | [] -> forget draft ~question_id
   | ids -> record draft ~question_id (Draft_chose ids)
 
-type free_text_slot = { fts_question_id : string; fts_hint : string option }
+type free_text_slot = {
+  fts_ask_id : string;
+  fts_question_id : string;
+  fts_hint : string option;
+}
 
-let free_text_slot (question : Decode.ask_question) =
+let free_text_slot ~ask_id (question : Decode.ask_question) =
   match question.aq_free_text with
   | Decode.Ask_free_text_allowed { aft_hint } ->
-      { fts_question_id = question.aq_id; fts_hint = aft_hint }
+      { fts_ask_id = ask_id; fts_question_id = question.aq_id; fts_hint = aft_hint }
   | Decode.Ask_choices_only ->
-      { fts_question_id = question.aq_id; fts_hint = None }
+      { fts_ask_id = ask_id; fts_question_id = question.aq_id; fts_hint = None }
 
 (* Digits are single-key shortcuts. Above eight offered choices, [t] remains
    the unambiguous text key; a two-digit "10" would select "1" first. *)
@@ -134,11 +138,16 @@ let alternative_position (question : Decode.ask_question) =
   if count > 0 && count < 9 then Some (count + 1) else None
 
 let free_text_hint slot = slot.fts_hint
+let free_text_ask_id slot = slot.fts_ask_id
 let free_text_question_id slot = slot.fts_question_id
 
+(* Question ids are only unique inside one ask (masc_ask numbers every ask's
+   questions from q1), so a slot writes into its own ask's draft and nowhere
+   else. *)
 let set_text draft ~slot ~text =
   let question_id = slot.fts_question_id in
-  if String.trim text = "" then forget draft ~question_id
+  if not (String.equal draft.d_ask_id slot.fts_ask_id) then draft
+  else if String.trim text = "" then forget draft ~question_id
   else record draft ~question_id (Draft_wrote text)
 
 let response_json = function

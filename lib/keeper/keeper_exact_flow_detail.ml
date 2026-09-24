@@ -8,7 +8,7 @@ module Http_client = Llm_provider.Http_client
 let transport_error_detail : Http_client.http_error -> string = function
   | HttpError { code; _ } -> Printf.sprintf "http_status=%d" code
   | NetworkError { kind; _ } ->
-    "network_error:" ^ Keeper_internal_error.network_error_kind_to_string kind
+    "network_error:" ^ Http_client.network_error_kind_to_string kind
   | TimeoutError { phase; _ } -> "timeout:" ^ Http_client.timeout_phase_to_label phase
   | AcceptRejected _ -> "accept_rejected"
   | ProviderTerminal { kind = Session_conflict; _ } -> "provider_terminal:session_conflict"

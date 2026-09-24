@@ -1,4 +1,4 @@
-type source = Live | Automation
+type source = Browser_lane.Lane_name.t = Live | Automation
 type request = { route : Browser_lane.route; tab_id : int option }
 type tab = { id : int; title : string; url : string; active : bool }
 type selection = Requested of tab | Active of tab | None_active
@@ -13,10 +13,11 @@ let parse_client_id = function
   | _ -> Error "body must be a JSON object"
 let parse_request = function
   | `Assoc fields ->
+    let lane_error = "lane must be " ^ Browser_lane.Lane_name.expected in
     let* source = match List.assoc_opt "lane" fields with
-      | None | Some (`String "live") -> Ok Live
-      | Some (`String "automation") -> Ok Automation
-      | _ -> Error "lane must be live or automation" in
+      | None -> Ok Live
+      | Some (`String raw) -> Option.to_result ~none:lane_error (Browser_lane.Lane_name.of_wire raw)
+      | Some _ -> Error lane_error in
     let* tab_id = match List.assoc_opt "tabId" fields with
       | None -> Ok None
       | Some (`Int id) when id >= 0 -> Ok (Some id)
@@ -57,9 +58,7 @@ let rec decode_tabs = function
   | json :: rest -> let* tab = decode_tab json in let* tabs = decode_tabs rest in Ok (tab :: tabs)
 let tab_json tab = `Assoc ["id",`Int tab.id;"title",`String tab.title;
   "url",`String tab.url;"active",`Bool tab.active]
-let source_name = function
-  | Browser_lane.Live_route _ -> "live"
-  | Browser_lane.Automation_route -> "automation"
+let source_name route = Browser_lane.Lane_name.to_wire (Browser_lane.route_lane_name route)
 let select ~tab_id tabs = match tab_id with
   | Some id -> (match List.find_opt (fun tab -> tab.id = id) tabs with
       | Some tab -> Ok (Requested tab)

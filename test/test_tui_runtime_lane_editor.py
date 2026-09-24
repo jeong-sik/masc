@@ -536,6 +536,10 @@ def run_exact_slot_editor(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"K", b"HTTP slots run before CLI slots")
         h.send_and_wait(process, fd, output, b"j" * 9,
                         b"> 11  CLI  codex_subscription.fixture-10")
+        h.send_and_wait(process, fd, output, b"a",
+                        b"adding a candidate to librarian_exact")
+        h.send_and_wait(process, fd, output, b"e",
+                        b"> 11  CLI  codex_subscription.fixture-10")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

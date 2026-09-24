@@ -5862,47 +5862,86 @@ let render_lanes_slot_editor (state : state) (editor : slot_editor) =
    | Some detail ->
      box_line_styled buf cols ~style:(Theme.warn ())
        ("  " ^ Keeper_chat.terminal_safe_text detail));
-  let slot_rows = Masc_tui_types.slot_editor_rows state in
-  let count = List.length slot_rows in
-  let content_height = max 0 (rows - count_frame_lines buf - 3) in
-  let first =
-    min (max 0 (count - content_height))
-      (max 0 (editor.se_cursor - content_height + 1))
-  in
-  let window = Rows.of_list ~first ~height:content_height slot_rows in
-  if count = 0 then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      "  (this lane declares no slot)"
-  else
-    for index = first to first + content_height - 1 do
-      match Rows.at window index with
-      | None -> ()
-      | Some (row : slot_editor_row) ->
-        let line =
-          Printf.sprintf "  %s %d  %s %s%s"
-            (if index = editor.se_cursor then ">" else " ")
-            (index + 1)
-            (match row.sr_kind with
-             | `Http -> "HTTP"
-             | `Cli -> "CLI "
-             | `Media -> "    ")
-            (Terminal_text.single_line row.sr_slot)
-            (if row.sr_admitted then ""
-             else Ansi.dim ^ "  (declared, not admitted)" ^ Ansi.reset)
-        in
-        if index = editor.se_cursor then
-          box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
-        else box_line buf cols line
-    done;
-  let window_hint =
-    if count > content_height then
-      Printf.sprintf "  [%s]"
-        (Masc_tui_scroll.window_text ~scroll:first ~height:content_height count)
-    else ""
-  in
-  box_line_styled buf cols ~style:(Theme.recede ())
-    ("  j/k select · a add · x drop · J/K reorder · d HTTP provider · Esc close"
-     ^ window_hint);
+  List.iter
+    (fun line ->
+       box_line_styled buf cols ~style:(Theme.warn ())
+         ("  " ^ Keeper_chat.terminal_safe_text line))
+    (Masc_tui_types.runtime_lane_stale_lines state);
+  (match Masc_tui_types.runtime_picker_projection state with
+   | Some picker ->
+     box_line_styled buf cols ~style:(Theme.info ())
+       (Printf.sprintf "  adding a candidate to %s"
+          (Terminal_text.single_line picker.rlp_lane));
+     if picker.rlp_choices = [] then
+       box_line_styled buf cols ~style:(Theme.recede ())
+         "  (runtime catalogue unread)"
+     else
+       List.iteri
+         (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
+            let note =
+              if List.exists (String.equal runtime.ro_id) picker.rlp_already
+              then "  (already a slot)"
+              else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
+              then "  (same provider as a current slot)"
+              else ""
+            in
+            let line =
+              Printf.sprintf "  %s %s   %s / %s [%s ctx]%s%s"
+                (if offset = 0 then ">" else " ")
+                (Terminal_text.single_line runtime.ro_id)
+                (Terminal_text.single_line runtime.ro_provider)
+                (Terminal_text.single_line runtime.ro_model)
+                (format_context_tokens runtime.ro_effective_max_context)
+                (if runtime.ro_is_default then " [default]" else "")
+                note
+            in
+            if offset = 0 then box_line_selected buf cols line
+            else box_line buf cols line)
+         picker.rlp_choices;
+     box_line_styled buf cols ~style:(Theme.recede ())
+       "  j/k move · Enter append · e cancel"
+   | None ->
+     let slot_rows = Masc_tui_types.slot_editor_rows state in
+     let count = List.length slot_rows in
+     let content_height = max 0 (rows - count_frame_lines buf - 3) in
+     let first =
+       min (max 0 (count - content_height))
+         (max 0 (editor.se_cursor - content_height + 1))
+     in
+     let window = Rows.of_list ~first ~height:content_height slot_rows in
+     if count = 0 then
+       box_line_styled buf cols ~style:(Theme.recede ())
+         "  (this lane declares no slot)"
+     else
+       for index = first to first + content_height - 1 do
+         match Rows.at window index with
+         | None -> ()
+         | Some (row : slot_editor_row) ->
+           let line =
+             Printf.sprintf "  %s %d  %s %s%s"
+               (if index = editor.se_cursor then ">" else " ")
+               (index + 1)
+               (match row.sr_kind with
+                | `Http -> "HTTP"
+                | `Cli -> "CLI "
+                | `Media -> "    ")
+               (Terminal_text.single_line row.sr_slot)
+               (if row.sr_admitted then ""
+                else Ansi.dim ^ "  (declared, not admitted)" ^ Ansi.reset)
+           in
+           if index = editor.se_cursor then
+             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+           else box_line buf cols line
+       done;
+     let window_hint =
+       if count > content_height then
+         Printf.sprintf "  [%s]"
+           (Masc_tui_scroll.window_text ~scroll:first ~height:content_height count)
+       else ""
+     in
+     box_line_styled buf cols ~style:(Theme.recede ())
+       ("  j/k select · a add · x drop · J/K reorder · d HTTP provider · Esc close"
+        ^ window_hint));
   for _ = 1 to max 0 (rows - count_frame_lines buf - 2) do
     box_empty buf cols
   done;

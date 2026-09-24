@@ -268,6 +268,21 @@ let test_direct_yield_ignores_older_continuation () = with_path (fun path ->
       (Store.has_newer_original_queued store ~operation_id:second |> ok)))
 ;;
 
+let test_direct_yield_uses_admission_order_when_clock_repeats_or_rewinds () =
+  with_path (fun path -> with_open path (fun store ->
+    ignore (admitted store);
+    let second = Operation.Operation_id.of_string "same-time-chat" |> string_ok in
+    ignore (Store.submit store ~now:10. ~operation_id:second ~source ~input |> ok);
+    check bool "same timestamp is still a later admission" true
+      (Store.has_newer_original_queued store ~operation_id |> ok)));
+  with_path (fun path -> with_open path (fun store ->
+    ignore (admitted store);
+    let second = Operation.Operation_id.of_string "clock-rewound-chat" |> string_ok in
+    ignore (Store.submit store ~now:9. ~operation_id:second ~source ~input |> ok);
+    check bool "clock rewind does not hide a later admission" true
+      (Store.has_newer_original_queued store ~operation_id |> ok)))
+;;
+
 let test_cooperative_checkpoint_commit_fault_and_cancel () = with_path (fun path ->
   with_open path (fun store ->
     let first = admitted store in
@@ -321,6 +336,7 @@ let () = run "Keeper direct runtime continuation" ["durable owner journal", [
   test_case "official checkpoint preserves original conversation without native replay" `Quick test_official_checkpoint_retains_session_input_and_cancel_boundary;
   test_case "cooperative checkpoint yields to steering and survives claim crash" `Quick test_cooperative_checkpoint_preserves_identity_and_yields_to_steering;
   test_case "B ignores A's older continuation after A yields" `Quick test_direct_yield_ignores_older_continuation;
+  test_case "direct yield uses admission order across equal or rewound clocks" `Quick test_direct_yield_uses_admission_order_when_clock_repeats_or_rewinds;
   test_case "cooperative checkpoint commit fault and cancel" `Quick test_cooperative_checkpoint_commit_fault_and_cancel;
   test_case "batch retry freezes members and excludes new arrivals" `Quick test_batch_runtime_retry_keeps_frozen_members;
   test_case "same operation survives and completes" `Quick test_same_operation_survives_and_completes;

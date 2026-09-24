@@ -1194,8 +1194,9 @@ let has_claimable_queued store ~now =
 
 (* A direct turn may hand its slot to a later person's original input, but a
    yielded continuation must not make the next turn yield back to it. The
-   immutable admission time establishes which input is later even when a
-   checkpoint moves the original operation to the end of the queue. A queued
+   operations table does not delete rows or VACUUM, so its insertion rowid
+   keeps admission order even when queue priority or a checkpoint changes
+   sequence. Wall-clock created_at can repeat or move backwards. A queued
    operation with a semantic execution has already been claimed and is a
    continuation, regardless of its current queue position. *)
 let has_newer_original_queued store ~operation_id =
@@ -1206,13 +1207,14 @@ let has_newer_original_queued store ~operation_id =
   | Operation.Cancelled _ -> Error (Not_running operation_id)
   | Operation.Running _ ->
     with_statement store.db ~operation:"read newer original chat operations"
-      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' AND created_at > ? "
+      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' "
+       ^ "AND rowid > (SELECT rowid FROM operations WHERE operation_id = ?) "
        ^ "AND NOT EXISTS (SELECT 1 FROM operation_batch_members b "
        ^ "WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id) "
        ^ "ORDER BY sequence")
       (fun statement ->
-        let* () = bind_float store.db statement ~operation:"bind running admission time"
-          1 running.created_at in
+        let* () = bind_text store.db statement ~operation:"bind running admission identity"
+          1 (Id.to_string operation_id) in
         let rec read () =
           let rc = Sqlite3.step statement in
           if rc = Sqlite3.Rc.DONE then Ok false

@@ -2353,10 +2353,23 @@ type inventory_freshness =
   | Warming
   | Settled
 
+type effective_tool_origin =
+  | Descriptor_origin
+  | Instruction_skill_origin
+  | Composition_skill_origin of { skill_source_id : string option }
+  | Composition_control_origin
+  | Unrecognised_origin of string
+
+let effective_tool_origin_kind = function
+  | Descriptor_origin -> "descriptor"
+  | Instruction_skill_origin -> "instruction_skill"
+  | Composition_skill_origin _ -> "composition_skill"
+  | Composition_control_origin -> "composition_control"
+  | Unrecognised_origin kind -> kind
+
 type effective_tool = {
   et_name : string;
-  et_origin : string;
-  et_skill_source_id : string option;
+  et_origin : effective_tool_origin;
 }
 
 type effective_tool_delivery =
@@ -2410,11 +2423,11 @@ type effective_skill_profile = {
    hold. It is not a read failure -- the document may not exist at all -- so it
    is a different fact from [ets_skills_left_out] and the producer sends it as
    its own list. [csn_reason] is the producer's word for why
-   (`not_in_turn_skill_catalog`), kept optional because a reader that invents
-   one would be speaking for a producer that said nothing. *)
+   (`not_in_turn_skill_catalog`); every entry carries one
+   (Keeper_skill_catalog.configured_name_unavailable_to_yojson). *)
 type configured_skill_name_unavailable = {
   csn_name : string;
-  csn_reason : string option;
+  csn_reason : string;
 }
 
 type effective_tool_surface =
@@ -3093,29 +3106,37 @@ let decode_tool_entry json =
 let decode_effective_tool json =
   let* et_name = required_string_field json "name" in
   let* origin = required_object_field json "origin" in
-  let* et_origin = required_string_field origin "kind" in
+  let* kind = required_string_field origin "kind" in
   (* Which configured skill source supplied this tool.
-     Keeper_effective_tool_surface.origin_to_yojson carries it as
-     origin.skill_provenance.identity.source_id, and only for composition
-     skills: for every other origin the key is absent, and for a composition
-     skill whose provenance is unknown it is null. Both mean "no source to
-     name", not a malformed payload, so each step is optional.
-
-     This used to read origin.group and origin.skill_source. No producer has
-     emitted either since the surface moved to skill_provenance, so the
-     Tools screen printed a bare "composition_skill" for every skill tool
-     and never said which skill it came from. *)
-  let* provenance = optional_object_field origin "skill_provenance" in
-  let* et_skill_source_id =
-    match provenance with
-    | None -> Ok None
-    | Some provenance ->
-      let* identity = optional_object_field provenance "identity" in
-      (match identity with
-       | None -> Ok None
-       | Some identity -> optional_string_field identity "source_id")
+     Keeper_effective_tool_surface.origin_to_yojson sends
+     origin.skill_provenance for a composition skill and for no other kind:
+     an object when the provenance resolved, null when it did not, and the
+     object always holds identity.source_id. So the key is required for that
+     kind and not read for the others. Without the key the Tools screen would
+     draw a bare "composition_skill" and never say which source it came
+     from. *)
+  let* et_origin =
+    match kind with
+    | "descriptor" -> Ok Descriptor_origin
+    | "instruction_skill" -> Ok Instruction_skill_origin
+    | "composition_control" -> Ok Composition_control_origin
+    | "composition_skill" ->
+      let* skill_source_id =
+        match Json_util.assoc_member_opt "skill_provenance" origin with
+        | None -> missing_field "skill_provenance"
+        | Some `Null -> Ok None
+        | Some (`Assoc _ as provenance) ->
+          let* identity = required_object_field provenance "identity" in
+          let* source_id = required_string_field identity "source_id" in
+          Ok (Some source_id)
+        | Some bad -> field_type_error "skill_provenance" "an object or null" bad
+      in
+      Ok (Composition_skill_origin { skill_source_id })
+    (* A kind a newer server adds is kept as the word it sent: the Tools
+       column still draws it, and the rest of the surface still loads. *)
+    | unrecognised -> Ok (Unrecognised_origin unrecognised)
   in
-  Ok { et_name; et_origin; et_skill_source_id }
+  Ok { et_name; et_origin }
 
 let decode_skill_reference_list json field =
   let* values = required_list_field json field in
@@ -3265,13 +3286,13 @@ let decode_effective_tool_surface json =
         decode_string_name_list json "skills_left_out"
       in
       let* unavailable_skill_names_json =
-        optional_list_field json "unavailable_skill_names"
+        required_list_field json "unavailable_skill_names"
       in
       let* ets_unavailable_skill_names =
         decode_list "effective_keeper_surface.unavailable_skill_names"
           (fun entry ->
             let* csn_name = required_string_field entry "name" in
-            let* csn_reason = optional_string_field entry "reason" in
+            let* csn_reason = required_string_field entry "reason" in
             Ok { csn_name; csn_reason })
           unavailable_skill_names_json
       in
@@ -3445,12 +3466,18 @@ type skill_usage_coverage = {
   suc_unavailable : string list;
 }
 
+type skill_catalog_shadow = {
+  scsh_winner : Skill_reference.identity;
+  scsh_shadowed : Skill_reference.identity;
+}
+
 type skills_catalog =
   { sc_state : skills_catalog_state
   ; sc_config : skill_catalog_config option
   ; sc_sources : skill_catalog_source list
   ; sc_surfaces : skills_catalog_surface list
   ; sc_rejections : skill_catalog_rejection list
+  ; sc_shadows : skill_catalog_shadow list
   ; sc_usage_coverage : skill_usage_coverage option
   }
 
@@ -3783,7 +3810,36 @@ let decode_skill_catalog_rejection json =
     ; scr_reason
     }
 
-let decode_skill_snapshot_rejections json =
+let decode_skill_catalog_shadow json =
+  let* () =
+    validate_closed_object
+      ~label:"skill snapshot shadow"
+      ~allowed:[ "winner"; "shadowed" ]
+      json
+  in
+  let identity field =
+    let* value = required_object_field json field in
+    Skill_reference.identity_of_yojson value
+    |> Result.map_error (fun _ ->
+      Printf.sprintf "skill snapshot shadow %s is not an exact identity" field)
+  in
+  let* scsh_winner = identity "winner" in
+  let* scsh_shadowed = identity "shadowed" in
+  (* The snapshot pairs two entries that declare one name
+     (Skill_catalog_snapshot.effective_projection). A pair with two names, or
+     one identity twice, is not a shadow. *)
+  if not (String.equal scsh_winner.Skill_reference.name scsh_shadowed.Skill_reference.name)
+  then
+    Error
+      (Printf.sprintf "skill snapshot shadow pairs two names, %S and %S"
+         scsh_winner.Skill_reference.name scsh_shadowed.Skill_reference.name)
+  else if Skill_reference.equal_identity scsh_winner scsh_shadowed
+  then Error "skill snapshot shadow names one identity as both winner and shadowed"
+  else Ok { scsh_winner; scsh_shadowed }
+
+(* Shadows and rejections are the two ways a declared Skill stays out of what
+   Keeper turns see, and both are read from the same closed snapshot object. *)
+let decode_skill_snapshot_shadows_and_rejections json =
   let* () =
     validate_closed_object
       ~label:"skills snapshot"
@@ -3809,12 +3865,18 @@ let decode_skill_snapshot_rejections json =
   let* _sources = required_list_field json "sources" in
   let* _skills = required_list_field json "skills" in
   let* _effective_skills = required_list_field json "effective_skills" in
-  let* _shadows = required_list_field json "shadows" in
+  let* shadows_json = required_list_field json "shadows" in
   let* rejections_json = required_list_field json "rejections" in
-  decode_list
-    "snapshot.rejections"
-    decode_skill_catalog_rejection
-    rejections_json
+  let* shadows =
+    decode_list "snapshot.shadows" decode_skill_catalog_shadow shadows_json
+  in
+  let* rejections =
+    decode_list
+      "snapshot.rejections"
+      decode_skill_catalog_rejection
+      rejections_json
+  in
+  Ok (shadows, rejections)
 
 (* One discovery source, as [/api/v1/skills] publishes it. The endpoint that
    the Skill editor calls answers a different question -- it filters to the
@@ -3933,7 +3995,9 @@ let decode_skills_catalog json =
       in
       let* coverage = decode_skill_usage_coverage json in
       let* snapshot = required_object_field json "snapshot" in
-      let* sc_rejections = decode_skill_snapshot_rejections snapshot in
+      let* sc_shadows, sc_rejections =
+        decode_skill_snapshot_shadows_and_rejections snapshot
+      in
       let* config_json = required_object_field snapshot "config" in
       let* config = decode_skill_catalog_config config_json in
       let* sources_json = optional_list_field snapshot "sources" in
@@ -3950,6 +4014,7 @@ let decode_skills_catalog json =
         ; sc_sources
         ; sc_surfaces
         ; sc_rejections
+        ; sc_shadows
         ; sc_usage_coverage = Some coverage
         }
     | "not_registered" ->
@@ -3965,6 +4030,7 @@ let decode_skills_catalog json =
         ; sc_sources = []
         ; sc_surfaces = []
         ; sc_rejections = []
+        ; sc_shadows = []
         ; sc_usage_coverage = None
         }
     | "uninitialized" ->
@@ -3980,6 +4046,7 @@ let decode_skills_catalog json =
         ; sc_sources = []
         ; sc_surfaces = []
         ; sc_rejections = []
+        ; sc_shadows = []
         ; sc_usage_coverage = None
         }
     | "invalid_workspace" ->
@@ -4006,6 +4073,7 @@ let decode_skills_catalog json =
           ; sc_sources = []
           ; sc_surfaces = []
           ; sc_rejections = []
+          ; sc_shadows = []
           ; sc_usage_coverage = None
           }
     | unknown ->
@@ -6153,12 +6221,15 @@ let decode_verification_request json =
   let* vr_task_id = required_string_field json "task_id" in
   let* vr_task_title = required_string_field json "task_title" in
   let* vr_submitted_by = required_string_field json "submitted_by" in
-  (* [null] is a row the backlog join found nothing for. A word outside the
-     pair is kept as itself rather than folded into either intent, so a
-     vocabulary this build does not know reaches the screen as that word. *)
+  (* [null] is a history-view row: that view joins no backlog, so nothing
+     names the verdict the row waits on. The awaiting view joins it and every
+     row carries a word (Dashboard_verification.filter_by_view). A word
+     outside the pair is kept as itself rather than folded into either intent,
+     so a vocabulary this build does not know reaches the screen as that
+     word. *)
   let* vr_ask =
-    let* intent = optional_string_field json "intent" in
-    let* reason = optional_string_field json "cancellation_reason" in
+    let* intent = required_nullable_string_field json "intent" in
+    let* reason = required_nullable_string_field json "cancellation_reason" in
     match intent with
     | None -> Ok Ask_unstated
     | Some word -> (
@@ -6216,19 +6287,27 @@ let decode_verification_snapshot json =
   let* vs_view = decode_verification_view json in
   let* vs_offset = required_int_field json "offset" in
   let* vs_truncated = required_bool_field json "truncated" in
-  let* vs_awaiting_unresolved =
-    decode_string_name_list json "awaiting_unresolved"
-  in
-  let* vs_awaiting_unresolved_total =
+  let* ( vs_awaiting_unresolved
+       , vs_awaiting_unresolved_total
+       , vs_backlog_error
+       , vs_backlog_recovery ) =
     match vs_view with
-    | Awaiting_queue -> required_int_field json "awaiting_unresolved_total"
+    | Awaiting_queue ->
+      (* Dashboard_verification.awaiting_fields sends all four on every arm
+         of this view, the unreadable backlog included, so a missing one is
+         a broken payload rather than an empty queue. *)
+      let* unresolved = require_string_list json "awaiting_unresolved" in
+      let* unresolved_total = required_int_field json "awaiting_unresolved_total" in
+      let* backlog_error = required_nullable_string_field json "backlog_error" in
+      let* backlog_recovery =
+        required_nullable_string_field json "backlog_recovery"
+      in
+      Ok (unresolved, unresolved_total, backlog_error, backlog_recovery)
     | Full_history ->
-      (* The history view does not join the backlog, so it sends neither the
-         unresolved list nor its count; there is nothing it failed to find. *)
-      Ok 0
+      (* The history view does not join the backlog, so it sends none of the
+         four; there is nothing it failed to find. *)
+      Ok ([], 0, None, None)
   in
-  let* vs_backlog_error = optional_string_field json "backlog_error" in
-  let* vs_backlog_recovery = optional_string_field json "backlog_recovery" in
   Ok
     { vs_requests
     ; vs_total
@@ -7648,7 +7727,7 @@ let decode_fusion_seat_attempt json =
 let decode_fusion_seat_route json =
   let* fsr_seat = decode_fusion_seat json in
   let* fsr_route = required_string_field json "route" in
-  let* fsr_answered_by = optional_string_field json "answered_by" in
+  let* fsr_answered_by = required_nullable_string_field json "answered_by" in
   let* attempts = required_list_field json "failed_attempts" in
   let* fsr_failed_attempts =
     decode_list "failed_attempts" decode_fusion_seat_attempt attempts
@@ -8119,45 +8198,14 @@ let gate_input_preview ~operation ~server_preview envelope =
    the row; absent legacy fields remain queued rather than gaining invented
    success. *)
 let gate_pending_phase_of_json json =
-  let summary = member "summary_status" json in
-  let disposition = member "summary_attempt_disposition" json in
-  let disposition_code =
-    match member "code" disposition with
-    | `String value -> value
-    | _ -> ""
-  in
-  let pre_worker_reason =
-    match member "reason_code" disposition with
-    | `String value -> value
-    | _ -> ""
-  in
-  let summary_status =
-    match summary with
-    | `String value -> value
-    | `Assoc _ ->
-      (match member "status" summary with
-       | `String value -> value
-       | _ -> "")
-    | _ -> ""
-  in
-  let judgment =
-    match member "summary" summary |> member "judgment" with
-    | `String value -> value
-    | _ -> ""
-  in
-  match disposition_code, pre_worker_reason, summary_status, judgment with
-  | ("identity_unbound" | "persistence_uncertain"), _, _, _ -> Gate_blocked
-  (* A start reservation is a pre-worker state like its siblings: the worker is
-     not judging yet. Rendering it as judging hid reservations that a restart
-     stranded (now recovered by [release_orphaned_start_reservation]) behind a
-     healthy-looking in-progress row. Blocked surfaces a lingering one; a healthy
-     reservation clears within a poll. *)
-  | "pre_worker_unavailable", _, _, _ -> Gate_blocked
-  | _, _, "failed", _ -> Gate_blocked
-  | _, _, "available", "require_human" -> Gate_human_required
-  | "in_flight", _, _, _ | _, _, "pending", _ -> Gate_judging
-  | "settled", _, "available", ("approve" | "deny") -> Gate_judging
-  | _ -> Gate_queued
+  let* raw = required_string_field json "phase" in
+  match raw with
+  | "queued" -> Ok Gate_queued
+  | "judging" -> Ok Gate_judging
+  | "human_required" -> Ok Gate_human_required
+  | "blocked" -> Ok Gate_blocked
+  | other ->
+    Error (Printf.sprintf "unknown gate pending phase: %S" other)
 
 let gate_auto_judge_detail_of_json json =
   let summary = member "summary_status" json in
@@ -8210,6 +8258,7 @@ let decode_gate_pending json =
     | `Assoc _ as input -> Some input
     | _ -> None
   in
+  let* gp_phase = gate_pending_phase_of_json json in
   Ok
     {
       gp_id;
@@ -8226,7 +8275,7 @@ let decode_gate_pending json =
       gp_execution_sandbox =
         snd (gate_execution_site ~operation:gp_operation input);
       gp_waiting_s;
-      gp_phase = gate_pending_phase_of_json json;
+      gp_phase;
       gp_auto_judge_detail = gate_auto_judge_detail_of_json json;
       gp_retry_request = gate_retry_request_of_json ~id:gp_id json;
     }

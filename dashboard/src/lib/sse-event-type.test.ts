@@ -37,13 +37,13 @@ describe('agentCoreEventSuffix', () => {
 
 describe('withoutMascNamespace', () => {
   it('masc/ 쌍둥이를 bare 이름으로 되돌린다', () => {
-    expect(withoutMascNamespace('masc/keeper_handoff')).toBe('keeper_handoff')
-    expect(isMascNamespacedEventType('masc/keeper_handoff')).toBe(true)
+    expect(withoutMascNamespace('masc/keeper_tool_call')).toBe('keeper_tool_call')
+    expect(isMascNamespacedEventType('masc/keeper_tool_call')).toBe(true)
   })
 
   it('bare 이름은 그대로 둔다', () => {
-    expect(withoutMascNamespace('keeper_handoff')).toBe('keeper_handoff')
-    expect(isMascNamespacedEventType('keeper_handoff')).toBe(false)
+    expect(withoutMascNamespace('keeper_tool_call')).toBe('keeper_tool_call')
+    expect(isMascNamespacedEventType('keeper_tool_call')).toBe(false)
   })
 })
 
@@ -61,7 +61,7 @@ describe('sseEventFamily', () => {
   // 세 화면이 각자 bare 이름과 masc/ 쌍둥이를 따로 물었다. 같은 계열이다.
   it.each([
     ['masc/task_created', 'task'],
-    ['masc/keeper_handoff', 'keeper'],
+    ['masc/keeper_tool_call', 'keeper'],
     ['masc/decision_recorded', 'decision'],
     ['masc/board_post', 'board'],
   ])('%s 도 %s 계열', (type, family) => {

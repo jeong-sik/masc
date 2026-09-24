@@ -3937,6 +3937,9 @@ def blocked_gate_detail_http_fixtures() -> HttpFixtures:
                     },
                     "summary_status": {"status": "failed", "reason": reason},
                     "summary_attempt_disposition": {"code": "settled"},
+                    # What the server derives from a settled attempt whose
+                    # summary failed (phase_of_disposition_and_summary).
+                    "phase": "blocked",
                 }
             ],
             "approval_queue_state": {"state": "ready"},
@@ -5735,7 +5738,8 @@ def seed_playground_workspace(base_path: str) -> None:
     all."""
     Path(base_path, ".masc", "config", "keepers").mkdir(parents=True, exist_ok=True)
     Path(base_path, ".masc", "config", "keepers", "alpha.toml").write_text(
-        '[keeper]\nsandbox_profile = "docker"\n', encoding="utf-8"
+        '[keeper]\nsandbox_profile = "docker"\nsandbox_image = "masc-sandbox:general"\n',
+        encoding="utf-8"
     )
     Path(base_path, ".masc", "playground", "docker", "alpha").mkdir(
         parents=True, exist_ok=True
@@ -8659,6 +8663,7 @@ def run_tools_request_identity_regression(executable: str) -> None:
                 "skill_snapshot_revision": "c" * 64,
                 "instruction_skills": [], "composition_skills": [], "skill_profiles": [],
                 "skill_discovery_bytes": 0, "skill_eager_body_bytes": 0, "skills_left_out": [],
+                "unavailable_skill_names": [],
                 "count": 1, "tools": [{"name": tool, "origin": {"kind": "descriptor"}}],
                 "tool_surface_sha256": None,
             },
@@ -8780,6 +8785,7 @@ def run_tools_purpose_regression(executable: str) -> None:
         "native_posture": None, "skill_snapshot_revision": "c" * 64,
         "instruction_skills": [], "composition_skills": [], "skill_profiles": [],
         "skill_discovery_bytes": 0, "skill_eager_body_bytes": 0, "skills_left_out": [],
+        "unavailable_skill_names": [],
         "count": 1, "tools": [{"name": "keeper_status", "origin": {"kind": "descriptor"}}],
         "tool_surface_sha256": None,
     }
@@ -10200,6 +10206,11 @@ def verification_request_row(task_id: str) -> dict[str, object]:
         # thing on every request ever drawn. Nothing reads them now.
         "submitted_by": "keeper-alpha",
         "created_at": "2026-08-25T14:00:00+09:00",
+        # Both keys ride every row. The awaiting view joins the backlog, so
+        # its rows always name the verdict they wait on; a completion keeps
+        # no cancellation reason.
+        "intent": "complete",
+        "cancellation_reason": None,
         "required_artifacts": ["diff"],
         "submitted_evidence": ["diff"],
     }

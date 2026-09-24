@@ -1986,7 +1986,10 @@
   terminal_size
   masc.jsonl_writer
   decompress.de
-  decompress.gz))
+  decompress.gz)
+ ;; The schedule lookup found answer is pinned to the fixture the Dashboard
+ ;; decoder test reads (#38510).
+ (deps ../dashboard/src/api/fixtures/scheduled-automation-lookup-found.json))
 
 (test
  (name test_server_runtime_bootstrap)
@@ -2005,6 +2008,8 @@
 ; their (test)/(tests) stanzas under @test/runtest.
 (rule
  (alias runtest-dashboard-http-behavior-contracts)
+ ;; The found-lookup case reads the fixture the Dashboard decoder test reads.
+ (deps ../dashboard/src/api/fixtures/scheduled-automation-lookup-found.json)
  (action
   (progn
    (run %{exe:test_dashboard_http_core.exe} test "dashboard behavior contracts")
@@ -2882,6 +2887,8 @@
 
 (include stanzas/test_local_review_script.inc)
 
+(include stanzas/test_review_approve_guard.inc)
+
 (include stanzas/test_masc_dirname_ssot.inc)
 
 (include stanzas/test_masc_error_dashboard_auth_code.inc)
@@ -2947,6 +2954,7 @@
 
 (include stanzas/test_keeper_shutdown_reconciliation_settlement.inc)
 (include stanzas/test_keeper_shutdown_blocked_purge_release.inc)
+(include stanzas/test_keeper_shutdown_fence_stage.inc)
 
 (include stanzas/test_keeper_shutdown_ownerless_admission_release.inc)
 (include stanzas/test_keeper_shutdown_reconciliation_http.inc)
@@ -5688,6 +5696,7 @@
  (modules test_skill_catalog_snapshot)
  (libraries
   alcotest
+  masc
   masc.skill_snapshot
   masc.skill_reference
   masc.skill_config

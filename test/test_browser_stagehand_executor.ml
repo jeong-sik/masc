@@ -177,12 +177,16 @@ let test_sentence_verbs () =
       check (list string) "tab, Stagehand's data and metadata" [ "data"; "metadata"; "tabId" ]
         (match data with `Assoc fields -> List.sort compare (List.map fst fields) | _ -> []);
       match fake.sent with
-      | [ sent ] -> check string (Wire.method_name expected) (to_s (Wire.call_params expected)) (to_s (Wire.call_params sent))
+      | [ sent ] ->
+        check string (Wire.method_name expected) (to_s (Wire.call_params expected)) (to_s (Wire.call_params sent));
+        check int "the protocol receives the per-call timeout in milliseconds"
+          (Wire.timeout_ms Wire.sentence_timeout)
+          Yojson.Safe.Util.(Wire.call_params sent |> member "options" |> member "timeout" |> to_int)
       | _ -> fail "one Stagehand call")
-    [ Lane.Page_instruct { tab_id = 1; instruction = "click Buy" }, Wire.Act { page_id = "P2"; instruction = "click Buy" };
-      Lane.Page_locate { tab_id = 1; instruction = None }, Wire.Observe { page_id = "P2"; instruction = None };
+    [ Lane.Page_instruct { tab_id = 1; instruction = "click Buy" }, Wire.Act { page_id = "P2"; instruction = "click Buy"; timeout = Wire.sentence_timeout };
+      Lane.Page_locate { tab_id = 1; instruction = None }, Wire.Observe { page_id = "P2"; instruction = None; timeout = Wire.sentence_timeout };
       Lane.Page_extract { tab_id = 0; instruction = "the price"; schema = Some schema },
-      Wire.Extract { page_id = "P1"; instruction = "the price"; schema = Some schema } ];
+      Wire.Extract { page_id = "P1"; instruction = "the price"; schema = Some schema; timeout = Wire.sentence_timeout } ];
   fake.failing <- (function Wire.Act _ -> Some (Session.Rejected { code = -32603; message = "no element" }) | _ -> None);
   check bool "an act the extension refused may have acted" true
     (refused (Executor.execute ~tabs ~call:(call fake) (Lane.Page_instruct { tab_id = 1; instruction = "click Buy" })));

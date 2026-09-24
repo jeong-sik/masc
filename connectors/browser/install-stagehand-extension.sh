@@ -5,12 +5,14 @@
 #
 #   connectors/browser/install-stagehand-extension.sh [--base-path PATH]
 #
-# The version is pinned here and only here. The npm tarball is checked against
-# the registry's dist.integrity before anything is unpacked.
+# The version and its reviewed npm integrity are pinned together. The tarball
+# is checked against that digest before anything is unpacked.
 set -euo pipefail
 
 version="4.1.0"
 package="@browserbasehq/stagehand"
+# npm view @browserbasehq/stagehand@4.1.0 dist.integrity (2026-09-24).
+integrity="sha512-PJikMBVoaCRh6TFD7GcmeISmsMq4IwUu1BD5FOsGUVDUxrVqZomWa6W6dF+a/zu4xRZu2Z2xX1nXVMDaCuZWsw=="
 base_path="${MASC_BASE_PATH:-}"
 
 while [ $# -gt 0 ]; do
@@ -26,16 +28,43 @@ if [ -z "$base_path" ]; then
   exit 2
 fi
 
+if ! command -v npm >/dev/null || ! command -v openssl >/dev/null; then
+  echo "install-stagehand-extension: npm and openssl are required" >&2
+  exit 2
+fi
+
 base_path="$(cd "$base_path" && pwd -P)"
 target="$base_path/.masc/browser-lane/stagehand-extension/$version"
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+stage=""
+backup=""
+installed=false
 
-integrity="$(npm view "$package@$version" dist.integrity)"
-case "$integrity" in
-  sha512-*) ;;
-  *) echo "install-stagehand-extension: the registry gave no sha512 integrity for $package@$version" >&2; exit 1 ;;
-esac
+cleanup() {
+  status=$?
+  trap - EXIT
+  if [ -n "$backup" ] && { [ -e "$backup/extension" ] || [ -L "$backup/extension" ]; }; then
+    if [ "$installed" = true ]; then
+      rm -rf "$backup"
+    elif [ ! -e "$target" ] && [ ! -L "$target" ]; then
+      if mv "$backup/extension" "$target"; then
+        rm -rf "$backup"
+      else
+        echo "install-stagehand-extension: previous extension remains at $backup/extension" >&2
+        status=1
+      fi
+    else
+      echo "install-stagehand-extension: previous extension remains at $backup/extension" >&2
+      status=1
+    fi
+  elif [ -n "$backup" ]; then
+    rm -rf "$backup"
+  fi
+  [ -z "$stage" ] || rm -rf "$stage"
+  rm -rf "$work"
+  exit "$status"
+}
+trap cleanup EXIT
 
 (cd "$work" && npm pack --silent "$package@$version" >/dev/null)
 tarball="$(find "$work" -maxdepth 1 -name '*.tgz' -print -quit)"
@@ -46,10 +75,18 @@ if [ "$actual" != "$integrity" ]; then
 fi
 
 tar -xzf "$tarball" -C "$work" package/dist/extension
-rm -rf "$target"
-mkdir -p "$(dirname "$target")"
-mv "$work/package/dist/extension" "$target"
-chmod -R go-w "$target"
+parent="$(dirname "$target")"
+mkdir -p "$parent"
+stage="$(mktemp -d "$parent/.stagehand-extension-stage.XXXXXX")"
+mv "$work/package/dist/extension" "$stage/extension"
+chmod -R go-w "$stage/extension"
+
+if [ -e "$target" ] || [ -L "$target" ]; then
+  backup="$(mktemp -d "$parent/.stagehand-extension-backup.XXXXXX")"
+  mv "$target" "$backup/extension"
+fi
+mv "$stage/extension" "$target"
+installed=true
 
 echo "installed the Stagehand $version extension into $target"
 echo

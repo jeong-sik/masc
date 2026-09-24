@@ -70,7 +70,8 @@ let leftover owner ~command =
   match command with
   | Some command
     when String.starts_with ~prefix:(owner.chrome ^ " ") command
-         && String_util.contains_substring command (profile_flag owner.profile) ->
+         && (String_util.contains_substring command (profile_flag owner.profile ^ " ")
+             || String.ends_with ~suffix:(profile_flag owner.profile) command) ->
     Stop_recorded_browser owner.pid
   | Some _ | None -> Not_the_recorded_browser
 ;;

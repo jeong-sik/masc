@@ -191,7 +191,7 @@ let evict_block ~read ~mode ~keeper_name ~eager_budget (block : Agent_core.Types
                 (image_store_failed_placeholder ~reason:"unsupported image media type")
             | Ok media_type ->
               (match
-                 Keeper_vision_tool.store_artifact ~dir:(store_dir ~keeper_name) bytes
+                 Keeper_vision_tool.store_artifact ~auto_prune:false ~dir:(store_dir ~keeper_name) bytes
                with
                | Error _ ->
                  record_eviction ~keeper_name ~mode ~result:"error" ~reason:"store_failed";

@@ -44,8 +44,14 @@ val prune
     (by mtime) until both [max_entries] and [max_bytes] are satisfied.
     Non-canonical files and subdirectories are never removed. *)
 
-val store : ?auto_prune:bool -> dir:string -> string -> (handle, string) result
-(** [store ?auto_prune ~dir bytes] writes [bytes] to a content-addressed file under [dir] and
+val store
+  :  ?auto_prune:bool
+  -> ?max_entries:int
+  -> ?max_bytes:int
+  -> dir:string
+  -> string
+  -> (handle, string) result
+(** [store ?auto_prune ?max_entries ?max_bytes ~dir bytes] writes [bytes] to a content-addressed file under [dir] and
     returns its handle. Idempotent: identical bytes map to the same handle and
     file. A re-store compares a bounded owned regular-file read, skipping the atomic write
     only on an exact match. Missing or different content is written again.
@@ -62,7 +68,8 @@ type load_error =
 val load_error_to_string : load_error -> string
 
 val load : dir:string -> handle -> (string, load_error) result
-(** [load ~dir h] reads the bytes for [h]. [Error] (never a silent empty success)
+(** [load ~dir h] reads the bytes for [h]. Checks [dir] directly, falling back
+    to [dir/frames] if present. [Error] (never a silent empty success)
     if: [h] is not a canonical 64-char lowercase-hex handle (rejected before any
     filesystem access, so a forged "../" handle cannot read outside [dir]); the
     file is absent; or the stored bytes do not hash back to [h] (corruption). *)

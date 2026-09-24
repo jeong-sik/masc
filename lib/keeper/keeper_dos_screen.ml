@@ -22,7 +22,7 @@ let handle ~keeper_name ~tool_name ~start_time _args =
           Result.map
             (fun handle -> (bytes, handle))
             (Keeper_vision_tool.store_artifact
-               ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name)
+               ~dir:(Keeper_vision_tool.frames_dir ~keeper_name)
                bytes))
     in
     (match result with

@@ -223,25 +223,21 @@ let test_prune_preserves_non_canonical () =
 
 let test_auto_prune_on_store () =
   let dir = temp_dir () in
-  Unix.putenv "MASC_VISION_MAX_ARTIFACTS_PER_KEEPER" "2";
-  Fun.protect
-    ~finally:(fun () -> Unix.putenv "MASC_VISION_MAX_ARTIFACTS_PER_KEEPER" "500")
-    (fun () ->
-      let h1 = ok (S.store ~dir "frame 1") in
-      let p1 = Filename.concat dir (S.to_string h1) in
-      Unix.utimes p1 10.0 10.0;
-      let h2 = ok (S.store ~dir "frame 2") in
-      let p2 = Filename.concat dir (S.to_string h2) in
-      Unix.utimes p2 20.0 20.0;
-      let h3 = ok (S.store ~dir "frame 3") in
-      let p3 = Filename.concat dir (S.to_string h3) in
-      Unix.utimes p3 30.0 30.0;
-      (* Only 2 newest should remain *)
-      match S.load ~dir h1 with
-      | Error (S.Missing_artifact _) ->
-          assert (Result.is_ok (S.load ~dir h2));
-          assert (Result.is_ok (S.load ~dir h3))
-      | _ -> assert false)
+  let h1 = ok (S.store ~max_entries:2 ~dir "frame 1") in
+  let p1 = Filename.concat dir (S.to_string h1) in
+  Unix.utimes p1 10.0 10.0;
+  let h2 = ok (S.store ~max_entries:2 ~dir "frame 2") in
+  let p2 = Filename.concat dir (S.to_string h2) in
+  Unix.utimes p2 20.0 20.0;
+  let h3 = ok (S.store ~max_entries:2 ~dir "frame 3") in
+  let p3 = Filename.concat dir (S.to_string h3) in
+  Unix.utimes p3 30.0 30.0;
+  (* Only 2 newest should remain *)
+  match S.load ~dir h1 with
+  | Error (S.Missing_artifact _) ->
+      assert (Result.is_ok (S.load ~dir h2));
+      assert (Result.is_ok (S.load ~dir h3))
+  | _ -> assert false
 
 let test_re_store_refreshes_mtime_against_eviction () =
   let dir = temp_dir () in
@@ -263,17 +259,36 @@ let test_re_store_refreshes_mtime_against_eviction () =
   assert (Result.is_ok (S.load ~dir h_a));
   assert (Result.is_error (S.load ~dir h_b))
 
-let test_invalid_env_vars_fallback_to_defaults () =
+let test_prune_stops_on_unlink_failure () =
   let dir = temp_dir () in
-  Unix.putenv "MASC_VISION_MAX_ARTIFACTS_PER_KEEPER" "0";
-  Unix.putenv "MASC_VISION_MAX_BYTES_PER_KEEPER" "-1";
+  let h1 = ok (S.store ~auto_prune:false ~dir "frame 1") in
+  let p1 = Filename.concat dir (S.to_string h1) in
+  Unix.utimes p1 10.0 10.0;
+  let h2 = ok (S.store ~auto_prune:false ~dir "frame 2") in
+  let p2 = Filename.concat dir (S.to_string h2) in
+  Unix.utimes p2 20.0 20.0;
+  let h3 = ok (S.store ~auto_prune:false ~dir "frame 3") in
+  let p3 = Filename.concat dir (S.to_string h3) in
+  Unix.utimes p3 30.0 30.0;
+  (* Make the directory read-only so unlink fails with EACCES.
+     Eviction must abort immediately, protecting newer frames h2 and h3! *)
+  Unix.chmod dir 0o555;
   Fun.protect
-    ~finally:(fun () ->
-      Unix.putenv "MASC_VISION_MAX_ARTIFACTS_PER_KEEPER" "500";
-      Unix.putenv "MASC_VISION_MAX_BYTES_PER_KEEPER" "20971520")
+    ~finally:(fun () -> Unix.chmod dir 0o755)
     (fun () ->
-      let h = ok (S.store ~dir "frame") in
-      assert (Result.is_ok (S.load ~dir h)))
+      let res = ok (S.prune ~max_entries:1 ~max_bytes:(10 * 1024 * 1024) ~dir ()) in
+      assert (res.S.deleted_count = 0);
+      assert (Result.is_ok (S.load ~dir h1));
+      assert (Result.is_ok (S.load ~dir h2));
+      assert (Result.is_ok (S.load ~dir h3)))
+
+let test_load_finds_in_frames_subdir () =
+  let dir = temp_dir () in
+  let frames_dir = Filename.concat dir "frames" in
+  let h = ok (S.store ~dir:frames_dir "lane screenshot bytes") in
+  match S.load ~dir h with
+  | Ok bytes -> assert (bytes = "lane screenshot bytes")
+  | Error err -> failwith (S.load_error_to_string err)
 
 let () =
   test_round_trip ();
@@ -290,6 +305,7 @@ let () =
   test_prune_preserves_non_canonical ();
   test_auto_prune_on_store ();
   test_re_store_refreshes_mtime_against_eviction ();
-  test_invalid_env_vars_fallback_to_defaults ();
+  test_prune_stops_on_unlink_failure ();
+  test_load_finds_in_frames_subdir ();
   print_endline "test_vision_artifact_store: all assertions passed"
 

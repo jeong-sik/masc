@@ -88,8 +88,13 @@ val vision_store_dir : keeper_name:string -> string
 (** Per-keeper artifact store directory used by [analyze_image] and eager image
     eviction. *)
 
+val frames_dir : keeper_name:string -> string
+(** Per-keeper subdirectory for ephemeral screen captures (MSX, DOS, browser)
+    subject to bounded retention/rotation. *)
+
 val store_artifact
-  :  dir:string
+  :  ?auto_prune:bool
+  -> dir:string
   -> string
   -> (Multimodal.Vision_artifact_store.handle, string) result
 (** Store image bytes in the content-addressed artifact store. Blocking

@@ -44,7 +44,7 @@ let handle ~keeper_name ~tool_name ~start_time _args =
     let result = Result.bind encoded (fun bytes ->
       Result.map (fun handle -> bytes, handle)
         (Keeper_vision_tool.store_artifact
-          ~dir:(Keeper_vision_tool.vision_store_dir ~keeper_name) bytes)) in
+          ~dir:(Keeper_vision_tool.frames_dir ~keeper_name) bytes)) in
     match result with
     | Error message ->
       Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure

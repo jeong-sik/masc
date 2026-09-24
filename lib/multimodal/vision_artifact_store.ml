@@ -36,35 +36,17 @@ type prune_result =
 let default_max_entries = 500
 let default_max_bytes = 20 * 1024 * 1024 (* 20 MB *)
 
-let get_env_positive_int name default =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some s ->
-      match int_of_string_opt (String.trim s) with
-      | Some n when n > 0 -> n
-      | Some _ | None ->
-          Log.Keeper.warn "vision: invalid %s=%S: must be a positive integer, using default %d" name s default;
-          default
-
-let resolved_max_entries ?max_entries () =
-  match max_entries with
+let resolve_limit ?custom default =
+  match custom with
   | Some n when n >= 0 -> n
   | Some _ ->
-      Log.Keeper.warn "vision: invalid max_entries: must be non-negative, using default %d" default_max_entries;
-      default_max_entries
-  | None -> get_env_positive_int "MASC_VISION_MAX_ARTIFACTS_PER_KEEPER" default_max_entries
-
-let resolved_max_bytes ?max_bytes () =
-  match max_bytes with
-  | Some b when b >= 0 -> b
-  | Some _ ->
-      Log.Keeper.warn "vision: invalid max_bytes: must be non-negative, using default %d" default_max_bytes;
-      default_max_bytes
-  | None -> get_env_positive_int "MASC_VISION_MAX_BYTES_PER_KEEPER" default_max_bytes
+      Log.Misc.warn "vision: invalid custom limit: must be non-negative, using default %d" default;
+      default
+  | None -> default
 
 let prune ?max_entries ?max_bytes ~dir () : (prune_result, string) result =
-  let max_entries = resolved_max_entries ?max_entries () in
-  let max_bytes = resolved_max_bytes ?max_bytes () in
+  let max_entries = resolve_limit ?custom:max_entries default_max_entries in
+  let max_bytes = resolve_limit ?custom:max_bytes default_max_bytes in
   if not (Sys.file_exists dir && Sys.is_directory dir) then
     Ok { deleted_count = 0; reclaimed_bytes = 0; remaining_count = 0; remaining_bytes = 0 }
   else
@@ -111,18 +93,26 @@ let prune ?max_entries ?max_bytes ~dir () : (prune_result, string) result =
           | [] -> ()
           | (_name, path, size, _mtime) :: rest ->
               if !cur_entries > max_entries || !cur_bytes > max_bytes then begin
-                (try
-                   Unix.unlink path;
-                   decr cur_entries;
-                   cur_bytes := !cur_bytes - size;
-                   incr deleted;
-                   reclaimed := !reclaimed + size
-                 with
-                 | Unix.Unix_error (Unix.ENOENT, _, _) ->
-                     decr cur_entries;
-                     cur_bytes := !cur_bytes - size
-                 | Unix.Unix_error _ -> ());
-                evict rest
+                let unlinked =
+                  try
+                    Unix.unlink path;
+                    decr cur_entries;
+                    cur_bytes := !cur_bytes - size;
+                    incr deleted;
+                    reclaimed := !reclaimed + size;
+                    true
+                  with
+                  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+                      decr cur_entries;
+                      cur_bytes := !cur_bytes - size;
+                      true
+                  | Unix.Unix_error (err, fn, arg) ->
+                      Log.Misc.warn
+                        "vision: prune unlink %s failed: %s (%s %s); aborting eviction to protect newer frames"
+                        path (Unix.error_message err) fn arg;
+                      false
+                in
+                if unlinked then evict rest
               end
         in
         evict sorted;
@@ -138,7 +128,7 @@ let prune ?max_entries ?max_bytes ~dir () : (prune_result, string) result =
     | exn ->
         Error (Printf.sprintf "Vision_artifact_store.prune: %s" (Printexc.to_string exn))
 
-let store ?(auto_prune = true) ~dir (raw : string) : (handle, string) result =
+let store ?(auto_prune = true) ?max_entries ?max_bytes ~dir (raw : string) : (handle, string) result =
   let h = hash raw in
   (* [Fs_compat.mkdir_p] returns unit and raises on failure (EACCES, ENOSPC, a
      parent path component that is a regular file, test-isolation breach). Honor
@@ -181,12 +171,12 @@ let store ?(auto_prune = true) ~dir (raw : string) : (handle, string) result =
       match Fs_compat.save_file_atomic path raw with
       | Ok () ->
           if auto_prune then begin
-            match prune ~dir () with
+            match prune ?max_entries ?max_bytes ~dir () with
             | Ok { deleted_count; reclaimed_bytes; remaining_count; remaining_bytes } ->
                 if deleted_count > 0 then
-                  Log.Keeper.info "vision: prune %s: deleted %d frames (%d bytes), %d remaining (%d bytes)" dir deleted_count reclaimed_bytes remaining_count remaining_bytes
+                  Log.Misc.info "vision: prune %s: deleted %d frames (%d bytes), %d remaining (%d bytes)" dir deleted_count reclaimed_bytes remaining_count remaining_bytes
             | Error err ->
-                Log.Keeper.warn "vision: prune %s failed: %s" dir err
+                Log.Misc.warn "vision: prune %s failed: %s" dir err
           end;
           Ok h
       | Error msg -> Error (Printf.sprintf "Vision_artifact_store.store: %s" msg)
@@ -204,33 +194,45 @@ let load_error_to_string = function
   | Hash_mismatch path -> "Vision_artifact_store.load: content hash mismatch for " ^ path
   | Read_failed detail -> "Vision_artifact_store.load: read failed: " ^ detail
 
+let load_from_path (path : string) (h : handle) : (string, load_error) result =
+  try
+    (* Use typed OS failures to distinguish an absent reference from a denied
+       or broken store. The actual read retains Fs_compat's path checks. *)
+    (* See Missing_artifact below: stat probes existence; metadata is unused. *)
+    ignore (Unix.stat path);
+    let bytes = Fs_compat.load_file path in
+    if String.equal (hash bytes) h then Ok bytes
+    else Error (Hash_mismatch path)
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Error (Missing_artifact path)
+  | Unix.Unix_error (error, operation, _) ->
+      Error (Read_failed (operation ^ ": " ^ Unix.error_message error))
+  | Sys_error detail ->
+      (* The file can disappear between the first stat and the read, whose
+         filesystem adapter may report Sys_error rather than Unix_error.
+         Recheck with typed OS errors; never classify from message text. *)
+      (try
+         (* See the ENOENT branch below: only continued existence is needed. *)
+         ignore (Unix.stat path);
+         Error (Read_failed detail)
+       with
+       | Unix.Unix_error (Unix.ENOENT, _, _) -> Error (Missing_artifact path)
+       | Unix.Unix_error (error, operation, _) ->
+           Error (Read_failed (operation ^ ": " ^ Unix.error_message error))
+       | Sys_error recheck_detail -> Error (Read_failed recheck_detail))
+  | End_of_file -> Error (Read_failed "unexpected end of file while reading artifact")
+
 let load ~dir (h : handle) : (string, load_error) result =
   if not (is_canonical h) then Error (Malformed_handle h)
   else
-    let path = path_of ~dir h in
-    try
-      (* Use typed OS failures to distinguish an absent reference from a denied
-         or broken store. The actual read retains Fs_compat's path checks. *)
-      (* See Missing_artifact below: stat probes existence; metadata is unused. *)
-      ignore (Unix.stat path);
-      let bytes = Fs_compat.load_file path in
-      if String.equal (hash bytes) h then Ok bytes
-      else Error (Hash_mismatch path)
-    with
-    | Unix.Unix_error (Unix.ENOENT, _, _) -> Error (Missing_artifact path)
-    | Unix.Unix_error (error, operation, _) ->
-        Error (Read_failed (operation ^ ": " ^ Unix.error_message error))
-    | Sys_error detail ->
-        (* The file can disappear between the first stat and the read, whose
-           filesystem adapter may report Sys_error rather than Unix_error.
-           Recheck with typed OS errors; never classify from message text. *)
-        (try
-           (* See the ENOENT branch below: only continued existence is needed. *)
-           ignore (Unix.stat path);
-           Error (Read_failed detail)
-         with
-         | Unix.Unix_error (Unix.ENOENT, _, _) -> Error (Missing_artifact path)
-         | Unix.Unix_error (error, operation, _) ->
-             Error (Read_failed (operation ^ ": " ^ Unix.error_message error))
-         | Sys_error recheck_detail -> Error (Read_failed recheck_detail))
-    | End_of_file -> Error (Read_failed "unexpected end of file while reading artifact")
+    let primary_path = path_of ~dir h in
+    match load_from_path primary_path h with
+    | Ok bytes -> Ok bytes
+    | Error (Missing_artifact _) ->
+        (* Fallback: check frames subdirectory if loading from parent keeper vision dir *)
+        let frames_path = Filename.concat (Filename.concat dir "frames") h in
+        (match load_from_path frames_path h with
+         | Ok bytes -> Ok bytes
+         | Error (Missing_artifact _) -> Error (Missing_artifact primary_path)
+         | Error (Malformed_handle _ | Hash_mismatch _ | Read_failed _) as e -> e)
+    | Error (Malformed_handle _ | Hash_mismatch _ | Read_failed _) as e -> e

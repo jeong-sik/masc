@@ -1325,6 +1325,30 @@ status: reference
 : Keeper tool이 접근할 수 있는 writable filesystem 경계. 도구에는 반환된
   sandbox-relative path를 사용한다.
 
+**Sandbox Target (샌드박스 실행 타깃)**
+: Keeper의 `Execute` 도구가 셸 명령을 격리 실행하는 환경 추상화(`Sandbox_target.t`).
+  `Host`·`Docker`·`Micro_vm`·`Ssh`·`Delegated`의 닫힌 variant로 표현된다. 각 타깃은
+  명령의 표준 입출력과 종료 상태를 `run_outcome`(`Ran`·`Transport_failed`)으로
+  전달하여, 원격 런타임 전송 장애와 명령의 자체 실패를 명확히 분리한다.
+
+**Endpoint Allowed Paths (엔드포인트 허용 경로)**
+: SSH 샌드박스 타깃(`Sandbox_target.Ssh`, `Exec_ssh_endpoint.t`)에서 명령이 접근할 수 있는
+  추가 루트 경로 목록(`allowed_paths`).
+  - **격리 기본값**: 기본 실행 정책(`Exec_policy_paths.validate_path`)은 Keeper 작업
+    디렉터리(`workdir`)와 `/tmp` 외의 경로 접근을 정적 스크립트 검사에서 엄격히 거절한다.
+  - **추가 루트 선언**: Terminal-Bench 등 외부 벤치마크/엔드포인트 환경(예: `/app`)을
+    지원하기 위해 `runtime.toml`의 `[exec.ssh.endpoints.<name>] allowed_paths = ["/app", ...]`로
+    추가 허용 루트를 선언할 수 있다(#38603).
+  - **설정 불변식**: 선언 경로는 반드시 절대 경로이자 정규화된(normalized) 경로여야 하며,
+    루트(`/`)는 거절된다(`Exec_ssh_endpoint.parse_toml`).
+  - **어휘 비교 경계**: 엔드포인트가 원격 머신일 수 있으므로 호스트 파일시스템의 심볼릭
+    링크를 해석하지 않고 순수 어휘(lexical prefix)로만 비교한다. 그래서 추가 루트 아래에서
+    밖을 가리키는 심볼릭 링크는 이 검사가 막지 못한다. 엔드포인트가 이 머신이면 추가 루트는 링크를
+    풀어 보는 작업 디렉터리(`workdir`)보다 느슨하고, 실제 경계는 엔드포인트 계정의 권한이다. 기본값은 빈 목록(`[]`)이다.
+  → [Sandbox_target](../../lib/exec/sandbox_target.mli),
+  [Exec_policy_paths](../../lib/exec_policy/exec_policy_paths.mli),
+  [Exec_ssh_endpoint](../../lib/runtime/exec_ssh_endpoint.mli)
+
 **Worktree**
 : 한 repository 안에서 branch 작업을 격리하는 Git worktree.
 

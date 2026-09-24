@@ -1,5 +1,27 @@
 open Masc
 
+(* The saved-app reply's scope count picks the TUI notice: 0 says the
+   service's own list will be asked for. A reply without [scopes] used to
+   count as 0 and so told the operator something the server never said. *)
+let test_decode_oauth_client_saved_reads_scopes_and_refuses_their_absence () =
+  let decode text =
+    Tui_decode.decode_oauth_client_saved (Yojson.Safe.from_string text)
+  in
+  let result = Alcotest.(result int string) in
+  Alcotest.check result "two scopes" (Ok 2)
+    (decode {|{"provider":"github","scopes":["repo","read:org"]}|});
+  Alcotest.check result "saved with none" (Ok 0)
+    (decode {|{"provider":"github","scopes":[]}|});
+  Alcotest.check result "no scopes field"
+    (Error "missing required field 'scopes'")
+    (decode {|{"provider":"github"}|});
+  Alcotest.check result "the server's own error" (Error "unknown provider")
+    (decode {|{"error":"unknown provider"}|});
+  Alcotest.(check bool) "an error that is not a string is refused" true
+    (Result.is_error (decode {|{"error":{"code":1},"scopes":[]}|}));
+  Alcotest.(check bool) "a reply that is not an object is refused" true
+    (Result.is_error (decode {|[]|}))
+
 (* #38205: a schedule row carries the occurrence the runner is holding back.
    The hold is read, not guessed: absent or null is "not held", an object must
    name both the occurrence and its due, and any other shape is refused. *)
@@ -10982,6 +11004,10 @@ let test_tool_approval_mode_unknown_word_fails () =
 
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_oauth_client_saved",
+      [ Alcotest.test_case "reads scopes and refuses their absence" `Quick
+          test_decode_oauth_client_saved_reads_scopes_and_refuses_their_absence
+      ] );
     ( "decode_tool_approval_mode_overrides",
       [ Alcotest.test_case "the wire word becomes the mode" `Quick
           test_tool_approval_mode_overrides_are_typed

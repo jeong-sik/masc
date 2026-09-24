@@ -11683,3 +11683,17 @@ let decode_schedule_runner_hold row =
     Ok (Some { srh_occurrence_id; srh_due_at_iso })
   | bad -> field_type_error "runner_hold" "an object or null" bad
 ;;
+
+let decode_oauth_client_saved json =
+  match json with
+  | `Assoc _ -> (
+      match member "error" json with
+      | `String detail -> Error detail
+      | `Null ->
+          let* scopes = required_list_field json "scopes" in
+          Ok (List.length scopes)
+      | bad -> field_type_error "error" "a string" bad)
+  | other ->
+      Error
+        (Printf.sprintf "the reply must be an object (received %s)"
+           (Json_util.kind_name other))

@@ -223,45 +223,31 @@ sandbox-images/
 
 ### 2.3 목록: 이름은 저장소가, 버전은 호스트가
 
-저장소의 `config/sandbox-images.toml` 은 이름과 레시피 위치만 적는다. digest 는
-적지 않는다. 레지스트리를 쓰지 않으니 digest 는 그 digest 를 빌드한 호스트에서만
-맞기 때문이다.
+목록은 파일 하나다: 설정 루트의 `sandbox-images.toml`. 저장소가 이름만 적은
+사본을 배포하고(`config/sandbox-images.toml`), 호스트가 자기가 빌드해 올린 버전을
+같은 파일에 더한다. 레지스트리를 쓰지 않으니 digest 는 그 digest 를 빌드한
+호스트에서만 맞기 때문이다. 호스트에 아직 이 파일이 없으면 바이너리에 든 배포
+사본에서 시작한다. 두 파일을 섞지는 않는다.
 
 ```toml
-# 저장소: config/sandbox-images.toml
-[images.base]
-recipe = "sandbox-images/base"
+[images.base]                       # 이름만. 이 호스트에서 아직 올린 빌드가 없다
 
-[images.ocaml]
-recipe = "sandbox-images/ocaml"
+[images.ocaml.apple_container]      # 이 호스트에서 빌드해 올린 것
+reference = "masc-sandbox-ocaml:20260924T1130Z-3f9a1c07"
+digest    = "sha256:…"              # 저장소가 떠 있는 VM 에 대해 보고하는 digest
+previous  = { reference = "…", digest = "sha256:…" }
 ```
 
-호스트의 라이브 목록(`<base-path>/.masc/config/sandbox-images.toml`)은 이 호스트에서
-빌드해 올린 버전을 저장소별로 적는다.
-
-```toml
-# 라이브
-[images.ocaml.apple_container]
-ref      = "masc-sandbox-ocaml:20260924T1130Z-3f9a1c07"
-digest   = "sha256:…"          # container 가 VM 마다 보고하는 image index digest
-previous = { ref = "masc-sandbox-ocaml:20260921T0517Z-9b04e6d1", digest = "sha256:…" }
-```
-
-타입:
-
-```ocaml
-type image_name = private string                 (* 저장소 목록의 키. 파싱에서만 만든다 *)
-type store = Apple_container                      (* docker 는 §6 의 G 단계에서 더한다 *)
-type promoted =
-  { ref : Oci_ref.t
-  ; digest : Oci_digest.t
-  ; previous : (Oci_ref.t * Oci_digest.t) option  (* promote 가 채운다 *)
-  }
-type version =
-  | Unpromoted                                    (* 저장소 목록에는 있고 이 호스트에서 아직 올리지 않음 *)
-  | Promoted of promoted
-type catalog = (image_name * (store * version) list) list
-```
+- 저장소(store)는 `docker` 와 microVM 백엔드 이름(`apple_container`, `nerdctl_kata`,
+  `microsandbox`)이다. docker 프로필 Keeper 가 있어서(msx-retro-mania) 첫 구현부터
+  docker 도 다룬다.
+- `reference` 는 `repository:tag` 모양만 받는다. digest 참조, 태그 없는 이름,
+  `-` 로 시작하는 값은 거절한다. 이 값이 런타임 argv 에 그대로 들어가기 때문이다.
+- `resolve` 는 `Resolved`, `Unknown_image`(목록에 없는 이름), `Not_built_on_host`
+  (이름은 있고 이 저장소에 올린 빌드가 없음) 중 하나로 답한다.
+- 쓰기는 읽었을 때의 바이트와 비교한 뒤 원자적으로 바꾼다. 그 사이 다른 쓰기가
+  있었으면 아무것도 쓰지 않고 거절한다.
+- 구현: `Keeper_sandbox_image_catalog` (#38745).
 
 - Keeper TOML 은 이름만 적는다: `sandbox_image = "ocaml"`. 이 필드는 태그를 받지 않는다.
   저장소 목록에 없는 이름이면 #38572 와 같은 자리에서 로드를 거절한다.
@@ -282,9 +268,10 @@ type catalog = (image_name * (store * version) list) list
 
 ### 2.4 런타임: 이름 → 버전 → 실제 VM
 
-1. 턴을 받을 때 Keeper 의 `sandbox_image` 이름으로 라이브 목록을 찾는다.
+1. Keeper TOML 을 읽을 때(`load_profile_doc_content`, 턴마다 다시 읽힌다) `sandbox_image`
+   이름으로 라이브 목록을 찾는다. 그 뒤의 런타임 경로는 지금처럼 태그 문자열을 받는다.
    - `Promoted` 면 그 `ref` 와 `digest` 가 턴의 샌드박스 설정에 들어간다.
-   - `Unpromoted` 면 턴을 거절한다. 사유는 `Image_not_built_on_host { name }` 이고,
+   - `Not_built_on_host` 면 턴을 거절한다. 사유는 `Image_not_built_on_host { name }` 이고,
      운영자가 칠 명령(`masc sandbox-image build <이름>` 과 `promote`)을 함께 적는다.
    - 라이브 목록을 읽지 못하면 `Image_catalog_unreadable` 로 거절한다. 권위 있는
      저장소를 못 읽으면 진행하지 않는다(constitution `authoritative_read_only`).
@@ -463,13 +450,15 @@ constitution `<gates>` 는 하드 게이트를 기본으로 두지 말라고 한
 | 단계 | 내용 | 의존 |
 |---|---|---|
 | A | `sandbox-images/` 레시피·`common-packages.txt`·`tools.toml`, 태그 계산, `masc sandbox-image build`, §2.6 확인, 바이너리에 `base` 레시피를 dune rule 로 넣기 | — |
-| B1 | 저장소·라이브 목록 파서와 타입, 턴 받을 때 이름 해석과 typed 거절, env·내장 기본값·`image_source`·자동 빌드 삭제, sandbox 마법사의 `base` 빌드·promote | A |
-| B2 | `sandbox_image = "` 98곳과 관련 스크립트·문서를 이름으로 바꾸는 스크립트와 그 결과 | B1 |
-| C | 실제 digest 기록·비교, `Image_drift`, 상태·영수증·TUI 표시(#36993 image 축) | B1 |
+| B1a | 목록 파서·타입·이름 해석·promote·rollback·저장(#38745) | — |
+| B1b-1 | `masc sandbox-image promote`/`rollback` 명령, 배포 목록과 레시피 이름 일치 검사 | A, B1a |
+| B1b-2 | Keeper TOML 을 읽을 때 이름을 풀고 typed 거절(hard cut), setup 이 `base` 를 목록에 올림 | B1b-1 |
+| B1b-3 | env·내장 기본값·`image_source`·자동 빌드 삭제 | B1b-2 |
+| B2 | `sandbox_image = "` 98곳과 관련 스크립트·문서를 이름으로 바꾸는 스크립트와 그 결과(B1b-2 와 같은 PR) | B1b-1 |
+| C | 실제 digest 기록·비교, `Image_drift`, 상태·영수증·TUI 표시(#36993 image 축) | B1b-2 |
 | D | `rust`, `web`, `media` 이미지, 크기 실측 | A |
-| E | CI 트리거 확장, 모든 이미지 빌드·확인, CI 의 테스트용 이미지를 목록으로 쓰기 | A, B1 |
-| F | `promote`, `rollback`, `prune` | B1 |
-| G | docker 저장소를 `store` 에 더하기 | C |
+| E | CI 트리거 확장, 모든 이미지 빌드·확인, CI 의 테스트용 이미지를 목록으로 쓰기 | A, B1b-2 |
+| F | `prune` | B1b-1 |
 
 ## 7. 확인 방법
 
@@ -477,7 +466,7 @@ constitution `<gates>` 는 하드 게이트를 기본으로 두지 말라고 한
   다시 빌드하면 거절된다. `tools.toml` 의 `probe` 가 실패하는 이미지는 태그가 남지
   않는다. 쓰기 권한이 필요한 `probe` 는 Keeper 제약에서 실패한다.
 - B1: 저장소 목록에 없는 이름, 태그 문자열, 빈 digest 를 적은 설정은 로드가 거절된다.
-  `Unpromoted` 이름을 쓴 Keeper 는 턴이 `Image_not_built_on_host` 로 거절되고, 사유에
+  아직 올린 빌드가 없는 이름을 쓴 Keeper 는 턴이 `Image_not_built_on_host` 로 거절되고, 사유에
   칠 명령이 있다.
 - C: 같은 태그를 다른 이미지로 덮어쓴 뒤 턴을 돌리면 VM 은 뜨고, 상태는
   `Image_drift` 에 두 digest 를 보여 준다. 목록의 digest 를 바꾸면 다음 턴에 VM 이

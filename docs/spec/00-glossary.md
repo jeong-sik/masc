@@ -360,6 +360,19 @@ status: reference
   → [Keeper_execution_receipt](../../lib/keeper/keeper_execution_receipt.mli),
   [Keeper_terminal_reason](../../lib/keeper_runtime/keeper_terminal_reason.mli)
 
+**Stop Reason (제공자 발화 중단 사유)**
+: 모델 제공자(LLM Provider)가 wire 스트림(`KEEPER_STREAM_MESSAGE_DELTA`)에 통보한 발화 중단 사유.
+  MASC가 턴 전체를 어떻게 처리했는지를 분류하는 **Keeper Turn Outcome**(가시적 응답·체크포인트·게이트 대기 등)이나
+  영수증 필드인 **Terminal Reason**과 다른 층위의 개념이다(#37723·#38508).
+  - **Outcome과의 비일치**: 제공자의 12개 중단 사유 중 6개(`max_tokens`, `refusal`, `content_filter`,
+    `repetition_truncation`, `model_context_window_exceeded`, `unmatched_tool_calls`)는 대응하는 Turn Outcome이 없다.
+    예컨대 `max_tokens`로 출력이 잘려나간 응답도 MASC 관점에서는 정상적인 가시적 응답 턴(`Reply`)이므로,
+    Turn Outcome만으로는 제공자가 토큰 한도에 부딪혀 답변을 다 쓰지 못했는지 알 수 없다.
+  - **표면 투영**: TUI 채팅 헤더는 실시간 스트리밍 중 제공자가 작성을 멈춘 이유를 `stopped: <reason>`(예: `stopped: max_tokens`)으로
+    명시해 완성된 응답으로 오인되는 것을 방지하며, 행 폭이 좁으면 줄임표 대신 통째로 생략한다. 대시보드는 세션 트레이스 엔트리의
+    `종료:` 필드에 이를 그린다. wire 이벤트 하나가 토큰 사용량(`usage`)과 중단 사유(`stop_reason`)를 함께 나른다(`Stream_details`).
+  → [Keeper_chat_events](../../lib/keeper/keeper_chat_events.mli), [TUI Guide](../TUI-GUIDE.md)
+
 **Keeper Chat Operation**
 : Keeper 대화에 접수한 메시지 실행의 durable 기록. `operation_id`로 식별하며
   `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론이나 다른 Keeper(`masc_keeper_msg`·
@@ -1837,6 +1850,13 @@ status: reference
   철회한 것이다. 철회 뒤 같은 claim을 다시 저장하면 같은 Memory ID에 과거 기록이
   붙는다. TUI의 `History: Retracted`는 그 철회 횟수이며, 현재 Fact의 신뢰도나
   강화 정도를 뜻하지 않는다.
+  - **교체된 흡수 기억 연쇄 추적**: `keeper_memory_search`는 흡수된(`absorbs`) 기억의
+    대상 claim이 이후 `keeper_memory_write ~supersedes`로 대체된 경우, 버려진(dropped)
+    claim에서 멈춰 `into_current=false`로 보고하지 않고 원장의 `Revised` 이벤트(`superseded_by`)를
+    따라 현재 살아 있는 claim까지 연쇄 추적하여 `into_current=true`로 연결한다.
+    매 검색마다 이벤트 사이드카를 읽는 부하를 막기 위해 평소에는 흡수 원장(`memory-absorbed.jsonl`)만으로
+    해결하고, 체인의 끝이 non-current일 때만 사이드카(`.memory-events.jsonl`)를 읽는다. 손상된
+    이벤트 줄은 `event_unreadable_lines`로 분리 보고된다(#38543·#38552).
 
 **Library**
 : `masc_library_add`로 수동 추가한 Markdown 문서를 읽는 지식 라이브러리.

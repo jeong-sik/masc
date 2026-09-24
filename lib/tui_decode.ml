@@ -11870,7 +11870,10 @@ let fleet_cost_of_keeper_costs (costs : keeper_costs) =
         | Cost_not_reported -> acc
         | Cost_reported { usd; samples } ->
             { acc with
-              fc_usd = Some (Option.value acc.fc_usd ~default:0.0 +. usd)
+              fc_usd =
+                (match acc.fc_usd with
+                 | None -> Some usd
+                 | Some sum -> Some (sum +. usd))
             ; fc_priced_turns = acc.fc_priced_turns + samples
             }
       in

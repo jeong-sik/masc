@@ -134,6 +134,3 @@ let resolve_tool_read_path
         ~meta
         ~raw_for_error:raw_path
         ~projected_path
-
-let shell_command_available name =
-  Executable_path.command_available name

@@ -10,12 +10,6 @@
     defense in depth and is still applied before this module is
     consulted. *)
 
-(** [should_route_read ~meta] is [true] iff this keeper's reads
-    should go through the sandbox backend. Encapsulates the
-    [sandbox_profile=docker|micro_vm|remote_ssh] policy so callers do not have
-    to repeat it. *)
-val should_route_read : meta:Keeper_meta_contract.keeper_meta -> bool
-
 (** Translate a runner's [run_outcome] into a read result. A
     [Transport_failed] is always an [Error]; a [Ran] result applies
     [ok_exit_codes] to its exit status. Exposed for the differential test that

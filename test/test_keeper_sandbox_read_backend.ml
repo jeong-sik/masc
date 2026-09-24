@@ -103,33 +103,6 @@ let make_meta ~name ~sandbox =
     { m with Masc.Keeper_meta_contract.sandbox_profile = sandbox }
   | Error e -> Alcotest.fail e
 
-(* ── should_route_read profile policy ────────────────────────────── *)
-
-(* The case that answered [false] was the [Local] profile, and it is gone:
-   every profile a keeper may declare routes reads through its backend. *)
-let test_docker_keeper_routes () =
-  let meta =
-    make_meta ~name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker
-  in
-  Alcotest.(check bool) "docker keeper routes through docker"
-    true
-    (Keeper_sandbox_read_backend.should_route_read ~meta)
-
-let test_docker_second_keeper_routes () =
-  let meta =
-    make_meta ~name:"poe" ~sandbox:Keeper_types_profile_sandbox.Docker
-  in
-  Alcotest.(check bool) "docker second keeper also routes" true
-    (Keeper_sandbox_read_backend.should_route_read ~meta)
-
-let test_remote_ssh_keeper_routes () =
-  let meta =
-    make_meta ~name:"remote" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
-  in
-  Alcotest.(check bool) "remote SSH keeper routes through backend"
-    true
-    (Keeper_sandbox_read_backend.should_route_read ~meta)
-
 (* ── container_path_of_host pure mapping ─────────────────────────── *)
 
 let setup_config name =
@@ -2869,15 +2842,6 @@ let run_tests ~clock () =
         ] );
       ( "raw_prefix", [Alcotest.test_case "command bounded before binary transport" `Quick
             test_raw_prefix_bounds_command_and_preserves_binary] );
-      ( "should_route_read",
-        [
-          Alcotest.test_case "docker keeper routes" `Quick
-            test_docker_keeper_routes;
-          Alcotest.test_case "docker second keeper also routes" `Quick
-            test_docker_second_keeper_routes;
-          Alcotest.test_case "remote SSH keeper routes" `Quick
-            test_remote_ssh_keeper_routes;
-        ] );
       ( "container_path_of_host",
         [
           Alcotest.test_case "a microvm host path maps to the work volume" `Quick

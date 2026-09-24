@@ -426,15 +426,15 @@ let handle_read_file_with_outcome
       (error_json refusal.message)
   | Ok window, Ok read_target ->
     let target = read_file_target_path read_target in
-    let payload_of_slice ~via ~file_bytes ~first_line ~scan_complete body =
-      match slice_read_window ~window ~first_line ~max_bytes ~scan_complete body with
-      (* Neither caller below reaches this arm. The sandbox body begins at
-         [window.start_line], so the window's first line is the body's first
-         line and always has a start. The host read passes the whole file
-         with [scan_complete:true], which turns a line past EOF into an empty
-         window. Only [handle_owned_read_file_with_outcome] can get
-         [Offset_beyond_scan], in its own arm; #38609 removes the [Error]
-         case there. Reaching it here is masc's defect, not the caller's. *)
+    let payload_of_slice ~scan_complete body =
+      match
+        slice_read_window ~window ~first_line:window.start_line ~max_bytes ~scan_complete body
+      with
+      (* The backend body begins at [window.start_line], so the window's first
+         line is the body's first line and always has a start. Only
+         [handle_owned_read_file_with_outcome] can get [Offset_beyond_scan], in
+         its own arm; #38609 removes the [Error] case there. Reaching it here is
+         masc's defect, not the caller's. *)
       | Error `Offset_beyond_scan ->
         Read_refused
           { failure_class = Tool_result.Runtime_failure
@@ -459,12 +459,6 @@ let handle_read_file_with_outcome
             ; (if slice.last_line_partial
                then [ "last_line_partial", `Bool true ]
                else [])
-            ; (match file_bytes with
-               | Some total -> [ "file_bytes", `Int total ]
-               | None -> [])
-            ; (match via with
-               | Some via -> [ "via", `String via ]
-               | None -> [])
             ]
         in
         Read_succeeded
@@ -477,7 +471,8 @@ let handle_read_file_with_outcome
                ; "returned_lines", `Int slice.returned_lines
                ; "content", `String slice.window_content
                ]
-               @ optional_fields))
+               @ optional_fields
+               @ [ "via", `String Keeper_sandbox_read_runner.backend_via ]))
     in
     let refused failure_class message =
       Read_refused
@@ -501,67 +496,31 @@ let handle_read_file_with_outcome
       | Error (refusal : Keeper_alerting_path.path_refusal) ->
         refused refusal.failure_class refusal.message
       | Ok () ->
-        (* RFC-0006 Phase B-2: sandbox-backed keepers route the actual
-           byte read through the backend read runner so the backend mount
-           restrictions are the load-bearing isolation. The host containment
-           check above remains as defense-in-depth. *)
-        if Keeper_sandbox_read_runner.should_route_read ~meta
-        then (
-          let timeout_sec =
-            Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()
-          in
-          (* The backend streams from [window.start_line], so the byte bound
-             is the window's and every line of the file is reachable. *)
-          match
-            Keeper_sandbox_read_runner.read_file
-              ?turn_sandbox_factory
-              ~start_line:window.start_line
-              ~config
-              ~meta
-              ~host_path:target
-              ~max_bytes
-              ~timeout_sec
-              ()
-          with
-          | Error (Keeper_sandbox_read_backend.Missing_file error) -> missing_file error
-          | Error (Keeper_sandbox_read_backend.Not_a_file detail) ->
-            refused Tool_result.Policy_rejection detail
-          | Error (Keeper_sandbox_read_backend.Read_failed detail) ->
-            refused Tool_result.Runtime_failure detail
-          | Ok body ->
-            let scan_complete = String.length body < max_bytes in
-            payload_of_slice
-              ~via:(Some Keeper_sandbox_read_runner.backend_via)
-              ~file_bytes:None
-              ~first_line:window.start_line
-              ~scan_complete
-              body)
-        else (
-          match read_target with
-          (* An endpoint path is the endpoint's file; this host never holds
-             it, so a keeper whose reads are not routed cannot read one. Only
-             an OpenSSH endpoint declares roots, and its reads are routed, so
-             reaching here is a broken contract rather than the caller's path. *)
-          | Declared_endpoint_file endpoint_path ->
-            refused
-              Tool_result.Runtime_failure
-              (Printf.sprintf
-                 "declared_endpoint_path_needs_remote_lane: %s is an endpoint path and \
-                  this keeper's reads do not go through its endpoint"
-                 endpoint_path)
-          | Keeper_tree_file target ->
-            (match Safe_ops.read_file_result target with
-             | Error (Safe_ops.File_not_found _ as err) ->
-               missing_file (Safe_ops.read_file_error_to_string err)
-             | Error (Safe_ops.Read_failed _ as err) ->
-               refused Tool_result.Runtime_failure (Safe_ops.read_file_error_to_string err)
-             | Ok content ->
-               payload_of_slice
-                 ~via:None
-                 ~file_bytes:(Some (String.length content))
-                 ~first_line:1
-                 ~scan_complete:true
-                 content))
+        (* RFC-0006 Phase B-2: every sandbox profile reads through its
+           backend read runner, so the backend's mount restrictions are the
+           load-bearing isolation. The host containment check above remains
+           as defense in depth. *)
+        let timeout_sec = Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read () in
+        (* The backend streams from [window.start_line], so the byte bound is
+           the window's and every line of the file is reachable. *)
+        (match
+           Keeper_sandbox_read_runner.read_file
+             ?turn_sandbox_factory
+             ~start_line:window.start_line
+             ~config
+             ~meta
+             ~host_path:target
+             ~max_bytes
+             ~timeout_sec
+             ()
+         with
+         | Error (Keeper_sandbox_read_backend.Missing_file error) -> missing_file error
+         | Error (Keeper_sandbox_read_backend.Not_a_file detail) ->
+           refused Tool_result.Policy_rejection detail
+         | Error (Keeper_sandbox_read_backend.Read_failed detail) ->
+           refused Tool_result.Runtime_failure detail
+         | Ok body ->
+           payload_of_slice ~scan_complete:(String.length body < max_bytes) body)
     in
     (match run_read () with
      | Read_succeeded json -> Keeper_tool_execution.success_data json

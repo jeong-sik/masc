@@ -36,12 +36,6 @@ let validate_rg_inputs ~pattern:_ ~file_type =
   | Ok () -> Ok ()
 ;;
 
-type read_target_result =
-  | Read_target of string
-  | Declared_read_target of string
-    (* An endpoint path under the endpoint's declared roots (#38593). *)
-  | Read_target_error of Keeper_alerting_path.path_refusal
-
 let try_handle_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
@@ -67,7 +61,7 @@ let try_handle_with_outcome
       | Ok target -> Result.map (fun () -> target) (containment_check target)
     in
     match keeper_tree_target with
-    | Ok target -> Read_target target
+    | Ok target -> Ok target
     | Error refusal ->
       (* Only what the keeper's own tree refused may be a path under the
          endpoint's declared roots (#38593): the endpoint's own name, which
@@ -83,69 +77,12 @@ let try_handle_with_outcome
          Keeper_sandbox_remote_lane.declared_endpoint_path_of_args
            ~config ~meta ~path:(arg "path") ~cwd
        with
-       | Ok (Some endpoint_path) -> Declared_read_target endpoint_path
-       | Ok None -> Read_target_error refusal
+       | Ok (Some endpoint_path) -> Ok endpoint_path
+       | Ok None -> Error refusal
        (* An endpoint that cannot be resolved is the operator's
           configuration, not the caller's path. *)
        | Error message ->
-         Read_target_error
-           { Keeper_alerting_path.failure_class = Tool_result.Runtime_failure; message })
-  in
-  (* TEL-OK: read-op adapter delegates to Keeper_tooling.Execute_shell_ir/Exec_dispatch or the
-     sandbox read runner; execution telemetry stays with those runtime paths. *)
-  let dispatch_host_shell_ir ~workdir ir =
-    Keeper_tooling.Execute_shell_ir.dispatch
-      ~workdir
-      ~sandbox:(Masc_exec.Sandbox_target.host ())
-      ir
-  in
-  let run_host_shell_ir
-        ?path
-        ~workdir
-        ~cmd
-        ir
-        ~on_ok
-    =
-    let fields =
-      [ "typed", `Bool true; "cmd", `String cmd ]
-      @
-      match path with
-        | None -> []
-        | Some path -> [ "path", `String path ]
-    in
-    (* This module builds the command: one rg with literal arguments, no cwd
-       change and no redirect. The gate refuses only pipes and redirects, and
-       the path check reads only cwd, redirects and a few programs' operands,
-       so neither judges anything the caller named; if one fires, this module
-       or a policy changed. *)
-    match dispatch_host_shell_ir ~workdir ir with
-    | Error (Gate_reject diagnostic) ->
-      Keeper_tool_execution.failure
-        ~class_:Tool_result.Runtime_failure
-        (error_json ~fields diagnostic)
-    | Error (Cannot_parse reason) ->
-      Keeper_tool_execution.failure
-        ~class_:Tool_result.Runtime_failure
-        (error_json
-           ~fields
-           (Printf.sprintf
-              "Cannot parse command: %s"
-              (Keeper_tooling.Execute_shell_ir.parse_reason_tag reason)))
-    | Error (Too_complex reason) ->
-      Keeper_tool_execution.failure
-        ~class_:Tool_result.Runtime_failure
-        (error_json
-           ~fields
-           (Printf.sprintf
-              "Command too complex: %s. %s."
-              (Keeper_tooling.Execute_shell_ir.too_complex_reason_tag reason)
-              (Keeper_tooling.Subset_rewrite.to_string
-                 (Keeper_tooling.Subset_rewrite.of_reason reason))))
-    | Error (Path_reject e) ->
-      Keeper_tool_execution.failure
-        ~class_:Tool_result.Runtime_failure
-        (error_json ~fields:[ "blocked_cmd", `String cmd ] e)
-    | Ok result -> on_ok result
+         Error { Keeper_alerting_path.failure_class = Tool_result.Runtime_failure; message })
   in
   let sandbox_read_error ~target msg =
     error_json ~fields:[ "op", `String op; "path", `String target ] msg
@@ -184,9 +121,6 @@ let try_handle_with_outcome
           with
           | Error msg -> Error (Tool_result.Runtime_failure, sandbox_read_error ~target msg)
           | Ok payload -> Ok payload)
-  in
-  let host_search_workdir target =
-    if safe_is_dir target then target else Filename.dirname target
   in
   match op with
   | "rg" ->
@@ -263,82 +197,10 @@ let try_handle_with_outcome
                       (Yojson.Safe.to_string payload))
            in
            match read_target () with
-           | Read_target_error refusal ->
+           | Error refusal ->
              path_error ~class_:refusal.Keeper_alerting_path.failure_class refusal.message
-           (* A declared endpoint path names the endpoint's file, so it is
-              searched only there; the host rg below never sees one. *)
-           | Declared_read_target target -> rg_in_sandbox target
-           | Read_target target ->
-             if Keeper_sandbox_read_runner.should_route_read ~meta then rg_in_sandbox target
-           else
-             let rg_available = Keeper_tool_execute_path.shell_command_available "rg" in
-             if not rg_available then
-               path_error
-                 ~class_:Tool_result.Dependency_unavailable
-                 "rg executable not found; Grep requires rg"
-             else
-               let argv =
-                 [ "-n"; "-m"; string_of_int limit ]
-                 @ (if file_type <> "" then
-                      [ "--type"; file_type ]
-                    else [])
-                 @ (if glob <> "" then
-                      [ "--glob"; glob ]
-                    else [])
-                 (* [-e]: same leading-dash guard as the sandbox lane. *)
-                 @ [ "-e"; pattern; target ]
-               in
-               (match Masc_exec.Exec_program.of_string "rg" with
-                | Error (`Unknown executable) ->
-                  path_error
-                    ~class_:Tool_result.Runtime_failure
-                    (Printf.sprintf "invalid executable: %S" executable)
-                | Ok bin ->
-                  let ir = Keeper_tooling.Execute_shell_ir.simple_bin bin argv in
-                  run_host_shell_ir
-                    ~workdir:(host_search_workdir target)
-                    ~cmd:op
-                    ~path:target
-                    ir
-                    ~on_ok:(fun result ->
-                   let is_ok =
-                     match result.status with
-                     | Unix.WEXITED 0 | Unix.WEXITED 1 -> true
-                     | _ -> false
-                   in
-                   (* On non-zero rg exit (exit 2 for an unrecognized
-                      --type/--glob value or a missing path), surface rg's
-                      own stderr so the keeper can self-correct instead of
-                      retrying the same broken argv until the circuit
-                      breaker trips. exit_code.ml's generic exit-2 hint
-                      already promises "Check stderr for details", but the
-                      rg result dropped stderr — this fulfils that broken
-                      contract. It does NOT classify stderr (RFC-0089: no
-                      new string classifier; status.category stays typed,
-                      error_detail is a human-readable diagnostic). *)
-                   let trimmed_stderr = String.trim result.stderr in
-                   let error_detail =
-                     if is_ok || String.equal trimmed_stderr ""
-                     then []
-                     else [ "error_detail", `String trimmed_stderr ]
-                   in
-                   let payload =
-                     `Assoc
-                        ([ "ok", `Bool is_ok
-                         ; "op", `String op
-                         ; "path", `String target
-                         ; "pattern", `String pattern
-                         ; "via", `String "host"
-                         ; "status", Keeper_alerting_path.process_status_to_json result.status
-                         ; "matches", lines_to_json ~limit result.stdout
-                         ]
-                         @ error_detail)
-                   in
-                   if is_ok
-                   then Keeper_tool_execution.success_data payload
-                   else
-                     Keeper_tool_execution.failure
-                       ~class_:Tool_result.Runtime_failure
-                       (Yojson.Safe.to_string payload))))))
+           (* A keeper-tree path and a path under the endpoint's declared
+              roots (#38593) are both searched through the backend. *)
+           | Ok target -> rg_in_sandbox target)))
   | _ -> None
 ;;

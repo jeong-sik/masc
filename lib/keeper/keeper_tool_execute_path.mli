@@ -54,7 +54,3 @@ val resolve_tool_read_path :
 (** Resolve the [path] arg exactly against the selected cwd and objective
     allowed-root containment. No path correction or rewriting is applied. *)
 
-val shell_command_available : string -> bool
-(** PATH executable probe for workspace read fallback selection.
-    This intentionally avoids [/bin/sh -c] and does not treat empty
-    PATH entries as the current directory. *)

@@ -45,7 +45,8 @@ let resolve_limit ~name ?custom default =
   | Some n -> Ok n
   | None -> Ok default
 
-let prune ?max_entries ?max_bytes ~dir () : (prune_result, string) result =
+let prune_internal ?max_entries ?max_bytes ~protected_handle ~dir () :
+    (prune_result, string) result =
   let* max_entries = resolve_limit ~name:"max_entries" ?custom:max_entries default_max_entries in
   let* max_bytes = resolve_limit ~name:"max_bytes" ?custom:max_bytes default_max_bytes in
   if not (Sys.file_exists dir && Sys.is_directory dir) then
@@ -80,11 +81,15 @@ let prune ?max_entries ?max_bytes ~dir () : (prune_result, string) result =
       else begin
         (* Sort by mtime ascending (oldest first). If mtimes are equal, sort by name for determinism. *)
         let sorted =
+          (* A successful [store] must keep the handle it just wrote even if
+             another file has a future mtime or equal-resolution timestamp.
+             The current frame fits the validated limits on its own. *)
+          List.filter (fun (name, _, _, _) -> Some name <> protected_handle) !items
+          |>
           List.sort
             (fun (n1, _, _, m1) (n2, _, _, m2) ->
               let cmp = Float.compare m1 m2 in
               if cmp <> 0 then cmp else String.compare n1 n2)
-            !items
         in
         let cur_entries = ref !total_entries in
         let cur_bytes = ref !total_bytes in
@@ -127,6 +132,9 @@ let prune ?max_entries ?max_bytes ~dir () : (prune_result, string) result =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
         Error (Printf.sprintf "Vision_artifact_store.prune: %s" (Printexc.to_string exn))
+
+let prune ?max_entries ?max_bytes ~dir () =
+  prune_internal ?max_entries ?max_bytes ~protected_handle:None ~dir ()
 
 let store ~auto_prune ?max_entries ?max_bytes ~dir (raw : string) : (handle, string) result =
   let* max_entries = resolve_limit ~name:"max_entries" ?custom:max_entries default_max_entries in
@@ -179,7 +187,8 @@ let store ~auto_prune ?max_entries ?max_bytes ~dir (raw : string) : (handle, str
       match Fs_compat.save_file_atomic path raw with
       | Ok () ->
           if auto_prune then begin
-            match prune ~max_entries ~max_bytes ~dir () with
+            match prune_internal ~max_entries ~max_bytes
+                    ~protected_handle:(Some h) ~dir () with
             | Ok { deleted_count; reclaimed_bytes; remaining_count; remaining_bytes } ->
                 if deleted_count > 0 then
                   Log.Misc.info "vision: prune %s: deleted %d frames (%d bytes), %d remaining (%d bytes)" dir deleted_count reclaimed_bytes remaining_count remaining_bytes

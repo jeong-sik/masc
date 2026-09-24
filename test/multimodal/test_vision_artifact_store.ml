@@ -239,6 +239,25 @@ let test_auto_prune_on_store () =
       assert (Result.is_ok (S.load ~dir h3))
   | _ -> assert false
 
+(* A copied or clock-skewed older file can have a future mtime. The newly
+   stored frame is the oldest by mtime, but [store] must not return a handle
+   that its own prune just deleted. *)
+let test_auto_prune_keeps_its_new_handle_with_future_mtimes () =
+  let dir = temp_dir () in
+  let old_handles =
+    List.map
+      (fun bytes -> ok (S.store ~auto_prune:false ~dir bytes))
+      [ "older frame A"; "older frame B" ]
+  in
+  let future = Unix.gettimeofday () +. 3600.0 in
+  List.iter
+    (fun handle ->
+      Unix.utimes (Filename.concat dir (S.to_string handle)) future future)
+    old_handles;
+  let bytes = "new frame" in
+  let handle = ok (S.store ~auto_prune:true ~max_entries:2 ~dir bytes) in
+  assert (S.load ~dir handle = Ok bytes)
+
 let test_invalid_limits_cannot_return_a_missing_frame () =
   let dir = temp_dir () in
   let frame = "frame that must survive its own store" in
@@ -324,6 +343,7 @@ let () =
   test_prune_by_max_bytes ();
   test_prune_preserves_non_canonical ();
   test_auto_prune_on_store ();
+  test_auto_prune_keeps_its_new_handle_with_future_mtimes ();
   test_invalid_limits_cannot_return_a_missing_frame ();
   test_re_store_refreshes_mtime_against_eviction ();
   test_prune_stops_on_unlink_failure ();

@@ -314,14 +314,50 @@ let ocaml_string_opener_in text =
   from 0
 ;;
 
+(* Java turns a [\uXXXX] escape into its character before it lexes, so
+   [\u000a] (any number of [u]s, either case of hex) in a [//] comment is a
+   real line break and the rest of the memo is code. *)
+let java_line_break_escape_in text =
+  let n = String.length text in
+  let lower = String.lowercase_ascii text in
+  let rec after_us i = if i < n && Char.equal lower.[i] 'u' then after_us (i + 1) else i in
+  let rec from i =
+    i < n
+    &&
+    ((Char.equal text.[i] '\\'
+      && i + 1 < n
+      && Char.equal lower.[i + 1] 'u'
+      &&
+      let hex = after_us (i + 1) in
+      hex + 4 <= n
+      && (String.equal (String.sub lower hex 4) "000a" || String.equal (String.sub lower hex 4) "000d"))
+     || from (i + 1))
+  in
+  from 0
+;;
+
 let language_breaks_comment language (memo : Ide_memo.t) =
   match language with
   | Ocaml ->
     if ocaml_string_opener_in memo.text
     then Some "the text has \" or {|, which OCaml reads as a string inside the comment"
     else None
-  | Typescript | Javascript | Rust | Go | C | Cpp | Swift | Java | Kotlin | Php | Zig | Dart
-  | Scala | Csharp | Python | Ruby | Bash | Yaml | Elixir | Lua | Haskell | Markdown | Json ->
+  | C | Cpp ->
+    (* A backslash at the end of a line splices the next source line into
+       the [//] comment, and the memo sits above a line of code. *)
+    if String.ends_with ~suffix:"\\" memo.text
+    then Some "the text ends in \\, which joins the next line into the comment"
+    else None
+  | Java ->
+    if java_line_break_escape_in memo.text
+    then Some "the text has \\u000a or \\u000d, which Java reads as a line break"
+    else None
+  | Php ->
+    if Ide_memo.contains ~sub:"?>" memo.text
+    then Some "the text has ?>, which ends the PHP block and the comment with it"
+    else None
+  | Typescript | Javascript | Rust | Go | Swift | Kotlin | Zig | Dart | Scala | Csharp | Python
+  | Ruby | Bash | Yaml | Elixir | Lua | Haskell | Markdown | Json ->
     None
 ;;
 

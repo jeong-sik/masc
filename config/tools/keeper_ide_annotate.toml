@@ -31,4 +31,4 @@ description = "Memo kind; defaults to comment"
 name = "text"
 type = "string"
 required = true
-description = "One line of memo text. Text that would leave the comment is refused: *) or (* in OCaml, where \" and {| also open a string, and --> or <!-- in Markdown."
+description = "One line of memo text"

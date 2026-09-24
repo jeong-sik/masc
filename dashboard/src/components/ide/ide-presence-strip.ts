@@ -129,6 +129,25 @@ function presenceHeader(snap: KeeperPresenceSnapshot) {
   `
 }
 
+function samePresence(a: KeeperPresenceSnapshot, b: KeeperPresenceSnapshot): boolean {
+  if (a.kind !== b.kind) return false
+  if (a.kind === 'loading') return true
+  if (a.kind === 'disconnected') return b.kind === 'disconnected' && a.reason === b.reason
+  if (b.kind !== 'live') return false
+  return a.runtime_id === b.runtime_id
+    && a.branch === b.branch
+    && a.supervisor === b.supervisor
+    && a.entries.length === b.entries.length
+    && a.entries.every((entry, i) => {
+      const other = b.entries[i]!
+      return entry.keeper_id === other.keeper_id
+        && entry.workspace_label === other.workspace_label
+        && entry.role === other.role
+        && entry.status === other.status
+        && entry.last_seen_ms === other.last_seen_ms
+    })
+}
+
 /** How often the strip re-reads presence when the shell gives no cadence. */
 const DEFAULT_PRESENCE_POLL_MS = 10_000
 
@@ -155,7 +174,11 @@ export function IdePresenceStrip({
       inFlight = true
       try {
         const snapshot = await fetchPresence()
-        if (!cancelled) globalPresenceSnapshot.value = snapshot
+        // Every surface that reads presence re-renders on a write, so a
+        // poll that read the same presence leaves the signal alone.
+        if (!cancelled && !samePresence(globalPresenceSnapshot.value, snapshot)) {
+          globalPresenceSnapshot.value = snapshot
+        }
       } finally {
         inFlight = false
       }

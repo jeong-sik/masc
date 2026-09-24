@@ -376,6 +376,15 @@ let test_memo_text_that_would_leave_its_comment_is_refused () =
   refused "lib/a.ml" "a {id| quoted string";
   refused "lib/a.ml" "a {%ext| quoted extension";
   refused "notes/readme.md" "ends --> early";
+  refused "notes/readme.md" "ends --!> early too";
+  refused "src/a.c" "splices the next line \\";
+  refused "src/a.cpp" "splices the next line \\";
+  refused "src/A.java" "a \\u000a line break";
+  refused "src/A.java" "a \\uuu000D carriage return";
+  refused "web/a.php" "leaves ?> the block";
+  written "src/a.c" "a \\ in the middle";
+  written "src/A.java" "a \\u0041 letter";
+  written "src/a.ts" "leaves ?> nothing";
   (* The same texts are plain words where the comment runs to the line's
      end or the language lexes no strings in it. *)
   written "src/a.ts" "closes here *) then code";

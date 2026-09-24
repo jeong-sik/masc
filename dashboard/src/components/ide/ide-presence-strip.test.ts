@@ -184,6 +184,13 @@ describe('IdePresenceStrip', () => {
       expect(snap.entries[0]?.status).toBe('idle')
     })
 
+    // A poll that reads the same presence does not wake every reader.
+    const unchanged = globalPresenceSnapshot.value
+    const callsBefore = call
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => expect(call).toBe(callsBefore + 1))
+    expect(globalPresenceSnapshot.value).toBe(unchanged)
+
     render(null, container)
     const callsAtUnmount = call
     await vi.advanceTimersByTimeAsync(3_000)

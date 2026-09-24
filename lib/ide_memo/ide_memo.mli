@@ -71,6 +71,9 @@ val make
     stay on one line: a C0 control other than tab (CR included), DEL, NEL,
     or the Unicode line and paragraph separators. *)
 
+val contains : sub:string -> string -> bool
+(** [contains ~sub text]: [sub] occurs in [text]. [false] for an empty [sub]. *)
+
 val breaks_comment : markers -> t -> string option
 (** Why the memo's text would not stay inside a comment spelled with
     [markers]: a block comment's closer ends it early, and its opener nests

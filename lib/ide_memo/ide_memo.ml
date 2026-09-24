@@ -159,11 +159,14 @@ let breaks_comment markers t =
   match markers with
   | Line _ -> None
   | Block { opens; closes } ->
-    if contains ~sub:closes t.text
-    then Some (Printf.sprintf "the text has %s, which ends the comment early" closes)
-    else if contains ~sub:opens t.text
-    then Some (Printf.sprintf "the text has %s, which opens a comment inside the memo" opens)
-    else None
+    (* HTML also ends a comment at [--!>]. *)
+    let early_closes = if String.equal closes "-->" then [ closes; "--!>" ] else [ closes ] in
+    match List.find_opt (fun closer -> contains ~sub:closer t.text) early_closes with
+    | Some closer -> Some (Printf.sprintf "the text has %s, which ends the comment early" closer)
+    | None ->
+      if contains ~sub:opens t.text
+      then Some (Printf.sprintf "the text has %s, which opens a comment inside the memo" opens)
+      else None
 ;;
 
 let to_body t =

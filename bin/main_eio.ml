@@ -3328,11 +3328,16 @@ let sandbox_image_config_root base_path =
 let sandbox_image_change_catalog ~base_path change =
   let ( let* ) = Result.bind in
   let config_root = sandbox_image_config_root base_path in
+  let* shipped =
+    match Embedded_config.read Keeper_sandbox_image_catalog.file_name with
+    | Some shipped -> Ok shipped
+    | None ->
+      Error "sandbox-image: missing embedded config/sandbox-images.toml"
+  in
   let* catalog, expected =
     Result.map_error
       (fun error -> "sandbox-image: " ^ Keeper_sandbox_image_catalog.load_error_to_string error)
-      (Keeper_sandbox_image_catalog.load_for_change ~config_root
-         ~shipped:(Embedded_config.read Keeper_sandbox_image_catalog.file_name))
+      (Keeper_sandbox_image_catalog.load_for_change ~config_root ~shipped)
   in
   let* next =
     Result.map_error

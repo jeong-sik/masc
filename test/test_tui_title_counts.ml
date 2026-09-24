@@ -46,6 +46,39 @@ let test_the_field_says_the_words_without_the_brackets () =
   Alcotest.(check string) "the field is the words" "not loaded" field_unread;
   Alcotest.(check string) "the title brackets them" "(not loaded)" title_unread
 
+(* The Activity feed's title. With no server on the port the feed never opens,
+   and every sibling surface's title in that frame reads "(load failed)" or
+   "(not loaded)" while the row under this one reads "the feed is not open". *)
+let test_an_unopened_feed_has_no_count () =
+  Alcotest.(check string) "never opened" title_unread
+    (activity_title_reading ~observer:Observer_off ~shown:0 ~held:0);
+  Alcotest.(check string) "asked and still waiting" title_unread
+    (activity_title_reading ~observer:Observer_opening ~shown:0 ~held:0)
+
+let test_a_feed_that_answered_is_counted_even_when_empty () =
+  Alcotest.(check string) "live with nothing yet"
+    "(0 rows \xc2\xb7 0 events held)"
+    (activity_title_reading
+       ~observer:(Observer_live { session_id = "s"; since = 0.; events = 0 })
+       ~shown:0 ~held:0);
+  Alcotest.(check string) "and once it has frames"
+    "(3 rows \xc2\xb7 120 events held)"
+    (activity_title_reading
+       ~observer:(Observer_live { session_id = "s"; since = 0.; events = 120 })
+       ~shown:3 ~held:120)
+
+(* Held frames outlive the stream that delivered them, so a feed that has
+   closed still has a reading to report. *)
+let test_frames_in_hand_are_a_reading_after_the_stream_closes () =
+  Alcotest.(check string) "closed, frames kept"
+    "(2 rows \xc2\xb7 12 events held)"
+    (activity_title_reading
+       ~observer:(Observer_closed { reason = "eof"; at = 0.; events = 12 })
+       ~shown:2 ~held:12);
+  Alcotest.(check string) "off again, frames still in hand"
+    "(2 rows \xc2\xb7 12 events held)"
+    (activity_title_reading ~observer:Observer_off ~shown:2 ~held:12)
+
 let () =
   Alcotest.run "tui_title_counts"
     [ ( "fetched view"
@@ -57,5 +90,13 @@ let () =
             test_the_field_says_the_words_without_the_brackets
         ; Alcotest.test_case "an answer is counted even when empty" `Quick
             test_an_answer_is_counted_even_when_empty
+        ; Alcotest.test_case "an unopened feed has no count" `Quick
+            test_an_unopened_feed_has_no_count
+        ; Alcotest.test_case
+            "a feed that answered is counted even when empty" `Quick
+            test_a_feed_that_answered_is_counted_even_when_empty
+        ; Alcotest.test_case
+            "frames in hand are a reading after the stream closes" `Quick
+            test_frames_in_hand_are_a_reading_after_the_stream_closes
         ] )
     ]

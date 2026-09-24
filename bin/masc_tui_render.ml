@@ -12832,9 +12832,8 @@ let render_acting (state : state) =
     Printf.sprintf "%s  %s  %s"
       (activity_title ~cols ~on_logs:false
          ~after:(Printf.sprintf "  %s  %s" timestamp (connection_badge state))
-         (Printf.sprintf "(%s \xc2\xb7 %s held)"
-            (Message_layout.count_noun shown "row")
-            (Message_layout.count_noun held "event")))
+         (Masc_tui_types.activity_title_reading ~observer:state.observer
+            ~shown ~held))
       timestamp
       (connection_badge state)
   in

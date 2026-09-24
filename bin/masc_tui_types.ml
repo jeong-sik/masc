@@ -8246,6 +8246,25 @@ let title_missing_reading ~error =
 let field_missing_reading ~error =
   if Option.is_some error then field_failed else field_unread
 
+(* The Activity feed's title reading. A count is a reading only once the feed
+   has answered. With no server on the port the feed never opens, and a title
+   reading "(0 rows \xc2\xb7 0 events held)" there states a measurement of
+   nothing while the row under it reads "the feed is not open"; every other
+   surface's title in that frame, and the Logs tab of this very surface, reads
+   "(load failed)" or "(not loaded)".
+
+   Held frames outlive the stream that delivered them, so a closed feed, or one
+   switched back off, with frames in hand still has a reading to report. Only
+   the state before any answer, with nothing held, has none. *)
+let activity_title_reading ~observer ~shown ~held =
+  match observer, held with
+  | (Observer_off | Observer_opening), 0 -> title_missing_reading ~error:None
+  | (Observer_off | Observer_opening | Observer_live _ | Observer_closed _), _
+    ->
+    Printf.sprintf "(%s \xc2\xb7 %s held)"
+      (Masc_tui_message_layout.count_noun shown "row")
+      (Masc_tui_message_layout.count_noun held "event")
+
 (* The same answer for a pane whose reading is a [Masc_tui_fetched] view: the
    count once it has answered, and otherwise which of the two it is. Asked and
    still waiting reads as not loaded, the way a title before any request does. *)

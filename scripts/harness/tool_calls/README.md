@@ -14,7 +14,7 @@ print.
 ```sh
 # Baseline: the masc_ask definition masc actually sent in the newest captured request.
 python3 scripts/harness/tool_calls/first_call_validity.py \
-  --masc-dir ~/me/.masc \
+  --masc-dir "$MASC_BASE_PATH/.masc" \
   --from-wire-capture masc_ask \
   --scenarios scripts/harness/tool_calls/masc_ask.scenarios.json \
   --lanes glm-coding.glm-5.3-flash,kimi_coding.kimi-k3 \
@@ -22,7 +22,7 @@ python3 scripts/harness/tool_calls/first_call_validity.py \
 
 # Candidate: an edited definition, same scenarios, same lanes, same output file.
 python3 scripts/harness/tool_calls/first_call_validity.py \
-  --masc-dir ~/me/.masc --tool-json /tmp/masc_ask.candidate.json --variant-name candidate \
+  --masc-dir "$MASC_BASE_PATH/.masc" --tool-json /tmp/masc_ask.candidate.json --variant-name candidate \
   --scenarios scripts/harness/tool_calls/masc_ask.scenarios.json \
   --lanes glm-coding.glm-5.3-flash,kimi_coding.kimi-k3 \
   --reps 5 --out /tmp/masc_ask.jsonl

@@ -32,3 +32,9 @@ val pid : t -> int
 val stop_left_behind : masc_root:string -> unit
 
 val attach_error_message : Browser_stagehand_session.attach_error -> string
+
+(** Stops a Chromium a previous server left, then, when [runtime.toml] has
+    [\[browser.stagehand\]], installs the Stagehand lane's backend on [sw]
+    (RFC-browser-lane-stagehand §3.4). No browser starts until a
+    [Session_open]. *)
+val start : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> unit

@@ -387,6 +387,7 @@ let test_live_an_absent_image_is_refused_not_built () =
     (match
        M.image_present_for
          Backend.Apple_container
+         ~name:(Some "base")
          ~image:"masc-proof-definitely-missing:never"
          ~timeout_sec:15.0
      with
@@ -398,23 +399,36 @@ let test_live_an_absent_image_is_refused_not_built () =
          true
          (Astring.String.is_infix ~affix:"microvm_image_missing" message))
 
-(* The gate builds nothing, so the refusal is where the operator learns how
-   the build gets there: the catalog commands, for this runtime's store. *)
-let test_a_missing_image_names_the_commands_that_fix_it () =
-  match
-    M.image_present_result_for Backend.Apple_container ~image:"masc-sandbox-ocaml:t1"
-      M.Image_missing
-  with
-  | Ok () -> Alcotest.fail "a missing image passed the gate"
-  | Error message ->
-    List.iter
-      (fun needle ->
-        Alcotest.(check bool) needle true (Astring.String.is_infix ~affix:needle message))
-      [ "masc-sandbox-ocaml:t1"
-      ; "masc sandbox-image --recipe <sandbox_image> --runtime apple_container"
-      ; "masc sandbox-image promote <sandbox_image> <tag> --runtime apple_container"
-      ; "masc sandbox-image rollback <sandbox_image> --runtime apple_container"
-      ]
+(* A missing promoted build needs different repair steps for each backend.
+   Only Apple's store has a supported catalog promotion path. *)
+let test_a_missing_image_names_supported_recovery_for_its_backend () =
+  let refusal backend name =
+    match
+      M.image_present_result_for backend ~name ~image:"masc-sandbox-ocaml:t1"
+        M.Image_missing
+    with
+    | Ok () -> Alcotest.fail "a missing image passed the gate"
+    | Error message -> message
+  in
+  let has message needle = Astring.String.is_infix ~affix:needle message in
+  let apple = refusal Backend.Apple_container (Some "ocaml") in
+  List.iter
+    (fun needle -> Alcotest.(check bool) needle true (has apple needle))
+    [ "masc-sandbox-ocaml:t1"
+    ; "masc sandbox-image --recipe ocaml --source <checkout> --runtime apple_container"
+    ; "masc sandbox-image promote ocaml <tag> --runtime apple_container"
+    ; "masc sandbox-image rollback ocaml --runtime apple_container"
+    ];
+  let msb = refusal Backend.Microsandbox (Some "ocaml") in
+  Alcotest.(check bool) "msb load is the supported restore path" true
+    (has msb "msb load");
+  Alcotest.(check bool) "msb is not told to build or promote" false
+    (has msb "masc sandbox-image --recipe" || has msb "sandbox-image promote");
+  let nerdctl = refusal Backend.Nerdctl_kata (Some "ocaml") in
+  Alcotest.(check bool) "nerdctl digest gap is explained" true
+    (has nerdctl "cannot read that store's image digest");
+  Alcotest.(check bool) "nerdctl is not told to promote" false
+    (has nerdctl "sandbox-image promote")
 
 let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
   with_eio_fs @@ fun () ->
@@ -2223,8 +2237,8 @@ let () =
             test_live_structured_image_probe
         ; Alcotest.test_case "an absent image is refused, not built"
             `Slow test_live_an_absent_image_is_refused_not_built
-        ; Alcotest.test_case "a missing image names the commands that fix it" `Quick
-            test_a_missing_image_names_the_commands_that_fix_it
+        ; Alcotest.test_case "a missing image gives backend-supported recovery" `Quick
+            test_a_missing_image_names_supported_recovery_for_its_backend
         ; Alcotest.test_case "sweeps only guests whose owner is gone" `Quick
             test_only_guests_whose_owner_is_gone
         ; Alcotest.test_case "lists only this Keeper's Apple Container VM" `Quick

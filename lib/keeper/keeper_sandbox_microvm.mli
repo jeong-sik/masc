@@ -98,7 +98,11 @@ val network_args_for :
     be a guess at how open the guest is. *)
 
 val image_present_for :
-  Keeper_microvm_backend.t -> image:string -> timeout_sec:float -> (unit, string) result
+  Keeper_microvm_backend.t ->
+  name:string option ->
+  image:string ->
+  timeout_sec:float ->
+  (unit, string) result
 (** Gate the run on the image already being in this runtime's own store.
     None of the three has a [--pull=never]: without this, a missing image is
     fetched from a registry rather than refused. The refusal names the CLI
@@ -123,10 +127,15 @@ type image_probe_outcome =
   | Image_probe_failed of image_probe_failure
 
 val image_present_result_for :
-  Keeper_microvm_backend.t -> image:string -> image_probe_outcome -> (unit, string) result
-(** The gate's answer for one probe outcome. A missing image names the
-    [masc sandbox-image] commands that build, promote or roll back the
-    Keeper's catalog image in this runtime's store. *)
+  Keeper_microvm_backend.t ->
+  name:string option ->
+  image:string ->
+  image_probe_outcome ->
+  (unit, string) result
+(** The gate's answer for one probe outcome. [name] is the Keeper's catalog
+    name, when declared. A missing image gives recovery steps supported by
+    the selected backend; only Apple Container can currently promote a newly
+    built image through [masc sandbox-image]. *)
 
 type json_shape =
   | Json_array

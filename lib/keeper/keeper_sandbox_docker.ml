@@ -251,7 +251,10 @@ let ensure_shell_image_available ~(meta : keeper_meta) ~image ~timeout_sec =
             meta.name
             (String.concat ", " Keeper_microvm_backend.valid_strings))
      | Some backend ->
-       (match Keeper_sandbox_microvm.image_present_for backend ~image ~timeout_sec with
+       (match
+          Keeper_sandbox_microvm.image_present_for backend
+            ~name:meta.sandbox_image ~image ~timeout_sec
+        with
         | Ok () -> Ok ()
         | Error detail -> Error ("microvm_shell_failed: " ^ detail)))
   (* Fail closed: a remote_ssh keeper has no host-side shell image store,

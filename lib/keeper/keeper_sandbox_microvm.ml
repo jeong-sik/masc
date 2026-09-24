@@ -407,7 +407,46 @@ let phase_label = function
    was asked. Telling an [msb] keeper to install Apple container -- which the
    Apple-only wording did -- sends the operator to fix a runtime the keeper
    does not use. *)
-let image_present_result_for backend ~image = function
+let missing_image_recovery backend ~name ~image =
+  let rollback =
+    match name with
+    | None -> ""
+    | Some name ->
+      Printf.sprintf
+        " If its previous build is still in this store, use `masc sandbox-image \
+         rollback %s --runtime %s`."
+        name (Backend.to_string backend)
+  in
+  match backend, name with
+  | Backend.Apple_container, Some name ->
+    let source =
+      if String.equal name Keeper_sandbox_image_version.(base_embedded.name)
+      then ""
+      else " --source <checkout>"
+    in
+    Printf.sprintf
+      "Next: build a new version with `masc sandbox-image --recipe %s%s \
+       --runtime apple_container`, then promote the tag it prints with `masc \
+       sandbox-image promote %s <tag> --runtime apple_container`.%s"
+      name source name rollback
+  | Backend.Apple_container, None ->
+    "Next: inspect this Keeper's sandbox_image catalog name, then build and \
+     promote a new version for apple_container."
+  | Backend.Microsandbox, _ ->
+    Printf.sprintf
+      "Next: restore the exact promoted image %s to msb's store from a \
+       trusted OCI archive with `msb load`. MASC cannot build or promote a new \
+       microsandbox image through `masc sandbox-image` yet.%s"
+      image rollback
+  | Backend.Nerdctl_kata, _ ->
+    Printf.sprintf
+      "Next: restore the exact promoted image %s to nerdctl's store from a \
+       trusted archive. MASC cannot promote a new nerdctl_kata image yet \
+       because it cannot read that store's image digest.%s"
+      image rollback
+;;
+
+let image_present_result_for backend ~name ~image = function
   | Image_present -> Ok ()
   | Image_missing ->
     Error
@@ -416,16 +455,10 @@ let image_present_result_for backend ~image = function
           for this Keeper, and it is not in %s's image store. Each microVM \
           runtime keeps its images apart from Docker's, and none of these runs \
           has a --pull=never, so running without this check fetches from a \
-          registry instead of failing. Next: build a new one with `masc \
-          sandbox-image --recipe <sandbox_image> --runtime %s` and record the \
-          tag it prints with `masc sandbox-image promote <sandbox_image> <tag> \
-          --runtime %s`, or return to the previous build with `masc \
-          sandbox-image rollback <sandbox_image> --runtime %s`."
+          registry instead of failing. %s"
          image
          (Backend.cli_name backend)
-         (Backend.to_string backend)
-         (Backend.to_string backend)
-         (Backend.to_string backend))
+         (missing_image_recovery backend ~name ~image))
   | Image_cli_unavailable ->
     Error
       (Printf.sprintf
@@ -585,8 +618,9 @@ let image_probe_for backend ~image ~timeout_sec =
    stranger's image under the keeper's name. Nor does it build one: the image
    is the build the host catalog has promoted, and only
    [masc sandbox-image] builds and promotes. *)
-let image_present_for backend ~image ~timeout_sec =
-  image_probe_for backend ~image ~timeout_sec |> image_present_result_for backend ~image
+let image_present_for backend ~name ~image ~timeout_sec =
+  image_probe_for backend ~image ~timeout_sec
+  |> image_present_result_for backend ~name ~image
 ;;
 
 (* ── Turn-container argv ─────────────────────────────────────────────

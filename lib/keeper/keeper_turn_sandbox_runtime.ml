@@ -1374,6 +1374,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
          Result.bind
            (Keeper_sandbox_microvm.image_present_for
               backend
+              ~name:t.meta.sandbox_image
               ~image
               ~timeout_sec:image_timeout)
            (fun () -> microvm_guest_provisions t ~backend ~timeout_sec:image_timeout)

@@ -11333,7 +11333,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                 | Some browser -> "  Live " ^ browser ^ " • b:choose browser • a:automation"
                 | None -> "  Live • b:choose browser • a:automation")
              | Automation -> "  Automation browser • g:URL • o:open / x:close • l:live"
-             | Stagehand -> "  Stagehand browser • l:live");
+             | Stagehand -> "  Stagehand browser • a:automation • l:live");
       let tabs, page = match view.reading with
         | None -> [], None
         | Some reading -> reading.tabs, reading.page

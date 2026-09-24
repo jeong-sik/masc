@@ -25,31 +25,46 @@ let decode_all tool names =
 
 let sorted lanes = List.sort compare lanes
 
-(* A tool that offers every lane must list exactly the names the readers
-   decode, so a lane added in code shows up here until its tools declare it.
-   The declared default is the lane a missing [lane] means in code: live for
-   the read tools ([route_of], [Browser_surface.parse_request]) and
-   automation for BrowserAct. *)
+(* A tool offers a lane exactly when that lane's backend serves the verbs the
+   tool issues with its defaults, so a schema cannot advertise a lane whose
+   backend refuses the call, and a lane added in code shows up here until the
+   tools it serves declare it. *)
+let serving verbs = List.filter (fun lane -> List.for_all (Browser_lane.verb_allowed lane) verbs) Lane_name.all
+
+let tool_verbs = Browser_lane.[
+  "masc_browser_tabs", Tool_schemas_misc_toml.browser_tabs, [ Tabs_list ];
+  "masc_browser_read", Tool_schemas_misc_toml.browser_read, [ Page_read { tab_id = None; max_chars = None } ];
+  "masc_browser_interact", Tool_schemas_misc_toml.browser_interact,
+    [ Page_interact { tab_id = 1; expected_url = None; action = Scroll { x = 0; y = 1 } } ];
+  "masc_browser_session", Tool_schemas_misc_toml.browser_session,
+    [ Session_open { headless = None }; Session_close; Session_status ];
+  "masc_browser_goto", Tool_schemas_misc_toml.browser_goto,
+    [ Page_goto { url = "https://example.org/"; tab_id = None } ];
+]
+
+(* The declared default is the lane a missing [lane] means in code: live for
+   the reads ([Browser_surface.parse_request]), automation for the tools that
+   only the server's lanes serve ([issue_on_server_lane], [route_of] for
+   BrowserAct). *)
+let declared_default = [
+  "masc_browser_tabs", Lane_name.Live;
+  "masc_browser_read", Lane_name.Live;
+  "masc_browser_interact", Lane_name.Live;
+  "masc_browser_session", Lane_name.Automation;
+  "masc_browser_goto", Lane_name.Automation;
+]
+
 let test_tool_enums () =
-  List.iter (fun (tool, schema) ->
-    check (list lane) (tool ^ " offers every lane") (sorted Lane_name.all)
+  List.iter (fun (tool, schema, verbs) ->
+    check (list lane) (tool ^ " offers the lanes that serve it") (sorted (serving verbs))
       (sorted (decode_all tool (lane_enum schema)));
-    check (list lane) (tool ^ " defaults to live") [ Lane_name.Live ] (decode_all tool [ lane_default schema ]))
-    [ "masc_browser_tabs", Tool_schemas_misc_toml.browser_tabs;
-      "masc_browser_read", Tool_schemas_misc_toml.browser_read;
-      "masc_browser_interact", Tool_schemas_misc_toml.browser_interact ];
+    check (list lane) (tool ^ " default") [ List.assoc tool declared_default ] (decode_all tool [ lane_default schema ]))
+    tool_verbs;
   let act = Tool_schemas_misc_toml.browser_act in
   check (list lane) "masc_browser_act offers automation only" [ Lane_name.Automation ]
     (decode_all "masc_browser_act" (lane_enum act));
   check (list lane) "masc_browser_act defaults to automation" [ Lane_name.Automation ]
-    (decode_all "masc_browser_act" [ lane_default act ]);
-  (* Sessions and navigation belong to the lanes the server owns. *)
-  List.iter (fun (tool, schema) ->
-    check (list lane) (tool ^ " offers the server's lanes") (sorted [ Lane_name.Automation; Lane_name.Stagehand ])
-      (sorted (decode_all tool (lane_enum schema)));
-    check (list lane) (tool ^ " defaults to automation") [ Lane_name.Automation ] (decode_all tool [ lane_default schema ]))
-    [ "masc_browser_session", Tool_schemas_misc_toml.browser_session;
-      "masc_browser_goto", Tool_schemas_misc_toml.browser_goto ]
+    (decode_all "masc_browser_act" [ lane_default act ])
 
 let () =
   run "browser_lane_name" [
@@ -57,5 +72,5 @@ let () =
       test_case "every lane round-trips" `Quick test_round_trip;
       test_case "a non-name is refused" `Quick test_rejects_non_names;
     ];
-    "tool schemas", [ test_case "lane enums decode" `Quick test_tool_enums ];
+    "tool schemas", [ test_case "lane enums follow the backends" `Quick test_tool_enums ];
   ]

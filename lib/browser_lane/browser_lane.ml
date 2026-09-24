@@ -3,9 +3,11 @@
 
     A lane is one connected browser backend: "live" is the user's real
     Firefox/Zen through the extension's native-messaging host. "automation"
-    is the in-process OCaml WebDriver executor. Only the live host long-polls
-    this process and posts results through the HTTP transport; automation
-    owns its session directly inside the server.
+    is the in-process OCaml WebDriver executor. "stagehand" is a Chromium the
+    server launches with the Stagehand runtime, reached over CDP
+    (RFC-browser-lane-stagehand). Only the live host long-polls this process
+    and posts results through the HTTP transport; automation and stagehand
+    own their sessions directly inside the server.
 
     Verbs are a closed variant: an unknown verb is refused by name on every
     boundary (tool input, lane issue, backend), the same rule the observe
@@ -187,16 +189,26 @@ let verb_allowed_on_automation = function
   | Page_instruct _ | Page_locate _ | Page_extract _ -> false
 ;;
 
-(* What the Stagehand backend serves in this step: its session, tabs,
-   navigation, screenshots and the three sentence verbs. Reads through the
-   scene scripts, interaction and actions come with the verb mapping that
-   follows (RFC-browser-lane-stagehand §7 step 7). *)
+(* What the Stagehand backend serves once its executor is installed
+   (RFC-browser-lane-stagehand §7 step 7): its session, tabs, navigation,
+   screenshots and the three sentence verbs. Reads through the scene scripts,
+   interaction and actions are not served. *)
 let verb_allowed_on_stagehand = function
   | Session_open _ | Session_close | Session_status | Tabs_list | Page_goto _ | Page_capture _
   | Page_instruct _ | Page_locate _ | Page_extract _ -> true
   | Page_read _ | Page_document _ | Page_elements _ | Page_scene _ | Page_context _ | Page_downloads _
   | Page_interact _ | Page_act _ -> false
 ;;
+
+let verb_allowed (lane : Lane_name.t) verb =
+  match lane with
+  | Live -> verb_allowed_on_live verb
+  | Automation -> verb_allowed_on_automation verb
+  | Stagehand -> verb_allowed_on_stagehand verb
+;;
+
+(* The refusal the other lanes give a sentence verb. *)
+let sentence_verbs_refused = "sentence verbs belong to the stagehand lane"
 
 type issued = { id : string; verb_json : Yojson.Safe.t }
 
@@ -254,6 +266,11 @@ let client_json info = `Assoc ["clientId", `String (client_id_to_string info.cli
   "browser", `String (browser_name info.browser); "version", `String info.version;
   "engineVersion", `String info.engine_version]
 let target_client_id = function Automation | Stagehand -> None | Live_client client -> Some client.info.client_id
+let target_lane = function
+  | Automation -> Lane_name.Automation
+  | Live_client _ -> Lane_name.Live
+  | Stagehand -> Lane_name.Stagehand
+;;
 
 (* Which backend a request names. A browser client id belongs to the live
    source, so a request for the automation backend has nowhere to carry one. *)
@@ -386,7 +403,7 @@ let automation_document_observer : (tab_id:int -> answer) option Atomic.t = Atom
 let install_automation_document_observer observer = Atomic.set automation_document_observer observer
 let issue_automation ~verb ~timeout_sec =
   if not (verb_allowed_on_automation verb) then
-    Rejected_before_effect "sentence verbs belong to the stagehand lane"
+    Rejected_before_effect sentence_verbs_refused
   else
   match Atomic.get automation_executor with
   | None -> Lane_absent

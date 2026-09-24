@@ -16,6 +16,7 @@ val to_wire : t -> string
 (** [None] for any string that is not exactly a lane name. *)
 val of_wire : string -> t option
 
-(** ["live or automation or stagehand"]: the names a reader accepts, for its
-    error text. *)
+(** ["live or automation or stagehand"]: every lane name, for the error text
+    about a string that is no lane name. A reader that accepts only some lanes
+    names those itself. *)
 val expected : string

@@ -1,6 +1,6 @@
 name = "masc_browser_tabs"
 description = """
-List {clientId,tabs:[{id,active,title,url}]} and live index/windowId. Carry clientId/tabId into reads/actions. Ambiguous or stale live selection returns clients without dispatch: select explicitly and retry. Automation clientId is null."""
+List {clientId,tabs:[{id,active,title,url}]} and live index/windowId. Carry clientId/tabId into reads/actions. Ambiguous or stale live selection returns clients without dispatch: select explicitly and retry. Automation and stagehand clientId is null."""
 additional_properties = false
 
 [[params]]

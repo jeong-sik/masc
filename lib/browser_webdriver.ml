@@ -460,7 +460,7 @@ let execute_unlocked t = function
       | _ -> Error (Protocol "invalid screenshot response"))
   | Browser_lane.Page_instruct _ | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
     (* [execute] refuses these before taking the session lock. *)
-    Error (Protocol "sentence verbs belong to the stagehand lane")
+    Error (Protocol Browser_lane.sentence_verbs_refused)
   | Browser_lane.Tabs_list ->
     let* session = session t in
     let* handles = call t session `GET "/window/handles" None in
@@ -506,7 +506,7 @@ let execute t verb =
     | Browser_lane.Page_interact {action=Browser_lane.Activate_tab;_} ->
       Browser_lane.Rejected_before_effect "activate_tab requires live lane; automation observations already select their explicit tab"
     | Browser_lane.Page_instruct _ | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
-      Browser_lane.Rejected_before_effect "sentence verbs belong to the stagehand lane"
+      Browser_lane.Rejected_before_effect Browser_lane.sentence_verbs_refused
     | Browser_lane.Page_act action ->
       (match execute_action t action with
        | Ok data, _ -> Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])

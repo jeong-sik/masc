@@ -48,7 +48,20 @@ let route_of ~default ~tool_name ~start_time args =
   | _ -> Error (make_input_err ~tool_name ~start_time "browser arguments must be an object")
 ;;
 
-let answer_to_result ~tool_name ~start_time = function
+(* What an absent backend means on each lane, and where the operator looks. *)
+let lane_absent_message = function
+  | Browser_lane.Lane_name.Live ->
+    "no browser lane connected: the live lane needs the operator's browser \
+     running with the browser-lane extension and host (connectors/browser)"
+  | Browser_lane.Lane_name.Automation ->
+    "the automation lane has no WebDriver: configure browser.geckodriver, or \
+     read the server log for why it did not start"
+  | Browser_lane.Lane_name.Stagehand ->
+    "the stagehand lane has no browser: configure [browser.stagehand], or \
+     read the server log for why it did not start"
+;;
+
+let answer_to_result ~lane ~tool_name ~start_time = function
   | Browser_lane.Answered (`Assoc fields) ->
     (match List.assoc_opt "ok" fields, List.assoc_opt "data" fields with
      | Some (`Bool true), Some data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
@@ -60,10 +73,7 @@ let answer_to_result ~tool_name ~start_time = function
      | _ -> make_workflow_err ~tool_name ~start_time "invalid browser backend response")
   | Browser_lane.Answered _ ->
     make_workflow_err ~tool_name ~start_time "invalid browser backend response"
-  | Browser_lane.Lane_absent ->
-    make_workflow_err ~tool_name ~start_time
-      "no browser lane connected: the live lane needs the operator's browser \
-       running with the browser-lane extension and host (connectors/browser)"
+  | Browser_lane.Lane_absent -> make_workflow_err ~tool_name ~start_time (lane_absent_message lane)
   | Browser_lane.Timed_out ->
     make_workflow_err ~tool_name ~start_time "the browser lane did not answer in time"
   | Browser_lane.Refused reason | Browser_lane.Rejected_before_effect reason ->
@@ -139,20 +149,35 @@ let handle_tabs ~base_path ~tool_name ~start_time args : Tool_result.result =
     | Ok target ->
       match Browser_lane.issue_for ~target ~verb:Browser_lane.Tabs_list ~timeout_sec:default_timeout_sec with
       | Error error -> selection_error ~base_path ~tool_name ~start_time error
-      | Ok answer -> answer_to_result ~tool_name ~start_time (add_client target answer)
+      | Ok answer ->
+        answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client target answer)
 ;;
 
-(* Sessions and navigations belong to the lanes the server owns, automation
-   and stagehand; a missing lane is automation, as both tools declare. The
-   live lane refuses them (verb_allowed_on_live), so a caller cannot route
-   them there even by naming it. *)
-let issue_on_lane ~tool_name ~start_time args ~verb ~timeout_sec =
-  match route_of ~default:Browser_lane.Lane_name.Automation ~tool_name ~start_time args with
-  | Error error -> error
-  | Ok route ->
-    (match Result.bind (Browser_lane.resolve_target route) (fun target -> Browser_lane.issue_for ~target ~verb ~timeout_sec) with
-     | Ok answer -> answer_to_result ~tool_name ~start_time answer
-     | Error selection -> make_workflow_err ~tool_name ~start_time (Browser_lane.selection_error_code selection))
+(* Sessions and navigations belong to the lanes the server owns; the live
+   browser belongs to the operator, and its lane refuses them too
+   (verb_allowed_on_live). A missing lane is automation, as both tools
+   declare. *)
+let server_lanes = Browser_lane.Lane_name.[ Automation; Stagehand ]
+let server_lanes_expected = String.concat " or " (List.map Browser_lane.Lane_name.to_wire server_lanes)
+
+let issue_on_server_lane ~tool_name ~start_time args ~verb ~timeout_sec =
+  let lane = match args with
+    | `Assoc fields ->
+      (match List.assoc_opt "lane" fields with
+       | None -> Ok Browser_lane.Lane_name.Automation
+       | Some (`String raw) ->
+         Option.to_result ~none:("lane must be " ^ server_lanes_expected) (Browser_lane.Lane_name.of_wire raw)
+       | Some _ -> Error ("lane must be " ^ server_lanes_expected))
+    | _ -> Error "browser arguments must be an object" in
+  match lane with
+  | Error detail -> make_input_err ~tool_name ~start_time detail
+  | Ok (Browser_lane.Lane_name.Automation as lane) ->
+    answer_to_result ~lane ~tool_name ~start_time (Browser_lane.issue_automation ~verb ~timeout_sec)
+  | Ok (Browser_lane.Lane_name.Stagehand as lane) ->
+    answer_to_result ~lane ~tool_name ~start_time (Browser_lane.issue_stagehand ~verb ~timeout_sec)
+  | Ok Browser_lane.Lane_name.Live ->
+    make_input_err ~tool_name ~start_time
+      ("lane must be " ^ server_lanes_expected ^ ": the live browser belongs to the operator")
 ;;
 
 let handle_session ~tool_name ~start_time args : Tool_result.result =
@@ -160,12 +185,12 @@ let handle_session ~tool_name ~start_time args : Tool_result.result =
   match action with
   | "open" ->
     let headless = Some (get_bool args "headless" true) in
-    issue_on_lane ~tool_name ~start_time args ~verb:(Browser_lane.Session_open { headless }) ~timeout_sec:60.0
-  | "close" -> issue_on_lane ~tool_name ~start_time args ~verb:Browser_lane.Session_close ~timeout_sec:60.0
+    issue_on_server_lane ~tool_name ~start_time args ~verb:(Browser_lane.Session_open { headless }) ~timeout_sec:60.0
+  | "close" -> issue_on_server_lane ~tool_name ~start_time args ~verb:Browser_lane.Session_close ~timeout_sec:60.0
   | "status" ->
     (* Reads the backend's record rather than the browser, so the short timeout
        is the lane round trip, not a page load. *)
-    issue_on_lane ~tool_name ~start_time args ~verb:Browser_lane.Session_status ~timeout_sec:10.0
+    issue_on_server_lane ~tool_name ~start_time args ~verb:Browser_lane.Session_status ~timeout_sec:10.0
   | _ ->
     make_input_err ~tool_name ~start_time
       "action must be one of: open, close, status"
@@ -178,7 +203,7 @@ let handle_goto ~tool_name ~start_time args : Tool_result.result =
     make_input_err ~tool_name ~start_time
       "url must be a valid http or https URL"
   else
-    issue_on_lane ~tool_name ~start_time args
+    issue_on_server_lane ~tool_name ~start_time args
       ~verb:(Browser_lane.Page_goto { url; tab_id = get_int_opt args "tabId" }) ~timeout_sec:45.0
 ;;
 
@@ -217,7 +242,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
             | _ -> Error "framePath supports text, elements and frames; dialogs belong to the top-level tab" in
           match mode with
           | Error detail -> make_input_err ~tool_name ~start_time detail
-          | Ok mode -> answer_to_result ~tool_name ~start_time
+          | Ok mode -> answer_to_result ~lane:Browser_lane.Lane_name.Automation ~tool_name ~start_time
               (Browser_lane.issue_automation
                 ~verb:(Browser_lane.Page_context {tab_id;frame_path;mode}) ~timeout_sec:default_timeout_sec))
     else
@@ -256,7 +281,7 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
     | "downloads" ->
       if not automation then make_input_err ~tool_name ~start_time "downloads require automation"
       else (match get_int_opt args "tabId" with
-        | Some tab_id when tab_id >= 0 -> answer_to_result ~tool_name ~start_time
+        | Some tab_id when tab_id >= 0 -> answer_to_result ~lane:Browser_lane.Lane_name.Automation ~tool_name ~start_time
             (Browser_lane.issue_automation ~verb:(Browser_lane.Page_downloads {tab_id}) ~timeout_sec:default_timeout_sec)
         | _ -> make_input_err ~tool_name ~start_time "downloads require an observed nonnegative tabId")
     | "screenshot" ->
@@ -283,7 +308,8 @@ let handle_read ?keeper_name ~base_path ~tool_name ~start_time args : Tool_resul
          | Ok target ->
            match Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec with
            | Error error -> selection_error ~base_path ~tool_name ~start_time error
-           | Ok answer -> answer_to_result ~tool_name ~start_time (add_client target answer))
+           | Ok answer ->
+             answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client target answer))
 ;;
 
 (* Retention requires an owner that will commit the observation receipt. *)
@@ -337,7 +363,7 @@ let handle_act_with_phase ?upload_paths ~base_path ~tool_name ~start_time args =
         | Browser_lane.Refused _, Browser_lane.Live_route _ -> Tool_result.Proven_pre_effect
         | Browser_lane.Refused _, (Browser_lane.Automation_route | Browser_lane.Stagehand_route)
         | (Browser_lane.Timed_out | Browser_lane.Answered _), _ -> Tool_result.Effect_outcome_unknown in
-      answer_to_result ~tool_name ~start_time answer, phase
+      answer_to_result ~lane:(Browser_lane.route_lane_name route) ~tool_name ~start_time answer, phase
 ;;
 let handle_act ~base_path ~tool_name ~start_time args =
   fst (handle_act_with_phase ~base_path ~tool_name ~start_time args)
@@ -363,7 +389,7 @@ let handle_interact_with_phase ~base_path ~tool_name ~start_time args =
              List.assoc_opt "ok" fields = Some (`Bool false)
              && List.assoc_opt "effectPhase" fields = Some (`String "not_started") -> Tool_result.Proven_pre_effect
          | Browser_lane.Answered _ | Browser_lane.Refused _ | Browser_lane.Timed_out -> Tool_result.Effect_outcome_unknown in
-       answer_to_result ~tool_name ~start_time (add_client target answer), phase)
+       answer_to_result ~lane:(Browser_lane.target_lane target) ~tool_name ~start_time (add_client target answer), phase)
 ;;
 let handle_interact ~base_path ~tool_name ~start_time args =
   fst (handle_interact_with_phase ~base_path ~tool_name ~start_time args)

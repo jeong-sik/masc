@@ -185,6 +185,76 @@ let test_malformed_window_is_a_typed_error () =
   | Ok _ -> fail "a string utilization was accepted"
 ;;
 
+let test_official_client_home_owns_usage_across_provider_rows () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let temp = Filename.get_temp_dir_name () in
+  let home_a = Filename.concat temp "masc-usage-home-a" in
+  let home_b = Filename.concat temp "masc-usage-home-b" in
+  let config first_home =
+    Printf.sprintf
+      {|[providers.usage_shared_one]
+protocol = "claude-code"
+command = "/usr/bin/true"
+is-non-interactive = true
+account-home = %S
+
+[providers.usage_shared_two]
+protocol = "claude-code"
+command = "/usr/bin/true"
+is-non-interactive = true
+account-home = %S
+
+[models.sonnet]
+api-name = "sonnet"
+max-context = 200000
+
+[usage_shared_one.sonnet]
+[usage_shared_two.sonnet]
+
+[runtime]
+default = "usage_shared_one.sonnet"
+|}
+      first_home home_a
+  in
+  let load source =
+    with_temp_file ~suffix:".toml" source (fun path ->
+      match Runtime.init_default ~config_path:path with
+      | Ok () -> ()
+      | Error msg -> failf "fixture runtime.toml should load: %s" msg)
+  in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       load (config home_a);
+       let old_scope = scope_of "usage_shared_one.sonnet" in
+       let shared_scope = scope_of "usage_shared_two.sonnet" in
+       check bool "same CLI home shares one quota scope" true
+         (Runtime_quota_window.scope_equal old_scope shared_scope);
+       let report =
+         In_channel.with_open_bin claude_fixture_path In_channel.input_all
+         |> Yojson.Safe.from_string
+         |> Usage.decode_claude_rate_limit_event
+         |> decode_ok
+       in
+       Usage.record ~scope:old_scope ~observed_at:1790180000.0 report;
+       let shared_row = usage_row (resolved ()) (Runtime_quota_window.scope_to_string old_scope) in
+       check (list string) "both provider ids share the reported row"
+         [ "usage_shared_one"; "usage_shared_two" ]
+         Yojson.Safe.Util.(shared_row |> member "providers" |> to_list |> List.map to_string);
+       load (config home_b);
+       let new_scope = scope_of "usage_shared_one.sonnet" in
+       check bool "changed home has a different scope" false
+         (Runtime_quota_window.scope_equal old_scope new_scope);
+       let after = resolved () in
+       let fresh_row = usage_row after (Runtime_quota_window.scope_to_string new_scope) in
+       check string "changed home has no report" "not_reported_since_start"
+         Yojson.Safe.Util.(fresh_row |> member "state" |> to_string);
+       let retained_row = usage_row after (Runtime_quota_window.scope_to_string old_scope) in
+       check (list string) "old report belongs only to the unchanged home"
+         [ "usage_shared_two" ]
+         Yojson.Safe.Util.(retained_row |> member "providers" |> to_list |> List.map to_string))
+;;
+
 (* A read without the per-limit map falls back to the single [rateLimits];
    a map of the wrong type is refused with its path, not skipped. *)
 let test_codex_read_falls_back_and_refuses_a_bad_map () =
@@ -211,6 +281,8 @@ let () =
             test_reports_reach_the_resolved_document
         ; test_case "malformed window is a typed error" `Quick
             test_malformed_window_is_a_typed_error
+        ; test_case "official client home owns usage" `Quick
+            test_official_client_home_owns_usage_across_provider_rows
         ; test_case "codex read falls back and refuses a bad map" `Quick
             test_codex_read_falls_back_and_refuses_a_bad_map
         ] )

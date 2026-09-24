@@ -89,5 +89,13 @@ val scope_of_credential :
     and falls back to the row's [provider_id], as does an absent
     credential. *)
 
+val scope_of_claude_code_home : string option -> scope
+val scope_of_codex_home : string option -> scope
+(** Official-client quota identity is the selected CLI home, not the provider
+    row id. Two rows selecting the same home share observations; selecting a
+    different home under the same row id does not reuse prior observations.
+    Without an explicit home, the process's CLI home environment is sampled
+    at materialization, or the client's default home is used as one scope. *)
+
 val reset_for_testing : unit -> unit
 (** Drop every remembered window.  Test-only. *)

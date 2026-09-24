@@ -12,6 +12,8 @@ type scope =
   | Provider_row of string
   | Credential_env of string
   | Credential_file of string
+  | Official_client_home of string * string
+  | Official_client_default of string
 
 (* Two facts, not one duration. [Until] is the provider's own reset time.
    [Observed] is a hard-quota rejection that stated no reset. It claims no end
@@ -91,13 +93,41 @@ let scope_to_string = function
   | Provider_row row -> "provider:" ^ row
   | Credential_env name -> "env:" ^ name
   | Credential_file path -> "file:" ^ path
+  | Official_client_home (client, home) -> "official:" ^ client ^ ":home:" ^ home
+  | Official_client_default client -> "official:" ^ client ^ ":default"
 
 let scope_equal left right =
   match left, right with
   | Provider_row a, Provider_row b
   | Credential_env a, Credential_env b
   | Credential_file a, Credential_file b -> String.equal a b
-  | (Provider_row _ | Credential_env _ | Credential_file _), _ -> false
+  | Official_client_home (a_client, a_home), Official_client_home (b_client, b_home) ->
+    String.equal a_client b_client && String.equal a_home b_home
+  | Official_client_default a, Official_client_default b -> String.equal a b
+  | (Provider_row _ | Credential_env _ | Credential_file _
+    | Official_client_home _ | Official_client_default _), _ -> false
+;;
+
+let official_client_scope ~client ~env_name account_home =
+  let home =
+    match account_home with
+    | Some _ -> account_home
+    | None ->
+      (match Sys.getenv_opt env_name with
+       | Some path when path <> "" -> Some path
+       | Some _ | None -> None)
+  in
+  match home with
+  | Some path -> Official_client_home (client, path)
+  | None -> Official_client_default client
+;;
+
+let scope_of_claude_code_home =
+  official_client_scope ~client:"claude-code" ~env_name:"CLAUDE_CONFIG_DIR"
+;;
+
+let scope_of_codex_home =
+  official_client_scope ~client:"codex-app-server" ~env_name:"CODEX_HOME"
 ;;
 
 let scope_of_credential ~provider_id (credential : Runtime_schema.credential option) =

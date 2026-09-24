@@ -90,6 +90,7 @@ function OfficialClientAccount({ client, usage }: { client: DashboardRuntimeProv
       ${measured?.login.detail ? html`<span class="ml-2 text-text-muted">${measured.login.detail}</span>` : null}
       ${error ? html`<span class="ml-2" role="alert">${error}</span>` : null}
       <div class="text-text-muted" data-testid=${`overview-client-usage-${providerId}`}>
+        ${scope && scope.providers.length > 1 ? html`<div>공유 Client 홈: ${scope.providers.join(', ')}</div>` : null}
         ${usage.kind === 'loading' ? '제공자 사용량 읽는 중'
           : usage.kind === 'error' ? `제공자 사용량 조회 실패: ${usage.message}`
             : !usage.value.provider_usage_windows ? '제공자 사용량 상태 미보고'

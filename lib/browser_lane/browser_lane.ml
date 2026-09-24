@@ -444,15 +444,21 @@ let server_lanes_expected =
 (* [None] for a string that is no lane name and for the live lane. *)
 let server_lane_of_wire raw = Option.bind (Lane_name.of_wire raw) server_lane_of_name
 
+(* Opening waits for Chromium, CDP, and Stagehand's own bounded attach. The
+   generic server-lane deadline can expire while those are still running,
+   leaving the caller unsure whether a browser opened. *)
+let stagehand_server_deadline verb ~timeout_sec =
+  match verb with
+  | Session_open _ -> None
+  | Session_close | Session_status | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_capture _
+  | Page_scene _ | Page_interact _ | Page_goto _ | Page_elements _ | Page_act _ | Page_context _ | Page_instruct _
+  | Page_locate _ | Page_extract _ -> Some timeout_sec
+;;
+
 let issue_server_lane lane ~verb ~timeout_sec =
   match lane with
   | Server_automation -> issue_automation ~verb ~timeout_sec
-  | Server_stagehand ->
-    (* Opening waits for Chromium, CDP, and Stagehand's own bounded attach.
-       The generic server-lane deadline can expire while those are still
-       running, leaving the caller unsure whether a browser opened. *)
-    let timeout_sec = match verb with Session_open _ -> None | _ -> Some timeout_sec in
-    issue_stagehand ~verb ~timeout_sec
+  | Server_stagehand -> issue_stagehand ~verb ~timeout_sec:(stagehand_server_deadline verb ~timeout_sec)
 ;;
 
 let issue_for ~target ~verb ~timeout_sec =

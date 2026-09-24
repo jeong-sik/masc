@@ -3144,10 +3144,15 @@ for line in sys.stdin:
       check bool "the new current instruction still reaches the provider" true
         (String_util.contains_substring (Yojson.Safe.to_string params) "Continue operation 3."))
       (requests 3 "turn/start");
+    let history_requests =
+      requests 3 "thread/start" @ requests 3 "thread/resume"
+      @ requests 3 "thread/inject_items" in
+    check bool "turn three actually wrote history-bearing request frames" true
+      (history_requests <> []);
     List.iter (fun params ->
       check bool "third wire never resurrects an omitted history atom" false
         (String_util.contains_substring (Yojson.Safe.to_string params) "OMITTED_HISTORY_"))
-      (requests 3 "thread/resume");
+      history_requests;
     (* The transmission boundary does not mutate the checkpoint. *)
     match Keeper_checkpoint_store.load_agent_core
       ~session_dir:(Filename.concat (Filename.concat base_path "keeper-sessions") trace_id)

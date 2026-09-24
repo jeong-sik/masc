@@ -92,7 +92,7 @@ default = "codex.context"
     | Some _ | None -> fail "fixture runtime missing" in
   let reports = ref [] in
   let run ?official_task_reference ?model_input_projection
-      ?carried_front_seed
+      ?carried_front_seed ?librarian_front
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"]) ?official_client_continuation ?official_client_original_turn ?(goal="Continue from current World State.") ~instructions ~world () =
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
@@ -102,7 +102,7 @@ default = "codex.context"
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime:(Runtime.get_runtime_by_id "codex.context" |> Option.get)) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
       ~turn_start
-      ?carried_front_seed
+      ?carried_front_seed ?librarian_front
       ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_task_reference ?official_client_continuation ?official_client_original_turn
       ~goal_blocks:None ~system_prompt:instructions ~tools:[]
       ~initial_messages
@@ -523,6 +523,60 @@ let test_a_later_librarian_position_decides_the_range () =
          Ok (Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 62 }))
        (Keeper_carried_front.Turn_boundary { end_atom = 60 }))
 
+(* A response accepted no prior history, but the next request can retain the
+   Librarian's fitting summary and its separately delivered current goal. The
+   summary must not resurrect the omitted final atom or bypass a real ceiling. *)
+let test_empty_history_keeps_a_fitting_summary ?max_prompt_bytes ~oversized () =
+  with_fixture ?max_prompt_bytes @@ fun ~run ~capture ~reports ->
+  let trace_id = "accepted-empty-summary" in
+  let summary_marker = "KEEP_CONTINUITY_WITHOUT_OLD_ATOMS" in
+  let working_state = summary_marker ^
+    if oversized then String.make (2 * declared_limit) 's' else ": prior work is complete." in
+  let position = match Keeper_turn_boundaries.position_of_messages large_history with
+    | Ok position -> position | Error detail -> fail detail in
+  let lines = [ 1, Ok
+    { Keeper_turn_boundaries.recorded_at = 1.
+    ; event = Keeper_turn_boundaries.Turn_ended
+        { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+        ; history_at_start = Fresh_history; position }
+    } ] in
+  let snapshot = match Librarian_continuity_snapshot.capture
+    ~trace_id ~lines ~messages:large_history ~working_state with
+    | Ok snapshot -> snapshot
+    | Error error -> fail (Librarian_continuity_snapshot.error_to_string error) in
+  let librarian_front messages =
+    (match Librarian_continuity_snapshot.restore ~trace_id ~lines ~messages snapshot with
+     | Ok _ -> ()
+     | Error error -> fail (Librarian_continuity_snapshot.error_to_string error));
+    Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)
+  in
+  let seed : Keeper_carried_front.seed =
+    { first_atom = 64
+    ; front = Model_input_front.After_history
+        (Option.get (Runtime_model_input_tail_window.atom_opening_digest large_history 63))
+    ; source = Keeper_carried_front.Turn_record { turn = 1 }
+    } in
+  let carried_front_seed () =
+    { Keeper_carried_front.seed = Some seed; unreadable = None; boundary_error = None } in
+  let goal = "Continue with the new user instruction." in
+  successful (run ~initial_messages:large_history ~carried_front_seed ~librarian_front
+    ~goal ~instructions:"Keeper instructions" ~world:"Current state" ());
+  let requests = read_requests capture in
+  let start = match params_of "thread/start" requests with
+    | [params] -> params | _ -> fail "expected one fresh thread" in
+  let instructions = start |> member "developerInstructions" |> text in
+  check bool "a fitting summary survives; an oversized summary stays out"
+    (not oversized) (String_util.contains_substring instructions summary_marker);
+  (match params_of "turn/start" requests with
+   | [params] -> check string "current goal is still sent separately" goal (turn_input params)
+   | _ -> fail "summary handling should not need another provider attempt");
+  (match !reports with
+   | [Keeper_official_client_host.Whole_input_transmitted messages] ->
+     check (list int) "no omitted atom was resurrected" [] (carried_indices messages);
+     check bool "reported composition agrees with the native instructions"
+       (not oversized) (List.exists Runtime_model_input_tail_window.is_working_state messages)
+   | _ -> fail "expected one transmitted input observation")
+
 let test_a_declared_limit_cuts_inside_the_range () =
   (* Room for the omission preamble and two of the ~4 KiB messages: the
      declared ceiling cuts deeper than the range's own front at atom 60, and
@@ -605,6 +659,12 @@ let () = run "Keeper current Codex context" ["native requests",[
   test_case "a Resume after a Start carries the range" `Quick test_resume_after_start_carries_the_range;
   test_case "the seed decides the range" `Quick test_the_seed_decides_the_range;
   test_case "a later Librarian position decides the range" `Quick test_a_later_librarian_position_decides_the_range;
+  test_case "accepted empty history retains its summary without a ceiling" `Quick
+    (test_empty_history_keeps_a_fitting_summary ~oversized:false);
+  test_case "accepted empty history retains a summary under a fitting ceiling" `Quick
+    (test_empty_history_keeps_a_fitting_summary ~max_prompt_bytes:declared_limit ~oversized:false);
+  test_case "accepted empty history still omits an oversized summary" `Quick
+    (test_empty_history_keeps_a_fitting_summary ~max_prompt_bytes:declared_limit ~oversized:true);
   test_case "a declared limit cuts inside the range" `Quick test_a_declared_limit_cuts_inside_the_range;
   test_case "an overflow floor never restores the last atom" `Quick test_the_overflow_floor_does_not_restore_the_newest_atom;
   test_case "an unknown turn start carries the newest atom" `Quick test_an_unknown_turn_start_carries_the_newest_atom;

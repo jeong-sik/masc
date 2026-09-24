@@ -32,6 +32,10 @@ function entry(overrides: Record<string, unknown> = {}) {
       request_body_bytes: null,
       usage_scope: 'per_request',
       response_observed_model_input: null,
+      transmitted_atoms: null,
+      total_atoms: null,
+      model_input_measurement: null,
+      model_input_front: null,
       input_tokens: 1200,
       output_tokens: 340,
       ...overrides,
@@ -123,6 +127,8 @@ describe('keeper turn record cache token counts', () => {
       runtime_profile: 'codex.default',
       transmitted_atoms: 1,
       total_atoms: 2,
+      model_input_measurement: 'durable_shape',
+      model_input_front: { kind: 'at_atom', digest: 'a'.repeat(64) },
       response_observed_model_input: observed,
     })))
     const response = await fetchKeeperTurnRecords('sangsu')
@@ -144,6 +150,7 @@ describe('keeper turn record cache token counts', () => {
       ...writerRows[0]?.response_observed_model_input as Record<string, unknown>,
       transmitted_atoms: 0,
       total_atoms: 0,
+      model_input_front: { kind: 'empty_history' },
     }
     getMock.mockResolvedValue(payload(entry({ response_observed_model_input: observed })))
     const response = await fetchKeeperTurnRecords('sangsu')
@@ -279,6 +286,37 @@ describe('keeper turn record cache token counts', () => {
 
     expect(record?.cache_creation_input_tokens).toBeUndefined()
     expect(record?.cache_read_input_tokens).toBeUndefined()
+  })
+
+  it.each([
+    'transmitted_atoms', 'total_atoms', 'model_input_measurement', 'model_input_front',
+  ])('rejects a missing top-level window field %s', async field => {
+    const row = entry()
+    delete (row.record as Record<string, unknown>)[field]
+    getMock.mockResolvedValue(payload(row))
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow('유효하지 않은 keeper turn record payload')
+  })
+
+  it.each([
+    { transmitted_atoms: 0 },
+    { transmitted_atoms: -1, total_atoms: 8, model_input_measurement: 'durable_shape', model_input_front: { kind: 'after_history', digest: 'a'.repeat(64) } },
+    { transmitted_atoms: 0, total_atoms: 8, model_input_measurement: 'durable_shape', model_input_front: { kind: 'at_atom', digest: 'a'.repeat(64) } },
+    { transmitted_atoms: 0, total_atoms: 0, model_input_measurement: 'durable_shape', model_input_front: { kind: 'after_history', digest: 'a'.repeat(64) } },
+    { transmitted_atoms: 1, total_atoms: 0, model_input_measurement: 'wire_shape', model_input_front: { kind: 'at_atom', digest: 'a'.repeat(64) } },
+  ])('rejects an inconsistent attempted window %j', async window => {
+    getMock.mockResolvedValue(payload(entry(window)))
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow('유효하지 않은 keeper turn record payload')
+  })
+
+  it.each([
+    [8, { kind: 'after_history', digest: 'a'.repeat(64) }],
+    [0, { kind: 'empty_history' }],
+  ])('preserves an attempted empty window %s', async (total_atoms, model_input_front) => {
+    getMock.mockResolvedValue(payload(entry({
+      transmitted_atoms: 0, total_atoms, model_input_measurement: 'durable_shape', model_input_front,
+    })))
+    const response = await fetchKeeperTurnRecords('sangsu')
+    expect(response.entries[0]?.record).toMatchObject({ transmitted_atoms: 0, total_atoms, model_input_front })
   })
 
   it('accepts a fractional producer timestamp with its exact whole-second ISO projection', async () => {

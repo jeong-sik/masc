@@ -273,6 +273,10 @@ type carried_start =
   ; first_atom : int
   ; transmitted_bytes : int
   ; front : carried_start_front
+  ; accepted_front : Keeper_carried_front.seed option
+      (** A validated response-observed seed at or past the lane's own cut.
+          Retained when a Librarian snapshot wins so its accepted empty range
+          remains distinguishable from a nonempty range cut down to zero. *)
   }
 
 (** Where the turn's one continuity choice puts the range, as a position in
@@ -411,7 +415,7 @@ val read_seed_once
 val windowed_projection : windowed_range -> Runtime_model_input_tail_window.projection
 (** The window reading counted against the whole history, for
     {!Runtime_model_input_tail_window.observe}: the front it names is an atom
-    a later seed can reopen. *)
+    a later seed can reopen, or the witnessed end of an omitted history. *)
 
 val compose_librarian_range
   :  keeper_name:string
@@ -424,7 +428,9 @@ val compose_librarian_range
 
     A working state goes out only where it displaces none of the atoms after
     the range it leads. A [Librarian_snapshot] position is composed with it
-    first, and kept when the window left every atom of the range. Otherwise
+    first, and kept when the window left every atom of the range. A witnessed
+    accepted empty range may keep a fitting summary: the current goal travels
+    separately, and no prior conversation atom has to be restored. Otherwise
     the same position is composed alone ([Librarian_progress] at the
     snapshot's end), and the working state goes only when the window kept at
     least the newest atom and as many atoms with it as without it. When it

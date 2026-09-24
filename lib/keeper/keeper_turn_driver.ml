@@ -1444,21 +1444,29 @@ let official_client_dispatch ~provider_config_transform =
   | Some _ -> Keeper_attempt_dispatch.Rejected_before_dispatch
   | None -> Keeper_attempt_dispatch.Dispatched
 
-(* The agent_core pipeline answers a request it refused to send with
-   [Attempt_rejected] (a missing output ceiling, an invalid prepared request).
-   One attempt can send several requests, and a later one can be refused after
-   an earlier one reached the provider, so the refusal alone does not say that
-   no provider saw this attempt. The pre-dispatch serialization observer fires
-   after those checks, just before a request leaves: when it never fired and
-   the attempt ended with that refusal, no request was sent. Every other
-   outcome is attributed to the runtime, as before. *)
+(* Whether any request of this attempt reached a provider. The pre-dispatch
+   serialization observer fires just before a request leaves, after the
+   pipeline's own checks, so when it never fired no provider saw the attempt.
+   The shape then only says who refused it: the pipeline's route stage refuses
+   a request it will not send with [Attempt_rejected] (no output ceiling, an
+   invalid prepared request), [InputCapacity] (a serving constraint it can
+   judge locally), [ContextOverflow] (a window it counted locally) or
+   [InvalidConfig] (no or an invalid declared context limit). A provider gives
+   the same capacity shapes only after a request went out, so they pair with a
+   fired observer. Any other error with no request out, such as a failed
+   token-count round trip, may have reached the provider and stays dispatched.
+   One attempt can send several requests, so a refusal after an earlier one
+   went out is dispatched too. *)
 let provider_attempt_dispatch ~request_serialized result =
   match request_serialized, result with
   | ( false
     , Error
-        (Agent_core.Error.Api
-           (Llm_provider.Retry.InvalidRequest
-              { reason = Llm_provider.Retry.Attempt_rejected; _ })) ) ->
+        ( Agent_core.Error.Api
+            ( Llm_provider.Retry.InvalidRequest
+                { reason = Llm_provider.Retry.Attempt_rejected; _ }
+            | Llm_provider.Retry.InputCapacity _
+            | Llm_provider.Retry.ContextOverflow _ )
+        | Agent_core.Error.Config (Agent_core.Error.InvalidConfig _) ) ) ->
     Keeper_attempt_dispatch.Rejected_before_dispatch
   | (true | false), (Ok _ | Error _) -> Keeper_attempt_dispatch.Dispatched
 

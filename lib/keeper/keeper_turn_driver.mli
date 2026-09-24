@@ -364,8 +364,9 @@ module For_testing : sig
     request_serialized:bool ->
     (Runtime_agent.run_result, Agent_core.Error.t) result -> Keeper_attempt_dispatch.t
   (** [Rejected_before_dispatch] when no request of the attempt was serialized
-      for sending and it ended with the pipeline's own [Attempt_rejected];
-      [Dispatched] otherwise. *)
+      for sending and it ended with a refusal the pipeline's route stage makes
+      before sending ([Attempt_rejected], [InputCapacity], [ContextOverflow],
+      [InvalidConfig]); [Dispatched] otherwise. *)
 
   val run_result_answered : Runtime_agent.run_result -> bool
   (** Whether a successful attempt heard from its candidate: [false] for an

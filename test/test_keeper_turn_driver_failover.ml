@@ -5060,7 +5060,26 @@ let test_a_pipeline_refusal_is_not_a_dispatched_attempt () =
     (dispatch ~request_serialized:true (Error provider_refusal));
   Alcotest.check dispatch_disposition "a network failure after sending"
     Masc.Keeper_attempt_dispatch.Dispatched
-    (dispatch ~request_serialized:true (Error (retryable_network_error "reset")))
+    (dispatch ~request_serialized:true (Error (retryable_network_error "reset")));
+  let window_counted_locally =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.ContextOverflow { message = "window"; limit = None })
+  in
+  Alcotest.check dispatch_disposition "a window the pipeline counted before sending"
+    Masc.Keeper_attempt_dispatch.Rejected_before_dispatch
+    (dispatch ~request_serialized:false (Error window_counted_locally));
+  Alcotest.check dispatch_disposition "the same window refused by the provider"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch ~request_serialized:true (Error window_counted_locally));
+  Alcotest.check dispatch_disposition "no declared context limit"
+    Masc.Keeper_attempt_dispatch.Rejected_before_dispatch
+    (dispatch ~request_serialized:false
+       (Error
+          (Agent_core.Error.Config
+             (Agent_core.Error.InvalidConfig { field = "max_context"; detail = "none" }))));
+  Alcotest.check dispatch_disposition "a transport failure with no request serialized"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch ~request_serialized:false (Error (retryable_network_error "count")))
 ;;
 
 let () =

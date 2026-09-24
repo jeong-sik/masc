@@ -1521,11 +1521,7 @@ let handle_surface_post_with_outcome
     Keeper_tool_execution.success payload
     |> Keeper_tool_execution.with_surface_post_receipt target
   in
-  let fail
-        ?(class_ = Tool_result.Workflow_rejection)
-        ~effect_disposition
-        payload
-    =
+  let fail ~class_ ~effect_disposition payload =
     Keeper_tool_execution.failure ~class_ ~effect_disposition payload
   in
   let surface = String.trim (Safe_ops.json_string ~default:"" "surface" args) in
@@ -1564,28 +1560,33 @@ let handle_surface_post_with_outcome
   in
   if surface = "" then
     fail
+      ~class_:Tool_result.Policy_rejection
       ~effect_disposition:Tool_result.Proven_pre_effect
       (Keeper_surface_post.error_json
          "surface is required. Good: surface='dashboard'.")
   else if String.trim content = "" then
     fail
+      ~class_:Tool_result.Policy_rejection
       ~effect_disposition:Tool_result.Proven_pre_effect
       (Keeper_surface_post.error_json "content is required and must be non-empty.")
   else match Keeper_surface_post.user_mentions_of_args ~surface args with
   | Error message ->
     fail
+      ~class_:Tool_result.Policy_rejection
       ~effect_disposition:Tool_result.Proven_pre_effect
       (Keeper_surface_post.error_json message)
   | Ok mention_user_ids ->
     match Keeper_surface_post.thread_ts_of_args ~surface args with
     | Error message ->
       fail
+        ~class_:Tool_result.Policy_rejection
         ~effect_disposition:Tool_result.Proven_pre_effect
         (Keeper_surface_post.error_json message)
     | Ok requested_thread_ts ->
     match Keeper_surface_post.blocks_of_args ~surface args with
     | Error message ->
       fail
+        ~class_:Tool_result.Policy_rejection
         ~effect_disposition:Tool_result.Proven_pre_effect
         (Keeper_surface_post.error_json message)
     | Ok requested_blocks ->
@@ -1651,6 +1652,7 @@ let handle_surface_post_with_outcome
        with
       | Error message ->
         fail
+          ~class_:Tool_result.Workflow_rejection
           ~effect_disposition:Tool_result.Proven_pre_effect
           (Keeper_surface_post.error_json message)
       | Ok target ->
@@ -1666,6 +1668,7 @@ let handle_surface_post_with_outcome
          with
          | Error message ->
            fail
+             ~class_:Tool_result.Workflow_rejection
              ~effect_disposition:Tool_result.Proven_pre_effect
              (Keeper_surface_post.error_json message)
          | Ok () ->

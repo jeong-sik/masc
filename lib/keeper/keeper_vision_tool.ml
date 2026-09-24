@@ -235,7 +235,7 @@ let record_vision_candidate_cancelled ?tool_use_id ?trace_id ~runtime_id () =
 
 (* Default to Runtime_failure: an unclassified error is treated as an internal
    keeper-health fault, not a caller validation or workflow business rule. *)
-let err_json ?detail ?(failure_class = Tool_result.Runtime_failure) code =
+let err_json ?detail ~failure_class code =
   record_vision_analyze_result ~result:"error" ~reason:code;
   let fields =
     [ "ok", `Bool false

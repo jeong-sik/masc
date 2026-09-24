@@ -135,8 +135,7 @@ val register_running
   -> started_at:float
   -> input:run_input
   -> unit
-(** Raises [Invalid_argument] when [run_id] is not one path segment or [lane]
-    is [Verifier]. *)
+(** Raises [Invalid_argument] when [run_id] is not one path segment. *)
 
 val mark_completed
   :  t

@@ -2,9 +2,10 @@
     Keeper turn. A lane is one [\[runtime.exact_output_lanes.<id>\]] table, one
     row of the standalone-lane projection, and the [lane] a run record names.
 
-    [Runtime.exact_lane] and [Exact_lane_run_registry.lane] are this type, so
-    adding a lane here fails every match that has not yet said what the new
-    lane means. *)
+    [Runtime.exact_lane] is this type. [Exact_lane_run_registry.lane] is its
+    own type without [Verifier], and [Exact_lane_run_registry.lane_of_standalone]
+    matches on this one, so adding a lane here fails every match that has not
+    yet said what the new lane means. *)
 
 type t =
   | Librarian

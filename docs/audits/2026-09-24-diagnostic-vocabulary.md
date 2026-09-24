@@ -10,6 +10,7 @@ fields or phrases carry the same fact, rather than whether they share a word.
 | --- | --- | --- |
 | Librarian exact preflight (`keeper_librarian_runtime`) | `Exact_request_projection_failed.slot_id` repeated the first ID already embedded in its formatted `reason` list. A single-slot failure printed the ID twice. | Keep each slot ID beside its typed `Exact_output.admission_error` until rendering. The error line prints every refused slot once in declared order. |
 | Librarian CLI fallback (`keeper_librarian_runtime`) | `API failure:` wrapped an error that already identified the API projection; the WARN said `cli lane-slot failed` before `failure_to_string` said the same thing. | Compose the API and CLI details without a second failure label; use `librarian fallback:` for the WARN. |
+| Shared CLI slot execution error (`keeper_lane_cli_oneshot`) | The wrapper printed `runtime_id` before `Fusion_official_client.failure_detail` printed the same ID for client failures. Some setup failures had no ID at all. | Distinguish raw and already attributed setup failures as variants, then render the runtime ID once for each case. Keep the slot failure label and complete cause. |
 | TUI exact-run detail (`masc_tui_render`) | `RUN failed` was followed by `FAILURE librarian_failed`. | Label the second line `CODE`, preserving the machine code and detail without a second status word. |
 
 ## Similar names that carry different facts

@@ -467,7 +467,7 @@ type candidate_failure =
    admission and effect observations. An accepted-but-unobserved timeout is
    not evidence that another candidate may safely replace the turn. *)
 let official_failure_can_advance : Fusion_official_client.failure -> bool = function
-  | Setup_failure _ | Antigravity_failure _ -> false
+  | Setup_failure _ | Attributed_setup_failure _ | Antigravity_failure _ -> false
   | Claude_admission_failure (Invalid_config _) -> false
   | Claude_admission_failure _ -> true
   | Codex_failure error ->
@@ -509,7 +509,7 @@ let outcome_of_official_failure ~runtime_id failure =
    Only typed pre-submission or explicit no-effect observations grant that
    receipt. The stateless runner supplies no durable recovery session. *)
 let official_failure_effect : Fusion_official_client.failure -> Tool_result.failure_effect_disposition = function
-  | Setup_failure _ | Claude_admission_failure _ -> Proven_pre_effect
+  | Setup_failure _ | Attributed_setup_failure _ | Claude_admission_failure _ -> Proven_pre_effect
   | Codex_failure (Invalid_config _ | Subscription_required _ | Spawn_failed _
       | Timeout { turn_accepted = false; _ }
       | Context_window_exceeded { tool_effect_attempted = false; _ }) -> Proven_pre_effect

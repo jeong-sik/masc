@@ -105,20 +105,27 @@ type image_input = { media_type : string; base64_data : string }
 type response = { text : string; model : string }
 type failure =
   | Setup_failure of Fusion_types.panel_failure
+      (** A setup cause without runtime attribution. The renderer adds the
+          runtime ID supplied by the caller. *)
+  | Attributed_setup_failure of Fusion_types.panel_failure
+      (** A setup cause already attributed by this adapter's
+          [provider_error ~runtime_id] boundary. *)
   | Codex_failure of Runtime_codex_app_server.error
   | Claude_failure of Runtime_claude_code.error
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
 
 val failure_detail : runtime_id:string -> failure -> string
-(** The adapter's own failure text, prefixed with [runtime_id]. A
-    [Setup_failure] is rendered as its panel failure text, which already names
-    the runtime where one applies. For log and status lines that should keep
-    what {!panel_failure} folds away, such as a timeout's seconds. *)
+(** The adapter's own failure text, naming [runtime_id] once. A raw
+    [Setup_failure] gains the ID here; an [Attributed_setup_failure] already
+    has it. For log and status lines that should keep what {!panel_failure}
+    folds away, such as a timeout's seconds. *)
 
 val panel_failure : runtime_id:string -> failure -> Fusion_types.panel_failure
-(** Project a client failure onto the panel vocabulary. A [Setup_failure]
-    passes through unchanged. Each adapter's own [Timeout] becomes
+(** Project a client failure onto the panel vocabulary. A raw setup provider
+    error gains [runtime_id]; an attributed setup failure passes through. This
+    adapter emits the attributed variant for its own setup failures. Each
+    adapter's own [Timeout] becomes
     {!Fusion_types.Timeout}; every other adapter failure becomes
     [Provider_error] carrying the runtime id. Keep [failure] intact until
     transport-specific failover decisions have consumed its admission/effect

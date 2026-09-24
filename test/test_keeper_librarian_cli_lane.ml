@@ -126,6 +126,29 @@ let projection_failure =
   "request projection refused by all API slots: librarian-cli-unreachable: wire_admission_rejected:target_request_rejected"
 ;;
 
+let test_execution_failure_names_cli_slot_once () =
+  let runtime_id = "codex-cli-fixture" in
+  let check_once cause =
+    let detail = Cli.failure_to_string (Cli.Execution_failed { runtime_id; cause }) in
+    (match Astring.String.cut ~sep:runtime_id detail with
+     | None -> fail "the execution failure omitted its CLI slot"
+     | Some (_, tail) ->
+       check bool "the CLI slot is named once" false
+         (Astring.String.is_infix ~affix:runtime_id tail));
+    check bool "the adapter cause is retained" true
+      (Astring.String.is_infix ~affix:"synthetic failure" detail)
+  in
+  check_once
+    (Masc.Fusion_official_client.Codex_failure
+       (Masc.Runtime_codex_app_server.Invalid_config "synthetic failure"));
+  check_once
+    (Masc.Fusion_official_client.Setup_failure
+       (Provider_error "synthetic failure"));
+  check_once
+    (Masc.Fusion_official_client.Attributed_setup_failure
+       (Provider_error (runtime_id ^ ": synthetic failure")))
+;;
+
 let invalid_domain_failure () =
   match Librarian.selection_of_json_result (input ()) (`Assoc []) with
   | Ok _ -> fail "empty object must fail the real Librarian decoder"
@@ -616,7 +639,9 @@ let () =
   run
     "keeper_librarian_cli_lane"
     [ ( "cli lane slots"
-      , [ test_case "CLI-only librarian selects memory without an HTTP attempt" `Quick
+      , [ test_case "a CLI execution failure names its slot once" `Quick
+            test_execution_failure_names_cli_slot_once
+        ; test_case "CLI-only librarian selects memory without an HTTP attempt" `Quick
           (fun () -> test_cli_slot_answers_after_catalog_exhaustion ~cli_only:true ())
       ; test_case "body deadline reaches HTTP successor and commits Memory" `Quick
           (test_body_timeout_reaches_http_successor ~with_cli:false)

@@ -182,13 +182,16 @@ type image_input = { media_type : string; base64_data : string }
 type response = { text : string; model : string }
 type failure =
   | Setup_failure of Fusion_types.panel_failure
+  | Attributed_setup_failure of Fusion_types.panel_failure
   | Codex_failure of Runtime_codex_app_server.error
   | Claude_failure of Runtime_claude_code.error
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
 
 let failure_detail ~runtime_id = function
-  | Setup_failure failure -> Fusion_agent_core.panel_failure_text failure
+  | Setup_failure failure ->
+    Printf.sprintf "%s: %s" runtime_id (Fusion_agent_core.panel_failure_text failure)
+  | Attributed_setup_failure failure -> Fusion_agent_core.panel_failure_text failure
   | Codex_failure error ->
     Printf.sprintf "%s: %s" runtime_id (Runtime_codex_app_server.error_to_string error)
   | Claude_failure error | Claude_admission_failure error ->
@@ -202,7 +205,9 @@ let failure_detail ~runtime_id = function
    HTTP 쪽 [Fusion_panel.attempt_of_result] 가 두 timeout 갈래를 [Timeout] 으로
    올리는 것과 같은 규칙을 여기에도 적용한다. *)
 let panel_failure ~runtime_id = function
-  | Setup_failure failure -> failure
+  | Setup_failure (Fusion_types.Provider_error detail) ->
+    provider_error ~runtime_id detail
+  | Setup_failure failure | Attributed_setup_failure failure -> failure
   | Codex_failure (Runtime_codex_app_server.Timeout _) -> Fusion_types.Timeout
   | Codex_failure error -> provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)
   | Claude_failure (Runtime_claude_code.Timeout _)
@@ -241,7 +246,8 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
      | _ -> ());
     Error (if admission then Claude_admission_failure error else Claude_failure error)
   in
-  let* env, clock = eio_context ~runtime_id |> Result.map_error (fun failure -> Setup_failure failure) in
+  let* env, clock = eio_context ~runtime_id
+    |> Result.map_error (fun failure -> Attributed_setup_failure failure) in
   let mgr = Posix_spawn_process_mgr.mgr in
   let cwd = Eio.Path.(Eio.Stdenv.fs env / base_dir) in
   match execution with
@@ -250,7 +256,7 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
        here means the split in Fusion_panel disagreed with [is_official_client],
        which is a bug in this module's callers rather than a provider failure. *)
     Error
-      (Setup_failure (provider_error
+      (Attributed_setup_failure (provider_error
          ~runtime_id
          "runtime is Agent_core-owned; it belongs on the Async_agent path"))
   | Runtime_execution.Claude_code execution ->
@@ -297,7 +303,7 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
      | Error error ->
        Error (Codex_failure error))
   | Runtime_execution.Antigravity_cli _ when not (List.is_empty images) ->
-    Error (Setup_failure (provider_error ~runtime_id "Antigravity transport does not support image input"))
+    Error (Attributed_setup_failure (provider_error ~runtime_id "Antigravity transport does not support image input"))
   | Runtime_execution.Antigravity_cli execution ->
     let config =
       antigravity_config ~base_dir ~runtime_id ~override_s:timeout_s ~output_schema execution
@@ -307,7 +313,7 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
        per-keeper isolation; a panelist has no durable state to isolate. *)
     let* prompt =
       antigravity_prompt ~runtime_id ~system_prompt ~prompt
-      |> Result.map_error (fun failure -> Setup_failure failure)
+      |> Result.map_error (fun failure -> Attributed_setup_failure failure)
     in
     (match Runtime_antigravity.run_turn ~mgr ~clock ~cwd config ~prompt with
      | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model }

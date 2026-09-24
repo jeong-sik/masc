@@ -292,6 +292,24 @@ let test_the_shipped_catalog_promotes_nothing () =
     check (list string) "names" [ "base"; "ocaml" ] (List.map (fun e -> e.name) (entries catalog));
     check bool "nothing promoted" true (List.for_all (fun e -> e.promoted = []) (entries catalog))
 
+(* A recipe cannot be added without a name a Keeper can use, nor a name
+   without a recipe that builds it. *)
+let test_the_shipped_catalog_names_every_recipe () =
+  match find_source_root (Sys.getcwd ()) 8 with
+  | None -> fail ("config/sandbox-images.toml not found above " ^ Sys.getcwd ())
+  | Some root ->
+    let text =
+      In_channel.with_open_bin (Filename.concat root "config/sandbox-images.toml") In_channel.input_all
+    in
+    let names = List.sort String.compare (List.map (fun e -> e.name) (entries (parsed text))) in
+    let recipes_dir = Filename.concat root "sandbox-images" in
+    let recipes =
+      Sys.readdir recipes_dir |> Array.to_list
+      |> List.filter (fun d -> Sys.file_exists (Filename.concat (Filename.concat recipes_dir d) "Dockerfile"))
+      |> List.sort String.compare
+    in
+    check (list string) "catalog names = recipe directories" recipes names
+
 let () =
   run "Sandbox image catalog"
     [ ( "resolve"
@@ -313,6 +331,8 @@ let () =
             test_references_are_repository_and_tag
         ; test_case "the shipped catalog promotes nothing" `Quick
             test_the_shipped_catalog_promotes_nothing
+        ; test_case "the shipped catalog names every recipe" `Quick
+            test_the_shipped_catalog_names_every_recipe
         ] )
     ; ( "change"
       , [ test_case "to_toml round-trips" `Quick test_to_toml_round_trips

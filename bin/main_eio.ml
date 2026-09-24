@@ -21,6 +21,7 @@ module Keeper_memory = Masc.Keeper_memory
 module Keeper_execution = Masc.Keeper_execution
 module Keeper_runtime = Masc.Keeper_runtime
 module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
+module Keeper_sandbox_image_catalog = Masc.Keeper_sandbox_image_catalog
 module Keeper_github_identity = Masc.Keeper_github_identity
 module Keeper_github_login_lane = Masc.Keeper_github_login_lane
 module Tool_operator = Masc.Tool_operator
@@ -3322,10 +3323,10 @@ let sandbox_image_config_root base_path =
 let sandbox_image_change_catalog ~base_path change =
   let ( let* ) = Result.bind in
   let config_root = sandbox_image_config_root base_path in
-  let* catalog =
+  let* catalog, expected =
     Result.map_error
       (fun error -> "sandbox-image: " ^ Keeper_sandbox_image_catalog.load_error_to_string error)
-      (Keeper_sandbox_image_catalog.load_or_shipped ~config_root
+      (Keeper_sandbox_image_catalog.load_for_change ~config_root
          ~shipped:(Embedded_config.read Keeper_sandbox_image_catalog.file_name))
   in
   let* next =
@@ -3336,7 +3337,7 @@ let sandbox_image_change_catalog ~base_path change =
   in
   Result.map_error
     (fun error -> "sandbox-image: " ^ Keeper_sandbox_image_catalog.save_error_to_string error)
-    (Keeper_sandbox_image_catalog.save ~config_root next)
+    (Keeper_sandbox_image_catalog.save ~config_root ~expected next)
   |> Result.map (fun () -> Filename.concat config_root Keeper_sandbox_image_catalog.file_name)
 
 let sandbox_image_exit_of = function

@@ -9153,9 +9153,9 @@ let memory_fact_rows (state : state) : memory_fact_row list =
              (fun a b ->
                let key = function
                  | Memory_row_fact f ->
-                   (match f.Tui_decode.mf_events.Tui_decode.mfe_last_retrieved_at with
-                    | Some at -> (0, at)
-                    | None -> (1, f.Tui_decode.mf_last_seen))
+                   (match f.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
+                    | Tui_decode.Retrieved { last_at; _ } -> (0, last_at)
+                    | Tui_decode.Never_retrieved -> (1, f.Tui_decode.mf_last_seen))
                  | Memory_row_source_fact f -> (2, f.Tui_decode.msf_first_seen)
                  | Memory_row_invalidation f -> (2, f.Tui_decode.mi_invalidated_at)
                in
@@ -9169,7 +9169,9 @@ let memory_fact_rows (state : state) : memory_fact_row list =
                let key = function
                  | Memory_row_fact f ->
                    ( 0
-                   , f.Tui_decode.mf_events.Tui_decode.mfe_retrieved_count
+                   , (match f.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
+                      | Tui_decode.Retrieved { count; _ } -> count
+                      | Tui_decode.Never_retrieved -> 0)
                    , f.Tui_decode.mf_last_seen )
                  | Memory_row_source_fact f -> (1, 0, f.Tui_decode.msf_first_seen)
                  | Memory_row_invalidation f -> (1, 0, f.Tui_decode.mi_invalidated_at)

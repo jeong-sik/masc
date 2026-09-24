@@ -526,7 +526,7 @@ def run_exact_slot_editor(executable: str) -> None:
         {
             **config,
             "source_text": config["source_text"]
-            + '\n\n[providers."glm-coding"]\nexact-body-timeout-s = 1200\n',
+            + '\n\n[providers."glm-coding"] # request window\nexact-body-timeout-s = 1200\n',
         },
     )
 

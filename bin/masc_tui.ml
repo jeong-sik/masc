@@ -311,7 +311,16 @@ let runtime_config_section_line ~section rows =
     | [] -> None
     | segments :: rest ->
       let text = String.trim (String.concat "" (List.map fst segments)) in
-      if List.exists (String.equal text) headers then Some index
+      let is_header header =
+        String.starts_with ~prefix:header text
+        &&
+        let tail =
+          String.sub text (String.length header) (String.length text - String.length header)
+          |> String.trim
+        in
+        String.equal tail "" || String.starts_with ~prefix:"#" tail
+      in
+      if List.exists is_header headers then Some index
       else scan (index + 1) rest
   in
   scan 0 rows

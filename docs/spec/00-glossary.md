@@ -239,6 +239,31 @@ status: reference
   [Keeper_unified_prompt](../../lib/keeper/keeper_unified_prompt.mli),
   [Keeper_prompt](../../lib/keeper/keeper_prompt.mli)
 
+**Ask (질문)**
+: Keeper가 운영자에게 묻는 durable 질문 묶음. `masc_ask`가 만들고,
+  `masc_ask_status`·`masc_ask_withdraw`가 조회·철회하며, 답변은 별도 wake로
+  Keeper에게 돌아간다. 한 ask는 질문 여러 개를 담고, 각 질문은 선택지·자유 텍스트
+  또는 둘 다를 받는다. 질문 id(`q1`, `q2`, ...)와 선택지 id(`c1`, `c2`, ...)는
+  모델이 이름 짓지 않고 위치로 붙는다 — 한 ask 안에서만 유일하면 되고, 나중에
+  어떤 도구도 그 id를 다시 받지 않는다(#38585). 답이 Keeper에게 도달할 때는
+  각 id가 이미 헤더와 라벨로 되돌아가 있고, `masc_ask_status`는 id를 그 옆에
+  함께 적는다. TUI의 자유 텍스트 편집은 같은 q1이 두 ask에 있을 수 있어 ask id로
+  묶는다. **Board Interest**와 달리 사람의 답을 기다리는 일방향 요청이고,
+  **Schedule**의 미래 실행 예약과도 다르다.
+  → [mcp_tool_runtime_ask](../../lib/mcp_tool_runtime_ask.ml),
+  [Keeper_ask](../../lib/keeper/keeper_ask.mli)
+
+**Latched Reason (durable latch 까닭)**
+: Keeper가 durable pause에 들어간 typed 까닭
+  (`Keeper_latched_reason.t`). 현재는 `Operator_paused of { operator_actor }` 하나뿐이고,
+  `operator_actor`는 `Grpc_directive`·`Keeper_down` 둘 중 하나다. 일반적인 turn·
+  provider·task 실패는 관측으로만 남고 이 latch를 만들지 못한다 — 실패는 스케줄링
+  게이트가 아니라 증거다. 폐기되거나 알 수 없는 latch 문자열은 명시적으로 거절한다.
+  **Turn Configuration Error**처럼 registry가 기록하는 실행 실패 원인과는 다른
+  층이다 — 이쪽은 typed lifecycle latch이고, 저쪽은 turn이 typed 구성 오류로
+  끝난 실패 관측이다.
+  → [Keeper_latched_reason](../../lib/keeper_runtime/keeper_latched_reason.mli)
+
 **Board Interest**
 : Keeper가 직접 지목되지 않은 Board post와 comment를
   의미 판정 대상으로 받을 수 있는 주제 선언. `board_interests = []`이면 이

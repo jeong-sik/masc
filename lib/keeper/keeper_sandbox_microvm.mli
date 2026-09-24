@@ -122,6 +122,12 @@ type image_probe_outcome =
   | Image_cli_unavailable
   | Image_probe_failed of image_probe_failure
 
+val image_present_result_for :
+  Keeper_microvm_backend.t -> image:string -> image_probe_outcome -> (unit, string) result
+(** The gate's answer for one probe outcome. A missing image names the
+    [masc sandbox-image] commands that build, promote or roll back the
+    Keeper's catalog image in this runtime's store. *)
+
 type json_shape =
   | Json_array
       (** One array of records: [container image list --format json],

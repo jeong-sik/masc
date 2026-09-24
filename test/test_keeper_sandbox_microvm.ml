@@ -394,12 +394,27 @@ let test_live_an_absent_image_is_refused_not_built () =
        Alcotest.fail "an absent image passed the gate"
      | Error message ->
        Alcotest.(check bool)
-         "the refusal is the plain one, so nothing was built"
+         "the refusal is the missing-image one"
          true
-         (String.length message > 0
-         && not
-              (Astring.String.is_infix ~affix:"microvm_image_build_failed"
-                 message)))
+         (Astring.String.is_infix ~affix:"microvm_image_missing" message))
+
+(* The gate builds nothing, so the refusal is where the operator learns how
+   the build gets there: the catalog commands, for this runtime's store. *)
+let test_a_missing_image_names_the_commands_that_fix_it () =
+  match
+    M.image_present_result_for Backend.Apple_container ~image:"masc-sandbox-ocaml:t1"
+      M.Image_missing
+  with
+  | Ok () -> Alcotest.fail "a missing image passed the gate"
+  | Error message ->
+    List.iter
+      (fun needle ->
+        Alcotest.(check bool) needle true (Astring.String.is_infix ~affix:needle message))
+      [ "masc-sandbox-ocaml:t1"
+      ; "masc sandbox-image --recipe <sandbox_image> --runtime apple_container"
+      ; "masc sandbox-image promote <sandbox_image> <tag> --runtime apple_container"
+      ; "masc sandbox-image rollback <sandbox_image> --runtime apple_container"
+      ]
 
 let test_factory_resolves_microvm_to_a_profile_carrying_runtime () =
   with_eio_fs @@ fun () ->
@@ -2208,6 +2223,8 @@ let () =
             test_live_structured_image_probe
         ; Alcotest.test_case "an absent image is refused, not built"
             `Slow test_live_an_absent_image_is_refused_not_built
+        ; Alcotest.test_case "a missing image names the commands that fix it" `Quick
+            test_a_missing_image_names_the_commands_that_fix_it
         ; Alcotest.test_case "sweeps only guests whose owner is gone" `Quick
             test_only_guests_whose_owner_is_gone
         ; Alcotest.test_case "lists only this Keeper's Apple Container VM" `Quick

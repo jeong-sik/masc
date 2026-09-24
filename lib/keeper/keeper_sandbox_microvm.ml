@@ -412,14 +412,20 @@ let image_present_result_for backend ~image = function
   | Image_missing ->
     Error
       (Printf.sprintf
-         "microvm_image_missing: %s is not in %s's image store. Each microVM \
-          runtime keeps its images apart from Docker's, and none of these \
-          runs has a --pull=never, so running without this check fetches from \
-          a registry instead of failing. Next: build or load the image into \
-          %s before starting a microvm keeper."
+         "microvm_image_missing: %s is the build the host image catalog names \
+          for this Keeper, and it is not in %s's image store. Each microVM \
+          runtime keeps its images apart from Docker's, and none of these runs \
+          has a --pull=never, so running without this check fetches from a \
+          registry instead of failing. Next: build a new one with `masc \
+          sandbox-image --recipe <sandbox_image> --runtime %s` and record the \
+          tag it prints with `masc sandbox-image promote <sandbox_image> <tag> \
+          --runtime %s`, or return to the previous build with `masc \
+          sandbox-image rollback <sandbox_image> --runtime %s`."
          image
          (Backend.cli_name backend)
-         (Backend.cli_name backend))
+         (Backend.to_string backend)
+         (Backend.to_string backend)
+         (Backend.to_string backend))
   | Image_cli_unavailable ->
     Error
       (Printf.sprintf

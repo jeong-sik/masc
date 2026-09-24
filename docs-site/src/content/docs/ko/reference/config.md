@@ -96,9 +96,9 @@ verifier 같은 역할은 `[roles]` 테이블이 아니라, lane 에 `<provider>
 slots = ["deepseek.deepseek-v4-flash"]
 ```
 
-슬롯의 provider 에는 `exact-body-timeout-s` 가 있어야 해요. 없는 채로 저장하면
-거절되고, 부팅 때는 그 슬롯을 레인에서 빼고 런타임 시작 보고에 레인·슬롯·provider
-이름을 남겨요.
+슬롯의 provider 에는 `exact-body-timeout-s` 가 있어야 해요. 이 키가 없는 슬롯을
+새로 더하는 저장은 거절되고, 부팅 때는 그런 슬롯을 레인에서 빼고 런타임 시작 보고에
+레인·슬롯·provider 이름을 남겨요.
 
 ---
 

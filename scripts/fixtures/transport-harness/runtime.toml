@@ -12,7 +12,7 @@ display-name = "Transport Harness Smoke"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
 # Exact-output slots above run on this provider, and a slot whose provider
-# declares no exact-body-timeout-s does not load (#38779). Nothing here is
+# declares no exact-body-timeout-s is left out at boot (#38779). Nothing here is
 # ever answered, so the value only has to be a valid deadline.
 exact-body-timeout-s = 1200.0
 

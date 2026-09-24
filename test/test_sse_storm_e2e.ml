@@ -325,7 +325,7 @@ display-name = "SSE Storm Smoke"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
 # The exact lanes above run on this provider; a slot whose provider declares
-# no exact-body-timeout-s does not load (#38779).
+# no exact-body-timeout-s is left out at boot (#38779).
 exact-body-timeout-s = 120.0
 
 [models.smoke]

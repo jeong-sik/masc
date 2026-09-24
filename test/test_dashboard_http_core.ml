@@ -2191,8 +2191,8 @@ default = "test_provider.test_model"
 display-name = "Test Provider"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
-# The routing test appends this runtime to an exact lane; a slot whose
-# provider declares no exact-body-timeout-s does not load (#38779).
+# The routing test appends this runtime to an exact lane; a save adding a
+# slot whose provider declares no exact-body-timeout-s is refused (#38779).
 exact-body-timeout-s = 120.0
 [models.test_model]
 api-name = "test-model"

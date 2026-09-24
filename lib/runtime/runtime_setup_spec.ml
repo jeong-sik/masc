@@ -152,8 +152,9 @@ let table ?(array=false) path fields =
   ^ String.concat "" (List.map (fun (key,value) -> quoted key ^ " = " ^ Yojson.Safe.to_string value ^ "\n") fields)
 type rendered = {runtime_id:string;runtime_toml:string}
 (* [--setup-lanes] points the exact-output lanes at the connection set up here
-   when it is an HTTP one, and an exact slot whose provider declares no
-   [exact-body-timeout-s] does not load (rule 3, #38779). The wizard has no
+   when it is an HTTP one. An exact slot whose provider declares no
+   [exact-body-timeout-s] is left out at boot and cannot be added by a save
+   (rule 3, #38779), so the connection declares one. The wizard has no
    measurement of the operator's endpoint to size it from, so it writes the
    value the seed runtime.toml gives its own exact-slot providers; the
    operator narrows it in the file. *)

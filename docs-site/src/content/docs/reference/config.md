@@ -98,9 +98,9 @@ a lane, not with a `[roles]` table:
 slots = ["deepseek.deepseek-v4-flash"]
 ```
 
-A slot's provider must declare `exact-body-timeout-s`. Saving a file that
-names a slot without it is refused; at boot the slot is left out of its lane and
-the runtime startup report names the lane, the slot and the provider.
+A slot's provider must declare `exact-body-timeout-s`. A save that adds a slot
+without it is refused; at boot such a slot is left out of its lane and the
+runtime startup report names the lane, the slot and the provider.
 
 ---
 

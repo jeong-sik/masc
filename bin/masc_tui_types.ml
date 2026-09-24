@@ -6292,6 +6292,7 @@ type state = {
   (* An agenda jump waits for a fresh queue read. Keep both identities so a
      reordered or replaced request cannot turn into the first visible row. *)
   mutable verification_jump: (string * string) option;
+  mutable verification_selection_suspended: bool;
   mutable verification_detail_scroll: int;
   (* An approve armed for a second keypress: which task. The cursor can move
      between the two presses, so the task id is captured at arm time and a
@@ -8144,6 +8145,7 @@ let create_state
   verification_offset = 0;
   verification_detail_request_id = None;
   verification_jump = None;
+  verification_selection_suspended = false;
   verification_detail_scroll = 0;
   verification_verdict_armed = None;
   verification_verdict_error = None;

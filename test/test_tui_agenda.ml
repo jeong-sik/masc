@@ -624,7 +624,19 @@ let test_the_stuck_section_answers_in_words () =
             ~stalled:Agenda.Not_read))
   in
   check bool "a list nobody read does not say it is empty" false
-    (contains ~needle:"no stop requests" unread)
+    (contains ~needle:"no stop requests" unread);
+  let failed =
+    joined
+      (overlay_of
+         (Masc_tui_agenda.project
+            ~scheduled:(Agenda.Read [])
+            ~awaiting:(Agenda.Read [])
+            ~stalled:(Agenda.Read_failed "backlog unreadable")))
+  in
+  check bool "a failed task read does not say there are no stops" false
+    (contains ~needle:"no stop requests" failed);
+  check bool "a failed task read keeps its reason" true
+    (contains ~needle:"backlog unreadable" failed)
 ;;
 
 (* The wait is why the row exists, so it is what the right column says. *)

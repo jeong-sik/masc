@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import threading
 
 import test_tui_keyboard_input as h
 
@@ -89,7 +90,8 @@ def exact_jump(gate):
     def interact(process, master_fd, _slave_fd, output, _base_path):
         open_agenda(process, master_fd, output)
         h.resize_and_wait(
-            process, master_fd, output, rows=30, columns=60, needle=b"MASC Agenda"
+            process, master_fd, output, rows=30, columns=60,
+            needle=b"MASC Agenda", final_cursor=b"\x1b[?25l",
         )
         narrow = h.CSI_RE.sub(b"", latest_frame(output))
         for count in (b"tool approvals 0", b"stop requests 7",
@@ -115,7 +117,7 @@ def exact_jump(gate):
     return interact
 
 
-def changed_request(gate):
+def changed_request(gate, requests):
     def interact(process, master_fd, _slave_fd, output, _base_path):
         open_agenda(process, master_fd, output)
         h.send_and_wait(process, master_fd, output, b"j", b"MASC Agenda")
@@ -129,21 +131,52 @@ def changed_request(gate):
         frame = h.CSI_RE.sub(b"", latest_frame(output))
         if b"VERIFICATION REQUEST" in frame:
             raise AssertionError(f"a changed request opened another detail: {frame!r}")
+        os.write(master_fd, b"r")
+        if not h.wait_for_fixture_state(
+            process, master_fd, output, lambda: gate.calls >= 2, timeout=3.0
+        ):
+            raise AssertionError("the queue did not refresh after the changed request")
+        h.drain_until_quiet(process, master_fd, output)
+        h.write_all(master_fd, output, b"aa")
+        h.drain_until_quiet(process, master_fd, output)
+        if any(path == h.VERIFICATION_VERDICT_PATH for path, _ in requests):
+            raise AssertionError("a changed request allowed a verdict on another row")
         os.write(master_fd, b"q")
 
     return interact
 
 
-def verdict_refresh(requests):
+def failed_jump_then_refresh(requests):
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        open_agenda(process, master_fd, output)
+        h.send_and_wait(process, master_fd, output, b"\r", b"could not open stop request")
+        h.send_and_wait(process, master_fd, output, b"r", b"awaiting 7")
+        h.write_all(master_fd, output, b"aa")
+        h.drain_until_quiet(process, master_fd, output)
+        if any(path == h.VERIFICATION_VERDICT_PATH for path, _ in requests):
+            raise AssertionError("a failed exact jump selected a different request on refresh")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def verdict_refresh(requests, stale_read):
     def interact(process, master_fd, _slave_fd, output, _base_path):
         open_agenda(process, master_fd, output)
         h.send_and_wait(process, master_fd, output, b"\r", b"stop for specific test-0")
         detail = h.CSI_RE.sub(b"", latest_frame(output))
         if b"vr-stop-0" not in detail:
             raise AssertionError(f"the visible request ID is missing: {detail!r}")
+        stale_read["gate_next"] = True
+        os.write(master_fd, b"r")
+        if not h.wait_for_fixture_event(
+            process, master_fd, output, stale_read["requested"], timeout=3.0
+        ):
+            raise AssertionError("the pre-verdict queue read did not start")
         h.send_and_wait(process, master_fd, output, b"a", b"ARMED: press a again")
         if any(path == h.VERIFICATION_VERDICT_PATH for path, _ in requests):
             raise AssertionError("the first a sent a verdict")
+        approve_start = len(output)
         os.write(master_fd, b"a")
         approve = h.wait_for_http_request(
             process, master_fd, output, requests, path=h.VERIFICATION_VERDICT_PATH
@@ -154,6 +187,11 @@ def verdict_refresh(requests):
             "verdict": "approve",
         }:
             raise AssertionError(f"approve used a different request: {approve!r}")
+        h.wait_for_output(
+            process, master_fd, output, b"not loaded yet",
+            start=approve_start, timeout=3.0,
+        )
+        stale_read["release"].set()
         h.wait_for_output(process, master_fd, output, b"awaiting 6", start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b";", b"MASC Agenda")
         h.wait_for_output(process, master_fd, output, b"stop requests 6", start=0, timeout=5.0)
@@ -198,23 +236,52 @@ def run(executable):
     )
     changed = rows()
     changed[1]["request_id"] = "vr-replaced-1"
-    gate = h.GatedHttpResponse((200, h.verification_snapshot(changed)))
+    changed_snapshot = (200, h.verification_snapshot(changed))
+    gate = h.GatedHttpResponse(changed_snapshot, subsequent_response=changed_snapshot)
+    changed_requests = []
     h.run_terminal_scenario(
         executable,
         description="Stop agenda reports a replaced request without opening another",
-        interact=changed_request(gate),
+        interact=changed_request(gate, changed_requests),
         prepare_workspace=seed_stops,
         http_fixtures={h.VERIFICATION_QUEUE_PATH: gate},
+        http_requests=changed_requests,
+    )
+    failed_requests = []
+    h.run_terminal_scenario(
+        executable,
+        description="A failed exact jump stays unselected after a later successful read",
+        interact=failed_jump_then_refresh(failed_requests),
+        prepare_workspace=seed_stops,
+        http_fixtures={
+            h.VERIFICATION_QUEUE_PATH: h.SequencedHttpResponse(
+                [(503, {"error": "queue unavailable"}),
+                 (200, h.verification_snapshot(queue))]
+            ),
+        },
+        http_requests=failed_requests,
     )
     current = rows()
     workspace = {}
     requests = []
+    stale_read = {
+        "gate_next": False,
+        "requested": threading.Event(),
+        "release": threading.Event(),
+    }
 
     def seed(base_path):
         seed_stops(base_path)
         workspace["base_path"] = base_path
 
     def queue_response():
+        if stale_read["gate_next"]:
+            stale_read["gate_next"] = False
+            stale = h.verification_snapshot(list(current))
+            stale_read["requested"].set()
+            if not stale_read["release"].wait(timeout=5.0):
+                return 504, {"error": "stale queue gate timed out"}
+            return 200, stale
         return 200, h.verification_snapshot(list(current))
 
     def record_verdict(body):
@@ -234,7 +301,7 @@ def run(executable):
         h.run_terminal_scenario(
             executable,
             description="Stop verdict uses the visible request and refreshes the agenda count",
-            interact=verdict_refresh(requests),
+            interact=verdict_refresh(requests, stale_read),
             prepare_workspace=seed,
             http_fixtures={
                 h.VERIFICATION_QUEUE_PATH: queue_response,

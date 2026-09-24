@@ -8791,7 +8791,9 @@ let render_verification_list (state : state) =
             | Some _ -> (Theme.bad ())
             | None -> Ansi.reset
           in
-          if idx = state.verification_cursor then box_line_selected buf cols line
+          if idx = state.verification_cursor
+             && not state.verification_selection_suspended then
+            box_line_selected buf cols line
           else box_line_styled buf cols ~style line
     done;
   (* Which list this is, and where in it -- drawn on every read rather than

@@ -6372,6 +6372,7 @@ let reset_verification_rows state =
   state.verification_scroll <- 0;
   state.verification_detail_request_id <- None;
   state.verification_jump <- None;
+  state.verification_selection_suspended <- false;
   state.verification_detail_scroll <- 0;
   state.verification_verdict_armed <- None;
   state.verification_verdict_error <- None
@@ -6541,7 +6542,9 @@ let row_list (state : state) : row_list option =
       of_counted (fun count ->
           scrolling ~count ~cursor:state.verification_cursor
             ~scroll:state.verification_scroll
-            ~set_cursor:(fun i -> state.verification_cursor <- i)
+            ~set_cursor:(fun i ->
+              state.verification_cursor <- i;
+              state.verification_selection_suspended <- false)
             ~set_scroll:(fun s -> state.verification_scroll <- s))
   | Harness ->
       of_counted (fun count ->
@@ -8970,7 +8973,10 @@ let selected_surface_reference state =
   | Verification ->
       (* The task, not the request: a verification request is a question about
          a task, and the task is the thing another surface can open. *)
-      Option.bind state.verification (fun snapshot ->
+      Option.bind
+        (if state.verification_selection_suspended then None
+         else state.verification)
+        (fun snapshot ->
           Option.map
             (fun (request : Tui_decode.verification_request) ->
                Link.reference Task request.vr_task_id)
@@ -12250,6 +12256,7 @@ let verification_cursor_row state =
     | None -> []
     | Some s -> s.Masc.Tui_decode.vs_requests
   in
+  if state.verification_selection_suspended then None else
   match state.verification_detail_request_id with
   | Some request_id ->
       List.find_opt
@@ -12318,7 +12325,10 @@ let open_verification_detail state ~mailbox =
     | None -> []
     | Some s -> s.Masc.Tui_decode.vs_requests
   in
-  match List.nth_opt requests state.verification_cursor with
+  match
+    if state.verification_selection_suspended then None
+    else List.nth_opt requests state.verification_cursor
+  with
   | None -> ()
   | Some row ->
       state.verification_detail_request_id <-
@@ -16009,7 +16019,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.verification_error <- None;
           let requests = snapshot.Masc.Tui_decode.vs_requests in
           let count = List.length requests in
-          if state.verification_cursor >= count then
+          if not state.verification_selection_suspended
+             && state.verification_cursor >= count then
             state.verification_cursor <- max 0 (count - 1);
           (match state.verification_jump with
            | None -> ()
@@ -16024,6 +16035,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                                | Asks_completion | Ask_unstated | Unrecognised_ask _ -> false))
                         requests with
                 | Some index ->
+                    state.verification_selection_suspended <- false;
                     state.verification_cursor <- index;
                     state.verification_detail_request_id <- Some request_id;
                     state.verification_detail_scroll <- 0;
@@ -16035,6 +16047,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                        Keeping cursor zero here would let the next a or x
                        judge the first, unrelated request. *)
                     state.verification_cursor <- count;
+                    state.verification_selection_suspended <- true;
                     state.verification_verdict_error <-
                       Some (Printf.sprintf
                         "%s: stop request %s changed or closed; review the refreshed queue"
@@ -16059,6 +16072,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            | None -> ()
            | Some (task_id, request_id) ->
                state.verification_jump <- None;
+               state.verification_selection_suspended <- true;
                state.verification_verdict_error <-
                  Some (Printf.sprintf "%s: could not open stop request %s: %s"
                    task_id request_id detail)))
@@ -21153,7 +21167,9 @@ and is loaded on demand through keeper_skill.
                 | Some s -> List.length s.Masc.Tui_decode.vs_requests)
              ~cursor:state.verification_cursor
              ~delta:(if bracket = "]" then 1 else -1)
-             ~set_cursor:(fun n -> state.verification_cursor <- n)
+             ~set_cursor:(fun n ->
+               state.verification_cursor <- n;
+               state.verification_selection_suspended <- false)
              ~reopen:(fun () ->
                open_verification_detail state ~mailbox:async_messages)
        | Some (("[" | "]") as bracket)
@@ -22387,6 +22403,7 @@ and is loaded on demand through keeper_skill.
                       ~scroll:state.verification_scroll
                   in
                   state.verification_cursor <- cursor;
+                  state.verification_selection_suspended <- false;
                   state.verification_scroll <- scroll
             | Harness ->
                 if Option.is_some state.harness_detail then
@@ -23286,6 +23303,7 @@ and is loaded on demand through keeper_skill.
                        ~scroll:state.verification_scroll
                    in
                    state.verification_cursor <- cursor;
+                   state.verification_selection_suspended <- false;
                    state.verification_scroll <- scroll)
             | Clients ->
                 let cursor, scroll =
@@ -23639,6 +23657,7 @@ and is loaded on demand through keeper_skill.
                        ~scroll:state.verification_scroll
                    in
                    state.verification_cursor <- cursor;
+                   state.verification_selection_suspended <- false;
                    state.verification_scroll <- scroll)
             | Clients ->
                 let cursor, scroll =

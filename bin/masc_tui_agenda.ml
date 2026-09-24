@@ -351,10 +351,10 @@ let overlay ~now ~localtime ~cols t =
     | Read rows -> string_of_int (List.length rows)
     | Not_read | Read_failed _ -> "unknown"
   in
-  let cancellations, other_stalled, counts =
+  let cancellations, other_stalled, counts, stop_unread =
     match t.stuck with
-    | Not_read -> [], [], [ quiet "tasks not loaded yet" ]
-    | Read_failed reason -> [], [], [ failure ~cols reason ]
+    | Not_read -> [], [], [ quiet "tasks not loaded yet" ], true
+    | Read_failed reason -> [], [], [ failure ~cols reason ], true
     | Read rows ->
       let cancellations, other =
         List.partition
@@ -375,7 +375,7 @@ let overlay ~now ~localtime ~cols t =
       [ quiet ("tool approvals " ^ tool_count)
       ; quiet (Printf.sprintf "stop requests %d" (List.length cancellations))
       ; quiet (Printf.sprintf "held without actor %d" actorless)
-      ; quiet (Printf.sprintf "unreadable producer %d" unreadable) ]
+      ; quiet (Printf.sprintf "unreadable producer %d" unreadable) ], false
   in
   let task_lines rows =
     List.map
@@ -416,7 +416,9 @@ let overlay ~now ~localtime ~cols t =
   let blank = { tone = Quiet; text = ""; goes_to = Nowhere } in
   [ heading "Waiting on you" ] @ counts @ questions
   @ [ blank; heading "Stop requests" ]
-  @ (if cancel_count = 0 then [ quiet "no stop requests" ] else cancel_lines)
+  @ (if stop_unread then [ quiet "stop request count unknown" ]
+     else if cancel_count = 0 then [ quiet "no stop requests" ]
+     else cancel_lines)
   @ (if other_lines = [] then [] else [ blank; heading "Other task alerts" ] @ other_lines)
   @ [ blank; heading "Coming up" ] @ wakes
 ;;

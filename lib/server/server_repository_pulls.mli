@@ -40,8 +40,6 @@ type mergeable =
 type pull_request =
   { repo_slug : string  (** [owner/repo] *)
   ; number : int
-  ; title : string
-  ; head_branch : string
   ; draft : bool
   ; checks : check_state
   ; review : review_state
@@ -52,7 +50,6 @@ type pull_request =
           is skipped because its author brought the base in. [None] when
           that window holds no such commit, or GitHub gives its author or
           name as [null]. *)
-  ; updated_at : float
   }
 
 type failure =

@@ -220,6 +220,9 @@ let slot_takes_system_prompt (slot : Registry.selected_slot) =
 ;;
 
 let admit_lane (resolved : Registry.resolved_lane) =
+  (* This bridge executes only AGENT_CORE HTTP candidates. Stagehand's usage
+     field is optional; the CLI tail is refused because this bridge has no
+     official-client executor yet, rather than silently skipping its slots. *)
   match resolved.cli_slots with
   | _ :: _ as cli_slots -> Error (Cli_slots_declared cli_slots)
   | [] ->
@@ -244,7 +247,7 @@ let published_lane () =
   match Registry.current () with
   | Error error -> Error (Registry_unavailable error)
   | Ok registry ->
-    Registry.resolve_lane registry ~lane_id:(Runtime.exact_lane_id Runtime.Browser_stagehand)
+    Registry.resolve_lane registry ~lane_id:(Standalone_lane.to_id Standalone_lane.Browser_stagehand)
     |> Result.map_error (fun error -> Lane_unresolved error)
 ;;
 
@@ -313,6 +316,19 @@ let refusal_to_rpc_error refusal : Wire.rpc_error =
   { code = Wire.host_refused; message = refusal_to_string refusal }
 ;;
 
+(* The extension gets the detailed refusal. The server records a bounded,
+   closed cause without copying extension-supplied tool names or provider text
+   into its log. *)
+let refusal_kind = function
+  | Params_malformed _ -> "params_malformed"
+  | Generation_not_served _ -> "generation_not_served"
+  | Content_not_served _ -> "content_not_served"
+  | Lane_unavailable _ -> "lane_unavailable"
+  | Lane_refused _ -> "lane_refused"
+  | Flow_not_started _ -> "flow_not_started"
+  | Generation_failed _ -> "generation_failed"
+;;
+
 (* ---- Answer --------------------------------------------------------------- *)
 
 let usage_json (usage : Agent_core.Types.api_usage) =
@@ -335,6 +351,10 @@ let answer_of_success (success : Exact.success) =
   let usage =
     match success.usage with
     | None -> []
+    (* Some wire parsers fill an unreported token count with zero (#38669).
+       This request has input text and a structured output, so either zero
+       makes the report unsuitable for Stagehand's usage field. *)
+    | Some usage when usage.input_tokens <= 0 || usage.output_tokens <= 0 -> []
     | Some usage -> [ "usage", usage_json usage ]
   in
   `Assoc
@@ -446,5 +466,10 @@ let serve ~net ~clock ~resolve_lane params =
 ;;
 
 let create ~net ~clock ~resolve_lane : Browser_stagehand_session.model =
-  fun params -> serve ~net ~clock ~resolve_lane params |> Result.map_error refusal_to_rpc_error
+  fun params ->
+    match serve ~net ~clock ~resolve_lane params with
+    | Ok answer -> Ok answer
+    | Error refusal ->
+      Log.Server.warn "browser_stagehand: llm.generate refused (%s)" (refusal_kind refusal);
+      Error (refusal_to_rpc_error refusal)
 ;;

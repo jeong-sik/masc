@@ -147,7 +147,7 @@ val lower_typed_pipeline
   -> verdict
 (** Lower a stage list assembled by the caller into the same {!verdict}
     shape. Not from {!Keeper_tool_execute_typed_input}: since #32662 that
-    module's [source] is [Argv] or [Script] and it lowers to a single
+    module's [source] is [Argv] or [Command] and it lowers to a single
     [Shell_ir.Simple], so it can no longer hand this function more than one
     stage. Empty input yields {!Cannot_parse
     Parse_error}; a single stage yields [Allow] with a [Simple] AST;

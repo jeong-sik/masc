@@ -413,7 +413,9 @@ let stagehand_executor : (verb -> answer) option Atomic.t = Atomic.make None
 let install_stagehand_executor executor = Atomic.set stagehand_executor executor
 let issue_stagehand ~verb ~timeout_sec =
   if not (verb_allowed_on_stagehand verb) then
-    Rejected_before_effect ("the stagehand lane does not serve " ^ verb_to_string verb ^ " yet")
+    Rejected_before_effect
+      ("the stagehand lane serves session, tabs, goto, capture and sentence verbs, not "
+       ^ verb_to_string verb)
   else
   match Atomic.get stagehand_executor with
   | None -> Lane_absent

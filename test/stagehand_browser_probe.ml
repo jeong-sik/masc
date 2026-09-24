@@ -148,7 +148,7 @@ let () =
   and fixture_url = argument "--fixture-url"
   and out = argument "--out" in
   let masc_root = Filename.concat out "masc-root" in
-  Eio_main.run
+  let failed = Eio_main.run
   @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   Time_compat.set_clock clock;
@@ -220,9 +220,12 @@ let () =
         | Ok data ->
           (match string_at [ "data" ] data with
            | Some image ->
-             let path = Filename.concat out "stagehand.png" in
-             Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel (Base64.decode_exn image));
-             Ok data
+             (match string_at [ "url" ] data, string_at [ "title" ] data with
+              | Some url, Some "clicked" when String.equal url fixture_url ->
+                let path = Filename.concat out "stagehand.png" in
+                Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel (Base64.decode_exn image));
+                Ok data
+              | _ -> Error "capture did not name the clicked fixture")
            | None -> Error "capture without data")));
   record "close" (session "close");
   record "the browser stopped"
@@ -238,9 +241,11 @@ let () =
   Out_channel.with_open_bin (Filename.concat out "stagehand-proof.json") (fun channel ->
     Out_channel.output_string channel (Yojson.Safe.pretty_to_string proof));
   Browser_lane.install_stagehand_executor None;
-  match !failures with
+  List.rev !failures
+  in
+  match failed with
   | [] -> ()
   | failed ->
-    Printf.printf "%d step(s) failed: %s\n%!" (List.length failed) (String.concat ", " (List.rev failed));
+    Printf.printf "%d step(s) failed: %s\n%!" (List.length failed) (String.concat ", " failed);
     exit 1
 ;;

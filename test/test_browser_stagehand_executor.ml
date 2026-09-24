@@ -145,7 +145,16 @@ let test_capture_passes_the_surface () =
   match captured with
   | Ok data ->
     check string "source" "stagehand" Yojson.Safe.Util.(member "source" data |> to_string);
-    check string "url" "http://127.0.0.1:1/shop" Yojson.Safe.Util.(member "url" data |> to_string)
+    check string "url" "http://127.0.0.1:1/shop" Yojson.Safe.Util.(member "url" data |> to_string);
+    let scene_reads =
+      List.filter
+        (function
+          | Wire.Page_evaluate { expression; _ } ->
+            String.length expression > String.length Masc.Browser_scene_script.runtime
+          | _ -> false)
+        fake.sent
+    in
+    check int "only the two capture reads carry scene runtime" 2 (List.length scene_reads)
   | Error failure -> fail (Masc.Browser_surface.failure_message failure)
 ;;
 
@@ -195,17 +204,17 @@ let test_reads_run_the_page_scripts () =
   fake.sent <- [];
   ignore (served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_read { tab_id = Some 1; max_chars = None })));
   check string "text read with the default cap"
-    (Executor.evaluate_expression ~body:Masc.Browser_page_script.text ~args:(`Int Masc.Browser_page_script.default_text_chars))
+    (Executor.evaluate_expression ~runtime:Executor.No_runtime ~body:Masc.Browser_page_script.text ~args:(`Int Masc.Browser_page_script.default_text_chars))
     (sent_expression ());
   let elements = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_elements { tab_id = None })) in
-  check string "elements script" (Executor.evaluate_expression ~body:Masc.Browser_page_script.elements ~args:`Null) (sent_expression ());
+  check string "elements script" (Executor.evaluate_expression ~runtime:Executor.No_runtime ~body:Masc.Browser_page_script.elements ~args:`Null) (sent_expression ());
   check int "elements of the active tab name it" 1 Yojson.Safe.Util.(member "tabId" elements |> to_int);
   let scene =
     served (Executor.execute ~tabs ~call:(call fake)
       (Lane.Page_scene { tab_id = 0; max_chars = 2000; view = Lane.Content; scope = None }))
   in
   check string "scene call with the read arguments"
-    (Executor.evaluate_expression ~body:Masc.Browser_scene_script.read_call
+    (Executor.evaluate_expression ~runtime:Executor.Scene_runtime ~body:Masc.Browser_scene_script.read_call
        ~args:(match Lane.scene_args ~tab_id:0 ~max_chars:2000 ~view:Lane.Content ~scope:None with
               | `Assoc fields -> `Assoc (("mode", `String "read") :: fields)
               | json -> json))
@@ -229,9 +238,13 @@ let test_unserved_verbs () =
 
 let test_evaluate_expression () =
   let args = `Assoc [ "mode", `String "viewport" ] in
-  let expression = Executor.evaluate_expression ~body:"return 1;" ~args in
+  let expression = Executor.evaluate_expression ~runtime:Executor.No_runtime ~body:"return 1;" ~args in
+  let with_scene = Executor.evaluate_expression ~runtime:Executor.Scene_runtime ~body:"return 1;" ~args in
   check bool "called at once with its arguments as a JSON literal" true
-    (String.ends_with ~suffix:("(" ^ to_s args ^ ")") expression)
+    (String.ends_with ~suffix:("(" ^ to_s args ^ ")") expression);
+  check int "scene runtime is added only when requested"
+    (String.length expression + String.length Masc.Browser_scene_script.runtime)
+    (String.length with_scene)
 ;;
 
 let () =

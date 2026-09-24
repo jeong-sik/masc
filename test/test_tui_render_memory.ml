@@ -86,9 +86,12 @@ let test_detail_names_the_use_record () =
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-1"
     ; mf_events =
-        { mfe_retrieved_count = 4
-        ; mfe_retrieved_distinct_days = 2
-        ; mfe_last_retrieved_at = Some (Unix.gettimeofday () -. 7200.0)
+        { mfe_retrieval =
+            Decode.Retrieved
+              { count = 4
+              ; distinct_days = 2
+              ; last_at = Unix.gettimeofday () -. 7200.0
+              }
         ; mfe_retracted_count = 1
         ; mfe_revised_from = [ "mem-0" ]
         }
@@ -108,9 +111,8 @@ let test_detail_names_the_use_record () =
 ;;
 
 (* A fact nobody has read said so three times: "Retrieved 0", "0 days" and
-   "last never". The second two are computed from the first -- of 1,768
-   ordinary facts on the live roster 1,691 had a zero count and none of them
-   carried a day count or a clock (#38165) -- so zero says it once.
+   "last never". The second two are computed from the first (#38165), so it
+   says it once.
 
    The two counts after it keep their zeros: they are measured, and a hidden
    measured zero reads as "not measured". *)
@@ -123,9 +125,7 @@ let test_a_fact_nobody_read_says_so_once () =
     ; mf_last_seen = 200.0
     ; mf_memory_id = "mem-2"
     ; mf_events =
-        { mfe_retrieved_count = 0
-        ; mfe_retrieved_distinct_days = 0
-        ; mfe_last_retrieved_at = None
+        { mfe_retrieval = Decode.Never_retrieved
         ; mfe_retracted_count = 0
         ; mfe_revised_from = []
         }

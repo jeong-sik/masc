@@ -4588,28 +4588,44 @@ let test_decode_memory_fact_reads_the_use_record () =
               ~last:(`Float 1_775_000_040.0) ~retracted:1 ~revised_from:[ "mem-0" ] ())
          ())
   in
-  Alcotest.(check int) "retrieved" 4 fact.Tui_decode.mf_events.Tui_decode.mfe_retrieved_count;
-  Alcotest.(check int) "days" 2 fact.Tui_decode.mf_events.Tui_decode.mfe_retrieved_distinct_days;
-  Alcotest.(check (option (float 0.0))) "last" (Some 1_775_000_040.0)
-    fact.Tui_decode.mf_events.Tui_decode.mfe_last_retrieved_at;
+  (match fact.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
+   | Tui_decode.Retrieved { count; distinct_days; last_at } ->
+       Alcotest.(check int) "retrieved" 4 count;
+       Alcotest.(check int) "days" 2 distinct_days;
+       Alcotest.(check (float 0.0)) "last" 1_775_000_040.0 last_at
+   | Tui_decode.Never_retrieved -> Alcotest.fail "a retrieved fact decoded as never retrieved");
   Alcotest.(check int) "retracted" 1 fact.Tui_decode.mf_events.Tui_decode.mfe_retracted_count;
   Alcotest.(check (list string)) "revised from" [ "mem-0" ]
     fact.Tui_decode.mf_events.Tui_decode.mfe_revised_from;
   let unused = only_fact (snapshot_with ~events:(memory_fact_events_json ()) ()) in
-  Alcotest.(check (option (float 0.0))) "never retrieved is None" None
-    unused.Tui_decode.mf_events.Tui_decode.mfe_last_retrieved_at;
+  (match unused.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
+   | Tui_decode.Never_retrieved -> ()
+   | Tui_decode.Retrieved _ -> Alcotest.fail "0, 0 and null decoded as retrieved");
+  let rejected ~what ~needle snapshot =
+    match snapshot with
+    | Error error -> Alcotest.(check bool) what true (mentions needle error)
+    | Ok snapshot -> (
+        match snapshot.Tui_decode.mfs_ordinary with
+        | Tui_decode.Memory_store_read_error error ->
+            Alcotest.(check bool) what true (mentions needle error)
+        | Tui_decode.Memory_store_present _ -> Alcotest.failf "%s: the row was accepted" what
+        | Tui_decode.Memory_store_absent -> Alcotest.fail "ordinary store absent")
+  in
+  (* The server derives count, days and clock from one list of retrieval
+     times, so they are all empty or all present. A row where they disagree
+     is not a record this decoder knows. *)
+  rejected ~what:"a count without a clock is rejected" ~needle:"retrieved_count"
+    (snapshot_with ~events:(memory_fact_events_json ~retrieved:4 ~days:2 ()) ());
+  rejected ~what:"a clock without a count is rejected" ~needle:"retrieved_count"
+    (snapshot_with
+       ~events:(memory_fact_events_json ~last:(`Float 1_775_000_040.0) ())
+       ());
+  rejected ~what:"a count on no day is rejected" ~needle:"retrieved_count"
+    (snapshot_with
+       ~events:(memory_fact_events_json ~retrieved:4 ~last:(`Float 1_775_000_040.0) ())
+       ());
   (* A row without the record is a server this decoder does not know. *)
-  match snapshot_with () with
-  | Error error ->
-      Alcotest.(check bool) "the rejection names the field" true (mentions "events" error)
-  | Ok snapshot -> (
-      match snapshot.Tui_decode.mfs_ordinary with
-      | Tui_decode.Memory_store_read_error error ->
-          Alcotest.(check bool) "the store rejection names the field" true
-            (mentions "events" error)
-      | Tui_decode.Memory_store_present _ ->
-          Alcotest.fail "a row without events must be rejected"
-      | Tui_decode.Memory_store_absent -> Alcotest.fail "ordinary store absent")
+  rejected ~what:"a row without events is rejected" ~needle:"events" (snapshot_with ())
 
 (* The server writes a fact's category through [category_to_string], so a
    word outside the eight is a wire error -- not a ninth category for the

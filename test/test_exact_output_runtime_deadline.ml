@@ -227,7 +227,9 @@ let test_connect_only_declaration_is_left_out_at_boot () =
     degradation.gaps;
   check (list string) "every lane is emptied" expected_lane_ids
     (List.sort String.compare degradation.emptied_lane_ids);
-  Server_runtime_bootstrap.For_testing.configure_exact_output_registry ~config_root:root ();
+  Server_runtime_bootstrap.For_testing.configure_exact_output_registry
+    ~config_root:(Filename.dirname path)
+    ();
   let registry = Registry.current () |> require_ok "the registry still publishes" in
   List.iter
     (fun lane ->
@@ -279,13 +281,12 @@ max-context = 8192
     Runtime_schema.exact_body_timeout_s_key
 
 let test_a_lane_emptied_by_gaps_is_unavailable_alone () =
-  with_runtime_root @@ fun ~root _load ->
+  with_runtime_fixture @@ fun ~path ~boot:_ ~save:_ ->
   let emptied, keyed =
     match Server_runtime_bootstrap.mandatory_exact_output_lane_ids with
     | [ emptied; keyed ] -> emptied, keyed
     | _ -> fail "this case is written for two mandatory lanes"
   in
-  let path = Filename.concat root "runtime.toml" in
   Fs_compat.save_file path (mixed_runtime_toml ~emptied ~keyed);
   (match Runtime.init_default ~config_path:path with
    | Ok () -> ()
@@ -298,7 +299,9 @@ let test_a_lane_emptied_by_gaps_is_unavailable_alone () =
     (List.sort String.compare
        (List.map (fun (gap : Runtime.exact_slot_body_deadline_gap) -> gap.lane_id)
           degradation.gaps));
-  Server_runtime_bootstrap.For_testing.configure_exact_output_registry ~config_root:root ();
+  Server_runtime_bootstrap.For_testing.configure_exact_output_registry
+    ~config_root:(Filename.dirname path)
+    ();
   let registry = Registry.current () |> require_ok "the other lanes publish" in
   check bool "the emptied mandatory lane is unavailable" true
     (lane_unavailable registry emptied);
@@ -450,6 +453,156 @@ let test_save_over_a_file_that_already_breaks_the_registry_keeps_it () =
   let after = Registry.current () |> require_ok "registry after the save" in
   check bool "the published registry is kept" true (before == after)
 
+let degradation_status () =
+  Runtime.startup_degradation_to_yojson
+    ~exact_slots:(Runtime.exact_slot_degradation ())
+    (Runtime.startup_degradation ())
+  |> Yojson.Safe.Util.member "status"
+  |> Yojson.Safe.Util.to_string
+
+let selected_slot_ids registry lane =
+  match Registry.resolve_lane registry ~lane_id:lane with
+  | Ok { selected_slots; _ } ->
+    List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) selected_slots
+  | Error _ -> []
+
+let first_mandatory_lane () =
+  match Server_runtime_bootstrap.mandatory_exact_output_lane_ids with
+  | lane :: _ -> lane
+  | [] -> fail "no mandatory exact-output lane"
+
+let require_replaced label (receipt : Runtime.config_commit_receipt) =
+  match receipt.exact_output_registry with
+  | Runtime.Exact_output_registry_replaced { origin = Runtime.Runtime_binding_targets } -> ()
+  | Runtime.Exact_output_registry_replaced { origin = Runtime.Replacement_catalog_targets _ }
+  | Runtime.Exact_output_registry_unpublished
+  | Runtime.Exact_output_registry_kept _ ->
+    failf "%s: the receipt does not name a registry rebuilt from the bindings" label
+
+(* Boot with a provider that has only [connect-timeout-s]: every lane is all
+   gaps, so every lane is emptied and excused, and the registry publishes
+   with each lane unavailable. Saving the key rebuilds the registry in the
+   same commit: the emptied mandatory lane is required again and admitted,
+   and the startup report goes back to ok (#38779). *)
+let test_saving_the_key_restores_an_emptied_mandatory_lane () =
+  with_runtime_fixture @@ fun ~path:_ ~boot ~save ->
+  let mandatory = first_mandatory_lane () in
+  boot (runtime_toml ~connect:(Some 17.5) ~body:None ());
+  let booted = Registry.current () |> require_ok "a gap-only boot publishes" in
+  check bool "the emptied mandatory lane is unavailable" true
+    (lane_unavailable booted mandatory);
+  check string "the startup report is degraded" "degraded" (degradation_status ());
+  (match save (runtime_toml ~connect:(Some 17.5) ~body:(Some 91.5) ()) with
+   | Ok receipt -> require_replaced "saving the key" receipt
+   | Error detail -> failf "saving the key was refused: %s" detail);
+  let saved = Registry.current () |> require_ok "registry after the save" in
+  check (list string) "the mandatory lane admits the keyed slot"
+    [ "openai-responses.probe" ] (selected_slot_ids saved mandatory);
+  check (option (float 0.0)) "the Librarian target carries the saved deadline"
+    (Some 91.5) (EO.body_timeout_s (ready (published_target ())));
+  check int "no gap is left" 0 (List.length (Runtime.exact_slot_body_deadline_gaps ()));
+  check string "the startup report is ok in the same commit" "ok" (degradation_status ())
+
+(* The Librarian lane has a gap slot and a keyed slot; the mandatory lanes are
+   keyed. A save that does not touch the gap keeps it: the startup report
+   still names it and the rebuilt registry still leaves the slot out. *)
+let gap_beside_keyed_toml ?(probe = true) ?(trailer = "") () =
+  let mandatory_lanes =
+    String.concat "\n"
+      (List.map
+         (fun lane ->
+            Printf.sprintf
+              "[runtime.exact_output_lanes.%s]\nslots = [\"openai-responses.probe\"]\nmax_output_tokens = 4096\n"
+              lane)
+         Server_runtime_bootstrap.mandatory_exact_output_lane_ids)
+  in
+  Printf.sprintf {|[runtime]
+default = "%s"
+
+%s
+[runtime.exact_output_lanes.%s]
+slots = ["nokey.other", "openai-responses.probe"]
+max_output_tokens = 4096
+
+[providers.openai-responses]
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.com"
+%s = 91.5
+[providers.openai-responses.credentials]
+type = "env"
+key = "OPENAI_API_KEY"
+%s
+[providers.nokey]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+[models.other]
+api-name = "no-deadline-model"
+max-context = 8192
+[models.other.capabilities]
+supports-response-format-json = true
+supports-structured-output = true
+[nokey.other]
+%s|}
+    (if probe then "openai-responses.probe" else "nokey.other")
+    mandatory_lanes
+    lane_id
+    Runtime_schema.exact_body_timeout_s_key
+    (if probe then "[models.probe]\napi-name = \"gpt-5.6-luna\"\n[openai-responses.probe]\n" else "")
+    trailer
+
+let test_an_unrelated_save_keeps_an_existing_gap () =
+  with_runtime_fixture @@ fun ~path:_ ~boot ~save ->
+  boot (gap_beside_keyed_toml ());
+  let gap_slots () =
+    List.map
+      (fun (gap : Runtime.exact_slot_body_deadline_gap) -> gap.lane_id, gap.slot_id)
+      (Runtime.exact_slot_body_deadline_gaps ())
+  in
+  check (list (pair string string)) "boot records the gap" [ lane_id, "nokey.other" ]
+    (gap_slots ());
+  (match save (gap_beside_keyed_toml ~trailer:"# an unrelated edit\n" ()) with
+   | Ok receipt -> require_replaced "an unrelated save" receipt
+   | Error detail -> failf "a save that keeps an existing gap was refused: %s" detail);
+  check (list (pair string string)) "the startup report still names the gap"
+    [ lane_id, "nokey.other" ] (gap_slots ());
+  check string "the startup report stays degraded" "degraded" (degradation_status ());
+  let registry = Registry.current () |> require_ok "registry after the save" in
+  check (list string) "the rebuilt Librarian lane admits only the keyed slot"
+    [ "openai-responses.probe" ] (selected_slot_ids registry lane_id);
+  check bool "the gap slot stays out of the rebuilt registry" true
+    (List.exists
+       (fun (slot : Registry.rejected_slot) ->
+          String.equal slot.lane_id lane_id && String.equal slot.slot_id "nokey.other")
+       (Registry.rejected_slots registry))
+
+(* The file on disk has only gaps as faults, so it rebuilds the registry. A
+   text that breaks the registry -- the keyed binding every mandatory lane
+   names is gone -- is this text's fault and is refused. *)
+let test_a_break_over_a_gap_only_file_is_refused () =
+  with_runtime_fixture @@ fun ~path ~boot ~save ->
+  let booted = gap_beside_keyed_toml () in
+  boot booted;
+  let before = Registry.current () |> require_ok "published registry" in
+  (match save (gap_beside_keyed_toml ~probe:false ()) with
+   | Ok _ -> fail "a text that empties the mandatory lanes was committed"
+   | Error _ -> ());
+  check string "the file is unchanged" booted (Fs_compat.load_file path);
+  let after = Registry.current () |> require_ok "registry after the refusal" in
+  check bool "the registry is unchanged" true (before == after)
+
+(* A save that adds a gap is refused through the writer itself, before
+   anything is written. *)
+let test_a_save_that_adds_a_gap_is_refused () =
+  with_runtime_fixture @@ fun ~path ~boot ~save ->
+  let booted = runtime_toml ~connect:(Some 17.5) ~body:(Some 91.5) () in
+  boot booted;
+  (match save (runtime_toml ~connect:(Some 17.5) ~body:None ()) with
+   | Ok _ -> fail "a save that adds a gap was committed"
+   | Error detail ->
+     check bool "the refusal names the key" true
+       (contains ~needle:Runtime_schema.exact_body_timeout_s_key detail));
+  check string "the file is unchanged" booted (Fs_compat.load_file path)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -472,4 +625,12 @@ let () =
         test_case "a save that breaks the registry is refused before the write" `Quick
           test_save_that_breaks_the_registry_is_refused;
         test_case "a save over a file that already breaks the registry keeps it" `Quick
-          test_save_over_a_file_that_already_breaks_the_registry_keeps_it ] ]
+          test_save_over_a_file_that_already_breaks_the_registry_keeps_it;
+        test_case "saving the key restores an emptied mandatory lane" `Quick
+          test_saving_the_key_restores_an_emptied_mandatory_lane;
+        test_case "an unrelated save keeps an existing gap" `Quick
+          test_an_unrelated_save_keeps_an_existing_gap;
+        test_case "a break over a gap-only file is refused" `Quick
+          test_a_break_over_a_gap_only_file_is_refused;
+        test_case "a save that adds a gap is refused" `Quick
+          test_a_save_that_adds_a_gap_is_refused ] ]

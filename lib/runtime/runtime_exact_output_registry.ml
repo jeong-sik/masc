@@ -245,7 +245,17 @@ let with_publication_lock f =
   Fun.protect ~finally:(fun () -> Mutex.unlock publication_mutex) f
 ;;
 
-let publish ?(required_lane_ids = []) ~lanes resolver_snapshot =
+(* A required lane rule 3 emptied is excused at this one publication: it is
+   unavailable alone and every other lane still publishes. The registry keeps
+   the full required list, so the next publication requires the lane again
+   unless that text empties it too. *)
+let required_less_excused required_lane_ids ~excused_lane_ids =
+  List.filter
+    (fun lane_id -> not (List.exists (String.equal lane_id) excused_lane_ids))
+    required_lane_ids
+;;
+
+let publish ?(required_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
   with_publication_lock
   @@ fun () ->
   match !active_reservation with
@@ -254,7 +264,11 @@ let publish ?(required_lane_ids = []) ~lanes resolver_snapshot =
     let* exact_output_lanes, rejected_slots =
       admit_lanes ~admitted_by_id:String_map.empty resolver_snapshot lanes
     in
-    let* () = validate_required_lanes required_lane_ids exact_output_lanes in
+    let* () =
+      validate_required_lanes
+        (required_less_excused required_lane_ids ~excused_lane_ids)
+        exact_output_lanes
+    in
     let registry =
       { resolver_snapshot
       ; declared_lanes = lanes
@@ -297,7 +311,7 @@ let reserve candidate =
    targets the process started on, while the save reported the change applied
    (#38779). Handles admitted against the previous snapshot are never reused,
    because they carry that snapshot's binding. *)
-let prepare_replacement ~lanes ~load_resolver_snapshot =
+let prepare_replacement ~lanes ~excused_lane_ids ~load_resolver_snapshot =
   let base = Atomic.get published in
   match base, lanes with
   | None, [] -> Ok { base; candidate = None }
@@ -311,7 +325,9 @@ let prepare_replacement ~lanes ~load_resolver_snapshot =
       admit_lanes ~admitted_by_id:String_map.empty resolver_snapshot lanes
     in
     let* () =
-      validate_required_lanes previous.required_lane_ids exact_output_lanes
+      validate_required_lanes
+        (required_less_excused previous.required_lane_ids ~excused_lane_ids)
+        exact_output_lanes
     in
     Ok
       { base

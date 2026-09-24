@@ -319,8 +319,9 @@ val agent_core_model_catalog_env_var_name : string
 val exact_output_target_source :
   ?env:(string -> string option) -> unit -> exact_output_target_source
 (** One answer for both readers: configuration load decides whether rule 3
-    (exact slot body deadline) applies, and server bootstrap decides which
-    catalog the exact-output registry reads. A blank value names no file. *)
+    (exact slot body deadline) applies, and {!exact_output_resolver_catalog}
+    decides which catalog the exact-output registry reads, at boot and on
+    every config commit. A blank value names no file. *)
 
 val to_diagnostic_text : config_path:string -> load_failure -> string
 (** The operator-facing account of a refused configuration, and the wording the
@@ -443,6 +444,11 @@ type exact_output_catalog =
   { catalog_input : Agent_core.Exact_output.resolver_catalog_input
   ; catalog_origin : exact_output_target_source
   ; catalog_description : string  (** A phrase naming it for the publication log. *)
+  ; catalog_exact_slots : exact_slot_degradation
+        (** What rule 3 leaves out of this build: the gap slots, which are not
+            targets, and the lanes they empty, which the registry does not
+            require. The same function [set_loaded] records for the startup
+            report. *)
   }
 
 val exact_output_resolver_catalog :
@@ -453,22 +459,25 @@ val exact_output_resolver_catalog :
     {!exact_output_target_source} decides: the full replacement
     [AGENT_CORE_MODEL_CATALOG] names, or the embedded catalog with
     {!exact_output_targets} as its targets, less every slot rule 3 leaves out
-    for [exact_output_lane_decls]. Boot and every config commit read this one
-    derivation. *)
+    for [exact_output_lane_decls]. Boot, every config commit, the save preview
+    and the on-disk rebuild check read this one derivation, and pass
+    [catalog_exact_slots.emptied_lane_ids] as the lanes excused from the
+    required set. *)
 
 val report_exact_output_registry : Runtime_exact_output_registry.t -> unit
 (** Log what [registry] left out: targets whose binding has no catalog row,
     rejected lane slots (a slot rule 3 left out is counted, not diagnosed
     again), [verifier_exact] slots that cannot judge, and the optional lanes
     with nothing admitted. Boot runs it after publishing and every config
-    commit runs it after replacing. The rule-3 slots themselves are named by
-    {!warn_exact_slot_body_deadline_gaps}. *)
+    commit runs it after replacing or keeping the registry. The rule-3 slots
+    and lanes themselves are named by {!warn_exact_slot_degradation}. *)
 
-val warn_exact_slot_body_deadline_gaps : exact_slot_body_deadline_gap list -> unit
-(** One WARN per exact slot rule 3 leaves out. Boot logs it before publishing,
-    so it is said even when the registry cannot be published. A config commit
-    has none to log: a save with a gap is refused before the registry is
-    rebuilt. *)
+val warn_exact_slot_degradation : exact_slot_degradation -> unit
+(** One WARN per exact slot rule 3 leaves out and one per lane it empties.
+    Boot logs it before publishing, so it is said even when the registry
+    cannot be published. A config commit logs it after the write: a save
+    refuses only the gaps it adds, so the text it commits can keep gaps the
+    file already had. *)
 
 val load_exact_output_resolver_snapshot :
   Agent_core.Exact_output.resolver_catalog_input ->
@@ -480,12 +489,14 @@ val load_exact_output_resolver_snapshot :
 
 val publish_exact_output_registry :
   ?required_lane_ids:string list ->
+  ?excused_lane_ids:string list ->
   lanes:Runtime_schema.exact_output_lane_decl list ->
   Agent_core.Exact_output.resolver_snapshot ->
   (Runtime_exact_output_registry.t, string) result
 (** Publish one immutable AGENT_CORE resolver-and-lane snapshot and return that exact
-    publication. [required_lane_ids] must each retain an admitted slot; that
-    validation happens before the global publication changes. *)
+    publication. [required_lane_ids] must each retain an admitted slot, less
+    [excused_lane_ids] (the lanes rule 3 emptied); that validation happens
+    before the global publication changes. *)
 
 val init_default_strict : config_path:string -> (unit, string) result
 (** Fail-closed startup entry point: {!init_default} plus the capability check

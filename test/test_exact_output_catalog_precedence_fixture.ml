@@ -373,6 +373,7 @@ let test_closed_registry_transaction () =
     match
       Registry.prepare_replacement
         ~lanes:(transaction_lanes lane_id)
+        ~excused_lane_ids:[]
         ~load_resolver_snapshot:(fun () -> Ok snapshot)
     with
     | Ok prepared -> prepared

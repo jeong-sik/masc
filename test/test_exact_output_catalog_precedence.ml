@@ -176,6 +176,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     let prepared =
       match Registry.prepare_replacement
               ~lanes
+              ~excused_lane_ids:[]
               ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)
       with
       | Ok prepared -> prepared
@@ -206,6 +207,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     let concurrently_prepared =
       match Registry.prepare_replacement
               ~lanes
+              ~excused_lane_ids:[]
               ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)
       with
       | Ok prepared -> prepared
@@ -244,6 +246,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     let successor_prepared =
       match Registry.prepare_replacement
               ~lanes
+              ~excused_lane_ids:[]
               ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)
       with
       | Ok prepared -> prepared
@@ -324,6 +327,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     let stale_prepared =
       match Registry.prepare_replacement
               ~lanes
+              ~excused_lane_ids:[]
               ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)
       with
       | Ok prepared -> prepared
@@ -346,6 +350,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     let successor_prepared =
       match Registry.prepare_replacement
               ~lanes
+              ~excused_lane_ids:[]
               ~load_resolver_snapshot:(fun () -> Ok replacement_snapshot)
       with
       | Ok prepared -> prepared

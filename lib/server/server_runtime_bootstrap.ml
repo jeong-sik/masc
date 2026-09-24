@@ -181,10 +181,10 @@ let configure_exact_output_registry ?config_root () =
   in
   require_explicit_mandatory_exact_output_lanes ~config_path lanes;
   let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
-  (* Logged before the registry is published: see
-     [Runtime.warn_exact_slot_body_deadline_gaps]. *)
-  Runtime.warn_exact_slot_body_deadline_gaps (Runtime.exact_slot_body_deadline_gaps ());
   let catalog = Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes in
+  (* Logged before the registry is published, so it is said even when
+     publication fails. *)
+  Runtime.warn_exact_slot_degradation catalog.Runtime.catalog_exact_slots;
   match Runtime.load_exact_output_resolver_snapshot catalog.Runtime.catalog_input with
   | Error error ->
     raise
@@ -193,27 +193,15 @@ let configure_exact_output_registry ?config_root () =
           ^ Runtime_exact_output_registry.resolver_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
     (* A mandatory lane rule 3 emptied -- every slot a gap, no cli_slots --
-       is not required at publication, so it alone is unavailable and every
-       other lane still publishes. It stays named in the startup report
-       ([Runtime.exact_slot_degradation]) and here. A mandatory lane empty
-       for any other reason is still required and still stops publication. *)
-    let emptied_lane_ids = (Runtime.exact_slot_degradation ()).emptied_lane_ids in
-    let required_lane_ids =
-      List.filter
-        (fun lane_id ->
-           if List.exists (String.equal lane_id) emptied_lane_ids
-           then (
-             Log.Server.warn
-               "exact_output: mandatory lane %S is unavailable: every slot is left out because its provider declares no %s, and the lane declares no cli_slots"
-               lane_id
-               Runtime_schema.exact_body_timeout_s_key;
-             false)
-           else true)
-        mandatory_exact_output_lane_ids
-    in
+       is excused at this publication, so it alone is unavailable and every
+       other lane still publishes. A config commit excuses the same lanes from
+       the same derivation ([Runtime.exact_output_resolver_catalog]). A
+       mandatory lane empty for any other reason is still required and still
+       stops publication. *)
     (match
        Runtime.publish_exact_output_registry
-         ~required_lane_ids
+         ~required_lane_ids:mandatory_exact_output_lane_ids
+         ~excused_lane_ids:catalog.Runtime.catalog_exact_slots.Runtime.emptied_lane_ids
          ~lanes
          resolver_snapshot
      with

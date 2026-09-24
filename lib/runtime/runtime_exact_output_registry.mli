@@ -94,6 +94,7 @@ type lane_resolution_error =
 
 val publish
   :  ?required_lane_ids:string list
+  -> ?excused_lane_ids:string list
   -> lanes:Runtime_schema.exact_output_lane_decl list
   -> Agent_core.Exact_output.resolver_snapshot
   -> (t, publication_error) result
@@ -106,7 +107,10 @@ val publish
     catalog targets are retained as typed [rejected_slot] observations and do
     not suppress admitted siblings. Blank or duplicate ids (including across
     [slots] and [cli_slots]) and malformed target
-    refs remain fatal. A required lane must retain at least one admitted slot.
+    refs remain fatal. A required lane must retain at least one admitted slot,
+    unless it is in [excused_lane_ids] (a lane rule 3 emptied): that lane is
+    unavailable alone. The registry keeps [required_lane_ids] whole, so a
+    replacement requires an excused lane again unless it excuses it too.
     Returns [Publication_busy] while a replacement reservation is active. *)
 
 val unpublish : unit -> (unit, publication_error) result
@@ -116,6 +120,7 @@ val unpublish : unit -> (unit, publication_error) result
 
 val prepare_replacement
   :  lanes:Runtime_schema.exact_output_lane_decl list
+  -> excused_lane_ids:string list
   -> load_resolver_snapshot:
        (unit
         -> ( Agent_core.Exact_output.resolver_snapshot
@@ -123,7 +128,8 @@ val prepare_replacement
            result)
   -> (prepared_replacement, publication_error) result
 (** Admit [lanes] against the resolver snapshot [load_resolver_snapshot]
-    builds, and return an immutable candidate tied to the currently published
+    builds, requiring the published registry's required lanes less
+    [excused_lane_ids], and return an immutable candidate tied to the currently published
     registry's identity. The snapshot is built only when a registry is
     published; the candidate never reuses a handle admitted against the
     previous snapshot, so a changed binding (its body deadline, its endpoint)

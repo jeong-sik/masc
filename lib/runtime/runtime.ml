@@ -123,9 +123,9 @@ type config_durability =
 (* Where the exact-output registry reads its targets. The server builds them
    from this file's HTTP bindings, unless [AGENT_CORE_MODEL_CATALOG] names a
    full replacement catalog, whose [[targets]] rows are then the whole set and
-   carry their own [body_timeout_s] ([Server_runtime_bootstrap]
-   [configure_exact_output_registry] reads this same answer). An empty or
-   blank value names no file, as it always has for this variable. *)
+   carry their own [body_timeout_s] ([exact_output_resolver_catalog] reads
+   this same answer for boot and every config commit). An empty or blank
+   value names no file, as it always has for this variable. *)
 type exact_output_target_source =
   | Runtime_binding_targets
   | Replacement_catalog_targets of { path : string }
@@ -1232,6 +1232,16 @@ let exact_lanes_emptied_by_gaps
     decls
 ;;
 
+(* What rule 3 leaves out of [runtimes] and [decls]: the gaps, and the lanes
+   they empty. [set_loaded] records it for the startup report and
+   [exact_output_resolver_catalog] builds the registry's targets and excused
+   lanes from it, so what health reports and what the registry leaves out
+   are one answer. *)
+let exact_slot_degradation_of ~target_source runtimes decls =
+  let gaps = exact_slot_body_deadline_gaps_of ~target_source runtimes decls in
+  { gaps; emptied_lane_ids = exact_lanes_emptied_by_gaps decls gaps }
+;;
+
 (* Every runtime binding's provider/model pair must be known to the AGENT_CORE
    capability catalog. Use the materialized [Provider_config.t] so
    provider-qualified catalog rows are considered before bare model rows; this
@@ -1736,13 +1746,10 @@ let set_loaded
     ; config_path = Some config_path
     ; startup_degradation
     ; exact_slots =
-        (let gaps =
-           exact_slot_body_deadline_gaps_of
-             ~target_source:(exact_output_target_source ())
-             runtimes
-             exact_output_lane_decls
-         in
-         { gaps; emptied_lane_ids = exact_lanes_emptied_by_gaps exact_output_lane_decls gaps })
+        exact_slot_degradation_of
+          ~target_source:(exact_output_target_source ())
+          runtimes
+          exact_output_lane_decls
     };
   Runtime_typesafeai_policy.publish typesafeai;
   Runtime_startup_state.note_runtime_loaded ()
@@ -1817,28 +1824,30 @@ type exact_output_catalog =
   { catalog_input : Agent_core.Exact_output.resolver_catalog_input
   ; catalog_origin : exact_output_target_source
   ; catalog_description : string
+  ; catalog_exact_slots : exact_slot_degradation
   }
 
-(* Where the exact-output targets come from, read once per build: boot and
-   every config commit call this with the runtimes and lanes they are about
-   to publish. Under the runtime bindings, a slot left out by rule 3 (its
-   provider declares no [exact-body-timeout-s]) is not handed to the
-   resolver, so the registry leaves it out; the lane keeps its other slots
-   and its cli_slots. *)
+(* The one place a registry build decides what rule 3 leaves out: boot, every
+   config commit, the save preview and the on-disk rebuild check call this
+   with the runtimes and lanes they are about to publish. Under the runtime
+   bindings, a gap slot (its provider declares no [exact-body-timeout-s]) is
+   not handed to the resolver, so the registry leaves it out and the lane
+   keeps its other slots and its cli_slots; a lane the gaps empty is excused
+   from the required lanes ([catalog_exact_slots.emptied_lane_ids]), so it
+   alone is unavailable. *)
 let exact_output_resolver_catalog ~exact_output_lane_decls runtimes =
-  match exact_output_target_source () with
-  | Replacement_catalog_targets { path } as catalog_origin ->
+  let target_source = exact_output_target_source () in
+  let exact_slots =
+    exact_slot_degradation_of ~target_source runtimes exact_output_lane_decls
+  in
+  match target_source with
+  | Replacement_catalog_targets { path } ->
     { catalog_input = Agent_core.Exact_output.Full_replacement_file path
-    ; catalog_origin
+    ; catalog_origin = target_source
     ; catalog_description = " from full replacement " ^ path
+    ; catalog_exact_slots = exact_slots
     }
   | Runtime_binding_targets ->
-    let gaps =
-      exact_slot_body_deadline_gaps_of
-        ~target_source:Runtime_binding_targets
-        runtimes
-        exact_output_lane_decls
-    in
     let targets =
       exact_output_targets runtimes
       |> List.filter (fun (target : Agent_core.Exact_output.declared_target) ->
@@ -1846,14 +1855,15 @@ let exact_output_resolver_catalog ~exact_output_lane_decls runtimes =
           (List.exists
              (fun (gap : exact_slot_body_deadline_gap) ->
                 String.equal gap.slot_id target.target_ref)
-             gaps))
+             exact_slots.gaps))
     in
     { catalog_input = Agent_core.Exact_output.Embedded_with_targets targets
-    ; catalog_origin = Runtime_binding_targets
+    ; catalog_origin = target_source
     ; catalog_description =
         Printf.sprintf
           " from AGENT_CORE embedded catalog with %d runtime binding(s) as targets"
           (List.length targets)
+    ; catalog_exact_slots = exact_slots
     }
 ;;
 
@@ -1872,10 +1882,11 @@ let load_exact_output_resolver_snapshot catalog =
     ()
 ;;
 
-let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
+let publish_exact_output_registry ?required_lane_ids ?excused_lane_ids ~lanes resolver_snapshot =
   match
     Runtime_exact_output_registry.publish
       ?required_lane_ids
+      ?excused_lane_ids
       ~lanes
       resolver_snapshot
   with
@@ -3321,25 +3332,33 @@ let validate_save_text ~config_path content =
   Ok validated
 ;;
 
-(* Rule 3 (#38779) at boot: the server starts, and each exact slot whose HTTP
-   provider declares no [exact-body-timeout-s] is left out of its lane, with
-   one line per slot naming the lane, slot, provider and the key to add. The
-   same list is in the startup degradation report. Logged before the registry
-   is published, so it is said even when leaving the slots out empties a
-   mandatory lane and publication fails. *)
-let warn_exact_slot_body_deadline_gaps gaps =
+(* Rule 3 (#38779): each exact slot whose HTTP provider declares no
+   [exact-body-timeout-s] is left out of its lane, one line per slot naming
+   the lane, slot, provider and the key to add, and one line per lane that
+   leaves empty. The same lists are in the startup degradation report. Boot
+   logs it before publishing, so it is said even when publication fails; a
+   config commit logs it after replacing or keeping the registry, because a
+   save may keep a gap the file already had. *)
+let warn_exact_slot_degradation (degradation : exact_slot_degradation) =
   List.iter
     (fun gap ->
        Log.Server.warn
          "exact_output: slot left out until its provider declares a whole-request deadline: %s (connect-timeout-s ends at the response headers and does not bound the body)"
          (exact_slot_body_deadline_gap_to_string gap))
-    gaps
+    degradation.gaps;
+  List.iter
+    (fun lane_id ->
+       Log.Server.warn
+         "exact_output: lane %S is unavailable: every slot is left out because its provider declares no %s, and the lane declares no cli_slots"
+         lane_id
+         Runtime_schema.exact_body_timeout_s_key)
+    degradation.emptied_lane_ids
 ;;
 
 let warn_rejected_exact_output_slots registry =
   (* A slot left out for rule 3 is rejected here too, because its target was
      never handed to the resolver. Its cause is already named, one WARN per
-     slot, by [warn_exact_slot_body_deadline_gaps]; diagnosing it again would
+     slot, by [warn_exact_slot_degradation]; diagnosing it again would
      call it a subscription CLI or a typo. It is counted in the summary. *)
   let gaps = exact_slot_body_deadline_gaps () in
   let left_out_for_deadline (slot : Runtime_exact_output_registry.rejected_slot) =
@@ -3529,6 +3548,7 @@ let prepare_exact_output_replacement ~runtimes ~lanes =
   let catalog = exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes in
   Runtime_exact_output_registry.prepare_replacement
     ~lanes
+    ~excused_lane_ids:catalog.catalog_exact_slots.emptied_lane_ids
     ~load_resolver_snapshot:(fun () ->
       load_exact_output_resolver_snapshot catalog.catalog_input)
   |> Result.map (fun prepared -> prepared, catalog.catalog_origin)
@@ -3598,16 +3618,25 @@ let exact_output_registry_application_to_string = function
     ^ Runtime_exact_output_registry.publication_error_to_string reason
 ;;
 
+(* After a commit that replaced or kept the registry: what the committed
+   text leaves out under rule 3 ([exact_slot_degradation], just recorded by
+   [set_loaded]), then what the published registry leaves out. For a kept
+   registry that second report is about the registry still serving, which no
+   longer describes the file. *)
+let report_published_after_commit ~path =
+  warn_exact_slot_degradation (exact_slot_degradation ());
+  match Runtime_exact_output_registry.current () with
+  | Ok registry -> report_exact_output_registry registry
+  | Error error ->
+    Log.Misc.warn
+      "exact_output: registry after committing %s cannot be reported: %s"
+      path
+      (Runtime_exact_output_registry.publication_error_to_string error)
+;;
+
 let report_exact_output_commit ~path application =
   match application with
-  | Exact_output_registry_replaced _ ->
-    (match Runtime_exact_output_registry.current () with
-     | Ok registry -> report_exact_output_registry registry
-     | Error error ->
-       Log.Misc.warn
-         "exact_output: registry committed with %s cannot be reported: %s"
-         path
-         (Runtime_exact_output_registry.publication_error_to_string error))
+  | Exact_output_registry_replaced _ -> report_published_after_commit ~path
   | Exact_output_registry_unpublished ->
     (* Boot already warned that no registry is published; a commit does not
        change that, and processes that never publish one (the TUI) commit too. *)
@@ -3619,7 +3648,8 @@ let report_exact_output_commit ~path application =
     Log.Misc.warn
       "exact_output: %s committed; registry %s"
       path
-      (exact_output_registry_application_to_string application)
+      (exact_output_registry_application_to_string application);
+    report_published_after_commit ~path
 ;;
 
 let commit_runtime_config_text

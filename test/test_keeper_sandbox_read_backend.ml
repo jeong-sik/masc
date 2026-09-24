@@ -1645,6 +1645,31 @@ let test_docker_workspace_state_mount_args_expose_safe_subset () =
   Alcotest.(check bool) "does not mount auth" false
     (List.exists (fun spec -> String_util.contains_substring spec "/auth/") specs)
 
+(* An image name the host catalog could not resolve is the image check's
+   failure, and its reason reaches both the record and the admission refusal
+   rather than being dropped for a missing tag. *)
+let test_docker_preflight_keeps_the_unresolved_reason () =
+  with_fake_docker fake_docker_preflight_ok_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  let reason = "sandbox_image \"rust\" is not in the image catalog" in
+  match Keeper_sandbox_runtime.docker_preflight ~image:(Error reason) ~timeout_sec:5.0 () with
+  | None -> Alcotest.fail "expected docker preflight report"
+  | Some preflight ->
+    Alcotest.(check bool) "not ok" false preflight.ok;
+    Alcotest.(check (result string string)) "the reason is kept" (Error reason)
+      preflight.image;
+    (match Keeper_sandbox_runtime.docker_preflight_rejection preflight with
+     | None -> Alcotest.fail "an unresolved image was not refused"
+     | Some refusal ->
+       Alcotest.(check bool) "the refusal carries the reason" true
+         (String_util.contains_substring refusal reason));
+    let json = Keeper_sandbox_runtime.docker_preflight_to_yojson preflight in
+    Alcotest.(check string) "the JSON names the reason" reason
+      (Yojson.Safe.Util.(json |> member "image_unresolved" |> to_string))
+
 let test_docker_preflight_reports_ready_image () =
   with_fake_docker fake_docker_preflight_ok_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
@@ -1679,8 +1704,8 @@ let test_docker_preflight_respects_custom_image_argument () =
   | Some preflight ->
     Alcotest.(check bool) "custom image succeeds" true preflight.ok;
     Alcotest.(check bool) "custom image present" true preflight.image_present;
-    Alcotest.(check (option string)) "preflight record image matches custom"
-      (Some "custom:test") preflight.image
+    Alcotest.(check (result string string)) "preflight record image matches custom"
+      (Ok "custom:test") preflight.image
 
 let test_docker_preflight_surfaces_image_inspect_error () =
   with_fake_docker fake_docker_preflight_missing_image_script @@ fun () ->
@@ -2851,6 +2876,8 @@ let run_tests ~clock () =
         [
           Alcotest.test_case "ready image reports ok" `Quick
             test_docker_preflight_reports_ready_image;
+          Alcotest.test_case "an unresolved image keeps its reason" `Quick
+            test_docker_preflight_keeps_the_unresolved_reason;
           Alcotest.test_case "custom image argument is respected" `Quick
             test_docker_preflight_respects_custom_image_argument;
           Alcotest.test_case "image inspect error stays structural" `Quick

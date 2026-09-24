@@ -2315,7 +2315,7 @@ let test_the_creation_stem_network_mode_is_not_a_mode () =
 
 let preflight_fixture ~ok : Keeper_sandbox_runtime.docker_preflight =
   { ok
-  ; image = Some "masc-sandbox-base:test"
+  ; image = Ok "masc-sandbox-base:test"
   ; docker_runtime_ok = ok
   ; docker_runtime_error =
       (if ok

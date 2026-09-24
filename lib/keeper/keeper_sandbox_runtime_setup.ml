@@ -167,9 +167,10 @@ let docker_info_security_options_optional ?timeout_sec () =
 
 type docker_preflight =
   { ok : bool
-  ; image : string option
-      (** The tag checked, or [None] when the Keeper's image name did not
-          resolve through the host catalog. *)
+  ; image : (string, string) result
+      (** The tag checked, or why the Keeper's image name did not resolve
+          through the host catalog; that reason is the image check's failure,
+          and [image_error] is then [None]. *)
   ; docker_runtime_ok : bool
   ; docker_runtime_error : string option
   ; hardening_ok : bool

@@ -678,7 +678,12 @@ let docker_preflight_rejection (preflight : docker_preflight) =
   then None
   else (
     let failures =
-      [ preflight.docker_runtime_error; preflight.image_error; preflight.hardening_error ]
+      [ preflight.docker_runtime_error
+      ; (match preflight.image with
+         | Error reason -> Some reason
+         | Ok _ -> preflight.image_error)
+      ; preflight.hardening_error
+      ]
       |> List.filter_map (fun failure -> failure)
     in
     let classes =
@@ -705,7 +710,14 @@ let docker_preflight_to_yojson (preflight : docker_preflight) =
     [ "backend", `String "docker"
     ; "status", `String (if preflight.ok then "ok" else "error")
     ; "ok", `Bool preflight.ok
-    ; "image", Json_util.string_opt_to_json preflight.image
+    ; ( "image"
+      , match preflight.image with
+        | Ok tag -> `String tag
+        | Error _ -> `Null )
+    ; ( "image_unresolved"
+      , match preflight.image with
+        | Error reason -> `String reason
+        | Ok _ -> `Null )
     ; "docker_runtime_ok", `Bool preflight.docker_runtime_ok
     ; Json_util.string_opt_field "docker_runtime_error" preflight.docker_runtime_error
     ; "hardening_ok", `Bool preflight.hardening_ok
@@ -788,7 +800,7 @@ let docker_preflight ~image ~timeout_sec () =
        failure. *)
     let image_present, image_error, image_failure_class, image_inspect_failed =
       match image with
-      | Error reason -> false, Some reason, None, false
+      | Error _ -> false, None, None, false
       | Ok tag ->
         (match docker_image_present_with_class ~image:tag ~timeout_sec with
          | Ok () -> true, None, None, false
@@ -829,7 +841,7 @@ let docker_preflight ~image ~timeout_sec () =
           docker_runtime_ok
           && hardening_ok
           && image_present
-      ; image = Result.to_option image
+      ; image
       ; docker_runtime_ok
       ; docker_runtime_error
       ; hardening_ok

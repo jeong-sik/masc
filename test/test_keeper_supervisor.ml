@@ -1272,8 +1272,9 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
          meta;
        check bool "manual mode does not spontaneously launch" false (Atomic.get runner_ready);
        KSS.supervise_keepalive
-         ~intent:Masc.Keeper_activation_readiness.Requested_work
-         ~publish_lifecycle ~launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta;
+         ~publish_lifecycle ~launch_supervised_fiber ~proactive_warmup_sec:0 ctx
+         { meta with activation_mode = Masc.Keeper_activation_mode.On_demand };
+       check bool "on_demand mode restores the owner" true (Atomic.get runner_ready);
        let executor_started_in_time =
          wait_until
            ~clock

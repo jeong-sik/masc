@@ -1,15 +1,12 @@
 (** Which image a Keeper's [sandbox_image] name means on this host.
 
     A Keeper names an image by a short name ([base], [ocaml]). The catalog
-    file [sandbox-images.toml] in the config root says, for each name and
-    each image store, which build is current: its tag and its digest, plus
-    the one it replaced. The repository ships the names with no builds; a
-    host fills in what it has built, so the catalog is per host. A registry
+    repository's [config/sandbox-images.toml] supplies the names. The host's
+    [sandbox-images.toml] stores only promoted builds: for each name and image
+    store, the current tag and digest, plus the one it replaced. A registry
     is not involved, and a digest is only true where that image was built.
 
     {v
-    [images.base]                       # a name, nothing built here yet
-
     [images.ocaml.apple_container]      # built and promoted on this host
     reference = "masc-sandbox-ocaml:20260924T1130Z-3f9a1c07"
     digest    = "sha256:…"
@@ -58,7 +55,13 @@ type entry =
 type t
 
 val entries : t -> entry list
-(** In file order. *)
+(** Shipped names in file order. Host builds for names removed from the shipped
+    catalog are excluded. *)
+
+val orphaned_builds : t -> entry list
+(** Host builds whose names are no longer shipped. They cannot resolve or be
+    promoted, but are retained on save so a catalog update cannot erase them.
+    Operators can inspect and remove the stale entries deliberately. *)
 
 type parse_error =
   | Toml_syntax of string
@@ -71,6 +74,8 @@ type parse_error =
   | Invalid_digest of { path : string list; value : string }
   | Invalid_reference of { path : string list; value : string }
       (** Not [repository:tag] as {!pinned} describes it. *)
+  | Shipped_build of { name : string }
+  | Host_name_without_build of { name : string }
 
 val parse_error_to_string : parse_error -> string
 
@@ -89,23 +94,25 @@ val file_name : string
 (** ["sandbox-images.toml"], directly under the config root. *)
 
 type load_error =
-  | Missing of { path : string }
   | Unreadable of { path : string; detail : string }
   | Invalid of { path : string; error : parse_error }
 
 val load_error_to_string : load_error -> string
 
-val load : config_root:string -> (t, load_error) result
+val load : config_root:string -> shipped:string -> (t, load_error) result
+(** Read names from [shipped] on every load, and promotions from the host
+    file when it exists. Host builds for names no longer shipped are retained
+    as {!orphaned_builds}; builds in [shipped] fail. *)
 
 type snapshot
 (** The catalog file's bytes as they were read, or its absence. {!save}
     compares against it. *)
 
 val load_for_change :
-  config_root:string -> shipped:string option -> (t * snapshot, load_error) result
-(** Read the host's catalog to change it. A host that has not written one yet
-    starts from [shipped], the copy of [config/sandbox-images.toml] the binary
-    carries; the two are never merged. *)
+  config_root:string -> shipped:string -> (t * snapshot, load_error) result
+(** Read shipped names and host builds together, returning the host-file
+    snapshot for compare-and-replace. If the host has not saved a build yet,
+    the snapshot is absent. *)
 
 (** {1 Changing what a name means on this host} *)
 
@@ -129,17 +136,33 @@ val rollback : t -> name:string -> store:store -> (t, change_error) result
     first. *)
 
 val to_toml : t -> string
-(** The catalog as the file {!parse} reads, names in order, one table per
-    promoted store. {!parse} of the result gives back the same catalog. *)
+(** The host file, containing only promoted store tables. Unbuilt names are
+    supplied by [shipped] during {!load}. *)
 
 type save_error =
   | Changed_since_read of { path : string }
       (** Another writer changed the file after [expected] was read. Nothing
           was written. *)
   | Unwritable of { path : string; detail : string }
+      (** The target was not replaced. *)
+  | Written_but_durability_unconfirmed of { path : string; detail : string }
+      (** Rename happened but parent sync failed. Inspect the file before a
+          retry, especially before another rollback. *)
+  | Saved_but_unlock_failed of { path : string; detail : string }
+      (** The new catalog was written. Lock release failed afterward; inspect
+          the file before retrying, particularly before another rollback. *)
 
 val save_error_to_string : save_error -> string
 
 val save : config_root:string -> expected:snapshot -> t -> (unit, save_error) result
-(** Replace the file with {!to_toml} atomically (fsync, then rename), but
-    only if it still holds what [expected] read. *)
+(** Replace the file with {!to_toml} atomically (payload sync, rename, then
+    parent-directory sync), but
+    only if it still holds what [expected] read. A process lock covers the
+    comparison and replacement, so concurrent writers cannot both pass the
+    same expected snapshot. *)
+
+module For_testing : sig
+  val save_with :
+    write:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
+    config_root:string -> expected:snapshot -> t -> (unit, save_error) result
+end

@@ -4490,52 +4490,62 @@ let context_inspector_content_lines ~cols state : context_pane_body =
               else "  No context reading has been requested.")
           ]
         , None )
-  | Some (_, reading) ->
+  | Some (_, Masc_tui_context_inspector.Request_failed detail) ->
+      Plain
+        ( [ (Theme.bad ()) ^ "  Context read failed: "
+            ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]
+        , None )
+  | Some (_, Masc_tui_context_inspector.Turn_read_failed { detail; forecast }) ->
+      let detail = Keeper_chat.terminal_safe_text detail in
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Composition ->
-           (match reading.turn with
-            | Ok selection ->
-                Plain
-                  ( context_composition_lines ~cols
-                      ~turn_back:state.context_inspector_turn_back
-                      ~forecast:reading.Masc_tui_context_inspector.forecast
-                      selection
-                  , None )
-            | Error detail ->
-                Plain
-                  ( [ (Theme.bad ()) ^ "  Composition unavailable: "
-                      ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
-                    ; ""
-                    ]
-                    @ context_next_request_lines ~cols
-                        ~scale:Masc_tui_token_scale.fleet
-                        ~show_scale_note:true
-                        reading.Masc_tui_context_inspector.forecast
-                  , None ))
+           Plain
+             ( [ (Theme.bad ()) ^ "  Composition unavailable: " ^ detail
+                 ^ Ansi.reset
+               ; ""
+               ]
+               @ context_next_request_lines ~cols
+                   ~scale:Masc_tui_token_scale.fleet
+                   ~show_scale_note:true forecast
+             , None )
        | Masc_tui_context_inspector.Exact_input ->
-           (match reading.provider_input with
+           Plain
+             ( [ (Theme.bad ()) ^ "  Exact input unavailable: " ^ detail
+                 ^ Ansi.reset ]
+             , None )
+       | Masc_tui_context_inspector.Input_map ->
+           Plain
+             ( [ (Theme.bad ()) ^ "  Input map unavailable: " ^ detail
+                 ^ Ansi.reset ]
+             , None ))
+  | Some
+      ( _
+      , Masc_tui_context_inspector.Turn_read
+          { selection; provider_input; response; forecast } ) ->
+      (match state.context_inspector_tab with
+       | Masc_tui_context_inspector.Composition ->
+           Plain
+             ( context_composition_lines ~cols
+                 ~turn_back:state.context_inspector_turn_back ~forecast selection
+             , None )
+       | Masc_tui_context_inspector.Exact_input ->
+           (match provider_input with
             | Ok input ->
-                let response, response_parts =
-                  match reading.turn with
-                  | Ok selection ->
-                      ( Some selection.Masc_tui_context_inspector.latest
-                      , (match reading.response with
-                        | Ok parts -> Some parts
-                        | Error _ -> None) )
-                  | Error _ -> (None, None)
+                let response_parts =
+                  match response with
+                  | Ok parts -> Some parts
+                  | Error _ -> None
                 in
                 (* The request tab reads sizes at the newest turn's scale;
                    its body is that turn's, whichever row is stepped to
                    on the stack tab. *)
                 let scale =
-                  match reading.turn with
-                  | Ok selection ->
-                      Masc_tui_token_scale.of_turn
-                        ~rows:selection.Masc_tui_context_inspector.rows
-                        selection.Masc_tui_context_inspector.latest
-                  | Error _ -> Masc_tui_token_scale.fleet
+                  Masc_tui_token_scale.of_turn
+                    ~rows:selection.Masc_tui_context_inspector.rows
+                    selection.Masc_tui_context_inspector.latest
                 in
-                context_exact_input_lines ~cols ~scale state ~response
+                context_exact_input_lines ~cols ~scale state
+                  ~response:(Some selection.Masc_tui_context_inspector.latest)
                   ~response_parts input
             | Error detail ->
                 Plain
@@ -4544,14 +4554,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                     ]
                   , None ))
        | Masc_tui_context_inspector.Input_map ->
-           (match reading.turn with
-            | Error detail ->
-                Plain
-                  ( [ (Theme.bad ()) ^ "  Input map unavailable: "
-                      ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
-                    ]
-                  , None )
-            | Ok selection -> (
+           (
                 (* The newest reading keeps the attributed row -- it is the
                    row the exact provider input was fetched for, so the join
                    on this tab stays honest. A stepped-back turn names its
@@ -4588,7 +4591,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                       , None )
                 | Some record ->
                     let provider_input =
-                      match reading.provider_input with
+                      match provider_input with
                       | Ok input -> Some input
                       | Error _ -> None
                     in
@@ -4597,7 +4600,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                         ~rows:selection.Masc_tui_context_inspector.rows record
                     in
                     context_input_map_lines ~cols ~scale state record
-                      provider_input)))
+                      provider_input))
 
 
 (* The rows a split body holds below the common summary: one pinned header

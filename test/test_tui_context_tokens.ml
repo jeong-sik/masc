@@ -134,25 +134,32 @@ let forecast_success : Masc_tui_context_inspector.forecast =
       ]
   }
 
-let context_pane_lines turn =
+let context_pane_lines ?(tab = Masc_tui_context_inspector.Composition) reading =
   let state =
     Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
   in
-  state.context_inspector_reading <-
-    Some
-      ( "alpha"
-      , { Masc_tui_context_inspector.turn
-        ; provider_input = Error "provider input not needed by this tab"
-        ; response = Error "response not needed by this tab"
-        ; forecast = Ok forecast_success
-        } );
+  state.context_inspector_tab <- tab;
+  state.context_inspector_reading <- Some ("alpha", reading);
   match Masc_tui_render_prim.context_inspector_content_lines ~cols:140 state with
   | Masc_tui_render_prim.Plain (rows, _) -> rows
   | Masc_tui_render_prim.Split _ ->
       Alcotest.fail "the composition tab must render one pane"
 
 let check_forecast_survives_turn_failure ~label ~failure ~turn =
-  let rows = context_pane_lines turn in
+  let reading =
+    match turn with
+    | Error detail ->
+        Masc_tui_context_inspector.Turn_read_failed
+          { detail; forecast = Ok forecast_success }
+    | Ok selection ->
+        Masc_tui_context_inspector.Turn_read
+          { selection
+          ; provider_input = Error "provider input not needed by this tab"
+          ; response = Error "response not needed by this tab"
+          ; forecast = Ok forecast_success
+          }
+  in
+  let rows = context_pane_lines reading in
   Alcotest.(check bool)
     (label ^ " keeps the historical failure visible")
     true
@@ -183,6 +190,23 @@ let test_turn_read_error_keeps_forecast () =
     ~label:"turn read error"
     ~failure:"turn-record read failed"
     ~turn:(Error "turn-record read failed")
+
+let test_whole_request_failure_is_one_reading () =
+  let reading =
+    Masc_tui_context_inspector.Request_failed "connection closed before any read"
+  in
+  List.iter
+    (fun tab ->
+       let rows = context_pane_lines ~tab reading in
+       Alcotest.(check int) "one failure row per tab" 1 (List.length rows);
+       Alcotest.(check bool) "one cause" true
+         (says "Context read failed: connection closed before any read" rows);
+       Alcotest.(check bool) "no invented forecast" false
+         (says "NEXT REQUEST" rows))
+    [ Masc_tui_context_inspector.Composition
+    ; Masc_tui_context_inspector.Exact_input
+    ; Masc_tui_context_inspector.Input_map
+    ]
 
 (* 8,192 schema bytes at 18,000 tokens over 560,513 wire bytes is 263 tokens. *)
 let test_rows_read_at_this_turns_ratio () =
@@ -456,6 +480,8 @@ let () =
             `Quick test_empty_turn_record_keeps_forecast
         ; Alcotest.test_case "turn read error keeps the next request forecast"
             `Quick test_turn_read_error_keeps_forecast
+        ; Alcotest.test_case "whole inspector failure is one reading"
+            `Quick test_whole_request_failure_is_one_reading
         ] )
     ; ( "serialized request"
       , [ Alcotest.test_case "the band leads with the provider's count" `Quick

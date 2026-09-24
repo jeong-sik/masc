@@ -10460,7 +10460,8 @@ let surface_row_texts (state : state) : surface -> string list option =
         match state.context_inspector_reading with
         | Some
             ( _
-            , { Masc_tui_context_inspector.provider_input = Ok input; _ } ) ->
+            , Masc_tui_context_inspector.Turn_read
+                { provider_input = Ok input; _ } ) ->
             let labels =
               List.map
                 (fun (item : Masc_tui_context_inspector.exact_input_item) ->

@@ -61,7 +61,11 @@ let client_of_request request =
     | Some value when value <> "" -> Ok value
     | _ -> Error (name ^ " header is required") in
   let* lane = required "x-lane" in
-  let* () = if lane = Browser_lane.external_lane_name then Ok () else Error "unknown_lane" in
+  (* Only the live lane long-polls here: native-process identity owns each live
+     command queue, and automation keeps its session inside the server. *)
+  let* () = match Browser_lane.Lane_name.of_wire lane with
+    | Some Browser_lane.Lane_name.Live -> Ok ()
+    | Some Browser_lane.Lane_name.Automation | None -> Error "unknown_lane" in
   let* raw_id = required "x-browser-client-id" in
   let* client_id = Browser_lane.client_id_of_string raw_id in
   let* name = required "x-browser-name" in

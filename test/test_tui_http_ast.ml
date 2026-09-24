@@ -2278,7 +2278,7 @@ let test_missing_operator_token_is_reported () =
   check int "the window comes from the one place that states it" 1
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
        ~module_path:"bin/masc_tui_http.ml"
-       ~binding_name:"install_operator_token"
+       ~binding_name:"mint_operator_token"
        ~callees:[]
        ~identifiers:[ "Masc_tui_credential.self_mint_expiry_hours" ]);
   (* Both refusal surfaces must ask what this process actually holds. Passing a
@@ -2574,7 +2574,8 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      single place a row label can reach the terminal unsanitized. Seven
      callers now pass titles that came off the wire. *)
   (* The list sidebar is drawn beside more than one surface, so it sits with
-     the shared primitives. *)
+     the shared primitives. [write_list_sidebar] hands its labels to this
+     one, so this is where a row label reaches the terminal. *)
   check_identifiers ~module_path:"bin/masc_tui_render_prim.ml"
     ~binding:"write_list_sidebar_selection" ~callees:sanitizer_calls [ "label" ];
   check_fields "render_planning_list"
@@ -2782,6 +2783,32 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
        ~callee:"Terminal_text.short_timestamp");
   check_identifiers ~module_path:"bin/masc_tui_loader.ml" ~binding:"report"
     ~callees:[ "Masc_tui_ansi.Terminal_text.single_line" ] [ "path"; "err" ]
+;;
+
+(* The Keeper GitHub tab draws what the config stores and what this host
+   resolves from it. The second row is there to show a difference, and on a
+   plain login there is none: the live roster drew "signed in as
+   pangyo-preachers · scopes: gist, read:org, repo, workflow" twice, once
+   under each label. The rows are compared now, so agreement is one row
+   carrying both labels and only a difference costs two. *)
+let test_the_github_identity_rows_are_compared_before_they_are_drawn () =
+  check int "the two readings are compared" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_loader.ml"
+       ~binding_name:"github_identity_lines" ~callee:"String.equal")
+;;
+
+(* A server that leaves "authenticated" out, or sends it as something other
+   than a boolean, is not a server saying no. The row read "not signed in"
+   for it, which is the opposite of the truth for a Keeper that is signed in
+   and sends the operator to sign in again. Absence is its own reading. *)
+let test_an_unreported_sign_in_is_not_a_refusal () =
+  let holds needle =
+    Ast_grep.count_exact_string_literals_in_value_binding
+      ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"auth_status" ~needle
+  in
+  check int "the missing key has a reading of its own" 1
+    (holds "sign-in not reported");
+  check int "and the server's own no keeps its words" 1 (holds "not signed in")
 ;;
 
 (* A failed turn used to be drawn twice: the server records it in the
@@ -3139,6 +3166,14 @@ let () =
           "renderers sanitize untrusted terminal fields"
           `Quick
           test_renderers_sanitize_untrusted_terminal_fields;
+        test_case
+          "the GitHub identity rows are compared before they are drawn"
+          `Quick
+          test_the_github_identity_rows_are_compared_before_they_are_drawn;
+        test_case
+          "an unreported sign-in is not a refusal"
+          `Quick
+          test_an_unreported_sign_in_is_not_a_refusal;
         test_case
           "the session row filter reads the transcript"
           `Quick

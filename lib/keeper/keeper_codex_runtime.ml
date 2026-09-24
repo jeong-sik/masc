@@ -620,23 +620,22 @@ let recovery_failure_of_client_error = function
     Keeper_official_client_session_store.Protocol_failed
 ;;
 
-(* A Gate continuation may only resume the thread it was captured in. An
-   overflow there after a tool effect cannot be shrink-retried and the thread
-   cannot take the continuation again, so it is recorded [Vendor_session_full]
-   like the Claude Code lane: the Gate operation fails for good, the effect
-   stays on the attempt's evidence, and the next ordinary turn starts fresh.
-   An observation-free overflow keeps [Input_rejected Bootstrap_floor_exceeded]:
-   this lane resends its canonical context on resume, so the same-thread
-   shrink retry ([resolve_input_rejected_for_shrink_retry]) can still fit.
-   When that retry has nothing smaller left, [conclude_exhausted_gate_resume]
-   re-records it as [Vendor_session_full No_activity_observed]. *)
+(* A Gate continuation may only resume the thread it was captured in. When
+   that thread refuses the resume as a context overflow, the thread itself is
+   full: a Resume sends none of the conversation, so its input is the same at
+   every capacity, and no fresh start may carry the continuation. It is
+   recorded [Vendor_session_full], as in the Claude Code lane: the Gate
+   operation fails for good, whether a tool effect came first stays in the
+   record, and the next ordinary turn starts fresh. *)
 let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
   match thread_mode, gate_continuation, error with
   | ( Runtime_codex_app_server.Resume _
     , true
-    , Runtime_codex_app_server.Context_window_exceeded { tool_effect_attempted = true; _ } ) ->
+    , Runtime_codex_app_server.Context_window_exceeded { tool_effect_attempted; _ } ) ->
     Keeper_official_client_session_store.Vendor_session_full
-      Keeper_official_client_session_store.Activity_observed
+      (if tool_effect_attempted
+       then Keeper_official_client_session_store.Activity_observed
+       else Keeper_official_client_session_store.No_activity_observed)
   | (Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), _ ->
     recovery_failure_of_client_error error
 ;;
@@ -1478,10 +1477,10 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
    next capacity, so consuming the just-written
    [Input_rejected] recovery with the applicable explicit resolution
    cannot bypass the fence. A failed resolution is not retried here; the next
-   attempt's claim surfaces the refusal instead. *)
-(* A Gate is bound to its previous settlement. An observation-free rejected
-   input may retry there, but may never discard that session for a fresh one. *)
-let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_path ~keeper_name ~runtime_id
+   attempt's claim surfaces the refusal instead. A Gate continuation never
+   gets here ([same_run_retry_authorized] in [run]), so the retry is always a
+   fresh start. *)
+let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id
   ()
   =
   match Keeper_official_client_session_store.load ~base_path ~keeper_name with
@@ -1503,58 +1502,13 @@ let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_
          ~keeper_name
          ~expected
          ~recovery_id
-         ~resolution:(match official_client_continuation with
-           | Some _ -> Keeper_official_client_session_store.Retry_previous
-           | None -> Keeper_official_client_session_store.Restart_fresh)
+         ~resolution:Keeper_official_client_session_store.Restart_fresh
          ~resolved_by:"context-overflow-shrink-retry"
          ~resolved_at:(Time_compat.now ())
      with
      | Ok _ -> ()
      | Error _ -> ())
   | Ok _ -> ()
-;;
-(* The shrink sequence returns an error only once it will not retry, so a
-   Gate continuation's floor rejection still on record at that point is final:
-   the thread refused every smaller input, and no fresh session may carry the
-   continuation. Left as [Input_rejected], the Gate would wait on an operator
-   whose only resume is [Retry_previous] into the same full thread. It is
-   re-recorded [Vendor_session_full No_activity_observed], the same outcome as
-   an overflow after activity, so the Gate operation fails with that cause and
-   the next ordinary turn starts fresh. *)
-let conclude_exhausted_gate_resume ~gate_continuation ~base_path ~keeper_name ~runtime_id
-  ()
-  =
-  match gate_continuation, Keeper_official_client_session_store.load ~base_path ~keeper_name with
-  | false, _ | true, (Error _ | Ok None) -> ()
-  | ( true
-    , Ok
-        (Some
-           ({ Keeper_official_client_session_store.phase =
-                Recovery_required
-                  { failure = Input_rejected Bootstrap_floor_exceeded
-                  ; previous_settlement = Some _
-                  ; recovery_id
-                  ; _
-                  }
-            ; runtime_id = stored_runtime_id
-            ; _
-            } as expected)) )
-    when String.equal stored_runtime_id runtime_id ->
-    (match
-       Keeper_official_client_session_store.conclude_resume_session_full
-         ~base_path
-         ~keeper_name
-         ~expected
-         ~recovery_id
-         ~updated_at:(Time_compat.now ())
-     with
-     | Ok _ -> ()
-     | Error detail ->
-       Log.Keeper.error
-         ~keeper_name
-         "Codex Gate resume stayed an input rejection; recording the full thread failed: %s"
-         detail)
-  | true, Ok (Some _) -> ()
 ;;
 (* Uncertainty cannot erase stronger evidence from an earlier attempt. The
    compare-and-set also preserves an effect observed concurrently. *)
@@ -1604,9 +1558,14 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
       ~starting_capacity:
         (starting_capacity_of_declared_prompt_limit declared_max_prompt_bytes)
+      (* A continuation always resumes its original thread, and a Resume's
+         input is the same at every capacity; the retry would be a fresh
+         start, which a continuation forbids. Its overflow ends the turn on the
+         typed error instead ([recovery_failure_of_attempt]). *)
       ~same_run_retry_authorized:(fun () ->
-        Keeper_provider_attempt_effect.allows_same_turn_retry
-          (Atomic.get effect_disposition)
+        Option.is_none official_client_continuation
+        && Keeper_provider_attempt_effect.allows_same_turn_retry
+             (Atomic.get effect_disposition)
         && Option.is_some !observed_next_shrink_capacity_bytes)
       ~shrink_capacity:(fun ~capacity:_ ~default_capacity ->
         Option.value
@@ -1622,7 +1581,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
       ~shrink_admits_history:(fun ~capacity:_ -> true)
       ~on_shrink_retry:
         (fun ~shrink_attempt ~previous_capacity:previous_capacity_bytes ~capacity:capacity_bytes ->
-          resolve_input_rejected_for_shrink_retry ~official_client_continuation
+          resolve_input_rejected_for_shrink_retry
             ~base_path
             ~keeper_name
             ~runtime_id
@@ -1676,15 +1635,6 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
           ~config)
       ())
   in
-  (match result with
-   | Ok _ -> ()
-   | Error _ ->
-     conclude_exhausted_gate_resume
-       ~gate_continuation:(Option.is_some official_client_continuation)
-       ~base_path
-       ~keeper_name
-       ~runtime_id
-       ());
   { result
   ; settled_session = Atomic.get settled_session
   ; effect_disposition = Atomic.get effect_disposition
@@ -1711,5 +1661,4 @@ module For_testing = struct
   let codex_error_to_core_error = codex_error_to_core_error
   let recovery_failure_of_client_error = recovery_failure_of_client_error
   let recovery_failure_of_attempt = recovery_failure_of_attempt
-  let conclude_exhausted_gate_resume = conclude_exhausted_gate_resume
 end

@@ -260,7 +260,10 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
   check bool "the turn input carries no earlier conversation" false
     (String_util.contains_substring sent "Previous completed work")
 
-let test_resumed_context_overflow_shrinks_configuration () =
+let test_continuation_resume_overflow_ends_on_a_full_thread () =
+  (* A Resume's input is the same at every capacity, and a continuation may
+     not move to a fresh thread, so its overflow is not retried: the thread is
+     recorded full and the turn ends on the typed overflow. *)
   with_fixture ~overflow_resume:true @@ fun ~run ~capture ~reports:_ ->
   let first = run ~instructions:"Keeper instructions" ~world:"world" () in
   successful first;
@@ -275,25 +278,23 @@ let test_resumed_context_overflow_shrinks_configuration () =
   let checkpoint : Keeper_semantic_execution.official_client_checkpoint =
     {client_kind=settled.client_kind;runtime_id=settled.runtime_id;session_id;turn_id;
      tool_surface_sha256=settled.tool_surface_sha256;frame=seed.frame} in
-  let initial_messages = List.init 64 (fun index -> Agent_core.Types.user_msg
-    (Printf.sprintf "%d:%s" index (String.make 4096 'x'))) in
-  successful (run ~initial_messages ~official_client_continuation:checkpoint
-    ~official_client_original_turn:checkpoint ~instructions:"Keeper instructions" ~world:"world" ());
+  let attempt = run ~official_client_continuation:checkpoint
+    ~instructions:"Keeper instructions" ~world:"world" () in
+  check bool "the overflow ends the turn" true
+    (Result.is_error attempt.Keeper_codex_runtime.result);
   let resumes = read_requests capture |> List.filter (fun row -> member "method" row = `String "thread/resume") in
-  match resumes with
-  | [first; second] ->
-    let wire row = row |> member "params" |> member "developerInstructions" |> text in
-    check bool "retry sends smaller replacement configuration" true
-      (String.length (wire second) < String.length (wire first));
-    List.iter (fun row ->
-      check string "both attempts retain original vendor session" session_id
-        (row |> member "params" |> member "threadId" |> text);
-      let snapshot = wire row |> String.split_on_char '\n' |> List.rev |> List.hd |> Yojson.Safe.from_string in
-      check int "source provenance remains whole even when projection shrinks" 64
-        (snapshot |> member "source_message_count" |> Yojson.Safe.Util.to_int);
-      check string "original operation turn survives capacity retry" turn_id
-        (snapshot |> member "original_vendor_turn" |> member "turn_id" |> text)) resumes
-  | _ -> fail "expected exactly one context-capacity retry on the same vendor thread"
+  (match resumes with
+   | [resume] ->
+     check string "the continuation resumed the original thread" session_id
+       (resume |> member "params" |> member "threadId" |> text)
+   | rows -> fail (Printf.sprintf "expected one resume and no retry, saw %d" (List.length rows)));
+  match Keeper_official_client_session_store.load ~base_path:(Filename.dirname capture)
+          ~keeper_name:"context-fixture" with
+  | Ok (Some { phase = Recovery_required { failure; _ }; _ }) ->
+    check bool "the thread is recorded full, with no activity observed" true
+      (failure = Keeper_official_client_session_store.(Vendor_session_full No_activity_observed))
+  | Ok _ -> fail "the overflow left no recovery record"
+  | Error detail -> fail detail
 
 (* 64 messages of about 4 KiB: roughly 262 KiB of history, so the fixture can
    cross a declared limit without building a large request. *)
@@ -400,7 +401,7 @@ let () = run "Keeper current Codex context" ["native requests",[
   test_case "a declared prompt limit windows a Start" `Quick test_declared_limit_windows_start;
   test_case "a Resume sends none of the history" `Quick test_resume_sends_no_history;
   test_case "a prompt limit above the history changes nothing" `Quick test_declared_limit_above_history_changes_nothing;
-  test_case "resumed context overflow shrinks replacement configuration" `Quick test_resumed_context_overflow_shrinks_configuration;
+  test_case "a continuation's resume overflow ends on a full thread" `Quick test_continuation_resume_overflow_ends_on_a_full_thread;
   test_case "cooperative native resume does not replay original input" `Quick test_cooperative_resume_sends_only_remaining_work_instruction;
   test_case "a resume carries per-turn context in front of the goal" `Quick test_resume_carries_per_turn_context_in_front_of_the_goal;
   test_case "context injection must be acknowledged before model turn" `Quick test_rejected_context_never_submits_turn]]

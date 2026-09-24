@@ -897,6 +897,10 @@ let is_invisible_codepoint code =
   || (code >= 0x202A && code <= 0x202E)
   || (code >= 0x2066 && code <= 0x2069)
   || code = 0xFEFF
+  (* #38501: the tag block copies ASCII into characters a terminal draws as
+     nothing (U+E0061 is a tag "a"), so a sentence can be spelled twice --
+     once for the reader and once for the bytes the approval hash covers. *)
+  || (code >= 0xE0000 && code <= 0xE007F)
 ;;
 
 let zero_width_joiner = 0x200D
@@ -933,6 +937,66 @@ let opens_pictograph text index =
   | Some scalar -> Uucp.Emoji.is_extended_pictographic scalar
   | None -> false
 
+(* The tags that are not hiding anything: the ones spelling a subregion flag.
+   U+1F3F4 opens the sequence, a subdivision code follows, and U+E007F closes
+   it: U+1F3F4 U+E0067 U+E0062 U+E0073 U+E0063 U+E0074 U+E007F is Scotland.
+   [Masc_tui_message_layout] counts that block as part of one emoji cluster,
+   and the exemption here is deliberately narrower than that block: only the
+   shape UTS #51 gives a subdivision, three to seven tag characters drawn
+   from lowercase letters and digits. The wider grammar would carry a
+   sentence -- tag space and tag punctuation spell one -- and a reader would
+   see a single flag where the hash covers words. The sequence is admitted
+   whole or not at all: a run that never reaches the terminator, or one
+   shaped like anything but a subdivision, is loose text spelled in invisible
+   characters, and the flag in front of it stays visible. *)
+let tag_small_letter_first = 0xE0061
+let tag_small_letter_last = 0xE007A
+let tag_digit_first = 0xE0030
+let tag_digit_last = 0xE0039
+let tag_spec_min = 3
+let tag_spec_max = 7
+let cancel_tag = 0xE007F
+let waving_black_flag = 0x1F3F4
+
+let is_tag_spec code =
+  (code >= tag_small_letter_first && code <= tag_small_letter_last)
+  || (code >= tag_digit_first && code <= tag_digit_last)
+
+(* Bytes of a complete subdivision sequence starting at [index] -- the
+   position just past the flag -- not counting the flag itself. [None] when
+   the run is too short or too long for a subdivision, meets a tag character
+   outside the lowercase-and-digit shape, or ends without the terminator. *)
+let tag_sequence_bytes text index =
+  let length = String.length text in
+  let rec scan position ~spec_count =
+    if position >= length
+    then None
+    else (
+      let decoded = String.get_utf_8_uchar text position in
+      if not (Uchar.utf_decode_is_valid decoded)
+      then None
+      else (
+        let step = Uchar.utf_decode_length decoded in
+        let code = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
+        if code = cancel_tag
+        then (
+          if spec_count >= tag_spec_min && spec_count <= tag_spec_max
+          then Some (position + step - index)
+          else None)
+        else if is_tag_spec code && spec_count < tag_spec_max
+        then scan (position + step) ~spec_count:(spec_count + 1)
+        else None))
+  in
+  scan index ~spec_count:0
+
+(* [\uXXXX] has room for the basic plane only and the tag block needs five
+   digits (U+E0061), so a wider fixed-width form of the same family carries
+   them: the reader can still see where one escape ends and the next begins. *)
+let escape_text code =
+  if code <= 0xFFFF
+  then Printf.sprintf "\\u%04X" code
+  else Printf.sprintf "\\U%08X" code
+
 let escape_invisible text =
   let output = Buffer.create (String.length text) in
   let length = String.length text in
@@ -944,28 +1008,39 @@ let escape_invisible text =
       let scalar = Uchar.utf_decode_uchar decoded in
       let valid = Uchar.utf_decode_is_valid decoded in
       let code = Uchar.to_int scalar in
-      let joins_two_pictographs =
-        valid
-        && code = zero_width_joiner
-        && after_pictograph
-        && opens_pictograph text (index + step)
+      let flag_tags =
+        if valid && code = waving_black_flag
+        then tag_sequence_bytes text (index + step)
+        else None
       in
-      if valid && is_invisible_codepoint code && not joins_two_pictographs
-      then Buffer.add_string output (Printf.sprintf "\\u%04X" code)
-      else Buffer.add_substring output text index step;
-      let after_pictograph =
-        if not valid
-        then false
-        else if Uucp.Emoji.is_extended_pictographic scalar
-        then true
-        (* Only a joiner that actually joined carries the state: an escaped
-           one has been written out as text, so what follows it no longer sits
-           inside an emoji and a second joiner cannot ride through on it. *)
-        else if continues_pictograph scalar || joins_two_pictographs
-        then after_pictograph
-        else false
-      in
-      walk (index + step) ~after_pictograph)
+      match flag_tags with
+      | Some tail ->
+        Buffer.add_substring output text index (step + tail);
+        walk (index + step + tail) ~after_pictograph:true
+      | None ->
+        let joins_two_pictographs =
+          valid
+          && code = zero_width_joiner
+          && after_pictograph
+          && opens_pictograph text (index + step)
+        in
+        if valid && is_invisible_codepoint code && not joins_two_pictographs
+        then Buffer.add_string output (escape_text code)
+        else Buffer.add_substring output text index step;
+        let after_pictograph =
+          if not valid
+          then false
+          else if Uucp.Emoji.is_extended_pictographic scalar
+          then true
+          (* Only a joiner that actually joined carries the state: an escaped
+             one has been written out as text, so what follows it no longer
+             sits inside an emoji and a second joiner cannot ride through on
+             it. *)
+          else if continues_pictograph scalar || joins_two_pictographs
+          then after_pictograph
+          else false
+        in
+        walk (index + step) ~after_pictograph)
   in
   walk 0 ~after_pictograph:false;
   Buffer.contents output

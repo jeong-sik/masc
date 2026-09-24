@@ -8,7 +8,7 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["#38700", "#38633"]
-implementation_prs: []
+implementation_prs: ["#38633"]
 ---
 
 # RFC-0470 — masc 서버는 어떻게 띄워도 제어 터미널을 갖지 않는다
@@ -46,7 +46,9 @@ masc-tui 가 띄운 서버에서는 이 일이 생기지 않는다. masc-tui 는
 
 ## 3. 버린 방법
 
-#38633 에서 셋을 재 보고 버렸다.
+#38633 검토 과정에서 아래 셋을 재 보고 버렸다. #38633 의 현재 변경은 §4.4 의
+터미널 stdin 처리만 담고 있으며, 아래 신호 무시 방식은 담지 않는다. RFC 의 서버 분리,
+감독, `masc-stdio`, SIGPIPE 계약은 아직 구현되지 않았다.
 
 ### 3.1 자식마다 새 세션 (`POSIX_SPAWN_SETSID`)
 
@@ -133,12 +135,16 @@ masc-tui 가 띄운 서버에서는 이 일이 생기지 않는다. masc-tui 는
 
 `lib/process/posix_spawn_stubs.c` 는 지금 자기 그룹에 있는 자식에게만 터미널 stdin 을
 `/dev/null` 로 바꿔 준다. 이 규칙을 모든 자식으로 넓힌다. 서버에는 터미널이 없어지지만, `masc setup`
-같은 CLI 는 터미널을 가진 채 같은 스텁으로 자식을 띄우기 때문이다. #38633 에 이미 있다.
+같은 CLI 는 터미널을 가진 채 같은 스텁으로 자식을 띄우기 때문이다. 이 stdin 변경은
+#38633 의 현재 head 에 있다. §3.2 의 SIGTTIN·SIGTTOU 무시는 그 PR 에 포함되지 않는다.
 
 같은 스텁은 자식의 SIGPIPE 를 기본값으로 되돌린다 (`POSIX_SPAWN_SETSIGDEF`). 지금은 신호 마스크만 비운다
-(`POSIX_SPAWN_SETSIGMASK`). macOS 의 `eio_posix` 가 이미 무시한 SIGPIPE 를 자식이 물려받지
-않게 하는 독립적인 spawn 계약이다. 파이프 앞쪽 명령이 SIGPIPE 로 끝나지 않고 쓰기 오류를 받는
-문제를 막는다. 서버의 콘솔 출력에는 파이프를 쓰지 않으므로 서버에 새 SIGPIPE 무시 설정은 넣지 않는다.
+(`POSIX_SPAWN_SETSIGMASK`). Eio 의
+[`eio_linux`](https://github.com/ocaml-multicore/eio/blob/main/lib_eio_linux/eio_linux.ml) 와
+[`eio_posix`](https://github.com/ocaml-multicore/eio/blob/main/lib_eio_posix/eio_posix.ml)는
+둘 다 시작할 때 SIGPIPE 를 무시한다. 자식이 이 설정을 물려받지 않게 하는 독립적인 spawn 계약이다.
+파이프 앞쪽 명령이 SIGPIPE 로 끝나지 않고 쓰기 오류를 받는 문제를 막는다. 서버의 콘솔 출력에는
+파이프를 쓰지 않으므로 서버에 새 SIGPIPE 무시 설정은 넣지 않는다.
 
 ## 5. 검증
 

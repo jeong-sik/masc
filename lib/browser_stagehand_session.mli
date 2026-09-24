@@ -24,6 +24,8 @@ type attach_error =
       (** The runtime's receiver or marker did not appear within [worker_wait_s]. *)
   | Runtime_marker of string
   | Runtime_incompatible of { found : string; supported : int }
+  | Init_unanswered of float
+      (** [stagehand.init] did not answer within this many seconds. Its effect is unknown. *)
   | Init_failed of call_failure
   | Cdp of Browser_cdp.failure
 
@@ -35,6 +37,8 @@ and call_failure =
   | Not_delivered of string  (** The message never reached the extension. *)
   | Rejected of Wire.rpc_error  (** The extension answered with an error. *)
   | Lost of string  (** No answer. The call may or may not have taken effect. *)
+  | Answer_unreceived of float
+      (** An init answer did not arrive within this many seconds. Its effect is unknown. *)
 
 (** What the session reports for the operator's log. *)
 type event =
@@ -58,14 +62,16 @@ type model = Yojson.Safe.t -> (Yojson.Safe.t, Wire.rpc_error) result
 
 type t
 
-(** [create ~sw ~clock ~worker_wait_s ~model ~log] is an unattached session.
+(** [create ~sw ~clock ~worker_wait_s ~init_answer_s ~model ~log] is an unattached session.
     Fibers that answer the extension run on [sw]. [worker_wait_s] bounds the
     wait for the extension's service worker to appear after loading, and then
-    the wait for its runtime to be ready. *)
+    the wait for its runtime to be ready. [init_answer_s] bounds only the
+    answer to [stagehand.init]. *)
 val create :
   sw:Eio.Switch.t
   -> clock:_ Eio.Time.clock
   -> worker_wait_s:float
+  -> init_answer_s:float
   -> model:model
   -> log:(event -> unit)
   -> t

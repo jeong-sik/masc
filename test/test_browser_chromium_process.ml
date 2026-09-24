@@ -49,6 +49,8 @@ let test_leftover () =
   check leftover "the recorded browser" (P.Stop_recorded_browser 4242) (P.leftover owner ~command:(Some running));
   check leftover "another profile" P.Not_the_recorded_browser
     (P.leftover owner ~command:(Some (chrome ^ " --user-data-dir=/elsewhere")));
+  check leftover "profile path prefix" P.Not_the_recorded_browser
+    (P.leftover owner ~command:(Some (chrome ^ " --user-data-dir=" ^ profile ^ "-old")));
   check leftover "another program" P.Not_the_recorded_browser
     (P.leftover owner ~command:(Some ("/usr/bin/python3 --user-data-dir=" ^ profile)));
   check leftover "no such process" P.Not_the_recorded_browser (P.leftover owner ~command:None);

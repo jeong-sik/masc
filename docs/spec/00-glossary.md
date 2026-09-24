@@ -1216,6 +1216,24 @@ status: reference
   `Document`, `Audio`. 정본은 `packages/agent_core/lib/llm_provider/types.mli`의
   `content_block`이다.
 
+**Input Speaker (입력 화자)**
+: Keeper 대화에서 각 `User` message를 누가 발화했는지를 나타내는 메타데이터
+  (`agent_core.input_speaker.v1`, `Agent_core.Types.Input_speaker.key`). 메시지가 생성될
+  때 고정 스탬프되며, 이후 메시지 본문에서 추론하거나 변경하지 않는다(RFC-0468 §3.2).
+  닫힌 타입(`Keeper_input_speaker.t`)은 둘이다 — 외부 주체인 `Person`(`Owner`·`Keeper id`·
+  `External {channel; user_id; user_name}`)과 호스트가 작성한 프롬프트인 `Host_prompt`
+  (`Autonomous_wake {answered_asks}`·`Official_client_resume`). `Keeper`는 생성 지점에서
+  레지스트리와 일치된 등록된 Keeper만 가리키며, 호스트 자율 기상(`Autonomous_wake`)의 답변된
+  Ask들은 요청 형태 보존을 위해 단일 메시지에 인용되므로 `answered_asks`가 각 행에 답변한
+  사람 목록을 순서대로 나열한다.
+  Librarian은 대화 헤더에 `speaker=...`로 렌더링하며, 메타데이터 부재(`Absent`) 시
+  `speaker=unknown`, 잘못된 형태(`Invalid`)면 `speaker=invalid(...)`, 중복(`Duplicate`)이면
+  `speaker=duplicate`로 표기해 패스를 중단하지 않고 대화를 계속 읽는다.
+  이 메타데이터는 LLM provider로 전송되지 않고(`Input_speaker.without`), 공식 클라이언트
+  이력 봉투 및 스냅숏 해시에서 제외되며, 승인 입학 다이제스트(`Keeper_approval_input_admission.admission_digest`)
+  에서도 제외된다.
+  → [Keeper_input_speaker](../../lib/keeper/keeper_input_speaker.mli)
+
 **Atom**
 : History를 자를 때 쓰는 가장 작은 단위. `User` message 하나, 또는 `Assistant`
   message 하나와 그것에 답한 `Tool` message들이다. 따로 저장되지 않고 History를

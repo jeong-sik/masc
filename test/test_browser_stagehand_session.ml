@@ -43,6 +43,8 @@ type fake =
   ; mutable loaded_id : string option
   ; mutable listings_without_worker : int
   ; mutable marker : Yojson.Safe.t
+  ; mutable looks_before_ready : int
+  ; mutable readiness_throws : bool
   ; mutable act : act_behaviour
   ; mutable held_act : Yojson.Safe.t option
   ; mutable waiting_on_model : (Yojson.Safe.t * Yojson.Safe.t) option
@@ -124,6 +126,20 @@ let targets fake =
     [ page ]
 ;;
 
+(* What the readiness check reads: the runtime installs its receiver before
+   its marker, and where CDP evaluates in the worker the check can throw. *)
+let readiness fake =
+  if fake.readiness_throws then
+    obj
+      [ "result", obj [ "type", str "object"; "value", obj [] ]
+      ; "exceptionDetails", obj [ "text", str "Uncaught"; "exception", obj [ "description", str "ReferenceError: setTimeout is not defined" ] ]
+      ]
+  else if fake.looks_before_ready > 0 then (
+    fake.looks_before_ready <- fake.looks_before_ready - 1;
+    obj [ "result", obj [ "type", str "object"; "value", obj [ "receiver", `Bool true; "marker", `Null ] ] ])
+  else obj [ "result", obj [ "type", str "object"; "value", obj [ "receiver", `Bool true; "marker", fake.marker ] ] ]
+;;
+
 let browser_receives fake frame =
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string frame in
@@ -139,7 +155,7 @@ let browser_receives fake frame =
   | "Target.attachToTarget" -> answer (obj [ "sessionId", str worker ])
   | "Runtime.evaluate" ->
     let expression = member "expression" params |> to_string in
-    if String.equal expression Wire.readiness_expression then answer (obj [ "result", obj [ "type", str "object"; "value", fake.marker ] ])
+    if String.equal expression Wire.readiness_expression then answer (readiness fake)
     else (
       match delivered expression with
       | Some message ->
@@ -170,6 +186,8 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
     ; loaded_id = None
     ; listings_without_worker = 0
     ; marker = marker "2.0.0"
+    ; looks_before_ready = 0
+    ; readiness_throws = false
     ; act = Ask_the_model
     ; held_act = None
     ; waiting_on_model = None
@@ -253,6 +271,14 @@ let test_worker_found_after_loading () =
   | Error _ -> fail "a worker listed a few polls after loading is found"
 ;;
 
+let test_runtime_ready_after_a_few_looks () =
+  with_session ~configure:(fun fake -> fake.looks_before_ready <- 3)
+  @@ fun h ->
+  match attach h with
+  | Ok _ -> check int "every early look was answered" 0 h.fake.looks_before_ready
+  | Error _ -> fail "a runtime whose marker comes after its receiver is waited for"
+;;
+
 let calls_refused_after_failed_attach h =
   match Session.call h.session goto with
   | Error (Session.Connection_gone _) -> ()
@@ -271,6 +297,19 @@ let test_attach_refusals () =
    (match attach h with
     | Error Session.Service_worker_absent -> ()
     | _ -> fail "no worker within the wait is refused");
+   calls_refused_after_failed_attach h);
+  (with_session ~configure:(fun fake -> fake.readiness_throws <- true)
+   @@ fun h ->
+   (match attach h with
+    | Error (Session.Runtime_marker detail) ->
+      check string "the thrown cause is reported" "the readiness check threw: ReferenceError: setTimeout is not defined" detail
+    | _ -> fail "a readiness check that threw is refused with its cause");
+   calls_refused_after_failed_attach h);
+  (with_session ~configure:(fun fake -> fake.looks_before_ready <- max_int)
+   @@ fun h ->
+   (match attach h with
+    | Error Session.Runtime_not_ready -> ()
+    | _ -> fail "a runtime never ready within the wait is refused");
    calls_refused_after_failed_attach h);
   with_session ~configure:(fun fake -> fake.marker <- marker "3.1.0")
   @@ fun h ->
@@ -404,12 +443,27 @@ let test_protocol_major () =
   check string "the version masc sends" "2.0.0" Wire.protocol_version
 ;;
 
+let test_readiness_of_json () =
+  let read receiver marker_json = Wire.readiness_of_json (obj [ "receiver", receiver; "marker", marker_json ]) in
+  let is_ready = function Ok (Wire.Ready _) -> true | Ok Wire.Not_ready | Error _ -> false in
+  let not_ready = function Ok Wire.Not_ready -> true | Ok (Wire.Ready _) | Error _ -> false in
+  check bool "receiver and marker" true (is_ready (read (`Bool true) (marker "2.0.0")));
+  check bool "receiver before its marker" true (not_ready (read (`Bool true) `Null));
+  check bool "marker before its receiver" true (not_ready (read (`Bool false) (marker "2.0.0")));
+  check bool "neither" true (not_ready (read (`Bool false) `Null));
+  check bool "an answer of another shape" true (Result.is_error (Wire.readiness_of_json (obj [])))
+;;
+
 let () =
   run "browser_stagehand_session" [
-    "wire", [ test_case "protocol major is digits only" `Quick test_protocol_major ];
+    "wire", [
+      test_case "protocol major is digits only" `Quick test_protocol_major;
+      test_case "readiness needs the receiver and the marker" `Quick test_readiness_of_json;
+    ];
     "attach", [
       test_case "a matching extension attaches" `Quick test_attach;
       test_case "a worker listed after loading is found" `Quick test_worker_found_after_loading;
+      test_case "a runtime ready a few looks later is waited for" `Quick test_runtime_ready_after_a_few_looks;
       test_case "a failed attach ends the session" `Quick test_attach_refusals;
     ];
     "calls", [

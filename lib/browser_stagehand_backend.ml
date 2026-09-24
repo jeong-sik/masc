@@ -88,7 +88,11 @@ let run_session t ~headless ~opened ~resolve_opened =
   (match
     Eio.Switch.run (fun session_sw ->
       match t.open_session ~sw:session_sw ~headless ~log with
-      | Error detail -> not_opened detail
+      | Error detail ->
+        (* The browser may be running; it stops as this switch ends, and
+           until then the backend is closing, not opening. *)
+        t.state <- Closing;
+        not_opened detail
       | Ok (session, _init) ->
         let released, release = Eio.Promise.create () in
         t.state <- Open { session; tabs = Executor.Tabs.create (); release; stopped; ended };

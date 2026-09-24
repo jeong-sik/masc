@@ -8,4 +8,4 @@
  (flags (:standard -open Masc))
  (deps %{workspace_root}/config/sandbox-images.toml)
  (action (run %{test}))
- (libraries alcotest masc masc.masc_process))
+ (libraries alcotest masc masc.masc_process unix))

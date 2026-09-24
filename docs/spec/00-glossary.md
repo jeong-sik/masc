@@ -1469,7 +1469,7 @@ status: reference
 **Boot Meta Failure Cause (부팅 메타 실패 사유)**
 : Keeper 기동 및 구체화(materialization) 시점에 메타데이터 검증 실패를 표현하는 닫힌 구조화 사유(`Keeper_runtime.boot_meta_failure_cause`).
   - 닫힌 여섯 가지 variant:
-    1. `Missing_meta`: 저장된 메타데이터가 아예 없음(`keeper_up` 으로 먼저 만들어야 함).
+    1. `Missing_meta`: 저장된 메타데이터가 없음. 선언형 Keeper TOML 이 있으면 부팅이 스스로 구체화하므로, 이 사유가 남는 건 TOML 이 없을 때(`keeper_up` 필요)와 구체화 뒤에도 meta 가 안 써졌을 때뿐.
     2. `Meta_read_error`: 메타데이터 파일 읽기 또는 디코딩 실패.
     3. `Config_invalid`: TOML 파싱 또는 유효성 검사 실패.
     4. `Sandbox_profile_required`: 선언형 키퍼 프로필에 필수 `sandbox_profile` 누락.

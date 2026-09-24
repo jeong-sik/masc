@@ -583,9 +583,9 @@ let test_lane_unavailable_keeps_the_pending_row () =
        List.iter
          (fun outcome ->
             match outcome with
-            | Agent.Deferred reason ->
+            | Agent.Deferred deferral ->
               check bool "the deferral states a reason" true
-                (String.trim reason <> "")
+                (String.trim (Agent.deferral_detail deferral) <> "")
             | Agent.Committed ->
               fail "an unavailable evaluator must not commit a verdict"
             | Agent.Superseded ->
@@ -1343,6 +1343,153 @@ let test_reopen_from_verifying_cancels_a_hung_review () =
   check string "the new request committed" "awaiting_confirmation" (stored_phase config goal_id)
 ;;
 
+(* The idle window after a deferral, as ticks of the real clock. A plain
+   scheduler yield is not a tick here: a rescan waits on store reads, which
+   only finish when the loop polls for I/O. A rescan that a deferral started
+   registers its review within one tick; the window is several of them. *)
+let idle_ticks_after_deferral = 10
+let idle_tick_s = 0.02
+
+(* This Goal request's stall notices on the Board, read by the typed
+   metadata the notice itself compares, so posts from sibling tests on the
+   shared hearth cannot move the count. *)
+let goal_stall_posts ~goal_id ~request_id =
+  Board_dispatch.list_posts
+    ~hearth:"verification"
+    ~sort_by:Board_dispatch.Recent
+    ~limit:200
+    ()
+  |> List.filter_map (fun (post : Board.post) ->
+    match post.meta_json with
+    | Some (`Assoc fields)
+      when List.assoc_opt "type" fields = Some (`String "verification_stalled")
+           && List.assoc_opt "goal_id" fields = Some (`String goal_id)
+           && List.assoc_opt "request_id" fields = Some (`String request_id) ->
+      Some (post, fields)
+    | Some _ | None -> None)
+;;
+
+let pending_request_id config goal_id =
+  match (ledger_record config goal_id).completion with
+  | Goal_verification.Proof_pending { request_id; _ } -> request_id
+  | Goal_verification.Completion_idle
+  | Goal_verification.Proof_proven _
+  | Goal_verification.Proof_refuted _
+  | Goal_verification.Human_confirmed _ -> fail "expected a pending proof request"
+;;
+
+(* A deferral writes no ledger row, so nothing rescans: the Goal would sit in
+   Verifying with nobody told. Tick by tick on the real daemon: the boot scan
+   defers once and the Board gets one stall notice naming the gate and the
+   reason; the idle ticks start no review and post nothing. A Keeper asking
+   again while the lane is still down keeps the same request, so the second
+   deferral is not news and posts nothing (without the repeat check every
+   request_complete would post again, and each post invites the next call).
+   Once the lane is back, the next request_complete starts a review that
+   commits. *)
+let test_deferred_review_is_announced_and_waits_for_a_request () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Verifier lane is down" in
+  ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+  let request_id = pending_request_id config goal_id in
+  let registry = Goal_verification_run_registry.global () in
+  let completed_outcomes () =
+    reviews_of_goal registry goal_id
+    |> List.filter_map (fun (run : Goal_verification_run_registry.run) ->
+      match run.status with
+      | Goal_verification_run_registry.Completed { outcome; _ } -> Some outcome
+      | Goal_verification_run_registry.Running -> None)
+  in
+  let deferred_once, resolve_deferred_once = Eio.Promise.create () in
+  let deferred_twice, resolve_deferred_twice = Eio.Promise.create () in
+  let committed, resolve_committed = Eio.Promise.create () in
+  let saved_observer = Atomic.get Goal_verification_run_registry.change_observer_fn in
+  let observer () =
+    let deferrals =
+      List.fold_left (fun count outcome ->
+        match outcome with
+        | Goal_verification_run_registry.Deferred _ -> count + 1
+        | Goal_verification_run_registry.Committed ->
+          ignore (Eio.Promise.try_resolve resolve_committed ());
+          count
+        | Goal_verification_run_registry.Reviewed
+        | Goal_verification_run_registry.Superseded _
+        | Goal_verification_run_registry.Review_cancelled _
+        | Goal_verification_run_registry.Raised _ -> count)
+        0 (completed_outcomes ())
+    in
+    if deferrals >= 1 then ignore (Eio.Promise.try_resolve resolve_deferred_once ());
+    if deferrals >= 2 then ignore (Eio.Promise.try_resolve resolve_deferred_twice ())
+  in
+  let clock () = match !workspace_clock with
+    | Some clock -> clock
+    | None -> fail "test setup: with_workspace did not record its clock" in
+  let await_within label promise =
+    match Eio.Time.with_timeout (clock ()) hung_review_wait_s (fun () ->
+        Eio.Promise.await promise; Ok ()) with
+    | Ok () -> ()
+    | Error `Timeout -> fail (Printf.sprintf "%s did not happen within %.0fs" label hung_review_wait_s)
+  in
+  let stall_posts () = goal_stall_posts ~goal_id ~request_id in
+  Fun.protect ~finally:(fun () -> Atomic.set Goal_verification_run_registry.change_observer_fn saved_observer)
+    (fun () ->
+      Atomic.set Goal_verification_run_registry.change_observer_fn observer;
+      with_lane_and_reviewer ~slots:(fun () -> Ok ["verifier-a"])
+        ~reviewer:(recording_reviewer (ref []) ["verifier-a", Stub_unavailable])
+        (fun () ->
+          Eio.Switch.run (fun sw ->
+            Goal_verification_agent.start ~sw ~config;
+            await_within "the boot scan's deferral" deferred_once;
+            (match stall_posts () with
+             | [ (post, fields) ] ->
+               let text name =
+                 match List.assoc_opt name fields with
+                 | Some (`String value) -> value
+                 | Some _ | None -> fail ("stall notice lacks " ^ name) in
+               check string "the notice names a Goal review" "goal_review" (text "subject");
+               check string "the verifier authors the notice"
+                 (Masc_domain.completion_authority_actor Workspace_goals.verifier_authority)
+                 (Board.Agent_id.to_string post.author);
+               check bool "the notice carries the deferral reason" true
+                 (String_util.string_contains_substring
+                    ~needle:"test evaluator unavailable" (text "detail"));
+               (match List.assoc_opt "disposition" fields with
+                | Some disposition ->
+                  (match Verification_protocol.For_testing.stall_disposition_of_json disposition with
+                   | Some Verification_protocol.No_retry_armed -> ()
+                   | Some (Verification_protocol.Retry_scheduled _) ->
+                     fail "the Goal verifier arms no retry"
+                   | None -> fail "the disposition must decode")
+                | None -> fail "stall notice lacks its disposition");
+               check bool "the notice names the forward path" true
+                 (String_util.string_contains_substring
+                    ~needle:"request_complete" post.body)
+             | posts ->
+               fail (Printf.sprintf "expected one stall notice, got %d"
+                       (List.length posts)));
+            for _ = 1 to idle_ticks_after_deferral do Eio.Time.sleep (clock ()) idle_tick_s done;
+            check int "idle ticks start no review" 1 (List.length (reviews_of_goal registry goal_id));
+            check int "idle ticks post no notice" 1 (List.length (stall_posts ()));
+            check string "the Goal waits in verifying" "verifying" (stored_phase config goal_id);
+            ignore (must_succeed "a request while the lane is still down"
+              (transition ctx goal_id "request_complete"));
+            check string "asking again without evidence keeps the request" request_id
+              (pending_request_id config goal_id);
+            await_within "the second deferral" deferred_twice;
+            check int "the second request was reviewed" 2
+              (List.length (reviews_of_goal registry goal_id));
+            check int "the same stall is not posted twice" 1 (List.length (stall_posts ()));
+            Atomic.set AR.run_llm_reviewer_fn
+              (recording_reviewer (ref []) ["verifier-a", Stub_approve "lane back, target met"]);
+            ignore (must_succeed "the request the notice names"
+              (transition ctx goal_id "request_complete"));
+            await_within "the requested review's commit" committed)));
+  check int "each request started exactly one review" 3
+    (List.length (reviews_of_goal registry goal_id));
+  check string "the requested review committed" "awaiting_confirmation" (stored_phase config goal_id)
+;;
+
 let test_pending_before_phase_waits_for_explicit_request () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
@@ -1510,6 +1657,8 @@ let () =
     ; ( "drain"
       , [ test_case "wake after deferred persistence survives active scan" `Quick
             test_wake_after_deferred_persist_survives_active_scan
+        ; test_case "deferred review is announced and waits for a request" `Quick
+            test_deferred_review_is_announced_and_waits_for_a_request
         ; test_case "pending before phase waits for explicit retry" `Quick
             test_pending_before_phase_waits_for_explicit_request
         ; test_case "reopen from verifying cancels a hung review" `Quick

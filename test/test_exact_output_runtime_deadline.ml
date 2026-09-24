@@ -150,23 +150,29 @@ let test_deadlines_are_independent_and_frozen () =
       (EO.plan_fingerprint (expected_plan ~connect ~body)) (EO.plan_fingerprint plan);
     target, plan
   in
-  let _, omitted = capture None in
   let first_target, first = capture (Some 91.5) in
   let _, second = capture (Some 55.5) in
-  check (option (float 0.0)) "connect-only plan preserves its header deadline" connect
-    (EO.connect_timeout_s omitted);
-  check (option (float 0.0)) "connect-only plan does not invent a body deadline" None
-    (EO.body_timeout_s omitted);
   check (option (float 0.0)) "explicit body deadline leaves connection independent" connect
     (EO.connect_timeout_s first);
   check (option (float 0.0)) "explicit body deadline reaches the frozen plan" (Some 91.5)
     (EO.body_timeout_s first);
-  check bool "declared body differs from absent body" true
-    (EO.plan_fingerprint omitted <> EO.plan_fingerprint first);
   check bool "changing only body changes the frozen plan" true
     (EO.plan_fingerprint first <> EO.plan_fingerprint second);
   check string "republishing leaves the captured first target unchanged"
     (EO.plan_fingerprint first) (EO.plan_fingerprint (ready first_target))
+
+(* A connect deadline ends at the response headers, so a provider that
+   declares only [connect-timeout-s] would read the Exact body with no
+   deadline (#36979). The runtime still loads it; plan admission refuses it. *)
+let test_connect_only_declaration_is_refused () =
+  with_runtime @@ fun load ->
+  let target = load ~connect:(Some 17.5) ~body:None in
+  let selected = EO.resolve_target target |> require_ok "resolve frozen credential" in
+  match EO.admit ~target:selected ~messages requirement with
+  | Ok _ -> fail "connect-only Exact target was admitted"
+  | Error error ->
+    check string "connect-only Exact target is refused for its missing body deadline"
+      "wire_admission_rejected:missing_deadline" (EO.admission_error_reason error)
 
 let () =
   Eio_main.run @@ fun env ->
@@ -177,4 +183,6 @@ let () =
         test_case "body-only declaration reaches actual Exact projection" `Quick
           test_body_only_declaration_reaches_exact;
         test_case "connection and body deadlines remain independent and frozen" `Quick
-          test_deadlines_are_independent_and_frozen ] ]
+          test_deadlines_are_independent_and_frozen;
+        test_case "connect-only declaration is refused at admission" `Quick
+          test_connect_only_declaration_is_refused ] ]

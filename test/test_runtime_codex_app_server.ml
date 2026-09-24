@@ -2138,6 +2138,48 @@ let test_nonterminal_notifications_do_not_preempt_completion () =
     )
 ;;
 
+(* Shape from codex-cli 0.156.0's generated schema
+   (v2/AccountRateLimitsUpdatedNotification.json). A readable update reaches
+   the host as a usage report; one missing the required [usedPercent] is
+   logged; neither changes how the turn ends. *)
+let test_rate_limit_updates_are_reported_without_changing_the_turn () =
+  let readable =
+    {|{"method":"account/rateLimits/updated","params":{"rateLimits":{"limitId":"codex","limitName":null,"primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790200000},"secondary":null,"credits":null,"planType":"pro","rateLimitReachedType":null}}}|}
+  in
+  let unreadable =
+    {|{"method":"account/rateLimits/updated","params":{"rateLimits":{"limitId":"codex","primary":{"resetsAt":1}}}}|}
+  in
+  let reports = ref [] in
+  let on_stream_event = function
+    | Runtime_codex_app_server.Usage_windows_reported report -> reports := report :: !reports
+    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
+    | Turn_finished _ -> ()
+  in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; readable; unreadable
+    ; item_completed; turn_completed
+    ]
+    (fun path ->
+       match run_fixture ~on_stream_event path with
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok turn ->
+         check string "turn completes" "MASC_SUBSCRIPTION_OK" turn.text;
+         (match !reports with
+          | [ { Runtime_provider_usage_window.source = Codex_account_rate_limits_updated
+              ; windows =
+                  [ { limit_id = Some "codex"
+                    ; kind = Five_hour
+                    ; utilization = Percent 100
+                    ; resets_at = Some 1790200000
+                    }
+                  ]
+              }
+            ] -> ()
+          | reports ->
+            failf "expected one readable usage report, got %d" (List.length reports)))
+;;
+
 let test_item_output_deltas_are_typed_and_unbounded () =
   let delta index =
     Printf.sprintf
@@ -2682,9 +2724,8 @@ candidates = ["projection.http", "codex.codex"]
                                 ~base_dir:(Filename.concat base_path "keeper-sessions")
                                 ~max_context:400_000
                                 ~build_turn_prompt:
-                                  (fun ~base_system_prompt ~messages:_ ->
-                                    { Keeper_agent_run.system_prompt = base_system_prompt
-                                    ; dynamic_context_for_tools
+                                  (fun ~base_system_prompt:_ ~messages:_ ->
+                                    { Keeper_agent_run.dynamic_context_for_tools
                                     ; dynamic_context =
                                         (match turn_instructions with
                                          | None -> ""
@@ -2692,6 +2733,8 @@ candidates = ["projection.http", "codex.codex"]
                                            "--- Turn-specific instructions ---\n" ^ ti)
                                     })
                                 ~user_message
+                                ~input_speaker:
+                                  (Keeper_input_speaker.Person Keeper_input_speaker.Owner)
                                 ~turn_kind:Turn_record.Direct
                                 ~skill_snapshot:
                                   (Skill_catalog_snapshot.config_unreadable
@@ -5306,6 +5349,10 @@ let () =
              "nonterminal notifications do not preempt completion"
              `Quick
              test_nonterminal_notifications_do_not_preempt_completion
+         ; test_case
+             "rate-limit updates are reported without changing the turn"
+             `Quick
+             test_rate_limit_updates_are_reported_without_changing_the_turn
          ; test_case
              "item output deltas are typed and unbounded"
              `Quick

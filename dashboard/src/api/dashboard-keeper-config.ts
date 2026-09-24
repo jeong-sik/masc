@@ -7,7 +7,7 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperInputPolicy, KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, SandboxProfile } from '../types'
+import type { KeeperInputPolicy, KeeperConfig, KeeperSystemPromptPreview, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, KeeperConfigRuntimeSync, SandboxProfile } from '../types'
 import { UNKNOWN_NETWORK_MODE, UNKNOWN_SANDBOX_PROFILE } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
@@ -36,6 +36,31 @@ function asLooseNullableNumber(value: unknown): number | null {
 function decodeInputPolicy(value: unknown): KeeperInputPolicy {
   if (value === 'small' || value === 'wide') return value
   throw new Error('Invalid keeper config response: input_policy must be small or wide')
+}
+
+// Decodes only this field: an unknown shape becomes a visible decode failure
+// in the prompt preview instead of failing the whole keeper config.
+function decodeSystemPromptPreview(value: unknown): KeeperSystemPromptPreview {
+  if (!isRecord(value)) {
+    return { state: 'decode_failed', detail: `prompt.system_prompt is ${JSON.stringify(value) ?? 'absent'}` }
+  }
+  if (value.state === 'available') {
+    if (typeof value.effective === 'string' && typeof value.assembled === 'string') {
+      return { state: 'available', effective: value.effective, assembled: value.assembled }
+    }
+    return { state: 'decode_failed', detail: 'available prompt without effective and assembled text' }
+  }
+  if (value.state === 'unavailable') {
+    if (
+      value.reason === 'constitution_unreadable'
+      && typeof value.path === 'string'
+      && typeof value.detail === 'string'
+    ) {
+      return { state: 'unavailable', reason: value.reason, path: value.path, detail: value.detail }
+    }
+    return { state: 'decode_failed', detail: `unknown unavailable reason ${JSON.stringify(value.reason)}` }
+  }
+  return { state: 'decode_failed', detail: `unknown prompt state ${JSON.stringify(value.state)}` }
 }
 
 function decodeMaxContextOverride(value: unknown): number | null {
@@ -183,6 +208,12 @@ function decodeConfigWrite(value: unknown): KeeperConfig['config_write'] {
     applied: value.applied,
     warnings: decodeConfigWarningArray(value.warnings),
   }
+}
+
+function decodeRuntimeSync(value: unknown): KeeperConfig['runtime_sync'] {
+  if (value === undefined) return undefined
+  if (value === 'lane_restarted' || value === 'deferred_until_turn_end') return value
+  throw new Error('Invalid keeper config response: runtime_sync is not a success state')
 }
 
 function normalizeStringList(value: unknown): string[] {
@@ -346,6 +377,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     name: asNullableString(data.name) ?? requestedName,
     config_revision: decodeConfigRevision(data.config_revision),
     config_write: decodeConfigWrite(data.config_write),
+    runtime_sync: decodeRuntimeSync(data.runtime_sync),
     config_transaction_warnings:
       decodeConfigWarnings(data.config_transaction_warnings),
     activation_mode: requireKeeperActivationMode(data.activation_mode),
@@ -362,8 +394,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       system_prompt_blocks: {
         system: normalizePromptBlock(promptBlocks.system, 'keeper'),
       },
-      effective_system_prompt: asNullableString(prompt.effective_system_prompt) ?? '',
-      assembled_system_prompt: asNullableString(prompt.assembled_system_prompt) ?? '',
+      system_prompt: decodeSystemPromptPreview(prompt.system_prompt),
       unified_user_message_preview:
         asNullableString(prompt.unified_user_message_preview) ?? '',
     },
@@ -470,7 +501,7 @@ export async function patchKeeperConfig(
   name: string,
   payload: KeeperConfigUpdatePayload,
   expectedConfigRevision: KeeperConfigRevision,
-): Promise<KeeperConfig> {
+): Promise<KeeperConfig & { runtime_sync: KeeperConfigRuntimeSync }> {
   await ensureDevToken()
   return post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
@@ -478,5 +509,12 @@ export async function patchKeeperConfig(
       ...payload,
       expected_config_revision: expectedConfigRevision,
     },
-  ).then(raw => normalizeKeeperConfig(raw, name))
+  ).then(raw => {
+    const config = normalizeKeeperConfig(raw, name)
+    const runtimeSync = config.runtime_sync
+    if (runtimeSync === undefined) {
+      throw new Error('Invalid keeper config response: runtime_sync is required after a save')
+    }
+    return { ...config, runtime_sync: runtimeSync }
+  })
 }

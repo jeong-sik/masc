@@ -1,9 +1,6 @@
 (** Structured keeper-internal error envelopes carried through
     [Agent_core.Error.Internal]. *)
 
-(** Canonical wire kind emitted for {!Capacity_backpressure}.  Receipt
-    terminal projection and decoding consume this same value. *)
-val capacity_backpressure_kind : string
 (** Canonical wire kind for structural transcript corruption rejected before
     provider dispatch. *)
 val incomplete_tool_transcript_kind : string
@@ -60,15 +57,6 @@ type provider_rejection = {
   reason : string;
 }
 
-type capacity_backpressure_source =
-  | Provider_capacity
-  | Client_capacity
-  | Runtime_slot
-
-type capacity_retry_after =
-  | Explicit of float
-  | No_retry_hint
-
 type runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
@@ -76,7 +64,6 @@ type runtime_exhaustion_reason =
   | All_providers_failed
   | Candidates_filtered_after_cycles
   | Session_conflict
-  | Capacity_exhausted
   | Other_detail of string
 
 val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
@@ -165,12 +152,6 @@ and masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
       reason : runtime_exhaustion_reason;
-    }
-  | Capacity_backpressure of {
-      runtime_id : string;
-      source : capacity_backpressure_source;
-      detail : string;
-      retry_after : capacity_retry_after;
     }
   | Resumable_cli_session of {
       runtime_id : string;
@@ -295,7 +276,6 @@ val summary_of_masc_internal_error : masc_internal_error -> string option
 type wire_kind =
   | Wire_official_client_recovery_required
   | Wire_runtime_exhausted
-  | Wire_capacity_backpressure
   | Wire_resumable_cli_session
   | Wire_accept_rejected
   | Wire_internal_unhandled_exception

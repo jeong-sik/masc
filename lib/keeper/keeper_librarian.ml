@@ -147,10 +147,24 @@ let text_of_content block =
       | Agent_core.Types.Audio _ -> Some "[audio omitted]"))
 ;;
 
+(* RFC-0468 §3.2: the speaker comes from the metadata the host stamped when it
+   created the message, never from the text. Only a User message has a
+   speaker; a message without one says [unknown]. *)
+let speaker_header_field (m : Agent_core.Types.message) =
+  match m.role with
+  | Agent_core.Types.User ->
+    Printf.sprintf
+      " speaker=%s"
+      (Keeper_input_speaker.header_value (Keeper_input_speaker.classify m.metadata))
+  | Agent_core.Types.Assistant | Agent_core.Types.System | Agent_core.Types.Tool -> ""
+;;
+
 let message_to_text ~turn (m : Agent_core.Types.message) : string =
   let parts = List.filter_map text_of_content m.content in
   let body = String.concat "\n" parts |> String.trim in
-  let header = Printf.sprintf "turn=%d role=%s" turn (role_to_string m.role) in
+  let header =
+    Printf.sprintf "turn=%d role=%s%s" turn (role_to_string m.role) (speaker_header_field m)
+  in
   if String.equal body ""
   then Printf.sprintf "[%s] (empty)" header
   else Printf.sprintf "[%s] %s" header body

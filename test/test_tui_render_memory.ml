@@ -474,9 +474,12 @@ let body_lines ~cols ~budget state =
    said (#36497) -- the reading the fleet summary above already breaks at its
    clause mark rather than lose. The row under the list did not.
 
-   A reading the frame cannot hold in two rows keeps being cut: the block is
-   paid for out of the list's rows, and a block that grows without a bound
-   takes the list with it. *)
+   A reading that needs more than two rows still takes two: the block is paid
+   for out of the list's rows, and a block that grows without a bound takes
+   the list with it. It keeps its first row and its last and folds the middle
+   into the cut mark, so the tail survives at 80 columns and narrower. Joined
+   back into one row, as the block drew it before, the frame cut "since
+   server start" off at both narrow widths below. *)
 let test_the_keeper_block_breaks_the_librarian_row_at_a_clause_mark () =
   let keeper =
     { (make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024) with
@@ -491,15 +494,32 @@ let test_the_keeper_block_breaks_the_librarian_row_at_a_clause_mark () =
   in
   check bool "the count keeps its qualifier on a row of its own" true
     (holds "failed 3 since server start" (body_lines ~cols:140 ~budget:30 state));
-  let narrow = body_lines ~cols:60 ~budget:30 state in
-  check bool "a row that needs more than one break is not broken" true
-    (List.exists
-       (fun line ->
-         let line = String.trim line in
-         String.length line > 8 && String.sub line 0 9 = "Librarian")
-       narrow);
-  check bool "and the narrow frame draws no orphan tail" false
-    (holds "failed 3 since server start" narrow)
+  List.iter
+    (fun cols ->
+      let inner = Masc_tui_frame.inner_width ~cols in
+      let rec librarian_rows = function
+        | first :: second :: _
+          when String.starts_with ~prefix:"Librarian \xc2\xb7 " (String.trim first) ->
+          Some (first, second)
+        | _ :: rest -> librarian_rows rest
+        | [] -> None
+      in
+      match librarian_rows (body_lines ~cols ~budget:30 state) with
+      | None -> fail (Printf.sprintf "%d columns draws no Librarian row" cols)
+      | Some (first, fold) ->
+        check bool
+          (Printf.sprintf "%d columns: the second row is the fold" cols)
+          true
+          (String.starts_with ~prefix:Layout.cut_mark fold);
+        check bool
+          (Printf.sprintf "%d columns: the fold keeps the qualifier" cols)
+          true
+          (String.ends_with ~suffix:"failed 3 since server start" fold);
+        check bool
+          (Printf.sprintf "%d columns: both rows fit inside the frame" cols)
+          true
+          (Layout.display_width first <= inner && Layout.display_width fold <= inner))
+    [ 60; 80 ]
 
 (* The fleet readings wrap, so the header takes more rows at a narrow width
    than a fixed count could assume; the scroll bound now receives the real

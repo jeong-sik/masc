@@ -117,9 +117,9 @@ let recall_tokens bytes =
   Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet bytes
 ;;
 (* One break, and no more. The block sits under the list and is paid for out
-   of the same frame, so a reading the frame cannot hold in two rows is one
-   the block has no room for and is cut as it was. At a terminal wide enough
-   to draw the roster, the Librarian row and an alert each need one break. *)
+   of the same frame, so a reading never takes more than two rows. At a
+   terminal wide enough to draw the roster, the Librarian row and an alert
+   each need one break; a narrower one folds the middle (see [clause_rows]). *)
 let maximum_rows_for_a_reading = 2
 
 (* A row of the keeper block, given as its clauses rather than as the joined
@@ -132,18 +132,32 @@ let maximum_rows_for_a_reading = 2
 
    An alert is one sentence and arrives as one clause; [pack_clauses] wraps a
    clause too wide for a row rather than cutting it. Continuation rows carry
-   the same two-space indent as the first. *)
+   the same two-space indent as the first.
+
+   A reading that packs into more rows than the block pays for keeps its
+   first row and its last, with the cut mark between them, the way a roster
+   name folds its middle (#38469). The first row says which reading it is;
+   the last holds the clause that changes what the others mean. Joined back
+   into one row instead, the frame cut that tail again -- at 80 columns, the
+   commonest terminal, the Librarian row still ended "failed N". The fold
+   draws exactly two rows, so it holds for any [maximum_rows_for_a_reading]
+   of two or more. *)
 let clause_rows ~cols clauses =
   let indent = "  " in
-  let indent_cells = Message_layout.display_width indent in
-  let packed =
-    Message_layout.pack_clauses
-      ~max_cells:(max 1 (framed_inner_width cols - indent_cells))
-      clauses
-    |> List.map (fun row -> indent ^ row)
+  let fold = Message_layout.cut_mark ^ " " in
+  let lead_cells =
+    max (Message_layout.display_width indent) (Message_layout.display_width fold)
   in
-  if List.length packed <= maximum_rows_for_a_reading then packed
-  else [ indent ^ String.concat Message_layout.clause_separator clauses ]
+  let rows =
+    Message_layout.pack_clauses
+      ~max_cells:(max 1 (framed_inner_width cols - lead_cells))
+      clauses
+  in
+  match rows with
+  | first :: rest when List.length rows > maximum_rows_for_a_reading ->
+    let last = List.fold_left (fun _ row -> row) first rest in
+    [ indent ^ first; fold ^ last ]
+  | rows -> List.map (fun row -> indent ^ row) rows
 
 let memory_context_lines ~cols (k : memory_keeper_health) =
   let current_line =

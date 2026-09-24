@@ -333,6 +333,8 @@ def fixtures(
                 200,
                 {
                     "status": "ok",
+                    # The TUI refuses a list without the runner's status word.
+                    "schedule_runner": keyboard.SCHEDULE_RUNNER_OK,
                     "schedule_store_read_error": None,
                     "request_count": 0,
                     "truncated": False,

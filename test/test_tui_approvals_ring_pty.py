@@ -1,5 +1,6 @@
 """With zero approvals and one open ask, Approvals stays in the strip."""
 
+import json
 import os
 import sys
 
@@ -158,6 +159,51 @@ def run(executable: str) -> None:
         description="An empty approval queue says so beside a waiting question",
         interact=empty_queue_says_so,
         http_fixtures=fixtures,
+        refresh=2.0,
+    )
+
+    # The questions poll fails and one held call waits. The title's count has
+    # no question in it because none was read, and the title says so rather
+    # than let the count pass for "no question is open".
+    unread_fixtures = dict(fixtures)
+    unread_fixtures["/api/v1/keepers/asks"] = (
+        503, {"error": "asks fixture unavailable"})
+    unread_fixtures["/api/v1/keepers/tool-approvals"] = (
+        200,
+        {
+            "pending": [
+                {
+                    "keeper": "alpha",
+                    "tool_call_id": "tool-held-beside-unread-asks",
+                    "tool": "Bash",
+                    "args": json.dumps({"command": "true"}),
+                    "question": "Run Bash on true?",
+                    "because": None,
+                    "asked_at": 1787766400.0,
+                    "timeout_sec": 300.0,
+                }
+            ]
+        },
+    )
+
+    def unread_questions_say_so(process, master_fd, _slave_fd, output, _base_path):
+        h.resize_and_wait(process, master_fd, output, rows=38, columns=150,
+                          needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+        h.drain_until_quiet(process, master_fd, output)
+        h.wait_for_fixture_state(
+            process, master_fd, output,
+            lambda: b"Approvals\xc2\xb71" in bytes(output),
+            timeout=45.0)
+        h.tab_until(process, master_fd, output, b"MASC Approvals")
+        h.wait_for_output(process, master_fd, output,
+                          b"questions unread", start=0, timeout=10)
+        os.write(master_fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="A failed questions poll is named in the Approvals title",
+        interact=unread_questions_say_so,
+        http_fixtures=unread_fixtures,
         refresh=2.0,
     )
 

@@ -82,10 +82,13 @@ export function IdeFindPanel({
 
   // The editor follows the current match; closing the panel leaves the
   // selection where it is.
+  // Keyed on where the match is, not on the match object: a document update
+  // rebuilds every match, and re-revealing then would pull the viewport back
+  // each time a keeper writes to the open file.
   const activeMatch = matches[activeIndex] ?? null
   useEffect(() => {
     if (activeMatch !== null) revealMatch(filePath, activeMatch)
-  }, [activeMatch, filePath])
+  }, [activeMatch?.line, activeMatch?.column, activeMatch?.match, filePath])
   useEffect(() => () => { ideFindReveal.value = null }, [])
 
   const activeOrdinal = matches.length > 0 ? activeIndex + 1 : 0
@@ -101,6 +104,7 @@ export function IdeFindPanel({
     else setActiveIndex(index)
   }
   const handleKeyDown = (event: KeyboardEvent): void => {
+    if (isImeComposing(event)) return
     if (event.key === 'Enter') {
       event.preventDefault()
       move(event.shiftKey ? -1 : 1)
@@ -274,6 +278,15 @@ export function IdeFindPanel({
         : null}
     </div>
   `
+}
+
+/**
+ * The Enter (or Escape) that confirms or cancels an IME composition belongs
+ * to the IME. Safari reports that keydown with isComposing false and the
+ * legacy keyCode 229, so both are read.
+ */
+export function isImeComposing(event: KeyboardEvent): boolean {
+  return event.isComposing || event.keyCode === 229
 }
 
 function ToggleButton({

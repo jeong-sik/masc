@@ -215,13 +215,15 @@ function statusbarRepositoryLabel(repository: Repository | undefined): string | 
   return compactStatusbarPath(repository?.local_path ?? '') ?? repository?.id?.trim()
 }
 
+// No active repository means the tree is the project root. Naming the
+// first registered repository here put its origin and branch over a tree
+// that is not that repository.
 function activeStatusbarRepository(
   repositories: ReadonlyArray<Repository> | undefined,
   activeRepositoryId: string | null | undefined,
 ): Repository | undefined {
-  if (!repositories || repositories.length === 0) return undefined
-  return repositories.find(repository => activeRepositoryId && repository.id === activeRepositoryId)
-    ?? repositories[0]
+  if (!repositories || !activeRepositoryId) return undefined
+  return repositories.find(repository => repository.id === activeRepositoryId)
 }
 
 /**
@@ -961,7 +963,9 @@ export function IdeShell() {
 
   // Mod+F inside the IDE opens the current-file find, as every editor does;
   // outside it the browser keeps its own find. The editor surface is
-  // contenteditable, so the binding has to fire from inside inputs too.
+  // contenteditable, so the binding has to fire from inside inputs too. A
+  // click on empty IDE space leaves focus on the body, which counts as
+  // inside while the IDE is the page on screen.
   const shellRef = useRef<HTMLElement>(null)
   const findOpenRef = useRef(findOpen)
   findOpenRef.current = findOpen
@@ -971,9 +975,14 @@ export function IdeShell() {
     id: 'ide.find.open',
     chord: { key: 'f', modifiers: ['Mod'] },
     description: 'Find in the current file',
-    scope: { within: () => shellRef.current },
+    scope: 'global',
     preserveInInputs: true,
     action: (event) => {
+      const shell = shellRef.current
+      const target = event.target
+      const inside = shell !== null && target instanceof Node
+        && (shell.contains(target) || target === shell.ownerDocument.body)
+      if (!inside) return
       event.preventDefault()
       if (!findOpenRef.current) {
         handleFindOpenRef.current()

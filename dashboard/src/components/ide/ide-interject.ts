@@ -18,6 +18,7 @@ import { globalPresenceSnapshot, presenceEntries, type KeeperPresenceStatus } fr
 import { activeIdeFocus } from './ide-state'
 import { ideEditorSelection } from './ide-editor-selection'
 import { buildIdeInterjectSurfaceContext } from './ide-interject-surface-context'
+import { isImeComposing } from './ide-editor-find'
 
 // The input and button states flow through the same store/dispatch boundary
 // that live active-keeper wiring uses. Send remains disabled until a concrete
@@ -86,16 +87,22 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
     : null
   const contextLinks = interjectContextRouteLinks(keeperId)
 
+  // Opening moves focus into the chat; closing hands it back to the button
+  // that opened it rather than dropping it on the page body.
   const inputRef = useRef<HTMLInputElement>(null)
+  const fabRef = useRef<HTMLButtonElement>(null)
+  const wasExpanded = useRef(expanded)
   useEffect(() => {
     if (compact && expanded) inputRef.current?.focus()
+    if (compact && !expanded && wasExpanded.current) fabRef.current?.focus()
+    wasExpanded.current = expanded
   }, [compact, expanded])
 
   const sendAction = actions.find(action => action.kind === 'send')
   // Enter sends, as in every chat box. A Korean or Japanese IME confirms its
   // composition with Enter too; that keystroke belongs to the IME.
   const handleInputKeyDown = (event: KeyboardEvent): void => {
-    if (event.isComposing) return
+    if (isImeComposing(event)) return
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       if (sendAction?.enabled) void interjectStore.submit('send')
@@ -111,6 +118,7 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
         type="button"
         class="ide-interject-fab"
         data-testid="ide-interject-fab"
+        ref=${fabRef}
         aria-label="Open keeper chat"
         onClick=${() => setExpanded(true)}
       >✦ Chat</button>

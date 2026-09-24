@@ -241,6 +241,13 @@ describe('IdeEditor', () => {
 
     await waitFor(() => expect(selectedText()).toBe('1:runtime'))
 
+    // The Enter that confirms an IME composition is the IME's, in Chrome
+    // (isComposing) and in Safari (keyCode 229).
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
+    fireEvent.keyDown(input, { key: 'Enter', keyCode: 229 })
+    expect(container.querySelector('[data-testid="ide-find-status"]')?.textContent)
+      .toContain('1 of 2 matches')
+
     fireEvent.keyDown(input, { key: 'Enter' })
     await waitFor(() => {
       expect(container.querySelector('[data-testid="ide-find-status"]')?.textContent)

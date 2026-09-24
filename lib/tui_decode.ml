@@ -12029,7 +12029,7 @@ let schedule_hold_reading
 let decode_oauth_client_saved json =
   match json with
   | `Assoc _ ->
-      let* scopes = required_list_field json "scopes" in
+      let* scopes = decode_string_list json "scopes" in
       Ok (List.length scopes)
   | other ->
       Error

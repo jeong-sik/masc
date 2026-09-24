@@ -16,6 +16,8 @@ let test_decode_oauth_client_saved_reads_scopes_and_refuses_their_absence () =
     (Result.is_error (decode {|{"provider":"github"}|}));
   Alcotest.(check bool) "scopes that are not a list are refused" true
     (Result.is_error (decode {|{"provider":"github","scopes":"repo"}|}));
+  Alcotest.(check bool) "a non-string scope after a valid scope is refused" true
+    (Result.is_error (decode {|{"provider":"github","scopes":["repo",null]}|}));
   Alcotest.(check bool) "a reply that is not an object is refused" true
     (Result.is_error (decode {|[]|}))
 

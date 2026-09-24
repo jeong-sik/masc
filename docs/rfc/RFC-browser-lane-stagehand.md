@@ -112,10 +112,11 @@ variant 에 생성자를 더하면 컴파일러가 match 하는 곳을 짚는다
 7번에서 도구 입력을 바꾼다.
 - 도구의 `lane` enum 에는 그 lane 의 backend 가 도구의 기본 동사를 받을 때만 이름을 넣는다.
   `test_browser_lane_name` 이 `Browser_lane.verb_allowed` 로 이것을 확인한다.
-  그래서 stagehand 는 `BrowserTabs`·`BrowserSession`·`BrowserGoto` 에만 있고, `BrowserRead`·`BrowserInteract` 에는 없다.
+  stagehand 는 `BrowserTabs`·`BrowserRead`·`BrowserInteract`·`BrowserSession`·`BrowserGoto` 에 있고, `BrowserAct` 에는 없다.
 - `BrowserAct` 는 automation 만 받는다. 코드가 `lane` 없는 입력에 쓰는 기본값도 스키마의 기본값(automation)과 같다.
 - `BrowserSession`·`BrowserGoto` 는 `lane`(automation·stagehand, 기본 automation)을 받는다.
-  서버가 가진 lane 만 따로 읽어서 `lane:"live"` 는 입력 오류로 거절한다. live 선택 오류가 생길 길이 없다.
+  서버가 가진 lane 은 닫힌 타입 `Browser_lane.server_lane` 으로 읽어서 `lane:"live"` 는 입력 오류로 거절한다.
+  대시보드의 `/browser-lane/session`·`/goto` 도 같은 타입을 쓰고, lane 을 꼭 받는다.
 - 실행기가 없을 때(`Lane_absent`) 문구는 lane 마다 필요한 설정을 말한다.
 
 ### 3.2 동사
@@ -421,9 +422,10 @@ Firefox 와 Chromium 은 로그인 세션을 나눠 쓸 수 없다.
    - 동사를 Stagehand 호출로 바꾸는 실행기와 tab 번호 표(#38720)
    - 세션을 가지는 backend(#38736), 서버가 뜰 때 설치(#38739)
    - `BrowserInstruct` 도구(#38747), 문서(#38752)
-   - TUI 에서 stagehand 로 바꾸는 키
-   - `Page_read`·`Page_scene`·`Page_elements`·`Page_interact` 를 `page.evaluate` 등으로 연결하고 `BrowserRead`·`BrowserInteract` 에 stagehand 를 연다
-8. CI 실제 브라우저 증명, §6.3 비교 실험 증거.
+   - `Page_read`·`Page_elements`·`Page_scene` 을 automation 과 같은 페이지 스크립트로(#38805)
+   - TUI 의 `c` 키와 대시보드 경로의 lane(#38808)
+   - `Page_interact`: DOM 조작은 같은 스크립트로, 좌표 조작은 `page.click`·`page.scroll`·`page.drag_and_drop` 로(#38812)
+8. CI 실제 브라우저 증명(#38760, Chrome for Testing 154), §6.3 비교 실험 증거.
 
 ## 8. 열린 질문
 

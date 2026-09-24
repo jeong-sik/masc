@@ -1,5 +1,5 @@
 import { h } from 'preact'
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
@@ -156,8 +156,10 @@ describe('PostAttachments', () => {
       static createObjectURL = createObjectURL
       static revokeObjectURL = revokeObjectURL
     })
-    vi.mocked(fetchToolBlobBytes).mockResolvedValue(new Uint8Array([0, 255, 42]).buffer)
-    render(h(PostAttachments, { attachments: [{
+    const binary = new ArrayBuffer(3)
+    new Uint8Array(binary).set([0, 255, 42])
+    vi.mocked(fetchToolBlobBytes).mockResolvedValue(binary)
+    const { unmount } = render(h(PostAttachments, { attachments: [{
       ok: true,
       attachment: { kind: 'image', source: {
         kind: 'artifact', sha256, bytes: 12, mime: 'application/octet-stream',
@@ -167,11 +169,15 @@ describe('PostAttachments', () => {
     expect(card.querySelector('a')).toBeNull()
     fireEvent.click(card.querySelector('button')!)
     const link = await screen.findByTestId('board-attachment-artifact-download')
-    expect(fetchToolBlobBytes).toHaveBeenCalledWith(sha256)
+    expect(fetchToolBlobBytes).toHaveBeenCalledWith(sha256, {
+      signal: expect.any(AbortSignal),
+    })
     expect(link).toHaveAttribute('href', objectUrl)
     expect(link).toHaveAttribute('download', `artifact-${sha256}.bin`)
     expect(createObjectURL).toHaveBeenCalledOnce()
     expect(document.querySelector('img')).toBeNull()
+    unmount()
+    expect(revokeObjectURL).toHaveBeenCalledWith(objectUrl)
   })
 
   it('shows an artifact read failure instead of a broken link', async () => {
@@ -186,6 +192,31 @@ describe('PostAttachments', () => {
     const error = await screen.findByTestId('board-attachment-error')
     expect(error.textContent).toContain('403 Forbidden')
     expect(screen.queryByTestId('board-attachment-artifact-download')).toBeNull()
+  })
+
+  it('does not create a Blob URL after the attachment unmounts during a fetch', async () => {
+    const NativeURL = URL
+    const createObjectURL = vi.fn(() => 'blob:late')
+    vi.stubGlobal('URL', class extends NativeURL {
+      static createObjectURL = createObjectURL
+      static revokeObjectURL = vi.fn()
+    })
+    let resolveFetch!: (bytes: ArrayBuffer) => void
+    const pending = new Promise<ArrayBuffer>(resolve => { resolveFetch = resolve })
+    vi.mocked(fetchToolBlobBytes).mockReturnValue(pending)
+    const { unmount } = render(h(PostAttachments, { attachments: [{
+      ok: true,
+      attachment: { kind: 'image', source: {
+        kind: 'artifact', sha256: 'a'.repeat(64), bytes: 12, mime: 'application/octet-stream',
+      } },
+    }] }))
+    fireEvent.click(screen.getByTestId('board-attachment-artifact').querySelector('button')!)
+    unmount()
+    await act(async () => {
+      resolveFetch(new ArrayBuffer(1))
+      await pending
+    })
+    expect(createObjectURL).not.toHaveBeenCalled()
   })
 
   it('renders nothing when the attachments list is empty', () => {

@@ -34,11 +34,14 @@ export async function fetchToolBlob(
 /** Retrieve exact bytes with an operator token. A plain link cannot carry
  * the Dashboard's Authorization header, and the JSON endpoint cannot safely
  * carry arbitrary binary media. */
-export async function fetchToolBlobBytes(sha256: string): Promise<ArrayBuffer> {
+export async function fetchToolBlobBytes(
+  sha256: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<ArrayBuffer> {
   const path = `/api/v1/artifact-bytes/${encodeURIComponent(sha256)}`
   const response = await fetchWithTimeout(
     path,
-    { headers: authHeaders() },
+    { headers: authHeaders(), signal: opts.signal },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!response.ok) {

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { mediaEmbedForUrl } from '../common/rich-content-utils'
 import { formatFileSize } from './composer-v2'
 import { isRecord } from '../common/normalize'
@@ -184,20 +184,31 @@ function ArtifactAttachment({ source }: { source: ArtifactSource }) {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  useEffect(() => () => {
-    if (downloadUrl) URL.revokeObjectURL(downloadUrl)
-  }, [downloadUrl])
+  const mounted = useRef(true)
+  const pending = useRef<AbortController | null>(null)
+  const objectUrl = useRef<string | null>(null)
+  useLayoutEffect(() => () => {
+    mounted.current = false
+    pending.current?.abort()
+    if (objectUrl.current) URL.revokeObjectURL(objectUrl.current)
+  }, [])
   const load = async () => {
     if (loading || downloadUrl !== null) return
+    const controller = new AbortController()
+    pending.current = controller
     setLoading(true)
     setError(null)
     try {
-      const bytes = await fetchToolBlobBytes(source.sha256)
-      setDownloadUrl(URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' })))
+      const bytes = await fetchToolBlobBytes(source.sha256, { signal: controller.signal })
+      if (!mounted.current) return
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }))
+      objectUrl.current = url
+      setDownloadUrl(url)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
-      setLoading(false)
+      pending.current = null
+      if (mounted.current) setLoading(false)
     }
   }
   return html`

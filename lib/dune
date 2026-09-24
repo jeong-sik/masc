@@ -10,6 +10,10 @@
   mcp_protocol
   mcp_protocol.eio
   yojson
+  ; Tui_decode asks it which scalars are pictographs, so the terminal
+  ; sanitizer keeps the ZWJ that holds an emoji together (UAX #29 GB11).
+  ; Already in this library's link closure through masc.agent_core.
+  uucp
   otoml
   sqlite3
   base64

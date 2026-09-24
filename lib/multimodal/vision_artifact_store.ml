@@ -22,7 +22,108 @@ let is_canonical (h : handle) : bool =
 
 let path_of ~dir (h : handle) = Filename.concat dir h
 
-let store ~dir (raw : string) : (handle, string) result =
+type prune_result =
+  { deleted_count : int
+  ; reclaimed_bytes : int
+  ; remaining_count : int
+  ; remaining_bytes : int
+  }
+
+let default_max_entries = 500
+let default_max_bytes = 20 * 1024 * 1024 (* 20 MB *)
+
+let get_env_int name default =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some s -> (try int_of_string (String.trim s) with _ -> default)
+
+let resolved_max_entries ?max_entries () =
+  match max_entries with
+  | Some n when n >= 0 -> n
+  | _ -> get_env_int "MASC_VISION_MAX_ARTIFACTS_PER_KEEPER" default_max_entries
+
+let resolved_max_bytes ?max_bytes () =
+  match max_bytes with
+  | Some b when b >= 0 -> b
+  | _ -> get_env_int "MASC_VISION_MAX_BYTES_PER_KEEPER" default_max_bytes
+
+let prune ?max_entries ?max_bytes ~dir () : (prune_result, string) result =
+  let max_entries = resolved_max_entries ?max_entries () in
+  let max_bytes = resolved_max_bytes ?max_bytes () in
+  if not (Sys.file_exists dir && Sys.is_directory dir) then
+    Ok { deleted_count = 0; reclaimed_bytes = 0; remaining_count = 0; remaining_bytes = 0 }
+  else
+    try
+      let filenames = Sys.readdir dir in
+      let items = ref [] in
+      let total_entries = ref 0 in
+      let total_bytes = ref 0 in
+      Array.iter
+        (fun name ->
+          if is_canonical name then begin
+            let path = Filename.concat dir name in
+            (try
+               let stat = Unix.lstat path in
+               if stat.Unix.st_kind = Unix.S_REG then begin
+                 items := (name, path, stat.Unix.st_size, stat.Unix.st_mtime) :: !items;
+                 incr total_entries;
+                 total_bytes := !total_bytes + stat.Unix.st_size
+               end
+             with Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+          end)
+        filenames;
+      if !total_entries <= max_entries && !total_bytes <= max_bytes then
+        Ok
+          { deleted_count = 0
+          ; reclaimed_bytes = 0
+          ; remaining_count = !total_entries
+          ; remaining_bytes = !total_bytes
+          }
+      else begin
+        (* Sort by mtime ascending (oldest first). If mtimes are equal, sort by name for determinism. *)
+        let sorted =
+          List.sort
+            (fun (n1, _, _, m1) (n2, _, _, m2) ->
+              let cmp = Float.compare m1 m2 in
+              if cmp <> 0 then cmp else String.compare n1 n2)
+            !items
+        in
+        let cur_entries = ref !total_entries in
+        let cur_bytes = ref !total_bytes in
+        let deleted = ref 0 in
+        let reclaimed = ref 0 in
+        let rec evict = function
+          | [] -> ()
+          | (_name, path, size, _mtime) :: rest ->
+              if !cur_entries > max_entries || !cur_bytes > max_bytes then begin
+                (try
+                   Unix.unlink path;
+                   decr cur_entries;
+                   cur_bytes := !cur_bytes - size;
+                   incr deleted;
+                   reclaimed := !reclaimed + size
+                 with
+                 | Unix.Unix_error (Unix.ENOENT, _, _) ->
+                     decr cur_entries;
+                     cur_bytes := !cur_bytes - size
+                 | Unix.Unix_error _ -> ());
+                evict rest
+              end
+        in
+        evict sorted;
+        Ok
+          { deleted_count = !deleted
+          ; reclaimed_bytes = !reclaimed
+          ; remaining_count = !cur_entries
+          ; remaining_bytes = !cur_bytes
+          }
+      end
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        Error (Printf.sprintf "Vision_artifact_store.prune: %s" (Printexc.to_string exn))
+
+let store ?(auto_prune = true) ~dir (raw : string) : (handle, string) result =
   let h = hash raw in
   (* [Fs_compat.mkdir_p] returns unit and raises on failure (EACCES, ENOSPC, a
      parent path component that is a regular file, test-isolation breach). Honor
@@ -57,9 +158,14 @@ let store ~dir (raw : string) : (handle, string) result =
     in
     if already_stored then Ok h
     else
-      (match Fs_compat.save_file_atomic path raw with
-       | Ok () -> Ok h
-       | Error msg -> Error (Printf.sprintf "Vision_artifact_store.store: %s" msg))
+      match Fs_compat.save_file_atomic path raw with
+      | Ok () ->
+          if auto_prune then begin
+            match prune ~dir () with
+            | Ok _ | Error _ -> ()
+          end;
+          Ok h
+      | Error msg -> Error (Printf.sprintf "Vision_artifact_store.store: %s" msg)
 
 type load_error =
   | Malformed_handle of string

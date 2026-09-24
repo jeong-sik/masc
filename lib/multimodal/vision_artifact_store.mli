@@ -20,11 +20,37 @@ val of_string : string -> handle
 (** Re-wrap a handle string read back from a checkpoint. No I/O; integrity is
     verified later by {!load} (a wrong string fails closed there). *)
 
-val store : dir:string -> string -> (handle, string) result
-(** [store ~dir bytes] writes [bytes] to a content-addressed file under [dir] and
+type prune_result =
+  { deleted_count : int
+  ; reclaimed_bytes : int
+  ; remaining_count : int
+  ; remaining_bytes : int
+  }
+
+val default_max_entries : int
+(** Default limit on retained artifacts per vision store directory (500). *)
+
+val default_max_bytes : int
+(** Default limit on total retained bytes per vision store directory (20 MB). *)
+
+val prune
+  :  ?max_entries:int
+  -> ?max_bytes:int
+  -> dir:string
+  -> unit
+  -> (prune_result, string) result
+(** [prune ?max_entries ?max_bytes ~dir ()] prunes canonical artifact files
+    (64-char lowercase-hex SHA-256) under [dir], evicting oldest files first
+    (by mtime) until both [max_entries] and [max_bytes] are satisfied.
+    Non-canonical files and subdirectories are never removed. *)
+
+val store : ?auto_prune:bool -> dir:string -> string -> (handle, string) result
+(** [store ?auto_prune ~dir bytes] writes [bytes] to a content-addressed file under [dir] and
     returns its handle. Idempotent: identical bytes map to the same handle and
     file. A re-store compares a bounded owned regular-file read, skipping the atomic write
     only on an exact match. Missing or different content is written again.
+    When [auto_prune] is true (default: true) and a new file is written, triggers
+    a bounded prune pass.
     [Error msg] when the required directory creation or write fails. *)
 
 type load_error =

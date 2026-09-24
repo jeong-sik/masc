@@ -152,6 +152,95 @@ let test_unreadable_is_not_missing () =
   | Error (S.Read_failed _) -> ()
   | Error _ | Ok _ -> assert false
 
+(* Bounded retention and rotation tests *)
+
+let test_prune_by_max_entries () =
+  let dir = temp_dir () in
+  let handles = ref [] in
+  for i = 1 to 6 do
+    let bytes = Printf.sprintf "frame_data_%d" i in
+    let h = ok (S.store ~auto_prune:false ~dir bytes) in
+    let path = Filename.concat dir (S.to_string h) in
+    let t = float_of_int (i * 100) in
+    Unix.utimes path t t;
+    handles := (h, bytes, String.length bytes) :: !handles
+  done;
+  let all_rev = List.rev !handles in
+  let res = ok (S.prune ~max_entries:3 ~max_bytes:(1024 * 1024) ~dir ()) in
+  assert (res.S.deleted_count = 3);
+  assert (res.S.remaining_count = 3);
+  (* Oldest 3 (i=1, 2, 3) must be deleted *)
+  List.iteri (fun idx (h, _bytes, _len) ->
+    let loaded = S.load ~dir h in
+    if idx < 3 then
+      match loaded with
+      | Error (S.Missing_artifact _) -> ()
+      | _ -> assert false
+    else
+      match loaded with
+      | Ok b -> assert (String.equal b _bytes)
+      | Error _ -> assert false
+  ) all_rev
+
+let test_prune_by_max_bytes () =
+  let dir = temp_dir () in
+  let handles = ref [] in
+  (* 4 frames with sizes 100, 200, 300, 400 = total 1000 bytes *)
+  for i = 1 to 4 do
+    let bytes = String.make (i * 100) (Char.chr (64 + i)) in
+    let h = ok (S.store ~auto_prune:false ~dir bytes) in
+    let path = Filename.concat dir (S.to_string h) in
+    let t = float_of_int (i * 100) in
+    Unix.utimes path t t;
+    handles := (h, bytes, String.length bytes) :: !handles
+  done;
+  (* Target 500 bytes: 400 (i=4) fits, 400+300=700 > 500 so i=1, 2, 3 deleted, reclaimed = 600 *)
+  let res = ok (S.prune ~max_entries:100 ~max_bytes:500 ~dir ()) in
+  assert (res.S.deleted_count = 3);
+  assert (res.S.reclaimed_bytes = 600);
+  assert (res.S.remaining_count = 1);
+  assert (res.S.remaining_bytes = 400)
+
+let test_prune_preserves_non_canonical () =
+  let dir = temp_dir () in
+  let bytes = "keeper screenshot" in
+  let h = ok (S.store ~auto_prune:false ~dir bytes) in
+  (* Add non-canonical file and directory *)
+  let note_path = Filename.concat dir "notes.txt" in
+  Out_channel.with_open_text note_path (fun oc -> output_string oc "important note");
+  let sub_dir = Filename.concat dir "sub_dir" in
+  Unix.mkdir sub_dir 0o700;
+  (* Prune with max_entries: 0 should delete canonical artifact but preserve notes.txt and sub_dir *)
+  let res = ok (S.prune ~max_entries:0 ~dir ()) in
+  assert (res.S.deleted_count = 1);
+  assert (Sys.file_exists note_path);
+  assert (Sys.file_exists sub_dir);
+  match S.load ~dir h with
+  | Error (S.Missing_artifact _) -> ()
+  | _ -> assert false
+
+let test_auto_prune_on_store () =
+  let dir = temp_dir () in
+  Unix.putenv "MASC_VISION_MAX_ARTIFACTS_PER_KEEPER" "2";
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "MASC_VISION_MAX_ARTIFACTS_PER_KEEPER" "500")
+    (fun () ->
+      let h1 = ok (S.store ~dir "frame 1") in
+      let p1 = Filename.concat dir (S.to_string h1) in
+      Unix.utimes p1 10.0 10.0;
+      let h2 = ok (S.store ~dir "frame 2") in
+      let p2 = Filename.concat dir (S.to_string h2) in
+      Unix.utimes p2 20.0 20.0;
+      let h3 = ok (S.store ~dir "frame 3") in
+      let p3 = Filename.concat dir (S.to_string h3) in
+      Unix.utimes p3 30.0 30.0;
+      (* Only 2 newest should remain *)
+      match S.load ~dir h1 with
+      | Error (S.Missing_artifact _) ->
+          assert (Result.is_ok (S.load ~dir h2));
+          assert (Result.is_ok (S.load ~dir h3))
+      | _ -> assert false)
+
 let () =
   test_round_trip ();
   test_content_addressed ();
@@ -162,4 +251,9 @@ let () =
   test_unreadable_is_not_missing ();
   test_corruption_detected ();
   test_malformed_handle_rejected ();
+  test_prune_by_max_entries ();
+  test_prune_by_max_bytes ();
+  test_prune_preserves_non_canonical ();
+  test_auto_prune_on_store ();
   print_endline "test_vision_artifact_store: all assertions passed"
+

@@ -385,9 +385,13 @@ let process_pending_work_inner
                | Some reason -> reason
                | None -> Task.Anti_rationalization.gate_to_string result.gate
              in
-             (* No verdict was committed. The row stays durable and the next
-                real wake rescans it — a Keeper re-requesting completion, or a
-                worker slot coming free with work still queued. *)
+             (* No verdict was committed. The row stays durable and nothing
+                rescans it on its own: the next scan comes from a Keeper
+                requesting completion, from another review committing a
+                verdict, or from a freed worker slot whose Goal received a
+                wake while its review ran ([release_review] reports that
+                held wake). A slot that frees with no held wake starts no
+                scan. *)
              defer
                ~goal_id:work.goal_id
                (Not_reviewed

@@ -155,7 +155,8 @@ module For_testing : sig
       [notify] is recorded as an ERROR line carrying the exception and does
       not escape; [Eio.Cancel.Cancelled] is re-raised. Production passes
       [Verification_protocol.notify_stalled_verification] with the lane's
-      authority applied. *)
+      authority applied and the review named as
+      [Verification_protocol.Task_review { task_id; verification_id }]. *)
 
   val stall_disposition_of_scheduling
     :  retry_interval_sec:float

@@ -89,13 +89,13 @@ let never_writes _ = Alcotest.fail "export must not write into the peer's tree"
 
 let run_export ~base ~emitting =
   let config = Workspace.default_config base in
-  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ "test", "alpine:test" ];
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ "base", "alpine:test" ];
   let meta =
     match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String "peer-exporter" ]) with
     | Ok meta ->
       { meta with
         Masc.Keeper_meta_contract.sandbox_profile = Keeper_types_profile_sandbox.Docker
-      ; sandbox_image = Some "test"
+      ; sandbox_image = Some "base"
       }
     | Error detail -> Alcotest.fail detail
   in

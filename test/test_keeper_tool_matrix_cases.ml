@@ -122,7 +122,7 @@ let init_keeper_bridge =
 let keeper_matrix_owner = "keeper-tool-matrix"
 (* The tag this suite builds, and the catalog name its Keepers use for it. *)
 let sandbox_image = "masc-test-tool-matrix:fixture"
-let sandbox_image_name = "tool-matrix"
+let sandbox_image_name = "base"
 
 let make_meta ?(name = keeper_matrix_owner) () =
   match

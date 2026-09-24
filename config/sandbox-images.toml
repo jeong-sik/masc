@@ -1,6 +1,7 @@
-# Sandbox images a Keeper can name in `sandbox_image`, and the build this
-# host promoted for each image store. `masc sandbox-image promote` and
-# `rollback` rewrite this file. RFC keeper-sandbox-images-have-versions.
+# Names a Keeper can use in `sandbox_image`. This shipped file contains no
+# host builds. Each host records promoted builds in its config-root
+# `sandbox-images.toml`; promote and rollback rewrite that host file.
+# RFC keeper-sandbox-images-have-versions.
 
 [images.base]
 

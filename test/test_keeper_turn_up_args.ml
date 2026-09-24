@@ -79,15 +79,11 @@ let rec rm_rf path =
    process-global Eio fs (the persist round-trip below), later contexts can
    materialize files under their base, and an empty-dir-only cleanup fails the
    wrong test. *)
-(* A docker keeper's [sandbox_image] has to resolve through the host catalog
-   before it is admitted, so every context carries one with the names the
-   cases use. *)
+(* The preflight probes the build a docker keeper's [sandbox_image] names in
+   the host catalog, so every context promotes one for each shipped name. *)
 let catalog_images =
   [ "base", "masc-sandbox-base:test"
-  ; "custom", "masc-sandbox-custom:t1"
-  ; "requested", "masc-sandbox-requested:t2"
-  ; "documents", "masc-sandbox-documents:t1"
-  ; "reports", "masc-sandbox-reports:t1"
+  ; "ocaml", "masc-sandbox-ocaml:t1"
   ]
 
 let with_test_context f =
@@ -2470,7 +2466,7 @@ let test_a_name_the_catalog_lacks_reaches_the_preflight_as_its_reason () =
   | Some (Error reason) ->
     check bool "the catalog's refusal" true
       (contains "sandbox_image \"rust\" is not in the image catalog" reason);
-    check bool "with the names it has" true (contains "base, custom" reason)
+    check bool "with the names it has" true (contains "base, ocaml" reason)
   | Some (Ok tag) -> failf "a name the catalog lacks was probed as %s" tag
   | None -> fail "the preflight was not consulted"
 ;;
@@ -2506,7 +2502,7 @@ let test_docker_preflight_receives_sandbox_image_from_profile_defaults () =
 [keeper]
 instructions = "Exercise the declared custom sandbox image."
 sandbox_profile = "docker"
-sandbox_image = "custom"
+sandbox_image = "ocaml"
 network_mode = "none"
 |}
   in
@@ -2526,19 +2522,19 @@ network_mode = "none"
   match Keeper_turn_up_args.parse ~docker_preflight ctx args with
   | Ok parsed ->
     check (option string) "the preflight probes the build the TOML's name resolves to"
-      (Some "masc-sandbox-custom:t1")
+      (Some "masc-sandbox-ocaml:t1")
       !probed_image;
     check (option string) "parsed profile_defaults keeps the name"
-      (Some "custom")
+      (Some "ocaml")
       parsed.profile_defaults.sandbox_image;
     (match Keeper_turn_up_args.parse ~docker_preflight ctx
        (`Assoc ["name", `String keeper_name; "sandbox_profile", `String "docker";
-                "sandbox_image", `String "requested"]) with
+                "sandbox_image", `String "base"]) with
      | Ok parsed ->
        check (option string) "explicit image is preflighted instead of old TOML"
-         (Some "masc-sandbox-requested:t2") !probed_image;
+         (Some "masc-sandbox-base:test") !probed_image;
        check (option string) "requested image materializes"
-         (Some "requested") parsed.profile_defaults.sandbox_image
+         (Some "base") parsed.profile_defaults.sandbox_image
      | Error result -> fail (Keeper_types_profile.tool_result_body result));
     let failing_docker_preflight ~image ~timeout_sec:_ () =
       probed_image := Result.to_option image;
@@ -2714,13 +2710,13 @@ let test_sandbox_image_persistence () =
       ~base_path:ctx.config.base_path name with
     | Ok defaults -> defaults.sandbox_image
     | Error e -> fail (Keeper_types_profile.keeper_toml_load_error_to_string e) in
-  check (option string) "image set on disk" (Some "documents")
+  check (option string) "image set on disk" (Some "base")
     (apply ["instructions", `String "image fixture instructions";
-            "sandbox_image", `String "documents"]);
-  check (option string) "omission retains image" (Some "documents")
+            "sandbox_image", `String "base"]);
+  check (option string) "omission retains image" (Some "base")
     (apply ["instructions", `String "new instructions"]);
-  check (option string) "image replacement materializes" (Some "reports")
-    (apply ["sandbox_image", `String "reports"]);
+  check (option string) "image replacement materializes" (Some "ocaml")
+    (apply ["sandbox_image", `String "ocaml"]);
   (* A docker Keeper cannot drop its image (#37523): the explicit clear is
      refused before anything is written, and the stored image stays. *)
   (match parse_stating_a_profile ctx
@@ -2735,7 +2731,7 @@ let test_sandbox_image_persistence () =
      ~base_path:ctx.config.base_path name with
    | Ok defaults ->
      check (option string) "refused clear keeps the stored image"
-       (Some "reports") defaults.sandbox_image
+       (Some "ocaml") defaults.sandbox_image
    | Error e -> fail (Keeper_types_profile.keeper_toml_load_error_to_string e));
   List.iter (fun image ->
     match parse_stating_a_profile ctx (`Assoc ["name", `String name; "sandbox_image", image]) with

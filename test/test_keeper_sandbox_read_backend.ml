@@ -1736,8 +1736,8 @@ let test_docker_preflight_classifies_image_inspect_timeout () =
 let test_run_command_nonzero_exit_errors_by_default () =
   with_fake_docker fake_docker_exit_1_script @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
-  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("test", "alpine:test") ];
-  let meta = { meta with sandbox_image = Some "test" } in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
     Keeper_sandbox_read_backend.run_command_with_status ~config ~meta
@@ -1761,8 +1761,8 @@ let test_run_command_nonzero_exit_errors_by_default () =
 let test_run_command_allows_configured_nonzero_exit () =
   with_fake_docker fake_docker_exit_1_script @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
-  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("test", "alpine:test") ];
-  let meta = { meta with sandbox_image = Some "test" } in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
     Keeper_sandbox_read_backend.run_command_with_status
@@ -1785,8 +1785,8 @@ let test_run_command_allows_configured_nonzero_exit () =
 let test_run_command_preserves_bare_command_argv () =
   with_fake_docker fake_docker_echo_command_script @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
-  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("test", "alpine:test") ];
-  let meta = { meta with sandbox_image = Some "test" } in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
     Keeper_sandbox_read_backend.run_command_with_status ~config ~meta
@@ -1814,8 +1814,8 @@ let test_run_command_preserves_bare_command_argv () =
 let test_read_asks_the_sandbox_for_a_bounded_prefix () =
   with_fake_docker fake_docker_echo_command_script @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
-  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("test", "alpine:test") ];
-  let meta = { meta with sandbox_image = Some "test" } in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_path = Filename.concat host_root "scratch/oversize.bin" in
@@ -1845,8 +1845,8 @@ let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
-  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("test", "alpine:test") ];
-  let meta = { meta with sandbox_image = Some "test" } in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   let log_path = fake_docker_log_path () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let result = ref None in
@@ -1889,8 +1889,8 @@ let test_run_command_projects_keeper_secret_dir () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
-  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("test", "alpine:test") ];
-  let meta = { meta with sandbox_image = Some "test" } in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   let log_path = fake_docker_log_path () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let secret_root =
@@ -1937,8 +1937,8 @@ let test_run_command_scrubs_sensitive_env () =
   with_env "GH_TOKEN" "ghp_secret" @@ fun () ->
   with_env "ANTHROPIC_API_KEY" "sk-ant-secret" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
-  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("test", "alpine:test") ];
-  let meta = { meta with sandbox_image = Some "test" } in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   let log_path = fake_docker_log_path () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
@@ -1961,8 +1961,8 @@ let test_turn_runtime_reuses_single_container () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
-  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("test", "alpine:test") ];
-  let meta = { meta with sandbox_image = Some "test" } in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   let log_path = fake_docker_log_path () in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_config_dir =
@@ -2041,8 +2041,8 @@ let test_typed_guest_target_leaves_image_preflight_to_runtime_creation () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "typed-target-preflight" in
-  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("test", "alpine:test") ];
-  let meta = { meta with sandbox_image = Some "test" } in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   let log_path = fake_docker_log_path () in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir host_root;
@@ -2521,8 +2521,8 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "true" @@ fun () ->
   let base, config, meta = setup_config "acme-sandbox" in
-  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("test", "alpine:test") ];
-  let meta = { meta with sandbox_image = Some "test" } in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ ("base", "alpine:test") ];
+  let meta = { meta with sandbox_image = Some "base" } in
   let log_path = fake_docker_log_path () in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir host_root;
@@ -2612,9 +2612,9 @@ let test_complete_binary_failure_has_safe_diagnostic () =
     let base_path = temp_dir () in
     Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
       let config = Workspace.default_config base_path in
-      Masc_test_deps.write_sandbox_image_catalog ~base_path [ ("test", "alpine:test") ];
+      Masc_test_deps.write_sandbox_image_catalog ~base_path [ ("base", "alpine:test") ];
       let meta = { (make_meta ~name:"binary-error" ~sandbox:Keeper_types_profile_sandbox.Docker)
-        with sandbox_image = Some "test" } in
+        with sandbox_image = Some "base" } in
       let path = Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "partial.png" in
       match Keeper_sandbox_read_backend.read_complete_file ~config ~meta ~host_path:path ~timeout_sec:5. () with
       | Ok _ -> Alcotest.fail "failed binary process was accepted"
@@ -2640,9 +2640,9 @@ esac
     let base_path = temp_dir () in
     Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
       let config = Workspace.default_config base_path in
-      Masc_test_deps.write_sandbox_image_catalog ~base_path [ ("test", "alpine:test") ];
+      Masc_test_deps.write_sandbox_image_catalog ~base_path [ ("base", "alpine:test") ];
       let meta = { (make_meta ~name:"raw-prefix" ~sandbox:Keeper_types_profile_sandbox.Docker)
-        with sandbox_image = Some "test" } in
+        with sandbox_image = Some "base" } in
       let path = Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "capture" in
       match Keeper_sandbox_read_backend.read_raw_prefix ~config ~meta ~host_path:path
           ~max_bytes:4 ~timeout_sec:5. () with

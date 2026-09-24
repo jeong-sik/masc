@@ -17318,8 +17318,13 @@ def a_failing_keepers_open_turn_reads_failing(
     _base_path: str,
 ) -> None:
     tab_until(process, master_fd, output, b"MASC Keepers")
-    working = re.compile(rb"\d+s +alpha\b")
-    failing = re.compile(rb"\bfailing +beta\b")
+    # Both turns opened about 42 seconds ago. The HEALTH cell carries the
+    # health word the header counts -- nothing for healthy alpha, "failing"
+    # for beta -- and the TURN cell after the name carries the open turn's run
+    # time on both rows. A clock kept in HEALTH would leave it off beta's row,
+    # whose only age would then be its last recorded turn's: the failure's.
+    working = re.compile(rb"\balpha\b[^\n]*?\b\d+s\b")
+    failing = re.compile(rb"\bfailing +beta\b[^\n]*?\b\d+s\b")
     deadline = time.monotonic() + 10.0
     screen = b""
     while time.monotonic() < deadline:
@@ -17330,8 +17335,8 @@ def a_failing_keepers_open_turn_reads_failing(
         time.sleep(0.1)
     else:
         raise AssertionError(
-            "the roster did not draw alpha's turn with its elapsed time and "
-            f"beta's with its failing word: {screen!r}"
+            "the roster did not draw both open turns' run time in TURN, and "
+            f"beta's failing word in HEALTH: {screen!r}"
         )
     if not re.search(rb"\b1 failing\b", screen):
         raise AssertionError(f"the header did not count beta failing: {screen!r}")

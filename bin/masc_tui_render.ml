@@ -4763,48 +4763,38 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
      mark moves while the turn is being worked: it is the one thing on the
      screen that is changing as the reader looks at it.
 
-     The word beside it is how long the turn has run. The moving mark already
-     says the keeper is answering, and eight seconds and forty minutes are
-     different situations. It also fits: this column is cut for "healthy",
-     and "answering" does not.
+     The word beside the mark is the health word on every row, open turn or
+     not, because it is the word the roster header counts: a healthy keeper
+     says nothing, a failing one says "failing". How long the turn has run
+     belongs to the TURN cell (see [Masc_tui_keeper_mark.turn_clock]), on
+     every row alike. A failing keeper's row keeps its health word, so a
+     clock drawn here was left out of exactly that row, and the TURN cell's
+     last recorded turn -- the failure -- was the only age beside a moving
+     mark: "failing 7m45s" read as the work in progress, under a turn that
+     had run for half a minute (code-reviewer, 2026-09-24).
 
-     A failing keeper keeps its health word. Its keepalive is running the
-     next attempt, so the mark still moves, but the roster header counts it
-     as failing and its row is where the reader looks for it. Beside the
-     elapsed time it would draw exactly what a working keeper draws. The
-     colour stays the one its next action gives it, as on its idle row.
-
-     A turn whose keeper the health reading calls offline was never closed
-     and nothing works it: the mark stops, the elapsed stays -- how long it
-     has been open is the fact -- and the cell takes the failure colour.
-
-     Idle and unavailable rows keep the health word -- unavailable is the
-     owner lookup failing, which the health column describes better than a
-     blank would. *)
-  let glyph, status_word, status_color =
+     A failing keeper's mark keeps moving in its next-action colour: its
+     keepalive is running the next attempt. A turn whose keeper the health
+     reading calls offline was never closed and nothing works it: the mark
+     stops and takes the failure colour. *)
+  let health_word = keeper_health_deviation_word health in
+  let glyph, status_color =
     match (turn : Tui_decode.keeper_turn_state option) with
-    | Some (Tui_decode.Keeper_turn_running { started_at_unix; _ }) -> (
-        let elapsed = Masc_tui_answering.elapsed_text ~now started_at_unix in
+    | Some (Tui_decode.Keeper_turn_running _) -> (
         match
           Masc_tui_keeper_mark.open_turn
             (Option.map Tui_decode.keeper_health_reading health)
         with
         | Masc_tui_keeper_mark.Worked ->
-            (Masc_tui_answering.running_glyph ~frame, elapsed, Theme.info ())
+            (Masc_tui_answering.running_glyph ~frame, Theme.info ())
         | Masc_tui_keeper_mark.Worked_while_failing ->
-            ( Masc_tui_answering.running_glyph ~frame
-            , keeper_health_deviation_word health
-            , status_color )
+            (Masc_tui_answering.running_glyph ~frame, status_color)
         | Masc_tui_keeper_mark.Left_open ->
-            ( Masc_tui_answering.running_glyph ~frame:(-1)
-            , elapsed
-            , Theme.bad () ))
+            (Masc_tui_answering.running_glyph ~frame:(-1), Theme.bad ()))
     | Some Tui_decode.Keeper_turn_idle
     | Some (Tui_decode.Keeper_turn_unavailable _)
     | None ->
-      ( keeper_state_glyph ~paused ~health
-      , keeper_health_deviation_word health
-      , status_color )
+      (keeper_state_glyph ~paused ~health, status_color)
   in
   (* Selection is the full-row band the caller draws (box_line_selected over
      a strip_sgr'd copy of this row), so the row itself carries no marker.
@@ -4826,7 +4816,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
   String.concat ""
     [ "   "
     ; status_color ^ glyph ^ " "
-      ^ fit_width status_word (Render_schedule.keeper_status_width - 2)
+      ^ fit_width health_word (Render_schedule.keeper_status_width - 2)
       ^ Ansi.reset
     ; " "
     ; (* A keeper whose gate runs every call unasked wears its name in
@@ -4836,21 +4826,28 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
       (if yolo then (Theme.bad ()) ^ name ^ Ansi.reset else name)
     ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")
     ; (* The lifetime turn count said nothing an operator acts on; how long
-         since this keeper last turned does. A running row already carries
-         its elapsed time in the HEALTH cell, so this column answers the
-         idle rows. A keeper that never turned, or one whose last turn reads
-         from the future, draws the dash every unknown draws. The count
-         itself still lives on the detail pane. *)
-      (let last_turn_age =
-         match Masc_domain.parse_iso8601_opt keeper.k_last_turn_ts with
-         | None -> "\xe2\x80\x94"
-         | Some since -> (
+         this keeper has been at its turn, or since it last turned, does. An
+         open turn is what the keeper is doing now, so it wins, and it is
+         drawn in the mark's colour; a finished turn is past and stays dim.
+         A keeper that never turned, or one whose last turn reads from the
+         future, draws the dash every unknown draws. The count itself still
+         lives on the detail pane. *)
+      (let dash = "\xe2\x80\x94" in
+       let turn_color, turn_age =
+         match
+           Masc_tui_keeper_mark.turn_clock ~turn
+             ~last_turn_at:(Masc_domain.parse_iso8601_opt keeper.k_last_turn_ts)
+         with
+         | Masc_tui_keeper_mark.Open_turn_started started_at ->
+             (status_color, Masc_tui_answering.elapsed_text ~now started_at)
+         | Masc_tui_keeper_mark.Last_turn_recorded since -> (
              match Message_layout.age_text ~now ~since with
-             | Some text -> text
-             | None -> "\xe2\x80\x94")
+             | Some text -> (Ansi.dim, text)
+             | None -> (Ansi.dim, dash))
+         | Masc_tui_keeper_mark.No_turn_recorded -> (Ansi.dim, dash)
        in
-       Printf.sprintf " %s%*s%s" Ansi.dim
-         Render_schedule.keeper_last_turn_width last_turn_age Ansi.reset)
+       Printf.sprintf " %s%*s%s" turn_color
+         Render_schedule.keeper_last_turn_width turn_age Ansi.reset)
     ; (if columns.kcol_show_runtime then
          " " ^ (Theme.recede ())
          ^ keeper_runtime_cell ~width:columns.kcol_runtime runtime

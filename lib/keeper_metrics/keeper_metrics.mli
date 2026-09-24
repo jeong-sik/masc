@@ -76,7 +76,6 @@ type t =
   | ExecutionReceiptFailures
   | SessionCleanupFailures
   | ToolExecuteFailures
-  | RolloverFailures
   | LifecycleDispatchRejections
   | LifecycleTransactions
   | RecordingErrorDedup

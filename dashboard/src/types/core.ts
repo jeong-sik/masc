@@ -1390,7 +1390,6 @@ export interface Keeper {
   updated_at?: string
   keeper_age_s?: number
   last_turn_ago_s?: number
-  last_handoff_ago_s?: number
   last_proactive_ago_s?: number
   last_proactive_reason?: string | null
   last_proactive_preview?: string | null
@@ -1438,7 +1437,6 @@ export interface Keeper {
   conversation_tail_count?: number
   k2k_count?: number
   k2k_mentions?: Array<{ keeper: string; count: number }>
-  handoff_count_total?: number
   metrics_window?: MetricsWindow
   // Metrics time-series (from backend metrics_series)
   metrics_series?: KeeperMetricPoint[]

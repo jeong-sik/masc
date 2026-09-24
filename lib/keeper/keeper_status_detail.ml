@@ -384,16 +384,12 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let last_turn_ago_s =
            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.usage.last_turn_ts
          in
-         let last_handoff_ago_s =
-           Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.last_handoff_ts
-         in
          let last_proactive_ago_s =
            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.proactive_rt.last_ts
          in
          let last_visible_proactive_ago_s =
            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.proactive_rt.last_visible_ts
          in
-         let prior_trace_count = List.length m.runtime.trace_history in
          let runtime_runtime_metrics = `Null in
          let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
          let session_dir =
@@ -607,7 +603,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("keepalive_running", `Bool keepalive_running);
            ("keeper_age_s", Json_util.float_opt_to_json keeper_age_s);
            ("last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s);
-           ("last_handoff_ago_s", Json_util.float_opt_to_json last_handoff_ago_s);
            ("last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s);
            ("last_visible_proactive_ago_s", Json_util.float_opt_to_json last_visible_proactive_ago_s);
            ("active_model", `Null);
@@ -615,7 +610,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("disposition_reason", Json_util.string_opt_to_json disposition_reason);
            ("next_model_hint", `Null);
            ("runtime_runtime_metrics", runtime_runtime_metrics);
-           ("handoff_count_total", `Int prior_trace_count);
            ("sandbox_profile",
              `String (sandbox_profile_to_string m.sandbox_profile));
            ("network_mode",

@@ -28,7 +28,6 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
   if (keeper.context_max != null) extras.push({ title: '컨텍스트 최대', value: formatTokens(keeper.context_max) })
   if (keeper.k2k_count != null) extras.push({ title: 'K2K 카운트', value: String(keeper.k2k_count) })
   if (keeper.conversation_tail_count != null) extras.push({ title: '대화 tail', value: String(keeper.conversation_tail_count) })
-  if (keeper.handoff_count_total != null) extras.push({ title: '핸드오프 총합', value: String(keeper.handoff_count_total) })
   if (keeper.context?.message_count != null) extras.push({ title: '메시지 수', value: String(keeper.context.message_count) })
   if (keeper.context?.has_checkpoint != null) extras.push({ title: '체크포인트 보유', value: keeper.context.has_checkpoint ? '예' : '아니오' })
 

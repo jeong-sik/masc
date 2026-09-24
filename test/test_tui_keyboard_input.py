@@ -10396,7 +10396,7 @@ STANDALONE_LANES_PATH = "/api/v1/dashboard/standalone-lanes"
 
 
 def standalone_lane_fixture(
-    lane_id: str, label: str, *, status: str = "idle"
+    lane_id: str, label: str, *, status: str = "idle", retained: int = 12
 ) -> dict[str, object]:
     """One row of the observation matrix, in the wire shape the strict
     decoder accepts: every known lane exactly once, observation_only set."""
@@ -10422,6 +10422,11 @@ def standalone_lane_fixture(
             "Reviews Task completion and Goal proof evidence.",
             False,
         ),
+        "browser_stagehand_exact": (
+            "Answers structured model requests from the Stagehand browser lane; "
+            "run records are not retained yet.",
+            False,
+        ),
     }
     purpose, required = lane_contracts[lane_id]
     row = {
@@ -10443,16 +10448,20 @@ def standalone_lane_fixture(
         "dropped_slots": [],
         "admission_error": None,
         "status": status,
-        "retained_run_count": 12,
+        "retained_run_count": retained,
         "running_count": 0,
-        "succeeded_count": 12,
+        "succeeded_count": retained,
         "failed_count": 0,
         "cancelled_count": 0,
-        "last_started_at": 1787557600.0,
-        "last_terminal_at": 1787557660.0,
-        "last_outcome": "succeeded",
-        "p50_elapsed_s": 8.0,
-        "selected_slots": [{"slot_id": "glm-coding.glm-5-turbo", "count": 12}],
+        "last_started_at": 1787557600.0 if retained else None,
+        "last_terminal_at": 1787557660.0 if retained else None,
+        "last_outcome": "succeeded" if retained else None,
+        "p50_elapsed_s": 8.0 if retained else None,
+        "selected_slots": (
+            [{"slot_id": "glm-coding.glm-5-turbo", "count": retained}]
+            if retained
+            else []
+        ),
         "runs_without_slot": {"vendor_system_one": 0, "server_restarted": 0, "no_slot": 0},
     }
     if lane_id == "board_attention_exact":
@@ -10484,6 +10493,10 @@ def standalone_lanes_response() -> HttpResponse:
                     "workspace_curator_exact", "Workspace Curator"
                 ),
                 standalone_lane_fixture("verifier_exact", "Verifier"),
+                standalone_lane_fixture(
+                    "browser_stagehand_exact", "Browser Stagehand",
+                    status="no_retained_observation", retained=0,
+                ),
             ],
         },
     )

@@ -2165,7 +2165,25 @@ let test_retry_before_terminal_reconciliation_retains_wake () =
      |> Keeper_event_queue.length)
 ;;
 
-let test_deferred_keeper_wake_not_running_is_retryable () =
+(* How many runner ticks the unstarted-owner test watches. The defect it pins
+   repeated on every tick, so any count above one tells a single acceptance
+   from a loop. *)
+let unstarted_owner_observed_ticks = 8
+
+let activation_of_wake_detail (wake : Schedule_domain.wake_record) =
+  match wake.detail with
+  | Some detail ->
+    let open Yojson.Safe.Util in
+    ( detail |> member "activation_status" |> to_string
+    , detail |> member "activation_reason" |> to_string )
+  | None -> fail "accepted wake has no receipt"
+;;
+
+(* A Keeper that is registered but whose fiber is not running takes a due
+   occurrence the way a paused one does: the stimulus is committed to its
+   durable queue, the schedule accepts it once, and later runner ticks find
+   nothing left to dispatch. *)
+let test_unstarted_owner_accepts_the_occurrence_once () =
   with_workspace
   @@ fun config ->
   let keeper_name = "offline-schedule-keeper" in
@@ -2178,91 +2196,100 @@ let test_deferred_keeper_wake_not_running_is_retryable () =
        let request =
          create_named_keeper_wake_schedule
            config
-           ~schedule_id:"deferred-wake-not-running"
+           ~schedule_id:"unstarted-owner-wake"
            ~keeper_name
        in
-       let result = tick_ok config ~now:201.0 in
-       check int "one dispatch attempted" 1 (List.length result.dispatches);
-       let dispatch = List.hd result.dispatches in
-       check string "dispatch returns retryable failure" "failed"
-         (Schedule_runner.dispatch_status_to_string dispatch.status);
-       (match dispatch.error with
-        | Some detail ->
-          check bool "retryable failure explicitly mentions owner not running" true
-            (String_util.contains_substring detail "deferred owner-not-running")
-        | None -> fail "dispatch error detail missing");
+       let first_tick_at = request.due_at +. 1.0 in
+       let results =
+         List.init unstarted_owner_observed_ticks (fun index ->
+           tick_ok
+             config
+             ~now:
+               (first_tick_at
+                +. (Float.of_int index *. Env_config_runtime_services.ScheduleRunner.interval_sec)))
+       in
+       let dispatches =
+         List.concat_map
+           (fun (result : Schedule_runner.tick_result) -> result.dispatches)
+           results
+       in
+       (match dispatches with
+        | [ dispatch ] ->
+          check string "the one dispatch is accepted" "succeeded"
+            (Schedule_runner.dispatch_status_to_string dispatch.status)
+        | dispatches ->
+          failf "expected one dispatch across %d ticks, got %d"
+            unstarted_owner_observed_ticks
+            (List.length dispatches));
        (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
-        | None -> fail "schedule missing"
         | Some stored ->
-          check string "schedule remains due for retry" "due"
-            (Schedule_domain.schedule_status_to_string stored.status));
-       check int "stimulus is enqueued and remains pending" 1
-         (Keeper_event_queue.length
-            (Keeper_registry_event_queue.snapshot ~base_path keeper_name));
-       let retried = tick_ok config ~now:202.0 in
-       check int "one retry dispatch attempted" 1 (List.length retried.dispatches);
-       check int "queue does not accumulate duplicate entries on retry" 1
+          check string "the schedule is done, not due again" "succeeded"
+            (Schedule_domain.schedule_status_to_string stored.status)
+        | None -> fail "schedule missing");
+       (match
+          Schedule_store.wakes_for_schedule_instance
+            (Schedule_store.read_state config)
+            ~schedule_instance_id:request.schedule_instance_id
+            ~schedule_id:request.schedule_id
+        with
+        | [ wake ] ->
+          check (pair string string) "the receipt says the owner was not running"
+            ("deferred", "not_running")
+            (activation_of_wake_detail wake)
+        | wakes -> failf "expected one wake record, got %d" (List.length wakes));
+       check int "the stimulus waits in the owner's durable queue" 1
          (Keeper_event_queue.length
             (Keeper_registry_event_queue.snapshot ~base_path keeper_name)))
 ;;
 
-(* An interval wake may already be in the durable queue when activation or
-   the schedule acceptance fails. Self-clocking must not defer that same
-   occurrence's repair; it holds only a later firing back. *)
-let test_interval_wake_retries_activation_before_holding_the_next_occurrence () =
+(* An interval wake to an owner whose fiber is not running is accepted on its
+   first firing. The next firing is held until the owner consumes the first,
+   as for any other owner. *)
+let test_interval_wake_to_unstarted_owner_holds_the_next_occurrence () =
   with_workspace
   @@ fun config ->
   let keeper_name = "offline-interval-keeper" in
   let base_path = config.Workspace_utils.base_path in
+  let interval_sec = 60 in
   register_offline_keeper ~proactive_enabled:true config keeper_name;
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
     (fun () ->
        let request = create_named_keeper_wake_schedule
-           ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
-           config ~schedule_id:"interval-activation-retry" ~keeper_name in
-       let first = tick_ok config ~now:201.0 in
+           ~recurrence:(Schedule_domain.Interval { interval_sec })
+           config ~schedule_id:"interval-unstarted-owner" ~keeper_name in
+       let first_tick_at = request.due_at +. 1.0 in
+       let first = tick_ok config ~now:first_tick_at in
        let occurrence_id = single_occurrence_id first in
-       check bool "first dispatch fails after enqueue" true
-         ((List.hd first.dispatches).status = Schedule_runner.Dispatch_failed);
+       check bool "the first firing is accepted while the owner is down" true
+         ((List.hd first.dispatches).status = Schedule_runner.Dispatch_succeeded);
        let pending_ids () =
          Keeper_registry_event_queue.snapshot ~base_path keeper_name
          |> Keeper_event_queue.to_list
          |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id)
        in
-       check (list string) "failed activation retains durable occurrence"
+       check (list string) "the occurrence waits in the durable queue"
          [ occurrence_id ] (pending_ids ());
-       let retried = tick_ok config ~now:202.0 in
-       check bool "same occurrence retries activation while owner is offline" true
-         ((List.hd retried.dispatches).status = Schedule_runner.Dispatch_failed);
-       check int "retry does not emit another signal" 0 (List.length retried.emitted);
-       check string "retry has the same occurrence identity" occurrence_id
-         (Schedule_occurrence_id.to_string (List.hd retried.dispatches).occurrence_id);
-       (match Keeper_registry.prepare_fiber_launch ~base_path keeper_name with
-        | Ok _ -> ()
-        | Error error -> fail (Keeper_state_machine.transition_error_to_string error));
-       let repaired = tick_ok config ~now:203.0 in
-       check bool "running owner accepts the retried occurrence" true
-         ((List.hd repaired.dispatches).status = Schedule_runner.Dispatch_succeeded);
-       check (list string) "repair keeps one copy in the queue"
-         [ occurrence_id ] (pending_ids ());
-       (match Keeper_registry.get ~base_path keeper_name with
-        | Some entry -> check bool "repair signals the owner" true
-            (Atomic.get entry.fiber_wakeup)
-        | None -> fail "registered owner disappeared");
        (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
         | Some stored ->
           check bool "acceptance advances the recurring schedule" true
             (stored.status = Schedule_domain.Scheduled);
-          check (float 0.001) "next occurrence keeps its due" 260.0 stored.due_at
-        | None -> fail "schedule disappeared after repair");
-       let next = tick_ok config ~now:261.0 in
-       check int "a different occurrence waits for the pending one" 1
+          check (float 0.001) "next occurrence keeps its due"
+            (request.due_at +. Float.of_int interval_sec) stored.due_at
+        | None -> fail "schedule disappeared after acceptance");
+       let before_next_due =
+         tick_ok config ~now:(first_tick_at +. Env_config_runtime_services.ScheduleRunner.interval_sec)
+       in
+       check int "a tick before the next due dispatches nothing" 0
+         (List.length before_next_due.dispatches);
+       let next =
+         tick_ok config ~now:(request.due_at +. Float.of_int interval_sec +. 1.0)
+       in
+       check int "the next occurrence waits for the pending one" 1
          (List.length next.held);
        check int "a waiting occurrence is not dispatched" 0
          (List.length next.dispatches);
-       check int "held next occurrence emits no signal" 0 (List.length next.emitted);
-       check (list string) "next tick keeps the repaired occurrence"
+       check (list string) "the queue keeps the first occurrence only"
          [ occurrence_id ] (pending_ids ()))
 ;;
 
@@ -3185,11 +3212,11 @@ let () =
         ; test_case "retry before terminal reconciliation retains wake"
             `Quick
             test_retry_before_terminal_reconciliation_retains_wake
-        ; test_case "deferred keeper wake when not running is retryable"
+        ; test_case "an unstarted owner accepts the occurrence once"
             `Quick
-            test_deferred_keeper_wake_not_running_is_retryable
-        ; test_case "interval wake retries activation before holding the next occurrence"
-            `Quick test_interval_wake_retries_activation_before_holding_the_next_occurrence
+            test_unstarted_owner_accepts_the_occurrence_once
+        ; test_case "an interval wake to an unstarted owner holds the next occurrence"
+            `Quick test_interval_wake_to_unstarted_owner_holds_the_next_occurrence
         ; test_case "interval wake retries acceptance commit"
             `Quick (test_interval_wake_retries_acceptance_commit ~complete_before_retry:false)
         ; test_case "completed interval wake retries acceptance without enqueue"

@@ -22,7 +22,7 @@ cd masc
 
 # Pin and install the OCaml dependencies
 scripts/opam-pin-external-deps.sh --install
-opam install . --deps-only
+opam install ./masc.opam --deps-only --locked
 ```
 
 ## 2. Start the workspace server

@@ -22,7 +22,7 @@ cd masc
 
 # OCaml 의존성 고정 및 설치
 scripts/opam-pin-external-deps.sh --install
-opam install . --deps-only
+opam install ./masc.opam --deps-only --locked
 ```
 
 ## 2. 작업 공간 서버 켜기

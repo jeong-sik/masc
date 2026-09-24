@@ -33,7 +33,7 @@ jobs:
         with:
           pin-flags: --with-bisect
       - name: Dependencies
-        run: opam install . --deps-only --locked --with-test --yes
+        run: opam install ./masc.opam --deps-only --locked --with-test --yes
       - name: Build and test native integration
         run: |
           set -euo pipefail

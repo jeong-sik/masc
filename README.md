@@ -125,7 +125,7 @@ opam init --bare
 opam switch create . ocaml-base-compiler.5.5.1
 eval "$(opam env)"
 scripts/opam-pin-external-deps.sh
-opam install . --deps-only
+opam install ./masc.opam --deps-only --locked
 opam exec -- dune build bin/main_eio.exe bin/masc_tui.exe
 corepack enable
 corepack prepare pnpm@10.31.0 --activate

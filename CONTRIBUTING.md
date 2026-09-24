@@ -17,7 +17,7 @@ cd masc
 git config core.hooksPath .githooks       # pre-commit and pre-push guards
 
 scripts/opam-pin-external-deps.sh         # pin external OCaml dependencies
-opam install . --deps-only
+opam install ./masc.opam --deps-only --locked
 
 scripts/dune-local.sh build @default      # build
 scripts/dune-local.sh exec test/test_keeper_meta_json_config_toml_only.exe

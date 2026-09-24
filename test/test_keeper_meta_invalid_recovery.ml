@@ -287,6 +287,7 @@ let test_older_meta_keeps_owner_state_without_usage_fields () =
   let path = keeper_meta_path config name in
   let old_json =
     Masc_test_deps.current_meta_json_fixture ~name ()
+    |> replace_field "schema" (`String "masc.keeper_meta.v1")
     |> replace_field "total_turns" (`Int 41)
     |> replace_field "total_cost_usd" (`Float 12.5)
     |> replace_field "paused" (`Bool true)
@@ -421,6 +422,14 @@ let test_gate_verdict_matches_runtime_read () =
     optional;
   write_json (List.fold_left (fun json key -> remove_field key json) (current ()) optional);
   expect_accepted "older meta without both usage fields";
+  let previous_writer =
+    List.fold_left (fun json key -> remove_field key json) (current ()) optional
+    |> replace_field "schema" (`String "masc.keeper_meta.v1")
+  in
+  write_json previous_writer;
+  expect_accepted "previous v1 writer meta";
+  write_json (previous_writer |> replace_field "last_usage_resolution" `Null);
+  expect_not_current "v1 meta with one v2 usage field";
   write_json (current () |> replace_field "usage_cursor" (`Bool false));
   expect_not_current "malformed usage_cursor";
   write_json (current () |> replace_field "last_usage_resolution" (`Bool false));

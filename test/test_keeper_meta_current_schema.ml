@@ -175,10 +175,20 @@ let test_retired_compaction_failure_authority_requires_reset () =
      |> replace_field "compaction_consecutive_failures" (`Int 3))
 ;;
 
-let test_v1_requires_reset_and_v2_usage_state_roundtrips () =
+let test_previous_writer_shape_and_v2_usage_state_roundtrips () =
+  let previous_writer_json =
+    current_json ()
+    |> replace_field "schema" (`String "masc.keeper_meta.v1")
+    |> remove_field "usage_cursor"
+    |> remove_field "last_usage_resolution"
+  in
+  expect_current "v1 writer shape" previous_writer_json;
   expect_rejected
-    "v1 schema"
+    "v1 schema with v2 usage fields"
     (current_json () |> replace_field "schema" (`String "masc.keeper_meta.v1"));
+  expect_rejected
+    "v1 schema with one v2 usage field"
+    (previous_writer_json |> replace_field "usage_cursor" `Null);
   let sample : Keeper_usage_resolution.sample =
     { input_tokens = 160
     ; output_tokens = 20
@@ -308,8 +318,8 @@ let () =
             test_retired_compaction_failure_authority_requires_reset
         ; test_case "writer rejects non-finite values" `Quick
             test_current_writer_rejects_non_finite_values
-        ; test_case "v1 cut and v2 usage state roundtrip" `Quick
-            test_v1_requires_reset_and_v2_usage_state_roundtrips
+        ; test_case "previous writer shape and v2 usage state roundtrip" `Quick
+            test_previous_writer_shape_and_v2_usage_state_roundtrips
         ; test_case "client-turn totals preserve the conversation cursor" `Quick
             test_client_turn_totals_do_not_use_the_conversation_cursor
         ] )

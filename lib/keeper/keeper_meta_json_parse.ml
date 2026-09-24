@@ -364,7 +364,17 @@ let decode_current_meta fields =
   (* Kept now that the reader fails open: the exact-field check cannot see a
      format whose field names stayed the same while their meaning changed, and
      rejecting costs a reset rather than a dead keeper. *)
-  if not (String.equal schema "masc.keeper_meta.v2")
+  let schema_matches_fields =
+    match schema with
+    | "masc.keeper_meta.v2" -> true
+    | "masc.keeper_meta.v1" ->
+      (* The v1 writer emitted neither field. Accept only that exact
+         pre-usage shape; a hybrid v1 row has no writer contract. *)
+      not (List.mem_assoc "usage_cursor" fields)
+      && not (List.mem_assoc "last_usage_resolution" fields)
+    | _ -> false
+  in
+  if not schema_matches_fields
   then invalidf "unsupported schema: %S" schema
   else if not (validate_name name)
   then invalidf "name is invalid: %S" name

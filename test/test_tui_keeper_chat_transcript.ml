@@ -610,6 +610,16 @@ let test_run_failure_and_finish_set_the_phase () =
   feed missing [ Live.Run_started; Live.Run_failed { message = " " } ];
   check string "a missing cause is explicit" "cause not reported \xc2\xb7 0s"
     (List.assoc Transcript.Progress (rows missing));
+  let missing_on_runtime = fresh () in
+  feed missing_on_runtime
+    [ Live.Run_started
+    ; Live.Runtime_attempt_started
+        { runtime_id = Some "glm-coding.glm-5.3-flash"; attempt_index = Some 0 }
+    ; Live.Run_failed { message = " " }
+    ];
+  check string "a runtime cannot hide a missing cause"
+    "[glm-coding.glm-5.3-flash] cause not reported \xc2\xb7 0s"
+    (List.assoc Transcript.Progress (rows missing_on_runtime));
   let finished = fresh () in
   feed finished [ Live.Run_started; Live.Run_finished ];
   check phase "a finished run says so" Transcript.Stream_ended

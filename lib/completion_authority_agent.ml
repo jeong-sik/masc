@@ -1109,7 +1109,10 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
          about a timer that exists. Visibility only; the Board schedules
          nothing. *)
       announce_stall
-        ~notify:(Verification_protocol.notify_stalled_verification ~authority:system_authority)
+        ~notify:(fun ~task_id ~verification_id ->
+          Verification_protocol.notify_stalled_verification
+            ~authority:system_authority
+            ~subject:(Verification_protocol.Task_review { task_id; verification_id }))
         ~task_id:task.id
         ~verification_id
         ~cause

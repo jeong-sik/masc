@@ -467,6 +467,10 @@ let validate_verification_run_id verification_run_id =
 (* The authority is constructed inside the application boundary. It is not a
    field accepted from an MCP caller and cannot be replaced by a Keeper/session
    name. [Runtime.verifier_exact_lane_id] is the runtime configuration SSOT. *)
+let verifier_authority =
+  Masc_domain.System_llm_agent { agent_run_id = Runtime.verifier_exact_lane_id }
+;;
+
 let gate_verdict
       (outcome : Goal_verification.verdict_outcome)
       ~verification_run_id
@@ -479,9 +483,7 @@ let gate_verdict
   ; verification_run_id
   ; request_id
   ; criterion
-  ; authority =
-      Masc_domain.System_llm_agent
-        { agent_run_id = Runtime.verifier_exact_lane_id }
+  ; authority = verifier_authority
   ; evidence
   ; recorded_at = Masc_domain.now_iso ()
   }
@@ -524,36 +526,6 @@ let announce_proof_verdict
   | Error error ->
     Log.Misc.warn
       "goal verdict announcement failed goal_id=%s: %s"
-      goal.Goal_store.id
-      (Workspace_broadcast.broadcast_error_to_string error)
-;;
-
-(* A review that ends without a verdict changes nothing in the ledger, so no
-   scan follows it: the Goal waits in Verifying until something asks again.
-   The Keepers are told here, with the reason, so one of them can choose to
-   ask again once the cause is gone. No retry is scheduled. *)
-let announce_proof_deferred config ~(goal : Goal_store.goal) ~reason =
-  let content =
-    Printf.sprintf
-      "[goal_review_deferred] %s — %s\nreason: %s\n\
-       The Goal stays verifying. It is reviewed again on the next verifier \
-       scan; request_complete on this Goal starts one. While the reason \
-       above holds, that review is deferred the same way."
-      goal.Goal_store.id
-      goal.Goal_store.title
-      reason
-  in
-  match
-    Workspace_broadcast.broadcast
-      ~audience:Workspace_broadcast.Fleet_conversation
-      config
-      ~from_agent:Runtime.verifier_exact_lane_id
-      ~content
-  with
-  | Ok _ -> ()
-  | Error error ->
-    Log.Misc.warn
-      "goal review deferral announcement failed goal_id=%s: %s"
       goal.Goal_store.id
       (Workspace_broadcast.broadcast_error_to_string error)
 ;;

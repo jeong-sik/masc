@@ -50,6 +50,11 @@ type proof_reconciliation =
   | Reconciled of Goal_phase.t
   | Reconciliation_not_needed of Goal_phase.t
 
+val verifier_authority : Masc_domain.completion_authority
+(** The fixed authority of the Goal verifier: every proof verdict it commits
+    and every stalled-review notice it posts carries this value. It is built
+    inside the application boundary and is never read from a caller. *)
+
 (** Commit one verdict from the application-owned Goal verifier. The fixed
     [verifier_exact] authority is constructed inside this boundary; callers
     cannot supply or impersonate it. The ledger commit precedes any phase
@@ -67,13 +72,6 @@ val commit_verifier_decision
   -> decision:verifier_decision
   -> evidence:string
   -> Tool_result.result
-
-val announce_proof_deferred :
-  Workspace_utils_backend_setup.config -> goal:Goal_store.goal -> reason:string -> unit
-(** Tell the Keepers, as [verifier_exact], that a review of this still-
-    Verifying Goal ended without a verdict and why. A deferral writes no
-    ledger row, so no scan follows it; this message is how the Keepers learn
-    the Goal is waiting. A failed broadcast is logged, never raised. *)
 
 val reconcile_committed_proof :
   Workspace_utils_backend_setup.config ->

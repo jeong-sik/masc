@@ -1,4 +1,5 @@
 let supported_protocol_major = 2
+let protocol_version = Printf.sprintf "%d.0.0" supported_protocol_major
 let send_to_host_binding = "__stagehandSendToHost"
 let receive_from_host_function = "__stagehandReceiveFromHost"
 let client_name = "masc"
@@ -41,12 +42,13 @@ let marker_of_json json =
   Ok { protocol_version; runtime_version }
 ;;
 
+let is_digit = function '0' .. '9' -> true | _ -> false
+
+(* Digits only: int_of_string_opt would also read "0x2", "+2" or "2_0". *)
 let protocol_major marker =
   match String.split_on_char '.' marker.protocol_version with
-  | leading :: _ ->
-    Option.to_result ~none:("protocol version " ^ marker.protocol_version ^ " has no major")
-      (int_of_string_opt leading)
-  | [] -> Error "empty protocol version"
+  | leading :: _ when leading <> "" && String.for_all is_digit leading -> Ok (int_of_string leading)
+  | _ :: _ | [] -> Error ("protocol version " ^ marker.protocol_version ^ " has no numeric major")
 ;;
 
 (* Chrome ids are 32 letters from a to p. *)
@@ -69,8 +71,8 @@ type extension_request =
   | Unsupported_request of { id : id; method_ : string }
 
 type extension_notification =
-  | Log of Yojson.Safe.t
-  | Page_event of Yojson.Safe.t
+  | Log of Yojson.Safe.t option
+  | Page_event of Yojson.Safe.t option
   | Unsupported_notification of { method_ : string }
 
 type incoming =
@@ -79,9 +81,10 @@ type incoming =
   | Notification of extension_notification
 
 let request_of ~id method_ params =
-  match method_ with
-  | "llm.generate" -> Llm_generate { id; params }
-  | _ -> Unsupported_request { id; method_ }
+  match method_, params with
+  | "llm.generate", Some params -> Ok (Llm_generate { id; params })
+  | "llm.generate", None -> Error "llm.generate without params"
+  | _, (Some _ | None) -> Ok (Unsupported_request { id; method_ })
 ;;
 
 let notification_of method_ params =
@@ -101,9 +104,9 @@ let decode payload =
       | Some (`String s) -> Some (String_id s)
       | Some _ | None -> None
     in
-    let params = Option.value ~default:(`Assoc []) (field "params" json) in
+    let params = field "params" json in
     (match field "method" json, id with
-     | Some (`String method_), Some id -> Ok (Request (request_of ~id method_ params))
+     | Some (`String method_), Some id -> Result.map (fun request -> Request request) (request_of ~id method_ params)
      | Some (`String method_), None -> Ok (Notification (notification_of method_ params))
      | None, Some id ->
        (match field "result" json, field "error" json with
@@ -117,7 +120,7 @@ let decode payload =
 ;;
 
 type call =
-  | Init of { protocol_version : string; client_version : string; browser_cdp_url : string }
+  | Init of { client_version : string; browser_cdp_url : string }
   | Close
   | Act of { page_id : string; instruction : string }
   | Observe of { page_id : string; instruction : string option }
@@ -145,7 +148,7 @@ let optional key = function None -> [] | Some value -> [ key, value ]
 let page page_id = [ "page_id", `String page_id ]
 
 let call_params = function
-  | Init { protocol_version; client_version; browser_cdp_url } ->
+  | Init { client_version; browser_cdp_url } ->
     `Assoc
       [ "protocol_version", `String protocol_version
       ; "client_info", `Assoc [ "name", `String client_name; "version", `String client_version ]

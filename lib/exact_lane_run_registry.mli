@@ -1,23 +1,23 @@
 (** Admin-only durable execution records for model-driven Keeper exact-output
     lanes. Input/output values are exact. *)
 
+(** A run's lane. Every standalone lane but [Standalone_lane.Verifier] is
+    recorded here: a Verifier review is recorded by Verification_run_registry
+    or Goal_verification_run_registry, so this type leaves it out and replay
+    refuses a row naming it. *)
 type lane =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
   | Workspace_curator
 
-val all_lanes : lane list
-(** Every registry lane, for consumers that enumerate the wire vocabulary
-    (the standalone-lane projection and the TUI decoder). An independent
-    constructor oracle pins this enumeration; replay exercises every exported
-    lane, and language-boundary parity tests pin the wire keys. *)
+val standalone_lane : lane -> Standalone_lane.t
+(** The lane in the shared vocabulary. A run record writes its
+    {!Standalone_lane.to_id}. *)
 
-val lane_key : lane -> string
-(** The lane's wire identifier — the spelling the standalone-lane projection
-    serves and the TUI decoder and dashboard TS parse. This is the one
-    definition; a consumer that restates these strings drifts silently when
-    a lane is added or renamed. *)
+val lane_of_standalone : Standalone_lane.t -> lane option
+(** [None] for [Standalone_lane.Verifier], whose runs this registry does not
+    record. *)
 
 type outcome =
   | Succeeded
@@ -135,6 +135,7 @@ val register_running
   -> started_at:float
   -> input:run_input
   -> unit
+(** Raises [Invalid_argument] when [run_id] is not one path segment. *)
 
 val mark_completed
   :  t

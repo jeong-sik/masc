@@ -354,7 +354,7 @@ let write_config_root_keeper_toml ?(autoboot_enabled = true) config_root name =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     (Printf.sprintf
-       "[keeper]\ninstructions = \"instructions-%s\"\nactivation_mode = %S\nsandbox_profile = \"docker\"\n"
+       "[keeper]\ninstructions = \"instructions-%s\"\nactivation_mode = %S\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n"
        name
        (if autoboot_enabled then "autonomous" else "manual"))
 
@@ -375,6 +375,7 @@ let write_basepath_keeper_toml base_path name =
 instructions = "example"
 activation_mode = "on_demand"
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 |}
 let find_free_port_from start =
   let rec loop attempts port =
@@ -3009,7 +3010,9 @@ let test_fleet_official_client_recovery ~paused ~autoboot () =
         "turn_configuration_error" (json |> member "blocker" |> to_string);
       match Tui_decode.decode_fleet_safety (`Assoc [ "keeper_fleet_safety", json ]) with
       | Error error -> Alcotest.fail error
-      | Ok fleet ->
+      | Ok (Tui_decode.Fleet_not_measured _) ->
+        Alcotest.fail "the scan's own section decoded as not measured"
+      | Ok (Tui_decode.Fleet_measured fleet) ->
         Alcotest.(check int) "TUI retains the recovering count" 1 fleet.fs_recovering_count;
         Alcotest.(check int) "TUI retains session recovery count" (List.length required_names)
           fleet.fs_official_client_recovery_required_count;
@@ -3111,7 +3114,9 @@ let test_fleet_official_client_recovery_clears_after_success reason () =
         ((after |> member "blocker") = `Null);
       match Tui_decode.decode_fleet_safety (`Assoc [ "keeper_fleet_safety", after ]) with
       | Error error -> Alcotest.fail error
-      | Ok fleet ->
+      | Ok (Tui_decode.Fleet_not_measured _) ->
+        Alcotest.fail "the scan's own section decoded as not measured"
+      | Ok (Tui_decode.Fleet_measured fleet) ->
         Alcotest.(check int) "TUI clears session recovery count" 0
           fleet.fs_official_client_recovery_required_count;
         Alcotest.(check (list string)) "TUI clears session recovery names" []
@@ -3938,7 +3943,30 @@ let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
   Alcotest.(check bool) "cold timeout stale age is surfaced" true
     (match after |> member "full_health_snapshot" |> member "stale_age_ms" with
      | `Int age -> age >= 0
-     | _ -> false)
+     | _ -> false);
+  (* The TUI reads this same body. A cold refresh that timed out is a failure
+     with the server's reason in it, not a fleet of zeros and not a snapshot
+     that is merely being rebuilt. *)
+  match Tui_decode.decode_fleet_safety after with
+  | Ok _ -> Alcotest.fail "a timed-out cold refresh decoded as a fleet reading"
+  | Error err ->
+    Alcotest.(check bool) "the TUI names the timeout" true
+      (String_util.contains_substring err "refresh timed out")
+
+(* With no snapshot yet the health body carries the fleet section as the
+   "warming" placeholder. The TUI reads that exact body as not measured, so a
+   renamed placeholder key fails here rather than turning every rebuild into
+   a decode error on the operator's screen. *)
+let test_the_tui_reads_a_rebuilding_snapshot_as_not_measured () =
+  Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
+  let request = Httpun.Request.create `GET "/health?full=1" in
+  let body = Server_routes_http_runtime.make_health_response_json request in
+  match Tui_decode.decode_fleet_safety body with
+  | Ok (Tui_decode.Fleet_not_measured { status }) ->
+    Alcotest.(check string) "the placeholder's word" "warming" status
+  | Ok (Tui_decode.Fleet_measured _) ->
+    Alcotest.fail "a snapshot being rebuilt decoded as a fleet reading"
+  | Error err -> Alcotest.fail err
 
 let test_health_response_survives_deleted_cwd () =
   with_temp_dir "health-deleted-cwd" (fun dir ->
@@ -6054,6 +6082,8 @@ let () =
           Alcotest.test_case
             "full health cold refresh timeout is timeout" `Quick
             test_full_health_cold_refresh_timeout_is_timeout_not_error;
+          Alcotest.test_case "the TUI reads a rebuilding snapshot as not measured" `Quick
+            test_the_tui_reads_a_rebuilding_snapshot_as_not_measured;
           Alcotest.test_case "health response survives deleted cwd" `Quick
             test_health_response_survives_deleted_cwd;
           Alcotest.test_case "readiness false before init" `Quick

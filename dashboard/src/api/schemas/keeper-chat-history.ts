@@ -297,7 +297,8 @@ export const KeeperChatHistoryMessageSchema = object({
   external_message_id: optional(string()),
   // RFC-0223 P1 speaker identity, present on user rows written since
   // then. `speaker_authority` is 'owner' (authenticated dashboard
-  // operator) or 'external' (arbitrary person on a connector channel);
+  // operator), 'external' (arbitrary person on a connector channel) or
+  // 'keeper' (another registered Keeper; `speaker_id` is its id, RFC-0468);
   // left as open string() per the same deploy-window rationale as
   // `role` above. id/name are absent when the route supplies none
   // (dashboard rows carry authority only).

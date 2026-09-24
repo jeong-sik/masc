@@ -601,7 +601,7 @@ let write_board_lane_config config (meta : Keeper_meta_contract.keeper_meta) =
   Fs_compat.mkdir_p keepers_dir;
   Out_channel.with_open_text (Filename.concat keepers_dir (meta.name ^ ".toml"))
     (fun oc -> Printf.fprintf oc
-      "[keeper]\ninstructions = \"Review Board evidence.\"\nsandbox_profile = \"docker\"\nboard_interests = [%s]\n"
+      "[keeper]\ninstructions = \"Review Board evidence.\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\nboard_interests = [%s]\n"
       (String.concat ", " (List.map (Printf.sprintf "%S") meta.board_interests)))
 ;;
 
@@ -1255,8 +1255,8 @@ let test_path_rest_follows_the_answer_not_the_cadence () =
     (rest ~retry_class:rate_limited ~retry_after_hint:(Some 0.001));
   check (float 0.001) "an unstated throttle rests the floor" floor_sec
     (rest ~retry_class:rate_limited ~retry_after_hint:None);
-  check (float 0.001) "an unstated capacity refusal rests the floor" floor_sec
-    (rest ~retry_class:Keeper_runtime_failure_route.Capacity_backpressure
+  check (float 0.001) "an unstated provider capacity refusal rests the floor" floor_sec
+    (rest ~retry_class:Keeper_runtime_failure_route.Provider_capacity
        ~retry_after_hint:None);
   check (float 0.001) "an unstated hard quota rests the cap" 900.0
     (rest ~retry_class:hard_quota ~retry_after_hint:None);

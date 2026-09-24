@@ -101,7 +101,7 @@ let consume ~base_path ~keeper_name ~operation_id admission =
    would make is (RFC-provider-path-rest §3.4). Both lanes read
    [Keeper_turn_driver.next_dispatch_after_failure], so they answer one failure
    the same way: a suffix whose walk head serves is claimable now; a resting
-   head or capacity backpressure keeps the retry until its release. Claiming a
+   head keeps the retry until its release. Claiming a
    retry on a resting path re-issues a refused call in a tight loop (the chat
    lane retry storm of the 2026-09-10 drain investigation). *)
 let retry_not_before ~now (lane : Keeper_turn_driver.deferred_runtime_lane) =
@@ -118,7 +118,7 @@ let retry_not_before ~now (lane : Keeper_turn_driver.deferred_runtime_lane) =
       (Some lane)
   with
   | None | Some (Keeper_turn_driver.Dispatch_now { runtime_id = _ }) -> None
-  | Some (Keeper_turn_driver.Wait_until { release_at; waiting_on = _; wait = _ }) ->
+  | Some (Keeper_turn_driver.Wait_until { release_at; waiting_on = _ }) ->
     Some release_at
 
 let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id

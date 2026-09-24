@@ -187,7 +187,9 @@ type official_selection =
       (** Row 2c for these lines. A refused line beyond the cursor may be an
           official turn's end line; passing it would skip that turn (I3). No
           restart lifts it: a restart says where atoms begin again and
-          nothing about these lines. The remedy is a purge of the keeper. *)
+          nothing about these lines. The remedy is a purge of the keeper.
+          The stop holds these lines only; the atom selection of the same
+          round is independent of it (RFC §4.10). *)
 
 (** The [No_atom_history] end lines beyond [cursor], of every trace: a trace
     that ended still has fragments in its own session directory.

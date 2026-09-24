@@ -182,7 +182,7 @@ def require_fetched_release(bench_root: Path) -> dict:
     if fetched < floor:
         raise RuntimeError(
             f"dist/ holds masc {fetched_text}, older than {floor_text}, the first release "
-            "whose shim reads the env_file= the bootstrap writes; run image/fetch_masc.sh again")
+            "the default arm can run (see image/fetch_masc.sh); run image/fetch_masc.sh again")
     return manifest
 
 

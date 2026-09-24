@@ -105,7 +105,9 @@ let test_a_written_norm_reaches_the_turn_prompt () =
       let config = Masc.Workspace.default_config base_path in
       let meta = make_meta "prompt-reader" in
       let prompt () =
-        Masc.Keeper_unified_prompt.build_system_prompt ~meta ~config ()
+        match Masc.Keeper_unified_prompt.build_system_prompt ~meta ~config () with
+        | Ok prompt -> prompt
+        | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
       in
       Alcotest.(check bool)
         "the norm is absent before anyone writes it" false
@@ -259,11 +261,43 @@ let test_removing_an_id_the_world_does_not_hold_is_a_failure () =
         "a hand-written id is refused before the ledger is touched" true
         (failed (remove ~base_path "a-placeholder")))
 
+(* #38354: a ledger that exists but cannot be read is not a world without
+   norms. The prompt builder used to log and render the same text a fresh
+   world gets, so the turn ran without its articles and nothing downstream
+   could tell the two apart. The ledger path is made a directory: the store
+   sees something there, reading it fails, and [load] answers [Unreadable]. *)
+let test_an_unreadable_ledger_is_not_rendered_as_no_articles () =
+  with_world (fun base_path ->
+      let meta = make_meta "prompt-reader" in
+      let config = Masc.Workspace.default_config base_path in
+      let prompt () =
+        Masc.Keeper_unified_prompt.build_system_prompt ~meta ~config ()
+      in
+      (match prompt () with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.failf "a world with no ledger yet has a prompt: %s"
+           (Store.read_error_to_string error));
+      let ledger = Store.ledger_path ~base_path in
+      Fs_compat.mkdir_p ledger;
+      (match prompt () with
+       | Error (Store.Unreadable { path; detail = _ }) ->
+         Alcotest.(check string) "the error names the ledger" ledger path
+       | Ok _ -> Alcotest.fail "an unreadable ledger built a prompt");
+      Unix.rmdir ledger;
+      match prompt () with
+      | Ok _ -> ()
+      | Error error ->
+        Alcotest.failf "the prompt builds again once the ledger reads: %s"
+          (Store.read_error_to_string error))
+
 let () =
   Alcotest.run "world_constitution_tools"
     [ ( "end to end",
         [ Alcotest.test_case "a written norm reaches the turn prompt" `Quick
             test_a_written_norm_reaches_the_turn_prompt;
+          Alcotest.test_case "an unreadable ledger is not rendered as no articles"
+            `Quick test_an_unreadable_ledger_is_not_rendered_as_no_articles;
         ] );
       ( "write",
         [ Alcotest.test_case "a written norm reaches the rendered articles"

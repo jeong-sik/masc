@@ -88,11 +88,6 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
   | Session_conflict
       (** The provider session lease is owned by another process. This remains
           terminal for automatic retry and is never inferred from message text. *)
-  | Capacity_exhausted
-      (** Typed surface for capacity-induced runtime exhaustion.
-          Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
-          through to [Other_detail message], losing auto-recovery eligibility
-          and triggering the harsher failure policy. *)
   | Other_detail of string
 
 type blocker_class =
@@ -270,9 +265,23 @@ val missing_required_sandbox_profile_error :
 (** Error text shared by effective-meta reconcile and keeper-up parsing when a
     declarative keeper profile omits the required [sandbox_profile]. *)
 
+val missing_required_sandbox_image_error :
+  keeper_name:string ->
+  Keeper_types_profile.sandbox_profile ->
+  Keeper_types_profile.keeper_profile_defaults ->
+  string option
+(** [Some reason] when [sandbox_profile] runs a container ([docker],
+    [microvm]) and [defaults.sandbox_image] is absent or blank; [None]
+    otherwise. [remote_ssh] runs no image and is never asked. Shared by both
+    boot reconciles and keeper-up parsing, so a Keeper cannot boot or be
+    created on an image nobody named (#37523). *)
+
 val runtime_id_of_meta : keeper_meta -> string
-(** Runtime id selected for keeper dispatch. Uses the keeper profile [model]
-    when present; otherwise falls back to the configured default runtime id. *)
+(** The route a turn of this Keeper enters on: the Keeper's assignment in the
+    runtime file ([runtime.assignments]) when it has one, otherwise the
+    default route ([runtime.default]). Either may name a lane rather than a
+    single runtime. It is read when called, so a later reader can see a
+    different route than the one an earlier turn used. *)
 
 (** {1 Outcome <-> string} *)
 

@@ -1,0 +1,44 @@
+id = "quiz-questions"
+revision = "0.1.0"
+title = "Questions asked from retained records"
+contributions = ["derive"]
+image = "masc-lane-quiz-questions:0.1.0"
+command = ["python3", "server.py"]
+
+[world.outputs.questions]
+lanes = ["quiz/questions"]
+
+[world.skills]
+directory = "skills"
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304
+
+[interface]
+# The deck is a Keeper-exported snapshot file of facts, each citing its record.
+refresh_policy = "source_changes"
+binding_schema = '''{
+  "type": "object",
+  "properties": {
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "description": "Fact deck exported from Board, memory or GitHub records",
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1},
+          "kind": {"type": "string", "const": "snapshot_file"},
+          "path": {"type": "string", "minLength": 1}
+        },
+        "required": ["source_id", "kind", "path"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["sources"],
+  "additionalProperties": false
+}'''

@@ -110,6 +110,7 @@ type t =
   ; raw_trace_run_ref : raw_trace_run_ref option
   ; sampling : sampling
   ; usage : usage
+  ; turn_output_tokens : int option
   ; ts : float
   }
 
@@ -281,6 +282,7 @@ let to_json (r : t) : Yojson.Safe.t =
         r.usage.cache_read_input_tokens
      @ opt_field "output_tokens" (fun v -> `Int v) r.usage.output_tokens
     @ [ ("usage_scope", `String (Runtime_usage_scope.to_string r.usage.scope)) ]
+    @ opt_field "turn_output_tokens" (fun v -> `Int v) r.turn_output_tokens
     @ [ ("ts", `Float r.ts) ])
 
 let ( let* ) = Result.bind
@@ -545,6 +547,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "cache_read_input_tokens"
             ; "output_tokens"
             ; "usage_scope"
+            ; "turn_output_tokens"
             ; "ts"
             ]
             fields
@@ -774,6 +777,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
              Error (Printf.sprintf "turn_record: unknown usage_scope %S" value))
         | Some _ -> Error "turn_record: usage_scope is not a string"
       in
+      let* turn_output_tokens = opt_member "turn_output_tokens" fields as_int in
       let* ts_json = require "ts" fields in
       let* ts = as_float "ts" ts_json in
       Ok
@@ -807,6 +811,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; cache_read_input_tokens
             ; scope = usage_scope
             }
+        ; turn_output_tokens
         ; ts
         }
   | _ -> Error "turn_record: row is not an object"

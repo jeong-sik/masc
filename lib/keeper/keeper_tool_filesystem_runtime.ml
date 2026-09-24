@@ -67,11 +67,6 @@ type fs_guidance = Keeper_tool_filesystem_guidance.t =
       { offset : int
       ; window_bytes : int
       }
-  | Offset_beyond_scan_budget of
-      { offset : int
-      ; file_bytes : int
-      ; budget : int
-      }
   | Capability_unavailable
   | Publication_failed
   | Directory_publication_failed
@@ -136,12 +131,14 @@ let count_returned_lines capped =
     if capped.[len - 1] = '\n' then newlines else newlines + 1)
 ;;
 
-(* [scan_complete=false] means [content] is a byte-budgeted prefix of the
-   file (sandbox fetch cut), so exhausting [content] does not prove EOF and
-   line numbers past the scan horizon cannot be mapped. *)
-let slice_read_window ~(window : read_line_window) ~max_bytes ~scan_complete content =
+(* [first_line] is the file line [content] begins at: 1 for a whole file or a
+   prefix, [window.start_line] when the backend already streamed from there.
+   [scan_complete=false] means [content] stops at a byte bound, so exhausting
+   it does not prove EOF and line numbers past that bound cannot be mapped. *)
+let slice_read_window ~(window : read_line_window) ~first_line ~max_bytes ~scan_complete
+    content =
   let len = String.length content in
-  match line_start_index content len 0 window.start_line with
+  match line_start_index content len 0 (window.start_line - first_line + 1) with
   | None ->
     if scan_complete
     then
@@ -270,17 +267,19 @@ let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cw
        Execute/search cwd goes through the strict no-projection resolvers
        instead (keeper_tool_execute_path). *)
     let* cwd = resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd in
-    if safe_is_dir cwd
-    then Ok cwd
-    else if safe_file_exists cwd
-    then Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
-    else
-      Error
-        (Printf.sprintf
-           "cwd_not_directory: %s (directory does not exist; Read will not create \
-            cwd);%s"
-           cwd
-           (available_cwd_hint ~config ~meta))
+    (* The hint scans the host playground, so it is only offered where the
+       host holds the tree. *)
+    (match cwd_existence ~meta cwd with
+     | Endpoint_decides | Host_directory -> Ok cwd
+     | Host_file ->
+       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
+     | Host_missing ->
+       Error
+         (Printf.sprintf
+            "cwd_not_directory: %s (directory does not exist; Read will not create \
+             cwd);%s"
+            cwd
+            (available_cwd_hint ~config ~meta)))
 ;;
 
 let resolve_read_file_target
@@ -370,8 +369,15 @@ let handle_read_file_with_outcome
   | Error window_error, _ -> Keeper_tool_execution.failure (error_json window_error)
   | Ok _, Error (Read_path_error e) -> Keeper_tool_execution.failure (error_json e)
   | Ok window, Ok target ->
-    let payload_of_slice ~via ~file_bytes ~scan_complete body =
-      match slice_read_window ~window ~max_bytes ~scan_complete body with
+    let payload_of_slice ~via ~file_bytes ~first_line ~scan_complete body =
+      match slice_read_window ~window ~first_line ~max_bytes ~scan_complete body with
+      (* Neither caller below reaches this arm. The sandbox body begins at
+         [window.start_line], so the window's first line is the body's first
+         line and always has a start. The host read passes the whole file
+         with [scan_complete:true], which turns a line past EOF into an empty
+         window. Only [handle_owned_read_file_with_outcome] can get
+         [Offset_beyond_scan], in its own arm; #38609 removes the [Error]
+         case there. *)
       | Error `Offset_beyond_scan ->
         Read_failed_payload
           (error_json
@@ -380,10 +386,9 @@ let handle_read_file_with_outcome
                ; "offset", `Int window.start_line
                ]
              (fs_guidance_text
-                (Offset_beyond_scan_budget
+                (Offset_beyond_window
                    { offset = window.start_line
-                   ; file_bytes = String.length body
-                   ; budget = read_file_max_max_bytes
+                   ; window_bytes = String.length body
                    })))
       | Ok slice ->
         let optional_fields =
@@ -430,14 +435,16 @@ let handle_read_file_with_outcome
            let timeout_sec =
              Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()
            in
-           let fetch_bytes = read_window_fetch_bytes ~max_bytes window in
+           (* The backend streams from [window.start_line], so the byte bound
+              is the window's and every line of the file is reachable. *)
            match
              Keeper_sandbox_read_runner.read_file
                ?turn_sandbox_factory
+               ~start_line:window.start_line
                ~config
                ~meta
                ~host_path:target
-               ~max_bytes:fetch_bytes
+               ~max_bytes
                ~timeout_sec
                ()
            with
@@ -452,11 +459,12 @@ let handle_read_file_with_outcome
            | Error err ->
              Error (Keeper_sandbox_read_backend.read_error_to_string err)
            | Ok body ->
-             let scan_complete = String.length body < fetch_bytes in
+             let scan_complete = String.length body < max_bytes in
              Ok
                (payload_of_slice
                   ~via:(Some Keeper_sandbox_read_runner.backend_via)
                   ~file_bytes:None
+                  ~first_line:window.start_line
                   ~scan_complete
                   body))
          else (
@@ -476,6 +484,7 @@ let handle_read_file_with_outcome
                (payload_of_slice
                   ~via:None
                   ~file_bytes:(Some (String.length content))
+                  ~first_line:1
                   ~scan_complete:true
                   content))
     in
@@ -678,6 +687,7 @@ let handle_owned_read_file_with_outcome
        (match
           slice_read_window
             ~window
+            ~first_line:1
             ~max_bytes
             ~scan_complete:(not prefix.truncated)
             prefix.content
@@ -3140,6 +3150,20 @@ module For_testing = struct
 
   let with_created_directory_fault fault f =
     Eio.Fiber.with_binding created_directory_dispatch_fault_key fault f
+  ;;
+
+  let slice_read_window ~start_line ~max_lines ~first_line ~max_bytes ~scan_complete
+      content =
+    match
+      slice_read_window
+        ~window:({ start_line; max_lines } : read_line_window)
+        ~first_line
+        ~max_bytes
+        ~scan_complete
+        content
+    with
+    | Error `Offset_beyond_scan -> Error `Offset_beyond_scan
+    | Ok (slice : read_window_slice) -> Ok (slice.window_content, slice.next_offset)
   ;;
 end
 

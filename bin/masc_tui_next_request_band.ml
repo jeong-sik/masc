@@ -12,7 +12,7 @@ let signed_tokens n =
   else Inspector.format_tokens n
 ;;
 
-let origin_sentence = function
+let rec origin_sentence = function
   | Inspector.Carried_from_ledger -> "front from this runtime's ledger"
   | Inspector.Carried_from_turn_record { turn } ->
       Printf.sprintf "front from turn #%d's record; nothing counted since the server started" turn
@@ -22,6 +22,12 @@ let origin_sentence = function
       Printf.sprintf "front evicted after a refusal (retry %d)" retry
   | Inspector.Carried_turn_start_after_seed_refusal ->
       "the seed range was refused: front moved to where this turn began"
+  | Inspector.Carried_turn_start_after_librarian_refusal ->
+      "the range from the Librarian's point was refused: front moved to where this turn began"
+  | Inspector.Carried_past_librarian_point { librarian_end_atom; front } ->
+      Printf.sprintf
+        "the Librarian point is atom %d; the range opens later, where the provider last accepted it (%s)"
+        librarian_end_atom (origin_sentence front)
   | Inspector.Carried_turn_start { end_atom } ->
       (* The fact line ahead of this sentence already says which atom the
          range opens on ([first_atom]); [end_atom] is the completed boundary

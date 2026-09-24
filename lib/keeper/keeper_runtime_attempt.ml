@@ -1,13 +1,5 @@
 (** agent-core error mapping for keeper-managed provider attempts. *)
 
-let capacity_backpressure_source_to_failure_scope = function
-  | Keeper_internal_error.Provider_capacity ->
-    Llm_provider.Http_client.Failure_scope_provider
-  | Keeper_internal_error.Client_capacity ->
-    Llm_provider.Http_client.Failure_scope_account
-  | Keeper_internal_error.Runtime_slot ->
-    Llm_provider.Http_client.Failure_scope_unknown
-
 let http_error ~code ~body =
   Llm_provider.Http_client.HttpError
     { code; body = Llm_provider.Http_client.Received body; retry_after_header = None }
@@ -112,30 +104,11 @@ let core_error_to_runtime_outcome err =
       (Runtime_attempt_fsm.Call_err
          (Llm_provider.Http_client.NetworkError
             { message = detail; kind = Llm_provider.Http_client.Unknown }))
-  | Some
-      (Keeper_internal_error.Capacity_backpressure { detail; retry_after; source; _ }) ->
-    let retry_after =
-      match retry_after with
-      | Keeper_internal_error.Explicit s -> Some s
-      | No_retry_hint -> None
-    in
-    Some
-      (Runtime_attempt_fsm.Call_err
-         (Llm_provider.Http_client.ProviderFailure
-            { kind =
-                Llm_provider.Http_client.Capacity_exhausted
-                  { scope = capacity_backpressure_source_to_failure_scope source
-                  ; retry_after
-                  ; model = None
-                  }
-            ; message = detail
-            }))
-  (* RFC-0454 P2. A closed runtime connection used to reach here as
-     agent-core's [ProviderUnavailable] and rotate on it. Typing the cause
-     must not decide which runtime is tried next, so the attempt outcome is
-     rebuilt from the same provider error the runtime client used to raise.
-     A host stop is not in this match: it carried no rotation before either
-     ([Internal] short-circuits to [None] below) and still carries none. *)
+  (* A closed runtime connection rotates the way agent-core's
+     [ProviderUnavailable] does. The typed cause must not decide which
+     runtime is tried next, so the attempt outcome is built from that
+     provider error. A host stop is not in this match: [Internal]
+     short-circuits to [None] below, so it carries no rotation. *)
   | Some
       (Keeper_internal_error.Runtime_connection_closed { runtime_id; detail; _ })
     ->

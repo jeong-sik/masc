@@ -36,7 +36,7 @@ let view ?front snapshot messages =
   let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
   Driver.For_testing.request_view ~continuity ~provider_config
-    ~measure_message_bytes:measure ~front
+    ~measure_message_bytes:measure ~accepted:None ~front
     ~history_digest_at:(Window.atom_opening_digest messages)
     ~current_turn_results:Driver.Current_turn_verbatim
     ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int
@@ -101,7 +101,7 @@ let test_without_snapshot_seed_demotes_earlier_tool_bodies () =
   let planned = ref 0 in
   let seeded =
     Driver.For_testing.request_view ~continuity:Driver.without_snapshot
-      ~provider_config ~measure_message_bytes:measure ~front:(Some front)
+      ~provider_config ~measure_message_bytes:measure ~accepted:None ~front:(Some front)
       ~history_digest_at ~current_turn_results:Driver.Current_turn_verbatim
       ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:completed_end
       ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
@@ -192,7 +192,7 @@ let test_without_snapshot_starts_at_the_turn_start () =
   let completed_end = snd (Window.annotate source) in
   let project ?front ~turn_boundary () =
     Driver.For_testing.request_view ~continuity:Driver.without_snapshot
-      ~provider_config ~measure_message_bytes:measure ~front
+      ~provider_config ~measure_message_bytes:measure ~accepted:None ~front
       ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
       ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:completed_end ~turn_boundary
       ~materialize:(fun ~pending:_ _ -> fail "unsummarized history entered demotion") messages in
@@ -280,10 +280,21 @@ let test_turn_start_reader_says_unknown_when_the_store_is_unreadable () =
   let keeper_name = "reader" in
   mkdir_p (Filename.concat
     (Filename.concat (Masc.Workspace.keepers_runtime_dir config) keeper_name) "turn-boundaries.jsonl");
+  let before =
+    match Log.Ring.recent ~limit:1 () with
+    | [] -> -1
+    | entry :: _ -> entry.Log.Ring.seq
+  in
   (match Driver.turn_start ~config ~keeper_name ~trace_id:"t" ~messages:source with
    | Front.Turn_boundary_unknown _ -> ()
    | Front.Turn_boundary { end_atom } ->
-     fail (Printf.sprintf "an unreadable boundary store answered atom %d" end_atom))
+     fail (Printf.sprintf "an unreadable boundary store answered atom %d" end_atom));
+  (* Reading decides nothing: the request whose range it opens reports it. *)
+  check int "reading the unknown start logs no warning" 0
+    (Log.Ring.recent ~since_seq:before ~min_level:(Log.level_to_int Log.Warn) ()
+     |> List.filter (fun (entry : Log.Ring.entry) ->
+       Option.equal String.equal entry.keeper_name (Some keeper_name))
+     |> List.length)
 ;;
 
 (* A boundary log whose end lines no longer match the history -- the history
@@ -317,13 +328,35 @@ let test_turn_start_is_unknown_when_no_end_line_matches_the_history () =
      fail (Printf.sprintf "an end line that matches nothing answered atom %d" end_atom))
 ;;
 
+(* Where an unknown turn start is reported, pinned by name: the request that
+   composes a range warns by its origin, a refused seed that falls back to an
+   unknown turn start warns, and an official lane warns where it reports a
+   range it sent. *)
+let test_the_unknown_start_is_reported_where_a_range_opens () =
+  let calls ~module_path ~binding_name ~callee =
+    Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
+  in
+  check int "the Agent Core request warns by its origin" 1
+    (calls ~module_path:"lib/keeper/keeper_turn_driver_try_provider.ml"
+       ~binding_name:"bounded_model_input_projection"
+       ~callee:"Keeper_carried_front.warn_if_origin_is_unknown_start");
+  check int "a refused seed falling back to an unknown start warns" 1
+    (calls ~module_path:"lib/keeper/keeper_turn_driver_try_provider.ml"
+       ~binding_name:"run_try_provider_with_carried_range_eviction"
+       ~callee:"Keeper_carried_front.warn_range_opens_on_newest_atom");
+  check int "an official lane warns for a range it sent" 1
+    (calls ~module_path:"lib/keeper/keeper_turn_driver.ml"
+       ~binding_name:"record_official_client_continuity"
+       ~callee:"Keeper_official_client_host.warn_if_sent_on_unknown_start")
+;;
+
 let progress ~trace_id ~end_atom ~last_atom_digest : Progress.t =
   { position = { Progress.trace_id; end_atom; last_atom_digest }; boundary_lines_seen = 1 }
 ;;
 
 let absorbed_view continuity messages =
   Driver.For_testing.request_view ~continuity ~provider_config ~measure_message_bytes:measure
-    ~front:None ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
+    ~accepted:None ~front:None ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
     ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int
     (* Unread under a position: the range starts at the position itself. *)
     ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
@@ -404,29 +437,39 @@ let test_the_forecast_takes_the_drivers_start () =
     | None -> fail "a position that matches this history was refused" in
   let boundary = Front.Turn_boundary { end_atom = 2 } in
   let unknown = Front.Turn_boundary_unknown { reason = "boundary read failed: fixture" } in
+  (* The start the provider last accepted, as the turn record keeps it
+     (RFC librarian-lifecycle §4.10, rule 2): past the read position, so
+     both the driver and the forecast open there. *)
+  let accepted : Front.seed =
+    {first_atom = 2; front_digest = Option.get (digest_at 2); source = Front.Turn_record { turn = 3 }} in
   let cases =
-    [ "a fitting snapshot", summarized, Some held_seed, boundary,
+    [ "a fitting snapshot", summarized, Some held_seed, None, boundary,
       (function Front.Librarian_snapshot _ -> true | _ -> false);
-      "the read position", absorbed, Some held_seed, boundary,
+      "the read position", absorbed, Some held_seed, None, boundary,
       (function Front.Librarian_progress { end_atom = 1 } -> true | _ -> false);
-      "a held seed", Driver.without_snapshot, Some held_seed, boundary,
+      "an accepted start past the read position", absorbed, Some held_seed, Some accepted, boundary,
+      (function
+        | Front.Past_librarian_point
+            { librarian_end_atom = 1; source = Front.Turn_record { turn = 3 } } -> true
+        | _ -> false);
+      "a held seed", Driver.without_snapshot, Some held_seed, None, boundary,
       (function Front.Carried Front.Ledger -> true | _ -> false);
-      "an outlived seed", Driver.without_snapshot, Some outlived_seed, boundary,
+      "an outlived seed", Driver.without_snapshot, Some outlived_seed, None, boundary,
       (function Front.Turn_start { end_atom = 2 } -> true | _ -> false);
-      "the turn boundary", Driver.without_snapshot, None, boundary,
+      "the turn boundary", Driver.without_snapshot, None, None, boundary,
       (function Front.Turn_start { end_atom = 2 } -> true | _ -> false);
-      "an unknown boundary", Driver.without_snapshot, None, unknown,
+      "an unknown boundary", Driver.without_snapshot, None, None, unknown,
       (function Front.Turn_start_unknown _ -> true | _ -> false) ]
   in
-  List.iter (fun (name, continuity, front, turn_boundary, expected) ->
+  List.iter (fun (name, continuity, front, accepted, turn_boundary, expected) ->
     let driver =
       Driver.For_testing.request_view ~continuity ~provider_config
-        ~measure_message_bytes:measure ~front ~history_digest_at:digest_at
+        ~measure_message_bytes:measure ~accepted ~front ~history_digest_at:digest_at
         ~current_turn_results:Driver.Current_turn_verbatim
         ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:0 ~turn_boundary
         ~materialize:(fun ~pending:_ messages -> messages) messages in
     let forecast =
-      Masc.Keeper_next_request_forecast.carry ~measure ~continuity:(Some continuity) ~front
+      Masc.Keeper_next_request_forecast.carry ~measure ~continuity:(Some continuity) ~accepted ~front
         ~turn_start:turn_boundary ~counted_tokens:None messages in
     check bool (name ^ ": the driver takes the start this case names") true
       (expected driver.composed.origin);
@@ -437,6 +480,56 @@ let test_the_forecast_takes_the_drivers_start () =
     check int (name ^ ": with the same bytes")
       driver.composed.transmitted_bytes forecast.transmitted_bytes)
     cases
+;;
+
+(* RFC librarian-lifecycle §4.10: a snapshot that fits is still the
+   Librarian point when the provider last accepted a later start. The range
+   opens at that start and the working state still rides ahead of it, once;
+   the atoms between the snapshot's cut and the accepted start are not sent. *)
+let test_a_start_past_the_snapshot_keeps_the_working_state () =
+  let skipped = text T.User "Fresh unsummarized work" in
+  let accepted_atom = text T.Assistant "The accepted range opens here." in
+  let current = text T.User "This turn's input." in
+  let messages = source @ [skipped; accepted_atom; current] in
+  let digest_at = Window.atom_opening_digest messages in
+  let snapshot, lines = capture_source source in
+  let summarized = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
+    | Ok continuity -> continuity | Error error -> fail (Snapshot.error_to_string error) in
+  let accepted : Front.seed =
+    {first_atom = 3; front_digest = Option.get (digest_at 3); source = Front.Turn_record { turn = 5 }} in
+  let projected =
+    Driver.For_testing.request_view ~continuity:summarized ~provider_config
+      ~measure_message_bytes:measure ~accepted:(Some accepted) ~front:None
+      ~history_digest_at:digest_at ~current_turn_results:Driver.Current_turn_verbatim
+      ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:0
+      ~turn_boundary:(Front.Turn_boundary { end_atom = 4 })
+      ~materialize:(fun ~pending:_ messages -> messages) messages in
+  (match projected.composed.origin with
+   | Front.Past_librarian_point
+       { librarian_end_atom; source = Front.Turn_record { turn = 5 } } ->
+     check int "the gap opens at the snapshot's cut" snapshot.Snapshot.end_atom librarian_end_atom
+   | _ -> fail "the request was not attributed to the start past the snapshot");
+  check int "the range opens at the accepted start" 3 projected.composed.projection.dropped_atoms;
+  let sent = without_working_state (wire projected) in
+  check bool "the skipped atom is not sent" false (List.mem skipped sent);
+  check bool "the accepted atom is sent" true (List.mem accepted_atom sent);
+  check bool "this turn's input is sent" true (List.mem current sent);
+  (* The review's case: the last turn had no fitting snapshot and started at
+     the read position R, which was accepted; this turn a snapshot with the
+     earlier cut S fits. The request starts at R, and the atoms from S to R
+     are ones the Librarian has read, so there is no gap. *)
+  let gap ~read_position =
+    Option.map
+      (fun (g : Front.librarian_gap) -> g.gap_start_atom, g.gap_end_atom)
+      (Front.librarian_gap ~snapshot_cut:(Some snapshot.Snapshot.end_atom)
+         ~read_position ~accepted_start:accepted.first_atom)
+  in
+  check (option (pair int int)) "a read position at the accepted start leaves no gap" None
+    (gap ~read_position:(Some 3));
+  check (option (pair int int)) "a read position behind the cut leaves the cut to the start"
+    (Some (snapshot.Snapshot.end_atom, 3)) (gap ~read_position:(Some 1));
+  check (option (pair int int)) "no read position leaves the cut to the start"
+    (Some (snapshot.Snapshot.end_atom, 3)) (gap ~read_position:None)
 ;;
 
 let exchange id body =
@@ -474,7 +567,7 @@ let test_small_externalizes_only_completed_bodies () =
   let carried = pinned :: (older @ current) in
   let project ?(base_path = base_path) ?(continuity = Some behind) policy =
     Driver.For_testing.request_view ~input_policy:policy ?continuity
-      ~provider_config ~measure_message_bytes:measure ~front:None
+      ~provider_config ~measure_message_bytes:measure ~accepted:None ~front:None
       ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
       ~base_path ~demote_before:completed_end ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
       ~materialize:(fun ~pending messages ->
@@ -533,7 +626,7 @@ let test_failed_externalization_keeps_raw_body () =
   let reverted = ref 0 in
   let projected = Driver.For_testing.request_view ~input_policy:Small
     ~continuity:behind ~provider_config ~measure_message_bytes:measure
-    ~front:None ~history_digest_at:(Window.atom_opening_digest messages)
+    ~accepted:None ~front:None ~history_digest_at:(Window.atom_opening_digest messages)
     ~current_turn_results:Driver.Current_turn_verbatim ~base_path ~demote_before:completed_end ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
     ~materialize:(fun ~pending messages ->
       let outcome = Masc.Keeper_model_input_demotion.materialize
@@ -821,10 +914,13 @@ let () = run "continuity request projection"
                test_case "without a snapshot a seed range demotes earlier tool bodies" `Quick test_without_snapshot_seed_demotes_earlier_tool_bodies;
                test_case "the reader says unknown when the boundary store is unreadable" `Quick test_turn_start_reader_says_unknown_when_the_store_is_unreadable;
                test_case "the reader says unknown when no end line matches the history" `Quick test_turn_start_is_unknown_when_no_end_line_matches_the_history;
+               test_case "the unknown start is reported where a range opens" `Quick test_the_unknown_start_is_reported_where_a_range_opens;
                test_case "absorbed history starts at the Librarian's position" `Quick
                  test_absorbed_history_starts_at_the_librarians_position;
                test_case "the forecast takes the driver's start" `Quick
                  test_the_forecast_takes_the_drivers_start;
+               test_case "a start past the snapshot keeps the working state" `Quick
+                 test_a_start_past_the_snapshot_keeps_the_working_state;
                test_case "an unusable snapshot starts without it" `Quick
                  test_an_unusable_snapshot_starts_without_it;
                test_case "official lanes take the same choice" `Quick

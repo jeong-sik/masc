@@ -31,13 +31,21 @@ type run_context =
   ; runtime_config_path : string option
   }
 
+type prepare_error =
+  | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
+  | Constitution_unreadable of World_constitution_store.read_error
+      (** The world's constitution ledger exists but could not be read. The
+          turn is refused rather than built without its articles; the next
+          turn reads the ledger again (#38354). *)
+
 val build_base_system_prompt :
      config:Workspace.config
   -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> meta:keeper_meta
-  -> string
+  -> (string, World_constitution_store.read_error) result
 (** Build the keeper base system prompt from the same persisted meta/profile
-    inputs used by {!prepare_run_context}. *)
+    inputs used by {!prepare_run_context}. This is the only system prompt a
+    turn sends, direct or autonomous. *)
 
 val prepare_run_context :
      config:Workspace.config
@@ -49,13 +57,14 @@ val prepare_run_context :
   -> ?shared_context:Agent_core.Context.t
   -> ?checkpoint:Agent_core.Checkpoint.t
   -> unit
-  -> (run_context, Keeper_checkpoint_store.checkpoint_load_error) result
+  -> (run_context, prepare_error) result
 (** Resolve [temperature] as the caller fallback; a temperature declared by the
     selected runtime model always wins. [profile_defaults] is the immutable
     pre-dispatch snapshot. [checkpoint] is an already admitted direct
     continuation; when supplied it is the history source instead of a second
     disk read. A missing or superseded checkpoint starts fresh; every other
-    load failure returns its typed error before prompt construction. *)
+    load failure returns its typed error before prompt construction. An
+    unreadable constitution ledger returns [Constitution_unreadable]. *)
 
 (** Whether the turn starts from a checkpoint it loaded. *)
 val loaded_checkpoint_present : run_context -> bool

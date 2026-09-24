@@ -421,6 +421,7 @@ def test_a_missing_architecture_names_the_fetch_step(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("version, reason", [
     ("0.35.19", "older than"),
+    ("0.36.0", "older than"),
     ("0.35.20-rc1", "not an X.Y.Z release"),
     ("v0.35.20", "not an X.Y.Z release"),
 ])
@@ -506,6 +507,66 @@ def test_the_image_variables_the_keepers_lacked_reach_harbor_metadata(tmp_path):
     context = SimpleNamespace(metadata=None)
     make_agent(tmp_path).populate_context_post_run(context)
     assert context.metadata["endpoint_env_left_out"] == left_out
+
+
+def test_a_failover_trial_reports_its_candidate_order_and_who_answered(tmp_path):
+    # #37952: a result has to say which candidates the trial declared and which
+    # of them answered, or a failover run cannot be told from a single-model one.
+    write_result(tmp_path, answered_by={"kimi_coding.k3": 2},
+                 failed_on={"kimi_coding.kimi-for-coding": 1}, turns_unanswered=0)
+    agent = MascAgent(logs_dir=tmp_path, model_name="kimi_coding/kimi-for-coding",
+                      arm="l", fallback_models="kimi_coding/k3")
+    context = SimpleNamespace(metadata=None)
+    agent.populate_context_post_run(context)
+    assert context.metadata["arm"] == "l"
+    assert context.metadata["candidates"] == [
+        "kimi_coding.kimi-for-coding", "kimi_coding.k3"]
+    assert context.metadata["route"] == "bench"
+    assert context.metadata["answered_by"] == {"kimi_coding.k3": 2}
+    assert context.metadata["failed_on"] == {"kimi_coding.kimi-for-coding": 1}
+    assert context.metadata["turns_unanswered"] == 0
+
+
+def test_tool_failures_per_tool_reach_harbor_metadata(tmp_path):
+    # A low score has to say whether the tools refused the model (a path
+    # check, a schema error) or the model failed the task.
+    by_tool = [{"tool": "Execute", "calls": 12, "failed": 2, "result_bytes": 900,
+                "top_failure": "Path blocked: /app"}]
+    write_result(tmp_path, failed_tool_calls=2, tool_outcomes=by_tool)
+    context = SimpleNamespace(metadata=None)
+    make_agent(tmp_path).populate_context_post_run(context)
+    assert context.metadata["failed_tool_calls"] == 2
+    assert context.metadata["tool_outcomes"] == by_tool
+
+
+def test_a_single_model_trial_reports_one_candidate_routed_by_itself(tmp_path):
+    write_result(tmp_path)
+    context = SimpleNamespace(metadata=None)
+    make_agent(tmp_path, arm="e").populate_context_post_run(context)
+    assert context.metadata["candidates"] == ["claude.claude-fable-5"]
+    assert context.metadata["route"] == "claude.claude-fable-5"
+    # collect_result.sh wrote no answer counts: unmeasured, not zero turns.
+    assert context.metadata["answered_by"] is None
+    assert context.metadata["failed_on"] is None
+    assert context.metadata["turns_unanswered"] is None
+
+
+@pytest.mark.parametrize("result_text", [None, "{truncated"])
+def test_the_candidate_order_is_reported_without_a_readable_result(tmp_path, result_text):
+    if result_text is not None:
+        (Path(tmp_path) / "result.json").write_text(result_text)
+    agent = MascAgent(logs_dir=tmp_path, model_name="kimi_coding/kimi-for-coding",
+                      arm="l", fallback_models="kimi_coding/k3")
+    context = SimpleNamespace(metadata=None)
+    agent.populate_context_post_run(context)
+    assert context.metadata["candidates"] == [
+        "kimi_coding.kimi-for-coding", "kimi_coding.k3"]
+    assert context.metadata["route"] == "bench"
+
+
+def test_an_unknown_provider_is_refused_at_construction(tmp_path):
+    with pytest.raises(ValueError, match="unknown provider"):
+        MascAgent(logs_dir=tmp_path, model_name="nowhere/some-model", arm="b")
 
 
 def test_validated_dist_identity_reaches_harbor_metadata(tmp_path, monkeypatch):

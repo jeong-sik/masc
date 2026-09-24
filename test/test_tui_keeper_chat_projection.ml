@@ -799,6 +799,43 @@ let test_terminal_text_sanitization () =
   check bool "visible payload retained" true
     (String.starts_with ~prefix:" [31mred [0m" safe)
 
+let test_terminal_text_escapes_invisible_codepoints () =
+  (* #38445: the Keeper chat boundary must draw bidi controls and zero-width
+     characters as text, not pass them through, so what the operator reads
+     matches the bytes the value carries. *)
+  let rlo = "\xe2\x80\xae" in
+  let safe = Chat.terminal_safe_text ("a" ^ rlo ^ "b") in
+  check string "the bidi override is drawn as its escape text" "a\\u202Eb" safe;
+  check bool "the raw RLO bytes are gone" false
+    (let n = String.length rlo and h = String.length safe in
+     let rec scan i =
+       i + n <= h && (String.sub safe i n = rlo || scan (i + 1))
+     in
+     scan 0);
+  check string "a zero-width space is drawn as its escape text" "a\\u200Bb"
+    (Chat.terminal_safe_text "a\xe2\x80\x8bb");
+  check string "an ordinary string is unchanged" "café"
+    (Chat.terminal_safe_text "café")
+
+(* #38485 review, condition (c): a sent line is stored through this same call
+   ([masc_tui.ml:7552] builds [me_text] with
+   [Keeper_chat.terminal_safe_text ~preserve_newlines:true]) and [recall_land]
+   puts those stored bytes straight back in the composer. So whatever this
+   function does to an emoji is what the operator gets back on the up arrow:
+   while it escaped the joiner, the recall typed six ASCII characters into the
+   input line. This asks the function the composer actually reads from; the
+   key press itself is exercised by the keyboard walk, not here. *)
+let test_a_recalled_line_still_carries_its_emoji () =
+  let zwj = "\xe2\x80\x8d" in
+  let shrug = "\xf0\x9f\xa4\xb7" and male = "\xe2\x99\x82" in
+  let vs16 = "\xef\xb8\x8f" in
+  let typed = "배포 끝났어요 " ^ shrug ^ zwj ^ male ^ vs16 in
+  check string "the stored line is byte for byte what was typed" typed
+    (Chat.terminal_safe_text ~preserve_newlines:true typed);
+  check string "a joiner that holds no emoji together is still escaped"
+    ("a\\u200Db")
+    (Chat.terminal_safe_text ~preserve_newlines:true ("a" ^ zwj ^ "b"))
+
 let test_request_labels_keep_random_suffix () =
   let prefix = "tui-019d0000-0000-7000-8000-" in
   let first = Chat.compact_request_id (prefix ^ "aaaaaaaaaaaa") in
@@ -1106,7 +1143,7 @@ let test_batch_preserves_original_user_history_once () =
       ~continuation_channel ~surface:(Masc.Surface_ref.Dashboard {session_id=None})
       ~channel:"" ~channel_user_id:"" ~channel_user_name:"" ~channel_workspace_id:""
       ~conversation_id:None ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
-      ~user_row_origin:History.Needs_append |> ok in
+      ~sender_keeper:None ~user_row_origin:History.Needs_append |> ok in
     let ids = List.map (fun id -> Keeper_chat_operation.Operation_id.of_string id |> ok)
       ["batch-original-one"; "batch-original-two"] in
     List.iter2 (fun operation_id message ->
@@ -1525,6 +1562,10 @@ let () =
             test_protocol_errors_preserve_acceptance_provenance
         ; test_case "terminal text sanitization" `Quick
             test_terminal_text_sanitization
+        ; test_case "terminal text escapes invisible codepoints" `Quick
+            test_terminal_text_escapes_invisible_codepoints
+        ; test_case "a recalled line still carries its emoji" `Quick
+            test_a_recalled_line_still_carries_its_emoji
         ; test_case "request labels keep random suffix" `Quick
             test_request_labels_keep_random_suffix
         ; test_case "typed error certainty" `Quick test_error_certainty

@@ -20,6 +20,21 @@ type api_format =
   | Claude_code_runtime
 [@@deriving show, eq]
 
+(* The runtimes whose admission reads [max-prompt-bytes]: Claude Code cuts the
+   history it seeds a start turn with to it, and Antigravity refuses to send a
+   prompt above it. No other runtime reads the field, so a declaration there
+   bounds nothing the provider checks. Every arm is listed so a new format has
+   to be decided here. *)
+let api_format_reads_max_prompt_bytes = function
+  | Claude_code_runtime | Antigravity_cli_runtime -> true
+  | Messages_api
+  | Chat_completions_api
+  | Ollama_api
+  | Gemini_api
+  | Vertex_gemini_api
+  | Codex_app_server_runtime -> false
+;;
+
 (** Which vendor dialect an endpoint speaks. [protocol] names the request
     shape; this names the dialect inside it, and the two do not determine each
     other — [openai-compatible-http] is spoken both by plain OpenAI-compatible
@@ -116,14 +131,16 @@ type provider =
       provider, not the model, because it is a transport property.
       agent-core boundary, Agent Core contract I2: MASC declares the budget;
       AGENT_CORE owns enforcement and phase=Http_operation attribution.
-      On an exact-output lane a target with neither this key nor a body
-      budget is rejected at plan admission (Missing_deadline, #36979): the
-      wire would otherwise carry no deadline at all. *)
+      On an exact-output lane this key alone does not admit a target: it
+      ends at the response headers, so plan admission also requires
+      [exact_body_timeout_s] (Missing_deadline, #36979). *)
   ; exact_body_timeout_s : float option
     (** Explicit total HTTP request deadline for Exact-output calls through
         this provider, including connection, response headers and the full
-        response body. [None] declares no body deadline. This does not replace
-        [connect_timeout_s] or ordinary Keeper per-call body deadlines. *)
+        response body. [None] declares no body deadline, and every exact
+        target built from this provider is then refused at plan admission
+        (Missing_deadline). This does not replace [connect_timeout_s] or
+        ordinary Keeper per-call body deadlines. *)
   ; antigravity_cli : antigravity_cli_options option
     (** Typed [antigravity-cli] process options. Present exactly for providers
         using that protocol; absent for every other transport. *)
@@ -304,6 +321,10 @@ type model_spec =
         has no tokenizer: converting a token budget would need a
         bytes-per-token constant with nothing to justify it, and a wrong
         constant either truncates silently or overflows silently.
+
+        Only Claude Code and Antigravity runtimes read it
+        ([api_format_reads_max_prompt_bytes]). Declared on a model bound
+        through any other provider, it bounds nothing and no reader counts it.
 
         [None] applies no ceiling, which is the behaviour every deployment has
         today. Resolved via {!Runtime.max_prompt_bytes_of_runtime_id} →

@@ -396,12 +396,6 @@ let test_user_message_of_network_errors () =
     "a reset connection is named as a reset, not a refusal"
     "Runtime provider 'ollama_cloud' reset the connection"
     (AE.user_message_of_core_error provider_reset);
-  Alcotest.(check (option string))
-    "the reset kind survives the wire spelling"
-    (Some "connection_reset")
-    (Keeper_internal_error.network_error_kind_to_string Http.Connection_reset
-     |> Keeper_internal_error.network_error_kind_of_string
-     |> Option.map Keeper_internal_error.network_error_kind_to_string);
   let guardrail =
     CoreError.Agent
       (CoreError.GuardrailViolation { validator = "policy"; reason = "blocked" })

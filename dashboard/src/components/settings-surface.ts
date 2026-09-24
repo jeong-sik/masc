@@ -843,7 +843,9 @@ type RuntimeLaneCandidateEdit =
   | { kind: 'add'; runtimeId: string }
 
 type RuntimeLaneWrite =
-  | { kind: 'candidates'; edit: RuntimeLaneCandidateEdit }
+  // [rendered] is the declared order the card showed when the operator
+  // clicked; a relative edit means something only against that order.
+  | { kind: 'candidates'; edit: RuntimeLaneCandidateEdit; rendered: readonly string[] }
   | { kind: 'lane'; edit: RuntimeLaneEdit }
 
 // The declared order after [edit], or the reason the edit no longer applies
@@ -922,7 +924,10 @@ function RuntimeLaneEditor({
   const resolved = new Set(lane.resolvedRuntimeIds)
   const selected = new Set(chain)
   const addOptions = options.filter(option => !selected.has(option.id))
-  const editCandidates = (edit: RuntimeLaneCandidateEdit) => void onWrite(lane.id, { kind: 'candidates', edit })
+  const editCandidates = (edit: RuntimeLaneCandidateEdit) => {
+    if (lane.declared === null) return
+    void onWrite(lane.id, { kind: 'candidates', edit, rendered: lane.declared })
+  }
   const renameTarget = renameDraft?.trim() ?? ''
   const renameInvalid =
     renameTarget === '' || renameTarget === lane.id || runtimeLaneNameReserved(renameTarget)
@@ -1797,6 +1802,13 @@ export function SettingsSurface() {
     const declared = declaredRuntimeLaneCandidates(source.sourceText, lane)
     if (declared === null) {
       return `runtime.toml 에서 ${runtimeLaneTableLabel(lane)} 의 candidates 를 읽지 못해 후보 편집을 보내지 않았습니다`
+    }
+    // Another writer changed this lane since the card rendered. Applying the
+    // clicked move to the new order would save an order the operator never
+    // saw, and the fresh source revision would let it pass the server CAS.
+    // The reload above already re-rendered the card from the new text.
+    if (declared.length !== write.rendered.length || declared.some((id, index) => id !== write.rendered[index])) {
+      return `${runtimeLaneTableLabel(lane)} 후보 순서가 다른 곳에서 바뀌어 편집을 보내지 않았습니다. 새로 불러온 순서를 확인하고 다시 시도하세요.`
     }
     const next = applyRuntimeLaneCandidateEdit(declared, write.edit)
     return typeof next === 'string' ? next : {

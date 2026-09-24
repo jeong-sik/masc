@@ -1588,6 +1588,43 @@ describe('SettingsSurface', () => {
     expect(q('runtime-lane-coding-read-only')).not.toBeNull()
   })
 
+  it('routing section refuses a candidate edit when another writer reordered the lane since the card rendered', async () => {
+    const lanes = useLaneFile([['coding', ['rt-a', 'rt-b', 'rt-c']]])
+    stubRuntimeResolved(makeRuntimeResolved({
+      lanes: [{ id: 'coding', declared: true, runtime_ids: ['rt-a', 'rt-b', 'rt-c'] }],
+    }))
+    render(html`<${SettingsSurface} />`, container)
+    await openRouting()
+    await waitFor(() => {
+      expect((q('runtime-lane-coding-up-rt-b') as HTMLButtonElement | null)?.disabled).toBe(false)
+    })
+
+    // Another editor saves a different, equally valid order.
+    lanes.set('coding', ['rt-c', 'rt-a', 'rt-b'])
+    await fireEvent.click(q('runtime-lane-coding-up-rt-b')!)
+    await waitFor(() => {
+      const message = q('runtime-lane-message')
+      expect(message?.className).toBe('set-err')
+      expect(message?.textContent).toContain('다른 곳에서 바뀌어 편집을 보내지 않았습니다')
+    })
+    expect(apiMock.patchRuntimeLane).not.toHaveBeenCalled()
+    // The card now shows the order the file holds, so a retry acts on it.
+    const ids = () => [...q('runtime-lane-coding')!.querySelectorAll('.rt-fo-id')].map(el => el.textContent)
+    await waitFor(() => {
+      expect(ids()).toEqual(['rt-c', 'rt-a', 'rt-b'])
+    })
+    await waitFor(() => {
+      expect((q('runtime-lane-coding-up-rt-b') as HTMLButtonElement | null)?.disabled).toBe(false)
+    })
+    await fireEvent.click(q('runtime-lane-coding-up-rt-b')!)
+    await waitFor(() => {
+      expect(apiMock.patchRuntimeLane).toHaveBeenCalledTimes(1)
+    })
+    expect(apiMock.patchRuntimeLane.mock.calls[0]?.[1]).toMatchObject({
+      action: 'set', runtimeIds: ['rt-c', 'rt-b', 'rt-a'],
+    })
+  })
+
   it('routing section sends one lane write for a double click', async () => {
     useLaneFile([['coding', ['rt-a', 'rt-b']]])
     stubRuntimeResolved(makeRuntimeResolved({
@@ -1650,13 +1687,18 @@ describe('SettingsSurface', () => {
     await fireEvent.click(q('runtime-lane-coding-rename')!)
     const renameInput = q('runtime-lane-coding-rename-input') as HTMLInputElement
     await fireEvent.input(renameInput, { target: { value: ' builder ' } })
+    // The refresh after the rename resolves the lane under its new name; a lane
+    // the projection does not report is read-only.
+    stubRuntimeResolved(makeRuntimeResolved({
+      lanes: [{ id: 'builder', declared: true, runtime_ids: ['rt-a', 'rt-b'] }],
+    }))
     await fireEvent.keyDown(renameInput, { key: 'Enter' })
     await waitFor(() => {
       expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'rename', to: 'builder' })
       expect(q('runtime-lane-message')?.textContent).toContain('coding → builder')
     })
 
-    // The resolved stub still reports "coding"; the server refuses the delete.
+    // The server refuses the delete while an assignment names the lane.
     await waitFor(() => {
       expect((q('runtime-lane-builder-delete') as HTMLButtonElement | null)?.disabled).toBe(false)
     })

@@ -1,4 +1,7 @@
-"""Tools creates the name decoded from the authored SKILL.md, preserving its bytes."""
+"""Tools creates the name decoded from the authored SKILL.md, preserving its bytes.
+
+When the server answers that an earlier source's package shadows the new one,
+the footer names that package."""
 
 import json
 import os
@@ -40,6 +43,8 @@ def run_case(
     diagnostic: bytes | None = None,
     diagnostic_preview: bytes | None = None,
     composition: bool = False,
+    create_answer: dict[str, object] | None = None,
+    outcome: bytes | None = None,
 ) -> None:
     fixtures = h.overview_event_http_fixtures()
     fixtures["/api/v1/skills/editor/sources"] = (
@@ -51,6 +56,8 @@ def run_case(
 
     def create(body: bytes) -> h.HttpResponse:
         received.append(body)
+        if create_answer is not None:
+            return 200, create_answer
         return 200, {"status": "created_and_published"}
 
     fixtures[CREATE_PATH] = h.RequestHttpResponse(create)
@@ -66,10 +73,24 @@ def run_case(
         h.send_and_wait(process, fd, output, b"t", b"MASC Config / Tools")
         key = b"C" if composition else b"c"
         if diagnostic is None:
+            start = len(output)
             os.write(fd, key)
             # The harness records a POST only after sending its response.
             # An editor exit or a catalog refresh alone cannot satisfy this.
             h.wait_for_http_request(process, fd, output, requests, path=CREATE_PATH)
+            if outcome is not None:
+                # Tools draws no event log, so the answer is readable here
+                # only if it reached the footer of the surface [c] was on.
+                h.wait_for_output(
+                    process, fd, output, outcome, start=start, timeout=3.0
+                )
+                rows = [
+                    row
+                    for row in h.screen_rows(bytes(output)).values()
+                    if outcome in row
+                ]
+                if len(rows) != 1:
+                    raise AssertionError(f"expected one outcome row: {rows!r}")
         else:
             visible = (
                 diagnostic_preview if diagnostic_preview is not None else diagnostic
@@ -144,6 +165,28 @@ def run(executable: str) -> None:
             "\n# Reviewed procedure\n\nKeep operator notes: 확인.  \n"
         ).encode("utf-8")
         run_case(executable, description=description, source=source)
+    # An earlier source declares the same name, so the server publishes the
+    # package as a shadow; the operator has to learn which package Keepers
+    # see instead.
+    run_case(
+        executable,
+        description="a shadowed create names the package Keepers see",
+        source=(
+            "---\nname: reviewed-skill\ndescription: Inspect a reviewed procedure.\n"
+            "---\n\n# Reviewed procedure\n"
+        ).encode("utf-8"),
+        create_answer={
+            "status": "created_but_shadowed",
+            "preview": {},
+            "snapshot_revision": "snapshot-revision",
+            "winner": {
+                "source_id": "project-masc",
+                "package_id": PACKAGE_ID,
+                "name": PACKAGE_ID,
+            },
+        },
+        outcome=b"shadowed by project-masc/reviewed-skill",
+    )
     run_case(
         executable,
         description="invalid authored Skill is rejected before create",

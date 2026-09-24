@@ -247,7 +247,7 @@ let published_lane () =
   match Registry.current () with
   | Error error -> Error (Registry_unavailable error)
   | Ok registry ->
-    Registry.resolve_lane registry ~lane_id:(Runtime.exact_lane_id Runtime.Browser_stagehand)
+    Registry.resolve_lane registry ~lane_id:(Standalone_lane.to_id Standalone_lane.Browser_stagehand)
     |> Result.map_error (fun error -> Lane_unresolved error)
 ;;
 

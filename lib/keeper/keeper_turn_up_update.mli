@@ -17,6 +17,53 @@ type runtime_sync =
 val runtime_sync_to_wire : runtime_sync -> string
 (** ["lane_restarted"] or ["deferred_until_turn_end"]. *)
 
+(** What a refused update left in the keeper's declaration and runtime
+    assignment. *)
+type config_write =
+  | Config_unchanged
+      (** Both hold their pre-request contents: the update was refused before
+          writing (validation, revision conflict, shutdown preflight, a lock
+          or read failure), or its write was rolled back to the before-images. *)
+  | Config_committed
+      (** Both committed. The refusal came after: owner publication, the
+          shutdown supersession, or the lane restart failed. *)
+  | Config_indeterminate
+      (** A rollback or the journal retirement failed, so either contents may
+          be on disk until reconciliation. The payload names the files. *)
+
+(** Why an update was refused. Each constructor is raised at one stage of the
+    update, so the stage fixes what it left on disk
+    ({!config_write_of_refusal}) and the wire code ({!refusal_code}). *)
+type refusal =
+  | Profile_resolution_refused of string
+      (** [sandbox_profile] or [network_mode] did not resolve. Before the
+          write. *)
+  | Shutdown_preflight_failed of string
+      (** The shutdown supersession preflight failed. Before the write. *)
+  | Revision_conflict of Keeper_turn_up_config_persistence.conflict
+      (** The expected configuration revision is stale. Before the write. *)
+  | Publication_rolled_back of string
+      (** Refused before the first rename, or written and restored to both
+          before-images. *)
+  | Manifest_reconciliation_required of
+      Keeper_turn_up_config_persistence.reconciliation
+  | Composite_reconciliation_required of
+      Keeper_turn_up_config_persistence.composite_reconciliation
+      (** A restore or the journal retirement failed. *)
+  | Failed_after_commit of string
+      (** Owner publication, the shutdown supersession, or the lane restart
+          failed after the pair committed. *)
+
+val refusal_code : refusal -> string
+(** The wire [code] of a refusal. *)
+
+val config_write_of_refusal : refusal -> config_write
+
+val refusal_error_json : refusal -> Yojson.Safe.t
+(** The [error] body of a refusal: [code] from {!refusal_code} and its detail
+    or typed authority fields. The tool-result data of the structured
+    refusals is this same JSON. *)
+
 type update_outcome =
   | Runtime_synced of
       { result : Keeper_types_profile.tool_result
@@ -24,10 +71,12 @@ type update_outcome =
       }
       (** The configuration was committed and published. [result] is a
           success carrying [runtime_sync] and the updated [meta]. *)
-  | Update_refused of Keeper_types_profile.tool_result
-      (** Any failure: CAS conflict, persistence, publication, or a lane
-          restart that failed. The error payload says which, and its
-          [keeper_config_write] metadata says whether the write applied. *)
+  | Update_refused of
+      { result : Keeper_types_profile.tool_result
+      ; refusal : refusal
+      }
+      (** Any failure. The [keeper_config_write] receipt's [applied], when
+          present, is read from {!config_write_of_refusal}. *)
 
 val update_keeper_outcome :
   ?preserve_prompt_defaults:bool ->
@@ -60,16 +109,6 @@ val config_revision_conflict_code : string
     boundary contract: the same update serves the keeper tool surface, which
     only sees JSON.) *)
 
-val config_revision_conflict_of_result :
-  Keeper_types_profile.tool_result ->
-  Keeper_turn_up_config_persistence.conflict option
-
-val config_publication_rollback_of_result :
-  Keeper_types_profile.tool_result -> string option
-
-val config_reconciliation_required_of_result :
-  Keeper_types_profile.tool_result -> Yojson.Safe.t option
-
 type lane_swap_refusal =
   | Swap_turn_in_flight of Keeper_owner.turn_in_flight
       (** A turn holds the slot; the lane was not touched. *)
@@ -90,10 +129,6 @@ val swap_keepalive_lane_fenced :
   result
 
 module For_testing : sig
-  val composite_reconciliation_required_data :
-    Keeper_turn_up_config_persistence.composite_reconciliation ->
-    Yojson.Safe.t
-
   val update_keeper_with_apply_profile :
     apply_profile:
       (base_path:string ->
@@ -107,5 +142,5 @@ module For_testing : sig
     _ Keeper_types_profile.context ->
     Keeper_turn_up_args.parsed_args ->
     Keeper_meta_contract.keeper_meta ->
-    Keeper_types_profile.tool_result
+    update_outcome
 end

@@ -1242,9 +1242,11 @@ def fleet_safety_fixture() -> HttpResponse:
     unreliable" event, which is correct behaviour but adds a row to scenarios
     that are counting the event list. Every field the TUI reads is here,
     with the schema that marks a reading: the TUI requires each one, because
-    a missing observation must not become a zero count.
+    a missing observation must not become a zero count. The snapshot beside
+    it says the reading is current; without it the TUI refuses the reading,
+    because a stale snapshot serves a past one.
     """
-    return (200, {"keeper_fleet_safety": {
+    return (200, {"full_health_snapshot": {"status": "ready"}, "keeper_fleet_safety": {
         "schema": "masc.keeper_fleet_operator.v1",
         "status": "ok",
         "blocker": None,
@@ -1445,6 +1447,7 @@ def planning_goal(goal_id: str, title: str) -> dict[str, object]:
         "metric": f"metric-{goal_id}",
         "target_value": "100%",
         "verification": {"completion": {"state": "idle"}},
+        "verifier_unreconciled": None,
     }
 
 
@@ -1621,6 +1624,9 @@ def approval_selection_http_fixtures() -> tuple[
     # decides against. This scenario is about selection, so it answers the
     # poll with the honest empty queue.
     fixtures["/api/v1/keepers/tool-approvals"] = (200, {"pending": []})
+    # The questions poll is the same: left unanswered, the header says
+    # ", questions unread" beside the count.
+    fixtures[KEEPER_ASKS_PATH] = (200, {"keeper": None, "open_count": 0, "asks": []})
     return fixtures, initial_items, approval_new
 
 
@@ -6788,6 +6794,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                         "continuity_unread_atoms": 0,
                         "last_success_at": 1700000000.0,
                         "last_failure_kind": None,
+                        "stalled": None,
                     },
                     "librarian_failures": 0,
                     "vision_ingest_errors": 0,
@@ -8663,6 +8670,7 @@ def run_tools_request_identity_regression(executable: str) -> None:
                 "skill_snapshot_revision": "c" * 64,
                 "instruction_skills": [], "composition_skills": [], "skill_profiles": [],
                 "skill_discovery_bytes": 0, "skill_eager_body_bytes": 0, "skills_left_out": [],
+                "unavailable_skill_names": [],
                 "count": 1, "tools": [{"name": tool, "origin": {"kind": "descriptor"}}],
                 "tool_surface_sha256": None,
             },
@@ -8784,6 +8792,7 @@ def run_tools_purpose_regression(executable: str) -> None:
         "native_posture": None, "skill_snapshot_revision": "c" * 64,
         "instruction_skills": [], "composition_skills": [], "skill_profiles": [],
         "skill_discovery_bytes": 0, "skill_eager_body_bytes": 0, "skills_left_out": [],
+        "unavailable_skill_names": [],
         "count": 1, "tools": [{"name": "keeper_status", "origin": {"kind": "descriptor"}}],
         "tool_surface_sha256": None,
     }
@@ -10204,6 +10213,11 @@ def verification_request_row(task_id: str) -> dict[str, object]:
         # thing on every request ever drawn. Nothing reads them now.
         "submitted_by": "keeper-alpha",
         "created_at": "2026-08-25T14:00:00+09:00",
+        # Both keys ride every row. The awaiting view joins the backlog, so
+        # its rows always name the verdict they wait on; a completion keeps
+        # no cancellation reason.
+        "intent": "complete",
+        "cancellation_reason": None,
         "required_artifacts": ["diff"],
         "submitted_evidence": ["diff"],
     }
@@ -12776,6 +12790,13 @@ def runtime_surface_interaction(
 
 SCHEDULES_PATH = "/api/v1/dashboard/scheduled-automation"
 
+# The schedule list's [schedule_runner]: the runner's status word, the one
+# /health reports, and nothing else of that object. The TUI reads the word.
+SCHEDULE_RUNNER_OK = {
+    "schema": "masc.dashboard.scheduled_automation.schedule_runner.v1",
+    "status": "ok",
+}
+
 
 def schedule_detail_http_fixtures() -> HttpFixtures:
     fixtures = overview_event_http_fixtures()
@@ -12787,6 +12808,10 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
             "request_count": 1,
             "truncated": False,
             "fsm": {"next_due_at_iso": "2026-08-25T10:30:00Z"},
+            # The runner's status word rides the list once, the word /health
+            # reports. The loader requires it: a row's runner_hold is only
+            # current while this reads ok.
+            "schedule_runner": SCHEDULE_RUNNER_OK,
             "requests": [
                 {
                     "schedule_instance_id": "instance-proof-701",
@@ -12853,6 +12878,9 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
                         "latest_recorded_at_iso": "2026-08-25T09:31:00Z",
                         "reason": None,
                     },
+                    # Always on the row, null when the runner holds nothing:
+                    # the loader refuses a row without it.
+                    "runner_hold": None,
                 }
             ],
         },
@@ -14210,15 +14238,12 @@ def pull_request_row(number: int, keeper: str | None, mergeable: str) -> dict[st
     return {
         "repo_slug": "jeong-sik/masc",
         "number": number,
-        "title": f"pull {number}",
-        "head_branch": f"fix/{number}",
         "draft": False,
         "checks": "passing",
         "review": "waiting",
         "mergeable": mergeable,
         "author": keeper if keeper is not None else "someone-else",
         "keeper": keeper,
-        "updated_at": "2026-09-23T00:00:00Z",
     }
 
 

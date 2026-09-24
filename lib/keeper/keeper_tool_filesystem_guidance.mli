@@ -19,11 +19,6 @@ type t =
       { offset : int
       ; window_bytes : int
       }
-  | Offset_beyond_scan_budget of
-      { offset : int
-      ; file_bytes : int
-      ; budget : int
-      }
   | Capability_unavailable
   | Publication_failed
   | Directory_publication_failed

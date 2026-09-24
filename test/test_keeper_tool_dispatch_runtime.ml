@@ -634,8 +634,8 @@ let test_keeper_tools_list_json_names_the_model_visible_tools () =
     (list_member_contains "properties" "executable" schema_shape);
   check bool "Execute schema properties omit retired pipeline" false
     (list_member_contains "properties" "pipeline" schema_shape);
-  check bool "Execute schema properties include script" true
-    (list_member_contains "properties" "script" schema_shape);
+  check bool "Execute schema properties include command" true
+    (list_member_contains "properties" "command" schema_shape);
   check bool "Execute schema has no shape errors" true
     (Yojson.Safe.Util.member "schema_errors" schema_shape = `Null);
   let examples = Yojson.Safe.Util.(member "examples" execute |> to_list) in
@@ -726,7 +726,7 @@ let test_keeper_tools_list_json_names_the_model_visible_tools () =
     { (descriptor_for_internal "tool_execute") with
       KTD.input_schema =
         `Assoc
-          [ "properties", `Assoc [ "argv", `Assoc []; "script", `Assoc [] ]
+          [ "properties", `Assoc [ "argv", `Assoc []; "command", `Assoc [] ]
           ; "oneOf"
           , `List
               [ `Assoc [ "required", `List [ `String "argv" ] ]
@@ -2670,21 +2670,20 @@ let test_model_visible_masc_ask_records_the_question () =
               [ ( "questions"
                 , `List
                     [ `Assoc
-                        [ "question_id", `String "q1"
-                        ; "header", `String "deploy"
+                        [ "header", `String "deploy"
                         ; "prompt", `String "Roll forward or roll back?"
                         ; "mode", `String "single"
                         ; ( "choices"
                           , `List
-                              [ `Assoc
-                                  [ "choice_id", `String "c1"
-                                  ; "label", `String "roll forward"
-                                  ]
-                              ; `Assoc
-                                  [ "choice_id", `String "c2"
-                                  ; "label", `String "roll back"
-                                  ]
+                              [ `Assoc [ "label", `String "roll forward" ]
+                              ; `Assoc [ "label", `String "roll back" ]
                               ] )
+                        ]
+                    ; `Assoc
+                        [ "header", `String "announce"
+                        ; "prompt", `String "Who should hear about it first?"
+                        ; "mode", `String "single"
+                        ; "free_text", `Bool true
                         ]
                     ] )
               ; "context", `String "the release window closes tonight"
@@ -2695,7 +2694,7 @@ let test_model_visible_masc_ask_records_the_question () =
       let json = parse_json result.raw_output in
       check string "recorded under the asking keeper" meta.name
         Yojson.Safe.Util.(member "keeper_name" json |> to_string);
-      check int "the reply says one question is open" 1
+      check int "the reply says one ask is open" 1
         Yojson.Safe.Util.(member "open_count" json |> to_int);
       match
         Masc.Keeper_ask_store.rows ~base_path:config.base_path ~keeper_name:meta.name
@@ -2704,7 +2703,21 @@ let test_model_visible_masc_ask_records_the_question () =
         check string "the store row names the keeper" meta.name
           ask.Masc.Keeper_ask.keeper_name;
         check bool "the row is still open" true
-          (resolution = Masc.Keeper_ask.Open)
+          (resolution = Masc.Keeper_ask.Open);
+        (* The call named no ids. The handler numbers questions and choices
+           by position, so an answer still has an id to name. *)
+        check (list string) "questions are numbered by position" [ "q1"; "q2" ]
+          (List.map
+             (fun (q : Masc.Keeper_ask.question) -> q.Masc.Keeper_ask.question_id)
+             ask.Masc.Keeper_ask.questions);
+        check (list (list string)) "choices are numbered by position within their question"
+          [ [ "c1"; "c2" ]; [] ]
+          (List.map
+             (fun (q : Masc.Keeper_ask.question) ->
+               List.map
+                 (fun (c : Masc.Keeper_ask.choice) -> c.Masc.Keeper_ask.choice_id)
+                 q.Masc.Keeper_ask.choices)
+             ask.Masc.Keeper_ask.questions)
       | _ -> fail "expected exactly one recorded ask")
 
 let test_public_masc_web_fetch_rejects_localhost_after_gate () =
@@ -3823,9 +3836,9 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
       List.iter
         (fun raw ->
            let json = Yojson.Safe.from_string raw in
-           check string "cmd is refused by the parser, which names script"
-             "cmd is not a field of this tool; the shell form is named \
-              script"
+           check string "cmd is refused by the parser, which lists command"
+             "$.cmd is not a supported typed Execute field; accepted: argv, \
+              command, shell, cwd, timeout_sec, intent"
              Yojson.Safe.Util.(member "error" json |> to_string);
            check bool "typed marker" true
              Yojson.Safe.Util.(member "typed" json |> to_bool))
@@ -3835,18 +3848,18 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
         List.iter (check string "repeated failures stay byte-identical" first) rest
       | [] -> fail "expected dispatch outputs")
 
-(* task-777: #29813 advertised [script] in the schema while a key pre-check
-   in the dispatch refused any call that used it. The admission is the
-   parser now, so a schema-conformant script call must reach execution. *)
-let test_tool_execute_script_form_is_admitted_and_runs () =
+(* task-777: #29813 advertised the shell form in the schema while a key
+   pre-check in the dispatch refused any call that used it. The admission is
+   the parser now, so a schema-conformant command call must reach execution. *)
+let test_tool_execute_command_form_is_admitted_and_runs () =
   with_exec_fixture
     ~require_sandbox:true
     ~process:true
     ~always_allow:true
-    "tool_execute_script_form_runs"
+    "tool_execute_command_form_runs"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let input =
-        `Assoc [ "script", `String "printf begin- && printf end" ]
+        `Assoc [ "command", `String "printf begin- && printf end" ]
       in
       let raw =
         KET.Compatibility.execute_keeper_tool_call
@@ -3855,7 +3868,7 @@ let test_tool_execute_script_form_is_admitted_and_runs () =
           ~name:"tool_execute" ~input ()
       in
       let json = Yojson.Safe.from_string raw in
-      check bool "script form executes" true
+      check bool "command form executes" true
         Yojson.Safe.Util.(member "ok" json |> to_bool);
       check string "the and-chain ran both commands" "begin-end"
         Yojson.Safe.Util.(member "output" json |> to_string))
@@ -3870,7 +3883,7 @@ let test_tool_execute_empty_input_names_both_forms () =
       in
       let json = Yojson.Safe.from_string raw in
       check string "no-source refusal names every form"
-        "$.argv or $.script is required"
+        "$.argv or $.command is required"
         Yojson.Safe.Util.(member "error" json |> to_string))
 
 let keeper_delegate_input_schema () =
@@ -6487,7 +6500,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
               execute.call
                 ~call_id:"direct-execute-post-effect-failure"
                 (`Assoc
-                   [ "script", `String
+                   [ "command", `String
                        ("printf x >> execute-invocations; printf %s "
                         ^ Filename.quote oversized)
                    ])
@@ -9836,8 +9849,8 @@ let () =
         test_manual_gate_defers_tool_execute_before_process;
       test_case "tool_execute raw cmd requires typed Shell IR" `Quick
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
-      test_case "tool_execute script form is admitted and runs" `Quick
-        test_tool_execute_script_form_is_admitted_and_runs;
+      test_case "tool_execute command form is admitted and runs" `Quick
+        test_tool_execute_command_form_is_admitted_and_runs;
       test_case "tool_execute empty input names all three forms" `Quick
         test_tool_execute_empty_input_names_both_forms;
       test_case "Agent Core handler threads Eio context to keeper dispatch" `Quick

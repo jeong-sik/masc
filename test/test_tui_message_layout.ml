@@ -2456,6 +2456,19 @@ let test_a_count_takes_the_number_it_counts () =
     (Layout.count_noun ~plural:"entries" 1 "entry")
 
 
+(* The Keepers roster's TURN cell is right-aligned to six cells. It was
+   padded with Printf's "%*s", which counts bytes, so the no-value mark --
+   three bytes and one column -- left the cell four cells wide and pulled the
+   runtime column after it two cells left. *)
+let test_a_right_aligned_cell_counts_cells_not_bytes () =
+  let width text = Layout.display_width (Layout.pad_left text 6) in
+  check int "an ascii age fills the cell" 6 (width "99d23h");
+  check int "a shorter one still fills it" 6 (width "2m14s");
+  check int "and a three-byte mark fills it too" 6 (width "\xe2\x80\x94");
+  check string "the padding goes in front" "     x" (Layout.pad_left "x" 6);
+  check string "a reading past the cell is cut, not widened" "99d2\xe2\x80\xa6"
+    (Layout.pad_left "99d23h12m" 5)
+
 (* The Board and Keeper roster ages are six cells. Days and hours from a
    hundred days on drew seven, and the column cut the day count out. *)
 let test_a_span_fits_a_six_cell_column () =
@@ -2475,6 +2488,36 @@ let test_a_span_fits_a_six_cell_column () =
         true
         (Layout.display_width text <= 6))
     [ 59.; 3599.; day -. 1.; (100. *. day) -. 1.; 99_999. *. day ]
+
+(* How long something took. The Standalone lanes table drew its P50 as raw
+   seconds -- "415.9s" for a seven-minute reading -- in the same frame where
+   its own detail block said "2m11s". Below a minute the tenths are what a
+   reader compares; past it they are noise. *)
+let test_a_duration_keeps_the_tenths_only_while_they_are_read () =
+  let reads = check (option string) in
+  reads "under a second, whole milliseconds" (Some "32ms") (Layout.elapsed_text 0.032);
+  reads "under a minute, tenths" (Some "16.2s") (Layout.elapsed_text 16.23);
+  reads "a seven-minute p50 is minutes" (Some "6m55s") (Layout.elapsed_text 415.9);
+  reads "an hour-long run is hours" (Some "1h02m") (Layout.elapsed_text 3723.);
+  reads "no time at all is still a reading" (Some "0ms") (Layout.elapsed_text 0.);
+  (* A server clock that disagreed with itself, not an instant call: "0ms"
+     would say the call took no time. It reads as nothing, as a backwards
+     [age_text] does, and the caller draws its own missing-value cell. *)
+  reads "a duration from the future is nothing, not a countdown" None
+    (Layout.elapsed_text (-4.))
+
+(* Each rung reads the value rounded to that rung's own precision, so no
+   reading steps backwards as the duration grows. *)
+let test_a_duration_does_not_step_back_at_a_rung () =
+  let reads = check (option string) in
+  reads "a second's worth of milliseconds is a second" (Some "1.0s")
+    (Layout.elapsed_text 0.9999);
+  reads "just under a second stays milliseconds" (Some "999ms")
+    (Layout.elapsed_text 0.9994);
+  reads "tenths that round up to a minute are a minute" (Some "1m00s")
+    (Layout.elapsed_text 59.96);
+  reads "and the tenth below it is still seconds" (Some "59.9s")
+    (Layout.elapsed_text 59.94)
 
 (* task-1516: a turn block's span clock rides in the body, folded in before
    wrapping. It must consume body budget like any other word -- no row of the
@@ -2844,5 +2887,11 @@ let () =
             test_a_count_takes_the_number_it_counts
         ; test_case "a span fits a six-cell column" `Quick
             test_a_span_fits_a_six_cell_column
+        ; test_case "a right-aligned cell counts cells, not bytes" `Quick
+            test_a_right_aligned_cell_counts_cells_not_bytes
+        ; test_case "a duration keeps the tenths only while they are read" `Quick
+            test_a_duration_keeps_the_tenths_only_while_they_are_read
+        ; test_case "a duration does not step back at a rung" `Quick
+            test_a_duration_does_not_step_back_at_a_rung
         ] )
     ]

@@ -20,7 +20,7 @@ let recorded_params =
      | _ -> Alcotest.fail "the fixture holds the three recorded llm.generate params")
 ;;
 
-let lane_id = Runtime.exact_lane_id Runtime.Browser_stagehand
+let lane_id = Standalone_lane.to_id Standalone_lane.Browser_stagehand
 let slot_id = "stagehand-fixture.model"
 let answer = `Assoc [ "action", `Null; "twoStep", `Bool false ]
 

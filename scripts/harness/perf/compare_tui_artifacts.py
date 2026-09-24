@@ -73,14 +73,14 @@ def cancel(signum, _frame):
     raise SystemExit(128 + signum)
 
 
-def run_scenario(scenario, binary, *, root, environment, out, name):
+def run_scenario(scenario, binary, *, cycles, root, environment, out, name):
     stdout_path = out / (name + '.stdout.txt')
     stderr_path = out / (name + '.stderr.txt')
     # Open before spawning: a cancelled run still has its output files. -u
     # prevents Python's redirected stdout from retaining observations in RAM.
     with stdout_path.open('wb', buffering=0) as stdout, stderr_path.open('wb', buffering=0) as stderr:
         process = subprocess.Popen(
-            [sys.executable, '-u', str(scenario), str(binary)],
+            [sys.executable, '-u', str(scenario), str(binary), '--cycles', str(cycles)],
             cwd=root, env=environment, stdout=stdout, stderr=stderr,
             start_new_session=True)
         try:
@@ -112,6 +112,39 @@ def run_scenario(scenario, binary, *, root, environment, out, name):
     return returncode, stdout_path.read_text(encoding='utf-8')
 
 
+def validate_observation(observation, *, cycles):
+    if observation['cycles'] != cycles:
+        raise ValueError('scenario cycle count differs')
+    samples = observation['samples']
+    inputs = [(sample['cycle'], sample['action'], sample['input_hex']) for sample in samples]
+    if (len(inputs) != 10 * cycles or len(set(inputs)) != len(inputs)
+            or {item[0] for item in inputs} != set(range(1, cycles + 1))):
+        raise ValueError('expected ten distinct acknowledged transitions per cycle')
+    first = [(action, data) for cycle, action, data in inputs if cycle == 1]
+    for cycle in range(1, cycles + 1):
+        if [(action, data) for actual, action, data in inputs if actual == cycle] != first:
+            raise ValueError('actions differ between cycles')
+    for index, sample in enumerate(samples):
+        value = sample['complete_frame_ms']
+        if not math.isfinite(value) or value < 0:
+            raise ValueError('invalid timing observation')
+        gap = sample['preceding_ack_to_input_ms']
+        if index in (0, 6 * cycles):
+            if gap is not None:
+                raise ValueError('first input of a phase must have no preceding timed acknowledgement')
+        elif (type(gap) not in (int, float) or not math.isfinite(gap) or gap < 0):
+            raise ValueError('invalid preceding acknowledgement gap')
+    resources = observation['session_resources']
+    for key in ('child_user_seconds', 'child_system_seconds', 'child_cpu_seconds', 'wall_seconds'):
+        if not math.isfinite(resources[key]) or resources[key] < 0:
+            raise ValueError('invalid session resource observation')
+    if resources['wall_seconds'] == 0 or not math.isclose(
+            resources['child_cpu_seconds'],
+            resources['child_user_seconds'] + resources['child_system_seconds']):
+        raise ValueError('inconsistent session resource observation')
+    return inputs, first
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for role in ('baseline', 'candidate'):
@@ -120,6 +153,7 @@ def main():
         parser.add_argument('--' + role + '-artifact', type=positive_int, required=True)
         parser.add_argument('--' + role + '-commit', type=commit, required=True)
     parser.add_argument('--repetitions', type=positive_int, default=3)
+    parser.add_argument('--input-cycles', type=positive_int, default=1)
     parser.add_argument('--output-dir', type=Path, required=True)
     args = parser.parse_args()
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
@@ -157,7 +191,7 @@ def main():
             name = f'{repeat + 1:02d}-{role}'
             frame_timing = out / (name + '.frame-timing.txt')
             returncode, stdout = run_scenario(
-                scenario, binary, root=root,
+                scenario, binary, cycles=args.input_cycles, root=root,
                 environment={**environment, 'MASC_TUI_FRAME_TIMING': str(frame_timing)},
                 out=out, name=name)
             if returncode != 0 or 'input and scroll frames: PASS' not in stdout.splitlines():
@@ -174,25 +208,18 @@ def main():
                     or digest(binary) != binary_hash
                     or digest(scenario) != scenario_hash or digest(helper) != helper_hash):
                 raise ValueError(f'{name}: observed identity changed')
-            samples = observation['samples']
-            inputs = [(sample['action'], sample['input_hex']) for sample in samples]
-            if len(inputs) != 10 or len(set(inputs)) != len(inputs):
-                raise ValueError(f'{name}: expected ten distinct acknowledged transitions')
+            inputs, action_inputs = validate_observation(observation, cycles=args.input_cycles)
             if expected_inputs is None:
                 expected_inputs = inputs
             elif inputs != expected_inputs:
                 raise ValueError(f'{name}: actions differ between runs')
-            for sample in samples:
-                value = sample['complete_frame_ms']
-                if not math.isfinite(value) or value < 0:
-                    raise ValueError(f'{name}: invalid timing observation')
             receipt = {'role': role, 'repetition': repeat + 1,
                        'frame_timing_file': frame_timing.name, **observation}
             receipts.append(receipt)
             (out / (name + '.json')).write_text(json.dumps(receipt, indent=2) + '\n')
             print(json.dumps(receipt), flush=True)
     rows = []
-    for action, _input in expected_inputs:
+    for action, _input in action_inputs:
         row = {'action': action}
         for role in ('baseline', 'candidate'):
             values = [sample['complete_frame_ms'] for receipt in receipts
@@ -210,6 +237,9 @@ def main():
         'platform': platform.platform(), 'python': sys.version,
         'perf_counter': vars(time.get_clock_info('perf_counter')),
         'scenario_sha256': scenario_hash, 'helper_sha256': helper_hash,
+        'input_cycles': args.input_cycles,
+        'session_resources': [{'role': r['role'], 'repetition': r['repetition'],
+                               **r['session_resources']} for r in receipts],
         'identities': identities, 'execution_order': [r['role'] for r in receipts],
         'rows': rows, 'goal_ms': goal_ms,
         'all_candidate_observations_below_goal': all(

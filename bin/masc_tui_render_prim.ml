@@ -387,6 +387,19 @@ let search_marker_styled (state : state) =
         marker Ansi.reset
 
 let footer_line ?(status = []) (state : state) ~max_cells ~hints =
+  (* The whole terminal, not the body. [get_terminal_size] hands a surface the
+     columns left after the Activity pane, and the surface passes that on as
+     this budget -- but the pane stops above this row, the way the strip and
+     the composer already span the full width ([finish_surface] adds the same
+     [pane_cols] back for them).
+
+     Measured live at 160 columns with the pane open: ten surfaces drew
+     footers of 85 to 103 cells and left the pane's 58 unused, while Activity
+     -- the one screen that reserves no pane -- drew 138. Three of them,
+     Lanes, Board and Planning, gave up the build-mismatch notice to the short
+     budget, and nothing else on any surface says the server is not this
+     build. At 200 columns all eleven kept it. *)
+  let max_cells = max_cells + !acting_pane_reserved_cols in
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
      a setting instead of per-screen behaviour. *)

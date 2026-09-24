@@ -156,6 +156,44 @@ let test_long_action_without_conflicts_keeps_pinned_keys () =
       check_at_most_cells "pinned keys and action stay bounded" width (String.trim rendered))
       [ 60; 98 ]) [ Masc_tui_types.Tools; Masc_tui_types.Repositories ]
 
+(* The Activity pane takes its columns out of what [get_terminal_size] hands a
+   surface, and the surface passes that on as the footer's budget -- but the
+   pane stops above the footer, so the row has the whole terminal.
+
+   Measured live at 160 columns with the pane open: ten surfaces drew footers
+   of 85 to 103 cells and left the pane's 58 unused, and three of them gave up
+   the build-mismatch notice to the short budget. Activity, the one screen
+   that reserves no pane, drew 138. *)
+let footer_of_surface state ~body_cells ~view =
+  Masc_tui_theme.strip_sgr
+    (Masc_tui_render_prim.footer_line state ~max_cells:body_cells
+       ~hints:(Masc_tui_keys.footer_hints view))
+
+let test_the_footer_spends_the_columns_the_pane_gave_back () =
+  let view = Masc_tui_types.Board in
+  let state = Masc_tui_types.create_state ~workspace:"" ~port:8935
+      ~refresh_interval:0. () in
+  state.Masc_tui_types.view <- view;
+  let body_cells = 102 and pane_cells = 58 in
+  let width row = Masc_tui_message_layout.display_width (String.trim row) in
+  Masc_tui_render_prim.acting_pane_reserved_cols := 0;
+  let without_pane = footer_of_surface state ~body_cells ~view in
+  Masc_tui_render_prim.acting_pane_reserved_cols := pane_cells;
+  let with_pane = footer_of_surface state ~body_cells ~view in
+  Masc_tui_render_prim.acting_pane_reserved_cols := 0;
+  check_bool "the pane's columns reach the footer" true
+    (width with_pane > width without_pane);
+  check_at_most_cells "and the row never runs past the terminal"
+    (body_cells + pane_cells) (String.trim with_pane);
+  (* The same row the surface would draw with no pane at all: the pane takes
+     rows from the body, not columns from this line. *)
+  Masc_tui_render_prim.acting_pane_reserved_cols := 0;
+  let whole_terminal =
+    footer_of_surface state ~body_cells:(body_cells + pane_cells) ~view
+  in
+  check_string "the pane changes nothing about this row" whole_terminal
+    with_pane
+
 let test_literal_search_status_survives_hint_fitting () =
   let prefix = "/  deploy note   (2) n/N" in
   let hints = "j/k:move  Home/End:top/bottom  c / C:category  s:sort  a / A:all fleet  Esc:close  q:quit" in
@@ -1199,6 +1237,8 @@ let tests =
           test_long_action_without_conflicts_keeps_pinned_keys
       ; Alcotest.test_case "literal search status survives hint fitting" `Quick
           test_literal_search_status_survives_hint_fitting
+        ; Alcotest.test_case "the footer spends the columns the pane gave back"
+            `Quick test_the_footer_spends_the_columns_the_pane_gave_back
       ; Alcotest.test_case "a conflict notice leads the search marker" `Quick
           test_a_conflict_notice_leads_the_search_marker
       ; Alcotest.test_case "port closes every footer" `Quick

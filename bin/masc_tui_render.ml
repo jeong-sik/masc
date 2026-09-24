@@ -9602,9 +9602,41 @@ let render_fusion_list (state : state) =
       box_divider buf cols) replay_warning;
   let chrome_rows = listing_chrome ~error:state.fusion_error
       + (if Option.is_some replay_warning then 2 else 0) in
-  (* The selected run's lifecycle is a reading, not footer help. Reserve one
-     row for it so every run says where it is in the four-stage flow. *)
-  let content_height = max 1 (rows - chrome_rows - 1) in
+  (* The selected run's lifecycle is a reading, not footer help, and it is
+     asked for its own height the way the Memory block under the roster is
+     (#38432): the clauses are packed into rows here, before the list is given
+     its height. [listing_note_rows] hands it only the rows the list leaves
+     blank, so every run still says where it is in the four-stage flow and no
+     entry loses its row. *)
+  let summary_indent = "  " in
+  let summary_clauses =
+    match List.nth_opt entries state.fusion_cursor with
+    | None -> None
+    | Some (Tui_decode.Fusion_historical_evidence _) ->
+        Some
+          ( Theme.warn ()
+          , [ "Historical Board evidence; run lifecycle unavailable"
+            ; "Enter:read original result" ] )
+    | Some (Tui_decode.Fusion_retained_run selected) ->
+        let style, summary = fusion_run_summary selected in
+        Some (style, [ fusion_run_duration ~now:now_epoch selected; summary ])
+  in
+  let packed_summary =
+    match summary_clauses with
+    | None -> []
+    | Some (_, clauses) ->
+        Message_layout.pack_clauses
+          ~max_cells:
+            (max 1
+               (framed_inner_width cols
+                - Message_layout.display_width summary_indent))
+          clauses
+  in
+  let summary_rows =
+    listing_note_rows ~body_rows:(rows - chrome_rows) ~entries:shown
+      ~wanted:(List.length packed_summary)
+  in
+  let content_height = max 1 (rows - chrome_rows - summary_rows) in
   let scroll =
     if state.fusion_cursor >= content_height then
       state.fusion_cursor - content_height + 1
@@ -9657,14 +9689,22 @@ let render_fusion_list (state : state) =
             box_line buf cols (Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line)
           else box_line buf cols ("  " ^ line)
     done;
-  (match List.nth_opt entries state.fusion_cursor with
-   | None -> box_empty buf cols
-   | Some (Tui_decode.Fusion_historical_evidence _) ->
-       box_line_styled buf cols ~style:(Theme.warn ())
-         "  Historical Board evidence; run lifecycle unavailable · Enter:read original result"
-   | Some (Tui_decode.Fusion_retained_run selected) ->
-       let style, summary = fusion_run_summary selected in
-       box_line_styled buf cols ~style ("  " ^ fusion_run_duration ~now:now_epoch selected ^ " · " ^ summary));
+  (match summary_clauses with
+   | None -> for _ = 1 to summary_rows do box_empty buf cols done
+   | Some (style, clauses) ->
+       (* The packed rows are drawn only when the frame had room for all of
+          them. A reading that does not fit is drawn as the one joined row it
+          was, where the frame's own cut mark still says it was cut; stopping
+          after the rows that fit would end on a row that reads as whole
+          (#38432 falls back to the same line). *)
+       let drawn =
+         if List.length packed_summary <= summary_rows then packed_summary
+         else [ String.concat Message_layout.clause_separator clauses ]
+       in
+       List.iter
+         (fun row -> box_line_styled buf cols ~style (summary_indent ^ row))
+         drawn;
+       for _ = List.length drawn + 1 to summary_rows do box_empty buf cols done);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols

@@ -6934,3 +6934,13 @@
 (include stanzas/test_keeper_librarian_capacity_callback.inc)
 
 (include stanzas/test_deployment_store_directories.inc)
+
+(test
+ (name test_tui_fusion_summary_rows)
+ (modules test_tui_fusion_summary_rows)
+ ; The Fusion list is drawn in the executable, which no test can link, so the
+ ; two wiring assertions are read through Ast_grep. The source is a dep:
+ ; without it the test reads a cached verdict and stays green while the wiring
+ ; it asserts is gone.
+ (deps %{workspace_root}/bin/masc_tui_render.ml)
+ (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))

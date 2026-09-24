@@ -5739,7 +5739,7 @@ let render_lanes_overview (state : state) =
         | None -> ()
         | Some detail ->
             box_line buf cols
-              ((Theme.warn ()) ^ "  STALE · refresh failed: "
+              ((Theme.warn ()) ^ "  STALE · "
                ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset))
    | None ->
        box_line buf cols

@@ -507,11 +507,16 @@ let test_the_lane_failure_row_adds_no_second_verdict () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_lanes_overview"
        ~needle:"  standalone lane observation unavailable: ");
-  check int "the stale row keeps the word the message has not got" 1
+  check int "the stale row does not repeat the loader's failure verdict" 0
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_lanes_overview"
-       ~needle:"  STALE \xc2\xb7 refresh failed: ")
+       ~needle:"  STALE \xc2\xb7 refresh failed: ");
+  check int "the stale row still identifies the previous reading" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_lanes_overview"
+       ~needle:"  STALE \xc2\xb7 ")
 ;;
 
 let test_keeper_chat_uses_current_async_contract () =

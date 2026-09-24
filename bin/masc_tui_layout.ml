@@ -14,9 +14,9 @@ let board_read_box_rows = 7
 let board_read_footer_rows = 1
 let board_read_position_rows = 1
 
-let allocate_board_read ~terminal_rows ~body_line_count ~comment_count =
-  let comment_count = max 0 comment_count in
-  let comment_chrome_rows = if comment_count > 0 then 2 else 0 in
+let allocate_board_read ~terminal_rows ~body_line_count ~comment_line_count =
+  let comment_line_count = max 0 comment_line_count in
+  let comment_chrome_rows = if comment_line_count > 0 then 2 else 0 in
   let allocate ~position_rows =
     let available =
       max 0
@@ -31,7 +31,7 @@ let allocate_board_read ~terminal_rows ~body_line_count ~comment_count =
            (available / board_comment_share))
     in
     let comment_rows =
-      min (min comment_ceiling comment_count)
+      min (min comment_ceiling comment_line_count)
         (max 0 (available - minimum_body_rows))
     in
     let body_rows = max 0 (available - comment_rows) in
@@ -40,7 +40,7 @@ let allocate_board_read ~terminal_rows ~body_line_count ~comment_count =
   let unpositioned = allocate ~position_rows:0 in
   if
     body_line_count > unpositioned.body_rows
-    || comment_count > unpositioned.comment_rows
+    || comment_line_count > unpositioned.comment_rows
   then allocate ~position_rows:board_read_position_rows
   else unpositioned
 
@@ -50,14 +50,14 @@ type board_read_scroll = {
   comment_offset : int;
 }
 
-let project_board_read_scroll ~body_line_count ~body_rows ~comment_count
+let project_board_read_scroll ~body_line_count ~body_rows ~comment_line_count
     ~comment_rows scroll =
   let body_line_count = max 0 body_line_count in
   let body_rows = max 0 body_rows in
-  let comment_count = max 0 comment_count in
+  let comment_line_count = max 0 comment_line_count in
   let comment_rows = max 0 comment_rows in
   let maximum_body_offset = max 0 (body_line_count - body_rows) in
-  let maximum_comment_offset = max 0 (comment_count - comment_rows) in
+  let maximum_comment_offset = max 0 (comment_line_count - comment_rows) in
   let maximum_scroll = maximum_body_offset + maximum_comment_offset in
   let normalized_scroll = max 0 (min scroll maximum_scroll) in
   let body_offset = min normalized_scroll maximum_body_offset in
@@ -86,20 +86,20 @@ type board_read_side_allocation = {
   comment_rows : int;
 }
 
-let allocate_board_read_side ~terminal_rows ~body_line_count ~comment_count =
+let allocate_board_read_side ~terminal_rows ~body_line_count ~comment_line_count =
   let body_line_count = max 0 body_line_count in
-  let comment_count = max 0 comment_count in
+  let comment_line_count = max 0 comment_line_count in
   let available =
     max 0
       (terminal_rows - board_read_box_rows - board_read_footer_rows
        - board_read_position_rows)
   in
-  let comment_header_rows = if comment_count > 0 then 1 else 0 in
+  let comment_header_rows = if comment_line_count > 0 then 1 else 0 in
   let minimum_comment_rows =
-    if comment_count > 0 then comment_header_rows + 1 else 0
+    if comment_line_count > 0 then comment_header_rows + 1 else 0
   in
   let comment_rows =
-    if comment_count > 0 && available >= minimum_comment_rows then available
+    if comment_line_count > 0 && available >= minimum_comment_rows then available
     else 0
   in
   let body_rows = if body_line_count > 0 then available else 0 in

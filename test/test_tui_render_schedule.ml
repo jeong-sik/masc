@@ -263,17 +263,17 @@ let test_overview_rows_share_one_viewport_budget () =
    writes above the box bottom. The footer and the position line were left out
    of the allocation, so the frame ran one or two rows past the terminal and
    the footer landed on the composer's row. *)
-let board_read_frame_rows ~body_line_count ~comment_count
+let board_read_frame_rows ~body_line_count ~comment_line_count
     (allocation : Layout.board_read_allocation) =
   let position_rows =
     if
       body_line_count > allocation.body_rows
-      || comment_count > allocation.comment_rows
+      || comment_line_count > allocation.comment_rows
     then 1
     else 0
   in
   Layout.board_read_box_rows
-  + (if comment_count > 0 then 2 else 0)
+  + (if comment_line_count > 0 then 2 else 0)
   + 1
   + position_rows
   + allocation.body_rows
@@ -515,28 +515,28 @@ let test_overview_goals_and_providers_share_the_viewport () =
 let test_board_read_rows_reserve_comments_and_footer () =
   let crowded =
     Layout.allocate_board_read ~terminal_rows:14 ~body_line_count:10
-      ~comment_count:5
+      ~comment_line_count:5
   in
   check int "14-row board keeps one body row" 1 crowded.body_rows;
   check int "14-row board fits two comments" 2 crowded.comment_rows;
   check int "14-row board frame is exact" 14
-    (board_read_frame_rows ~body_line_count:10 ~comment_count:5 crowded);
+    (board_read_frame_rows ~body_line_count:10 ~comment_line_count:5 crowded);
   let comments_only =
     Layout.allocate_board_read ~terminal_rows:14 ~body_line_count:0
-      ~comment_count:5
+      ~comment_line_count:5
   in
   check int "empty body consumes no semantic row" 0 comments_only.body_rows;
   check int "empty body frees a third comment row" 3
     comments_only.comment_rows;
   let no_comments =
     Layout.allocate_board_read ~terminal_rows:14 ~body_line_count:10
-      ~comment_count:0
+      ~comment_line_count:0
   in
   check int "comment-free board uses the full body viewport" 5
     no_comments.body_rows;
   let full_comments =
     Layout.allocate_board_read ~terminal_rows:16 ~body_line_count:10
-      ~comment_count:5
+      ~comment_line_count:5
   in
   check int "16-row board widens the thread" 4 full_comments.comment_rows;
   (* A tall terminal is where the old flat five hurt: a forty-reply thread got
@@ -544,7 +544,7 @@ let test_board_read_rows_reserve_comments_and_footer () =
      share grows with the height, and the post still keeps the larger half. *)
   let tall =
     Layout.allocate_board_read ~terminal_rows:60 ~body_line_count:200
-      ~comment_count:40
+      ~comment_line_count:40
   in
   check int "a tall pane gives comments a share, not a constant" 16
     tall.comment_rows;
@@ -552,7 +552,7 @@ let test_board_read_rows_reserve_comments_and_footer () =
     (tall.body_rows > tall.comment_rows);
   let few_comments =
     Layout.allocate_board_read ~terminal_rows:60 ~body_line_count:200
-      ~comment_count:3
+      ~comment_line_count:3
   in
   check int "a short thread takes only what it has" 3
     few_comments.comment_rows;
@@ -560,30 +560,30 @@ let test_board_read_rows_reserve_comments_and_footer () =
      rows of filler under a ten-line post while the thread was cut at five. *)
   let short_post =
     Layout.allocate_board_read ~terminal_rows:60 ~body_line_count:10
-      ~comment_count:40
+      ~comment_line_count:40
   in
   check int "a short post hands its unused rows to the thread" 40
     short_post.comment_rows;
   check int "the body keeps exactly the rows it has" 10 short_post.body_rows;
   for terminal_rows = 14 to 40 do
     for body_line_count = 0 to 10 do
-      for comment_count = 0 to 10 do
+      for comment_line_count = 0 to 10 do
         let allocation =
           Layout.allocate_board_read ~terminal_rows ~body_line_count
-            ~comment_count
+            ~comment_line_count
         in
         let total =
-          board_read_frame_rows ~body_line_count ~comment_count allocation
+          board_read_frame_rows ~body_line_count ~comment_line_count allocation
         in
         if total <> terminal_rows then
           failf
             "board-read does not fill viewport: rows=%d body=%d comments=%d total=%d"
-            terminal_rows body_line_count comment_count total;
+            terminal_rows body_line_count comment_line_count total;
         if body_line_count > 0 && allocation.body_rows < 1 then
           failf "board-read hid a nonempty body at rows=%d comments=%d"
-            terminal_rows comment_count;
+            terminal_rows comment_line_count;
         let ceiling =
-          let chrome = if comment_count > 0 then 2 else 0 in
+          let chrome = if comment_line_count > 0 then 2 else 0 in
           let available =
             max 0 (terminal_rows - Layout.board_read_box_rows - 1 - chrome)
           in
@@ -591,18 +591,18 @@ let test_board_read_rows_reserve_comments_and_footer () =
         in
         if
           allocation.comment_rows < 0
-          || allocation.comment_rows > min ceiling comment_count
+          || allocation.comment_rows > min ceiling comment_line_count
         then
           failf "board-read comment allocation escaped its cap";
         let last =
           Layout.project_board_read_scroll ~body_line_count
-            ~body_rows:allocation.body_rows ~comment_count
+            ~body_rows:allocation.body_rows ~comment_line_count
             ~comment_rows:allocation.comment_rows max_int
         in
-        if last.comment_offset + allocation.comment_rows <> comment_count then
+        if last.comment_offset + allocation.comment_rows <> comment_line_count then
           failf
             "board-read cannot reach the last comment: rows=%d body=%d comments=%d"
-            terminal_rows body_line_count comment_count;
+            terminal_rows body_line_count comment_line_count;
         if
           body_line_count > allocation.body_rows
           && last.body_offset + allocation.body_rows <> body_line_count
@@ -615,18 +615,18 @@ let test_board_read_rows_reserve_comments_and_footer () =
 let test_board_read_scroll_reaches_hidden_comments () =
   let allocation =
     Layout.allocate_board_read ~terminal_rows:14 ~body_line_count:1
-      ~comment_count:5
+      ~comment_line_count:5
   in
   let first =
     Layout.project_board_read_scroll ~body_line_count:1
-      ~body_rows:allocation.body_rows ~comment_count:5
+      ~body_rows:allocation.body_rows ~comment_line_count:5
       ~comment_rows:allocation.comment_rows 0
   in
   check int "initial body offset" 0 first.body_offset;
   check int "initial comment offset" 0 first.comment_offset;
   let last =
     Layout.project_board_read_scroll ~body_line_count:1
-      ~body_rows:allocation.body_rows ~comment_count:5
+      ~body_rows:allocation.body_rows ~comment_line_count:5
       ~comment_rows:allocation.comment_rows 99
   in
   check int "overscroll normalizes to the combined maximum" 3
@@ -635,14 +635,14 @@ let test_board_read_scroll_reaches_hidden_comments () =
   check int "last comment becomes visible" 3 last.comment_offset;
   let long_body =
     Layout.project_board_read_scroll ~body_line_count:10 ~body_rows:1
-      ~comment_count:5 ~comment_rows:3 10
+      ~comment_line_count:5 ~comment_rows:3 10
   in
   check int "body scroll is consumed first" 9 long_body.body_offset;
   check int "remaining scroll advances comments" 1
     long_body.comment_offset;
   let negative =
     Layout.project_board_read_scroll ~body_line_count:10 ~body_rows:1
-      ~comment_count:5 ~comment_rows:3 (-1)
+      ~comment_line_count:5 ~comment_rows:3 (-1)
   in
   check int "negative scroll normalizes to zero" 0
     negative.normalized_scroll
@@ -680,31 +680,31 @@ let test_board_read_side_layout_falls_back_when_narrow () =
    under it -- never a heading alone. *)
 let test_board_read_side_allocation_reserves_the_heading () =
   for terminal_rows = 9 to 40 do
-    for comment_count = 0 to 12 do
+    for comment_line_count = 0 to 12 do
       let allocation =
         Layout.allocate_board_read_side ~terminal_rows ~body_line_count:20
-          ~comment_count
+          ~comment_line_count
       in
-      if comment_count > 0 && allocation.comment_rows > 0
+      if comment_line_count > 0 && allocation.comment_rows > 0
          && allocation.comment_rows < 2
       then
         failf
           "rows=%d comments=%d: comment column has a heading with no room \
            under it (%d rows)"
-          terminal_rows comment_count allocation.comment_rows;
+          terminal_rows comment_line_count allocation.comment_rows;
       if allocation.body_rows < 0 || allocation.comment_rows < 0 then
         failf "rows=%d comments=%d: negative row allocation" terminal_rows
-          comment_count;
+          comment_line_count;
       let available = max 0 (terminal_rows - 9) in
       if max allocation.body_rows allocation.comment_rows <> available then
         failf
           "rows=%d comments=%d: side columns leave vertical space unused"
-          terminal_rows comment_count
+          terminal_rows comment_line_count
     done
   done;
   let no_comments =
     Layout.allocate_board_read_side ~terminal_rows:30 ~body_line_count:20
-      ~comment_count:0
+      ~comment_line_count:0
   in
   check int "no thread spends no row on a heading" 0 no_comments.comment_rows
 
@@ -718,14 +718,14 @@ let test_board_read_side_allocation_reserves_the_heading () =
 let test_board_read_side_layout_opens_head_first () =
   let allocation =
     Layout.allocate_board_read_side ~terminal_rows:16 ~body_line_count:20
-      ~comment_count:20
+      ~comment_line_count:20
   in
   check bool "this allocation has room for a heading and a line under it"
     true (allocation.comment_rows >= 2);
   let comment_rows = allocation.comment_rows - 1 (* the heading's own row *) in
   let opening =
     Layout.project_board_read_scroll ~body_line_count:20
-      ~body_rows:allocation.body_rows ~comment_count:20 ~comment_rows 0
+      ~body_rows:allocation.body_rows ~comment_line_count:20 ~comment_rows 0
   in
   check int "post opens at its head" 0 opening.body_offset;
   check int "thread opens at its head, not its tail" 0 opening.comment_offset

@@ -2682,7 +2682,7 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
     ~comment_cols ~total_lines ~detail_line_count ~detail_comment_count =
   let side_budget =
     Layout.allocate_board_read_side ~terminal_rows:rows
-      ~body_line_count:total_lines ~comment_count:detail_line_count
+      ~body_line_count:total_lines ~comment_line_count:detail_line_count
   in
   (* The heading spends the comment column's first row; only what is
      left under it can hold thread lines. *)
@@ -2694,7 +2694,7 @@ let draw_board_read_side buf (state : state) document ~rows ~body_cols
     Layout.project_board_read_scroll
       ~body_line_count:total_lines
       ~body_rows:side_budget.body_rows
-      ~comment_count:detail_line_count
+      ~comment_line_count:detail_line_count
       ~comment_rows:comment_content_rows
       state.board_scroll
   in
@@ -3029,14 +3029,14 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
     | None ->
         let row_budget =
           Layout.allocate_board_read ~terminal_rows:rows
-            ~body_line_count:total_lines ~comment_count:detail_line_count
+            ~body_line_count:total_lines ~comment_line_count:detail_line_count
         in
         let content_height = row_budget.body_rows in
         let comment_height = row_budget.comment_rows in
         let scroll =
           Layout.project_board_read_scroll
             ~body_line_count:total_lines ~body_rows:content_height
-            ~comment_count:detail_line_count ~comment_rows:comment_height
+            ~comment_line_count:detail_line_count ~comment_rows:comment_height
             state.board_scroll
         in
         for i = 0 to content_height - 1 do
@@ -3068,13 +3068,14 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
     total_lines > body_lines_drawn || detail_line_count > comment_lines_drawn
   then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "post lines %s%s"
-         (Masc_tui_scroll.window_text ~scroll:scroll.body_offset
-            ~height:body_lines_drawn total_lines)
+      (Printf.sprintf "%s%s"
+         (Masc_tui_scroll.window_reading ~noun:"post rows"
+            ~scroll:scroll.body_offset ~height:body_lines_drawn total_lines)
          (if detail_line_count > comment_lines_drawn then
-            "  \xc2\xb7  comment lines "
-            ^ Masc_tui_scroll.window_text ~scroll:scroll.comment_offset
-                ~height:comment_lines_drawn detail_line_count
+            "  \xc2\xb7  "
+            ^ Masc_tui_scroll.window_reading ~noun:"comment rows"
+                ~scroll:scroll.comment_offset ~height:comment_lines_drawn
+                detail_line_count
           else ""));
   box_bottom buf cols;
   scroll.normalized_scroll

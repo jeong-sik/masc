@@ -135,8 +135,9 @@ def run_side_by_side(executable: str) -> None:
 # rows, so both say so: the comment half read "comments 1-10/6085" beside a
 # header drawing the thread's own 157, and a reader meeting both numbers had
 # no way to tell which one counted comments.
-POST_WINDOW = re.compile(rb"post lines \d+-\d+/(\d+)")
-COMMENT_WINDOW = re.compile(rb"comment lines \d+-\d+/(\d+)")
+POST_WINDOW = re.compile(rb"post rows \d+-\d+/(\d+)")
+COMMENT_WINDOW = re.compile(rb"comment rows \d+-\d+/(\d+)")
+HEADER_COMMENTS = re.compile("💬".encode() + rb"(\d+)")
 
 
 def run_window_names_what_it_counts(executable: str) -> None:
@@ -161,7 +162,7 @@ def run_window_names_what_it_counts(executable: str) -> None:
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
         h.send_and_wait(process, fd, output, b"\r", b"Comment 000")
-        h.wait_for_output(process, fd, output, b"comment lines ", start=0, timeout=5)
+        h.wait_for_output(process, fd, output, b"comment rows ", start=0, timeout=5)
         h.read_available(fd, output)
         rows = h.screen_rows(bytes(output))
         screen = h.screen_text(bytes(output))
@@ -187,7 +188,8 @@ def run_window_names_what_it_counts(executable: str) -> None:
                   if b"MASC Board" in text]
         if not header:
             raise AssertionError("no Board header on screen")
-        if str(len(comments)).encode() not in header[0]:
+        header_count = HEADER_COMMENTS.search(header[0])
+        if header_count is None or int(header_count.group(1)) != len(comments):
             raise AssertionError(
                 f"the header does not draw the thread's {len(comments)} "
                 "comments: " + repr(header[0]))

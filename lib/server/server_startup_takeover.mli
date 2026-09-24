@@ -121,8 +121,10 @@ val base_path_lock_path :
 
 val status_line_is_healthy : string -> bool
 
-(** The start time ps reports for [pid] (C locale, UTC), or [None] when ps
-    cannot report it. The pid lock records its writer's value next to the pid,
+(** When [pid] started, as a source-tagged token: ["proc:<ticks>"] from field
+    22 of /proc/<pid>/stat where procfs is mounted, otherwise
+    ["ps:<lstart>"] from [ps -o lstart=] (C locale, UTC). [None] when neither
+    can report it. The pid lock records its writer's token next to the pid,
     and a takeover signals a live, unresponsive holder only when the two are
     equal: pid numbers are reused, a (pid, start time) pair is not. *)
 val process_started : int -> string option

@@ -378,10 +378,42 @@ let status_line_is_healthy line =
 ;;
 
 
-(* The start time ps reports for a pid, fixed to the C locale and UTC so two
-   boots under different settings read the same process the same way. The
-   kernel reuses pid numbers; it does not reuse (pid, start time). *)
-let process_started pid =
+(* When a pid started, as a token that names its source. The kernel reuses
+   pid numbers; it does not reuse (pid, start time).
+
+   Linux: field 22 of /proc/<pid>/stat, the start time in clock ticks after
+   boot. No external command, locale or time zone is involved, and the
+   runtime images carry no [ps]. The fields are counted after the last ')'
+   because the command name in field 2 may itself contain spaces or ')'.
+   procfs reports a size of 0, so the file is read to end of input rather
+   than sized first.
+
+   Elsewhere (macOS has no /proc): [ps -o lstart=], fixed to the C locale and
+   UTC so two boots under different settings read the same process the same
+   way.
+
+   The prefix keeps the two sources apart: a token from one never equals a
+   token from the other, so a mixed pair refuses rather than compares. *)
+let proc_stat_starttime pid =
+  let path = Printf.sprintf "/proc/%d/stat" pid in
+  match In_channel.with_open_bin path In_channel.input_all with
+  | exception Sys_error _ -> None
+  | stat ->
+    (match String.rindex_opt stat ')' with
+     | None -> None
+     | Some close ->
+       let after_comm =
+         String.sub stat (close + 1) (String.length stat - close - 1)
+         |> String.split_on_char ' '
+         |> List.filter (fun field -> not (String.equal field ""))
+       in
+       (* after_comm starts at field 3 (state); starttime is field 22. *)
+       (match List.nth_opt after_comm (22 - 3) with
+        | Some ticks when Option.is_some (Int64.of_string_opt ticks) -> Some ticks
+        | Some _ | None -> None))
+;;
+
+let ps_lstart pid =
   match
     Process_eio.run_argv_with_status
       [ "env"; "LC_ALL=C"; "TZ=UTC"; "ps"; "-p"; string_of_int pid; "-o"; "lstart=" ]
@@ -391,6 +423,19 @@ let process_started pid =
      | "" -> None
      | started -> Some started)
   | _ -> None
+;;
+
+let process_started pid =
+  match proc_stat_starttime pid with
+  | Some ticks -> Some ("proc:" ^ ticks)
+  | None ->
+    (match Sys.file_exists "/proc/self/stat" with
+     | true ->
+       (* /proc is mounted but this pid has no readable stat: the process
+          is gone or hidden. [ps] reads the same procfs and would say the
+          same, so there is nothing to fall back to. *)
+       None
+     | false -> Option.map (fun lstart -> "ps:" ^ lstart) (ps_lstart pid))
 ;;
 
 type pid_lock_record =
@@ -452,7 +497,7 @@ let holder_identity_refusal pid = function
           so it cannot be shown to be the masc server that wrote it"
          pid)
   | Identity_unreadable ->
-    Some (Printf.sprintf "PID %d is alive but ps did not report its start time" pid)
+    Some (Printf.sprintf "PID %d is alive but its start time could not be read" pid)
   | Different_process { recorded; current } ->
     Some
       (Printf.sprintf
@@ -549,8 +594,8 @@ let claim_pid_file path =
        ~level:Log.Warn
        ~module_name:"Server"
        (Printf.sprintf
-          "[WARN] ps reported no start time for this server (PID %d); the lock \
-           %s records none, so a later start will not take it over"
+          "[WARN] no start time could be read for this server (PID %d); the \
+           lock %s records none, so a later start will not take it over"
           pid
           path));
   write_pid_file path { pid; started };

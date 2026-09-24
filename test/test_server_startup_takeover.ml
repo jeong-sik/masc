@@ -237,6 +237,13 @@ let test_claimed_lock_records_writer_start_time () =
       match Server_startup_takeover.acquire_pid_lock ~lock_path:path port with
       | Server_startup_takeover.Acquired ->
           let own_pid = Unix.getpid () in
+          (* Where procfs is mounted the token comes from /proc, which needs
+             no ps binary (the runtime images carry none). *)
+          if Sys.file_exists "/proc/self/stat" then
+            Alcotest.(check bool) "start time read from /proc" true
+              (match Server_startup_takeover.process_started own_pid with
+               | Some token -> String.starts_with ~prefix:"proc:" token
+               | None -> false);
           Alcotest.(check (list string)) "pid and start time, one per line"
             [ string_of_int own_pid
             ; Option.value ~default:"<ps reported none>"

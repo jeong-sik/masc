@@ -228,7 +228,7 @@ let test_status_field_no_longer_decodes () =
      empty state, turning one undecodable row into permanent loss. *)
   (match
      Goal_store.upsert_goal config ~title:"phase only" ~metric:"m"
-       ~target_value:"1" ~phase:Goal_phase.Dropped ()
+       ~target_value:"1" ()
    with
    | Ok _ -> fail "upsert_goal wrote over an undecodable store"
    | Error (Goal_store.Store_unavailable u) ->
@@ -248,7 +248,7 @@ let test_serializer_omits_status () =
   with_workspace @@ fun config ->
   match
     Goal_store.upsert_goal config ~title:"phase only" ~metric:"m"
-      ~target_value:"1" ~phase:Goal_phase.Dropped ()
+      ~target_value:"1" ()
   with
   | Error error -> fail (write_error_msg error)
   | Ok (goal, _) -> (

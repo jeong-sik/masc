@@ -253,7 +253,6 @@ val upsert_goal :
   ?target_value:string ->
   ?due_date:string ->
   ?priority:int ->
-  ?phase:Goal_phase.t ->
   unit ->
   (goal * [ `created | `updated of Goal_phase.t ], write_error) result
 (** Creates a new goal when [id] is omitted (mints [goal-<ms>-<4 hex digits>]

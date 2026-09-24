@@ -669,14 +669,11 @@ let blank_opt = function
   | Some raw -> String.trim raw = ""
 
 let upsert_goal config ?id ?title ?metric ?target_value ?due_date
-    ?priority ?phase () =
+    ?priority () =
   let is_new_goal = id = None in
   if is_new_goal && (title = None || title = Some "") then
     Error (Rejected "title required for new goal")
   else
-    (* DET-OK: typed optional API param (not parsed input) — a new goal
-       without an explicit phase starts Executing, same as the removed match. *)
-    let default_phase = Option.value phase ~default:Goal_phase.Executing in
     let now = Masc_domain.now_iso () in
         let resolved_id = Option.value id ~default:(gen_goal_id ()) in
         let upserted = ref None in
@@ -685,9 +682,6 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
           update_state config (fun state ->
               match find_goal_in state.goals resolved_id with
               | Some existing ->
-                  (* DET-OK: typed optional param — omitted phase preserves
-                     the stored phase (same arm the removed match had). *)
-                  let next_phase = Option.value phase ~default:existing.phase in
                   let next_goal =
                       {
                         existing with
@@ -704,7 +698,6 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         priority =
                           clamp_priority
                             (Option.value priority ~default:existing.priority);
-                        phase = next_phase;
                         updated_at = now;
                       }
                   in
@@ -759,7 +752,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         target_value;
                         due_date;
                         priority = clamp_priority (Option.value priority ~default:3);
-                        phase = default_phase;
+                        phase = Goal_phase.Executing;
                         last_review_note = None;
                         last_review_at = None;
                         created_at = now;

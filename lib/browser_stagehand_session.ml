@@ -12,6 +12,7 @@ type attach_error =
   | Init_unanswered of float
   | Init_failed of call_failure
   | Cdp of Browser_cdp.failure
+  | Already_attached
 
 and call_failure =
   | Not_attached
@@ -21,9 +22,9 @@ and call_failure =
   | Not_delivered of string
   | Rejected of Wire.rpc_error
   | Lost of string
-  | Answer_unreceived of float
 
 type event =
+  | Runtime_ready of Wire.marker
   | Model_request_refused of { reason : string }
   | Model_failed of string
   | Unsupported_request of { method_ : string }
@@ -40,20 +41,38 @@ type event =
 type model = Yojson.Safe.t -> (Yojson.Safe.t, Wire.rpc_error) result
 type link = { cdp : Browser_cdp.t; worker : Browser_cdp.session_id }
 
-(* [Initialising] admits only [stagehand.init]; the runtime is not ready for
-   anything else until init answers. *)
-type link_state = Unattached | Initialising of link | Attached of link | Worker_gone | Ended of string
+(* [Attaching] is set when attach starts, so a second attach is refused.
+   [Initialising] carries only [stagehand.init], which attach sends itself;
+   the runtime is not ready for anything else until init answers. *)
+type link_state =
+  | Unattached
+  | Attaching
+  | Initialising of link
+  | Attached of link
+  | Worker_gone
+  | Ended of string
+
+type outgoing = Init of Wire.init | Operation of Wire.call
+
+let method_name = function Init _ -> Wire.init_method | Operation call -> Wire.method_name call
+let uses_model = function Init _ -> false | Operation call -> Wire.uses_model call
+
+let encode ~id = function
+  | Init init -> Wire.encode_init ~id init
+  | Operation call -> Wire.encode_call ~id call
+;;
 
 type call_state =
   | Idle
-  | In_flight of { id : int; call : Wire.call; ended : unit Eio.Promise.t }
+  | In_flight of { id : int; outgoing : outgoing; ended : unit Eio.Promise.t }
       (* [ended] resolves when the call finishes or is abandoned, which
          cancels a model answer still being computed for it. *)
-  | Abandoned of { id : int; call : Wire.call }
+  | Abandoned of { id : int; outgoing : outgoing }
 
 type t =
   { sw : Eio.Switch.t
   ; sleep : float -> unit
+  ; now : unit -> float
   ; worker_wait_s : float
   ; init_answer_s : float
   ; model : model
@@ -72,6 +91,7 @@ let worker_poll_s = 0.1
 let create ~sw ~clock ~worker_wait_s ~init_answer_s ~model ~log =
   { sw
   ; sleep = Eio.Time.sleep clock
+  ; now = (fun () -> Eio.Time.now clock)
   ; worker_wait_s
   ; init_answer_s
   ; model
@@ -86,7 +106,7 @@ let create ~sw ~clock ~worker_wait_s ~init_answer_s ~model ~log =
 
 let live_link = function
   | Initialising link | Attached link -> Some link
-  | Unattached | Worker_gone | Ended _ -> None
+  | Unattached | Attaching | Worker_gone | Ended _ -> None
 ;;
 
 let fail_pending t failure =
@@ -97,12 +117,20 @@ let fail_pending t failure =
 
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 
+let exception_text details =
+  match Option.bind (field "exception" details) (field "description"), field "text" details with
+  | Some (`String description), _ -> description
+  | (Some _ | None), Some (`String text) -> text
+  | (Some _ | None), (Some _ | None) -> "without a description"
+;;
+
 type delivery_failure =
   | Refused_delivery of string  (* the message did not reach the receiver *)
-  | Delivery_unknown of string  (* the connection ended with the message out *)
+  | Delivery_unknown of string  (* the message may have reached it *)
 
 (* Hands one message to the extension. It waits for a CDP reply, so it never
-   runs on the fiber that delivers CDP frames. *)
+   runs on the fiber that delivers CDP frames. A receiver that threw may have
+   acted on the message before throwing. *)
 let deliver link message =
   match
     Browser_cdp.command link.cdp ~session:link.worker "Runtime.evaluate"
@@ -117,16 +145,23 @@ let deliver link message =
   | Ok evaluated ->
     (match field "exceptionDetails" evaluated with
      | None -> Ok ()
-     | Some _ -> Error (Refused_delivery "the extension's receiver threw"))
+     | Some details -> Error (Delivery_unknown ("the extension's receiver threw: " ^ exception_text details)))
 ;;
 
+(* The extension waits for every answer to its requests, and the call that
+   made it ask waits on the extension, so an answer that did not arrive ends
+   the session: the call fails now instead of waiting for good. *)
 let send_reply t id result =
   match t.link with
   | Initialising link | Attached link ->
     (match deliver link (Wire.encode_reply ~id result) with
      | Ok () -> ()
-     | Error (Refused_delivery detail | Delivery_unknown detail) -> t.log (Reply_not_delivered detail))
-  | Unattached | Worker_gone -> t.log (Reply_not_delivered "no service worker to answer")
+     | Error (Refused_delivery detail | Delivery_unknown detail) ->
+       t.log (Reply_not_delivered detail);
+       let reason = "an answer to the extension was not delivered: " ^ detail in
+       t.link <- Ended reason;
+       fail_pending t (Lost reason))
+  | Unattached | Attaching | Worker_gone -> t.log (Reply_not_delivered "no service worker to answer")
   | Ended reason -> t.log (Reply_not_delivered reason)
 ;;
 
@@ -162,7 +197,7 @@ let ask_model t params =
 
 let answer_model t id params =
   match t.calls with
-  | In_flight { id = owner; call; ended } when Wire.uses_model call ->
+  | In_flight { id = owner; outgoing; ended } when uses_model outgoing ->
     fork t (fun () ->
       (* The answer is sent only while the call that asked for it is still
          out; the call ending cancels the model. *)
@@ -184,9 +219,9 @@ let answer_model t id params =
 
 let settle t id result =
   match t.calls with
-  | Abandoned { id = abandoned; call } when abandoned = id ->
+  | Abandoned { id = abandoned; outgoing } when abandoned = id ->
     t.calls <- Idle;
-    t.log (Abandoned_call_ended { method_ = Wire.method_name call; rejected = Result.is_error result })
+    t.log (Abandoned_call_ended { method_ = method_name outgoing; rejected = Result.is_error result })
   | Abandoned _ | Idle | In_flight _ ->
     (match Hashtbl.find_opt t.pending id with
      | Some resolver ->
@@ -200,7 +235,10 @@ let handle_message t payload =
   | Error detail -> t.log (Malformed_message detail)
   | Ok (Wire.Response { id = Wire.Int_id id; result }) ->
     settle t id (Result.map_error (fun error -> Rejected error) result)
-  | Ok (Wire.Response { id = Wire.String_id id; _ }) ->
+  | Ok (Wire.Malformed_response { id = Wire.Int_id id; detail }) ->
+    t.log (Malformed_message detail);
+    settle t id (Error (Lost ("the extension answered malformed: " ^ detail)))
+  | Ok (Wire.Response { id = Wire.String_id id; _ } | Wire.Malformed_response { id = Wire.String_id id; _ }) ->
     t.log (Malformed_message ("a response to id " ^ id ^ ", which masc never sends"))
   | Ok (Wire.Request (Wire.Llm_generate { id; params })) -> answer_model t id params
   | Ok (Wire.Request (Wire.Invalid_params { id; detail })) ->
@@ -238,13 +276,7 @@ let on_cdp_event t = function
     fail_pending t (Lost reason)
 ;;
 
-let is_init = function
-  | Wire.Init _ -> true
-  | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages | Wire.Context_active_page
-  | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_evaluate _ -> false
-;;
-
-let send_call t link call =
+let send t link outgoing =
   (* A caller cancelled before its turn sends nothing. *)
   Eio.Fiber.check ();
   t.next_id <- t.next_id + 1;
@@ -252,66 +284,64 @@ let send_call t link call =
   let reply, resolver = Eio.Promise.create () in
   let ended, end_call = Eio.Promise.create () in
   Hashtbl.replace t.pending id resolver;
-  t.calls <- In_flight { id; call; ended };
-  let finish () =
+  t.calls <- In_flight { id; outgoing; ended };
+  let over next =
     Hashtbl.remove t.pending id;
-    t.calls <- Idle;
+    t.calls <- next;
     Eio.Promise.resolve end_call ()
   in
-  let abandon () =
-    Hashtbl.remove t.pending id;
-    t.calls <- Abandoned { id; call };
-    Eio.Promise.resolve end_call ()
-  in
-  match
-    (match deliver link (Wire.encode_call ~id call) with
-     | Error (Refused_delivery detail) -> `Answered (Error (Not_delivered detail))
-     | Error (Delivery_unknown detail) -> `Answered (Error (Lost detail))
-     | Ok () ->
-       (match call with
-        | Wire.Init _ ->
-          Watched_work.run
-            ~watcher:(fun () ->
-              t.sleep t.init_answer_s;
-              `Init_timed_out)
-            (fun () -> `Answered (Eio.Promise.await reply))
-        | Wire.Close | Wire.Act _ | Wire.Observe _ | Wire.Extract _ | Wire.Context_pages | Wire.Context_active_page
-        | Wire.Page_goto _ | Wire.Page_screenshot _ | Wire.Page_evaluate _ ->
-          `Answered (Eio.Promise.await reply)))
-  with
-  | `Answered result ->
-    finish ();
-    result
-  | `Init_timed_out ->
-    (match Eio.Promise.peek reply with
-     | Some result -> finish (); result
-     | None -> abandon (); Error (Answer_unreceived t.init_answer_s))
-  | exception (Eio.Cancel.Cancelled _ as exn) ->
-    (* A reply that arrived in the pass the caller was cancelled settled the
-       call; only a call still without one is abandoned. *)
-    (match Eio.Promise.peek reply with
-     | Some _ -> finish ()
-     | None -> abandon ());
-    raise exn
+  (* Delivery is not cancelled: a CDP command whose caller leaves ends the
+     connection, and a cancelled delivery could not tell whether the
+     extension has the call. A caller cancelled meanwhile leaves at the wait
+     for the reply. *)
+  match Eio.Cancel.protect (fun () -> deliver link (encode ~id outgoing)) with
   | exception exn ->
-    finish ();
+    over Idle;
     raise exn
+  | Error (Refused_delivery detail) ->
+    over Idle;
+    Error (Not_delivered detail)
+  | Error (Delivery_unknown detail) ->
+    over Idle;
+    Error (Lost detail)
+  | Ok () ->
+    (match Eio.Promise.await reply with
+     | result ->
+       over Idle;
+       result
+     | exception (Eio.Cancel.Cancelled _ as exn) ->
+       (* A reply that arrived in the pass the caller was cancelled settled the
+          call; only a call still without one is abandoned. *)
+       (match Eio.Promise.peek reply with
+        | Some _ -> over Idle
+        | None -> over (Abandoned { id; outgoing }));
+       raise exn)
 ;;
 
-let call t call =
+let with_slot t work =
   Eio.Semaphore.acquire t.slot;
   (* fun-protect-finally-ok: [Eio.Semaphore.release] does not suspend, and
      the slot must come back on return, exception and cancellation alike;
      the semaphore, unlike [Eio.Mutex], is not poisoned by an exception. *)
-  Fun.protect ~finally:(fun () -> Eio.Semaphore.release t.slot) (fun () ->
+  Fun.protect ~finally:(fun () -> Eio.Semaphore.release t.slot) work
+;;
+
+let call t call =
+  with_slot t (fun () ->
     match t.link, t.calls with
-    | Unattached, (Idle | In_flight _ | Abandoned _) -> Error Not_attached
+    | (Unattached | Attaching | Initialising _), (Idle | In_flight _ | Abandoned _) -> Error Not_attached
     | Worker_gone, (Idle | In_flight _ | Abandoned _) -> Error Detached
     | Ended reason, (Idle | In_flight _ | Abandoned _) -> Error (Connection_gone reason)
     (* Behind the slot, a call still in flight is one whose caller left. *)
-    | (Initialising _ | Attached _), (Abandoned _ | In_flight _) -> Error Abandoned_call_pending
-    | Initialising link, Idle -> if is_init call then send_call t link call else Error Not_attached
-    | Attached link, Idle -> send_call t link call)
+    | Attached _, (Abandoned _ | In_flight _) -> Error Abandoned_call_pending
+    | Attached link, Idle -> send t link (Operation call))
+;;
+
+let send_init t link init =
+  with_slot t (fun () ->
+    match t.calls with
+    | Idle -> send t link (Init init)
+    | In_flight _ | Abandoned _ -> Error Abandoned_call_pending)
 ;;
 
 let ( let* ) = Result.bind
@@ -348,22 +378,23 @@ let find_worker cdp ~extension_id =
 ;;
 
 (* Runs [step] every [worker_poll_s] until it finds what it looks for, for at
-   most [worker_wait_s]; [absent] is the answer when the wait runs out. *)
+   most [worker_wait_s]; [absent] is the answer when the wait runs out. The
+   wait is checked between steps, never by cancelling one: a CDP command
+   whose caller is cancelled ends the connection. *)
 let poll_within_wait t ~absent step =
-  Watched_work.run
-    ~watcher:(fun () ->
-      t.sleep t.worker_wait_s;
-      Error absent)
-    (fun () ->
-      let rec poll () =
-        match step () with
-        | Ok (Some found) -> Ok found
-        | Ok None ->
-          t.sleep worker_poll_s;
-          poll ()
-        | Error _ as error -> error
-      in
-      poll ())
+  let deadline = t.now () +. t.worker_wait_s in
+  let rec poll () =
+    match step () with
+    | Ok (Some found) -> Ok found
+    | Error _ as error -> error
+    | Ok None ->
+      let remaining = deadline -. t.now () in
+      if remaining <= 0. then Error absent
+      else (
+        t.sleep (Float.min worker_poll_s remaining);
+        poll ())
+  in
+  poll ()
 ;;
 
 (* Looked for after the extension loaded, so a worker of an earlier load that
@@ -371,13 +402,6 @@ let poll_within_wait t ~absent step =
    in between, which then fails attach instead of attaching to it. *)
 let await_worker t cdp ~extension_id =
   poll_within_wait t ~absent:Service_worker_absent (fun () -> find_worker cdp ~extension_id)
-;;
-
-let exception_text details =
-  match Option.bind (field "exception" details) (field "description"), field "text" details with
-  | Some (`String description), _ -> description
-  | (Some _ | None), Some (`String text) -> text
-  | (Some _ | None), (Some _ | None) -> "without a description"
 ;;
 
 (* One look at the runtime. A check that threw is reported as such: its
@@ -406,11 +430,16 @@ let initialise t link ~browser_cdp_url =
     if major = Wire.supported_protocol_major then Ok ()
     else Error (Runtime_incompatible { found = marker.protocol_version; supported = Wire.supported_protocol_major })
   in
-  (* [send_call] starts this deadline only after CDP confirmed delivery. *)
-  match call t (Wire.Init { client_version = Build_version.current; browser_cdp_url }) with
-  | Ok init -> Ok init
-  | Error (Answer_unreceived seconds) -> Error (Init_unanswered seconds)
-  | Error failure -> Error (Init_failed failure)
+  t.log (Runtime_ready marker);
+  (* The init reply has no deadline of its own. When this one runs out, the
+     init is abandoned, and attach ends the session. *)
+  Watched_work.run
+    ~watcher:(fun () ->
+      t.sleep t.init_answer_s;
+      Error (Init_unanswered t.init_answer_s))
+    (fun () ->
+      Result.map_error (fun failure -> Init_failed failure)
+        (send_init t link { Wire.client_version = Build_version.current; browser_cdp_url }))
 ;;
 
 let attach_steps t cdp ~extension_dir ~browser_cdp_url =
@@ -442,16 +471,28 @@ let attach_steps t cdp ~extension_dir ~browser_cdp_url =
   initialise t { cdp; worker } ~browser_cdp_url
 ;;
 
-(* A failed attach may have loaded the extension or sent init, so the session
-   is not attached a second time. A worker or connection that went away
-   during attach keeps the state that says so. *)
+let attach_incomplete = "attach did not complete"
+
+(* A session attaches once: a failed attach may have loaded the extension or
+   sent init. A worker or connection that went away during attach keeps the
+   state that says so. *)
 let attach t cdp ~extension_dir ~browser_cdp_url =
-  let attached = attach_steps t cdp ~extension_dir ~browser_cdp_url in
-  (match attached, t.link with
-   | Ok _, Initialising link -> t.link <- Attached link
-   | Error _, (Unattached | Initialising _) -> t.link <- Ended "attach did not complete"
-   (* [Ok] comes from init, which runs only once the link is set. *)
-   | Ok _, Unattached -> t.link <- Ended "attach did not complete"
-   | (Ok _ | Error _), (Attached _ | Worker_gone | Ended _) -> ());
-  attached
+  match t.link with
+  | Attaching | Initialising _ | Attached _ | Worker_gone | Ended _ -> Error Already_attached
+  | Unattached ->
+    t.link <- Attaching;
+    (match attach_steps t cdp ~extension_dir ~browser_cdp_url with
+     | exception exn ->
+       (match t.link with
+        | Unattached | Attaching | Initialising _ -> t.link <- Ended attach_incomplete
+        | Attached _ | Worker_gone | Ended _ -> ());
+       raise exn
+     | attached ->
+       (match attached, t.link with
+        | Ok _, Initialising link -> t.link <- Attached link
+        (* [Ok] comes from init, which runs only once the link is set. *)
+        | Error _, (Unattached | Attaching | Initialising _) | Ok _, (Unattached | Attaching) ->
+          t.link <- Ended attach_incomplete
+        | (Ok _ | Error _), (Attached _ | Worker_gone | Ended _) -> ());
+       attached)
 ;;

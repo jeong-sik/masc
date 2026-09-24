@@ -52,7 +52,6 @@ let call_failure_message = function
   | Session.Not_delivered detail -> "not delivered: " ^ detail
   | Session.Rejected { code; message } -> Printf.sprintf "the extension refused (%d): %s" code message
   | Session.Lost detail -> "lost: " ^ detail
-  | Session.Answer_unreceived seconds -> Printf.sprintf "no answer within %.0f s" seconds
 ;;
 
 let attach_error_message = function
@@ -69,6 +68,7 @@ let attach_error_message = function
   | Session.Init_unanswered seconds -> Printf.sprintf "stagehand.init did not answer within %.0f s" seconds
   | Session.Init_failed failure -> "stagehand.init failed: " ^ call_failure_message failure
   | Session.Cdp failure -> "a CDP command failed: " ^ failure_message failure
+  | Session.Already_attached -> "the session was already attached"
 ;;
 
 let ( let* ) = Result.bind

@@ -587,6 +587,112 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
             (Printf.sprintf "%s is valid only for protocol antigravity-cli" key)))
 ;;
 
+let usage_read_key = "usage-read"
+let usage_read_keys = [ "shape"; "url" ]
+let usage_read_url_scheme = "https"
+
+let usage_read_shape_of_string = function
+  | "openrouter-key" -> Some Runtime_schema.Openrouter_key
+  | "zai-quota-limit" -> Some Runtime_schema.Zai_quota_limit
+  | "kimi-coding-usages" -> Some Runtime_schema.Kimi_coding_usages
+  | "ollama-usage" -> Some Runtime_schema.Ollama_usage
+  | _ -> None
+;;
+
+let usage_read_shape_field ~path tbl =
+  match typed_find "a string" path tbl "shape" Otoml.get_string with
+  | Error _ as error -> error
+  | Ok None -> Error (error (path ^ ".shape") "missing required field 'shape'")
+  | Ok (Some raw) ->
+    (match usage_read_shape_of_string raw with
+     | Some shape -> Ok shape
+     | None ->
+       Error
+         (error
+            (path ^ ".shape")
+            (Printf.sprintf
+               "unknown shape %S — expected one of %s"
+               raw
+               (String.concat
+                  ", "
+                  (List.map
+                     Runtime_schema.usage_read_shape_to_string
+                     Runtime_schema.all_usage_read_shapes)))))
+;;
+
+(* The read sends the provider's key, so only an absolute https URL with a
+   host is accepted. *)
+let usage_read_url_field ~path tbl =
+  match typed_find "a string" path tbl "url" Otoml.get_string with
+  | Error _ as error -> error
+  | Ok None -> Error (error (path ^ ".url") "missing required field 'url'")
+  | Ok (Some url) ->
+    let uri = Uri.of_string url in
+    let has_host =
+      match Uri.host uri with
+      | Some host -> String.length host > 0
+      | None -> false
+    in
+    (match Uri.scheme uri with
+     | Some scheme when String.equal scheme usage_read_url_scheme && has_host -> Ok url
+     | Some _ | None ->
+       Error
+         (error
+            (path ^ ".url")
+            (Printf.sprintf "url must be an absolute https:// URL, got %S" url)))
+;;
+
+(** Parse [providers.<id>.usage-read]. Every key must be one of
+    {!usage_read_keys}. The read authenticates with the provider's own
+    credentials, so a provider that declares none is refused here rather
+    than sending an unauthenticated request at start. *)
+let parse_usage_read ~(path : string) ~(credentials : Runtime_schema.credential option)
+    (tbl : Otoml.t)
+  : (Runtime_schema.usage_read option, parse_error list) result
+  =
+  let path = path ^ "." ^ usage_read_key in
+  match Otoml.find_opt tbl Fun.id [ usage_read_key ] with
+  | None -> Ok None
+  | Some ((Otoml.TomlTable entries | Otoml.TomlInlineTable entries) as usage_tbl) ->
+    let unknown_key_errors =
+      List.concat_map
+        (fun (key, _) ->
+           if List.mem key usage_read_keys
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown usage-read key %S; expected %s"
+                  key
+                  (String.concat ", " usage_read_keys)))
+        entries
+    in
+    let credential_errors =
+      match credentials with
+      | Some _ -> []
+      | None ->
+        error path "usage-read needs the provider's [credentials]; none are declared"
+    in
+    (match
+       ( unknown_key_errors @ credential_errors
+       , usage_read_shape_field ~path usage_tbl
+       , usage_read_url_field ~path usage_tbl )
+     with
+     | [], Ok shape, Ok url -> Ok (Some { Runtime_schema.shape; url })
+     | errors, shape, url ->
+       let field_errors = function
+         | Ok _ -> []
+         | Error errors -> errors
+       in
+       Error (errors @ field_errors shape @ field_errors url))
+  | Some
+      ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+      | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+      | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
+    Error (error path "usage-read must be a TOML table")
+;;
+
 let parse_provider (id : string) (tbl : Otoml.t)
   : (Runtime_schema.provider, parse_error list) result
   =
@@ -666,6 +772,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
            Error
              (error (path ^ ".healthcheck") "healthcheck must be a TOML table")
        in
+       let usage_read_result = parse_usage_read ~path ~credentials tbl in
        let headers =
          match Otoml.find_opt tbl Fun.id [ "headers" ] with
          | None -> None
@@ -721,6 +828,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
         let* exact_body_timeout_s = exact_body_timeout_result in
         let* is_non_interactive = is_non_interactive_result in
         let* wire_kind = wire_kind_result in
+        let* usage_read = usage_read_result in
           let enabled = match enabled_opt with Some value -> value | None -> true in
           Ok
             { Runtime_schema.id
@@ -738,6 +846,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; connect_timeout_s
             ; exact_body_timeout_s
             ; antigravity_cli
+            ; usage_read
             }))
 ;;
 

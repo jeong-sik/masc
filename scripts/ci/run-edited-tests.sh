@@ -16,15 +16,6 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 
-# The custom-bound hook read by suite_timeout() below exists for --self-test
-# alone, and it is read from the environment, so an inherited value would be
-# obeyed on the pull-request path too. Drop it there: that bound is a
-# workaround for one named walk (#36343), and a second suite holding it
-# doubles what a hung suite costs, which is what the bound is for.
-drop_self_test_hooks() {
-  unset MASC_SELFTEST_CUSTOM_BOUND_SUITE MASC_SELFTEST_CUSTOM_BOUND_SECONDS
-}
-
 # --self-test drives select_sources() and run_selected() over fixtures and
 # never reaches the API, so it takes neither a pull-request number, a
 # repository nor a budget.
@@ -33,7 +24,6 @@ self_test_only=false
 
 usage="usage: run-edited-tests.sh <pr-number> --budget-seconds <seconds> | --self-test"
 if [ "${self_test_only}" = false ]; then
-  drop_self_test_hooks
   pr_number="${1:?${usage}}"
   # The budget is the step's, and pr-check.yml sets the step's timeout-minutes
   # above it so this script, not the runner, ends a step that runs out.
@@ -82,13 +72,18 @@ per_suite_timeout=300
 # The list is a literal, so reading it answers "what has a custom bound".
 # --self-test needs one entry it can point at a stand-in: a fixture that
 # cannot enter the custom-bound phase proves nothing about that phase. The
-# hook names one suite by its exact path and only --self-test sets it, so
-# with the variable unset this function is the production one.
+# hook names one suite by its exact path, and this function obeys it only
+# under --self-test. The mode flag is the gate, not an emptied environment:
+# the hook is read here and nowhere else, so an inherited value is ignored
+# at the one place that could act on it and no call site has to remember to
+# scrub it. A second suite holding the custom bound would double what a
+# hung suite costs, which is what the bound is for (#36343).
 suite_timeout() {
   case "$1" in
     */test_tui_keyboard_input.py) echo 600 ;;
     *)
-      if [ -n "${MASC_SELFTEST_CUSTOM_BOUND_SUITE:-}" ] \
+      if [ "${self_test_only}" = true ] \
+        && [ -n "${MASC_SELFTEST_CUSTOM_BOUND_SUITE:-}" ] \
         && [ "$1" = "${MASC_SELFTEST_CUSTOM_BOUND_SUITE}" ]; then
         echo "${MASC_SELFTEST_CUSTOM_BOUND_SECONDS:-600}"
       else
@@ -1495,29 +1490,32 @@ FAKE
     failures=$((failures + 1))
   fi
 
-  # ...and an inherited value does not reach the pull-request path, because
-  # that path drops the hook before it reads anything. The first half is the
-  # splitting input: it shows the environment really does reach
-  # suite_timeout, so the second half is the drop doing the work and not the
-  # variable never having arrived.
+  # ...and an inherited value is ignored on the pull-request path, because
+  # the one function that reads the hook obeys it only under --self-test.
+  # The first half is the splitting input: it shows the environment really
+  # does reach suite_timeout, so the second half is the mode gate doing the
+  # work and not the variable never having arrived. Both halves ask the
+  # production function with the variable set, so dropping the gate from it
+  # turns the second half red -- there is no separate call this case could
+  # pass without.
   hook_kept=$(
     export MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py"
     suite_timeout test/test_slow_py.py
   )
-  hook_dropped=$(
+  hook_ignored=$(
     export MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py"
     export MASC_SELFTEST_CUSTOM_BOUND_SECONDS=600
-    drop_self_test_hooks
+    self_test_only=false
     printf '%s %s' "$(suite_timeout test/test_slow_py.py)" \
       "$(suite_timeout test/test_tui_keyboard_input.py)"
   )
   if [ "${hook_kept}" = "600" ] \
-    && [ "${hook_dropped}" = "${per_suite_timeout} 600" ]; then
-    echo "ok   the pull-request path drops an inherited custom-bound hook"
+    && [ "${hook_ignored}" = "${per_suite_timeout} 600" ]; then
+    echo "ok   the pull-request path ignores an inherited custom-bound hook"
   else
-    echo "FAIL the pull-request path drops an inherited custom-bound hook"
-    echo "     want: kept=600 dropped=\"${per_suite_timeout} 600\""
-    echo "     got:  kept=${hook_kept} dropped=\"${hook_dropped}\""
+    echo "FAIL the pull-request path ignores an inherited custom-bound hook"
+    echo "     want: kept=600 ignored=\"${per_suite_timeout} 600\""
+    echo "     got:  kept=${hook_kept} ignored=\"${hook_ignored}\""
     failures=$((failures + 1))
   fi
   # Count the call instead of inferring one call from whether two-second

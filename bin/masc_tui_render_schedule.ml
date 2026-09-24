@@ -1059,13 +1059,20 @@ let fusion_sidebar_label ~status ~time ~keeper ~run_id =
    lists hold a task once per submission. Measured on the live history
    2026-09-24: 200 Task Review rows carry 113 distinct ids, 45 of them more
    than once, and seven rows are task-1663 -- one submitter, no stated
-   intent, parted only by when each was sent, across two days.
+   intent. The Verdicts list is shorter and collides too: of eight rows one
+   task carries two verdicts, at the same gate, parted only by what each one
+   said.
 
-   The age is that reading, in the ladder the rest of the screen spells. A
-   row whose clock cannot be read keeps the id alone rather than inventing a
+   [apart] is what parts this row from its siblings. It has to hold still
+   while the reader looks at it, which an age does not: [age_text] spells
+   seconds under an hour, so an index row read "5m03s" and was a different
+   row a second later. And it has to be its own value rather than a reading
+   of one, because two rows minutes apart round to the same age.
+
+   A row with nothing to part it keeps the id alone rather than inventing a
    mark for it. *)
-let task_history_sidebar_label ~task_id ~age =
-  match age with None -> task_id | Some age -> task_id ^ "  " ^ age
+let task_history_sidebar_label ~task_id ~apart =
+  match apart with None -> task_id | Some apart -> task_id ^ "  " ^ apart
 
 let fusion_pipeline_diagram
     ?(glyph_done = "●")

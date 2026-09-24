@@ -1718,36 +1718,63 @@ let test_fusion_sidebar_label_format () =
 
 (* Task Review and Verdicts drew a row's task id and nothing else. Measured
    on the live history 2026-09-24: 200 Task Review rows carry 113 distinct
-   ids, 45 of them more than once, and seven rows are task-1663 -- one
-   submitter, no stated intent, parted only by when each was sent, across two
-   days. Seven rows reading "task-1663" cannot be picked between. *)
+   ids, 45 of them more than once, and seven rows are task-1663. The Verdicts
+   list is shorter and collides too -- of eight rows one task carries two
+   verdicts at the same gate. Rows reading the same thing cannot be picked
+   between. *)
 let test_two_submissions_of_one_task_read_differently () =
   let first =
-    Schedule.task_history_sidebar_label ~task_id:"task-1663" ~age:(Some "1d05h")
+    Schedule.task_history_sidebar_label ~task_id:"task-1663"
+      ~apart:(Some "vrf-2dc02d93")
   in
   let second =
-    Schedule.task_history_sidebar_label ~task_id:"task-1663" ~age:(Some "22h14m")
+    Schedule.task_history_sidebar_label ~task_id:"task-1663"
+      ~apart:(Some "vrf-9f1b0c47")
   in
   check bool "the two rows read differently" true (first <> second);
-  check string "the id leads so the column reads down" "task-1663  1d05h" first
+  check string "the id leads so the column reads down"
+    "task-1663  vrf-2dc02d93" first
 
-(* A clock the codec cannot read keeps the id alone. The row said one thing
-   before this column and still says it; a mark for "no age" would be a
+(* The value beside the id has to hold still. An age does not: the ladder
+   spells seconds under an hour, so a row read one thing and another a second
+   later, and two requests minutes apart round to the same reading. *)
+let test_the_parting_value_does_not_move_under_the_reader () =
+  let handle = Masc_tui_render_prim.sidebar_handle "4d461da516af9c02b1" in
+  check string "a handle is the same on every frame" handle
+    (Masc_tui_render_prim.sidebar_handle "4d461da516af9c02b1");
+  check bool "and two rows carry different ones" true
+    (handle <> Masc_tui_render_prim.sidebar_handle "a6bab710199c3f77d0")
+
+(* A row with nothing to part it keeps the id alone. The row said one thing
+   before this column and still says it; a mark for "nothing here" would be a
    second vocabulary on a surface that has none. *)
-let test_a_row_without_a_readable_clock_keeps_its_id () =
+let test_a_row_without_a_parting_value_keeps_its_id () =
   check string "the id alone" "task-1663"
-    (Schedule.task_history_sidebar_label ~task_id:"task-1663" ~age:None)
+    (Schedule.task_history_sidebar_label ~task_id:"task-1663" ~apart:None)
 
-(* The list pane is [Masc_tui_roster_pane.pane_cols] wide and folds a label
-   to the room its caret lead leaves. The longest live id and the widest
-   reading the ladder draws have to fit that room, or every row is cut. *)
+(* The list pane is [Masc_tui_roster_pane.pane_cols] wide and folds a label to
+   the room its caret lead leaves -- which is narrower than the frame's inner
+   width by that lead. Both parting values have to fit the room a task id
+   leaves, or every row is cut. *)
 let test_the_widest_row_fits_the_list_pane () =
-  let label =
-    Schedule.task_history_sidebar_label ~task_id:"task-1663" ~age:(Some "99d23h")
+  let room =
+    Masc_tui_frame.inner_width ~cols:Masc_tui_roster_pane.pane_cols
+    - Masc_tui_render_prim.sidebar_row_lead_cells
   in
-  check bool "the widest row fits the pane's label room" true
-    (Masc_tui_message_layout.display_width label
-     <= Masc_tui_frame.inner_width ~cols:Masc_tui_roster_pane.pane_cols)
+  List.iter
+    (fun apart ->
+       let label =
+         Schedule.task_history_sidebar_label ~task_id:"task-10000"
+           ~apart:(Some apart)
+       in
+       check bool
+         (Printf.sprintf "%S fits the pane's label room" apart)
+         true
+         (Masc_tui_message_layout.display_width label <= room))
+    [ "vrf-2dc02d93"
+    ; Masc_tui_render_prim.sidebar_handle
+        "4d461da516af9c02b1e7c5d3a0f428b6c9e1740d2358af61bc09d47e5a8f312b"
+    ]
 
 let test_fusion_pipeline_diagram_stages () =
   let running_judge =
@@ -2375,8 +2402,10 @@ let () =
             test_fusion_sidebar_label_format
         ; test_case "two submissions of one task read differently" `Quick
             test_two_submissions_of_one_task_read_differently
-        ; test_case "a row without a readable clock keeps its id" `Quick
-            test_a_row_without_a_readable_clock_keeps_its_id
+        ; test_case "a row without a parting value keeps its id" `Quick
+            test_a_row_without_a_parting_value_keeps_its_id
+        ; test_case "the parting value does not move under the reader" `Quick
+            test_the_parting_value_does_not_move_under_the_reader
         ; test_case "the widest row fits the list pane" `Quick
             test_the_widest_row_fits_the_list_pane
         ; test_case "fusion pipeline diagram stages" `Quick

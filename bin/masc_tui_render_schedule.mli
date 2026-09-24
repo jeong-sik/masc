@@ -421,10 +421,12 @@ val task_list_sidebar_label : title:string -> task_id:string -> string
 val fusion_sidebar_label :
   status:string -> time:string -> keeper:string -> run_id:string -> string
 
-val task_history_sidebar_label : task_id:string -> age:string option -> string
+val task_history_sidebar_label : task_id:string -> apart:string option -> string
 (** A Task Review or Verdicts list row. Both lists hold a task once per
-    submission, so the id alone draws the same row many times over; the age
-    beside it says which submission this is. An unreadable clock keeps the id
+    submission, so the id alone draws the same row many times over. [apart]
+    is the value that parts this row from its siblings: it must hold still
+    while the reader looks at it, and it must be the row's own value rather
+    than a reading of one. A row with nothing to part it keeps the id
     alone. *)
 
 val fusion_pipeline_diagram :

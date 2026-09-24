@@ -9096,18 +9096,15 @@ let render_verification_detail (state : state) request =
         match state.verification with
         | None -> []
         | Some snapshot ->
-          let now = Unix.gettimeofday () in
           List.map
             (fun (row : Tui_decode.verification_request) ->
-              let age =
-                match
-                  Masc_domain.parse_iso8601_opt row.Tui_decode.vr_created_at
-                with
-                | None -> None
-                | Some since -> Message_layout.age_text ~now ~since
-              in
+              (* The request id is one per row and never moves. The age it
+                 replaced rounded two requests six minutes apart to the same
+                 "1d12h", and spelled seconds under an hour, so an index row
+                 changed while the reader was looking at it. *)
               Render_schedule.task_history_sidebar_label
-                ~task_id:row.Tui_decode.vr_task_id ~age)
+                ~task_id:row.Tui_decode.vr_task_id
+                ~apart:(Some row.Tui_decode.vr_request_id))
             snapshot.Tui_decode.vs_requests
       in
       let left_buf = Buffer.create 1024 in
@@ -9579,14 +9576,16 @@ let render_harness_detail (state : state) verdict =
         match state.harness with
         | None -> []
         | Some snapshot ->
-          let now = Unix.gettimeofday () in
           List.map
             (fun (row : Tui_decode.harness_verdict) ->
+              (* A verdict has no id of its own on the wire, and the gate
+                 does not part the pair this list holds today -- both of
+                 task-1741's are structured_tool. The notes hash is one per
+                 row and never moves, which the age it replaced did on every
+                 frame. *)
               Render_schedule.task_history_sidebar_label
                 ~task_id:row.Tui_decode.hv_task_id
-                ~age:
-                  (Message_layout.age_text ~now
-                     ~since:row.Tui_decode.hv_at))
+                ~apart:(Some (sidebar_handle row.Tui_decode.hv_notes_hash)))
             snapshot.Tui_decode.hs_verdicts
       in
       let left_buf = Buffer.create 1024 in

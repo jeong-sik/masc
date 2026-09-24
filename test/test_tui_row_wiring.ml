@@ -997,11 +997,16 @@ let test_both_doors_into_the_runtime_detail_ask_the_same_lane_list () =
    number name the same time only while one reading feeds both. *)
 (* Both list panes drew a row's task id and nothing else. Measured on the
    live history 2026-09-24: 200 Task Review rows carry 113 distinct ids, 45
-   of them more than once, and seven rows are task-1663 -- one submitter, no
-   stated intent, parted only by when each was sent, across two days. The
-   label helper is tested on its own in test_tui_render_schedule; these two
-   say the panes reach it, and which clock each reads. *)
-let test_both_task_history_panes_say_when_each_row_was_sent () =
+   of them more than once, and seven rows are task-1663. The Verdicts list is
+   shorter and collides too -- of eight rows one task carries two verdicts at
+   the same gate.
+
+   What parts a row has to be the row's own and has to hold still, so each
+   pane reads the field that is one per row rather than a clock it would have
+   to re-read on every frame. The label helper is tested on its own in
+   test_tui_render_schedule; these two say the panes reach it, and which
+   field each hands it. *)
+let test_both_task_history_panes_say_which_row_each_is () =
   List.iter
     (fun binding_name ->
       Alcotest.(check int)
@@ -1011,12 +1016,24 @@ let test_both_task_history_panes_say_when_each_row_was_sent () =
            ~binding_name
            ~callee:"Render_schedule.task_history_sidebar_label"))
     [ "render_verification_detail"; "render_harness_detail" ];
-  Alcotest.(check int) "Task Review reads the submission clock" 1
+  Alcotest.(check int) "Task Review reads the request id" 1
     (Ast_grep.count_field_reads_in_value_binding ~module_path:render
-       ~binding_name:"render_verification_detail" ~field_name:"vr_created_at");
-  Alcotest.(check int) "Verdicts reads the verdict clock" 1
+       ~binding_name:"render_verification_detail" ~field_name:"vr_request_id");
+  Alcotest.(check int) "Verdicts reads the notes hash" 1
     (Ast_grep.count_field_reads_in_value_binding ~module_path:render
-       ~binding_name:"render_harness_detail" ~field_name:"hv_at")
+       ~binding_name:"render_harness_detail" ~field_name:"hv_notes_hash");
+  (* And neither reads a clock for it any more. A clock changes under the
+     reader, which is what this pair of fields replaced. *)
+  List.iter
+    (fun (binding_name, field_name) ->
+      Alcotest.(check int)
+        (binding_name ^ " no longer reads " ^ field_name)
+        0
+        (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+           ~binding_name ~field_name))
+    [ "render_verification_detail", "vr_created_at"
+    ; "render_harness_detail", "hv_at"
+    ]
 ;;
 
 (* The Tasks pane beside the detail drew a row's title and nothing else. The
@@ -1209,8 +1226,8 @@ let () =
         ; Alcotest.test_case "the Board age column reads the sort once" `Quick
             test_the_board_age_column_reads_the_sort_once
         ; Alcotest.test_case
-            "both task history panes say when each row was sent" `Quick
-            test_both_task_history_panes_say_when_each_row_was_sent
+            "both task history panes say which row each is" `Quick
+            test_both_task_history_panes_say_which_row_each_is
         ; Alcotest.test_case
             "the Tasks list pane says which task each row is" `Quick
             test_the_tasks_list_pane_says_which_task_each_row_is

@@ -104,6 +104,7 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
       ; delta.needs_asks
       ; delta.needs_runtime_quota
       ; delta.needs_repository_pulls
+      ; delta.needs_overview_goals
       ]
       |> List.fold_left (fun total wanted -> if wanted then total + 1 else total) 0
     in
@@ -167,11 +168,29 @@ let test_authoritative_refresh_waits_for_both_owners_then_runs_once () =
     (cadence = Types.No_scoped_followup)
 ;;
 
+(* The goal tree is read for the Overview's GOALS section and nowhere else;
+   Planning reads its own planning payload. *)
+let test_only_the_overview_asks_for_the_goal_tree () =
+  check bool "the overview asks for it" true
+    (needs Types.Overview).Types.needs_overview_goals;
+  List.iter
+    (fun (label, surface) ->
+      check bool (label ^ " does not") false
+        (needs surface).Types.needs_overview_goals)
+    [ ("planning", Types.Planning)
+    ; ("board", Types.Board)
+    ; ("metrics", Types.Metrics)
+    ; ("the keeper list", Types.Keepers Types.Keeper_list)
+    ]
+;;
+
 let () =
   run "tui_surface_needs"
     [ ( "refresh scope"
       , [ test_case "only the chat pane asks for chat history" `Quick
             test_only_the_chat_pane_asks_for_chat_history
+        ; test_case "only the overview asks for the goal tree" `Quick
+            test_only_the_overview_asks_for_the_goal_tree
         ; test_case "every keeper sub-mode asks for the roster" `Quick
             test_every_keeper_sub_mode_still_asks_for_the_roster
         ; test_case "the keeper pane asks for the roster wherever it is drawn"

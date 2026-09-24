@@ -16,6 +16,13 @@ type tool_occurrence =
   ; tool_call_id : string option
   }
 
+type stream_usage =
+  { input_tokens : int option
+  ; output_tokens : int option
+  ; cache_read_input_tokens : int option
+  ; cache_creation_input_tokens : int option
+  }
+
 type delta =
   | Run_started
   | Batch_bound of Masc_tui_keeper_chat_projection.batch_binding
@@ -24,6 +31,10 @@ type delta =
       ; attempt_index : int option
       }
   | Stream_model_started of { model : string }
+  | Stream_details of
+      { usage : stream_usage option
+      ; stop_reason : string option
+      }
   | Text of string
   | Thinking of string
   | Tool_started of
@@ -101,6 +112,32 @@ let nonnegative_int_field fields name =
   match List.assoc_opt name fields with
   | Some (`Int value) when value >= 0 -> Some value
   | Some _ | None -> None
+
+(* The one place that reads a usage object, for both the live wire arm and the
+   journal replay in {!Masc_tui_keeper_chat_log}: the producer writes the same
+   shape on both paths ([Keeper_chat_events.delta_usage_to_json]) and only the
+   counters the provider actually reported are present, so a missing field
+   stays [None] rather than becoming a zero the screen would state as fact.
+   All-absent reads as no usage at all, so an empty delta draws nothing. *)
+let stream_usage_of_usage_json (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    let usage =
+      { input_tokens = nonnegative_int_field fields "input_tokens"
+      ; output_tokens = nonnegative_int_field fields "output_tokens"
+      ; cache_read_input_tokens =
+          nonnegative_int_field fields "cache_read_input_tokens"
+      ; cache_creation_input_tokens =
+          nonnegative_int_field fields "cache_creation_input_tokens"
+      }
+    in
+    if usage.input_tokens = None
+       && usage.output_tokens = None
+       && usage.cache_read_input_tokens = None
+       && usage.cache_creation_input_tokens = None
+    then None
+    else Some usage
+  | _ -> None
 
 let optional_nonblank_string fields name =
   match List.assoc_opt name fields with
@@ -209,6 +246,30 @@ let custom_deltas_unvalidated fields =
         | Some model when String.trim model <> "" ->
           [ Stream_model_started { model = String.trim model } ]
         | _ -> [])
+     | None -> [])
+  | Some "KEEPER_STREAM_MESSAGE_DELTA" ->
+    (* The dashboard reader already keeps both of these
+       ([dashboard/src/keeper-stream.ts] KEEPER_STREAM_MESSAGE_DELTA) and draws
+       the stop reason ([dashboard/src/components/session-trace/
+       session-trace-entry.ts]), so a turn in flight told one renderer its
+       token cost and why it stopped, and the other nothing. A delta that
+       carried neither is not a row. *)
+    (match object_field fields "value" with
+     | Some value ->
+       let usage =
+         match List.assoc_opt "usage" value with
+         | Some usage -> stream_usage_of_usage_json usage
+         | None -> None
+       in
+       let stop_reason =
+         match List.assoc_opt "stop_reason" value with
+         | Some (`String reason) when String.trim reason <> "" ->
+           Some (String.trim reason)
+         | Some _ | None -> None
+       in
+       if usage = None && stop_reason = None
+       then []
+       else [ Stream_details { usage; stop_reason } ]
      | None -> [])
   | Some "KEEPER_TOOL_RESULT_READY" -> (
       match object_field fields "value" with

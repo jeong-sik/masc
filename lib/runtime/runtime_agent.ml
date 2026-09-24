@@ -13,37 +13,22 @@ type agent_core_tool_projector =
   (Yojson.Safe.t -> Tool_result.result) ->
   Agent_core.Tool.t
 
-let network_error_kind_of_unix_error = function
-  | Unix.ECONNREFUSED | Unix.ECONNRESET -> Llm_provider.Http_client.Connection_refused
-  | Unix.EPIPE -> Llm_provider.Http_client.End_of_file
-  | Unix.ETIMEDOUT -> Llm_provider.Http_client.Timeout
-  | Unix.ENETUNREACH | Unix.EHOSTUNREACH -> Llm_provider.Http_client.Dns_failure
-  | Unix.EMFILE | Unix.ENFILE | Unix.ENOBUFS | Unix.EADDRNOTAVAIL ->
-    Llm_provider.Http_client.Local_resource_exhaustion
-  | _ -> Llm_provider.Http_client.Unknown
-;;
-
-let network_error_kind_of_eio_error = function
-  | Eio.Net.E (Eio.Net.Connection_reset _) -> Some Llm_provider.Http_client.End_of_file
-  | Eio.Net.E (Eio.Net.Connection_failure (Eio.Net.Refused _)) ->
-    Some Llm_provider.Http_client.Connection_refused
-  | Eio.Net.E (Eio.Net.Connection_failure Eio.Net.Timeout) ->
+(* The runner reads a caught exception exactly as the HTTP client does. An
+   exception the client does not treat as transport, or a Unix/Eio error it
+   cannot name ([Unknown]; both also carry file-system errors), is [None]:
+   not known to be a transport failure. *)
+let transport_error_kind_of_exception exn =
+  match Llm_provider.Http_client.classify_network_exn exn with
+  | Some (Llm_provider.Http_client.NetworkError { kind; _ }) ->
+    Llm_provider.Http_client.known_network_error_kind kind
+  | Some (Llm_provider.Http_client.TimeoutError _) ->
     Some Llm_provider.Http_client.Timeout
-  | Eio.Net.E (Eio.Net.Connection_failure Eio.Net.No_matching_addresses) ->
-    Some Llm_provider.Http_client.Dns_failure
-  | Eio.Exn.X _ -> None
-  | _ -> None
-;;
-
-let transport_error_kind_of_exception = function
-  | End_of_file -> Some Llm_provider.Http_client.End_of_file
-  | Eio.Time.Timeout -> Some Llm_provider.Http_client.Timeout
-  | Unix.Unix_error (code, _, _) -> Some (network_error_kind_of_unix_error code)
-  | Eio.Io (err, _) -> network_error_kind_of_eio_error err
-  | Tls_eio.Tls_alert _ | Tls_eio.Tls_failure _ ->
-    Some Llm_provider.Http_client.Tls_error
-  | Sys_error _ | Failure _ -> Some Llm_provider.Http_client.Unknown
-  | _ -> None
+  | Some
+      ( Llm_provider.Http_client.HttpError _
+      | Llm_provider.Http_client.AcceptRejected _
+      | Llm_provider.Http_client.ProviderTerminal _
+      | Llm_provider.Http_client.ProviderFailure _ )
+  | None -> None
 ;;
 
 (* ================================================================ *)
@@ -830,6 +815,7 @@ let media_walk ~(candidates : Runtime.t list)
 
 let validate_content_blocks_for_config
     ?agent_core_checkpoint
+    ?(input_metadata = [])
     ~(config : config)
     (goal_blocks : Agent_core.Types.content_block list) =
   let validate ~checkpoint_messages ~initial_messages ~goal_blocks =
@@ -848,7 +834,7 @@ let validate_content_blocks_for_config
     let incoming = match goal_blocks with
       | [] -> canonical
       | _ -> canonical @ [Agent_core.Types.{role=User;content=goal_blocks;
-          name=None;tool_call_id=None;metadata=[]}] in
+          name=None;tool_call_id=None;metadata=input_metadata}] in
     let* projected = view.Runtime_recovery_projection.project incoming in
     validate ~checkpoint_messages:[] ~initial_messages:projected ~goal_blocks:[]
 
@@ -977,6 +963,7 @@ let prefer_cooperative_probe_error probe_error advanced_result =
 ;;
 
 module For_testing = struct
+  let transport_error_kind_of_exception = transport_error_kind_of_exception
   let runtime_observation_for_completed_config =
     runtime_observation_for_completed_config
   let runtime_observation_for_terminal_config =
@@ -1208,8 +1195,12 @@ let config_with_boundary_response_capture
   { config with hooks = Some hooks }
 ;;
 
+(* [metadata] is stamped on the User message AGENT_CORE appends for [blocks]. *)
 type run_input =
-  | New_input of Agent_core.Types.content_block list
+  | New_input of
+      { blocks : Agent_core.Types.content_block list
+      ; metadata : Agent_core.Types.metadata
+      }
   | Continue_from_checkpoint
 
 let run_blocks_internal
@@ -1225,9 +1216,15 @@ let run_blocks_internal
     ~(run_input : run_input)
     (goal_blocks : Agent_core.Types.content_block list)
   : (run_result, Agent_core.Error.t) result =
+  let input_metadata =
+    match run_input with
+    | New_input { metadata; _ } -> metadata
+    | Continue_from_checkpoint -> []
+  in
   match
     validate_content_blocks_for_config
       ?agent_core_checkpoint
+      ~input_metadata
       ~config
       goal_blocks
   with
@@ -1290,7 +1287,7 @@ let run_blocks_internal
           match boundary_probe with
             | None ->
               (match run_input with
-               | New_input goal_blocks ->
+               | New_input { blocks = goal_blocks; metadata = input_metadata } ->
                  (match on_event with
                   | Some cb ->
                     Agent_core.Agent.run_stream_blocks
@@ -1298,6 +1295,7 @@ let run_blocks_internal
                       ?clock
                       ?on_yield
                       ?on_resume
+                      ~input_metadata
                       ~on_event:cb
                       agent
                       goal_blocks
@@ -1307,6 +1305,7 @@ let run_blocks_internal
                       ?clock
                       ?on_yield
                       ?on_resume
+                      ~input_metadata
                       agent
                       goal_blocks)
                  |> Result.map (fun response -> `Completed response)
@@ -1366,12 +1365,13 @@ let run_blocks_internal
               in
               let advanced_result =
                 match run_input with
-                | New_input goal_blocks ->
+                | New_input { blocks = goal_blocks; metadata = input_metadata } ->
                   Agent_core.Agent.Advanced.run_blocks
                     ~sw
                     ?clock
                     ?on_yield
                     ?on_resume
+                    ~input_metadata
                     ~api_strategy
                     ~on_tool_boundary
                     agent
@@ -1589,6 +1589,7 @@ let run_blocks
     ?on_resume
     ?agent_ref
     ?cooperative_yield_probe
+    ?(input_metadata = [])
     goal_blocks
   =
   run_blocks_internal
@@ -1601,7 +1602,7 @@ let run_blocks
     ?on_resume
     ?agent_ref
     ?cooperative_yield_probe
-    ~run_input:(New_input goal_blocks)
+    ~run_input:(New_input { blocks = goal_blocks; metadata = input_metadata })
     goal_blocks
 
 let continue_from_checkpoint
@@ -1639,10 +1640,11 @@ let run
     ?on_resume
     ?agent_ref
     ?cooperative_yield_probe
+    ?input_metadata
     (goal : string)
   : (run_result, Agent_core.Error.t) result =
   run_blocks ~sw ~net ~config ?agent_core_checkpoint ?on_event ?on_yield ?on_resume
-    ?agent_ref ?cooperative_yield_probe [Agent_core.Types.Text goal]
+    ?agent_ref ?cooperative_yield_probe ?input_metadata [Agent_core.Types.Text goal]
 
 (* ================================================================ *)
 (* Convenience: run_with_masc_tools                                  *)

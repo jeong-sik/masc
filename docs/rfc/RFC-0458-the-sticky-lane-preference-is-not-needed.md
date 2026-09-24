@@ -158,12 +158,12 @@ analyst, glm-coding 레인, 14:06Z~15:57Z.
    - `Rate_limited` → 지금처럼 후보 칸의 429 증거
    - `Hard_quota` → 지금처럼 quota 창
    - `Server_error`·`Network_transient`·`Provider_timeout` → 후보 칸의 실패 증거. 다만 경로는
-     MASC 자신의 입장 단계(허가 대기열 `Queue`, 로컬 용량 `Capacity_backpressure`)에서 끝난
+     MASC 자신의 입장 단계(허가 대기열 `Queue`, 로컬 용량 phase `Capacity_backpressure`)에서 끝난
      타임아웃도 `Provider_timeout` 이라 부른다. 아무것도 보내지 않은 실패라 후보의 사실이
      아니므로, 그 두 phase 는 증거로 남기지 않는다. 경로가 이 둘을 가르지 못하는 문제는 따로
      고친다.
-   - `Capacity_backpressure` → 남기지 않는다. MASC 자신의 슬롯과 클라이언트 봉투라 후보의
-     사실이 아니다.
+   - `Provider_capacity`(HTTP 529, provider 의 `CapacityExhausted`) → 후보 칸의 실패 증거.
+     503 과 같은 사실이다. 그 provider 가 답하지 않았다.
    - `Rotate_now`·`Exhausted_visible_alive` → 남기지 않는다(§5).
    wildcard 없이 전부 나열한다. 새 class 가 생기면 컴파일러가 이 자리를 가리킨다.
 2. **한 칸에 두 증거를 나란히 둔다.** 후보 칸은 `{ rate_limit; failed_attempt }` 다. 429 는
@@ -223,7 +223,8 @@ analyst, glm-coding 레인, 14:06Z~15:57Z.
 - 타임아웃·5xx·네트워크로 실패한 후보는 다음 걸음에서 뒤로 가고, 그 후보가 성공하면 돌아온다.
   기다림은 생기지 않는다.
 - `Runtime_connection_closed` 도 같은 증거를 남긴다(경로 분류 하나).
-- `Capacity_backpressure`·`Rotate_now`·`Exhausted_visible_alive` 는 증거를 남기지 않는다.
+- 529 로 실패한 후보는 503 처럼 뒤로 간다.
+- `Rotate_now`·`Exhausted_visible_alive` 는 증거를 남기지 않는다.
 - 첫 토큰 전에 양보한 시도는 기존 429 증거와 quota 관측을 지우지 않는다.
 - 예측·밴드·대시보드·TUI 에 preferred 필드가 없다.
 

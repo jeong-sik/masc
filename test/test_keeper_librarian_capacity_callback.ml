@@ -220,20 +220,27 @@ let test_prefit_real_continuity ~base_path () =
     (P.memory_committed ~config ~keeper_name:keeper_id half |> get);
   Alcotest.(check bool) "missing working state leaves no continuity frontier" true
     (P.read ~config ~keeper_name:keeper_id |> get |> Option.is_none);
-  let ordinary_runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt:_ =
-    check_working_state_schema ~continuity:false output_schema;
-    Ok (Yojson.Safe.to_string null_state) in
-  (match Runtime.For_testing.execute_exact_output_classified ~continuity:None
-     ~cli_runner:ordinary_runner ~clock:env#clock ~net:env#net ~base_path ~keeper_id
-     ~selected_input:{(input half) with working_context=Context.empty} ~messages:[Agent_core.Types.user_msg "ordinary Memory"] () with
-   | Ok (({ Runtime.selection; continuity_answer }, _), _) ->
-     Alcotest.(check bool) "ordinary Memory still accepts null working state" true
-       (Option.is_none selection.Keeper_librarian.working_state);
-     Alcotest.(check bool) "and carries no continuity answer" true
-       (match continuity_answer with
-        | Runtime.Memory_only -> true
-        | Runtime.Continuity _ -> false)
-   | Error error -> Alcotest.fail (Runtime.For_testing.classified_error_detail error));
+  (* An ordinary Memory pass never reads the working state, so a blank one
+     the current schema allows refuses nothing, as null never did. *)
+  List.iter (fun (label, working_state) ->
+    let answer = match missing_state with
+      | `Assoc fields -> `Assoc (("working_state", working_state) :: fields)
+      | _ -> Alcotest.fail "expected fixture object" in
+    let ordinary_runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt:_ =
+      check_working_state_schema ~continuity:false output_schema;
+      Ok (Yojson.Safe.to_string answer) in
+    match Runtime.For_testing.execute_exact_output_classified ~continuity:None
+      ~cli_runner:ordinary_runner ~clock:env#clock ~net:env#net ~base_path ~keeper_id
+      ~selected_input:{(input half) with working_context=Context.empty} ~messages:[Agent_core.Types.user_msg "ordinary Memory"] () with
+    | Ok (({ Runtime.continuity_answer; _ }, _), _) ->
+      Alcotest.(check bool)
+        ("ordinary Memory accepts a " ^ label ^ " working state and carries no continuity answer")
+        true
+        (match continuity_answer with
+         | Runtime.Memory_only -> true
+         | Runtime.Continuity _ -> false)
+    | Error error -> Alcotest.fail (Runtime.For_testing.classified_error_detail error))
+    [ "null", `Null; "blank", `String "" ];
   let api_answer = `Assoc ["new_claims", `List []; "dropped", `List [];
     "working_contexts", `List []; "working_state", `String "API saved state."] in
   let api_server output = Fixture.start_server ~sw ~net:env#net ~clock:env#clock
@@ -342,7 +349,7 @@ let test_prefit_real_continuity ~base_path () =
     ~input_policy:Keeper_input_policy.Small ~continuity ~provider_config
     ~measure_message_bytes:(fun message -> String.length
       (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
-    ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
+    ~accepted:None ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
     ~current_turn_results:Driver.Current_turn_verbatim ~base_path
     ~demote_before:completed_end ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = completed_end })
     ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical in
@@ -416,6 +423,7 @@ let test_size_verdict_table () =
     ; "completion failed, dns failure", network Http.Dns_failure, false
     ; "completion failed, connection refused", network Http.Connection_refused, false
     ; "completion failed, tls failure", network Http.Tls_error, false
+    ; "completion failed, peer reset", network Http.Connection_reset, false
     ; "completion failed, peer closed", network Http.End_of_file, false
     ; "completion failed, unclassified network failure", network Http.Unknown, false
     (* Deadlines on a sent request: those on the provider's handling of the

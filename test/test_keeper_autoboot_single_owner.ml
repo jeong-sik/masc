@@ -15,7 +15,7 @@ let write_keeper_toml ~base_path ~name ~autoboot_enabled =
   write_file
     path
     (Printf.sprintf
-       "[keeper]\nname = %S\ninstructions = \"test keeper\"\nactivation_mode = %S\nsandbox_profile = \"docker\"\n"
+       "[keeper]\nname = %S\ninstructions = \"test keeper\"\nactivation_mode = %S\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n"
        name
        (if autoboot_enabled then "autonomous" else "manual"))
 ;;

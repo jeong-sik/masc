@@ -26,7 +26,7 @@ type pending_board_event_kind =
   | Board_vote_cast of Board_dispatch.board_vote_change
   | Fusion_completed
   | Delegate_completed
-  | Ask_answered_row
+  | Ask_answered_row of { answered_by : Keeper_input_speaker.person }
       (** A human answered a question this Keeper asked. Like
           {!Composition_completed} the row carries the answer itself: the
           asker has nowhere else to read it mid-cycle, and a wake with no
@@ -89,7 +89,7 @@ let is_board_activity_event (event : pending_board_event) =
   | Composition_completed
   (* Same again: this block renders the row's title and preview, and the
      answer is the whole point of the wake. *)
-  | Ask_answered_row
+  | Ask_answered_row _
   | External_attention _ -> true
   (* Neither carries a Board post, so routing either here would count a
      non-existent post in [board_activity_count]. Each has its own renderer,
@@ -109,7 +109,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Fusion_completed
   | Delegate_completed
   | Composition_completed
-  | Ask_answered_row
+  | Ask_answered_row _
   | External_attention _
   | Completion_authority_rejected _
   | Task_outcome _
@@ -127,7 +127,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Fusion_completed
   | Delegate_completed
   | Composition_completed
-  | Ask_answered_row
+  | Ask_answered_row _
   | Schedule_due _
   | External_attention _
   | Task_outcome _
@@ -147,7 +147,7 @@ let is_task_outcome_event (event : pending_board_event) =
   | Fusion_completed
   | Delegate_completed
   | Composition_completed
-  | Ask_answered_row
+  | Ask_answered_row _
   | Schedule_due _
   | External_attention _
   | Completion_authority_rejected _
@@ -162,7 +162,7 @@ let is_task_cancellation_event (event : pending_board_event) =
   | Task_cancelled _ -> true
   | Delegate_completed
   | Composition_completed
-  | Ask_answered_row
+  | Ask_answered_row _
   | Board_post_created
   | Board_post_updated
   | Board_comment_added _
@@ -962,7 +962,9 @@ let pending_board_event_of_ask_answer
        | None -> Surface_ref.lane_label responder.Keeper_ask.surface)
   in
   let body = String.concat " · " (List.map (ask_answer_line ask) answers) in
-  { event_kind = Ask_answered_row
+  { event_kind =
+      Ask_answered_row
+        { answered_by = Keeper_input_speaker.of_ask_responder responder }
   ; post_id = "keeper-ask:" ^ ask.Keeper_ask.ask_id
   ; author = who
   ; title =

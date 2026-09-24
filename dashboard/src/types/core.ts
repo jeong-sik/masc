@@ -769,7 +769,6 @@ export interface KeeperConversationDetails {
   traceId?: string | null
   turnRef?: string | null
   providerMessageId?: string | null
-  generation?: number | null
   modelUsed?: string | null
   stopReason?: string | null
   latencyMs?: number | null
@@ -1645,7 +1644,6 @@ interface KeeperConfigSources {
 }
 
 interface KeeperConfigMetrics {
-  generation: number
   total_turns: number
   total_input_tokens: number
   total_output_tokens: number
@@ -1692,10 +1690,14 @@ interface KeeperHookIntrospection {
 
 export type KeeperInputPolicy = 'small' | 'wide'
 
+/** What a successful config POST did to the running lane. Absent on GET. */
+export type KeeperConfigRuntimeSync = 'lane_restarted' | 'deferred_until_turn_end'
+
 export interface KeeperConfig {
   name: string
   config_revision: KeeperConfigRevisionState
   config_write?: KeeperConfigWriteReceipt
+  runtime_sync?: KeeperConfigRuntimeSync
   config_transaction_warnings?: KeeperManifestWarning[]
   activation_mode: KeeperActivationMode
   input_policy: KeeperInputPolicy

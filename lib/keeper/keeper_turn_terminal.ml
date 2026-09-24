@@ -67,8 +67,6 @@ let of_failure ?(tool_call_count = 0) ~raw_error err =
         ~summary:(Keeper_internal_error.official_client_recovery_summary recovery)
         (Keeper_turn_disposition.Provider_error
            (Keeper_agent_error.terminal_reason_code_of_core_error_typed err))
-    | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-      make ~source:"typed_error" "capacity_backpressure"
     | Some (Keeper_turn_driver.Runtime_exhausted _) ->
       of_disposition
         ~source:"typed_error"

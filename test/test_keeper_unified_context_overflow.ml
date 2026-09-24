@@ -55,7 +55,7 @@ let test_is_context_overflow_only_for_overflow_errors () =
        (Agent_core.Error.Api
           (NetworkError
              { message = "Connection_reset"
-             ; kind = Llm_provider.Http_client.Connection_refused
+             ; kind = Llm_provider.Http_client.Connection_reset
              })));
   let rendered_only =
     Agent_core.Error.Internal

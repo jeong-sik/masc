@@ -46,6 +46,7 @@ val write :
   raw_trace_run_ref:Turn_record.raw_trace_run_ref option ->
   sampling:Turn_record.sampling ->
   usage:Turn_record.usage ->
+  turn_output_tokens:int option ->
   execution_ids:Ids.Execution_id.t list ->
   blocks:Turn_record.prompt_block list ->
   input_components:Turn_record.input_component list option ->

@@ -1018,6 +1018,37 @@ let reasoning_details_text
     Keys are caller-defined strings; values are JSON payloads. *)
 type metadata = (string * Yojson.Safe.t) list [@@deriving show]
 
+(* Host-owned attribution of a User input: who said it, as the host that
+   created the message knows it. AGENT_CORE owns only the key. The payload is
+   the host's typed value encoded as JSON; AGENT_CORE never reads it, never
+   sends it to a provider, and does not let it change request shape (see
+   [Conversation_metadata.is_mergeable_followup]). *)
+module Input_speaker = struct
+  type classification =
+    | Absent
+    | Present of Yojson.Safe.t
+    | Duplicate
+
+  let key = "agent_core.input_speaker.v1"
+  let entry payload = key, payload
+
+  let classify metadata =
+    match
+      List.filter_map
+        (fun (field_key, value) ->
+           if String.equal field_key key then Some value else None)
+        metadata
+    with
+    | [] -> Absent
+    | [ payload ] -> Present payload
+    | _ :: _ :: _ -> Duplicate
+  ;;
+
+  let without metadata =
+    List.filter (fun (field_key, _) -> not (String.equal field_key key)) metadata
+  ;;
+end
+
 module Conversation_metadata = struct
   type run_boundary =
     | Absent
@@ -1043,9 +1074,15 @@ module Conversation_metadata = struct
     | _ -> Duplicate
   ;;
 
-  let is_mergeable_followup = function
-    | [] -> true
-    | metadata -> classify_run_boundary metadata = Present && List.length metadata = 1
+  (* The input speaker is attribution the provider never sees, so it alone
+     must not keep a follow-up out of the tool-result span. *)
+  let is_mergeable_followup metadata =
+    match Input_speaker.classify metadata with
+    | Input_speaker.Duplicate -> false
+    | Input_speaker.Absent | Input_speaker.Present _ ->
+      (match Input_speaker.without metadata with
+       | [] -> true
+       | rest -> classify_run_boundary rest = Present && List.length rest = 1)
   ;;
 end
 

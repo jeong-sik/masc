@@ -28,6 +28,17 @@ val resolve_write_attribution
     [Unaddressed] carries the typed reason and the path exactly as the
     resolver saw it. Total — never raises. *)
 
+val resolve_read_file_cwd :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  cwd:string option ->
+  (string, string) result
+(** The directory a Read resolves its path against: the Keeper's read root
+    without [cwd], else [cwd] projected and confined. Whether it exists is
+    asked of the filesystem that holds the tree
+    ({!Keeper_tool_shared_runtime.cwd_existence}); a cwd missing from a
+    shared-mount tree is refused with the checkouts that do exist. *)
+
 val handle_read_file_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->
@@ -175,6 +186,17 @@ module For_testing : sig
     :  created_directory_fault
     -> (unit -> 'a)
     -> 'a
+
+  (** Pure. The Read window cut from a body whose first byte is file line
+      [first_line], projected to the returned content and [next_offset]. *)
+  val slice_read_window
+    :  start_line:int
+    -> max_lines:int option
+    -> first_line:int
+    -> max_bytes:int
+    -> scan_complete:bool
+    -> string
+    -> (string * int option, [ `Offset_beyond_scan ]) result
 end
 
 val read_sandbox_raw_prefix :

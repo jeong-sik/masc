@@ -160,6 +160,9 @@ let test_claim_status_uses_typed_outcome () =
   log_claim_payload ~keeper:"malformed"
     (output ~result:"Error: storage read failed"
        ~typed_outcome:(`Assoc [ "kind", `String "unexpected" ]) ());
+  log_claim_payload ~keeper:"malformed-failed" ~wire_outcome:Tool_result.Error
+    (output ~result:"Everything is fine"
+       ~typed_outcome:(`Assoc [ "kind", `String "unexpected" ]) ());
   log_claim_payload ~keeper:"missing-exclusions"
     (output ~result:"No eligible tasks."
        ~typed_outcome:
@@ -190,6 +193,7 @@ let test_claim_status_uses_typed_outcome () =
   check_status "untyped" "observed";
   check_status "untyped-failure" "error";
   check_status "malformed" "unknown";
+  check_status "malformed-failed" "error";
   check_status "missing-exclusions" "unknown";
   check_status "contradictory" "unknown";
   check_status "missing-task-id" "observed";

@@ -95,8 +95,14 @@ let claim_status_of_output ~claimed_task ~recorded_outcome output =
      | Some (Keeper_tool_outcome.Error _) -> Claim_error
      | Some (Keeper_tool_outcome.No_progress
                { reason = Keeper_tool_outcome.Resource_conflict _ })
-     | Some Keeper_tool_outcome.Progress
-     | None -> Unknown)
+     | Some Keeper_tool_outcome.Progress -> Unknown
+     | None ->
+       (match recorded_outcome with
+        | Tool_result.Recorded_failed -> Claim_error
+        | Tool_result.Recorded_succeeded
+        | Tool_result.Recorded_deferred
+        | Tool_result.Recorded_unsettled
+        | Tool_result.Recorded_malformed -> Unknown))
   | None, None ->
     (match recorded_outcome with
      | Tool_result.Recorded_failed -> Claim_error

@@ -66,9 +66,11 @@ let note_end ended event =
   | Some _, (Some _ | None) | None, None -> ()
 ;;
 
-(* The session's whole life, on a fiber of the backend's switch. It ends when
-   close releases it, when the session fails, or when the server stops; the
-   browser stops with the inner switch in every case. *)
+(* The session's whole life, on a daemon fiber of the backend's switch. It
+   ends when close releases it, when the session fails, or when the server
+   stops: a daemon is cancelled once the switch's other fibers are done, so an
+   open browser never holds the server's switch open. The browser stops with
+   the inner switch in every case. *)
 let run_session t ~headless ~opened ~resolve_opened =
   let ended = ref None in
   let log event =
@@ -83,7 +85,7 @@ let run_session t ~headless ~opened ~resolve_opened =
     t.state <- Closed;
     Eio.Promise.resolve resolve_stopped ()
   in
-  match
+  (match
     Eio.Switch.run (fun session_sw ->
       match t.open_session ~sw:session_sw ~headless ~log with
       | Error detail -> not_opened detail
@@ -102,7 +104,8 @@ let run_session t ~headless ~opened ~resolve_opened =
     (* The opener and the session's fibers fail this session, not the server
        whose switch this fiber is on. *)
     not_opened ("the stagehand session failed: " ^ Printexc.to_string exn);
-    finish ()
+    finish ());
+  `Stop_daemon
 ;;
 
 let open_session t ~headless =
@@ -112,7 +115,7 @@ let open_session t ~headless =
   | Closed ->
     t.state <- Opening;
     let opened, resolve_opened = Eio.Promise.create () in
-    Eio.Fiber.fork ~sw:t.sw (fun () -> run_session t ~headless ~opened ~resolve_opened);
+    Eio.Fiber.fork_daemon ~sw:t.sw (fun () -> run_session t ~headless ~opened ~resolve_opened);
     (match Eio.Promise.await opened with
      | Ok () -> answered (`Assoc [ "opened", `Bool true; "reused", `Bool false; "backend", `String backend_name ])
      | Error detail -> Browser_lane.Refused ("the stagehand browser did not open: " ^ detail))

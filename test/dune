@@ -147,6 +147,12 @@
    masc.msx_lane masc.masc_compression masc.multimodal masc.tool_types))
 
 (test
+ (name test_dos_vision)
+ (modules test_dos_vision)
+ (libraries alcotest unix yojson fs_compat masc masc_test_deps
+   masc.dos_lane masc.multimodal masc.tool_types))
+
+(test
  (name test_sse_observer_epoch)
  (modules test_sse_observer_epoch)
  (libraries alcotest masc masc.sse_wire masc_test_deps eio))
@@ -3635,10 +3641,14 @@
  (modules test_tui_keeper_chat_log)
  ; The golden case runs the server's own AG-UI projection and SSE encoder over
  ; a journal, so the wire the TUI decodes is the real one, not a fixture.
+ ; agent_core is named for the stop reason and the mid-stream counters a
+ ; message delta carries; it is already in this test's link closure through
+ ; masc.
  (libraries
   alcotest
   fmt
   masc
+  masc.agent_core
   masc.masc_types
   masc.keeper_chat_operations
   masc.ag_ui

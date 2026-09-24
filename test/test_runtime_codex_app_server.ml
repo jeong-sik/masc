@@ -985,6 +985,47 @@ let test_metadata_listing_pages_without_turn () =
         check string "opaque cursor forwarded" "page-two" (last |> member "params" |> member "cursor" |> to_string)))
 ;;
 
+(* An exhausted account runs no turn, so no [account/rateLimits/updated] ever
+   arrives for it. [account/rateLimits/read] asks without a thread or a turn,
+   and every metered limit of the per-limit map is kept; a bucket that does
+   not name itself takes its key. *)
+let test_rate_limits_read_without_turn () =
+  let capture = Filename.temp_file "masc-rate-limits-capture-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
+    with_fixture ~capture_path:capture [init_result; account_chatgpt;
+      {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":null},"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":{"usedPercent":64,"windowDurationMins":10080,"resetsAt":1790800000}},"codex_other":{"primary":{"usedPercent":3,"windowDurationMins":300}}}}}|}]
+      (fun path ->
+        let outcome = Eio_main.run (fun env ->
+          let config = { (Runtime_codex_app_server.default_config ()) with cli_path=path; admission_timeout_s=2. } in
+          Runtime_codex_app_server.read_rate_limits ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env) ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp") config) in
+        let report = match outcome with Ok report -> report | Error error -> fail (Runtime_codex_app_server.error_to_string error) in
+        check string "source" "codex.account_rate_limits_read"
+          (Runtime_provider_usage_window.source_to_string report.source);
+        let seen =
+          List.map
+            (fun (w : Runtime_provider_usage_window.window) ->
+              ( Option.value ~default:"-" w.limit_id
+              , (match w.kind with
+                 | Five_hour -> "5h" | Seven_day -> "7d"
+                 | Duration_minutes m -> string_of_int m | Provider_label l -> l)
+              , (match w.utilization with Percent p -> p | Fraction _ -> -1) ))
+            report.windows
+        in
+        check (list (triple string string int)) "every bucket, keyed"
+          [ ("codex", "5h", 100); ("codex", "7d", 64); ("codex_other", "5h", 3) ]
+          seen;
+        let channel = open_in capture in
+        let requests = Fun.protect ~finally:(fun () -> close_in channel) (fun () ->
+          let rec read acc = match input_line channel with
+            | line -> read (Yojson.Safe.from_string line :: acc)
+            | exception End_of_file -> List.rev acc in read []) in
+        let open Yojson.Safe.Util in
+        check (list string) "no thread or turn request"
+          ["initialize";"initialized";"account/read";"account/rateLimits/read"]
+          (List.map (fun json -> json |> member "method" |> to_string) requests)))
+;;
+
 let test_thread_resume_skips_history_injection () =
   let history =
     [ { Runtime_codex_app_server.role = User; text = "already in official thread" } ]
@@ -5215,6 +5256,7 @@ let () =
             `Quick
             test_subscription_probe_stops_before_thread
         ; test_case "metadata listing pages without turn" `Quick test_metadata_listing_pages_without_turn
+        ; test_case "rate limits read without turn" `Quick test_rate_limits_read_without_turn
         ; test_case "declared cwd reaches spawn" `Quick test_declared_cwd_reaches_spawn
         ; test_case
             "protocol and spawn share cwd authority"

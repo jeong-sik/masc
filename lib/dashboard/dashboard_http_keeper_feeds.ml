@@ -114,10 +114,21 @@ let keeper_costs_window_of_query = function
     those lines vanished from the sums without a trace. [read] carries the
     rows that were not JSON, any of which may have been a turn, so a sum
     beside a non-zero count is a floor. [failed] is a store that could not
-    be read; its sums are zeroed and say nothing. *)
+    be read; its sums are zeroed and say nothing.
+
+    [read.unplaced_turn_rows] counts turn rows whose [ts_unix] or
+    [latency_ms] has a shape the writer never produces: the row cannot be
+    placed in or out of the window, so it may have been a turn in it, and a
+    sum beside a non-zero count is a floor. A row placed before the window
+    start is outside it and counts nowhere.
+
+    [unread_keepers] are Keepers whose meta could not be read, with why.
+    They have no row in [keepers], so they are listed apart as
+    [keepers_unread]: their turns are in no sum. *)
 let keeper_cost_aggregates_json
     ~(config : Workspace.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
+    ~(unread_keepers : (string * string) list)
     ~(window_minutes : int)
     ~(now_ts : float)
   : Yojson.Safe.t =
@@ -132,6 +143,7 @@ let keeper_cost_aggregates_json
         let sample_count = ref 0 in
         let latencies_rev = ref [] in
         let malformed_rows = ref 0 in
+        let unplaced_turn_rows = ref 0 in
         let add_row j =
           if keeper_cost_metric_row_is_event j
           then
@@ -140,20 +152,20 @@ let keeper_cost_aggregates_json
               Json_util.assoc_member_opt "latency_ms" j
             with
             | Some (`Float ts_unix), Some (`Int latency_ms)
-              when Float.is_finite ts_unix
-                   && latency_ms >= 0
-                   && ts_unix >= start_ts ->
-                incr sample_count;
-                latencies_rev := float_of_int latency_ms :: !latencies_rev;
-                add_reading cost ~add:( +. ) (cost_reading_of_row j);
-                add_reading tokens
-                  ~add:(fun sum counts ->
-                    { input = sum.input + counts.input
-                    ; output = sum.output + counts.output
-                    ; total = sum.total + counts.total
-                    })
-                  (token_reading_of_row j)
-            | _ -> ()
+              when Float.is_finite ts_unix && latency_ms >= 0 ->
+                if ts_unix >= start_ts then begin
+                  incr sample_count;
+                  latencies_rev := float_of_int latency_ms :: !latencies_rev;
+                  add_reading cost ~add:( +. ) (cost_reading_of_row j);
+                  add_reading tokens
+                    ~add:(fun sum counts ->
+                      { input = sum.input + counts.input
+                      ; output = sum.output + counts.output
+                      ; total = sum.total + counts.total
+                      })
+                    (token_reading_of_row j)
+                end
+            | (Some _ | None), (Some _ | None) -> incr unplaced_turn_rows
         in
         let read =
           Dated_jsonl.iter_range_entries_result metrics_store
@@ -166,7 +178,11 @@ let keeper_cost_aggregates_json
         let metrics_read =
           match read with
           | Ok () ->
-              `Assoc [ "state", `String "read"; "malformed_rows", `Int !malformed_rows ]
+              `Assoc
+                [ "state", `String "read"
+                ; "malformed_rows", `Int !malformed_rows
+                ; "unplaced_turn_rows", `Int !unplaced_turn_rows
+                ]
           | Error error ->
               (* The rows seen before the failure are a fragment of the
                  window; drawing them would pass a part for the whole. *)
@@ -213,6 +229,12 @@ let keeper_cost_aggregates_json
   in
   `Assoc
     [ "keepers", `List keeper_items
+    ; ( "keepers_unread"
+      , `List
+          (List.map
+             (fun (name, reason) ->
+               `Assoc [ "keeper_name", `String name; "reason", `String reason ])
+             unread_keepers) )
     ; "window_minutes", `Int window_minutes
     ; "generated_at", `Float now_ts
     ]

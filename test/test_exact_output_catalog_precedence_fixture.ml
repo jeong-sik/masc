@@ -342,12 +342,7 @@ max_output_tokens = 4096
 let with_replacement_catalog_file root f =
   let path = Filename.concat root "replacement-models.toml" in
   write_file path replacement_catalog;
-  let env = Runtime.agent_core_model_catalog_env_var_name in
-  let previous = Sys.getenv_opt env in
-  Unix.putenv env path;
-  Fun.protect
-    ~finally:(fun () -> Unix.putenv env (Option.value previous ~default:""))
-    f
+  Masc_test_deps.with_process_env Runtime.agent_core_model_catalog_env_var_name (Some path) f
 ;;
 
 let current_registry label =

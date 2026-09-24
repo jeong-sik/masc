@@ -50,6 +50,13 @@ let test_follow_output_contract () =
     check bool "ordinary clicks need no destination receipt" false
       (List.mem (`String "destinationUrl") (schema |> member "required" |> to_list))
 
+(* Both are held back from Agent Core requests until keeper_tool_search names
+   them. Measured 2026-09-18..24: 2 and 14 turns used them, while their 1,980
+   and 1,583 byte schemas rode every request. *)
+let test_is_deferred skill_name () =
+  check bool "declared defer_loading = true" true
+    ((skill_entry skill_name).Catalog.loading = Tool_definition_toml.Deferrable)
+
 type navigation_case = Navigated | Navigation_failed | Read_failed | Invalid_receipt
 type observation = Regions | Content
 
@@ -226,6 +233,8 @@ let () = run "browser composition" ["native skill",[
   test_case "runtime destination output contract" `Quick test_follow_output_contract;
   test_case "live follow description is one text" `Quick (test_description_is_one_text follow_skill);
   test_case "navigation description is one text" `Quick (test_description_is_one_text navigate_skill);
+  test_case "live follow is deferred" `Quick (test_is_deferred follow_skill);
+  test_case "navigation is deferred" `Quick (test_is_deferred navigate_skill);
   test_case "live follow offers only scene and regions" `Quick (test_mode_is_a_closed_choice follow_skill);
   test_case "navigation offers only scene and regions" `Quick (test_mode_is_a_closed_choice navigate_skill);
   test_case "observed follow then region read" `Quick (test_follow_then_read Regions Navigated);

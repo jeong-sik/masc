@@ -7,6 +7,7 @@ type expected_value =
   | Table_value
   | Table_array_value
   | Array_value
+  | Bool_value
 
 type enum_value_fault =
   | Empty_value
@@ -127,6 +128,7 @@ type entry =
   ; execution : execution_mode
   ; params : param list
   ; plan : Plan.t
+  ; loading : Tool_definition_toml.loading
   }
 
 type t = entry list
@@ -242,6 +244,13 @@ let optional_string ~path field fields =
     (match string_value ~path ~field value with
      | Ok value -> Ok (Some value)
      | Error _ as error -> error)
+;;
+
+let optional_bool ~path field fields =
+  match List.assoc_opt field fields with
+  | None -> Ok None
+  | Some (Toml.Toml_bool value) -> Ok (Some value)
+  | Some _ -> Error (Wrong_value_kind { path; field; expected = Bool_value })
 ;;
 
 let table_fields ~path ~field = function
@@ -589,7 +598,7 @@ let parse_composition ~index value =
     (match
        validate_fields
          ~path
-         ~allowed:[ "name"; "description"; "execution"; "params"; "nodes" ]
+         ~allowed:[ "name"; "description"; "execution"; "params"; "nodes"; "defer_loading" ]
          fields
      with
      | Error _ as error -> error
@@ -615,6 +624,16 @@ let parse_composition ~index value =
            (match optional_string ~path "description" fields with
            | Error _ as error -> error
            | Ok description ->
+             (* The same declaration a tool file makes: held back from the
+                request until [keeper_tool_search] names it. *)
+             (match optional_bool ~path "defer_loading" fields with
+              | Error _ as error -> error
+              | Ok defer_loading ->
+             let loading =
+               match defer_loading with
+               | Some true -> Tool_definition_toml.Deferrable
+               | Some false | None -> Tool_definition_toml.Always_loaded
+             in
              (match required_string ~path "execution" fields with
               | Error _ as error -> error
               | Ok raw_execution ->
@@ -656,7 +675,7 @@ let parse_composition ~index value =
                           | Ok () ->
                          (match execution with
                           | Inline ->
-                            Ok { name; description; execution; params; plan }
+                            Ok { name; description; execution; params; plan; loading }
                           | Async ->
                             (
                             (match
@@ -671,14 +690,14 @@ let parse_composition ~index value =
                                  | Some _ | None -> Some node)
                              with
                              | None ->
-                               Ok { name; description; execution; params; plan }
+                               Ok { name; description; execution; params; plan; loading }
                              | Some node ->
                                Error
                                  (Async_tool_not_statically_read_only
                                     { name
                                     ; node_id = node.id
                                     ; tool_name = node.tool_name
-                                    }))))))))))))))))
+                                    })))))))))))))))))
 ;;
 
 let parse content =

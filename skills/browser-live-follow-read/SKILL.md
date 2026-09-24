@@ -20,6 +20,9 @@ guidance is in `browser-lanes/references/composition.md`.
 name = "browser-live-follow-read"
 description = "Live lane only: follow one observed same-tab HTTP(S) anchor in the operator's browser and read the destination in one call. It opens the href without page click handlers; if the page needs one, use an ordinary BrowserInteract click. New-window targets and downloads are refused before navigating. mode=scene reads visible content; mode=regions returns landmarks that scope a later read. The read is pinned to the receipt's destinationUrl and navigationSource. If the follow succeeded and only the read failed, do not call this again: retry BrowserRead alone on the same clientId/tabId with navigationSource. A read still showing the source URL and document means the follow is pending. For a same-URL follow keep expectedUrl too: a reload counts only with a new document ID. To inspect a redirect, drop only expectedUrl. A matching URL does not show the site is ready: check title and content; a login page or unrelated destination stays unverified."
 execution = "inline"
+# Held back from Agent Core requests until keeper_tool_search names it: used
+# in few turns a week, and its schema rode every request (2026-09-24).
+defer_loading = true
 
 [[compositions.params]]
 name = "clientId"

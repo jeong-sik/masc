@@ -643,12 +643,16 @@ status: reference
   후보 순서를 선언한다(`exact_output_lane_decl`). 도구를 쓰지 않고 단일 완결 응답을
   받아 도메인 검증기가 유효성을 판정하며, 일반 턴 failover인 Runtime Candidate Order와
   구분된다.
-  - **슬롯 전진 및 타임아웃 경계**: 요청이 wire로 나간 뒤 해당 바인딩의 헤더 기한
-    (`connect_timeout_s`, `Http_operation`) 또는 전체 기한(`body_timeout_s`,
-    `Wall_clock`) 안에 응답 헤더를 받지 못한 타임아웃(`Http_client.TimeoutError`)이
-    발생하면, 첫 슬롯에서 패스를 중단하지 않고 다음 후보 슬롯으로 전진
-    (`execution_failure_may_advance`)한다. 바인딩별 응답 속도와 기한은 슬롯 자체의
-    성질이므로 후속 슬롯이 동일 입력을 처리할 기회를 보장한다(#38437).
+  - **슬롯 전진 조건 (타임아웃 및 컨텍스트 초과)**: 슬롯 전진은 공통적으로 이 슬롯에서
+    발송이 한 번이었을 때(`receipt_dispatch_count = 1`)만 허용된다. 요청이 wire로 나간
+    뒤 바인딩의 헤더 기한(`connect_timeout_s`, `Http_operation`) 또는 전체 기한
+    (`body_timeout_s`, `Wall_clock`) 안에 응답 헤더를 받지 못한 타임아웃
+    (`Http_client.TimeoutError`)이 발생하거나(#38437), 제공자가 입력을 바인딩 창보다
+    크다고 거절한 경우(`Context_overflow`, #38454) 첫 슬롯에서 패스를 중단하거나 범위를
+    축소하지 않고 선언된 다음 후보 슬롯으로 전진(`execution_failure_may_advance`)한다.
+    바인딩별 응답 기한과 컨텍스트 윈도우 크기는 슬롯 자체의 고유 속성이므로, 더 큰
+    창이나 독립 기한을 가진 후속 후보(예: Claude CLI)가 동일 입력을 처리할 기회를
+    보장한다.
   - **생성 발송 관측 권위 (`flow_evidence_generation_dispatch`)**: 걸음(walk)에 속한 어느
     후보라도 외부 완료 생성 요청(`generation dispatch`)을 시작했는지 여부를 불변
     증거(`Started`·`Not_started`)로 기록한다. 앞선 슬롯이 생성 요청을 보낸 뒤(예: 5xx

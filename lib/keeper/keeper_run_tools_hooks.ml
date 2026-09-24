@@ -357,6 +357,48 @@ let guard_repetition_before_turn_params repetition_execution hook event =
   | None -> hook event
 ;;
 
+(* The [Skills] block for one round. [deferred] is fixed when the run's tools
+   are built, but [keeper_tool_search] extends the running agent's tool set
+   and the loaded tool stays there for the rest of the run
+   ([Keeper_identity_tool_search.load_found]). A composition is therefore
+   still to be loaded only while it is deferred and absent from [on_the_wire];
+   splitting on [deferred] alone kept telling the model to search for a tool it
+   already held, every round after the load. *)
+let skill_compositions_block ~compositions ~deferred ~on_the_wire =
+  let to_load, on_turn =
+    List.partition
+      (fun name ->
+         List.exists (String.equal name) deferred
+         && not (List.exists (String.equal name) on_the_wire))
+      compositions
+  in
+  let on_turn_line =
+    match on_turn with
+    | [] -> []
+    | _ ->
+      [ Printf.sprintf
+          "[Skills] %d composition tools on this turn — each is one call whose \
+           reads run in parallel: %s"
+          (List.length on_turn)
+          (String.concat ", " on_turn)
+      ]
+  in
+  let to_load_line =
+    match to_load with
+    | [] -> []
+    | _ ->
+      [ Printf.sprintf
+          "[Skills] %d more composition tools load by name through \
+           keeper_tool_search: %s"
+          (List.length to_load)
+          (String.concat ", " to_load)
+      ]
+  in
+  match on_turn_line @ to_load_line with
+  | [] -> None
+  | lines -> Some (String.concat "\n" lines)
+;;
+
 let assemble_hooks
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
@@ -809,50 +851,29 @@ let assemble_hooks
                    prefix: that function answers [None] for a name that is not
                    a composition tool, so the choice is a declared fact rather
                    than a guess about spelling. *)
-                (match
-                   List.filter
-                     (fun tool_name ->
-                       Option.is_some
-                         (Keeper_tool_composition_catalog
-                          .skill_source_of_tool_name
-                            tool_name))
-                     all_tool_names
-                 with
-                 | [] -> ()
-                 | compositions ->
-                   (* A deferred composition is built but not on the request:
-                      naming it as on this turn sent the model straight to a
-                      call Agent Core refuses. *)
-                   let deferred, on_turn =
-                     List.partition
-                       (fun name -> List.mem name deferred_tool_names)
-                       compositions
-                   in
-                   let on_turn_line =
-                     match on_turn with
-                     | [] -> []
-                     | _ ->
-                       [ Printf.sprintf
-                           "[Skills] %d composition tools on this turn — each is \
-                            one call whose reads run in parallel: %s"
-                           (List.length on_turn)
-                           (String.concat ", " on_turn)
-                       ]
-                   in
-                   let deferred_line =
-                     match deferred with
-                     | [] -> []
-                     | _ ->
-                       [ Printf.sprintf
-                           "[Skills] %d more composition tools load by name \
-                            through keeper_tool_search: %s"
-                           (List.length deferred)
-                           (String.concat ", " deferred)
-                       ]
-                   in
-                   record_block
-                     Prompt_block_id.Skill_compositions
-                     (String.concat "\n" (on_turn_line @ deferred_line)));
+                (* A deferred composition is built but not on the request:
+                   naming it as on this turn sent the model straight to a call
+                   Agent Core refuses. Without an agent nothing can have been
+                   loaded yet -- the loader refuses when the cell is empty
+                   ([Keeper_identity_tool_search.load]) -- so the declared
+                   deferral is the whole answer there. *)
+                Option.iter
+                  (record_block Prompt_block_id.Skill_compositions)
+                  (skill_compositions_block
+                     ~compositions:
+                       (List.filter
+                          (fun tool_name ->
+                            Option.is_some
+                              (Keeper_tool_composition_catalog
+                               .skill_source_of_tool_name
+                                 tool_name))
+                          all_tool_names)
+                     ~deferred:deferred_tool_names
+                     ~on_the_wire:
+                       (match !turn_agent_cell with
+                        | Some agent ->
+                          Agent_core.Tool_set.names (Agent_core.Agent.tools agent)
+                        | None -> []));
                 let schema_filter, computed_turn_lane =
                   compute_tool_surface
                     ~turn

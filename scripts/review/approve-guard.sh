@@ -19,6 +19,10 @@
 #   approve-guard.sh --check ...   # evaluate only, never writes (safe probe)
 # Exit: 0 approved/skipped/would-approve, 2 refused (reasons on stderr), 1 infra error.
 # Env: GUARD_GH overrides the gh binary (tests use a fake).
+# Needs only bash + gh: every JSON read uses gh's built-in --jq and the POST uses
+# gh -f/-F fields, so a lane without a standalone jq binary can still approve.
+# gh_json runs inside $( ); every caller ends with `|| exit 1` so a transport
+# error stops the guard with exit 1 instead of turning into false refusals.
 set -u
 GH="${GUARD_GH:-gh}"
 check_only=0; repo=""; pr=""; head=""; slot=""; body=""
@@ -41,10 +45,10 @@ finish_refused() {
   for r in "${reasons[@]}"; do echo "  - $r" >&2; done
   exit 2
 }
-gh_json() { # gh_json <endpoint> <jq> ; stdout=result, exit 1 on transport error
+gh_json() { # gh_json <endpoint> <jq> ; stdout=result, returns 1 on transport error
   local out
   if ! out="$("$GH" api --paginate "$1" --jq "$2" 2>&1)"; then
-    echo "approve-guard: gh api $1 failed: $out" >&2; exit 1
+    echo "approve-guard: gh api $1 failed: $out" >&2; return 1
   fi
   printf '%s' "$out"
 }
@@ -65,7 +69,7 @@ fi
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 
 # ---- 2. PR state ----
-pr_row="$(gh_json "repos/${repo}/pulls/${pr}" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring)] | @tsv')"
+pr_row="$(gh_json "repos/${repo}/pulls/${pr}" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring)] | @tsv')" || exit 1
 IFS=$'\t' read -r st draft base cur merged <<<"$pr_row"
 [ "$st" = "open" ] || refuse "PR state is '${st}' (merged=${merged})"
 [ "$draft" = "false" ] || refuse "PR is Draft"
@@ -73,7 +77,7 @@ IFS=$'\t' read -r st draft base cur merged <<<"$pr_row"
 [ "$cur" = "$head" ] || refuse "head moved: PR head is ${cur}"
 
 # ---- 3. check-runs on this exact SHA ----
-runs="$(gh_json "repos/${repo}/commits/${head}/check-runs?per_page=100" '.check_runs[] | [.name, .status, (.conclusion // "none"), (.id|tostring)] | @tsv')"
+runs="$(gh_json "repos/${repo}/commits/${head}/check-runs?per_page=100" '.check_runs[] | [.name, .status, (.conclusion // "none"), (.id|tostring)] | @tsv')" || exit 1
 n_runs=0; run_ids=()
 while IFS=$'\t' read -r name status concl id; do
   [ -n "${name:-}" ] || continue
@@ -85,7 +89,7 @@ done <<<"$runs"
 [ "$n_runs" -gt 0 ] || refuse "no check-runs on ${head} (empty is not green)"
 
 # ---- 4. workflow runs on this exact SHA (catches queued workflows) ----
-wf="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [.name, .status, (.conclusion // "none"), (.id|tostring)] | @tsv')"
+wf="$(gh_json "repos/${repo}/actions/runs?head_sha=${head}&per_page=100" '.workflow_runs[] | [.name, .status, (.conclusion // "none"), (.id|tostring)] | @tsv')" || exit 1
 wf_ids=()
 while IFS=$'\t' read -r name status concl id; do
   [ -n "${name:-}" ] || continue
@@ -98,8 +102,9 @@ done <<<"$wf"
 [ ${#reasons[@]} -eq 0 ] || finish_refused
 
 # ---- 5. idempotence: already approved this SHA? ----
-me="$(gh_json user '.login')"
-dup="$(gh_json "repos/${repo}/pulls/${pr}/reviews?per_page=100" ".[] | select(.user.login == \"${me}\" and .state == \"APPROVED\" and .commit_id == \"${head}\") | .id")"
+me="$(gh_json user '.login')" || exit 1
+[ -n "$me" ] || { echo "approve-guard: gh api user returned no login; cannot check for a duplicate approval" >&2; exit 1; }
+dup="$(gh_json "repos/${repo}/pulls/${pr}/reviews?per_page=100" ".[] | select(.user.login == \"${me}\" and .state == \"APPROVED\" and .commit_id == \"${head}\") | .id")" || exit 1
 if [ -n "$dup" ]; then
   echo "SKIP #${pr}: ${me} already APPROVED ${head} (review $(echo "$dup" | head -n1))"
   exit 0
@@ -113,13 +118,13 @@ if [ "$check_only" -eq 1 ]; then
 fi
 
 # ---- 6. write, then read back ----
-payload="$(jq -n --rawfile b "$body" --arg f "$footer" --arg c "$head" \
-  '{event:"APPROVE", commit_id:$c, body:($b + $f)}')" || { echo "approve-guard: jq failed" >&2; exit 1; }
-if ! resp="$(printf '%s' "$payload" | "$GH" api -X POST "repos/${repo}/pulls/${pr}/reviews" --input - --jq '[(.id|tostring), .state, .commit_id] | @tsv' 2>&1)"; then
+if ! resp="$({ cat "$body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/${repo}/pulls/${pr}/reviews" \
+    -f event=APPROVE -f "commit_id=${head}" -F body=@- \
+    --jq '[(.id|tostring), .state, .commit_id] | @tsv' 2>&1)"; then
   echo "approve-guard: POST review failed: $resp" >&2; exit 1
 fi
 IFS=$'\t' read -r rid rstate rcommit <<<"$resp"
-back="$(gh_json "repos/${repo}/pulls/${pr}/reviews/${rid}" '[.state, .commit_id] | @tsv')"
+back="$(gh_json "repos/${repo}/pulls/${pr}/reviews/${rid}" '[.state, .commit_id] | @tsv')" || exit 1
 IFS=$'\t' read -r bstate bcommit <<<"$back"
 if [ "$bstate" != "APPROVED" ] || [ "$bcommit" != "$head" ]; then
   echo "approve-guard: posted review ${rid} reads back as ${bstate} on ${bcommit}" >&2; exit 1

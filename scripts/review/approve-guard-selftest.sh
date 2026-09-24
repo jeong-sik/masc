@@ -8,31 +8,55 @@ guard="$here/approve-guard.sh"
 work="$(mktemp -d "${TMPDIR:-/tmp}/agtest.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
+# The harness itself uses jq (fixtures, payload check); the GUARD must not.
+JQ="$(command -v jq)" || { echo "selftest needs jq for fixtures" >&2; exit 1; }
+export FAKE_JQ="$JQ"
+# A PATH entry whose jq always fails: runs the guard as if the lane had no jq.
+mkdir -p "$work/nojq"
+printf '#!/bin/sh\necho "jq: not installed on this lane" >&2\nexit 127\n' >"$work/nojq/jq"
+chmod +x "$work/nojq/jq"
+
 cat >"$work/gh" <<'EOF'
 #!/usr/bin/env bash
-# fake gh: api [--paginate] [-X POST] <endpoint> [--jq F] [--input -]
-d="$FAKE_DIR"; jqf="."; method=GET; ep=""
+# fake gh: api [--paginate] [-X POST] <endpoint> [--jq F] [-f k=v] [-F k=@-]
+# FAKE_FAIL=<glob>: endpoints matching it fail like a transport error.
+d="$FAKE_DIR"; jqf="."; method=GET; ep=""; ev=""; cid=""; body_src=""
 shift # "api"
 while [ $# -gt 0 ]; do
   case "$1" in
     --paginate) shift ;;
     -X) method="$2"; shift 2 ;;
     --jq) jqf="$2"; shift 2 ;;
-    --input) shift 2 ;;
+    --input) echo "fake gh: --input is not how the guard posts" >&2; exit 1 ;;
+    -f|-F) case "$2" in
+             event=*) ev="${2#event=}" ;;
+             commit_id=*) cid="${2#commit_id=}" ;;
+             body=@-) body_src=stdin ;;
+             *) echo "fake gh: unexpected field $2" >&2; exit 1 ;;
+           esac; shift 2 ;;
     *) ep="$1"; shift ;;
   esac
 done
+if [ -n "${FAKE_FAIL:-}" ]; then
+  case "$ep" in $FAKE_FAIL) echo "HTTP 502: Bad Gateway (fake)" >&2; exit 1 ;; esac
+fi
 case "$ep" in
   */check-runs*) f=checkruns ;;
   */actions/runs*) f=actions ;;
   user) f=user ;;
   */reviews/*) f=reviewget ;;
-  */reviews*) if [ "$method" = POST ]; then cat >"$d/posted.json"; f=postresp; else f=reviews; fi ;;
+  */reviews*) if [ "$method" = POST ]; then
+                [ "$body_src" = stdin ] || { echo "fake gh: POST without body=@-" >&2; exit 1; }
+                cat >"$d/posted.body"
+                "$FAKE_JQ" -n --arg e "$ev" --arg c "$cid" --rawfile b "$d/posted.body" \
+                  '{event:$e, commit_id:$c, body:$b}' >"$d/posted.json"
+                f=postresp
+              else f=reviews; fi ;;
   */pulls/*) f=pull ;;
   *) echo "fake gh: no fixture for $ep" >&2; exit 1 ;;
 esac
 [ -f "$d/$f.json" ] || { echo "fake gh: missing $f.json" >&2; exit 1; }
-jq -r "$jqf" "$d/$f.json"
+"$FAKE_JQ" -r "$jqf" "$d/$f.json"
 EOF
 chmod +x "$work/gh"
 
@@ -57,10 +81,12 @@ run_case() { # run_case <name> <want_rc> <needle> <want_post 0|1> <casedir> [gua
   local out rc posted=0
   out="$(FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" "$@" 2>&1)"; rc=$?
   [ -f "$d/posted.json" ] && posted=1
-  if [ "$rc" = "$want" ] && printf '%s' "$out" | grep -qF -- "$needle" && [ "$posted" = "$wpost" ]; then
+  local masked=0
+  [ "$want" = 1 ] && printf '%s' "$out" | grep -qF -- "REFUSED" && masked=1
+  if [ "$rc" = "$want" ] && printf '%s' "$out" | grep -qF -- "$needle" && [ "$posted" = "$wpost" ] && [ "$masked" = 0 ]; then
     pass=$((pass+1)); echo "ok   $name"
   else
-    fail=$((fail+1)); echo "FAIL $name (rc=$rc want=$want posted=$posted want=$wpost)"; printf '%s\n' "$out" | sed 's/^/     /'
+    fail=$((fail+1)); echo "FAIL $name (rc=$rc want=$want posted=$posted want=$wpost masked=$masked)"; printf '%s\n' "$out" | sed 's/^/     /'
   fi
 }
 
@@ -112,6 +138,23 @@ d="$work/readback"; setup "$d"; echo "{\"id\":777,\"state\":\"COMMENTED\",\"comm
 run_case readback-mismatch 1 "reads back as COMMENTED" 1 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md"
 d="$work/multi"; setup "$d"; jq '.draft=true|.base.ref="dev"' "$d/pull.json" >"$d/p" && mv "$d/p" "$d/pull.json"
 run_case reports-all-reasons 2 "not main" 0 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md"
+
+# ---- lane without jq: the guard must still post (code-reviewer P1 on #38625) ----
+d="$work/nojq-case"; setup "$d"
+out="$(PATH="$work/nojq:$PATH" FAKE_DIR="$d" GUARD_GH="$work/gh" bash "$guard" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md" 2>&1)"; rc=$?
+if [ "$rc" = 0 ] && [ -f "$d/posted.json" ] && "$JQ" -e --arg h "$H" '.event=="APPROVE" and .commit_id==$h and (.body|startswith("LGTM")) and (.body|contains("SLOT: #5 head"))' "$d/posted.json" >/dev/null; then
+  pass=$((pass+1)); echo "ok   no-jq-still-posts"
+else fail=$((fail+1)); echo "FAIL no-jq-still-posts (rc=$rc)"; printf '%s\n' "$out" | sed 's/^/     /'; fi
+
+# ---- transport errors: exit 1, one message, no refusal list, no write ----
+d="$work/pullfail"; setup "$d"
+FAKE_FAIL='*/pulls/5' run_case gh-pull-fails 1 "gh api repos/o/r/pulls/5 failed" 0 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md"
+d="$work/checkfail"; setup "$d"
+FAKE_FAIL='*/check-runs*' run_case gh-checkruns-fails 1 "check-runs?per_page=100 failed" 0 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md"
+d="$work/userfail"; setup "$d"
+FAKE_FAIL='user' run_case gh-user-fails-no-post 1 "gh api user failed" 0 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md"
+d="$work/userempty"; setup "$d"; echo '{"login":""}' >"$d/user.json"
+run_case user-empty-no-post 1 "returned no login" 0 "$d" --repo o/r --pr 5 --head "$H" --slot "SLOT: #5 head $H" --body "$d/body.md"
 
 echo "pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]

@@ -35,20 +35,21 @@ let reads ~binding_name ~fields =
 let reads_prim ~binding_name ~fields =
   reads_in ~module_path:"bin/masc_tui_render_prim.ml" ~binding_name ~fields
 
-(* The detail under the list is three rows, and [boxed_surface_chrome_rows]
-   budgets one for the selected row's own line. Every kind takes that one
-   except a held tool call, which answers two questions -- what is being asked,
-   and why it was held -- and the ask runs the width of the pane, so at eighty
-   columns they cannot share a row.
+(* The detail under the list is three rows, and every kind takes one of them
+   except a held tool call, which answers two questions -- what is being
+   asked, and why it was held -- and the ask runs the width of the pane, so at
+   eighty columns they cannot share a row.
 
    That second row used to be spelled as a literal ["\\n"]: backslash and n,
    printed to the operator as those two characters, because a real newline
-   would have drawn a row nobody had counted. Both halves live in one place
-   now -- the budget asks [approval_detail_line] how tall its line is before
-   spending the rows on it -- and this pins that they stay one place. A height
-   declared beside the drawing instead of read off it is how the footer floats
-   a row, which is the defect the queue rows already taught the chat pane
-   (#29818). *)
+   would have drawn a row nobody had counted. The surface draws the block into
+   a buffer and reads its height back with [rows_drawn], so a row it draws is
+   a row it counted. A height declared beside the drawing instead of read off
+   it is how the footer floats a row: the rows above the queue were once
+   subtracted twice, in [boxed_surface_chrome_rows] and again as the Gate lane
+   rows, and the Approvals footer sat two rows above the composer at every
+   height. The four readings are the block above the queue, the block below
+   it, the footer, and the ask section. *)
 let test_the_detail_height_is_read_off_the_line_it_draws () =
   let calls callee =
     Ast_grep.count_calls_in_value_binding ~module_path:render
@@ -56,8 +57,8 @@ let test_the_detail_height_is_read_off_the_line_it_draws () =
   in
   Alcotest.(check int) "the surface builds the detail line once" 1
     (calls "approval_detail_line");
-  Alcotest.(check int) "and asks that same line for its height" 1
-    (calls "approval_detail_rows")
+  Alcotest.(check int) "and reads every block's height off what it drew" 4
+    (calls "rows_drawn")
 
 (* Whether the reading is live. Forty-two surface renderers in this file end
    their title with [connection_badge]; the roster was the one that did not,
@@ -995,6 +996,24 @@ let test_both_doors_into_the_runtime_detail_ask_the_same_lane_list () =
    "newest post first" a post replied to a minute ago sat sixth reading "25s".
    The sort is read once for the whole list: the header word and every row's
    number name the same time only while one reading feeds both. *)
+(* The Tasks pane beside the detail drew a row's title and nothing else. The
+   label itself is tested in test_tui_sidebar_index_fold; this says the pane
+   reaches it, and that the id it passes is the row's own. *)
+let test_the_tasks_list_pane_says_which_task_each_row_is () =
+  Alcotest.(check int) "the pane builds its labels through the shared one" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_task_detail"
+       ~callee:"Render_schedule.task_list_sidebar_label");
+  (* Off [task], which is the one the detail beside this pane is open on: a
+     label built from that id would give every row the same one. The pane
+     also reads [task.id] to find which row to highlight, and that read is
+     what this excludes rather than counts. *)
+  Alcotest.(check int) "and passes the row's own id, not the open task's" 1
+    (Ast_grep.count_field_accesses_off_other_records_in_value_binding
+       ~module_path:render ~binding_name:"render_task_detail" ~record:"task"
+       ~fields:[ "id" ])
+;;
+
 let test_the_board_age_column_reads_the_sort_once () =
   let asks ~callee =
     Ast_grep.count_calls_in_value_binding ~module_path:render
@@ -1166,6 +1185,9 @@ let () =
             test_both_doors_into_the_runtime_detail_ask_the_same_lane_list
         ; Alcotest.test_case "the Board age column reads the sort once" `Quick
             test_the_board_age_column_reads_the_sort_once
+        ; Alcotest.test_case
+            "the Tasks list pane says which task each row is" `Quick
+            test_the_tasks_list_pane_says_which_task_each_row_is
         ; Alcotest.test_case "every Fusion run list reads one clock" `Quick
             test_every_fusion_run_list_reads_one_clock
         ] )

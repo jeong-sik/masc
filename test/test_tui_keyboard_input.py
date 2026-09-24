@@ -18105,7 +18105,7 @@ def run_dos_live_regression(executable: str) -> None:
     posts: HttpRequests = []
     first_read = GatedHttpResponse(
         machine_live_answer("dos_capture", picture["frame"], None,
-                            count=100, frame_number=None), hold_seconds=20.0)
+                            count=999, frame_number=None), hold_seconds=20.0)
 
     def resolve(path: str) -> HttpResponse:
         kind, since = machine_live_query(path)
@@ -18141,10 +18141,21 @@ def run_dos_live_regression(executable: str) -> None:
             assert not first_read.completed.is_set(), "DOS menu read did not remain pending"
             key(b"j", b"Esc:back")
             assert not first_read.completed.is_set(), "menu key waited for DOS pixels"
+            key(b"\x1b", b"MASC Overview")
+            reopened_from = key(b":go msx\r", MSX_MENU_TITLE)
+            wait_for_output(process, master, output, b"watch DOS machine",
+                            start=reopened_from, timeout=5.0)
+            assert len(dos_reads) == 2, "reopened menu waited for or duplicated the old DOS read"
+            assert not first_read.completed.is_set(), "old DOS read completed before the reopen check"
         finally:
             first_read.release.set()
-        wait_for_output(process, master, output, b"watch DOS machine",
-                        start=0, timeout=5.0)
+        assert wait_for_fixture_event(process, master, output,
+                                      first_read.completed, timeout=5.0)
+        observe_for(0.2)
+        assert len(dos_reads) == 2, "stale DOS completion started another menu read"
+        # The delayed old response says change 999; the fresh reopened view
+        # says 100. The spectator assertion below catches an old response
+        # that overwrites the fresh view even if no extra HTTP read was made.
         start = key(b"\r", b"Esc: back  +/-: 100%")
         watching = bytes(output[start:])
         if b"DOS \xe2\x80\x94 change 100" not in watching:

@@ -1889,12 +1889,9 @@ type msx_poll_state = Poll_idle | Poll_pending of msx_poll_request | Poll_failed
 let msx_pending_poll = ref Poll_idle
 let invalidate_msx_poll () = msx_poll_view := ref ()
 
-(* A live read of the DOS screen. It changes nothing on the server, so a lost
-   answer is simply read again at the next interval; one is in flight at a
-   time. It belongs to the spectator view it was asked for, the same view
-   identity the MSX tick carries. *)
-type machine_live_request = { live_view : unit ref; live_port : int }
-let dos_live_pending = ref false
+(* A DOS read changes nothing on the server. The current view owns one read;
+   reopening may start another without waiting for an old view's HTTP timeout.
+   Only the owning request may clear its state slot or draw its answer. *)
 
 type async_msg =
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
@@ -3235,9 +3232,12 @@ let launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
 ;;
 
 let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
-  if not !dos_live_pending then begin
-    dos_live_pending := true;
+  let current_view = !msx_poll_view in
+  match state.dos_live_in_flight with
+  | Some pending when pending.live_view == current_view && pending.live_port = state.port -> ()
+  | Some _ | None ->
     let request = { live_view = !msx_poll_view; live_port = state.port } in
+    state.dos_live_in_flight <- Some request;
     let since = Masc_tui_machine_live.since state.dos_live in
     let run () =
       let result =
@@ -3257,7 +3257,6 @@ let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> enqueue_async mailbox (Dos_live_loaded (request, Error (Printexc.to_string exn))))
-  end
 ;;
 
 let launch_keeper_turns_load state ~mailbox =
@@ -14887,25 +14886,28 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 end)
        | Poll_pending _ | Poll_idle | Poll_failed -> ())
   | Dos_live_loaded (request, result) ->
-      dos_live_pending := false;
-      let watching_dos =
-        match state.machine_source with
-        | Masc_tui_machine_live.Dos -> true
-        | Masc_tui_machine_live.Msx -> false
-      in
-      if request.live_view == !msx_poll_view && request.live_port = state.port
-         && state.msx_open && (state.msx_menu_open || watching_dos) then
-        (* An unchanged answer draws nothing and decodes no pixels. The same
-           read also discovers the DOS watch row while the menu is open. *)
-        (match Masc_tui_machine_live.advance state.dos_live result with
-         | None -> ()
-         | Some view ->
-             state.dos_live <- view;
-             if state.msx_menu_open then
-               Masc_tui_msx.render_menu ~write:write_to_terminal state
-             else render_spectator state)
-      else if state.msx_open && state.msx_menu_open then
-        launch_dos_live_poll state ~mailbox
+      (match state.dos_live_in_flight with
+       | Some pending when pending == request ->
+           state.dos_live_in_flight <- None;
+           let watching_dos =
+             match state.machine_source with
+             | Masc_tui_machine_live.Dos -> true
+             | Masc_tui_machine_live.Msx -> false
+           in
+           if request.live_view == !msx_poll_view && request.live_port = state.port
+              && state.msx_open && (state.msx_menu_open || watching_dos) then
+             (* An unchanged answer draws nothing and decodes no pixels. The
+                read also discovers the DOS watch row while the menu is open. *)
+             (match Masc_tui_machine_live.advance state.dos_live result with
+              | None -> ()
+              | Some view ->
+                  state.dos_live <- view;
+                  if state.msx_menu_open then
+                    Masc_tui_msx.render_menu ~write:write_to_terminal state
+                  else render_spectator state)
+           else if state.msx_open && state.msx_menu_open then
+             launch_dos_live_poll state ~mailbox
+       | Some _ | None -> ())
   | Keeper_chat_control_received (keeper_name, generation, token) ->
       if generation = keeper_chat_control_generation state keeper_name then begin
         (* [false] means no control was pending for this generation and

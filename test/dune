@@ -2808,6 +2808,8 @@
 (include stanzas/test_prompt_registry_dune_fallback.inc)
 (include stanzas/test_provider_usage_windows.inc)
 
+(include stanzas/test_tui_overview_providers.inc)
+
 (include stanzas/test_keeper_surface_status.inc)
 
 (include stanzas/test_keeper_memory_write.inc)
@@ -3641,10 +3643,14 @@
  (modules test_tui_keeper_chat_log)
  ; The golden case runs the server's own AG-UI projection and SSE encoder over
  ; a journal, so the wire the TUI decodes is the real one, not a fixture.
+ ; agent_core is named for the stop reason and the mid-stream counters a
+ ; message delta carries; it is already in this test's link closure through
+ ; masc.
  (libraries
   alcotest
   fmt
   masc
+  masc.agent_core
   masc.masc_types
   masc.keeper_chat_operations
   masc.ag_ui

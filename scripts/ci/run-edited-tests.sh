@@ -1413,19 +1413,19 @@ FAKE
       failures=$((failures + 1))
     fi
   }
-  runner_invocation_check() {
-    local label="$1" want_call="$2"
+  runner_calls_check() {
+    local label="$1" want_calls="$2"
     shift 2
     local calls got recorded_call
     calls=$(mktemp)
     got=$(RUNNER_DUNE_CALLS_FILE="${calls}" runner_failures "$@")
     recorded_call=$(cat "${calls}")
     rm -f "${calls}"
-    if [ -z "${got}" ] && [ "${recorded_call}" = "${want_call}" ]; then
+    if [ -z "${got}" ] && [ "${recorded_call}" = "${want_calls}" ]; then
       echo "ok   ${label}"
     else
       echo "FAIL ${label}"
-      echo "     want: no failures, one dune invocation: ${want_call}"
+      echo "     want: no failures, dune calls in order: ${want_calls}"
       echo "     got:  ${got:-<nothing>}, dune invocation(s): ${recorded_call:-<nothing>}"
       failures=$((failures + 1))
     fi
@@ -1459,30 +1459,21 @@ FAKE
   # (202s/221s in run 35685267067) and its bound shrank to that. It must run
   # first, at its own bound, with everything else fitted into what is left.
   #
-  # The phase does not make a selection cheaper, it decides who is starved
-  # when the budget cannot hold all of it, so what this pins is that pair:
-  # the walk finishes whole and the suite after it is the one the budget
-  # names. Disable the phase and this fixture fails -- nothing is named,
-  # because the walk then spends the budget the other suite was going to use.
-  # MASC_SELFTEST_CUSTOM_BOUND_SUITE is what puts the stand-in on the
-  # custom-bound list; without it the walk never enters the phase and any
-  # ordering passes. When #36343 removes the custom bound, the phase, the
-  # hook and this fixture go together.
-  #
-  # The numbers: the walk builds for four seconds and runs for eight, so it
-  # needs twelve of the budget's fifteen and the suite after it cannot start
-  # its own four-second build. They were one, two and four, which left the
-  # walk one second of slack -- and on a loaded runner the setup spent that
-  # second before dune began, so the walk named itself "stopped at the step
-  # budget" and the case failed on pull requests that had not touched it
-  # (#38615). The shape still reads the clock; what changed is that the
-  # margin is now three seconds rather than one. The case below stopped
-  # reading the clock altogether for the same reason.
+  # Assert the calls themselves: the custom-bound Python rule runs before
+  # linked suites and is not run again by the ordinary Python phase. This
+  # checks the order without making a loaded runner prove it by sleeping
+  # close to a wall-clock budget (#38615). Removing the custom-bound phase
+  # reverses these calls; running the rule twice adds a third call. The hook
+  # and this fixture go together when #36343 removes the custom bound.
   MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py" \
-  FAKE_DUNE_SUITE_SECONDS=8 \
-    runner_check "a custom-bound walk runs first and whole, and the budget names what follows" \
-      "test/test_slow_one (not built: the step budget ran out);" \
-      4 15 test_slow_one test/test_slow_py.py
+  FAKE_DUNE_SUITE_SECONDS=0 \
+    runner_calls_check "a custom-bound walk runs once before linked suites" \
+      $'@test/runtest-test_slow_py\ntest/test_slow_one.exe' \
+      0 30 test_slow_one test/test_slow_py.py
+  MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py" \
+    runner_check "an exhausted budget names the walk and the linked suite" \
+      "test/test_slow_py (not run: the step budget ran out);test/test_slow_one (not built: the step budget ran out);" \
+      0 0 test_slow_one test/test_slow_py.py
 
   # Production is untouched by the hook: with the variable unset a plain
   # Python suite keeps the default bound and only the walk has its own.
@@ -1497,7 +1488,7 @@ FAKE
   # Count the call instead of inferring one call from whether two-second
   # stand-in builds fit inside a three-second wall-clock budget. On a loaded
   # runner the setup could consume that one-second margin before dune began.
-  runner_invocation_check "default-bound Python rules share one dune invocation" \
+  runner_calls_check "default-bound Python rules share one dune invocation" \
     "@test/runtest-test_python_one @test/runtest-test_python_two" \
     0 30 test/test_python_one.py test/test_python_two.py
   # The build starts with budget left and outlasts it, so the timeout on the

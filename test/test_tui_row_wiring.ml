@@ -1107,23 +1107,24 @@ let test_an_automation_row_says_when_it_was_asked_for () =
    recurrence column. [%-Ns] also counts bytes, so any non-ASCII value would
    miss its width even inside the column.
 
-   Both cells are now cut to a width measured in cells: the status to the
-   widest word the schedule contract names, the recurrence to a declared
-   budget. *)
+   Every cell is now held to a width measured in cells: the status to the
+   widest word the schedule contract names, the clock to the shape the format
+   answers in, the recurrence to the widest summary the page holds. *)
 let test_the_automation_row_cuts_the_columns_it_draws () =
-  Alcotest.(check int) "the status cell is cut to a width" 1
+  Alcotest.(check int) "the three fixed cells are held to a width" 3
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"automation_lines" ~callee:"fit_width");
-  (* The recurrence cell is folded rather than cut: see the case below. *)
-  Alcotest.(check int) "the recurrence cell is folded in the middle" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render
-       ~binding_name:"automation_lines" ~callee:"Message_layout.fit_middle");
-  (* The column is measured over the rows the frame draws, so a page whose
-     summaries all fit loses nothing. Without the fold the ceiling was the
-     width, whatever the page held. *)
-  Alcotest.(check int) "and its width is measured over the page" 1
+  (* The column is measured over the rows the frame draws, so a page of short
+     summaries draws no wider than it needs and no summary is ever cut. *)
+  Alcotest.(check int) "and the recurrence width is measured over the page" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"automation_lines" ~callee:"List.fold_left");
+  (* The clock width is read off the format. A number typed here would drift
+     from it the first time the format changed. *)
+  Alcotest.(check int) "the clock width is read off the format" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"schedule_requested_clock_cells"
+       ~callee:"Terminal_text.short_timestamp_of_unix");
   Alcotest.(check int) "and no column is padded by Printf" 0
     (Ast_grep.count_string_literals_containing_in_value_binding
        ~module_path:render ~binding_name:"automation_lines" ~needle:"%-");
@@ -1139,54 +1140,43 @@ let has_substring haystack needle =
   let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
   n = 0 || scan 0
 
-(* The summaries the live fleet holds, longest first: of 676 schedule
-   requests these two are the only ones past eighteen cells. *)
+(* The column is measured over the page and has no ceiling, so every summary
+   on a page is drawn whole -- including the two the live fleet holds that
+   reach past eighteen cells. A ceiling would be today's measurement, and one
+   summary past it puts the cut back on a clock, where the middle fold keeps
+   a third of the room at the head and the hour is what goes. *)
 let longest_live_recurrences =
   [ "daily 09:25:00 +09:00"; "cron 0 */2 * * * UTC" ]
 
-(* The ceiling is set to the longest of them, so neither is folded. The fold
-   keeps a third of the room at the head, which at eighteen cells drew
-   "daily\xe2\x80\xa625:00 +09:00" -- the zone survives and the hour does
-   not, and a clock missing either one is a wrong reading. Lowering the
-   ceiling brings that back, and this case is what says so. *)
-let test_the_ceiling_draws_the_longest_live_recurrence_whole () =
+let test_the_measured_column_draws_every_summary_whole () =
+  let widest =
+    List.fold_left
+      (fun widest summary ->
+         max widest (Masc_tui_message_layout.display_width summary))
+      0 longest_live_recurrences
+  in
   List.iter
     (fun summary ->
-       let drawn =
-         Masc_tui_message_layout.fit_middle
-           Masc_tui_layout.schedule_recurrence_ceiling_cells summary
-       in
+       let drawn = Masc_tui_message_layout.fit_width summary widest in
        Alcotest.(check bool)
          (Printf.sprintf "%s is drawn whole" summary)
          true
          (has_substring drawn summary);
-       (* Named so a ceiling that keeps the ends but drops the middle cannot
-          pass by carrying the tail alone. *)
-       Alcotest.(check bool)
-         (Printf.sprintf "%s keeps its hour" summary)
-         true
-         (not (has_substring drawn "\xe2\x80\xa6")))
+       Alcotest.(check int)
+         (Printf.sprintf "%s fills the column" summary)
+         widest
+         (Masc_tui_message_layout.display_width drawn))
     longest_live_recurrences
 ;;
 
-(* And the fold itself keeps the tail, at every width the column can be
-   measured to under the ceiling. A page of short summaries measures narrow,
-   and one long summary on such a page is folded rather than cut. *)
-let test_a_folded_recurrence_keeps_its_zone () =
-  List.iter
-    (fun (summary, tail) ->
-       for column = 10 to Masc_tui_layout.schedule_recurrence_ceiling_cells - 1 do
-         let drawn = Masc_tui_message_layout.fit_middle column summary in
-         Alcotest.(check bool)
-           (Printf.sprintf "%s at %d cells keeps %s" summary column tail)
-           true
-           (has_substring drawn tail);
-         Alcotest.(check int)
-           (Printf.sprintf "%s at %d cells fills the column" summary column)
-           column
-           (Masc_tui_message_layout.display_width drawn)
-       done)
-    [ "daily 09:25:00 +09:00", "+09:00"; "cron 0 */2 * * * UTC", "UTC" ]
+(* And the shorter rows are padded into the same column rather than left to
+   shift the summary beside them. *)
+let test_a_short_summary_is_padded_to_the_column () =
+  let drawn = Masc_tui_message_layout.fit_width "daily" 21 in
+  Alcotest.(check int) "padded to the column" 21
+    (Masc_tui_message_layout.display_width drawn);
+  Alcotest.(check bool) "and nothing was cut" false
+    (has_substring drawn "\xe2\x80\xa6")
 ;;
 
 (* Three lists draw a Fusion run's start: the Fusion list, the run detail and
@@ -1298,10 +1288,10 @@ let () =
             `Quick test_an_automation_row_says_when_it_was_asked_for
         ; Alcotest.test_case "the automation row cuts the columns it draws"
             `Quick test_the_automation_row_cuts_the_columns_it_draws
-        ; Alcotest.test_case "the ceiling draws the longest live recurrence whole"
-            `Quick test_the_ceiling_draws_the_longest_live_recurrence_whole
-        ; Alcotest.test_case "a folded recurrence keeps its zone" `Quick
-            test_a_folded_recurrence_keeps_its_zone
+        ; Alcotest.test_case "the measured column draws every summary whole"
+            `Quick test_the_measured_column_draws_every_summary_whole
+        ; Alcotest.test_case "a short summary is padded to the column" `Quick
+            test_a_short_summary_is_padded_to_the_column
         ; Alcotest.test_case
             "the Tasks list pane says which task each row is" `Quick
             test_the_tasks_list_pane_says_which_task_each_row_is

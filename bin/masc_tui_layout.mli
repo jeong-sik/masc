@@ -34,12 +34,6 @@ val board_read_side_minimum_cols : int
 (** Minimum width of the two-column layout, derived from its post, gutter,
     and comment widths. *)
 
-val schedule_recurrence_ceiling_cells : int
-(** The widest the Automation rows' recurrence column can be measured to. Set
-    to the widest summary the live fleet holds, because a summary past it is
-    folded in the middle and the fold keeps only a third of the room at the
-    head -- enough for the zone at the tail, not for the hour. *)
-
 val board_read_side_body_minimum_cols : int
 (** Minimum width preserved for the post when the side layout is active. *)
 

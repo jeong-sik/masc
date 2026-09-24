@@ -3986,6 +3986,14 @@ let schedule_status_word_cells =
     0 Schedule_contract_values.schedule_status_strings
 
 
+(* The width of the request clock column, read off the format rather than
+   typed. [short_timestamp] answers a parsed stamp in this shape, but an
+   unparsed one comes back as the source text and an absent one as "(never)",
+   and either of those pulls the three columns after it out of line -- the
+   same shape as the printf padding this row gave up. *)
+let schedule_requested_clock_cells =
+  Message_layout.display_width (Terminal_text.short_timestamp_of_unix 0.)
+
 (* What became of the wake, for a list row that has one line to say it in.
 
    The word is the server's own [projection_status], not a reading of it.
@@ -7861,18 +7869,23 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
             ^ Terminal_text.single_line err ^ Ansi.reset ]
       | _, Some (keeper_name, snapshot) when String.equal keeper_name k.k_name ->
           let rows = snapshot.scs_rows in
-          (* The column is as wide as the widest summary this page holds, up
-             to the ceiling. A page whose summaries all fit loses nothing,
-             and a page with one long summary folds that one rather than
-             reserving cells the rest of the rows leave blank. *)
+          (* The column is as wide as the widest summary this page holds, and
+             no wider: it pads the shorter rows into line and cuts nothing.
+
+             There is no ceiling. A ceiling would be today's measurement --
+             of 676 live requests the longest is 21 cells -- and one summary
+             past it puts the cut back on a clock, where the middle fold
+             keeps a third of the room at the head and the hour is what goes.
+             A clock missing its hour or its zone is a wrong reading. The
+             column beside it carries the payload summary, which the detail
+             shows in full, so that is where a narrow row gives way. *)
           let recurrence_cells =
-            min Layout.schedule_recurrence_ceiling_cells
-              (List.fold_left
-                 (fun widest (row : schedule_row) ->
-                    max widest
-                      (Message_layout.display_width
-                         (Terminal_text.single_line row.sch_recurrence_summary)))
-                 0 rows)
+            List.fold_left
+              (fun widest (row : schedule_row) ->
+                 max widest
+                   (Message_layout.display_width
+                      (Terminal_text.single_line row.sch_recurrence_summary)))
+              0 rows
           in
           if not (String.equal snapshot.scs_status "ok") then
             [ (Theme.bad ())
@@ -7931,9 +7944,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                      (fit_width
                         (Terminal_text.single_line row.sch_status)
                         schedule_status_word_cells)
-                     (Terminal_text.short_timestamp row.sch_requested_at_iso)
-                     (Message_layout.fit_middle recurrence_cells
-                        (Terminal_text.single_line row.sch_recurrence_summary))
+                     (fit_width
+                        (Terminal_text.short_timestamp row.sch_requested_at_iso)
+                        schedule_requested_clock_cells)
+                     (fit_width
+                        (Terminal_text.single_line row.sch_recurrence_summary)
+                        recurrence_cells)
                      (Terminal_text.single_line
                         (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))
                 rows

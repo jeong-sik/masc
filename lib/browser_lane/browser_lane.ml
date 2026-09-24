@@ -413,12 +413,40 @@ let stagehand_executor : (verb -> answer) option Atomic.t = Atomic.make None
 let install_stagehand_executor executor = Atomic.set stagehand_executor executor
 let issue_stagehand ~verb ~timeout_sec =
   if not (verb_allowed_on_stagehand verb) then
-    Rejected_before_effect ("the stagehand lane does not serve " ^ verb_to_string verb ^ " yet")
+    Rejected_before_effect ("the stagehand lane does not serve " ^ verb_to_string verb)
   else
   match Atomic.get stagehand_executor with
   | None -> Lane_absent
   | Some execute -> Watched_work.run (fun () -> execute verb)
       ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)
+(* The lanes whose browser the server owns; sessions and navigation belong
+   to them, and the live browser belongs to the operator. *)
+type server_lane = Server_automation | Server_stagehand
+
+let server_lane_of_name : Lane_name.t -> server_lane option = function
+  | Lane_name.Automation -> Some Server_automation
+  | Lane_name.Stagehand -> Some Server_stagehand
+  | Lane_name.Live -> None
+;;
+
+let server_lane_name = function
+  | Server_automation -> Lane_name.Automation
+  | Server_stagehand -> Lane_name.Stagehand
+;;
+
+let server_lanes_expected =
+  String.concat " or " (List.map (fun lane -> Lane_name.to_wire (server_lane_name lane)) [ Server_automation; Server_stagehand ])
+;;
+
+(* [None] for a string that is no lane name and for the live lane. *)
+let server_lane_of_wire raw = Option.bind (Lane_name.of_wire raw) server_lane_of_name
+
+let issue_server_lane lane ~verb ~timeout_sec =
+  match lane with
+  | Server_automation -> issue_automation ~verb ~timeout_sec
+  | Server_stagehand -> issue_stagehand ~verb ~timeout_sec
+;;
+
 let issue_for ~target ~verb ~timeout_sec =
   match target with
   | Live_client client -> issue_live client ~verb ~timeout_sec

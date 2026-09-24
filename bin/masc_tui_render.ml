@@ -11330,10 +11330,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
          | None -> match view.source with
              | Live ->
                (match browser_label view with
-                | Some browser -> "  Live " ^ browser ^ " • b:choose browser • a:automation"
-                | None -> "  Live • b:choose browser • a:automation")
-             | Automation -> "  Automation browser • g:URL • o:open / x:close • l:live"
-             | Stagehand -> "  Stagehand browser • a:automation • l:live");
+                | Some browser -> "  Live " ^ browser ^ " • b:choose browser • a:automation • c:stagehand"
+                | None -> "  Live • b:choose browser • a:automation • c:stagehand")
+             | Automation -> "  Automation browser • g:URL • o:open / x:close • l:live • c:stagehand"
+             | Stagehand -> "  Stagehand browser • g:URL • o:open / x:close • l:live • a:automation");
       let tabs, page = match view.reading with
         | None -> [], None
         | Some reading -> reading.tabs, reading.page

@@ -10,32 +10,40 @@ let read_body request reqd f =
     match Yojson.Safe.from_string body with
     | exception Yojson.Json_error detail -> reply request reqd (Error detail)
     | json -> reply request reqd (f json))
+(* Sessions and navigation belong to the lanes the server owns. The request
+   names one; the live browser belongs to the operator. *)
+let server_lane fields =
+  let refused = "lane must be " ^ Browser_lane.server_lanes_expected in
+  match List.assoc_opt "lane" fields with
+  | Some (`String raw) -> Option.to_result ~none:refused (Browser_lane.server_lane_of_wire raw)
+  | Some _ | None -> Error refused
 let session = function
   | `Assoc fields ->
     let headless = match List.assoc_opt "headless" fields with
       | None -> Ok None | Some (`Bool value) -> Ok (Some value)
       | _ -> Error "headless must be boolean" in
-    (match headless, List.assoc_opt "action" fields with
-     | Error detail, _ -> Error detail
-     | Ok headless, Some (`String "open") ->
-       Browser_lane.issue_automation ~verb:(Browser_lane.Session_open {headless}) ~timeout_sec:60.
+    (match headless, server_lane fields, List.assoc_opt "action" fields with
+     | Error detail, _, _ | Ok _, Error detail, _ -> Error detail
+     | Ok headless, Ok lane, Some (`String "open") ->
+       Browser_lane.issue_server_lane lane ~verb:(Browser_lane.Session_open {headless}) ~timeout_sec:60.
        |> Browser_surface.decode_answer
-     | Ok _, Some (`String "close") ->
-       Browser_lane.issue_automation ~verb:Browser_lane.Session_close ~timeout_sec:60.
+     | Ok _, Ok lane, Some (`String "close") ->
+       Browser_lane.issue_server_lane lane ~verb:Browser_lane.Session_close ~timeout_sec:60.
        |> Browser_surface.decode_answer
      | _ -> Error "action must be open or close")
   | _ -> Error "body must be an object"
 let goto = function
   | `Assoc fields ->
-    (match List.assoc_opt "url" fields with
-     | Some (`String url) ->
+    (match server_lane fields, List.assoc_opt "url" fields with
+     | Error detail, _ -> Error detail
+     | Ok lane, Some (`String url) ->
        let uri = Uri.of_string url in
        (match Uri.scheme uri, Uri.host uri with
         | Some ("http" | "https"), Some host when host <> "" ->
-          Browser_lane.issue_automation ~verb:(Browser_lane.Page_goto { url; tab_id = None }) ~timeout_sec:60.
+          Browser_lane.issue_server_lane lane ~verb:(Browser_lane.Page_goto { url; tab_id = None }) ~timeout_sec:60.
           |> Browser_surface.decode_answer
         | _ -> Error "url must be an absolute HTTP(S) URL")
-     | _ -> Error "url is required")
+     | Ok _, _ -> Error "url is required")
   | _ -> Error "body must be an object"
 let add_routes router =
   router

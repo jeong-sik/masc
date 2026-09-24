@@ -6031,6 +6031,7 @@
 
 (include stanzas/test_browser_native_host.inc)
 (include stanzas/test_browser_lane_routes.inc)
+(include stanzas/test_browser_surface_session_routes.inc)
 
 (test
  (name test_shell_ir_with_sandbox)

@@ -774,6 +774,7 @@ if [ "$rc" = 124 ]; then
     echo "[test-suite] alcotest case output at deadline: no .output file under $sandbox_root;" \
          "no suite had started a case, or the suites run outside a sandbox"
   fi
+  full_log_evidence "$log"
   echo
   tail -60 "$log"
   exit 2
@@ -810,9 +811,6 @@ if [ "$rc" != 0 ] && [ "$header_count" -eq 0 ]; then
   echo
   echo "[test-suite] a PASS line above is that suite's own verdict, not dune's exit code:" \
        "dune exited ${rc} somewhere this log does not name."
-  # The self-test checks that the workflow's artifact name and upload step
-  # land together. #37529 remains open until a real failed run proves both
-  # this receipt and the artifact exist outside the runner.
   full_log_evidence "$log"
   echo
   tail -60 "$log"
@@ -865,6 +863,13 @@ if [ -n "$fixed" ]; then
   echo
   echo "Take these lines out of $known_file. Leaving them is slack: the next"
   echo "suite to break can take the empty slot and still read as expected."
+fi
+
+# Every red exit names where the untruncated Dune log went: the step output
+# holds only its tail, and the suite block above can be the one cut off.
+if [ "$status" != 0 ]; then
+  echo
+  full_log_evidence "$log"
 fi
 
 if [ "$status" = 0 ]; then

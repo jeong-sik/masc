@@ -63,6 +63,20 @@ val keeper_observation_host_path_of_visible_path
 val safe_file_exists : string -> bool
 val safe_is_dir : string -> bool
 
+(** Whether a resolved cwd exists, asked of the filesystem that holds the
+    Keeper's tree (RFC-0427 A-1). [Endpoint_decides] for a tree the endpoint
+    owns: the host path is bookkeeping, so the host is not asked and the
+    endpoint reports a missing directory when the tool runs there. The other
+    three are the host's answer for a shared-mount tree. Every file tool that
+    checks a cwd asks here. *)
+type cwd_existence =
+  | Endpoint_decides
+  | Host_directory
+  | Host_missing
+  | Host_file
+
+val cwd_existence : meta:Keeper_meta_contract.keeper_meta -> string -> cwd_existence
+
 (** Project a Keeper-visible write path into its deterministic logical
     namespace and return the opaque allowed-root capability locator. This is
     the single owner of relative-path and Docker-visible-path projection for

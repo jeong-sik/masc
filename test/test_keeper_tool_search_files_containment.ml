@@ -13,6 +13,8 @@ module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory
 module Keeper_sandbox_repo_path = Masc.Keeper_sandbox_repo_path
 module Keeper_tool_execute_path = Masc.Keeper_tool_execute_path
+module Keeper_tool_filesystem_runtime = Masc.Keeper_tool_filesystem_runtime
+module Keeper_tool_shared_runtime = Masc.Keeper_tool_shared_runtime
 module Keeper_types = Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path
 module Fs_compat = Fs_compat
@@ -535,6 +537,69 @@ let test_a_guest_only_cwd_is_the_endpoints_to_check () =
       (String_util.contains_substring e "cwd_not_directory")
 
 
+(* The rule Execute follows, asked directly. The host answers for a tree it
+   holds; for a tree the endpoint owns it is not asked at all, whatever the
+   host happens to have at that path. *)
+let test_cwd_existence_asks_whoever_holds_the_tree () =
+  setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~base:_ ~config:_ ~meta ~playground ->
+  let file = Filename.concat playground "notes.txt" in
+  ignore (Fs_compat.save_file_atomic file "notes\n");
+  let missing = Filename.concat playground "masc" in
+  let check label meta path expected =
+    Alcotest.(check bool) label true
+      (Keeper_tool_shared_runtime.cwd_existence ~meta path = expected)
+  in
+  check "docker: a directory" meta playground Keeper_tool_shared_runtime.Host_directory;
+  check "docker: a file" meta file Keeper_tool_shared_runtime.Host_file;
+  check "docker: missing" meta missing Keeper_tool_shared_runtime.Host_missing;
+  List.iter
+    (fun (label, profile) ->
+       let meta = { meta with Masc.Keeper_meta_contract.sandbox_profile = profile } in
+       List.iter
+         (fun path ->
+            check (label ^ ": the endpoint decides") meta path
+              Keeper_tool_shared_runtime.Endpoint_decides)
+         [ playground; file; missing ])
+    [ "microvm", Keeper_types_profile_sandbox.Micro_vm
+    ; "remote_ssh", Keeper_types_profile_sandbox.Remote_ssh
+    ]
+
+(* Read and the search tools checked their cwd on the host whatever the
+   profile. A microvm keeper's Read with cwd="masc" was refused 101 times in
+   the week to 2026-09-24, told that "no repository is materialized" -- the
+   host playground scan answering for a checkout that existed in the guest.
+   A docker keeper, whose tree is this host's, still hears the checkouts
+   that exist. *)
+let test_read_cwds_follow_the_tree () =
+  let masc_cwd = `Assoc [ ("cwd", `String "masc") ] in
+  (setup ~keeper_name:"glossary-maniac" ~sandbox:Keeper_types_profile_sandbox.Micro_vm
+   @@ fun ~base:_ ~config ~meta ~playground ->
+   let guest_only = Filename.concat playground "masc" in
+   let names_the_guest_checkout label cwd =
+     Alcotest.(check bool) label true
+       (String.ends_with ~suffix:(Filename.concat "glossary-maniac" "masc") cwd)
+   in
+   (match Keeper_tool_filesystem_runtime.resolve_read_file_cwd ~config ~meta ~cwd:(Some "masc") with
+    | Error e -> Alcotest.fail ("Read refused a guest-only cwd on the host: " ^ e)
+    | Ok cwd -> names_the_guest_checkout "Read keeps the path for the endpoint" cwd);
+   (match Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args:masc_cwd with
+    | Error e -> Alcotest.fail ("search refused a guest-only cwd on the host: " ^ e)
+    | Ok cwd -> names_the_guest_checkout "search keeps the path for the endpoint" cwd);
+   Alcotest.(check bool) "nothing was created" false (Sys.file_exists guest_only));
+  setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~base:_ ~config ~meta ~playground:_ ->
+  (match Keeper_tool_filesystem_runtime.resolve_read_file_cwd ~config ~meta ~cwd:(Some "masc") with
+   | Ok cwd -> Alcotest.fail ("a shared-mount tree's missing Read cwd resolved: " ^ cwd)
+   | Error e ->
+     Alcotest.(check bool) "Read still says nothing is materialized" true
+       (String_util.contains_substring e "no repository is materialized"));
+  match Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args:masc_cwd with
+  | Ok cwd -> Alcotest.fail ("a shared-mount tree's missing search cwd resolved: " ^ cwd)
+  | Error e ->
+    Alcotest.(check bool) "search still hears the directory is missing" true
+      (String_util.contains_substring e "cwd_not_directory")
+
 (* Containment held for the read tools and did not hold for spawn: it ran
    [Eio.Process.spawn] on the host whatever profile the keeper was declared
    under. Measured 2026-09-01 -- a [remote_ssh] keeper built and ran OCaml on
@@ -619,5 +684,11 @@ let () =
           Alcotest.test_case
             "a guest-only cwd is the endpoint's to check"
             `Quick test_a_guest_only_cwd_is_the_endpoints_to_check;
+          Alcotest.test_case
+            "cwd existence asks whoever holds the tree"
+            `Quick test_cwd_existence_asks_whoever_holds_the_tree;
+          Alcotest.test_case
+            "Read and search cwds follow the tree"
+            `Quick test_read_cwds_follow_the_tree;
         ] );
     ]

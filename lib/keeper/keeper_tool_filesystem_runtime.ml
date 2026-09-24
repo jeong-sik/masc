@@ -270,17 +270,19 @@ let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cw
        Execute/search cwd goes through the strict no-projection resolvers
        instead (keeper_tool_execute_path). *)
     let* cwd = resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd in
-    if safe_is_dir cwd
-    then Ok cwd
-    else if safe_file_exists cwd
-    then Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
-    else
-      Error
-        (Printf.sprintf
-           "cwd_not_directory: %s (directory does not exist; Read will not create \
-            cwd);%s"
-           cwd
-           (available_cwd_hint ~config ~meta))
+    (* The hint scans the host playground, so it is only offered where the
+       host holds the tree. *)
+    (match cwd_existence ~meta cwd with
+     | Endpoint_decides | Host_directory -> Ok cwd
+     | Host_file ->
+       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
+     | Host_missing ->
+       Error
+         (Printf.sprintf
+            "cwd_not_directory: %s (directory does not exist; Read will not create \
+             cwd);%s"
+            cwd
+            (available_cwd_hint ~config ~meta)))
 ;;
 
 let resolve_read_file_target

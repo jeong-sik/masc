@@ -133,6 +133,30 @@ let safe_is_dir path =
   | Sys_error _ -> false
 ;;
 
+(* Whose filesystem says whether a cwd exists follows where the tree is
+   (RFC-0427 A-1). A shared-mount tree is on this host, so the host answers.
+   A tree the endpoint owns (a microvm work volume, a remote_ssh account) is
+   not: the host directory of the same name is the bookkeeping bundle, and
+   the endpoint answers ENOENT itself when the tool runs there. Asking the
+   host refused 38 Execute calls on 2026-09-05, and 101 Read calls in the
+   week to 2026-09-24, each for a checkout that existed in the guest. *)
+type cwd_existence =
+  | Endpoint_decides
+  | Host_directory
+  | Host_missing
+  | Host_file
+
+let cwd_existence ~(meta : keeper_meta) cwd =
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Keeper_types_profile_sandbox.Endpoint_owned -> Endpoint_decides
+  | Keeper_types_profile_sandbox.Shared_mount ->
+    if safe_is_dir cwd
+    then Host_directory
+    else if safe_file_exists cwd
+    then Host_file
+    else Host_missing
+;;
+
 let user_message_error (rej : Keeper_alerting_path.keeper_path_rejection) =
   Keeper_alerting_path.rejection_to_telemetry rej;
   Error (Keeper_alerting_path.rejection_to_user_message rej)

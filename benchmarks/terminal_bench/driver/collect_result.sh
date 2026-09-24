@@ -107,8 +107,9 @@ else
 fi
 
 # --- metrics: tool calls, failures per tool, duplicate calls ---
-# tool_outcomes.sh counts the ledger's tool_call rows only (lifecycle and
-# composition rows are not calls) and applies the repository's failure rule.
+# tool_outcomes.sh counts the ledger's tool_call rows only (a composition_run
+# row summarizes steps already recorded as calls, and a lifecycle_event row is
+# not a call) and applies the repository's failure rule.
 # null when nothing was recorded or a row could not be read, never a count
 # that silently left rows out.
 tool_log_dir="$MASC_BASE_PATH/.masc/tool_calls"
@@ -125,7 +126,7 @@ if [[ -d "$tool_log_dir" ]]; then
   # -- after the episode state was known and before result.json was written,
   # so harbor recorded no result at all.
   dup_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + \
-    | jq -c 'select((.record_kind // "tool_call") == "tool_call")
+    | jq -c 'select(.record_kind == "tool_call")
              | [.tool, ((.input // .arguments // {})|tostring)]' \
     | jq -s 'group_by(.) | map(select(length>1) | (length-1)) | add // 0')" \
     || dup_calls=0

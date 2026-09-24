@@ -53,22 +53,26 @@ def test_calls_and_failures_are_counted_per_tool(tmp_path):
 
 
 def test_rows_that_are_not_calls_are_not_counted(tmp_path):
-    # vision_candidate end rows and composition runs share the ledger with
-    # calls; counting them inflated tool_calls.
+    # A composition's steps are tool_call rows of their own; its
+    # composition_run row summarizes them, so counting it would count the run
+    # twice. A vision_candidate end row is a lifecycle marker, not a call.
     write_day(tmp_path, "24", [
         call("Execute"),
+        call("Read", disposition="failed"),
+        {"record_kind": "composition_run", "tool": "keeper_composition_run_summary",
+         "wire_outcome": "error"},
         {"record_kind": "lifecycle_event", "tool": "vision_candidate", "wire_outcome": "error"},
-        {"record_kind": "composition_run", "tool": "keeper_compose_x", "disposition": "failed"},
     ])
     data = json.loads(outcomes(tmp_path).stdout)
-    assert (data["tool_calls"], data["failed_tool_calls"]) == (1, 0)
+    assert (data["tool_calls"], data["failed_tool_calls"]) == (2, 1)
+    assert [row["tool"] for row in data["by_tool"]] == ["Read", "Execute"]
 
 
 def test_the_failure_rule_is_the_repositorys(tmp_path):
     # disposition first; wire_outcome only without one; "unknown" is not a
-    # failure; a row with no record_kind predates the field and is a call.
+    # failure.
     write_day(tmp_path, "24", [
-        {"tool": "A", "wire_outcome": "error", "output": "boom"},
+        {"record_kind": "tool_call", "tool": "A", "wire_outcome": "error", "output": "boom"},
         {"record_kind": "tool_call", "tool": "B", "wire_outcome": "unknown"},
         {"record_kind": "tool_call", "tool": "C", "disposition": "succeeded", "wire_outcome": "error"},
     ])
@@ -99,6 +103,20 @@ def test_a_row_it_cannot_read_fails_rather_than_being_left_out(tmp_path):
     assert outcomes(tmp_path).returncode != 0
     write_day(tmp_path, "24", [{"record_kind": "tool_call", "tool": "Execute"}])
     assert outcomes(tmp_path).returncode != 0
+
+
+def test_a_row_the_writer_would_not_write_fails(tmp_path):
+    # keeper_tool_call_log.ml writes record_kind and tool on every row, so a
+    # row without them, or with a kind it does not write, is broken.
+    broken = [
+        {k: v for k, v in call("Execute").items() if k != "record_kind"},
+        call("Execute", record_kind="tool_result"),
+        {k: v for k, v in call("Execute").items() if k != "tool"},
+    ]
+    for row in broken:
+        write_day(tmp_path, "24", [call("Read"), row])
+        result = outcomes(tmp_path)
+        assert result.returncode != 0, row
 
 
 def test_collect_result_reports_the_outcomes():

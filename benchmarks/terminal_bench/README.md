@@ -82,14 +82,17 @@ CPU 24개가 필요하다. CPU 가 16개인 Mac 에서는 로컬 docker 로 동�
 점수가 낮을 때 모델이 과제를 못 푼 건지, 도구가 모델을 막은 건지(경로 거절, 스키마 오류)를
 가르려고 trial 마다 도구 호출 결과를 남긴다(`driver/tool_outcomes.sh`).
 
-- `tool_calls` 는 원장의 `tool_call` 행만 센다. `lifecycle_event`·`composition_run` 행은
-  호출이 아니다.
+- `tool_calls` 는 원장의 `tool_call` 행만 센다. 조합(composition)이 돌린 단계도 각각
+  `tool_call` 행으로 남는다. `composition_run` 행은 그 단계들을 요약한 줄이라 세면 두 번
+  센다. `lifecycle_event` 행은 호출이 아니다. 대시보드는 `composition_run` 행도 세서, 조합을
+  쓴 trial 은 여기 수가 조합 실행 수만큼 적다.
 - `failed_tool_calls` 는 실패한 호출 수다. 실패는 저장소 규칙을 따른다: `disposition` 이
   `failed` 이거나, `disposition` 이 없을 때 `wire_outcome` 이 `error` 인 호출. `unknown` 은
   실패가 아니다.
 - harbor metadata 의 `tool_outcomes` 에 도구별 호출 수·실패 수·결과 바이트·가장 흔한 실패
   문장(줄바꿈은 ` / `, 200자)이 실패가 많은 순서로 들어간다.
 - 원장이 없거나 읽을 수 없는 줄이 하나라도 있으면 세 값 모두 `null` 이다. 0 이 아니다.
+  `record_kind` 가 없거나 세 값 밖인 줄, `tool` 이 없는 호출 줄도 읽을 수 없는 줄이다.
 - `aggregate.py` CSV 끝에 `failed_tool_calls` 와 `failed_by_tool`(`도구=실패 수` 를 `;` 로)
   칸이 붙는다.
 

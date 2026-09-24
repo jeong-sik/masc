@@ -549,7 +549,7 @@ let kimi_limit ~path json =
    [usages.*.used_ratio] is not read: on the same response it contradicts
    [limits[].detail] (used 20 of 100 with ratio 0), an open upstream issue,
    MoonshotAI/kimi-code#3951.  The top-level [usage] states no window
-   length, so it keeps the label "plan period". *)
+   length. Its [resetTime] is preserved without guessing the period. *)
 let decode_kimi_coding_usages json =
   let path = "kimi-coding-usages" in
   let* fields = fields_at ~path json in
@@ -560,16 +560,20 @@ let decode_kimi_coding_usages json =
     match plan with
     | None -> Ok []
     | Some (path, plan_fields) ->
-      let* window = kimi_count_window ~path ~kind:(Provider_label "plan period") plan_fields in
+      let* window =
+        kimi_count_window ~path ~kind:(Provider_label "usage (provider resetTime)") plan_fields
+      in
       Ok [ window ]
   in
   distinct_windows ~path { source = Kimi_coding_usages_read; windows = windows @ plan_windows }
 ;;
 
 (* Ollama, GET https://ollama.com/api/usage (undocumented; the vendor's own
-   client calls it).  [usage] is a 0-1 fraction: masc live log 2026-09-24 shows 21
-   refusals "you have reached your weekly usage limit" while weekly.usage
-   was 1.  The response states no reset time and no session length. *)
+   client calls it).  The observed session/weekly response reports [usage]
+   as a 0-1 fraction: masc live log 2026-09-24 shows 21 refusals "you have
+   reached your weekly usage limit" while weekly.usage was 1.  Other account
+   plans may return a different shape; refuse an unknown value with its path.
+   The observed response states no reset time and no session length. *)
 let ollama_window ~path ~kind name fields =
   let* entry = optional_object ~path name fields in
   match entry with

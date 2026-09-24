@@ -207,7 +207,8 @@ type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
 # Usage windows for the operator view, read once at server start with no
-# model call. Undocumented endpoint; Ollama's own client calls it.
+# model call. Undocumented endpoint; Ollama's own client calls it. The decoder
+# supports the observed session/weekly shape and reports other shapes as errors.
 [providers.ollama_cloud.usage-read]
 shape = "ollama-usage"
 url = "https://ollama.com/api/usage"

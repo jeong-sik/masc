@@ -293,6 +293,12 @@ let test_zai_quota_limit () =
     ]
     (decoded_windows Usage.decode_zai_quota_limit ~source:"zai.quota_limit"
        zai_quota_limit_response);
+  check (list string) "same limit type with known and unknown unit codes stays distinct"
+    [ "limit=CREDIT_LIMIT five_hour percent 12 resets=-"
+    ; "limit=CREDIT_LIMIT label \"CREDIT_LIMIT, 1 x unit 6\" percent 34 resets=-"
+    ]
+    (decoded_windows Usage.decode_zai_quota_limit ~source:"zai.quota_limit"
+       {|{"success":true,"data":{"limits":[{"type":"CREDIT_LIMIT","unit":3,"number":5,"percentage":12},{"type":"CREDIT_LIMIT","unit":6,"number":1,"percentage":34}]}}|});
   check string "success false is refused with its msg"
     "zai-quota-limit.success is not true: Unauthorized"
     (refused Usage.decode_zai_quota_limit
@@ -322,7 +328,7 @@ let test_zai_quota_limit () =
 let test_kimi_coding_usages () =
   check (list string) "windows; usages.*.used_ratio is not read"
     [ "limit=- five_hour fraction 0.2 resets=1790262616"
-    ; "limit=- label \"plan period\" fraction 0.15 resets=1790763016"
+    ; "limit=- label \"usage (provider resetTime)\" fraction 0.15 resets=1790763016"
     ]
     (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
        kimi_coding_usages_response);

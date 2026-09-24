@@ -495,10 +495,13 @@ jobs:
             echo "v$ver is already tagged; this RC publishes no body, so there is none to check."
             exit 0
           fi
-          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-            -f tag_name="v$ver" -f target_commitish="${GITHUB_SHA}" --jq .body > generated-notes.md
+          prev="$(TAG="v$ver" gh api "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq '[.[] | select(.draft | not) | .tag_name] | (index(env.TAG)) as $i | if $i == null then .[0] else .[$i + 1] end // empty')"
+          test -n "$prev"
+          printf '**Full changelog**: https://github.com/%s/compare/%s...v%s\n' \
+            "${GITHUB_REPOSITORY}" "$prev" "$ver" > compare-link.md
           python3 scripts/ci/changelog-section.py "$ver" CHANGELOG.md /dev/null \
-            --append generated-notes.md --max-chars 125000
+            --append compare-link.md --max-chars 125000
 
   release:
     needs: build
@@ -588,16 +591,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         # GitHub keeps the first 125,000 characters of a release body and drops
-        # the rest without an error (v0.37.0 lost 47,240). The generated PR list
-        # is appended here, not by the action, so the body measured is the body
-        # stored. The gate is the release-body job on the RC; this is the last
-        # line of defence once the tag exists.
+        # the rest without an error (v0.37.0 lost 47,240). The body is the
+        # CHANGELOG section plus one compare link to the previous release; the
+        # generated PR list is gone (it was about 45k on v0.37.0). The link is
+        # appended here and counted, so the body measured is the body stored.
+        # The gate is the release-body job on the RC; this is the last line of
+        # defence once the tag exists.
         run: |
-          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-            -f tag_name="${GITHUB_REF_NAME}" --jq .body > generated-notes.md
+          prev="$(TAG="${GITHUB_REF_NAME}" gh api "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq '[.[] | select(.draft | not) | .tag_name] | (index(env.TAG)) as $i | if $i == null then .[0] else .[$i + 1] end // empty')"
+          test -n "$prev"
+          printf '**Full changelog**: https://github.com/%s/compare/%s...%s\n' \
+            "${GITHUB_REPOSITORY}" "$prev" "${GITHUB_REF_NAME}" > compare-link.md
           python3 scripts/ci/changelog-section.py \
             "${GITHUB_REF_NAME#v}" CHANGELOG.md release-body.md \
-            --append generated-notes.md --max-chars 125000
+            --append compare-link.md --max-chars 125000
           head -40 release-body.md
 
       - name: Create Release
@@ -606,5 +614,5 @@ jobs:
         with:
           files: release-assets/*
           body_path: release-body.md
-          # The list is already inside release-body.md and counted there.
+          # No generated PR list: the compare link in release-body.md replaces it.
           generate_release_notes: false

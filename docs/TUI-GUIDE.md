@@ -563,11 +563,9 @@ collapsing to zero.
  Keeper: code-reviewer
    Identity
    Name:                  code-reviewer
-   Generation:            1
    Paused:                no
    Current Work
    Task:                  -
-   Last Blocker:          -
    Live Context
    Context:               8.9%  ##--------------------  93213 / 1048576 tokens
    Observed:              2026-08-23T01:53:26

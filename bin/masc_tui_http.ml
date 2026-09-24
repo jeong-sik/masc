@@ -483,13 +483,22 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
 (* One live read of a workspace machine's screen (RFC machine-spectating-
    goes-through-lanes §2.1). A transport error, a refusal and a body that does
    not decode are all [Error]: none of them says the machine is absent. The
-   message goes to the screen, so it is made terminal-safe here. *)
+   message goes to the screen, so it is made terminal-safe here.
+
+   A changed DOS answer is about 1.2 MB of JSON around 921 KB of pixels.
+   Parsing it and decoding the base64 are pure work, so they run on a system
+   thread and the UI domain keeps drawing and reading keys meanwhile; the
+   request itself stays on the fiber, where the Eio client runs. *)
 let fetch_machine_live ~(host : string) ~(port : int)
     (source : Masc_tui_machine_live.source) ~(since : Masc_tui_machine_live.mark option) :
     (Masc_tui_machine_live.answer, string) result =
   let result =
-    Result.bind (get_json ~host ~port ~path:(Masc_tui_machine_live.path source ~since))
-      (Masc_tui_machine_live.decode source)
+    match http_get ~host ~port ~path:(Masc_tui_machine_live.path source ~since) with
+    | Error _ as error -> error
+    | Ok (status_code, body) ->
+        Eio_guard.run_in_systhread ~label:"tui-machine-live-decode" (fun () ->
+          Result.bind (decode_json ~allow_empty:false ~status_code ~body)
+            (Masc_tui_machine_live.decode source))
   in
   Result.map_error Masc.Tui_decode.sanitize_terminal_text result
 

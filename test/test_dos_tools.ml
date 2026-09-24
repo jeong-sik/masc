@@ -564,17 +564,20 @@ let test_a_free_controller_goes_to_the_next_successful_mover () =
 
 (* A hotseat game runs for hours, and the Keeper holding the controller can
    stop in that time. It will never pass, so a stopped holder is let go the
-   next time someone moves the machine. A Keeper that is still running
-   keeps it. *)
+   next time a Keeper moves the machine. A Keeper that is still running keeps
+   it. The check reads Keeper state, so it sits on the Keeper's own tool
+   path, not the generic dispatch. *)
+let keeper_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ ("name", `String name); ("activation_mode", `String "manual") ])
+  with
+  | Ok meta -> meta
+  | Error error -> fail error
+;;
+
 let with_keeper ~base_path ~running name f =
-  let meta =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc [ ("name", `String name); ("activation_mode", `String "manual") ])
-    with
-    | Ok meta -> meta
-    | Error error -> fail error
-  in
+  let meta = keeper_meta name in
   ignore
     ((if running then Keeper_registry.For_testing.register ~base_path name meta
       else Keeper_registry.register_offline ~base_path name meta)
@@ -584,22 +587,36 @@ let with_keeper ~base_path ~running name f =
     f
 ;;
 
+let keeper_press ~base_path who key =
+  let execution =
+    Keeper_tool_in_process_runtime.handle_masc_misc_with_outcome
+      ~config:(Workspace.default_config base_path) ~meta:(keeper_meta who)
+      ~name:"masc_dos_press" ~args:(`Assoc [ ("keys", `List [ `String key ]) ])
+  in
+  match execution.disposition with
+  | Tool_result.Failed _ -> false
+  | _ -> true
+;;
+
+let current_controller () =
+  match Dos_lane.screen () with
+  | Ok o -> o.Dos_lane.controller
+  | Error e -> fail (Dos_lane.error_to_string e)
+;;
+
 let test_a_stopped_holders_controller_is_let_go () =
   with_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
     with_keeper ~base_path ~running:false "cao-cao" (fun () ->
       boot ~agent:"cao-cao" ~base_path "hello.com";
-      let moved = press_as ~base_path "liu-bei" "a" in
-      check bool "the next player moves" true (is_completed moved);
-      check (option string) "and holds it" (Some "liu-bei") (controller moved));
+      check bool "the next Keeper moves" true (keeper_press ~base_path "liu-bei" "a");
+      check (option string) "and holds it" (Some "liu-bei") (current_controller ()));
     with_keeper ~base_path ~running:true "won-chik" (fun () ->
       ignore
         (dispatch ~base_path ~agent:"liu-bei" "masc_dos_pass" [ ("to", `String "won-chik") ]
           : Tool_result.result);
-      let refused = press_as ~base_path "sun-quan" "a" in
-      check bool "a running holder keeps it" false (is_completed refused);
-      check (option string) "still won-chik" (Some "won-chik")
-        (controller (dispatch ~base_path "masc_dos_screen" []))))
+      check bool "a running holder keeps it" false (keeper_press ~base_path "sun-quan" "a");
+      check (option string) "still won-chik" (Some "won-chik") (current_controller ())))
 ;;
 
 (* A pass to a name no caller can ever have -- "@liu-bei", "liu bei" --

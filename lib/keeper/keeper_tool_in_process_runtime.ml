@@ -602,22 +602,54 @@ let discord_tool_error ~code message =
     (Tool_args.error_response_typed ~code message)
 ;;
 
-let discord_rest_error error =
+let discord_rest_error (error : Discord_rest_client.error) =
+  let code =
+    match error with
+    | Network _ -> Tool_args.External_service_unavailable
+    | Http_status { code = status; _ }
+    | Discord_api { http_status = status; _ } ->
+      (match status with
+       | 401 -> Tool_args.Auth_required
+       | 403 -> Tool_args.Permission_denied
+       | 404 -> Tool_args.Not_found
+       | 408 | 504 -> Tool_args.Timeout
+       | 429 -> Tool_args.Rate_limited
+       | status when status >= 500 && status <= 599 ->
+         Tool_args.External_service_unavailable
+       | _ -> Tool_args.Internal_error)
+    | Other _ -> Tool_args.Internal_error
+  in
   discord_tool_error
-    ~code:Tool_args.Internal_error
+    ~code
     (Format.asprintf "Discord read failed: %a" Discord_rest_client.pp_error error)
+;;
+
+type discord_channel_selection_error =
+  | Invalid_channel_request of string
+  | Binding_lookup_failed of string
+  | No_channel_binding of string
+
+let discord_channel_selection_failure = function
+  | Invalid_channel_request message ->
+    discord_tool_error ~code:Tool_args.Validation_error message
+  | Binding_lookup_failed message ->
+    discord_tool_error ~code:Tool_args.Internal_error message
+  | No_channel_binding message ->
+    discord_tool_error ~code:Tool_args.Precondition_failed message
 ;;
 
 let discord_bound_channel ~meta ~args =
   let requested = strict_string_opt "channel_id" args in
   match requested with
-  | Error message -> Error message
+  | Error message -> Error (Invalid_channel_request message)
   | Ok requested ->
     (match
        Channel_gate_discord_state.bound_channels_result ~keeper_name:meta.name
      with
      | Error detail ->
-       Error (Channel_gate_discord_state.binding_lookup_error_to_string detail)
+       Error
+         (Binding_lookup_failed
+            (Channel_gate_discord_state.binding_lookup_error_to_string detail))
      | Ok bound_channels ->
        let allowed channel_id =
          List.mem channel_id bound_channels
@@ -631,20 +663,22 @@ let discord_bound_channel ~meta ~args =
          if allowed channel_id then Ok channel_id
          else
            Error
-             (Printf.sprintf
-                "channel_id %S is not bound to keeper %s"
-                channel_id meta.name)
-       | Some _ -> Error "channel_id must not be empty"
+             (Invalid_channel_request
+                (Printf.sprintf
+                   "channel_id %S is not bound to keeper %s"
+                   channel_id meta.name))
+       | Some _ -> Error (Invalid_channel_request "channel_id must not be empty")
        | None ->
          (match bound_channels with
           | [ channel_id ] -> Ok channel_id
-          | [] -> Error "this keeper has no bound Discord channel"
+          | [] -> Error (No_channel_binding "this keeper has no bound Discord channel")
           | channels ->
             Error
-              (Printf.sprintf
-                 "channel_id is required; this keeper has %d bound Discord channels: %s"
-                 (List.length channels)
-                 (String.concat ", " channels))))
+              (Invalid_channel_request
+                 (Printf.sprintf
+                    "channel_id is required; this keeper has %d bound Discord channels: %s"
+                    (List.length channels)
+                    (String.concat ", " channels)))))
 ;;
 
 let discord_token () =
@@ -818,12 +852,12 @@ let handle_discord_surface_read ~meta ~args ~mode =
   | Ok (Some "discord") ->
     (match discord_bound_channel ~meta ~args, discord_token () with
      | Error message, _ ->
-       discord_tool_error ~code:Tool_args.Precondition_failed message
+       discord_channel_selection_failure message
      | _, Error message -> discord_tool_error ~code:Tool_args.Auth_required message
      | Ok raw_channel_id, Ok token ->
        (match discord_snowflake ~field:"channel_id" raw_channel_id with
         | Error message ->
-          discord_tool_error ~code:Tool_args.Precondition_failed message
+          discord_tool_error ~code:Tool_args.Validation_error message
         | Ok channel_id ->
           let clock = Eio_context.get_clock_opt () in
           let rest ?guild_id call resource =

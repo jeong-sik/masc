@@ -532,6 +532,75 @@ let test_surface_read_rejects_duplicate_dispatch_fields () =
       check (option string) "a blank lane label is the caller's to fix"
         (Some "policy_rejection") (failure_class (run (`Assoc [ "surface", `String " " ]))))
 
+let test_discord_surface_read_rest_failure_causes () =
+  let module Rest = Masc.Discord_rest_client in
+  let check_failure label error expected_code expected_class =
+    let result = Masc.Keeper_tool_in_process_runtime.discord_rest_error error in
+    let code =
+      Yojson.Safe.Util.(member "error_code" (parse_json result.raw_output) |> to_string)
+    in
+    check string (label ^ " code") expected_code code;
+    match result.disposition with
+    | Tool_result.Failed class_ ->
+      check string (label ^ " class") expected_class
+        (Tool_result.tool_failure_class_to_string class_)
+    | Tool_result.Completed () | Tool_result.Deferred () ->
+      fail (label ^ " unexpectedly completed")
+  in
+  let http code = Rest.Http_status { request_id = "test"; code; body_bytes = 0 } in
+  let api http_status =
+    Rest.Discord_api { request_id = "test"; http_status; code = 0 }
+  in
+  List.iter
+    (fun (label, error, code, class_) -> check_failure label error code class_)
+    [ "network", Rest.Network "dns", "external_service_unavailable", "dependency_unavailable"
+    ; "HTTP auth", http 401, "auth_required", "policy_rejection"
+    ; "API permission", api 403, "permission_denied", "policy_rejection"
+    ; "HTTP missing", http 404, "not_found", "policy_rejection"
+    ; "API rate limit", api 429, "rate_limited", "dependency_unavailable"
+    ; "HTTP gateway timeout", http 504, "timeout", "dependency_unavailable"
+    ; "API outage", api 503, "external_service_unavailable", "dependency_unavailable"
+    ; "HTTP unexplained bad request", http 400, "internal_error", "runtime_failure"
+    ; ( "unusable response"
+      , Rest.Other { request_id = "test"; reason = "body"; body_bytes = 0 }
+      , "internal_error"
+      , "runtime_failure" )
+    ]
+
+let test_discord_surface_read_channel_selection_causes () =
+  with_exec_fixture
+    "keeper_surface_read_channel_selection_causes"
+    (fun ~config ~meta ~publication_recovery:_ ~ctx_work:_ ->
+      let path = Filename.concat config.base_path "discord-bindings.json" in
+      with_env "MASC_DISCORD_BINDING_STORE_PATH" path @@ fun () ->
+      let run fields =
+        Masc.Keeper_tool_in_process_runtime.handle_surface_read_with_outcome
+          ~config ~meta
+          ~args:(`Assoc (("surface", `String "discord") :: ("mode", `String "channel") :: fields))
+      in
+      let check_failure label fields expected_code expected_class =
+        let result = run fields in
+        let code =
+          Yojson.Safe.Util.(member "error_code" (parse_json result.raw_output) |> to_string)
+        in
+        check string (label ^ " code") expected_code code;
+        match result.disposition with
+        | Tool_result.Failed class_ ->
+          check string (label ^ " class") expected_class
+            (Tool_result.tool_failure_class_to_string class_)
+        | Tool_result.Completed () | Tool_result.Deferred () ->
+          fail (label ^ " unexpectedly completed")
+      in
+      check_failure "no binding" [] "precondition_failed" "workflow_rejection";
+      write_file path {|{"123":"keeper-exec-tools","456":"keeper-exec-tools"}|};
+      check_failure "ambiguous binding" [] "validation_error" "policy_rejection";
+      check_failure "foreign channel" [ "channel_id", `String "999" ]
+        "validation_error" "policy_rejection";
+      check_failure "wrong channel type" [ "channel_id", `Int 123 ]
+        "validation_error" "policy_rejection";
+      write_file path "{";
+      check_failure "unreadable binding" [] "internal_error" "runtime_failure")
+
 let test_board_runtime_rejects_unknown_route () =
   let meta = make_meta ~name:"keeper-board-runtime-guard" () in
   let raw =
@@ -9792,6 +9861,10 @@ let () =
         test_public_read_accepts_offset_without_enrichment;
       test_case "surface Read rejects duplicate dispatch fields" `Quick
         test_surface_read_rejects_duplicate_dispatch_fields;
+      test_case "Discord surface Read preserves REST failure causes" `Quick
+        test_discord_surface_read_rest_failure_causes;
+      test_case "Discord surface Read selects typed channel causes" `Quick
+        test_discord_surface_read_channel_selection_causes;
       test_case "missing file is failure" `Quick
         test_execute_with_outcome_missing_file_is_failure;
       test_case "initializing recovery isolates only publication writes" `Quick

@@ -87,6 +87,7 @@ let test_failure_class_of_every_error_code () =
     ; Tool_args.Precondition_failed, "workflow_rejection"
     ; Tool_args.Rate_limited, "dependency_unavailable"
     ; Tool_args.Timeout, "dependency_unavailable"
+    ; Tool_args.External_service_unavailable, "dependency_unavailable"
     ; Tool_args.Unavailable, "dependency_unavailable"
     ; Tool_args.Internal_error, "runtime_failure"
     ; Tool_args.Not_implemented, "runtime_failure"

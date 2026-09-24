@@ -54,6 +54,7 @@ type error_code =
   | Conflict              (** Resource state conflict (e.g. already claimed). *)
   | Rate_limited          (** Too many requests. *)
   | Timeout               (** Operation timed out. *)
+  | External_service_unavailable (** An external service or transport is unavailable. *)
   | Not_implemented       (** Feature exists in schema but not in runtime. *)
   | Internal_error        (** Unexpected server-side failure. *)
   | Precondition_failed   (** Required precondition not met (e.g. workspace not session-bound). *)
@@ -77,7 +78,7 @@ val failure_class_of_error_code : error_code -> Tool_result.tool_failure_class
       not change with other arguments.
     - [Conflict], [Precondition_failed]: the current state does not admit
       the call → [Workflow_rejection].
-    - [Rate_limited], [Timeout], [Unavailable]: something the call depends on
+    - [Rate_limited], [Timeout], [External_service_unavailable], [Unavailable]: something the call depends on
       did not answer → [Dependency_unavailable].
     - [Internal_error], [Not_implemented]: masc failed → [Runtime_failure]. *)
 

@@ -193,6 +193,10 @@ val handle_surface_read_with_outcome
     ({!Tool_args.failure_class_of_error_code}); a lane label the caller can
     correct is a [Policy_rejection]. *)
 
+val discord_rest_error : Discord_rest_client.error -> Keeper_tool_execution.t
+(** Preserve the typed Discord REST cause in the error code and failed
+    disposition. Exposed to test the read path without live network calls. *)
+
 val handle_surface_post_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta

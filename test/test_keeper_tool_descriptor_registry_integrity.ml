@@ -1067,7 +1067,7 @@ let test_read_descriptor_spells_out_path_basis () =
 let test_execute_descriptor_validates_process_forms () =
   let argv = `List [ `String "printf"; `String "%s"; `String "a;$(literal)"; `String "" ] in
   let direct = `Assoc [ "argv", argv; "cwd", `String "repos/masc" ] in
-  let shell = `Assoc [ "script", `String "printf x | cat"; "shell", `String "sh" ] in
+  let shell = `Assoc [ "command", `String "printf x | cat"; "shell", `String "sh" ] in
   List.iter
     (fun input ->
       match Resolution.validated_descriptor_and_input_for_tool_call
@@ -1088,7 +1088,7 @@ let test_execute_descriptor_validates_process_forms () =
       | Some (Ok _) -> Alcotest.fail ("Execute accepted " ^ label)
       | None -> Alcotest.fail "Execute public descriptor did not resolve")
     [ "an empty vector", `Assoc [ "argv", `List [] ]
-    ; "both process forms", `Assoc [ "argv", argv; "script", `String "printf x" ]
+    ; "both process forms", `Assoc [ "argv", argv; "command", `String "printf x" ]
     ; "neither process form", `Assoc [ "cwd", `String "." ]
     ; "an unknown process field", `Assoc [ "argv", argv; "background", `Bool true ]
     ];

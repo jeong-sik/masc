@@ -715,8 +715,8 @@ let test_keeper_tools_list_json_names_the_model_visible_tools () =
     (list_member_contains "properties" "executable" schema_shape);
   check bool "Execute schema properties omit retired pipeline" false
     (list_member_contains "properties" "pipeline" schema_shape);
-  check bool "Execute schema properties include script" true
-    (list_member_contains "properties" "script" schema_shape);
+  check bool "Execute schema properties include command" true
+    (list_member_contains "properties" "command" schema_shape);
   check bool "Execute schema has no shape errors" true
     (Yojson.Safe.Util.member "schema_errors" schema_shape = `Null);
   let examples = Yojson.Safe.Util.(member "examples" execute |> to_list) in
@@ -807,7 +807,7 @@ let test_keeper_tools_list_json_names_the_model_visible_tools () =
     { (descriptor_for_internal "tool_execute") with
       KTD.input_schema =
         `Assoc
-          [ "properties", `Assoc [ "argv", `Assoc []; "script", `Assoc [] ]
+          [ "properties", `Assoc [ "argv", `Assoc []; "command", `Assoc [] ]
           ; "oneOf"
           , `List
               [ `Assoc [ "required", `List [ `String "argv" ] ]
@@ -3917,9 +3917,9 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
       List.iter
         (fun raw ->
            let json = Yojson.Safe.from_string raw in
-           check string "cmd is refused by the parser, which names script"
-             "cmd is not a field of this tool; the shell form is named \
-              script"
+           check string "cmd is refused by the parser, which lists command"
+             "$.cmd is not a supported typed Execute field; accepted: argv, \
+              command, shell, cwd, timeout_sec, intent"
              Yojson.Safe.Util.(member "error" json |> to_string);
            check bool "typed marker" true
              Yojson.Safe.Util.(member "typed" json |> to_bool))
@@ -3929,18 +3929,18 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
         List.iter (check string "repeated failures stay byte-identical" first) rest
       | [] -> fail "expected dispatch outputs")
 
-(* task-777: #29813 advertised [script] in the schema while a key pre-check
-   in the dispatch refused any call that used it. The admission is the
-   parser now, so a schema-conformant script call must reach execution. *)
-let test_tool_execute_script_form_is_admitted_and_runs () =
+(* task-777: #29813 advertised the shell form in the schema while a key
+   pre-check in the dispatch refused any call that used it. The admission is
+   the parser now, so a schema-conformant command call must reach execution. *)
+let test_tool_execute_command_form_is_admitted_and_runs () =
   with_exec_fixture
     ~require_sandbox:true
     ~process:true
     ~always_allow:true
-    "tool_execute_script_form_runs"
+    "tool_execute_command_form_runs"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let input =
-        `Assoc [ "script", `String "printf begin- && printf end" ]
+        `Assoc [ "command", `String "printf begin- && printf end" ]
       in
       let raw =
         KET.Compatibility.execute_keeper_tool_call
@@ -3949,7 +3949,7 @@ let test_tool_execute_script_form_is_admitted_and_runs () =
           ~name:"tool_execute" ~input ()
       in
       let json = Yojson.Safe.from_string raw in
-      check bool "script form executes" true
+      check bool "command form executes" true
         Yojson.Safe.Util.(member "ok" json |> to_bool);
       check string "the and-chain ran both commands" "begin-end"
         Yojson.Safe.Util.(member "output" json |> to_string))
@@ -3964,7 +3964,7 @@ let test_tool_execute_empty_input_names_both_forms () =
       in
       let json = Yojson.Safe.from_string raw in
       check string "no-source refusal names every form"
-        "$.argv or $.script is required"
+        "$.argv or $.command is required"
         Yojson.Safe.Util.(member "error" json |> to_string))
 
 let keeper_delegate_input_schema () =
@@ -6581,7 +6581,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
               execute.call
                 ~call_id:"direct-execute-post-effect-failure"
                 (`Assoc
-                   [ "script", `String
+                   [ "command", `String
                        ("printf x >> execute-invocations; printf %s "
                         ^ Filename.quote oversized)
                    ])
@@ -9934,8 +9934,8 @@ let () =
         test_manual_gate_defers_tool_execute_before_process;
       test_case "tool_execute raw cmd requires typed Shell IR" `Quick
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
-      test_case "tool_execute script form is admitted and runs" `Quick
-        test_tool_execute_script_form_is_admitted_and_runs;
+      test_case "tool_execute command form is admitted and runs" `Quick
+        test_tool_execute_command_form_is_admitted_and_runs;
       test_case "tool_execute empty input names all three forms" `Quick
         test_tool_execute_empty_input_names_both_forms;
       test_case "Agent Core handler threads Eio context to keeper dispatch" `Quick

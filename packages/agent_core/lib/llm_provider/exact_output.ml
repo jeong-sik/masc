@@ -653,7 +653,7 @@ let wire_admission_error_disposition = function
   | Global_admission_not_allowed
   | Invalid_connect_timeout
   | Invalid_body_timeout
-  | Missing_deadline
+  | Missing_deadline _
   | Context_limit_unavailable
   | Invalid_context_limit
   | Unsupported_target_model _ -> Runtime_contract_rejected
@@ -856,6 +856,30 @@ let refusal_reason = function
   | Http_client.ProviderFailure { kind; message } ->
     Http_client.provider_failure_to_string ~kind ~message
 
+(* The provider a deadline refusal names, rendered for a line a person
+   reads. [None] is said as such rather than left blank: a config with no
+   provider id is a fact about that config, not a missing word. The whole
+   detail is quoted where it lands in a reason line, so the id is not. *)
+let missing_deadline_provider_label = function
+  | Some provider_id -> provider_id
+  | None -> "(config names no provider)"
+;;
+
+(* What a deadline refusal tells an operator to do. The target's body
+   deadline has two spellings, one per surface that declares targets: a
+   runtime.toml provider's [exact-body-timeout-s], and a replacement
+   catalog's [[targets]] row [body_timeout_s]. Which one built this target
+   is not known here, so both are named. The connect deadline is named
+   because it is what an operator who set one expects to have been enough. *)
+let missing_deadline_detail provider_id =
+  Printf.sprintf
+    "provider %s declares no whole-request deadline: set exact-body-timeout-s \
+     on that provider in runtime.toml, or body_timeout_s on its \
+     AGENT_CORE_MODEL_CATALOG [[targets]] row. connect-timeout-s ends when the \
+     response headers arrive and does not bound the response body"
+    (missing_deadline_provider_label provider_id)
+;;
+
 let wire_admission_error_evidence_json = function
   | Capability_snapshot_missing ->
     `Assoc [ "kind", `String "capability_snapshot_missing" ]
@@ -866,7 +890,13 @@ let wire_admission_error_evidence_json = function
     `Assoc [ "kind", `String "global_admission_not_allowed" ]
   | Invalid_connect_timeout -> `Assoc [ "kind", `String "invalid_connect_timeout" ]
   | Invalid_body_timeout -> `Assoc [ "kind", `String "invalid_body_timeout" ]
-  | Missing_deadline -> `Assoc [ "kind", `String "missing_deadline" ]
+  | Missing_deadline { provider_id } ->
+    `Assoc
+      [ "kind", `String "missing_deadline"
+      ; ( "provider_id"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) provider_id )
+      ; "detail", `String (missing_deadline_detail provider_id)
+      ]
   | Caller_supplied_header_not_allowed ->
     `Assoc [ "kind", `String "caller_supplied_header_not_allowed" ]
   | Unsupported_image_input -> `Assoc [ "kind", `String "unsupported_image_input" ]
@@ -946,7 +976,10 @@ let wire_admission_error_reason = function
   | Global_admission_not_allowed -> "global_admission_not_allowed"
   | Invalid_connect_timeout -> "invalid_connect_timeout"
   | Invalid_body_timeout -> "invalid_body_timeout"
-  | Missing_deadline -> "missing_deadline"
+  | Missing_deadline { provider_id } ->
+    Printf.sprintf
+      "missing_deadline(%s)"
+      (quoted_dynamic (missing_deadline_detail provider_id))
   | Caller_supplied_header_not_allowed ->
     "caller_supplied_header_not_allowed"
   | Unsupported_image_input -> "unsupported_image_input"
@@ -1686,6 +1719,29 @@ let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = functi
   | Retry.Timeout _ -> Timeout
 ;;
 
+(* The candidate-fault judgment projects onto the flow's collapsed refusal
+   vocabulary. [provider_refusal] folds [Retry.InvalidRequest]'s five reasons
+   to one [Invalid_request]; that collapsed refusal is the un-attributed one,
+   and [Refusal_body_not_received] is the unread one. A new [provider_refusal]
+   constructor stops compilation here, so the two walks stay on one judgment
+   (RFC-one-slot-fault-judgment-for-every-walk.md, #38472). *)
+let candidate_fault_of_provider_refusal : provider_refusal -> Candidate_fault.t = function
+  | Request_body_refused -> Binding Body_limit
+  | Refusal_body_not_received -> Binding Refusal_unread
+  | Rate_limited -> Binding Rate_limit
+  | Overloaded -> Binding Capacity
+  | Server_error -> Binding Server
+  | Auth_failed -> Binding Credential
+  | Authorization_refused -> Binding Credential
+  | Payment_required -> Binding Account
+  | Invalid_request -> Unattributed
+  | Not_found -> Binding Model_absent
+  | Context_overflow -> Binding Window
+  | Input_capacity -> Binding Admission
+  | Network_error -> Binding Credential
+  | Timeout -> Binding Deadline
+;;
+
 let execution_error_cause ~http_status ~dispatch = function
   | Exec.Clock_required_for_timeout -> Clock_required_for_timeout
   | Exec.Frozen_request_mismatch -> Frozen_request_mismatch
@@ -1915,11 +1971,21 @@ let execution_failure_may_advance (error : execution_error) =
      the reasoning field (2026-08-16/08-27). *)
   | Missing_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
-  (* The remaining refusals do not advance, as before this classification
-     existed ([Payment_required] and [Context_overflow] were promoted above:
-     the successor bills a different account, or carries its own window).
-     Promoting any other one needs its own argument about whether the
-     successor can serve the same input. *)
+  (* One closed judgment decides whose affair a refusal is (Candidate_fault,
+     RFC-one-slot-fault-judgment-for-every-walk.md, #38472). §3.3: 401·403·404
+     are this binding's affair — the key, permission, or model is missing
+     here, not in the request — so the successor carries its own and may serve
+     the same input. §3.4: an un-attributed refusal (the collapsed
+     Invalid_request) is advanced too, since no response yet proves the input
+     itself is what failed. §2.1: Refusal_body_not_received is the unread
+     refusal. Exact requests have no tools, so advancing cannot double an
+     effect. *)
+  | Provider_response_refused { refusal; _ }, Response_received
+    when (match candidate_fault_of_provider_refusal refusal with
+          | Candidate_fault.Binding _ | Candidate_fault.Unattributed -> true
+          | Candidate_fault.Unknown_after_dispatch -> false) ->
+    receipt_dispatch_count error.receipt = 1
+  (* The remaining transport and non-advance refusals do not advance. *)
   | ( Provider_response_refused
         { refusal =
             ( Auth_failed
@@ -1932,7 +1998,7 @@ let execution_failure_may_advance (error : execution_error) =
             | Timeout )
         ; _
         }
-    , (Not_started | Before_dispatch | Dispatch_started | Response_received | Terminal) )
+    , (Not_started | Before_dispatch | Dispatch_started | Terminal) )
   | Completion_failed _, (Not_started | Dispatch_started | Response_received | Terminal)
   | Response_body_deadline_exceeded,
       (Not_started | Before_dispatch | Dispatch_started | Terminal)
@@ -1956,7 +2022,8 @@ let execution_failure_may_advance (error : execution_error) =
       | Ambiguous_output _
       | Unexpected_output_content
       | Internal_non_json_output )
-    , _ ) -> false
+    , _ )
+  | ( Provider_response_refused _, _ ) -> false
 ;;
 
 let candidate_rejection_may_advance (receipt : candidate_rejection_receipt) =

@@ -3967,7 +3967,7 @@ type palette_mode =
    belongs to this view instance, so late browser replies cannot replace a
    different source or tab after the operator moves. *)
 module Browser_lane_view = struct
-  type source = Live | Automation
+  type source = Browser_lane.Lane_name.t = Live | Automation
   type browser = Firefox | Zen
   type client = { client_id : string; browser : browser }
   type discovery = Read_after_discovery | Choose_client
@@ -4057,7 +4057,7 @@ module Browser_lane_view = struct
     read_continuation : read_continuation;
   }
 
-  let source_name = function Live -> "live" | Automation -> "automation"
+  let source_name = Browser_lane.Lane_name.to_wire
   let browser_name = function Firefox -> "Firefox" | Zen -> "Zen"
   let client_id t = match t.source, t.selected_client with
     | Live, Some client -> Some client.client_id
@@ -4198,7 +4198,7 @@ module Browser_lane_view = struct
   let integer = function `Int n when n >= 0 -> Ok n | _ -> Error "expected nonnegative integer"
   let boolean = function `Bool b -> Ok b | _ -> Error "expected boolean"
   let parse_source = function
-    | `String "live" -> Ok Live | `String "automation" -> Ok Automation
+    | `String raw -> Option.to_result ~none:"unknown browser source" (Browser_lane.Lane_name.of_wire raw)
     | _ -> Error "unknown browser source"
   let get parse name json = let* value = field name json in parse value
   let parse_client json =

@@ -16,6 +16,7 @@ module Pointer = Browser_pointer
 module Action = Browser_action
 module Upload_lease = Browser_upload_lease
 module Document = Browser_document
+module Lane_name = Browser_lane_name
 
 type node_ref = { document_id : string; node_id : string }
 type scene_view = Content | Regions
@@ -224,6 +225,11 @@ let target_client_id = function Automation -> None | Live_client client -> Some 
 (* Which backend a request names. A browser client id belongs to the live
    source, so a request for the automation backend has nowhere to carry one. *)
 type route = Automation_route | Live_route of client_id option
+
+let route_lane_name = function
+  | Automation_route -> Lane_name.Automation
+  | Live_route _ -> Lane_name.Live
+;;
 
 (* Why a live request names no browser to send its command to. Each case has
    a different next step: a browser has to connect, or the caller has to

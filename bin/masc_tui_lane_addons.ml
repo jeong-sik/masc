@@ -630,7 +630,7 @@ let visual_lines ?(failed_note = "") ~height ~width view =
                         | S.Snapshot_file {id;path} -> id, "file " ^ path
                         | S.Msx_capture {id} -> id, "MSX capture"
                         | S.Browser_document {id;selection;tab_id;target_id;environment;_} ->
-                            let lane = match selection with S.Live _ -> "live" | S.Automation -> "automation" in
+                            let lane = S.browser_selection_lane selection in
                             id,Printf.sprintf "browser %s · tab %d · %s · %s" lane tab_id environment target_id
                         | S.Lane_output {id;installation_id;output_id} ->
                             id, installation_id ^ "/" ^ Option.value ~default:"all outputs" output_id in

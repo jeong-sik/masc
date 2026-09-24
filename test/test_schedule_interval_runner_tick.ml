@@ -2,10 +2,8 @@
 
     The schedule runner looks for due schedules once per tick, so an interval
     shorter than the tick fires once per tick. Create and modify refuse such an
-    interval, so a stored interval says how often it fires. Load accepts any
-    positive interval, so a row stored before the tick check keeps loading, and
-    a modify that carries its interval back unchanged is accepted, so its
-    payload can still be edited.
+    interval, so a stored interval says how often it fires. Load checks
+    structure only and accepts any positive interval.
 
     The two paths therefore differ exactly on [1, tick): below the tick create
     refuses and load accepts; from the tick up both accept; at or below zero
@@ -56,8 +54,7 @@ let created interval_sec =
   | Error _ -> false
   | Ok request ->
     Result.is_ok
-      (Schedule_domain.interval_fires_as_declared ~runner_tick_sec ~stored:None
-         request.recurrence)
+      (Schedule_domain.interval_fires_as_declared ~runner_tick_sec request.recurrence)
 ;;
 
 (* The load path: a row the codec itself wrote, with only its recurrence
@@ -130,13 +127,10 @@ let with_workspace f =
   f config
 ;;
 
-(* A row below the tick, stored while the runner ran on a shorter tick. *)
-let below_tick_interval = 1
-let stored_under_tick = 1.0
-
-let store_below_tick_row config =
-  let row = request_exn below_tick_interval in
-  match Schedule_store.insert_request config ~runner_tick_sec:stored_under_tick row with
+let insert config ~runner_tick_sec interval_sec =
+  match
+    Schedule_store.insert_request config ~runner_tick_sec (request_exn interval_sec)
+  with
   | Ok row -> row
   | Error err -> failf "fixture row refused: %s" (Schedule_store.store_error_to_string err)
 ;;
@@ -146,41 +140,60 @@ let modify config ~text interval_sec =
     (request_exn ~schedule_id:"sched-interval-tick" ~text interval_sec)
 ;;
 
-let test_modify_keeping_the_interval_is_accepted () =
-  with_workspace
-  @@ fun config ->
-  ignore (store_below_tick_row config);
-  match modify config ~text:"edited payload" below_tick_interval with
-  | Ok { Schedule_domain.recurrence = Schedule_domain.Interval { interval_sec }; _ } ->
-    check int "interval kept" below_tick_interval interval_sec
-  | Ok _ -> fail "modify changed the recurrence kind"
-  | Error err ->
-    failf "payload edit of a below-tick row was refused: %s"
-      (Schedule_store.store_error_to_string err)
-;;
-
-let test_modify_to_another_below_tick_interval_is_refused () =
-  with_workspace
-  @@ fun config ->
-  ignore (store_below_tick_row config);
-  let changed = below_tick_interval + 1 in
-  match modify config ~text:"wake" changed with
+let expect_below_tick ~interval_sec:want = function
   | Error
       (Schedule_store.Interval_below_runner_tick
         { schedule_id; below = { interval_sec; runner_tick_sec = tick } }) ->
     check string "names the schedule" "sched-interval-tick" schedule_id;
-    check int "names the interval" changed interval_sec;
+    check int "names the interval" want interval_sec;
     check (float 0.0) "names the tick" runner_tick_sec tick
   | Error err ->
     failf "expected Interval_below_runner_tick, got %s"
       (Schedule_store.store_error_to_string err)
-  | Ok _ -> fail "modify accepted a changed interval below the tick"
+  | Ok _ -> failf "modify accepted interval %ds below the tick" want
+;;
+
+let test_modify_payload_at_the_tick_is_accepted () =
+  with_workspace
+  @@ fun config ->
+  ignore (insert config ~runner_tick_sec tick_boundary);
+  match modify config ~text:"edited payload" tick_boundary with
+  | Ok { Schedule_domain.recurrence = Schedule_domain.Interval { interval_sec }; _ } ->
+    check int "interval kept" tick_boundary interval_sec
+  | Ok _ -> fail "modify changed the recurrence kind"
+  | Error err ->
+    failf "payload edit at the tick was refused: %s"
+      (Schedule_store.store_error_to_string err)
+;;
+
+let test_modify_below_the_tick_is_refused () =
+  with_workspace
+  @@ fun config ->
+  ignore (insert config ~runner_tick_sec tick_boundary);
+  let below = tick_boundary - 1 in
+  expect_below_tick ~interval_sec:below (modify config ~text:"wake" below)
+;;
+
+(* The tick is configuration, so it can rise after a row was stored. A row
+   stored at a 14s tick is then below the 15s tick: modify applies the same
+   rule to it as to any other write, even when the interval is carried back
+   unchanged and only the payload differs. *)
+let raised_from_tick = tick_boundary - 1
+
+let test_payload_edit_below_a_raised_tick_is_refused () =
+  with_workspace
+  @@ fun config ->
+  ignore
+    (insert config ~runner_tick_sec:(float_of_int raised_from_tick) raised_from_tick);
+  expect_below_tick ~interval_sec:raised_from_tick
+    (modify config ~text:"edited payload" raised_from_tick)
 ;;
 
 let test_modify_up_to_the_tick_is_accepted () =
   with_workspace
   @@ fun config ->
-  ignore (store_below_tick_row config);
+  ignore
+    (insert config ~runner_tick_sec:(float_of_int raised_from_tick) raised_from_tick);
   match modify config ~text:"wake" tick_boundary with
   | Ok _ -> ()
   | Error err ->
@@ -191,7 +204,8 @@ let test_create_below_tick_is_refused_by_the_store () =
   with_workspace
   @@ fun config ->
   match
-    Schedule_store.insert_request config ~runner_tick_sec (request_exn below_tick_interval)
+    Schedule_store.insert_request config ~runner_tick_sec
+      (request_exn (tick_boundary - 1))
   with
   | Error (Schedule_store.Interval_below_runner_tick _) -> ()
   | Error err ->
@@ -214,10 +228,12 @@ let () =
     ; ( "store"
       , [ test_case "create below the tick refused" `Quick
             test_create_below_tick_is_refused_by_the_store
-        ; test_case "modify keeping the interval accepted" `Quick
-            test_modify_keeping_the_interval_is_accepted
-        ; test_case "modify to another below-tick interval refused" `Quick
-            test_modify_to_another_below_tick_interval_is_refused
+        ; test_case "payload edit at the tick accepted" `Quick
+            test_modify_payload_at_the_tick_is_accepted
+        ; test_case "modify below the tick refused" `Quick
+            test_modify_below_the_tick_is_refused
+        ; test_case "payload edit below a raised tick refused" `Quick
+            test_payload_edit_below_a_raised_tick_is_refused
         ; test_case "modify up to the tick accepted" `Quick
             test_modify_up_to_the_tick_is_accepted
         ] )

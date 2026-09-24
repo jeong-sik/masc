@@ -50,8 +50,7 @@ type store_error =
       ; below : Schedule_domain.interval_below_runner_tick
       }
       (** {!insert_request} or {!update_request} refused an [Interval] shorter
-          than the schedule runner tick. An update that keeps the stored
-          interval is not refused. See
+          than the schedule runner tick. See
           {!Schedule_domain.interval_fires_as_declared}. *)
   | Running_wake_absent of { schedule_id : string }
       (** A [Running] request has no wake record at all to settle or

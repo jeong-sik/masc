@@ -782,8 +782,9 @@ let handle_write ~action ~tool_name ~start_time ctx args =
       (* [start_time], not [requested_at]: a caller can set requested_at,
          and the question is whether the due time is already behind the
          clock this call runs on. *)
-      (* The cadence the production runner loop sleeps on
-         ([Server_schedule_runner_policy.interval_sec] reads the same value). *)
+      (* The cadence the production runner loop sleeps on:
+         [MASC_SCHEDULE_RUNNER_INTERVAL_SEC], which
+         [Server_schedule_runner_policy.interval_sec] also reads. *)
       let runner_tick_sec = Env_config_runtime_services.ScheduleRunner.interval_sec in
       match action, schedule_id with
       | Create_schedule, schedule_id ->

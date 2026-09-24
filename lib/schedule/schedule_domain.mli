@@ -139,14 +139,12 @@ type interval_below_runner_tick =
 
 val interval_fires_as_declared :
   runner_tick_sec:float ->
-  stored:recurrence option ->
   recurrence ->
   (unit, interval_below_runner_tick) result
 (** Whether the schedule runner, which looks once every [runner_tick_sec],
     fires [recurrence] as often as it declares. Refuses an [Interval] shorter
-    than the tick, unless [stored] is the row being modified and carries the
-    same interval. [validate_recurrence] does not apply this, so a stored row
-    below the tick keeps loading and fires once per tick. *)
+    than the tick. Create and modify ask it; [validate_recurrence] does not,
+    so loading accepts any positive interval. *)
 val first_due_after : now:float -> recurrence -> float option
 (** Compute the first due time for calendar recurrences that do not need an
     explicit [due_at] anchor. Returns [None] for [One_shot] and [Interval]. *)

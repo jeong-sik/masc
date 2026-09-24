@@ -149,8 +149,8 @@ let store_error_to_string = function
       { schedule_id; below = { interval_sec; runner_tick_sec } } ->
     Printf.sprintf
       "schedule %s: recurrence.interval_sec %d is shorter than the schedule \
-       runner tick (%gs, MASC_SCHEDULE_RUNNER_INTERVAL_SEC); the runner would \
-       fire it once per tick, not every %d seconds"
+       runner tick (%gs); the runner would fire it once per tick, not every \
+       %d seconds"
       schedule_id
       interval_sec
       runner_tick_sec
@@ -765,8 +765,8 @@ let validate_initial_request (request : Schedule_domain.schedule_request) =
            "new requests must start scheduled")
 ;;
 
-let interval_fires_as_declared ~runner_tick_sec ~stored (request : schedule_request) =
-  Schedule_domain.interval_fires_as_declared ~runner_tick_sec ~stored request.recurrence
+let interval_fires_as_declared ~runner_tick_sec (request : schedule_request) =
+  Schedule_domain.interval_fires_as_declared ~runner_tick_sec request.recurrence
   |> Result.map_error (fun below ->
     Interval_below_runner_tick { schedule_id = request.schedule_id; below })
 ;;
@@ -778,7 +778,7 @@ let insert_request config ~runner_tick_sec (request : Schedule_domain.schedule_r
     | Some _ -> Error Schedule_already_exists
     | None ->
       let* () = validate_initial_request request in
-      let* () = interval_fires_as_declared ~runner_tick_sec ~stored:None request in
+      let* () = interval_fires_as_declared ~runner_tick_sec request in
       let schedules = request :: state.schedules in
       let next_state =
         bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes
@@ -823,10 +823,7 @@ let update_request config ~now ~runner_tick_sec (request : Schedule_domain.sched
       then (
         let* () = validate_initial_request request in
         let* () = changed_due_not_past ~now ~current request in
-        let* () =
-          interval_fires_as_declared ~runner_tick_sec
-            ~stored:(Some current.recurrence) request
-        in
+        let* () = interval_fires_as_declared ~runner_tick_sec request in
         let schedules = replace_schedule state.schedules request in
         let next_state = bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes in
         let* () = write_state config next_state in

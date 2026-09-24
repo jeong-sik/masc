@@ -286,23 +286,13 @@ type interval_below_runner_tick =
    schedule at most once per look ([next_due_after] skips the ticks it
    missed). An interval shorter than the tick therefore fires once per tick,
    not once per interval, and the stored interval would say something the
-   runner never does. Create and modify refuse it.
-
-   A modify that carries the stored interval back unchanged is not asked: the
-   row already exists, fires once per tick whatever it says, and refusing the
-   edit would only stop its payload or due time from being changed. The
-   decoder does not ask either, so such a row keeps loading. *)
-let interval_fires_as_declared ~runner_tick_sec ~stored recurrence =
+   runner never does. Create and modify refuse it; the refusal names the tick,
+   so the caller can send an interval the runner keeps. *)
+let interval_fires_as_declared ~runner_tick_sec recurrence =
   match recurrence with
   | One_shot | Daily _ | Cron _ -> Ok ()
   | Interval { interval_sec } ->
-    let unchanged =
-      match stored with
-      | Some (Interval { interval_sec = stored_interval_sec }) ->
-        Int.equal stored_interval_sec interval_sec
-      | Some (One_shot | Daily _ | Cron _) | None -> false
-    in
-    if unchanged || Float.compare (float_of_int interval_sec) runner_tick_sec >= 0
+    if Float.compare (float_of_int interval_sec) runner_tick_sec >= 0
     then Ok ()
     else Error { interval_sec; runner_tick_sec }
 ;;

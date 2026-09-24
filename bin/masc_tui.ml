@@ -4830,17 +4830,10 @@ let launch_identity_app_save state ~mailbox
             ~client_id ~client_secret ~scopes
         with
         | Error err -> Error err
-        | Ok (`Assoc pairs) -> (
-          match List.assoc_opt "error" pairs with
-          | Some (`String detail) -> Error detail
-          | Some _ | None ->
-            let count =
-              match List.assoc_opt "scopes" pairs with
-              | Some (`List rows) -> List.length rows
-              | Some _ | None -> 0
-            in
-            Ok count)
-        | Ok _ -> Error "the server answered with something unreadable"
+        | Ok json ->
+          Masc.Tui_decode.decode_oauth_client_saved json
+          |> Result.map_error (fun detail ->
+            "app recorded, but the reply could not be read: " ^ detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)

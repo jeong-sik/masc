@@ -93,7 +93,7 @@ Stagehand 없이 Chromium 만 모는 target 은 이 RFC 에 없다.
 client id 규칙은 자리마다 달라 lane 이름만 공유한다. Stagehand 생성자를 더하면
 각 타입 패턴매치가 새 경우를 짚는다. TUI source 와 도구 enum 도 함께 갱신한다.
 
-7번에서 도구 입력을 바꾼다.
+6·8번에서 도구 입력을 바꾼다.
 - 도구의 `lane` enum 에는 그 lane 의 backend 가 도구의 기본 동사를 받을 때만 이름을 넣는다.
   `test_browser_lane_name` 이 `Browser_lane.verb_allowed` 로 이것을 확인한다.
   stagehand 는 `BrowserTabs`·`BrowserRead`·`BrowserInteract`·`BrowserSession`·`BrowserGoto` 에 있고, `BrowserAct` 에는 없다.
@@ -210,7 +210,11 @@ backend 의 status 가 그 이유를 보여준다. 세션을 닫고 다시 열�
     `Tool_result.Effect_outcome_unknown` 으로 끝난다 (`tool_misc_browser_lane.ml:333`). 상태는 `Abandoned` 가 된다.
     Stagehand 에는 `act`·`observe`·`extract` 취소 메서드가 없다.
     각 호출의 `options.timeout` 에 lane deadline 보다 짧은 양의 밀리초를 보내
-    확장이 스스로 호출을 끝낼 기회를 준다. 응답이 여전히 없으면 `Abandoned` 상태를 유지한다.
+    확장이 스스로 호출을 끝낼 기회를 준다. #38720 의 문장 동사 정책은 120,000 ms 를
+    Wire 와 host 의 `llm.generate` 답변 deadline 에 함께 쓰고, #38747 의 `BrowserInstruct`
+    바깥 대기는 그보다 20초 길다. 확장의 timeout 검사는 실행 중간의 checkpoint 에서
+    이뤄지므로 멈춘 await 를 강제로 끊는다는 보장은 없다. 응답이 여전히 없으면
+    `Abandoned` 상태를 유지한다.
   - `Abandoned` 동안 온 `llm.generate` 는 거절한다. 도구가 이미 실패를 알린 뒤에 클릭이 일어나지 않게 하려는 것이다.
     버려진 호출의 응답이 오면 `Idle` 로 돌아간다. 그전의 새 호출은 `Rejected_before_effect` 다.
   - `Idle` 에서 온 `llm.generate` 는 주인이 없으므로 거절하고 로그를 남긴다.
@@ -396,26 +400,34 @@ Firefox 와 Chromium 은 로그인 세션을 나눠 쓸 수 없다.
 
 ## 7. 구현 순서 (Stacked PR)
 
-4–7번은 따로 두면 아무 데서도 부르지 않는 코드다.
-그래서 한 묶음으로 리뷰하고 순서대로 함께 병합한다.
+4–8번은 따로 두면 아무 데서도 부르지 않는 코드다.
+그래서 한 묶음으로 리뷰하고 아래 의존 순서대로 병합한다.
 2·3번은 혼자서도 쓸모가 있어서 먼저 들어가도 된다.
+
+구현 PR 의 의도한 의존 순서는 #38668 → #38676 → #38684 → #38686 →
+#38697 → #38708 → #38720 → #38736 → #38739 → #38747 → #38752 →
+#38760 → #38805 → #38808 → #38812 이다. 병합할 때 각 자식 head 가
+그때의 부모 head 를 포함하는지 확인한다. 아래 번호는 설계 작업 단위다.
 
 1. 이 RFC 와 실측 증거.
 2. 완료 (#38664): lane 이름을 읽는 곳을 `Browser_lane.Lane_name` 하나로 모았다. 동작은 바꾸지 않았다.
 3. AGENT_CORE: `Exact_output.success` 에 typed usage 를 담는다.
-4. `Browser_cdp`(#38668), Stagehand 세션(#38676): `ws-direct`, 닫힌 봉투·메시지 타입, `call_state`,
-   호출별 `options.timeout` 과 가짜 transport 테스트.
+4. `Browser_cdp`(#38668), Stagehand 세션(#38676): `ws-direct`, 닫힌 봉투·메시지 타입,
+   `call_state` 와 가짜 transport 테스트.
 5. `Browser_configuration` 변경과 확장 설치 스크립트(#38684), `server_browser_stagehand` 실행과 정리(#38686).
-6. `Standalone_lane.Browser_stagehand`, lane 선언, system prompt admission, `llm.generate` 연결(#38708).
-7. 나눠서 쌓는다.
-   - `Browser_lane.Stagehand` target, 동사, surface·TUI source, `BrowserSession`·`BrowserGoto` 의 `lane`(#38697)
-   - 동사를 Stagehand 호출로 바꾸는 실행기와 tab 번호 표(#38720)
+6. `Browser_lane.Stagehand` target, 동사, surface·TUI source,
+   `BrowserSession`·`BrowserGoto` 의 `lane`(#38697).
+7. `Standalone_lane.Browser_stagehand`, lane 선언, system prompt admission,
+   `llm.generate` 연결(#38708).
+8. 이어서 나눠서 쌓는다.
+   - 동사를 Stagehand 호출로 바꾸는 실행기와 tab 번호 표, 호출별
+     `options.timeout`, host 모델 답변 deadline 과 가짜 transport 테스트(#38720)
    - 세션을 가지는 backend(#38736), 서버가 뜰 때 설치(#38739)
-   - `BrowserInstruct` 도구(#38747), 문서(#38752)
+   - `BrowserInstruct` 도구와 바깥 lane 대기(#38747), 문서(#38752)
    - `Page_read`·`Page_elements`·`Page_scene` 을 automation 과 같은 페이지 스크립트로(#38805)
    - TUI 의 `c` 키와 대시보드 경로의 lane(#38808)
    - `Page_interact`: DOM 조작은 같은 스크립트로, 좌표 조작은 `page.click`·`page.scroll`·`page.drag_and_drop` 로(#38812)
-8. CI 실제 브라우저 증명(#38760, Chrome for Testing 154), §6.3 비교 실험 증거.
+9. CI 실제 브라우저 증명(#38760, Chrome for Testing 154), §6.3 비교 실험 증거.
 
 ## 8. 열린 질문
 

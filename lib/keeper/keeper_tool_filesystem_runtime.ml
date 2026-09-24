@@ -643,15 +643,6 @@ let resolve_owned_read_target ~ownership_root ~path ~cwd =
   if String.equal path ""
   then Error (Keeper_alerting_path.refusal_of_rejection Keeper_alerting_path.Path_required)
   else
-    let refusal message =
-      match cwd with
-      | Some _ ->
-        Keeper_alerting_path.owned_read_target_refusal
-          (Keeper_alerting_path.Caller_cwd message)
-      | None ->
-        Keeper_alerting_path.owned_read_target_refusal
-          (Keeper_alerting_path.Default_cwd message)
-    in
     let cwd_abs, target_rel =
       match cwd with
       | None -> default_owned_target ~ownership_root ~path
@@ -662,9 +653,19 @@ let resolve_owned_read_target ~ownership_root ~path ~cwd =
     in
     match Fs_compat.inspect_owned_directory_chain ~ownership_root cwd_abs with
     | Error rejection ->
-      Error (refusal (Fs_compat.owned_directory_chain_rejection_to_string rejection))
+      let reason =
+        match cwd with
+        | Some _ -> Keeper_alerting_path.Caller_cwd_rejected rejection
+        | None -> Keeper_alerting_path.Default_cwd_rejected rejection
+      in
+      Error (Keeper_alerting_path.owned_read_target_refusal reason)
     | Ok Fs_compat.Owned_directory_missing ->
-      Error (refusal (fs_guidance_text (Cwd_not_directory { cwd = cwd_abs })))
+      let reason =
+        match cwd with
+        | Some _ -> Keeper_alerting_path.Caller_cwd_missing { cwd = cwd_abs }
+        | None -> Keeper_alerting_path.Default_cwd_missing { cwd = cwd_abs }
+      in
+      Error (Keeper_alerting_path.owned_read_target_refusal reason)
     | Ok (Fs_compat.Owned_directory _) ->
       let target =
         if Filename.is_relative target_rel

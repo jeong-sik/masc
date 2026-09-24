@@ -48,8 +48,8 @@ ASSUME Bounds ==
 NoTurn == [none |-> TRUE]
 NoProgress == [none |-> TRUE]
 
-RestartLine == [kind |-> "HR", fresh |-> FALSE, end |-> 0]
-RefusedLine == [kind |-> "BAD", fresh |-> FALSE, end |-> 0]
+RestartLine == [kind |-> "HR", fresh |-> FALSE, start |-> 0, end |-> 0]
+RefusedLine == [kind |-> "BAD", fresh |-> FALSE, start |-> 0, end |-> 0]
 
 VARIABLES
     hist,       \* the saved checkpoint: the atom ids it holds, in order
@@ -74,6 +74,14 @@ Min(S) == CHOOSE x \in S : \A y \in S : x <= y
 \* Row 3d. Two kinds of line say the atoms are numbered from zero again.
 IsRestart(l) == l.kind = "HR" \/ (l.kind \in {"TE", "TN"} /\ l.fresh)
 
+\* A turn's end line carries the position it started from ([start], RFC 4.6).
+\* A line that says the turn started on a non-empty history settles a refused
+\* line before it: the refused line did not restart the history, or, if it did,
+\* the atoms saved after it are still reachable from atom zero. Without this a
+\* continued turn's end line settles nothing and the round stands on the
+\* refused line for good (masc#37061).
+IsContinuedStart(l) == l.kind \in {"TE", "TN"} /\ l.start > 0
+
 \* Row 2a. A line is a place to cut only when it describes the history that was
 \* loaded. Every digest collides here, so that is end_atom <= atom count.
 IsCut(l, ck) == l.kind = "TE" /\ l.end <= Len(ck)
@@ -93,16 +101,18 @@ FirstRefused(lines) ==
     LET refused == { i \in 1..Len(lines) : lines[i].kind = "BAD" }
     IN IF refused = {} THEN 0 ELSE Min(refused)
 
-\* Row 2c'. A restart line after the refused one settles what the refused line
-\* could have said: the round starts at atom zero and no start is smaller.
-RefusedIsDead(lines, at) ==
-    \E i \in (at + 1)..Len(lines) : IsRestart(lines[i])
+\* Row 2c'. A later line settles what the refused line could have said: a
+\* restart line puts the start at atom zero and no start is smaller, and a turn
+\* that started on a non-empty history says the refused line did not restart
+\* it. Either way the round may go on; the restart case is decided by [back].
+RefusedIsSettled(lines, at) ==
+    \E i \in (at + 1)..Len(lines) : IsRestart(lines[i]) \/ IsContinuedStart(lines[i])
 
-\* A restart settles the refused lines before it and no others, so the question
-\* is asked of each of them, not of the first alone.
+\* A settling line settles the refused lines before it and no others, so the
+\* question is asked of each of them, not of the first alone.
 FirstBlockingRefused(lines) ==
     LET blocking == { i \in 1..Len(lines) :
-                        lines[i].kind = "BAD" /\ ~RefusedIsDead(lines, i) }
+                        lines[i].kind = "BAD" /\ ~RefusedIsSettled(lines, i) }
     IN IF blocking = {} THEN 0 ELSE Min(blocking)
 
 \* keeper_librarian_range.select. [kind, start, end]; start is exclusive of what
@@ -113,13 +123,22 @@ Choose(lines, ck, prog, refusedMode, restartFirst) ==
     LET first == FirstRefused(lines)
         bad == CASE refusedMode = "block" -> FirstBlockingRefused(lines)
                  [] refusedMode = "first" ->
-                      IF first # 0 /\ ~RefusedIsDead(lines, first) THEN first ELSE 0
+                      IF first # 0 /\ ~RefusedIsSettled(lines, first) THEN first ELSE 0
                  [] OTHER -> 0
     IN IF bad # 0
        THEN [kind |-> "stop", start |-> 0, end |-> 0]
        ELSE LET seen  == IF prog = NoProgress THEN 0 ELSE prog.seen
                 cuts  == CutsOf(lines, ck)
-                back  == \E i \in (seen + 1)..Len(lines) : IsRestart(lines[i])
+                \* Row 3c, extended. A restart line beyond the count the
+                \* progress file holds was appended after the position last
+                \* moved. A refused line beyond that count, settled by a later
+                \* turn that started on a non-empty history, counts too: the
+                \* refused line may have been the restart that renumbered the
+                \* history, so the round goes back to atom zero (masc#37061).
+                back  == \E i \in (seen + 1)..Len(lines) :
+                           IsRestart(lines[i])
+                           \/ (lines[i].kind = "BAD"
+                               /\ \E j \in (i + 1)..Len(lines) : IsContinuedStart(lines[j]))
                 \* Row 3c puts the restart line ahead of a position that seems
                 \* to match: a digest carries neither an index nor a time, so
                 \* the same message at the same place reads as the same history.
@@ -248,11 +267,16 @@ TurnSaveRefusedRestart ==
     /\ nextId' = nextId + 1
     /\ UNCHANGED << progress, readIds, clearHalf, snap >>
 
+\* The end line carries the position the turn started from ([start]), so a later
+\* line answers what an unreadable line before it was (RFC 4.6, masc#37061).
+\* [start] is the atom count the turn loaded; a turn that started from no atom
+\* has 0, which is also what [fresh] says.
 EndLine(t) ==
     LET taken == t.loaded \o t.mine
+        start == Len(t.loaded)
     IN IF t.accepted /\ Len(taken) > 0
-       THEN [kind |-> "TE", fresh |-> t.fresh, end |-> Len(taken)]
-       ELSE [kind |-> "TN", fresh |-> t.fresh, end |-> 0]
+       THEN [kind |-> "TE", fresh |-> t.fresh, start |-> start, end |-> Len(taken)]
+       ELSE [kind |-> "TN", fresh |-> t.fresh, start |-> start, end |-> 0]
 
 TurnEnd ==
     /\ turn # NoTurn
@@ -550,7 +574,22 @@ AtomsUpToLastCutRead ==
     LET cuts == CutsOf(log, hist)
     IN cuts = {} \/ \A i \in 1..Min({Max(cuts), Len(hist)}) : hist[i] \in readIds
 
-EveryReachableAtomEventuallyRead == <>[]AtomsUpToLastCutRead
+\* A log whose last line is one the decoder refused. The round stands on that
+\* line and waits for a line that settles it (RFC 4.4 row 2c'), which is the
+\* operator-visible halt of 4.10 and not a loss: the next turn's end line
+\* settles it and the round comes back. A finite turn budget can end the log
+\* there, so the state is reachable and is not the stall this property is
+\* about. Every TE/TN line is a settling line -- a fresh one restarts the
+\* history and a continued one states its start -- so a refused line is
+\* unsettled exactly when no line follows it, which is this predicate.
+LastLineRefused(lines) ==
+    Len(lines) > 0 /\ lines[Len(lines)].kind = "BAD"
+
+\* What it forbids is a round that had a settling line in front of it and did
+\* not come back: the stall of masc#37061, where a continued turn's end line
+\* settled nothing and the round stood on the refused line for good.
+EveryReachableAtomEventuallyRead ==
+    <>[](LastLineRefused(log) \/ AtomsUpToLastCutRead)
 
 \* Strong fairness on the apply: a round that failed puts the snapshot back, so
 \* the apply is enabled again and again rather than continuously, and weak

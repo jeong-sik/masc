@@ -3,6 +3,7 @@ type rate_limit =
 
 type attempt_failure =
   | Server_error
+  | Provider_capacity
   | Network_transient
   | Provider_timeout
 

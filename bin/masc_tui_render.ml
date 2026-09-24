@@ -1364,11 +1364,20 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
       ; ( "working directory"
         , Terminal_text.single_line_or ~default:"(not recorded)"
             pending.Tui_decode.gp_execution_cwd )
-      ; "input",
-        (match pending.Tui_decode.gp_input_preview with
-         | Some preview -> preview
-         | None -> "")
       ]
+      @ (match pending.Tui_decode.gp_input_rows with
+         | Tui_decode.Rows (_ :: _ as fields) ->
+           List.map
+             (fun (key, value) ->
+               ( Terminal_text.single_line key
+               , Keeper_chat.terminal_safe_text ~preserve_newlines:true value ))
+             fields
+         | Tui_decode.Rows [] -> [ "input", "(the stored input object is empty)" ]
+         | Tui_decode.Flattened preview ->
+           [ ( "input (flattened preview, may be cut)"
+             , Terminal_text.single_line_or
+                 ~default:"(the server recorded no input preview)" preview )
+           ])
     | Operator_row a ->
       [ "actor", a.Masc_tui_operator_projection.ap_actor
       ; "action", a.Masc_tui_operator_projection.ap_action_type
@@ -1393,6 +1402,17 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
   (* The pane is where the field count and the drawn height meet, so the row
      it could actually use is reported back rather than recomputed outside. *)
   clamped := scroll;
+  (* The pane scrolls, but nothing on it said the ask ran past the frame: an
+     operator could read the first screen, believe it whole, and press y. The
+     window line the other reading panes carry is what says there is more, so
+     the footer gets it when the field list outgrows the frame. *)
+  let total = List.length lines in
+  let overflow_hint =
+    if total > content_height then
+      Printf.sprintf "[rows %s]  "
+        (Masc_tui_scroll.window_text ~scroll ~height:content_height total)
+    else ""
+  in
   let drawn =
     lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
   in
@@ -1417,7 +1437,8 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
   for _ = 1 to content_height - List.length drawn do
     box_empty buf cols
   done;
-  box_bottom buf cols
+  box_bottom buf cols;
+  overflow_hint
 ;;
 
 (* The queue stays beside the ask. Reading one used to hide the rest, and the
@@ -1433,25 +1454,30 @@ let render_approval_detail (state : state) (row : approval_row) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let scroll = ref state.approval_detail_scroll in
-  if cols < keeper_split_threshold_cols then
-    approval_detail_pane state ~clamped:scroll ~rows ~cols row buf
-  else begin
-    let left_cols = keeper_roster_pane_cols in
-    let left_buf = Buffer.create 1024 in
-    let right_buf = Buffer.create 4096 in
-    (* Not "Asks": this surface already calls a Keeper's question to a human
-       an ask, and these rows are the confirmations waiting on an operator. *)
-    write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Approvals"
-      ~focused:false
-      ~labels:(List.map approval_sidebar_label (approval_items state))
-      ~selected:state.approval_cursor;
-    approval_detail_pane state ~clamped:scroll ~rows
-      ~cols:(cols - left_cols) row right_buf;
-    write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf
-  end;
+  let overflow_hint =
+    if cols < keeper_split_threshold_cols then
+      approval_detail_pane state ~clamped:scroll ~rows ~cols row buf
+    else begin
+      let left_cols = keeper_roster_pane_cols in
+      let left_buf = Buffer.create 1024 in
+      let right_buf = Buffer.create 4096 in
+      (* Not "Asks": this surface already calls a Keeper's question to a human
+         an ask, and these rows are the confirmations waiting on an operator. *)
+      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Approvals"
+        ~focused:false
+        ~labels:(List.map approval_sidebar_label (approval_items state))
+        ~selected:state.approval_cursor;
+      let hint =
+        approval_detail_pane state ~clamped:scroll ~rows
+          ~cols:(cols - left_cols) row right_buf
+      in
+      write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
+      hint
+    end
+  in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:Masc_tui_keys.footer_hints_approval_detail);
+       ~hints:(overflow_hint ^ Masc_tui_keys.footer_hints_approval_detail));
   finish_surface state ~clamped:(Approval_detail_scroll !scroll)
     ~surface_key:"approval-detail" ~rows:terminal_rows ~cols buf
 

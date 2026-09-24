@@ -65,7 +65,7 @@ MESSAGE = "Please investigate this naturally.\n"
 
 def operation_source(submitted_by="proof-operator"):
     return {
-        "schema": "masc.keeper_chat_operation.source.v1",
+        "schema": "masc.keeper_chat_operation.source.v2",
         "submitted_by": submitted_by,
         "thread_id": "keeper:keeper-one",
         "continuation_channel": {
@@ -81,6 +81,7 @@ def operation_source(submitted_by="proof-operator"):
         "external_message_id": None,
         "workspace_id": None,
         "extra_mentions": [],
+        "sender_keeper": None,
         "user_row_origin": "needs_append",
     }
 

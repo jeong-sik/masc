@@ -237,19 +237,34 @@ let add_routes ~sw router =
              ~placeholder:
                (* NDT-OK: request-time clock for a cost window; a dashboard read endpoint, not durable output. *)
                (Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                  ~keepers:[] ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
+                  ~keepers:[] ~unread_keepers:[] ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
              ~compute:(fun () ->
                let keeper_names = Keeper_meta_store.keeper_names config in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
+               (* A meta that is there but does not read -- an I/O or syntax
+                  error, or a file this binary does not decode as the current
+                  schema -- is listed with its reason: its turns are in no
+                  sum, and dropping it without a trace drew the rest as the
+                  whole fleet (#38718). Only a name with no file at all is no
+                  longer a Keeper. *)
+               let unread name detail =
+                 { Keeper_snapshot_unread.name
+                 ; reason = Keeper_snapshot_unread.Meta_read_failed detail
+                 }
+               in
+               let keepers, unread_keepers =
+                 List.fold_right
+                   (fun name (keepers, unreads) ->
+                     match Keeper_meta_store.read_meta_presence config name with
+                     | Ok (Keeper_meta_store.Meta_present m) -> (m :: keepers, unreads)
+                     | Ok Keeper_meta_store.Meta_absent -> (keepers, unreads)
+                     | Ok (Keeper_meta_store.Meta_not_current detail)
+                     | Error detail ->
+                         (keepers, unread name detail :: unreads))
+                   keeper_names ([], [])
                in
                (* NDT-OK: request-time clock for a cost window; a dashboard read endpoint, not durable output. *)
                Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                 ~keepers ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
+                 ~keepers ~unread_keepers ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

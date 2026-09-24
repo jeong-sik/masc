@@ -37,7 +37,7 @@ let deadline schedule =
     (fun rendered_at -> Int64.add rendered_at schedule.min_interval_ns)
     schedule.last_rendered_at_ns
 
-let take ?(input_pending = false) schedule ~now_ns =
+let take ~input_pending schedule ~now_ns =
   let render () =
     schedule.last_was_input <- schedule.pending = Some Input;
     schedule.pending <- None;

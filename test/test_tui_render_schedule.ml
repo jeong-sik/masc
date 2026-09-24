@@ -20,66 +20,80 @@ let check_idle label = function
 
 let test_idle_has_no_render_work () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   for offset = 1 to 1000 do
-    check_idle "one second idle" (Schedule.take schedule ~now_ns:(ms offset))
+    check_idle "one second idle" (Schedule.take ~input_pending:false schedule ~now_ns:(ms offset))
   done;
   check (float 0.000_001) "idle keeps the maximum input wait" 0.1
     (Schedule.input_timeout_seconds schedule ~now_ns:(ms 1000) ~maximum:0.1)
 
 let test_burst_coalesces_to_one_frame () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   for offset = 1 to 1000 do
     Schedule.request schedule Schedule.Background;
-    match Schedule.take schedule ~now_ns:(Int64.of_int offset) with
+    match Schedule.take ~input_pending:false schedule ~now_ns:(Int64.of_int offset) with
     | Schedule.Wait_until due -> check int64 "stable deadline" (ms 16) due
     | Schedule.Idle -> fail "dirty burst became idle"
     | Schedule.Render -> fail "dirty burst rendered before its frame deadline"
   done;
   check_render "one coalesced frame"
-    (Schedule.take schedule ~now_ns:(ms 16));
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 16));
   check_idle "burst is consumed"
-    (Schedule.take schedule ~now_ns:(ms 17))
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 17))
 
 let test_input_after_idle_renders_immediately () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   Schedule.request schedule Schedule.Input;
   check_render "input after idle"
-    (Schedule.take schedule ~now_ns:(ms 1000))
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 1000))
 
 let test_input_does_not_wait_for_recent_frame () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   Schedule.request schedule Schedule.Input;
   check (float 0.0) "first input does not sleep" 0.0
     (Schedule.input_timeout_seconds schedule ~now_ns:1L ~maximum:0.1);
   check_render "keypress immediately after a background frame"
-    (Schedule.take schedule ~now_ns:1L)
+    (Schedule.take ~input_pending:false schedule ~now_ns:1L)
 
 let test_separate_repeated_inputs_keep_the_frame_interval () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   Schedule.request schedule Schedule.Input;
-  check_render "first input is immediate" (Schedule.take schedule ~now_ns:(ms 1));
+  check_render "first input is immediate" (Schedule.take ~input_pending:false schedule ~now_ns:(ms 1));
   Schedule.request schedule Schedule.Input;
   check (float 0.000_001) "next input waits without a busy poll" 0.011
     (Schedule.input_timeout_seconds schedule ~now_ns:(ms 6) ~maximum:0.1);
-  (match Schedule.take schedule ~now_ns:(ms 6) with
+  (match Schedule.take ~input_pending:false schedule ~now_ns:(ms 6) with
    | Schedule.Wait_until due -> check int64 "input frame deadline" (ms 17) due
    | Schedule.Idle | Schedule.Render -> fail "a separate input rendered before its frame deadline");
   check_render "second input renders at the frame deadline"
-    (Schedule.take schedule ~now_ns:(ms 17));
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 17));
   Schedule.request schedule Schedule.Force;
-  check_render "force still renders immediately" (Schedule.take schedule ~now_ns:(ms 18));
+  check_render "force still renders immediately" (Schedule.take ~input_pending:false schedule ~now_ns:(ms 18));
   Schedule.request schedule Schedule.Input;
   check_render "a later input preempts the forced frame"
-    (Schedule.take schedule ~now_ns:(ms 19))
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 19))
+
+let test_a_second_of_separate_inputs_keeps_the_frame_ceiling () =
+  let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
+  let rendered = ref 0 in
+  for offset = 1 to 1000 do
+    Schedule.request schedule Schedule.Input;
+    match Schedule.take ~input_pending:false schedule ~now_ns:(ms offset) with
+    | Schedule.Render -> incr rendered
+    | Schedule.Wait_until _ -> ()
+    | Schedule.Idle -> fail "separate input was dropped"
+  done;
+  check bool "one second of 1ms-spaced input paints at most 63 frames" true
+    (!rendered > 0 && !rendered <= 63)
 
 let test_buffered_input_renders_when_drained () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   Schedule.request schedule Schedule.Background;
   Schedule.request schedule Schedule.Input;
   (match Schedule.take ~input_pending:true schedule ~now_ns:1L with
@@ -89,30 +103,30 @@ let test_buffered_input_renders_when_drained () =
   Schedule.request schedule Schedule.Input;
   check_render "the last byte need not wait for the deadline"
     (Schedule.take ~input_pending:false schedule ~now_ns:2L);
-  check_idle "input frame consumed" (Schedule.take schedule ~now_ns:3L)
+  check_idle "input frame consumed" (Schedule.take ~input_pending:false schedule ~now_ns:3L)
 
 let test_dirty_timeout_wakes_at_deadline () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   Schedule.request schedule Schedule.Background;
   check (float 0.000_001) "deadline caps the select wait" 0.006
     (Schedule.input_timeout_seconds schedule ~now_ns:(ms 10) ~maximum:0.1)
 
 let test_input_preempts_pending_background_frame () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   Schedule.request schedule Schedule.Background;
-  (match Schedule.take schedule ~now_ns:(ms 2) with
+  (match Schedule.take ~input_pending:false schedule ~now_ns:(ms 2) with
    | Schedule.Wait_until due -> check int64 "background deadline" (ms 16) due
    | Schedule.Idle -> fail "background request became idle"
    | Schedule.Render -> fail "background request rendered too early");
   Schedule.request schedule Schedule.Input;
   check_render "input preempts background deadline"
-    (Schedule.take schedule ~now_ns:(ms 2))
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 2))
 
 let test_input_burst_stays_inside_one_frame_window () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
-  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
   for offset = 1 to 1000 do
     Schedule.request schedule Schedule.Input;
     match Schedule.take ~input_pending:true schedule ~now_ns:(Int64.of_int offset) with
@@ -2246,6 +2260,8 @@ let () =
             test_input_does_not_wait_for_recent_frame
         ; test_case "separate repeated inputs keep the frame interval" `Quick
             test_separate_repeated_inputs_keep_the_frame_interval
+        ; test_case "one second of separate input keeps the frame ceiling" `Quick
+            test_a_second_of_separate_inputs_keeps_the_frame_ceiling
         ; test_case "buffered input paints when drained" `Quick
             test_buffered_input_renders_when_drained
         ; test_case "dirty input wait uses the frame deadline" `Quick

@@ -12,7 +12,7 @@ type t
 
 val create : min_interval_ns:int64 -> unit -> t
 val request : t -> request -> unit
-val take : ?input_pending:bool -> t -> now_ns:int64 -> decision
+val take : input_pending:bool -> t -> now_ns:int64 -> decision
 (** The first input frame renders when its already-buffered bytes have been
     handled; later input frames keep the minimum interval. [input_pending]
     also coalesces a buffered burst until it drains or the deadline arrives.

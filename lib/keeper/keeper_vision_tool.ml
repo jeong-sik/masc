@@ -111,10 +111,17 @@ let vision_store_dir ~keeper_name =
   Filename.concat (Config_dir_resolver.keepers_dir ()) (keeper_name ^ ".vision")
 
 let frames_dir ~keeper_name =
-  Filename.concat (vision_store_dir ~keeper_name) "frames"
+  Store.frames_dir ~dir:(vision_store_dir ~keeper_name)
 
-let store_artifact ?auto_prune ~dir bytes =
-  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () -> Store.store ?auto_prune ~dir bytes)
+let store_frame ~keeper_name bytes =
+  let dir = frames_dir ~keeper_name in
+  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () ->
+    Store.store ~auto_prune:true ~dir bytes)
+
+let store_kept ~keeper_name bytes =
+  let dir = vision_store_dir ~keeper_name in
+  Eio_guard.run_in_systhread ~label:"vision-artifact-store" (fun () ->
+    Store.store ~auto_prune:false ~dir bytes)
 
 let load_artifact ~dir handle =
   Eio_guard.run_in_systhread ~label:"vision-artifact-load" (fun () -> Store.load ~dir handle)

@@ -21,6 +21,7 @@ let is_canonical (h : handle) : bool =
        h
 
 let path_of ~dir (h : handle) = Filename.concat dir h
+let frames_dir ~dir = Filename.concat dir "frames"
 
 type prune_result =
   { deleted_count : int
@@ -90,45 +91,44 @@ let prune ?max_entries ?max_bytes ~dir () : (prune_result, string) result =
         let deleted = ref 0 in
         let reclaimed = ref 0 in
         let rec evict = function
-          | [] -> ()
+          | [] -> Ok ()
           | (_name, path, size, _mtime) :: rest ->
-              if !cur_entries > max_entries || !cur_bytes > max_bytes then begin
-                let unlinked =
-                  try
-                    Unix.unlink path;
-                    decr cur_entries;
-                    cur_bytes := !cur_bytes - size;
-                    incr deleted;
-                    reclaimed := !reclaimed + size;
-                    true
-                  with
-                  | Unix.Unix_error (Unix.ENOENT, _, _) ->
-                      decr cur_entries;
-                      cur_bytes := !cur_bytes - size;
-                      true
-                  | Unix.Unix_error (err, fn, arg) ->
-                      Log.Misc.warn
-                        "vision: prune unlink %s failed: %s (%s %s); aborting eviction to protect newer frames"
-                        path (Unix.error_message err) fn arg;
-                      false
-                in
-                if unlinked then evict rest
-              end
+              if !cur_entries > max_entries || !cur_bytes > max_bytes then
+                (match
+                   try Unix.unlink path; Ok `Deleted with
+                   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok `Already_absent
+                   | Unix.Unix_error (err, fn, arg) ->
+                       Error
+                         (Printf.sprintf "unlink %s failed: %s (%s %s)"
+                            path (Unix.error_message err) fn arg)
+                 with
+                 | Error _ as error -> error
+                 | Ok outcome ->
+                     decr cur_entries;
+                     cur_bytes := !cur_bytes - size;
+                     if outcome = `Deleted then begin
+                       incr deleted;
+                       reclaimed := !reclaimed + size
+                     end;
+                     evict rest)
+              else Ok ()
         in
-        evict sorted;
-        Ok
-          { deleted_count = !deleted
-          ; reclaimed_bytes = !reclaimed
-          ; remaining_count = !cur_entries
-          ; remaining_bytes = !cur_bytes
-          }
+        (match evict sorted with
+         | Error _ as error -> error
+         | Ok () ->
+             Ok
+               { deleted_count = !deleted
+               ; reclaimed_bytes = !reclaimed
+               ; remaining_count = !cur_entries
+               ; remaining_bytes = !cur_bytes
+               })
       end
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
         Error (Printf.sprintf "Vision_artifact_store.prune: %s" (Printexc.to_string exn))
 
-let store ?(auto_prune = true) ?max_entries ?max_bytes ~dir (raw : string) : (handle, string) result =
+let store ~auto_prune ?max_entries ?max_bytes ~dir (raw : string) : (handle, string) result =
   let h = hash raw in
   (* [Fs_compat.mkdir_p] returns unit and raises on failure (EACCES, ENOSPC, a
      parent path component that is a regular file, test-isolation breach). Honor
@@ -226,13 +226,20 @@ let load ~dir (h : handle) : (string, load_error) result =
   if not (is_canonical h) then Error (Malformed_handle h)
   else
     let primary_path = path_of ~dir h in
+    let frame_path = path_of ~dir:(frames_dir ~dir) h in
     match load_from_path primary_path h with
     | Ok bytes -> Ok bytes
     | Error (Missing_artifact _) ->
-        (* Fallback: check frames subdirectory if loading from parent keeper vision dir *)
-        let frames_path = Filename.concat (Filename.concat dir "frames") h in
-        (match load_from_path frames_path h with
+        (match load_from_path frame_path h with
          | Ok bytes -> Ok bytes
          | Error (Missing_artifact _) -> Error (Missing_artifact primary_path)
          | Error (Malformed_handle _ | Hash_mismatch _ | Read_failed _) as e -> e)
-    | Error (Malformed_handle _ | Hash_mismatch _ | Read_failed _) as e -> e
+    | Error (Hash_mismatch _ | Read_failed _ as primary_error) ->
+        (match load_from_path frame_path h with
+         | Ok bytes ->
+             Log.Misc.warn
+               "vision: root artifact %s is unreadable; using verified frame copy"
+               primary_path;
+             Ok bytes
+         | Error _ -> Error primary_error)
+    | Error (Malformed_handle _) as error -> error

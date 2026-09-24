@@ -123,7 +123,7 @@ let store_image meta bytes =
   let store_dir =
     Vt.vision_store_dir ~keeper_name:meta.Masc.Keeper_meta_contract.name
   in
-  match Store.store ~dir:store_dir bytes with
+  match Store.store ~auto_prune:false ~dir:store_dir bytes with
   | Ok handle -> Store.to_string handle
   | Error msg -> failwith msg
 

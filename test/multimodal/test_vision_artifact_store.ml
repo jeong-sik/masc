@@ -24,14 +24,14 @@ let ok = function
 let test_round_trip () =
   let dir = temp_dir () in
   let bytes = "\x89PNG\r\n\x1a\n\x00\xffbinary\x00\x00bytes\xfe" in
-  let h = ok (S.store ~dir bytes) in
+  let h = ok (S.store ~auto_prune:false ~dir bytes) in
   assert (String.equal (ok (Result.map_error S.load_error_to_string (S.load ~dir h))) bytes)
 
 (* content-addressed: identical bytes -> identical handle. *)
 let test_content_addressed () =
   let dir = temp_dir () in
-  let h1 = ok (S.store ~dir "abc") in
-  let h2 = ok (S.store ~dir "abc") in
+  let h1 = ok (S.store ~auto_prune:false ~dir "abc") in
+  let h2 = ok (S.store ~auto_prune:false ~dir "abc") in
   assert (String.equal (S.to_string h1) (S.to_string h2))
 
 (* Repeated reads preserve the durable inode and mtime, while deletion or
@@ -39,12 +39,12 @@ let test_content_addressed () =
 let test_repeated_store_preserves_and_repairs () =
   let dir = temp_dir () in
   let bytes = "original image" in
-  let h = ok (S.store ~dir bytes) in
+  let h = ok (S.store ~auto_prune:false ~dir bytes) in
   let path = Filename.concat dir (S.to_string h) in
   Unix.utimes path 1.0 1.0;
   let before = Unix.stat path in
   for _ = 1 to 100 do
-    assert (S.to_string (ok (S.store ~dir bytes)) = S.to_string h)
+    assert (S.to_string (ok (S.store ~auto_prune:false ~dir bytes)) = S.to_string h)
   done;
   let after = Unix.stat path in
   (* Same inode = no rewrite. mtime advances: a re-store is a fresh use,
@@ -53,37 +53,37 @@ let test_repeated_store_preserves_and_repairs () =
   assert (after.Unix.st_mtime > before.Unix.st_mtime);
   Out_channel.with_open_bin path (fun oc ->
     output_string oc (String.make (String.length bytes) 'x'));
-  ignore (ok (S.store ~dir bytes));
+  ignore (ok (S.store ~auto_prune:false ~dir bytes));
   assert (ok (Result.map_error S.load_error_to_string (S.load ~dir h)) = bytes);
   Unix.unlink path;
-  ignore (ok (S.store ~dir bytes));
+  ignore (ok (S.store ~auto_prune:false ~dir bytes));
   assert (ok (Result.map_error S.load_error_to_string (S.load ~dir h)) = bytes);
   (* Matching prefix is not an exact image. The bounded reader must detect
      the extra suffix and repair it instead of accepting truncated content. *)
   Out_channel.with_open_bin path (fun oc ->
     output_string oc bytes;
     output_string oc (String.make 1_000_000 'x'));
-  ignore (ok (S.store ~dir bytes));
+  ignore (ok (S.store ~auto_prune:false ~dir bytes));
   assert ((Unix.stat path).Unix.st_size = String.length bytes);
   assert (ok (Result.map_error S.load_error_to_string (S.load ~dir h)) = bytes);
   Unix.unlink path;
   Unix.mkfifo path 0o600;
   (* No writer exists: opening this FIFO with a blocking reader would hang.
      The owned regular-file reader rejects it and atomic storage replaces it. *)
-  ignore (ok (S.store ~dir bytes));
+  ignore (ok (S.store ~auto_prune:false ~dir bytes));
   assert ((Unix.lstat path).Unix.st_kind = Unix.S_REG);
   assert (ok (Result.map_error S.load_error_to_string (S.load ~dir h)) = bytes);
   Unix.unlink path;
   Unix.mkdir path 0o700;
-  match S.store ~dir bytes with
+  match S.store ~auto_prune:false ~dir bytes with
   | Error _ -> ()
   | Ok _ -> assert false
 
 (* distinct bytes -> distinct handles. *)
 let test_distinct () =
   let dir = temp_dir () in
-  let h1 = ok (S.store ~dir "abc") in
-  let h2 = ok (S.store ~dir "abd") in
+  let h1 = ok (S.store ~auto_prune:false ~dir "abc") in
+  let h2 = ok (S.store ~auto_prune:false ~dir "abd") in
   assert (not (String.equal (S.to_string h1) (S.to_string h2)))
 
 (* the handle survives a string round-trip (what a checkpoint persists) and the
@@ -91,7 +91,7 @@ let test_distinct () =
 let test_persisted_handle_reload () =
   let dir = temp_dir () in
   let bytes = "durable-across-checkpoint" in
-  let h = ok (S.store ~dir bytes) in
+  let h = ok (S.store ~auto_prune:false ~dir bytes) in
   let persisted = S.to_string h in
   let rewrapped = S.of_string persisted in
   assert (String.equal (ok (Result.map_error S.load_error_to_string (S.load ~dir rewrapped))) bytes)
@@ -108,7 +108,7 @@ let test_missing_is_error () =
 (* a tampered file (bytes no longer hash to the handle) is rejected on read. *)
 let test_corruption_detected () =
   let dir = temp_dir () in
-  let h = ok (S.store ~dir "original") in
+  let h = ok (S.store ~auto_prune:false ~dir "original") in
   let path = Filename.concat dir (S.to_string h) in
   let oc = open_out_bin path in
   output_string oc "tampered-content";
@@ -127,7 +127,7 @@ let test_corruption_detected () =
    the filesystem. *)
 let test_malformed_handle_rejected () =
   let dir = temp_dir () in
-  ignore (ok (S.store ~dir "seed so dir exists"));
+  ignore (ok (S.store ~auto_prune:false ~dir "seed so dir exists"));
   List.iter
     (fun bad ->
       match S.load ~dir (S.of_string bad) with
@@ -147,7 +147,7 @@ let test_malformed_handle_rejected () =
 
 let test_unreadable_is_not_missing () =
   let dir = temp_dir () in
-  ignore (ok (S.store ~dir "seed"));
+  ignore (ok (S.store ~auto_prune:false ~dir "seed"));
   let handle = String.make 64 'b' in
   Unix.mkdir (Filename.concat dir handle) 0o700;
   match S.load ~dir (S.of_string handle) with
@@ -223,13 +223,13 @@ let test_prune_preserves_non_canonical () =
 
 let test_auto_prune_on_store () =
   let dir = temp_dir () in
-  let h1 = ok (S.store ~max_entries:2 ~dir "frame 1") in
+  let h1 = ok (S.store ~auto_prune:true ~max_entries:2 ~dir "frame 1") in
   let p1 = Filename.concat dir (S.to_string h1) in
   Unix.utimes p1 10.0 10.0;
-  let h2 = ok (S.store ~max_entries:2 ~dir "frame 2") in
+  let h2 = ok (S.store ~auto_prune:true ~max_entries:2 ~dir "frame 2") in
   let p2 = Filename.concat dir (S.to_string h2) in
   Unix.utimes p2 20.0 20.0;
-  let h3 = ok (S.store ~max_entries:2 ~dir "frame 3") in
+  let h3 = ok (S.store ~auto_prune:true ~max_entries:2 ~dir "frame 3") in
   let p3 = Filename.concat dir (S.to_string h3) in
   Unix.utimes p3 30.0 30.0;
   (* Only 2 newest should remain *)
@@ -276,18 +276,29 @@ let test_prune_stops_on_unlink_failure () =
   Fun.protect
     ~finally:(fun () -> Unix.chmod dir 0o755)
     (fun () ->
-      let res = ok (S.prune ~max_entries:1 ~max_bytes:(10 * 1024 * 1024) ~dir ()) in
-      assert (res.S.deleted_count = 0);
+      assert (Result.is_error (S.prune ~max_entries:1 ~max_bytes:(10 * 1024 * 1024) ~dir ()));
       assert (Result.is_ok (S.load ~dir h1));
       assert (Result.is_ok (S.load ~dir h2));
       assert (Result.is_ok (S.load ~dir h3)))
 
 let test_load_finds_in_frames_subdir () =
   let dir = temp_dir () in
-  let frames_dir = Filename.concat dir "frames" in
-  let h = ok (S.store ~dir:frames_dir "lane screenshot bytes") in
+  let frames_dir = S.frames_dir ~dir in
+  let h = ok (S.store ~auto_prune:false ~dir:frames_dir "lane screenshot bytes") in
   match S.load ~dir h with
   | Ok bytes -> assert (bytes = "lane screenshot bytes")
+  | Error err -> failwith (S.load_error_to_string err)
+
+let test_load_uses_verified_frame_when_root_is_corrupt () =
+  let dir = temp_dir () in
+  let bytes = "captured frame" in
+  let h = ok (S.store ~auto_prune:false ~dir bytes) in
+  let frames_dir = S.frames_dir ~dir in
+  assert (S.to_string (ok (S.store ~auto_prune:false ~dir:frames_dir bytes)) = S.to_string h);
+  Out_channel.with_open_bin (Filename.concat dir (S.to_string h)) (fun oc ->
+    output_string oc "corrupt root");
+  match S.load ~dir h with
+  | Ok loaded -> assert (String.equal loaded bytes)
   | Error err -> failwith (S.load_error_to_string err)
 
 let () =
@@ -307,5 +318,5 @@ let () =
   test_re_store_refreshes_mtime_against_eviction ();
   test_prune_stops_on_unlink_failure ();
   test_load_finds_in_frames_subdir ();
+  test_load_uses_verified_frame_when_root_is_corrupt ();
   print_endline "test_vision_artifact_store: all assertions passed"
-

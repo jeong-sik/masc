@@ -107,7 +107,6 @@ let extraction_query =
    exhaustive — the reader cannot see the image, only your description."
 ;;
 
-let store_dir ~keeper_name = Keeper_vision_tool.vision_store_dir ~keeper_name
 
 (* An [Image] block's [data] is the base64 wire payload
    ([Keeper_multimodal_input.normalize_media_payload] guarantees base64); decode
@@ -191,7 +190,7 @@ let evict_block ~read ~mode ~keeper_name ~eager_budget (block : Agent_core.Types
                 (image_store_failed_placeholder ~reason:"unsupported image media type")
             | Ok media_type ->
               (match
-                 Keeper_vision_tool.store_artifact ~auto_prune:false ~dir:(store_dir ~keeper_name) bytes
+                 Keeper_vision_tool.store_kept ~keeper_name bytes
                with
                | Error _ ->
                  record_eviction ~keeper_name ~mode ~result:"error" ~reason:"store_failed";

@@ -20,6 +20,9 @@ val of_string : string -> handle
 (** Re-wrap a handle string read back from a checkpoint. No I/O; integrity is
     verified later by {!load} (a wrong string fails closed there). *)
 
+val frames_dir : dir:string -> string
+(** The only frame subdirectory name used for storage and read fallback. *)
+
 type prune_result =
   { deleted_count : int
   ; reclaimed_bytes : int
@@ -45,17 +48,17 @@ val prune
     Non-canonical files and subdirectories are never removed. *)
 
 val store
-  :  ?auto_prune:bool
+  :  auto_prune:bool
   -> ?max_entries:int
   -> ?max_bytes:int
   -> dir:string
   -> string
   -> (handle, string) result
-(** [store ?auto_prune ?max_entries ?max_bytes ~dir bytes] writes [bytes] to a content-addressed file under [dir] and
+(** [store ~auto_prune ?max_entries ?max_bytes ~dir bytes] writes [bytes] to a content-addressed file under [dir] and
     returns its handle. Idempotent: identical bytes map to the same handle and
     file. A re-store compares a bounded owned regular-file read, skipping the atomic write
     only on an exact match. Missing or different content is written again.
-    When [auto_prune] is true (default: true) and a new file is written, triggers
+    When [auto_prune] is true and a new file is written, triggers
     a bounded prune pass.
     [Error msg] when the required directory creation or write fails. *)
 

@@ -92,13 +92,17 @@ val frames_dir : keeper_name:string -> string
 (** Per-keeper subdirectory for ephemeral screen captures (MSX, DOS, browser)
     subject to bounded retention/rotation. *)
 
-val store_artifact
-  :  ?auto_prune:bool
-  -> dir:string
+val store_frame
+  :  keeper_name:string
   -> string
   -> (Multimodal.Vision_artifact_store.handle, string) result
-(** Store image bytes in the content-addressed artifact store. Blocking
-    filesystem work is offloaded when the Eio runtime is active. *)
+(** Store a transient lane/browser frame under the bounded frames directory. *)
+
+val store_kept
+  :  keeper_name:string
+  -> string
+  -> (Multimodal.Vision_artifact_store.handle, string) result
+(** Store a conversation or checkpoint image without retention pruning. *)
 
 (** Candidate identity and requested model come from the call configuration.
     [response_model] is the provider-reported label, not an independently

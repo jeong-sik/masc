@@ -9,21 +9,18 @@ let deliver_expression message =
     (Yojson.Safe.to_string (`String message))
 ;;
 
-(* The receiver appears when the service worker has run its module. The
-   browser re-checks every 50 ms; the host's CDP command deadline, not this
-   loop, decides how long that may take. *)
+let runtime_marker_global = "__stagehand_runtime"
+
+(* Answers at once; the host polls it. Where CDP evaluates in the extension's
+   service worker there is no setTimeout (Chrome for Testing 154,
+   2026-09-24), so the page cannot wait by itself. *)
 let readiness_expression =
-  Printf.sprintf
-    {|new Promise((resolve) => {
-  const check = () => typeof globalThis.%s === "function"
-    ? resolve(globalThis.__stagehand_runtime ?? null)
-    : setTimeout(check, 50);
-  check();
-})|}
-    receive_from_host_function
+  Printf.sprintf {|({ receiver: typeof globalThis.%s === "function", marker: globalThis.%s ?? null })|}
+    receive_from_host_function runtime_marker_global
 ;;
 
 type marker = { protocol_version : string; runtime_version : string }
+type readiness = Not_ready | Ready of marker
 
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
@@ -40,6 +37,15 @@ let marker_of_json json =
   let* protocol_version = string_at [ "protocolVersion" ] json in
   let* runtime_version = string_at [ "serverInfo"; "version" ] json in
   Ok { protocol_version; runtime_version }
+;;
+
+(* Ready once the receiver is installed and the marker set; the runtime
+   installs the receiver first. *)
+let readiness_of_json json =
+  match field "receiver" json, field "marker" json with
+  | Some (`Bool true), Some (`Assoc _ as marker) -> Result.map (fun marker -> Ready marker) (marker_of_json marker)
+  | Some (`Bool (true | false)), Some `Null | Some (`Bool false), Some (`Assoc _) -> Ok Not_ready
+  | (Some _ | None), (Some _ | None) -> Error "the readiness check answered without receiver and marker"
 ;;
 
 let is_digit = function '0' .. '9' -> true | _ -> false

@@ -457,6 +457,11 @@ val fit_width : string -> int -> string
     For a fixed column whose head carries the meaning. Where both ends carry
     -- an identifier, an address -- use {!fit_middle}. *)
 
+val pad_left : string -> int -> string
+(** [pad_left text width] right-aligns [text] in [width] cells, cutting it
+    with {!fit_width} when it does not fit. Printf's ["%*s"] counts bytes,
+    which leaves a cell holding a multi-byte mark short of its column. *)
+
 val fit_middle : int -> string -> string
 
 val role_label_mark_cells : ?column:int -> style:style -> unit -> int

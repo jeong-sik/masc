@@ -267,21 +267,17 @@ let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cw
        Execute/search cwd goes through the strict no-projection resolvers
        instead (keeper_tool_execute_path). *)
     let* cwd = resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd in
-    let cwd_not_directory message = Error (Keeper_alerting_path.caller_refusal message) in
+    let cwd_refusal reason = Error (Keeper_alerting_path.caller_refusal reason) in
     (* The hint scans the host playground, so it is only offered where the
        host holds the tree. *)
     (match cwd_existence ~meta cwd with
      | Endpoint_decides | Host_directory -> Ok cwd
      | Host_file ->
-       cwd_not_directory
-         (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
+       cwd_refusal (Keeper_alerting_path.Cwd_is_file { cwd })
      | Host_missing ->
-       cwd_not_directory
-         (Printf.sprintf
-            "cwd_not_directory: %s (directory does not exist; Read will not create \
-             cwd);%s"
-            cwd
-            (available_cwd_hint ~config ~meta)))
+       cwd_refusal
+         (Keeper_alerting_path.Missing_cwd
+            { cwd; read_hint = Some (available_cwd_hint ~config ~meta) }))
 ;;
 
 (* What a Read names. A remote keeper's file is either a name in its own
@@ -686,11 +682,11 @@ let default_owned_target ~ownership_root ~path =
    is the default this module picked, so its absence is not the caller's. *)
 let resolve_owned_read_target ~ownership_root ~path ~cwd =
   if String.equal path ""
-  then Error (Keeper_alerting_path.caller_refusal "path is required")
+  then Error (Keeper_alerting_path.refusal_of_rejection Keeper_alerting_path.Path_required)
   else
     let refusal message =
       match cwd with
-      | Some _ -> Keeper_alerting_path.caller_refusal message
+      | Some _ -> { Keeper_alerting_path.failure_class = Tool_result.Policy_rejection; message }
       | None -> { Keeper_alerting_path.failure_class = Tool_result.Runtime_failure; message }
     in
     let cwd_abs, target_rel =

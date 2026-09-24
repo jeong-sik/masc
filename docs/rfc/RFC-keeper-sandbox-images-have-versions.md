@@ -25,7 +25,7 @@ Keeper 는 `sandbox_image` 에 적힌 이미지 안에서 명령을 실행한다
 1. **태그는 덮어쓰지 않는다.** 태그는 `<이미지 이름>:<UTC 빌드 시각>-<레시피 입력 해시>`
    로 만들고, 같은 태그가 이미 있으면 빌드를 거절한다(§2.2).
 2. **Keeper 는 목록의 이름을 고른다.** 이미지 이름(`base`, `ocaml`, `rust`,
-   `postgres`, `media`)은 저장소가 정한다. 그 이름이 이 호스트에서 어떤 태그와
+   `web`, `media`)은 저장소가 정한다. 그 이름이 이 호스트에서 어떤 태그와
    digest 인지는 호스트의 라이브 목록이 정한다. Keeper TOML 의 `sandbox_image` 는
    이름만 받는다. 버전을 올리고 내릴 때는 라이브 목록 한 줄만 바뀐다(§2.3).
 3. **런타임은 실제로 뜬 이미지의 digest 를 기록하고 보여 준다.** 설정한 이미지와
@@ -180,9 +180,9 @@ sandbox-images/
   ocaml/inputs           # 빌드 컨텍스트에 넣을 파일: masc.opam, masc.opam.locked,
                          #   scripts/opam-pin-from-lock.sh
   rust/Dockerfile        # FROM base. rustup 으로 고정한 toolchain 하나
-  postgres/Dockerfile    # FROM base. psql, pg_dump, python3-psycopg
+  web/Dockerfile         # FROM base. node, pnpm, psql, pg_dump, python3-psycopg
   media/Dockerfile       # FROM base. 지금 general 레시피의 ffmpeg·pandoc·libreoffice·PIL 등
-  (rust, postgres, media 에도 tools.toml)
+  (rust, web, media 에도 tools.toml)
 ```
 
 - `inputs` 에 적힌 파일과 `common-packages.txt` 만 빌드 컨텍스트로 복사한다.
@@ -209,7 +209,7 @@ sandbox-images/
   파일 내용, 부모 이미지의 digest 를 순서대로 이어 붙인 SHA-256 이다. 태그에는 앞
   8자를 쓴다. 이 길이는 코드에서 이름 붙은 상수로 둔다. 전체 해시는 라벨에 남긴다.
 - 모든 `FROM` 은 digest 로 고정한다(`ubuntu:24.04@sha256:…`,
-  `ocaml/opam:ubuntu-24.04-ocaml-5.5@sha256:…`). `rust`·`postgres`·`media` 의 `FROM` 은
+  `ocaml/opam:ubuntu-24.04-ocaml-5.5@sha256:…`). `rust`·`web`·`media` 의 `FROM` 은
   빌드 인자로 받는다. 빌드 명령이 라이브 목록에서 `base` 의 ref 와 digest 를 읽어
   넘긴다. 부모 digest 가 해시에 들어가므로, `base` 가 바뀌면 자식 태그도 바뀐다.
 - 시각을 넣는 이유: 레시피가 같아도 `apt-get` 은 그날의 패키지를 받는다. 해시만
@@ -314,15 +314,15 @@ INSTALL 문서도 이 순서로 고친다.
 | `base` | Ubuntu 24.04 | `common-packages.txt`: bash, curl, gh, git, python3, ripgrep, `jq`, `file`, `xxd`, `time`, `iproute2`, `dnsutils`, `procps`, `make`, `python3-pip`, `python3-venv`, `python3-yaml` | `file` 12명, `ip` 계열 9명, `yaml` 15건, `jq` 27건 | 코드를 빌드하지 않는 Keeper |
 | `ocaml` | `ocaml/opam` | common + 지금 `:local` 의 내용 전부 | `dune`·`opam` 24건 | masc 저장소에서 빌드·테스트하는 Keeper |
 | `rust` | `base` | rustup 으로 고정한 stable 하나, `wasm32-unknown-unknown` target | `cargo`·`rustc` 14건 | rust-hwp-guy |
-| `postgres` | `base` | `postgresql-client`, `python3-psycopg` | 16건 | wkbl 레인 |
+| `web` | `base` | node 22, pnpm, `postgresql-client`, `python3-psycopg` | Postgres 16건, `node` 4건 | wkbl 레인 |
 | `media` | `base` | 지금 `general` 레시피의 ffmpeg, pandoc, libreoffice-impress, poppler-utils, fonts-nanum, python3-pil·reportlab·cairosvg, 그리고 `python3-numpy` | #34959 의 문서·멀티미디어 작업, `PIL`·`numpy` 9건 | msx-retro-mania, 문서·음악을 만드는 Keeper |
 
-- libreoffice 와 ffmpeg 를 `base` 에서 뺀다. `base` 에 두면 `rust`·`postgres` 에도 전부
+- libreoffice 와 ffmpeg 를 `base` 에서 뺀다. `base` 에 두면 `rust`·`web` 에도 전부
   내려간다. §4 가 큰 이미지 하나를 버린 이유와 같다.
 - `general` 과 `:local` 은 Debian 과 Ubuntu 로 베이스가 달랐다. 새 구성은 모두
   Ubuntu 24.04 다.
-- wkbl 레인은 node·pnpm 과 Postgres 가 함께 필요하다. `postgres` 를 어디에 쌓을지는
-  §8 에 남긴다.
+- wkbl 레인은 node·pnpm 과 Postgres 가 함께 필요하고 OCaml 은 쓰지 않는다. 그래서
+  둘을 `web` 한 이미지에 담고 `ocaml` 위에 쌓지 않는다(09-24 결정).
 - 이미지 크기는 `base` 말고는 재지 않았다. 단계 D 에서 빌드하며 잰다.
 
 ### 2.6 이미지 안의 도구 목록
@@ -466,7 +466,7 @@ constitution `<gates>` 는 하드 게이트를 기본으로 두지 말라고 한
 | B1 | 저장소·라이브 목록 파서와 타입, 턴 받을 때 이름 해석과 typed 거절, env·내장 기본값·`image_source`·자동 빌드 삭제, sandbox 마법사의 `base` 빌드·promote | A |
 | B2 | `sandbox_image = "` 98곳과 관련 스크립트·문서를 이름으로 바꾸는 스크립트와 그 결과 | B1 |
 | C | 실제 digest 기록·비교, `Image_drift`, 상태·영수증·TUI 표시(#36993 image 축) | B1 |
-| D | `rust`, `postgres`, `media` 이미지, 크기 실측 | A |
+| D | `rust`, `web`, `media` 이미지, 크기 실측 | A |
 | E | CI 트리거 확장, 모든 이미지 빌드·확인, CI 의 테스트용 이미지를 목록으로 쓰기 | A, B1 |
 | F | `promote`, `rollback`, `prune` | B1 |
 | G | docker 저장소를 `store` 에 더하기 | C |
@@ -486,13 +486,18 @@ constitution `<gates>` 는 하드 게이트를 기본으로 두지 말라고 한
   모든 Keeper 에서 같은지 확인하고, TUI 스크린샷을 남긴다.
 - 효과: 적용 2주 뒤 §1.4 와 같은 방법으로 다시 센다. 공통 도구 행이 0 이 되는지 본다.
 
-## 8. 열린 질문
+## 8. 정한 것과 열린 질문
 
-1. wkbl 레인은 node·pnpm 과 Postgres 가 함께 필요하다. `postgres` 를 `ocaml` 위에
-   쌓을지, node 만 담은 `web` 이미지를 따로 둘지.
-2. `/etc/masc/image.json` 을 Keeper 프롬프트에 넣을지, VM 안 파일로만 둘지. 넣으면 매
-   턴 바이트가 늘고, 안 넣으면 Keeper 가 파일을 읽어야 안다.
-3. Apple `container` 가 `ref@sha256:…` 형태로 실행을 받는지 확인하지 않았다. 받으면
-   §2.4 의 2 에서 digest 로 직접 띄운다.
-4. 같은 호스트에 base path 가 여럿이면 `prune` 이 다른 base path 의 이미지를 모른다
-   (§2.8). 호스트 단위 목록이 필요한지.
+09-24 에 운영자와 정했다.
+
+- wkbl 레인 이미지: `web` 하나로 둔다(§2.5).
+- `/etc/masc/image.json` 은 VM 안 파일로만 둔다. Keeper 프롬프트에 넣지 않는다.
+  넣으면 매 턴 요청 바이트가 늘고, 지금도 Keeper 별 기억 크기가 비용 논의의
+  중심이다(Board `p-3b9f8fbadfc64471f8163f09551c5d4a`).
+- `prune` 과 base path 여럿: 지금 운영 호스트의 base path 는 하나다. §2.8 의 한계만
+  적어 두고, 둘 이상이 되면 호스트 단위 목록을 다시 본다.
+
+남은 질문:
+
+1. Apple `container` 가 `ref@sha256:…` 형태로 실행을 받는지 확인하지 않았다. 받으면
+   §2.4 의 2 에서 digest 로 직접 띄운다. 단계 C 에서 확인한다.

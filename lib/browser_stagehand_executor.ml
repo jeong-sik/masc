@@ -83,13 +83,16 @@ let active_of = function
   | json -> Result.map Option.some (page_id_of ~method_:"context.active_page" json)
 ;;
 
-let evaluate_expression ~body ~args =
+type page_runtime = Scene_runtime | No_runtime
+
+let evaluate_expression ~runtime ~body ~args =
+  let runtime = match runtime with Scene_runtime -> Browser_scene_script.runtime | No_runtime -> "" in
   Printf.sprintf "(function(args) { %s\nreturn JSON.stringify((function(){ %s }).call(null, args)); })(%s)"
-    Browser_scene_script.runtime body (Yojson.Safe.to_string args)
+    runtime body (Yojson.Safe.to_string args)
 ;;
 
-let evaluate ~send ?(args = `Null) page_id body =
-  let* reply = send (Wire.Page_evaluate { page_id; expression = evaluate_expression ~body ~args }) in
+let evaluate ~runtime ~send ?(args = `Null) page_id body =
+  let* reply = send (Wire.Page_evaluate { page_id; expression = evaluate_expression ~runtime ~body ~args }) in
   match field "value" reply with
   | Some (`String encoded) ->
     (match Yojson.Safe.from_string encoded with
@@ -153,7 +156,7 @@ let list_tabs ~tabs ~call =
   let* listed =
     traverse
       (fun page_id ->
-        let* summary = Result.bind (evaluate ~send page_id summary_body) summary_of in
+        let* summary = Result.bind (evaluate ~runtime:No_runtime ~send page_id summary_body) summary_of in
         Ok
           (`Assoc
             [ "id", `Int (Tabs.id_of_page tabs page_id)
@@ -170,17 +173,21 @@ let goto ~tabs ~call ~url ~tab_id =
   let* () = absolute_http url in
   let* _, page_id = page_or_active ~tabs ~call tab_id in
   let* _ = send call (Wire.Page_goto { page_id; url }) in
-  let* summary = Result.bind (evaluate ~send:(send_after_effect call) page_id summary_body) summary_of in
+  let* summary =
+    Result.bind (evaluate ~runtime:No_runtime ~send:(send_after_effect call) page_id summary_body) summary_of
+  in
   Ok (`Assoc [ "url", `String summary.url; "title", `String summary.title ])
 ;;
 
 let capture ~tabs ~call ~tab_id =
   let send = send call in
   let* page_id = page_of ~tabs tab_id in
-  let* (before, viewport) = Result.bind (evaluate ~send page_id observation_body) observation_of in
+  let* (before, viewport) = Result.bind (evaluate ~runtime:Scene_runtime ~send page_id observation_body) observation_of in
   let* shot = send (Wire.Page_screenshot { page_id }) in
   let* data = string_field ~method_:"page.screenshot" "data" shot in
-  let* (after, viewport_after) = Result.bind (evaluate ~send page_id observation_body) observation_of in
+  let* (after, viewport_after) =
+    Result.bind (evaluate ~runtime:Scene_runtime ~send page_id observation_body) observation_of
+  in
   if String.equal before.url after.url && Yojson.Safe.equal viewport viewport_after then
     Ok
       (`Assoc
@@ -206,7 +213,7 @@ let read_text ~tabs ~call ~tab_id ~max_chars =
          (Printf.sprintf "maxChars must be between 1 and %d" Browser_page_script.max_text_chars))
   else
     let* _, page_id = page_or_active ~tabs ~call tab_id in
-    evaluate ~send:(send call) ~args:(`Int cap) page_id Browser_page_script.text
+    evaluate ~runtime:No_runtime ~send:(send call) ~args:(`Int cap) page_id Browser_page_script.text
 ;;
 
 let with_tab_id tab_id method_ = function
@@ -216,7 +223,7 @@ let with_tab_id tab_id method_ = function
 
 let read_elements ~tabs ~call ~tab_id =
   let* tab_id, page_id = page_or_active ~tabs ~call tab_id in
-  let* elements = evaluate ~send:(send call) page_id Browser_page_script.elements in
+  let* elements = evaluate ~runtime:No_runtime ~send:(send call) page_id Browser_page_script.elements in
   with_tab_id tab_id "an elements observation" elements
 ;;
 
@@ -227,7 +234,7 @@ let read_scene ~tabs ~call ~tab_id ~max_chars ~view ~scope =
     | `Assoc fields -> `Assoc (("mode", `String "read") :: fields)
     | json -> json
   in
-  let* scene = evaluate ~send:(send call) ~args page_id Browser_scene_script.read_call in
+  let* scene = evaluate ~runtime:Scene_runtime ~send:(send call) ~args page_id Browser_scene_script.read_call in
   with_tab_id tab_id "a scene" scene
 ;;
 

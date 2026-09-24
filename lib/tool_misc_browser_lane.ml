@@ -387,11 +387,6 @@ let handle_interact_with_phase ~base_path ~tool_name ~start_time args =
 let handle_interact ~base_path ~tool_name ~start_time args =
   fst (handle_interact_with_phase ~base_path ~tool_name ~start_time args)
 
-(* A sentence waits for the model the runtime asks through the exact-output
-   lane, one call for act and observe and two for extract, each of which may
-   fall back to the lane's next slot, and then for the page work. *)
-let instruct_timeout_sec = 120.
-
 let instruct_arguments = [ "action"; "instruction"; "tabId"; "schema" ]
 
 let instruct_verb fields =
@@ -434,7 +429,12 @@ let handle_instruct_with_phase ~tool_name ~start_time args =
     (match instruct_verb fields with
      | Error detail -> refused_as_input detail
      | Ok verb ->
-       let answer = Browser_lane.issue_stagehand ~verb ~timeout_sec:instruct_timeout_sec in
+       (* The exact-output lane may try several slots for each model call,
+          and extract may need two calls before page work completes. There
+          is no declared upper bound for that sequence, so a separate tool
+          deadline could abandon an in-flight page action. The caller may
+          still cancel; the backend propagates that cancellation. *)
+       let answer = Browser_lane.issue_stagehand ~verb ~timeout_sec:None in
        (* observe and extract read the page; a failed act may have acted. *)
        let phase =
          match answer, Browser_lane.verb_is_read verb with

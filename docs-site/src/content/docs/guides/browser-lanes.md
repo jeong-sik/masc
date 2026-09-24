@@ -110,6 +110,18 @@ The browser starts when `BrowserSession` opens with `lane="stagehand"` and
 stops on close, when the session fails, or when the server stops. A Chromium a
 crashed server left is stopped at the next start.
 
+Stagehand has one server-shared session. `BrowserSession` with `action="open"`
+can reuse an existing session; `reused: true` does not prove that its connection
+is healthy. If a call reports a disconnected session, check `action="status"`
+for `ended`. After confirming the session can be closed, call `action="close"`
+then `action="open"`, and rediscover its tab IDs with `BrowserTabs`. Repeating
+`open` alone can return `reused: true` for the disconnected session. Do not
+repeat an act that may already have changed the page.
+
+`status` does not report who opened or is using the session. Close it only when
+the operator has confirmed it can be stopped or your task has an explicit
+exclusive session; otherwise coordinate a handoff with other users.
+
 ## Keeper and MCP tools
 
 Keeper-facing names use CamelCase; the MCP registration names use `masc_browser_*`.
@@ -139,8 +151,9 @@ current rendered page, not every hidden or virtualized item.
 `instruction` sentence (required for act and extract), a `tabId` from
 `BrowserTabs lane="stagehand"`, and for extract an optional `schema`: JSON
 Schema text for the data to return. It returns Stagehand's `data` and
-`metadata`. An act can change the page, so read or capture it afterwards; a
-failed act may have acted. observe and extract only read.
+`metadata`. An act can change the page, so verify the result with Stagehand
+`observe` or `extract`; a failed act may have acted. `observe` and `extract`
+only read.
 
 Use observed selectors for `BrowserInteract` click/fill and `BrowserAct` element
 actions; a selector must match exactly one element. For `BrowserInteract`, pass

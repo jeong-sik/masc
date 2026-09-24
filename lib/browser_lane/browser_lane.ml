@@ -417,8 +417,11 @@ let issue_stagehand ~verb ~timeout_sec =
   else
   match Atomic.get stagehand_executor with
   | None -> Lane_absent
-  | Some execute -> Watched_work.run (fun () -> execute verb)
-      ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out)
+  | Some execute ->
+    (match timeout_sec with
+     | None -> execute verb
+     | Some timeout_sec -> Watched_work.run (fun () -> execute verb)
+         ~watcher:(fun () -> Time_compat.sleep timeout_sec; Timed_out))
 (* The lanes whose browser the server owns; sessions and navigation belong
    to them, and the live browser belongs to the operator. *)
 type server_lane = Server_automation | Server_stagehand
@@ -444,14 +447,14 @@ let server_lane_of_wire raw = Option.bind (Lane_name.of_wire raw) server_lane_of
 let issue_server_lane lane ~verb ~timeout_sec =
   match lane with
   | Server_automation -> issue_automation ~verb ~timeout_sec
-  | Server_stagehand -> issue_stagehand ~verb ~timeout_sec
+  | Server_stagehand -> issue_stagehand ~verb ~timeout_sec:(Some timeout_sec)
 ;;
 
 let issue_for ~target ~verb ~timeout_sec =
   match target with
   | Live_client client -> issue_live client ~verb ~timeout_sec
   | Automation -> Ok (issue_automation ~verb ~timeout_sec)
-  | Stagehand -> Ok (issue_stagehand ~verb ~timeout_sec)
+  | Stagehand -> Ok (issue_stagehand ~verb ~timeout_sec:(Some timeout_sec))
 
 (** Additional observations never queue behind an existing browser command.
     Busy or missing browsers leave this optional source unavailable. The caller

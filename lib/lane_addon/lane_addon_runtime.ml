@@ -23,6 +23,7 @@ type backend = {
     (Yojson.Safe.t, string) result;
   recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->
     (unit, string) result;
+  image_ready : package:package -> (unit, string) result;
 }
 type configuration_owner = { id : string; source_path : string; revision : string }
 type skill_export_owner = Declaration of string | Instance of string
@@ -431,6 +432,14 @@ let backend ~store () = match !override with
               ~on_created:(fun worker -> on_created (wrap worker)) ~artifact_store:store ()
             |> Result.map wrap |> Result.map_error Lane_addon_worker.error_to_string);
       acquire = Lane_addon_sources.acquire;
+      image_ready = (fun ~package ->
+        match clock with
+        | None -> Error "Lane Add-on Docker control requires the server Eio clock"
+        | Some clock ->
+            Lane_addon_worker.inspect_image ~clock ~control_timeout_sec
+              ~mgr:Posix_spawn_process_mgr.mgr ~package ()
+            |> Result.map (fun (_ : string) -> ())
+            |> Result.map_error Lane_addon_worker.error_to_string);
       recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes ->
         match clock with
         | None -> Error "Lane Add-on Docker control requires the server Eio clock"
@@ -980,9 +989,18 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
                let pending = List.filter (fun (owner, fields) -> owner.id = d.id && not (detached fields)) histories in
                if pending <> [] then List.iter (retire_past sw) pending
                else (
-                 let owner = Some {id=d.id; source_path=d.source_path; revision=d.revision} in
-                 match attach_entry ~sw m ~run_id:d.run_id ~package:d.package ~binding:d.binding ~configuration:owner with
-                 | Ok _ -> () | Error message -> add_issue ~id:d.id d.source_path message)
+                 (* An image that is not on the host is not a worker that failed.
+                    Creating one would fail the same way on every beat and leave
+                    an instance behind each time (#37897). Look first, report the
+                    missing image as this declaration's issue, and look again on
+                    the next beat, so an image built later attaches without a
+                    TOML edit. *)
+                 match (backend ~store:m.store ()).image_ready ~package:d.package with
+                 | Error message -> add_issue ~id:d.id d.source_path message
+                 | Ok () ->
+                     let owner = Some {id=d.id; source_path=d.source_path; revision=d.revision} in
+                     match attach_entry ~sw m ~run_id:d.run_id ~package:d.package ~binding:d.binding ~configuration:owner with
+                     | Ok _ -> () | Error message -> add_issue ~id:d.id d.source_path message)
            | _ -> add_issue ~id:d.id d.source_path "multiple workers claim this configuration identity") snapshot.declarations
      | Ok _ -> ());
     let nullable_string = function None -> `Null | Some s -> `String s in
@@ -1067,6 +1085,7 @@ module For_testing = struct
       (Yojson.Safe.t, string) result;
     recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->
       (unit, string) result;
+    image_ready : package:package -> (unit, string) result;
   }
   let with_backend backend f = let previous = !override in override := Some backend;
     Fun.protect ~finally:(fun () -> override := previous) f

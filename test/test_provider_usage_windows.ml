@@ -185,6 +185,24 @@ let test_malformed_window_is_a_typed_error () =
   | Ok _ -> fail "a string utilization was accepted"
 ;;
 
+(* A read without the per-limit map falls back to the single [rateLimits];
+   a map of the wrong type is refused with its path, not skipped. *)
+let test_codex_read_falls_back_and_refuses_a_bad_map () =
+  let read json = Usage.decode_codex_rate_limits_read (Yojson.Safe.from_string json) in
+  let single =
+    decode_ok
+      (read
+         {|{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000}},"rateLimitsByLimitId":null}|})
+  in
+  check string "source" "codex.account_rate_limits_read" (Usage.source_to_string single.source);
+  check int "the single snapshot is read" 1 (List.length single.windows);
+  match read {|{"rateLimits":{"primary":null},"rateLimitsByLimitId":[1]}|} with
+  | Error (Usage.Wrong_type { path; expected = _ }) ->
+    check string "names the map" "account/rateLimits/read.rateLimitsByLimitId" path
+  | Error error -> failf "unexpected error: %s" (Usage.decode_error_to_string error)
+  | Ok _ -> fail "a list map was accepted"
+;;
+
 let () =
   run
     "provider_usage_windows"
@@ -193,6 +211,8 @@ let () =
             test_reports_reach_the_resolved_document
         ; test_case "malformed window is a typed error" `Quick
             test_malformed_window_is_a_typed_error
+        ; test_case "codex read falls back and refuses a bad map" `Quick
+            test_codex_read_falls_back_and_refuses_a_bad_map
         ] )
     ]
 ;;

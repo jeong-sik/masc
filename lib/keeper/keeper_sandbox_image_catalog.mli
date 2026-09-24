@@ -55,7 +55,13 @@ type entry =
 type t
 
 val entries : t -> entry list
-(** In file order. *)
+(** Shipped names in file order. Host builds for names removed from the shipped
+    catalog are excluded. *)
+
+val orphaned_builds : t -> entry list
+(** Host builds whose names are no longer shipped. They cannot resolve or be
+    promoted, but are retained on save so a catalog update cannot erase them.
+    Operators can inspect and remove the stale entries deliberately. *)
 
 type parse_error =
   | Toml_syntax of string
@@ -69,7 +75,6 @@ type parse_error =
   | Invalid_reference of { path : string list; value : string }
       (** Not [repository:tag] as {!pinned} describes it. *)
   | Shipped_build of { name : string }
-  | Host_name_not_shipped of { name : string }
   | Host_name_without_build of { name : string }
 
 val parse_error_to_string : parse_error -> string
@@ -96,7 +101,8 @@ val load_error_to_string : load_error -> string
 
 val load : config_root:string -> shipped:string -> (t, load_error) result
 (** Read names from [shipped] on every load, and promotions from the host
-    file when it exists. Unknown host names and builds in [shipped] fail. *)
+    file when it exists. Host builds for names no longer shipped are retained
+    as {!orphaned_builds}; builds in [shipped] fail. *)
 
 type snapshot
 (** The catalog file's bytes as they were read, or its absence. {!save}

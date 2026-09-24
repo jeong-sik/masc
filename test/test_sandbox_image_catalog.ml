@@ -282,8 +282,17 @@ let test_host_and_shipped_catalogs_keep_their_own_roles () =
     write_catalog config_root
       (Printf.sprintf "[images.rogue.docker]\nreference = \"r:1\"\ndigest = \"%s\"\n" (digest 'a'));
     (match load ~config_root ~shipped:shipped_names with
-     | Error (Invalid { error = Host_name_not_shipped { name = "rogue" }; _ }) -> ()
-     | Ok _ -> fail "host added an unshipped image name"
+     | Ok catalog ->
+       check (list string) "orphan is visible" [ "rogue" ]
+         (List.map (fun entry -> entry.name) (orphaned_builds catalog));
+       resolves "orphan cannot resolve" "Unknown_image rogue [base;ocaml]" catalog
+         ~name:"rogue" ~store:Docker_daemon;
+       (match promote catalog ~name:"rogue" ~store:Docker_daemon ~reference:"r:2"
+                ~digest:(digest 'b') with
+        | Error (No_such_image _) -> ()
+        | _ -> fail "orphan was promoted");
+       check (list string) "orphan is preserved for an operator" [ "rogue" ]
+         (List.map (fun entry -> entry.name) (entries (parsed (to_toml catalog))))
      | Error error -> fail (load_error_to_string error));
     write_catalog config_root "[images.base]\n";
     (match load ~config_root ~shipped:shipped_names with
@@ -294,6 +303,32 @@ let test_host_and_shipped_catalogs_keep_their_own_roles () =
     | Error (Invalid { error = Shipped_build { name = "ocaml" }; _ }) -> ()
     | Ok _ -> fail "shipped names included a host build"
     | Error error -> fail (load_error_to_string error))
+
+let test_removed_shipped_name_does_not_stop_other_images_or_erase_build () =
+  with_dir (fun config_root ->
+    write_catalog config_root host_promoted_ocaml;
+    let shipped = "[images.base]\n" in
+    let catalog, snapshot = for_change "removed name" ~config_root ~shipped in
+    resolves "base still works" "Not_built_on_host base apple_container" catalog
+      ~name:"base" ~store:apple;
+    resolves "removed name cannot resolve" "Unknown_image ocaml [base]" catalog
+      ~name:"ocaml" ~store:apple;
+    check (list string) "removed build is reported" [ "ocaml" ]
+      (List.map (fun entry -> entry.name) (orphaned_builds catalog));
+    let next =
+      changed "promote active name"
+        (promote catalog ~name:"base" ~store:apple ~reference:"masc-sandbox:general"
+           ~digest:(digest 'c'))
+    in
+    saved "save active and orphaned builds" (save ~config_root ~expected:snapshot next);
+    let reloaded, _ = for_change "after save" ~config_root ~shipped in
+    check (option string) "active build survives" (Some "masc-sandbox:general")
+      (current reloaded "base" apple);
+    check (list string) "orphan survives save" [ "ocaml" ]
+      (List.map (fun entry -> entry.name) (orphaned_builds reloaded));
+    let restored, _ = for_change "restored name" ~config_root ~shipped:shipped_names in
+    check (option string) "restored name gets its previous build" (Some ocaml_now)
+      (current restored "ocaml" apple))
 
 let test_a_stale_writer_writes_nothing () =
   with_dir (fun config_root ->
@@ -449,6 +484,8 @@ let () =
             test_new_shipped_names_reach_an_existing_host
         ; test_case "host and shipped catalogs keep their own roles" `Quick
             test_host_and_shipped_catalogs_keep_their_own_roles
+        ; test_case "removed name preserves its build and other names" `Quick
+            test_removed_shipped_name_does_not_stop_other_images_or_erase_build
         ; test_case "a stale writer writes nothing" `Quick test_a_stale_writer_writes_nothing
         ; test_case "parent sync failure reports renamed bytes" `Quick
             test_parent_sync_failure_reports_written_file

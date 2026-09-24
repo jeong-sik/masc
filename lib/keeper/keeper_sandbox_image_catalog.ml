@@ -29,9 +29,13 @@ type entry =
   ; promoted : (store * promotion) list
   }
 
-type t = entry list
+type t =
+  { active : entry list
+  ; orphaned_builds : entry list
+  }
 
-let entries t = t
+let entries t = t.active
+let orphaned_builds t = t.orphaned_builds
 
 type parse_error =
   | Toml_syntax of string
@@ -44,7 +48,6 @@ type parse_error =
   | Invalid_digest of { path : string list; value : string }
   | Invalid_reference of { path : string list; value : string }
   | Shipped_build of { name : string }
-  | Host_name_not_shipped of { name : string }
   | Host_name_without_build of { name : string }
 
 let dotted = function [] -> "the catalog" | path -> String.concat "." path
@@ -78,8 +81,6 @@ let parse_error_to_string = function
       (dotted path) value
   | Shipped_build { name } ->
     Printf.sprintf "shipped image %S contains a host build" name
-  | Host_name_not_shipped { name } ->
-    Printf.sprintf "host image %S is not in the shipped name list" name
   | Host_name_without_build { name } ->
     Printf.sprintf "host image %S has no build; names belong in the shipped catalog" name
 
@@ -250,7 +251,7 @@ let entry (name, value) =
   in
   Ok { name; promoted = List.rev promoted }
 
-let parse text =
+let parse_entries text =
   let* toml = Result.map_error (fun detail -> Toml_syntax detail) (Otoml.Parser.from_string_result text) in
   let* top = table ~path:[] toml in
   let* () = only_keys ~path:[] ~allowed:[ images_key ] top in
@@ -268,14 +269,17 @@ let parse text =
     in
     Ok (List.rev entries)
 
+let parse text =
+  Result.map (fun active -> { active; orphaned_builds = [] }) (parse_entries text)
+
 type resolution =
   | Resolved of pinned
   | Unknown_image of { name : string; known : string list }
   | Not_built_on_host of { name : string; store : store }
 
 let resolve t ~name ~store =
-  match List.find_opt (fun entry -> String.equal entry.name name) t with
-  | None -> Unknown_image { name; known = List.map (fun entry -> entry.name) t }
+  match List.find_opt (fun entry -> String.equal entry.name name) t.active with
+  | None -> Unknown_image { name; known = List.map (fun entry -> entry.name) t.active }
   | Some entry ->
     (match List.assoc_opt store entry.promoted with
      | Some promotion -> Resolved promotion.current
@@ -320,7 +324,7 @@ let parse_at ~path text = Result.map_error (fun error -> Invalid { path; error }
 
 let from_shipped_and_snapshot ~path ~shipped snapshot =
   let shipped_path = "config/sandbox-images.toml (shipped)" in
-  let* names = parse_at ~path:shipped_path shipped in
+  let* names = Result.map entries (parse_at ~path:shipped_path shipped) in
   let* () =
     match List.find_opt (fun entry -> entry.promoted <> []) names with
     | None -> Ok ()
@@ -329,26 +333,32 @@ let from_shipped_and_snapshot ~path ~shipped snapshot =
   let* host =
     match snapshot with
     | Absent -> Ok []
-    | Read text -> parse_at ~path text
+    | Read text -> Result.map entries (parse_at ~path text)
   in
   let* () =
     List.fold_left
       (fun checked entry ->
          let* () = checked in
-         if not (List.exists (fun named -> String.equal named.name entry.name) names)
-         then Error (Invalid { path; error = Host_name_not_shipped { name = entry.name } })
-         else if entry.promoted = []
+         if entry.promoted = []
          then Error (Invalid { path; error = Host_name_without_build { name = entry.name } })
          else Ok ())
       (Ok ()) host
   in
+  let active, orphaned_builds =
+    List.partition
+      (fun entry -> List.exists (fun named -> String.equal named.name entry.name) names)
+      host
+  in
   Ok
-    (List.map
-       (fun named ->
-          match List.find_opt (fun entry -> String.equal entry.name named.name) host with
-          | None -> named
-          | Some entry -> { named with promoted = entry.promoted })
-       names)
+    { active =
+        List.map
+          (fun named ->
+             match List.find_opt (fun entry -> String.equal entry.name named.name) active with
+             | None -> named
+             | Some entry -> { named with promoted = entry.promoted })
+          names
+    ; orphaned_builds
+    }
 
 let load ~config_root ~shipped =
   let path = catalog_path ~config_root in
@@ -375,10 +385,10 @@ let change_error_to_string = function
     Printf.sprintf "%s on %s has no previous build to roll back to" name
       (store_to_string store)
 
-let known_names t = List.map (fun entry -> entry.name) t
+let known_names t = List.map (fun entry -> entry.name) t.active
 
 let change_entry t ~name f =
-  match List.find_opt (fun entry -> String.equal entry.name name) t with
+  match List.find_opt (fun entry -> String.equal entry.name name) t.active with
   | None -> Error (No_such_image { name; known = known_names t })
   | Some _ ->
     let rec replace = function
@@ -390,7 +400,7 @@ let change_entry t ~name f =
         let* rest = replace rest in
         Ok (entry :: rest)
     in
-    replace t
+    Result.map (fun active -> { t with active }) (replace t.active)
 
 let set_store store promotion promoted =
   if List.mem_assoc store promoted
@@ -437,7 +447,7 @@ let to_toml t =
                    reference_key previous.reference digest_key previous.digest)
               promotion.previous)
          entry.promoted)
-    t;
+    (t.active @ t.orphaned_builds);
   Buffer.contents buf
 
 type save_error =

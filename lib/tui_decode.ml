@@ -219,6 +219,11 @@ type standalone_lanes_snapshot = {
   sls_lanes : standalone_lane list;
 }
 
+type standalone_lane_answer = {
+  sla_output_meaning : string;
+  sla_evidence : string;
+}
+
 type keeper_secret_status =
   | Secret_ready
   | Secret_empty
@@ -492,6 +497,11 @@ type goal_proof =
   | Proof_stale of string option
   | Proof_unreadable of string option
 
+type verifier_unreconciled = {
+  vu_step : Goal_reconcile_step.t;
+  vu_detail : string;
+}
+
 type planning_goal = {
   pg_id : string;
   pg_title : string;
@@ -501,6 +511,7 @@ type planning_goal = {
   pg_metric : string option;
   pg_target_value : string option;
   pg_proof : goal_proof;
+  pg_verifier_unreconciled : verifier_unreconciled option;
   pg_last_review_note : string option;
   (* RFC 3339 server timestamps. Optional because an older server build may
      not emit them; the TUI renders what is there rather than refusing the
@@ -2070,6 +2081,24 @@ let decode_goal_proof json =
     Proof_unreadable (Some "no verification block on the goal")
 ;;
 
+(* Required and nullable: the server writes [null] for every goal the latest
+   verifier scan settled, so a missing key is a wire mismatch, not a goal the
+   verifier is fine with. *)
+let decode_verifier_unreconciled json =
+  match Json_util.assoc_member_opt "verifier_unreconciled" json with
+  | None -> Error "missing required field 'verifier_unreconciled'"
+  | Some `Null -> Ok None
+  | Some (`Assoc _ as blocked) ->
+    let* raw_step = required_string_field blocked "step" in
+    let* vu_detail = required_string_field blocked "detail" in
+    (match Goal_reconcile_step.of_string raw_step with
+     | Some vu_step -> Ok (Some { vu_step; vu_detail })
+     | None -> Error (Printf.sprintf "unknown verifier reconcile step %S" raw_step))
+  | Some other ->
+    Error
+      (Printf.sprintf "field 'verifier_unreconciled' must be an object or null (received %s)"
+         (Json_util.kind_name other))
+
 let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_title = required_string_field json "title" in
@@ -2088,6 +2117,7 @@ let decode_planning_goal json =
   let* pg_created_at = optional_string_field json "created_at" in
   let* pg_updated_at = optional_string_field json "updated_at" in
   let pg_proof = decode_goal_proof (member "verification" json) in
+  let* pg_verifier_unreconciled = decode_verifier_unreconciled json in
   Ok
     {
       pg_id;
@@ -2098,6 +2128,7 @@ let decode_planning_goal json =
       pg_metric;
       pg_target_value;
       pg_proof;
+      pg_verifier_unreconciled;
       pg_last_review_note;
       pg_last_review_at;
       pg_created_at;
@@ -2814,6 +2845,28 @@ type memory_librarian_failure_kind =
   | Failure_lane_cancelled
   | Failure_unhandled_exception
 
+(* RFC librarian-lifecycle §4.10: the atoms the Keeper's requests skip
+   because the Librarian stands behind the start the provider last
+   accepted. [mls_gap_end_atom] is that start; the gap ends just before it.
+   [Stalled_unmeasured] is a file the gap is read from that did not read:
+   neither "no gap" nor a gap. *)
+type memory_librarian_stall_cause =
+  | Stall_meta_unreadable
+  | Stall_turn_records_unreadable
+  | Stall_turn_boundary_refused
+  | Stall_snapshot_unreadable
+  | Stall_read_position_unreadable
+
+type memory_librarian_stalled =
+  | Stalled_gap of {
+      mls_gap_start_atom : int;
+      mls_gap_end_atom : int;
+    }
+  | Stalled_unmeasured of {
+      mls_cause : memory_librarian_stall_cause;
+      mls_detail : string;
+    }
+
 (* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
    standing, and what its last pass and its journal say. [None] in a field is
    "not measured", which the header prints as such; it is not zero. *)
@@ -2825,6 +2878,7 @@ type memory_librarian_health = {
   mlh_continuity_unread_atoms : int option;
   mlh_last_success_at : float option;
   mlh_last_failure_kind : memory_librarian_failure_kind option;
+  mlh_stalled : memory_librarian_stalled option;
 }
 
 type memory_context_frontier = {
@@ -5409,6 +5463,7 @@ let decode_memory_librarian_health keeper_json =
       ; "continuity_unread_atoms"
       ; "last_success_at"
       ; "last_failure_kind"
+      ; "stalled"
       ]
       json
   in
@@ -5430,6 +5485,41 @@ let decode_memory_librarian_health keeper_json =
   let* mlh_last_failure_kind =
     required_nullable_string_field json "last_failure_kind"
     |> Fun.flip Result.bind decode_memory_librarian_failure_kind
+  in
+  let* mlh_stalled =
+    match member "stalled" json with
+    | `Null -> Ok None
+    | stalled ->
+      let* kind = required_string_field stalled "kind" in
+      (match kind with
+       | "gap" ->
+         let* () =
+           require_exact_object_fields
+             "librarian stalled gap" [ "kind"; "gap_start_atom"; "gap_end_atom" ] stalled
+         in
+         let* mls_gap_start_atom = required_int_field stalled "gap_start_atom" in
+         let* mls_gap_end_atom = required_int_field stalled "gap_end_atom" in
+         if mls_gap_start_atom >= 0 && mls_gap_end_atom > mls_gap_start_atom
+         then Ok (Some (Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }))
+         else Error "librarian stalled gap must end after it starts"
+       | "unmeasured" ->
+         let* () =
+           require_exact_object_fields
+             "librarian stalled unmeasured" [ "kind"; "cause"; "detail" ] stalled
+         in
+         let* cause = required_string_field stalled "cause" in
+         let* mls_cause =
+           match cause with
+           | "meta_unreadable" -> Ok Stall_meta_unreadable
+           | "turn_records_unreadable" -> Ok Stall_turn_records_unreadable
+           | "turn_boundary_refused" -> Ok Stall_turn_boundary_refused
+           | "snapshot_unreadable" -> Ok Stall_snapshot_unreadable
+           | "read_position_unreadable" -> Ok Stall_read_position_unreadable
+           | other -> Error ("unknown librarian stalled cause: " ^ other)
+         in
+         let* mls_detail = required_string_field stalled "detail" in
+         Ok (Some (Stalled_unmeasured { mls_cause; mls_detail }))
+       | other -> Error ("unknown librarian stalled kind: " ^ other))
   in
   let* () =
     if List.for_all
@@ -5455,6 +5545,7 @@ let decode_memory_librarian_health keeper_json =
     ; mlh_continuity_unread_atoms
     ; mlh_last_success_at
     ; mlh_last_failure_kind
+    ; mlh_stalled
     }
 
 let decode_memory_alert json =
@@ -6955,6 +7046,63 @@ let standalone_lane_configuration_phrase = function
   | Lane_unconfigured -> "not configured"
   | Lane_registry_unavailable -> "registry unreadable"
 
+(* The lane detail's last two lines. They used to be picked by comparing the
+   id with each lane's spelling in turn, and Workspace curator had no branch,
+   so it drew the sentence meant for a lane this TUI does not know. The id is
+   now read into the lane once and every lane has its own arm. *)
+let standalone_lane_answer (lane : standalone_lane) =
+  let structured_output_without_ledger =
+    "Evidence: structured-output generation, not a MASC tool loop; the run \
+     retains exact Input/Output, outcome, and selected slot, so no tool-call \
+     ledger exists."
+  in
+  match Standalone_lane.of_id lane.sl_lane_id with
+  | Some Standalone_lane.Board_attention ->
+    { sla_output_meaning = "Output meaning: the accepted candidate judgment JSON."
+    ; sla_evidence =
+        "Evidence: structured-output generation, not a MASC tool loop; the run \
+         retains exact Input/Output and outcome. HTTP/CLI attribution uses \
+         selected slot; Vendor System One provenance stays in Output."
+    }
+  | Some Standalone_lane.Hitl_auto_judge ->
+    { sla_output_meaning =
+        "Output meaning: the validated and durably settled approval-context \
+         judgment summary."
+    ; sla_evidence = structured_output_without_ledger
+    }
+  | Some Standalone_lane.Librarian ->
+    { sla_output_meaning =
+        "Output meaning: selected memory facts plus committed snapshot metadata."
+    ; sla_evidence = structured_output_without_ledger
+    }
+  | Some Standalone_lane.Workspace_curator ->
+    { sla_output_meaning =
+        "Output meaning: the id of the proposal it published, with shared claims \
+         and conflicts that each cite source ids, and the sources it excluded \
+         with reasons."
+    ; sla_evidence =
+        "Evidence: structured-output generation over admitted catalog slots only \
+         (CLI tails are refused), not a MASC tool loop; the run retains the exact \
+         memory inventory and rendered prompt as Input, the proposal as Output, \
+         outcome, and selected slot."
+    }
+  | Some Standalone_lane.Verifier ->
+    { sla_output_meaning =
+        "Output meaning: Task completion or Goal proof verdict, reason, and \
+         evaluator runtime."
+    ; sla_evidence =
+        "Evidence: Verifier review records also retain MASC tool observations; \
+         open a run to inspect inputs, dispositions, excerpts, duration, and \
+         truncation."
+    }
+  | None ->
+    { sla_output_meaning = "Output meaning: open a retained run for its exact result."
+    ; sla_evidence =
+        Printf.sprintf
+          "Evidence: unknown lane id: %s; this TUI has no evidence contract for it."
+          (sanitize_terminal_text lane.sl_lane_id)
+    }
+
 let standalone_lane_status_of_string = function
   | "running" -> Ok Standalone_running
   | "idle" -> Ok Standalone_idle
@@ -7024,14 +7172,17 @@ let decode_standalone_lane json =
     standalone_lane_configuration_of_string configuration_state
   in
   let* sl_jev =
-    if
-      String.equal sl_lane_id
-        (Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention)
-    then
+    match Standalone_lane.of_id sl_lane_id with
+    | Some Standalone_lane.Board_attention ->
       let* jev = required_object_field json "jev" in
       let* decoded = decode_standalone_lane_jev jev in
       Ok (Some decoded)
-    else Ok None
+    | Some
+        ( Standalone_lane.Librarian
+        | Standalone_lane.Hitl_auto_judge
+        | Standalone_lane.Workspace_curator
+        | Standalone_lane.Verifier )
+    | None -> Ok None
   in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
@@ -7148,12 +7299,9 @@ let decode_standalone_lanes_snapshot json =
   let* items = required_list_field json "lanes" in
   let* sls_lanes = decode_list "lanes" decode_standalone_lane items in
   let expected_lane_ids =
-    (* The registry owns the exact-lane spellings; only the verifier lane
-       lives outside it. Spelling them here again was the drift the
-       lane_key export exists to close. *)
-    Runtime.verifier_exact_lane_id
-    :: List.map Exact_lane_run_registry.lane_key Exact_lane_run_registry.all_lanes
-    |> List.sort String.compare
+    (* [Standalone_lane] spells every lane id; spelling them here again is
+       how a list drifts when a lane is added or renamed. *)
+    List.map Standalone_lane.to_id Standalone_lane.all |> List.sort String.compare
   in
   let observed_lane_ids =
     sls_lanes |> List.map (fun lane -> lane.sl_lane_id) |> List.sort String.compare
@@ -9369,7 +9517,7 @@ let decode_librarian_run_page json =
         if
           String.equal
             lane
-            (Exact_lane_run_registry.lane_key Exact_lane_run_registry.Librarian)
+            (Standalone_lane.to_id Standalone_lane.Librarian)
         then
           let* run_id = required_string_field run "run_id" in
           Ok (Some run_id)
@@ -9620,7 +9768,7 @@ let decode_lane_run_skill_evidence run =
 
 let decode_lane_run_gate_judgment ~lane ~status ~output =
   let hitl_lane =
-    Exact_lane_run_registry.lane_key Exact_lane_run_registry.Hitl_auto_judge
+    Standalone_lane.to_id Standalone_lane.Hitl_auto_judge
   in
   if not (String.equal lane hitl_lane)
   then Ok Lane_run_not_gate_judgment
@@ -9831,22 +9979,17 @@ let decode_lane_run_detail json =
                   | Exact_lane_run_registry.Unavailable _) -> Ok None
   in
   let* lrd_answer_source =
-    (* The lane key is read into the registry's lane once; the answer-source
-       rule below is about the Board-attention lane, and a key no registered
-       lane spells is not that lane. *)
-    let lane =
-      List.find_opt
-        (fun lane ->
-          String.equal (Exact_lane_run_registry.lane_key lane) summary.lrs_lane)
-        Exact_lane_run_registry.all_lanes
-    in
+    (* The lane key is read into the lane once; the answer-source rule below
+       is about the Board-attention lane, and a key no lane spells is not
+       that lane. *)
     let is_board_attention =
-      match lane with
-      | Some Exact_lane_run_registry.Board_attention -> true
+      match Standalone_lane.of_id summary.lrs_lane with
+      | Some Standalone_lane.Board_attention -> true
       | Some
-          ( Exact_lane_run_registry.Librarian
-          | Exact_lane_run_registry.Hitl_auto_judge
-          | Exact_lane_run_registry.Workspace_curator )
+          ( Standalone_lane.Librarian
+          | Standalone_lane.Hitl_auto_judge
+          | Standalone_lane.Workspace_curator
+          | Standalone_lane.Verifier )
       | None ->
         false
     in
@@ -9933,7 +10076,7 @@ let decode_lane_run_detail json =
     | Some (Exact_lane_run_registry.Not_loaded
            | Exact_lane_run_registry.Unavailable _)
       when String.equal summary.lrs_lane
-        (Exact_lane_run_registry.lane_key Exact_lane_run_registry.Hitl_auto_judge) ->
+        (Standalone_lane.to_id Standalone_lane.Hitl_auto_judge) ->
       Ok Lane_run_gate_judgment_unavailable
     | _ ->
       decode_lane_run_gate_judgment ~lane:summary.lrs_lane

@@ -74,6 +74,7 @@ let make_backend () =
         on_created connection;
         Ok connection
       end);
+    image_ready = (fun ~package:_ -> Ok ());
     acquire = (fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
     recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes:_ ->

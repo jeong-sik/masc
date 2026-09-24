@@ -527,6 +527,18 @@ def test_a_failover_trial_reports_its_candidate_order_and_who_answered(tmp_path)
     assert context.metadata["turns_unanswered"] == 0
 
 
+def test_tool_failures_per_tool_reach_harbor_metadata(tmp_path):
+    # A low score has to say whether the tools refused the model (a path
+    # check, a schema error) or the model failed the task.
+    by_tool = [{"tool": "Execute", "calls": 12, "failed": 2, "result_bytes": 900,
+                "top_failure": "Path blocked: /app"}]
+    write_result(tmp_path, failed_tool_calls=2, tool_outcomes=by_tool)
+    context = SimpleNamespace(metadata=None)
+    make_agent(tmp_path).populate_context_post_run(context)
+    assert context.metadata["failed_tool_calls"] == 2
+    assert context.metadata["tool_outcomes"] == by_tool
+
+
 def test_a_single_model_trial_reports_one_candidate_routed_by_itself(tmp_path):
     write_result(tmp_path)
     context = SimpleNamespace(metadata=None)

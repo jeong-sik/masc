@@ -139,7 +139,7 @@ let test_only_current_turn_rows_count_as_cost_samples () =
          ]);
     ]);
   let aggregate =
-    Dashboard_http_keeper.keeper_cost_aggregates_json
+    Dashboard_http_keeper.keeper_cost_aggregates_json ~unread_keepers:[]
       ~config ~keepers:[ meta ] ~window_minutes:60 ~now_ts:(Unix.gettimeofday ())
     |> keeper_item
   in
@@ -185,7 +185,7 @@ let run_keeper_aggregate ~prefix ~keeper_name rows =
   let config = Workspace.default_config base_dir in
   ignore (Workspace.init config ~agent_name:None);
   List.iter (append_metric config keeper_name) rows;
-  Dashboard_http_keeper.keeper_cost_aggregates_json
+  Dashboard_http_keeper.keeper_cost_aggregates_json ~unread_keepers:[]
     ~config ~keepers:[ make_meta keeper_name ] ~window_minutes:60
     ~now_ts:(Unix.gettimeofday ())
   |> keeper_item
@@ -244,21 +244,29 @@ let test_all_unreported_cost_leaves_total_unknown () =
    field is the route's, added here the way the route adds it. *)
 let test_the_tui_decoder_reads_the_encoders_row () =
   let ts = Unix.gettimeofday () -. 1.0 in
-  let aggregate =
-    run_keeper_aggregate ~prefix:"keeper_cost_tui_decode"
-      ~keeper_name:"mixed-keeper"
-      [
-        turn_row ~ts ~cost:(`Float 0.25) ~latency_ms:100 ~total_tokens:10;
-        turn_row ~ts ~cost:`Null ~latency_ms:200 ~total_tokens:1000;
-      ]
+  let encoded =
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Masc_test_deps.init_eio_clock env;
+    let config = Workspace.default_config (temp_dir "keeper_cost_tui_decode") in
+    ignore (Workspace.init config ~agent_name:None);
+    List.iter
+      (append_metric config "mixed-keeper")
+      [ turn_row ~ts ~cost:(`Float 0.25) ~latency_ms:100 ~total_tokens:10
+      ; turn_row ~ts ~cost:`Null ~latency_ms:200 ~total_tokens:1000
+      ];
+    Dashboard_http_keeper.keeper_cost_aggregates_json ~config
+      ~keepers:[ make_meta "mixed-keeper" ]
+      ~unread_keepers:[ ("ghost", "meta unreadable") ]
+      ~window_minutes:60 ~now_ts:(Unix.gettimeofday ())
   in
   let reply =
-    `Assoc
-      [ "keepers", `List [ aggregate ]
-      ; "window_minutes", `Int 60
-      ; "generated_at", `Float ts
-      ; "cache", `Assoc [ "state", `String "fresh"; "generated_at", `Float ts ]
-      ]
+    match encoded with
+    | `Assoc fields ->
+        `Assoc
+          (fields
+          @ [ "cache", `Assoc [ "state", `String "fresh"; "generated_at", `Float ts ] ])
+    | other -> fail ("the encoder did not answer an object: " ^ Yojson.Safe.to_string other)
   in
   match Masc.Tui_decode.decode_keeper_costs reply with
   | Error err -> fail ("the TUI decoder refused the encoder's reply: " ^ err)
@@ -272,8 +280,58 @@ let test_the_tui_decoder_reads_the_encoders_row () =
            | Masc.Tui_decode.Cost_not_reported ->
                fail "a reported cost decoded as not reported");
           check int "unreported samples" 1 row.kc_unreported_samples;
-          check int "unread samples" 0 row.kc_unread_samples
+          check int "unread samples" 0 row.kc_unread_samples;
+          check (list (pair string string)) "unread keepers"
+            [ ("ghost", "meta unreadable") ] costs.kcs_keepers_unread
       | rows -> failf "expected one keeper row, got %d" (List.length rows))
+
+(* #38718: a turn row whose ts_unix or latency_ms has a shape the writer
+   never produces cannot be placed in or out of the window. It was dropped
+   without a count, so the sum beside it read as exact. It is counted apart
+   now; a well-formed row before the window start is outside it and counts
+   nowhere. *)
+let test_unplaced_turn_rows_are_counted () =
+  let ts = Unix.gettimeofday () -. 1.0 in
+  let with_field key value fields = (key, value) :: List.remove_assoc key fields in
+  let aggregate =
+    run_keeper_aggregate ~prefix:"keeper_cost_unplaced" ~keeper_name:"odd"
+      [ turn_row ~ts ~cost:(`Float 0.25) ~latency_ms:100 ~total_tokens:10
+      ; with_field "ts_unix" (`String "yesterday")
+          (turn_row ~ts ~cost:(`Float 1.0) ~latency_ms:100 ~total_tokens:10)
+      ; with_field "latency_ms" (`Float 1.5)
+          (turn_row ~ts ~cost:(`Float 1.0) ~latency_ms:100 ~total_tokens:10)
+      ; turn_row ~ts:(ts -. 7200.0) ~cost:(`Float 9.0) ~latency_ms:100
+          ~total_tokens:10
+      ]
+  in
+  let read = Yojson.Safe.Util.member "metrics_read" aggregate in
+  check int "two rows could not be placed" 2 (int_field "unplaced_turn_rows" read);
+  check int "only the placed in-window turn is a sample" 1
+    (int_field "sample_count" aggregate);
+  check (float 0.0001) "the sum covers the placed turn only" 0.25
+    (float_field "total_cost_usd" aggregate)
+
+(* #38718: a Keeper whose meta could not be read has no row, so the reply
+   lists it apart with the reason rather than drawing the rest as the whole
+   fleet. *)
+let test_unread_keepers_are_listed () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_test_deps.init_eio_clock env;
+  let config = Workspace.default_config (temp_dir "keeper_cost_unread_meta") in
+  ignore (Workspace.init config ~agent_name:None);
+  let json =
+    Dashboard_http_keeper.keeper_cost_aggregates_json ~config ~keepers:[]
+      ~unread_keepers:[ ("ghost", "meta.json: unexpected end of input") ]
+      ~window_minutes:60 ~now_ts:(Unix.gettimeofday ())
+  in
+  match Yojson.Safe.Util.member "keepers_unread" json with
+  | `List [ `Assoc fields ] ->
+      check string "name" "ghost"
+        (Yojson.Safe.Util.to_string (List.assoc "keeper_name" fields));
+      check string "reason" "meta.json: unexpected end of input"
+        (Yojson.Safe.Util.to_string (List.assoc "reason" fields))
+  | other -> fail ("keepers_unread: " ^ Yojson.Safe.to_string other)
 
 let row_with ~ts ~latency_ms ~cost ~usage =
   Keeper_metrics_record.fields Keeper_metrics_record.Turn
@@ -453,7 +511,7 @@ let aggregate_of_workspace ?(now_ts = Unix.gettimeofday ()) ~prefix ~keeper_name
   let config = Workspace.default_config (temp_dir prefix) in
   ignore (Workspace.init config ~agent_name:None);
   write config;
-  Dashboard_http_keeper.keeper_cost_aggregates_json
+  Dashboard_http_keeper.keeper_cost_aggregates_json ~unread_keepers:[]
     ~config ~keepers:[ make_meta keeper_name ] ~window_minutes ~now_ts
   |> keeper_item
 
@@ -618,5 +676,9 @@ let () =
             test_unreadable_usage_is_unread;
           test_case "the TUI decoder reads the encoder's row" `Quick
             test_the_tui_decoder_reads_the_encoders_row;
+          test_case "unplaced turn rows are counted" `Quick
+            test_unplaced_turn_rows_are_counted;
+          test_case "unread keepers are listed" `Quick
+            test_unread_keepers_are_listed;
         ] );
     ]

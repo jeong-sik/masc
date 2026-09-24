@@ -224,19 +224,25 @@ let add_routes ~sw router =
              ~placeholder:
                (* NDT-OK: request-time clock for a cost window; a dashboard read endpoint, not durable output. *)
                (Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                  ~keepers:[] ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
+                  ~keepers:[] ~unread_keepers:[] ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
              ~compute:(fun () ->
                let keeper_names = Keeper_meta_store.keeper_names config in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
+               (* A meta that cannot be read is listed with its reason: its
+                  turns are in no sum, and dropping it without a trace drew
+                  the rest as the whole fleet (#38718). A name whose meta is
+                  gone is no longer a Keeper. *)
+               let keepers, unread_keepers =
+                 List.fold_right
+                   (fun name (keepers, unread) ->
+                     match Keeper_meta_store.read_meta config name with
+                     | Ok (Some m) -> (m :: keepers, unread)
+                     | Ok None -> (keepers, unread)
+                     | Error reason -> (keepers, (name, reason) :: unread))
+                   keeper_names ([], [])
                in
                (* NDT-OK: request-time clock for a cost window; a dashboard read endpoint, not durable output. *)
                Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                 ~keepers ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
+                 ~keepers ~unread_keepers ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

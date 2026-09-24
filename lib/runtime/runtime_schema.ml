@@ -20,6 +20,21 @@ type api_format =
   | Claude_code_runtime
 [@@deriving show, eq]
 
+(* The runtimes whose admission reads [max-prompt-bytes]: Claude Code cuts the
+   history it seeds a start turn with to it, and Antigravity refuses to send a
+   prompt above it. No other runtime reads the field, so a declaration there
+   bounds nothing the provider checks. Every arm is listed so a new format has
+   to be decided here. *)
+let api_format_reads_max_prompt_bytes = function
+  | Claude_code_runtime | Antigravity_cli_runtime -> true
+  | Messages_api
+  | Chat_completions_api
+  | Ollama_api
+  | Gemini_api
+  | Vertex_gemini_api
+  | Codex_app_server_runtime -> false
+;;
+
 (** Which vendor dialect an endpoint speaks. [protocol] names the request
     shape; this names the dialect inside it, and the two do not determine each
     other — [openai-compatible-http] is spoken both by plain OpenAI-compatible
@@ -304,6 +319,10 @@ type model_spec =
         has no tokenizer: converting a token budget would need a
         bytes-per-token constant with nothing to justify it, and a wrong
         constant either truncates silently or overflows silently.
+
+        Only Claude Code and Antigravity runtimes read it
+        ([api_format_reads_max_prompt_bytes]). Declared on a model bound
+        through any other provider, it bounds nothing and no reader counts it.
 
         [None] applies no ceiling, which is the behaviour every deployment has
         today. Resolved via {!Runtime.max_prompt_bytes_of_runtime_id} →

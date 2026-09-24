@@ -1445,6 +1445,7 @@ def planning_goal(goal_id: str, title: str) -> dict[str, object]:
         "metric": f"metric-{goal_id}",
         "target_value": "100%",
         "verification": {"completion": {"state": "idle"}},
+        "verifier_unreconciled": None,
     }
 
 
@@ -6788,6 +6789,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                         "continuity_unread_atoms": 0,
                         "last_success_at": 1700000000.0,
                         "last_failure_kind": None,
+                        "stalled": None,
                     },
                     "librarian_failures": 0,
                     "vision_ingest_errors": 0,

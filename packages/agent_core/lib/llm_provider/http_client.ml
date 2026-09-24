@@ -379,6 +379,52 @@ let network_error_kind_to_string = function
   | Unknown -> "unknown"
 ;;
 
+let network_error_kind_of_string = function
+  | "connection_refused" -> Some Connection_refused
+  | "dns_failure" -> Some Dns_failure
+  | "tls_error" -> Some Tls_error
+  | "timeout" -> Some Timeout
+  | "local_resource_exhaustion" -> Some Local_resource_exhaustion
+  | "connection_reset" -> Some Connection_reset
+  | "end_of_file" -> Some End_of_file
+  | "unknown" -> Some Unknown
+  | _ -> None
+;;
+
+let%test "network_error_kind: every kind reads back from its own spelling" =
+  (* A new kind stops the build at this exhaustive match. Add it to
+     [every_kind] in the same edit, so the round trip covers it. *)
+  let (_ : network_error_kind -> unit) = function
+    | Connection_refused
+    | Dns_failure
+    | Tls_error
+    | Timeout
+    | Local_resource_exhaustion
+    | Connection_reset
+    | End_of_file
+    | Unknown -> ()
+  in
+  let every_kind =
+    [ Connection_refused
+    ; Dns_failure
+    ; Tls_error
+    ; Timeout
+    ; Local_resource_exhaustion
+    ; Connection_reset
+    ; End_of_file
+    ; Unknown
+    ]
+  in
+  List.for_all
+    (fun kind ->
+       network_error_kind_of_string (network_error_kind_to_string kind) = Some kind)
+    every_kind
+;;
+
+let%test "network_error_kind: a spelling no kind emits reads as None" =
+  network_error_kind_of_string "connection_refused_or_reset" = None
+;;
+
 type http_scheme =
   | Http
   | Https

@@ -351,11 +351,14 @@ status: reference
 
 **Operator Disposition**
 : 끝난 turn을 운영자 관점에서 분류한 (kind, reason) 쌍. `Keeper_execution_receipt.operator_disposition`이
-  영수증 필드에서 파생한다. kind는 여덟이고 `keeper_execution_receipt.mli`의 `operator_disposition_kind`가
+  영수증 필드에서 파생한다. kind는 아홉이고 `keeper_execution_receipt.mli`의 `operator_disposition_kind`가
   전부다 — `Disp_pass`·`Disp_fail_open_next_runtime`·`Disp_retry_later`·`Disp_pass_next_model`·
-  `Disp_operator_action_required`·`Disp_user_cancelled`·`Disp_skipped`·`Disp_unknown`.
-  reason도 닫힌 집합이다. `Disp_operator_action_required`는 운영자만 고칠 수 있는 알려진 원인을
-  가리키며 런타임 연속·폴백을 주장하지 않는다. 그 원인은 둘로 갈린다 — `Reason_config_invalid`는
+  `Disp_operator_action_required`·`Disp_effect_review_required`·`Disp_user_cancelled`·`Disp_skipped`·
+  `Disp_unknown`. reason도 닫힌 집합이다. `Disp_effect_review_required`는 원인은 알지만 턴이 밖에
+  남긴 효과가 있었는지 모르는 경우다. Keeper는 다음 턴을 돌고, 사람이 그 효과를 확인한다.
+  `Disp_unknown`은 분류기가 이 turn을 분류하지 못했다는 뜻이고, `ReceiptUnmappedDisposition`을 올리는
+  마지막 갈래만 이 값을 낸다. `Disp_operator_action_required`는 운영자만 고칠 수 있는 알려진 원인을
+  가리키며 런타임 연속·폴백을 주장하지 않는다. 설정 거부와 권한 거절은 reason으로 갈린다 — `Reason_config_invalid`는
   런타임이 provider dispatch 전에 설정값을 거부한 경우(`Keeper_terminal_reason.Config_invalid`)로
   운영자가 runtime toml을 고치고, `Reason_authorization_refused`는 provider가 권한 사유로 요청을
   거절한 경우(`Keeper_terminal_reason.Authorization_refused`)로 wire에 주간·5시간 사용량 한도가 실려
@@ -641,10 +644,13 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
-: 모델이 도는 Keeper의 exact-output 작업을 위한 고정 실행 경로. `Runtime.exact_lane`의
-  다섯(`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`)이
-  `all_exact_lanes`로 열거된다. 실행 기록(`Exact_lane_run_registry.lane`)은 이 중
-  `Verifier`를 뺀 넷을 센다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
+: 모델이 도는 Keeper의 exact-output 작업을 위한 고정 실행 경로. 다섯
+  (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`)은
+  닫힌 타입 `Standalone_lane.t` 하나다. `Standalone_lane.all`이 열거하고 `to_id`가
+  이름을 적는다. `Runtime.exact_lane`은 이 타입을 그대로 쓴다. 실행 기록의
+  `Exact_lane_run_registry.lane`은 `Verifier`를 뺀 넷이고, `standalone_lane`·
+  `lane_of_standalone`으로 이 타입과 오간다. Verifier 검토는 Task·Goal 검증 기록에
+  남는다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
   Keeper turn이 runtime 후보를 시도하는 순서(`Runtime Candidate Order`)와 다른 층이다.
   경계: 코드와 문서가 lane이라는 말을 네 곳에 더 쓴다. 뜻이 모두 다르다.
   `[runtime.lanes.<이름>]` 표와 `Runtime_lane.t`는 **Runtime Candidate Order**다.
@@ -656,7 +662,7 @@ status: reference
   (`fork_server_owned`). 서버 root switch가 없거나 종료 중일 때는 turn switch로
   fallback하지 않고 typed 시작 오류 `Server_root_switch_unavailable`로 거절된다(#38426).
   Memory queue에서 기다리던 일은 나중에 `Librarian` lane에서 돈다.
-  → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
+  → [Standalone_lane](../../lib/runtime/standalone_lane.mli) · [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
 
 **Runtime Candidate Order (런타임 후보 순서)**
 : Keeper turn이 배정된 runtime이 실패했을 때 시도할 runtime 후보의 순서 있는 목록.
@@ -691,8 +697,7 @@ status: reference
 **Standalone Lane**
 : TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
   admission·run registry를 서술할 뿐 제어 동작을 싣지 않는다. 위의 Lane
-  (고정 실행 경로) 생성자 넷에 `Runtime.verifier_exact_lane_id`("Verifier")를
-  더한 다섯 lane을 그린다 — Lane은 그 작업이 무엇을 실행할 수 있는지의 고정
+  (고정 실행 경로) 다섯을 그린다 — Lane은 그 작업이 무엇을 실행할 수 있는지의 고정
   경로이고, Standalone Lane은 그 lane이 무엇을 실행할 수 있고 무엇을
   실행했는지의 관찰이다. 두 축을 함께 갖는다:
   - `sl_status`(상태): `Standalone_running`·`Standalone_idle`·
@@ -704,10 +709,11 @@ status: reference
   합치지만, 아무도 구성하지 않은 lane과 registry를 읽지 못한 lane은 다른
   문제이고 다른 처방을 갖기에 여기서는 나눈다. `Lane_slotless`는 서버가
   "degraded"라 부르는 것 — 구성됐으나 catalog slot도 CLI slot도 admit되지
-  않은 상태다. lane은 다섯이고 `server_standalone_lane_projection.ml`의
-  `lane_specs`가 전부다 — `Board_attention`(Board lane)·`Hitl_auto_judge`·
-  `Librarian`·`Workspace_curator`·verifier exact lane. 앞의 넷은
-  `Exact_lane_run_registry.lane`의 생성자 전부이고 `all_lanes`로 열거된다.
+  않은 상태다. 행은 `Standalone_lane.t`의 lane마다 하나다.
+  `server_standalone_lane_projection.ml`의 `lane_spec`이 lane마다 이름·목적·필수
+  여부를 적고, 표는 필수 lane 둘(`Board_attention`·`Hitl_auto_judge`)을 먼저
+  그린다. 고른 lane의 상세 맨 아래 두 줄(Output meaning·Evidence)은
+  `Tui_decode.standalone_lane_answer`가 lane마다 따로 적는다.
   → [tui_decode.mli](../../lib/tui_decode.mli)
 
 **Keeper Health Reading (Keeper 건강 판독)**
@@ -1872,6 +1878,19 @@ status: reference
   옆에 센다(`librarian_continuity_unmeasured`) — 한 Keeper 때문에 합계가 null이 되면
   잴 수 있는 Keeper가 다 가려진다.
   → [server_dashboard_http_keeper_memory_health](../../lib/server/server_dashboard_http_keeper_memory_health.ml)
+
+**Librarian Stalled (Librarian 이 멈춰 건너뛴 구간)**
+: Librarian 지점이 provider 가 마지막으로 받아들인 시작점보다 뒤에 있어서, 다음 요청이
+  건너뛰는 atom 중 요청에도 기억에도 없는 구간. 시작은 스냅숏 컷과 durable 읽은 위치 중 늦은
+  쪽, 끝은 받아들여진 시작점 바로 앞이다. 비면 gap 이 없다. 규칙은 순수 함수
+  `Keeper_carried_front.librarian_gap` 하나이고, 경보는 Keeper 의 작은 파일(meta, 스냅숏,
+  진행 파일, 턴 기록)만 읽어 그 함수를 부른다(`Keeper_next_request_forecast.librarian_gap`).
+  health JSON 의 `librarian.stalled`(`kind: "gap"`, `gap_start_atom`, `gap_end_atom` — 끝은
+  제외)이고, TUI 는 `Librarian stalled · atoms <a>-<b>` 로 그린다. 읽어야 할 파일을 못 읽으면
+  gap 없음(`null`)도 gap 도 아닌 `kind: "unmeasured"` 와 못 읽은 파일(`cause`)로 보낸다.
+  경보이지 Gate 가 아니다. Librarian 이 받아들여진 시작점에 닿으면 사라진다(RFC
+  librarian-lifecycle §4.10).
+  → [keeper_carried_front](../../lib/keeper/keeper_carried_front.mli) · [keeper_next_request_forecast](../../lib/keeper/keeper_next_request_forecast.mli)
 
 **Continuity Width (연속성 회차의 폭)**
 : 연속성 회차가 한 번에 읽을 수 있는 atom 수의 상한. 크기 때문에 거절당한 회차가 좁힌

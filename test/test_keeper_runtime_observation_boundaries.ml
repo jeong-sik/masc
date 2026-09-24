@@ -289,7 +289,22 @@ let test_runner_exception_reads_reset_as_reset () =
   check_kind
     "Unix ECONNREFUSED stays a refusal"
     "connection_refused"
-    (Unix.Unix_error (Unix.ECONNREFUSED, "connect", ""))
+    (Unix.Unix_error (Unix.ECONNREFUSED, "connect", ""));
+  check_kind "an Eio clock timeout is a timeout" "timeout" Eio.Time.Timeout;
+  (* The HTTP client does not read an exception's text as transport
+     evidence, so the runner does not either. *)
+  check_kind
+    "a Failure whose text names a refusal is not transport"
+    "none"
+    (Failure "Connection refused");
+  check_kind
+    "a Sys_error whose text names a refusal is not transport"
+    "none"
+    (Sys_error "Connection refused");
+  check_kind
+    "a Unix error no kind names is not known to be transport"
+    "none"
+    (Unix.Unix_error (Unix.ENOENT, "open", "/missing"))
 
 let test_tls_handshake_internal_error_is_transient () =
   let err = tls_handshake_internal_error () in

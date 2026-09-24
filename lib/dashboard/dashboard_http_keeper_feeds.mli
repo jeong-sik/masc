@@ -9,6 +9,7 @@ val keeper_costs_window_of_query : string option -> (int, string) result
 val keeper_cost_aggregates_json :
   config:Workspace.config ->
   keepers:Keeper_meta_contract.keeper_meta list ->
+  unread_keepers:(string * string) list ->
   window_minutes:int ->
   now_ts:float ->
   Yojson.Safe.t

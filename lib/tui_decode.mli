@@ -3415,14 +3415,25 @@ val sgr_left_release : string -> char -> (int * int) option
 
 val keeper_of_declaration : Keeper_declared_roster.t -> keeper
 
+type schedule_hold_reason =
+  | Hold_previous_wake_untaken
+      (** The target Keeper has not taken the previous occurrence yet. *)
+  | Hold_target_shutdown_fenced of
+      { target : string
+      ; fence_owner : string
+      }
+      (** The target Keeper refuses intake while the shutdown operation
+          [fence_owner] holds its fence (#34642). *)
+
 type schedule_runner_hold =
   { srh_occurrence_id : string
       (** The occurrence the schedule runner held back on its newest tick. *)
   ; srh_due_at_iso : string
       (** When that occurrence came due. *)
+  ; srh_reason : schedule_hold_reason
+      (** Why the runner holds it. *)
   }
-(** A schedule the runner is holding because its target Keeper has not yet
-    taken the previous occurrence. The server reads it from the same runner
+(** A schedule the runner is holding back. The server reads it from the same runner
     status [/health] reports as [schedule_runner.held]. *)
 
 val decode_schedule_runner_hold :

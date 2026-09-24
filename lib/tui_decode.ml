@@ -11573,10 +11573,32 @@ let decode_async_request_observation json =
   | _ -> Error (Printf.sprintf "unknown async inventory status %S" status)
 ;;
 
+type schedule_hold_reason =
+  | Hold_previous_wake_untaken
+  | Hold_target_shutdown_fenced of
+      { target : string
+      ; fence_owner : string
+      }
+
 type schedule_runner_hold =
   { srh_occurrence_id : string
   ; srh_due_at_iso : string
+  ; srh_reason : schedule_hold_reason
   }
+
+let decode_schedule_hold_reason hold =
+  match member "reason" hold with
+  | `Assoc _ as reason ->
+    let* kind = required_string_field reason "kind" in
+    (match kind with
+     | "previous_occurrence_unconsumed" -> Ok Hold_previous_wake_untaken
+     | "target_intake_fenced" ->
+       let* target = required_string_field reason "target" in
+       let* fence_owner = required_string_field reason "fence_owner" in
+       Ok (Hold_target_shutdown_fenced { target; fence_owner })
+     | unknown -> Error (Printf.sprintf "unknown runner hold reason %S" unknown))
+  | bad -> field_type_error "runner_hold.reason" "an object" bad
+;;
 
 let decode_schedule_runner_hold row =
   match member "runner_hold" row with
@@ -11584,6 +11606,7 @@ let decode_schedule_runner_hold row =
   | `Assoc _ as hold ->
     let* srh_occurrence_id = required_string_field hold "occurrence_id" in
     let* srh_due_at_iso = required_string_field hold "due_at_iso" in
-    Ok (Some { srh_occurrence_id; srh_due_at_iso })
+    let* srh_reason = decode_schedule_hold_reason hold in
+    Ok (Some { srh_occurrence_id; srh_due_at_iso; srh_reason })
   | bad -> field_type_error "runner_hold" "an object or null" bad
 ;;

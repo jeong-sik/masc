@@ -771,6 +771,10 @@ let recover_operation_with_corrupt_owner_fence
    boot recovery, where the process that held the lane has ended. *)
 let redrivable_in_process (operation : Keeper_shutdown_types.t) =
   match operation.phase, operation.lane_ownership with
+  (* Recovery treats a delivered purge receipt as retained evidence and walks
+     nothing, so asking again every tick would only report it settled. *)
+  | Finalized { completion = Completion_delivered Dashboard_keeper_purged; _ }
+  , (Dormant_meta | Registered_lane _) -> false
   | Finalized _, (Dormant_meta | Registered_lane _) -> true
   | (Joined_idle | Finalizing_tasks _ | Cleanup_ready _), Dormant_meta -> true
   | (Joined_idle | Finalizing_tasks _ | Cleanup_ready _), Registered_lane _ -> false
@@ -838,6 +842,10 @@ let rec redrive_finalization ~config ~keeper_name ~operation_id =
   else
     match Keeper_shutdown_store.load ~config ~keeper_name operation_id with
     | Error error -> Error (Redrive_load_failed error)
+    (* Checked before claiming as well as after: a phase the walk refuses
+       must not hold the claim, or boot recovery of that operation, running
+       beside the first tick, finds it taken and gives up. *)
+    | Ok operation when not (redrivable_in_process operation) -> Ok ()
     | Ok operation ->
       (match fork_claimed ~config ~run:(redrive_claimed ~config) operation with
        | Worker_started | Worker_already_active -> Ok ()

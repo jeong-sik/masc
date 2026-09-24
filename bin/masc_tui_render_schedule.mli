@@ -604,3 +604,9 @@ val schedule_hold_reading : due:string -> string
 (** What the Schedules screen says about a schedule the runner is holding:
     since when its held occurrence has been due, and that it waits for the
     target Keeper to take the previous wake. [due] is already formatted. *)
+
+val schedule_fence_hold_reading :
+  due:string -> target:string -> fence_owner:string -> string
+(** The same reading for a schedule held because its target Keeper is
+    shutting down: it names the Keeper and the shutdown operation instead of
+    the previous wake. *)

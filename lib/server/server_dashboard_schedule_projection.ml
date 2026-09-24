@@ -684,15 +684,16 @@ let schedule_signal_rows_and_errors config limit =
 
 (* The runner's own hold, read from the same [held] list [/health] reports.
    A held occurrence has no signal and no wake yet, so nothing else on the row
-   can say the schedule is waiting for its target to take the previous one. *)
+   can say why the schedule is waiting. *)
 let schedule_runner_hold_dashboard_json = function
   | None -> `Null
-  | Some (signal : Schedule_runner.wake_signal) ->
+  | Some ({ signal; reason } : Schedule_runner.held) ->
     `Assoc
       [ ( "occurrence_id"
         , `String (Schedule_occurrence_id.to_string signal.occurrence_id) )
       ; "due_at", `Float signal.due_at
       ; "due_at_iso", unix_iso_json signal.due_at
+      ; "reason", Schedule_runner.hold_reason_to_json reason
       ]
 ;;
 

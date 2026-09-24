@@ -47,7 +47,7 @@ type snapshot =
   ; last_duration_sec : float option
   ; last_counts : tick_counts option
   ; totals : tick_counts
-  ; held : Schedule_runner.wake_signal list
+  ; held : Schedule_runner.held list
   }
 
 let zero_counts : tick_counts =
@@ -176,10 +176,7 @@ let record_tick_ok
     ; last_duration_sec = Some (duration ~started_at ~finished_at)
     ; last_counts = Some counts
     ; totals = add_counts current.totals counts
-    ; held =
-        List.map
-          (fun (hold : Schedule_runner.held) -> hold.signal)
-          result.Schedule_runner.held
+    ; held = result.Schedule_runner.held
     })
 ;;
 
@@ -210,7 +207,7 @@ let snapshot () = Atomic.get state
 
 let held_occurrence snapshot ~schedule_instance_id ~schedule_id =
   List.find_opt
-    (fun (signal : Schedule_runner.wake_signal) ->
+    (fun ({ signal; _ } : Schedule_runner.held) ->
        String.equal signal.schedule_instance_id schedule_instance_id
        && String.equal signal.schedule_id schedule_id)
     snapshot.held
@@ -315,12 +312,13 @@ let snapshot_to_yojson ?now ?stale_after_sec snapshot =
     ; ( "held"
       , `List
           (List.map
-             (fun (signal : Schedule_runner.wake_signal) ->
+             (fun ({ signal; reason } : Schedule_runner.held) ->
                 `Assoc
                   [ ( "occurrence_id"
                     , `String (Schedule_occurrence_id.to_string signal.occurrence_id) )
                   ; "schedule_id", `String signal.schedule_id
                   ; "due_at", `Float signal.due_at
+                  ; "reason", Schedule_runner.hold_reason_to_json reason
                   ])
              snapshot.held) )
     ; ( "stale_after_sec"

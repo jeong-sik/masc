@@ -4467,8 +4467,12 @@ let schedule_detail_lines ~width (row : schedule_row)
      | None -> []
      | Some hold ->
          [ field ~style:(Theme.warn ()) "Held"
-             (Render_schedule.schedule_hold_reading
-                ~due:(Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso))
+             (let due = Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso in
+              match hold.Tui_decode.srh_reason with
+              | Tui_decode.Hold_previous_wake_untaken ->
+                  Render_schedule.schedule_hold_reading ~due
+              | Tui_decode.Hold_target_shutdown_fenced { target; fence_owner } ->
+                  Render_schedule.schedule_fence_hold_reading ~due ~target ~fence_owner)
          ; field "Held id" hold.Tui_decode.srh_occurrence_id
          ])
   @ schedule_turn_rows ~field row

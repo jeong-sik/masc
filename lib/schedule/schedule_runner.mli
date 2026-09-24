@@ -120,9 +120,13 @@ val signals_dir : Workspace_utils.config -> string
 
 val wake_signal_of_yojson : Yojson.Safe.t -> (wake_signal, string) result
 
+val hold_reason_to_json : hold_reason -> Yojson.Safe.t
+(** [{"kind": "previous_occurrence_unconsumed"}] or
+    [{"kind": "target_intake_fenced", "target": _, "fence_owner": _}]. *)
+
 val newly_held : previous:held list -> held list -> held list
 (** The held occurrences that were not held in [previous], by occurrence
-    identity. A hold is a state that lasts until its reason clears, so a caller reports it when it starts rather than on
+    identity and reason. A hold is a state that lasts until its reason clears, so a caller reports it when it starts rather than on
     every tick that re-observes it (#37912). *)
 
 val tick :

@@ -1743,7 +1743,24 @@ let test_a_held_schedule_says_what_it_waits_for () =
   let tag = Schedule.schedule_hold_tag ~due:"09-23 12:34" in
   check bool "the short tag leads the full reading" true
     (String.length reading >= String.length tag
-     && String.sub reading 0 (String.length tag) = tag)
+     && String.sub reading 0 (String.length tag) = tag);
+  (* #34642: a hold on the target's shutdown fence must not claim the keeper
+     still has the previous wake. *)
+  let fenced =
+    Schedule.schedule_fence_hold_reading ~due:"09-23 12:34" ~target:"analyst"
+      ~fence_owner:"shutdown-1"
+  in
+  let fenced_has needle =
+    let n = String.length needle and m = String.length fenced in
+    let rec go i = i + n <= m && (String.sub fenced i n = needle || go (i + 1)) in
+    go 0
+  in
+  check bool "a fence hold names the keeper" true (fenced_has "analyst");
+  check bool "a fence hold names the shutdown" true (fenced_has "shutdown-1");
+  check bool "a fence hold does not blame the previous wake" false
+    (fenced_has "previous wake");
+  check bool "a fence hold leads with the same tag" true
+    (String.sub fenced 0 (String.length tag) = tag)
 ;;
 
 (* Slack reaches the name and the runtime before the task id, and both stop at

@@ -585,13 +585,35 @@ let tick ?consumer ?clock config ~now ~retention_days =
           Ok { due_changed; emitted; rescheduled; dispatches = []; held }))
 ;;
 
+let hold_reason_to_json = function
+  | Previous_occurrence_unconsumed ->
+    `Assoc [ "kind", `String "previous_occurrence_unconsumed" ]
+  | Target_intake_fenced { target; fence_owner } ->
+    `Assoc
+      [ "kind", `String "target_intake_fenced"
+      ; "target", `String target
+      ; "fence_owner", `String fence_owner
+      ]
+;;
+
+let hold_reason_equal left right =
+  match left, right with
+  | Previous_occurrence_unconsumed, Previous_occurrence_unconsumed -> true
+  | ( Target_intake_fenced { target; fence_owner }
+    , Target_intake_fenced { target = target'; fence_owner = fence_owner' } ) ->
+    String.equal target target' && String.equal fence_owner fence_owner'
+  | Previous_occurrence_unconsumed, Target_intake_fenced _
+  | Target_intake_fenced _, Previous_occurrence_unconsumed -> false
+;;
+
 let newly_held ~previous held =
-  let was_held ({ signal; _ } : held) =
+  let was_held ({ signal; reason } : held) =
     List.exists
-      (fun ({ signal = earlier; _ } : held) ->
+      (fun ({ signal = earlier; reason = earlier_reason } : held) ->
          String.equal
            (Schedule_occurrence_id.to_string earlier.occurrence_id)
-           (Schedule_occurrence_id.to_string signal.occurrence_id))
+           (Schedule_occurrence_id.to_string signal.occurrence_id)
+         && hold_reason_equal earlier_reason reason)
       previous
   in
   List.filter (fun hold -> not (was_held hold)) held

@@ -50,9 +50,9 @@ type snapshot =
           it and still here. Process-local like the rest of this snapshot:
           the durable record of each attempt is the schedule store's wake
           list. *)
-  ; held : Schedule_runner.wake_signal list
-      (** The occurrences the newest successful tick held back, each waiting
-          for its target to consume the previous occurrence. A current state,
+  ; held : Schedule_runner.held list
+      (** The occurrences the newest successful tick held back, each with the
+          reason it was held. A current state,
           not a count: it is replaced every tick and never summed into
           [totals] (#37912). *)
   }
@@ -78,7 +78,7 @@ val held_occurrence :
   snapshot ->
   schedule_instance_id:string ->
   schedule_id:string ->
-  Schedule_runner.wake_signal option
+  Schedule_runner.held option
 (** The occurrence of this schedule instance that the newest successful tick
     held back, if it held one. The same [held] list [/health] reports, looked
     up for one schedule row so a reader of the schedule list does not rebuild

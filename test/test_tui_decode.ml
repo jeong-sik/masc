@@ -12,15 +12,61 @@ let test_decode_schedule_runner_hold_reads_a_held_row () =
             [ "occurrence_id", `String "occ-2"
             ; "due_at", `Float 260.0
             ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+            ; "reason", `Assoc [ "kind", `String "previous_occurrence_unconsumed" ]
             ] )
       ]
   in
   match Tui_decode.decode_schedule_runner_hold row with
   | Ok (Some hold) ->
       Alcotest.(check string) "occurrence" "occ-2" hold.Tui_decode.srh_occurrence_id;
-      Alcotest.(check string) "due" "1970-01-01T00:04:20Z" hold.Tui_decode.srh_due_at_iso
+      Alcotest.(check string) "due" "1970-01-01T00:04:20Z" hold.Tui_decode.srh_due_at_iso;
+      Alcotest.(check bool) "reason" true
+        (hold.Tui_decode.srh_reason = Tui_decode.Hold_previous_wake_untaken)
   | Ok None -> Alcotest.fail "a held row decoded as not held"
   | Error err -> Alcotest.fail err
+
+(* #34642: a schedule held on its target's shutdown fence names that fence,
+   and a reason the TUI does not know is refused rather than read as the
+   previous-wake hold. *)
+let test_decode_schedule_runner_hold_reads_a_fence_hold_and_refuses_unknown_reasons () =
+  let hold reason =
+    `Assoc
+      [ ( "runner_hold"
+        , `Assoc
+            [ "occurrence_id", `String "occ-3"
+            ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+            ; "reason", reason
+            ] )
+      ]
+  in
+  (match
+     Tui_decode.decode_schedule_runner_hold
+       (hold
+          (`Assoc
+            [ "kind", `String "target_intake_fenced"
+            ; "target", `String "analyst"
+            ; "fence_owner", `String "shutdown-1"
+            ]))
+   with
+   | Ok (Some { srh_reason = Hold_target_shutdown_fenced { target; fence_owner }; _ }) ->
+       Alcotest.(check string) "target" "analyst" target;
+       Alcotest.(check string) "fence owner" "shutdown-1" fence_owner
+   | Ok _ -> Alcotest.fail "a fence hold decoded as another reason"
+   | Error err -> Alcotest.fail err);
+  Alcotest.(check bool) "an unknown reason is refused" true
+    (Result.is_error
+       (Tui_decode.decode_schedule_runner_hold
+          (hold (`Assoc [ "kind", `String "cooling_down" ]))));
+  Alcotest.(check bool) "a missing reason is refused" true
+    (Result.is_error
+       (Tui_decode.decode_schedule_runner_hold
+          (`Assoc
+            [ ( "runner_hold"
+              , `Assoc
+                  [ "occurrence_id", `String "occ-3"
+                  ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+                  ] )
+            ])))
 
 let test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes () =
   let decode hold = Tui_decode.decode_schedule_runner_hold (`Assoc hold) in
@@ -11754,6 +11800,8 @@ let () =
           test_decode_schedule_runner_hold_reads_a_held_row
       ; Alcotest.test_case "reads not held and refuses bad shapes" `Quick
           test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes
+      ; Alcotest.test_case "reads a fence hold and refuses unknown reasons" `Quick
+          test_decode_schedule_runner_hold_reads_a_fence_hold_and_refuses_unknown_reasons
       ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert

@@ -1436,3 +1436,11 @@ let schedule_hold_tag ~due = "held since " ^ due
 
 let schedule_hold_reading ~due =
   schedule_hold_tag ~due ^ ": the keeper has not taken the previous wake yet"
+
+(* #34642: a schedule held on its target's shutdown fence. *)
+let schedule_fence_hold_reading ~due ~target ~fence_owner =
+  Printf.sprintf
+    "%s: %s is shutting down (%s) and takes no wakes until that finishes"
+    (schedule_hold_tag ~due)
+    target
+    fence_owner

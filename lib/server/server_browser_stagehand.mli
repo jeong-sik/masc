@@ -34,6 +34,6 @@ val pid : t -> int
 (** Startup cleanup for a Chromium left by a crashed server. Refuses to
     erase the owner record when it cannot identify or stop that browser;
     [open_] will then return [Error] before replacing its profile. *)
-val stop_left_behind : masc_root:string -> unit
+val stop_left_behind : clock:_ Eio.Time.clock -> masc_root:string -> unit
 
 val attach_error_message : Browser_stagehand_session.attach_error -> string

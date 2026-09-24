@@ -110,11 +110,11 @@ let official_client_scope ~client ~env_name ~default_subdir account_home =
     match account_home with
     | Some _ -> account_home
     | None ->
-      (match Sys.getenv_opt env_name with
+      (match Env_config_core.raw_value_opt env_name with
        | Some path when path <> "" -> Some path
        | Some _ | None ->
          Option.map (fun path -> Filename.concat path default_subdir)
-           (Sys.getenv_opt "HOME"))
+           (Env_config_core.raw_value_opt "HOME"))
   in
   match home with
   | Some path when Runtime_account_home.is_valid path -> Official_client_home (client, path)

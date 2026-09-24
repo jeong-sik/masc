@@ -59,12 +59,12 @@ let default_config ~cwd =
 let effective_account_home = function
   | Some path -> Some path
   | None ->
-    (match Sys.getenv_opt "CLAUDE_CONFIG_DIR" with
+    (match Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
      | Some path when path <> "" -> Some path
      | Some _ | None ->
        Option.map
          (fun home -> Filename.concat home ".claude")
-         (Sys.getenv_opt "HOME"))
+         (Env_config_core.raw_value_opt "HOME"))
 ;;
 
 let timeout_s_for_phase config ~turn_admitted =

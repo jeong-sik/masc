@@ -3337,12 +3337,7 @@ let sandbox_image_change_catalog ~base_path change =
       (fun error -> "sandbox-image: " ^ Keeper_sandbox_image_catalog.load_error_to_string error)
       (Keeper_sandbox_image_catalog.load_for_change ~config_root ~shipped)
   in
-  let* next =
-    Result.map_error
-      (fun error ->
-         "sandbox-image: " ^ Keeper_sandbox_image_catalog.change_error_to_string error)
-      (change catalog)
-  in
+  let* next = change catalog in
   Result.map_error
     (fun error -> "sandbox-image: " ^ Keeper_sandbox_image_catalog.save_error_to_string error)
     (Keeper_sandbox_image_catalog.save ~config_root ~expected next)

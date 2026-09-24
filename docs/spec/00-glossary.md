@@ -306,7 +306,8 @@ status: reference
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
 
 **Turn**
-: "turn"이 가리키는 단위는 넷이고 서로 다르다. 문맥 없이 쓰지 않는다.
+: "turn"만 쓰면 아래 넷 가운데 무엇인지 알 수 없다. 앞의 셋은 단위나 기록이고, 마지막
+  하나는 실패 원인이다. 문맥 없이 쓰지 않는다.
   - **Keeper Turn** — MASC가 하나의 Keeper 작업을 시도하는 단위. (아래 항목)
   - **agent core Turn** — 하나의 agent core Agent run 내부의 한 단계. Keeper turn과
     동일한 단위가 아니다. (아래 항목)
@@ -348,11 +349,14 @@ status: reference
 
 **Operator Disposition**
 : 끝난 turn을 운영자 관점에서 분류한 (kind, reason) 쌍. `Keeper_execution_receipt.operator_disposition`이
-  영수증 필드에서 파생한다. kind는 여덟이고 `keeper_execution_receipt.mli`의 `operator_disposition_kind`가
+  영수증 필드에서 파생한다. kind는 아홉이고 `keeper_execution_receipt.mli`의 `operator_disposition_kind`가
   전부다 — `Disp_pass`·`Disp_fail_open_next_runtime`·`Disp_retry_later`·`Disp_pass_next_model`·
-  `Disp_operator_action_required`·`Disp_user_cancelled`·`Disp_skipped`·`Disp_unknown`.
-  reason도 닫힌 집합이다. `Disp_operator_action_required`는 운영자만 고칠 수 있는 알려진 원인을
-  가리키며 런타임 연속·폴백을 주장하지 않는다. 그 원인은 둘로 갈린다 — `Reason_config_invalid`는
+  `Disp_operator_action_required`·`Disp_effect_review_required`·`Disp_user_cancelled`·`Disp_skipped`·
+  `Disp_unknown`. reason도 닫힌 집합이다. `Disp_effect_review_required`는 원인은 알지만 턴이 밖에
+  남긴 효과가 있었는지 모르는 경우다. Keeper는 다음 턴을 돌고, 사람이 그 효과를 확인한다.
+  `Disp_unknown`은 분류기가 이 turn을 분류하지 못했다는 뜻이고, `ReceiptUnmappedDisposition`을 올리는
+  마지막 갈래만 이 값을 낸다. `Disp_operator_action_required`는 운영자만 고칠 수 있는 알려진 원인을
+  가리키며 런타임 연속·폴백을 주장하지 않는다. 설정 거부와 권한 거절은 reason으로 갈린다 — `Reason_config_invalid`는
   런타임이 provider dispatch 전에 설정값을 거부한 경우(`Keeper_terminal_reason.Config_invalid`)로
   운영자가 runtime toml을 고치고, `Reason_authorization_refused`는 provider가 권한 사유로 요청을
   거절한 경우(`Keeper_terminal_reason.Authorization_refused`)로 wire에 주간·5시간 사용량 한도가 실려
@@ -429,7 +433,12 @@ status: reference
 **Checkpoint Load**
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
   새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고
-  새 이력을 시작하며, 첫 저장이 받아들여진 뒤 재시작을 기록한다.
+  새 이력을 시작하며, 첫 저장이 받아들여진 뒤 재시작을 기록한다. 이전 버전 체크포인트는
+  턴 실행 시 저장된 이력 없음(`Saved_history_superseded`)으로 읽히며, 초기화 도구
+  (`masc_keeper_clear`)에서도 읽기 오류로 거절하지 않고 부재한 것으로 취급해 공식
+  클라이언트 세션과 함께 정상 비운다(#38223).
+  → [Keeper_checkpoint_store](../../lib/keeper/keeper_checkpoint_store.mli),
+  [Keeper_tool_surface](../../lib/keeper/keeper_tool_surface.ml)
 
 **Prepare Error (준비 오류)**
 : Keeper turn이 모델에 파견(dispatch)되기 전, 실행 컨텍스트를 구성하는 단계(`Keeper_run_context.prepare_run_context`)에서
@@ -454,7 +463,8 @@ status: reference
   → [Observer event](../../bin/masc_tui_observer.mli), [Activity 라벨](../../bin/masc_tui_acting.ml)
 
 **Runtime Attempt**
-: Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
+: Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도. 코드는 같은 것을
+  provider attempt라고도 부른다(`Keeper_provider_attempt_effect`, `provider_attempt_outcomes`).
 
 **Failure Route (실패 경로)**
 : Keeper turn이 실패했을 때 그 실패를 타입으로 분류한 관측(`Keeper_runtime_failure_route.route`).
@@ -476,6 +486,9 @@ status: reference
   MASC 자체의 슬롯 대기가 아니라 시도한 런타임 후보의 실패(Server_error와 같은 층위)로 분류되며,
   클래스 라벨은 `provider_capacity`다(#38290). 이 실패는 다음 런타임 후보로 walk하며 503 과 같이
   다음 후보로 넘기고 이 후보를 뒤로 미룬다.
+  `ECONNRESET`은 요청을 보낸 뒤(`sent`) 발생한 연결 단절로, 연결 수립 전 거부(`connection_refused`)와
+  구분되는 `connection_reset`으로 기록된다(#38518). 재시도 가능 여부·Librarian 크기 판정 제외 등
+  처리 정책은 `connection_refused`와 같으나 wire 및 운영자 요약 라벨이 분리된다.
   `Exact-output route`·`Fusion Route`
   (실행 경로 이름)와 이름이 겹치지만 다른 축이다.
   → [keeper_runtime_failure_route](../../lib/keeper_runtime/keeper_runtime_failure_route.mli)
@@ -487,7 +500,10 @@ status: reference
     (`Keeper_model_input_demotion`, RFC-0363).
   - 후보 강등: 쉬는 중이거나 실패한 runtime 후보를 세 무리(`Not_demoted` ·
     `Failed_without_rest` · `Told_to_rest`)로 나눠 뒤로 보낸다. 배제가 아니라 순서다 —
-    맨 앞 후보가 쉬는 중이면 그 walk는 그 후보가 풀릴 때까지 기다린다
+    쉬라는 말을 들은 후보는 뒤로 가므로, 앞에 쉬지 않는 후보가 있으면 그 후보부터
+    보낸다. 강등한 뒤에도 맨 앞 후보가 쉬는 중이면 그 walk는 기다린다 — 맨 앞 후보가
+    풀리는 때와, 뒤 후보 가운데 풀리는 순간 앞으로 올라오는 후보가 더 일찍 풀리는 때
+    중 빠른 쪽까지다(`walk_rest`). 실패만 한 후보는 기다리게 하지 않는다
     (`Keeper_turn_driver.demote_unavailable_candidates`, RFC-0458 §3.4).
   - 차단 강등: 낡은 blocker를 "이전 차단"으로 낮춰 보여준다. 감추지 않는다
     (`agent-roster.ts`).
@@ -566,6 +582,13 @@ status: reference
 : 이름·입력 schema·handler로 노출되는 호출 단위. MASC가 제공하는 Tool의
   descriptor와 권한 검사는 MASC가 소유한다. → [Tool boundary](13-agent-core.md#tool-boundary)
 
+**Tool Input Validation (도구 입력 검증)**
+: 도구 핸들러로 전달하기 전에 인자 스키마를 사전 검사하는 경계(`Tool_input_validation.validate_input`).
+  도구 선언의 `required`·`type`·`enum`·`const`를 중첩 객체(`properties`)와 배열 항목(`items`)까지
+  재귀적으로 검사하며, 위반된 모든 경로(`JSON path`)와 원인을 한 번에 보고한다(#38391).
+  스키마 위반은 도구 실행이 아니라 사전 거절(`pre-dispatch refusal`)이며, `oneOf`는 루트에서만 검사한다.
+  → [Tool_input_validation](../../packages/agent_core/lib/tool_input_validation.mli)
+
 **Tool-host failure report**
 : 클라이언트가 관측한 도구 연결 실패 기록. HTTP 인증 결과의 보고자는 감사
   이벤트의 `actor`가 된다. 본문의 `agent_name`은 실패가 보고된 Agent이며,
@@ -633,10 +656,13 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
-: 모델이 도는 Keeper의 exact-output 작업을 위한 고정 실행 경로. `Runtime.exact_lane`의
-  다섯(`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`)이
-  `all_exact_lanes`로 열거된다. 실행 기록(`Exact_lane_run_registry.lane`)은 이 중
-  `Verifier`를 뺀 넷을 센다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
+: 모델이 도는 Keeper의 exact-output 작업을 위한 고정 실행 경로. 다섯
+  (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`)은
+  닫힌 타입 `Standalone_lane.t` 하나다. `Standalone_lane.all`이 열거하고 `to_id`가
+  이름을 적는다. `Runtime.exact_lane`은 이 타입을 그대로 쓴다. 실행 기록의
+  `Exact_lane_run_registry.lane`은 `Verifier`를 뺀 넷이고, `standalone_lane`·
+  `lane_of_standalone`으로 이 타입과 오간다. Verifier 검토는 Task·Goal 검증 기록에
+  남는다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
   Keeper turn이 runtime 후보를 시도하는 순서(`Runtime Candidate Order`)와 다른 층이다.
   경계: 코드와 문서가 lane이라는 말을 네 곳에 더 쓴다. 뜻이 모두 다르다.
   `[runtime.lanes.<이름>]` 표와 `Runtime_lane.t`는 **Runtime Candidate Order**다.
@@ -648,7 +674,7 @@ status: reference
   (`fork_server_owned`). 서버 root switch가 없거나 종료 중일 때는 turn switch로
   fallback하지 않고 typed 시작 오류 `Server_root_switch_unavailable`로 거절된다(#38426).
   Memory queue에서 기다리던 일은 나중에 `Librarian` lane에서 돈다.
-  → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
+  → [Standalone_lane](../../lib/runtime/standalone_lane.mli) · [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
 
 **Runtime Candidate Order (런타임 후보 순서)**
 : Keeper turn이 배정된 runtime이 실패했을 때 시도할 runtime 후보의 순서 있는 목록.
@@ -683,8 +709,7 @@ status: reference
 **Standalone Lane**
 : TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
   admission·run registry를 서술할 뿐 제어 동작을 싣지 않는다. 위의 Lane
-  (고정 실행 경로) 생성자 넷에 `Runtime.verifier_exact_lane_id`("Verifier")를
-  더한 다섯 lane을 그린다 — Lane은 그 작업이 무엇을 실행할 수 있는지의 고정
+  (고정 실행 경로) 다섯을 그린다 — Lane은 그 작업이 무엇을 실행할 수 있는지의 고정
   경로이고, Standalone Lane은 그 lane이 무엇을 실행할 수 있고 무엇을
   실행했는지의 관찰이다. 두 축을 함께 갖는다:
   - `sl_status`(상태): `Standalone_running`·`Standalone_idle`·
@@ -696,10 +721,11 @@ status: reference
   합치지만, 아무도 구성하지 않은 lane과 registry를 읽지 못한 lane은 다른
   문제이고 다른 처방을 갖기에 여기서는 나눈다. `Lane_slotless`는 서버가
   "degraded"라 부르는 것 — 구성됐으나 catalog slot도 CLI slot도 admit되지
-  않은 상태다. lane은 다섯이고 `server_standalone_lane_projection.ml`의
-  `lane_specs`가 전부다 — `Board_attention`(Board lane)·`Hitl_auto_judge`·
-  `Librarian`·`Workspace_curator`·verifier exact lane. 앞의 넷은
-  `Exact_lane_run_registry.lane`의 생성자 전부이고 `all_lanes`로 열거된다.
+  않은 상태다. 행은 `Standalone_lane.t`의 lane마다 하나다.
+  `server_standalone_lane_projection.ml`의 `lane_spec`이 lane마다 이름·목적·필수
+  여부를 적고, 표는 필수 lane 둘(`Board_attention`·`Hitl_auto_judge`)을 먼저
+  그린다. 고른 lane의 상세 맨 아래 두 줄(Output meaning·Evidence)은
+  `Tui_decode.standalone_lane_answer`가 lane마다 따로 적는다.
   → [tui_decode.mli](../../lib/tui_decode.mli)
 
 **Keeper Health Reading (Keeper 건강 판독)**
@@ -752,13 +778,31 @@ status: reference
   없음과, 토글이 사다리 밖으로 만든 값이다.
   → [Provider_config.reasoning_effort_request_rejection](../../packages/agent_core/lib/llm_provider/provider_config.mli)
 
+**DOS Lane**
+: 서버 안에 사는 DOS 기계 하나. Keeper 는 `masc_dos_*` 도구로 같은 기계에 키를
+  넣고 화면을 읽는다. 시간은 8086 명령 수로 흐르고, 도구를 불러야만 간다.
+  `settled` 는 "프로그램이 키를 물었고 화면이 멈췄다" 이다. 게임 파일은
+  `<.masc>/dos/programs/` 에 두고, 게임이 쓴 세이브는 `<.masc>/dos/saves/` 에
+  남아 다음 로드에서 다시 쓰인다.
+  → [Dos_lane](../../lib/dos_lane/dos_lane.mli)
+
+**조종권 (Controller)**
+: DOS Lane 기계의 시간을 움직일 수 있는 한 사람. 핫시트 게임에서 여러 Keeper
+  가 한 키보드를 번갈아 쓰기 때문에 있다. 쥔 사람만 load·eject·step·press·click·
+  type 을 하고, 다른 사람은 거절되지만 화면은 볼 수 있다. `masc_dos_pass` 로
+  넘기면 보드 글이 다음 사람을 @멘션해 깨운다. 쥔 Keeper 가 일시정지되거나 정지하면
+  다음 Keeper 가 움직일 때 풀린다. 충돌 뒤 자동 재시작을 기다리거나 막 켜지는 중인
+  Keeper 는 그대로 쥔다. 이름은 부르는 쪽이 스스로 대는 값이라
+  권한 검사가 아니라 차례를 정하는 장치다.
+  → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli)
+
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
-  Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
+  DOS Lane의 머신, Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
   Lane 행을 제공할 수 있고, 패키지 worker는 관측 계산만 격리한다. attach·detach와
   Add-on 장애는 기존 Keeper의 권한·도구·진행 중 작업을 축소하지 않으며, 추가 근거는
-  활용·보류·무시할 수 있다. 원천 어댑터는 `snapshot_file`·`msx_capture`·`lane_output`·
-  `browser_document`이고, 코어는 도메인 의미를 해석하지 않고 공통 row/coverage를
+  활용·보류·무시할 수 있다. 원천 어댑터는 `snapshot_file`·`msx_capture`·`dos_capture`·
+  `lane_output`·`browser_document`이고, 코어는 도메인 의미를 해석하지 않고 공통 row/coverage를
   검사·표시한다.
   → [설계 계약](../design/lane-addon-v0.md),
   [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
@@ -971,6 +1015,11 @@ status: reference
     수 있고 다른 예약은 `not_schedule_owner`로 거절된다(운영자 자격만 임의 변경 가능).
   - `wake_record`는 scheduler가 남기는 일반 wake 시도(`Wake_running`·`Wake_succeeded`·
     `Wake_failed`)이고, Keeper turn 결과는 Keeper 원장에 산다 — 같은 것이 아니다.
+  - 미기동·정지 대상 수락: 대상 Keeper가 등록되어 있으나 fiber가 돌지 않는 상태
+    (`offline`·`crashed`·`restarting`·`draining`)이거나 일시정지(`paused`) 상태일 때의
+    due 발화는 재시도 실패로 튕기지 않고 단 1회 수락(`accepted`)되어 해당 Keeper의
+    durable 큐에 대기한다(#38523). 다음 턴이 깨어날 때 stimulus로 읽히며, 새 발화가
+    이전 대기를 대체하여 큐에는 스케줄당 최대 1건만 유지된다.
   - 노트는 `schedule_id`에 매이고 append-only다. terminal 전이 뒤에도 남는다 —
     상태가 아니라 이력이다.
   - 상태는 `Scheduled`·`Due`·`Running`·`Succeeded`·`Failed`·`Cancelled`·`Expired`,
@@ -1055,6 +1104,11 @@ status: reference
 **Gate**
 : 외부 효과를 설정된 방식(`Keeper_gate_mode.t`: `Always_allow`·`Auto_judge`·`Manual`,
   `Manual`은 사람이 판정)으로 판정하는 경계. pending 판정은 다른 작업을 막지 않는다.
+  **다른 것**: 채팅 창에서 도구 호출 하나를 두고 운영자에게 묻는 도구 승인
+  (`Keeper_tool_approval_mode`: `Auto`·`Yolo`)은 Gate가 아니다. 그 대기는 턴을 멈추고
+  답을 기다리며, `Yolo`로 꺼도 Gate로 가는 바깥 작업은 Gate가 따로 판정한다.
+  도구 승인의 `Auto`와 Gate의 `Auto_judge`도 다른 값이다.
+  → [Keeper_tool_approval_mode](../../lib/keeper/keeper_tool_approval_mode.mli)
 
 **HITL Delivery Occasion (HITL 전달 계기)**
 : 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값
@@ -1092,6 +1146,27 @@ status: reference
   → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli),
   [Keeper_approval_queue](../../lib/keeper/keeper_approval_queue.mli)
 
+**Late Tool Approval (늦은 도구 승인)**
+: Human-in-the-Loop (HITL) 실시간 대기(`await`)가 만료(타임아웃, `keeper_tool_approval_timeout_sec`: 180초)된
+  뒤 뒤늦게 도착한 운영자의 답변을 보존하는 인메모리 저장소(`Keeper_late_approval`). 키퍼가 다음 턴에 동일한
+  호출을 재시도할 때 같은 질문을 두 번 묻지 않고 늦은 답변으로 1회 해결한다.
+  - **동일 호출 엄격 매칭**: `(keeper_name, tool_name, canonical_args_fingerprint)`가 정확히 일치하는
+    호출에만 매칭된다. 인자가 조금이라도 다르면 매칭되지 않고 다시 묻는다.
+  - **1회성 소비(Single-use)**: 한 번 매칭(`take`)되면 메모리에서 즉시 제거된다. 운영자는 해당 단일 호출을
+    승인한 것이지, 동일한 형태를 지닌 모든 후속 호출을 영구 승인한 것이 아니다.
+  - **유효 시간 제한(TTL, 900초)**: 실시간 대기 창(180초)을 지나 도착한 결정은 최대 900초(15분) 동안만
+    유효하며, 초과된 항목은 다음 조회 시 회수(`reap`)되어 부재(`None`) 처리된다. 인간의 결정이 영구적인
+    호출 자격 증명으로 오남용되지 않도록 안전 상한을 둔다.
+  - **인증된 행위자 기록**: HTTP 경계에서 인증된 호출자(`actor`)를 필수 인자로 받아 기록하며, 클라이언트가
+    요청 본문으로 자체 보고하는 `actor_id`는 신뢰하지 않는다(#38038·#38230).
+  - **거부 결정 대칭 보존**: 승인(`Approve`)뿐 아니라 거부(`Deny`) 결정도 동일하게 기억하여 불필요한 재질문을
+    방지한다. 키퍼가 실제로 재시도하지 않은 호출은 자동 실행되지 않으며, 유효 시간 경과 시 안전하게 폐기된다.
+  - **판정 결과 상태**: `remember_outcome`은 `Remembered of { tool_name : string }` 또는 `No_matching_ask`로
+    나뉜다.
+  - **Yolo 모드 안전 불변식**: 키퍼가 `Yolo` 스탠스로 전환된 동안에는 승인 게이트를 묻지도 소비하지도 않아
+    항목이 쌓일 수 있으나, TTL 검사 덕분에 이전 결정이 스탠스 복귀 후 임의로 발화하지 않고 만료 폐기된다.
+  → [Keeper_late_approval](../../lib/keeper/keeper_late_approval.mli)
+
 ## Task Lifecycle
 
 **Created By**
@@ -1113,6 +1188,8 @@ status: reference
 : `Todo` 인 Task 를 맡는 전이. 한 에이전트는 `Claimed` 와 `InProgress` 를 합쳐 하나만
   가질 수 있고, 이 검사는 claim 할 때만 한다. Keeper 의 claim 은 곧바로 Start 를 이어
   보낸다.
+  **다른 뜻**: Memory 쪽의 `claim`은 전이가 아니라 Fact의 문장 필드다(→ Fact).
+  "새 claim"은 Librarian이 새로 적자고 낸 Fact를 말한다.
 
 **Release**
 : 맡은 쪽이 Task 를 `Todo` 로 돌려놓는 전이. Handoff Context 를 남긴다.
@@ -1226,6 +1303,25 @@ status: reference
   → [Skill_source_config](../../lib/skill_config/skill_source_config.mli),
   [Server_skill_editor](../../lib/server/server_skill_editor.mli)
 
+**Skill Deletion (Skill 삭제)**
+: 선언된 소스에서 Skill 패키지를 제거하고 복구 격리소로 이동하는 절차(`Server_skill_editor.delete`).
+  단순 파일 삭제가 아니라 격리 검증·패키지 폴더 처분·스냅샷 갱신(`delete_outcome`)의 세 단계를
+  거치며, 발행 여부에 따라 `Deleted_and_published`와 `Deleted_but_unpublished`로 나뉜다.
+  - **SKILL.md 격리 (`recovery_id`)**: 원본 `SKILL.md`는 삭제되지 않고 고유 복구 식별자(`recovery_id`)가
+    부여된 격리 디렉터리로 이동(`recovery_disposition`)되어 비상 복구 가능성을 보존한다.
+  - **패키지 폴더 처분 (`package_directory`)**: `SKILL.md` 이동 후 남겨진 패키지 폴더를 닫힌 네 가지
+    상태로 판정하여 처리한다(#38594·#38616). 과거에는 빈 폴더를 방치하여 동일한 패키지 ID로
+    재생성할 때 영구히 `Package_already_exists` 거절을 받는 결함이 있었다.
+    1. `Package_directory_removed` (wire: `{"kind": "removed"}`): 빈 패키지 폴더가 `rmdir`로 완전히
+       제거되어 동일한 ID로 새 Skill 생성이 즉시 가능함.
+    2. `Package_directory_kept_non_empty` (wire: `{"kind": "kept_non_empty"}`): 폴더 내에 부속
+       파일(예: `references/`, `scripts/` 등)이 남아 있어 패키지 폴더를 그대로 보존함.
+    3. `Package_directory_removed_unsynced of string` (wire: `{"kind": "removed_unsynced", "detail": "..."}`):
+       폴더는 지웠으나 상위 디렉터리 동기화(`fsync`)에 실패하여 비정상 종료 시 폴더가 복원될 수 있음.
+    4. `Package_directory_remove_failed of string` (wire: `{"kind": "remove_failed", "detail": "..."}`):
+       폴더 삭제(`rmdir`) 작업 자체가 시스템 오류로 실패함.
+  → [Server_skill_editor](../../lib/server/server_skill_editor.mli)
+
 **Instruction Skill**
 : Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.
   본문을 읽었다는 사실은 그 절차를 실행했거나 성공했다는 증거가 아니다.
@@ -1280,6 +1376,30 @@ status: reference
 : Keeper tool이 접근할 수 있는 writable filesystem 경계. 도구에는 반환된
   sandbox-relative path를 사용한다.
 
+**Sandbox Target (샌드박스 실행 타깃)**
+: Keeper의 `Execute` 도구가 셸 명령을 격리 실행하는 환경 추상화(`Sandbox_target.t`).
+  `Host`·`Docker`·`Micro_vm`·`Ssh`·`Delegated`의 닫힌 variant로 표현된다. 각 타깃은
+  명령의 표준 입출력과 종료 상태를 `run_outcome`(`Ran`·`Transport_failed`)으로
+  전달하여, 원격 런타임 전송 장애와 명령의 자체 실패를 명확히 분리한다.
+
+**Endpoint Allowed Paths (엔드포인트 허용 경로)**
+: SSH 샌드박스 타깃(`Sandbox_target.Ssh`, `Exec_ssh_endpoint.t`)에서 명령이 접근할 수 있는
+  추가 루트 경로 목록(`allowed_paths`).
+  - **격리 기본값**: 기본 실행 정책(`Exec_policy_paths.validate_path`)은 Keeper 작업
+    디렉터리(`workdir`)와 `/tmp` 외의 경로 접근을 정적 스크립트 검사에서 엄격히 거절한다.
+  - **추가 루트 선언**: Terminal-Bench 등 외부 벤치마크/엔드포인트 환경(예: `/app`)을
+    지원하기 위해 `runtime.toml`의 `[exec.ssh.endpoints.<name>] allowed_paths = ["/app", ...]`로
+    추가 허용 루트를 선언할 수 있다(#38603).
+  - **설정 불변식**: 선언 경로는 반드시 절대 경로이자 정규화된(normalized) 경로여야 하며,
+    루트(`/`)는 거절된다(`Exec_ssh_endpoint.parse_toml`).
+  - **어휘 비교 경계**: 엔드포인트가 원격 머신일 수 있으므로 호스트 파일시스템의 심볼릭
+    링크를 해석하지 않고 순수 어휘(lexical prefix)로만 비교한다. 그래서 추가 루트 아래에서
+    밖을 가리키는 심볼릭 링크는 이 검사가 막지 못한다. 엔드포인트가 이 머신이면 추가 루트는 링크를
+    풀어 보는 작업 디렉터리(`workdir`)보다 느슨하고, 실제 경계는 엔드포인트 계정의 권한이다. 기본값은 빈 목록(`[]`)이다.
+  → [Sandbox_target](../../lib/exec/sandbox_target.mli),
+  [Exec_policy_paths](../../lib/exec_policy/exec_policy_paths.mli),
+  [Exec_ssh_endpoint](../../lib/runtime/exec_ssh_endpoint.mli)
+
 **Worktree**
 : 한 repository 안에서 branch 작업을 격리하는 Git worktree.
 
@@ -1299,7 +1419,8 @@ status: reference
 : 서버가 등록된 GitHub 저장소의 열린 PR 을 읽을 때 쓰는 GitHub 토큰의 주인 Keeper.
   runtime.toml `[repositories] pr_reader = "<keeper>"` 로 선언한다. 토큰은 그 Keeper 의
   `github-cli/hosts.yml` 에서 읽을 때마다 새로 읽고 복사해 두지 않는다. 선언이 없거나
-  Keeper 가 없거나 토큰이 없으면 서버는 그 이유(`Reader_not_declared`·
+  runtime.toml 을 못 읽거나 `pr_reader` 가 Keeper 이름이 아니거나 Keeper 가 없거나
+  토큰이 없으면 서버는 그 이유(`Reader_not_declared`·`Reader_declaration_invalid`·
   `Reader_keeper_missing`·`Reader_token_unavailable`)를 말하고, 다른 자격으로 대신
   읽지 않는다. 결과는 메모리에만 두고 `GET /api/v1/repositories/pulls` 로 보인다
   (RFC-0465).
@@ -1329,6 +1450,32 @@ status: reference
   가능한 operation을 같은 bootstrap에서 정산하면 supervisor의 주기 pass가 그
   Keeper를 등록한다. 배제된 Keeper는 이 이유와 함께 excluded list에 찍는다.
   → [keeper_runtime.mli](../../lib/keeper/keeper_runtime.mli)
+
+**Shutdown Admission Fence (종료 진입 차단막)**
+: 종료 작업 진행 중인 Keeper의 재부팅을 막아 원장 정합성을 지키는 진입 차단 술어(`Keeper_shutdown_types.requires_admission_fence`).
+  - **단계별 차단막 해제 규칙 (#31738·#38569)**: 과거에는 `Blocked` 상태의 종료 작업에 대해 실패 단계와
+    무관하게 차단막을 영구 유지하여, 영속 상태가 전혀 파괴되지 않은 Keeper도 수동 교체(`Superseded`) 없이는
+    영구히 재부팅할 수 없는 결함이 있었다. 현재는 실패 단계(`failure_stage`)를 검사하여 영속 상태 변경 전에
+    실패한 단계는 차단막을 해제하고 즉시 재시도(`retryable`)를 허용한다:
+    1. **해제 대상 (`retryable`, 차단막 없음)**: 영속 상태를 변경하기 전의 읽기·초기화·멱등 정리 단계
+       (`Task_discovery`·`Record_persist`·`Meta_update`·`Pending_confirm_cleanup`).
+    2. **유지 대상 (`fenced`, 차단막 유지)**: 키퍼의 영속 상태(태스크 소유권, 레인, 메타데이터, 세션, 레지스트리)가
+       반쯤 철거된 단계(`Turn_cancel`·`Lane_cancel`·`Turn_join`·`Lane_join`·`Record_update`·`Unhandled_worker`·
+       `Task_settlement`·`Approval_summary_retirement`·`Meta_remove`·`Session_remove`·`Registry_unregister`).
+  - **영속 복구**: 재시작 시 디스크에 이미 기록된 `Blocked` 레코드라도 해제 대상 단계에 머물러 있다면 차단막을
+    세우지 않고 다음 부팅에서 종료 작업을 안전하게 재실행한다.
+  → [Keeper_shutdown_types](../../lib/keeper/keeper_shutdown_types.mli)
+
+**Boot Meta Failure Cause (부팅 메타 실패 사유)**
+: Keeper 기동 및 구체화(materialization) 시점에 메타데이터 검증 실패를 표현하는 닫힌 구조화 사유(`Keeper_runtime.boot_meta_failure_cause`).
+  - 닫힌 다섯 가지 variant:
+    1. `Meta_read_error`: 메타데이터 파일 읽기 또는 디코딩 실패.
+    2. `Config_invalid`: TOML 파싱 또는 유효성 검사 실패.
+    3. `Sandbox_profile_required`: 선언형 키퍼 프로필에 필수 `sandbox_profile` 누락.
+    4. `Sandbox_image_required`: 컨테이너 실행 프로필(`docker`·`microvm`)에 `sandbox_image` 누락 또는 공백(#37523·#38572). `remote_ssh`는 이미지를 쓰지 않으므로 요구되지 않음. 부팅 조정(`reconcile`)과 `keeper_up` 생성 파싱 양쪽에서 `Keeper_meta_contract.missing_required_sandbox_image_error` 공통 규칙으로 즉시 거절.
+    5. `Materialization_failed`: 파일시스템 또는 디렉터리 구조 구체화 실패.
+  → [keeper_runtime](../../lib/keeper/keeper_runtime.mli),
+  [Keeper_meta_contract](../../lib/keeper/keeper_meta_contract.mli)
 
 **Checkpoint**
 : History와 설정을 담은 Agent Core의 durable 저장점. trace당 파일 하나
@@ -1381,7 +1528,7 @@ status: reference
 
 **Transcript Tail Recovery (전사 꼬리 복구)**
 : 프로세스가 죽어 열린 채 남은 tool cycle을 부팅 때 닫는 일
-  (`Keeper_transcript_tail_recovery.recover_open_tails`). `Recovering_requests` 부팅
+  (`Keeper_transcript_tail_recovery.recover_open_tails`). `Recovering_persistence` 부팅
   단계에서 Keeper loop가 시작되기 전에 돈다. checkpoint 저장이 진행 중이던 tool
   cycle을 일부러 남겨 두므로(어느 호출이 dispatch됐는지 복구가 알 수 있게), 아무도
   닫지 않으면 provider가 매 reload마다 history를 거절해 lane이 영영 resume되지
@@ -1628,7 +1775,12 @@ status: reference
   Turn Boundary와 같은 cluster의 Keeper runtime 디렉터리에 저장한다.
   Turn Boundary 파일의 줄 번호가 아니라 값이다: trace, 읽은 Atom 수, 마지막으로
   읽은 Atom을 여는 Message의 digest. 그 파일에는 지난 History의 줄도 남아 있어서
-  줄 번호로는 지금 History 안의 자리를 말할 수 없다. 파일이 없으면 아직 읽은 적이 없다는 뜻이다. 못
+  줄 번호로는 지금 History 안의 자리를 말할 수 없다. 공식 클라이언트 턴은 Atom을 남기지
+  않으므로 그 위치만은 turn-boundary 파일의 줄 번호로 따로 적는다
+  (`librarian-official-progress.json`의 `boundary_line`,
+  [Keeper_librarian_official_progress](../../lib/keeper/keeper_librarian_official_progress.mli)).
+  turn-boundary 파일은 줄을 뒤에 붙이기만 하고 고쳐 쓰지 않으므로 이 번호는 커지기만 한다.
+  위치 파일은 둘 다, 없으면 아직 읽은 적이 없다는 뜻이다. 못
   읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
   전체가 안 읽은 것으로 보인다.
   이 값도 선택한 cluster의 Turn Boundary와 History에만 의미가 있으며, 다른
@@ -1671,6 +1823,12 @@ status: reference
   Agent Core는 저장본을 검증한 뒤, 완료된 원문 구간 대신 하던 일을 다음
   요청에 전달한다. 원본 checkpoint는 보존한다. 저장 완료와 요청에 사용한
   상태는 별개이며, 둘 다 모델 생성 설명의 의미 보존을 증명하지는 않는다.
+  저장본은 유도된 파생 상태(`derived state`)다. 롤백이나 판올림 후 포맷 불일치로 파일을
+  디코딩할 수 없는 경우(`Undecodable { reason }`), 이전처럼 매 회차 `Source_unavailable`로
+  멈춰 서지 않고 atom 0부터 재구축(`rebuilt from atom 0`)하여 다음 커밋 CAS에서 파일을
+  대체한다(#38477). 이때 이전 작업 상태(`working_state`)는 하드컷 정책에 따라 폐기되며,
+  재구축 중에도 `catch_up_end_atom`을 유지하여 턴 드라이버가 Librarian 위치에서 안정적으로
+  시작하도록 보장한다. 파일 읽기 실패(`Sys_error`)는 영구 오류로 남는다.
   `masc-librarian-continuity capture/restore`는 같은 파일 경계를 검증한다.
   → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
 
@@ -1775,6 +1933,19 @@ status: reference
   잴 수 있는 Keeper가 다 가려진다.
   → [server_dashboard_http_keeper_memory_health](../../lib/server/server_dashboard_http_keeper_memory_health.ml)
 
+**Librarian Stalled (Librarian 이 멈춰 건너뛴 구간)**
+: Librarian 지점이 provider 가 마지막으로 받아들인 시작점보다 뒤에 있어서, 다음 요청이
+  건너뛰는 atom 중 요청에도 기억에도 없는 구간. 시작은 스냅숏 컷과 durable 읽은 위치 중 늦은
+  쪽, 끝은 받아들여진 시작점 바로 앞이다. 비면 gap 이 없다. 규칙은 순수 함수
+  `Keeper_carried_front.librarian_gap` 하나이고, 경보는 Keeper 의 작은 파일(meta, 스냅숏,
+  진행 파일, 턴 기록)만 읽어 그 함수를 부른다(`Keeper_next_request_forecast.librarian_gap`).
+  health JSON 의 `librarian.stalled`(`kind: "gap"`, `gap_start_atom`, `gap_end_atom` — 끝은
+  제외)이고, TUI 는 `Librarian stalled · atoms <a>-<b>` 로 그린다. 읽어야 할 파일을 못 읽으면
+  gap 없음(`null`)도 gap 도 아닌 `kind: "unmeasured"` 와 못 읽은 파일(`cause`)로 보낸다.
+  경보이지 Gate 가 아니다. Librarian 이 받아들여진 시작점에 닿으면 사라진다(RFC
+  librarian-lifecycle §4.10).
+  → [keeper_carried_front](../../lib/keeper/keeper_carried_front.mli) · [keeper_next_request_forecast](../../lib/keeper/keeper_next_request_forecast.mli)
+
 **Continuity Width (연속성 회차의 폭)**
 : 연속성 회차가 한 번에 읽을 수 있는 atom 수의 상한. 크기 때문에 거절당한 회차가 좁힌
   값을 다음 회차가 이어받는다. (keepers dir, keeper)별로 그 값을 잰 trace와 함께 루프
@@ -1782,7 +1953,7 @@ status: reference
   atom 번호가 다시 매겨지므로 비교하지 않고 새 값으로 바꾸고, 같은 trace 안에서는 더
   좁은 값만 남는다. 끝 atom이 아니라 폭을 남기므로 커밋한 회차 다음에는 같은 자리가
   아니라 그다음 자리를 읽는다. 좁히는 것은 작은 요청이 같은 벽을 피할 수 있는 실패뿐이고,
-  그 판정은 `walk_shows_size`(`keeper_librarian_runtime.mli:47`)가 들고, 원인별 판정
+  그 판정은 `walk_shows_size`(`keeper_librarian_runtime.mli`의 `not_committed` 필드)가 들고, 원인별 판정
   규칙은 RFC-librarian-lifecycle §4.3이 정한다. 마지막 후보 하나가 아니라 후보를 차례로
   시도한 전체 결과로 판정한다. 폭은 backlog를 끝까지 읽었을 때(`Drained`)만 푼다. 좁힌 커밋 한 번은
   거절했던 범위가 이제 들어간다는 증거가 아니다. 루프
@@ -1902,6 +2073,13 @@ status: reference
     매 검색마다 이벤트 사이드카를 읽는 부하를 막기 위해 평소에는 흡수 원장(`memory-absorbed.jsonl`)만으로
     해결하고, 체인의 끝이 non-current일 때만 사이드카(`.memory-events.jsonl`)를 읽는다. 손상된
     이벤트 줄은 `event_unreadable_lines`로 분리 보고된다(#38543·#38552).
+  - **Keeper 삭제 시 사이드카 정리 및 캐시 무효화**: Keeper를 삭제(`purge_keeper_artifacts`)할 때 이
+    사이드카 파일(`<keeper>.memory-events.jsonl`)도 함께 삭제(`Keeper_memory_events_artifact`)되고
+    캐시된 파일 쓰기 핸들러(`Fs_compat.invalidate_cached_writer`)도 무효화된다. 따라서 동일 프로세스에서
+    같은 이름으로 다시 생성된 후속 키퍼가 이전의 조회·철회·대체 이벤트를 상속하거나 삭제된 inode에 쓰기
+    내용이 유실되는 결함을 원천 방지한다(#38235).
+  → [Keeper_shutdown_types](../../lib/keeper/keeper_shutdown_types.mli),
+  [Server_dashboard_http_delete_actions](../../lib/server/server_dashboard_http_delete_actions.ml)
 
 **Library**
 : `masc_library_add`로 수동 추가한 Markdown 문서를 읽는 지식 라이브러리.

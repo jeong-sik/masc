@@ -251,10 +251,9 @@ let otel_health_json () =
 ;;
 
 let schedule_runner_status_json () =
-  Schedule_runner_status.snapshot ()
-  |> Schedule_runner_status.snapshot_to_yojson
-       ~now:(Time_compat.now ())
-       ~stale_after_sec:Server_schedule_runner_policy.stale_after_sec
+  Server_schedule_runner_policy.status_json
+    ~now:(Time_compat.now ())
+    (Schedule_runner_status.snapshot ())
 ;;
 
 let measure_health_phase timing phase f =
@@ -298,7 +297,10 @@ let make_health_probe_fields ?timing ?(listener = "http/1.1") ?full_health_url
       ("startup", Server_startup_state.to_yojson ());
       ("schedule_runner", schedule_runner_status_json ());
       ("runtime_startup_degradation",
-       Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ()));
+       Runtime.startup_degradation_to_yojson
+         ~exact_slots:(Runtime.exact_slot_degradation ())
+         ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
+         (Runtime.startup_degradation ()));
       ("dashboard_surface",
        measure_health_phase timing Server_timing.Health_dashboard_surface
          Web_dashboard.surface_status_json);
@@ -520,7 +522,10 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
       (Otel_metric_store.metric_total "masc_lazy_task_boot_guard_fired_total")
   in
   let runtime_startup_degradation_json =
-    Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ())
+    Runtime.startup_degradation_to_yojson
+         ~exact_slots:(Runtime.exact_slot_degradation ())
+         ~exact_registry_stale:(Runtime.exact_output_registry_stale ())
+         (Runtime.startup_degradation ())
   in
   let keeper_config_operator_action_required = keeper_config_schema_blocking in
   (* The sections come first and the rollup reads them, rather than the rollup
@@ -1253,12 +1258,13 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
       ("last_good_available", `Bool (Option.fold ~none:false ~some:(fun s -> s.last_good_available) snapshot));
       ("section_timings", section_timings_json);
       (* [stale_since_ts] is the wall-clock of the FIRST failure of
-         the current outage; null when the snapshot is fresh.
-         Consumers should prefer this over [computed_at_unix] for
-         "how long stale?" reasoning under partial-degradation, since
-         [computed_at_unix] under an error now points at the failure
-         time of the latest refresh attempt, not the last good
-         data. *)
+         the current outage; null when the snapshot is fresh. It
+         answers "how long has it been stale?". [computed_at_unix]
+         answers "when was what is served measured?": a failure keeps
+         the last good snapshot's [computed_at]
+         ([mark_full_health_snapshot_failure_locked]), so under partial
+         degradation it is the last good refresh's time, not the failed
+         attempt's. *)
       ("stale_since_ts", stale_since_ts);
     ]
 

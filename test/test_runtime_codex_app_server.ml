@@ -985,6 +985,95 @@ let test_metadata_listing_pages_without_turn () =
         check string "opaque cursor forwarded" "page-two" (last |> member "params" |> member "cursor" |> to_string)))
 ;;
 
+(* An exhausted account runs no turn, so no [account/rateLimits/updated] ever
+   arrives for it. [account/rateLimits/read] asks without a thread or a turn,
+   and every metered limit of the per-limit map is kept; a bucket that does
+   not name itself takes its key. *)
+let test_rate_limits_read_without_turn () =
+  let capture = Filename.temp_file "masc-rate-limits-capture-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
+    with_fixture ~capture_path:capture [init_result; account_chatgpt;
+      {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":null},"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":{"usedPercent":64,"windowDurationMins":10080,"resetsAt":1790800000}},"codex_other":{"primary":{"usedPercent":3,"windowDurationMins":300}}}}}|}]
+      (fun path ->
+        let outcome = Eio_main.run (fun env ->
+          let config = { (Runtime_codex_app_server.default_config ()) with cli_path=path; admission_timeout_s=2. } in
+          Runtime_codex_app_server.read_rate_limits ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env) ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp") config) in
+        let report = match outcome with Ok report -> report | Error error -> fail (Runtime_codex_app_server.error_to_string error) in
+        check string "source" "codex.account_rate_limits_read"
+          (Runtime_provider_usage_window.source_to_string report.source);
+        let seen =
+          List.map
+            (fun (w : Runtime_provider_usage_window.window) ->
+              ( Option.value ~default:"-" w.limit_id
+              , (match w.kind with
+                 | Five_hour -> "5h" | Seven_day -> "7d"
+                 | Duration_minutes m -> string_of_int m | Provider_label l -> l)
+              , (match w.utilization with Percent p -> p | Fraction _ -> -1) ))
+            report.windows
+        in
+        check (list (triple string string int)) "every bucket, keyed"
+          [ ("codex", "5h", 100); ("codex", "7d", 64); ("codex_other", "5h", 3) ]
+          seen;
+        let channel = open_in capture in
+        let requests = Fun.protect ~finally:(fun () -> close_in channel) (fun () ->
+          let rec read acc = match input_line channel with
+            | line -> read (Yojson.Safe.from_string line :: acc)
+            | exception End_of_file -> List.rev acc in read []) in
+        let open Yojson.Safe.Util in
+        check (list string) "no thread or turn request"
+          ["initialize";"initialized";"account/read";"account/rateLimits/read"]
+          (List.map (fun json -> json |> member "method" |> to_string) requests)))
+;;
+
+(* The read after a quota refusal is asked for by a turn that ends at once.
+   It must outlive that turn: a fiber on the turn's switch would be
+   cancelled when the turn returns, before the app-server answered. A
+   second ask while the first is still reading starts nothing. *)
+let test_background_read_outlives_the_turn () =
+  with_fixture [init_result; account_chatgpt;
+    {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000}},"rateLimitsByLimitId":null}}|}]
+    (fun path ->
+      let scope = Runtime_quota_window.scope_of_credential ~provider_id:"background-read-test" None in
+      let saved = Eio_context.snapshot_state () in
+      Fun.protect ~finally:(fun () -> Eio_context.restore_state saved) (fun () ->
+        Eio_main.run (fun env ->
+          let clock = Eio.Stdenv.clock env in
+          let cwd = Eio.Path.(Eio.Stdenv.fs env / "/tmp") in
+          let codex =
+            ({ cli_path = path; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
+          in
+          let recorded =
+            Eio.Switch.run (fun root_sw ->
+              Eio_context.set_switch root_sw;
+              let first, second =
+                Eio.Switch.run (fun turn_sw ->
+                  Eio_context.with_turn_switch turn_sw (fun () ->
+                    let first =
+                      Runtime_provider_usage_read.read_codex_in_background ~clock ~cwd ~scope codex
+                    in
+                    let second =
+                      Runtime_provider_usage_read.read_codex_in_background ~clock ~cwd ~scope codex
+                    in
+                    first, second))
+              in
+              check bool "the first ask starts a read" true
+                (first = Runtime_provider_usage_read.Started);
+              check bool "a second ask while it runs starts nothing" true
+                (second = Runtime_provider_usage_read.Already_reading);
+              let rec wait tries =
+                match Runtime_provider_usage_window.state ~scope with
+                | Runtime_provider_usage_window.Reported _ -> true
+                | Runtime_provider_usage_window.Not_reported_since_start when tries > 0 ->
+                  Eio.Time.sleep clock 0.05;
+                  wait (tries - 1)
+                | Runtime_provider_usage_window.Not_reported_since_start -> false
+              in
+              wait 100)
+          in
+          check bool "the window is recorded after the turn ended" true recorded)))
+;;
+
 let test_thread_resume_skips_history_injection () =
   let history =
     [ { Runtime_codex_app_server.role = User; text = "already in official thread" } ]
@@ -2633,7 +2722,8 @@ let production_keeper_meta ~base_path ~trace_id =
   | Error detail -> fail ("production Keeper meta fixture failed: " ^ detail)
 ;;
 
-let run_production_keeper_turn_with_projection ~dynamic_context_for_tools
+let run_production_keeper_turn_with_projection ~after_turn
+    ~dynamic_context_for_tools
     ~http_requests ~base_path ~trace_id
     ~user_message ~cli_path ~model ~turn_instructions =
   Masc_test_deps.declare_fixture_keeper
@@ -2713,7 +2803,7 @@ candidates = ["projection.http", "codex.codex"]
                                 ; keeper_name = meta.name
                                 }
                               in
-                              (Keeper_agent_run.run_turn
+                              let result = (Keeper_agent_run.run_turn
                                 ~config
                                 ~meta
                                 ~publication_recovery
@@ -2741,12 +2831,16 @@ candidates = ["projection.http", "codex.codex"]
                                      ~detail:"test fixture has no Skill publication")
                                 ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
                                 ~runtime_id
-                                ()).Keeper_agent_run.result))))))
+                                ()).Keeper_agent_run.result in
+                              (* Read while the turn's runtime catalog is
+                                 still the published one. *)
+                              after_turn ();
+                              result))))))
 ;;
 
 let run_production_keeper_turn_with_predecessor ~http_requests ~base_path ~trace_id
     ~user_message ~cli_path ~model ~turn_instructions =
-  run_production_keeper_turn_with_projection ~dynamic_context_for_tools:None
+  run_production_keeper_turn_with_projection ~after_turn:ignore ~dynamic_context_for_tools:None
     ~http_requests ~base_path ~trace_id ~user_message ~cli_path ~model ~turn_instructions
 ;;
 
@@ -2754,6 +2848,48 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
     ~turn_instructions =
   run_production_keeper_turn_with_predecessor ~http_requests:None ~base_path
     ~trace_id ~user_message ~cli_path ~model ~turn_instructions
+;;
+
+(* #38174, RFC-0458 §3.4. A production Keeper turn names its Keeper as the
+   recorder of a failed attempt, so that Keeper's next cycle dispatches the
+   candidate again. The client closes before the turn starts; the route calls
+   that a server error, which a fleet walk records. *)
+let test_production_turn_records_its_keeper_as_the_failure_recorder () =
+  let base_path = temp_workspace "masc-codex-production-recorder-" in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let recorded_by = ref None in
+    let read_mark () =
+      let runtime = match Runtime.get_runtime_by_id "codex.codex" with
+        | Some runtime -> runtime | None -> fail "the Codex runtime resolves" in
+      recorded_by :=
+        (match Runtime_candidate_backpressure.candidate_backpressure
+                 ~now:(Unix.gettimeofday ()) ~candidate:runtime.Runtime.candidate_backpressure with
+         | Some
+             { Runtime_candidate_backpressure.failed_attempt =
+                 Some (Runtime_candidate_backpressure.Failed_attempt { recorded_by; _ })
+             ; rate_limit = _
+             } -> Some recorded_by
+         | Some { Runtime_candidate_backpressure.failed_attempt = None; rate_limit = _ }
+         | None -> None)
+    in
+    with_fixture ~close_before_turn:true
+      [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+      (fun cli_path ->
+        let trace_id = "recorder-trace" in
+        let result =
+          run_production_keeper_turn_with_projection ~after_turn:read_mark
+            ~dynamic_context_for_tools:None ~http_requests:None ~base_path ~trace_id
+            ~user_message:"Start the turn." ~cli_path ~model:"gpt-fixture"
+            ~turn_instructions:None
+        in
+        check bool "the closed client fails the turn" true (Result.is_error result);
+        let keeper_name = (production_keeper_meta ~base_path ~trace_id).name in
+        match !recorded_by with
+        | Some recorder ->
+          check bool "the Keeper that ran the turn is the recorder" true
+            (Runtime_candidate_backpressure.same_recorder recorder
+               (Runtime_candidate_backpressure.keeper_recorder ~keeper_name))
+        | None -> fail "the failed attempt left no mark"))
 ;;
 
 (* The actual turn collector and writer, not a callback replica. A later
@@ -2935,7 +3071,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       | [] -> None
                       | _ :: _ -> Some (Agent_core.Context.create ())
                     in
-                    Keeper_turn_driver.run_named
+                    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"codex.codex"
                       ~keeper_name
                       ~base_path
@@ -4579,7 +4715,7 @@ let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
          ]
          (fun cli_path ->
             match
-              run_production_keeper_turn_with_projection
+              run_production_keeper_turn_with_projection ~after_turn:ignore
                 ~dynamic_context_for_tools ~http_requests:None
                 ~turn_instructions:(Some turn_instructions)
                 ~base_path
@@ -5215,6 +5351,8 @@ let () =
             `Quick
             test_subscription_probe_stops_before_thread
         ; test_case "metadata listing pages without turn" `Quick test_metadata_listing_pages_without_turn
+        ; test_case "rate limits read without turn" `Quick test_rate_limits_read_without_turn
+        ; test_case "background read outlives the turn" `Quick test_background_read_outlives_the_turn
         ; test_case "declared cwd reaches spawn" `Quick test_declared_cwd_reaches_spawn
         ; test_case
             "protocol and spawn share cwd authority"
@@ -5491,6 +5629,10 @@ let () =
             "production Keeper resumes across trace rotation"
             `Quick
             test_production_keeper_resumes_across_trace_rotation
+        ; test_case
+            "production Keeper turn records its Keeper as the failure recorder"
+            `Quick
+            test_production_turn_records_its_keeper_as_the_failure_recorder
         ; test_case
             "production dynamic context reaches Codex instruction wire"
             `Quick

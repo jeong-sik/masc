@@ -169,6 +169,9 @@ let runtime_toml
        {|[providers.replacement_provider]
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1/v1"
+# Lanes below may name this provider's runtimes as slots; without a body
+# deadline such a slot is left out under the embedded catalog (#38779).
+exact-body-timeout-s = 120.0
 
 [models.replacement]
 api-name = "replacement-model"
@@ -331,6 +334,17 @@ max_output_tokens = 4096
     replacement_target
 ;;
 
+(* A config commit rebuilds the exact-output resolver snapshot from what the
+   process reads: the full replacement [AGENT_CORE_MODEL_CATALOG] names, or
+   the bindings in the committed text. A registry a case publishes by hand
+   from [replacement_catalog] therefore needs that catalog on disk and named,
+   or the commit rebuilds against a catalog the case never meant. *)
+let with_replacement_catalog_file root f =
+  let path = Filename.concat root "replacement-models.toml" in
+  write_file path replacement_catalog;
+  Masc_test_deps.with_process_env Runtime.agent_core_model_catalog_env_var_name (Some path) f
+;;
+
 let current_registry label =
   match Registry.current () with
   | Ok registry -> registry
@@ -356,7 +370,12 @@ let test_closed_registry_transaction () =
         (Registry.publication_error_to_string error)
   in
   let prepare lane_id =
-    match Registry.prepare_replacement ~lanes:(transaction_lanes lane_id) with
+    match
+      Registry.prepare_replacement
+        ~lanes:(transaction_lanes lane_id)
+        ~excused_lane_ids:[]
+        ~load_resolver_snapshot:(fun () -> Ok snapshot)
+    with
     | Ok prepared -> prepared
     | Error error ->
       Alcotest.failf
@@ -490,6 +509,7 @@ let test_runtime_after_rename_converges_state () =
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
     (fun () ->
        with_temp_dir "exact-output-runtime-after-rename" @@ fun root ->
+       with_replacement_catalog_file root @@ fun () ->
        let path = Filename.concat root "runtime.toml" in
        let snapshot =
          load_control_snapshot

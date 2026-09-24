@@ -353,8 +353,42 @@ let runtime_config_commit_json (receipt : Runtime.config_commit_receipt) =
     ]
 ;;
 
+(* The exact-output registry is its own row, not part of [routing]: the
+   runtime cache and the registry are published by different code, and a
+   commit made while no registry is published leaves exact lanes unavailable
+   although routing applied (#38779). *)
+let exact_output_registry_application_json
+      (application : Runtime.exact_output_registry_application)
+  =
+  match application with
+  | Runtime.Exact_output_registry_replaced { origin } ->
+    `Assoc
+      [ "status", `String "applied"
+      ; "requires_restart", `Bool false
+      ; ( "targets"
+        , `String
+            (match origin with
+             | Runtime.Runtime_binding_targets -> "runtime_bindings"
+             | Runtime.Replacement_catalog_targets _ -> "replacement_catalog") )
+      ]
+  | Runtime.Exact_output_registry_unpublished ->
+    `Assoc [ "status", `String "unpublished"; "requires_restart", `Bool true ]
+  | Runtime.Exact_output_registry_kept { reason } ->
+    (* A restart would not help: boot rebuilds from the same file, which
+       publishes no registry, so exact output would be unavailable until the
+       file is fixed. [next_boot_publishes] says so. *)
+    `Assoc
+      [ "status", `String "kept"
+      ; "requires_restart", `Bool false
+      ; "next_boot_publishes", `Bool false
+      ; ( "reason"
+        , `String (Runtime_exact_output_registry.publication_error_to_string reason) )
+      ]
+;;
+
 let runtime_config_application_json
       ?skill_application
+      ?exact_output_registry
       ~operation
       ~routing_applied_at
       overlay
@@ -372,9 +406,13 @@ let runtime_config_application_json
           ] )
     ; "keeper_overlay", overlay
     ]
-     @ match skill_application with
+     @ (match skill_application with
+        | None -> []
+        | Some application -> [ "skills", skill_application_json application ])
+     @ match exact_output_registry with
        | None -> []
-       | Some application -> [ "skills", skill_application_json application ])
+       | Some outcome ->
+         [ "exact_output_registry", exact_output_registry_application_json outcome ])
 ;;
 
 let runtime_config_raw_json
@@ -398,6 +436,11 @@ let runtime_config_raw_json
     ; ( "application"
       , runtime_config_application_json
           ?skill_application
+          ?exact_output_registry:
+            (Option.map
+               (fun (receipt : Runtime.config_commit_receipt) ->
+                  receipt.exact_output_registry)
+               commit)
           ~operation
           ~routing_applied_at
           overlay )
@@ -567,7 +610,7 @@ let runtime_route_lane_to_string = function
   | Runtime_default -> "default"
   | Runtime_media_failover -> "media_failover"
   | Runtime_named_lane lane_id -> lane_id
-  | Runtime_exact_lane lane -> exact_route_prefix ^ Runtime.exact_lane_id lane
+  | Runtime_exact_lane lane -> exact_route_prefix ^ Standalone_lane.to_id lane
 
 (* Which name space a route string belongs to, before anything is resolved.
    Creating or renaming a lane asks only this: the name must land in the
@@ -591,21 +634,21 @@ let route_name_space = function
    [`Missing] for anything else, so a typo is refused with the name it could
    not find. An exact-output lane name never reaches that resolver: the prefix
    names which name space the rest of the string belongs to, and the name must
-   be one of the exact lanes the server runs ({!Runtime.exact_lane_of_id}), so
+   be one of the exact lanes the server runs ({!Standalone_lane.of_id}), so
    a typo is refused here instead of becoming a table nothing reads. *)
 let parse_runtime_route_lane lane =
   match route_name_space lane with
   | Default_route -> Ok Runtime_default
   | Media_failover_route -> Ok Runtime_media_failover
   | Exact_route name ->
-    (match Runtime.exact_lane_of_id name with
+    (match Standalone_lane.of_id name with
      | Some exact -> Ok (Runtime_exact_lane exact)
      | None ->
        Error
          (Printf.sprintf
             "unknown exact-output lane: %s (expected one of %s)"
             name
-            (String.concat ", " (List.map Runtime.exact_lane_id Runtime.all_exact_lanes))))
+            (String.concat ", " (List.map Standalone_lane.to_id Standalone_lane.all))))
   | Lane_route ->
     (match Runtime.resolve_assignment lane with
      | `Lane _ -> Ok (Runtime_named_lane lane)
@@ -992,7 +1035,11 @@ let audit_runtime_config_write
               ]
             @ (match receipt with
                | None -> []
-               | Some commit -> [ "commit", runtime_config_commit_json commit ])
+               | Some (commit : Runtime.config_commit_receipt) ->
+                 [ "commit", runtime_config_commit_json commit
+                 ; ( "exact_output_registry"
+                   , exact_output_registry_application_json commit.exact_output_registry )
+                 ])
             @ (match skill_application with
                | None -> []
                | Some application ->
@@ -1374,7 +1421,7 @@ module For_testing = struct
   let lane_string = function
     | Runtime_default -> "default"
     | Runtime_media_failover -> "media_failover"
-    | Runtime_exact_lane exact -> exact_route_prefix ^ Runtime.exact_lane_id exact
+    | Runtime_exact_lane exact -> exact_route_prefix ^ Standalone_lane.to_id exact
     | Runtime_named_lane id -> id
 
   let parse_runtime_route_body body =
@@ -1393,12 +1440,12 @@ module For_testing = struct
     | Ok (Runtime_route_lane_renamed (lane_id, new_lane_id)) ->
         Ok (lane_id, "rename", [ new_lane_id ])
     | Ok (Runtime_route_exact_slot_appended (exact, runtime_id)) ->
-        Ok (exact_route_prefix ^ Runtime.exact_lane_id exact, "append", [ runtime_id ])
+        Ok (exact_route_prefix ^ Standalone_lane.to_id exact, "append", [ runtime_id ])
     | Ok (Runtime_route_exact_slot_dropped (exact, runtime_id)) ->
-        Ok (exact_route_prefix ^ Runtime.exact_lane_id exact, "drop", [ runtime_id ])
+        Ok (exact_route_prefix ^ Standalone_lane.to_id exact, "drop", [ runtime_id ])
     | Ok (Runtime_route_exact_slot_moved (exact, runtime_id, move)) ->
         Ok
-          ( exact_route_prefix ^ Runtime.exact_lane_id exact
+          ( exact_route_prefix ^ Standalone_lane.to_id exact
           , "move"
           , [ runtime_id
             ; (match move with
@@ -2308,6 +2355,8 @@ let add_routes ~sw ~clock router =
                     | Server_skill_editor.Created_and_published
                         { preview; snapshot_revision = _ } ->
                       preview, "created_and_published", Audit_log.Success
+                    | Created_but_shadowed { preview; snapshot_revision = _; winner = _ } ->
+                      preview, "created_but_shadowed", Audit_log.Success
                     | Created_but_unpublished { preview; reason } ->
                       preview, "created_but_unpublished", Audit_log.Failure reason
                   in

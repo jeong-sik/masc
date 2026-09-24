@@ -211,7 +211,7 @@ let () =
                 let path = Filename.concat out "stagehand.png" in
                 Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel (Base64.decode_exn image));
                 Ok data
-              | _ -> Error "capture did not name the clicked fixture"
+              | _ -> Error "capture did not name the clicked fixture")
            | None -> Error "capture without data")));
   record "close" (session "close");
   record "the browser stopped"

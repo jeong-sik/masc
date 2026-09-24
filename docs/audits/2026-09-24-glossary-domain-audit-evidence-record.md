@@ -21,7 +21,7 @@ Keeper, Librarian, Memory, HITL, 접근 제어, Multi Lane, Schedule, Runtime �
 - 09-23 이 제안한 `Keeper_memory_lane` → `Keeper_librarian_queue` 개명은 쓰면 안 된다.
   `Keeper_librarian_queue_signal`·`Keeper_librarian_queue_refresh` 가 이미 "queue" 를 Keeper **이벤트** 대기열 뜻으로 쓴다
   (`keeper_registry_event_queue.ml:17`). 겹치지 않는 이름은 `Keeper_librarian_drain` 같은 것이다.
-- 09-23 이 "열림" 으로 남긴 PR 은 모두 병합됐다: #38096(401 강등), #38047(Goal `Verifying` 에서 Drop·Reopen),
+- 09-23 Tick 표가 "열림" 으로 남긴 PR 가운데 아래 여덟은 병합됐다: #38096(401 강등), #38047(Goal `Verifying` 에서 Drop·Reopen),
   #38042(purge 뒤 Librarian 다시 넣기), #38048(같은 기억 id 다시 쓰기), #38045(경로 표시와 걸음), #38188, #38043, #38053.
   #38205(held 목록)는 #38304 가 TUI 만 고치고 닫혔고, 남은 것은 #38411(열림)이다.
 - 09-23 결합 제안 가운데 끝난 것: Karma 항목과 11-board §9, Evidence Reference·Working Context 합치기, Producer, Gate 문장.
@@ -54,7 +54,7 @@ Fact / Memory Event, Continuity Snapshot / Working State(Working State 는 Snaps
 
 | 자리 | 문제 | 처리 |
 |---|---|---|
-| Demotion 항목 "맨 앞 후보가 쉬는 중이면 그 walk는 그 후보가 풀릴 때까지 기다린다" | 쉬라는 말을 들은 후보는 맨 뒤로 가므로(`keeper_turn_driver.ml:175-209`), 이 말은 모든 후보가 쉬는 중일 때만 맞다. 읽으면 "머리 하나가 쉬면 전체가 멈춘다" 로 들린다 | **이 PR 에서 고쳤다** |
+| Demotion 항목 "맨 앞 후보가 쉬는 중이면 그 walk는 그 후보가 풀릴 때까지 기다린다" | 쉬라는 말을 들은 후보는 뒤로 가므로(`keeper_turn_driver.ml:175-209`) 선언 순서의 머리가 쉬어도 쉬지 않는 후보가 먼저 나간다. 강등 뒤 머리도 쉬면 기다리는데, 그 시각은 머리가 풀리는 때와 앞으로 올라올 뒤 후보가 풀리는 때 중 빠른 쪽이다(`walk_rest`, `:315-337`). 옛 문장은 "머리 하나가 쉬면 전체가 멈춘다" 로 읽혔다. 풀리지 않는 id 는 강등된 후보 뒤에 붙고(`:212-221`), 순서를 정하는 검사와 기다림을 정하는 `path_rest` 는 서로 다른 값을 본다는 점은 용어집에 옮기지 않았다 | **이 PR 에서 고쳤다** |
 | Exact lane 이름 `Hitl_auto_judge` | 이름에 HITL(사람)이 들어 있지만 lane 은 모델을 부른다(`lib/keeper/hitl_summary_worker.mli:1`). 이 lane 이 Gate `Auto_judge` 판정까지 맡는지는 끝까지 따라가지 못했다 | 확인 필요. 코드 이름 변경은 라이브 `[runtime.exact_output_lanes.hitl_auto_judge]` 표를 바꿔야 해서 제안만 한다 |
 | "Exact-output route" | Failure Route·Fusion Route 와 "route" 가 겹치고, 실제로는 exact lane 선언(`exact_output_lane_decl`)이다 | 제안: "Exact Lane 선언" 으로 부른다 |
 | "원장" 27번, "영수증" 12번, "귀속" 7번, "투영" 6번 | 한자어가 몰린 항목은 Continuity 절이다. 코드 이름을 옮긴 자리라 이번에는 두었다 | 다음 용어집 정리 때 항목별로 본다 |
@@ -65,7 +65,7 @@ Fact / Memory Event, Continuity Snapshot / Working State(Working State 는 Snaps
 |---|---|---|---|
 | PR Reader | 이유 셋 | `Reader_declaration_invalid` 까지 넷(`server_repository_pulls.mli:109`) | **이 PR 에서 고쳤다** |
 | Transcript Tail Recovery | `Recovering_requests` 부팅 단계 | 그런 생성자는 없다. `Recovering_persistence`(`server_bootstrap_loops.mli:21`, `.ml:737` 에서 들어가고 `:778` 에서 복구) | **이 PR 에서 고쳤다**. 같은 잘못된 이름이 `keeper_transcript_tail_recovery.mli:9` 주석에도 있다(코드라 두었다) |
-| Continuity Width | `keeper_librarian_runtime.mli:47` | 필드는 `:71` 이고 `:47` 은 `type served_slot =` | **이 PR 에서 줄 번호를 빼고 필드 이름으로 적었다** |
+| Continuity Width | `keeper_librarian_runtime.mli:47` | 필드는 `:71` 의 `not_committed.walk_shows_size` 이고 `:47` 근처는 `type served_slot` 이다 | **이 PR 에서 줄 번호를 빼고 `not_committed` 필드라고 적었다** |
 | Seed | `source` 다섯 | `Turn_start_after_librarian_refusal` 까지 여섯(`keeper_carried_front.mli:38-57`) | 이 PR 에서 뺐다. #38341 이 바로 아랫줄에 문단을 넣어서 충돌한다. #38341 뒤에 한 줄 더하면 된다 |
 | Operator Disposition | "그 원인은 둘로 갈린다" | 셋째 `Reason_official_client_recovery_required`(`keeper_execution_receipt.ml:171`) | #38442 가 "둘" 을 지운다. 셋째 이름은 그 PR 뒤에도 없다 |
 | Carried Front | origin 다섯 | `Past_librarian_point` 까지 여섯 | #38497 이 고친다. 다만 #38497 도 "Librarian 지점이 있으면 원장·씨앗은 읽지 않는다" 문장을 남겨 `Past_librarian_point` 와 맞지 않는다 |
@@ -118,7 +118,8 @@ Librarian Range Receipt, Memory OS 항목들, Library, Librarian Pass End(종결
    가장 작은 방향: 더 나눌 수 없는 턴이 크기나 출력 판정으로 실패하면 "못 읽은 턴" 을 타입으로 적은 영수증을 커밋하고 위치를 옮긴다. 그 턴은 흡수 안 된 턴으로 남긴다.
 2. 증명할 수 없는 읽은 위치. `Position_mismatch`(`keeper_librarian_range.ml:285`), `Position_not_in_history`(`durable_consumer.ml:621`), `Progress_boundary_missing`, `Range_end_boundary_missing` 는 모든 회차를 멈춘다. 새 trace 나 운영자가 `librarian-progress.json` 을 고쳐야 풀린다(09-23 lane-smith 사례).
    가장 작은 방향: 위치가 지금 checkpoint 에 없고 Memory 범위 영수증이 흡수한 곳을 증명하면 기준점을 다시 잡는 타입 단계를 둔다.
-3. 공식 클라이언트 줄의 `Official_stop` 과 `Counterpart_interval_non_monotone`(`durable_consumer.ml:1080-1106`). 둘 다 운영자만 풀 수 있고, 각자의 문서가 그렇게 적는다(`keeper_librarian_range.mli:185-192`). 설계대로다.
+3. 공식 클라이언트 줄의 `Official_stop` 은 purge 로만 풀린다(`keeper_librarian_range.mli:185-192`, `durable_consumer.ml:509,784`). 설계대로다.
+   `Counterpart_interval_non_monotone`(`durable_consumer.ml:1080-1106`)은 대개 스스로 풀린다. 나중에 공식 줄을 읽어 공식 위치가 움직이면 풀린다. 다만 `Official_stop` 이 그 줄을 붙잡고 있으면 purge 나 그 시각 뒤에서 끝나는 범위만 풀 수 있고, 한 trace 안에서 뒤집힌 경우는 계속 멈춘다.
 
 확신: 코드 경로 High, 라이브 빈도 Medium(로그로 세지 않았다).
 
@@ -211,7 +212,7 @@ Turn, Runtime Attempt, Demotion, Gate, Claim, PR Reader, Transcript Tail Recover
   용어집을 고치는 열린 PR 13건(#38511·#38497·#38484·#38463·#38453·#38447·#38443·#38442·#38438·#38421·#38344·#38341·#38309)의 용어집 diff
 - Timestamp: 2026-09-24T10:30:00+09:00
 - Confidence: High(목록 대조, PR 상태, 닫힘 판정의 코드 경로), Medium(열린 갈래가 라이브에서 얼마나 자주 일어나는지, Atom 위치 타입 합치기의 이득), Low(`Hitl_auto_judge` lane 이 Gate `Auto_judge` 를 맡는지)
-- Delta: 09-23 의 열린 칸이 모두 병합으로 닫혔음을 확인하고, 새로 열린 갈래 여섯(Librarian 둘, Keeper 연속 실패, Goal `Deferred`, Schedule 둘)과 중복 개념 13건, 새 결합 5건을 더했다.
+- Delta: 09-23 Tick 표의 열린 PR 여덟이 병합됐고 #38411 과 결합 제안 대부분은 아직 열려 있음을 확인했다. 그리고 새로 열린 갈래 여섯(Librarian 둘, Keeper 연속 실패, Goal `Deferred`, Schedule 둘)과 중복 개념 13건, 새 결합 5건을 더했다.
 
 ## 불확실성
 

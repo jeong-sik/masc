@@ -401,9 +401,10 @@ status: reference
     (`Keeper_model_input_demotion`, RFC-0363).
   - 후보 강등: 쉬는 중이거나 실패한 runtime 후보를 세 무리(`Not_demoted` ·
     `Failed_without_rest` · `Told_to_rest`)로 나눠 뒤로 보낸다. 배제가 아니라 순서다 —
-    쉬라는 말을 들은 후보는 맨 뒤로 가므로, 모든 후보가 쉬는 중일 때만 맨 앞 후보가
-    쉬는 중이 된다. 그때 그 walk는 그 후보가 풀릴 때까지 기다린다. 실패만 한 후보는
-    기다리게 하지 않는다
+    쉬라는 말을 들은 후보는 뒤로 가므로, 앞에 쉬지 않는 후보가 있으면 그 후보부터
+    보낸다. 강등한 뒤에도 맨 앞 후보가 쉬는 중이면 그 walk는 기다린다 — 맨 앞 후보가
+    풀리는 때와, 뒤 후보 가운데 풀리는 순간 앞으로 올라오는 후보가 더 일찍 풀리는 때
+    중 빠른 쪽까지다(`walk_rest`). 실패만 한 후보는 기다리게 하지 않는다
     (`Keeper_turn_driver.demote_unavailable_candidates`, RFC-0458 §3.4).
   - 차단 강등: 낡은 blocker를 "이전 차단"으로 낮춰 보여준다. 감추지 않는다
     (`agent-roster.ts`).
@@ -1520,7 +1521,7 @@ status: reference
   atom 번호가 다시 매겨지므로 비교하지 않고 새 값으로 바꾸고, 같은 trace 안에서는 더
   좁은 값만 남는다. 끝 atom이 아니라 폭을 남기므로 커밋한 회차 다음에는 같은 자리가
   아니라 그다음 자리를 읽는다. 좁히는 것은 작은 요청이 같은 벽을 피할 수 있는 실패뿐이고,
-  그 판정은 `walk_shows_size`(`keeper_librarian_runtime.mli`의 `served_slot` 필드)가 들고, 원인별 판정
+  그 판정은 `walk_shows_size`(`keeper_librarian_runtime.mli`의 `not_committed` 필드)가 들고, 원인별 판정
   규칙은 RFC-librarian-lifecycle §4.3이 정한다. 마지막 후보 하나가 아니라 후보를 차례로
   시도한 전체 결과로 판정한다. 폭은 backlog를 끝까지 읽었을 때(`Drained`)만 푼다. 좁힌 커밋 한 번은
   거절했던 범위가 이제 들어간다는 증거가 아니다. 루프

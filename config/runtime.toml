@@ -153,6 +153,9 @@ max_output_tokens = 8192
 #                                     # wire (default [] — no host secrets cross)
 # capabilities = []                   # reserved Phase 2 markers: "kvm",
 #                                     # "firecracker"; unknown values warn-and-ignore
+# allowed_paths = []                  # extra endpoint roots Execute may name besides
+#                                     # the workdir and /tmp, e.g. ["/app"]; absolute,
+#                                     # normalized, not "/" (default [])
 
 # Every model row bound here carries `reasoning-uncontrolled = true`.
 # ollama.com /v1 turns reasoning on when a request carries no control, so a
@@ -1590,7 +1593,6 @@ max-concurrent = 4
 [models.kimi-for-coding]
 api-name = "kimi-for-coding"
 max-context = 262144
-max-prompt-bytes = 262144
 tools-support = true
 streaming = true
 

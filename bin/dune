@@ -1375,6 +1375,7 @@
   masc_tui_token_scale
   masc_tui_types
   masc_tui_message_layout
+  masc_tui_fleet_line
   unix))
 
 (library
@@ -1565,6 +1566,14 @@
   ptime
   unix))
 
+;; The Overview Providers section: each provider account's usage windows as
+;; the provider reported them. A library so a test can draw it.
+(library
+ (name masc_tui_overview_providers)
+ (wrapped false)
+ (modules masc_tui_overview_providers)
+ (libraries masc masc_tui_types masc_tui_ansi masc_tui_message_layout unix))
+
 ;; RFC-0465: the Overview's pull request reading, decoder and lines. A
 ;; library so a test can decode the server's own encoder output.
 (library
@@ -1610,6 +1619,7 @@
   masc_tui_task_flow
   masc_tui_overview_team
   masc_tui_overview_goals
+  masc_tui_overview_providers
   masc.masc_tool_blob_store
   masc_tui_agenda
   masc_tui_ansi
@@ -1639,6 +1649,7 @@
   masc
   masc.ide_memo
   masc.auth
+  masc.masc_process
   masc.masc_random_id
    masc.time_codec
   terminal_size

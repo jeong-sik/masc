@@ -11,6 +11,11 @@ open Masc_domain
     (missing prefix, empty suffix, or non-integer suffix). *)
 val task_id_to_int : string -> int option
 
+(** The task rows of a parsed [tasks-archive.json]: the [{"tasks": [...]}]
+    envelope's list, or [[]] for any other shape. The one place that knows
+    the envelope, for the writers here and for readers outside. *)
+val archive_entries_of_json : Yojson.Safe.t -> Yojson.Safe.t list
+
 (** Read every task id stored in [tasks-archive.json] under the
     config's base path.  Returns an empty list when the archive
     file does not exist. *)

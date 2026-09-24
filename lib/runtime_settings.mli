@@ -9,7 +9,6 @@
     runtime settings group, see {!surface}):
 
     - [keeper_lifecycle] — heartbeat / supervisor / restart limits
-    - [keeper_handoff] — handoff threshold / cooldown / pressure
     - [keeper_retention] — how much of a keeper's past each store keeps
     - [keeper_diagnostics] — snapshot / hb tuning / profiling ring
     - [keeper_turn] / [keeper_proactive] / [keeper_rules] — keeper LLM tuning surfaces

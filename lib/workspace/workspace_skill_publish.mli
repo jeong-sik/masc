@@ -36,6 +36,15 @@ type outcome =
             text because this layer does not link the snapshot library;
             nothing branches on it. *)
       }
+  | Created_but_shadowed of
+      { reference : Skill_reference.t
+      ; snapshot_revision : string
+      ; winner : Skill_reference.identity
+      }
+      (** Written and published, but [winner] declares the same name earlier
+          in catalog order. Turns that list Skills by name see [winner];
+          [reference] stays in the catalog as its shadow, and only a Task
+          that pins it gets it. *)
   | Created_but_unpublished of
       { reference : Skill_reference.t
       ; reason : string

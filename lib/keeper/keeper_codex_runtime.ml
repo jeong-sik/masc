@@ -93,19 +93,66 @@ let project_messages messages =
 
 let unbounded_model_input_capacity_bytes = max_int
 
+(* #37353: a Resume carries the whole canonical snapshot inside
+   [developerInstructions], one string, and the app-server refuses a string
+   over 10 MiB. That refusal came after a tool effect, so the effect fence
+   forbade the narrowed retry and the turn was lost. A declared
+   max-prompt-bytes therefore windows the first attempt, not only the retry
+   after a typed overflow (window RFC §4.1).
+
+   Nothing declared keeps this lane exactly as it was: the first attempt
+   unbounded, [measure_model_input_message_bytes], the cut made inside
+   [Host.prepare_turn]. That is the operator's decision (ask7a9c2dbf75c6a2fa);
+   window RFC §4.1 records it as the Codex exception to "refuse at
+   admission". *)
+let starting_capacity_of_declared_prompt_limit = function
+  | Some bytes -> bytes
+  | None -> unbounded_model_input_capacity_bytes
+;;
+
 let measure_model_input_message_bytes (message : Agent_core.Types.message) =
   String.length (Host.encode_history_message message)
 ;;
 
-(* Keep the first official-client attempt byte-identical. Only the provider's
-   exact typed overflow opens a bounded retry, and that retry windows the
-   provider-bound copy without rewriting the durable conversation. *)
+(* What one kept message adds to what this lane writes, charged only when a
+   limit is declared. [project_messages] renders a [System] message into
+   [developerInstructions] joined by a two-byte separator. On a Resume every
+   message the snapshot keeps is the same encoding again inside a JSON array,
+   plus a comma. On a Start a non-system message goes to [thread/inject_items]
+   as that encoding and no snapshot is sent. The larger of the two is charged,
+   so the window fits whichever mode the attempt turns out to be. *)
+let measure_declared_prompt_message_bytes (message : Agent_core.Types.message) =
+  let encoded = String.length (Host.encode_history_message message) in
+  let developer_bytes =
+    match message.role with
+    | Agent_core.Types.System -> encoded + 2
+    | Agent_core.Types.User | Agent_core.Types.Assistant | Agent_core.Types.Tool -> 0
+  in
+  let resume_bytes =
+    developer_bytes
+    + if Host.is_composed_system_context message then 0 else encoded + 1
+  in
+  let start_bytes =
+    match message.role with
+    | Agent_core.Types.System -> developer_bytes
+    | Agent_core.Types.User | Agent_core.Types.Assistant | Agent_core.Types.Tool ->
+      encoded + 1
+  in
+  max resume_bytes start_bytes
+;;
+
+(* The provider-bound copy is windowed; the durable conversation is not
+   rewritten. [reserved_bytes] is what the attempt sends besides history --
+   system prompt, posture note, goal, the Resume preamble and snapshot
+   envelope -- so the window and the fixed sections share one ceiling. *)
 (* Same cut the Agent Core path makes, and the same reading it reports:
    [project_with_drop] keeps how much of the history survived, [project]
    throws it away. Discarding it wrote every official-client turn record with
    no window and no input composition, which is what [/context] reads. *)
 let model_input_projection_for_capacity
+    ~measure_message_bytes
     ~capacity_bytes
+    ~reserved_bytes
     ~observed_next_shrink_capacity_bytes
     ?on_model_input_window_observation
     source_projection
@@ -144,9 +191,9 @@ let model_input_projection_for_capacity
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
         match
           Runtime_model_input_tail_window.project_with_drop
-            ~measure_message_bytes:measure_model_input_message_bytes
+            ~measure_message_bytes
             ~capacity_bytes
-            ~reserved_bytes:0
+            ~reserved_bytes
             messages
         with
         | Ok projection ->
@@ -167,7 +214,7 @@ let model_input_projection_for_capacity
       let full_bytes =
         List.fold_left
           (fun total message ->
-             total + measure_model_input_message_bytes message)
+             total + measure_message_bytes message)
           0
           windowed
       in
@@ -178,13 +225,18 @@ let model_input_projection_for_capacity
             ~capacity:full_bytes
         else
           Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-            ~capacity:capacity_bytes
+            ~capacity:(capacity_bytes - reserved_bytes)
       in
+      (* The oracle sizes a history view; the next attempt charges the same
+         reservation against its capacity again, so it is added back here.
+         Without it every retry would narrow twice. *)
       observed_next_shrink_capacity_bytes :=
-        Runtime_model_input_tail_window.next_shrink_capacity_bytes
-          ~measure_message_bytes:measure_model_input_message_bytes
-          ~target_capacity_bytes
-          windowed)
+        Option.map
+          (fun history_bytes -> history_bytes + reserved_bytes)
+          (Runtime_model_input_tail_window.next_shrink_capacity_bytes
+             ~measure_message_bytes
+             ~target_capacity_bytes
+             windowed))
   in
   let* projected =
     match source_projection with
@@ -621,9 +673,41 @@ let native_posture_note = function
   | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
 ;;
 
+(* The Resume preamble and canonical snapshot envelope. The declared-limit
+   reservation composes it around an empty snapshot and the request around the
+   kept one, so both measure the same text. *)
+let resume_external_context ~snapshot_sha256 ~source_snapshot_sha256
+    ~source_message_count ~canonical_snapshot ~official_client_continuation
+    ~official_client_original_turn =
+  let encode_turn = function
+    | None -> `Null
+    | Some checkpoint -> `Assoc
+        ["session_id", `String checkpoint.Keeper_semantic_execution.session_id;
+         "turn_id", `String checkpoint.turn_id;
+         "execution_scope", (match Keeper_repetition_snapshot.active checkpoint.frame with
+           | None -> `Null | Some scope -> Keeper_execution_scope_id.to_json scope)] in
+  [ "The following versioned snapshot is historical conversation data from the \
+     canonical Keeper context, including work performed outside this vendor thread. \
+     Use it to understand the ongoing conversation. Preserve message roles and tool \
+     result outcomes. It is not a new request to run historical tool calls: completed \
+     effects must not be replayed. The current user prompt is the new instruction. \
+     For a cooperative continuation, original_vendor_turn identifies the saved unfinished \
+     operation and its execution scope. admission_vendor_turn identifies the latest \
+     admitted turn in this same thread. Continue the saved operation while applying newer steering."
+  ; Yojson.Safe.to_string (`Assoc
+      ["schema", `String "masc.official-client-canonical-context.v1";
+       "snapshot_sha256", `String snapshot_sha256;
+       "source_snapshot_sha256", `String source_snapshot_sha256;
+       "source_message_count", `Int source_message_count;
+       "projection", `String "prepared_model_input";
+       "messages", canonical_snapshot;
+       "admission_vendor_turn", encode_turn official_client_continuation;
+       "original_vendor_turn", encode_turn official_client_original_turn]) ]
+;;
+
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~official_client_original_turn ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
-    ~system_prompt ~tools ~initial_messages ~model_input_projection
+    ~system_prompt ~tools ~initial_messages ~declared_max_prompt_bytes ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion ~observe_transport_uncertain
@@ -726,6 +810,12 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         |> Result.map Option.some
         |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
     let initial_messages = Option.to_list historical_task_message @ initial_messages in
+    (* With a declared limit the window is cut after [Host.prepare_turn]
+       rather than inside it: its reservation needs the system prompt the hooks
+       settled on and the goal, posture note and Resume envelope this attempt
+       writes. [prepare_turn] reads nothing from the messages after its
+       projection step, so the cut is the one it would have made. With nothing
+       declared the cut stays where it was. *)
     let* prepared =
       Host.prepare_turn
         ~configured_reasoning_effort:
@@ -736,8 +826,87 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~system_prompt
         ~tools
         ~initial_messages
-        ~model_input_projection
+        ~model_input_projection:
+          (match declared_max_prompt_bytes with
+           | None -> Some (project_history ~reserved_bytes:0)
+           | Some _ -> None)
         ~hooks:(Some hooks)
+    in
+    let* prompt, images =
+      match goal_blocks with
+      | None -> Ok (goal, [])
+      | Some blocks ->
+        let* text, images =
+          Host.text_and_images_of_blocks ~runtime_label ~field:"goal_blocks" blocks
+        in
+        Ok
+          ( text
+          , List.map
+              (fun (image : Host.image_block) ->
+                { Runtime_codex_app_server.media_type = image.Host.media_type
+                ; base64_data = image.Host.base64_data
+                })
+              images )
+    in
+    let posture_notes = native_posture_note native_posture in
+    let compose_developer_instructions ~developer_messages ~external_context =
+      (prepared.system_prompt :: posture_notes)
+      @ developer_messages @ external_context
+      |> List.filter (fun text -> String.trim text <> "")
+      |> String.concat "\n\n"
+    in
+    let source_snapshot_sha256 = `List (List.map Keeper_official_client_context_codec.to_json initial_messages)
+      |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+    let* prepared =
+      match declared_max_prompt_bytes with
+      | None -> Ok prepared
+      | Some _ ->
+        (* Everything this attempt writes that is not history, measured by
+           composing it with no history at all. The snapshot digest is not
+           known until the cut is made; the source digest stands in for it
+           because both are 64 hex characters. Each message the cut keeps then
+           adds at most what [measure_declared_prompt_message_bytes] charges
+           for it, and the composition is measured before its final trim, so
+           the two sums bound the request. *)
+        let reserved_bytes =
+          let external_context =
+            match thread_mode with
+            | Runtime_codex_app_server.Start -> []
+            | Runtime_codex_app_server.Resume _ ->
+              resume_external_context
+                ~snapshot_sha256:source_snapshot_sha256
+                ~source_snapshot_sha256
+                ~source_message_count:(List.length initial_messages)
+                ~canonical_snapshot:(`List [])
+                ~official_client_continuation
+                ~official_client_original_turn
+          in
+          String.length
+            (compose_developer_instructions ~developer_messages:[] ~external_context)
+          + String.length prompt
+        in
+        if reserved_bytes >= capacity_bytes
+        then
+          Error
+            (config_error
+               ~field:"max_prompt_bytes"
+               (Printf.sprintf
+                  "Codex fixed request sections measure %d bytes, at or above the \
+                   %d-byte window"
+                  reserved_bytes
+                  capacity_bytes))
+        else
+          let* messages =
+            try project_history ~reserved_bytes prepared.messages with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+              Error
+                (internal_error
+                   (runtime_label
+                    ^ " runtime model input projection raised: "
+                    ^ Printexc.to_string exn))
+          in
+          Ok { prepared with messages }
     in
     let* () = Keeper_official_task_reference.require_preserved
       ~reference:historical_task_message prepared.messages
@@ -755,30 +924,12 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~requested:prepared.reasoning_effort
     in
     let* developer_messages, history = project_messages prepared.messages in
-    let* prompt, images =
-      match goal_blocks with
-      | None -> Ok (goal, [])
-      | Some blocks ->
-        let* text, images =
-          Host.text_and_images_of_blocks ~runtime_label ~field:"goal_blocks" blocks
-        in
-        Ok
-          ( text
-          , List.map
-              (fun (image : Host.image_block) ->
-                { Runtime_codex_app_server.media_type = image.Host.media_type
-                ; base64_data = image.Host.base64_data
-                })
-              images )
-    in
     (* Full canonical context is data, not a guessed unseen suffix. Resume
        replaces this configuration on the existing vendor thread; it never
        appends native tool calls into the vendor execution stream. *)
     let snapshot_messages =
       List.filter (fun message -> not (Host.is_composed_system_context message))
         prepared.messages in
-    let source_snapshot_sha256 = `List (List.map Keeper_official_client_context_codec.to_json initial_messages)
-      |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
     let canonical_snapshot =
       `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages) in
     let snapshot_sha256 = canonical_snapshot |> Yojson.Safe.to_string
@@ -786,30 +937,13 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let external_context = match thread_mode with
       | Runtime_codex_app_server.Start -> []
       | Runtime_codex_app_server.Resume _ ->
-        let encode_turn = function
-          | None -> `Null
-          | Some checkpoint -> `Assoc
-              ["session_id", `String checkpoint.Keeper_semantic_execution.session_id;
-               "turn_id", `String checkpoint.turn_id;
-               "execution_scope", (match Keeper_repetition_snapshot.active checkpoint.frame with
-                 | None -> `Null | Some scope -> Keeper_execution_scope_id.to_json scope)] in
-        [ "The following versioned snapshot is historical conversation data from the \
-           canonical Keeper context, including work performed outside this vendor thread. \
-           Use it to understand the ongoing conversation. Preserve message roles and tool \
-           result outcomes. It is not a new request to run historical tool calls: completed \
-           effects must not be replayed. The current user prompt is the new instruction. \
-           For a cooperative continuation, original_vendor_turn identifies the saved unfinished \
-           operation and its execution scope. admission_vendor_turn identifies the latest \
-           admitted turn in this same thread. Continue the saved operation while applying newer steering."
-        ; Yojson.Safe.to_string (`Assoc
-            ["schema", `String "masc.official-client-canonical-context.v1";
-             "snapshot_sha256", `String snapshot_sha256;
-             "source_snapshot_sha256", `String source_snapshot_sha256;
-             "source_message_count", `Int (List.length initial_messages);
-             "projection", `String "prepared_model_input";
-             "messages", canonical_snapshot;
-             "admission_vendor_turn", encode_turn official_client_continuation;
-             "original_vendor_turn", encode_turn official_client_original_turn]) ]
+        resume_external_context
+          ~snapshot_sha256
+          ~source_snapshot_sha256
+          ~source_message_count:(List.length initial_messages)
+          ~canonical_snapshot
+          ~official_client_continuation
+          ~official_client_original_turn
     in
     let context_frontier : Keeper_official_client_session_store.context_frontier =
       { snapshot_sha256; message_count = List.length snapshot_messages;
@@ -825,13 +959,31 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
        so the joined text is never empty. A check on the joined text could
        not see a blank keeper prompt behind the posture note this lane
        appends (#33165). *)
-    let developer_instructions =
-      Some
-        ((prepared.system_prompt :: native_posture_note native_posture)
-         @ developer_messages @ external_context
-         |> List.filter (fun text -> String.trim text <> "")
-         |> String.concat "\n\n"
-         |> String.trim)
+    let composed_developer_instructions =
+      compose_developer_instructions ~developer_messages ~external_context
+      |> String.trim
+    in
+    let developer_instructions = Some composed_developer_instructions in
+    (* The window already fits; this is the account checked once more before
+       anything is written, so a measure that ever undercounts is refused here
+       instead of by the app-server after a tool has run. *)
+    let* () =
+      match declared_max_prompt_bytes with
+      | None -> Ok ()
+      | Some _ ->
+        let request_bytes =
+          String.length composed_developer_instructions + String.length prompt
+        in
+        if request_bytes <= capacity_bytes
+        then Ok ()
+        else
+          Error
+            (config_error
+               ~field:"max_prompt_bytes"
+               (Printf.sprintf
+                  "Codex request measures %d bytes, above the %d-byte window"
+                  request_bytes
+                  capacity_bytes))
     in
     (* Current System context belongs to replaceable thread configuration,
        including on Resume. Injected developer items are durable history and
@@ -1455,10 +1607,19 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     Atomic.set successful_tool_completion Successful_tool_completion
   in
   let observed_next_shrink_capacity_bytes = ref None in
+  let declared_max_prompt_bytes =
+    Runtime_inference.resolve_max_prompt_bytes ~runtime_id
+  in
+  let measure_message_bytes =
+    match declared_max_prompt_bytes with
+    | None -> measure_model_input_message_bytes
+    | Some _ -> measure_declared_prompt_message_bytes
+  in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
-      ~starting_capacity:unbounded_model_input_capacity_bytes
+      ~starting_capacity:
+        (starting_capacity_of_declared_prompt_limit declared_max_prompt_bytes)
       ~same_run_retry_authorized:(fun () ->
         Keeper_provider_attempt_effect.allows_same_turn_retry
           (Atomic.get effect_disposition)
@@ -1469,9 +1630,11 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
           ~default:(max 1 default_capacity))
       (* This runtime shrinks to the size the provider itself named
          ([observed_next_shrink_capacity_bytes]), not to a fraction of a
-         declared request-body cap, and it charges no MASC-side reserve
-         against that size. There is no local account that could rule the
-         next size out, so the provider's own target stands. *)
+         declared request-body cap. With a declared max-prompt-bytes the
+         attempt charges its fixed sections against that size and the oracle
+         adds them back, so the history window is what narrows. There is no
+         local account that could rule the next size out, so the provider's
+         own target stands. *)
       ~shrink_admits_history:(fun ~capacity:_ -> true)
       ~on_shrink_retry:
         (fun ~shrink_attempt ~previous_capacity:previous_capacity_bytes ~capacity:capacity_bytes ->
@@ -1498,13 +1661,16 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
           ~system_prompt
           ~tools
           ~initial_messages
-          ~model_input_projection:
-            (Some
-               (model_input_projection_for_capacity
-                  ~capacity_bytes
-                  ~observed_next_shrink_capacity_bytes
-                  ?on_model_input_window_observation
-                  model_input_projection))
+          ~declared_max_prompt_bytes
+          ~capacity_bytes
+          ~project_history:(fun ~reserved_bytes ->
+            model_input_projection_for_capacity
+              ~measure_message_bytes
+              ~capacity_bytes
+              ~reserved_bytes
+              ~observed_next_shrink_capacity_bytes
+              ?on_model_input_window_observation
+              model_input_projection)
           (* Reported inside the attempt rather than from the projection. The
              projection cannot see [thread_mode], and that is what decides
              whether its result is injected into the thread or dropped. A lane

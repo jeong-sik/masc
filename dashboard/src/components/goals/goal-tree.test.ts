@@ -163,6 +163,32 @@ describe('GoalTree', () => {
     expect(screen.getByTestId('goal-measurement-badge-goal-unavailable').textContent).toContain('측정 저장소 읽기 실패')
   })
 
+  it('keeps the measurement detail in sync with a refreshed tree', async () => {
+    mocks.get.mockResolvedValue(measurementFixture)
+    const first = await decodeGoalTree()
+    const updated = structuredClone(first)
+    const measurement = updated.tree[0]!.measurement
+    if (measurement.state !== 'reported') throw new Error('fixture needs a reported measurement')
+    updated.tree[0]!.measurement = {
+      state: 'reported', record: { ...measurement.record, observed_value: '8' },
+    }
+    mocks.route.value = {
+      tab: 'workspace', params: { section: 'planning', goal: first.tree[0]!.id }, postId: null,
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValueOnce(first).mockResolvedValueOnce(updated)
+    // Detail remains on the earlier response while the tree refreshes.
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({
+      goal: first.tree[0]!, linked_tasks: [], linked_keepers: [], approvals: [],
+      execution_receipts: [], timeline: [],
+    } satisfies DashboardGoalDetailResponse)
+
+    render(html`<${GoalTree} />`)
+    await waitFor(() => expect(screen.getByTestId('goal-observed-value').textContent).toBe('7'))
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }))
+    await waitFor(() => expect(screen.getByTestId('goal-observed-value').textContent).toBe('8'))
+    expect(screen.getByTestId('goal-measurement-badge-goal-measured').textContent).toContain('관측 8')
+  })
+
   it('selects and expands the goal from the planning route focus', async () => {
     const child = makeGoal('goal-child', 'Child goal')
     const parent = makeGoal('goal-parent', 'Parent goal', [child])

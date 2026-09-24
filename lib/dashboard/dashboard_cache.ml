@@ -119,6 +119,7 @@ let maybe_evict map =
   if SMap.cardinal map > max_entries then begin
     let now_ts = Time_compat.now () in
     let victim = ref None in
+    let oldest_fresh = ref None in
     SMap.iter (fun key slot ->
       match slot with
       | Ready entry when entry.stale_until <= now_ts ->
@@ -129,12 +130,20 @@ let maybe_evict map =
           (match !victim with
            | Some (_, true) -> ()
            | _ -> victim := Some (key, false))
-      | Ready _ -> ()
+      | Ready entry ->
+          (match !oldest_fresh with
+           | Some (_, expires_at) when expires_at <= entry.expires_at -> ()
+           | Some _ | None -> oldest_fresh := Some (key, entry.expires_at))
       | Computing _ -> ()
     ) map;
     match !victim with
     | Some (key, _) -> SMap.remove key map
-    | None -> map
+    | None ->
+      (* Versioned projection keys can all be fresh after a burst of writes.
+         Keep the configured entry bound even before their TTL elapses. *)
+      (match !oldest_fresh with
+       | Some (key, _) -> SMap.remove key map
+       | None -> map)
   end else map
 
 let now () = Time_compat.now ()

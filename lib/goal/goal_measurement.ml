@@ -1,10 +1,6 @@
 let ( let* ) = Result.bind
 
-(* A successful Keeper or operator write changes the public goal projection.
-   The dashboard uses this generation in its cache key, so either writer path
-   reaches the next read without this domain depending on the dashboard. *)
-let cache_generation_counter = Atomic.make 0
-let cache_generation () = Atomic.get cache_generation_counter
+let cache_generation = Goal_projection_generation.current
 
 type t = {
   id : string;
@@ -183,7 +179,7 @@ let record config ~goal_id ~criterion_revision ~observed_value ~evidence ~actor 
                 Ok (goal, Result.map_error (fun detail -> Store_error detail) recorded)))
     with
     | Ok (_, Ok item) ->
-        ignore (Atomic.fetch_and_add cache_generation_counter 1);
+        Goal_projection_generation.advance ();
         Ok item
     | Ok (_, Error error) -> Error error
     | Error (Goal_store.Goal_not_found _) ->

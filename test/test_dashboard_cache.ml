@@ -539,6 +539,23 @@ let test_stats () =
   let fresh = Yojson.Safe.Util.(member "ready_fresh" stats |> to_int) in
   Alcotest.(check int) "2 fresh entries" 2 fresh
 
+let test_fresh_versions_stay_within_cache_limit () =
+  Dashboard_cache.invalidate_all ();
+  let max_entries =
+    Yojson.Safe.Util.(member "max_entries" (Dashboard_cache.stats ()) |> to_int)
+  in
+  for i = 0 to max_entries + 4 do
+    ignore
+      (Dashboard_cache.get_or_compute
+         (Printf.sprintf "goal-version:%04d" i)
+         ~ttl:(600.0 +. float_of_int i)
+         (fun () -> `Null))
+  done;
+  let entries = Yojson.Safe.Util.(member "entries" (Dashboard_cache.stats ()) |> to_int) in
+  Alcotest.(check bool) "fresh versions respect max_entries" true (entries <= max_entries);
+  Alcotest.(check (option string)) "oldest fresh version was evicted" None
+    (Option.map Yojson.Safe.to_string (Dashboard_cache.peek "goal-version:0000"))
+
 (* Phase 1 Action 2 — verify the extended stats surface that the
    /api/v1/dashboard/cache-stats endpoint exposes.  This protects:
    - per-entry ttl_remaining_ms and kind strings (UI filters on them)
@@ -1561,6 +1578,8 @@ let () =
           test_case "execution preparation failure releases owner" `Quick
             test_execution_preparation_failure_releases_owner;
           test_case "stats" `Quick test_stats;
+          test_case "fresh version keys remain bounded" `Quick
+            test_fresh_versions_stay_within_cache_limit;
           test_case "stats detail surface" `Quick test_stats_detail_surface;
           test_case "stats empty table" `Quick test_stats_handles_empty_table;
           test_case "exception recovery" `Quick test_exception_recovery;

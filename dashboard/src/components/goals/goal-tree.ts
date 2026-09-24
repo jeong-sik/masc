@@ -975,7 +975,7 @@ function GoalDetailPanel({
             variant="ghost"
             size="sm"
             disabled=${loading}
-            onClick=${() => { void refreshGoalDetail(selectedNode.id) }}
+            onClick=${() => { void Promise.all([refreshGoalDetail(selectedNode.id), refreshTree()]) }}
           >
             ${loading ? 'detail 갱신 중...' : 'detail 새로고침'}
           <//>
@@ -983,7 +983,7 @@ function GoalDetailPanel({
       </div>
 
       <${GoalTaskRelationStrip} node=${selectedNode} />
-      <${GoalMeasurementDetail} node=${detail?.goal ?? selectedNode} />
+      <${GoalMeasurementDetail} node=${selectedNode} />
       <${GoalProofDetail} proof=${selectedNode.verification} />
       <${GoalLifecycleActionPanel} node=${selectedNode} />
       ${selectedNode.phase === 'awaiting_confirmation' || selectedNode.phase === 'completed' ? html`

@@ -512,11 +512,14 @@ let test_measurement_requires_current_criterion_and_evidence () =
        check string "latest replaces prior value" "1" row.observed_value;
        check string "latest replaces prior evidence" "artifact:updated-count" row.evidence
    | Ok _ | Error _ -> fail "measurement snapshot kept more than one row for a Goal");
+  let before_revision = Goal_measurement.cache_generation () in
   let changed =
     match Goal_store.upsert_goal config ~id:goal_id ~target_value:"2" () with
     | Ok (goal, _) -> goal
     | Error error -> fail (Goal_store.write_error_to_string error)
   in
+  check bool "criterion change refreshes dashboard cache" true
+    (Goal_measurement.cache_generation () > before_revision);
   check string "old criterion is not current" "not_recorded"
     (json_state (Goal_measurement.projection (Goal_measurement.load config) changed)
        [ "state" ]);

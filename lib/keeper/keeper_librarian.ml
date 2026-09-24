@@ -33,6 +33,7 @@ type goal_context =
 type input =
   { turn_ref : Ids.Turn_ref.t
   ; goal_context : goal_context
+  ; keeper_id : Keeper_identity.Keeper_id.t
   ; keeper_instructions : string
   ; current : current_selection option
   ; working_context : Keeper_librarian_context.input
@@ -146,10 +147,24 @@ let text_of_content block =
       | Agent_core.Types.Audio _ -> Some "[audio omitted]"))
 ;;
 
+(* RFC-0468 §3.2: the speaker comes from the metadata the host stamped when it
+   created the message, never from the text. Only a User message has a
+   speaker; a message without one says [unknown]. *)
+let speaker_header_field (m : Agent_core.Types.message) =
+  match m.role with
+  | Agent_core.Types.User ->
+    Printf.sprintf
+      " speaker=%s"
+      (Keeper_input_speaker.header_value (Keeper_input_speaker.classify m.metadata))
+  | Agent_core.Types.Assistant | Agent_core.Types.System | Agent_core.Types.Tool -> ""
+;;
+
 let message_to_text ~turn (m : Agent_core.Types.message) : string =
   let parts = List.filter_map text_of_content m.content in
   let body = String.concat "\n" parts |> String.trim in
-  let header = Printf.sprintf "turn=%d role=%s" turn (role_to_string m.role) in
+  let header =
+    Printf.sprintf "turn=%d role=%s%s" turn (role_to_string m.role) (speaker_header_field m)
+  in
   if String.equal body ""
   then Printf.sprintf "[%s] (empty)" header
   else Printf.sprintf "[%s] %s" header body
@@ -276,8 +291,15 @@ let goal_context_to_json = function
     `Assoc (("task_id", `String task_id) :: fields)
 ;;
 
+(* The Keeper's identity is host data every librarian prompt shows next to
+   [keeper_instructions], so the three passes read it from one binding. *)
+let keeper_id_variable (inp : input) =
+  "keeper_id", Keeper_identity.Keeper_id.to_string inp.keeper_id
+;;
+
 let prompt_variables (inp : input) : (string * string) list =
-  [ ( "keeper_instructions"
+  [ keeper_id_variable inp
+  ; ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "continuity", "null"
   ; "working_context", Yojson.Safe.to_string (Keeper_librarian_context.prompt_json inp.working_context)
@@ -294,7 +316,8 @@ let prompt_variables (inp : input) : (string * string) list =
 ;;
 
 let continuity_prompt_variables (inp : input) ~continuity =
-  [ ( "keeper_instructions"
+  [ keeper_id_variable inp
+  ; ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
   ; "current_memory", format_current_selection_for_prompt inp.current
@@ -304,7 +327,8 @@ let continuity_prompt_variables (inp : input) ~continuity =
 ;;
 
 let working_context_prompt_variables (inp : input) =
-  [ ( "keeper_instructions"
+  [ keeper_id_variable inp
+  ; ( "keeper_instructions"
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
   ; "current_memory", format_current_selection_for_prompt inp.current

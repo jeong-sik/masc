@@ -51,7 +51,13 @@ def discovery_fragment(catalog, descriptor):
 def validate_preview(value, keeper, descriptor, expected_fragment):
     require(value['name'] == keeper, 'Keeper preview identity mismatch')
     prompt = value['prompt']
-    assembled = prompt['assembled_system_prompt']
+    system_prompt = prompt['system_prompt']
+    # A keeper whose system prompt cannot be built is refused every turn
+    # (#38354); there is no preview to check, and that is the finding.
+    require(system_prompt.get('state') == 'available',
+            'Keeper system prompt is not available: '
+            + json.dumps({key: system_prompt.get(key) for key in ('state', 'reason', 'path', 'detail')}))
+    assembled = system_prompt['assembled']
     proposal_id = descriptor['proposal_id']
     require(assembled.count(expected_fragment) == 1,
             'Preview does not contain exactly one complete resolved discovery fragment')
@@ -60,7 +66,7 @@ def validate_preview(value, keeper, descriptor, expected_fragment):
         require(marker in assembled, 'Preview missing publication identity or uncertainty marker')
     require(proposal_id not in prompt['unified_user_message_preview'],
             'Publication discovery leaked into the persisted-message preview')
-    require(proposal_id not in prompt['effective_system_prompt'],
+    require(proposal_id not in system_prompt['effective'],
             'Publication discovery leaked into the stable system prompt')
 
 

@@ -1,7 +1,7 @@
 module Types = Masc_tui_types
 module Tui_decode = Masc.Tui_decode
 
-type group = Needs_you | Working | Idle | Parked
+type group = Needs_you | Working | Idle | No_phase | Paused | Stopped
 
 type detail =
   | Blocker of { summary : string; item : Types.attention_item; held : int }
@@ -13,7 +13,9 @@ type row = { keeper : Types.overview_keeper; group : group; detail : detail }
 
 type t = {
   rows : row list;
-  parked : (string * int) list;
+  no_phase : (string * int) list;
+  paused : (string * int) list;
+  stopped : (string * int) list;
   other_holders : (string * int) list;
 }
 
@@ -79,6 +81,14 @@ let alive holding =
       )
   | [] -> (Idle, No_open_task { awaiting = holding.awaiting })
 
+(* Where a Keeper is drawn: on a row of its own, or by name on the no-phase,
+   the paused or the stopped line. *)
+type placement =
+  | On_row of group * detail
+  | No_phase_name
+  | Paused_name
+  | Stopped_name
+
 let classify ~attention ~holding (keeper : Types.overview_keeper) =
   let name = keeper.okp_name in
   match (keeper.okp_paused, keeper.okp_phase) with
@@ -86,36 +96,50 @@ let classify ~attention ~holding (keeper : Types.overview_keeper) =
       (* The operator paused it. The status bridge still raises a "paused"
          item for it, and after a server restart autoboot skips it so the
          phase is null; neither is a stop the operator has not seen. *)
-      None
+      Paused_name
   | (Some false | None), Types.Keeper_phase phase -> (
       let word = Tui_decode.keeper_phase_to_string phase in
       match Tui_decode.keeper_phase_band phase with
       | Tui_decode.Phase_stuck ->
-          Some (Needs_you, stuck ~attention ~holding ~word name)
-      | Tui_decode.Phase_alive -> Some (alive holding)
-      | Tui_decode.Phase_parked -> None)
+          On_row (Needs_you, stuck ~attention ~holding ~word name)
+      | Tui_decode.Phase_alive ->
+          let group, detail = alive holding in
+          On_row (group, detail)
+      | Tui_decode.Phase_paused -> Paused_name
+      | Tui_decode.Phase_stopped -> Stopped_name)
   | (Some false | None), Types.Keeper_phase_unreadable word ->
-      Some (Needs_you, stuck ~attention ~holding ~word name)
+      On_row (Needs_you, stuck ~attention ~holding ~word name)
   | (Some false | None), Types.Keeper_phase_absent -> (
-      (* No registry entry and not paused: the Keeper is not running in this
-         process. Whether that is a stop the operator chose or one they have
-         not seen yet is what the attention list says, so the row follows
-         it. *)
+      (* No registry entry and not paused. With an item asking for the
+         operator the row follows it; without one, the briefing has said
+         nothing about where the Keeper is, and that is not a stop. *)
       match first_blocker ~attention name with
-      | Some item -> Some (Needs_you, blocker ~holding item)
-      | None -> None)
+      | Some item -> On_row (Needs_you, blocker ~holding item)
+      | None -> No_phase_name)
 
-let band = function Needs_you -> 0 | Working -> 1 | Idle -> 2 | Parked -> 3
+let band = function
+  | Needs_you -> 0
+  | Working -> 1
+  | Idle -> 2
+  | No_phase -> 3
+  | Paused -> 4
+  | Stopped -> 5
+
+let by_name names = List.sort (fun (left, _) (right, _) -> String.compare left right) names
 
 let project ~keepers ~tasks ~attention =
-  let rows, parked =
+  let rows, no_phase, paused, stopped =
     List.fold_left
-      (fun (rows, parked) (keeper : Types.overview_keeper) ->
+      (fun (rows, no_phase, paused, stopped) (keeper : Types.overview_keeper) ->
         let holding = holding_of ~tasks keeper.okp_name in
+        let entry = (keeper.okp_name, held holding) in
         match classify ~attention ~holding keeper with
-        | Some (group, detail) -> ({ keeper; group; detail } :: rows, parked)
-        | None -> (rows, (keeper.okp_name, held holding) :: parked))
-      ([], []) keepers
+        | On_row (group, detail) ->
+            ({ keeper; group; detail } :: rows, no_phase, paused, stopped)
+        | No_phase_name -> (rows, entry :: no_phase, paused, stopped)
+        | Paused_name -> (rows, no_phase, entry :: paused, stopped)
+        | Stopped_name -> (rows, no_phase, paused, entry :: stopped))
+      ([], [], [], []) keepers
   in
   let rows =
     List.stable_sort
@@ -142,18 +166,23 @@ let project ~keepers ~tasks ~attention =
            if by_count <> 0 then by_count else String.compare left_name right_name)
   in
   { rows
-  ; parked = List.sort (fun (left, _) (right, _) -> String.compare left right) parked
+  ; no_phase = by_name no_phase
+  ; paused = by_name paused
+  ; stopped = by_name stopped
   ; other_holders
   }
 
+let line_if_any = function [] -> 0 | _ :: _ -> 1
+
 let drawn_rows t =
-  List.length t.rows
-  + (match t.parked with [] -> 0 | _ :: _ -> 1)
-  + match t.other_holders with [] -> 0 | _ :: _ -> 1
+  List.length t.rows + line_if_any t.no_phase + line_if_any t.paused
+  + line_if_any t.stopped + line_if_any t.other_holders
 
 let count t group =
   match group with
-  | Parked -> List.length t.parked
+  | No_phase -> List.length t.no_phase
+  | Paused -> List.length t.paused
+  | Stopped -> List.length t.stopped
   | Needs_you | Working | Idle ->
       List.length (List.filter (fun row -> row.group = group) t.rows)
 

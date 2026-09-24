@@ -255,6 +255,12 @@ type t =
        fields are then required explicit nulls. *)
   ; sampling : sampling
   ; usage : usage
+  ; turn_output_tokens : int option
+      (** Output the whole client turn produced, from a turn-scope total
+          (Claude Code's result frame), kept apart from [usage] because
+          [usage] there describes the newest request. [None] when the
+          runtime reports no turn total apart from [usage]. Key
+          [turn_output_tokens], omitted when [None]. *)
   ; ts : float
   }
 

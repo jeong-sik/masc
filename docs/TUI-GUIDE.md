@@ -101,7 +101,7 @@ decides whether launching one is worth it.
 
 An unreachable server is reported, not hidden. The header shows
 `[disconnected]`, the surface prints the failing call, and each failed load
-lands in Recent Events:
+lands in the TUI session block on Metrics:
 
 ```
  MASC Board (0)  10:55:37  [disconnected]
@@ -125,19 +125,18 @@ own log exists, that file is the only place the reason is written. The TUI
 reads its last line back when the server exits before `/health` answers.
 
 Measured on 2026-09-13 with the base path already held by a server on port
-8976 and the TUI pointed at port 8977. The TUI added these four events, newest
-first:
+8976 and the TUI pointed at port 8977. The TUI added these four events, drawn
+oldest first:
 
 ```
+starting masc server here...
 masc server exited (exit 1) before it was ready
 [FATAL] Base path <base> is locked. The lease records PID 15310; its namespace and current holder are unverified. Lock file: '…'. …
 full output: .masc/logs/masc-server-8977.log
-starting masc server here...
 ```
 
-The events pane is half the screen. At 120 columns it cut each event at 57
-cells, timestamp included: the headline lost its last word and the lock line
-was cut inside the base path, so open the file for the whole line. The file held 961 bytes: one `[INFO]` line
+The TUI session block on Metrics cuts each event at the frame width, and the
+lock line is longer than most frames, so open the file for the whole line. The file held 961 bytes: one `[INFO]` line
 and the `[FATAL]` line. If the server is still not answering after 30 seconds,
 the TUI says `masc server did not answer /health in time` and names the same
 file.
@@ -283,60 +282,50 @@ The `Changes` tab lists the files this keeper's calls wrote, newest first.
 
 ### Overview
 
-Workspace health, agent count, pending approvals, incident count, the Attention
-list, Recent Events, and active tasks.
+Workspace health, agent count, pending approvals, the Attention list, and
+active tasks.
 
 ```
  MASC Overview  [me]  10:54:52  [connected]
-   Health: bad  Keepers: 10  MCP agents: 2  Approvals: 0  Incidents: 4
-   Cluster: default          Project: me       sse 3 ▸ws 1  grpc :8936  steady
- Attention                              | Recent Events 1-5/5
- [bad ] analyst needs operator atten~   | [10:54:52] TUI started
- [warn] sangsu has external attention   |
+   Health: bad  Keepers: 10  MCP agents: 2  Approvals: 0
+ Attention 2
+ [bad ] analyst needs operator attention
+ [warn] sangsu has external attention from discord
  Tasks
    * [task-317] Apply File_lock_eio to approval queue (in_progress @keeper-...)
    o [task-272] Add HTTP route regression coverage (todo) !
-  j/k:events  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: 2s | Port: 8935
+  m:telemetry  t:tasks  2:keepers  r:refresh  Tab:next  q:quit  | Refresh: 2s | Port: 8935
 ```
 
-`j`/`k` scroll the events pane, not the task list. `t` hands `j`/`k` to the
-task list instead; under task focus, `Enter` opens the selected task in full -
-description, status with its assignee and timestamps, handoff summary, the
-completion contract's evidence list, attached files - read from the same
-backlog load the list was projected from. `Esc` closes the detail, a second
-`Esc` returns `j`/`k` to the events. Events are windowed against
-both panel columns, so a long event wraps to the width actually available
-rather than the header width. An error event wears the `✗` the chat pane
-uses for a failure, just after the clock; every other level keeps that cell
-for its text. The mark is a shape rather than a colour alone, so it holds
-under `NO_COLOR`.
+`j`/`k` move nothing until `t` selects the task list. With the list selected,
+`Enter` opens the selected task in full - description, status with its
+assignee and timestamps, handoff summary, the completion contract's evidence
+list, attached files - read from the same backlog load the list was projected
+from. `Esc` closes the detail, and a second `Esc` lets go of the list.
 
-The tail of the cluster row is what the server reports about its own delivery
-paths: one entry per path, then the queue's pressure and its drop count. It
-rides that row rather than taking one of its own, so a short viewport does not
-trade an event line for it. A path that is not listening reads `off` rather
-than as zero sessions, because those are different facts, and a nonzero drop
-count is spelled out - a steady queue that drops is not a healthy transport.
+This TUI's own session log is on Metrics (`m`), first in the Engine &
+Scheduler section under `TUI session`: what the TUI did and what it was told,
+oldest first so the newest line is last. It keeps eleven lines, and a run of
+the same line folds into one row with a `×N` tail. When the frame is too
+short for all of it, the block keeps its newest rows under a `+N earlier`
+row, so the newest line stays in view. An error event wears the
+`✗` the chat pane uses for a failure, just after the clock; every other level
+keeps that cell for its text. The mark is a shape rather than a colour alone,
+so it holds under `NO_COLOR`.
 
-The path carrying the traffic wears the same `▸` the surface strip puts on the
-tab you are on. The row used to name that path again in front of the entries,
-in the wire's spelling - `websocket/steady` beside `ws 1` - so one path wore
-two names on one row. Streamable HTTP has no session count in this reading, so
-it appears only while it is the path in use.
+The server's delivery paths and this TUI's runtime event feed are on Metrics
+(`m`), in the Transport delivery block, which reads the transport health
+itself: the path carrying the traffic, the gRPC port or `off`, SSE and
+WebSocket sessions, dropped events, queue pressure, and the feed as
+`live N`, `opening`, `closed N (reason)` or `off`. The feed is opened after
+the first refresh that reaches the server and reopened on the refresh cadence
+after it closes. Every keeper's tool calls, turn boundaries, heartbeats, and
+turn done rows arrive on it; this build keeps the last 1,000 and counts what
+falls off the end.
 
-This tail is read only while Overview is the current surface.
-
-The same row ends with the runtime event feed: `feed: live 1240` while the
-TUI is subscribed to `GET /mcp?sse_kind=observer` and counting the frames it
-has received, `feed: opening` while the MCP session and the subscription are
-being set up, and `feed: closed after N` once the stream has ended (the
-reason is in Recent Events and on the Activity status row) -
-the count stays so a stream that dropped after a thousand events and one that
-never opened do not read alike. The feed is opened after the first refresh
-that reaches the server and reopened on the refresh cadence after it closes;
-both transitions land in Recent Events. Every keeper's tool calls, turn
-boundaries, heartbeats, and turn done rows arrive on it; this build keeps
-the last 1,000 and counts what falls off the end.
+Overview draws one Attention item for the transport, and only while the
+outbound queue's pressure is `watch` (warning) or `high` (bad). A steady queue
+adds nothing.
 
 Tasks show terminal states in Planning rollups but not in this list. A task
 detail that is open when its task turns terminal stays open - the detail reads
@@ -394,7 +383,7 @@ names. A line that starts with `/` is a command for the TUI instead:
 - `/task <title>` — followed by any further lines as the body — creates a
   task over the server's `masc_add_task` tool and then messages the keeper
   the operator's own words with the new id in front: `[task-512] <title>`.
-  The keeper claims that exact task. The events row records the creation;
+  The keeper claims that exact task. The TUI session block records the creation;
   a failure puts the typed text back into the input, unsent.
 - `/diff` — opens the working-tree Git changes directly in chat. Pressing
   `Enter`, `d`, or `Right` opens the file's Git diff inline with syntax
@@ -574,11 +563,9 @@ collapsing to zero.
  Keeper: code-reviewer
    Identity
    Name:                  code-reviewer
-   Generation:            1
    Paused:                no
    Current Work
    Task:                  -
-   Last Blocker:          -
    Live Context
    Context:               8.9%  ##--------------------  93213 / 1048576 tokens
    Observed:              2026-08-23T01:53:26
@@ -606,7 +593,7 @@ reads `name (id)` when the connector's name directory knows it, and
 
 `U` `U` sends one unbind per binding with the Keeper's name as a condition, so
 a channel rebound to another Keeper after the first press is left as is.
-Recent Events gets one line per binding -- removed, kept (now bound to
+The TUI session block gets one line per binding -- removed, kept (now bound to
 another Keeper), not found (with the server's words), or FAILED with the
 server's reason, failures last -- and the footer shows the count of each and
 names the channels that failed. A transport whose binding list the server
@@ -1019,8 +1006,8 @@ log excerpts keep the shape they were copied in.
 
 A paste while the composer row is idle takes focus for it, so pasted text
 always lands somewhere visible and addressed to the keeper the row named. With
-no keeper to send to, the paste is refused out loud in Recent Events rather
-than dropped.
+no keeper to send to, the paste is refused out loud in the TUI session block
+rather than dropped.
 
 A paste longer than 50 lines, or larger than 8 KiB, is not put into the draft.
 The composer is five rows; a four-hundred-line paste in it is a draft nobody
@@ -1042,7 +1029,7 @@ Keeper) and the message names it bare.
 A Keeper that has never run has no directory, and one is not created for it -
 that would be this surface deciding something about the Keeper's own space.
 Nor is a failed write hidden: both cases put the pasted text into the message
-instead and say so in Recent Events. A paste that arrives as a large message
+instead and say so in the TUI session block. A paste that arrives as a large message
 is worse than one read off disk; a paste that arrives as neither is the thing
 this must not do.
 
@@ -1056,7 +1043,7 @@ could reach a message, since typed keys are filtered one scalar at a time.
 
 A paste over 1 MiB keeps the first 1 MiB. The rest is read - the end marker
 has to be consumed, or the tail of the paste arrives as keystrokes - and
-counted, and Recent Events says how many bytes are not in the draft.
+counted, and the TUI session block says how many bytes are not in the draft.
 
 #### Looking at an image
 
@@ -1761,7 +1748,7 @@ Per surface:
 
 | Key | Surface | Action |
 |-----|---------|--------|
-| `j` / `k` | Overview | Scroll Recent Events |
+| `t` | Overview | Select the task list, then `j` / `k` move its cursor |
 | `j` / `k` | Keepers, Lanes, Approvals, Board, Planning, Schedules, Fusion list | Move cursor |
 | `j` / `k` | Runtime, System Logs | Move the list cursor; scroll when detail is open |
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail, Fusion detail | Scroll content |
@@ -1954,7 +1941,7 @@ keeper is in. The header's `N unread` counts the same rows.
 
 **A surface shows a count of `0` next to `data unreliable`.** The read failed;
 the count is not an observation. The failing call is printed on the same row and
-recorded in Recent Events.
+recorded in the TUI session block on Metrics.
 
 ### Preset source and current settings
 

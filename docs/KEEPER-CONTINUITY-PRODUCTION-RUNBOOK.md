@@ -25,7 +25,7 @@ Release only when all items are true:
 
 Attach the exact validation command and artifacts for:
 
-- Keeper identity, trace, generation, and turn IDs;
+- Keeper identity, trace, and turn IDs;
 - input event delivery/queue evidence;
 - checkpoint loaded/saved manifest rows;
 - terminal execution receipt;

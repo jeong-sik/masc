@@ -136,21 +136,19 @@ type event = {
    about the key the operator just pressed. *)
 let last_action_window_s = 12.0
 
-(* The one key the Overview event panel folds identical neighbours by; the
-   renderer and both scroll handlers must count the same folded rows or the
-   scroll range and the drawn range drift apart. *)
-let overview_event_collapse_key event =
+(* The key the TUI session block folds identical neighbours by. *)
+let session_event_collapse_key event =
   event.event_type ^ "\x00" ^ event.content
 ;;
 
-(* What an Overview event row says about its level, beside its clock. The
-   level was recorded on every event and read only by the fold key above, so
-   a failed mint and a first install waiting for its workspace drew the same
-   row: the operator could tell them apart only by reading the sentence.
-   Only an error is marked, with the glyph the chat pane draws for one, so
-   the ordinary rows keep every cell of the panel for their text. A shape and
-   not a colour alone: under NO_COLOR the mark is still there. *)
-let overview_event_mark event =
+(* What a TUI session row says about its level, beside its clock. The level
+   was recorded on every event and read only by the fold key above, so a
+   failed mint and a first install waiting for its workspace drew the same
+   row: the reader could tell them apart only by reading the sentence. Only
+   an error is marked, with the glyph the chat pane draws for one, so the
+   ordinary rows keep every cell for their text. A shape and not a colour
+   alone: under NO_COLOR the mark is still there. *)
+let session_event_mark event =
   if String.equal event.event_type "error" then Some "\xe2\x9c\x97" else None
 ;;
 
@@ -1977,6 +1975,14 @@ type overview_quota_reading =
   | Quota_read of Tui_decode.runtime_option list
   | Quota_failed of string
 
+(** The Overview's reading of [GET /api/v1/dashboard/goals]. A failed read and
+    one not made yet are each drawn as what they are, never as an empty
+    section. *)
+type overview_goals_reading =
+  | Goals_unread
+  | Goals_read of Tui_decode.overview_goal list
+  | Goals_failed of string
+
 (** One open pull request as [GET /api/v1/repositories/pulls] reports it
     (RFC-0465). The check and review words are parsed at decode; a word this
     build cannot name makes the row undecodable rather than a default. *)
@@ -2057,8 +2063,6 @@ type overview_keeper = {
 
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
-  ov_cluster: string;
-  ov_project: string;
   ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
   ov_keeper_liveness: keeper_liveness_counts;
   ov_keeper_rows: overview_keeper list;
@@ -2887,6 +2891,7 @@ type surface_needs = {
   needs_asks : bool;
   needs_runtime_quota : bool;
   needs_repository_pulls : bool;
+  needs_overview_goals : bool;
 }
 
 let nothing =
@@ -2901,6 +2906,7 @@ let nothing =
     needs_asks = false;
     needs_runtime_quota = false;
     needs_repository_pulls = false;
+    needs_overview_goals = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -2923,12 +2929,14 @@ let rec surface_needs ~keeper_pane_drawn surface =
 and surface_needs_of_surface : surface -> surface_needs = function
   (* The Team block names the quota windows that are shut. The catalogue is
      43 KB and answers in under two milliseconds on the live runtime, and
-     only this surface draws the windows beside the Keepers they stop. *)
+     only this surface draws the windows beside the Keepers they stop.
+     The goal tree is read only here too: the GOALS section is its reader. *)
   | Overview ->
       { nothing with
         needs_transport = true
       ; needs_runtime_quota = true
       ; needs_repository_pulls = true
+      ; needs_overview_goals = true
       }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -2958,8 +2966,14 @@ and surface_needs_of_surface : surface -> surface_needs = function
      different machinery. *)
   | Approvals ->
       { nothing with needs_operator_approvals = true; needs_asks = true }
+  (* The Transport delivery block reads the transport health itself, so it
+     is not whatever an Overview refresh happened to leave behind. *)
   | Metrics ->
-      { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
+      { nothing with
+        needs_keeper_roster = true
+      ; needs_fleet_safety = true
+      ; needs_transport = true
+      }
   | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
   | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
   | Tools ->
@@ -2985,6 +2999,8 @@ let surface_needs_delta ~previous ~next =
       next.needs_runtime_quota && not previous.needs_runtime_quota
   ; needs_repository_pulls =
       next.needs_repository_pulls && not previous.needs_repository_pulls
+  ; needs_overview_goals =
+      next.needs_overview_goals && not previous.needs_overview_goals
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -3122,6 +3138,7 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.Run_finished
   | Masc_tui_keeper_chat_live.Runtime_attempt_started _
   | Masc_tui_keeper_chat_live.Stream_model_started _
+  | Masc_tui_keeper_chat_live.Stream_usage _
   | Masc_tui_keeper_chat_live.Undecodable _ ->
       if Masc_tui_keeper_chat_log.add turn_log.tl_log ~seq delta
       then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
@@ -5545,7 +5562,6 @@ type state = {
   mutable task_detail_scroll: int;
   mutable tasks_error: string option;
   mutable events: event list;
-  mutable overview_event_scroll: int;
   mutable keepers: keeper list;
   mutable keepers_error: string option;
   (* The live roster reading, separate from the durable one above: it answers
@@ -5595,13 +5611,12 @@ type state = {
      unrelated input clears it; a second [q] exits. *)
   mutable quit_armed: bool;
   (* What the last key the operator pressed actually did, and the clock
-     reading it was set at. These outcomes go to [add_event], and the event
-     log is drawn by Overview alone -- so the operator who pressed [a] on
-     Workspace stood on the one surface that could not answer them, and a
-     registration that succeeded looked the same as an editor that never
-     started. The footer every surface draws answers instead, and only for
-     [last_action_window_s]: an outcome that stayed would go on claiming a
-     keypress the operator has since forgotten making. *)
+     reading it was set at. The session log is drawn by Metrics alone, so the
+     operator who pressed [a] on Workspace could not read there whether the
+     registration landed. The footer every surface draws answers instead,
+     until the next input or for [last_action_window_s], whichever comes
+     first: an outcome that stayed would go on claiming a keypress the
+     operator has moved past. *)
   mutable last_action: (string * float) option;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
@@ -5633,6 +5648,7 @@ type state = {
      the rows under an open picker's cursor. *)
   mutable overview_quota: overview_quota_reading;
   mutable overview_pulls: overview_pulls_reading;
+  mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
@@ -7740,7 +7756,6 @@ let create_state
   task_detail_scroll = 0;
   tasks_error = None;
   events = [];
-  overview_event_scroll = 0;
   keepers = [];
   keepers_error = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
@@ -7768,6 +7783,7 @@ let create_state
   runtime_catalog = [];
   overview_quota = Quota_unread;
   overview_pulls = Overview_pulls_unread;
+  overview_goals = Goals_unread;
   runtime_lanes = [];
   runtime_assignments = [];
   runtime_catalog_error = None;
@@ -8485,7 +8501,6 @@ let composer_extra_rows (state : state) =
     drawing reaching back into the state it is drawing from: the drawing is a
     function of the state again, and every write lives on one side of it. *)
 type clamped_scroll =
-  | Overview_events of int
   | Task_detail of int
   | Board_read of int
   | Message_scroll of int
@@ -8569,7 +8584,6 @@ let scroll_down_from scroll ~by =
   if scroll > max_int - by then max_int else scroll + by
 
 let apply_clamped_scroll (state : state) = function
-  | Overview_events value -> state.overview_event_scroll <- value
   | Task_detail value -> state.task_detail_scroll <- value
   | Board_read value -> state.board_scroll <- value
   | Message_scroll value -> set_msg_scroll state value

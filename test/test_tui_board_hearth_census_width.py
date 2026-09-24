@@ -95,7 +95,7 @@ def run(executable: str) -> None:
     )
 
     def interact(process, fd, _slave, output, _base):
-        h.wait_for_output(process, fd, output, b"cluster-a", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
         # Never 100: the scenario opens there, and resizing to the width the
         # terminal already has sends no SIGWINCH, so nothing redraws.

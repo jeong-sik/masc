@@ -905,8 +905,16 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         (match thread_mode with
          | Runtime_codex_app_server.Start -> prepared.messages
          | Runtime_codex_app_server.Resume _ ->
+           (* Runtime_codex_app_server drops history on Resume. Only
+              non-carried System messages can enter developerInstructions;
+              formatting the held conversation here would allocate it again. *)
            List.filter
-             (fun message -> not (Host.is_carried_on_resume message))
+             (fun (message : Agent_core.Types.message) ->
+                not (Host.is_carried_on_resume message)
+                && match message.role with
+                   | Agent_core.Types.System -> true
+                   | Agent_core.Types.User | Agent_core.Types.Assistant
+                   | Agent_core.Types.Tool -> false)
              prepared.messages)
     in
     let prompt =

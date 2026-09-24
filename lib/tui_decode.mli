@@ -3546,7 +3546,7 @@ type keeper_costs = {
 }
 
 val decode_keeper_costs : Yojson.Safe.t -> (keeper_costs, string) result
-(** Every field is required. A sum and a reported-sample count that disagree
+(** Every field the TUI reads is required. A sum and a reported-sample count that disagree
     ([null] beside a non-zero count, or a number beside zero) refuse the
     reply, as does a [metrics_read.state] or [cache.state] this build does
     not know. *)

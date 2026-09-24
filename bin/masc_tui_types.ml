@@ -2941,9 +2941,9 @@ let nothing =
    millisecond, which is what makes this affordable where planning is not.
 
    [overview_cost_shown] is the other one: the Team title draws the fleet's
-   cost only after [/team-cost], and keeper-costs reads every day file of
-   every Keeper's metrics in its window, so a surface that could draw it asks
-   for it only while it is shown. *)
+   cost only after [/team-cost], and keeper-costs rereads every day file of
+   every Keeper's metrics in its window whenever its server cache expires, so
+   a surface that could draw it asks for it only while it is shown. *)
 let rec surface_needs ~keeper_pane_drawn ~overview_cost_shown surface =
   let needs = surface_needs_of_surface surface in
   let needs =
@@ -5703,9 +5703,9 @@ type state = {
   mutable overview_pulls: overview_pulls_reading;
   mutable overview_goals: overview_goals_reading;
   mutable overview_cost: overview_cost_reading;
-  (* [/team-cost]: off until the operator asks. keeper-costs reads every day
-     file of every Keeper's metrics in the window on each refresh, so a hidden
-     cost is not fetched at all. Process-only, like [burn_hud_visible]. *)
+  (* [/team-cost]: off until the operator asks. keeper-costs rereads every day
+     file of every Keeper's metrics in the window whenever its server cache
+     expires, so a hidden cost is not fetched at all. Process-only, like [burn_hud_visible]. *)
   mutable overview_cost_visible: bool;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;

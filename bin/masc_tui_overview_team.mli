@@ -113,9 +113,9 @@ type cost_words = {
       (** The sum and its window (["$12.34 24h"]), or what stands in its
           place. *)
   details : string list;
-      (** Why [lead] is a floor or stale, one clause each, or the failed
-          read's reason. Drawn after [lead]; the first thing a narrow title
-          drops. *)
+      (** Why [lead] is a floor, one clause each, or the failed read's
+          reason. Drawn after [lead]; the first thing a narrow title drops,
+          so nothing that changes what [lead] means lives only here. *)
   tone : cost_tone;
 }
 
@@ -125,5 +125,8 @@ val cost_words : Masc_tui_types.overview_cost_reading -> cost_words
     or a Keeper's metrics could not be read, and [details] counts each. With
     no priced turn the cost is ["cost unknown"] -- subscription runtimes
     report no price -- and never [$0.00]; with no turn at all, and every
-    Keeper read, it is ["no turns in <window>"]. A read not made yet, the
-    server's warming placeholder and a failed read each say so. *)
+    Keeper read, it is ["no turns in <window>"]. A sum the server keeps
+    serving while its refresh fails carries ["(refresh failing)"] in the
+    lead. A read not made yet and the server's warming placeholder read
+    ["cost not read yet"]; a failed read, or a warming reply whose reads have
+    all failed, reads ["cost unavailable"]. *)

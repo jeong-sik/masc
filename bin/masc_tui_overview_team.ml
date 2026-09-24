@@ -246,12 +246,12 @@ let cost_words (cost : Types.overview_cost_reading) =
       { lead = "cost unavailable"; details = [ reason ]; tone = Cost_warn }
   | Types.Cost_read { kcs_cache = Tui_decode.Keeper_costs_warming { last_error }; _ }
     ->
-      let details =
-        match last_error with
-        | Some _ -> [ "last server read failed" ]
-        | None -> []
-      in
-      { lead = "cost not read yet"; details; tone = Cost_muted }
+      (* Warming with an error is a server whose every read so far failed:
+         a failure, not a read still to come. *)
+      (match last_error with
+       | Some reason ->
+           { lead = "cost unavailable"; details = [ reason ]; tone = Cost_warn }
+       | None -> { lead = "cost not read yet"; details = []; tone = Cost_muted })
   | Types.Cost_read
       ({ kcs_cache = Tui_decode.Keeper_costs_fresh | Tui_decode.Keeper_costs_stale _
        ; _
@@ -269,15 +269,17 @@ let cost_words (cost : Types.overview_cost_reading) =
             , plural fleet.fc_unread_keepers "keeper" ^ " unread" )
           ]
       in
+      (* A stale reply whose refresh failed can be any age: the server keeps
+         answering the last good sum. That goes in the lead, which a narrow
+         title keeps, not in a detail it drops. *)
       let refresh_failed =
         match costs.kcs_cache with
-        | Tui_decode.Keeper_costs_stale { last_error = Some _ } ->
-            [ "last refresh failed" ]
+        | Tui_decode.Keeper_costs_stale { last_error = Some _ } -> true
         | Tui_decode.Keeper_costs_stale { last_error = None }
         | Tui_decode.Keeper_costs_fresh | Tui_decode.Keeper_costs_warming _ ->
-            []
+            false
       in
-      let lead, tone =
+      let sum_lead, sum_tone =
         match fleet.fc_usd, shortfalls with
         | None, [] -> (Printf.sprintf "no turns in %s" window, Cost_muted)
         | None, _ :: _ -> (Printf.sprintf "cost unknown %s" window, Cost_plain)
@@ -285,4 +287,8 @@ let cost_words (cost : Types.overview_cost_reading) =
         | Some usd, _ :: _ ->
             (Printf.sprintf "at least $%.2f %s" usd window, Cost_plain)
       in
-      { lead; details = shortfalls @ refresh_failed; tone }
+      let lead, tone =
+        if refresh_failed then (sum_lead ^ " (refresh failing)", Cost_warn)
+        else (sum_lead, sum_tone)
+      in
+      { lead; details = shortfalls; tone }

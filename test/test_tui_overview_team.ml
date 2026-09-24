@@ -390,8 +390,8 @@ let test_cost_words_say_what_the_sum_is () =
     (costs [ cost_row ~unreported:4 "a" Tui_decode.Cost_not_reported ]);
   check_words "no turn at all" ~lead:"no turns in 24h" ~details:[]
     (costs [ cost_row "a" Tui_decode.Cost_not_reported ]);
-  check_words "a stale reply whose refresh failed" ~lead:"$0.50 24h"
-    ~details:[ "last refresh failed" ]
+  check_words "a stale reply whose refresh failed"
+    ~lead:"$0.50 24h (refresh failing)" ~details:[]
     (costs
        ~cache:(Tui_decode.Keeper_costs_stale { last_error = Some "boom" })
        [ cost_row "a" (Tui_decode.Cost_reported { usd = 0.5; samples = 1 }) ])
@@ -401,7 +401,10 @@ let test_cost_words_never_draw_an_unread_cost () =
   check_words "failed read" ~lead:"cost unavailable" ~details:[ "503" ]
     (Types.Cost_failed "503");
   check_words "warming placeholder" ~lead:"cost not read yet" ~details:[]
-    (costs ~cache:(Tui_decode.Keeper_costs_warming { last_error = None }) [])
+    (costs ~cache:(Tui_decode.Keeper_costs_warming { last_error = None }) []);
+  check_words "warming after failed reads" ~lead:"cost unavailable"
+    ~details:[ "EACCES" ]
+    (costs ~cache:(Tui_decode.Keeper_costs_warming { last_error = Some "EACCES" }) [])
 
 let () =
   run "tui_overview_team"

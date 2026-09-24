@@ -55,6 +55,53 @@ let test_read_exception_is_attributed_once () =
             (Error "connector load failed: Failure(\"decode boom\")")
             (Eio.Promise.await answer)))
 
+let test_keeper_turns_uses_one_label_for_every_failure_boundary () =
+  let source = Masc_tui_async_read.Keeper_turns in
+  let label detail = Error ("keeper turns load failed: " ^ detail) in
+  check result "loader error is attributed once"
+    (label "bad response")
+    (Masc_tui_async_read.attribute source (Error "bad response"));
+  let cleared = ref false in
+  Masc_tui_async_read.launch
+    ~source
+    ~switch:None
+    ~on_sync_failure:(fun () -> cleared := true)
+    ~deliver:(fun answer ->
+      check bool "no-switch launch clears inflight before delivery" true !cleared;
+      check result "no-switch failure has source" (label "Eio switch is unavailable") answer)
+    ~read:(fun () -> fail "read ran without a switch")
+    ();
+  Eio_main.run (fun _ ->
+      let finished = ref None in
+      Eio.Switch.run (fun sw -> finished := Some sw);
+      match !finished with
+      | None -> fail "could not capture a finished switch"
+      | Some sw ->
+        let cleared = ref false in
+        Masc_tui_async_read.launch
+          ~source
+          ~switch:(Some sw)
+          ~on_sync_failure:(fun () -> cleared := true)
+          ~deliver:(fun answer ->
+            check bool "finished-switch launch clears inflight before delivery" true !cleared;
+            check result "finished-switch failure has source"
+              (label "Invalid_argument(\"Switch finished!\")") answer)
+          ~read:(fun () -> fail "read ran on a finished switch")
+          ());
+  Eio_main.run (fun _ ->
+      Eio.Switch.run (fun sw ->
+          let answer, resolver = Eio.Promise.create () in
+          Masc_tui_async_read.launch
+            ~source
+            ~switch:(Some sw)
+            ~on_sync_failure:(fun () -> fail "open switch refused launch")
+            ~deliver:(Eio.Promise.resolve resolver)
+            ~read:(fun () -> raise (Failure "decode boom"))
+            ();
+          check result "read exception has source"
+            (label "Failure(\"decode boom\")")
+            (Eio.Promise.await answer)))
+
 let () =
   run "TUI async read"
     [ ( "read boundary"
@@ -64,5 +111,7 @@ let () =
             test_finished_switch_keeps_guarded_failure
         ; test_case "read exception is attributed once" `Quick
             test_read_exception_is_attributed_once
+        ; test_case "keeper turns labels every failure boundary" `Quick
+            test_keeper_turns_uses_one_label_for_every_failure_boundary
         ] )
     ]

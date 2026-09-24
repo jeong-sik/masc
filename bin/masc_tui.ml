@@ -3232,23 +3232,13 @@ let launch_keeper_turns_load state ~mailbox =
     let generation = state.keeper_chat_control_generations in
     let host = server_peer_host in
     let port = state.port in
-    let run () =
-      let result =
-        try Masc_tui_loader.load_keeper_turns ~host ~port with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      enqueue_async mailbox (Keeper_turns_loaded (generation, result))
-    in
-    match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Eio.Fiber.fork_daemon ~sw (fun () ->
-            run ();
-            `Stop_daemon)
-    | None ->
-        state.keeper_turns_inflight <- false;
-        enqueue_async mailbox
-          (Keeper_turns_loaded (generation, Error "Eio switch is unavailable"))
+    Masc_tui_async_read.launch
+      ~source:Masc_tui_async_read.Keeper_turns
+      ~switch:(Eio_context.get_switch_opt ())
+      ~on_sync_failure:(fun () -> state.keeper_turns_inflight <- false)
+      ~deliver:(fun result -> enqueue_async mailbox (Keeper_turns_loaded (generation, result)))
+      ~read:(fun () -> Masc_tui_loader.load_keeper_turns ~host ~port)
+      ()
   end
 
 let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =

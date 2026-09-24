@@ -1789,8 +1789,6 @@ let run_heartbeat_loop
 
 module For_testing = struct
   let retain_connector_attention_sources = retain_connector_attention_sources
-  let consume_deferred_runtime_lane_hint = consume_deferred_runtime_lane_hint
-  let deferred_runtime_lane_for_assignment = deferred_runtime_lane_for_assignment
   type deferred_lane_slot = Deferred_lane_slot.t
 
   type deferred_lane_now = Deferred_lane_slot.lane_now =
@@ -1802,7 +1800,6 @@ module For_testing = struct
   let record_deferred_lane = Deferred_lane_slot.record
   let consume_deferred_lane = Deferred_lane_slot.consume
   let deferred_lane_for_assignment = Deferred_lane_slot.for_assignment
-  let deferred_lane_hint (slot : Deferred_lane_slot.t) = !(slot.hint)
   let batch_disposition_records_continuation =
     batch_disposition_records_continuation
   ;;

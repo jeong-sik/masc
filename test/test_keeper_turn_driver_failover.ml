@@ -4964,52 +4964,6 @@ let test_a_same_path_suffix_waits_only_for_a_recorded_rest () =
         (next ~route:rate_limited_route bad_gateway)))
 ;;
 
-let test_deferred_hint_refs_are_not_shared () =
-  let failure = retryable_network_error "checkpoint failure" in
-  let hint =
-    Driver.For_testing.make_deferred_runtime_lane
-      ~assignment_id:"lane.one"
-      ~failed_runtime_id:"runtime.a"
-      ~next_runtime_id:"runtime.b"
-      ~later_runtime_ids:[ "runtime.c" ]
-      ~failure
-  in
-  let first = ref (Some hint) in
-  let second = ref (Some hint) in
-  Alcotest.(check bool)
-    "first owner consumes its hint"
-    true
-    (Masc.Keeper_heartbeat_loop.For_testing.consume_deferred_runtime_lane_hint
-       first
-       hint);
-  Alcotest.(check bool) "first hint cleared" true (Option.is_none !first);
-  Alcotest.(check bool)
-    "second owner remains independent"
-    true
-    (Option.is_some !second)
-
-let test_deferred_hint_is_dropped_when_assignment_changes () =
-  let failure = retryable_network_error "checkpoint failure" in
-  let hint =
-    Driver.For_testing.make_deferred_runtime_lane
-      ~assignment_id:"lane.one"
-      ~failed_runtime_id:"runtime.a"
-      ~next_runtime_id:"runtime.b"
-      ~later_runtime_ids:[]
-      ~failure
-  in
-  let hint_ref = ref (Some hint) in
-  let for_assignment =
-    Masc.Keeper_heartbeat_loop.For_testing.deferred_runtime_lane_for_assignment
-  in
-  Alcotest.(check bool) "same assignment keeps its hint" true
-    (Option.is_some (for_assignment hint_ref ~assignment_id:"lane.one"));
-  Alcotest.(check bool) "hint survives a matching read" true
-    (Option.is_some !hint_ref);
-  Alcotest.(check bool) "changed assignment gets no hint" true
-    (Option.is_none (for_assignment hint_ref ~assignment_id:"lane.two"));
-  Alcotest.(check bool) "stale hint is cleared" true (Option.is_none !hint_ref)
-
 let rec remove_tree path =
   match Unix.lstat path with
   | { st_kind = Unix.S_DIR; _ } ->
@@ -5037,49 +4991,6 @@ let unchanged_lane _assignment_id =
     [ "runtime.a"; "runtime.b"; "runtime.c" ]
 ;;
 
-let test_deferred_hint_survives_store_restart_and_clears_after_settlement () =
-  with_deferred_store (fun base_path ->
-    let original =
-      Driver.For_testing.make_deferred_runtime_lane
-        ~assignment_id:"lane.restart"
-        ~failed_runtime_id:"runtime.a"
-        ~next_runtime_id:"runtime.b"
-        ~later_runtime_ids:[ "runtime.c" ]
-        ~failure:(accept_empty_no_progress_error "runtime.a")
-    in
-    (match Deferred_store.save ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" original with
-     | Ok () -> ()
-     | Error error ->
-       Alcotest.failf "save failed: %s" (Deferred_store.error_to_string error));
-    let restored =
-      match Deferred_store.load ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" with
-      | Ok (Some hint) -> hint
-      | Ok None -> Alcotest.fail "restart lost the durable deferred suffix"
-      | Error error ->
-        Alcotest.failf "load failed: %s" (Deferred_store.error_to_string error)
-    in
-    Alcotest.(check (list string))
-      "restart starts from frozen successor"
-      [ "runtime.b"; "runtime.c" ]
-      (Driver.deferred_runtime_ids restored);
-    Alcotest.(check bool)
-      "typed accept rejection survives durable codec"
-      true
-      (match Driver.classify_masc_internal_error restored.failure with
-       | Some (Driver.Accept_rejected { reason_kind; _ }) ->
-         reason_kind = Some Driver.Accept_no_usable_progress
-       | _ -> false);
-    (match Deferred_store.clear ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" with
-     | Ok () -> ()
-     | Error error ->
-       Alcotest.failf "clear failed: %s" (Deferred_store.error_to_string error));
-    match Deferred_store.load ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" with
-    | Ok None -> ()
-    | Ok (Some _) -> Alcotest.fail "settled suffix remained replayable"
-    | Error error ->
-      Alcotest.failf "post-clear load failed: %s" (Deferred_store.error_to_string error))
-;;
-
 (* The heartbeat loop's own restart path: one loop records the suffix a failed
    cycle left, a fresh loop on the same base path starts from it, and the
    settlement or an assignment change removes the file. *)
@@ -5103,13 +5014,20 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
          "restarted loop starts from the frozen successor"
          [ "runtime.b"; "runtime.c" ]
          (Driver.deferred_runtime_ids restored);
+       Alcotest.(check bool)
+         "typed accept rejection survives the restart"
+         true
+         (match Driver.classify_masc_internal_error restored.failure with
+          | Some (Driver.Accept_rejected { reason_kind; _ }) ->
+            reason_kind = Some Driver.Accept_no_usable_progress
+          | _ -> false);
        Loop.consume_deferred_lane after restored
      | None -> Alcotest.fail "restarted heartbeat lost the deferred suffix");
     Alcotest.(check bool)
       "consumed suffix is not restored again"
       true
       (Option.is_none
-         (Loop.deferred_lane_hint
+         (Loop.deferred_lane_for_assignment ~assignment_id:"lane.restart"
             (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend")));
     Loop.record_deferred_lane after hint;
     let reassigned = Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
@@ -5122,7 +5040,7 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
       "dropped suffix is not restored again"
       true
       (Option.is_none
-         (Loop.deferred_lane_hint
+         (Loop.deferred_lane_for_assignment ~assignment_id:"lane.restart"
             (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend"))))
 ;;
 
@@ -5149,7 +5067,7 @@ let test_deferred_suffix_is_isolated_between_clusters () =
     let next_of cluster =
       Option.map
         (fun (h : Driver.deferred_runtime_lane) -> h.next_runtime_id)
-        (Loop.deferred_lane_hint (slot cluster))
+        (Loop.deferred_lane_for_assignment ~assignment_id:"lane.shared" (slot cluster))
     in
     let alpha = slot "alpha" in
     Loop.record_deferred_lane alpha (hint "runtime.b");
@@ -5196,24 +5114,24 @@ let test_restored_suffix_yields_to_edited_lane () =
     Alcotest.(check bool)
       "edited lane drops the frozen suffix"
       true
-      (Option.is_none (Loop.deferred_lane_hint (restore edited)));
+      (Option.is_none (Loop.deferred_lane_for_assignment ~assignment_id:"lane.edited" (restore edited)));
     Alcotest.(check bool)
       "dropped suffix does not come back under the old lane"
       true
-      (Option.is_none (Loop.deferred_lane_hint (restore unchanged_lane)));
+      (Option.is_none (Loop.deferred_lane_for_assignment ~assignment_id:"lane.edited" (restore unchanged_lane)));
     Loop.record_deferred_lane (restore unchanged_lane) hint;
     Alcotest.(check bool)
       "unavailable catalog entry keeps the suffix"
       true
-      (Option.is_some (Loop.deferred_lane_hint (restore (fun _ -> Loop.Lane_unavailable))));
+      (Option.is_some (Loop.deferred_lane_for_assignment ~assignment_id:"lane.edited" (restore (fun _ -> Loop.Lane_unavailable))));
     Alcotest.(check bool)
       "removed assignment drops the suffix"
       true
-      (Option.is_none (Loop.deferred_lane_hint (restore (fun _ -> Loop.Lane_missing))));
+      (Option.is_none (Loop.deferred_lane_for_assignment ~assignment_id:"lane.edited" (restore (fun _ -> Loop.Lane_missing))));
     Alcotest.(check bool)
       "removed assignment's suffix is not restored again"
       true
-      (Option.is_none (Loop.deferred_lane_hint (restore unchanged_lane))))
+      (Option.is_none (Loop.deferred_lane_for_assignment ~assignment_id:"lane.edited" (restore unchanged_lane))))
 ;;
 
 let test_deferred_store_rejects_unknown_schema_without_fallback () =
@@ -5808,18 +5726,6 @@ let () =
             "the heartbeat lane restarts its cycle"
             `Quick
             test_the_heartbeat_lane_restarts_its_cycle;
-          Alcotest.test_case
-            "deferred hint refs are not shared"
-            `Quick
-            test_deferred_hint_refs_are_not_shared;
-          Alcotest.test_case
-            "deferred hint is dropped when the assignment changes"
-            `Quick
-            test_deferred_hint_is_dropped_when_assignment_changes;
-          Alcotest.test_case
-            "deferred hint survives restart and settles durably"
-            `Quick
-            test_deferred_hint_survives_store_restart_and_clears_after_settlement;
           Alcotest.test_case
             "heartbeat restart resumes the deferred suffix"
             `Quick

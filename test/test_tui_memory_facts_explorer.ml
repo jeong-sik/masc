@@ -260,6 +260,62 @@ let test_search_filtering () =
   check int "no match" 0 (List.length (Types.memory_fact_rows state))
 ;;
 
+(* A fact has no length limit, and the detail under the cursor is as tall as
+   the fact. On the live store at thirty rows one fact filled fifteen of them
+   and the list fell to a single row -- a browser of 254 facts showing one,
+   whose height then moved on every [j] as the next fact wrapped to a
+   different depth.
+
+   Measured against the exported floor rather than a number typed here, and
+   swept over the depths a fact can reach, so the case cannot pass by
+   happening to pick a fact that fits. *)
+let test_a_long_fact_leaves_the_list_its_floor () =
+  let paragraph = String.concat " " (List.init 40 (fun _ -> "claim")) in
+  List.iter
+    (fun depth ->
+       let state = make_state () in
+       let long =
+         make_fact ~claim:(String.concat "\n" (List.init depth (fun _ -> paragraph)))
+           "long"
+       in
+       let others =
+         List.init 30 (fun i ->
+           make_fact ~claim:(Printf.sprintf "short %d" i) (string_of_int i))
+       in
+       state.memory_facts <-
+         Some
+           (make_snapshot ~ordinary_facts:(long :: others) ~source_facts:[]
+              ~invalidations:[]);
+       let height =
+         Masc_tui_render_memory.memory_facts_content_height ~cols:80 ~budget:20
+           ~cursor:0 state
+       in
+       check bool
+         (Printf.sprintf "a %d-paragraph fact leaves the list its floor" depth)
+         true
+         (height
+          >= Masc_tui_render_memory.memory_fact_list_floor_rows - 1))
+    [ 1; 4; 12; 40 ]
+;;
+
+(* And the floor is a floor, not the height: a fact that fits leaves the list
+   everything the detail does not need. *)
+let test_a_short_fact_leaves_the_list_more_than_its_floor () =
+  let state = make_state () in
+  let facts =
+    List.init 30 (fun i ->
+      make_fact ~claim:(Printf.sprintf "short %d" i) (string_of_int i))
+  in
+  state.memory_facts <-
+    Some (make_snapshot ~ordinary_facts:facts ~source_facts:[] ~invalidations:[]);
+  let height =
+    Masc_tui_render_memory.memory_facts_content_height ~cols:80 ~budget:40
+      ~cursor:0 state
+  in
+  check bool "a short fact leaves more than the floor" true
+    (height > Masc_tui_render_memory.memory_fact_list_floor_rows)
+;;
+
 let () =
   run "masc_tui_memory_facts_explorer"
     [ ( "navigation"
@@ -272,5 +328,11 @@ let () =
         ] )
     ; ( "search"
       , [ test_case "search filtering" `Quick test_search_filtering ] )
+    ; ( "layout"
+      , [ test_case "a long fact leaves the list its floor" `Quick
+            test_a_long_fact_leaves_the_list_its_floor
+        ; test_case "a short fact leaves the list more than its floor" `Quick
+            test_a_short_fact_leaves_the_list_more_than_its_floor
+        ] )
     ]
 ;;

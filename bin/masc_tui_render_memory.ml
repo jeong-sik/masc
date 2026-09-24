@@ -839,6 +839,14 @@ let render_memory_body ~cols ~budget (state : state)
        push_divider ();
        List.iter (push_styled ~style:(Theme.recede ())) lines)
 
+(* How many fact rows the list keeps before the detail below it takes any.
+   Enough to read the cursor against its neighbours -- one row above, one
+   below, and the room a filter leaves when it lands the cursor near an
+   edge. One of these rows goes to the window reading when the list
+   overflows, the way it does on every other reading pane. Under this the
+   browser stops being one. *)
+let memory_fact_list_floor_rows = 5
+
 let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   let total = List.length rows in
   let cursor = max 0 (min cursor (total - 1)) in
@@ -867,14 +875,39 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
      divider. Input asks for the target cursor because wrapped details can
      change the height on every movement. The search row is counted from
      [memory_search_query], the same value the renderer draws it from. *)
-  let fixed_rows =
+  let chrome_rows =
     4
     + (if Option.is_some state.memory_facts then 1 else 0)
     + (if String.trim (memory_search_query state) <> "" then 1 else 0)
-    + detail_rows + store_error_rows
+    + store_error_rows
     + (if Option.is_some state.memory_facts_error then 2 else 0)
   in
-  let room = max 1 (budget - fixed_rows) in
+  (* The detail is as tall as the fact under the cursor, and a fact can be
+     any length. On the live store at thirty rows one fact filled fifteen of
+     them and the list fell to its floor of one: a browser of 254 facts
+     showing one row, whose height then moved on every [j] as the next fact
+     wrapped to a different depth. The list keeps this many rows before the
+     detail takes any, and what the detail then loses is one keypress away --
+     [Enter] opens the whole fact in an overlay that owns the terminal. *)
+  let room_below_chrome = max 1 (budget - chrome_rows) in
+  let detail_rows =
+    min detail_rows (max 0 (room_below_chrome - memory_fact_list_floor_rows))
+  in
+  let detail_lines =
+    match detail_lines with
+    | [] -> []
+    | lines ->
+      let kept = max 0 (detail_rows - 1) in
+      if kept >= List.length lines then lines
+      else
+        (* The last row it can draw says what is under the fold, in the
+           window the list below and the other reading panes draw. *)
+        List.filteri (fun index _ -> index < max 0 (kept - 1)) lines
+        @ [ Printf.sprintf "      [fact %s \xc2\xb7 Enter for the whole fact]"
+              (Masc_tui_scroll.window_text ~scroll:0
+                 ~height:(max 0 (kept - 1)) (List.length lines)) ]
+  in
+  let room = max 1 (room_below_chrome - detail_rows) in
   let overflowing = total > room in
   let height = if overflowing then max 1 (room - 1) else room in
   let scroll =

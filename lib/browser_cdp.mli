@@ -6,7 +6,11 @@
     the point of it, not noise. [Runtime.bindingCalled] carries every message
     the Stagehand extension sends to the host. The socket runs under a daemon
     of the owner's switch, so the owner's work finishing, or the connection
-    ending, closes it without waiting for Chrome to close its end. *)
+    ending, closes it without waiting for Chrome to close its end.
+
+    [t] is confined to one Eio domain: [command], [receive], and [lost]
+    mutate the same pending-command table and must not be called from
+    different domains. Fibers on that domain may interleave. *)
 
 type session_id = string
 (** A flat-mode CDP session ([Target.attachToTarget] with [flatten: true]). *)
@@ -67,9 +71,13 @@ type t
     transport can let go. A command still without a reply after
     [command_deadline_s], or whose caller is cancelled while it is out, ends
     the connection, because a later command would be written behind one whose
-    outcome is unknown. [on_event] runs on whichever fiber delivered the frame
-    or ended the connection (the reader, a deadline, a cancelled caller, the
-    owner's release) and must not block. *)
+    outcome is unknown. A failed [send] also ends the connection and settles
+    every pending command as [Connection_lost]. Cancellation during [send]
+    ends the connection and is re-raised. [on_event] runs on whichever fiber
+    delivered the frame or ended the connection (the reader, a deadline, a
+    cancelled caller, the owner's release) and must not block. In particular,
+    calling [command] from [on_event] would wait for a reply that the reader
+    cannot receive until [on_event] returns. Fork a separate fiber instead. *)
 val create :
   send:(string -> unit)
   -> close:(unit -> unit)

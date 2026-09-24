@@ -32,6 +32,7 @@ let failure_message = function
   | Session.Connection_gone reason -> "the Stagehand connection ended: " ^ reason
   | Session.Abandoned_call_pending -> "a Stagehand call whose caller left has not answered yet"
   | Session.Not_delivered detail -> "the call did not reach Stagehand: " ^ detail
+  | Session.Answer_unreceived seconds -> Printf.sprintf "Stagehand did not answer within %.0f s" seconds
   | Session.Rejected { code; message } -> Printf.sprintf "Stagehand refused the call (%d): %s" code message
   | Session.Lost detail -> "Stagehand did not answer: " ^ detail
 ;;
@@ -51,7 +52,7 @@ let answer_before_effect failure =
   match failure with
   | Session.Not_attached | Session.Detached | Session.Connection_gone _ | Session.Abandoned_call_pending
   | Session.Not_delivered _ -> Browser_lane.Rejected_before_effect (failure_message failure)
-  | Session.Rejected _ | Session.Lost _ -> Browser_lane.Refused (failure_message failure)
+  | Session.Answer_unreceived _ | Session.Rejected _ | Session.Lost _ -> Browser_lane.Refused (failure_message failure)
 ;;
 
 (* For calls sent up to and including the verb's effect. *)
@@ -214,11 +215,11 @@ let execute ~tabs ~call verb =
     | Browser_lane.Page_goto { url; tab_id } -> goto ~tabs ~call ~url ~tab_id
     | Browser_lane.Page_capture { tab_id } -> capture ~tabs ~call ~tab_id
     | Browser_lane.Page_instruct { tab_id; instruction } ->
-      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Act { page_id; instruction })
+      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Act { page_id; instruction; timeout = Wire.sentence_timeout })
     | Browser_lane.Page_locate { tab_id; instruction } ->
-      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Observe { page_id; instruction })
+      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Observe { page_id; instruction; timeout = Wire.sentence_timeout })
     | Browser_lane.Page_extract { tab_id; instruction; schema } ->
-      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Extract { page_id; instruction; schema })
+      sentence ~tabs ~call ~tab_id (fun page_id -> Wire.Extract { page_id; instruction; schema; timeout = Wire.sentence_timeout })
     | Browser_lane.Session_open _ | Browser_lane.Session_close | Browser_lane.Session_status | Browser_lane.Page_read _
     | Browser_lane.Page_document _ | Browser_lane.Page_downloads _ | Browser_lane.Page_scene _
     | Browser_lane.Page_interact _ | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _ ->

@@ -7919,6 +7919,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                          "may change .github/workflows, which run with repo secrets"
                      | Masc.Keeper_github_identity.Write_packages ->
                          "may publish GitHub Packages, ghcr.io images among them"
+                     | Masc.Keeper_github_identity.Read_packages ->
+                         "may download GitHub Packages, ghcr.io images among them"
+                     | Masc.Keeper_github_identity.Project ->
+                         "may read and change Projects (v2) the account can reach"
+                     | Masc.Keeper_github_identity.Write_repo_hook ->
+                         "may add repo webhooks, which post repo events to any URL"
                    in
                    Printf.sprintf "  %d %s %s %s— %s%s" (index + 1)
                      (if ticked then "[x]" else "[ ]")

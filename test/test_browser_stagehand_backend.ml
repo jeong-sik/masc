@@ -145,7 +145,10 @@ let test_open_failures () =
   with_backend ~configure:(fun behaviour -> behaviour.opening <- Fails)
   @@ fun h ->
   check bool "a failed open is refused" true (refused (Backend.execute h.backend open_));
+  h.settle ();
   check bool "and leaves the backend closed" false (is_open h);
+  check bool "closed, not opening" false
+    (Yojson.Safe.Util.member "opening" (data (Backend.execute h.backend Lane.Session_status)) = `Bool true);
   h.behaviour.opening <- Raises;
   check bool "an opener that raises is refused" true (refused (Backend.execute h.backend open_));
   h.behaviour.opening <- Opens;

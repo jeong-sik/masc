@@ -20,7 +20,7 @@ let strip_sgr row =
    side. *)
 let border_bytes = String.length Masc_tui_theme.Box.v + 1
 
-let content_rows ?(title = "Board") ~cols ~focused ~labels ~selected =
+let content_rows ~title ~cols ~focused ~labels ~selected =
   let buf = Buffer.create 1024 in
   (* This fold is about the label column, not the count in the title, so the
      index holds exactly what it was given. *)
@@ -51,7 +51,7 @@ let approved_by_pangyo =
 
 let test_names_that_share_an_opening_stay_apart () =
   match
-    content_rows ~cols:40 ~focused:true
+    content_rows ~title:"Board" ~cols:40 ~focused:true
       ~labels:[ approved_by_anyang; approved_by_pangyo ]
       ~selected:0
   with
@@ -68,7 +68,7 @@ let test_names_that_share_an_opening_stay_apart () =
 
 let first_row ~cols ~focused ~selected =
   match
-    content_rows ~cols ~focused
+    content_rows ~title:"Board" ~cols ~focused
       ~labels:[ approved_by_anyang; approved_by_pangyo ]
       ~selected
   with
@@ -89,7 +89,7 @@ let test_the_fold_holds_still_under_the_cursor () =
 let test_a_row_never_runs_past_the_frame () =
   let cols = 36 in
   let rows =
-    content_rows ~cols ~focused:false
+    content_rows ~title:"Board" ~cols ~focused:false
       ~labels:[ approved_by_anyang; approved_by_pangyo ]
       ~selected:0
   in

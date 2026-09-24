@@ -1457,7 +1457,7 @@ let load_skills_catalog ~(host : string) ~(port : int) :
 let load_connectors ~(host : string) ~(port : int) :
     (Tui_decode.connector_snapshot, string) result =
   match fetch_connectors ~host ~port with
-  | Error err -> Error ("connector load failed: " ^ err)
+  | Error err -> Error err
   | Ok json ->
       (match Tui_decode.decode_connector_snapshot json with
        | Error _ as error -> error

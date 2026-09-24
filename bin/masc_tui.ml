@@ -4957,26 +4957,33 @@ let launch_connectors_load state ~mailbox =
     state.connectors_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
+    let enqueue_result result =
+      enqueue_async mailbox
+        (Connectors_loaded
+           (Result.map_error
+              (fun detail -> "connector load failed: " ^ detail)
+              result))
+    in
     let run () =
       let result =
         try Masc_tui_loader.load_connectors ~host ~port with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
-      enqueue_async mailbox (Connectors_loaded result)
+      enqueue_result result
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
         Masc_tui_fork_guard.launch ~sw
           ~on_sync_failure:(fun detail ->
               state.connectors_inflight <- false;
-              enqueue_async mailbox (Connectors_loaded (Error detail)))
+              enqueue_result (Error detail))
           (fun () ->
             run ();
             `Stop_daemon)
     | None ->
         state.connectors_inflight <- false;
-        enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
+        enqueue_result (Error "Eio switch is unavailable")
   end
 
 (* A binding write changed what the server holds. A load already in flight

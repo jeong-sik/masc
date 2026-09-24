@@ -4339,6 +4339,8 @@
  (name runtest)
  (deps (alias runtest-test_tui_connectors_entry)))
 
+(include stanzas/test_tui_connector_error_once.inc)
+
 (test
  (name test_tui_render_memory)
  (modules test_tui_render_memory)

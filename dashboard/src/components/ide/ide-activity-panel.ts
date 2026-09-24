@@ -284,8 +284,8 @@ function mergeRunActivityEvents(
 }
 
 /**
- * The bridge rows carry no id of their own, so the id is built from what the
- * row says about itself. It must not depend on the row's position in the
+ * Stored bridge rows carry no id of their own, so the server derives one
+ * from their content when serving a page. It must not depend on position in the
  * page: a poll that brings one new event shifts every older one. Current
  * servers hash the stored row into an opaque event_id, including differences
  * in tool outcome or output without placing output text in a URL. The id is

@@ -659,6 +659,27 @@ status: reference
   런타임 후보 순서와 별개 축이다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
+**Attempt Dispatch (시도 파견 여부)**
+: Keeper turn 실행 중 후보 순서(`Runtime Candidate Order`)의 각 런타임 후보를 시도할 때,
+  해당 시도가 실제 제공자 또는 클라이언트로 파견되어 실행되었는지를 구분하는 닫힌 두 값
+  (`Keeper_attempt_dispatch.t` = `Runtime_attempt_dispatch.t`: `Dispatched` ·
+  `Rejected_before_dispatch`). 로그 및 이벤트 wire 문자열은 각각 `"dispatched"`,
+  `"rejected_before_dispatch"`다.
+  - `Dispatched`: 후보 런타임의 공급자(provider) 또는 클라이언트가 실제로 호출됨.
+    발생한 오류나 반환값은 해당 런타임 후보가 직접 낸 응답이다.
+  - `Rejected_before_dispatch`: 파이프라인이 런타임을 호출하지 않고 사전에 거절함.
+    요청을 어떤 공급자도 본 적이 없으므로 해당 런타임의 실행 실패가 아니다.
+  - **파견 판단 및 실행 런타임 귀속 불변식 (#38562)**: 런타임 후보 시도 중 어떤 요청도
+    실제 provider로 직렬화되어 전송(`request_serialized = true`)되지 않고 agent_core
+    파이프라인의 사전 검증 단계(`Attempt_rejected`, `InputCapacity`, `ContextOverflow`,
+    `InvalidConfig`)에서 거절된 경우, 해당 런타임은 요청을 본 적이 없으므로
+    `Rejected_before_dispatch`로 기록되며 '실행한 런타임(the one that ran)'으로
+    귀속되지 않는다. 반면, 한 시도 내에서 선행 요청이 provider에 도달한 후 후속 요청이
+    사전 거절된 경우에는 이미 해당 런타임이 파견되어 실행된 것이므로 `Dispatched`로
+    유지된다.
+  → [Keeper_attempt_dispatch](../../lib/keeper/keeper_attempt_dispatch.mli),
+  [keeper_turn_driver](../../lib/keeper/keeper_turn_driver.mli)
+
 **Standalone Lane**
 : TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
   admission·run registry를 서술할 뿐 제어 동작을 싣지 않는다. 위의 Lane

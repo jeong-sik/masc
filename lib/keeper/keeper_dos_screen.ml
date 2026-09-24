@@ -11,7 +11,7 @@
 (* Only the Keeper boundary supplies this identity, from its owned meta.name.
    Neither tool arguments nor a generic MCP caller can name a vision store. *)
 let handle ~keeper_name ~tool_name ~start_time _args =
-  match Dos_lane.capture () with
+  match Tool_misc_dos_lane.off_domain Dos_lane.capture with
   | Error e -> Tool_misc_dos_lane.of_lane ~tool_name ~start_time (Error e)
   | Ok (observation, frame) ->
     let result =

@@ -484,6 +484,9 @@ status: reference
   MASC 자체의 슬롯 대기가 아니라 시도한 런타임 후보의 실패(Server_error와 같은 층위)로 분류되며,
   클래스 라벨은 `provider_capacity`다(#38290). 이 실패는 다음 런타임 후보로 walk하며 503 과 같이
   다음 후보로 넘기고 이 후보를 뒤로 미룬다.
+  `ECONNRESET`은 요청을 보낸 뒤(`sent`) 발생한 연결 단절로, 연결 수립 전 거부(`connection_refused`)와
+  구분되는 `connection_reset`으로 기록된다(#38518). 재시도 가능 여부·Librarian 크기 판정 제외 등
+  처리 정책은 `connection_refused`와 같으나 wire 및 운영자 요약 라벨이 분리된다.
   `Exact-output route`·`Fusion Route`
   (실행 경로 이름)와 이름이 겹치지만 다른 축이다.
   → [keeper_runtime_failure_route](../../lib/keeper_runtime/keeper_runtime_failure_route.mli)
@@ -573,6 +576,13 @@ status: reference
 **Tool**
 : 이름·입력 schema·handler로 노출되는 호출 단위. MASC가 제공하는 Tool의
   descriptor와 권한 검사는 MASC가 소유한다. → [Tool boundary](13-agent-core.md#tool-boundary)
+
+**Tool Input Validation (도구 입력 검증)**
+: 도구 핸들러로 전달하기 전에 인자 스키마를 사전 검사하는 경계(`Tool_input_validation.validate_input`).
+  도구 선언의 `required`·`type`·`enum`·`const`를 중첩 객체(`properties`)와 배열 항목(`items`)까지
+  재귀적으로 검사하며, 위반된 모든 경로(`JSON path`)와 원인을 한 번에 보고한다(#38391).
+  스키마 위반은 도구 실행이 아니라 사전 거절(`pre-dispatch refusal`)이며, `oneOf`는 루트에서만 검사한다.
+  → [Tool_input_validation](../../packages/agent_core/lib/tool_input_validation.mli)
 
 **Tool-host failure report**
 : 클라이언트가 관측한 도구 연결 실패 기록. HTTP 인증 결과의 보고자는 감사
@@ -763,13 +773,31 @@ status: reference
   없음과, 토글이 사다리 밖으로 만든 값이다.
   → [Provider_config.reasoning_effort_request_rejection](../../packages/agent_core/lib/llm_provider/provider_config.mli)
 
+**DOS Lane**
+: 서버 안에 사는 DOS 기계 하나. Keeper 는 `masc_dos_*` 도구로 같은 기계에 키를
+  넣고 화면을 읽는다. 시간은 8086 명령 수로 흐르고, 도구를 불러야만 간다.
+  `settled` 는 "프로그램이 키를 물었고 화면이 멈췄다" 이다. 게임 파일은
+  `<.masc>/dos/programs/` 에 두고, 게임이 쓴 세이브는 `<.masc>/dos/saves/` 에
+  남아 다음 로드에서 다시 쓰인다.
+  → [Dos_lane](../../lib/dos_lane/dos_lane.mli)
+
+**조종권 (Controller)**
+: DOS Lane 기계의 시간을 움직일 수 있는 한 사람. 핫시트 게임에서 여러 Keeper
+  가 한 키보드를 번갈아 쓰기 때문에 있다. 쥔 사람만 load·eject·step·press·click·
+  type 을 하고, 다른 사람은 거절되지만 화면은 볼 수 있다. `masc_dos_pass` 로
+  넘기면 보드 글이 다음 사람을 @멘션해 깨운다. 쥔 Keeper 가 일시정지되거나 정지하면
+  다음 Keeper 가 움직일 때 풀린다. 충돌 뒤 자동 재시작을 기다리거나 막 켜지는 중인
+  Keeper 는 그대로 쥔다. 이름은 부르는 쪽이 스스로 대는 값이라
+  권한 검사가 아니라 차례를 정하는 장치다.
+  → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli)
+
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
-  Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
+  DOS Lane의 머신, Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
   Lane 행을 제공할 수 있고, 패키지 worker는 관측 계산만 격리한다. attach·detach와
   Add-on 장애는 기존 Keeper의 권한·도구·진행 중 작업을 축소하지 않으며, 추가 근거는
-  활용·보류·무시할 수 있다. 원천 어댑터는 `snapshot_file`·`msx_capture`·`lane_output`·
-  `browser_document`이고, 코어는 도메인 의미를 해석하지 않고 공통 row/coverage를
+  활용·보류·무시할 수 있다. 원천 어댑터는 `snapshot_file`·`msx_capture`·`dos_capture`·
+  `lane_output`·`browser_document`이고, 코어는 도메인 의미를 해석하지 않고 공통 row/coverage를
   검사·표시한다.
   → [설계 계약](../design/lane-addon-v0.md),
   [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
@@ -982,6 +1010,11 @@ status: reference
     수 있고 다른 예약은 `not_schedule_owner`로 거절된다(운영자 자격만 임의 변경 가능).
   - `wake_record`는 scheduler가 남기는 일반 wake 시도(`Wake_running`·`Wake_succeeded`·
     `Wake_failed`)이고, Keeper turn 결과는 Keeper 원장에 산다 — 같은 것이 아니다.
+  - 미기동·정지 대상 수락: 대상 Keeper가 등록되어 있으나 fiber가 돌지 않는 상태
+    (`offline`·`crashed`·`restarting`·`draining`)이거나 일시정지(`paused`) 상태일 때의
+    due 발화는 재시도 실패로 튕기지 않고 단 1회 수락(`accepted`)되어 해당 Keeper의
+    durable 큐에 대기한다(#38523). 다음 턴이 깨어날 때 stimulus로 읽히며, 새 발화가
+    이전 대기를 대체하여 큐에는 스케줄당 최대 1건만 유지된다.
   - 노트는 `schedule_id`에 매이고 append-only다. terminal 전이 뒤에도 남는다 —
     상태가 아니라 이력이다.
   - 상태는 `Scheduled`·`Due`·`Running`·`Succeeded`·`Failed`·`Cancelled`·`Expired`,
@@ -1772,6 +1805,12 @@ status: reference
   Agent Core는 저장본을 검증한 뒤, 완료된 원문 구간 대신 하던 일을 다음
   요청에 전달한다. 원본 checkpoint는 보존한다. 저장 완료와 요청에 사용한
   상태는 별개이며, 둘 다 모델 생성 설명의 의미 보존을 증명하지는 않는다.
+  저장본은 유도된 파생 상태(`derived state`)다. 롤백이나 판올림 후 포맷 불일치로 파일을
+  디코딩할 수 없는 경우(`Undecodable { reason }`), 이전처럼 매 회차 `Source_unavailable`로
+  멈춰 서지 않고 atom 0부터 재구축(`rebuilt from atom 0`)하여 다음 커밋 CAS에서 파일을
+  대체한다(#38477). 이때 이전 작업 상태(`working_state`)는 하드컷 정책에 따라 폐기되며,
+  재구축 중에도 `catch_up_end_atom`을 유지하여 턴 드라이버가 Librarian 위치에서 안정적으로
+  시작하도록 보장한다. 파일 읽기 실패(`Sys_error`)는 영구 오류로 남는다.
   `masc-librarian-continuity capture/restore`는 같은 파일 경계를 검증한다.
   → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
 

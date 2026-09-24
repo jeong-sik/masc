@@ -683,6 +683,9 @@ module Terminal_text = struct
   let single_lines values = List.map single_line values
   let short_timestamp text =
     Masc.Tui_decode.short_timestamp_for_terminal ~localtime:Unix.localtime text
+  let short_timestamp_of_unix unix_seconds =
+    Masc.Tui_decode.short_timestamp_of_unix_for_terminal ~localtime:Unix.localtime
+      unix_seconds
   (* The screen's clock is the terminal's zone. This is the one place that
      names it, so every row clock and the header clock agree -- which is also
      why no row spells "(local)" beside its own time. Four rows out of the

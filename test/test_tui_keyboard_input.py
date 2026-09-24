@@ -1242,9 +1242,11 @@ def fleet_safety_fixture() -> HttpResponse:
     unreliable" event, which is correct behaviour but adds a row to scenarios
     that are counting the event list. Every field the TUI reads is here,
     with the schema that marks a reading: the TUI requires each one, because
-    a missing observation must not become a zero count.
+    a missing observation must not become a zero count. The snapshot beside
+    it says the reading is current; without it the TUI refuses the reading,
+    because a stale snapshot serves a past one.
     """
-    return (200, {"keeper_fleet_safety": {
+    return (200, {"full_health_snapshot": {"status": "ready"}, "keeper_fleet_safety": {
         "schema": "masc.keeper_fleet_operator.v1",
         "status": "ok",
         "blocker": None,
@@ -12785,6 +12787,13 @@ def runtime_surface_interaction(
 
 SCHEDULES_PATH = "/api/v1/dashboard/scheduled-automation"
 
+# The schedule list's [schedule_runner]: the runner's status word, the one
+# /health reports, and nothing else of that object. The TUI reads the word.
+SCHEDULE_RUNNER_OK = {
+    "schema": "masc.dashboard.scheduled_automation.schedule_runner.v1",
+    "status": "ok",
+}
+
 
 def schedule_detail_http_fixtures() -> HttpFixtures:
     fixtures = overview_event_http_fixtures()
@@ -12796,6 +12805,10 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
             "request_count": 1,
             "truncated": False,
             "fsm": {"next_due_at_iso": "2026-08-25T10:30:00Z"},
+            # The runner's status word rides the list once, the word /health
+            # reports. The loader requires it: a row's runner_hold is only
+            # current while this reads ok.
+            "schedule_runner": SCHEDULE_RUNNER_OK,
             "requests": [
                 {
                     "schedule_instance_id": "instance-proof-701",
@@ -12862,6 +12875,9 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
                         "latest_recorded_at_iso": "2026-08-25T09:31:00Z",
                         "reason": None,
                     },
+                    # Always on the row, null when the runner holds nothing:
+                    # the loader refuses a row without it.
+                    "runner_hold": None,
                 }
             ],
         },

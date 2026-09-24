@@ -174,6 +174,27 @@ let guarded work =
   | exception exn -> Browser_lane.Refused ("the stagehand backend failed: " ^ Printexc.to_string exn)
 ;;
 
+let is_sentence = function
+  | Browser_lane.Page_instruct _ | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ -> true
+  | Browser_lane.Session_open _ | Browser_lane.Session_close | Browser_lane.Session_status
+  | Browser_lane.Tabs_list | Browser_lane.Page_read _ | Browser_lane.Page_document _ | Browser_lane.Page_downloads _
+  | Browser_lane.Page_capture _ | Browser_lane.Page_scene _ | Browser_lane.Page_interact _ | Browser_lane.Page_goto _
+  | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _ -> false
+;;
+
+(* A sentence whose caller left can remain Abandoned if the extension never
+   replies. The stopped browser drops that session; a later open starts a
+   fresh one. Match the session captured before the call so a late cleanup
+   cannot close a newer session. *)
+let retire_sentence_session t expected =
+  match expected, t.state with
+  | Some expected, Open current when expected == current ->
+    t.state <- Closing;
+    Eio.Promise.resolve current.release ();
+    Eio.Promise.await current.stopped
+  | (Some _ | None), (Closed | Opening | Closing | Open _) -> ()
+;;
+
 let serve t { verb; reply; caller_left } =
   let run_to_the_end work = Eio.Promise.resolve reply (guarded work) in
   match verb with
@@ -187,8 +208,10 @@ let serve t { verb; reply; caller_left } =
   | Browser_lane.Page_capture _ | Browser_lane.Page_scene _ | Browser_lane.Page_interact _ | Browser_lane.Page_goto _
   | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _ | Browser_lane.Page_instruct _
   | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
+    let requested_session = match t.state with Open opened -> Some opened | Closed | Opening | Closing -> None in
     (* A caller that leaves cancels the call it asked for; the session then
-       holds it as abandoned until the runtime answers it. *)
+       holds it as abandoned until the runtime answers it or the sentence
+       session is retired below. *)
     (match
        Watched_work.run
          ~watcher:(fun () ->
@@ -197,7 +220,7 @@ let serve t { verb; reply; caller_left } =
          (fun () -> Some (guarded (fun () -> page t verb)))
      with
      | Some answer -> Eio.Promise.resolve reply answer
-     | None -> ())
+     | None -> if is_sentence verb then retire_sentence_session t requested_session)
 ;;
 
 let create ~sw ~clock ~open_session ~call ~pid ~log =

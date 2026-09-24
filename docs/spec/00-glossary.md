@@ -656,7 +656,7 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
-: 모델이 도는 Keeper의 exact-output 작업을 위한 고정 실행 경로. 다섯
+: 모델이 도는 exact-output 작업을 위한 고정 실행 경로. 다섯
   (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`)은
   닫힌 타입 `Standalone_lane.t` 하나다. `Standalone_lane.all`이 열거하고 `to_id`가
   이름을 적는다. `Runtime.exact_lane`은 이 타입을 그대로 쓴다. 실행 기록의
@@ -679,7 +679,8 @@ status: reference
 **Runtime Candidate Order (런타임 후보 순서)**
 : Keeper turn이 배정된 runtime이 실패했을 때 시도할 runtime 후보의 순서 있는 목록.
   `[runtime.lanes.<이름>]` 표가 이름을 붙이고 `Runtime_lane.t`(`{id; candidates}`)가
-  그 값이다. TUI 화면은 "runtime candidate order"로 읽는다.
+  그 값이다. TUI 화면은 "runtime candidate order"로 읽는다. RFC-0457부터 Keeper를
+  특정 lane에 배정할 수 있고, 배정된 Keeper는 그 lane의 후보 순서를 따른다.
   `[runtime].media_failover`(vision fleet)와
   exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
   런타임 후보 순서와 별개 축이다.
@@ -796,14 +797,27 @@ status: reference
   권한 검사가 아니라 차례를 정하는 장치다.
   → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli)
 
+**MSX Lane**
+: 서버 안에 사는 MSX 기계 하나. Keeper 는 `masc_msx_*` 도구로 같은 기계에 키를
+  넣고 화면을 읽는다. DOS Lane과 같은 축의 공유 머신으로, Lane Add-on의
+  `msx_capture` 원천이 이 머신을 관측한다.
+  → [Msx_lane](../../lib/msx_lane/msx_lane.mli)
+
+**Browser Lane**
+: 서버가 관리하는 브라우저 세션. Keeper 는 `masc_browser_*` 도구로 탭을 읽고
+  조작한다. Lane Add-on의 `browser_document` 원천이 이 세션을 관측한다.
+  → [Browser_lane](../../lib/browser_lane/browser_lane.ml)
+
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
   DOS Lane의 머신, Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
-  Lane 행을 제공할 수 있고, 패키지 worker는 관측 계산만 격리한다. attach·detach와
-  Add-on 장애는 기존 Keeper의 권한·도구·진행 중 작업을 축소하지 않으며, 추가 근거는
-  활용·보류·무시할 수 있다. 원천 어댑터는 `snapshot_file`·`msx_capture`·`dos_capture`·
-  `lane_output`·`browser_document`이고, 코어는 도메인 의미를 해석하지 않고 공통 row/coverage를
-  검사·표시한다.
+  Lane 행을 제공할 수 있다. 패키지는 `lane.toml`의 `contributions`로 observe·derive·act
+  기여를 선언하며, act 기여 패키지(예: `dos-world`·`quiz-grader`)는 `lane_act` 도구로
+  조치를 출하한다 — 즉 이 레이어는 관측뿐 아니라 조치(act)까지 포함한다. 패키지 worker는
+  그 계산을 격리한다. attach·detach와 Add-on 장애는 기존 Keeper의 권한·도구·진행 중
+  작업을 축소하지 않으며, 추가 근거는 활용·보류·무시할 수 있다. 원천 어댑터는
+  `snapshot_file`·`msx_capture`·`dos_capture`·`lane_output`·`browser_document`이고,
+  코어는 도메인 의미를 해석하지 않고 공통 row/coverage를 검사·표시한다.
   → [설계 계약](../design/lane-addon-v0.md),
   [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
   [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.ml)
@@ -839,9 +853,13 @@ status: reference
 **Exact-output route**
 : Librarian, Workspace memory curator, HITL auto judge, Board attention 같은 단독
   모델 작업의 목적별 실행 경로(`Agent_core.Exact_output`). 설정은 API slot과 후속 CLI
-  후보 순서를 선언한다(`exact_output_lane_decl`). 도구를 쓰지 않고 단일 완결 응답을
-  받아 도메인 검증기가 유효성을 판정하며, 일반 턴 failover인 Runtime Candidate Order와
-  구분된다.
+  후보 순서를 선언한다(`exact_output_lane_decl`). 대부분의 exact route는 도구를 쓰지
+  않고 단일 완결 응답을 받아 도메인 검증기가 유효성을 판정하며, 일반 턴 failover인
+  Runtime Candidate Order와 구분된다. 단 **verifier_exact은 예외로 도구를 호출한다** —
+  판정(verdict)을 `report_review_verdict` 도구 호출 한 번으로 낸다
+  (`lib/task/anti_rationalization.ml`: "The verdict channel is the
+  report_review_verdict tool call, so every slot needs a tool-calling model"). 이 lane의
+  모든 slot은 도구 호출이 가능한 모델이어야 한다.
   - **슬롯 전진 조건 (타임아웃 및 컨텍스트 초과)**: 슬롯 전진은 공통적으로 이 슬롯에서
     발송이 한 번이었을 때(`receipt_dispatch_count = 1`)만 허용된다. 요청이 wire로 나간
     뒤 바인딩의 헤더 기한(`connect_timeout_s`, `Http_operation`) 또는 전체 기한

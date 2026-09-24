@@ -458,8 +458,11 @@ let test_overview_providers_section_sits_before_backlog () =
       ~has_task_error:false
   in
   check int "chrome with no row is no section" 0 (at 19).providers_rows;
-  check int "the backlog keeps its held row" 1 (at 19).task_rows;
+  check int "the backlog takes the rows the section could not use" 3
+    (at 19).task_rows;
+  check int "19-row frame is exact" 19 (overview_frame_rows (at 19));
   check int "one row past the chrome draws one row" 1 (at 20).providers_rows;
+  check int "the backlog keeps its held row" 1 (at 20).task_rows;
   check int "20-row frame is exact" 20 (overview_frame_rows (at 20))
 
 (* GOALS, Providers and Team together: each is paid in that order, and the

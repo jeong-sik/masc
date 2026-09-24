@@ -1388,7 +1388,9 @@ let test_apple_build_volume_delete_argv_names_the_volume () =
    [container] on PATH records every call and keeps the volume's existence
    in a marker file, so the delete-then-create order and the create's [-s]
    are read off the log, and a probe fault (inspect exit 2) must be
-   reported under each volume's own code. *)
+   reported under each volume's own code. A create that fails must come
+   back as [microvm_build_volume_create_failed], both when the volume was
+   absent and when it was deleted first. *)
 let test_recreate_apple_build_volume_shares_the_work_volume_commands () =
   with_eio_fs @@ fun () ->
   let context = Eio_context.snapshot_state () in
@@ -1408,7 +1410,7 @@ let test_recreate_apple_build_volume_shares_the_work_volume_commands () =
   @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   Eio_context.set_switch sw;
-  let install ~inspect_absent_exit =
+  let install ?(create_exit = 0) ~inspect_absent_exit () =
     let oc = open_out cli in
     Printf.fprintf
       oc
@@ -1418,7 +1420,7 @@ let test_recreate_apple_build_volume_shares_the_work_volume_commands () =
        'volume inspect %s') [ -e %s ] && exit 0; exit %d;;\n\
        'volume list --format json') printf '[]\\n'; exit 0;;\n\
        'volume delete %s') rm -f %s; exit 0;;\n\
-       'volume create -s 128g %s') : > %s; exit 0;;\n\
+       'volume create -s 128g %s') [ %d -eq 0 ] || exit %d; : > %s; exit 0;;\n\
        *) exit 99;;\n\
        esac\n"
       (Filename.quote log)
@@ -1428,6 +1430,8 @@ let test_recreate_apple_build_volume_shares_the_work_volume_commands () =
       volume_name
       (Filename.quote marker)
       volume_name
+      create_exit
+      create_exit
       (Filename.quote marker);
     close_out oc;
     Unix.chmod cli 0o755;
@@ -1439,7 +1443,7 @@ let test_recreate_apple_build_volume_shares_the_work_volume_commands () =
     close_in ic;
     text
   in
-  install ~inspect_absent_exit:1;
+  install ~inspect_absent_exit:1 ();
   close_out (open_out marker);
   (match M.recreate_apple_build_volume ~volume_name ~size:"128g" ~timeout_sec:5.0 with
    | Ok `Created -> ()
@@ -1456,7 +1460,7 @@ let test_recreate_apple_build_volume_shares_the_work_volume_commands () =
        ; "volume create -s 128g masc-keeper-build-fixture\n"
        ])
     (calls ());
-  install ~inspect_absent_exit:2;
+  install ~inspect_absent_exit:2 ();
   if Sys.file_exists marker then Unix.unlink marker;
   let expect_error ~prefix = function
     | Error message ->
@@ -1475,7 +1479,41 @@ let test_recreate_apple_build_volume_shares_the_work_volume_commands () =
        Masc.Keeper_microvm_backend.Apple_container
        ~volume_name
        ~size:"128g"
-       ~timeout_sec:5.0)
+       ~timeout_sec:5.0);
+  (* Any non-zero create exit; 3 is distinct from the probe's 1 and 2. *)
+  let failing_create_exit = 3 in
+  install ~create_exit:failing_create_exit ~inspect_absent_exit:1 ();
+  if Sys.file_exists marker then Unix.unlink marker;
+  expect_error
+    ~prefix:"microvm_build_volume_create_failed: "
+    (M.recreate_apple_build_volume ~volume_name ~size:"128g" ~timeout_sec:5.0);
+  Alcotest.(check string)
+    "absent: recreate's probe, ensure's probe, then the failing create, no delete"
+    (String.concat
+       ""
+       [ "volume inspect masc-keeper-build-fixture\n"
+       ; "volume list --format json\n"
+       ; "volume inspect masc-keeper-build-fixture\n"
+       ; "volume list --format json\n"
+       ; "volume create -s 128g masc-keeper-build-fixture\n"
+       ])
+    (calls ());
+  install ~create_exit:failing_create_exit ~inspect_absent_exit:1 ();
+  close_out (open_out marker);
+  expect_error
+    ~prefix:"microvm_build_volume_create_failed: "
+    (M.recreate_apple_build_volume ~volume_name ~size:"128g" ~timeout_sec:5.0);
+  Alcotest.(check string)
+    "present: delete, probe, then the failing create"
+    (String.concat
+       ""
+       [ "volume inspect masc-keeper-build-fixture\n"
+       ; "volume delete masc-keeper-build-fixture\n"
+       ; "volume inspect masc-keeper-build-fixture\n"
+       ; "volume list --format json\n"
+       ; "volume create -s 128g masc-keeper-build-fixture\n"
+       ])
+    (calls ())
 ;;
 
 let test_plan_build_link_never_deletes_real_build_output () =

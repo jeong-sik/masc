@@ -43,6 +43,7 @@ import {
   resolveOfficialClientSession,
   probeOfficialClientLogin,
   patchRuntimeAssignment,
+  patchRuntimeLane,
   patchRuntimeMediaFailover,
   patchRuntimeRouting,
   patchKeeperConfig,
@@ -4383,6 +4384,41 @@ describe('runtime.toml raw config API', () => {
       lane: 'media_failover',
       runtime_ids: ['rt-a', 'rt-b'],
     })
+    expect(result.source_text).toBe(sourceText)
+  })
+
+  it('posts runtime lane set/create/rename/remove bodies to the routing writer', async () => {
+    const sourceText = '[runtime.lanes.coding]\ncandidates = ["rt-b", "rt-a"]\n'
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify(committedPayload({
+        ok: true,
+        path: '/tmp/.masc/config/runtime.toml',
+        file_name: 'runtime.toml',
+        source_text: sourceText,
+        reloaded: true,
+        provider_protocols: providerProtocols,
+      })), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await patchRuntimeLane('coding', { action: 'set', runtimeIds: ['rt-b', 'rt-a'] })
+    await patchRuntimeLane('review', { action: 'create', runtimeIds: ['rt-c'] })
+    await patchRuntimeLane('coding', { action: 'rename', to: 'builder' })
+    await patchRuntimeLane('builder', { action: 'remove' })
+
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(4)
+    const calls = fetchMock.mock.calls as Array<[string, RequestInit]>
+    expect(calls.map(([url]) => url)).toEqual(Array(4).fill('/api/v1/runtime/config/routing'))
+    expect(calls.every(([, init]) => init.method === 'POST')).toBe(true)
+    expect(calls.map(([, init]) => JSON.parse(init.body as string))).toEqual([
+      { lane: 'coding', action: 'set', runtime_ids: ['rt-b', 'rt-a'] },
+      { lane: 'review', action: 'create', runtime_ids: ['rt-c'] },
+      { lane: 'coding', action: 'rename', to: 'builder' },
+      { lane: 'builder', action: 'remove' },
+    ])
     expect(result.source_text).toBe(sourceText)
   })
 

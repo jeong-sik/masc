@@ -57,6 +57,10 @@ export interface RuntimeTomlBinding {
 export interface RuntimeTomlEnvironment {
   defaultRuntimeId: string
   assignments: Record<string, string>
+  // Declared [runtime.lanes.<id>] table names. Since RFC-0457 a keeper
+  // assignment may name a lane: the server validates assignments lane first,
+  // runtime second (runtime.ml assignment_references, Lane_then_runtime).
+  laneIds: string[]
   providers: RuntimeTomlProvider[]
   models: RuntimeTomlModel[]
   bindings: RuntimeTomlBinding[]
@@ -271,6 +275,21 @@ function modelIds(document: TomlDocument): string[] {
     .filter((id): id is string => Boolean(id))
 }
 
+// One table per lane, written bare or quoted (runtime.ml lane_table_path).
+// A header deeper than the lane key is not a lane declaration.
+function laneIdsFromDocument(document: TomlDocument): string[] {
+  const ids: string[] = []
+  for (const section of document.sections) {
+    const rest = section.name.match(/^runtime\s*\.\s*lanes\s*\.\s*(.+)$/)?.[1]?.trim()
+    if (!rest) continue
+    const id = /^"[^"]*"$|^'[^']*'$/.test(rest)
+      ? dequoteTomlKey(rest)
+      : BARE_TOML_KEY.test(rest) ? rest : null
+    if (id && !ids.includes(id)) ids.push(id)
+  }
+  return ids
+}
+
 function bindingSections(document: TomlDocument): Array<{ providerId: string; modelId: string; section: string }> {
   return document.sections
     .map(section => {
@@ -395,6 +414,7 @@ export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvi
   return {
     defaultRuntimeId: asString(runtimeValues.default),
     assignments,
+    laneIds: laneIdsFromDocument(document),
     providers,
     models,
     bindings,

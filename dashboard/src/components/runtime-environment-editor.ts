@@ -586,6 +586,31 @@ export function RuntimeEnvironmentEditor({
   const pinnedAssignments = assignmentRows.filter(row => row.isPinned)
   const fallbackAssignments = assignmentRows.filter(row => !row.isPinned)
 
+  // A keeper may be assigned a declared lane or a runtime id (RFC-0457); the
+  // server resolves a lane first when both share a name, so a lane of the same
+  // id is listed only once, under lanes. A current value that is neither is
+  // kept as its own option instead of the select silently showing another id.
+  const laneIds = environment.laneIds
+  const laneIdSet = new Set(laneIds)
+  const assignRuntimeIds = runtimeIds.filter(id => !laneIdSet.has(id))
+
+  function assignmentOptions(current: string) {
+    const known = current === '' || laneIdSet.has(current) || assignRuntimeIds.includes(current)
+    return html`
+      ${known ? null : html`<option value=${current}>${current} (알 수 없음)</option>`}
+      ${laneIds.length > 0
+        ? html`
+          <optgroup label="레인">
+            ${laneIds.map(id => html`<option value=${id}>${id}</option>`)}
+          </optgroup>
+          <optgroup label="런타임">
+            ${assignRuntimeIds.map(id => html`<option value=${id}>${id}</option>`)}
+          </optgroup>
+        `
+        : assignRuntimeIds.map(id => html`<option value=${id}>${id}</option>`)}
+    `
+  }
+
   function assignRow(row: (typeof assignmentRows)[number]) {
     const canPinCurrent = row.current !== ''
     return html`
@@ -601,7 +626,7 @@ export function RuntimeEnvironmentEditor({
           aria-label=${`${row.keeper.name} 런타임 배정`}
           onChange=${(event: Event) => updateAssignment(row.keeper.name, (event.currentTarget as HTMLSelectElement).value)}
         >
-          ${runtimeIds.map(id => html`<option value=${id}>${id}</option>`)}
+          ${assignmentOptions(row.current)}
         </select>
         ${row.isPinned
           ? html`<span class="rt-assign-tag pin mono">

@@ -33,8 +33,10 @@ import {
 } from '../api/dashboard-logs'
 import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
 import {
+  patchRuntimeLane,
   patchRuntimeMediaFailover,
   patchRuntimeRouting,
+  type RuntimeLaneEdit,
   type RuntimeRoutingLane,
 } from '../api/dashboard.js'
 import { callMcpTool } from '../api/mcp'
@@ -184,6 +186,14 @@ const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
     kind: 'live-write',
     source: 'GET /api/v1/dashboard/runtime-defaults',
     action: 'PATCH /api/v1/runtime/routing for default',
+  },
+  {
+    id: 'runtime-candidate-lanes',
+    section: 'routing',
+    label: 'Runtime candidate lanes',
+    kind: 'live-write',
+    source: 'GET /api/v1/runtime/resolved lanes (declared)',
+    action: 'POST /api/v1/runtime/config/routing action=set|create|rename|remove',
   },
   {
     id: 'runtime-media-failover',
@@ -807,6 +817,256 @@ function RuntimeMediaFailoverEditor({
   `
 }
 
+// Names the routing endpoint reads as another route, never as a
+// [runtime.lanes] table (route_name_space in
+// server_routes_http_routes_dashboard.ml). A lane declared under one of them
+// cannot be addressed by a lane action, and a new lane must not take one.
+function runtimeLaneNameReserved(name: string): boolean {
+  return name === 'default' || name === 'media_failover' || name.startsWith('exact/')
+}
+
+// The table header the runtime writer emits: a bare key when TOML allows it,
+// a quoted basic string otherwise (runtime.ml lane_table_path).
+function runtimeLaneTableLabel(laneId: string): string {
+  const key = /^[A-Za-z0-9_-]+$/.test(laneId) ? laneId : JSON.stringify(laneId)
+  return `[runtime.lanes.${key}]`
+}
+
+function RuntimeLaneEditor({
+  lane,
+  options,
+  disabled,
+  onEdit,
+}: {
+  lane: { id: string; runtime_ids: readonly string[] }
+  options: readonly RuntimeSelectOption[]
+  disabled: boolean
+  onEdit: (lane: string, edit: RuntimeLaneEdit) => Promise<boolean>
+}) {
+  const [renameDraft, setRenameDraft] = useState<string | null>(null)
+  const value = lane.runtime_ids
+  const editable = !runtimeLaneNameReserved(lane.id)
+  const selected = new Set(value)
+  const addOptions = options.filter(option => !selected.has(option.id))
+  // `set` sends the whole order: the endpoint's contract is the lane's order,
+  // not a delta.
+  const setOrder = (runtimeIds: string[]) => void onEdit(lane.id, { action: 'set', runtimeIds })
+  const move = (index: number, delta: number) => {
+    const target = index + delta
+    if (target < 0 || target >= value.length) return
+    const next = [...value]
+    const current = next[index]
+    if (current === undefined) return
+    next[index] = next[target] ?? current
+    next[target] = current
+    setOrder(next)
+  }
+  const renameTarget = renameDraft?.trim() ?? ''
+  const renameInvalid =
+    renameTarget === '' || renameTarget === lane.id || runtimeLaneNameReserved(renameTarget)
+  const submitRename = async () => {
+    if (renameInvalid) return
+    if (await onEdit(lane.id, { action: 'rename', to: renameTarget })) setRenameDraft(null)
+  }
+  const removeLane = () => {
+    if (window.confirm(`${runtimeLaneTableLabel(lane.id)} 레인을 runtime.toml 에서 지울까요? 이 레인을 가리키는 배정이 남아 있으면 서버가 거절합니다.`)) {
+      void onEdit(lane.id, { action: 'remove' })
+    }
+  }
+
+  return html`
+    <div class="rt-fo" data-testid=${`runtime-lane-${lane.id}`}>
+      <div class="rt-fo-h">
+        <span class="rt-fo-lane">${lane.id}</span>
+        <span class="rt-fo-lane-id mono">${runtimeLaneTableLabel(lane.id)}</span>
+      </div>
+      ${editable
+        ? null
+        : html`<div class="rt-fo-note" data-testid=${`runtime-lane-${lane.id}-reserved`}>
+            routing API 가 이 이름을 다른 경로로 읽어 레인 편집을 보낼 수 없습니다. runtime.toml 섹션에서 직접 고치세요.
+          </div>`}
+      <div class="rt-fo-chain">
+        ${value.map((runtimeId, index) => html`
+          <div key=${runtimeId} class=${`rt-fo-cand ${index === 0 ? 'head' : ''}`}>
+            <span class="rt-fo-rank mono">${index === 0 ? '1차' : `${index + 1}`}</span>
+            <span class="rt-fo-id mono">${runtimeId}</span>
+            ${editable
+              ? html`
+                <span class="rt-fo-cand-acts">
+                  <button
+                    type="button"
+                    class="rt-fo-mv"
+                    disabled=${disabled || index === 0}
+                    aria-label=${`${lane.id} 레인 ${runtimeId} 위로 이동`}
+                    data-testid=${`runtime-lane-${lane.id}-up-${runtimeId}`}
+                    onClick=${() => move(index, -1)}
+                  >↑</button>
+                  <button
+                    type="button"
+                    class="rt-fo-mv"
+                    disabled=${disabled || index === value.length - 1}
+                    aria-label=${`${lane.id} 레인 ${runtimeId} 아래로 이동`}
+                    data-testid=${`runtime-lane-${lane.id}-down-${runtimeId}`}
+                    onClick=${() => move(index, 1)}
+                  >↓</button>
+                  <button
+                    type="button"
+                    class="rt-fo-mv del"
+                    disabled=${disabled || value.length <= 1}
+                    aria-label=${`${lane.id} 레인에서 ${runtimeId} 제거`}
+                    title=${value.length <= 1 ? '마지막 후보는 뺄 수 없습니다 — 레인 삭제를 쓰세요' : undefined}
+                    data-testid=${`runtime-lane-${lane.id}-remove-${runtimeId}`}
+                    onClick=${() => setOrder(value.filter(id => id !== runtimeId))}
+                  >×</button>
+                </span>
+              `
+              : null}
+          </div>
+        `)}
+      </div>
+      ${editable
+        ? html`
+          <div class="set-runtime-media-actions" style=${{ marginTop: '8px' }}>
+            <select
+              class="set-input mono rt-fo-add"
+              data-testid=${`runtime-lane-${lane.id}-add`}
+              value=""
+              disabled=${disabled || addOptions.length === 0}
+              onInput=${(event: Event) => {
+                const select = event.currentTarget as HTMLSelectElement
+                const next = select.value.trim()
+                select.value = ''
+                if (next !== '') setOrder([...value, next])
+              }}
+            >
+              <option value="">후보 추가</option>
+              ${addOptions.map(option => html`
+                <option key=${option.id} value=${option.id}>${option.label}</option>
+              `)}
+            </select>
+            ${renameDraft === null
+              ? html`
+                <button
+                  type="button"
+                  class="set-route-clear"
+                  disabled=${disabled}
+                  data-testid=${`runtime-lane-${lane.id}-rename`}
+                  onClick=${() => setRenameDraft(lane.id)}
+                >이름 변경</button>
+              `
+              : html`
+                <input
+                  class="set-input mono"
+                  value=${renameDraft}
+                  disabled=${disabled}
+                  aria-label=${`${lane.id} 레인 새 이름`}
+                  data-testid=${`runtime-lane-${lane.id}-rename-input`}
+                  onInput=${(event: Event) => setRenameDraft((event.currentTarget as HTMLInputElement).value)}
+                />
+                <button
+                  type="button"
+                  class="set-route-clear"
+                  disabled=${disabled || renameInvalid}
+                  data-testid=${`runtime-lane-${lane.id}-rename-submit`}
+                  onClick=${() => void submitRename()}
+                >이름 저장</button>
+                <button
+                  type="button"
+                  class="set-route-clear"
+                  disabled=${disabled}
+                  onClick=${() => setRenameDraft(null)}
+                >취소</button>
+              `}
+            <button
+              type="button"
+              class="set-route-clear"
+              disabled=${disabled}
+              data-testid=${`runtime-lane-${lane.id}-delete`}
+              onClick=${removeLane}
+            >레인 삭제</button>
+          </div>
+        `
+        : null}
+    </div>
+  `
+}
+
+// A new lane starts with one candidate; the rest are added on its lane card.
+// `create` refuses a name the file already declares, so a typo cannot land on
+// an existing lane's candidates.
+function RuntimeLaneCreateForm({
+  existingLaneIds,
+  options,
+  disabled,
+  onCreate,
+}: {
+  existingLaneIds: readonly string[]
+  options: readonly RuntimeSelectOption[]
+  disabled: boolean
+  onCreate: (lane: string, edit: RuntimeLaneEdit) => Promise<boolean>
+}) {
+  const [name, setName] = useState('')
+  const [firstRuntimeId, setFirstRuntimeId] = useState('')
+  const trimmed = name.trim()
+  const nameError =
+    trimmed === ''
+      ? null
+      : runtimeLaneNameReserved(trimmed)
+        ? `"${trimmed}" 는 다른 routing 경로 이름이라 레인 이름으로 쓸 수 없습니다`
+        : existingLaneIds.includes(trimmed)
+          ? `이미 선언된 레인입니다: ${trimmed}`
+          : null
+  const canSubmit = !disabled && trimmed !== '' && nameError === null && firstRuntimeId !== ''
+  const submit = async () => {
+    if (!canSubmit) return
+    if (await onCreate(trimmed, { action: 'create', runtimeIds: [firstRuntimeId] })) {
+      setName('')
+      setFirstRuntimeId('')
+    }
+  }
+
+  return html`
+    <div class="rt-fo" data-testid="runtime-lane-create">
+      <div class="rt-fo-h">
+        <span class="rt-fo-lane">새 레인</span>
+        <span class="rt-fo-lane-id mono">${trimmed === '' ? '[runtime.lanes.<id>]' : runtimeLaneTableLabel(trimmed)}</span>
+      </div>
+      <div class="set-runtime-media-actions" style=${{ marginTop: '8px' }}>
+        <input
+          class="set-input mono"
+          placeholder="레인 이름"
+          value=${name}
+          disabled=${disabled}
+          aria-label="새 레인 이름"
+          data-testid="runtime-lane-create-name"
+          onInput=${(event: Event) => setName((event.currentTarget as HTMLInputElement).value)}
+        />
+        <select
+          class="set-input mono rt-fo-add"
+          value=${firstRuntimeId}
+          disabled=${disabled || options.length === 0}
+          aria-label="새 레인 1차 후보"
+          data-testid="runtime-lane-create-runtime"
+          onInput=${(event: Event) => setFirstRuntimeId((event.currentTarget as HTMLSelectElement).value.trim())}
+        >
+          <option value="">1차 후보 선택</option>
+          ${options.map(option => html`
+            <option key=${option.id} value=${option.id}>${option.label}</option>
+          `)}
+        </select>
+        <button
+          type="button"
+          class="set-route-clear"
+          disabled=${!canSubmit}
+          data-testid="runtime-lane-create-submit"
+          onClick=${() => void submit()}
+        >레인 추가</button>
+      </div>
+      ${nameError ? html`<div class="set-err" data-testid="runtime-lane-create-error">${nameError}</div>` : null}
+    </div>
+  `
+}
+
 function configEntry(data: DashboardConfig | undefined, env: string): ConfigEntry | undefined {
   if (data === undefined) return undefined
   for (const entries of Object.values(data.categories)) {
@@ -1243,6 +1503,10 @@ export function SettingsSurface() {
   const [runtimeCatalogStatus, setRuntimeCatalogStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [runtimeRoutingStatus, setRuntimeRoutingStatus] = useState<RuntimeRoutingSaveState>('idle')
   const [runtimeRoutingMessage, setRuntimeRoutingMessage] = useState('')
+  // Lane edits write the same runtime.toml, so they share the routing saving
+  // gate, but report next to the lane cards they changed.
+  const [runtimeLaneStatus, setRuntimeLaneStatus] = useState<RuntimeRoutingSaveState>('idle')
+  const [runtimeLaneMessage, setRuntimeLaneMessage] = useState('')
 
   useEffect(() => {
     let active = true
@@ -1354,7 +1618,7 @@ export function SettingsSurface() {
   }
 
   async function applyRuntimeRoutingPatch(lane: RuntimeRoutingLane, runtimeId: string | null): Promise<void> {
-    if (runtimeRoutingStatus === 'saving') return
+    if (runtimeRoutingStatus === 'saving' || runtimeLaneStatus === 'saving') return
     setRuntimeRoutingStatus('saving')
     setRuntimeRoutingMessage('')
     let receipt: CommittedRuntimeTomlConfig
@@ -1376,7 +1640,7 @@ export function SettingsSurface() {
   }
 
   async function applyMediaFailoverPatch(runtimeIds: string[]): Promise<void> {
-    if (runtimeRoutingStatus === 'saving') return
+    if (runtimeRoutingStatus === 'saving' || runtimeLaneStatus === 'saving') return
     setRuntimeRoutingStatus('saving')
     setRuntimeRoutingMessage('')
     let receipt: CommittedRuntimeTomlConfig
@@ -1395,6 +1659,30 @@ export function SettingsSurface() {
       setRuntimeRoutingStatus('error')
       setRuntimeRoutingMessage(`저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)} · 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
     }
+  }
+
+  async function applyRuntimeLaneEdit(lane: string, edit: RuntimeLaneEdit): Promise<boolean> {
+    if (runtimeRoutingStatus === 'saving' || runtimeLaneStatus === 'saving') return false
+    setRuntimeLaneStatus('saving')
+    setRuntimeLaneMessage('')
+    let receipt: CommittedRuntimeTomlConfig
+    try {
+      receipt = await patchRuntimeLane(lane, edit)
+    } catch (err) {
+      setRuntimeLaneStatus('error')
+      setRuntimeLaneMessage(errorToString(err))
+      return false
+    }
+    const target = edit.action === 'rename' ? `${lane} → ${edit.to}` : lane
+    try {
+      await finishRuntimeRoutingWrite()
+      setRuntimeLaneStatus('saved')
+      setRuntimeLaneMessage(`runtime.toml lane ${edit.action} (${target}) 저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)}`)
+    } catch (err) {
+      setRuntimeLaneStatus('error')
+      setRuntimeLaneMessage(`저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)} · 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
+    }
+    return true
   }
 
   // display
@@ -1417,13 +1705,14 @@ export function SettingsSurface() {
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
   // Declared runtime lanes with their ordered candidate chains — the live
   // counterpart of the design's failover section (runtime-editor.jsx:191-229,
-  // .rt-fo-*). Read-only: the routing PATCH writer covers default +
-  // media_failover only, so no reorder/add/remove controls are rendered.
+  // .rt-fo-*). Each [runtime.lanes.<id>] is edited through the routing writer
+  // (set/create/rename/remove); the server resolves and validates every write.
   // Assignment-only routes belong to Keeper assignment truth and must not be
-  // mislabeled as [runtime].<id> declarations on this configuration surface.
+  // mislabeled as [runtime.lanes] declarations on this configuration surface.
   const runtimeLanes = runtimeResolved?.lanes.filter(lane => lane.declared) ?? []
   const runtimeSelectOptions = runtimeSelectOptionsFromResolved(runtimeResolved?.runtimes ?? [])
-  const runtimeRoutingDisabled = runtimeRoutingStatus === 'saving' || runtimeResolvedStatus !== 'ready'
+  const runtimeRoutingDisabled =
+    runtimeRoutingStatus === 'saving' || runtimeLaneStatus === 'saving' || runtimeResolvedStatus !== 'ready'
   const runtimeResolution = shellRuntimeResolution.value
   const configResolution = shellConfigResolution.value
   const hasRuntimePathResolution = runtimeResolution !== null
@@ -1699,29 +1988,33 @@ export function SettingsSurface() {
                   </div>
                 </div>
 
-                ${runtimeLanes.length > 0
+                ${runtimeResolvedStatus === 'ready'
                   ? html`
                     <div class="settings-runtime-section" data-testid="runtime-lanes-section">
                       <div class="set-sub-h">Runtime lanes (${runtimeLanes.length})</div>
-                      <div class="set-hint" style=${{ marginBottom: '8px' }}>
-                        lane 별 후보 체인 — resolved runtime projection 읽기 전용. 후보 순서 writer는 아직 없으므로 편집 컨트롤은 렌더하지 않습니다.
+                      <div class="set-hint" data-testid="runtime-lanes-hint" style=${{ marginBottom: '8px' }}>
+                        lane 별 후보 체인 — 위에서부터 순서대로 시도합니다. 편집은 runtime.toml 의 <span class="mono">${'[runtime.lanes.<id>]'}</span> 에 바로 저장되고, 이름 변경은 이 레인을 가리키는 배정·default·Fusion seat 도 함께 고칩니다.
                       </div>
                       ${runtimeLanes.map(lane => html`
-                        <div key=${lane.id} class="rt-fo" data-testid=${`runtime-lane-${lane.id}`}>
-                          <div class="rt-fo-h">
-                            <span class="rt-fo-lane">${lane.id}</span>
-                            <span class="rt-fo-lane-id mono">[runtime].${lane.id}</span>
-                          </div>
-                          <div class="rt-fo-chain">
-                            ${lane.runtime_ids.map((runtimeId, index) => html`
-                              <div key=${runtimeId} class=${`rt-fo-cand ${index === 0 ? 'head' : ''}`}>
-                                <span class="rt-fo-rank mono">${index === 0 ? '1차' : `${index + 1}`}</span>
-                                <span class="rt-fo-id mono">${runtimeId}</span>
-                              </div>
-                            `)}
-                          </div>
-                        </div>
+                        <${RuntimeLaneEditor}
+                          key=${lane.id}
+                          lane=${lane}
+                          options=${runtimeSelectOptions}
+                          disabled=${runtimeRoutingDisabled}
+                          onEdit=${applyRuntimeLaneEdit}
+                        />
                       `)}
+                      <${RuntimeLaneCreateForm}
+                        existingLaneIds=${runtimeLanes.map(lane => lane.id)}
+                        options=${runtimeSelectOptions}
+                        disabled=${runtimeRoutingDisabled}
+                        onCreate=${applyRuntimeLaneEdit}
+                      />
+                      ${runtimeLaneStatus === 'saving'
+                        ? html`<div class="set-hint" data-testid="runtime-lane-saving">runtime.toml 저장 중...</div>`
+                        : runtimeLaneMessage
+                          ? html`<div class=${runtimeLaneStatus === 'error' ? 'set-err' : 'set-ok'} data-testid="runtime-lane-message">${runtimeLaneMessage}</div>`
+                          : null}
                     </div>
                   `
                   : null}

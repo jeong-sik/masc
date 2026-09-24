@@ -2172,6 +2172,41 @@ export async function patchRuntimeMediaFailover(
   }).then(decodeCommittedRuntimeTomlConfig)
 }
 
+// A declared [runtime.lanes."<id>"] candidate chain. The server resolves the
+// lane name before it writes, so `set` refuses a name nothing resolves (a typo
+// cannot become a lane) and `create` refuses a name the file already declares.
+// `set` sends the whole order: the endpoint's contract is the lane's order,
+// not a delta, and an empty order is refused (removing the lane is `remove`).
+export type RuntimeLaneEdit =
+  | { action: 'set'; runtimeIds: readonly string[] }
+  | { action: 'create'; runtimeIds: readonly string[] }
+  | { action: 'remove' }
+  | { action: 'rename'; to: string }
+
+function runtimeLaneEditBody(
+  lane: string,
+  edit: RuntimeLaneEdit,
+): Record<string, unknown> {
+  switch (edit.action) {
+    case 'set':
+    case 'create':
+      return { lane, action: edit.action, runtime_ids: [...edit.runtimeIds] }
+    case 'remove':
+      return { lane, action: 'remove' }
+    case 'rename':
+      return { lane, action: 'rename', to: edit.to }
+  }
+}
+
+export async function patchRuntimeLane(
+  lane: string,
+  edit: RuntimeLaneEdit,
+): Promise<CommittedRuntimeTomlConfig> {
+  await ensureDevToken()
+  return post<unknown>('/api/v1/runtime/config/routing', runtimeLaneEditBody(lane, edit))
+    .then(decodeCommittedRuntimeTomlConfig)
+}
+
 export async function patchRuntimeAssignment(
   keeperName: string,
   runtimeId: string | null,

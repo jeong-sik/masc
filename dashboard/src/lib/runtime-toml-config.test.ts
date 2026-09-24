@@ -154,6 +154,25 @@ mad-improver = "runpod_mtp.qwen"
     })
   })
 
+  it('lists declared [runtime.lanes.<id>] tables, bare or quoted, as lane ids', () => {
+    const withLanes = `${sourceText}
+
+[runtime.lanes.coding]
+candidates = ["ollama_cloud.deepseek-v4-flash"]
+
+[runtime.lanes."ollama_cloud.minimax-m3"]
+candidates = ["ollama_cloud.minimax-m3"]
+
+[runtime.lanes.coding.extra]
+note = "not a lane header"
+`
+
+    const environment = parseRuntimeTomlEnvironment(withLanes)
+
+    expect(environment.laneIds).toEqual(['coding', 'ollama_cloud.minimax-m3'])
+    expect(parseRuntimeTomlEnvironment(sourceText).laneIds).toEqual([])
+  })
+
   it('updates an existing quoted-key assignment line in place instead of appending a duplicate', () => {
     const withQuotedAssignments = `${sourceText}
 

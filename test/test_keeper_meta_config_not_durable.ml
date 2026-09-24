@@ -177,13 +177,13 @@ let test_a_container_profile_must_name_its_image () =
           (defaults Keeper_types_profile.Micro_vm)));
   (match
      effective_meta_of_profile_defaults
-       (defaults ~sandbox_image:"masc-keeper-sandbox:local" Keeper_types_profile.Docker)
+       (defaults ~sandbox_image:"ocaml" Keeper_types_profile.Docker)
        meta
    with
    | Ok effective ->
      Alcotest.(check (option string))
        "a declared image is the one the keeper runs in"
-       (Some "masc-keeper-sandbox:local")
+       (Some "ocaml")
        effective.sandbox_image
    | Error detail -> Alcotest.fail detail);
   Alcotest.(check (option string))

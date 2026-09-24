@@ -68,6 +68,8 @@ let finish_unterminated decoder =
   decoder.matched <- 0;
   contents decoder
 
+let snapshot_payload decoder = contents decoder
+
 let feed decoder byte =
   let marker_length = String.length end_marker in
   if byte = end_marker.[decoder.matched] then begin

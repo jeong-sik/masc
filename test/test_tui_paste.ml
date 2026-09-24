@@ -80,6 +80,24 @@ let test_interrupted_decoder_keeps_partial_marker () =
   check string "kept for the draft" "tail\x1b[20" paste.Masc_tui_paste.text
 ;;
 
+let test_snapshot_excludes_partial_marker_for_late_end () =
+  let decoder = Masc_tui_paste.create () in
+  String.iter (fun byte -> ignore (Masc_tui_paste.feed decoder byte))
+    "tail\x1b[20";
+  let snapshot = Masc_tui_paste.snapshot_payload decoder in
+  check string "visible recovery draft" "tail" snapshot.text;
+  check (option string) "later marker still completes"
+    (Some "tail")
+    (let result = ref None in
+     String.iter
+       (fun byte ->
+         match Masc_tui_paste.feed decoder byte with
+         | Some paste -> result := Some paste.text
+         | None -> ())
+       "1~";
+     !result)
+;;
+
 (* The stream ending is a terminal that went away, not a reason to lose what
    the operator already pasted. *)
 let test_an_unterminated_paste_keeps_what_arrived () =
@@ -183,6 +201,8 @@ let () =
             test_a_partial_marker_before_the_end_is_text
         ; test_case "interrupted decoder keeps partial marker" `Quick
             test_interrupted_decoder_keeps_partial_marker
+        ; test_case "snapshot excludes partial marker for late end" `Quick
+            test_snapshot_excludes_partial_marker_for_late_end
         ; test_case "an unterminated paste keeps what arrived" `Quick
             test_an_unterminated_paste_keeps_what_arrived
         ] )

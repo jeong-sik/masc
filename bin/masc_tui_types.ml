@@ -6307,6 +6307,9 @@ type state = {
   mutable system_logs_detail_seq: int option;
   mutable system_logs_detail_scroll: int;
   msg_input: Buffer.t;
+  (* A draft restored from an unterminated terminal paste needs explicit
+     confirmation before any chat send. Keep its owner across pane changes. *)
+  mutable msg_recovered_paste_keepers: string list;
   (* Images staged with :attach, sent with the next message and cleared by the
      send. Held next to the draft because they are part of the same unsent
      message: switching keepers or abandoning the draft must not leave an image
@@ -8148,6 +8151,7 @@ let create_state
   system_logs_detail_seq = None;
   system_logs_detail_scroll = 0;
   msg_input = Buffer.create 256;
+  msg_recovered_paste_keepers = [];
   msg_attachments = [];
   msg_references = [];
   msg_attachments_since = None;

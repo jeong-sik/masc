@@ -472,6 +472,11 @@ type input_reader = {
           the same character arriving late rather than a lost one. Empty
           whenever no character is in flight. *)
   mutable paste_decoder : Masc_tui_paste.decoder option;
+  mutable paste_recovery_guard : Masc_tui_paste.decoder option;
+  mutable paste_guard_idle_observed : bool;
+  mutable paste_cancel_armed : bool;
+  mutable paste_idle_observed : bool;
+  mutable csi_parameters : Buffer.t option;
 }
 
 (* One terminal read. Bigger than any escape sequence and big enough that a
@@ -489,6 +494,11 @@ let create_input_reader () =
     last_source = None;
     partial_scalar = "";
     paste_decoder = None;
+    paste_recovery_guard = None;
+    paste_guard_idle_observed = false;
+    paste_cancel_armed = false;
+    paste_idle_observed = false;
+    csi_parameters = None;
   }
 
 (* Whether the terminal has bytes for us, waited for inside Eio rather than
@@ -772,17 +782,97 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
       let key name = Some (Key name) in
       let rec continue_paste decoder =
         match take_input_byte reader ~timeout:paste_byte_timeout_seconds with
-        | None -> None
+        | None ->
+            reader.paste_idle_observed <- true;
+            None
         | Some byte ->
+            reader.paste_idle_observed <- false;
             (match Masc_tui_paste.feed decoder byte with
-             | None -> continue_paste decoder
+             | None ->
+                 (* Return to the main loop after each terminal read buffer.
+                    A sender that never pauses must not hold Ctrl-C or other
+                    queued work behind this recursive byte consumer. *)
+                 if reader.position >= reader.filled then None
+                 else continue_paste decoder
              | Some paste ->
                  reader.paste_decoder <- None;
+                 reader.paste_cancel_armed <- false;
+                 reader.paste_idle_observed <- false;
                  Some (Pasted paste))
       in
-      match reader.paste_decoder with
-      | Some decoder -> continue_paste decoder
-      | None ->
+      let rec drain_recovered_paste decoder =
+        match take_input_byte reader ~timeout:paste_byte_timeout_seconds with
+        | None ->
+            reader.paste_guard_idle_observed <- true;
+            None
+        | Some byte ->
+            reader.paste_guard_idle_observed <- false;
+            (match Masc_tui_paste.feed decoder byte with
+             | Some _ ->
+                 reader.paste_recovery_guard <- None;
+                 None
+             | None ->
+                 if reader.position >= reader.filled then None
+                 else drain_recovered_paste decoder)
+      in
+      let handle_csi parameters final =
+        match parameters, final with
+        | "200", '~' ->
+            let decoder = Masc_tui_paste.create () in
+            reader.paste_decoder <- Some decoder;
+            reader.paste_cancel_armed <- false;
+            reader.paste_idle_observed <- false;
+            continue_paste decoder
+        | params, final when String.length params > 0 && params.[0] = '<' -> (
+            match Masc.Tui_decode.sgr_wheel_report params final with
+            | Some (direction, row, column) ->
+                Some (Mouse_wheel (direction, row, column))
+            | None -> (
+                match Masc.Tui_decode.sgr_left_press params final with
+                | Some (row, column) -> Some (Mouse_left_press (row, column))
+                | None -> (
+                    match Masc.Tui_decode.sgr_left_release params final with
+                    | Some (row, column) -> Some (Mouse_left_release (row, column))
+                    | None -> key "unknown-esc")))
+        | "", 'M' ->
+            let button = take_input_byte reader ~timeout:0.05 in
+            let _column = take_input_byte reader ~timeout:0.05 in
+            let _row = take_input_byte reader ~timeout:0.05 in
+            (match button with
+             | None -> key "unknown-esc"
+             | Some button -> (
+                 match Masc.Tui_decode.x10_wheel_key button with
+                 | Some wheel_key -> key wheel_key
+                 | None -> key "unknown-esc"))
+        | parameters, final -> (
+            match Masc_tui_csi.name ~parameters ~final with
+            | Some named -> key named
+            | None -> key "unknown-esc")
+      in
+      let rec continue_csi parameters =
+        match take_input_byte reader ~timeout:paste_byte_timeout_seconds with
+        | None -> None
+        | Some byte when Char.code byte >= 0x40 && Char.code byte <= 0x7E ->
+            reader.csi_parameters <- None;
+            Some (`Complete (Buffer.contents parameters, byte))
+        | Some byte ->
+            Buffer.add_char parameters byte;
+            if Buffer.length parameters > 16 then begin
+              reader.csi_parameters <- None;
+              Some `Malformed
+            end else continue_csi parameters
+      in
+      let finish_csi_read parameters =
+        match continue_csi parameters with
+        | None -> None
+        | Some (`Complete (parameters, final)) -> handle_csi parameters final
+        | Some `Malformed -> key "esc"
+      in
+      match reader.paste_recovery_guard, reader.paste_decoder, reader.csi_parameters with
+      | Some decoder, _, _ -> drain_recovered_paste decoder
+      | None, Some decoder, _ -> continue_paste decoder
+      | None, None, Some parameters -> finish_csi_read parameters
+      | None, None, None ->
       (* A character left half-read by the previous call is finished before
          anything else is looked at. Its remaining bytes are the next thing in
          the stream, so reading past them would decode the tail of one
@@ -803,76 +893,15 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
       match take_input_byte reader ~timeout with
       | None -> None
       | Some '\027' -> (
-          (* CSI: parameter bytes, then one final byte in 0x40-0x7E. Reading to
-             the final byte is what keeps a parameterised key from leaving its
-             tail in the stream -- Page Up is ESC [ 5 ~, and stopping at the 5
-             left the ~ to be typed as text. *)
+          (* ESC is ambiguous until another byte arrives: it is both a key and
+             the prefix of bracketed paste. Keep the short standalone-Escape
+             response; once '[' has arrived, retain CSI parameters across
+             idle reads so a slow marker tail cannot become typed input. *)
           match take_input_byte reader ~timeout:0.05 with
           | Some '[' ->
               let parameters = Buffer.create 4 in
-              let rec read_csi () =
-                match take_input_byte reader ~timeout:0.05 with
-                | None -> None
-                | Some byte when Char.code byte >= 0x40 && Char.code byte <= 0x7E
-                  -> Some (Buffer.contents parameters, byte)
-                | Some byte ->
-                    Buffer.add_char parameters byte;
-                    if Buffer.length parameters > 16 then None else read_csi ()
-              in
-              (match read_csi () with
-               | None -> key "esc"
-
-               (* The terminal says the next bytes were pasted, not typed.
-                  Every newline in them is text; without this mode each one
-                  arrives as Return and a three-line paste is three sends. *)
-               | Some ("200", '~') ->
-                   let decoder = Masc_tui_paste.create () in
-                   reader.paste_decoder <- Some decoder;
-                   continue_paste decoder
-               (* A parameter span starting with [<] is an SGR mouse report.
-                  A wheel notch travels with its position, so the loop can
-                  give it to the pane under the pointer and turn the rest into
-                  the key every surface's scroll binding answers; an unmodified
-                  left press travels as its own event so a surface can map the
-                  row to its cursor; a report nothing consumes stays unclaimed
-                  rather than leaking into a key. *)
-               | Some (params, final)
-                 when String.length params > 0 && params.[0] = '<' -> (
-                   match Masc.Tui_decode.sgr_wheel_report params final with
-                   | Some (direction, row, column) ->
-                       Some (Mouse_wheel (direction, row, column))
-                   | None -> (
-                       match Masc.Tui_decode.sgr_left_press params final with
-                       | Some (row, column) ->
-                           Some (Mouse_left_press (row, column))
-                       | None -> (match Masc.Tui_decode.sgr_left_release params final with
-                           | Some (row,column) -> Some (Mouse_left_release (row,column))
-                           | None -> key "unknown-esc")))
-               (* A bare [CSI M] is the legacy X10 mouse report: three raw
-                  bytes follow and belong to the report, not to the typist.
-                  Terminals that ignore the SGR half of the [?1006;1000h]
-                  request answer in this shape -- Apple Terminal, the macOS
-                  default, is one -- so leaving the bytes unread typed three
-                  characters into the composer on every wheel notch. They are
-                  consumed whether or not the button means anything. *)
-               | Some ("", 'M') ->
-                   let button = take_input_byte reader ~timeout:0.05 in
-                   let _column = take_input_byte reader ~timeout:0.05 in
-                   let _row = take_input_byte reader ~timeout:0.05 in
-                   (match button with
-                    | None -> key "unknown-esc"
-                    | Some button -> (
-                        match Masc.Tui_decode.x10_wheel_key button with
-                        | Some wheel_key -> key wheel_key
-                        | None -> key "unknown-esc"))
-               (* Every named key, legacy or modifier-reporting, comes from
-                  one vocabulary now. It was seven arms here that could not
-                  see a second parameter, so Shift+Up and Ctrl+P both reached
-                  the surface as "unknown-esc". *)
-               | Some (parameters, final) -> (
-                   match Masc_tui_csi.name ~parameters ~final with
-                   | Some named -> key named
-                   | None -> key "unknown-esc"))
+              reader.csi_parameters <- Some parameters;
+              finish_csi_read parameters
           (* [ESC O <final>] is SS3: what a terminal in application cursor
              mode sends for the arrows and Home/End instead of [ESC \[
              <final>]. Left unread the [ESC] answered as "esc" and the final
@@ -1006,6 +1035,30 @@ let save_message_draft state =
       state.msg_drafts <-
         if String.equal text "" then other_drafts
         else (keeper_name, text) :: other_drafts
+
+let recovered_paste_send_locked_for state keeper_name =
+  match keeper_name with
+  | Some target ->
+      List.exists (String.equal target) state.msg_recovered_paste_keepers
+  | None -> false
+
+let recovered_paste_send_locked state =
+  recovered_paste_send_locked_for state state.msg_target_keeper_name
+
+let discard_recovered_paste_lock state =
+  match state.msg_target_keeper_name with
+  | Some target ->
+      state.msg_recovered_paste_keepers <-
+        List.filter (fun name -> not (String.equal name target))
+          state.msg_recovered_paste_keepers
+  | None -> ()
+
+let protect_recovered_paste_for_current_keeper state =
+  match state.msg_target_keeper_name with
+  | Some target when not (recovered_paste_send_locked state) ->
+      state.msg_recovered_paste_keepers <-
+        target :: state.msg_recovered_paste_keepers
+  | Some _ | None -> ()
 
 (* Put the pasted text back into the draft where its placeholder stands.
 
@@ -1248,6 +1301,7 @@ let leave_keeper_message state ~drain_queue =
 
 let clear_current_message_draft state =
   Buffer.clear state.msg_input;
+  discard_recovered_paste_lock state;
   save_message_draft state
 
 let consume_dispatched_message_draft state request =
@@ -1261,7 +1315,8 @@ let consume_dispatched_message_draft state request =
   match state.msg_target_keeper_name with
   | Some keeper_name
     when String.equal keeper_name request.Keeper_chat.keeper_name
-         && String.equal (Buffer.contents state.msg_input) request.message ->
+         && String.equal (Buffer.contents state.msg_input) request.message
+         && not (recovered_paste_send_locked state) ->
       clear_current_message_draft state
   | Some _ | None -> save_message_draft state
 
@@ -1449,7 +1504,10 @@ let clear_staged_attachments (state : state) =
 let submit_chat_draft (state : state) ~(submit_message : string -> unit)
     ~(drain_queue : unit -> unit) =
   let text = Buffer.contents state.msg_input in
-  if String.trim text <> "" then begin
+  if recovered_paste_send_locked state then
+    report_action state "system"
+      "Recovered draft protected; press Ctrl-G to enable Enter"
+  else if String.trim text <> "" then begin
     (* Back to the newest row: the turn that is about to start is drawn
        there, and staying scrolled back would hide the send. *)
     set_msg_scroll state 0;
@@ -1525,6 +1583,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     state.msg_recall_replaces <- None;
     clear_staged_attachments state;
     Buffer.clear state.msg_input;
+    discard_recovered_paste_lock state;
     drain_queue ();
     true
   | "\t" -> apply_autocomplete Masc_tui_command.Next
@@ -1700,13 +1759,14 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          next Enter is a new line, not a replacement. *)
       state.msg_spill <- None;
       forget_recall state;
+      clear_staged_attachments state;
       if Option.is_some state.msg_recall_replaces
       then begin
-        clear_staged_attachments state;
         state.msg_recall_replaces <- None;
         drain_queue ()
       end;
       Buffer.clear state.msg_input;
+      discard_recovered_paste_lock state;
       (* Cleared composer: release any line held only for this keeper's compose
          ([composing_for_keeper]). *)
       drain_queue ();
@@ -9743,6 +9803,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
   else
   match command with
+  | Masc_tui_command.Say _ when recovered_paste_send_locked_for state target ->
+      notice ~kind:Notice_failure
+        "Recovered draft protected; press Ctrl-G to enable Enter"
   | Masc_tui_command.Say _ ->
       start_keeper_message ?keeper_name state ~base_path ~mailbox text
   | Masc_tui_command.Task_missing_title ->
@@ -12782,6 +12845,11 @@ let handle_composer_key state ~base_path ~mailbox key =
            drain_queued_message state ~base_path ~mailbox);
       true
   | Composer.Send ->
+      if recovered_paste_send_locked state then begin
+        report_action state "system"
+          "Recovered draft protected; press Ctrl-G to enable Enter";
+        true
+      end else begin
       state.composer_focused <- false;
       let text = Buffer.contents state.msg_input in
       (match Masc_tui_command.parse text with
@@ -12858,6 +12926,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            ());
       send_operator_text state ~base_path ~mailbox text;
       true
+      end
   | Composer.Edit ->
       (* Annotated: [handle_message_key] takes labelled callbacks, and a
          missing one leaves a partial application that binds to [_handled]
@@ -12928,7 +12997,8 @@ let spill_nonce () =
 
    Shares handle_paste's guard: a staged image with no keeper to send it to is
    the same silence as a paste with nowhere to go. *)
-let attach_dropped_image state ~base_path ~mailbox attachment =
+let attach_dropped_image ?(protect_recovered = false) state ~base_path ~mailbox
+    attachment =
   let in_chat = state.view = Keepers Keeper_message in
   if not (in_chat || state.composer_focused) then
     ignore
@@ -12938,6 +13008,7 @@ let attach_dropped_image state ~base_path ~mailbox attachment =
       (Printf.sprintf "Dropped %s with no Keeper to send it to"
          attachment.Masc_tui_keeper_chat_projection.name)
   else begin
+    if protect_recovered then protect_recovered_paste_for_current_keeper state;
     state.msg_attachments <- state.msg_attachments @ [ attachment ];
     note_attachment_staged state;
     report_action state "system"
@@ -12948,7 +13019,8 @@ let attach_dropped_image state ~base_path ~mailbox attachment =
          (List.length state.msg_attachments))
   end
 
-let handle_paste state ~base_path ~mailbox ~(paste : Masc_tui_paste.t) =
+let handle_paste ?(protect_recovered = false) state ~base_path ~mailbox
+    ~(paste : Masc_tui_paste.t) =
   if state.workspace_identity <> Masc_tui_types.Workspace_identity_match
   then ()
   else
@@ -12969,6 +13041,11 @@ let handle_paste state ~base_path ~mailbox ~(paste : Masc_tui_paste.t) =
       Keeper_chat.terminal_safe_text ~preserve_newlines:true
         paste.Masc_tui_paste.text
     in
+    if protect_recovered
+       && (String.trim (Buffer.contents state.msg_input ^ text) <> ""
+           || state.msg_attachments <> [] || state.msg_references <> [])
+    then
+      protect_recovered_paste_for_current_keeper state;
     (match
        Masc_tui_paste_spill.of_paste ~now_iso:(spill_stamp ())
          ~nonce:(spill_nonce ()) text
@@ -16784,6 +16861,9 @@ let main
          state.view)
   in
   let input_reader = create_input_reader () in
+  let paste_pause_notified = ref false in
+  let csi_pause_notified = ref false in
+  let paste_guard_idle_notified = ref false in
   (* Palette and graphics share one bounded startup probe because both replies
      arrive on the key stream. The probe removes only replies to these exact
      questions and puts every other consumed byte back into this same reader.
@@ -18087,6 +18167,7 @@ and is loaded on demand through keeper_skill.
          outright. Both leave through [Break], the exit q takes, so the
          switch release that stops a server this TUI started runs for every
          way out. *)
+      let skip_input_after_interrupt = ref false in
       let interrupted_paste =
         match Masc_tui_exit_signals.poll exit_signals with
        | Masc_tui_exit_signals.Quit ->
@@ -18096,13 +18177,57 @@ and is loaded on demand through keeper_skill.
               | None -> Masc_tui_exit_reason.Interrupt);
            raise Break
        | Masc_tui_exit_signals.Interrupt_armed ->
-           (match input_reader.paste_decoder with
-            | Some decoder ->
-                input_reader.paste_decoder <- None;
+           state.quit_armed <- false;
+           (match input_reader.paste_recovery_guard,
+                  input_reader.paste_decoder, input_reader.csi_parameters with
+            | Some _, _, _ when not input_reader.paste_guard_idle_observed ->
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
-                Some (Masc_tui_paste.finish_unterminated decoder)
-            | None ->
-                state.quit_armed <- false;
+                report_action state "system" "Paste tail still arriving; waiting for end marker";
+                Render_schedule.request render_schedule Render_schedule.Background;
+                None
+            | Some _, _, _ ->
+                (* Once the terminal loses its closing marker, stdin has no
+                   provenance bit: a later pasted BEL is indistinguishable
+                   from the operator's Ctrl-G. This is a force unlock for a
+                   stream the operator has observed stop, not an automatic
+                   declaration that all paste bytes have arrived. *)
+                input_reader.paste_recovery_guard <- None;
+                input_reader.paste_guard_idle_observed <- false;
+                Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                skip_input_after_interrupt := true;
+                report_action state "system"
+                  "Paste input unlocked; confirm only after the terminal stops";
+                Render_schedule.request render_schedule Render_schedule.Background;
+                None
+            | None, Some _, _ when not input_reader.paste_cancel_armed ->
+                input_reader.paste_cancel_armed <- true;
+                Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                report_action state "system"
+                  "Paste end awaited; press Ctrl-C again after bytes stop if the marker is missing";
+                Render_schedule.request render_schedule Render_schedule.Background;
+                None
+            | None, Some _, _ when not input_reader.paste_idle_observed ->
+                Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                report_action state "system"
+                  "Paste still arriving; waiting for end marker";
+                Render_schedule.request render_schedule Render_schedule.Background;
+                None
+            | None, Some decoder, _ ->
+                input_reader.paste_decoder <- None;
+                input_reader.paste_recovery_guard <- Some decoder;
+                input_reader.paste_guard_idle_observed <- false;
+                input_reader.paste_cancel_armed <- false;
+                input_reader.paste_idle_observed <- false;
+                Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                Some (Masc_tui_paste.snapshot_payload decoder)
+            | None, None, Some _ ->
+                input_reader.csi_parameters <- None;
+                Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                skip_input_after_interrupt := true;
+                report_action state "system" "Incomplete terminal sequence cancelled";
+                Render_schedule.request render_schedule Render_schedule.Background;
+                None
+            | None, None, None ->
                 report_action state "system"
                   (Masc_tui_exit_signals.quit_notice ~key:"Ctrl-C"
                      ~waiting:(Masc_tui_keeper_chat_queue.length state.msg_queued));
@@ -18166,10 +18291,24 @@ and is loaded on demand through keeper_skill.
           launch_msx_poll state ~mailbox:async_messages
         end
       end;
+      let guarding_before_read = Option.is_some input_reader.paste_recovery_guard in
       let input =
         match interrupted_paste with
         | Some paste -> Some (Pasted paste)
+        | None when !skip_input_after_interrupt -> None
         | None -> read_input ~timeout:input_timeout input_reader ()
+      in
+      let input =
+        if recovered_paste_send_locked state then
+          match input with
+          | Some (Key "\007")
+            when Option.is_none input_reader.paste_recovery_guard
+                 && (state.view = Keepers Keeper_message || state.composer_focused) ->
+              discard_recovered_paste_lock state;
+              report_action state "system" "Recovered draft confirmed; Enter may send";
+              None
+          | other -> other
+        else input
       in
       (* The footer's notice answers the last key. The next input is a new
          key, so the notice goes before anything handles it: it takes the
@@ -18180,8 +18319,37 @@ and is loaded on demand through keeper_skill.
       Option.iter
         (fun _ ->
           report_action state "system"
-            "Incomplete paste restored as draft; press Enter to send")
+            "Incomplete paste restored; wait for marker or Ctrl-C, then Ctrl-G enables Enter")
         interrupted_paste;
+      if guarding_before_read && Option.is_none input_reader.paste_recovery_guard then
+        report_action state "system" "Paste tail ended; review the draft before sending";
+      (match input_reader.paste_decoder with
+       | Some _ when not !paste_pause_notified ->
+           paste_pause_notified := true;
+           report_action state "system"
+             "Paste in progress; Ctrl-C twice restores, third unlocks if stuck";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Some _ -> ()
+       | None -> paste_pause_notified := false);
+      (match input_reader.csi_parameters with
+       | Some _ when not !csi_pause_notified ->
+           csi_pause_notified := true;
+           report_action state "system"
+             "Terminal sequence incomplete; Ctrl-C cancels it";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Some _ -> ()
+       | None -> csi_pause_notified := false);
+      (match input_reader.paste_recovery_guard with
+       | Some _ when input_reader.paste_guard_idle_observed
+                     && not !paste_guard_idle_notified ->
+           paste_guard_idle_notified := true;
+           report_action state "system"
+             "Paste tail quiet; Ctrl-C unlocks input if the end marker was lost";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Some _ when not input_reader.paste_guard_idle_observed ->
+           paste_guard_idle_notified := false
+       | Some _ -> ()
+       | None -> paste_guard_idle_notified := false);
       (* SIGWINCH can arrive while [read_input] is waiting. Consume it before
          this input sees the old frame; the next loop would be one key too
          late. *)
@@ -18429,6 +18597,7 @@ and is loaded on demand through keeper_skill.
          pasted text the way the palette, row search and the preset name
          each did. *)
       let text_target = text_input_target state ~compact_viewport in
+      let recovered_paste = Option.is_some interrupted_paste in
       (match input with
        | Some (Pasted paste) when Option.is_some state.lane_addons ->
            (match state.lane_addons with
@@ -18577,16 +18746,19 @@ and is loaded on demand through keeper_skill.
             | Some path when Sys.file_exists path -> (
                 match Masc_tui_attachment.classify_drop ~path with
                 | Masc_tui_attachment.Attach attachment ->
-                    attach_dropped_image state ~base_path
+                    attach_dropped_image ~protect_recovered:recovered_paste
+                      state ~base_path
                       ~mailbox:async_messages attachment
                 | Masc_tui_attachment.Keep_path ->
-                    handle_paste state ~base_path ~mailbox:async_messages
+                    handle_paste ~protect_recovered:recovered_paste state
+                      ~base_path ~mailbox:async_messages
                       ~paste:{ paste with Masc_tui_paste.text = path }
                 | Masc_tui_attachment.Refuse error ->
                     report_action state "error"
                       (Masc_tui_attachment.error_to_string error))
             | Some _ | None ->
-                handle_paste state ~base_path ~mailbox:async_messages ~paste)
+                handle_paste ~protect_recovered:recovered_paste state
+                  ~base_path ~mailbox:async_messages ~paste)
        (* The wheel over the Activity pane scrolls the pane. The pane is drawn
           under no modal (render reserves it no columns while one is up), so
           the hit test alone says whether the notch is the pane's. *)

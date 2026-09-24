@@ -40,11 +40,11 @@ permissions:
   contents: read
   actions: write
 
-# Keep each main commit's compile result: a later push must not cancel it.
-# A rerun of the same commit may supersede an earlier run.
+# Finish the main compile already running when another push arrives. Keep one
+# newer pending run so main CI cannot consume one runner per queued commit.
 concurrency:
-  group: ${{ inputs.candidate_verification && format('candidate-ci-{0}', github.run_id) || format('ci-{0}', github.sha) }}
-  cancel-in-progress: true
+  group: ${{ inputs.candidate_verification && format('candidate-ci-{0}', github.run_id) || 'ci' }}
+  cancel-in-progress: false
 
 jobs:
   build:

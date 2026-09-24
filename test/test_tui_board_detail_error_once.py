@@ -42,7 +42,19 @@ def run(executable: str) -> None:
         h.resize_and_wait(
             process, fd, output, rows=30, columns=160, needle=b"MASC Overview"
         )
+        before_board = len(output)
         h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.wait_for_output(
+            process, fd, output, b"Failure vocabulary", start=before_board, timeout=5
+        )
+        h.wait_for_output(
+            process,
+            fd,
+            output,
+            h.FRAME_END,
+            start=h.end_of_needle(output, b"Failure vocabulary", before_board),
+            timeout=5,
+        )
         h.send_and_wait(process, fd, output, b"\r", CAUSE)
         check_frame(output, "Board read with list post")
 

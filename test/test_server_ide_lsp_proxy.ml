@@ -32,7 +32,19 @@ let test_initialize_handshake_is_read_only () =
     bool
     "workspace edit/applyEdit is not advertised"
     false
-    (List.mem_assoc "workspace" capabilities)
+    (List.mem_assoc "workspace" capabilities);
+  (* completionItem/resolve has no handler, so advertising it would have the
+     client ask for an answer that is always Method_not_found. *)
+  check
+    (option bool)
+    "completion resolve is not advertised"
+    (Some false)
+    (match List.assoc_opt "completionProvider" capabilities with
+     | Some provider ->
+       (match member "resolveProvider" provider with
+        | Some (`Bool b) -> Some b
+        | _ -> None)
+     | None -> None)
 ;;
 
 let test_workspace_root_initialize_stays_in_base () =
@@ -98,7 +110,128 @@ let test_file_uri_resolution_is_workspace_scoped () =
     (option string)
     "remote file authority is rejected"
     None
-    (Lsp.resolve_relative ~base "file://remote/workspace/masc/lib/server.ml")
+    (Lsp.resolve_relative ~base "file://remote/workspace/masc/lib/server.ml");
+  (* The scheme is case-insensitive, so an uppercase file URI is held to the
+     same containment instead of passing through as a relative path. *)
+  check
+    (option string)
+    "uppercase file scheme inside resolves"
+    (Some "lib/server.ml")
+    (Lsp.resolve_relative ~base "FILE:///workspace/masc/lib/server.ml");
+  check
+    (option string)
+    "uppercase file scheme outside is rejected"
+    None
+    (Lsp.resolve_relative ~base "FILE:///etc/passwd");
+  check
+    (option string)
+    "foreign scheme names no workspace file"
+    None
+    (Lsp.resolve_relative ~base "untitled:Untitled-1");
+  check
+    (option string)
+    "relative path resolves against the root"
+    (Some "lib/server.ml")
+    (Lsp.resolve_relative ~base "lib/server.ml");
+  check
+    (option string)
+    "relative path is normalized"
+    (Some "server.ml")
+    (Lsp.resolve_relative ~base "lib/../server.ml");
+  check
+    (option string)
+    "relative path climbing out is rejected"
+    None
+    (Lsp.resolve_relative ~base "../../etc/passwd");
+  check
+    (option string)
+    "bare absolute path outside is rejected"
+    None
+    (Lsp.resolve_relative ~base "/etc/passwd")
+;;
+
+let initialize_params root_uri = `Assoc [ "rootUri", root_uri ]
+
+(* The dashboard sends an empty rootUri; that names no root, so the anchor
+   resolved from the connection URL stands. A declared anchor stands against
+   any rootUri. *)
+let test_initialize_keeps_resolved_anchor () =
+  let base_path = "/workspace/masc" in
+  let anchor = "/workspace/masc/repos/masc" in
+  let after authority params =
+    Lsp.workspace_root_after_initialize ~authority ~base_path ~anchor params
+  in
+  check
+    string
+    "empty rootUri keeps the anchor"
+    anchor
+    (after Lsp.Anchor_from_root_uri (initialize_params (`String "")));
+  check
+    string
+    "null rootUri keeps the anchor"
+    anchor
+    (after Lsp.Anchor_from_root_uri (initialize_params `Null));
+  check
+    string
+    "absent rootUri keeps the anchor"
+    anchor
+    (after Lsp.Anchor_from_root_uri (`Assoc []));
+  check
+    string
+    "undeclared connection takes a named rootUri"
+    "/workspace/masc/subdir"
+    (after
+       Lsp.Anchor_from_root_uri
+       (initialize_params (`String "file:///workspace/masc/subdir")));
+  check
+    string
+    "declared anchor ignores rootUri"
+    anchor
+    (after
+       Lsp.Anchor_declared
+       (initialize_params (`String "file:///workspace/masc/subdir")))
+;;
+
+(* A workspace named on the URL that does not resolve refuses the connection
+   with the reason, instead of silently serving the project root. *)
+let test_unresolved_workspace_refuses_connection () =
+  let refused source expected_code =
+    match Lsp.anchor_authority_of_source ~scope:None source with
+    | Error err -> check string "refusal code" expected_code err.Server_ide_scope.code
+    | Ok _ -> fail (expected_code ^ " must refuse the connection")
+  in
+  refused (`RepositoryUnknown "ghost") "repository_unknown";
+  refused (`RepositoryMissing "gone") "repository_missing";
+  refused (`KeeperUnknown "nobody") "keeper_unknown";
+  refused (`PlaygroundMissing "analyst") "playground_missing";
+  let authority ~scope source =
+    match Lsp.anchor_authority_of_source ~scope source with
+    | Ok authority -> authority
+    | Error err -> fail ("unexpected refusal: " ^ err.Server_ide_scope.message)
+  in
+  check
+    bool
+    "resolved repository is declared"
+    true
+    (authority ~scope:None (`Repository "masc") = Lsp.Anchor_declared);
+  check
+    bool
+    "resolved playground is declared"
+    true
+    (authority ~scope:None (`Playground "analyst") = Lsp.Anchor_declared);
+  check
+    bool
+    "codebase scope declares the project anchor"
+    true
+    (authority
+       ~scope:(Some (Server_ide_scope.Scope_codebase { slug = "masc" }))
+       `Project
+     = Lsp.Anchor_declared);
+  check
+    bool
+    "no declaration lets rootUri decide"
+    true
+    (authority ~scope:None `Project = Lsp.Anchor_from_root_uri)
 ;;
 
 let test_file_uri_resolution_rejects_symlink_escape () =
@@ -509,6 +642,10 @@ let () =
             test_workspace_root_initialize_stays_in_base
         ; test_case "file uri resolution is workspace scoped" `Quick
             test_file_uri_resolution_is_workspace_scoped
+        ; test_case "initialize keeps the resolved anchor" `Quick
+            test_initialize_keeps_resolved_anchor
+        ; test_case "unresolved workspace refuses the connection" `Quick
+            test_unresolved_workspace_refuses_connection
         ; test_case "file uri resolution rejects symlink escape" `Quick
             test_file_uri_resolution_rejects_symlink_escape
         ; test_case "document request resolves once" `Quick

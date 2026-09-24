@@ -460,6 +460,22 @@ describe('LspConnection', () => {
     conn.dispose()
   })
 
+  it('carries the dashboard bearer as a query token, since a WebSocket cannot send headers', () => {
+    installWebSocketMock()
+    publishLspScope({ repoId: 'masc', codebase: null, keeper: null })
+    sessionStorage.setItem('masc_bearer_token', 'tok-123')
+    try {
+      const conn = new LspConnection(() => {}, () => {})
+      conn.connect()
+      const url = new URL(mockSockets[0]!.url)
+      expect(url.searchParams.get('token')).toBe('tok-123')
+      expect(url.searchParams.get('repo_id')).toBe('masc')
+      conn.dispose()
+    } finally {
+      sessionStorage.removeItem('masc_bearer_token')
+    }
+  })
+
   // A repo-relative path prefixed with `file://` is not an absolute URI — its
   // first segment lands in the authority slot — so the server rejected the
   // document as outside its workspace and answered empty.

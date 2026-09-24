@@ -22,6 +22,7 @@ import {
   TRANSPORT_RETRY_MAX_MS,
 } from '../../config/constants'
 import { DEFAULT_LANGUAGE_ID } from './ide-language'
+import { dashboardBearerToken } from '../../api/core'
 import { ownLspDocument, ownsLspDocument, publishLspDocument, type LspDocumentConnection, type LspDocumentDiagnostics } from './ide-lsp-document-status'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -31,8 +32,9 @@ import { ownLspDocument, ownsLspDocument, publishLspDocument, type LspDocumentCo
  *
  * `codebase` declares the IDE scope, which fixes the tree the connection's
  * document paths are relative to. `repoId`/`keeper` select that tree
- * independently. Without a codebase the server takes the tree from the
- * client's `rootUri` instead.
+ * independently. Only when none of them is declared may a non-empty client
+ * `rootUri` choose the tree; this client sends none, so the server keeps the
+ * project root.
  */
 export interface LspScope {
   readonly repoId: string | null
@@ -71,7 +73,12 @@ export function lspScopeSnapshot(): LspScope {
   return currentLspScope
 }
 
-function lspScopeQuery(scope: LspScope): string {
+/**
+ * Query string for the LSP socket. The server token-gates the socket because
+ * each connection spawns language servers, and a browser WebSocket cannot set
+ * an Authorization header, so the dashboard bearer rides as `token`.
+ */
+function lspConnectionQuery(scope: LspScope, token: string | null): string {
   const params = new URLSearchParams()
   if (scope.repoId) {
     params.set('repo_id', scope.repoId)
@@ -79,6 +86,7 @@ function lspScopeQuery(scope: LspScope): string {
     params.set('keeper', scope.keeper)
   }
   if (scope.codebase) params.set('codebase', scope.codebase)
+  if (token) params.set('token', token)
   const query = params.toString()
   return query === '' ? '' : `?${query}`
 }
@@ -529,7 +537,7 @@ export class LspConnection {
     this.workspaceRoot = null
     this.clearAnalysis(this.document && languageIdFromPath(this.document.filePath) === null ? { kind: 'unsupported' } : { kind: 'connecting' })
     const wsUrl =
-      origin.replace(/^http/, 'ws') + '/api/v1/ide/lsp' + lspScopeQuery(scope)
+      origin.replace(/^http/, 'ws') + '/api/v1/ide/lsp' + lspConnectionQuery(scope, dashboardBearerToken())
     const ws = new WebSocket(wsUrl)
     this.ws = ws
 

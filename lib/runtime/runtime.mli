@@ -828,7 +828,14 @@ val save_config_text :
     [Durability_unconfirmed], because the replacement is already visible. A
     fully durable replacement returns an [Ok] receipt carrying [Durable]. Before exact-output registry bootstrap,
     the same write-stage rules apply to the runtime cache while the registry
-    remains unpublished. *)
+    remains unpublished.
+
+    Refused when the text leaves a Fusion preset seat naming a route that is
+    no declared lane and no available runtime in the text, unless that seat
+    already did not resolve in the file on disk: every run of the preset would
+    fail with [unknown_route]. So removing or renaming a
+    [\[runtime.lanes.<id>\]] table here is refused while a seat names it, as it
+    is through {!remove_runtime_lane}. *)
 
 val edit_config_text :
   ?runtime_config_path:string ->
@@ -844,8 +851,9 @@ val edit_config_text :
 val validate_config_text :
   ?runtime_config_path:string -> string -> (unit, string) result
 (** Run the raw runtime.toml save precondition — TOML parse, ordered Skill
-    source validation, config materialization, dispatch-cap validation, and
-    the [\[fusion\]] section — without writing or mutating the active
+    source validation, config materialization, dispatch-cap validation, the
+    [\[fusion\]] section, and the Fusion seats {!save_config_text} judges —
+    without writing or mutating the active
     registry. Preview endpoints call
     this so [can_save] reflects the same rejection {!save_config_text}
     enforces. Returns [Ok ()] when the text would be accepted for save;
@@ -940,7 +948,8 @@ val create_runtime_lane :
     output beyond an operator's reach. The Runtime surface marks which lanes a
     table declares. *)
 
-(** A place in runtime.toml that names a route (a lane name or a runtime id). *)
+(** A place in runtime.toml that can name a lane. [\[runtime\].media_failover]
+    and [verifier_exact] slots name runtimes only and are not here. *)
 type route_reference =
   | Keeper_assignment of string  (** [\[runtime.assignments\].<keeper>] *)
   | Default_runtime  (** [\[runtime\].default] *)
@@ -953,12 +962,14 @@ val route_reference_to_string : route_reference -> string
 (** The operator's name for the place, e.g. [\[fusion.presets.trio\].judge]. *)
 
 val route_references :
-  Runtime_schema.config -> Fusion_policy.t -> (route_reference * string) list
-(** Every route the config names, with where it names it. Keeper assignments,
-    then the default, then each Fusion preset's seats as
-    {!Fusion_policy.preset_seat_routes} counts them. Seat routes are trimmed,
-    as a Fusion run trims them before it resolves them. The lane rename and
-    remove writers read references from here. *)
+  Runtime_schema.config ->
+  (string * Fusion_policy.seat_kind * string) list ->
+  (route_reference * string) list
+(** Every place the config can name a lane, with the route it names. Keeper
+    assignments, then the default, then the Fusion seats as given, which are
+    {!Fusion_config.seat_routes_of_toml}'s (preset, seat, route). Seat routes
+    are trimmed, as a Fusion run trims them before it resolves them. The lane
+    rename and remove writers read references from here. *)
 
 val rename_runtime_lane :
   ?runtime_config_path:string ->
@@ -982,10 +993,12 @@ val rename_runtime_lane :
     [\[runtime\].default] takes the new name like an assignment does, because
     it holds a route ({!get_default_route}).
 
-    Refused while [\[fusion\]] does not load, and when the Fusion writer cannot
-    address a preset with a seat on the lane (inline [judges] tables, dotted
-    [presets.<name>.judge] keys); the raw runtime.toml endpoint still edits
-    such a file.
+    When a seat names the lane, the rename needs [\[fusion\]] to load, since
+    the seats are rewritten through the Fusion writer; it is refused while
+    [\[fusion\]] does not load, and when the writer cannot address a preset
+    with a seat on the lane (inline [judges] tables, dotted
+    [presets.<name>.judge] keys). When no seat names the lane, [\[fusion\]] is
+    only read for its seats.
 
     What the rename does not reach:
     - A Fusion run already in progress resolves each seat when it reaches it,
@@ -1004,8 +1017,12 @@ val remove_runtime_lane :
     SSOT writer. Refused while a keeper still routes through the lane id,
     naming each way it does: an entry of [\[runtime.assignments\]],
     [\[runtime\].default], which every unassigned keeper walks, or a Fusion
-    preset seat. Both writers refuse while [\[fusion\]] does not load, since
-    then its seats cannot be read. A keeper's route is read as a lane before a runtime ({!resolve_assignment}), so
+    preset seat. The seats are read without validating the presets
+    ({!Fusion_config.seat_routes_of_toml}), so an invalid preset elsewhere does
+    not block the remove; both lane writers refuse only while a [\[fusion\]]
+    value has the wrong TOML type and the seats cannot be read. Every save also
+    refuses a Fusion seat that would stop resolving ({!save_config_text}). A
+    keeper's route is read as a lane before a runtime ({!resolve_assignment}), so
     removing the lane would either fail the load or silently hand those
     keepers the runtime of the same id. Refused when the file does not declare
     the lane as its own table. *)

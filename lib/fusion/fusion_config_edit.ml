@@ -186,7 +186,8 @@ let valid_name name =
 (* Every seat must resolve now, the way a run will resolve it. A route that
    does not would fail every run with Unknown_route; saving it would only move
    the error from the settings screen to the run. The seats are the ones
-   [Runtime.route_references] reports to the lane editor. *)
+   [Fusion_policy.preset_seat_routes] counts, as the lane editor and the save
+   check count them. *)
 let check_routes (preset : Fusion_policy.preset) =
   List.fold_left
     (fun acc (_seat, route) ->

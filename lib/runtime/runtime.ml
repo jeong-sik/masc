@@ -2717,6 +2717,107 @@ let validate_fusion_change ~config_path content =
          ^ String.concat "; " (List.map Fusion_config.config_error_message errors)))
 ;;
 
+(* A place in runtime.toml that names a lane. [resolve_assignment] reads a lane
+   before a runtime of the same id, and each of these is resolved that way: a
+   keeper's route is its assignment or, without one, the default, and a Fusion
+   run resolves each seat when it reaches it. [\[runtime\].media_failover] and
+   [verifier_exact] slots name runtimes only and never reach a lane, so they
+   are not here. *)
+type route_reference =
+  | Keeper_assignment of string
+  | Default_runtime
+  | Fusion_seat of
+      { preset : string
+      ; seat : Fusion_policy.seat_kind
+      }
+
+let route_reference_to_string = function
+  | Keeper_assignment keeper_name -> Printf.sprintf "[runtime.assignments].%s" keeper_name
+  | Default_runtime -> "[runtime].default, which every keeper without an assignment walks"
+  | Fusion_seat { preset; seat } ->
+    Printf.sprintf "[fusion.presets.%s].%s" preset (Fusion_policy.seat_kind_key seat)
+;;
+
+(* The Fusion seats of [toml] that the config [validated] would not resolve,
+   read the way a run resolves them: trimmed, then a declared lane before a
+   runtime ([resolve_assignment]). [validated] is what a save would publish,
+   runtimes the catalog cannot serve already dropped, so this is the answer
+   the next run gets. *)
+let unresolved_fusion_seats ((runtimes, _, _, _, _, lanes, _, _), _, _, _) toml =
+  let resolves route =
+    Option.is_some (find_declared_lane lanes route)
+    || List.exists (fun (runtime : t) -> String.equal runtime.id route) runtimes
+  in
+  Result.map
+    (List.filter (fun (_, _, route) -> not (resolves (String.trim route))))
+    (Fusion_config.seat_routes_of_toml toml)
+;;
+
+(* A save must not leave a Fusion seat on a route the file no longer
+   declares: every run of that preset would fail with unknown_route. Every
+   writer meets the seats here -- the lane editor, the Fusion editor, the raw
+   endpoint -- so removing [\[runtime.lanes.<id>\]] by hand is refused the
+   same as through the lane editor.
+
+   A seat that already did not resolve in the file on disk is not judged, the
+   way [validate_fusion_change] leaves an unchanged [fusion] alone, so a broken
+   seat does not block an unrelated save. The file on disk is read only when
+   the new text has a seat that does not resolve; a file that cannot be read
+   or does not load counts as resolving nothing, so every such seat is judged.
+
+   Seats that cannot be read (a value of the wrong TOML type) pass here, and
+   that is not a gap: [Fusion_config.of_toml] reads every value the seat
+   reader does, so [validate_fusion_change] has already refused such a
+   [fusion] if this save changes it, and an unchanged one is the table on
+   disk. *)
+let validate_fusion_seats ~config_path ~validated content =
+  let* toml =
+    Result.map_error
+      (fun detail -> "runtime config parse failed: " ^ detail)
+      (Otoml.Parser.from_string_result content)
+  in
+  match unresolved_fusion_seats validated toml with
+  | Error _ | Ok [] -> Ok ()
+  | Ok unresolved ->
+    let on_disk =
+      match load_file_result config_path with
+      | Error _ -> []
+      | Ok text ->
+        (match
+           ( Otoml.Parser.from_string_result text
+           , parse_and_validate_config_text ~config_path text )
+         with
+         | Ok previous_toml, Ok previous ->
+           (match unresolved_fusion_seats previous previous_toml with
+            | Ok seats -> seats
+            | Error _ -> [])
+         | Error _, _ | _, Error _ -> [])
+    in
+    let newly =
+      List.fold_left
+        (fun found seat ->
+           if List.mem seat on_disk || List.mem seat found then found else found @ [ seat ])
+        []
+        unresolved
+    in
+    (match newly with
+     | [] -> Ok ()
+     | _ :: _ ->
+       Error
+         (Printf.sprintf
+            "a Fusion seat must name a declared lane or an available runtime: %s. \
+             Every run of the preset would fail with unknown_route"
+            (String.concat
+               ", "
+               (List.map
+                  (fun (preset, seat, route) ->
+                     Printf.sprintf
+                       "%s names %S"
+                       (route_reference_to_string (Fusion_seat { preset; seat }))
+                       route)
+                  newly))))
+;;
+
 (* The save precondition, shared by the writer and the preview endpoint, so a
    [can_save] preview cannot diverge from what [commit_runtime_config_text]
    enforces. Boot does not come through here: it loads through
@@ -2725,6 +2826,7 @@ let validate_fusion_change ~config_path content =
 let validate_save_text ~config_path content =
   let* validated = parse_and_validate_config_text ~config_path content in
   let* () = validate_fusion_change ~config_path content in
+  let* () = validate_fusion_seats ~config_path ~validated content in
   Ok validated
 ;;
 
@@ -3444,107 +3546,101 @@ let create_runtime_lane ?runtime_config_path ~lane_id ~runtime_ids () =
     else Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
 ;;
 
-(* Every place runtime.toml names a route. A keeper's route is its assignment
-   or, without one, the default; a Fusion seat names one too, and a run
-   resolves it the way it resolves an assignment. [resolve_assignment] reads a
-   lane before a runtime of the same id, so a lane any of these names cannot
-   be removed or renamed alone. media_failover and verifier_exact slots name
-   runtimes only and never reach a lane. *)
-type route_reference =
-  | Keeper_assignment of string
-  | Default_runtime
-  | Fusion_seat of
-      { preset : string
-      ; seat : Fusion_policy.seat_kind
-      }
-
-let route_reference_to_string = function
-  | Keeper_assignment keeper_name -> Printf.sprintf "[runtime.assignments].%s" keeper_name
-  | Default_runtime -> "[runtime].default, which every keeper without an assignment walks"
-  | Fusion_seat { preset; seat } ->
-    Printf.sprintf "[fusion.presets.%s].%s" preset (Fusion_policy.seat_kind_key seat)
-;;
-
-let route_references (config : Runtime_schema.config) (fusion : Fusion_policy.t) =
+(* Every place the config names a lane, with the route it names. The Fusion
+   seats come from [Fusion_config.seat_routes_of_toml], which reads them
+   without validating the presets. *)
+let route_references (config : Runtime_schema.config) seats =
   List.map (fun (keeper_name, target) -> Keeper_assignment keeper_name, target)
     config.keeper_assignments
   @ (match config.default_runtime_id with
      | Some id -> [ Default_runtime, id ]
      | None -> [])
-  @ List.concat_map
-      (fun validated ->
-         let preset = Fusion_policy.Validated_preset.preset validated in
-         List.map
-           (fun (seat, route) ->
-              Fusion_seat { preset = preset.name; seat }, String.trim route)
-           (Fusion_policy.preset_seat_routes preset))
-      fusion.Fusion_policy.presets
+  @ List.map
+      (fun (preset, seat, route) -> Fusion_seat { preset; seat }, String.trim route)
+      seats
 ;;
 
 (* A preset naming the lane at two panel seats is one reference to report. *)
-let lane_references config fusion ~lane_id =
+let lane_references config seats ~lane_id =
   List.fold_left
     (fun found (reference, route) ->
        if String.equal route lane_id && not (List.mem reference found)
        then found @ [ reference ]
        else found)
     []
-    (route_references config fusion)
+    (route_references config seats)
 ;;
 
-(* The seats are read from the text under the lock. A [fusion] that does not
-   load hides which seats name the lane, so a lane edit refuses rather than
-   leave them pointing at a name that is gone. *)
-let lane_fusion_policy content ~lane_id =
-  let* toml =
-    Result.map_error
-      (fun detail -> "runtime config parse failed: " ^ detail)
-      (Otoml.Parser.from_string_result content)
-  in
-  match Fusion_config.of_toml toml with
-  | Ok policy -> Ok policy
-  | Error errors ->
-    Error
-      (Printf.sprintf
-         "lane %S cannot be edited here while [fusion] does not load (%s): its \
-          seats may name the lane and cannot be read. Fix [fusion], or edit \
-          runtime.toml through POST /api/v1/runtime/config/raw"
-         lane_id
-         (String.concat "; " (List.map Fusion_config.config_error_message errors)))
+let lane_edit_toml content =
+  Result.map_error
+    (fun detail -> "runtime config parse failed: " ^ detail)
+    (Otoml.Parser.from_string_result content)
+;;
+
+(* The seats are read from the text under the lock, without validating the
+   presets: a preset that does not validate still names what it names, so an
+   error in another preset does not block a lane edit. Only a [fusion] whose
+   values have the wrong TOML type hides its seats, and then a lane edit
+   refuses rather than leave them pointing at a name that is gone. *)
+let lane_fusion_seats toml ~lane_id =
+  Fusion_config.seat_routes_of_toml toml
+  |> Result.map_error (fun error ->
+    Printf.sprintf
+      "lane %S cannot be edited while the seats of [fusion] cannot be read (%s): \
+       they may name the lane. Fix [fusion] first"
+      lane_id
+      (Fusion_config.config_error_message error))
 ;;
 
 (* A seat is a route, so a rename rewrites every preset with a seat on the
-   lane through the Fusion writer, in the same text as the header. A preset
-   the writer cannot address refuses the rename, and the refusal says the
-   lane rename is what reached it. *)
-let rename_fusion_seats text (fusion : Fusion_policy.t) references ~lane_id ~new_lane_id =
-  List.fold_left
-    (fun acc validated ->
-       let* text = acc in
-       let preset = Fusion_policy.Validated_preset.preset validated in
-       let named = function
-         | Fusion_seat { preset = name; _ } -> String.equal name preset.name
-         | Keeper_assignment _ | Default_runtime -> false
-       in
-       if not (List.exists named references)
-       then Ok text
-       else (
-         let rename route =
-           if String.equal (String.trim route) lane_id then new_lane_id else route
-         in
-         let* renamed =
-           Fusion_policy.Validated_preset.of_preset
-             (Fusion_policy.map_seat_routes rename preset)
-           |> Result.map_error (fun invalid ->
-             Printf.sprintf "preset %s %s after the rename" preset.name
-               (Fusion_policy.Validated_preset.invalid_to_string invalid))
-         in
-         Fusion_config_writer.upsert_preset text renamed
-         |> Result.map_error (fun error ->
-           Printf.sprintf "renaming lane %S rewrites a seat of preset %s, and %s"
-             lane_id preset.name (Fusion_config_writer.error_message error))))
-    (Ok text)
-    fusion.presets
+   lane through the Fusion writer, in the same text as the header. The writer
+   takes validated presets, so this needs [fusion] to load -- but only when a
+   seat names the lane; otherwise [fusion] is not read. A preset the writer
+   cannot address refuses the rename, and the refusal says the lane rename is
+   what reached it. *)
+let rename_fusion_seats text toml references ~lane_id ~new_lane_id =
+  let seat_presets =
+    List.filter_map
+      (function
+        | Fusion_seat { preset; _ } -> Some preset
+        | Keeper_assignment _ | Default_runtime -> None)
+      references
+  in
+  match seat_presets with
+  | [] -> Ok text
+  | _ :: _ ->
+    let* (fusion : Fusion_policy.t) =
+      Fusion_config.of_toml toml
+      |> Result.map_error (fun errors ->
+        Printf.sprintf
+          "renaming lane %S rewrites Fusion seats that name it, and [fusion] does not \
+           load (%s). Fix [fusion] first"
+          lane_id
+          (String.concat "; " (List.map Fusion_config.config_error_message errors)))
+    in
+    List.fold_left
+      (fun acc validated ->
+         let* text = acc in
+         let preset = Fusion_policy.Validated_preset.preset validated in
+         if not (List.mem preset.name seat_presets)
+         then Ok text
+         else (
+           let rename route =
+             if String.equal (String.trim route) lane_id then new_lane_id else route
+           in
+           let* renamed =
+             Fusion_policy.Validated_preset.of_preset
+               (Fusion_policy.map_seat_routes rename preset)
+             |> Result.map_error (fun invalid ->
+               Printf.sprintf "preset %s %s after the rename" preset.name
+                 (Fusion_policy.Validated_preset.invalid_to_string invalid))
+           in
+           Fusion_config_writer.upsert_preset text renamed
+           |> Result.map_error (fun error ->
+             Printf.sprintf "renaming lane %S rewrites a seat of preset %s, and %s"
+               lane_id preset.name (Fusion_config_writer.error_message error))))
+      (Ok text)
+      fusion.presets
 ;;
 
 (* A lane's name is its routing key: [\[runtime.assignments\]] entries,
@@ -3591,8 +3687,9 @@ let rename_runtime_lane ?runtime_config_path ~lane_id ~new_lane_id () =
                 renamed here"
                lane_id)
         | Toml_line_editor.Table_renamed renamed ->
-          let* fusion = lane_fusion_policy content ~lane_id in
-          let references = lane_references config fusion ~lane_id in
+          let* toml = lane_edit_toml content in
+          let* seats = lane_fusion_seats toml ~lane_id in
+          let references = lane_references config seats ~lane_id in
           rename_fusion_seats
             ~lane_id
             ~new_lane_id
@@ -3617,7 +3714,7 @@ let rename_runtime_lane ?runtime_config_path ~lane_id ~new_lane_id () =
                   | Fusion_seat _ -> text)
                renamed
                references)
-            fusion
+            toml
             references)
 ;;
 
@@ -3627,8 +3724,9 @@ let remove_runtime_lane ?runtime_config_path ~lane_id () =
     if not (lane_is_declared config lane_id)
     then Error (Printf.sprintf "lane %S is not declared in [runtime.lanes]" lane_id)
     else
-      let* fusion = lane_fusion_policy content ~lane_id in
-      match lane_references config fusion ~lane_id with
+      let* toml = lane_edit_toml content in
+      let* seats = lane_fusion_seats toml ~lane_id in
+      match lane_references config seats ~lane_id with
       | _ :: _ as references ->
         Error
           (Printf.sprintf

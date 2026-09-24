@@ -258,8 +258,8 @@ val run_keepalive_unified_turn :
   shared_context:Agent_core.Context.t ->
   deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
   on_deferred_runtime_consumed:(unit -> unit) ->
-  record_deferred_runtime_lane:
-    (Keeper_turn_driver.deferred_runtime_lane -> unit) ->
+  settle_deferred_runtime_lane:
+    (Keeper_turn_driver.deferred_runtime_lane option -> unit) ->
   keepalive_turn_outcome
 (** Why the last turn that ran ended before completing is no longer this
     loop's state: {!Keeper_heartbeat_loop_cycle.run_keeper_cycle} records it
@@ -385,9 +385,16 @@ module For_testing : sig
   val record_deferred_lane :
     deferred_lane_slot -> Keeper_turn_driver.deferred_runtime_lane -> unit
 
-  (** Clear the hint and its file when [expected] is still the held hint. *)
+  (** Dispatch consumed [expected]: the in-process hint is cleared when it is
+      still the held one, but its file stays until the cycle settles, so a
+      restart while the next runtime runs resumes on it. *)
   val consume_deferred_lane :
     deferred_lane_slot -> Keeper_turn_driver.deferred_runtime_lane -> unit
+
+  (** End of cycle: the suffix the cycle left behind replaces the file, or,
+      when it left none, the file of a suffix it dispatched is removed. *)
+  val settle_deferred_lane :
+    deferred_lane_slot -> Keeper_turn_driver.deferred_runtime_lane option -> unit
 
   (** The held hint when it was recorded for [assignment_id]. A hint for
       another assignment is dropped and its file removed, as a lane restart

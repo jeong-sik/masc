@@ -5023,8 +5023,21 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
           | _ -> false);
        Loop.consume_deferred_lane after restored
      | None -> Alcotest.fail "restarted heartbeat lost the deferred suffix");
+    (* Dispatch consumed the suffix and runtime.b is running; a restart now,
+       before the cycle settles, must still start from runtime.b. *)
+    (match
+       Loop.deferred_lane_for_assignment ~assignment_id:"lane.restart"
+         (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend")
+     with
+     | Some mid_run ->
+       Alcotest.(check (list string))
+         "restart while the successor runs resumes on it"
+         [ "runtime.b"; "runtime.c" ]
+         (Driver.deferred_runtime_ids mid_run)
+     | None -> Alcotest.fail "restart during the successor's run walked back to runtime.a");
+    Loop.settle_deferred_lane after None;
     Alcotest.(check bool)
-      "consumed suffix is not restored again"
+      "settled suffix is not restored again"
       true
       (Option.is_none
          (Loop.deferred_lane_for_assignment ~assignment_id:"lane.restart"

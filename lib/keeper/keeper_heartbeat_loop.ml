@@ -233,6 +233,9 @@ module Deferred_lane_slot = struct
     ; keepers_dir : string
     ; keeper_name : string
     ; hint : Keeper_turn_driver.deferred_runtime_lane option ref
+    ; dispatched : bool ref
+        (** The held hint was consumed by a dispatch whose cycle has not
+            settled yet; its file still names the suffix that dispatch runs. *)
     }
 
   let log_store_error slot ~action error =
@@ -292,7 +295,9 @@ module Deferred_lane_slot = struct
   ;;
 
   let restore ~lane_now ~base_path ~keepers_dir ~keeper_name =
-    let slot = { base_path; keepers_dir; keeper_name; hint = ref None } in
+    let slot =
+      { base_path; keepers_dir; keeper_name; hint = ref None; dispatched = ref false }
+    in
     (match Store.load ~keepers_dir ~keeper_name with
      | Ok None -> ()
      | Ok (Some (restored : Keeper_turn_driver.deferred_runtime_lane)) ->
@@ -336,12 +341,27 @@ module Deferred_lane_slot = struct
      with
      | Ok () -> ()
      | Error error -> log_store_error slot ~action:"save" error);
-    slot.hint := Some hint
+    slot.hint := Some hint;
+    slot.dispatched := false
   ;;
 
+  (* The driver consumes the hint at dispatch, before the next runtime is
+     called. The file stays until that cycle settles: a restart while B runs
+     must still start from B, not walk back to the runtime just rejected. *)
   let consume slot expected =
     if consume_deferred_runtime_lane_hint slot.hint expected
-    then clear_durable slot
+    then slot.dispatched := true
+  ;;
+
+  (* Once the cycle ends, the suffix it ran is either replaced by the one it
+     left behind or settled. *)
+  let settle slot = function
+    | Some hint -> record slot hint
+    | None ->
+      if !(slot.dispatched)
+      then (
+        clear_durable slot;
+        slot.dispatched := false)
   ;;
 
   let for_assignment slot ~assignment_id =
@@ -768,8 +788,8 @@ let run_keepalive_unified_turn
       ~(shared_context : Agent_core.Context.t)
       ~(deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option)
       ~(on_deferred_runtime_consumed : unit -> unit)
-      ~(record_deferred_runtime_lane :
-          Keeper_turn_driver.deferred_runtime_lane -> unit)
+      ~(settle_deferred_runtime_lane :
+          Keeper_turn_driver.deferred_runtime_lane option -> unit)
   : keepalive_turn_outcome
   =
     let () = match Keeper_direct_gate_continuation.reconcile ~config:ctx.config ~meta:meta_after_triage with
@@ -1090,9 +1110,7 @@ let run_keepalive_unified_turn
           in
           let run_cycle () = run_fresh_cycle () in
           let cycle_outcome = run_cycle () in
-          Option.iter
-            record_deferred_runtime_lane
-            (Cycle.deferred_runtime_lane cycle_outcome);
+          settle_deferred_runtime_lane (Cycle.deferred_runtime_lane cycle_outcome);
           cycle_outcome_ref := Some cycle_outcome;
           (* What the next turn is told about this one moved into
              [Keeper_heartbeat_loop_cycle.run_keeper_cycle]: every lane runs
@@ -1619,8 +1637,8 @@ let run_heartbeat_loop
                 ~shared_context
                 ~deferred_runtime_lane
                 ~on_deferred_runtime_consumed
-                ~record_deferred_runtime_lane:
-                  (Deferred_lane_slot.record deferred_runtime_lane_slot)
+                ~settle_deferred_runtime_lane:
+                  (Deferred_lane_slot.settle deferred_runtime_lane_slot)
             in
             Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
             turn_running := false;
@@ -1799,6 +1817,7 @@ module For_testing = struct
   let restore_deferred_lane_slot = Deferred_lane_slot.restore
   let record_deferred_lane = Deferred_lane_slot.record
   let consume_deferred_lane = Deferred_lane_slot.consume
+  let settle_deferred_lane = Deferred_lane_slot.settle
   let deferred_lane_for_assignment = Deferred_lane_slot.for_assignment
   let batch_disposition_records_continuation =
     batch_disposition_records_continuation

@@ -44,7 +44,7 @@ let pull_node
   =
   Printf.sprintf
     {|{"number":%d,"isDraft":%b,
-       "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":%s,%s
+       "reviewDecision":%s,%s
        "authored":{"nodes":[{"commit":{"parents":{"totalCount":1},"author":%s}}]},
        "head":{"nodes":[{"commit":{"statusCheckRollup":%s}}]}}|}
     number
@@ -151,7 +151,7 @@ let test_unknown_enum_is_counted () =
           ~rollup:{|{"state":"QUEUED_FOR_SOMETHING_NEW"}|} ()
       ; pull_node ~number:3 ~draft:false ~review:{|"DISMISSED_NEW"|} ~rollup:"null" ()
       ; {|{"number":4,"isDraft":false,
-          "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"MERGEABLE",
+          "reviewDecision":null,"mergeable":"MERGEABLE",
           "authored":{"nodes":[{"commit":{"parents":{"totalCount":1},"author":null}}]},
           "head":{"nodes":[{"commit":{}}]}}|}
       ]
@@ -509,7 +509,7 @@ let test_rate_limit_waits_for_reset () =
 let no_commit_node ~number =
   Printf.sprintf
     {|{"number":%d,"isDraft":false,
-       "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"UNKNOWN",
+       "reviewDecision":null,"mergeable":"UNKNOWN",
        "authored":{"nodes":[]},"head":{"nodes":[]}}|}
     number
 
@@ -574,7 +574,7 @@ let test_unknown_mergeable_or_missing_author_is_counted () =
           ()
       ; pull_node ~mergeable:"" ~number:2 ~draft:false ~review:"null" ~rollup:"null" ()
       ; {|{"number":3,"isDraft":false,
-          "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"MERGEABLE",
+          "reviewDecision":null,"mergeable":"MERGEABLE",
           "authored":{"nodes":[{"commit":{"parents":{"totalCount":1}}}]},
           "head":{"nodes":[{"commit":{"statusCheckRollup":null}}]}}|}
       ; pull_node ~author:"{}" ~number:4 ~draft:false ~review:"null" ~rollup:"null" ()
@@ -599,7 +599,7 @@ let authored_node ~parents ~author =
 let merge_head_node ~number ~authored ~head_rollup =
   Printf.sprintf
     {|{"number":%d,"isDraft":false,
-       "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"MERGEABLE",
+       "reviewDecision":null,"mergeable":"MERGEABLE",
        "authored":{"nodes":[%s]},
        "head":{"nodes":[{"commit":{"statusCheckRollup":%s}}]}}|}
     number
@@ -700,7 +700,6 @@ let pull ~number ~author =
   ; review = Pulls.Review_none
   ; mergeable = Pulls.Mergeable
   ; author
-  ; updated_at = now ()
   }
 
 let test_join_is_exact () =
@@ -760,7 +759,7 @@ let test_json_shape () =
   Alcotest.(check (list string))
     "row keys"
     [ "repo_slug"; "number"; "draft"; "checks"; "review"; "mergeable"
-    ; "author"; "keeper"; "updated_at" ]
+    ; "author"; "keeper" ]
     (keys (List.hd rows))
 
 (* A Keeper directory that cannot be listed: the snapshot says so instead of

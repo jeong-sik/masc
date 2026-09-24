@@ -19,7 +19,6 @@ let pull ?(checks = Server.Checks_passing) ?(review = Server.Review_waiting)
   ; review
   ; mergeable
   ; author
-  ; updated_at = 1_790_000_000.
   }
 
 let entry repository_id pulls : Server.repository_entry =

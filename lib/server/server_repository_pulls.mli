@@ -50,7 +50,6 @@ type pull_request =
           is skipped because its author brought the base in. [None] when
           that window holds no such commit, or GitHub gives its author or
           name as [null]. *)
-  ; updated_at : float
   }
 
 type failure =

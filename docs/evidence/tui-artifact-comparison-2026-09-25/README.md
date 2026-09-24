@@ -39,3 +39,7 @@ was not met. These are three samples per action and binary, with Python/PTY
 and OS scheduling included. They establish this fixture comparison only;
 physical display latency, live workspace behavior, sustained repeated-input
 CPU use, the latest paced scheduler and server performance remain unproven.
+
+## Later integrated candidate
+
+The [candidate2 comparison](../tui-artifact-comparison-candidate2-2026-09-25/README.md) measures the latest paced scheduler and retains internal frame histograms. Its successive-input results remain above target and must not be replaced with the earlier immediate-input measurements in this directory.

@@ -35,6 +35,9 @@ merged or deployed behavior claim.
 | Board reaction summary | `reacted` and `has_reacted` carried the same viewer boolean through the server, Dashboard normalizer, and UI type. | #38842 keeps `reacted`; the producer test requires the alias key to be absent. |
 | Keeper status and Dashboard | `trace_history_count` and `handoff_count_total` were both `List.length m.runtime.trace_history`. | #38843 keeps `handoff_count_total` for KPI and briefing readers. |
 | Keeper model label | `last_model_used_label` and `active_model_label` were populated from the same last runtime attempt, or both null. | #38844 keeps `active_model_label` and removes the duplicate producer and Dashboard fallback. |
+| Fusion decision journal | New rows stored a generated `notes` string that repeated `decision`, `choice`, and `reason`. | #38896 derives display text at the Dashboard boundary while keeping independent older notes readable. Its exact-head CI passed; it remains a Draft PR. |
+| Dashboard cached surface | Attempt, success, and error instants were each held as both Unix time and ISO text, sampled by separate clock reads. | #38900 stores each instant once and derives the existing ISO wire fields. Its exact-head CI passed; it remains a Draft PR. |
+| Dashboard task claim status | Two helpers inferred `no_eligible`, `no_unclaimed`, and `error` from English `result` prefixes even though the claim tool emits `typed_outcome`. | #38903 classifies the claim from typed data, uses a recorded failed tool call for untyped errors, and removes the second classifier. Its exact-head CI is pending. |
 
 `handoff_count_total` still reports the number of prior trace IDs. This audit
 does not establish that it counts executed handoffs; that metric meaning needs
@@ -55,6 +58,15 @@ the identical alias without changing that existing meaning.
 - `Keeper_runtime_attempt` maps provider `detail` into the HTTP client's
   `message` field at a type boundary. The source value is transferred, not
   stored twice in one error.
+- Keeper stream terminal `body` and queued failure `detail` can differ: when
+  transcript persistence fails, the stream retains the original turn error
+  while the queued outcome names the persistence failure. Collapsing them
+  would erase one cause.
+- `Tool_result.Failed` carries `message` and `data` for different consumers.
+  Typed failures can provide structured `data`; the strict composition result
+  reader requires both wire fields. The opaque-string constructors still copy
+  their message into `data`, so that narrower duplicate remains a contract
+  change to investigate rather than a safe field deletion.
 
 ## Remaining audit areas
 
@@ -64,10 +76,8 @@ the identical alias without changing that existing meaning.
   status word.
 - Wire records with both code/reason and detail/message: check the producer
   and decoder before changing any schema.
-- `Fusion_decision` writes `notes` by concatenating its stored `decision`,
-  `choice`, and `reason`. Its strict reader requires `notes`, and Task history
-  displays that field; removing only the write would make existing decisions
-  unreadable. This needs a storage and read-projection change together.
+- The Draft PRs above need their remaining CI, review, and merge/deployment
+  boundaries checked before any source change is claimed as live behavior.
 - Health version aliases need consumer and semantic review before collapsing
   them: equal source strings alone do not prove that their fields have the
   same meaning.

@@ -84,7 +84,7 @@ Keeper에 보이는 이름은 CamelCase이고, MCP 등록 이름은 `masc_browse
 
 `BrowserRead`의 기본값은 `mode="text"`, `format="text"`, Unicode code point 50,000개입니다. `maxChars`는 최대 100,000이며 결과의 `truncated`를 확인합니다. `mode="elements"`는 레이블과 관측한 CSS selector를 포함해 보이는 컨트롤을 최대 200개 반환합니다. `format="image"`에는 명시적인 `tabId`가 필요하며, Keeper 호출은 이미지 분석에 사용할 영속 artifact handle을 반환합니다. 텍스트와 요소 읽기는 현재 렌더된 페이지 기준이므로 숨겨지거나 가상 스크롤 뒤에 있는 모든 항목을 포함하지 않습니다.
 
-`BrowserInstruct`는 `action`(`act`·`observe`·`extract`), 문장 `instruction`(act와 extract에는 필수), `BrowserTabs lane="stagehand"`가 준 `tabId`를 받습니다. extract에는 돌려받을 데이터 모양을 JSON Schema 문자열로 `schema`에 줄 수 있습니다. 결과는 Stagehand의 `data`와 `metadata`입니다. act는 페이지를 바꿀 수 있으므로 뒤에 읽거나 캡처해서 확인하며, 실패한 act도 이미 동작했을 수 있습니다. observe와 extract는 읽기만 합니다.
+`BrowserInstruct`는 `action`(`act`·`observe`·`extract`), 문장 `instruction`(act와 extract에는 필수), `BrowserTabs lane="stagehand"`가 준 `tabId`를 받습니다. extract에는 돌려받을 데이터 모양을 JSON Schema 문자열로 `schema`에 줄 수 있습니다. 결과는 Stagehand의 `data`와 `metadata`입니다. act는 페이지를 바꿀 수 있으므로 뒤에 Stagehand `observe`나 `extract`로 확인하며, 실패한 act도 이미 동작했을 수 있습니다. observe와 extract는 읽기만 합니다.
 
 `BrowserInteract`의 click/fill과 `BrowserAct`의 요소 조작에는 관측한 selector를 사용하며, 정확히 하나의 요소와 일치해야 합니다. `BrowserInteract`의 `expectedUrl`에 직전에 읽은 URL을 넣으면 중간에 페이지가 이동한 경우 거부합니다. fill은 페이지 이벤트를 발생시키지만 자체적으로 Enter를 누르거나 submit하지 않습니다. 오류가 발생한 경우도 포함해 조작 후에는 페이지를 읽거나 캡처한 뒤 재시도 여부를 결정합니다.
 

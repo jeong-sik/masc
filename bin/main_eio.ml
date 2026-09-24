@@ -3335,7 +3335,9 @@ let sandbox_image_promote ~base_path ~builder ~store ~name ~reference =
   in
   let* path =
     sandbox_image_change_catalog ~base_path (fun catalog ->
-      Keeper_sandbox_image_catalog.promote catalog ~name ~store ~reference ~digest)
+      Keeper_sandbox_image_catalog.promote catalog ~name ~store ~reference ~digest
+      |> Result.map_error (fun error ->
+           "sandbox-image: " ^ Keeper_sandbox_image_catalog.change_error_to_string error))
   in
   Ok
     (Printf.sprintf "%s on %s is now %s (%s), recorded in %s." name
@@ -3376,14 +3378,13 @@ let sandbox_image_ensure_exit ~base_path runtime =
      let build_and_promote () =
        let built_at = Unix.gettimeofday () in
        let tag = Keeper_sandbox_image_version.tag ~built_at recipe in
-       let version = Keeper_sandbox_image_version.version ~built_at recipe in
        let* () =
          match sandbox_image_tag_presence ~command:builder.build_command ~tag with
          (* The same recipe in the same minute: an earlier setup built it and
             did not get to promote it. *)
          | Tag_present -> Ok ()
          | Tag_absent ->
-           let labels = Keeper_sandbox_image_version.labels ~version ~built_at recipe in
+           let labels = Keeper_sandbox_image_version.labels ~built_at recipe in
            if sandbox_image_build ~builder ~recipe ~tag ~labels = Cmd.Exit.ok then Ok ()
            else Error (Printf.sprintf "sandbox-image: building %s failed, so nothing was promoted." tag)
          | Store_unanswered detail ->

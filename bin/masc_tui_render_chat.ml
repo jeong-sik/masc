@@ -822,32 +822,30 @@ let keeper_message_identity ~max_cells state keeper_name =
              Printf.sprintf "%s%s \xc2\xb7 %s \xc2\xb7 " status Ansi.dim
                (Tui_decode.keeper_phase_to_string row.kr_phase)
            in
-           (* What the turn has spent so far and why the provider stopped
-              writing, in the same clause shape as the rest of the row. It is
-              an addition to this row, never a claim on it: it is drawn whole
-              or not at all, so it can neither cut the runtime id nor arrive
-              as a half-written number that reads as a smaller bill than the
-              real one, nor as a stop reason cut down to another word. *)
-           let usage_clause =
-             match
-               Keeper_chat_transcript.stream_details_text ~keeper_name
-                 (Option.map (fun live -> live.tl_transcript) state.msg_live)
-             with
-             | None -> ""
-             | Some text -> " \xc2\xb7 " ^ text
+           (* What the answer now streaming has spent and why the provider
+              stopped writing, in the same clause shape as the rest of the
+              row. It is an addition to this row, never a claim on it: it is
+              drawn whole or not at all, so it can neither cut the runtime id
+              nor arrive as a half-written number that reads as a smaller bill
+              than the real one, nor as a stop reason cut down to another
+              word. A row with room for the counters but not for both keeps
+              the counters: the newer fact must not take away the one the
+              screen was already showing. *)
+           let transcript =
+             Option.map (fun live -> live.tl_transcript) state.msg_live
            in
            let prefix_width = Message_layout.display_width prefix in
            if prefix_width >= max_cells then
              fit_width (prefix ^ runtime_id ^ Ansi.reset) max_cells
            else
              let room = max_cells - prefix_width in
-             let both =
-               Message_layout.display_width runtime_id
-               + Message_layout.display_width usage_clause
-             in
-             if usage_clause <> "" && both <= room then
-               prefix ^ runtime_id ^ usage_clause ^ Ansi.reset
-             else prefix ^ fit_runtime_id room runtime_id ^ Ansi.reset)
+             let id_width = Message_layout.display_width runtime_id in
+             (match
+                Keeper_chat_transcript.stream_details_within ~keeper_name
+                  ~room:(room - id_width) transcript
+              with
+              | Some clause -> prefix ^ runtime_id ^ clause ^ Ansi.reset
+              | None -> prefix ^ fit_runtime_id room runtime_id ^ Ansi.reset))
 
 
 (** Render message input/conversation view *)

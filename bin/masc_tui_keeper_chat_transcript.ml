@@ -334,17 +334,14 @@ let runtime_identity_text ~keeper_name ~configured_runtime transcript =
      | None, None -> configured)
   | Some _ | None -> configured
 
-(* What the request now streaming has spent so far and why the provider
-   stopped writing, in the clause shape the rest of this screen uses. The
-   counters are that request's running total, not the turn's: a turn that
-   calls tools asks several times and each answer counts from zero. Only
-   counters the provider reported appear, and each is written out in full: a
-   reader comparing this against a bill needs the digits, not a rounded
-   stand-in. The stop reason is drawn whenever one was reported, [end_turn]
-   included — the screen keeps no list of "ordinary" reasons to hide, because
-   such a list goes stale the day a provider adds one. [None] when nothing was
-   reported, so the row stays as it was instead of gaining an empty label. *)
-let stream_details_text ~keeper_name transcript =
+(* What the request now streaming has spent so far, in the clause shape the
+   rest of this screen uses. It is that request's running total, not the
+   turn's: a turn that calls tools asks several times and each answer counts
+   from zero. Only counters the provider reported appear, and each is written
+   out in full: a reader comparing this against a bill needs the digits, not a
+   rounded stand-in. [None] when nothing was reported, so the row stays as it
+   was instead of gaining an empty label. *)
+let stream_tokens_text ~keeper_name transcript =
   let tokens_clause usage =
     match usage with
     | None -> None
@@ -367,10 +364,24 @@ let stream_details_text ~keeper_name transcript =
   in
   match transcript with
   | Some t when String.equal t.keeper_name keeper_name ->
+    tokens_clause t.observed_usage
+  | Some _ | None -> None
+
+(* The counters and why the provider stopped writing, joined the way the row
+   joins clauses. The reason is drawn whenever one was reported, [end_turn]
+   included — the screen keeps no list of "ordinary" reasons to hide, because
+   such a list goes stale the day a provider adds one. The caller draws a
+   clause whole or not at all and the two together do not fit every frame, so
+   the tokens keep their own reading above: a row too narrow for both keeps
+   the counters it was already drawing rather than losing them to the newer
+   fact. *)
+let stream_details_text ~keeper_name transcript =
+  match transcript with
+  | Some t when String.equal t.keeper_name keeper_name ->
     let parts =
       List.filter_map
         (fun clause -> clause)
-        [ tokens_clause t.observed_usage
+        [ stream_tokens_text ~keeper_name transcript
         ; Option.map
             (fun reason -> "stopped: " ^ safe_line reason)
             t.observed_stop_reason
@@ -380,6 +391,23 @@ let stream_details_text ~keeper_name transcript =
      | [] -> None
      | parts -> Some (String.concat " · " parts))
   | Some _ | None -> None
+
+(* The clause a row draws beside the runtime id when it has [room] cells left,
+   separator included. A clause is drawn whole or not at all -- a half-written
+   number reads as a smaller bill than the real one, and a cut stop reason
+   reads as another word -- so a row that cannot hold both facts falls back to
+   the counters alone rather than to nothing: the newer fact must not take
+   away the one the screen was already showing. [None] when not even the
+   counters fit, and the row is what it was before any of this was measured. *)
+let stream_details_within ~keeper_name ~room transcript =
+  let clause text = " \xc2\xb7 " ^ text in
+  List.find_opt
+    (fun text -> Masc_tui_message_layout.display_width text <= room)
+    (List.filter_map
+       (fun text -> Option.map clause text)
+       [ stream_details_text ~keeper_name transcript
+       ; stream_tokens_text ~keeper_name transcript
+       ])
 
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
    between closes it. Coalescing here rather than at draw time keeps the trail

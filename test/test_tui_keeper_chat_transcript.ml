@@ -1514,6 +1514,50 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
     ];
   check (option string) "a new attempt starts from no counters" None (usage (Some t))
 
+(* The stop reason arrived after the counters were already on the header, so a
+   frame that had room for the counters and not for both must keep drawing the
+   counters. Losing them would be a regression against the row as it shipped,
+   and the narrow frames are exactly where a reader has least to go on. *)
+let test_a_narrow_row_keeps_the_counters_it_was_drawing () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Runtime_attempt_started
+        { runtime_id = Some "observed-glm"; attempt_index = Some 0 }
+    ; (let counters ?stop_reason usage =
+         Live.Stream_details { usage = Some usage; stop_reason }
+       in
+       counters ~stop_reason:"max_tokens"
+         { input_tokens = Some 1200
+         ; output_tokens = Some 900
+         ; cache_read_input_tokens = Some 4096
+         ; cache_creation_input_tokens = None
+         })
+    ];
+  let cells text = Masc_tui_message_layout.display_width (" \xc2\xb7 " ^ text) in
+  let tokens = "tokens: in 1200 \xc2\xb7 out 900 \xc2\xb7 cache read 4096" in
+  let both = tokens ^ " \xc2\xb7 stopped: max_tokens" in
+  let within room =
+    Transcript.stream_details_within ~keeper_name:"keeper.one" ~room (Some t)
+  in
+  check (option string) "a frame with room for both draws both"
+    (Some (" \xc2\xb7 " ^ both))
+    (within (cells both));
+  (* The dividing width: one cell short of both, and only there does the
+     fallback decide anything. Without it the row draws nothing here. *)
+  check (option string) "one cell short of both keeps the counters"
+    (Some (" \xc2\xb7 " ^ tokens))
+    (within (cells both - 1));
+  check (option string) "and so does a frame with room for the counters alone"
+    (Some (" \xc2\xb7 " ^ tokens))
+    (within (cells tokens));
+  check (option string) "below that the row is what it was before" None
+    (within (cells tokens - 1));
+  check (option string) "a room of nothing claims nothing" None (within 0);
+  check (option string) "another keeper's transcript claims nothing" None
+    (Transcript.stream_details_within ~keeper_name:"keeper.other"
+       ~room:(cells both) (Some t))
+
 let test_new_attempt_does_not_inherit_previous_runtime () =
   List.iter (fun attempt_index ->
     let t = fresh () in
@@ -2847,6 +2891,8 @@ let () =
             test_the_row_names_the_model_phase_between_tool_calls
         ; test_case "header separates configured and observed runtimes" `Quick
             test_runtime_identity_separates_configured_and_observed
+        ; test_case "a narrow row keeps the counters it was drawing" `Quick
+            test_a_narrow_row_keeps_the_counters_it_was_drawing
         ; test_case "the turn reports the tokens it has spent" `Quick
             test_the_turn_reports_the_tokens_it_has_spent
         ; test_case "new attempt does not inherit previous runtime" `Quick

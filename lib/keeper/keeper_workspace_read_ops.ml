@@ -40,7 +40,7 @@ type read_target_result =
   | Read_target of string
   | Declared_read_target of string
     (* An endpoint path under the endpoint's declared roots (#38593). *)
-  | Read_target_error of string
+  | Read_target_error of Keeper_alerting_path.path_refusal
 
 let try_handle_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -53,8 +53,9 @@ let try_handle_with_outcome
   let containment_check target =
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target
   in
-  let path_error e =
+  let path_error ~class_ e =
     Keeper_tool_execution.failure
+      ~class_
       (error_json
          ~fields:[ "ok", `Bool false; "op", `String op; "path", `String raw_path ]
          e)
@@ -84,7 +85,9 @@ let try_handle_with_outcome
        with
        | Ok (Some endpoint_path) -> Declared_read_target endpoint_path
        | Ok None -> Read_target_error refusal
-       | Error e -> Read_target_error e)
+       | Error endpoint_error ->
+         Read_target_error
+           (Keeper_alerting_path.endpoint_unresolved ~tree_refusal:refusal ~endpoint_error))
   in
   (* TEL-OK: read-op adapter delegates to Keeper_tooling.Execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)
@@ -237,7 +240,8 @@ let try_handle_with_outcome
                   else Keeper_tool_execution.failure (Yojson.Safe.to_string payload))
            in
            match read_target () with
-           | Read_target_error e -> path_error e
+           | Read_target_error refusal ->
+             path_error ~class_:refusal.Keeper_alerting_path.failure_class refusal.message
            (* A declared endpoint path names the endpoint's file, so it is
               searched only there; the host rg below never sees one. *)
            | Declared_read_target target -> rg_in_sandbox target
@@ -246,7 +250,9 @@ let try_handle_with_outcome
            else
              let rg_available = Keeper_tool_execute_path.shell_command_available "rg" in
              if not rg_available then
-               path_error "rg executable not found; Grep requires rg"
+               path_error
+                 ~class_:Tool_result.Dependency_unavailable
+                 "rg executable not found; Grep requires rg"
              else
                let argv =
                  [ "-n"; "-m"; string_of_int limit ]
@@ -261,7 +267,9 @@ let try_handle_with_outcome
                in
                (match Masc_exec.Exec_program.of_string "rg" with
                 | Error (`Unknown executable) ->
-                  path_error (Printf.sprintf "invalid executable: %S" executable)
+                  path_error
+                    ~class_:Tool_result.Runtime_failure
+                    (Printf.sprintf "invalid executable: %S" executable)
                 | Ok bin ->
                   let ir = Keeper_tooling.Execute_shell_ir.simple_bin bin argv in
                   run_host_shell_ir

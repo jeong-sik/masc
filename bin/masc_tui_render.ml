@@ -854,6 +854,12 @@ let render_overview (state : state) =
         Printf.sprintf " · %s%d done 24h%s" (Theme.ok ())
           flow.Masc_tui_task_flow.recent.completed Ansi.reset
   in
+  (* The selection the pane's rows are windowed around. Read here because the
+     title above them says how many rows that window leaves out. *)
+  let task_selection =
+    Overview_tasks.selected_index state.tasks
+      ~selected:(Overview_tasks.selection state.task_focus)
+  in
   let task_header =
     (* A backlog with nothing open is when the completions are the whole
        story, so the empty header keeps them. *)
@@ -884,8 +890,22 @@ let render_overview (state : state) =
             | Claimed _ -> true
             | Todo | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ -> false)
       in
-      Printf.sprintf " %sTasks%s (%s%d in progress%s · %s%d awaiting%s · %s%d claimed%s%s)"
-        Ansi.bold Ansi.reset
+      (* How many held rows this height leaves out, beside the name the way
+         the Team title above carries its own. It was a line under the rows
+         until the pane was squeezed to one: a line costs a row, and that row
+         was spent on a task, so the pane drew one of twenty-three and said
+         nothing about the other twenty-two. The title is drawn whatever the
+         height. *)
+      let held_back =
+        Overview_tasks.held_back ~height:row_budget.task_rows
+          ~selected:task_selection state.tasks
+          (Overview_tasks.backlog state.tasks_domain)
+      in
+      let window =
+        if held_back > 0 then Printf.sprintf " +%d more" held_back else ""
+      in
+      Printf.sprintf " %sTasks%s%s (%s%d in progress%s · %s%d awaiting%s · %s%d claimed%s%s)"
+        Ansi.bold Ansi.reset window
         (Theme.info ()) in_progress_c Ansi.reset
         (Theme.warn ()) awaiting_c Ansi.reset
         (Theme.info ()) claimed_c Ansi.reset
@@ -920,10 +940,7 @@ let render_overview (state : state) =
        [Overview_tasks.rows], so a poll that drops a task above it cannot
        move the highlight onto another task. *)
     let now = Unix.gettimeofday () in
-    let selected =
-      Overview_tasks.selected_index state.tasks
-        ~selected:(Overview_tasks.selection state.task_focus)
-    in
+    let selected = task_selection in
     (* An unread or failed backlog has said so above; "no task in progress"
        would be a reading it never made. *)
     let lines =
@@ -940,8 +957,7 @@ let render_overview (state : state) =
               Some
                 (Overview_tasks.age_text ~age_text:keeper_lane_idle_text ~now
                    (Overview_tasks.held_since task))
-          | Overview_tasks.More_active _ | Overview_tasks.Nothing_active
-          | Overview_tasks.Todo_backlog _ ->
+          | Overview_tasks.Nothing_active | Overview_tasks.Todo_backlog _ ->
               None)
         lines
     in
@@ -971,8 +987,7 @@ let render_overview (state : state) =
             then
               box_line_selected buf cols (Masc_tui_theme.strip_sgr ("> " ^ row))
             else box_line buf cols ("  " ^ row)
-        | Overview_tasks.More_active _ | Overview_tasks.Nothing_active
-        | Overview_tasks.Todo_backlog _ ->
+        | Overview_tasks.Nothing_active | Overview_tasks.Todo_backlog _ ->
             Option.iter
               (fun text -> box_line buf cols (Ansi.dim ^ "  " ^ text ^ Ansi.reset))
               (Overview_tasks.summary_text ~age_text:keeper_lane_idle_text ~now

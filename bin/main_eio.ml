@@ -3262,6 +3262,10 @@ let sandbox_image_store = function
   | None -> Keeper_sandbox_image_catalog.Docker_daemon
   | Some backend -> Keeper_sandbox_image_catalog.Microvm backend
 
+(* Only stdout is taken; the store's stderr stays on the operator's terminal.
+   Unlike the presence probe, whose failure is an expected answer, a failed
+   digest read is a real error, and the store's own words for it ("no such
+   image") are the most direct explanation. *)
 let sandbox_image_read_stdout argv =
   match argv with
   | [] -> Error "no image command resolved"

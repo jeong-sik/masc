@@ -30,11 +30,15 @@ type live_answer =
       (** No machine, or a [since] that still names the current mark
           ([state] ["unchanged"]). *)
   | Needs_locked_read
-      (** The mark moved or no [since] was given: the frame has to be copied
-          under the machine lock. *)
+      (** The mark moved, no [since] was given, or the machine is running:
+          the frame has to be copied under the machine lock. *)
+
+val dos_answer_from_publication :
+  since:since option -> Dos_lane.published_state -> live_answer
+(** A running DOS machine always needs a locked read, even when its last
+    stable mark equals [since]. *)
 
 val live_from_published_mark : screen_source -> since:since option -> live_answer
 (** The first step of [GET /api/v1/lane-addons/live]. It reads the machine's
-    published mark without taking the machine lock and never suspends, so a
-    spectator whose [since] is current is answered while a run holds the
-    lock. *)
+    published state without taking the machine lock and never suspends.
+    [Running] goes to the locked read to observe the completed run. *)

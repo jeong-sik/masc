@@ -110,20 +110,24 @@ type change_mark = { count : int; incarnation : string }
    the new machine, an eject marks when it drops it, and nothing resets the
    count, so one value never names two screens while the server runs.
 
-   [published] is the same count with the incarnation of [!state], or [None]
-   with no machine. It is set only here, under [lock], every time either
-   half changes, so a spectator whose [since] still matches is answered
-   without waiting for a run that holds the lock. *)
+   [published] also records when a run holds the lock. A spectator may answer
+   unchanged from a Stable mark, but a Running mark must wait for the final
+   frame even when its count matches [since]. *)
 let change_count = ref 0
-let published : change_mark option Atomic.t = Atomic.make None
+type published_state = No_screen | Stable of change_mark | Running of change_mark
+let published : published_state Atomic.t = Atomic.make No_screen
 
-let mark_change () =
-  incr change_count;
+let publish make =
   Atomic.set published
-    (Option.map (fun (st : machine) -> { count = !change_count; incarnation = st.incarnation }) !state)
+    (match !state with
+     | None -> No_screen
+     | Some st -> make { count = !change_count; incarnation = st.incarnation })
 ;;
 
-let current_mark () = Atomic.get published
+let publish_stable () = publish (fun mark -> Stable mark)
+let publish_running () = publish (fun mark -> Running mark)
+let mark_change () = incr change_count; publish_stable ()
+let current_publication () = Atomic.get published
 
 let with_machine f =
   locked (fun () ->
@@ -146,6 +150,7 @@ let with_machine f =
    raises rather than misbehave quietly), or the ledger file will not take a
    line. Both come back as errors, not exceptions out of the tool. *)
 let running f =
+  publish_running ();
   let result =
     match f () with
     | result -> result
@@ -158,7 +163,7 @@ let running f =
   in
   (match result with
    | Ok _ | Error (Unreadable _ | Guest_fault _) -> mark_change ()
-   | Error (No_machine | Invalid_request _ | Held_by _) -> ());
+   | Error (No_machine | Invalid_request _ | Held_by _) -> publish_stable ());
   result
 ;;
 

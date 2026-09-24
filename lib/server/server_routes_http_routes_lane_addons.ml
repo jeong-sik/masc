@@ -180,10 +180,9 @@ let screen_json ~width ~height ~rgb =
 
 type live_answer = Answered of Yojson.Safe.t | Needs_locked_read
 
-(* The lock-free half of a live read. [current] is the machine's published
-   mark, read without its lock. No machine and a [since] that still names it
-   are answered here, on the request fiber, with no systhread; only a mark
-   that moved needs the locked read, which runs in a systhread. *)
+(* The lock-free half of a live read. A stable matching mark answers on the
+   request fiber. A running DOS machine needs the locked read even when its
+   last stable mark matches: its pixels may be changing. *)
 let answer_from_mark source ~since ~current =
   match current, since with
   | None, (Some _ | None) -> Answered (no_machine_json source)
@@ -192,16 +191,20 @@ let answer_from_mark source ~since ~current =
       Answered (`Assoc (marked_json source "unchanged" ~count ~incarnation))
   | Some _, (Some _ | None) -> Needs_locked_read
 
+let dos_answer_from_publication ~since = function
+  | Dos_lane.No_screen -> answer_from_mark Dos_screen ~since ~current:None
+  | Dos_lane.Stable { count; incarnation } ->
+      answer_from_mark Dos_screen ~since ~current:(Some (count, incarnation))
+  | Dos_lane.Running _ -> Needs_locked_read
+
 let live_from_published_mark source ~since =
-  let current =
-    match source with
-    | Msx_screen ->
+  match source with
+  | Msx_screen ->
+      let current =
         Option.map (fun { Msx_lane.count; incarnation } -> (count, incarnation))
-          (Msx_lane.current_mark ())
-    | Dos_screen ->
-        Option.map (fun { Dos_lane.count; incarnation } -> (count, incarnation))
-          (Dos_lane.current_mark ()) in
-  answer_from_mark source ~since ~current
+          (Msx_lane.current_mark ()) in
+      answer_from_mark source ~since ~current
+  | Dos_screen -> dos_answer_from_publication ~since (Dos_lane.current_publication ())
 
 (* The locked half: the lane compares again and copies under one hold, so a
    Changed mark always names its pixels. It writes nothing. *)

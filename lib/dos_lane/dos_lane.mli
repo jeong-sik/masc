@@ -201,28 +201,24 @@ val capture_with_identity : unit -> (identified_capture, error) result
 
 type change_mark = {
   count : int;
-      (** The machine change counter. Every run attempt raises it before it
-          touches the machine: {!step}, {!press}, {!type_text}, {!click}, and
-          a run that faults at its first instruction too. It is not
-          [steps], which a fault leaves where it was. {!load} raises it once
-          the new machine is installed, before its boot run, {!eject} once
-          the machine is gone. A call refused before it touches the
-          machine ([Held_by], [Invalid_request]) and {!pass} leave it.
-          Nothing resets it, so a value never names two screens while the
-          server runs; a restarted server counts from 0 again, which is why
-          {!live} answers [Unchanged] only when the incarnation matches
-          too. *)
+      (** The machine change counter. A completed run raises it even when
+          the guest faults before [steps] moves. {!load} also raises it when
+          installing a new machine, and {!eject} when removing it. Refused
+          calls and {!pass} leave it alone. Nothing resets it in this process;
+          after a restart {!live} also compares the incarnation. *)
   incarnation : string;  (** as in {!identified_capture} *)
 }
 
-val current_mark : unit -> change_mark option
-(** The current count and incarnation, [None] with no machine, read without
-    the machine lock and without blocking: every call that moves either half
-    publishes the new mark before it lets go of the lock. A spectator whose
-    [since] equals this has nothing new to read and needs neither the lock
-    nor a systhread. A run publishes its new mark before it touches the
-    machine, so this never matches a [since] whose pixels a running call is
-    changing; reading those pixels then waits for the call in {!live}. *)
+type published_state =
+  | No_screen
+  | Stable of change_mark
+  | Running of change_mark
+
+val current_publication : unit -> published_state
+(** An atomic, lock-free read. [Running] is published before a run can mutate
+    the guest; a spectator must then use {!live} on a systhread and wait for
+    the final frame. [Stable mark] permits an immediate unchanged answer for
+    the same mark. A refused call restores [Stable] without raising the count. *)
 
 type live =
   | Nothing_loaded  (** no machine: nothing to watch *)
@@ -236,8 +232,8 @@ val live : since:change_mark option -> live
     the frame under one hold of the machine lock, so a [Changed] mark always
     names its pixels. Never runs the guest or writes anything. A run can hold
     the lock for a whole call (up to {!max_steps_per_call} instructions), so
-    an Eio caller compares [since] with {!current_mark} first and runs this,
-    in [Eio_unix.run_in_systhread], only when they differ. *)
+    an Eio caller uses {!current_publication} first and runs this in
+    [Eio_unix.run_in_systhread] when it sees [Running] or a different mark. *)
 
 val entry_json : entry -> Yojson.Safe.t
 (** One ledger line: [{"step", "who", "key"}], the shape written to

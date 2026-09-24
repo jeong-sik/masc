@@ -87,27 +87,11 @@ type route = Automation_route | Live_route of client_id option | Stagehand_route
 이름을 `chromium` 이 아니라 `stagehand` 로 둔다. 동사에 답하는 것이 Stagehand 런타임이기 때문이다.
 Stagehand 없이 Chromium 만 모는 target 은 이 RFC 에 없다.
 
-variant 에 생성자를 더하면 컴파일러가 match 하는 곳을 짚는다.
-하지만 lane 이름을 문자열로 읽는 곳은 컴파일러가 못 본다. 지금 그런 곳이 여러 군데다.
-
-| 위치 | 하는 일 |
-|---|---|
-| `lib/tool_misc_browser_lane.ml:37-40` `route_of` | 도구 입력 `lane` |
-| `lib/tool_misc_browser_lane.ml:311` | `BrowserAct` 에 `lane` 이 없으면 `"automation"` 을 채운다 |
-| `lib/browser_surface.ml:16-19` | Tabs·Read·Interact 결과의 source |
-| `lib/browser_observation.ml:44-47` | scene 보관. 모르는 값이면 `retain_read_result` 가 실패로 끝난다 |
-| `lib/browser_screenshot.ml:34` | 스크린샷 source |
-| `lib/lane_addon/lane_addon_sources.ml:51-56` | lane addon 이 고르는 브라우저 |
-| `bin/masc_tui_types.ml:4200-4202` | TUI source |
-| `config/tools/masc_browser_{tabs,interact,read,act}.toml` | `lane` enum |
-
-그래서 target 을 더하기 전에 lane 이름을 읽는 곳을 하나로 모은다 (§7 2번).
-자리마다 client id 규칙이 다르다. live 에 client id 가 꼭 있어야 하는 곳도 있고, 없어도 되는 곳도 있다.
-그래서 공유하는 것은 lane 이름뿐이다.
-`Browser_lane.Lane_name` 에 `type t = Live | Automation`, `of_wire`, `to_wire` 를 두고,
-위 자리는 이 타입 위에서 `_ ->` 없이 match 한다. 이름이 하나 늘면 컴파일러가 자리마다 짚는다.
-도구 TOML 의 `lane` enum 은 테스트가 `Lane_name.of_wire` 로 읽어 본다.
-이 단계는 동작을 바꾸지 않는다.
+#38664 에서 도구 입력, source, observation, screenshot, lane addon 의 lane 이름을
+`Browser_lane.Lane_name` 으로 모았다. 이 타입은 현재 `Live | Automation` 과
+`of_wire`·`to_wire` 를 가지며, 도구 TOML 의 enum 도 테스트가 이 파서로 확인한다.
+client id 규칙은 자리마다 달라 lane 이름만 공유한다. Stagehand 생성자를 더하면
+각 타입 패턴매치가 새 경우를 짚는다. TUI source 와 도구 enum 도 함께 갱신한다.
 
 7번에서 도구 입력을 바꾼다.
 - 도구의 `lane` enum 에는 그 lane 의 backend 가 도구의 기본 동사를 받을 때만 이름을 넣는다.
@@ -224,7 +208,9 @@ backend 의 status 가 그 이유를 보여준다. 세션을 닫고 다시 열�
 
   - lane deadline 이 지나면 lane 은 `Timed_out` 으로 답하고, 도구 결과는 지금처럼
     `Tool_result.Effect_outcome_unknown` 으로 끝난다 (`tool_misc_browser_lane.ml:333`). 상태는 `Abandoned` 가 된다.
-    Stagehand 에는 `act`·`extract` 를 취소하는 메서드가 없어서, 확장 안에서는 호출이 계속 돈다.
+    Stagehand 에는 `act`·`observe`·`extract` 취소 메서드가 없다.
+    각 호출의 `options.timeout` 에 lane deadline 보다 짧은 양의 밀리초를 보내
+    확장이 스스로 호출을 끝낼 기회를 준다. 응답이 여전히 없으면 `Abandoned` 상태를 유지한다.
   - `Abandoned` 동안 온 `llm.generate` 는 거절한다. 도구가 이미 실패를 알린 뒤에 클릭이 일어나지 않게 하려는 것이다.
     버려진 호출의 응답이 오면 `Idle` 로 돌아간다. 그전의 새 호출은 `Rejected_before_effect` 다.
   - `Idle` 에서 온 `llm.generate` 는 주인이 없으므로 거절하고 로그를 남긴다.
@@ -249,8 +235,10 @@ backend 의 status 가 그 이유를 보여준다. 세션을 닫고 다시 열�
   `--remote-allow-origins=chrome-extension://<id>`, `--no-first-run`, `--no-default-browser-check`,
   `--user-data-dir`, 창 크기.
 - profile 은 두 가지다.
-  - 설정에 `profile` 이 없으면 `<base-path>/.masc/browser-lane/stagehand-profiles` 에 두고 시작할 때 비운다.
+  - 설정에 `profile` 이 없으면 `<base-path>/.masc/browser-lane/stagehand-profile` 에 두고 시작할 때 비운다.
   - 설정에 `profile` 이 있으면 운영자가 가진 폴더를 그대로 쓰고 지우지 않는다. 로그인 상태를 남기는 용도다 (§6.3).
+    Chrome 136 부터 기본 user-data-dir 에서는 원격 디버깅 플래그가 무시되므로, 평소 쓰는 Chrome 기본 폴더는 쓸 수 없다
+    ([Chrome 공식 안내](https://developer.chrome.com/blog/remote-debugging-port)).
   - 어느 쪽이든 폴더 권한은 0700 으로 만든다.
 
 ### 3.6 설정
@@ -289,9 +277,9 @@ integrity 대조는 설치할 때 한 번만 한다. 확장을 올릴 때마다 
 
 ### 3.7 `llm.generate` 는 masc runtime 이 답한다
 
-`Runtime.exact_lane` 에 `Browser_stagehand` 생성자를 더하고,
+`Standalone_lane.t` 에 `Browser_stagehand` 생성자를 더하고 (`Runtime.exact_lane` 은 그 별칭이다),
 `[runtime.exact_output_lanes.browser_stagehand_exact]` 를 선언한다.
-`exact_lane_run_registry.ml:130-146` 의 목록에도 같이 더한다.
+이 lane 은 retained run 을 만들지 않으므로 `Exact_lane_run_registry` 에는 넣지 않는다.
 librarian·verifier 처럼 한 번 묻고 구조화된 답을 받는 모양이라 exact-output lane 이 맞다.
 slot 목록과 failover 는 기존 lane 과 같이 운영자가 정한다.
 요소 고르기에 Keeper 와 다른 모델을 쓰는 것이 이 구조의 핵심이다.
@@ -340,6 +328,7 @@ Stagehand RPC 하나, `llm.generate` 하나마다 로그 한 줄을 남긴다.
 메서드, page, 걸린 시간, 주고받은 바이트, 쓴 slot, usage, 결과 variant 를 적는다.
 거절한 `llm.generate`(`Idle`·`Abandoned`) 도 같은 줄로 남긴다.
 TUI 브라우저 패널은 source 에 `stagehand` 를 그린다.
+Dashboard standalone lane 목록은 `browser_stagehand_exact` 를 표시하고 retained run 이 없음을 밝힌다.
 
 ## 4. 보안
 
@@ -412,11 +401,12 @@ Firefox 와 Chromium 은 로그인 세션을 나눠 쓸 수 없다.
 2·3번은 혼자서도 쓸모가 있어서 먼저 들어가도 된다.
 
 1. 이 RFC 와 실측 증거.
-2. lane 이름을 읽는 곳을 `Browser_lane.Lane_name` 하나로 모은다. 동작은 바꾸지 않는다.
+2. 완료 (#38664): lane 이름을 읽는 곳을 `Browser_lane.Lane_name` 하나로 모았다. 동작은 바꾸지 않았다.
 3. AGENT_CORE: `Exact_output.success` 에 typed usage 를 담는다.
-4. `Browser_cdp`(#38668), Stagehand 세션(#38676): `ws-direct`, 닫힌 봉투·메시지 타입, `call_state`, 가짜 transport 테스트.
+4. `Browser_cdp`(#38668), Stagehand 세션(#38676): `ws-direct`, 닫힌 봉투·메시지 타입, `call_state`,
+   호출별 `options.timeout` 과 가짜 transport 테스트.
 5. `Browser_configuration` 변경과 확장 설치 스크립트(#38684), `server_browser_stagehand` 실행과 정리(#38686).
-6. `Runtime.exact_lane.Browser_stagehand`, lane 선언, system prompt admission, `llm.generate` 연결(#38708).
+6. `Standalone_lane.Browser_stagehand`, lane 선언, system prompt admission, `llm.generate` 연결(#38708).
 7. 나눠서 쌓는다.
    - `Browser_lane.Stagehand` target, 동사, surface·TUI source, `BrowserSession`·`BrowserGoto` 의 `lane`(#38697)
    - 동사를 Stagehand 호출로 바꾸는 실행기와 tab 번호 표(#38720)

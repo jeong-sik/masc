@@ -158,6 +158,7 @@ val resolve_reference :
   t -> Skill_reference.t -> (entry, reference_resolution_error) result
 val find_effective_by_name : t -> string -> entry option
 
+val source_operation_to_string : source_operation -> string
 val content_revision_to_string : content_revision -> string
 val config_source_revision_to_string : config_source_revision -> string
 val config_revision_to_string : config_revision -> string

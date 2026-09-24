@@ -1215,7 +1215,7 @@ let load_keeper_turns ~(host : string) ~(port : int) :
     | Error err -> Error err
     | Ok json -> Tui_decode.decode_keeper_turns json
   in
-  Result.map_error (fun err -> "keeper turns load failed: " ^ err) result
+  Masc_tui_async_read.attribute Masc_tui_async_read.Keeper_turns result
 
 (** Load the durable Gate: pending approvals and both lane modes. *)
 let load_dashboard_gate ~(host : string) ~(port : int) :

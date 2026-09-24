@@ -258,6 +258,103 @@ let test_terminal_text_is_idempotent_and_single_line () =
   Alcotest.(check string) "sanitization is idempotent" once
     (Tui_decode.sanitize_terminal_text once)
 
+let test_terminal_text_escapes_invisible_codepoints () =
+  (* #38445: a terminal draws bidi controls and zero-width characters as
+     nothing, so the glyphs an operator reads can differ from the bytes an
+     approval hash covers (Trojan Source, CVE-2021-42574). *)
+  let contains_substring hay needle =
+    let n = String.length needle and h = String.length hay in
+    let rec scan i =
+      i + n <= h && (String.sub hay i n = needle || scan (i + 1))
+    in
+    n = 0 || scan 0
+  in
+  let rlo = "\xe2\x80\xae" in
+  let escaped = Tui_decode.sanitize_terminal_text ("a" ^ rlo ^ "b") in
+  Alcotest.(check string) "the bidi override is drawn as its escape text"
+    "a\\u202Eb" escaped;
+  Alcotest.(check bool) "the raw RLO bytes are gone" false
+    (contains_substring escaped rlo);
+  Alcotest.(check string) "escape_invisible is the one rule" "a\\u202Eb"
+    (Tui_decode.escape_invisible ("a" ^ rlo ^ "b"));
+  List.iter
+    (fun (label, bytes, expected) ->
+       Alcotest.(check string) label expected
+         (Tui_decode.escape_invisible bytes))
+    [ "ALM", "\xd8\x9c", "\\u061C"
+    ; "ZWSP", "\xe2\x80\x8b", "\\u200B"
+    ; "ZWNJ", "\xe2\x80\x8c", "\\u200C"
+    ; "ZWJ", "\xe2\x80\x8d", "\\u200D"
+    ; "LRM", "\xe2\x80\x8e", "\\u200E"
+    ; "RLM", "\xe2\x80\x8f", "\\u200F"
+    ; "LRE", "\xe2\x80\xaa", "\\u202A"
+    ; "RLE", "\xe2\x80\xab", "\\u202B"
+    ; "PDF", "\xe2\x80\xac", "\\u202C"
+    ; "LRO", "\xe2\x80\xad", "\\u202D"
+    ; "RLO", "\xe2\x80\xae", "\\u202E"
+    ; "LRI", "\xe2\x81\xa6", "\\u2066"
+    ; "RLI", "\xe2\x81\xa7", "\\u2067"
+    ; "FSI", "\xe2\x81\xa8", "\\u2068"
+    ; "PDI", "\xe2\x81\xa9", "\\u2069"
+    ; "BOM", "\xef\xbb\xbf", "\\uFEFF"
+    ];
+  Alcotest.(check string) "an ordinary string is unchanged" "café"
+    (Tui_decode.escape_invisible "café");
+  Alcotest.(check string) "the escape is idempotent" "a\\u202Eb"
+    (Tui_decode.escape_invisible
+       (Tui_decode.escape_invisible ("a" ^ rlo ^ "b")))
+
+(* #38485 review: the first cut escaped every ZWJ, and the ZWJ an operator
+   types most often is the one inside an emoji. UAX #29 GB11 is the rule this
+   screen follows: between two pictographs the joiner stays, anywhere else it
+   is drawn as its escape like the other invisibles. *)
+let test_terminal_text_keeps_the_joiner_inside_an_emoji () =
+  let zwj = "\xe2\x80\x8d" in
+  let zwsp = "\xe2\x80\x8b" in
+  let shrug = "\xf0\x9f\xa4\xb7" (* U+1F937 *) in
+  let male = "\xe2\x99\x82" (* U+2642 *) in
+  let vs16 = "\xef\xb8\x8f" (* U+FE0F *) in
+  let person = "\xf0\x9f\xa7\x91" (* U+1F9D1 *) in
+  let skin_tone = "\xf0\x9f\x8f\xbd" (* U+1F3FD *) in
+  let laptop = "\xf0\x9f\x92\xbb" (* U+1F4BB *) in
+  let man = "\xf0\x9f\x91\xa8" and woman = "\xf0\x9f\x91\xa9" in
+  let girl = "\xf0\x9f\x91\xa7" in
+  let keeps label text =
+    Alcotest.(check string) label text (Tui_decode.escape_invisible text)
+  in
+  keeps "the shrugging man keeps its joiner" (shrug ^ zwj ^ male ^ vs16);
+  keeps "a skin tone before the joiner does not end the emoji"
+    (person ^ skin_tone ^ zwj ^ laptop);
+  keeps "both joiners of a family survive"
+    (man ^ zwj ^ woman ^ zwj ^ girl);
+  keeps "an emoji inside a sentence is untouched"
+    ("배포 끝났어요 " ^ shrug ^ zwj ^ male ^ vs16 ^ " 확인 부탁해요");
+  (* The dividing inputs: each side of the joiner is asked separately, so a
+     rule that only looked left, or only right, or let every joiner through
+     fails here. *)
+  Alcotest.(check string) "a joiner between letters is still escaped"
+    ("a\\u200Db") (Tui_decode.escape_invisible ("a" ^ zwj ^ "b"));
+  Alcotest.(check string) "a joiner after an emoji but before a letter is escaped"
+    (shrug ^ "\\u200Da")
+    (Tui_decode.escape_invisible (shrug ^ zwj ^ "a"));
+  Alcotest.(check string) "a joiner before an emoji but after a letter is escaped"
+    ("a\\u200D" ^ shrug)
+    (Tui_decode.escape_invisible ("a" ^ zwj ^ shrug));
+  (* A joiner that was escaped is text now, so the next one is not inside an
+     emoji either: carrying the state through an escaped joiner would let the
+     second one through raw. *)
+  Alcotest.(check string) "a doubled joiner does not smuggle one through"
+    (shrug ^ "\\u200D\\u200D" ^ laptop)
+    (Tui_decode.escape_invisible (shrug ^ zwj ^ zwj ^ laptop));
+  Alcotest.(check string) "only the joiner is spared, not every zero width"
+    (shrug ^ "\\u200B" ^ laptop)
+    (Tui_decode.escape_invisible (shrug ^ zwsp ^ laptop));
+  (* The sanitizer the screens call has to agree with the rule, or the rule
+     is only true of a function nothing draws through. *)
+  Alcotest.(check string) "the terminal sanitizer keeps it too"
+    (shrug ^ zwj ^ male ^ vs16)
+    (Tui_decode.sanitize_terminal_text (shrug ^ zwj ^ male ^ vs16))
+
 let test_preview_line_marks_breaks_and_escapes_the_rest () =
   let mark = "\xe2\x8f\x8e" in
   Alcotest.(check string) "a break is one return mark" ("a" ^ mark ^ "b")
@@ -9386,6 +9483,17 @@ let decoded_execute_preview ~preview ~input =
       | [ pending ] -> pending.Tui_decode.gp_input_preview
       | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
 
+let decoded_execute_rows ~preview ~input =
+  match
+    Tui_decode.decode_gate_snapshot
+      (gate_snapshot_json ~queue:(`List [ execute_gate_row ~preview ~input ]) ())
+  with
+  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.gs_pending with
+      | [ pending ] -> pending.Tui_decode.gp_input_rows
+      | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
+
 (* The envelope opens with the schema URN and an absolute cwd, so the command
    sat off the right edge of the row at every terminal width. This is the
    shape and the preview text observed on screen with seven rows waiting. *)
@@ -9526,6 +9634,96 @@ let test_decode_execute_gate_row_keeps_the_preview_on_an_unknown_shape () =
     Alcotest.(option string)
     "an argv that is not words keeps the server preview"
     (Some observed_execute_preview) preview
+
+let test_decode_execute_row_details_the_whole_command () =
+  (* The summary line may be cut; the detail pane may not be. The stored
+     input's own keys are the detail's fields, so argv rides whole no matter
+     how long the command is. A list rides as the JSON it is: joined with
+     spaces, ["rm"; "-rf"; "a b"] and ["rm"; "-rf"; "a"; "b"] would draw as
+     the same line and the word boundaries the operator approves between
+     would be gone. *)
+  let long_url = String.make 180 'x' in
+  let rows =
+    decoded_execute_rows ~preview:"{\"cut\":true}"
+      ~input:
+        (`Assoc
+           [ ( "input",
+               `Assoc
+                 [ ("cwd", `String "/home/keeper/playground/polisher");
+                   ( "argv",
+                     `List
+                       [ `String "git"; `String "clone";
+                         `String ("https://example.org/" ^ long_url) ] );
+                 ] );
+           ])
+  in
+  match rows with
+  | Tui_decode.Rows fields ->
+    Alcotest.check Alcotest.int "one field per stored key" 2 (List.length fields);
+    Alcotest.check
+      Alcotest.(option string)
+      "argv is whole, not the cut summary"
+      (Some
+         (Yojson.Safe.to_string
+            (`List
+               [ `String "git"; `String "clone";
+                 `String ("https://example.org/" ^ long_url) ])))
+      (List.assoc_opt "argv" fields)
+  | Tui_decode.Flattened _ ->
+    Alcotest.fail "an object input must draw key by key"
+
+let test_decode_connector_row_holds_a_korean_body_whole () =
+  (* The queue's 200-byte preview spends its budget on JSON keys first, so a
+     1,500-character Korean body showed 52 characters of itself. The detail
+     carries the body as its own field, and the preview budget never
+     touches it. *)
+  let body = String.concat "" (List.init 1500 (fun _ -> "\xea\xb0\x80")) in
+  let row =
+    `Assoc
+      [ ("id", `String "appr-9");
+        ("keeper_name", `String "messenger");
+        ("tool_name", `String "connector_post");
+        ("input_preview", `String "{\"connector\":\"discord\",\"channel_id\"");
+        ( "input",
+          `Assoc
+            [ ("connector", `String "discord");
+              ("channel_id", `String "123");
+              ("content", `String body);
+            ] );
+      ]
+  in
+  match
+    Tui_decode.decode_gate_snapshot (gate_snapshot_json ~queue:(`List [ row ]) ())
+  with
+  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
+  | Ok snapshot -> (
+    match snapshot.Tui_decode.gs_pending with
+    | [ pending ] -> (
+      match pending.Tui_decode.gp_input_rows with
+      | Tui_decode.Rows fields ->
+        Alcotest.check
+          Alcotest.(option string)
+          "the Korean body is carried whole"
+          (Some body) (List.assoc_opt "content" fields)
+      | Tui_decode.Flattened _ ->
+        Alcotest.fail "an object input must draw key by key")
+    | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
+
+let test_decode_execute_row_with_no_command_names_the_preview () =
+  (* This is the quiet fallback the detail pane used to have: a command that
+     would not assemble sank into the flattened preview under the label
+     "input". Now the pane is told what it is showing, and says so. *)
+  let rows =
+    decoded_execute_rows ~preview:observed_execute_preview
+      ~input:(`Assoc [ ("input", `String "not an object") ])
+  in
+  match rows with
+  | Tui_decode.Flattened preview ->
+    Alcotest.check
+      Alcotest.(option string)
+      "the server preview is kept" (Some observed_execute_preview) preview
+  | Tui_decode.Rows _ ->
+    Alcotest.fail "a non-object input has no keys to show"
 
 let test_decode_gate_row_of_another_operation_keeps_its_preview () =
   (* A memory_write row already leads with its title, and nothing here should
@@ -11093,6 +11291,10 @@ let () =
           test_terminal_text_preserves_printable_utf8
       ; Alcotest.test_case "escapes malformed UTF-8 bytes" `Quick
           test_terminal_text_escapes_malformed_utf8_bytes
+      ; Alcotest.test_case "escapes invisible codepoints" `Quick
+          test_terminal_text_escapes_invisible_codepoints
+      ; Alcotest.test_case "keeps the joiner inside an emoji" `Quick
+          test_terminal_text_keeps_the_joiner_inside_an_emoji
       ; Alcotest.test_case "is idempotent and single-line" `Quick
           test_terminal_text_is_idempotent_and_single_line
       ; Alcotest.test_case "preview marks breaks and escapes the rest" `Quick
@@ -11333,6 +11535,13 @@ let () =
           test_decode_execute_gate_row_quotes_a_word_with_a_space;
         Alcotest.test_case "an unknown execute shape keeps the preview" `Quick
           test_decode_execute_gate_row_keeps_the_preview_on_an_unknown_shape;
+        Alcotest.test_case "an execute detail draws the whole command" `Quick
+          test_decode_execute_row_details_the_whole_command;
+        Alcotest.test_case "a connector body is carried whole" `Quick
+          test_decode_connector_row_holds_a_korean_body_whole;
+        Alcotest.test_case
+          "a command that will not assemble names the flattened preview" `Quick
+          test_decode_execute_row_with_no_command_names_the_preview;
         Alcotest.test_case "another operation keeps its preview" `Quick
           test_decode_gate_row_of_another_operation_keeps_its_preview;
         Alcotest.test_case "a null queue is empty with modes" `Quick

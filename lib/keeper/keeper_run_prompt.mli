@@ -1,8 +1,8 @@
 (** Keeper_run_prompt — build turn prompt context (Steps 5-6).
 
-    Takes the run context from [Keeper_run_context], calls the
-    [build_turn_prompt] callback to get the final system prompt and
-    dynamic context, then renders memory/temporal context, builds prompt
+    Takes the run context from [Keeper_run_context], whose base system prompt
+    is the one the turn sends, calls the [build_turn_prompt] callback to get
+    the dynamic context, then renders memory/temporal context, builds prompt
     metrics, and appends the user message.
 
     @since 0.120.0 *)
@@ -71,6 +71,7 @@ val build_turn_context
   :  ctx:Keeper_run_context.run_context
   -> build_turn_prompt:(base_system_prompt:string -> messages:Agent_core.Types.message list -> Keeper_agent_prompt_metrics.turn_prompt)
   -> user_message:string
+  -> input_metadata:Agent_core.Types.metadata
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> turn_ref:Ids.Turn_ref.t

@@ -157,11 +157,15 @@ let test_typed_execute_response_cwd_uses_container_path () =
         Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
       in
       let prompt =
-        Keeper_run_context.build_base_system_prompt
-          ~config
-          ~profile_defaults:
-            Keeper_types_profile_defaults.empty_keeper_profile_defaults
-          ~meta
+        match
+          Keeper_run_context.build_base_system_prompt
+            ~config
+            ~profile_defaults:
+              Keeper_types_profile_defaults.empty_keeper_profile_defaults
+            ~meta
+        with
+        | Ok prompt -> prompt
+        | Error error -> fail (World_constitution_store.read_error_to_string error)
       in
       check bool "Docker prompt does NOT contain host base" false
         (Astring.String.is_infix ~affix:base prompt);
@@ -344,11 +348,15 @@ let test_prompt_keeps_caller_owned_workspace_generation () =
       with_env "MASC_BASE_PATH" (Some divergent_base) @@ fun () ->
       Workspace.reset_default_config_cache ();
       let prompt =
-        Keeper_run_context.build_base_system_prompt
-          ~config
-          ~profile_defaults:
-            Keeper_types_profile_defaults.empty_keeper_profile_defaults
-          ~meta
+        match
+          Keeper_run_context.build_base_system_prompt
+            ~config
+            ~profile_defaults:
+              Keeper_types_profile_defaults.empty_keeper_profile_defaults
+            ~meta
+        with
+        | Ok prompt -> prompt
+        | Error error -> fail (World_constitution_store.read_error_to_string error)
       in
       check bool "prompt uses the admitted config sandbox root" true
         (Astring.String.is_infix ~affix:expected_root prompt);

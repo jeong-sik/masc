@@ -202,7 +202,7 @@ let user_message ?turn_decision ?current_task ?active_goal_summaries
     | None -> Inputs.No_current_task
   in
   let { Prompt.world_state = user; _ } =
-    Prompt.build_prompt ~meta ~config:(Lazy.force prompt_config) ~turn_decision
+    Prompt.build_prompt ~turn_decision
       ?previous_turn_stop ~current_task ?active_goal_summaries ~observation ()
   in
   user
@@ -586,7 +586,7 @@ let test_current_task_unavailable_is_explicit () =
   let task_id = task_id_exn "task-42" in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.world_state; _ } =
-    Prompt.build_prompt ~meta ~config:(Lazy.force prompt_config)
+    Prompt.build_prompt
       ~turn_decision:decision
       ~current_task:
         (Inputs.Current_task_unavailable
@@ -604,7 +604,7 @@ let test_current_task_missing_is_explicit () =
   let task_id = task_id_exn "task-42" in
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let { Prompt.world_state; _ } =
-    Prompt.build_prompt ~meta ~config:(Lazy.force prompt_config)
+    Prompt.build_prompt
       ~turn_decision:decision
       ~current_task:(Inputs.Current_task_missing { task_id; recovery = None })
       ~observation:base_observation ()
@@ -623,7 +623,7 @@ let test_recovered_current_task_is_non_authoritative () =
     { recovery_path = "/tmp/backlog.last-good"; primary_error = "decode failed" }
   in
   let { Prompt.world_state; _ } =
-    Prompt.build_prompt ~meta ~config:(Lazy.force prompt_config)
+    Prompt.build_prompt
       ~turn_decision:decision
       ~current_task:
         (Inputs.Recovered_current_task { task = recovered_task; recovery })
@@ -774,32 +774,6 @@ let test_direct_turn_discovers_published_workspace_memory () =
     check bool "unavailable direct reply does not reuse a stale read target" false
       (contains ~needle:proposal_id unavailable))
 
-let test_direct_and_autonomous_share_system_prompt () =
-  let decision = WO.keeper_cycle_decision ~meta base_observation in
-  let { Prompt.system_prompt = autonomous_system_prompt; _ } =
-    Prompt.build_prompt
-      ~meta
-      ~config:(Lazy.force prompt_config)
-      ~turn_decision:decision
-      ~current_task:Inputs.No_current_task
-      ~observation:base_observation
-      ()
-  in
-  let base_system_prompt =
-    Masc.Keeper_run_context.build_base_system_prompt
-      ~config:(Masc.Workspace.default_config "/tmp/unused")
-      ~profile_defaults:
-        Masc.Keeper_types_profile_defaults.empty_keeper_profile_defaults
-      ~meta
-  in
-  (* Both turn entrypoints consume the same system prompt contract. *)
-  check string
-    "stable contract is byte-identical across turn entrypoints"
-    autonomous_system_prompt
-    base_system_prompt;
-  check bool "shared system block is present" true
-    (contains ~needle:"<system>" base_system_prompt)
-
 let test_open_goal_store_keeps_one_stable_safety_contract () =
   let meta_with_goal =
     meta_of_json
@@ -810,38 +784,22 @@ let test_open_goal_store_keeps_one_stable_safety_contract () =
         ])
   in
   let config = Masc.Workspace.default_config "/tmp/unused" in
-  let active_goal_summaries =
-    Prompt.active_goal_summaries_for_task
-      ~config
-      ~current_task:Inputs.No_current_task
-  in
-  let decision = WO.keeper_cycle_decision ~meta:meta_with_goal base_observation in
-  let { Prompt.system_prompt = autonomous_system_prompt; _ } =
-    Prompt.build_prompt
-      ~meta:meta_with_goal
-      ~config:(Lazy.force prompt_config)
-      ~active_goal_summaries
-      ~turn_decision:decision
-      ~current_task:Inputs.No_current_task
-      ~observation:base_observation
-      ()
-  in
   let base_system_prompt =
-    Masc.Keeper_run_context.build_base_system_prompt
-      ~config
-      ~profile_defaults:
-        Masc.Keeper_types_profile_defaults.empty_keeper_profile_defaults
-      ~meta:meta_with_goal
+    match
+      Masc.Keeper_run_context.build_base_system_prompt
+        ~config
+        ~profile_defaults:
+          Masc.Keeper_types_profile_defaults.empty_keeper_profile_defaults
+        ~meta:meta_with_goal
+    with
+    | Ok prompt -> prompt
+    | Error error -> fail (Masc.World_constitution_store.read_error_to_string error)
   in
-  check string
-    "unresolved goal does not split direct and autonomous prompts"
-    base_system_prompt
-    autonomous_system_prompt;
   check bool "removed per-Keeper goal id is absent" false
     (contains ~needle:"- missing-goal\n" base_system_prompt);
   check bool "identity block is preserved" true
     (contains ~needle:"<identity>" base_system_prompt);
-  (* The shared prompt remains the stable system prefix for both turn paths. *)
+  (* Direct and autonomous turns both send this one prompt. *)
   check bool "shared system block is preserved" true
     (contains ~needle:"<system>" base_system_prompt)
 
@@ -907,8 +865,6 @@ let test_preview_does_not_invent_wake_reason () =
           ()));
   let { Prompt.world_state; _ } =
     Prompt.build_prompt_preview
-      ~meta:preview_meta
-      ~config:(Lazy.force prompt_config)
       ~current_task:Inputs.No_current_task
       ~observation:base_observation
       ()
@@ -990,8 +946,6 @@ let test_autonomous_turn_renders_an_unread_lane_notice () =
   let preview ~lane_updates =
     let { Prompt.world_state; _ } =
       Prompt.build_prompt_preview
-        ~meta
-        ~config:(Lazy.force prompt_config)
         ~current_task:Inputs.No_current_task
         ~observation:base_observation
         ~lane_updates
@@ -1152,9 +1106,6 @@ let () =
             test_direct_turn_carries_held_task_skills;
           test_case "direct reply discovers shared proposal with source uncertainty" `Quick
             test_direct_turn_discovers_published_workspace_memory;
-          test_case "direct and autonomous turns share the stable contract"
-            `Quick
-            test_direct_and_autonomous_share_system_prompt;
           test_case "unresolved goal keeps one stable safety contract" `Quick
             test_open_goal_store_keeps_one_stable_safety_contract;
         ] );

@@ -31,6 +31,13 @@ type run_context =
   ; runtime_config_path : string option
   }
 
+(* Why a turn could not be prepared. Both are reads that failed before
+   anything was dispatched; the caller turns either into the same
+   not-dispatched settlement. *)
+type prepare_error =
+  | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
+  | Constitution_unreadable of World_constitution_store.read_error
+
 let build_base_system_prompt
       ~(config : Workspace.config)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
@@ -96,7 +103,7 @@ let prepare_run_context
     | Keeper_context_runtime.Checkpoint_absent -> Ok (None, Saved_history_absent)
     | Keeper_context_runtime.Checkpoint_unread (Keeper_checkpoint_store.Superseded_version _) ->
       Ok (None, Saved_history_superseded)
-    | Keeper_context_runtime.Checkpoint_unread error -> Error error
+    | Keeper_context_runtime.Checkpoint_unread error -> Error (Checkpoint_unread error)
   in
   let loaded_checkpoint_present = Option.is_some ctx_opt in
   (* 3. Build base system prompt from meta *)
@@ -109,8 +116,9 @@ let prepare_run_context
     resolution.Config_dir_resolver.config_root.path
   in
   let runtime_config_path = Runtime.config_path () in
-  let base_system_prompt =
+  let* base_system_prompt =
     build_base_system_prompt ~config ~profile_defaults ~meta
+    |> Result.map_error (fun error -> Constitution_unreadable error)
   in
   (* 4. Create or restore working context, re-apply current prompt *)
   let base_ctx =

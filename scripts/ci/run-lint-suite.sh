@@ -73,6 +73,9 @@ blocking_lints() {
   run_lint "CHANGELOG has one section for this version" \
     python3 scripts/ci/changelog-section.py \
     "$(sed -n 's/^(version \([0-9.]*\))$/\1/p' dune-project)" CHANGELOG.md /dev/null
+  # GitHub drops everything past 125,000 characters of a release body with no
+  # error; the cutter refuses such a body, and this pins that refusal.
+  run_lint "Changelog section self-test" python3 test/test_changelog_section.py
   # Entries arrive as changelog.d/<PR>.md so parallel pull requests do not
   # all insert at the same line of CHANGELOG.md.
   run_lint "Changelog fragments well-formed" \

@@ -200,11 +200,6 @@ type operator_disposition_reason =
       turn after neither a degraded retry nor cross-runtime fallback occurred.
       Paired with [Disp_retry_later]: a later keepalive cycle may retry, but the
       receipt does not claim same-turn continuation. *)
-  | Reason_capacity_backpressure
-  (** Typed provider-capacity observation before a retry/rotation has completed.
-      Paired with [Disp_fail_open_next_runtime]: the keeper keeps moving and
-      no operator broadcast is emitted, while the receipt does not falsely
-      claim [Reason_runtime_fallback]. *)
   | Reason_provider_runtime_error
   (** A terminal provider rejection or parse/runtime failure after neither a
       degraded retry nor cross-runtime fallback occurred. Paired with
@@ -222,8 +217,8 @@ type operator_disposition_reason =
       fallback is claimed. *)
   | Reason_provider_attempt_effect_fenced
   (** The provider attempt did not prove whether an effect occurred. Paired
-      with [Disp_unknown] so operator attention remains required, while the
-      receipt is no longer counted as an unmapped classifier regression. *)
+      with [Disp_unknown] so operator attention remains required, and the
+      receipt is not counted as an unmapped classifier regression. *)
   | Reason_tool_correction_lost
   (** The fenced turn also recorded typed pre_tool_use rejections
       (masc#28885). Same [Disp_unknown] pairing as

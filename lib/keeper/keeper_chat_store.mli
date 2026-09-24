@@ -151,11 +151,15 @@ type user_row_origin =
 (** Authority class of the human (or agent) whose message opened a
     turn. Derived structurally from the arrival route, never from
     message content: the authenticated dashboard route is [Owner];
-    anything carrying connector context is [External]. Persisted as
-    ["owner"] / ["external"] in [speaker_authority] (RFC-0223 §3). *)
+    anything carrying connector context is [External]; a sender that the
+    producing site matched exactly against the Keeper registry is [Keeper],
+    with the Keeper's id in [speaker_id] (RFC-0468 §3.2). Persisted as
+    ["owner"] / ["external"] / ["keeper"] in [speaker_authority]
+    (RFC-0223 §3). *)
 type speaker_authority =
   | Owner
   | External
+  | Keeper
 
 val authority_label : speaker_authority -> string
 val authority_of_label : string -> speaker_authority option
@@ -205,6 +209,13 @@ type speaker = {
   speaker_name : string option;
   speaker_authority : speaker_authority;
 }
+
+val keeper_speaker : Keeper_identity.Keeper_id.t -> speaker
+(** The speaker of a line another registered Keeper sent. The caller has
+    already matched the sender against the Keeper registry; the id is not
+    read back from the shape of any string here. [speaker_id] and
+    [speaker_name] both carry the Keeper id, since a Keeper has exactly one
+    name (RFC-0393). *)
 
 type chat_message = {
   id : string;

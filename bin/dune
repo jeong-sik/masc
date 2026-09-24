@@ -1006,7 +1006,7 @@
  (name masc_tui_approval_detail)
  (wrapped false)
  (modules masc_tui_approval_detail)
- (libraries masc_tui_message_layout))
+ (libraries masc masc_tui_message_layout))
 
 (library
  (name masc_tui_footer)
@@ -1359,6 +1359,7 @@
   masc_tui_ansi
   masc_tui_chart
   masc_tui_context_inspector
+  masc_tui_render_schedule
   masc_tui_rows
   masc_tui_scroll
   masc_tui_theme
@@ -1543,6 +1544,23 @@
  (modules masc_tui_overview_team)
  (libraries masc masc_types masc_tui_types))
 
+;; The Overview's GOALS section: whether the fleet's work moves any goal. A
+;; library so a test can draw it from a fixture of the server's goal tree.
+(library
+ (name masc_tui_overview_goals)
+ (wrapped false)
+ (modules masc_tui_overview_goals)
+ (libraries
+  masc
+  masc.masc_goal
+  masc_types
+  masc_tui_types
+  masc_tui_ansi
+  masc_tui_message_layout
+  masc_tui_render_prim
+  ptime
+  unix))
+
 ;; RFC-0465: the Overview's pull request reading, decoder and lines. A
 ;; library so a test can decode the server's own encoder output.
 (library
@@ -1587,6 +1605,7 @@
   masc.sse_wire
   masc_tui_task_flow
   masc_tui_overview_team
+  masc_tui_overview_goals
   masc.masc_tool_blob_store
   masc_tui_agenda
   masc_tui_ansi

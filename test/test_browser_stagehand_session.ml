@@ -142,7 +142,8 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok (obj [ "structured
   in
   let session = Session.create ~sw ~clock ~worker_wait_s:deadline_s ~model ~log:(fun event -> events := event :: !events) in
   let cdp =
-    Cdp.create ~send:(browser_receives fake) ~clock ~command_deadline_s:deadline_s ~on_event:(Session.on_cdp_event session)
+    Cdp.create ~send:(browser_receives fake) ~close:ignore ~clock ~command_deadline_s:deadline_s
+      ~on_event:(Session.on_cdp_event session)
   in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     let rec read () =
@@ -173,6 +174,21 @@ let run_until ready =
       go (remaining - 1))
   in
   go yields_allowed
+;;
+
+(* The extension holds an act only after masc's [Runtime.evaluate] carrying
+   it was answered; until the reader has taken that answer, a cancelled
+   caller would still have a CDP command out, which ends the connection. *)
+let act_held fake () = Option.is_some fake.held_act && Eio.Stream.is_empty fake.inbox
+
+(* After the answer is read, the caller's fiber still has to reach its wait
+   for the JSON-RPC reply. *)
+let passes_to_reach_the_wait = 10
+
+let let_callers_reach_their_waits () =
+  for _ = 1 to passes_to_reach_the_wait do
+    Eio.Fiber.yield ()
+  done
 ;;
 
 let error_code message = Yojson.Safe.Util.(message |> member "error" |> member "code" |> to_int)
@@ -232,7 +248,8 @@ let test_abandoned_call () =
   (try
      Eio.Switch.run (fun caller ->
        Eio.Fiber.fork ~sw:caller (fun () -> ignore (Session.call session act));
-       run_until (fun () -> Option.is_some fake.held_act);
+       run_until (act_held fake);
+       let_callers_reach_their_waits ();
        Eio.Switch.fail caller Exit)
    with
    | Exit -> ());
@@ -254,7 +271,7 @@ let test_worker_detached () =
   Eio.Switch.run
   @@ fun sw ->
   let waiting = Eio.Fiber.fork_promise ~sw (fun () -> Session.call session act) in
-  run_until (fun () -> Option.is_some fake.held_act);
+  run_until (act_held fake);
   Eio.Stream.add fake.inbox (to_s (obj [ "method", str "Target.detachedFromTarget"; "params", obj [ "sessionId", str worker ] ]));
   (match Eio.Promise.await_exn waiting with
    | Error (Session.Lost _) -> ()

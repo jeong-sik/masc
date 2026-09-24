@@ -39,15 +39,17 @@ export async function fetchToolBlobBytes(
   opts: { signal?: AbortSignal } = {},
 ): Promise<ArrayBuffer> {
   const path = `/api/v1/artifact-bytes/${encodeURIComponent(sha256)}`
-  const response = await fetchWithTimeout(
+  return fetchWithTimeout(
     path,
     { headers: authHeaders(), signal: opts.signal },
     DEFAULT_GET_TIMEOUT_MS,
+    async response => {
+      if (!response.ok) {
+        throw new ApiRequestError({
+          method: 'GET', path, status: response.status, statusText: response.statusText,
+        })
+      }
+      return response.arrayBuffer()
+    },
   )
-  if (!response.ok) {
-    throw new ApiRequestError({
-      method: 'GET', path, status: response.status, statusText: response.statusText,
-    })
-  }
-  return response.arrayBuffer()
 }

@@ -1558,7 +1558,7 @@ let load_keeper_lanes ~(host : string) ~(port : int) :
 let load_standalone_lanes ~(host : string) ~(port : int) :
     (Tui_decode.standalone_lanes_snapshot, string) result =
   match fetch_standalone_lanes ~host ~port with
-  | Error err -> Error ("standalone lanes load failed: " ^ err)
+  | Error err -> Error err
   | Ok json -> Tui_decode.decode_standalone_lanes_snapshot json
 
 (** Load the clients roster from /api/v1/dashboard/clients *)

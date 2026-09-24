@@ -255,36 +255,40 @@ default = "usage_shared_one.sonnet"
          Yojson.Safe.Util.(retained_row |> member "providers" |> to_list |> List.map to_string))
 ;;
 
-let test_codex_default_and_explicit_home_share_scope () =
+let test_default_and_explicit_home_share_scope
+    ~client ~protocol ~model ~api_name ~max_context ~resolve_home () =
   let home =
-    match Runtime_codex_app_server.effective_account_home None with
+    match resolve_home None with
     | Some path -> path
-    | None -> fail "Codex default home cannot be resolved without HOME or CODEX_HOME"
+    | None -> failf "%s default home cannot be resolved" client
   in
+  let implicit_id = "usage_" ^ client ^ "_default" in
+  let explicit_id = "usage_" ^ client ^ "_explicit" in
   let source =
     Printf.sprintf
-      {|[providers.usage_codex_default]
-protocol = "codex-app-server"
+      {|[providers.%s]
+protocol = %S
 command = "/usr/bin/true"
 is-non-interactive = true
 
-[providers.usage_codex_explicit]
-protocol = "codex-app-server"
+[providers.%s]
+protocol = %S
 command = "/usr/bin/true"
 is-non-interactive = true
 account-home = %S
 
-[models.sol]
-api-name = "gpt-5.6-sol"
-max-context = 400000
+[models.%s]
+api-name = %S
+max-context = %d
 
-[usage_codex_default.sol]
-[usage_codex_explicit.sol]
+[%s.%s]
+[%s.%s]
 
 [runtime]
-default = "usage_codex_default.sol"
+default = %S
 |}
-      home
+      implicit_id protocol explicit_id protocol home model api_name max_context
+      implicit_id model explicit_id model (implicit_id ^ "." ^ model)
   in
   let snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
@@ -294,14 +298,28 @@ default = "usage_codex_default.sol"
          match Runtime.init_default ~config_path:path with
          | Ok () -> ()
          | Error msg -> failf "fixture runtime.toml should load: %s" msg);
-       let implicit = scope_of "usage_codex_default.sol" in
-       let explicit = scope_of "usage_codex_explicit.sol" in
-       check bool "Codex implicit home and explicit same home share scope" true
+       let implicit = scope_of (implicit_id ^ "." ^ model) in
+       let explicit = scope_of (explicit_id ^ "." ^ model) in
+       check bool (client ^ " implicit and explicit same home share scope") true
          (Runtime_quota_window.scope_equal implicit explicit);
        let row = usage_row (resolved ()) (Runtime_quota_window.scope_to_string implicit) in
        check (list string) "one row names both providers"
-         [ "usage_codex_default"; "usage_codex_explicit" ]
+         [ implicit_id; explicit_id ]
          Yojson.Safe.Util.(row |> member "providers" |> to_list |> List.map to_string))
+;;
+
+let test_codex_default_and_explicit_home_share_scope =
+  test_default_and_explicit_home_share_scope
+    ~client:"codex" ~protocol:"codex-app-server" ~model:"sol"
+    ~api_name:"gpt-5.6-sol" ~max_context:400000
+    ~resolve_home:Runtime_codex_app_server.effective_account_home
+;;
+
+let test_claude_default_and_explicit_home_share_scope =
+  test_default_and_explicit_home_share_scope
+    ~client:"claude" ~protocol:"claude-code" ~model:"sonnet"
+    ~api_name:"sonnet" ~max_context:200000
+    ~resolve_home:Runtime_claude_code.effective_account_home
 ;;
 
 (* A read without the per-limit map falls back to the single [rateLimits];
@@ -334,6 +352,8 @@ let () =
             test_official_client_home_owns_usage_across_provider_rows
         ; test_case "Codex default and explicit home share scope" `Quick
             test_codex_default_and_explicit_home_share_scope
+        ; test_case "Claude default and explicit home share scope" `Quick
+            test_claude_default_and_explicit_home_share_scope
         ; test_case "codex read falls back and refuses a bad map" `Quick
             test_codex_read_falls_back_and_refuses_a_bad_map
         ] )

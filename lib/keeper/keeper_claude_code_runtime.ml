@@ -1419,7 +1419,10 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
     ~event_bus ~raw_trace ~on_event ~config () =
-  let quota_scope = Runtime_quota_window.scope_of_claude_code_home config.account_home in
+  let quota_scope =
+    Runtime_quota_window.scope_of_claude_code_home
+      (Runtime_claude_code.effective_account_home config.account_home)
+  in
   let settled_session = Atomic.make None in
   let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition =

@@ -74,6 +74,10 @@ type config =
 
 val default_timeout_s : float
 val default_config : cwd:string -> config
+val effective_account_home : string option -> string option
+(** The selected Claude Code configuration directory: explicit home,
+    CLAUDE_CONFIG_DIR, or the CLI's HOME/.claude default. Quota ownership
+    uses this resolution; [None] does not change the child environment. *)
 
 (** One image attached to a turn's user message. [base64_data] is the raw
     base64 payload with no data-URL prefix and no newlines, the shape the

@@ -275,7 +275,8 @@ let quota_scope_of_materialized
   in
   match execution with
   | Runtime_execution.Claude_code client ->
-    Runtime_quota_window.scope_of_claude_code_home client.account_home
+    Runtime_quota_window.scope_of_claude_code_home
+      (Runtime_claude_code.effective_account_home client.account_home)
   | Runtime_execution.Codex_app_server client ->
     Runtime_quota_window.scope_of_codex_home
       (Runtime_codex_app_server.effective_account_home client.account_home)

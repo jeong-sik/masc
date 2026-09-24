@@ -64,9 +64,12 @@ author: claude-main
 - `publication.json` 쓰기가 실패해도 발행은 막지 않아요. 도구 결과에 실패를 타입으로 알려요(아래 "실패").
 
 **운영자 삭제도 같이 바꿔야 해요.**
-지금 `Server_skill_editor.delete` 는 `SKILL.md` 파일 하나만 격리 폴더로 옮겨요.
-그대로 두면 `publication.json` 이 빈 패키지 폴더에 남아요. 그러면 같은 package id 로 다시 발행할 수도 없어요(`create` 는 폴더가 있으면 `package_already_exists`).
-삭제할 때 `publication.json` 도 같은 `recovery_id` 아래로 함께 옮겨요. 이렇게 하면 지운 Skill 의 근거도 복구 자료에 같이 남아요.
+지금 `Server_skill_editor.delete` 는 `SKILL.md` 파일 하나만 격리 폴더로 옮기고, 패키지 폴더는 그대로 둬요.
+그래서 지금도 운영자가 Skill 을 지우면 빈 패키지 폴더가 남고, 같은 package id 로 다시 발행하면 `package_already_exists` 가 나와요(`create` 는 `mkdir` 이 `EEXIST` 면 거절).
+삭제는 이렇게 바꿔요.
+1. `SKILL.md` 와 `publication.json` 을 같은 `recovery_id` 아래로 옮겨요. 지운 Skill 의 근거도 복구 자료에 같이 남아요.
+2. 두 파일을 옮긴 뒤 빈 패키지 폴더를 `rmdir` 해요. 폴더에 다른 파일(`references/` 등)이 남아 있으면 지우지 않아요.
+3. 두 번째 이동이나 `rmdir` 이 실패하면 기존 `Quarantine_failed`·`Recovery_required` 규칙대로 멈춰요. 새 상태는 없어요.
 
 ### 2. 발행 공지: Board 의 토론 자리
 
@@ -146,7 +149,7 @@ Skill 하나를 볼 때 아래를 함께 보여 줘요. 모두 기존 기록에�
 ## 확인 방법
 
 - 근거: 발행 한 건마다 패키지 폴더에 `publication.json` 이 생기고, 발행자·evidence·revision·`post_id` 가 들어가는지. audit 을 지운 뒤에도 화면이 이 파일로 발행 근거를 보여 주는지.
-- 삭제: 운영자가 Skill 을 지우면 `publication.json` 도 같은 `recovery_id` 아래로 옮겨지는지. 그 뒤 같은 package id 로 다시 발행할 수 있는지.
+- 삭제: 운영자가 Skill 을 지우면 `SKILL.md` 와 `publication.json` 이 같은 `recovery_id` 아래로 옮겨지고 빈 패키지 폴더가 사라지는지. 그 뒤 같은 package id 로 다시 발행할 수 있는지.
 - cleanup: 공지 글에 댓글·표가 없을 때 `masc_board_cleanup dry_run=false` 로 지워져도 `publication.json` 은 남고, 화면이 "공지 지워짐"으로 보이는지.
 - 게이트 없음: 근거 파일 쓰기와 공지를 억지로 실패시켜도 발행 결과가 그대로인지. Down 표만 잔뜩 달린 Skill 이 목록에 남고 활성화되는지. 누군가 게이트를 넣으면 이 테스트가 깨져야 해요.
 - 투영: 공지 글의 투표·댓글을 바꾸면 화면 값이 따라 바뀌는지. 발행자 본인 표가 빠지는지.

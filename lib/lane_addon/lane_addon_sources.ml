@@ -1,5 +1,8 @@
 let ( let* ) = Result.bind
 type browser_selection = Live of Browser_lane.client_id | Automation
+let browser_selection_lane = function
+  | Live _ -> Browser_lane.Lane_name.(to_wire Live)
+  | Automation -> Browser_lane.Lane_name.(to_wire Automation)
 type lane_output = {
   installation_id : string;
   instance_id : string;
@@ -50,12 +53,15 @@ let parse_source = function
                  (match Browser_lane.client_id_of_string value with
                   | Ok id -> Ok (Some id) | Error error -> Error error)
              | _ -> Error "client_id requires a UUID" in
-           let* selection = match List.assoc_opt "lane" fields, client_id with
-             | Some (`String "live"), Some client -> Ok (Live client)
-             | Some (`String "live"), None -> Error "live browser observation requires an explicit client_id"
-             | Some (`String "automation"), None -> Ok Automation
-             | Some (`String "automation"), Some _ -> Error "automation does not use a live client_id"
-             | _ -> Error "browser source requires live or automation lane" in
+           let lane = match List.assoc_opt "lane" fields with
+             | Some (`String raw) -> Browser_lane.Lane_name.of_wire raw
+             | Some _ | None -> None in
+           let* selection = match lane, client_id with
+             | Some Browser_lane.Lane_name.Live, Some client -> Ok (Live client)
+             | Some Browser_lane.Lane_name.Live, None -> Error "live browser observation requires an explicit client_id"
+             | Some Browser_lane.Lane_name.Automation, None -> Ok Automation
+             | Some Browser_lane.Lane_name.Automation, Some _ -> Error "automation does not use a live client_id"
+             | None, _ -> Error ("browser source requires " ^ Browser_lane.Lane_name.expected ^ " lane") in
            let* tab_id = match List.assoc_opt "tab_id" fields with
              | Some (`Int value) when value >= 0 -> Ok value
              | _ -> Error "tab_id requires a nonnegative integer" in

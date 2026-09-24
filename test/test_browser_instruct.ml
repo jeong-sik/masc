@@ -9,7 +9,8 @@ let sent = ref []
 let with_executor answer f =
   sent := [];
   Eio_main.run
-  @@ fun _ ->
+  @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Lane.install_stagehand_executor
     (Some
        (fun verb ->

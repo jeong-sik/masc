@@ -7159,13 +7159,17 @@ let decode_standalone_lane_jev json =
      | _ :: _ -> Ok (Jev_configured { destinations }))
   | other -> Error ("standalone lane JEV state: unknown value " ^ other)
 
+(* A standalone lane id read off the wire, into the lane it names. An id no
+   lane has is refused where it is read, so nothing past the decoder holds a
+   lane as a string. *)
+let required_standalone_lane_field json field =
+  let* id = required_string_field json field in
+  match Standalone_lane.of_id id with
+  | Some lane -> Ok lane
+  | None -> Error (Printf.sprintf "%s: unknown standalone lane %s" field id)
+
 let decode_standalone_lane json =
-  let* lane_id = required_string_field json "lane_id" in
-  let* sl_lane =
-    match Standalone_lane.of_id lane_id with
-    | Some lane -> Ok lane
-    | None -> Error ("standalone lane: unknown lane_id " ^ lane_id)
-  in
+  let* sl_lane = required_standalone_lane_field json "lane_id" in
   let* sl_label = required_string_field json "label" in
   let* sl_purpose = optional_string_field json "purpose" in
   let* sl_required = required_bool_field json "required" in
@@ -7304,17 +7308,18 @@ let decode_standalone_lanes_snapshot json =
   in
   let* items = required_list_field json "lanes" in
   let* sls_lanes = decode_list "lanes" decode_standalone_lane items in
-  let expected_lane_ids =
-    (* [Standalone_lane] spells every lane id; spelling them here again is
-       how a list drifts when a lane is added or renamed. *)
-    List.map Standalone_lane.to_id Standalone_lane.all |> List.sort String.compare
+  let every_lane_once =
+    (* As many rows as lanes, and every lane among them: a lane present twice
+       would leave another one missing. *)
+    List.length sls_lanes = List.length Standalone_lane.all
+    && List.for_all
+         (fun lane ->
+            List.exists
+              (fun (row : standalone_lane) -> Standalone_lane.equal row.sl_lane lane)
+              sls_lanes)
+         Standalone_lane.all
   in
-  let observed_lane_ids =
-    sls_lanes
-    |> List.map (fun lane -> Standalone_lane.to_id lane.sl_lane)
-    |> List.sort String.compare
-  in
-  if observed_lane_ids = expected_lane_ids
+  if every_lane_once
   then
     Ok
       { sls_observed_at_unix
@@ -9521,15 +9526,15 @@ let decode_librarian_run_page json =
   let rec find_librarian = function
     | [] -> Ok None
     | run :: rest ->
-        let* lane = required_string_field run "lane" in
-        if
-          String.equal
-            lane
-            (Standalone_lane.to_id Standalone_lane.Librarian)
-        then
-          let* run_id = required_string_field run "run_id" in
-          Ok (Some run_id)
-        else find_librarian rest
+        let* lane = required_standalone_lane_field run "lane" in
+        (match lane with
+         | Standalone_lane.Librarian ->
+           let* run_id = required_string_field run "run_id" in
+           Ok (Some run_id)
+         | Standalone_lane.Hitl_auto_judge
+         | Standalone_lane.Board_attention
+         | Standalone_lane.Workspace_curator
+         | Standalone_lane.Verifier -> find_librarian rest)
   in
   let* run_id = find_librarian runs in
   let* lrp_next =
@@ -9885,12 +9890,7 @@ type lane_run_detail =
 let decode_lane_run_summary json =
   let* lrs_run_id = required_string_field json "run_id" in
   let* lrs_run_kind = optional_string_field json "run_kind" in
-  let* lane_id = required_string_field json "lane" in
-  let* lrs_lane =
-    match Standalone_lane.of_id lane_id with
-    | Some lane -> Ok lane
-    | None -> Error ("lane run: unknown lane " ^ lane_id)
-  in
+  let* lrs_lane = required_standalone_lane_field json "lane" in
   let* lrs_subject_id = optional_string_field json "subject_id" in
   let* lrs_actor = required_string_field json "actor" in
   let* lrs_started_at = require_float_field json "started_at" in
@@ -9992,9 +9992,7 @@ let decode_lane_run_detail json =
                   | Exact_lane_run_registry.Unavailable _) -> Ok None
   in
   let* lrd_answer_source =
-    (* The lane key is read into the lane once; the answer-source rule below
-       is about the Board-attention lane, and a key no lane spells is not
-       that lane. *)
+    (* The answer-source rule below is about the Board-attention lane. *)
     let is_board_attention =
       match summary.lrs_lane with
       | Standalone_lane.Board_attention -> true

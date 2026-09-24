@@ -6004,22 +6004,22 @@ let test_decode_standalone_lane_keeps_the_run_start () =
           ]
       ]
   in
-  let find id lanes =
+  let find target lanes =
     match
       List.find_opt
         (fun (lane : Tui_decode.standalone_lane) ->
-          String.equal (Standalone_lane.to_id lane.sl_lane) id)
+          Standalone_lane.equal lane.sl_lane target)
         lanes
     with
     | Some lane -> lane
-    | None -> Alcotest.failf "%s missing from the snapshot" id
+    | None -> Alcotest.failf "%s missing from the snapshot" (Standalone_lane.to_id target)
   in
   match Tui_decode.decode_standalone_lanes_snapshot json with
   | Error detail -> Alcotest.failf "decode failed: %s" detail
   | Ok snapshot ->
     (match
-       ( find "board_attention_exact" snapshot.sls_lanes
-       , find "verifier_exact" snapshot.sls_lanes )
+       ( find Standalone_lane.Board_attention snapshot.sls_lanes
+       , find Standalone_lane.Verifier snapshot.sls_lanes )
      with
      | running, never_ran ->
        Alcotest.(check (option (float 0.001)))
@@ -9769,6 +9769,24 @@ let test_decode_verifier_detail_keeps_kind_subject_and_tool_result () =
          tool.lrt_duration_ms
      | _ -> Alcotest.fail "verifier tool evidence must decode to one tool")
 
+(* The run detail reads its lane the way the run page does, so a run whose
+   lane no lane has refuses the detail. *)
+let test_decode_lane_run_detail_refuses_an_unknown_lane () =
+  let detail =
+    match lane_run_detail_json "retired-1" with
+    | `Assoc [ "run", `Assoc fields ] ->
+      `Assoc
+        [ ( "run"
+          , `Assoc (("lane", `String "retired_lane_exact") :: List.remove_assoc "lane" fields) )
+        ]
+    | _ -> Alcotest.fail "the run detail fixture changed shape"
+  in
+  match Tui_decode.decode_lane_run_detail detail with
+  | Ok _ -> Alcotest.fail "a run whose lane no lane has decoded"
+  | Error message ->
+    Alcotest.(check bool) "the error names the lane" true
+      (String_util.contains_substring message "retired_lane_exact")
+
 let test_lane_detail_distinguishes_null_missing_and_unavailable () =
   let make ~availability ~output =
     match lane_run_detail_json "recorded-null" with
@@ -11873,6 +11891,8 @@ let () =
           test_goal_run_decision_uses_evaluated_verdict_independently_of_settlement;
         Alcotest.test_case "lane detail distinguishes null, missing and unavailable output" `Quick
           test_lane_detail_distinguishes_null_missing_and_unavailable;
+        Alcotest.test_case "lane run detail refuses an unknown lane" `Quick
+          test_decode_lane_run_detail_refuses_an_unknown_lane;
       ] );
     ( "decode_fusion",
       [

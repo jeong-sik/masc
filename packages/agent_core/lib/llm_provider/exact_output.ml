@@ -654,7 +654,7 @@ let wire_admission_error_disposition = function
   | Global_admission_not_allowed
   | Invalid_connect_timeout
   | Invalid_body_timeout
-  | Missing_deadline
+  | Missing_deadline _
   | Context_limit_unavailable
   | Invalid_context_limit
   | Unsupported_target_model _ -> Runtime_contract_rejected
@@ -857,6 +857,30 @@ let refusal_reason = function
   | Http_client.ProviderFailure { kind; message } ->
     Http_client.provider_failure_to_string ~kind ~message
 
+(* The provider a deadline refusal names, rendered for a line a person
+   reads. [None] is said as such rather than left blank: a config with no
+   provider id is a fact about that config, not a missing word. The whole
+   detail is quoted where it lands in a reason line, so the id is not. *)
+let missing_deadline_provider_label = function
+  | Some provider_id -> provider_id
+  | None -> "(config names no provider)"
+;;
+
+(* What a deadline refusal tells an operator to do. The target's body
+   deadline has two spellings, one per surface that declares targets: a
+   runtime.toml provider's [exact-body-timeout-s], and a replacement
+   catalog's [[targets]] row [body_timeout_s]. Which one built this target
+   is not known here, so both are named. The connect deadline is named
+   because it is what an operator who set one expects to have been enough. *)
+let missing_deadline_detail provider_id =
+  Printf.sprintf
+    "provider %s declares no whole-request deadline: set exact-body-timeout-s \
+     on that provider in runtime.toml, or body_timeout_s on its \
+     AGENT_CORE_MODEL_CATALOG [[targets]] row. connect-timeout-s ends when the \
+     response headers arrive and does not bound the response body"
+    (missing_deadline_provider_label provider_id)
+;;
+
 let wire_admission_error_evidence_json = function
   | Capability_snapshot_missing ->
     `Assoc [ "kind", `String "capability_snapshot_missing" ]
@@ -867,7 +891,13 @@ let wire_admission_error_evidence_json = function
     `Assoc [ "kind", `String "global_admission_not_allowed" ]
   | Invalid_connect_timeout -> `Assoc [ "kind", `String "invalid_connect_timeout" ]
   | Invalid_body_timeout -> `Assoc [ "kind", `String "invalid_body_timeout" ]
-  | Missing_deadline -> `Assoc [ "kind", `String "missing_deadline" ]
+  | Missing_deadline { provider_id } ->
+    `Assoc
+      [ "kind", `String "missing_deadline"
+      ; ( "provider_id"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) provider_id )
+      ; "detail", `String (missing_deadline_detail provider_id)
+      ]
   | Caller_supplied_header_not_allowed ->
     `Assoc [ "kind", `String "caller_supplied_header_not_allowed" ]
   | Unsupported_image_input -> `Assoc [ "kind", `String "unsupported_image_input" ]
@@ -947,7 +977,10 @@ let wire_admission_error_reason = function
   | Global_admission_not_allowed -> "global_admission_not_allowed"
   | Invalid_connect_timeout -> "invalid_connect_timeout"
   | Invalid_body_timeout -> "invalid_body_timeout"
-  | Missing_deadline -> "missing_deadline"
+  | Missing_deadline { provider_id } ->
+    Printf.sprintf
+      "missing_deadline(%s)"
+      (quoted_dynamic (missing_deadline_detail provider_id))
   | Caller_supplied_header_not_allowed ->
     "caller_supplied_header_not_allowed"
   | Unsupported_image_input -> "unsupported_image_input"

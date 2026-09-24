@@ -454,15 +454,13 @@ function handleEvent(event: SSEEvent): void {
     case 'keeper_heartbeat':
       addTypedJournalEntry(
         event.name ?? agent,
-        `Heartbeat gen=${event.generation ?? '?'}`,
+        'Heartbeat',
         'keepers',
         'keeper_heartbeat',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText:
-            `${actorLabel(event.name ?? agent)}가 하트비트를 보냈습니다`
-            + ` (gen ${event.generation ?? '?'})`,
+          narrativeText: `${actorLabel(event.name ?? agent)}가 하트비트를 보냈습니다`,
         },
       )
       break

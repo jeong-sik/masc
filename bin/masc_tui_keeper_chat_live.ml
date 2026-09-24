@@ -31,7 +31,10 @@ type delta =
       ; attempt_index : int option
       }
   | Stream_model_started of { model : string }
-  | Stream_usage of stream_usage
+  | Stream_details of
+      { usage : stream_usage option
+      ; stop_reason : string option
+      }
   | Text of string
   | Thinking of string
   | Tool_started of
@@ -245,18 +248,28 @@ let custom_deltas_unvalidated fields =
         | _ -> [])
      | None -> [])
   | Some "KEEPER_STREAM_MESSAGE_DELTA" ->
-    (* The dashboard reader already keeps these counters
-       ([dashboard/src/keeper-stream.ts] KEEPER_STREAM_MESSAGE_DELTA), so a
-       turn in flight told one renderer its token cost and the other nothing.
-       A delta that carried no counters is not a row. *)
+    (* The dashboard reader already keeps both of these
+       ([dashboard/src/keeper-stream.ts] KEEPER_STREAM_MESSAGE_DELTA) and draws
+       the stop reason ([dashboard/src/components/session-trace/
+       session-trace-entry.ts]), so a turn in flight told one renderer its
+       token cost and why it stopped, and the other nothing. A delta that
+       carried neither is not a row. *)
     (match object_field fields "value" with
      | Some value ->
-       (match List.assoc_opt "usage" value with
-        | Some usage ->
-          (match stream_usage_of_usage_json usage with
-           | Some usage -> [ Stream_usage usage ]
-           | None -> [])
-        | None -> [])
+       let usage =
+         match List.assoc_opt "usage" value with
+         | Some usage -> stream_usage_of_usage_json usage
+         | None -> None
+       in
+       let stop_reason =
+         match List.assoc_opt "stop_reason" value with
+         | Some (`String reason) when String.trim reason <> "" ->
+           Some (String.trim reason)
+         | Some _ | None -> None
+       in
+       if usage = None && stop_reason = None
+       then []
+       else [ Stream_details { usage; stop_reason } ]
      | None -> [])
   | Some "KEEPER_TOOL_RESULT_READY" -> (
       match object_field fields "value" with

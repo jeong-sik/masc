@@ -614,6 +614,7 @@ remote_endpoint = "fixture"
          ; env_allowlist = []
          ; capabilities = []
          ; private_home = false
+         ; allowed_paths = []
          });
   let missing_host_path =
     Filename.concat

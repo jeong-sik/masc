@@ -2246,6 +2246,15 @@ type fleet_safety = {
     alive, its durable demand is not admissible. Collapsing the two reads a
     live fleet as a stopped one. *)
 
+type fleet_safety_reading =
+  | Fleet_measured of fleet_safety
+  | Fleet_not_measured of { status : string }
+      (** The health snapshot has no fleet reading and nothing failed: it is
+          being rebuilt, at boot and again after a change invalidates it.
+          [status] is the placeholder's word (["warming"]). Kept apart from a
+          reading: zero counts would draw an idle fleet the server never
+          measured. *)
+
 type server_gc_health = {
   sgc_heap_words : int;
   sgc_live_words : int;
@@ -2746,6 +2755,54 @@ val decode_runtime_resolved_snapshot :
     Assignment and max-context fields belong to other consumers and are not
     duplicated into this light projection. *)
 
+(** What each provider account said about its own usage windows, as
+    [GET /api/v1/runtime/resolved] carries it. The server keeps these values
+    as reported and derives no availability from them. *)
+type provider_usage_window_kind =
+  | Window_five_hour
+  | Window_seven_day
+  | Window_duration_minutes of int
+      (** A window length the server has no name for. *)
+  | Window_provider_label of string
+      (** A label the provider gave the window, kept as written. *)
+
+(** The usage in the unit the provider reported it in. Not clamped. *)
+type provider_usage_utilization =
+  | Utilization_fraction of float  (** [0.67] is 67 %. *)
+  | Utilization_percent of int
+
+type provider_usage_window = {
+  puw_limit_id : string option;
+  puw_kind : provider_usage_window_kind;
+  puw_utilization : provider_usage_utilization;
+  puw_resets_at : float option;  (** Epoch seconds, as reported. *)
+  puw_observed_at : float;  (** When the server heard this report. *)
+}
+
+(** A reported account holds at least one window; an account that has not
+    reported since the server started holds none. *)
+type provider_usage_state =
+  | Account_not_reported_since_start
+  | Account_reported of provider_usage_window * provider_usage_window list
+
+type provider_usage_account = {
+  pua_scope : string;  (** The quota scope, as [quota_scope] on runtime rows. *)
+  pua_providers : string list;
+  pua_state : provider_usage_state;
+}
+
+type provider_usage_windows = {
+  puws_since : float;  (** Server process start: the table's first moment. *)
+  puws_accounts : provider_usage_account list;
+}
+
+val decode_provider_usage_windows :
+  Yojson.Safe.t -> (provider_usage_windows, string) result
+(** Strict decoder for the [provider_usage_windows_since] and
+    [provider_usage_windows] members of [GET /api/v1/runtime/resolved]. An
+    unknown [state], window [kind] or utilization [unit] is an error, as is a
+    reported account without windows or an unreported one with windows. *)
+
 val decode_runtime_surface_snapshot :
   probe_json:Yojson.Safe.t ->
   resolved_json:Yojson.Safe.t ->
@@ -2874,11 +2931,19 @@ val decode_overview_goals :
     server order. Goals of every phase are returned; which ones a surface
     draws is the surface's decision. *)
 
-val decode_fleet_safety : Yojson.Safe.t -> (fleet_safety, string) result
+val decode_fleet_safety :
+  Yojson.Safe.t -> (fleet_safety_reading, string) result
 (** Reads the [keeper_fleet_safety] section out of a [/health?full=1] body.
     A body without the section is an error rather than an empty reading: an
     absent section and a healthy fleet are different facts, and rendering the
-    second for the first is how a blocked keeper stays invisible. *)
+    second for the first is how a blocked keeper stays invisible.
+
+    A section carrying [schema = Keeper_fleet_blocker.reading_schema] is a
+    reading, and every field of {!fleet_safety} is required: a missing count
+    is an error, not zero. A section without [schema] is the health
+    snapshot's placeholder: {!Fleet_not_measured} when it carries no
+    [error], and an error with the server's reason when it does (the refresh
+    timed out or the scan raised). *)
 val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :

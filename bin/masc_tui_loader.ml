@@ -1070,6 +1070,22 @@ let load_runtime_resolved ~(host : string) ~(port : int) :
   | Error err -> Error ("runtime catalogue load failed: " ^ err)
   | Ok json -> Tui_decode.decode_runtime_resolved_full json
 
+(** One read of [/api/v1/runtime/resolved] for the Overview: the runtime rows
+    and the provider usage windows. The two decode apart, and a failed fetch
+    fails both with one reason. *)
+let load_overview_runtime_resolved ~(host : string) ~(port : int) :
+    (Tui_decode.runtime_option list, string) result
+    * (Tui_decode.provider_usage_windows, string) result =
+  match fetch_runtime_resolved ~host ~port with
+  | Error err ->
+      let reason = "runtime catalogue load failed: " ^ err in
+      (Error reason, Error reason)
+  | Ok json ->
+      ( Result.map
+          (fun (options, _lanes, _assignments) -> options)
+          (Tui_decode.decode_runtime_resolved_full json)
+      , Tui_decode.decode_provider_usage_windows json )
+
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
   rsl_probe : (Tui_decode.runtime_probe_snapshot, string) result;
@@ -1644,7 +1660,7 @@ let restore_preset ~(host : string) ~(port : int) ~(name : string)
    started has no row, so the roster shows nine keepers whether the tenth is
    absent by design or blocked. *)
 let load_fleet_safety ~(host : string) ~(port : int) :
-    (Tui_decode.fleet_safety, string) result =
+    (Tui_decode.fleet_safety_reading, string) result =
   match fetch_fleet_safety ~host ~port with
   | Error err -> Error ("fleet safety load failed: " ^ err)
   | Ok json -> Tui_decode.decode_fleet_safety json

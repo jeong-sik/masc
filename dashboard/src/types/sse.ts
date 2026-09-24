@@ -151,7 +151,6 @@ export interface SSEEvent {
   event_type?: string
   // Keeper event fields
   name?: string
-  generation?: number
   context_ratio?: number
   ts_unix?: number
   from_model?: string

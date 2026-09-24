@@ -97,6 +97,10 @@ let runtime_row json id =
   |> List.find (fun row -> Yojson.Safe.Util.(row |> member "id" |> to_string) = id)
 ;;
 
+let runtime_scope_label json id =
+  Yojson.Safe.Util.(runtime_row json id |> member "quota_scope" |> to_string)
+;;
+
 let window_summary row =
   Yojson.Safe.Util.(
     row
@@ -116,10 +120,10 @@ let test_reports_reach_the_resolved_document () =
   with_runtimes @@ fun () ->
   let claude_scope = scope_of "usage_claude.sonnet" in
   let codex_scope = scope_of "usage_codex.sol" in
-  let claude_label = Runtime_quota_window.scope_to_string claude_scope in
-  let codex_label = Runtime_quota_window.scope_to_string codex_scope in
-  (* Before any report both scopes are listed, and say so. *)
   let before = resolved () in
+  let claude_label = runtime_scope_label before "usage_claude.sonnet" in
+  let codex_label = runtime_scope_label before "usage_codex.sol" in
+  (* Before any report both scopes are listed, and say so. *)
   check bool "since is the process start" true
     (Yojson.Safe.Util.(before |> member "provider_usage_windows_since" |> to_number)
      = Usage.recording_since);
@@ -190,7 +194,7 @@ let test_official_client_home_owns_usage_across_provider_rows () =
   let temp = Filename.get_temp_dir_name () in
   let home_a = Filename.concat temp "masc-usage-home-a" in
   let home_b = Filename.concat temp "masc-usage-home-b" in
-  let config first_home =
+  let config first_home second_home =
     Printf.sprintf
       {|[providers.usage_shared_one]
 protocol = "claude-code"
@@ -214,7 +218,7 @@ max-context = 200000
 [runtime]
 default = "usage_shared_one.sonnet"
 |}
-      first_home home_a
+      first_home second_home
   in
   let load source =
     with_temp_file ~suffix:".toml" source (fun path ->
@@ -225,7 +229,7 @@ default = "usage_shared_one.sonnet"
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore snapshot)
     (fun () ->
-       load (config home_a);
+       load (config home_a home_a);
        let old_scope = scope_of "usage_shared_one.sonnet" in
        let shared_scope = scope_of "usage_shared_two.sonnet" in
        check bool "same CLI home shares one quota scope" true
@@ -237,22 +241,51 @@ default = "usage_shared_one.sonnet"
          |> decode_ok
        in
        Usage.record ~scope:old_scope ~observed_at:1790180000.0 report;
-       let shared_row = usage_row (resolved ()) (Runtime_quota_window.scope_to_string old_scope) in
+       let first = resolved () in
+       let shared_label = runtime_scope_label first "usage_shared_one.sonnet" in
+       check string "same CLI home has one public account id" shared_label
+         (runtime_scope_label first "usage_shared_two.sonnet");
+       let shared_row = usage_row first shared_label in
        check (list string) "both provider ids share the reported row"
          [ "usage_shared_one"; "usage_shared_two" ]
          Yojson.Safe.Util.(shared_row |> member "providers" |> to_list |> List.map to_string);
-       load (config home_b);
+       check bool "first account path is absent from public JSON" false
+         (String_util.contains_substring (Yojson.Safe.to_string first) home_a);
+       load (config home_b home_a);
        let new_scope = scope_of "usage_shared_one.sonnet" in
        check bool "changed home has a different scope" false
          (Runtime_quota_window.scope_equal old_scope new_scope);
        let after = resolved () in
-       let fresh_row = usage_row after (Runtime_quota_window.scope_to_string new_scope) in
+       let fresh_label = runtime_scope_label after "usage_shared_one.sonnet" in
+       let retained_label = runtime_scope_label after "usage_shared_two.sonnet" in
+       check bool "distinct CLI homes have distinct public account ids" false
+         (String.equal fresh_label retained_label);
+       let fresh_row = usage_row after fresh_label in
        check string "changed home has no report" "not_reported_since_start"
          Yojson.Safe.Util.(fresh_row |> member "state" |> to_string);
-       let retained_row = usage_row after (Runtime_quota_window.scope_to_string old_scope) in
+       let retained_row = usage_row after retained_label in
        check (list string) "old report belongs only to the unchanged home"
          [ "usage_shared_two" ]
-         Yojson.Safe.Util.(retained_row |> member "providers" |> to_list |> List.map to_string))
+         Yojson.Safe.Util.(retained_row |> member "providers" |> to_list |> List.map to_string);
+       let public_json = Yojson.Safe.to_string after in
+       List.iter
+         (fun home ->
+            check bool ("account path is absent from public JSON: " ^ home) false
+              (String_util.contains_substring public_json home))
+         [ home_a; home_b ];
+       let unconfigured_count json =
+         Yojson.Safe.Util.(json |> member "provider_usage_windows" |> to_list)
+         |> List.filter (fun row ->
+           Yojson.Safe.Util.(row |> member "providers" |> to_list) = [])
+         |> List.length
+       in
+       let before_retirement = unconfigured_count after in
+       load (config home_b home_b);
+       let retired = resolved () in
+       check int "retired account keeps one unconfigured report"
+         (before_retirement + 1) (unconfigured_count retired);
+       check bool "retired home path is absent from public JSON" false
+         (String_util.contains_substring (Yojson.Safe.to_string retired) home_a))
 ;;
 
 let test_default_and_explicit_home_share_scope
@@ -302,10 +335,16 @@ default = %S
        let explicit = scope_of (explicit_id ^ "." ^ model) in
        check bool (client ^ " implicit and explicit same home share scope") true
          (Runtime_quota_window.scope_equal implicit explicit);
-       let row = usage_row (resolved ()) (Runtime_quota_window.scope_to_string implicit) in
+       let json = resolved () in
+       let implicit_label = runtime_scope_label json (implicit_id ^ "." ^ model) in
+       check string "implicit and explicit home have one public account id" implicit_label
+         (runtime_scope_label json (explicit_id ^ "." ^ model));
+       let row = usage_row json implicit_label in
        check (list string) "one row names both providers"
          [ implicit_id; explicit_id ]
-         Yojson.Safe.Util.(row |> member "providers" |> to_list |> List.map to_string))
+         Yojson.Safe.Util.(row |> member "providers" |> to_list |> List.map to_string);
+       check bool "default home path is absent from public JSON" false
+         (String_util.contains_substring (Yojson.Safe.to_string json) home))
 ;;
 
 let test_codex_default_and_explicit_home_share_scope =

@@ -71,8 +71,9 @@ val demote_order :
     place — an unresolved id is not evidence of exhaustion.  Returns the
     input unchanged when no candidate is demoted. *)
 
-(** The scope's own label, for operator-facing projections: which provider
-    row or credential the exhaustion belongs to. *)
+(** The scope's own label for trusted diagnostics. File and official-client
+    scopes can contain absolute paths; public projections must use opaque
+    labels instead. *)
 val scope_to_string : scope -> string
 
 val scope_equal : scope -> scope -> bool

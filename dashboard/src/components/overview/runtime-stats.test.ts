@@ -32,7 +32,7 @@ it('shows each official client account once with its provider-reported usage', a
     config_path: null, default_runtime: null, runtimes: [], lanes: [], assignments: [],
     provider_usage_windows_since: 1_000,
     provider_usage_windows: [
-      { scope: 'official:claude-code:home:/tmp/claude-shared', providers: ['claude_one', 'claude_alias'], state: 'reported', windows: [{
+      { scope: 'account:1', providers: ['claude_one', 'claude_alias'], state: 'reported', windows: [{
         limit_id: null, window: { kind: 'five_hour' }, utilization: { unit: 'fraction', value: 0.67 },
         resets_at: null, observed_at: 1_100, source: 'claude_code.rate_limit_event',
       }] },

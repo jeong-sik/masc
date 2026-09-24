@@ -7,15 +7,19 @@ status: runbook
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
-`bin/masc_tui_types.ml`: Overview, Activity, Keepers, Memory, Approvals,
-Board, Planning, Fusion, Workspace, Config.
+`bin/masc_tui_types.ml`: Dashboard, Work, Keepers, Usage, Board, Workspace,
+System. Dashboard is the first screen. It shows Goal measurements, Task flow,
+usage coverage, and what needs the operator. The full Goal and Task lists are
+under Work; provider quota scopes, Keeper costs and tokens, and daily provider
+reports are under Usage. Activity and server logs are under System (`A` / `L`).
 Additional surfaces hang off parents instead of holding Tab stops:
-Planning's `v` cycles through Task Review and Task Verdicts, then back to Goals;
+Work's `t` switches Goals and Tasks, and `v` cycles through Task Review and
+Task Verdicts, then back to Goals;
 the Keepers roster reaches Changes with `f`, and Keeper detail owns Channels,
 Automation, and Runs as tabs. Runtime reaches standalone Lanes with `p` (its
 third stop) and the clients roster with `c`, Workspace reaches Code with
 `Enter` on a repository row, and
-Config reaches Runtime with `9` (Esc returns to Config), Resources with `s` and Tools with `t`, and Activity
+System reaches Runtime with `9` (Esc returns to System), Resources with `s` and Tools with `t`, and Activity
 reaches the server log with `l`. Task Review, Task Verdicts, Schedules,
 Fusion, Lanes, Clients, Runtime, Changes, Code, Resources, Tools, and Logs
 also keep `go <name>` palette entries, and each Config pane has
@@ -23,9 +27,8 @@ also keep `go <name>` palette entries, and each Config pane has
 `presets`, `themes`, `voice`). Changes follows the Keeper selected on
 Keepers. Keeper operations are reached from their parent only.
 
-Every clock and date the TUI draws is the terminal's own timezone - header
-clocks, row times, and the dates in every column. One helper makes them all,
-so no row marks its own time with a zone.
+Header clocks and ordinary row times use the terminal's timezone. Usage trends
+and Task completion days are explicitly labeled UTC.
 
 ## Quick Start
 
@@ -247,8 +250,9 @@ reveal a hidden toggle that had no visible effect when it was pressed.
 
 ### The Activity pane
 
-`Ctrl-L` walks the pane on the right of every surface through narrow, wide
-and hidden. Its `[Recent]` tab is what each keeper is doing now, one row
+`Ctrl-L` walks the pane on the right of eligible surfaces through narrow, wide
+and hidden. Dashboard, Work, Usage, Activity, and Logs keep this pane off so
+their primary reading has the full width. Its `[Recent]` tab is what each keeper is doing now, one row
 each:
 
 ```
@@ -281,77 +285,47 @@ The `Changes` tab lists the files this keeper's calls wrote, newest first.
 
 ## Surfaces
 
-### Overview
+### Dashboard
 
-Workspace health, agent count, pending approvals, the Attention list, and
-active tasks.
+The first screen shows workspace health, the number of listed Keepers, two
+active Goals, Task flow, quota coverage, and up to two operator attention
+items. It leaves individual Keeper rows, Task rows, provider meters, and logs
+to their own destinations. The Recent activity pane stays hidden on this
+screen even in a wide terminal.
 
-```
- MASC Overview  [me]  10:54:52  [connected]
-   Health: bad  Keepers: 10  MCP agents: 2  Approvals: 0
- Attention 2
- [bad ] analyst needs operator attention
- [warn] sangsu has external attention from discord
- Tasks
-   * [task-317] Apply File_lock_eio to approval queue (in_progress @keeper-...)
-   o [task-272] Add HTTP route regression coverage (todo) !
-  m:telemetry  t:tasks  2:keepers  r:refresh  Tab:next  q:quit  | Refresh: 2s | Port: 8935
-```
+For a Goal, `actual` comes only from an explicitly recorded measurement bound
+to that Goal's current criterion revision. The screen says `not recorded`,
+`not observed`, or `unavailable` when it has no valid value. The count of
+linked Tasks marked done is a separate fact; it never becomes the Goal's
+measured value.
 
-`j`/`k` move nothing until `t` selects the task list. With the list selected,
-`Enter` opens the selected task in full - description, status with its
-assignee and timestamps, handoff summary, the completion contract's evidence
-list, attached files - read from the same backlog load the list was projected
-from. `Esc` closes the detail, and a second `Esc` lets go of the list.
+Work shows current Task statuses and a 14-day UTC plot of Tasks *currently*
+done by their completion date. Its coverage line names backlog, Goal-link,
+and archive read failures. The quota line on Dashboard is only a count of
+provider scopes with a report since server start; `m` or Tab opens the full
+Usage screen.
 
-This TUI's own session log is on Metrics (`m`), first in the Engine &
-Scheduler section under `TUI session`: what the TUI did and what it was told,
-oldest first so the newest line is last. It keeps eleven lines, and a run of
-the same line folds into one row with a `×N` tail. When the frame is too
-short for all of it, the block keeps its newest rows under a `+N earlier`
-row, so the newest line stays in view. An error event wears the
-`✗` the chat pane uses for a failure, just after the clock; every other level
-keeps that cell for its text. The mark is a shape rather than a colour alone,
-so it holds under `NO_COLOR`.
+### Work
 
-The server's delivery paths and this TUI's runtime event feed are on Metrics
-(`m`), in the Transport delivery block, which reads the transport health
-itself: the path carrying the traffic, the gRPC port or `off`, SSE and
-WebSocket sessions, dropped events, queue pressure, and the feed as
-`live N`, `opening`, `closed N (reason)` or `off`. The feed is opened after
-the first refresh that reaches the server and reopened on the refresh cadence
-after it closes. Every keeper's tool calls, turn boundaries, heartbeats, and
-turn done rows arrive on it; this build keeps the last 1,000 and counts what
-falls off the end.
+`t` switches between Goals and Tasks. On Tasks, `j`/`k`, paging, Home/End,
+search, `Enter`, and `Esc` operate on the visible Task rows and detail. Goal
+details retain their criterion, measurement and linked Task references.
+`v` opens Task Review and Task Verdicts, then returns to Goals.
 
-Overview draws one Attention item for the transport, and only while the
-outbound queue's pressure is `watch` (warning) or `high` (bad). A steady queue
-adds nothing.
+### Usage
 
-Tasks show terminal states in Planning rollups but not in this list. A task
-detail that is open when its task turns terminal stays open - the detail reads
-the full backlog rows, not the active projection.
+Current provider quota windows are grouped by **quota scope**. A scope may be
+a provider row or a credential source; its short identifier distinguishes
+multiple scopes without displaying a credential path. The provider reports
+their utilization and reset time. Catalogue quota blocks are labeled
+separately. The 1/7/14 UTC-day plot uses the latest stored provider report for
+each day; `·` means no report was stored for that day, and `w` changes the
+window. A failed read is labeled unavailable rather than drawn as zero.
 
-The Providers section sits above the Team block, so the reason a Keeper there
-is stuck stays on screen with it. It reads
-`provider_usage_windows` from `GET /api/v1/runtime/resolved` and draws one
-strip per provider account: a meter per usage window, the value as a whole
-percent (a fraction is multiplied by 100 and floored), the reset time, and how long ago the provider said so.
-
-```
- Providers  reported by the provider · since server start 22:39
- claude_code  5h ▕██████████▋     ▏  67%  ↻ 18:10 in 4h12m        heard 3m ago
-              7d ▕███████         ▏  44%  ↻ 09-29 13:00 in 5d23h
- codex        no report since server start
-```
-
-A meter is drawn in the exhausted style only when the value reaches the full
-value of its own unit (`1.0` for a fraction, `100` for a percent). A reset time
-that has passed reads `reset time passed · no newer report`; the meter keeps
-the last reported value. An account whose runtime rows carry
-`quota_exhausted` wears `exhausted (observed)` with the catalogue's own reopen
-time, and is listed first. A failed read is one line,
-`providers unavailable: <reason>`.
+Keeper rows show recorded 24-hour token and cost totals with the number of
+turns that reported each value and the number missing it. Transport delivery
+and the TUI session are also here. Activity and the server log are reached
+from System when a detailed event timeline is needed.
 
 ### Activity
 
@@ -1827,9 +1801,8 @@ Per surface:
 ```
 Tab cycles the surfaces:
 
-  Overview -> Activity -> Keepers -> Memory -> Approvals -> Board
-           -> Planning -> Workspace
-           -> Runtime -> Config -> Overview
+  Dashboard -> Work -> Keepers -> Usage -> Board -> Workspace
+            -> System -> Dashboard
 
 Within a surface:
 
@@ -1839,20 +1812,21 @@ Within a surface:
   Keeper list/detail  --c-->  Message input
 
   Board     --Right/Enter-->  Board read
-  Planning  --Right/Enter-->  Goal detail
+  Work      --t-->  Goals / Tasks  --Right/Enter-->  Detail
 Off-ring children:
 
-  Planning  --v-->  Task Review --v--> Verdicts
+  Work      --v-->  Task Review --v--> Verdicts
   Keepers   --f-->  Changes
   Keeper detail --[ / ]--> Channels / Automation / Runs
   Runtime   --p--> ... --p--> Lanes
   Workspace --Enter-->  Code (the selected repository's tree)
-  Config    --s-->  Resources        Config --t--> Tools
-  Activity  --l-->  System Logs
+  System    --A-->  Activity         System --L--> Logs
+  System    --s-->  Resources        System --t--> Tools
+  Activity  --l-->  Logs             Logs --e--> Activity
 ```
 
 `2` reaches Keepers after the active field or panel has declined it.
-`Esc` returns one level within Keepers, Board, and Planning.
+`Esc` returns one level within Keepers, Board, and Work.
 
 ## Requirements
 

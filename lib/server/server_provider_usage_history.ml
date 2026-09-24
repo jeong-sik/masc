@@ -131,8 +131,12 @@ let read config ~now ~days =
     let latest = Hashtbl.create 128 in
     let error = ref None in
     let consume = function
-      | Dated_jsonl.Malformed_json { detail; _ } ->
-          error := Some ("provider usage history: malformed JSON: " ^ detail)
+      | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+          Log.Server.warn "provider usage history malformed: %s:%s: %s"
+            path
+            (Option.fold ~none:"?" ~some:string_of_int line_number)
+            detail;
+          error := Some "provider usage history: malformed stored report"
       | Dated_jsonl.Parsed json ->
           let items =
             match json with

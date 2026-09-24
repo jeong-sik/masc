@@ -299,7 +299,7 @@ let dashboard_work_lines (state : state) =
       ; Printf.sprintf "   Open: %d working · %d awaiting verification · %d claimed · %d todo"
           current.in_progress current.awaiting_verification current.claimed
           current.todo
-      ; Printf.sprintf "   Done by UTC day (%d days): %s"
+      ; Printf.sprintf "   Currently done by UTC day (%d days): %s"
           (List.length flow.daily) (braille_sparkline completed) ]
       @ (match state.tasks_error with
          | None -> []
@@ -722,7 +722,7 @@ let render_work_tasks (state : state) =
            let completed =
              List.map (fun (day : Masc_tui_task_flow.day) ->
                float_of_int day.d_completed) flow.daily in
-           c.push (Printf.sprintf " Done by UTC day (%d days): %s"
+           c.push (Printf.sprintf " Currently done by UTC day (%d days): %s"
                      (List.length flow.daily) (braille_sparkline completed)));
       (match state.tasks_error with
        | None -> ()

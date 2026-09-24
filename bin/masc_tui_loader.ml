@@ -203,10 +203,10 @@ let load_active_tasks (base_path : string) :
       ( Tui_decode.active_tasks_of_domain ~goals_for_task
           observation.observed_backlog.tasks
       , observation.observed_backlog.tasks
-      , (match recovery_error, goal_link_error, archive_error with
-         | Some recovery, _, _ -> Some recovery
-         | None, Some goal_links, _ -> Some goal_links
-         | None, None, archive -> archive)
+      , (match List.filter_map Fun.id
+                 [ recovery_error; goal_link_error; archive_error ] with
+         | [] -> None
+         | errors -> Some (String.concat " · " errors))
       , Some (Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived
                 observation.observed_backlog.tasks)
       (* Projected here rather than on a render frame: resolving whether an

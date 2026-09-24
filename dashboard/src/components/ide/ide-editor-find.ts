@@ -104,6 +104,7 @@ export function IdeFindPanel({
     else setActiveIndex(index)
   }
   const handleKeyDown = (event: KeyboardEvent): void => {
+    // Committing an IME query uses Enter too; leave that key to the input.
     if (isImeComposing(event)) return
     if (event.key === 'Enter') {
       event.preventDefault()

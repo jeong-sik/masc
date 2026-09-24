@@ -63,9 +63,9 @@ val parse_max_context_override :
     {!Keeper_sandbox_runtime.docker_preflight_failed_label} when it fails.
     [docker_preflight] defaults to {!Keeper_sandbox_runtime.docker_preflight}
     with the [Io] shell-timeout bucket, and is handed the Keeper's
-    [sandbox_image] as the host catalog resolves it; [None] from it means the
-    preflight master switch is off and admission proceeds, except that a
-    name the catalog cannot resolve is refused either way. Both preflights run on
+    [sandbox_image] as the host catalog resolves it, or the catalog's reason
+    when it does not; [None] from it means the preflight master switch is off
+    and admission proceeds. Both preflights run on
     every call, creation and update alike: a redeclared keeper whose sandbox
     is unreachable is refused the same way a new one is. The test suite has
     no daemon and passes its own probe. *)

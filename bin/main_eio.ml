@@ -22,6 +22,7 @@ module Keeper_execution = Masc.Keeper_execution
 module Keeper_runtime = Masc.Keeper_runtime
 module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
 module Keeper_sandbox_image_catalog = Masc.Keeper_sandbox_image_catalog
+module Keeper_sandbox_image_resolver = Masc.Keeper_sandbox_image_resolver
 module Keeper_github_identity = Masc.Keeper_github_identity
 module Keeper_github_login_lane = Masc.Keeper_github_login_lane
 module Tool_operator = Masc.Tool_operator
@@ -3203,32 +3204,6 @@ let sandbox_image_cmd_exit print_only tag runtime recipe_name source =
     prerr_endline message;
     Cmd.Exit.some_error
 
-(* Setup makes sure the image the shipped Keepers name exists: build it when
-   the store lacks it, leave it alone when it is there. It never rebuilds a
-   present tag, so a second setup run does not move the image under a running
-   Keeper. *)
-let sandbox_image_ensure_exit runtime =
-  let tag = Keeper_sandbox_image.default_tag in
-  match sandbox_image_builder runtime with
-  | Error message ->
-    prerr_endline message;
-    Cmd.Exit.some_error
-  | Ok builder ->
-    (match sandbox_image_tag_presence ~command:builder.build_command ~tag with
-     | Tag_present ->
-       Printf.printf "%s is already in the image store; left as it is.\n" tag;
-       Cmd.Exit.ok
-     | Store_unanswered detail ->
-       Printf.eprintf
-         "sandbox-image: could not ask the image store whether %s is there (%s).\n"
-         tag detail;
-       Cmd.Exit.some_error
-     | Tag_absent ->
-       let recipe = Keeper_sandbox_image_version.base_embedded in
-       let built_at = Unix.gettimeofday () in
-       let labels = Keeper_sandbox_image_version.labels ~version:tag ~built_at recipe in
-       sandbox_image_build ~builder ~recipe ~tag ~labels)
-
 (* Which image store --runtime names: Docker's when it is omitted, otherwise
    the named microVM runtime's own. *)
 let sandbox_image_runtime_term =
@@ -3349,6 +3324,21 @@ let sandbox_image_exit_of = function
     prerr_endline message;
     Cmd.Exit.some_error
 
+let sandbox_image_promote ~base_path ~builder ~store ~name ~reference =
+  let ( let* ) = Result.bind in
+  let* digest =
+    Result.map_error
+      (fun detail -> Printf.sprintf "sandbox-image: cannot read the digest of %s: %s" reference detail)
+      (sandbox_image_store_digest ~builder ~store ~reference)
+  in
+  let* path =
+    sandbox_image_change_catalog ~base_path (fun catalog ->
+      Keeper_sandbox_image_catalog.promote catalog ~name ~store ~reference ~digest)
+  in
+  Ok
+    (Printf.sprintf "%s on %s is now %s (%s), recorded in %s." name
+       (Keeper_sandbox_image_catalog.store_to_string store) reference digest path)
+
 let sandbox_image_promote_exit base_path runtime name reference =
   let ( let* ) = Result.bind in
   sandbox_image_exit_of
@@ -3363,19 +3353,82 @@ let sandbox_image_promote_exit base_path runtime name reference =
      in
      let* runtime = runtime in
      let* builder = sandbox_image_builder runtime in
-     let store = sandbox_image_store runtime in
-     let* digest =
-       Result.map_error
-         (fun detail -> Printf.sprintf "sandbox-image: cannot read the digest of %s: %s" reference detail)
-         (sandbox_image_store_digest ~builder ~store ~reference)
+     sandbox_image_promote ~base_path ~builder ~store:(sandbox_image_store runtime) ~name
+       ~reference)
+
+(* Setup leaves the host able to start a Keeper that names [base]: when the
+   catalog has no [base] build for the chosen store, it builds one under a new
+   tag and promotes it. A promoted build is left alone. One the catalog names
+   and the store no longer has is not rebuilt behind the operator's back:
+   the catalog would then name a build nobody promoted. *)
+let sandbox_image_ensure_exit ~base_path runtime =
+  let ( let* ) = Result.bind in
+  let recipe = Keeper_sandbox_image_version.base_embedded in
+  let name = recipe.Keeper_sandbox_image_version.name in
+  let store = sandbox_image_store runtime in
+  let store_name = Keeper_sandbox_image_catalog.store_to_string store in
+  sandbox_image_exit_of
+    (let* builder = sandbox_image_builder runtime in
+     let build_and_promote () =
+       let built_at = Unix.gettimeofday () in
+       let tag = Keeper_sandbox_image_version.tag ~built_at recipe in
+       let version = Keeper_sandbox_image_version.version ~built_at recipe in
+       let* () =
+         match sandbox_image_tag_presence ~command:builder.build_command ~tag with
+         (* The same recipe in the same minute: an earlier setup built it and
+            did not get to promote it. *)
+         | Tag_present -> Ok ()
+         | Tag_absent ->
+           let labels = Keeper_sandbox_image_version.labels ~version ~built_at recipe in
+           if sandbox_image_build ~builder ~recipe ~tag ~labels = Cmd.Exit.ok then Ok ()
+           else Error (Printf.sprintf "sandbox-image: building %s failed, so nothing was promoted." tag)
+         | Store_unanswered detail ->
+           Error
+             (Printf.sprintf
+                "sandbox-image: could not ask the image store whether %s is there (%s), \
+                 so nothing was built."
+                tag detail)
+       in
+       sandbox_image_promote ~base_path ~builder ~store ~name ~reference:tag
      in
-     let* path =
-       sandbox_image_change_catalog ~base_path (fun catalog ->
-         Keeper_sandbox_image_catalog.promote catalog ~name ~store ~reference ~digest)
-     in
-     Ok
-       (Printf.sprintf "%s on %s is now %s (%s), recorded in %s." name
-          (Keeper_sandbox_image_catalog.store_to_string store) reference digest path))
+     match Keeper_sandbox_image_resolver.resolve_in_workspace ~base_path ~store (Some name) with
+     | Ok pinned ->
+       let reference = pinned.Keeper_sandbox_image_catalog.reference in
+       (match sandbox_image_tag_presence ~command:builder.build_command ~tag:reference with
+        | Tag_present ->
+          Ok (Printf.sprintf "%s on %s is %s; left as it is." name store_name reference)
+        | Tag_absent ->
+          Error
+            (Printf.sprintf
+               "sandbox-image: the catalog names %s for %s on %s and the image store \
+                does not have it. Build %s again with `masc sandbox-image%s` and \
+                promote the tag it prints, or return to the previous build with \
+                `masc sandbox-image rollback %s%s`."
+               reference name store_name name
+               (match runtime with
+                | None -> ""
+                | Some backend -> " --runtime " ^ Keeper_microvm_backend.to_string backend)
+               name
+               (match runtime with
+                | None -> ""
+                | Some backend -> " --runtime " ^ Keeper_microvm_backend.to_string backend))
+        | Store_unanswered detail ->
+          Error
+            (Printf.sprintf
+               "sandbox-image: could not ask the image store whether %s is there (%s)."
+               reference detail))
+     | Error
+         ( Keeper_sandbox_image_resolver.Not_built_on_host _
+         | Keeper_sandbox_image_resolver.Catalog_unreadable (Keeper_sandbox_image_catalog.Missing _) )
+       -> build_and_promote ()
+     | Error
+         (( Keeper_sandbox_image_resolver.Not_declared
+          | Keeper_sandbox_image_resolver.Unknown_image _
+          | Keeper_sandbox_image_resolver.No_image_store _
+          | Keeper_sandbox_image_resolver.Catalog_unreadable
+              (Keeper_sandbox_image_catalog.Unreadable _ | Keeper_sandbox_image_catalog.Invalid _) )
+          as error) ->
+       Error ("sandbox-image: " ^ Keeper_sandbox_image_resolver.error_to_string error))
 
 let sandbox_image_rollback_exit base_path runtime name =
   let ( let* ) = Result.bind in
@@ -3738,7 +3791,7 @@ let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend network
     ~validate_runtime:(fun () -> setup_validate_runtime base_path)
     ~prepare_image:(fun ~selection ->
       let runtime = Masc.Sandbox_readiness.microvm_backend selection.Masc.Sandbox_readiness.backend in
-      sandbox_image_ensure_exit runtime)
+      sandbox_image_ensure_exit ~base_path runtime)
     ~login:(fun () -> ensure_local_operator_login ~base_path ~port ~agent:default_login_agent)
     ~resume_models:(fun () -> Masc_cli_model_resume.run ~base_path ~port ~agent:default_login_agent)
     ~start_keeper:(fun () ->

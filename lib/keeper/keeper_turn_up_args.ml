@@ -488,10 +488,9 @@ let parse
               docker_container_probe_failed, purged eleven minutes later.
               [None] from the preflight is the master switch being off, which
               keeps the operator's opt-out. *)
-           (* The name has to resolve through the host catalog whether or
-              not the preflight is on: a Keeper admitted with a name its
-              host has no build for would only be refused at its first
-              container. *)
+           (* The preflight checks the build the host catalog has for the
+              name; a name with none fails its image check with the
+              catalog's reason. *)
            let image =
              Keeper_sandbox_image_resolver.resolve_in_workspace
                ~base_path:ctx.config.base_path
@@ -509,7 +508,7 @@ let parse
                      ())
                 ()
             with
-            | None -> Result.fold ~ok:(fun _ -> None) ~error:Option.some image
+            | None -> None
             | Some preflight ->
               Keeper_sandbox_runtime.docker_preflight_rejection preflight)
          (* No microvm preflight exists yet; the guest is created on the first

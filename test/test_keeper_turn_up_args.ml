@@ -2448,28 +2448,31 @@ let test_docker_preflight_is_consulted_only_for_the_docker_profile () =
   check int "microvm never consulted the probe" 1 !probes
 ;;
 
-(* The name has to mean a build on this host before a docker keeper is
-   admitted, and that is not the preflight's to switch off: reading the
-   catalog probes no daemon. The refusal is the catalog's, with the names it
-   has. *)
-let test_a_docker_keeper_whose_image_the_catalog_lacks_is_refused () =
+(* The preflight is handed the catalog's answer for the name, and a name the
+   catalog lacks reaches it as that refusal, with the names the catalog has,
+   rather than as a tag to probe. *)
+let test_a_name_the_catalog_lacks_reaches_the_preflight_as_its_reason () =
   with_test_context
   @@ fun ctx ->
-  let switched_off ~image:_ ~timeout_sec:_ () = None in
-  match
-    Keeper_turn_up_args.parse ~docker_preflight:switched_off ctx
-      (`Assoc
-        [ "name", `String "unbuilt"
-        ; "sandbox_profile", `String "docker"
-        ; "sandbox_image", `String "rust"
-        ])
-  with
-  | Ok _ -> fail "a docker keeper naming an image the catalog lacks was admitted"
-  | Error result ->
-    let body = Keeper_types_profile.tool_result_body result in
-    check bool "the refusal is the catalog's" true
-      (contains "sandbox_image \"rust\" is not in the image catalog" body);
-    check bool "and lists what it has" true (contains "base, custom" body)
+  let seen = ref None in
+  let probe ~image ~timeout_sec:_ () =
+    seen := Some image;
+    None
+  in
+  ignore
+    (Keeper_turn_up_args.parse ~docker_preflight:probe ctx
+       (`Assoc
+         [ "name", `String "unbuilt"
+         ; "sandbox_profile", `String "docker"
+         ; "sandbox_image", `String "rust"
+         ]));
+  match !seen with
+  | Some (Error reason) ->
+    check bool "the catalog's refusal" true
+      (contains "sandbox_image \"rust\" is not in the image catalog" reason);
+    check bool "with the names it has" true (contains "base, custom" reason)
+  | Some (Ok tag) -> failf "a name the catalog lacks was probed as %s" tag
+  | None -> fail "the preflight was not consulted"
 ;;
 
 let test_docker_preflight_receives_sandbox_image_from_profile_defaults () =
@@ -2810,9 +2813,9 @@ let () =
             `Quick
             test_docker_preflight_is_consulted_only_for_the_docker_profile
         ; test_case
-            "a docker keeper whose image the catalog lacks is refused"
+            "a name the catalog lacks reaches the preflight as its reason"
             `Quick
-            test_a_docker_keeper_whose_image_the_catalog_lacks_is_refused        ; test_case
+            test_a_name_the_catalog_lacks_reaches_the_preflight_as_its_reason        ; test_case
             "docker preflight receives sandbox_image from profile defaults"
             `Quick
             test_docker_preflight_receives_sandbox_image_from_profile_defaults

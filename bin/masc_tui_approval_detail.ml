@@ -1,4 +1,5 @@
 module Message_layout = Masc_tui_message_layout
+module Tui_decode = Masc.Tui_decode
 
 type line =
   { label : string option
@@ -39,6 +40,22 @@ let label_column_cells = 16
    label column, and a field that is present and empty has to draw a row that
    says so. *)
 let of_fields ~width fields =
+  (* Every value is a Keeper's, a model's or another operator's text, and this
+     is the one place a row of the pane is built, so it is the one place the
+     bytes are made safe to print. A value carrying ESC [ 1 A ESC [ 2 K would
+     otherwise move the cursor and rub out rows the operator already read, and
+     [y] would approve what the store holds rather than what the screen
+     showed. The escape is drawn as [\x1B], not blanked: a blank would hide
+     that one was tried, and a Makefile's tab would read as spaces. The
+     newlines are kept -- they are how the ask was written -- and a label is
+     a single row, so it keeps none. *)
+  let fields =
+    List.map
+      (fun (label, value) ->
+        ( Tui_decode.sanitize_terminal_text label
+        , Tui_decode.sanitize_terminal_lines value ))
+      fields
+  in
   let label_cells =
     List.fold_left
       (fun widest (label, _) -> max widest (Message_layout.display_width label))

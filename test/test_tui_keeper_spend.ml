@@ -98,10 +98,17 @@ let append_turns config name turns =
 
 (* The server's own answer for [keepers], wrapped with the cache object the
    route appends. *)
+(* The TUI sends no [window]; the route answers over the window an absent
+   query parses to. *)
+let server_default_window =
+  match Dashboard_http_keeper_feeds.keeper_costs_window_of_query None with
+  | Ok minutes -> minutes
+  | Error err -> failwith ("the route refused an absent window: " ^ err)
+
 let server_answer ?(state = Route.Cache_fresh) ?age_s ?error config names =
   let body =
     Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-      ~keepers:(List.map make_meta names) ~window_minutes:Spend.window_minutes
+      ~keepers:(List.map make_meta names) ~window_minutes:server_default_window
       ~now_ts:(Unix.gettimeofday ())
   in
   Route.json_with_cache_metadata body
@@ -136,7 +143,7 @@ let names = List.map fst fleet @ [ "unlisted" ]
 
 let sum_pp pp fmt = function
   | Spend_unknown -> Format.fprintf fmt "unknown"
-  | Spend_sum { sum; missing } -> Format.fprintf fmt "%a (missing %d)" pp sum missing
+  | Spend_sum { sum; floor } -> Format.fprintf fmt "%a (floor %b)" pp sum floor
 
 let spend_testable =
   testable
@@ -159,7 +166,7 @@ let read_keepers reading =
 let test_server_json_decodes_per_keeper () =
   match decode (server_json ()) with
   | Overview_spend_read { window_minutes; keepers; undecodable; freshness } ->
-      check int "the window asked for is the window answered" Spend.window_minutes
+      check int "the route's default window is the window decoded" server_default_window
         window_minutes;
       check int "every row decodes" 0 undecodable;
       check bool "a fresh answer is fresh" true (freshness = Spend_fresh);
@@ -170,18 +177,18 @@ let test_server_json_decodes_per_keeper () =
       in
       check spend_testable "priced turns sum"
         (Spend_turns
-           { cost_usd = Spend_sum { sum = 0.75; missing = 0 }
-           ; tokens = Spend_sum { sum = 25; missing = 0 }
+           { cost_usd = Spend_sum { sum = 0.75; floor = false }
+           ; tokens = Spend_sum { sum = 25; floor = false }
            })
         (spend "priced");
       check spend_testable "turns without a cost stay unknown, not 0"
         (Spend_turns
-           { cost_usd = Spend_unknown; tokens = Spend_sum { sum = 3_500_000; missing = 0 } })
+           { cost_usd = Spend_unknown; tokens = Spend_sum { sum = 3_500_000; floor = false } })
         (spend "subscription");
       check spend_testable "a turn without a cost makes the sum a floor"
         (Spend_turns
-           { cost_usd = Spend_sum { sum = 1.25; missing = 1 }
-           ; tokens = Spend_sum { sum = 400; missing = 1 }
+           { cost_usd = Spend_sum { sum = 1.25; floor = true }
+           ; tokens = Spend_sum { sum = 400; floor = true }
            })
         (spend "mixed");
       check spend_testable "no turns is its own reading" Spend_no_turns (spend "quiet")
@@ -402,18 +409,18 @@ let test_a_narrow_row_keeps_its_detail () =
   check string "a tag never sits one cell from the detail" row
     (Spend.place_tag ~inner:one_cell_gap ~tag row)
 
-(* The title's total covers the parked roll call as well as the rows: the
-   render passes both. A parked Keeper that spent is in the figure, and one
-   whose row could not be read makes it a floor. *)
-let test_team_total_covers_parked_keepers () =
+(* The title's total covers the name lines (no phase, paused, stopped) as
+   well as the rows: the render passes both. A stopped Keeper that spent is
+   in the figure, and one whose row could not be read makes it a floor. *)
+let test_team_total_covers_named_keepers () =
   let reading = decode (server_json ()) in
-  let rows = [ "subscription" ] and parked = [ "priced" ] in
-  check string "a parked Keeper's spend is in the total"
-    "24h \xe2\x89\xa5$0.75 3.5M tok" (total reading (rows @ parked));
-  check string "a parked Keeper nobody read makes it a floor"
+  let rows = [ "subscription" ] and stopped = [ "priced" ] in
+  check string "a stopped Keeper's spend is in the total"
+    "24h \xe2\x89\xa5$0.75 3.5M tok" (total reading (rows @ stopped));
+  check string "a named Keeper nobody read makes it a floor"
     "24h \xe2\x89\xa53.5M tok" (total reading (rows @ [ "unlisted" ]))
 
-let head = " Team  1 need you \xc2\xb7 1 working \xc2\xb7 1 idle \xc2\xb7 1 parked"
+let head = " Team  1 need you \xc2\xb7 1 working \xc2\xb7 1 idle \xc2\xb7 1 stopped"
 let full = "24h, 12m old \xe2\x89\xa5$123.45 \xe2\x89\xa5123.4M tok"
 let marker = "24h, 12m old"
 let spark = "   14d \xe2\x96\x81\xe2\x96\x81\xe2\x96\x81 today 0"
@@ -452,8 +459,8 @@ let () =
         ; test_case "torn and unreadable stores" `Quick test_torn_and_unreadable_stores
         ; test_case "an unreadable row is unknown" `Quick test_unreadable_row_is_unknown
         ; test_case "a narrow row keeps its detail" `Quick test_a_narrow_row_keeps_its_detail
-        ; test_case "team total covers parked Keepers" `Quick
-            test_team_total_covers_parked_keepers
+        ; test_case "team total covers Keepers on the name lines" `Quick
+            test_team_total_covers_named_keepers
         ; test_case "the title sheds the total whole" `Quick test_title_sheds_the_total_whole
         ] )
     ]

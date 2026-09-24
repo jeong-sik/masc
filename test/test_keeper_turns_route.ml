@@ -218,13 +218,13 @@ let test_run_next_ownership_and_started_boundary () =
       | Ok id -> id | Error e -> Alcotest.fail e in
     let submit actor raw =
       let source = `Assoc
-        ["schema",`String "masc.keeper_chat_operation.source.v1";"submitted_by",`String actor
+        ["schema",`String "masc.keeper_chat_operation.source.v2";"submitted_by",`String actor
         ;"thread_id",`String ("keeper:" ^ name)
         ;"continuation_channel",`Assoc ["kind",`String "dashboard";"thread_id",`String ("keeper:" ^ name)]
         ;"surface",`Assoc ["kind",`String "dashboard"]
         ;"channel",`String "";"channel_user_id",`String "";"channel_user_name",`String "";"channel_workspace_id",`String ""
         ;"conversation_id",`Null;"external_message_id",`Null;"workspace_id",`Null;"extra_mentions",`List []
-        ;"user_row_origin",`String "needs_append"] in
+        ;"sender_keeper",`Null;"user_row_origin",`String "needs_append"] in
       let input = Keeper_chat_operation_payload.input_to_json ~message:raw ~user_blocks:[]
         ~turn_instructions:None ~surface_context:None ~attachments:[] in
       match Keeper_owner_registry.submit_operation ~base_path:config.base_path ~keeper_name:name

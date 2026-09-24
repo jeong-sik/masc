@@ -83,8 +83,28 @@ let is_restart (written : B.record) =
   match written.event with
   | B.History_restarted { trace_id = _ } -> true
   | B.Turn_ended { turn_ref = _; history_at_start = B.Fresh_history; position = _ } -> true
-  | B.Turn_ended { turn_ref = _; history_at_start = B.Continued_history; position = _ } ->
-    false
+  | B.Turn_ended
+      { turn_ref = _
+      ; history_at_start = B.Continued_history | B.Continued_history_from _; position = _
+      } -> false
+;;
+
+(* Row 2c'. A line that says the turn started on a non-empty history of this
+   trace settles a refused line before it: the refused line did not restart the
+   history, or, if it did, the atoms saved after it are still reachable from
+   atom zero. Either way the round may go on instead of standing for good
+   (masc#37061). The bare [Continued_history] token is not a start state, so a
+   line written before this branch existed does not settle anything. *)
+let is_continued_start (written : B.record) =
+  match written.event with
+  | B.Turn_ended
+      { turn_ref = _; history_at_start = B.Continued_history_from _; position = _ } -> true
+  | B.Turn_ended
+      { turn_ref = _
+      ; history_at_start = B.Fresh_history | B.Continued_history
+      ; position = _
+      }
+  | B.History_restarted { trace_id = _ } -> false
 ;;
 
 (* A seen restart still excludes older endpoints. Share this source-order
@@ -174,9 +194,29 @@ type start =
    matters: a restart puts the start at atom zero, and no content makes a start
    smaller than that, while any cut point it carried belongs to a history that
    has since been renumbered. The restart must be of this trace, because what
-   trace the refused line belonged to is exactly what cannot be read. *)
+   trace the refused line belonged to is exactly what cannot be read.
+
+   A continued turn's end line settles it too (masc#37061): the turn started on
+   a non-empty history of this trace, so the refused line did not restart it,
+   or, if it did, the atoms saved after it are reachable from atom zero. *)
 let dead_line ~own line =
-  List.exists (fun (later, written) -> later > line && is_restart written) own
+  List.exists
+    (fun (later, written) ->
+       later > line && (is_restart written || is_continued_start written))
+    own
+;;
+
+(* A refused line the round has not counted, settled by a later continued turn.
+   The round must go back to atom zero for it: the refused line may have been
+   the restart that renumbered the history, and reading from zero re-reads at
+   worst (I2 accepts that) instead of passing an atom over. *)
+let refused_settled_as_restart ~own ~seen_before lines =
+  unreadable_lines lines
+  |> List.exists (fun (line, _) ->
+    line > seen_before
+    && List.exists
+         (fun (later, written) -> later > line && is_continued_start written)
+         own)
 ;;
 
 (* The question is not whether the first refused line still matters but whether
@@ -224,6 +264,7 @@ let select ~trace_id ~lines ~progress ~messages extent =
        in
        let restarted =
          List.exists (fun (line, written) -> line > seen_before && is_restart written) own
+         || refused_settled_as_restart ~own ~seen_before lines
        in
        let start =
          if restarted
@@ -294,6 +335,7 @@ let unread_turns ~trace_id ~lines ~progress ~messages =
   in
   let restarted =
     List.exists (fun (line, written) -> line > seen_before && is_restart written) own
+    || refused_settled_as_restart ~own ~seen_before lines
   in
   if restarted
   then Some (List.length cuts)

@@ -92,6 +92,14 @@ let scope_to_string = function
   | Credential_env name -> "env:" ^ name
   | Credential_file path -> "file:" ^ path
 
+let scope_equal left right =
+  match left, right with
+  | Provider_row a, Provider_row b
+  | Credential_env a, Credential_env b
+  | Credential_file a, Credential_file b -> String.equal a b
+  | (Provider_row _ | Credential_env _ | Credential_file _), _ -> false
+;;
+
 let scope_of_credential ~provider_id (credential : Runtime_schema.credential option) =
   match credential with
   | Some (Runtime_schema.Env key) -> Credential_env key

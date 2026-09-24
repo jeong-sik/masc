@@ -387,6 +387,7 @@ let test_remote_ssh_reader_is_refused () =
          ; env_allowlist = []
          ; capabilities = []
          ; private_home = false
+         ; allowed_paths = []
          }
      ^ Printf.sprintf "\n[repositories]\npr_reader = %S\n" reader_keeper);
   write_file

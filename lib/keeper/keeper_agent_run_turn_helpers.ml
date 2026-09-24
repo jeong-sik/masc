@@ -327,7 +327,8 @@ let restart_notice
       (saved_history : Keeper_run_context.saved_history)
   =
   match history_at_start, saved_history with
-  | ( Keeper_turn_boundaries.Continued_history
+  | ( (Keeper_turn_boundaries.Continued_history
+      | Keeper_turn_boundaries.Continued_history_from _)
     , ( Keeper_run_context.Saved_history_loaded
       | Keeper_run_context.Saved_history_absent
       | Keeper_run_context.Saved_history_superseded ) ) -> No_restart_notice

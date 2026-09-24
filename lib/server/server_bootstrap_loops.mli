@@ -179,6 +179,7 @@ module For_testing : sig
     config:Workspace.config ->
     base_path:string ->
     is_running:(string -> bool) ->
+    is_registered_keeper:(string -> bool) ->
     wakeup:(string -> unit) ->
     Workspace_broadcast.broadcast_delivery ->
     Workspace_broadcast.mention_delivery

@@ -441,6 +441,8 @@ export type {
   KeeperMemoryHealthAlertSeverity,
   KeeperMemoryHealthAlertTarget,
   KeeperMemoryHealthKeeperEntry,
+  KeeperMemoryHealthLibrarianStallCause,
+  KeeperMemoryHealthLibrarianStalled,
   KeeperMemoryHealthResponse,
   VerificationRequest,
   VerificationRequestsResponse,

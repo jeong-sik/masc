@@ -143,12 +143,13 @@ let measure (message : Agent_core.Types.message) =
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
-let carry ~measure ~continuity ~front ~turn_start ~counted_tokens messages =
+let carry ~measure ~continuity ~front ~accepted ~turn_start ~counted_tokens messages =
   let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
   let { Keeper_turn_driver_try_provider.start; outlived_seed = _ } =
     Keeper_turn_driver_try_provider.choose_range_start
       ~continuity
       ~front
+      ~accepted
       ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
       ~turn_boundary:turn_start
   in
@@ -159,6 +160,7 @@ let carry ~measure ~continuity ~front ~turn_start ~counted_tokens messages =
     | Keeper_turn_driver_try_provider.From_seed _ -> counted_tokens
     | Keeper_turn_driver_try_provider.From_snapshot _
     | Keeper_turn_driver_try_provider.From_read_position _
+    | Keeper_turn_driver_try_provider.Past_librarian_point _
     | Keeper_turn_driver_try_provider.From_turn_boundary _ -> None
   in
   let projection, transmitted_bytes =
@@ -415,7 +417,9 @@ let candidate
          candidate alike. The forecast only reads: a ledger that does not
          hold is passed over here and dropped by the turn driver's next
          composition. Where the range starts is then the driver's own
-         choice ({!Keeper_turn_driver_try_provider.choose_range_start}). *)
+         choice ({!Keeper_turn_driver_try_provider.choose_range_start}). A
+         Librarian point weighs the seed alone, never the ledger: the
+         driver reads the accepted start from the turn record too. *)
       let front, counted_tokens =
         match
           Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
@@ -429,6 +433,7 @@ let candidate
            ~measure:(Keeper_context_core.message_measurer ())
            ~continuity:(Some continuity)
            ~front
+           ~accepted:(Lazy.force seed)
            ~turn_start
            ~counted_tokens
            messages)
@@ -645,4 +650,82 @@ let to_json forecast =
         | Error refusal -> `Assoc [ "refusal", `String (walk_refusal_to_string refusal) ] )
     ; "candidates", `List (List.map candidate_to_json forecast.candidates)
     ]
+;;
+
+type librarian_gap_unmeasured =
+  | Meta_unreadable of string
+  | Turn_records_unreadable of Keeper_carried_front.unreadable_records
+  | Turn_boundary_refused of string
+  | Snapshot_unreadable of string
+  | Read_position_unreadable of Keeper_librarian_progress.read_error
+
+let librarian_gap_unmeasured_cause = function
+  | Meta_unreadable _ -> "meta_unreadable"
+  | Turn_records_unreadable _ -> "turn_records_unreadable"
+  | Turn_boundary_refused _ -> "turn_boundary_refused"
+  | Snapshot_unreadable _ -> "snapshot_unreadable"
+  | Read_position_unreadable _ -> "read_position_unreadable"
+;;
+
+let librarian_gap_unmeasured_detail = function
+  | Meta_unreadable detail | Turn_boundary_refused detail | Snapshot_unreadable detail ->
+    detail
+  | Turn_records_unreadable { count; first_reason } ->
+    Printf.sprintf "%d turn record(s) did not decode: %s" count first_reason
+  | Read_position_unreadable error -> Keeper_librarian_progress.read_error_to_string error
+;;
+
+(* RFC librarian-lifecycle §4.10, rule 3, from the keeper's small files: its
+   meta names the current trace, the snapshot and the progress file say what
+   the Librarian covers on it, and the newest response-observed turn record
+   says where the last accepted request started. The gap is a fact about
+   that accepted request, so the checkpoint is not read: whether the next
+   request starts there is the driver's question, not the alarm's.
+
+   Every read that fails is its own answer, never "no gap" or "not covered":
+   a turn record that did not decode may be the newest accepted start, and a
+   snapshot or progress file that did not read may cover the whole gap. So
+   the seed read's [unreadable] and [boundary_error] refuse the measurement
+   even beside a seed, and the Librarian side is read only once there is an
+   accepted start to weigh it against. *)
+let librarian_gap ~config ~keeper_name =
+  let ( let* ) = Result.bind in
+  (* Presence, not [read_meta]: [read_meta] folds a meta this binary cannot
+     decode into [Ok None], which would read as "no gap". *)
+  match Keeper_meta_store.read_meta_presence config keeper_name with
+  | Error message | Ok (Keeper_meta_store.Meta_not_current message) ->
+    Error (Meta_unreadable message)
+  | Ok Keeper_meta_store.Meta_absent -> Ok None
+  | Ok (Keeper_meta_store.Meta_present meta) ->
+    let trace_id = Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id in
+    let read : Keeper_carried_front.seed_read =
+      Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id
+    in
+    (match read with
+     | { boundary_error = Some detail; _ } -> Error (Turn_boundary_refused detail)
+     | { unreadable = Some unreadable; _ } -> Error (Turn_records_unreadable unreadable)
+     | { seed = None; unreadable = None; boundary_error = None } -> Ok None
+     | { seed = Some (accepted : Keeper_carried_front.seed); unreadable = None; boundary_error = None }
+       ->
+       let* snapshot_cut =
+         match Keeper_librarian_continuity.read ~config ~keeper_name with
+         | Ok (Some snapshot)
+           when String.equal snapshot.Librarian_continuity_snapshot.trace_id trace_id ->
+           Ok (Some snapshot.Librarian_continuity_snapshot.end_atom)
+         | Ok (Some _) | Ok None -> Ok None
+         | Error detail -> Error (Snapshot_unreadable detail)
+       in
+       let* read_position =
+         match
+           Keeper_librarian_progress.read
+             ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+         with
+         | Ok (Some { Keeper_librarian_progress.position = { trace_id = read_on; end_atom; _ }; _ })
+           when String.equal read_on trace_id -> Ok (Some end_atom)
+         | Ok (Some _) | Ok None -> Ok None
+         | Error error -> Error (Read_position_unreadable error)
+       in
+       Ok
+         (Keeper_carried_front.librarian_gap
+            ~snapshot_cut ~read_position ~accepted_start:accepted.first_atom))
 ;;

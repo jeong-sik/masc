@@ -11,10 +11,6 @@ open Masc_tui_ansi
 
 let ( let* ) = Result.bind
 
-(* The window the Team block reports over. The server takes the window in
-   minutes; a day is the span a team report is read against. *)
-let window_minutes = 24 * 60
-
 let seconds_per_minute = 60
 
 let minutes_per_hour = 60
@@ -49,7 +45,7 @@ let decode_sum json ~samples ~malformed_rows ~total_key ~prefix ~sum_of_json =
     | _, 0 -> Error (total_key ^ " is set although no turn reported it")
     | value, _ ->
         let* sum = sum_of_json value in
-        Ok (Spend_sum { sum; missing = unreported + unread + malformed_rows })
+        Ok (Spend_sum { sum; floor = unreported + unread + malformed_rows > 0 })
 
 let cost_of_json = function
   | `Float usd when Float.is_finite usd && usd >= 0.0 -> Ok usd
@@ -144,30 +140,30 @@ let age_text age_s =
   if seconds < seconds_per_minute then Printf.sprintf "%ds" seconds
   else Printf.sprintf "%dm" (seconds / seconds_per_minute)
 
-let floor_prefix missing = if missing > 0 then floor_mark else ""
+let floor_prefix floor = if floor then floor_mark else ""
 
 let unknown_tokens_text = Ansi.dim ^ "? tok" ^ Ansi.reset
 
 (* A known cost only; an unknown one is left out, not drawn as a figure. *)
-let cost_text sum missing =
+let cost_text sum ~floor =
   (* A cost that rounds to no cents is still a cost. *)
   let amount =
     if sum > 0.0 && Float.round (sum *. cents_per_dollar) = 0.0 then "<$0.01"
     else Printf.sprintf "$%.2f" sum
   in
-  floor_prefix missing ^ amount
+  floor_prefix floor ^ amount
 
 let tokens_text = function
   | Spend_unknown -> unknown_tokens_text
-  | Spend_sum { sum; missing } ->
-      floor_prefix missing ^ format_context_tokens sum ^ " tok"
+  | Spend_sum { sum; floor } ->
+      floor_prefix floor ^ format_context_tokens sum ^ " tok"
 
 (* Cost is drawn only where some turn reported one; every live subscription
    runtime reports none, and "$?" on each of their rows says nothing the
    tokens beside it do not. *)
 let turns_text ~cost_usd ~tokens =
   match cost_usd with
-  | Spend_sum { sum; missing } -> cost_text sum missing ^ " " ^ tokens_text tokens
+  | Spend_sum { sum; floor } -> cost_text sum ~floor ^ " " ^ tokens_text tokens
   | Spend_unknown -> tokens_text tokens
 
 (* What one Keeper's tag says. A Keeper missing from the rows -- not listed
@@ -210,14 +206,15 @@ let place_tag ~inner ~tag row =
 let add_sums add left right =
   match (left, right) with
   | Spend_unknown, Spend_unknown -> Spend_unknown
-  | Spend_sum { sum; missing }, Spend_unknown
-  | Spend_unknown, Spend_sum { sum; missing } ->
-      Spend_sum { sum; missing = missing + 1 }
+  | Spend_sum { sum; floor = _ }, Spend_unknown
+  | Spend_unknown, Spend_sum { sum; floor = _ } ->
+      Spend_sum { sum; floor = true }
   | Spend_sum left, Spend_sum right ->
-      Spend_sum { sum = add left.sum right.sum; missing = left.missing + right.missing }
+      Spend_sum { sum = add left.sum right.sum; floor = left.floor || right.floor }
 
 (* The team's spend over the window, for the Team title, summed over every
-   Keeper the block knows -- its rows and its parked roll call. A Keeper the
+   Keeper the block knows -- its rows and its no-phase, paused and stopped
+   name lines. A Keeper the
    server's rows do not account for (not listed, its row unreadable, its
    store unread) is spend nobody read, so the total is then a floor or
    unknown.

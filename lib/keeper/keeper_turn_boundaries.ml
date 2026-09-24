@@ -21,6 +21,10 @@ type position =
 type history_at_start =
   | Fresh_history
   | Continued_history
+  | Continued_history_from of
+      { start_atom : int
+      ; start_atom_digest : string
+      }
 
 type event =
   | Turn_ended of
@@ -39,7 +43,16 @@ let history_at_start_of_messages messages =
   let _labelled, atom_count = Window.annotate messages in
   match atom_count with
   | 0 -> Fresh_history
-  | _ -> Continued_history
+  | start_atom ->
+    (* The start state is the position the turn began from, so a later line can
+       answer what an unreadable line before it was (RFC librarian-lifecycle
+       §4.6, masc#37061). The digest is the same one [position_of_messages]
+       takes; when the opening message is missing it is left out and the branch
+       degrades to the bare [Continued_history], which a reader does not treat
+       as a start state. *)
+    (match Window.atom_opening_digest messages (start_atom - 1) with
+     | Some start_atom_digest -> Continued_history_from { start_atom; start_atom_digest }
+     | None -> Continued_history)
 ;;
 
 let position_of_messages messages =
@@ -65,6 +78,8 @@ let field_history_at_start = "history_at_start"
 let field_position = "position"
 let field_end_atom = "end_atom"
 let field_last_atom_digest = "last_atom_digest"
+let field_start_atom = "start_atom"
+let field_start_atom_digest = "start_atom_digest"
 let field_trace_id = "trace_id"
 let kind_turn_ended = "turn_ended"
 let kind_history_restarted = "history_restarted"
@@ -72,6 +87,7 @@ let kind_atom_history = "atom_history"
 let kind_empty_atom_history = "empty_atom_history"
 let kind_no_atom_history = "no_atom_history"
 let kind_stale_noop = "stale_noop"
+let kind_continued_from = "continued_from"
 let token_fresh_history = "fresh"
 let token_continued_history = "continued"
 
@@ -81,6 +97,7 @@ let turn_ended_fields =
 
 let history_restarted_fields = [ field_kind; field_recorded_at; field_trace_id ]
 let atom_history_fields = [ field_kind; field_end_atom; field_last_atom_digest ]
+let continued_from_fields = [ field_kind; field_start_atom; field_start_atom_digest ]
 let bare_position_fields = [ field_kind ]
 let non_blank s = not (String.equal (String.trim s) "")
 
@@ -97,6 +114,19 @@ let validate_position = function
   | Empty_atom_history | No_atom_history | Stale_noop -> Ok ()
 ;;
 
+let validate_history_at_start = function
+  | Fresh_history | Continued_history -> Ok ()
+  | Continued_history_from { start_atom; start_atom_digest } ->
+    let* () =
+      if start_atom >= 1
+      then Ok ()
+      else W.wire_fail [ W.Wire_field field_start_atom ] W.Not_positive
+    in
+    if non_blank start_atom_digest
+    then Ok ()
+    else W.wire_fail [ W.Wire_field field_start_atom_digest ] W.Blank_string
+;;
+
 (* Shared by the decoder and [append], so a row this module wrote is a row this
    module reads back. [Ids.Turn_ref.make] takes any trace id while
    [Ids.Turn_ref.of_string] refuses an empty one, so the reference is checked
@@ -108,13 +138,18 @@ let validate (r : record) =
     else W.wire_fail [ W.Wire_field field_recorded_at ] W.Not_finite
   in
   match r.event with
-  | Turn_ended { turn_ref; history_at_start = _; position } ->
+  | Turn_ended { turn_ref; history_at_start; position } ->
     let* () =
       let printed = Ids.Turn_ref.to_string turn_ref in
       match Ids.Turn_ref.of_string printed with
       | Some read_back when Ids.Turn_ref.equal read_back turn_ref -> Ok ()
       | Some _ | None ->
         W.wire_fail [ W.Wire_field field_turn_ref ] (W.Not_a_turn_ref printed)
+    in
+    let* () =
+      W.wire_at
+        (W.Wire_field field_history_at_start)
+        (validate_history_at_start history_at_start)
     in
     let* () = W.wire_at (W.Wire_field field_position) (validate_position position) in
     Ok r
@@ -136,9 +171,15 @@ let position_to_json = function
   | Stale_noop -> `Assoc [ field_kind, `String kind_stale_noop ]
 ;;
 
-let history_at_start_to_string = function
-  | Fresh_history -> token_fresh_history
-  | Continued_history -> token_continued_history
+let history_at_start_to_json = function
+  | Fresh_history -> `String token_fresh_history
+  | Continued_history -> `String token_continued_history
+  | Continued_history_from { start_atom; start_atom_digest } ->
+    `Assoc
+      [ field_kind, `String kind_continued_from
+      ; field_start_atom, `Int start_atom
+      ; field_start_atom_digest, `String start_atom_digest
+      ]
 ;;
 
 let record_to_json (r : record) =
@@ -148,7 +189,7 @@ let record_to_json (r : record) =
       [ field_kind, `String kind_turn_ended
       ; field_recorded_at, `Float r.recorded_at
       ; field_turn_ref, `String (Ids.Turn_ref.to_string turn_ref)
-      ; field_history_at_start, `String (history_at_start_to_string history_at_start)
+      ; field_history_at_start, history_at_start_to_json history_at_start
       ; field_position, position_to_json position
       ]
   | History_restarted { trace_id } ->
@@ -196,6 +237,24 @@ let history_at_start_of_string token =
   else W.wire_fail [ W.Wire_field field_history_at_start ] (W.Unknown_token token)
 ;;
 
+(* A start state is an object; the two bare tokens stay strings, so a line
+   written before this branch existed still decodes. *)
+let history_at_start_of_json (json : Yojson.Safe.t) =
+  match json with
+  | `String token -> history_at_start_of_string token
+  | `Assoc assoc ->
+    let* kind = W.wire_string_field field_kind assoc in
+    if String.equal kind kind_continued_from
+    then (
+      let* () = W.exact_field_names_result continued_from_fields assoc in
+      let* start_atom = W.wire_int_field field_start_atom assoc in
+      let* start_atom_digest = W.wire_string_field field_start_atom_digest assoc in
+      Ok (Continued_history_from { start_atom; start_atom_digest }))
+    else W.wire_fail [ W.Wire_field field_kind ] (W.Unknown_token kind)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null ->
+    W.wire_here W.Expected_object
+;;
+
 (* The line's kind names the fields it carries, so it is read first and the
    exact-fields check is made against that kind's set. *)
 let record_of_json (json : Yojson.Safe.t) =
@@ -213,8 +272,8 @@ let record_of_json (json : Yojson.Safe.t) =
         | None ->
           W.wire_fail [ W.Wire_field field_turn_ref ] (W.Not_a_turn_ref turn_ref_text)
       in
-      let* history_at_start_token = W.wire_string_field field_history_at_start assoc in
-      let* history_at_start = history_at_start_of_string history_at_start_token in
+      let* history_at_start_json = W.wire_json_field field_history_at_start assoc in
+      let* history_at_start = history_at_start_of_json history_at_start_json in
       let* position_json = W.wire_json_field field_position assoc in
       let* position =
         W.wire_at (W.Wire_field field_position) (position_of_json position_json)

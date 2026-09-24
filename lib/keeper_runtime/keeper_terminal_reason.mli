@@ -12,11 +12,7 @@
       they are all collapsed into its [Agent_core_error of string] blob.
       Splitting that blob is designed in RFC-0371 §6.1(3), which carries a
       typed observation beside the byte-identical wire and requires all four
-      types on the chain to be threaded in one batch. (Earlier revisions of
-      this comment attributed the deferral to "RFC-0042 §5.2". That section
-      argues the opposite — it accepts the variant count as the price of the
-      guarantee — and RFC-0042 was withdrawn in #24332 and removed from the
-      tree in #27624, so the citation pointed at nothing.) Matching on
+      types on the chain to be threaded in one batch. Matching on
       [Agent_core_error s] would force the substring re-parse back into the
       open, so it cannot be the consumer's parse target.
     - [Keeper_turn_disposition] is the operator-facing layer;
@@ -59,11 +55,6 @@ type t =
   (** Exact wire ["runtime_exhausted"]. Payload is the
           original string, carried only so [to_wire] is a byte-identical
           inverse; the disposition classifier ignores it. *)
-  | Capacity_backpressure of string
-  (** Exact canonical wire kind
-          {!Keeper_internal_error.capacity_backpressure_kind}.  This is a
-          typed provider/infrastructure retry observation, not an opaque
-          internal failure.  Payload preserves the original bytes. *)
   | Config_invalid of string
   (** Exact wire ["config_error"] or
           [String.starts_with ~prefix:"provider_error_invalid_config:"]. A

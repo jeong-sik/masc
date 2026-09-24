@@ -506,6 +506,20 @@ let operation_id_of_invocation_ref invocation_ref =
   "kmsg-" ^ String.sub digest 0 32
 ;;
 
+(* Who sent this, as the recipient's transcript and Librarian will see it.
+   Registry membership decides it, the same exact lookup
+   [delegate_continuation_channel] uses: a name shaped like a Keeper id is
+   not proof, since people and external bots mint the same shape
+   (RFC-0468 §3.2). An operator or agent driving the tool over HTTP is not
+   in the registry and stays [None], which the route records as the owner. *)
+let sender_keeper_of_submitter ~(config : Workspace.config) ~submitted_by =
+  match Keeper_identity.Keeper_id.of_string submitted_by with
+  | Some keeper_id
+    when Keeper_registry.is_registered ~base_path:config.base_path submitted_by ->
+    Some keeper_id
+  | Some _ | None -> None
+;;
+
 let submit_agent_operation
       ?continuation_channel
       ?operation_id_raw
@@ -550,6 +564,7 @@ let submit_agent_operation
       ~external_message_id:None
       ~workspace_id:None
       ~extra_mentions:[]
+      ~sender_keeper:(sender_keeper_of_submitter ~config:ctx.config ~submitted_by)
       ~user_row_origin:Keeper_chat_store.Needs_append
     |> Result.map_error (operation_payload_error ~class_:Tool_result.Policy_rejection "invalid_input")
   in
@@ -913,6 +928,7 @@ let complete_keeper_msg_stream_result : Turn.dispatch -> Turn.dispatch = functio
 let handle_keeper_msg_stream_admitted
       ~operation_id
       ~admission_token
+      ~input_speaker
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -947,6 +963,7 @@ let handle_keeper_msg_stream_admitted
     Turn.handle_keeper_msg_admitted
       ~operation_id
       ~admission_token
+      ~input_speaker
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation

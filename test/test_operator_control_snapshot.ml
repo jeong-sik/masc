@@ -284,6 +284,7 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
        | Ok _ -> ()
        | Error error ->
          Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config;
@@ -304,6 +305,7 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
             (`Assoc
               [
                 ("sandbox_profile", `String "docker");
+                ("sandbox_image", `String "masc-sandbox:general");
                 ("name", `String keeper_name);
                 ("instructions", `String "Prefer metrics context truth");
                 ("activation_mode", `String "on_demand");
@@ -654,6 +656,7 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
     (fun () ->
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "operator")); (* See: fixture init. *)
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config;
@@ -673,6 +676,7 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
             (`Assoc
               [
                 ("sandbox_profile", `String "docker");
+                ("sandbox_image", `String "masc-sandbox:general");
                 ("name", `String keeper_name);
                 ("instructions", `String "Expose keeper attention in digest");
                 ("activation_mode", `String "on_demand");
@@ -755,6 +759,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
     (fun () ->
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "operator"));
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config;
@@ -774,6 +779,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
             (`Assoc
               [
                 ("sandbox_profile", `String "docker");
+                ("sandbox_image", `String "masc-sandbox:general");
                 ("name", `String keeper_name);
                 ("instructions", `String "Keep receipt causal signal in summary");
                 ("activation_mode", `String "on_demand");
@@ -1028,6 +1034,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "owner"));
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config;
@@ -1048,6 +1055,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             (`Assoc
               [
                 ("sandbox_profile", `String "docker");
+                ("sandbox_image", `String "masc-sandbox:general");
                 ("name", `String keeper_name);
                 ("instructions", `String "Surface tool audit in lightweight snapshots");
                 ("activation_mode", `String "on_demand");
@@ -1167,6 +1175,7 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "owner"));
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config;
@@ -1187,6 +1196,7 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
             (`Assoc
               [
                 ("sandbox_profile", `String "docker");
+                ("sandbox_image", `String "masc-sandbox:general");
                 ("name", `String keeper_name);
                 ("instructions", `String "Keep recent tool names distinct from latest");
                 ("activation_mode", `String "on_demand");

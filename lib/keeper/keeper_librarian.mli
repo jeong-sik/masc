@@ -40,6 +40,12 @@ type goal_context =
 type input =
   { turn_ref : Ids.Turn_ref.t
   ; goal_context : goal_context
+  ; keeper_id : Keeper_identity.Keeper_id.t
+    (** The Keeper whose memory this pass curates: the name the calling lane
+        already holds, minted through {!Keeper_identity.Keeper_id.of_string},
+        so it is case-folded. The prompt shows it as host-attached data so the
+        librarian reads the conversation from this Keeper's side and knows
+        whom [keeper_instructions] addresses (RFC-0468 §3.1). *)
   ; keeper_instructions : string
     (** The same instructions the keeper's own system prompt carries.
         The librarian curates on the keeper's behalf, so it judges
@@ -87,6 +93,15 @@ type ignored_fields =
 val claim_field_to_string : claim_field -> string
 val kept_fields_from_to_string : kept_fields_from -> string
 
+(** How the Memory answer organized the pending input. The Memory decision in
+    the same answer stands either way: a slip in the organization skips it for
+    this pass instead of refusing the memory decision with it. *)
+type working_contexts_answer =
+  | Working_contexts_organized of Keeper_librarian_context.pocket list
+  | Working_contexts_missing
+  | Working_contexts_invalid of string
+      (** The pending-input selector's reason. *)
+
 type selection =
   { new_claims : Keeper_memory_os_types.fact list
     (** The memories the answer adds. A claim that writes a current memory
@@ -113,8 +128,7 @@ type selection =
         the current memory itself when the claim restated one. *)
   ; facts : Keeper_memory_os_types.fact list
   ; revisions : revision list
-  ; working_state : string option
-  ; working_contexts : Keeper_librarian_context.pocket list
+  ; working_contexts : working_contexts_answer
   }
 
 val wire_field_new_claims : string
@@ -188,6 +202,13 @@ val selection_of_json_result
 (** The continuity-only answer: an object with exactly a nonblank
     [working_state]. Any other field, a Memory field included, is refused. *)
 val working_state_of_json_result : Yojson.Safe.t -> (string, parse_error) result
+
+(** The working state a Memory answer with continuity writes: its nonblank
+    [working_state]. A Memory pass without continuity never reads that field,
+    so a slip in it cannot refuse the Memory decision. *)
+val continuity_working_state_of_json_result
+  :  Yojson.Safe.t
+  -> (string, parse_error) result
 
 (** The pending-input organization answer: an object with exactly
     [working_contexts], checked against [input.working_context]. Any other

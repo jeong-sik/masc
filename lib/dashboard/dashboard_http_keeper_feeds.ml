@@ -79,7 +79,8 @@ let tally_count_fields prefix tally =
 (* The longest window a keeper-costs request may ask for. Every day file the
    window touches is read on each refresh, and the route is a public read,
    so the window is bounded by what callers ask for: the web cost dashboard
-   offers 30, 60, 360 and 1440 minutes and the TUI Team block asks for 1440.
+   offers 30, 60, 360 and 1440 minutes and the TUI Team block sends no
+   window, taking the default below.
    No longer view exists; one that needs it raises this with it. *)
 let keeper_costs_max_window_minutes = 24 * 60
 

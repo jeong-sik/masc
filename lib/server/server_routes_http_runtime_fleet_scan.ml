@@ -1393,7 +1393,7 @@ let keeper_fleet_safety_health_json
     else None
   in
   `Assoc
-    [ "schema", `String "masc.keeper_fleet_operator.v1"
+    [ "schema", `String Keeper_fleet_blocker.reading_schema
     ; "status", `String status
     ; ( "blocker"
       , Json_util.string_opt_to_json (Option.map Keeper_fleet_blocker.wire_name blocker) )

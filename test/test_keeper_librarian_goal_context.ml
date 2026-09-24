@@ -93,7 +93,7 @@ let meta ?current_task_id () =
   | Error detail -> failf "fixture metadata: %s" detail
 
 let queue_goal_context config meta =
-  (Queue.queue_input ~config ~meta ~current:None
+  (Queue.queue_input ~config ~keeper_id:(Masc_test_deps.keeper_id_fixture "keeper-goal") ~meta ~current:None
      ~working_context:Keeper_librarian_context.empty).Keeper_librarian.goal_context
 
 (* The queue pass is a production path: a Keeper holding a task hands the

@@ -441,6 +441,14 @@ let test_title_sheds_the_total_whole () =
   check string "too narrow for any form, the counts alone" head
     (fit (Masc_tui_message_layout.display_width head))
 
+(* A stale answer's age reads in the window's unit once it passes an hour:
+   a refresh failing all day read "1440m old" beside "24h". *)
+let test_age_reads_in_hours_past_an_hour () =
+  check string "seconds" "45s" (Spend.age_text 45.0);
+  check string "minutes" "59m" (Spend.age_text 3599.0);
+  check string "hours" "1h" (Spend.age_text 3600.0);
+  check string "a day" "24h" (Spend.age_text 86400.0)
+
 let () =
   run "tui_keeper_spend"
     [ ( "server JSON"
@@ -462,5 +470,7 @@ let () =
         ; test_case "team total covers Keepers on the name lines" `Quick
             test_team_total_covers_named_keepers
         ; test_case "the title sheds the total whole" `Quick test_title_sheds_the_total_whole
+        ; test_case "age reads in hours past an hour" `Quick
+            test_age_reads_in_hours_past_an_hour
         ] )
     ]

@@ -7,7 +7,8 @@
  (name keeper_sandbox_image)
  (public_name masc.keeper_sandbox_image)
  (wrapped false)
- (modules keeper_sandbox_image keeper_sandbox_image_base_recipe))
+ (modules keeper_sandbox_image keeper_sandbox_image_base_recipe)
+ (private_modules keeper_sandbox_image_base_recipe))
 
 ; sandbox-images/base/Dockerfile is the recipe's only copy. The binary carries
 ; it as a string so an installed binary can build the image with no checkout.

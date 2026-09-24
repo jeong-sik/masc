@@ -458,6 +458,11 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
+  | Exact_slot_body_deadline_absent of
+      { lane_id : string
+      ; slot_id : string
+      ; provider_id : string
+      }
   | Context_marks_exceed_max_context of
       { runtime_id : string
       ; high_water_tokens : int
@@ -573,6 +578,23 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       high_water_tokens
       max_context
+  | Exact_slot_body_deadline_absent { lane_id; slot_id; provider_id } ->
+    Printf.sprintf
+      "%s: [runtime.exact_output_lanes.%s] slot %S runs on provider %S, and \
+       [providers.%s] declares no %s. An exact-output request is refused \
+       without it: %s ends when the response headers arrive and does not \
+       bound the response body, so %s is the only deadline on the whole \
+       request. Declare %s on [providers.%s]"
+      config_path
+      lane_id
+      slot_id
+      provider_id
+      provider_id
+      Runtime_schema.exact_body_timeout_s_key
+      Runtime_schema.connect_timeout_s_key
+      Runtime_schema.exact_body_timeout_s_key
+      Runtime_schema.exact_body_timeout_s_key
+      provider_id
 ;;
 
 (* The same account, minus the one part this repository did not write. A parse
@@ -595,7 +617,8 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Reference_unresolved _
   | Lane_candidate_unresolved _
   | Max_context_absent _
-  | Context_marks_exceed_max_context _ -> to_diagnostic_text ~config_path failure
+  | Context_marks_exceed_max_context _
+  | Exact_slot_body_deadline_absent _ -> to_diagnostic_text ~config_path failure
 ;;
 
 (* The list is carried out whole rather than counted here: the caller decides
@@ -997,6 +1020,72 @@ let verifier_exact_slot_references
     references "slots" lane.slot_ids @ references "cli_slots" lane.cli_slot_ids
 ;;
 
+(* Where the exact-output registry reads its targets. The server builds them
+   from this file's HTTP bindings, unless [AGENT_CORE_MODEL_CATALOG] names a
+   full replacement catalog, whose [[targets]] rows are then the whole set and
+   carry their own [body_timeout_s] ([Server_runtime_bootstrap]
+   [configure_exact_output_registry] reads this same answer). An empty or
+   blank value names no file, as it always has for this variable. *)
+type exact_output_target_source =
+  | Runtime_binding_targets
+  | Replacement_catalog_targets of { path : string }
+
+let agent_core_model_catalog_env_var_name = "AGENT_CORE_MODEL_CATALOG"
+
+let exact_output_target_source ?(env = Env_config_core.raw_value_opt) () =
+  match Env_config_core.trim_opt (env agent_core_model_catalog_env_var_name) with
+  | None -> Runtime_binding_targets
+  | Some path -> Replacement_catalog_targets { path }
+;;
+
+(* Rule 3 of RFC-runtime-two-layers. An HTTP slot of an exact-output lane is
+   built from its binding, and its whole-request deadline is the provider's
+   [exact-body-timeout-s]. Without it plan admission refuses every request on
+   that slot ([Missing_deadline]) and the lane falls to its cli_slots with one
+   WARN line per request, while this file loads as valid: 1,002 such refusals
+   in one restart log on 2026-09-24 (#38779). The provider's
+   [connect-timeout-s] does not stand in for it, because that deadline ends
+   at the response headers.
+
+   Only a slot that names a configured HTTP runtime carries the rule. A slot
+   naming no runtime is a catalog id: the registry resolves or drops it, and
+   [verifier_exact_slot_references] already refuses one on the verifier lane.
+   An official-client runtime is not an HTTP target (cli_slots are not read
+   here at all). Under a replacement catalog the bindings are not the
+   targets, so this file's providers say nothing about the deadline. *)
+let validate_exact_slot_body_deadlines
+    ~(target_source : exact_output_target_source)
+    (runtimes : t list)
+    (decls : Runtime_schema.exact_output_lane_decl list)
+  : (unit, load_failure) result
+  =
+  let deadline_absent (lane : Runtime_schema.exact_output_lane_decl) slot_id =
+    match List.find_opt (fun (r : t) -> String.equal r.id slot_id) runtimes with
+    | None -> None
+    | Some r ->
+      (match r.execution, r.provider.Runtime_schema.exact_body_timeout_s with
+       | Runtime_execution.Agent_core _, None ->
+         Some
+           (Exact_slot_body_deadline_absent
+              { lane_id = lane.id; slot_id; provider_id = r.provider.Runtime_schema.id })
+       | Runtime_execution.Agent_core _, Some (_ : float) -> None
+       | ( Runtime_execution.Codex_app_server _
+         | Runtime_execution.Claude_code _
+         | Runtime_execution.Antigravity_cli _ ), (Some _ | None) -> None)
+  in
+  match target_source with
+  | Replacement_catalog_targets { path = _ } -> Ok ()
+  | Runtime_binding_targets ->
+    (match
+       List.find_map
+         (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+            List.find_map (deadline_absent lane) lane.slot_ids)
+         decls
+     with
+     | None -> Ok ()
+     | Some failure -> Error failure)
+;;
+
 (* Every runtime binding's provider/model pair must be known to the AGENT_CORE
    capability catalog. Use the materialized [Provider_config.t] so
    provider-qualified catalog rows are considered before bare model rows; this
@@ -1333,6 +1422,12 @@ let materialize_config
   let* () =
     validate_runtime_references ~dropped_bindings runtimes lanes
       (verifier_exact_slot_references cfg.exact_output_lane_decls)
+  in
+  let* () =
+    validate_exact_slot_body_deadlines
+      ~target_source:(exact_output_target_source ())
+      runtimes
+      cfg.exact_output_lane_decls
   in
   let* () =
     if validate_max_context then validate_runtime_max_context runtimes else Ok ()

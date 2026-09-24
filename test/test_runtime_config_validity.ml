@@ -1985,6 +1985,58 @@ let test_boot_path_fixtures_declare_mandatory_exact_output_lanes () =
     fixtures
 ;;
 
+(* Every shipped config -- the seed and each boot-path fixture -- is read by a
+   real boot, so an exact slot on an HTTP provider without
+   [exact-body-timeout-s] would refuse the whole file there (#38779). Read at
+   parse level on purpose: a full load of the seed needs a deployment catalog
+   and credentials this test does not own, and would hide this finding behind
+   whichever unrelated check fails first. *)
+let exact_slots_missing_body_deadline (config : Runtime_schema.config) =
+  let provider_of_slot slot_id =
+    match
+      List.find_opt
+        (fun binding -> String.equal (Runtime.id_of_binding binding) slot_id)
+        config.bindings
+    with
+    | None -> None
+    | Some (binding : Runtime_schema.binding) ->
+      List.find_opt
+        (fun (provider : Runtime_schema.provider) ->
+           String.equal provider.id binding.provider_id)
+        config.providers
+  in
+  List.concat_map
+    (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+       List.filter_map
+         (fun slot_id ->
+            match provider_of_slot slot_id with
+            | None -> None
+            | Some { Runtime_schema.transport = Runtime_schema.Cli _; _ } -> None
+            | Some { Runtime_schema.transport = Runtime_schema.Http _; exact_body_timeout_s = Some _; _ } ->
+              None
+            | Some { Runtime_schema.transport = Runtime_schema.Http _; exact_body_timeout_s = None; id; _ } ->
+              Some (Printf.sprintf "%s slot %s (provider %s)" lane.id slot_id id))
+         lane.slot_ids)
+    config.exact_output_lane_decls
+;;
+
+let test_shipped_configs_declare_exact_slot_body_deadlines () =
+  let shipped =
+    ("config/runtime.toml", Filename.concat (repo_root ()) "config/runtime.toml")
+    :: discover_boot_path_fixture_runtime_tomls ()
+  in
+  List.iter
+    (fun (label, path) ->
+       match Runtime_toml.parse_file path with
+       | Error errors -> failf "%s should parse: %s" label (render_runtime_toml_errors errors)
+       | Ok config ->
+         check (list string)
+           (label ^ " exact slots whose HTTP provider declares no exact-body-timeout-s")
+           []
+           (exact_slots_missing_body_deadline config))
+    shipped
+;;
+
 (* release-evidence.sh boots the installed binary with no environment secret,
    so the second startup gate (require_usable_mandatory_exact_output_lanes,
    which calls resolve_lane) only passes if the fixture's lane slots are
@@ -3558,6 +3610,7 @@ let exact_lane_runtime_toml ~lane ~slot =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
      endpoint = \"http://127.0.0.1:1/v1\"\n\
+     exact-body-timeout-s = 120.0\n\
      \n\
      [models.sample]\n\
      api-name = \"sample\"\n\
@@ -3605,6 +3658,165 @@ let test_sibling_exact_lanes_keep_catalog_only_slots () =
             | Error msg ->
               failf "%s must accept a catalog-only slot id, got: %s" lane msg))
     [ "hitl_auto_judge"; "librarian_exact"; "board_attention_exact" ]
+;;
+
+(* Rule 3 of RFC-runtime-two-layers (#38779). An exact slot on an HTTP
+   provider without [exact-body-timeout-s] used to load as valid and then be
+   refused on every request, falling to cli_slots with one WARN per request
+   that named neither the key nor where it goes. The provider below declares
+   [connect-timeout-s] on purpose: that deadline ends at the response headers
+   and must not be read as enough. *)
+let exact_deadline_body_timeout_s = 120.0
+
+let exact_deadline_runtime_toml ~body_timeout ~lane =
+  Printf.sprintf
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     connect-timeout-s = 30.0\n\
+     %s\
+     \n\
+     [providers.subscription]\n\
+     protocol = \"claude-code\"\n\
+     command = \"/usr/bin/true\"\n\
+     is-non-interactive = true\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.seeded]\n\
+     api-name = \"seeded\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     \n\
+     [subscription.seeded]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n\
+     \n\
+     %s"
+    (match body_timeout with
+     | None -> ""
+     | Some seconds ->
+       Printf.sprintf "%s = %.1f\n" Runtime_schema.exact_body_timeout_s_key seconds)
+    lane
+;;
+
+let http_slot_lane =
+  "[runtime.exact_output_lanes.librarian_exact]\nslots = [\"local.sample\"]\n"
+;;
+
+(* Pinned so a replacement catalog left in the environment by the caller
+   cannot switch the rule off under these tests. *)
+let with_runtime_binding_targets f =
+  Masc_test_deps.with_process_env Runtime.agent_core_model_catalog_env_var_name None f
+;;
+
+let test_exact_slot_without_body_deadline_fails_the_load () =
+  with_runtime_binding_targets @@ fun () ->
+  with_temp_runtime_toml
+    (exact_deadline_runtime_toml ~body_timeout:None ~lane:http_slot_lane)
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ -> fail "an exact slot whose provider declares no body deadline must not load"
+       | Error
+           (Runtime.Exact_slot_body_deadline_absent { lane_id; slot_id; provider_id } as
+            failure) ->
+         check string "names the lane" "librarian_exact" lane_id;
+         check string "names the slot" "local.sample" slot_id;
+         check string "names the provider" "local" provider_id;
+         let text = Runtime.to_diagnostic_text ~config_path:path failure in
+         List.iter
+           (fun needle ->
+              check bool
+                (Printf.sprintf "the diagnostic says %S" needle)
+                true
+                (String_util.contains_substring text needle))
+           [ "[runtime.exact_output_lanes.librarian_exact]"
+           ; "\"local.sample\""
+           ; "[providers.local]"
+           ; Runtime_schema.exact_body_timeout_s_key
+           ; Runtime_schema.connect_timeout_s_key
+           ]
+       | Error failure ->
+         failf
+           "expected the exact body deadline failure, got: %s"
+           (Runtime.to_diagnostic_text ~config_path:path failure))
+;;
+
+let test_exact_slot_with_body_deadline_loads () =
+  with_runtime_binding_targets @@ fun () ->
+  with_temp_runtime_toml
+    (exact_deadline_runtime_toml
+       ~body_timeout:(Some exact_deadline_body_timeout_s)
+       ~lane:http_slot_lane)
+    (fun path ->
+       match load_list_text ~config_path:path with
+       | Ok _ -> ()
+       | Error msg -> failf "the declared body deadline must admit the slot: %s" msg)
+;;
+
+(* Official clients are not HTTP targets: the rule reads [slots] of HTTP
+   runtimes only, so the same provider without the key still loads when the
+   lane walks official clients. *)
+let test_exact_cli_slots_carry_no_body_deadline_rule () =
+  with_runtime_binding_targets @@ fun () ->
+  with_temp_runtime_toml
+    (exact_deadline_runtime_toml
+       ~body_timeout:None
+       ~lane:
+         "[runtime.exact_output_lanes.librarian_exact]\n\
+          slots = []\n\
+          cli_slots = [\"subscription.seeded\"]\n")
+    (fun path ->
+       match load_list_text ~config_path:path with
+       | Ok _ -> ()
+       | Error msg -> failf "cli_slots must not require a body deadline: %s" msg)
+;;
+
+(* Under a replacement catalog the exact targets are its [[targets]] rows,
+   which carry their own body_timeout_s; this file's providers are not the
+   targets, so requiring the key here would refuse a file for a value nothing
+   reads. The path is never opened by the load. *)
+let test_replacement_catalog_targets_skip_the_body_deadline_rule () =
+  Masc_test_deps.with_process_env
+    Runtime.agent_core_model_catalog_env_var_name
+    (Some "/nonexistent/replacement-catalog.toml")
+  @@ fun () ->
+  with_temp_runtime_toml
+    (exact_deadline_runtime_toml ~body_timeout:None ~lane:http_slot_lane)
+    (fun path ->
+       match load_list_text ~config_path:path with
+       | Ok _ -> ()
+       | Error msg ->
+         failf "a replacement catalog owns the target deadlines: %s" msg)
+;;
+
+let test_saving_an_exact_slot_without_body_deadline_is_refused () =
+  with_runtime_binding_targets @@ fun () ->
+  with_config_save_model_catalog @@ fun () ->
+  let baseline =
+    exact_deadline_runtime_toml
+      ~body_timeout:(Some exact_deadline_body_timeout_s)
+      ~lane:""
+  in
+  let refused = exact_deadline_runtime_toml ~body_timeout:None ~lane:http_slot_lane in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) @@ fun () ->
+  with_temp_runtime_toml baseline (fun path ->
+    (match Runtime.save_config_text ~runtime_config_path:path refused with
+     | Ok _receipt -> fail "a save that leaves an exact slot without a body deadline must fail"
+     | Error detail ->
+       check bool "the refusal names the lane" true
+         (String_util.contains_substring
+            detail
+            "[runtime.exact_output_lanes.librarian_exact]");
+       check bool "the refusal names the missing key" true
+         (String_util.contains_substring detail Runtime_schema.exact_body_timeout_s_key));
+    check string "the refused save leaves the file as it was" baseline
+      (Fs_compat.load_file path))
 ;;
 
 (* masc#28403. The runtime this declares — [local.typo] — cannot exist, because
@@ -5689,6 +5901,16 @@ let () =
             test_verifier_exact_slot_must_name_a_configured_route;
           test_case "sibling exact lanes keep catalog-only slots" `Quick
             test_sibling_exact_lanes_keep_catalog_only_slots;
+          test_case "exact slot without a body deadline fails the load" `Quick
+            test_exact_slot_without_body_deadline_fails_the_load;
+          test_case "exact slot with a body deadline loads" `Quick
+            test_exact_slot_with_body_deadline_loads;
+          test_case "exact cli_slots carry no body deadline rule" `Quick
+            test_exact_cli_slots_carry_no_body_deadline_rule;
+          test_case "replacement catalog targets skip the body deadline rule" `Quick
+            test_replacement_catalog_targets_skip_the_body_deadline_rule;
+          test_case "saving an exact slot without a body deadline is refused" `Quick
+            test_saving_an_exact_slot_without_body_deadline_is_refused;
           test_case "unreferenced binding naming an undeclared model fails the load"
             `Quick test_binding_naming_an_undeclared_model_fails_the_load;
           test_case "non-provider top-level namespaces are not bindings" `Quick
@@ -5789,6 +6011,9 @@ let () =
           test_case
             "every discovered boot-path fixture declares the mandatory exact-output lanes"
             `Quick test_boot_path_fixtures_declare_mandatory_exact_output_lanes;
+          test_case
+            "shipped configs declare a body deadline on every exact HTTP slot"
+            `Quick test_shipped_configs_declare_exact_slot_body_deadlines;
           test_case
             "release-evidence smoke lanes resolve with no environment credential"
             `Quick test_release_evidence_fixture_lanes_resolve_without_environment_credentials

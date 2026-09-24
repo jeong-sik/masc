@@ -147,7 +147,11 @@ let make_meta name : KMC.keeper_meta =
    Per-keeper routing is declared in
    [[runtime.assignments]] (runtime.toml SSOT), keyed by keeper name — NOT in
    keeper TOML.  [routingtest]/[budgettest] route to the non-default
-   [openai.gpt]; an unassigned keeper falls to [runtime].default. *)
+   [openai.gpt]; an unassigned keeper falls to [runtime].default.
+
+   Both HTTP providers declare [exact-body-timeout-s]: the first-run and
+   exact-lane writers below put their runtimes in exact-output slots, and a
+   slot whose provider declares none does not load (#38779). *)
 let runtime_config =
   {|
 [runtime]
@@ -161,11 +165,13 @@ budgettest = "openai.gpt"
 display-name = "RunPod"
 protocol = "openai-compatible-http"
 endpoint = "https://runpod.example/v1"
+exact-body-timeout-s = 120.0
 
 [providers.openai]
 display-name = "OpenAI"
 protocol = "openai-compatible-http"
 endpoint = "https://api.openai.example/v1"
+exact-body-timeout-s = 120.0
 
 [models.qwen]
 api-name = "qwen"
@@ -225,11 +231,13 @@ default = "openai.gpt"
 display-name = "RunPod"
 protocol = "openai-compatible-http"
 endpoint = "https://runpod.example/v1"
+exact-body-timeout-s = 120.0
 
 [providers.openai]
 display-name = "OpenAI"
 protocol = "openai-compatible-http"
 endpoint = "https://api.openai.example/v1"
+exact-body-timeout-s = 120.0
 
 [models.qwen]
 api-name = "qwen"
@@ -3195,11 +3203,13 @@ let lane_fixture_bindings =
 display-name = "RunPod"
 protocol = "openai-compatible-http"
 endpoint = "https://runpod.example/v1"
+exact-body-timeout-s = 120.0
 
 [providers.openai]
 display-name = "OpenAI"
 protocol = "openai-compatible-http"
 endpoint = "https://api.openai.example/v1"
+exact-body-timeout-s = 120.0
 
 [models.qwen]
 api-name = "qwen"

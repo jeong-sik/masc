@@ -48,8 +48,7 @@ let ready target =
   | Ok plan -> plan
   | Error error -> failf "Exact admission: %s" (EO.admission_error_reason error)
 
-let expected_plan ~connect ~body =
-  let target : EO.declared_target =
+let declared_target ~connect ~body : EO.declared_target =
     { target_ref = "openai-responses.probe"
     ; binding =
         Llm_provider.Provider_config.make
@@ -63,7 +62,8 @@ let expected_plan ~connect ~body =
     ; credential =
         EO.Credential_resolved (Llm_provider.Secret.of_string "synthetic-no-network")
     ; body_timeout_s = body }
-  in
+
+let admitted_declared_target (target : EO.declared_target) =
   let snapshot =
     EO.load_resolver_snapshot
       ~io:{ getenv = (fun name -> Ok (Sys.getenv_opt name)) }
@@ -73,6 +73,9 @@ let expected_plan ~connect ~body =
   in
   EO.admit_target_ref snapshot target.target_ref
   |> require_ok "expected admitted target"
+
+let expected_plan ~connect ~body =
+  admitted_declared_target (declared_target ~connect ~body)
   (* The runtime bootstrap runs this target through a lane that declares
      [max_output_tokens = 4096]; the expected plan must carry the same budget
      or the fingerprints differ for a reason this test is not about. *)
@@ -161,18 +164,60 @@ let test_deadlines_are_independent_and_frozen () =
   check string "republishing leaves the captured first target unchanged"
     (EO.plan_fingerprint first) (EO.plan_fingerprint (ready first_target))
 
+let contains ~needle haystack =
+  let n = String.length needle
+  and h = String.length haystack in
+  let rec scan index =
+    if index + n > h then false else String.sub haystack index n = needle || scan (index + 1)
+  in
+  n = 0 || scan 0
+
 (* A connect deadline ends at the response headers, so a provider that
    declares only [connect-timeout-s] would read the Exact body with no
-   deadline (#36979). The runtime still loads it; plan admission refuses it. *)
-let test_connect_only_declaration_is_refused () =
-  with_runtime @@ fun load ->
-  let target = load ~connect:(Some 17.5) ~body:None in
-  let selected = EO.resolve_target target |> require_ok "resolve frozen credential" in
+   deadline (#36979). The file that names such a slot does not load, and the
+   refusal names the slot and its provider (#38779). *)
+let test_connect_only_declaration_is_refused_at_load () =
+  with_runtime @@ fun _load ->
+  let path = Filename.temp_file "exact-runtime-connect-only-" ".toml" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) @@ fun () ->
+  Out_channel.with_open_bin path (fun oc ->
+    output_string oc (runtime_toml ~connect:(Some 17.5) ~body:None));
+  match Runtime.load_list ~config_path:path with
+  | Ok _ -> fail "a connect-only provider behind an Exact slot loaded"
+  | Error (Runtime.Exact_slot_body_deadline_absent { slot_id; provider_id; _ }) ->
+    check string "the refusal names the slot" "openai-responses.probe" slot_id;
+    check string "the refusal names the provider" "openai-responses" provider_id
+  | Error failure ->
+    failf "expected the Exact body deadline refusal, got: %s"
+      (Runtime.to_diagnostic_text ~config_path:path failure)
+
+(* Plan admission still refuses a target that reaches it without a body
+   deadline -- through a replacement catalog row, or a binding built outside
+   runtime.toml. That line is what an operator reads, so it names the
+   provider, the key to set and why the connect deadline was not enough;
+   "missing_deadline" stays in it as the kind a search finds (#38779). *)
+let test_missing_body_deadline_refusal_names_provider_and_key () =
+  with_runtime @@ fun _load ->
+  let admitted =
+    EO.admitted_target_with_max_tokens
+      (admitted_declared_target (declared_target ~connect:(Some 17.5) ~body:None))
+      4096
+  in
+  let selected = EO.resolve_target admitted |> require_ok "resolve frozen credential" in
   match EO.admit ~target:selected ~messages requirement with
-  | Ok _ -> fail "connect-only Exact target was admitted"
+  | Ok _ -> fail "a target without a body deadline was admitted"
   | Error error ->
-    check string "connect-only Exact target is refused for its missing body deadline"
-      "wire_admission_rejected:missing_deadline" (EO.admission_error_reason error)
+    let reason = EO.admission_error_reason error in
+    List.iter
+      (fun needle ->
+         check bool (Printf.sprintf "the refusal says %S" needle) true
+           (contains ~needle reason))
+      [ "wire_admission_rejected:missing_deadline"
+      ; "\"openai-responses\""
+      ; Runtime_schema.exact_body_timeout_s_key
+      ; Runtime_schema.connect_timeout_s_key
+      ; "response headers"
+      ]
 
 let () =
   Eio_main.run @@ fun env ->
@@ -184,5 +229,7 @@ let () =
           test_body_only_declaration_reaches_exact;
         test_case "connection and body deadlines remain independent and frozen" `Quick
           test_deadlines_are_independent_and_frozen;
-        test_case "connect-only declaration is refused at admission" `Quick
-          test_connect_only_declaration_is_refused ] ]
+        test_case "connect-only declaration is refused at load" `Quick
+          test_connect_only_declaration_is_refused_at_load;
+        test_case "missing body deadline refusal names provider and key" `Quick
+          test_missing_body_deadline_refusal_names_provider_and_key ] ]

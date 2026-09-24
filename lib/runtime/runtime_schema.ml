@@ -132,13 +132,16 @@ type provider =
       agent-core boundary, Agent Core contract I2: MASC declares the budget;
       AGENT_CORE owns enforcement and phase=Http_operation attribution.
       On an exact-output lane this key alone does not admit a target: it
-      ends at the response headers, so plan admission also requires
-      [exact_body_timeout_s] (Missing_deadline, #36979). *)
+      ends at the response headers, so an exact slot on this provider also
+      needs [exact_body_timeout_s] (Missing_deadline, #36979), and the
+      configuration that names one without it does not load (#38779). *)
   ; exact_body_timeout_s : float option
     (** Explicit total HTTP request deadline for Exact-output calls through
         this provider, including connection, response headers and the full
-        response body. [None] declares no body deadline, and every exact
-        target built from this provider is then refused at plan admission
+        response body. [None] declares no body deadline; an exact-output
+        lane slot on this provider is then refused when the configuration is
+        read or saved ([Runtime.Exact_slot_body_deadline_absent], #38779),
+        and a target that reaches plan admission without one is refused there
         (Missing_deadline). This does not replace [connect_timeout_s] or
         ordinary Keeper per-call body deadlines. *)
   ; antigravity_cli : antigravity_cli_options option

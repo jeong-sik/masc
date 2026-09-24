@@ -11,7 +11,7 @@ let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
 
-let agent_core_model_catalog_env_var_name = "AGENT_CORE_MODEL_CATALOG"
+let agent_core_model_catalog_env_var_name = Runtime.agent_core_model_catalog_env_var_name
 
 (* Seconds withheld from tool-blob maintenance so the boot stages that follow
    it (Runtime_params restore, credential audit, Domain_pool, Keeper gate
@@ -450,10 +450,14 @@ let configure_exact_output_registry ?config_root () =
     load_exact_output_lane_declarations ?config_root ()
   in
   require_explicit_mandatory_exact_output_lanes ~config_path lanes;
+  (* The same answer configuration load used to decide whether an exact slot's
+     provider must declare its body deadline, so the rule and the catalog it
+     guards cannot disagree about where the targets come from. *)
   let catalog, catalog_description =
-    match nonempty_env Sys.getenv_opt agent_core_model_catalog_env_var_name with
-    | Some path -> Exact_output.Full_replacement_file path, " from full replacement " ^ path
-    | None ->
+    match Runtime.exact_output_target_source () with
+    | Runtime.Replacement_catalog_targets { path } ->
+      Exact_output.Full_replacement_file path, " from full replacement " ^ path
+    | Runtime.Runtime_binding_targets ->
       let targets = exact_output_targets_of_runtimes () in
       ( Exact_output.Embedded_with_targets targets
       , Printf.sprintf

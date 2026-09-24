@@ -250,6 +250,16 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
+  | Exact_slot_body_deadline_absent of
+      { lane_id : string
+      ; slot_id : string
+      ; provider_id : string
+      }
+      (** An exact-output lane's [slots] entry names an HTTP runtime whose
+          provider declares no [exact-body-timeout-s]. Every request on that
+          slot would be refused at plan admission; the load refuses the file
+          instead, naming lane, slot and provider. Not checked under
+          {!Replacement_catalog_targets}. *)
   | Context_marks_exceed_max_context of
       { runtime_id : string
       ; high_water_tokens : int
@@ -260,6 +270,24 @@ type load_failure =
           {!drop_reason} keeps one level down. [Toml_unparsable] is the one case
           whose text comes from the parser and can quote operator input; the
           rest name ids and config keys this repository authored. *)
+
+type exact_output_target_source =
+  | Runtime_binding_targets
+      (** The exact-output registry builds its targets from this file's HTTP
+          bindings, so a slot's deadline is its provider's
+          [exact-body-timeout-s]. *)
+  | Replacement_catalog_targets of { path : string }
+      (** [AGENT_CORE_MODEL_CATALOG] names a full replacement catalog; its
+          [[targets]] rows are the whole target set and carry their own
+          [body_timeout_s]. *)
+
+val agent_core_model_catalog_env_var_name : string
+
+val exact_output_target_source :
+  ?env:(string -> string option) -> unit -> exact_output_target_source
+(** One answer for both readers: configuration load decides whether rule 3
+    (exact slot body deadline) applies, and server bootstrap decides which
+    catalog the exact-output registry reads. A blank value names no file. *)
 
 val to_diagnostic_text : config_path:string -> load_failure -> string
 (** The operator-facing account of a refused configuration, and the wording the

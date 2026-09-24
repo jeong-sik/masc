@@ -169,6 +169,9 @@ let runtime_toml
        {|[providers.replacement_provider]
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1/v1"
+# Lanes below may name this provider's runtimes as slots; without a body
+# deadline such a slot does not load under the embedded catalog (#38779).
+exact-body-timeout-s = 120.0
 
 [models.replacement]
 api-name = "replacement-model"

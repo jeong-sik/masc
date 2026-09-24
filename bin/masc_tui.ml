@@ -4830,7 +4830,10 @@ let launch_identity_app_save state ~mailbox
             ~client_id ~client_secret ~scopes
         with
         | Error err -> Error err
-        | Ok json -> Masc.Tui_decode.decode_oauth_client_saved json
+        | Ok json ->
+          Masc.Tui_decode.decode_oauth_client_saved json
+          |> Result.map_error (fun detail ->
+            "app recorded, but the reply could not be read: " ^ detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)

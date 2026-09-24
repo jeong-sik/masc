@@ -205,6 +205,11 @@ let capture ~tabs ~call ~tab_id =
 
 (* The reads run the automation lane's page scripts, so an observation has
    the same shape on every lane. *)
+let with_tab_id tab_id method_ = function
+  | `Assoc fields -> Ok (`Assoc (("tabId", `Int tab_id) :: fields))
+  | _ -> Error (malformed "page.evaluate" method_)
+;;
+
 let read_text ~tabs ~call ~tab_id ~max_chars =
   let cap = match max_chars with Some cap -> cap | None -> Browser_page_script.default_text_chars in
   if cap < 1 || cap > Browser_page_script.max_text_chars then
@@ -212,13 +217,9 @@ let read_text ~tabs ~call ~tab_id ~max_chars =
       (Browser_lane.Rejected_before_effect
          (Printf.sprintf "maxChars must be between 1 and %d" Browser_page_script.max_text_chars))
   else
-    let* _, page_id = page_or_active ~tabs ~call tab_id in
-    evaluate ~runtime:No_runtime ~send:(send call) ~args:(`Int cap) page_id Browser_page_script.text
-;;
-
-let with_tab_id tab_id method_ = function
-  | `Assoc fields -> Ok (`Assoc (("tabId", `Int tab_id) :: fields))
-  | _ -> Error (malformed "page.evaluate" method_)
+    let* tab_id, page_id = page_or_active ~tabs ~call tab_id in
+    let* text = evaluate ~runtime:No_runtime ~send:(send call) ~args:(`Int cap) page_id Browser_page_script.text in
+    with_tab_id tab_id "a text observation" text
 ;;
 
 let read_elements ~tabs ~call ~tab_id =

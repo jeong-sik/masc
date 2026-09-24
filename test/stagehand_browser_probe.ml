@@ -188,9 +188,9 @@ let () =
      in
      record "BrowserRead text reads the page"
        (let* data = read "text" in
-        match string_at [ "text" ] data with
-        | Some text when contains ~sub:"Order form" text -> Ok data
-        | Some _ | None -> Error ("the text read answered " ^ Yojson.Safe.to_string data));
+        match string_at [ "text" ] data, Yojson.Safe.Util.member "tabId" data with
+        | Some text, `Int observed_id when observed_id = tab_id && contains ~sub:"Order form" text -> Ok data
+        | _ -> Error ("the text read answered " ^ Yojson.Safe.to_string data));
      record "BrowserRead scene reads the page"
        (let* data = read "scene" in
         if contains ~sub:"Order form" (Yojson.Safe.to_string data) then Ok data

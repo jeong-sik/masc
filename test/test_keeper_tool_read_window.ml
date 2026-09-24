@@ -420,6 +420,45 @@ let test_legacy_max_bytes_args_unchanged () =
   Alcotest.(check (option int)) "returned_lines" (Some 10) (parse_int "returned_lines" raw)
 ;;
 
+(* The whole Read path, backend included, for a line past the first
+   [read_file_max_max_bytes]: Read used to fetch that prefix and answer any
+   later offset with an "offset beyond window" error. The backend now streams from the
+   offset, and the runtime has to number the body it gets back from that
+   offset rather than from line 1, or the window comes back empty. *)
+let test_offset_past_the_old_prefix_reads_that_line () =
+  setup
+  @@ fun ~config ~meta ~playground ->
+  let buffer = Buffer.create 400_000 in
+  for i = 1 to 30_000 do
+    Buffer.add_string buffer (Printf.sprintf "line-%d\n" i)
+  done;
+  let file = Buffer.contents buffer in
+  Alcotest.(check bool)
+    "the target line lies past the old prefix Read fetched"
+    true
+    (Astring.String.find_sub ~sub:"line-25000\n" file
+     |> Option.fold ~none:false ~some:(fun at ->
+       at > Tool_shard_limits.read_file_max_max_bytes));
+  write_file (Filename.concat playground "repos/masc/large.ml") file;
+  let raw =
+    read
+      ~config
+      ~meta
+      (`Assoc
+          [ "path", `String "repos/masc/large.ml"
+          ; "offset", `Int 25_000
+          ; "limit", `Int 2
+          ])
+  in
+  if not (parse_ok raw) then Alcotest.failf "expected Read ok, got: %s" raw;
+  Alcotest.(check (option string))
+    "window content"
+    (Some "line-25000\nline-25001\n")
+    (parse_string "content" raw);
+  Alcotest.(check (option int)) "offset" (Some 25_000) (parse_int "offset" raw);
+  Alcotest.(check (option int)) "next_offset" (Some 25_002) (parse_int "next_offset" raw)
+;;
+
 (* A sandbox Read streams from the window's first line, so the body it
    slices does not begin at file line 1. [first_line] carries where it does
    begin; offsets must stay file line numbers. The second case starts the
@@ -481,6 +520,10 @@ let () =
             "legacy max_bytes args unchanged"
             `Quick
             test_legacy_max_bytes_args_unchanged
+        ; Alcotest.test_case
+            "offset past the old prefix reads that line"
+            `Quick
+            test_offset_past_the_old_prefix_reads_that_line
         ; Alcotest.test_case
             "window offsets follow the body's first line"
             `Quick

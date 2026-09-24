@@ -369,9 +369,13 @@ let handle_read_file_with_outcome
   | Ok window, Ok target ->
     let payload_of_slice ~via ~file_bytes ~first_line ~scan_complete body =
       match slice_read_window ~window ~first_line ~max_bytes ~scan_complete body with
-      (* The sandbox streams from [window.start_line], so its body always
-         holds the window's first line and cannot reach this branch; only the
-         owned path's prefix read can (removal tracked in #38609). *)
+      (* Neither caller below reaches this arm. The sandbox body begins at
+         [window.start_line], so the window's first line is the body's first
+         line and always has a start. The host read passes the whole file
+         with [scan_complete:true], which turns a line past EOF into an empty
+         window. Only [handle_owned_read_file_with_outcome] can get
+         [Offset_beyond_scan], in its own arm; #38609 removes the [Error]
+         case there. *)
       | Error `Offset_beyond_scan ->
         Read_failed_payload
           (error_json

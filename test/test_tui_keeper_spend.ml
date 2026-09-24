@@ -108,7 +108,7 @@ let server_default_window =
 let server_answer ?(state = Route.Cache_fresh) ?age_s ?error config names =
   let body =
     Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-      ~keepers:(List.map make_meta names) ~unread_keepers:[]
+      ~keepers:(List.map make_meta names)
       ~window_minutes:server_default_window
       ~now_ts:(Unix.gettimeofday ())
   in
@@ -152,6 +152,7 @@ let spend_testable =
       match spend with
       | Spend_no_turns -> Format.fprintf fmt "no turns"
       | Spend_unread reason -> Format.fprintf fmt "unread: %s" reason
+      | Spend_rows_unread { rows } -> Format.fprintf fmt "%d rows unread" rows
       | Spend_turns { cost_usd; tokens } ->
           Format.fprintf fmt "cost %a, tokens %a"
             (sum_pp (fun fmt -> Format.fprintf fmt "%.4f")) cost_usd
@@ -367,7 +368,11 @@ let test_unread_turn_rows_make_floors () =
   check string "an unplaceable turn row makes the sums floors"
     "\xe2\x89\xa5$0.50 \xe2\x89\xa510 tok" (String.trim (strip (tag "odd")));
   check bool "only unplaceable rows is unknown, not no turns" true
-    (String.starts_with ~prefix:"? tok" (strip (tag "only-odd")))
+    (String.starts_with ~prefix:"? tok" (strip (tag "only-odd")));
+  check bool "and a line says why" true
+    (List.exists
+       (String.equal "$ spend unknown for 1 Keeper: its 1 row did not read")
+       (List.map strip (Spend.lines reading)))
 
 (* A row this build cannot read leaves its Keeper unknown and is counted;
    the other rows still draw. *)

@@ -14298,7 +14298,6 @@ def keeper_costs_fixture() -> HttpResponse:
                     "metrics_read": {"state": "read", "malformed_rows": 0, "unread_turn_rows": 0},
                 }
             ],
-            "keepers_unread": [],
             "window_minutes": 1440,
             "generated_at": 1_790_000_000.0,
             "cache": {"state": "fresh", "generated_at": 1_790_000_000.0},

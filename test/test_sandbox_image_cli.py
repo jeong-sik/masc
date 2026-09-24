@@ -95,10 +95,11 @@ sys.exit(int(os.environ['TEST_EXIT']))
 class SandboxImageCatalogCliTest(unittest.TestCase):
     """promote and rollback record builds in <base>/.masc/config/sandbox-images.toml."""
 
-    def run_cli(self, root, base, *args, inspect_output='', config_dir=None):
+    def run_cli(self, root, base, *args, inspect_output='', inspect_exit=0,
+                config_dir=None):
         env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ.get('PATH', ''),
                    TEST_RECEIPT=str(root / 'receipt.json'), TEST_EXIT='0',
-                   TEST_INSPECT_EXIT='0', TEST_INSPECT_OUTPUT=inspect_output)
+                   TEST_INSPECT_EXIT=str(inspect_exit), TEST_INSPECT_OUTPUT=inspect_output)
         env.pop('MASC_TEST_FAKE_DOCKER_PATH', None)
         env.pop('MASC_CONFIG_DIR', None)
         if config_dir is not None:
@@ -150,7 +151,21 @@ sys.exit(0)
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertIn('previous = { reference = "masc-sandbox:general"', catalog.read_text())
 
-            back = self.run_cli(root, base, 'rollback', 'base', '--runtime', 'apple_container')
+            before_rollback = catalog.read_text()
+            missing = self.run_cli(root, base, 'rollback', 'base',
+                                   '--runtime', 'apple_container', inspect_exit=1)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn('cannot inspect previous build', missing.stderr)
+            self.assertEqual(catalog.read_text(), before_rollback)
+
+            changed = self.run_cli(root, base, 'rollback', 'base',
+                                   '--runtime', 'apple_container', inspect_output=inspect(digest_b))
+            self.assertNotEqual(changed.returncode, 0)
+            self.assertIn('changed digest', changed.stderr)
+            self.assertEqual(catalog.read_text(), before_rollback)
+
+            back = self.run_cli(root, base, 'rollback', 'base',
+                                '--runtime', 'apple_container', inspect_output=inspect(digest_a))
             self.assertEqual(back.returncode, 0, back.stdout + back.stderr)
             self.assertIn('reference = "masc-sandbox:general"\ndigest = "' + digest_a, catalog.read_text())
 

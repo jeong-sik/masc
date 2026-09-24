@@ -5057,6 +5057,11 @@ let test_codex_app_server_materializes_as_turn_runtime () =
     | Ok (runtimes, default, _, _, _) ->
       check int "one runtime" 1 (List.length runtimes);
       check string "default id" "codex.codex" default.id;
+      check string "picker and exact writer agree on Codex destination" "cli_slots"
+        Yojson.Safe.Util.(Server_dashboard_runtime_resolved_json.runtime_resolution_json default
+                          |> member "exact_slot_group" |> to_string);
+      check string "HTTP bindings append to the other declared list" "slots"
+        (Runtime.exact_slot_list_key_of_api_format Runtime_schema.Chat_completions_api);
       (match default.execution with
        | Runtime_execution.Agent_core _
        | Runtime_execution.Claude_code _ ->

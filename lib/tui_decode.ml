@@ -2722,10 +2722,13 @@ type runtime_context_source =
   | Runtime_context_capability
   | Runtime_context_clamped
 
+type exact_slot_group = Exact_http_slots | Exact_cli_slots
+
 type runtime_option = {
   ro_id : string;
   ro_provider : string;
   ro_model : string;
+  ro_exact_slot_group : exact_slot_group;
   ro_effective_max_context : int;
   ro_max_context_source : runtime_context_source;
   ro_max_output_tokens : int option;
@@ -4871,6 +4874,13 @@ let decode_runtime_option ~default_id json =
   let* ro_id = required_string_field json "id" in
   let* ro_provider = required_string_field json "provider" in
   let* ro_model = required_string_field json "model" in
+  let* ro_exact_slot_group =
+    let* group = required_string_field json "exact_slot_group" in
+    match group with
+    | "slots" -> Ok Exact_http_slots
+    | "cli_slots" -> Ok Exact_cli_slots
+    | _ -> Error (Printf.sprintf "unknown exact_slot_group %S" group)
+  in
   let* ro_effective_max_context = required_int_field json "effective_max_context" in
   let* context_source = required_string_field json "max_context_source" in
   let* ro_max_context_source = decode_runtime_context_source context_source in
@@ -4910,6 +4920,7 @@ let decode_runtime_option ~default_id json =
     { ro_id
     ; ro_provider
     ; ro_model
+    ; ro_exact_slot_group
     ; ro_effective_max_context
     ; ro_max_context_source
     ; ro_max_output_tokens
@@ -5027,6 +5038,7 @@ let decode_runtime_resolved_snapshot json =
          | Some listed
            when String.equal default.ro_provider listed.ro_provider
                 && String.equal default.ro_model listed.ro_model
+                && default.ro_exact_slot_group = listed.ro_exact_slot_group
                 && Int.equal default.ro_effective_max_context listed.ro_effective_max_context
                 && default.ro_max_context_source = listed.ro_max_context_source
                 && Option.equal Int.equal default.ro_max_output_tokens listed.ro_max_output_tokens

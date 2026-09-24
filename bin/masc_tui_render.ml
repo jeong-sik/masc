@@ -5885,9 +5885,18 @@ let render_lanes_slot_editor (state : state) (editor : slot_editor) =
               then "  (same provider as a current slot)"
               else ""
             in
+            let destination =
+              match editor.se_target with
+              | Exact_lane_slots _ ->
+                (match runtime.ro_exact_slot_group with
+                 | Exact_http_slots -> "[HTTP tail] "
+                 | Exact_cli_slots -> "[CLI tail] ")
+              | Media_failover_slots -> ""
+            in
             let line =
-              Printf.sprintf "  %s %s   %s / %s [%s ctx]%s%s"
+              Printf.sprintf "  %s %s%s   %s / %s [%s ctx]%s%s"
                 (if offset = 0 then ">" else " ")
+                destination
                 (Terminal_text.single_line runtime.ro_id)
                 (Terminal_text.single_line runtime.ro_provider)
                 (Terminal_text.single_line runtime.ro_model)

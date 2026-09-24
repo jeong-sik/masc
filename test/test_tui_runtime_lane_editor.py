@@ -116,6 +116,7 @@ class LaneStore:
         exact = self.exact_lane(EXACT_LANE)
         exact["dropped_slots"] = [DROPPED_SLOT]
         self.exact_declared = {EXACT_LANE: [DROPPED_SLOT, *exact["admitted_slots"]]}
+        self.exact_declared_cli: dict[str, list[str]] = {}
         # The projection now carries the file's own order beside the admission
         # lists; the fixture serves the one it tracks.
         exact["declared_slots"] = list(self.exact_declared[EXACT_LANE])
@@ -198,15 +199,28 @@ class LaneStore:
                     raise AssertionError(f"the TUI posted {action!r} to a standalone lane")
                 name = lane_id[len("exact/"):]
                 slot = request["runtime_id"]
-                declared = self.exact_declared[name]
-                if slot in declared:
-                    return 400, {"error": f"{slot} is already a slot of {name}"}
-                declared.append(slot)
                 lane = self.exact_lane(name)
+                declared = self.exact_declared.setdefault(
+                    name, list(lane["declared_slots"])
+                )
+                declared_cli = self.exact_declared_cli.setdefault(
+                    name, list(lane["declared_cli_slots"])
+                )
+                if slot in declared or slot in declared_cli:
+                    return 400, {"error": f"{slot} is already a slot of {name}"}
+                runtime = next(
+                    (row for row in self.body["runtimes"] if row["id"] == slot), None
+                )
+                if runtime is not None and runtime["exact_slot_group"] == "cli_slots":
+                    declared_cli.append(slot)
+                else:
+                    declared.append(slot)
                 lane["admitted_slots"] = [
                     s for s in declared if s not in lane["dropped_slots"]
                 ]
                 lane["declared_slots"] = list(declared)
+                lane["cli_slots"] = list(declared_cli)
+                lane["declared_cli_slots"] = list(declared_cli)
                 return 200, commit_receipt()
             declared = [lane for lane in self.lanes if lane["id"] == lane_id]
             if action == "create":
@@ -509,6 +523,11 @@ def run_exact_slot_editor(executable: str) -> None:
     """bin/masc_tui_types.ml and bin/masc_tui_render.ml: Librarian's CLI
     candidates share the visible slot editor with its HTTP candidates."""
     store = LaneStore()
+    new_cli = "a-cli"
+    store.body["runtimes"].append({
+        **h.runtime_resolved_runtime(new_cli, "Official client", "model"),
+        "exact_slot_group": "cli_slots",
+    })
     cli_candidates = [
         "codex_subscription.gpt-6-luna-xhigh", "claude_code.claude-sonnet-5",
         *(f"codex_subscription.fixture-{index}" for index in range(3, 11)),
@@ -520,6 +539,8 @@ def run_exact_slot_editor(executable: str) -> None:
     fixtures[h.RUNTIME_PROBE_FORCE_PATH] = h.runtime_probe_response(fresh=True)
     fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
     fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    requests: h.HttpRequests = []
     status, config = h.standalone_lane_runtime_config_response()
     fixtures[h.RUNTIME_CONFIG_RAW_PATH] = (
         status,
@@ -550,11 +571,29 @@ def run_exact_slot_editor(executable: str) -> None:
         mark = mark_output(fd, output)
         h.send_and_wait(process, fd, output, b"a",
                         b"adding a candidate to librarian_exact")
+        h.wait_for_output(process, fd, output, b"[CLI tail] a-cli",
+                          start=mark, timeout=5)
+        h.wait_for_output(process, fd, output, b"[HTTP tail] runtime-a",
+                          start=mark, timeout=5)
         h.wait_for_output(process, fd, output,
                           "j/k move · Enter append · e cancel".encode(),
                           start=mark, timeout=5)
         # The picker owns focus; d must not jump to the underlying HTTP slot.
         os.write(fd, b"d")
+        mark = mark_output(fd, output)
+        os.write(fd, b"\r")
+        h.wait_for_output(process, fd, output, b"/12", start=mark, timeout=5)
+        screen_lacks(process, fd, output, b"adding a candidate to librarian_exact",
+                    timeout=5)
+        posted = [json.loads(body) for path, body in requests if path == ROUTING_PATH]
+        if posted != [{"lane": "exact/librarian_exact", "action": "append",
+                       "runtime_id": new_cli}]:
+            raise AssertionError(f"CLI append posted {posted!r}")
+        if store.exact_declared_cli["librarian_exact"][-1] != new_cli:
+            raise AssertionError("official client was not appended to the CLI tail")
+        # The picker has closed after the committed write and refreshed read.
+        h.send_and_wait(process, fd, output, b"a",
+                        b"adding a candidate to librarian_exact")
         h.send_and_wait(process, fd, output, b"e",
                         b"> 1  HTTP glm-coding.glm-5-turbo")
         h.send_and_wait(process, fd, output, b"d", b'[providers."glm-coding"]')
@@ -567,6 +606,7 @@ def run_exact_slot_editor(executable: str) -> None:
         description="Librarian slot editor shows HTTP and CLI candidates",
         interact=interact,
         http_fixtures=fixtures,
+        http_requests=requests,
     )
 
 

@@ -48,10 +48,10 @@ let catalog_entry ~id ~base_url ~api_key_env =
     id
     id
     (id ^ "-model")
-    (* #36984 rejects a plan whose target declares no connect and no body
-       budget (Missing_deadline). This fixture predates that admission rule;
-       30.0 mirrors the flow suite's default (test_exact_output_flow.ml). *)
-    "connect_timeout_s = 30.0\n"
+    (* Plan admission rejects a target without a body budget
+       (Missing_deadline). Both values mirror the flow suite's defaults
+       (test_exact_output_flow.ml). *)
+    "connect_timeout_s = 30.0\nbody_timeout_s = 30.0\n"
 ;;
 
 let with_catalog ~base_url f =

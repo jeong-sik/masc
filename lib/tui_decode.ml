@@ -619,6 +619,10 @@ type fleet_safety = {
   fs_active_task_owner_scan_error_count : int;
 }
 
+type fleet_safety_reading =
+  | Fleet_measured of fleet_safety
+  | Fleet_not_measured of { status : string }
+
 type log_kind =
   | Log_turn
   | Log_heartbeat
@@ -893,6 +897,10 @@ let is_invisible_codepoint code =
   || (code >= 0x202A && code <= 0x202E)
   || (code >= 0x2066 && code <= 0x2069)
   || code = 0xFEFF
+  (* #38501: the tag block copies ASCII into characters a terminal draws as
+     nothing (U+E0061 is a tag "a"), so a sentence can be spelled twice --
+     once for the reader and once for the bytes the approval hash covers. *)
+  || (code >= 0xE0000 && code <= 0xE007F)
 ;;
 
 let zero_width_joiner = 0x200D
@@ -929,6 +937,66 @@ let opens_pictograph text index =
   | Some scalar -> Uucp.Emoji.is_extended_pictographic scalar
   | None -> false
 
+(* The tags that are not hiding anything: the ones spelling a subregion flag.
+   U+1F3F4 opens the sequence, a subdivision code follows, and U+E007F closes
+   it: U+1F3F4 U+E0067 U+E0062 U+E0073 U+E0063 U+E0074 U+E007F is Scotland.
+   [Masc_tui_message_layout] counts that block as part of one emoji cluster,
+   and the exemption here is deliberately narrower than that block: only the
+   shape UTS #51 gives a subdivision, three to seven tag characters drawn
+   from lowercase letters and digits. The wider grammar would carry a
+   sentence -- tag space and tag punctuation spell one -- and a reader would
+   see a single flag where the hash covers words. The sequence is admitted
+   whole or not at all: a run that never reaches the terminator, or one
+   shaped like anything but a subdivision, is loose text spelled in invisible
+   characters, and the flag in front of it stays visible. *)
+let tag_small_letter_first = 0xE0061
+let tag_small_letter_last = 0xE007A
+let tag_digit_first = 0xE0030
+let tag_digit_last = 0xE0039
+let tag_spec_min = 3
+let tag_spec_max = 7
+let cancel_tag = 0xE007F
+let waving_black_flag = 0x1F3F4
+
+let is_tag_spec code =
+  (code >= tag_small_letter_first && code <= tag_small_letter_last)
+  || (code >= tag_digit_first && code <= tag_digit_last)
+
+(* Bytes of a complete subdivision sequence starting at [index] -- the
+   position just past the flag -- not counting the flag itself. [None] when
+   the run is too short or too long for a subdivision, meets a tag character
+   outside the lowercase-and-digit shape, or ends without the terminator. *)
+let tag_sequence_bytes text index =
+  let length = String.length text in
+  let rec scan position ~spec_count =
+    if position >= length
+    then None
+    else (
+      let decoded = String.get_utf_8_uchar text position in
+      if not (Uchar.utf_decode_is_valid decoded)
+      then None
+      else (
+        let step = Uchar.utf_decode_length decoded in
+        let code = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
+        if code = cancel_tag
+        then (
+          if spec_count >= tag_spec_min && spec_count <= tag_spec_max
+          then Some (position + step - index)
+          else None)
+        else if is_tag_spec code && spec_count < tag_spec_max
+        then scan (position + step) ~spec_count:(spec_count + 1)
+        else None))
+  in
+  scan index ~spec_count:0
+
+(* [\uXXXX] has room for the basic plane only and the tag block needs five
+   digits (U+E0061), so a wider fixed-width form of the same family carries
+   them: the reader can still see where one escape ends and the next begins. *)
+let escape_text code =
+  if code <= 0xFFFF
+  then Printf.sprintf "\\u%04X" code
+  else Printf.sprintf "\\U%08X" code
+
 let escape_invisible text =
   let output = Buffer.create (String.length text) in
   let length = String.length text in
@@ -940,28 +1008,39 @@ let escape_invisible text =
       let scalar = Uchar.utf_decode_uchar decoded in
       let valid = Uchar.utf_decode_is_valid decoded in
       let code = Uchar.to_int scalar in
-      let joins_two_pictographs =
-        valid
-        && code = zero_width_joiner
-        && after_pictograph
-        && opens_pictograph text (index + step)
+      let flag_tags =
+        if valid && code = waving_black_flag
+        then tag_sequence_bytes text (index + step)
+        else None
       in
-      if valid && is_invisible_codepoint code && not joins_two_pictographs
-      then Buffer.add_string output (Printf.sprintf "\\u%04X" code)
-      else Buffer.add_substring output text index step;
-      let after_pictograph =
-        if not valid
-        then false
-        else if Uucp.Emoji.is_extended_pictographic scalar
-        then true
-        (* Only a joiner that actually joined carries the state: an escaped
-           one has been written out as text, so what follows it no longer sits
-           inside an emoji and a second joiner cannot ride through on it. *)
-        else if continues_pictograph scalar || joins_two_pictographs
-        then after_pictograph
-        else false
-      in
-      walk (index + step) ~after_pictograph)
+      match flag_tags with
+      | Some tail ->
+        Buffer.add_substring output text index (step + tail);
+        walk (index + step + tail) ~after_pictograph:true
+      | None ->
+        let joins_two_pictographs =
+          valid
+          && code = zero_width_joiner
+          && after_pictograph
+          && opens_pictograph text (index + step)
+        in
+        if valid && is_invisible_codepoint code && not joins_two_pictographs
+        then Buffer.add_string output (escape_text code)
+        else Buffer.add_substring output text index step;
+        let after_pictograph =
+          if not valid
+          then false
+          else if Uucp.Emoji.is_extended_pictographic scalar
+          then true
+          (* Only a joiner that actually joined carries the state: an escaped
+             one has been written out as text, so what follows it no longer
+             sits inside an emoji and a second joiner cannot ride through on
+             it. *)
+          else if continues_pictograph scalar || joins_two_pictographs
+          then after_pictograph
+          else false
+        in
+        walk (index + step) ~after_pictograph)
   in
   walk 0 ~after_pictograph:false;
   Buffer.contents output
@@ -9708,8 +9787,9 @@ let decode_lane_run_detail json =
     }
 ;;
 
-let decode_fleet_safety json =
-  let* section = required_object_field json "keeper_fleet_safety" in
+(* Every field is read as required: the full reading writes all of them, so a
+   missing count is a broken payload, not an idle fleet. *)
+let decode_fleet_safety_reading section =
   let* fs_status = required_string_field section "status" in
   let* fs_blocker =
     Result.map
@@ -9717,29 +9797,26 @@ let decode_fleet_safety json =
            match Keeper_fleet_blocker.of_wire_name name with
            | Some blocker -> Blocker blocker
            | None -> Unrecognised_blocker name))
-      (optional_string_field section "blocker")
+      (required_nullable_string_field section "blocker")
   in
   let* fs_operator_action_required =
-    match member "operator_action_required" section with
-    | `Bool value -> Ok value
-    | `Null -> Ok false
-    | bad -> field_type_error "operator_action_required" "a bool or null" bad
+    required_bool_field section "operator_action_required"
   in
-  let* fs_bootable_count = int_field_or section "bootable_keeper_count" ~default:0 in
-  let* fs_running_count = int_field_or section "running_keeper_fiber_count" ~default:0 in
+  let* fs_bootable_count = required_int_field section "bootable_keeper_count" in
+  let* fs_running_count = required_int_field section "running_keeper_fiber_count" in
   let* fs_executable_count =
-    int_field_or section "executable_keeper_fiber_count" ~default:0
+    required_int_field section "executable_keeper_fiber_count"
   in
-  let* fs_failing_count = int_field_or section "failing_keeper_fiber_count" ~default:0 in
+  let* fs_failing_count = required_int_field section "failing_keeper_fiber_count" in
   let* fs_recovering_count =
-    int_field_or section "recovering_keeper_fiber_count" ~default:0
+    required_int_field section "recovering_keeper_fiber_count"
   in
   (* The unscoped count: every Failing keeper whose reason is a turn
      configuration error, autoboot target or not. The configuration_blocked_*
      fields answer an autoboot question instead and skip keepers outside the
      autoboot set, so they cannot partition the failing count. *)
   let* fs_turn_configuration_error_count =
-    int_field_or section "turn_configuration_error_keeper_count" ~default:0
+    required_int_field section "turn_configuration_error_keeper_count"
   in
   let* fs_official_client_recovery_required_count =
     required_int_field section "official_client_recovery_required_keeper_count"
@@ -9747,34 +9824,34 @@ let decode_fleet_safety json =
   let* fs_official_client_recovery_required_names =
     require_string_list section "official_client_recovery_required_keeper_names"
   in
-  let* fs_paused_count = int_field_or section "paused_keeper_count" ~default:0 in
+  let* fs_paused_count = required_int_field section "paused_keeper_count" in
   let* fs_target_reaction_capacity =
-    int_field_or section "target_reaction_capacity_count" ~default:0
+    required_int_field section "target_reaction_capacity_count"
   in
   let* fs_reaction_capacity_shortfall =
-    int_field_or section "reaction_capacity_shortfall_count" ~default:0
+    required_int_field section "reaction_capacity_shortfall_count"
   in
-  let* fs_bootable_names = decode_string_name_list section "bootable_keeper_names" in
-  let* fs_running_names = decode_string_name_list section "running_keeper_names" in
+  let* fs_bootable_names = require_string_list section "bootable_keeper_names" in
+  let* fs_running_names = require_string_list section "running_keeper_names" in
   let* fs_executable_names =
-    decode_string_name_list section "executable_keeper_names"
+    require_string_list section "executable_keeper_names"
   in
   let* fs_turn_configuration_error_names =
-    decode_string_name_list section "turn_configuration_error_keeper_names"
+    require_string_list section "turn_configuration_error_keeper_names"
   in
   let* fs_active_task_owner_without_fiber_count =
-    int_field_or section "active_task_owner_without_executable_fiber_count" ~default:0
+    required_int_field section "active_task_owner_without_executable_fiber_count"
   in
   let* fs_completion_authority_pending_count =
-    int_field_or section "completion_authority_pending_task_count" ~default:0
+    required_int_field section "completion_authority_pending_task_count"
   in
   (* Sources the task-owner scan could not read -- the backlog, or a Keeper
      whose profile did not load. Their tasks are left out of the count above,
      and only a backlog failure moves [status] off "ok", so a Keeper that
      could not be read leaves the count short with nothing on the row saying
-     so. Absent reads as none, the way every count in this section does. *)
+     so. *)
   let* fs_active_task_owner_scan_error_count =
-    int_field_or section "active_task_owner_scan_error_count" ~default:0
+    required_int_field section "active_task_owner_scan_error_count"
   in
   Ok
     { fs_status
@@ -9799,6 +9876,42 @@ let decode_fleet_safety json =
     ; fs_completion_authority_pending_count
     ; fs_active_task_owner_scan_error_count
     }
+
+(* Server_routes_http_runtime.full_health_component_placeholder: what the
+   section holds when the health snapshot has no fleet reading. It carries no
+   counts, and [error] only when something failed. Without [error] the
+   snapshot is being rebuilt -- "warming" at boot and again after a change
+   invalidates it -- and nothing failed. With [error] the refresh timed out or
+   the scan raised, which is a failure the operator should see as one, with
+   the server's reason. *)
+let decode_fleet_placeholder section =
+  let* status = required_string_field section "status" in
+  let* timed_out = required_bool_field section "component_timed_out" in
+  let* error = optional_string_field section "error" in
+  match error with
+  | None -> Ok (Fleet_not_measured { status })
+  | Some error ->
+    Error
+      (Printf.sprintf "the server could not measure the fleet (%s%s): %s" status
+         (if timed_out then ", refresh timed out" else "")
+         error)
+
+let decode_fleet_safety json =
+  let* section = required_object_field json "keeper_fleet_safety" in
+  match Json_util.assoc_member_opt "schema" section with
+  | Some (`String schema) when String.equal schema Keeper_fleet_blocker.reading_schema ->
+    Result.map (fun fleet -> Fleet_measured fleet) (decode_fleet_safety_reading section)
+  | Some (`String schema) ->
+    Error
+      (Printf.sprintf "keeper_fleet_safety schema %S is not %S" schema
+         Keeper_fleet_blocker.reading_schema)
+  | Some other -> field_type_error "keeper_fleet_safety.schema" "a string" other
+  | None ->
+    Result.map_error
+      (fun detail ->
+         "keeper_fleet_safety has no schema and is not the health placeholder: "
+         ^ detail)
+      (decode_fleet_placeholder section)
 
 let bounded_parent_depth ?(max_depth = 64) ~(id_of : 'a -> string)
     ~(parent_id_of : 'a -> string option) (items : 'a list) (item : 'a) : int =

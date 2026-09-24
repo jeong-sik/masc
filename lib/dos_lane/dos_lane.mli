@@ -164,6 +164,12 @@ val load :
 val eject : who:string -> announce:(unit -> unit) -> unit -> (unit, error) result
 (** Drops the workspace machine. [announce] runs under the same lock as
     {!load}'s, with the same restriction. *)
+val release_left : holder:string -> announce:(unit -> unit) -> (bool, error) result
+(** Frees the controller if [holder] still has it, and says whether it did.
+    For a holder whose Keeper stopped and so can never pass: the caller
+    decides that from Keeper state, which this module does not read.
+    [announce] runs under the machine's lock, as {!load}'s does. *)
+
 val screen : unit -> (observation, error) result
 
 type frame = { width : int; height : int; rgb : string }

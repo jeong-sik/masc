@@ -16,7 +16,6 @@ function trajectory(entries: TrajectoryEntry[]): TrajectoryResponse {
   return {
     keeper: 'keeper-a',
     trace_id: 'trace-1',
-    generation: 1,
     total_entries: entries.length,
     showing: entries.length,
     entries,

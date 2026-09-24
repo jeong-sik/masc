@@ -302,7 +302,51 @@ let after_announcing result =
   result
 ;;
 
+(* A call runs up to [Dos_lane.max_steps_per_call] instructions under the
+   lane's stdlib lock, a noticeable fraction of a second. On a system thread
+   the server's other fibers keep running meanwhile; a fiber that reaches
+   the lock waits on its own thread too, since every lane call goes through
+   here. Only the lane call moves: the announcements it queues are posted
+   afterwards, on the fiber, because posting takes an Eio lock. *)
+let off_domain f = Eio_guard.run_in_systhread ~label:"dos-lane" f
+
+(* A game can run for hours, and the Keeper holding the controller can stop
+   in that time: an operator pauses it, it crashes, it is shut down. It will
+   never pass, and every other caller would be refused until a restart. So
+   before a call that needs the controller, a holder whose Keeper is in one
+   of those phases is let go. A Keeper that is failing, draining or
+   restarting is on its way back and keeps it. A holder with no registry
+   entry is not a Keeper at all (an MCP client, an operator) and keeps it
+   too: nothing here can tell whether it is still playing. *)
+let holder_left ~base_path holder =
+  match Keeper_registry.get_phase ~base_path holder with
+  | Some (Paused | Stopped | Crashed | Offline) -> true
+  | Some (Running | Failing | Draining | Restarting) | None -> false
+;;
+
+let free_left_controller ~base_path ~who =
+  match off_domain Dos_lane.screen with
+  | Ok { Dos_lane.controller = Some holder; _ }
+    when (not (String.equal holder who)) && holder_left ~base_path holder ->
+    (* [Ok false] is a hand-off that landed after that read; an error is
+       the machine going away, which the call itself reports. *)
+    ignore
+      (off_domain (fun () ->
+         Dos_lane.release_left ~holder
+           ~announce:
+             (announce ~author:who
+                (Printf.sprintf
+                   "%s 님의 Keeper 가 멈춰서 DOS 조종권이 풀렸어요" holder))))
+  | Ok _ | Error _ -> ()
+;;
+
+let taking_control ~base_path ~who call =
+  free_left_controller ~base_path ~who;
+  after_announcing (call ())
+;;
+
 let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
+  free_left_controller ~base_path ~who:agent_name;
   match get_string_opt args "program" with
   | None | Some "" ->
     (* No name: the inventory, so the next call can name a program. *)
@@ -325,23 +369,24 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
      | Error message -> reject ~tool_name ~start_time message
      | Ok (program_name, program_bytes, files) ->
        let loaded =
-         Dos_lane.load ~who:agent_name ~ledger_dir:(dos_dir ~base_path)
-           ~saves_dir:(saves_dir ~base_path (String.trim name)) ~program_name ~program_bytes
-           ~files
-           ~announce:
-             (announce ~author:agent_name
-                (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name))
+         off_domain (fun () ->
+           Dos_lane.load ~who:agent_name ~ledger_dir:(dos_dir ~base_path)
+             ~saves_dir:(saves_dir ~base_path (String.trim name)) ~program_name ~program_bytes
+             ~files
+             ~announce:
+               (announce ~author:agent_name
+                  (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name)))
        in
        after_announcing (of_lane_run ~tool_name ~start_time loaded))
 ;;
 
-let handle_eject ~tool_name ~start_time ~agent_name _args =
-  after_announcing
+let handle_eject ~tool_name ~start_time ~base_path ~agent_name _args =
+  taking_control ~base_path ~who:agent_name @@ fun () ->
     (match
-       Dos_lane.eject ~who:agent_name
-         ~announce:
-           (announce ~author:agent_name (Printf.sprintf "%s 님이 기계를 껐습니다" agent_name))
-         ()
+       off_domain
+         (Dos_lane.eject ~who:agent_name
+            ~announce:
+              (announce ~author:agent_name (Printf.sprintf "%s 님이 기계를 껐습니다" agent_name)))
      with
      | Ok () ->
        Tool_result.make_ok ~tool_name ~start_time
@@ -358,7 +403,7 @@ let handle_eject ~tool_name ~start_time ~agent_name _args =
    controller would otherwise go to a name no caller has, nobody could move or
    eject the machine again, and the post meant to wake the next player would
    address no one. *)
-let handle_pass ~tool_name ~start_time ~agent_name args =
+let handle_pass ~tool_name ~start_time ~base_path ~agent_name args =
   let to_ =
     match get_string_opt args "to" with
     | None -> Ok None
@@ -379,13 +424,14 @@ let handle_pass ~tool_name ~start_time ~agent_name args =
       | Some next -> Printf.sprintf "@%s 님 차례예요. %s 님이 DOS 조종권을 넘겼습니다" next agent_name
       | None -> Printf.sprintf "%s 님이 DOS 조종권을 내려놓았습니다" agent_name
     in
-    after_announcing
-      (of_lane ~tool_name ~start_time
-         (Dos_lane.pass ~who:agent_name ~to_ ~announce:(announce ~author:agent_name content)))
+    taking_control ~base_path ~who:agent_name (fun () ->
+      of_lane ~tool_name ~start_time
+        (off_domain (fun () ->
+           Dos_lane.pass ~who:agent_name ~to_ ~announce:(announce ~author:agent_name content))))
 ;;
 
 let handle_screen ~tool_name ~start_time _args =
-  of_lane ~tool_name ~start_time (Dos_lane.screen ())
+  of_lane ~tool_name ~start_time (off_domain Dos_lane.screen)
 ;;
 
 (* The whole per-call ceiling: a call that settles stops early, so a large
@@ -394,32 +440,36 @@ let handle_screen ~tool_name ~start_time _args =
    settles in one call instead of coming back busy. *)
 let default_steps = Dos_lane.max_steps_per_call
 
-let handle_step ~tool_name ~start_time ~who args =
+let handle_step ~tool_name ~start_time ~base_path ~who args =
+  taking_control ~base_path ~who @@ fun () ->
   of_lane_run ~tool_name ~start_time
-    (Dos_lane.step ~who
+    (off_domain @@ fun () -> Dos_lane.step ~who
        ~steps:(get_int args "steps" default_steps)
        ~until_ready:(get_bool args "until_ready" true))
 ;;
 
-let handle_press ~tool_name ~start_time ~who args =
+let handle_press ~tool_name ~start_time ~base_path ~who args =
+  taking_control ~base_path ~who @@ fun () ->
   of_lane_run ~tool_name ~start_time
-    (Dos_lane.press ~who
+    (off_domain @@ fun () -> Dos_lane.press ~who
        ~keys:(get_string_list args "keys")
        ~steps:(get_int args "steps" default_steps))
 ;;
 
-let handle_click ~tool_name ~start_time ~who args =
+let handle_click ~tool_name ~start_time ~base_path ~who args =
+  taking_control ~base_path ~who @@ fun () ->
   of_lane_run ~tool_name ~start_time
-    (Dos_lane.click ~who
+    (off_domain @@ fun () -> Dos_lane.click ~who
        ~x:(get_int args "x" 0)
        ~y:(get_int args "y" 0)
        ~buttons:(get_int args "buttons" 1)
        ~steps:(get_int args "steps" default_steps))
 ;;
 
-let handle_type ~tool_name ~start_time ~who args =
+let handle_type ~tool_name ~start_time ~base_path ~who args =
+  taking_control ~base_path ~who @@ fun () ->
   of_lane_run ~tool_name ~start_time
-    (Dos_lane.type_text ~who ~text:(get_string args "text" "")
+    (off_domain @@ fun () -> Dos_lane.type_text ~who ~text:(get_string args "text" "")
        ~steps:(get_int args "steps" default_steps))
 ;;
 
@@ -439,7 +489,7 @@ let handle_peek ~tool_name ~start_time args =
     | Some a -> a
     | None -> -1
   in
-  match Dos_lane.peek ~address ~length:(get_int args "length" 16) with
+  match off_domain (fun () -> Dos_lane.peek ~address ~length:(get_int args "length" 16)) with
   | Ok hex ->
     Tool_result.make_ok ~tool_name ~start_time
       ~data:

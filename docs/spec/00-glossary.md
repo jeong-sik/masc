@@ -633,7 +633,9 @@ status: reference
 : DOS Lane 기계의 시간을 움직일 수 있는 한 사람. 핫시트 게임에서 여러 Keeper
   가 한 키보드를 번갈아 쓰기 때문에 있다. 쥔 사람만 load·eject·step·press·click·
   type 을 하고, 다른 사람은 거절되지만 화면은 볼 수 있다. `masc_dos_pass` 로
-  넘기면 보드 글이 다음 사람을 @멘션해 깨운다.
+  넘기면 보드 글이 다음 사람을 @멘션해 깨운다. 쥔 Keeper 가 멈추면(일시정지·정지·
+  충돌·오프라인) 다음 사람이 움직일 때 풀린다. 이름은 부르는 쪽이 스스로 대는 값이라
+  권한 검사가 아니라 차례를 정하는 장치다.
   → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli)
 
 **Lane Add-on**
@@ -1186,7 +1188,7 @@ status: reference
 : Librarian이 Keeper가 아직 처리하지 않은 event·chat 요청을 묶어, 원본 요청에 맥락과
   다음 행동 제안을 붙여 둔 것. 실행 권한도 checkpoint 이력도 아니다. 정리 하나가
   pocket(`Keeper_librarian_context.pocket`)이고, 지금 저장된 pocket 묶음이
-  `Keeper_librarian.selection.working_contexts`다. Keeper 이름에 묶인다. cluster 사이에서
+  `Keeper_librarian_context.snapshot`의 `pockets`다. Keeper 이름에 묶인다. cluster 사이에서
   무엇을 같이 쓰는지는 **Cluster** 항목에 적었다.
   **다른 뜻**: 코드의 `Keeper_types.working_context`는 이 묶음이 아니라 실행 중인
   Keeper가 쥔 Checkpoint 하나를 감싼 값이다(**Checkpoint** 항목). 이름만 같다.
@@ -1196,6 +1198,8 @@ status: reference
   `insufficient_evidence`는 검증 통과가 아니며 기존 저장 검사를 유지한다.
   실행 상세의 `context_review`는 판정, `context_write`는 정리 저장 결과다.
   `outcome_unconfirmed`는 저장 도중 중단되어 저장 여부를 확인하지 못한 상태다.
+  `answer_missing`·`answer_refused`는 기억 회차의 답이 정리를 빠뜨렸거나 검사에서
+  거절돼 그 회차의 정리를 건너뛴 상태다. 같은 답의 Memory 변경은 그대로 저장한다.
   원본 요청 처리·Memory 변경·Checkpoint 저장 결과와 구분한다.
   → [Keeper_librarian_context](../../lib/keeper/keeper_librarian_context.mli)
 
@@ -1413,8 +1417,9 @@ status: reference
   → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
 
 **Working State (대화 작업 상태)**
-: Librarian이 완료된 대화와 이전 상태에서 정리한 작업·제약·결정·미해결 사항
-  (`Keeper_librarian.selection.working_state`). Continuity Snapshot이 담는
+: Librarian이 완료된 대화와 이전 상태에서 정리한 작업·제약·결정·미해결 사항.
+  연속성 회차의 답에만 있고, `Keeper_librarian.continuity_working_state_of_json_result`가
+  비지 않은 글인지 보고 읽는다. 연속성이 없는 기억 회차는 이 칸을 읽지 않는다. Continuity Snapshot이 담는
   "이어서 할 일의 설명" 절반이며, 같은 파일에 저장된 정확한 대화 범위와 한 쌍이다.
   큐 원본을 정리한 Working Context(`working_contexts`)나 장기 Memory facts와 다르다.
   모델의 출력만으로 범위가 소비된 것은 아니며, pair 저장과 소비 시 이력 검증이

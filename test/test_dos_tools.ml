@@ -562,6 +562,46 @@ let test_a_free_controller_goes_to_the_next_successful_mover () =
       (controller moved))
 ;;
 
+(* A hotseat game runs for hours, and the Keeper holding the controller can
+   stop in that time. It will never pass, so a stopped holder is let go the
+   next time someone moves the machine. A Keeper that is still running
+   keeps it. *)
+let with_keeper ~base_path ~running name f =
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ ("name", `String name); ("activation_mode", `String "manual") ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  ignore
+    ((if running then Keeper_registry.For_testing.register ~base_path name meta
+      else Keeper_registry.register_offline ~base_path name meta)
+      : Keeper_registry.registry_entry);
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path name)
+    f
+;;
+
+let test_a_stopped_holders_controller_is_let_go () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    with_keeper ~base_path ~running:false "cao-cao" (fun () ->
+      boot ~agent:"cao-cao" ~base_path "hello.com";
+      let moved = press_as ~base_path "liu-bei" "a" in
+      check bool "the next player moves" true (is_completed moved);
+      check (option string) "and holds it" (Some "liu-bei") (controller moved));
+    with_keeper ~base_path ~running:true "won-chik" (fun () ->
+      ignore
+        (dispatch ~base_path ~agent:"liu-bei" "masc_dos_pass" [ ("to", `String "won-chik") ]
+          : Tool_result.result);
+      let refused = press_as ~base_path "sun-quan" "a" in
+      check bool "a running holder keeps it" false (is_completed refused);
+      check (option string) "still won-chik" (Some "won-chik")
+        (controller (dispatch ~base_path "masc_dos_screen" []))))
+;;
+
 (* A pass to a name no caller can ever have -- "@liu-bei", "liu bei" --
    would leave the machine held by nobody who can move or eject it again. It
    is refused, and the controller stays where it was. *)
@@ -698,6 +738,8 @@ let () =
             test_a_free_controller_goes_to_the_next_successful_mover
         ; test_case "pass to an impossible name" `Quick
             test_a_pass_to_an_impossible_name_is_refused
+        ; test_case "stopped holder is let go" `Quick
+            test_a_stopped_holders_controller_is_let_go
         ; test_case "unimplemented instruction" `Quick
             test_an_unimplemented_instruction_is_an_error
         ; test_case "unknown key" `Quick test_unknown_key_is_refused

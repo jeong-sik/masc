@@ -496,6 +496,20 @@ let pass ~who ~to_ ~announce =
       Ok (observe st))
 ;;
 
+(* A holder that can no longer act cannot pass. The caller, which can read
+   Keeper state (this module cannot), names the holder it found gone; the
+   controller is freed only if that holder still has it, so a hand-off that
+   landed in between is kept. *)
+let release_left ~holder ~announce =
+  with_machine (fun st ->
+    match st.controller with
+    | Some current when String.equal current holder ->
+      st.controller <- None;
+      announce ();
+      Ok true
+    | Some _ | None -> Ok false)
+;;
+
 let screen () = with_machine (fun st -> Ok (observe st))
 
 type frame = { width : int; height : int; rgb : string }

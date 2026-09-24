@@ -68,7 +68,18 @@ type 'a view =
   ; filter : string option
   }
 
-val view : page:int -> label:('a -> string) -> 'a list -> t -> 'a view
+(** Where the drawn window stands against the cursor. *)
+type window =
+  | Opens_at_cursor
+      (** The cursor's row is the window's first: a picker of a few rows,
+          where the rows under the cursor are the ones worth showing. *)
+  | Follows_cursor
+      (** The first page stays until the cursor passes its last row, and the
+          cursor then rides that last row: a picker that fills a screen,
+          whose rows would otherwise scroll on every step. *)
+
+val view :
+  page:int -> window:window -> label:('a -> string) -> 'a list -> t -> 'a view
 
 val summary : 'a view -> string
 (** The header's count and filter: ["12 of 12 · / filter"] with no filter,

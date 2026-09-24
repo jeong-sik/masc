@@ -25,7 +25,7 @@ let run keys =
     P.closed keys
 
 let under t =
-  let v = P.view ~page ~label items t in
+  let v = P.view ~page ~window:P.Opens_at_cursor ~label items t in
   match v.P.selected_row with
   | None -> None
   | Some row -> List.nth_opt v.P.rows row
@@ -35,7 +35,7 @@ let check_under name expected t =
 
 let test_typing_narrows_and_backspace_widens () =
   let t = run [ "/"; "o"; "p"; "e"; "n" ] in
-  let v = P.view ~page ~label items t in
+  let v = P.view ~page ~window:P.Opens_at_cursor ~label items t in
   Alcotest.(check int) "two runtimes say open" 2 v.P.shown;
   Alcotest.(check int) "out of six" 6 v.P.total;
   check_under "the first match is under the cursor" (Some "openai.gpt") t;
@@ -43,7 +43,7 @@ let test_typing_narrows_and_backspace_widens () =
     "filter: open\xe2\x96\x8f 2 of 6" (P.summary v);
   let wider = run [ "/"; "o"; "p"; "e"; "n"; "\127"; "\127"; "\127" ] in
   Alcotest.(check int) "\"o\" keeps every runtime with an o" 4
-    (P.view ~page ~label items wider).P.shown
+    (P.view ~page ~window:P.Opens_at_cursor ~label items wider).P.shown
 
 let test_case_is_folded () =
   let t = run [ "/"; "G"; "L"; "M" ] in
@@ -67,7 +67,7 @@ let test_the_cursor_clamps_when_the_list_shrinks () =
   (* Past the end of a list that shrank without a key: a reload. *)
   let before = run [ "end" ] in
   let fewer = [ "anthropic.claude"; "openai.gpt" ] in
-  let v = P.view ~page ~label fewer before in
+  let v = P.view ~page ~window:P.Opens_at_cursor ~label fewer before in
   Alcotest.(check (option int)) "a shorter list draws its last row selected"
     (Some 1) v.P.selected_row;
   match P.apply ~page ~label fewer before P.Choose with
@@ -84,12 +84,12 @@ let test_page_and_ends_stay_in_bounds () =
   check_under "Home is the first" (Some "anthropic.claude") (run [ "end"; "home" ]);
   check_under "arrows keep working" (Some "openai.gpt") (run [ "down" ]);
   check_under "and j/k" (Some "anthropic.claude") (run [ "j"; "k" ]);
-  let v = P.view ~page ~label items (run [ "end" ]) in
+  let v = P.view ~page ~window:P.Opens_at_cursor ~label items (run [ "end" ]) in
   Alcotest.(check (list string)) "the last page is full" [ "kimi.k2"; "openai.o4" ] v.P.rows
 
 let test_an_empty_result_picks_nothing () =
   let t = run [ "/"; "x"; "y"; "z" ] in
-  let v = P.view ~page ~label items t in
+  let v = P.view ~page ~window:P.Opens_at_cursor ~label items t in
   Alcotest.(check int) "nothing matches" 0 v.P.shown;
   Alcotest.(check (option int)) "no row is selected" None v.P.selected_row;
   (match P.apply ~page ~label items t P.Choose with
@@ -128,6 +128,27 @@ let test_a_paste_types_the_whole_text () =
   let t = P.type_text P.closed "GPT" in
   check_under "a pasted id narrows like typing" (Some "openai.gpt") t
 
+(* A screen-high picker keeps its first page while the cursor walks it, and
+   then the cursor rides the last drawn row. *)
+let test_a_following_window_keeps_the_first_page () =
+  let drawn keys =
+    let v = P.view ~page ~window:P.Follows_cursor ~label items (run keys) in
+    (v.P.rows, v.P.selected_row)
+  in
+  Alcotest.(check (pair (list string) (option int))) "the second row is the page's"
+    ([ "anthropic.claude"; "openai.gpt" ], Some 1) (drawn [ "down" ]);
+  Alcotest.(check (pair (list string) (option int))) "past the page, the cursor is its last row"
+    ([ "openai.gpt"; "ollama.qwen" ], Some 1) (drawn [ "down"; "down" ]);
+  Alcotest.(check (pair (list string) (option int))) "the end is a full page"
+    ([ "kimi.k2"; "openai.o4" ], Some 1) (drawn [ "end" ]);
+  Alcotest.(check (pair (list string) (option int))) "a shorter list draws its last row"
+    ([ "openai.gpt"; "ollama.qwen" ], Some 1)
+    (let v =
+       P.view ~page ~window:P.Follows_cursor ~label
+         [ "anthropic.claude"; "openai.gpt"; "ollama.qwen" ] (run [ "end" ])
+     in
+     (v.P.rows, v.P.selected_row))
+
 let () =
   Alcotest.run "tui_pick_list"
     [ ( "pick list",
@@ -149,4 +170,6 @@ let () =
           Alcotest.test_case "backspace on an empty filter keeps the cursor" `Quick
             test_backspace_on_an_empty_filter_keeps_the_cursor;
           Alcotest.test_case "a paste types the whole text" `Quick
-            test_a_paste_types_the_whole_text ] ) ]
+            test_a_paste_types_the_whole_text;
+          Alcotest.test_case "a following window keeps the first page" `Quick
+            test_a_following_window_keeps_the_first_page ] ) ]

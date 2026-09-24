@@ -5643,11 +5643,12 @@ type state = {
      screen showing it would be state nobody can see. *)
   mutable followed_from: (surface * string option) option;
   mutable keeper_cursor: int;
-  (* The runtime picker: the keeper it is choosing for, its cursor into the
-     dispatchable catalogue, and the catalogue itself with where every keeper
-     points today. Loaded when the picker opens; absent otherwise. *)
+  (* The runtime picker: the keeper it is choosing for, its cursor and typed
+     filter over the declared lanes and the dispatchable catalogue, and the
+     catalogue itself with where every keeper points today. Loaded when the
+     picker opens; absent otherwise. *)
   mutable runtime_pick_keeper: string option;
-  mutable runtime_pick_cursor: int;
+  mutable runtime_pick_list: Masc_tui_pick_list.t;
   mutable runtime_catalog: Tui_decode.runtime_option list;
   (* The Overview's own read of the same catalogue, kept apart from the
      picker's [runtime_catalog] so a refresh behind the Overview never moves
@@ -6599,6 +6600,7 @@ type text_input_target =
   | Text_palette
   | Text_row_search
   | Text_runtime_picker_filter
+  | Text_keeper_runtime_picker_filter
   | Text_identity_app_form
   | Text_identity_filter
   | Text_github_token
@@ -6655,6 +6657,11 @@ let text_input_target (state : state) ~compact_viewport =
           && Option.is_some state.runtime_lane_pick
           && Option.is_some state.runtime_lane_pick_list.Masc_tui_pick_list.query
   then Some Text_runtime_picker_filter
+  (* The Keeper runtime picker's filter, after [/]: [d] and the letters the
+     surfaces read are the filter's text until Esc. *)
+  else if state.view = Keepers Keeper_runtime_pick && not compact_viewport
+          && Option.is_some state.runtime_pick_list.Masc_tui_pick_list.query
+  then Some Text_keeper_runtime_picker_filter
   else if state.view = Connectors && not compact_viewport
           && Option.is_some (Option.bind (browser_lane_on_screen state) (fun view -> view.Browser_lane_view.url_draft))
   then Some Text_browser_url
@@ -6685,7 +6692,7 @@ let quit_key_allowed_for = function
       ( Text_browser_url | Text_ask_answer | Text_fusion_launch
       | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
       | Text_voice_wizard | Text_palette | Text_row_search
-      | Text_runtime_picker_filter
+      | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
       | Text_board_draft ) ->
       false
@@ -7795,7 +7802,7 @@ let create_state
   followed_from = None;
   keeper_cursor = 0;
   runtime_pick_keeper = None;
-  runtime_pick_cursor = 0;
+  runtime_pick_list = Masc_tui_pick_list.closed;
   runtime_catalog = [];
   overview_quota = Quota_unread;
   overview_providers = Providers_unread;
@@ -9378,7 +9385,8 @@ let runtime_picker_projection (state : state) =
   Option.map (fun pick ->
     let already, providers, catalog = runtime_picker_rows state pick in
     let view =
-      Masc_tui_pick_list.view ~page:runtime_picker_page ~label:runtime_picker_label
+      Masc_tui_pick_list.view ~page:runtime_picker_page
+        ~window:Masc_tui_pick_list.Opens_at_cursor ~label:runtime_picker_label
         catalog state.runtime_lane_pick_list
     in
     { rlp_lane = runtime_lane_pick_name pick; rlp_pick = pick; rlp_already = already;
@@ -9858,6 +9866,85 @@ let runtime_pick_badge_cells =
   max
     (Masc_tui_message_layout.display_width runtime_pick_lane_badge)
     (Masc_tui_message_layout.display_width runtime_pick_model_badge)
+
+(* The words a picker row draws before its facts: the kind badge, the target
+   and the route. The renderer draws these and the typed filter matches their
+   join, so the operator filters by what they read. The facts are left out:
+   which of them a row keeps depends on the terminal's width. *)
+type runtime_pick_columns = {
+  rpc_badge : string;
+  rpc_target : string;
+  rpc_route : string;
+}
+
+let runtime_pick_columns item =
+  let single_line = Tui_decode.sanitize_terminal_text in
+  match item with
+  | Pick_lane lane ->
+      (* A lane's route is its candidates by model, the provider prefix
+         dropped: the target column already says it is a lane. *)
+      let chain =
+        String.concat " \xe2\x86\x92 "
+          (List.map
+             (fun id ->
+                match String.split_on_char '.' id with
+                | [ _prov; model ] -> model
+                | _ -> id)
+             lane.Tui_decode.rrl_runtime_ids)
+      in
+      { rpc_badge = runtime_pick_lane_badge;
+        rpc_target = single_line lane.Tui_decode.rrl_id;
+        rpc_route = single_line chain }
+  | Pick_model option ->
+      { rpc_badge = runtime_pick_model_badge;
+        rpc_target = single_line option.Tui_decode.ro_id;
+        rpc_route =
+          single_line
+            (option.Tui_decode.ro_provider ^ " / " ^ option.Tui_decode.ro_model) }
+
+let runtime_pick_label item =
+  let columns = runtime_pick_columns item in
+  String.concat "  " [ columns.rpc_badge; columns.rpc_target; columns.rpc_route ]
+
+(* The rows above the picker's list: the filter and count, then the column
+   header -- or, in its place, why there are no rows. *)
+let keeper_runtime_picker_status_rows = 2
+
+(* How many rows the picker's list draws, and so how far PgUp/PgDn move it.
+   The key handler and the renderer both read it, so a page key moves exactly
+   the rows on screen. *)
+let keeper_runtime_picker_page (state : state) ~terminal_rows =
+  max 1
+    (surface_body_rows state ~terminal_rows
+     - Masc_tui_frame.chrome_rows
+     - keeper_runtime_picker_status_rows)
+
+let keeper_runtime_picker_view (state : state) ~terminal_rows =
+  Masc_tui_pick_list.view
+    ~page:(keeper_runtime_picker_page state ~terminal_rows)
+    ~window:Masc_tui_pick_list.Follows_cursor ~label:runtime_pick_label
+    (runtime_picker_items state) state.runtime_pick_list
+
+(* The count line, with the keys that still act while a filter is typed:
+   letters are the filter's then, so the footer's [d] and [j/k] are not. *)
+let keeper_runtime_picker_summary view =
+  match view.Masc_tui_pick_list.filter with
+  | None -> Masc_tui_pick_list.summary view
+  | Some _ ->
+      Masc_tui_pick_list.summary view
+      ^ " \xe2\x80\x94 \xe2\x86\x91/\xe2\x86\x93 move, Enter choose, Esc clear filter"
+
+(* The row in place of the column header when there are no rows; [None]
+   while there are. An unread catalogue is waited for and an empty match is
+   typed away, so they read differently. *)
+let keeper_runtime_picker_empty_note view =
+  if view.Masc_tui_pick_list.total = 0 then
+    Some "  (loading runtime catalogue\xe2\x80\xa6)"
+  else if view.Masc_tui_pick_list.shown = 0 then
+    Some
+      (Printf.sprintf "  (no lane or runtime among %d matches the filter)"
+         view.Masc_tui_pick_list.total)
+  else None
 
 (* Everything in the row that is not one of the two columns and not the facts:
    the cursor mark, the kind badge, and the two-space gap on each side of the

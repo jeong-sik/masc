@@ -393,7 +393,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let last_visible_proactive_ago_s =
            Keeper_status_metrics.age_seconds_opt ~now_ts m.runtime.proactive_rt.last_visible_ts
          in
-         let handoff_count_total = List.length m.runtime.trace_history in
+         let prior_trace_count = List.length m.runtime.trace_history in
          let runtime_runtime_metrics = `Null in
          let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
          let session_dir =
@@ -615,7 +615,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("disposition_reason", Json_util.string_opt_to_json disposition_reason);
            ("next_model_hint", `Null);
            ("runtime_runtime_metrics", runtime_runtime_metrics);
-           ("handoff_count_total", `Int handoff_count_total);
+           ("handoff_count_total", `Int prior_trace_count);
            ("sandbox_profile",
              `String (sandbox_profile_to_string m.sandbox_profile));
            ("network_mode",

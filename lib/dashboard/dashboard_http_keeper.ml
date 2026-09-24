@@ -446,7 +446,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
              | Some row -> [ ("runtime_blocker_summary", `String (pending_approval_summary row)) ]
              | None -> [])
           in
-          let handoff_count_total = List.length m.runtime.trace_history in
+          let prior_trace_count = List.length m.runtime.trace_history in
           let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
           (* Cap metrics lines to avoid O(n) slowdown as keepers accumulate turns.
              [series_points] is both the read and output bound. *)
@@ -812,7 +812,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s);
               ("last_visible_proactive_ago_s", Json_util.float_opt_to_json last_visible_proactive_ago_s);
               ("last_activity_ago_s", Json_util.float_opt_to_json last_activity_ago_s);
-              ("handoff_count_total", `Int handoff_count_total);
+              ("handoff_count_total", `Int prior_trace_count);
               ("total_turns", `Int m.runtime.usage.total_turns);
               ("total_input_tokens", `Int m.runtime.usage.total_input_tokens);
               ("total_output_tokens", `Int m.runtime.usage.total_output_tokens);

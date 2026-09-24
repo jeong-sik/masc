@@ -541,7 +541,19 @@ let write_pid_file path record =
 let claim_pid_file path =
   Fs_compat.mkdir_p (Filename.dirname path);
   let pid = Unix.getpid () in
-  write_pid_file path { pid; started = process_started pid };
+  let started = process_started pid in
+  (match started with
+   | Some _ -> ()
+   | None ->
+     Log.legacy_stderr
+       ~level:Log.Warn
+       ~module_name:"Server"
+       (Printf.sprintf
+          "[WARN] ps reported no start time for this server (PID %d); the lock \
+           %s records none, so a later start will not take it over"
+          pid
+          path));
+  write_pid_file path { pid; started };
   register_pid_cleanup ~path ~pid;
   Acquired
 ;;

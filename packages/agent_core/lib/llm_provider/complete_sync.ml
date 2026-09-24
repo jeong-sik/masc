@@ -177,34 +177,12 @@ let parse_sync_response
     (match error.origin with
      | Backend_glm.Response_parse -> provider_parse_failure ~parser:"glm" error.message
      | Backend_glm.Provider_response ->
-       (match error.error_class with
-        | Backend_glm.Glm_context_overflow ->
-          (* agent-core boundary: keep the provider-reported overflow typed instead of
-             flattening it into an HTTP 400 body string — consumers reach
-             their compaction/shrink path only on a typed overflow. glm's
-             envelope does not carry the token limit. *)
-          Error
-            (Http_client.ProviderFailure
-               { kind = Http_client.Context_overflow { limit = None }
-               ; message = error.message
-               })
-        | Backend_glm.Glm_quota_exceeded ->
-          (* Arrears, an exhausted package or an expired plan (1113, 1304,
-             1308-1311, 1313) do not clear on their own the way a rate
-             limit does, so they take the hard-quota route. The envelope
-             carries no reset time. *)
-          Error
-            (Http_client.ProviderFailure
-               { kind = Http_client.Hard_quota { retry_after = None }
-               ; message =
-                   (match error.code with
-                    | Some code -> Printf.sprintf "Glm error %s: %s" code error.message
-                    | None -> error.message)
-               })
-        | Backend_glm.Glm_rate_limited
-        | Backend_glm.Glm_auth_error
-        | Backend_glm.Glm_server_error
-        | Backend_glm.Glm_invalid_request ->
+       (* agent-core boundary: an overflow or a quota exhaustion stays typed
+          (Backend_glm.provider_failure_of_glm_error, shared with the stream
+          seam); every other class keeps the HTTP path. *)
+       (match Backend_glm.provider_failure_of_glm_error error with
+        | Some failure -> Error failure
+        | None ->
           let semantic_code =
             Backend_glm.http_code_of_glm_error_class error.error_class
           in

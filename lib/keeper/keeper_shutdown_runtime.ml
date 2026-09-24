@@ -806,6 +806,63 @@ let redrive_walk ~(config : Workspace.config) (operation : Keeper_shutdown_types
     , (Dormant_meta | Registered_lane _) ) -> None
 ;;
 
+(* What the durable record says stopped the operation. A re-drive that stops
+   again leaves either the same record or a new reason; only a new reason is
+   news. The first stop was already logged as an error by the walk that made
+   it, so a repeat of it on every held tick is logged at info. *)
+let recorded_stop (operation : Keeper_shutdown_types.t) =
+  let detail =
+    match operation.phase with
+    | Finalized { completion = Completion_delivery_failed { detail; _ }; _ } -> Some detail
+    | Blocked { detail; _ } -> Some detail
+    | Finalized
+        { completion =
+            (Completion_not_requested | Completion_pending _ | Completion_delivered _)
+        ; _
+        }
+    | Prepared
+    | Joining_lanes
+    | Joined_idle
+    | Finalizing_tasks _
+    | Cleanup_ready _
+    | Reconciliation_required _
+    | Owner_absent _
+    | Operator_absence_acknowledged _
+    | Superseded _ -> None
+  in
+  phase_to_string operation.phase, detail
+;;
+
+let log_redrive_stop ~config (before : Keeper_shutdown_types.t) detail =
+  let same_stop =
+    match
+      Keeper_shutdown_store.load
+        ~config
+        ~keeper_name:before.keeper_name
+        before.operation_id
+    with
+    | Ok after ->
+      let before_phase, before_detail = recorded_stop before in
+      let after_phase, after_detail = recorded_stop after in
+      String.equal before_phase after_phase
+      && Option.equal String.equal before_detail after_detail
+    | Error _ -> false
+  in
+  if same_stop
+  then
+    Log.Keeper.info
+      "re-driven shutdown finalization stopped on its recorded reason: keeper=%s operation=%s error=%s"
+      before.keeper_name
+      (worker_key before)
+      detail
+  else
+    Log.Keeper.error
+      "re-driven shutdown finalization stopped: keeper=%s operation=%s error=%s"
+      before.keeper_name
+      (worker_key before)
+      detail
+;;
+
 let redrive_claimed ~config (operation : Keeper_shutdown_types.t) =
   match redrive_walk ~config operation with
   | None -> ()
@@ -846,12 +903,7 @@ let redrive_claimed ~config (operation : Keeper_shutdown_types.t) =
             settled.keeper_name
             (worker_key settled)
             (phase_to_string settled.phase)
-        | Error detail ->
-          Log.Keeper.error
-            "re-driven shutdown finalization stopped: keeper=%s operation=%s error=%s"
-            operation.keeper_name
-            (worker_key operation)
-            detail))
+        | Error detail -> log_redrive_stop ~config operation detail))
 ;;
 
 type redrive_error =

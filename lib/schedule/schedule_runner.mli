@@ -92,11 +92,9 @@ type consumer =
       Workspace_utils.config ->
       occurrence_id:Schedule_occurrence_id.t ->
       Schedule_domain.schedule_request -> hold_reason option
-      (** [Some reason] leaves this due schedule unfired this tick. The
-          consumer may act on the reason's owner before returning; for
-          [Target_intake_fenced] it asks the fence owner to resume its
-          finalization, so the hold is what lets that finalization cancel a
-          schedule it would refuse to cancel while [Running].
+      (** [Some reason] leaves this due schedule unfired this tick. A pure
+          judgment: acting on a reason's owner belongs to the caller of
+          [tick], after it returns.
           Self-clock: [Some Previous_occurrence_unconsumed] leaves this due schedule unfired this tick — no
           signal, no dispatch, no advance — because its target still holds the
           previous, unconsumed occurrence. The current [occurrence_id] is a

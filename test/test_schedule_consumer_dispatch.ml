@@ -1481,11 +1481,24 @@ let test_fenced_purge_settles_on_the_first_tick_after_its_blocker_is_repaired ()
       ~keeper_name
       ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
   in
+  (* A second schedule on the same Keeper: holding two must still ask the
+     fence owner once per tick. *)
+  let sibling =
+    create_named_keeper_wake_schedule
+      config
+      ~schedule_id:"purge-fenced-sibling"
+      ~keeper_name
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+  in
   (* One wake is enqueued before the purge, as on 2026-09-22, so the
      completion has a pending wake to withdraw. *)
   let first = tick_ok config ~now:201.0 in
-  check string "the wake before the purge is delivered" "succeeded"
-    (Schedule_runner.dispatch_status_to_string (List.hd first.dispatches).status);
+  check (list string) "the wakes before the purge are delivered"
+    [ "succeeded"; "succeeded" ]
+    (List.map
+       (fun (dispatch : Schedule_runner.dispatch_result) ->
+          Schedule_runner.dispatch_status_to_string dispatch.status)
+       first.dispatches);
   let snapshot_path =
     match
       files_named base_path Keeper_event_queue_persistence.snapshot_filename
@@ -1525,7 +1538,9 @@ let test_fenced_purge_settles_on_the_first_tick_after_its_blocker_is_repaired ()
        let tick now =
          Eio.Switch.run (fun sw ->
            Keeper_process_switch.set sw;
-           tick_ok config ~now)
+           let result = tick_ok config ~now in
+           Server_schedule_consumers.resume_fenced_owners config result.held;
+           result)
        in
        let fence () =
          Keeper_shutdown_intake_fence.shutdown_operation_id ~base_path ~keeper_name
@@ -1540,17 +1555,26 @@ let test_fenced_purge_settles_on_the_first_tick_after_its_blocker_is_repaired ()
        in
        write_file snapshot_path "{\"schema\":\"keeper.event_queue.state.v18\"}";
        let blocked_ticks = [ 261.0; 262.0; 263.0 ] in
+       let log_cursor =
+         match Log.Ring.recent ~limit:1 () with
+         | [] -> -1
+         | entry :: _ -> entry.Log.Ring.seq
+       in
        List.iteri
          (fun index now ->
             let result = tick now in
             let label = Printf.sprintf "blocked tick %d" (index + 1) in
             check int (label ^ ": nothing is dispatched into the fence") 0
               (List.length result.dispatches);
-            (match result.held with
-             | [ { reason = Schedule_runner.Target_intake_fenced { fence_owner; _ }; _ } ] ->
-               check string (label ^ ": held on the purge's fence") operation_label
-                 fence_owner
-             | _ -> fail (label ^ ": schedule was not held on the fence"));
+            check (list string) (label ^ ": both schedules are held on the purge's fence")
+              [ operation_label; operation_label ]
+              (List.map
+                 (fun ({ reason; _ } : Schedule_runner.held) ->
+                    match reason with
+                    | Schedule_runner.Target_intake_fenced { fence_owner; _ } -> fence_owner
+                    | Schedule_runner.Previous_occurrence_unconsumed ->
+                      "previous occurrence")
+                 result.held);
             check int (label ^ ": the fence owner is asked once per tick")
               (index + 1) !completion_attempts;
             check (option string) (label ^ ": the fence stays") (Some operation_label)
@@ -1566,6 +1590,14 @@ let test_fenced_purge_settles_on_the_first_tick_after_its_blocker_is_repaired ()
                 (Schedule_domain.schedule_status_to_string stored.status)
             | None -> fail (label ^ ": schedule disappeared"))
          blocked_ticks;
+       (* The stop is news once. Later ticks that stop on the same recorded
+          reason are not errors, or they would bury every other line. *)
+       check int "a stop on an unchanged reason is an error only once" 1
+         (Log.Ring.recent ~since_seq:log_cursor ~min_level:(Log.level_to_int Log.Error) ()
+          |> List.filter (fun (entry : Log.Ring.entry) ->
+            String_util.contains_substring entry.message
+              "re-driven shutdown finalization stopped")
+          |> List.length);
        (* The repair happens outside the process; nothing tells the process. *)
        write_file snapshot_path readable_snapshot;
        let repaired = tick 264.0 in
@@ -1574,11 +1606,14 @@ let test_fenced_purge_settles_on_the_first_tick_after_its_blocker_is_repaired ()
        check int "repaired tick: the purge is walked once more"
          (List.length blocked_ticks + 1) !completion_attempts;
        check (option string) "repaired tick: the fence is released" None (fence ());
-       (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
-        | Some stored ->
-          check string "repaired tick: the purge cancelled the schedule" "cancelled"
-            (Schedule_domain.schedule_status_to_string stored.status)
-        | None -> fail "cancelled schedule disappeared");
+       List.iter
+         (fun (schedule : Schedule_domain.schedule_request) ->
+            match Schedule_store.get_schedule config ~schedule_id:schedule.schedule_id with
+            | Some stored ->
+              check string "repaired tick: the purge cancelled the schedule" "cancelled"
+                (Schedule_domain.schedule_status_to_string stored.status)
+            | None -> fail "cancelled schedule disappeared")
+         [ request; sibling ];
        let after = tick 265.0 in
        check int "after: nothing is held" 0 (List.length after.held);
        check int "after: nothing is dispatched" 0 (List.length after.dispatches);
@@ -1601,7 +1636,9 @@ let test_delivered_purge_releases_only_its_own_fence () =
   let tick now =
     Eio.Switch.run (fun sw ->
       Keeper_process_switch.set sw;
-      tick_ok config ~now)
+      let result = tick_ok config ~now in
+      Server_schedule_consumers.resume_fenced_owners config result.held;
+      result)
   in
   Fun.protect
     ~finally:(fun () -> Keeper_process_switch.For_testing.clear ())

@@ -1763,17 +1763,11 @@ let load_keeper_roster ~(host : string) ~(port : int) :
           | Ok (rows, errors, truncated, total) ->
               Ok (Masc_tui_keeper_control.roster_of_reading ~errors ~rows ~truncated ~total)))
 
-(* The two detail-pane tab reads. Lines are built here so the renderer draws
-   what one place formatted; a decode that only feeds a read-only pane keeps
-   the JSON generic instead of growing a typed mirror of the config shape. *)
 (* Every line these views hand the renderer goes through the terminal
    sanitizer: a CR, a tab, or a stray OSC in fetched text is data to show
    escaped, not a control to replay into the frame. *)
 let sanitize_view_lines lines =
   List.map Masc.Tui_decode.sanitize_terminal_text lines
-
-let json_block_lines (json : Yojson.Safe.t) =
-  Yojson.Safe.pretty_to_string json |> String.split_on_char '\n'
 
 let load_keeper_config_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =
@@ -1820,128 +1814,16 @@ let load_keeper_config_editor ~(host : string) ~(port : int)
   | Error err -> Error ("keeper config load failed: " ^ err)
   | Ok json -> Ok (json, Masc_tui_keeper_config.editor_stem json)
 
-(* The github-identity payload is the fixed record built by
-   Keeper_github_identity.observation_to_yojson: hostname, config_dir,
-   projected_token_env_names, stored + effective (each
-   authenticated/login/scopes/error), effective_probe_scope. Read those fields into a
-   short human view rather than pretty-printing the raw JSON. Any shape surprise
-   (hostname absent, an error envelope, a field of the wrong type) falls back to
-   the raw block, so the tab never shows less than the payload carried. *)
-let github_identity_lines (json : Yojson.Safe.t) : string list =
-  let fallback () = sanitize_view_lines (json_block_lines json) in
-  match json with
-  | `Assoc fields -> (
-    let string_field key =
-      match List.assoc_opt key fields with
-      | Some (`String value) -> Some value
-      | Some _ | None -> None
-    in
-    let auth_status = function
-      | Some (`Assoc af) ->
-        (* A missing key is not a negative answer. This read "not signed in"
-           for a server that left the key out or changed its type, which is
-           the opposite of the truth for a Keeper that is signed in, and the
-           operator's next move on that row is to sign in again. *)
-        let authenticated =
-          match List.assoc_opt "authenticated" af with
-          | Some (`Bool value) -> `Known value
-          | Some _ | None -> `Unreported
-        in
-        let login =
-          match List.assoc_opt "login" af with
-          | Some (`String value) -> Some value
-          | Some _ | None -> None
-        in
-        let error =
-          match List.assoc_opt "error" af with
-          | Some (`String value) -> Some value
-          | Some _ | None -> None
-        in
-        (* What the token may do, as GitHub listed it. A token GitHub lists
-           no scopes for (a fine-grained PAT, an App token) says so rather
-           than showing an empty list, which would read as "none". *)
-        let scopes =
-          match List.assoc_opt "scopes" af with
-          | Some (`List items) ->
-            " \xc2\xb7 scopes: "
-            ^ (match
-                 List.filter_map
-                   (function `String scope -> Some scope | _ -> None)
-                   items
-               with
-               | [] -> "(none)"
-               | scopes -> String.concat ", " scopes)
-          | Some `Null -> " \xc2\xb7 scopes: not listed by GitHub"
-          (* No key at all is a server that does not report scopes, not a
-             token GitHub lists none for; say nothing rather than the wrong
-             one of the two. *)
-          | Some _ | None -> ""
-        in
-        Some
-          (match authenticated, login, error with
-           | `Known true, Some who, _ -> "signed in as " ^ who ^ scopes
-           | `Known true, None, _ -> "signed in" ^ scopes
-           | `Known false, _, Some message -> "not signed in (" ^ message ^ ")"
-           | `Known false, _, None -> "not signed in"
-           | `Unreported, _, Some message ->
-               "sign-in not reported (" ^ message ^ ")"
-           | `Unreported, _, None -> "sign-in not reported")
-      | Some _ | None -> None
-    in
-    match string_field "hostname" with
-    | None -> fallback ()
-    | Some hostname ->
-      let effective_label =
-        match string_field "effective_probe_scope" with
-        | Some "host_process_credential_only" -> "effective (this host)"
-        | Some "endpoint_process_only" -> "effective (remote endpoint)"
-        | Some _ | None -> "effective"
-      in
-      let token_env_line =
-        match List.assoc_opt "projected_token_env_names" fields with
-        | Some (`List ((_ :: _) as names)) ->
-          let names =
-            List.filter_map
-              (function `String value -> Some value | _ -> None)
-              names
-          in
-          "  token env: " ^ String.concat ", " names
-        | Some _ | None -> "  token env: (none)"
-      in
-      let line label = function Some status -> [ "  " ^ label ^ ": " ^ status ] | None -> [] in
-      (* The second reading is here to show a difference: what the keeper's
-         config stores, against what this host resolves from it. They agree
-         on every keeper whose login is plain, and then the two rows are the
-         same sentence twice -- on the live roster code-reviewer drew
-         "signed in as pangyo-preachers · scopes: gist, read:org, repo,
-         workflow" on both. Agreement is one row carrying both labels, so a
-         reader is never left wondering whether the effective side was read
-         at all; a difference is still two rows. *)
-      let stored = auth_status (List.assoc_opt "stored" fields) in
-      let effective = auth_status (List.assoc_opt "effective" fields) in
-      let identity_lines =
-        match stored, effective with
-        | Some stored_status, Some effective_status
-          when String.equal stored_status effective_status ->
-            line ("stored and " ^ effective_label) stored
-        | Some _, _ | None, _ -> line "stored" stored @ line effective_label effective
-      in
-      let lines =
-        [ Printf.sprintf "GitHub (%s)" hostname ]
-        @ identity_lines
-        @ [ token_env_line ]
-        @ (match string_field "config_dir" with Some dir -> [ "  config: " ^ dir ] | None -> [])
-      in
-      sanitize_view_lines lines)
-  | _ -> fallback ()
-
 let load_keeper_github_identity_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =
   match
     Masc_tui_http.fetch_keeper_github_identity ~host ~port ~keeper_name
   with
   | Error err -> Error ("github identity load failed: " ^ err)
-  | Ok json -> Ok (github_identity_lines json)
+  | Ok json ->
+    Ok
+      (Masc_tui_github_identity.view_lines
+         ~sanitize:Masc.Tui_decode.sanitize_terminal_text json)
 
 let load_keeper_board_quarantines ~(host : string) ~(port : int)
     ~(keeper_name : string) :

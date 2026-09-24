@@ -1578,6 +1578,48 @@ let test_a_call_gives_exactly_one_due_input () =
     (List.length (Schedule_store.read_state config).schedules)
 ;;
 
+(* The schedule runner looks once per tick, so an interval shorter than the
+   tick would fire once per tick and the stored interval would misstate it
+   (#38176). The tool refuses it as a typed out-of-range argument that says
+   the smallest interval it takes, the tick, and what the call gave; an
+   interval equal to the tick is created. The tick is the one the production
+   runner sleeps on, read from the same value the tool reads. *)
+let test_create_refuses_an_interval_below_the_runner_tick () =
+  with_config
+  @@ fun config ->
+  let runner_tick_sec = Env_config_runtime_services.ScheduleRunner.interval_sec in
+  let minimum = int_of_float (Float.ceil runner_tick_sec) in
+  let create interval_sec =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (wake_args
+         ~extra:
+           [ "due_at_unix", `Float future_due_at
+           ; "recurrence_kind", `String "interval"
+           ; "recurrence_interval_sec", `Int interval_sec
+           ]
+         ())
+  in
+  let below = minimum - 1 in
+  let refused = create below in
+  check_refusal "interval below the tick"
+    Schedule_contract_values.Refusal_argument_out_of_range refused;
+  let open Yojson.Safe.Util in
+  let data = Tool_result.data refused in
+  check string "names the field" "recurrence_interval_sec"
+    (data |> member "field" |> to_string);
+  check int "says the smallest interval taken" minimum (data |> member "minimum" |> to_int);
+  check (float 0.0) "says the runner tick" runner_tick_sec
+    (data |> member "runner_tick_sec" |> to_number);
+  check int "says what the call gave" below (data |> member "given" |> to_int);
+  check int "the refused call is not stored" 0
+    (List.length (Schedule_store.read_state config).schedules);
+  let created = create minimum in
+  check bool "an interval equal to the tick is created" true
+    (Tool_result.is_success created);
+  check int "the created schedule is stored" 1
+    (List.length (Schedule_store.read_state config).schedules)
+;;
+
 (* A Keeper has the current time on its turn's first request only. A delay
    counts from the server's dispatch clock, so it needs none. *)
 let test_due_in_sec_counts_from_the_dispatch_clock () =
@@ -1907,6 +1949,8 @@ let () =
             test_a_named_caller_is_the_actor_not_the_argument
         ; test_case "a call gives exactly one due input" `Quick
             test_a_call_gives_exactly_one_due_input
+        ; test_case "create refuses an interval below the runner tick" `Quick
+            test_create_refuses_an_interval_below_the_runner_tick
         ; test_case "due_in_sec counts from the dispatch clock" `Quick
             test_due_in_sec_counts_from_the_dispatch_clock
         ; test_case "a calendar first due counts from dispatch, not requested_at" `Quick

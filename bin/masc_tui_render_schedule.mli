@@ -19,23 +19,9 @@ val normalize_keeper_detail_scroll :
 
 val collapse_consecutive : key:('a -> string) -> 'a list -> ('a * int) list
 (** Fold consecutive runs with the same key into (newest element, run length),
-    preserving order. The Overview event log draws a burst of identical lines
-    (six manual refreshes, a broadcast fan-out) as one row with a [×N] tail
-    instead of spending its whole panel repeating itself. *)
-
-type overview_event_window = {
-  oew_offset : int;
-  oew_first_position : int;
-  oew_last_position : int;
-}
-
-val project_overview_event_window :
-  event_count:int -> visible_rows:int -> int -> overview_event_window
-val scroll_overview_events_older :
-  event_count:int -> visible_rows:int -> int -> int
-val scroll_overview_events_newer :
-  event_count:int -> visible_rows:int -> int -> int
-val overview_event_offset_after_prepend : retained_count:int -> int -> int
+    preserving order. The TUI session block on Metrics draws a burst of
+    identical lines (six manual refreshes, a broadcast fan-out) as one row with
+    a [×N] tail instead of spending its rows repeating itself. *)
 
 module Input_wait : sig
   type 'a poll_result =
@@ -61,9 +47,16 @@ end
 
 type overview_allocation = {
   attention_rows : int;
+  goal_rows : int;
+      (** Rows of the GOALS block, its headline included. The divider under
+          it is one more row, drawn only when this is positive. *)
   team_rows : int;
       (** Keeper rows in the Team block. The block's title and its closing
           divider are two more rows, drawn only when this is positive. *)
+  providers_rows : int;
+      (** Rows of the Providers section. Its title and closing divider are
+          {!overview_providers_chrome_rows} more, drawn only when this is
+          positive. *)
   task_error_rows : int;
   task_rows : int;
   filler_rows : int;
@@ -77,6 +70,14 @@ val overview_team_chrome_rows : int
 (** The Team block's title row and the divider under it, drawn only when
     [team_rows] is positive. *)
 
+val overview_goal_chrome_rows : int
+(** The divider under the GOALS block, drawn only when [goal_rows] is
+    positive. *)
+
+val overview_providers_chrome_rows : int
+(** The Providers section's title row and the divider under it, drawn only
+    when [providers_rows] is positive. *)
+
 val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allocation
 (** Adds up to [extra] Team rows out of [filler_rows] only: rows nothing else
     on the Overview wanted. A Team block not yet drawn also pays its
@@ -85,13 +86,17 @@ val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allo
 
 val allocate_overview :
   terminal_rows:int ->
-  has_cluster:bool ->
   attention_count:int ->
-  event_count:int ->
+  goal_count:int ->
   team_count:int ->
+  providers_count:int ->
   task_count:int ->
   has_task_error:bool ->
   overview_allocation
+(** The Providers section is sized after GOALS and before the Team block: it
+    takes up to [providers_count] rows of what is left once the one task row
+    held back is kept. With no room for one row besides its chrome it is not
+    drawn at all. *)
 
 (** {1 Keeper roster columns} *)
 
@@ -285,13 +290,30 @@ type schedule_row_values = {
 
 val schedule_minimum_recurrence_width : int
 
+val schedule_minimum_delivery_width : int
+val schedule_maximum_delivery_width : int
+
+val schedule_delivery_width : string list -> int
+(** Cells the delivery column needs for [words]: the widest of them, never
+    under {!schedule_minimum_delivery_width} -- what the column drew before it
+    was measured -- and never over {!schedule_maximum_delivery_width}, so one
+    long word cannot take the recurrence's room. *)
+
 val schedule_recurrence_width :
-  inner_width:int -> target_width:int -> wake_width:int -> int
+  inner_width:int ->
+  target_width:int ->
+  wake_width:int ->
+  delivery_width:int ->
+  int
 (** Cells the recurrence may occupy: what the named columns leave, never below
     {!schedule_minimum_recurrence_width}. *)
 
 val schedule_header_row :
-  target_width:int -> wake_width:int -> recurrence_width:int -> string
+  target_width:int ->
+  wake_width:int ->
+  delivery_width:int ->
+  recurrence_width:int ->
+  string
 
 val schedule_row :
   ?status_style:string ->
@@ -299,6 +321,7 @@ val schedule_row :
   ?recurrence_style:string ->
   target_width:int ->
   wake_width:int ->
+  delivery_width:int ->
   recurrence_width:int ->
   schedule_row_values ->
   string
@@ -618,3 +641,14 @@ val schedule_hold_reading : due:string -> string
 (** What the Schedules screen says about a schedule the runner is holding:
     since when its held occurrence has been due, and that it waits for the
     target Keeper to take the previous wake. [due] is already formatted. *)
+
+val schedule_hold_as_of_tag : checked:string -> string
+(** The short form of a hold the runner has not read again since [checked]:
+    the time the hold was seen, in place of since when it has been due. It
+    leads {!schedule_hold_as_of_reading}. *)
+
+val schedule_hold_as_of_reading : checked:string -> string
+(** The same hold in the detail pane: that the keeper had not taken the
+    previous wake as of [checked]. Drawn instead of {!schedule_hold_reading}
+    when the runner status beside the list is not [ok], because a failed tick
+    does not re-read the hold (#38411). [checked] is already formatted. *)

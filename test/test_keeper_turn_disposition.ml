@@ -368,10 +368,10 @@ let test_registry_failure_reason_preserves_typed_configuration_error () =
   let secret = "invalid-config-must-not-reach-operator" in
   let marker_shaped_detail =
     Keeper_internal_error.core_error_of_masc_internal_error
-      (Keeper_internal_error.Capacity_backpressure
+      (Keeper_internal_error.Resumable_cli_session
          { runtime_id = "runtime.marker-injection"
          ; detail = secret
-         ; retry_after = Keeper_internal_error.No_retry_hint
+         ; exit_code = None
          })
     |> Agent_core.Error.to_string
   in

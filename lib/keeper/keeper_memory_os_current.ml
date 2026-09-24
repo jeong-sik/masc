@@ -1239,9 +1239,10 @@ let quarantined_outcome = "quarantined"
 
 (* [dropped_statements = None] means the writer makes no drop-reason
    statements (explicit keeper writes, upserts); [Some list] is the
-   librarian's own account of every drop in this commit, possibly empty.
-   Statements live only on the journal line: the snapshot codec stays
-   frozen, so existing on-disk snapshots keep parsing unchanged. *)
+   librarian's own account of the drops this commit carried out, possibly
+   empty ([dropped_by_commit]). Statements live only on the journal line:
+   the snapshot codec stays frozen, so existing on-disk snapshots keep
+   parsing unchanged. *)
 let journal_entry_to_json ~dropped_statements snapshot =
   `Assoc
     ([ "outcome", `String committed_outcome
@@ -1291,6 +1292,31 @@ let append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements snapshot =
     ~keepers_dir
     ~keeper_id
     (journal_entry_to_json ~dropped_statements snapshot)
+;;
+
+(* A committed line's [dropped] lists what this commit removed: a memory the
+   locked snapshot held and the next one does not. An answer can drop a memory
+   the commit keeps -- its only successor was not stored -- or one the keeper
+   already removed during the pass. Written as given, the append-only journal
+   would say a current memory was dropped. *)
+let dropped_by_commit ~(previous : t option) ~(next : t) statements =
+  let ids facts =
+    List.fold_left
+      (fun ids fact -> Set_util.StringSet.add (memory_id fact) ids)
+      Set_util.StringSet.empty
+      facts
+  in
+  let held_before =
+    match previous with
+    | None -> Set_util.StringSet.empty
+    | Some snapshot -> ids snapshot.facts
+  in
+  let held_after = ids next.facts in
+  List.filter
+    (fun (statement : Keeper_memory_os_types.dropped_statement) ->
+       Set_util.StringSet.mem statement.memory_id held_before
+       && not (Set_util.StringSet.mem statement.memory_id held_after))
+    statements
 ;;
 
 let append_librarian_failure
@@ -2001,7 +2027,12 @@ let update_locked_with_error
              let journal_result =
                match retraction_receipt, retraction_plan with
                | None, _ ->
-                 append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements next;
+                 append_journal_entry
+                   ~keepers_dir
+                   ~keeper_id
+                   ~dropped_statements:
+                     (Option.map (dropped_by_commit ~previous ~next) dropped_statements)
+                   next;
                  Ok ()
                | Some receipt, Some (_, evidence_error) ->
                  reconcile_retraction_plan_receipt

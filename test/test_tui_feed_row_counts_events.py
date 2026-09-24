@@ -1,4 +1,4 @@
-"""The closed feed row puts its count where the live row puts its count."""
+"""The closed feed row on Activity puts its count where the live row puts it."""
 import os
 import re
 import sys
@@ -6,8 +6,9 @@ import test_tui_keyboard_input as h
 
 # The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
 # suite when a pull request changes a path the suite names, so without this a
-# change to the drawn text below reaches main with no scenario run. Both rows
-# are built in masc_tui_render.ml.
+# change to the drawn text below reaches main with no scenario run. The row is
+# built in masc_tui_render.ml; the Metrics feed line is read by
+# test_tui_render_metrics.ml.
 SOURCE_MODULES = (
     "bin/masc_tui_render.ml",
 )
@@ -37,12 +38,10 @@ def run(executable: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
 
     def interact(process, fd, _slave, output, _base_path):
-        h.wait_for_output(process, fd, output, b"cluster-a", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
+        h.palette_go(process, fd, output, b"go activity", b"MASC Activity")
         drawn = h.resize_and_wait(process, fd, output, rows=30, columns=110,
                                   needle=CLOSED, controls=(h.FULL_REDRAW,))
-        check(h.screen_rows(drawn), "the Overview transport row")
-
-        drawn = h.palette_go(process, fd, output, b"go activity", b"MASC Activity")
         check(h.screen_rows(drawn), "the Activity status row")
         # The Activity row carries the reason as well, and the count belongs
         # between the state word and it -- not folded into the parenthesis.

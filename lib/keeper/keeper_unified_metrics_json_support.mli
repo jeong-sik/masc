@@ -11,7 +11,9 @@ val provider_context_json :
   ?executed_runtime_id:string ->
   Keeper_agent_run.run_result option ->
   Yojson.Safe.t
-(** [runtime_id] names the lane this turn was budgeted under.
+(** [runtime_id] names the route the keeper is assigned (a lane or a single
+    runtime), as [runtime_id_of_meta] reads it when the row is written,
+    whether or not a candidate answered.
     [executed_runtime_id] names the candidate that actually answered, which
     in-turn failover can make a different runtime. Two questions, two
     fields: reading the lane as the answerer filed 162 payment-required

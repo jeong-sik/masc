@@ -305,6 +305,7 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
             (`Assoc
               [
                 ("sandbox_profile", `String "docker");
+                ("sandbox_image", `String "masc-sandbox:general");
                 ("name", `String keeper_name);
                 ("instructions", `String "Prefer metrics context truth");
                 ("activation_mode", `String "on_demand");
@@ -675,6 +676,7 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
             (`Assoc
               [
                 ("sandbox_profile", `String "docker");
+                ("sandbox_image", `String "masc-sandbox:general");
                 ("name", `String keeper_name);
                 ("instructions", `String "Expose keeper attention in digest");
                 ("activation_mode", `String "on_demand");
@@ -777,6 +779,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
             (`Assoc
               [
                 ("sandbox_profile", `String "docker");
+                ("sandbox_image", `String "masc-sandbox:general");
                 ("name", `String keeper_name);
                 ("instructions", `String "Keep receipt causal signal in summary");
                 ("activation_mode", `String "on_demand");
@@ -1052,6 +1055,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             (`Assoc
               [
                 ("sandbox_profile", `String "docker");
+                ("sandbox_image", `String "masc-sandbox:general");
                 ("name", `String keeper_name);
                 ("instructions", `String "Surface tool audit in lightweight snapshots");
                 ("activation_mode", `String "on_demand");
@@ -1192,6 +1196,7 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
             (`Assoc
               [
                 ("sandbox_profile", `String "docker");
+                ("sandbox_image", `String "masc-sandbox:general");
                 ("name", `String keeper_name);
                 ("instructions", `String "Keep recent tool names distinct from latest");
                 ("activation_mode", `String "on_demand");

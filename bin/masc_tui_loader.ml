@@ -116,6 +116,36 @@ let load_keepers (base_path : string) : keeper list * string option =
       ( List.sort (fun a b -> String.compare a.k_name b.k_name) (keepers @ declarations)
       , summarize_errors "keeper metadata read failed" errors )
 
+(* The tasks [masc_gc] moved out of the backlog, for the flow's windows.
+   The archive is megabytes and only a GC rewrites it, so it is parsed again
+   only when its size or modification time changed. A row that does not
+   decode is counted and named, not dropped quietly. *)
+let archive_seen : (float * int * (Masc_domain.task list * int)) option ref = ref None
+
+let read_archived_tasks config : (Masc_domain.task list * int, string) result =
+  let path = Workspace_utils_paths_backend.archive_path config in
+  match Unix.stat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ([], 0)
+  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+  | { Unix.st_mtime; st_size; _ } ->
+    (match !archive_seen with
+     | Some (mtime, size, read) when Float.equal mtime st_mtime && size = st_size -> Ok read
+     | Some _ | None ->
+       (match Safe_ops.read_json_file_safe path with
+        | Error error -> Error error
+        | Ok json ->
+          let read =
+            List.fold_right
+              (fun entry (tasks, undecoded) ->
+                match Masc_domain.task_of_yojson entry with
+                | Ok task -> task :: tasks, undecoded
+                | Error _ -> tasks, undecoded + 1)
+              (Workspace_task_id.archive_entries_of_json json) ([], 0)
+          in
+          archive_seen := Some (st_mtime, st_size, read);
+          Ok read))
+;;
+
 (** Load tasks from the canonical workspace backlog: the active rows for the
     Overview list, plus the full domain rows the detail view reads. Terminal
     tasks remain available in Planning rollups and the detail view but do not
@@ -158,13 +188,26 @@ let load_active_tasks (base_path : string) :
           ( (fun task_id -> Workspace_goal_index.goals_for_task index ~task_id)
           , None )
       in
+      let archived, archive_error =
+        match read_archived_tasks config with
+        | Ok (tasks, 0) -> tasks, None
+        | Ok (tasks, undecoded) ->
+          ( tasks
+          , Some
+              (Printf.sprintf "%d archived tasks could not be read; the day bars miss them"
+                 undecoded) )
+        | Error error ->
+          report (Workspace_utils_paths_backend.archive_path config) error;
+          [], Some ("task archive unavailable, the day bars miss archived tasks: " ^ error)
+      in
       ( Tui_decode.active_tasks_of_domain ~goals_for_task
           observation.observed_backlog.tasks
       , observation.observed_backlog.tasks
-      , (match recovery_error, goal_link_error with
-         | Some recovery, _ -> Some recovery
-         | None, other -> other)
-      , Some (Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ())
+      , (match recovery_error, goal_link_error, archive_error with
+         | Some recovery, _, _ -> Some recovery
+         | None, Some goal_links, _ -> Some goal_links
+         | None, None, archive -> archive)
+      , Some (Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived
                 observation.observed_backlog.tasks)
       (* Projected here rather than on a render frame: resolving whether an
          assignee has a Keeper queue reads the registry and the meta store, and

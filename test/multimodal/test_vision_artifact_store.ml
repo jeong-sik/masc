@@ -47,8 +47,10 @@ let test_repeated_store_preserves_and_repairs () =
     assert (S.to_string (ok (S.store ~dir bytes)) = S.to_string h)
   done;
   let after = Unix.stat path in
+  (* Same inode = no rewrite. mtime advances: a re-store is a fresh use,
+     and retention evicts by mtime. *)
   assert (before.Unix.st_ino = after.Unix.st_ino);
-  assert (before.Unix.st_mtime = after.Unix.st_mtime);
+  assert (after.Unix.st_mtime > before.Unix.st_mtime);
   Out_channel.with_open_bin path (fun oc ->
     output_string oc (String.make (String.length bytes) 'x'));
   ignore (ok (S.store ~dir bytes));
@@ -241,6 +243,38 @@ let test_auto_prune_on_store () =
           assert (Result.is_ok (S.load ~dir h3))
       | _ -> assert false)
 
+let test_re_store_refreshes_mtime_against_eviction () =
+  let dir = temp_dir () in
+  let a_bytes = "frame-A" in
+  let b_bytes = "frame-B" in
+  let c_bytes = "frame-C" in
+  let h_a = ok (S.store ~auto_prune:false ~dir a_bytes) in
+  let path_a = Filename.concat dir (S.to_string h_a) in
+  Unix.utimes path_a 1000.0 1000.0;
+  let h_b = ok (S.store ~auto_prune:false ~dir b_bytes) in
+  let path_b = Filename.concat dir (S.to_string h_b) in
+  Unix.utimes path_b 2000.0 2000.0;
+  (* Re-store A: refreshes mtime to now *)
+  ignore (ok (S.store ~auto_prune:false ~dir a_bytes));
+  (* Store C: then prune with max_entries: 2. B (mtime 2000) is oldest, so B is evicted; A and C survive *)
+  ignore (ok (S.store ~auto_prune:false ~dir c_bytes));
+  let res = ok (S.prune ~max_entries:2 ~max_bytes:(10 * 1024 * 1024) ~dir ()) in
+  assert (res.S.deleted_count = 1);
+  assert (Result.is_ok (S.load ~dir h_a));
+  assert (Result.is_error (S.load ~dir h_b))
+
+let test_invalid_env_vars_fallback_to_defaults () =
+  let dir = temp_dir () in
+  Unix.putenv "MASC_VISION_MAX_ARTIFACTS_PER_KEEPER" "0";
+  Unix.putenv "MASC_VISION_MAX_BYTES_PER_KEEPER" "-1";
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "MASC_VISION_MAX_ARTIFACTS_PER_KEEPER" "500";
+      Unix.putenv "MASC_VISION_MAX_BYTES_PER_KEEPER" "20971520")
+    (fun () ->
+      let h = ok (S.store ~dir "frame") in
+      assert (Result.is_ok (S.load ~dir h)))
+
 let () =
   test_round_trip ();
   test_content_addressed ();
@@ -255,5 +289,7 @@ let () =
   test_prune_by_max_bytes ();
   test_prune_preserves_non_canonical ();
   test_auto_prune_on_store ();
+  test_re_store_refreshes_mtime_against_eviction ();
+  test_invalid_env_vars_fallback_to_defaults ();
   print_endline "test_vision_artifact_store: all assertions passed"
 

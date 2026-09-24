@@ -29,23 +29,47 @@ type prune_result =
   ; remaining_bytes : int
   }
 
+(* Default capacity limits: 500 frames at ~20 KB average covers ~10 MB,
+   providing sufficient recent temporal context for MSX/DOS/Browser vision
+   lanes across turns without unbounded disk accumulation. Derived from disk census
+   in task-1719 (top consumer msx-retro-mania.vision held 5,431 frames / 106.89 MB). *)
 let default_max_entries = 500
 let default_max_bytes = 20 * 1024 * 1024 (* 20 MB *)
 
-let get_env_int name default =
+let get_env_positive_int name default =
   match Sys.getenv_opt name with
   | None -> default
-  | Some s -> (try int_of_string (String.trim s) with _ -> default)
+  | Some s ->
+      match int_of_string_opt (String.trim s) with
+      | Some n when n > 0 -> n
+      | Some _ | None ->
+          Printf.eprintf
+            "[vision:warn] invalid %s=%S: must be a positive integer, using default %d
+%!"
+            name s default;
+          default
 
 let resolved_max_entries ?max_entries () =
   match max_entries with
   | Some n when n >= 0 -> n
-  | _ -> get_env_int "MASC_VISION_MAX_ARTIFACTS_PER_KEEPER" default_max_entries
+  | Some _ ->
+      Printf.eprintf
+        "[vision:warn] invalid max_entries: must be non-negative, using default %d
+%!"
+        default_max_entries;
+      default_max_entries
+  | None -> get_env_positive_int "MASC_VISION_MAX_ARTIFACTS_PER_KEEPER" default_max_entries
 
 let resolved_max_bytes ?max_bytes () =
   match max_bytes with
   | Some b when b >= 0 -> b
-  | _ -> get_env_int "MASC_VISION_MAX_BYTES_PER_KEEPER" default_max_bytes
+  | Some _ ->
+      Printf.eprintf
+        "[vision:warn] invalid max_bytes: must be non-negative, using default %d
+%!"
+        default_max_bytes;
+      default_max_bytes
+  | None -> get_env_positive_int "MASC_VISION_MAX_BYTES_PER_KEEPER" default_max_bytes
 
 let prune ?max_entries ?max_bytes ~dir () : (prune_result, string) result =
   let max_entries = resolved_max_entries ?max_entries () in
@@ -156,13 +180,26 @@ let store ?(auto_prune = true) ~dir (raw : string) : (handle, string) result =
           not existing.truncated && String.equal existing.content raw
       | Ok None | Error _ -> false
     in
-    if already_stored then Ok h
+    if already_stored then begin
+      (* A re-store hands this handle out again: refresh mtime to now so the
+         next prune does not evict a file the caller is actively re-using. *)
+      (try Unix.utimes path 0.0 0.0 with Unix.Unix_error _ -> ());
+      Ok h
+    end
     else
       match Fs_compat.save_file_atomic path raw with
       | Ok () ->
           if auto_prune then begin
             match prune ~dir () with
-            | Ok _ | Error _ -> ()
+            | Ok { deleted_count; reclaimed_bytes; remaining_count; remaining_bytes } ->
+                if deleted_count > 0 then
+                  Printf.eprintf
+                    "[vision:info] prune %s: deleted %d frames (%d bytes), %d remaining (%d bytes)
+%!"
+                    dir deleted_count reclaimed_bytes remaining_count remaining_bytes
+            | Error err ->
+                Printf.eprintf "[vision:warn] prune %s failed: %s
+%!" dir err
           end;
           Ok h
       | Error msg -> Error (Printf.sprintf "Vision_artifact_store.store: %s" msg)

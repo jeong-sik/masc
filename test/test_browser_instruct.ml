@@ -24,6 +24,14 @@ let args fields = `Assoc fields
 let instruct fields = Tools.handle_instruct_with_phase ~tool_name:"masc_browser_instruct" ~start_time:0.0 (args fields)
 let verb_name = function [ verb ] -> Lane.verb_to_string verb | verbs -> Printf.sprintf "%d verbs" (List.length verbs)
 
+let test_extension_deadline_precedes_lane_deadline () =
+  let extension_s =
+    float_of_int (Masc.Browser_stagehand_wire.timeout_ms Masc.Browser_stagehand_wire.sentence_timeout) /. 1000.
+  in
+  check bool "the extension and model can answer before the lane abandons the call" true
+    (Tools.instruct_timeout_sec > extension_s)
+;;
+
 let test_actions_become_sentence_verbs () =
   with_executor served
   @@ fun () ->
@@ -74,6 +82,7 @@ let test_a_failed_act_may_have_acted () =
 let () =
   run "browser_instruct" [
     "input", [
+      test_case "the sentence deadline precedes the lane deadline" `Quick test_extension_deadline_precedes_lane_deadline;
       test_case "each action becomes its sentence verb" `Quick test_actions_become_sentence_verbs;
       test_case "bad input reaches no browser" `Quick test_bad_input_sends_nothing;
     ];

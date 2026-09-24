@@ -396,6 +396,14 @@ let handle_interact ~base_path ~tool_name ~start_time args =
 
 let instruct_arguments = [ "action"; "instruction"; "tabId"; "schema" ]
 
+(* The extension and host model responder share one sentence deadline. Leave
+   the existing browser transport wait after it so their refusal can arrive
+   before the outer lane deadline. *)
+let instruct_timeout_sec =
+  (float_of_int (Browser_stagehand_wire.timeout_ms Browser_stagehand_wire.sentence_timeout) /. 1000.)
+  +. default_timeout_sec
+;;
+
 let instruct_verb fields =
   let ( let* ) = Result.bind in
   let* instruction =
@@ -436,12 +444,7 @@ let handle_instruct_with_phase ~tool_name ~start_time args =
     (match instruct_verb fields with
      | Error detail -> refused_as_input detail
      | Ok verb ->
-       (* The exact-output lane may try several slots for each model call,
-          and extract may need two calls before page work completes. There
-          is no declared upper bound for that sequence, so a separate tool
-          deadline could abandon an in-flight page action. The caller may
-          still cancel; the backend propagates that cancellation. *)
-       let answer = Browser_lane.issue_stagehand ~verb ~timeout_sec:None in
+       let answer = Browser_lane.issue_stagehand ~verb ~timeout_sec:(Some instruct_timeout_sec) in
        (* observe and extract read the page; a failed act may have acted. *)
        let phase =
          match answer, Browser_lane.verb_is_read verb with

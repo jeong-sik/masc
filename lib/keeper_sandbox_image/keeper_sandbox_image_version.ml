@@ -15,6 +15,7 @@ let base_embedded =
 type load_error =
   | Invalid_name of string
   | Recipe_missing of { path : string }
+  | Source_file_outside_source of { path : string }
   | Input_path_rejected of { listed_in : string; path : string }
   | Input_outside_source of { listed_in : string; path : string }
   | Input_missing of { listed_in : string; path : string }

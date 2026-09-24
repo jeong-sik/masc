@@ -75,8 +75,8 @@ let test_ok_assoc_drops_caller_status () =
       (Yojson.Safe.Util.(`Assoc fields |> member "status" |> to_string))
   | _ -> fail "expected assoc"
 
-(* Every code has one class. The table is the whole type, so a code added
-   later fails here until someone decides whose move it is. *)
+(* The class of every code, pinned. A code added later is caught by the
+   exhaustive match in [failure_class_of_error_code], not by this list. *)
 let test_failure_class_of_every_error_code () =
   let expected : (Tool_args.error_code * string) list =
     [ Tool_args.Validation_error, "policy_rejection"

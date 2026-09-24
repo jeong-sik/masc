@@ -642,6 +642,22 @@ let test_goal_failures_take_the_class_of_their_code () =
           ]))
 ;;
 
+(* A refusal the proof-request transaction decides keeps its code and
+   writes nothing. *)
+let test_proof_request_refusal_keeps_its_code () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Refuse a proof request" in
+  ignore (must_succeed "drop" (transition ctx goal_id "drop"));
+  (match Workspace_goals.request_current_proof config ~goal_id with
+   | Error (Workspace_goals.Refused { code = Tool_args.Precondition_failed; _ }) -> ()
+   | Error (Workspace_goals.Refused { code; message }) ->
+     failf "refused as %s: %s" (Tool_args.error_code_to_string code) message
+   | Error (Workspace_goals.Store error) -> fail (Goal_store.write_error_to_string error)
+   | Ok _ -> fail "a dropped goal accepted a proof request");
+  check string "nothing was written" "dropped" (stored_phase config goal_id)
+;;
+
 let test_dropped_pending_proof_gets_a_new_request_after_reopen () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
@@ -1290,6 +1306,8 @@ let () =
             test_dropped_pending_proof_gets_a_new_request_after_reopen
         ; test_case "goal failures take the class of their code" `Quick
             test_goal_failures_take_the_class_of_their_code
+        ; test_case "a proof request refusal keeps its code" `Quick
+            test_proof_request_refusal_keeps_its_code
         ; test_case "verdict after drop from verifying is refused" `Quick
             test_verdict_after_drop_from_verifying_is_refused
         ; test_case "reopen from verifying clears the pending request" `Quick

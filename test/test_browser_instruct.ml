@@ -64,6 +64,14 @@ let test_bad_input_sends_nothing () =
       "no tab", [ "action", `String "observe" ];
       "an unknown action", [ "action", `String "click"; "tabId", `Int 3 ];
       "an unknown argument", [ "action", `String "observe"; "tabId", `Int 3; "lane", `String "stagehand" ] ];
+  let unknown, _ =
+    instruct
+      [ "action", `String "observe"; "tabId", `Int 3; "lane", `String "stagehand" ]
+  in
+  check bool "unknown lane argument is named with the stagehand-only rule" true
+    (String.starts_with
+       ~prefix:"Invalid browser arguments: unknown browser instruct argument: lane; BrowserInstruct is stagehand only and takes no lane"
+       (Tool_result.message unknown));
   check int "nothing reached the lane" 0 (List.length !sent)
 ;;
 

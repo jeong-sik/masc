@@ -720,8 +720,11 @@ let default_http_fetch ~timeout_sec ~headers ~max_response_bytes url =
         ~max_response_bytes
         request_url
     with
-    | Error detail ->
-        Error (Transport_error (redact_transport_error_detail detail))
+    | Error failure ->
+        (* The cause, not the first word of the operator text: a bare
+           "curl" left a Keeper retrying one unresolvable host 16 times
+           (2026-09-18..24). The URL stays out; the caller sent it. *)
+        Error (Transport_error (Tool_local_runtime_http.transport_failure_cause failure))
     | Ok response when redirect_status response.http_status -> (
         match response.redirect_url with
         | None | Some "" ->

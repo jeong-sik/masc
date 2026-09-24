@@ -145,6 +145,48 @@ let curl_post_json_argv ~timeout_sec ?(headers = []) ~url ~body_json () =
 
 let curl_get_argv_for_test = curl_get_argv
 
+type transport_failure =
+  | Curl_exited of int
+  | Curl_signaled of int
+  | Curl_stopped of int
+
+let transport_failure_of_status = function
+  | Unix.WEXITED 0 -> None
+  | Unix.WEXITED code -> Some (Curl_exited code)
+  | Unix.WSIGNALED signal -> Some (Curl_signaled signal)
+  | Unix.WSTOPPED signal -> Some (Curl_stopped signal)
+;;
+
+let transport_failure_to_string ~url = function
+  | Curl_exited code -> Printf.sprintf "curl exit code %d for %s" code url
+  | Curl_signaled signal -> Printf.sprintf "curl signal %d for %s" signal url
+  | Curl_stopped signal -> Printf.sprintf "curl stopped %d for %s" signal url
+;;
+
+(* The causes a fetch meets, from curl(1) EXIT CODES. Any other code is
+   still reported by number. *)
+let curl_exit_cause = function
+  | 6 -> Some "could not resolve host"
+  | 7 -> Some "could not connect"
+  | 28 -> Some "timed out"
+  | 35 -> Some "TLS handshake failed"
+  | 47 -> Some "too many redirects"
+  | 52 -> Some "empty reply from server"
+  | 56 -> Some "connection reset while receiving"
+  | 60 -> Some "server certificate not trusted"
+  | 63 -> Some "response larger than the size limit"
+  | _ -> None
+;;
+
+let transport_failure_cause = function
+  | Curl_exited code ->
+    (match curl_exit_cause code with
+     | Some cause -> Printf.sprintf "curl exit %d (%s)" code cause
+     | None -> Printf.sprintf "curl exit %d" code)
+  | Curl_signaled signal -> Printf.sprintf "curl killed by signal %d" signal
+  | Curl_stopped signal -> Printf.sprintf "curl stopped by signal %d" signal
+;;
+
 let http_get_text_response_with_headers ?(timeout_sec = default_timeout_sec)
     ?(headers = []) ?(follow_redirects = false) ?(max_redirects = 3)
     ?(compressed = false) ?max_response_bytes url =
@@ -159,15 +201,9 @@ let http_get_text_response_with_headers ?(timeout_sec = default_timeout_sec)
         ~timeout_sec:(Stdlib.Float.of_int timeout_sec)
         argv)
   in
-  match status with
-  | Unix.WEXITED 0 ->
-      Ok (split_http_body_and_response body)
-  | Unix.WEXITED code ->
-      Error (Printf.sprintf "curl exit code %d for %s" code url)
-  | Unix.WSIGNALED sig_num ->
-      Error (Printf.sprintf "curl signal %d for %s" sig_num url)
-  | Unix.WSTOPPED sig_num ->
-      Error (Printf.sprintf "curl stopped %d for %s" sig_num url)
+  match transport_failure_of_status status with
+  | None -> Ok (split_http_body_and_response body)
+  | Some failure -> Error failure
 
 let http_get_text_with_status_with_headers ?timeout_sec ?headers ?follow_redirects
     ?max_redirects ?compressed ?max_response_bytes url =
@@ -175,7 +211,7 @@ let http_get_text_with_status_with_headers ?timeout_sec ?headers ?follow_redirec
     http_get_text_response_with_headers ?timeout_sec ?headers ?follow_redirects
       ?max_redirects ?compressed ?max_response_bytes url
   with
-  | Error _ as err -> err
+  | Error failure -> Error (transport_failure_to_string ~url failure)
   | Ok response -> Ok (response.http_status, response.body)
 
 let http_get_text_with_status ?timeout_sec url =
@@ -199,16 +235,11 @@ let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~u
         ~timeout_sec:(Stdlib.Float.of_int timeout_sec)
         argv)
   in
-  match status with
-  | Unix.WEXITED 0 ->
+  match transport_failure_of_status status with
+  | None ->
       let payload, http_status = split_http_body_and_status body in
       Ok (http_status, payload)
-  | Unix.WEXITED code ->
-      Error (Printf.sprintf "curl exit code %d for %s" code url)
-  | Unix.WSIGNALED sig_num ->
-      Error (Printf.sprintf "curl signal %d for %s" sig_num url)
-  | Unix.WSTOPPED sig_num ->
-      Error (Printf.sprintf "curl stopped %d for %s" sig_num url)
+  | Some failure -> Error (transport_failure_to_string ~url failure)
 
 let http_post_json_text_with_status ~timeout_sec ~url ~body_json =
   http_post_json_text_with_status_with_headers ~timeout_sec ~url ~body_json ()

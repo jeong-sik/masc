@@ -50,6 +50,20 @@ type http_get_response =
     [content_type], and [downloaded_bytes] are populated from curl write-out
     fields when available. *)
 
+(** Why curl did not deliver a response. *)
+type transport_failure =
+  | Curl_exited of int  (** curl's exit code, see curl(1) EXIT CODES *)
+  | Curl_signaled of int
+  | Curl_stopped of int
+
+val transport_failure_to_string : url:string -> transport_failure -> string
+(** The operator text: ["curl exit code 6 for <url>"]. *)
+
+val transport_failure_cause : transport_failure -> string
+(** The cause without the URL, for a reply a model reads:
+    ["curl exit 6 (could not resolve host)"]. A code without a named cause is
+    reported by number. *)
+
 val http_get_text_response_with_headers :
   ?timeout_sec:int ->
   ?headers:(string * string) list ->
@@ -58,7 +72,7 @@ val http_get_text_response_with_headers :
   ?compressed:bool ->
   ?max_response_bytes:int ->
   string ->
-  (http_get_response, string) Result.t
+  (http_get_response, transport_failure) Result.t
 (** [http_get_text_response_with_headers ?timeout_sec ?headers url] issues a
     [GET url] via curl and returns both body text and curl write-out metadata.
 

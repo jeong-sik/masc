@@ -1650,6 +1650,10 @@ let handle_surface_post_with_outcome
            ?requested_thread_ts
            ~bound_slack_channels ~bound_discord_channels ()
        with
+      (* One string covers a surface this tool does not post to and two
+         bound channels with no channel_id (the caller's to correct) as well
+         as a surface with no binding (state). Workflow_rejection until
+         resolve_target returns a typed reason. *)
       | Error message ->
         fail
           ~class_:Tool_result.Workflow_rejection

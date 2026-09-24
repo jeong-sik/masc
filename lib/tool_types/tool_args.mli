@@ -105,8 +105,6 @@ val ok_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
     constructors; absent metadata defaults to an empty tool name and the
     current timestamp. *)
 
-val error_result : ?tool_name:string -> ?start_time:float -> string -> Tool_result.result
-
 val error_result_typed :
   ?tool_name:string ->
   ?start_time:float ->
@@ -122,16 +120,10 @@ val ok_result :
 
     Return [Ok value] on success, [Error message] on missing / empty input.
     Messages are opaque text; callers that need typed failure fields must use
-    {!error_result_typed}. Combine with {!val-(let*!)} for early-return
-    chaining. *)
+    {!error_result_typed}. *)
 
 (** Trim whitespace; reject empty. *)
 val get_string_required : Yojson.Safe.t -> string -> (string, string) Result.t
-
-(** Monadic bind for [('a, string) Result.t] → [Tool_result.result].
-    Chains required field extractions with early error return. *)
-val ( let*! ) :
-  ('a, string) Result.t -> ('a -> Tool_result.result) -> Tool_result.result
 
 (** {1 Structured field validation}
 
@@ -168,9 +160,6 @@ val validation_error_assoc : field_error list -> Yojson.Safe.t
 (** [{"status":"error","error_code":"validation_error",
     "field_errors":[…],"message":"N field error(s)"}] *)
 val validation_error_response : field_error list -> string
-
-val validation_error_result :
-  ?tool_name:string -> ?start_time:float -> field_error list -> Tool_result.result
 
 (** {1 Field validators}
 

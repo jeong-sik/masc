@@ -795,10 +795,14 @@ let handle_tool_execute_typed
                   "execute stream end callback failed keeper=%s: %s"
                   meta.name
                   (Printexc.to_string exn));
-            (* The gate, the parser and the path policy judge the command
-               the caller wrote, so each refusal is the caller's to correct;
-               Too_complex also names the rewrite that would pass. *)
-            authorized (typed_error_json ~class_:Tool_result.Policy_rejection diagnostic)
+            (* The model's script reaches the shell as one opaque [-c]
+               argument, and the gate, parser and complexity checks judge
+               only the command tree masc lowers it to. That tree cannot
+               produce these refusals, so one firing is masc's own fault:
+               Runtime_failure. Path_reject below is different: it judges
+               the cwd and the script's cd and redirect targets the caller
+               wrote. *)
+            authorized (typed_error_json ~class_:Tool_result.Runtime_failure diagnostic)
           | Error (Keeper_tooling.Execute_shell_ir.Cannot_parse reason) ->
             let reason_tag = Keeper_tooling.Execute_shell_ir.parse_reason_tag reason in
             (* Parity with gate_reject/path_reject, which have always carried
@@ -825,7 +829,7 @@ let handle_tool_execute_typed
                   (Printexc.to_string exn));
             authorized
               (typed_error_json
-                 ~class_:Tool_result.Policy_rejection
+                 ~class_:Tool_result.Runtime_failure
                  (Printf.sprintf "Cannot parse command: %s" reason_tag))
           | Error (Keeper_tooling.Execute_shell_ir.Too_complex reason) ->
             let reason_tag = Keeper_tooling.Execute_shell_ir.too_complex_reason_tag reason in
@@ -853,7 +857,7 @@ let handle_tool_execute_typed
                   (Printexc.to_string exn));
             authorized
               (typed_error_json
-                 ~class_:Tool_result.Policy_rejection
+                 ~class_:Tool_result.Runtime_failure
                  (Printf.sprintf
                     "Command too complex: %s. %s."
                     reason_tag

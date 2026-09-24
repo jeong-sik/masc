@@ -156,34 +156,38 @@ let parse_bool_field raw field =
 
 (* ── The four rejected-dispatch branches ─────────────────────────── *)
 
+(* The second field is the failure class the model is told. Gate, parse and
+   complexity refusals judge only the command tree masc lowers the script to,
+   which cannot produce them, so they are masc's fault; a path refusal judges
+   the cwd and targets the caller wrote. *)
 let rejected_cases =
   [ ( "gate_reject"
-    , `String "gate_reject"
+    , "runtime_failure"
     , (fun () ->
         Error
           (Keeper_tooling.Execute_shell_ir.Gate_reject
              "gate denied by policy")) )
   ; ( "cannot_parse"
-    , `String "cannot_parse"
+    , "runtime_failure"
     , (fun () ->
         Error
           (Keeper_tooling.Execute_shell_ir.Cannot_parse
              Masc_exec_command_gate.Shell_command_gate.Parse_error)) )
   ; ( "too_complex"
-    , `String "too_complex"
+    , "runtime_failure"
     , (fun () ->
         Error
           (Keeper_tooling.Execute_shell_ir.Too_complex
              Masc_exec_command_gate.Shell_command_gate.Unsupported_nested_pipeline)) )
   ; ( "path_reject"
-    , `String "path_reject"
+    , "policy_rejection"
     , (fun () ->
         Error
           (Keeper_tooling.Execute_shell_ir.Path_reject
              "path outside allowed scope")) )
   ]
 
-let test_rejected_branch_finalizes_stream (name, _expected_status, dispatch) () =
+let test_rejected_branch_finalizes_stream (name, expected_class, dispatch) () =
   setup @@ fun ~config ~meta ~factory ~playground ->
   let stream_end_status = ref None in
   let dispatch_count = ref 0 in
@@ -198,8 +202,8 @@ let test_rejected_branch_finalizes_stream (name, _expected_status, dispatch) () 
       Keeper_tool_execute_runtime.For_testing.dispatch_override := Some (fun () ->
         incr dispatch_count;
         dispatch ());
-      let raw =
-        Keeper_tool_execute_runtime.handle_tool_execute
+      let outcome =
+        Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
           ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
           ~turn_sandbox_factory:(Some factory)
           ~config
@@ -207,7 +211,14 @@ let test_rejected_branch_finalizes_stream (name, _expected_status, dispatch) () 
           ~args:(typed_exec_args ~cwd:playground)
           ()
       in
+      let raw = outcome.raw_output in
       check int (name ^ ": reached the rejected dispatch") 1 !dispatch_count;
+      check (option string) (name ^ ": failure class")
+        (Some expected_class)
+        (match outcome.disposition with
+         | Tool_result.Failed failure_class ->
+           Some (Tool_result.tool_failure_class_to_string failure_class)
+         | Tool_result.Completed () | Tool_result.Deferred () -> None);
       (match parse_bool_field raw "ok" with
        | Some true -> Alcotest.failf "%s: rejected response unexpectedly ok: %s" name raw
        | Some false | None -> ());

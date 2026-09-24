@@ -222,6 +222,7 @@ val preview_to_yojson : preview -> Yojson.Safe.t
 val save_outcome_to_yojson : save_outcome -> Yojson.Safe.t
 val writable_source_to_yojson : writable_source -> Yojson.Safe.t
 val create_outcome_to_yojson : create_outcome -> Yojson.Safe.t
+val package_directory_to_yojson : package_directory -> Yojson.Safe.t
 val delete_outcome_to_yojson : delete_outcome -> Yojson.Safe.t
 val error_to_yojson : error -> Yojson.Safe.t
 

@@ -46,7 +46,9 @@ let test_config_writes_are_dropped () =
   let decoded = round_trip written in
   Alcotest.(check bool) "input policy is TOML-owned" true (decoded.input_policy = Keeper_input_policy.Small);
   let defaults = {Keeper_types_profile.empty_keeper_profile_defaults with
-    sandbox_profile=Some Keeper_types_profile.Docker; input_policy=Some Keeper_input_policy.Wide} in
+    sandbox_profile=Some Keeper_types_profile.Docker;
+    sandbox_image=Some "masc-sandbox:general";
+    input_policy=Some Keeper_input_policy.Wide} in
   let effective defaults meta = match Keeper_meta_contract.effective_meta_of_profile_defaults defaults meta with
     | Ok effective -> effective | Error detail -> Alcotest.fail detail in
   let wide = effective defaults decoded in
@@ -116,6 +118,7 @@ let test_board_interests_survive_an_empty_profile_default () =
   let defaults_with_profile board_interests =
     { Keeper_types_profile.empty_keeper_profile_defaults with
       sandbox_profile = Some Keeper_types_profile.Docker
+    ; sandbox_image = Some "masc-sandbox:general"
     ; board_interests
     }
   in
@@ -131,6 +134,66 @@ let test_board_interests_survive_an_empty_profile_default () =
     replaced.board_interests
 ;;
 
+(* #37523. A profile that runs a container has to name its image: boot
+   refuses a docker or microvm keeper whose TOML names none rather than
+   handing it the general image. The cases split on the two inputs that
+   decide it -- the profile, and whether an image is declared -- so a rule
+   that refused everything, or nothing, fails here. *)
+let test_a_container_profile_must_name_its_image () =
+  let open Keeper_meta_contract in
+  let meta = base_meta () in
+  let defaults ?sandbox_image ?remote_endpoint sandbox_profile =
+    { Keeper_types_profile.empty_keeper_profile_defaults with
+      sandbox_profile = Some sandbox_profile
+    ; sandbox_image
+    ; remote_endpoint
+    }
+  in
+  let contains ~affix text =
+    let n = String.length affix and m = String.length text in
+    let rec at i = i + n <= m && (String.sub text i n = affix || at (i + 1)) in
+    at 0
+  in
+  let refused label defaults =
+    match effective_meta_of_profile_defaults defaults meta with
+    | Ok _ -> Alcotest.failf "%s: boot must refuse a keeper with no image" label
+    | Error detail ->
+      Alcotest.(check bool)
+        (label ^ ": the refusal names the missing key")
+        true
+        (contains ~affix:"sandbox_image is required" detail)
+  in
+  refused "docker, no image" (defaults Keeper_types_profile.Docker);
+  refused "docker, blank image" (defaults ~sandbox_image:"  " Keeper_types_profile.Docker);
+  (* The microvm arm goes through the shared rule directly: boot checks the
+     guest backend first, and whether this host has a default backend is not
+     what this case is about. *)
+  Alcotest.(check bool)
+    "microvm, no image: refused by the shared rule"
+    true
+    (Option.is_some
+       (missing_required_sandbox_image_error ~keeper_name:"cfg-keeper"
+          Keeper_types_profile.Micro_vm
+          (defaults Keeper_types_profile.Micro_vm)));
+  (match
+     effective_meta_of_profile_defaults
+       (defaults ~sandbox_image:"masc-keeper-sandbox:local" Keeper_types_profile.Docker)
+       meta
+   with
+   | Ok effective ->
+     Alcotest.(check (option string))
+       "a declared image is the one the keeper runs in"
+       (Some "masc-keeper-sandbox:local")
+       effective.sandbox_image
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check (option string))
+    "remote_ssh runs no image and is not asked for one"
+    None
+    (missing_required_sandbox_image_error ~keeper_name:"cfg-keeper"
+       Keeper_types_profile.Remote_ssh
+       (defaults ~remote_endpoint:"fixture" Keeper_types_profile.Remote_ssh))
+;;
+
 let () =
   Alcotest.run
     "keeper-meta-config-not-durable"
@@ -139,6 +202,10 @@ let () =
         ; Alcotest.test_case "state writes survive" `Quick test_state_writes_do_survive
         ; Alcotest.test_case "board_interests survives an empty profile default"
             `Quick test_board_interests_survive_an_empty_profile_default
+        ] )
+    ; ( "sandbox image"
+      , [ Alcotest.test_case "a container profile must name its image" `Quick
+            test_a_container_profile_must_name_its_image
         ] )
     ]
 ;;

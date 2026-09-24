@@ -62,9 +62,41 @@ status: reference
 : Human-in-the-Loop의 약어. Gate에 걸린 바깥 작업을 사람이 허락하거나 거절하는
   경로다. 사람의 답을 기다리는 동안에도 다른 Keeper의 턴이나 상관없는 작업은 계속 돈다.
 
+**Approval Detail Pane (승인 상세 화면)**
+: TUI에서 단일 HITL 승인 요청의 전체 질문과 인자를 펼쳐 확인하는 상세 화면
+  (`Approval_detail`). 한 줄 요약(`single_line`)만으로 수십 줄의 코드 편집이나 명령을
+  다 보지 못한 채 운영자가 승인하는 위험을 막기 위해, 작성된 줄바꿈을 유지하며 전체
+  내용을 래핑하여 렌더링한다.
+  - **제어 문자 이스케이프 및 터미널 탈취 방지 경계**: 모델이 작성한 질문(`kta_question`)
+    이나 인자(`kta_args`)에 포함된 ANSI 제어 문자(`ESC [ 1 A` 등)가 터미널 커서를 조작해
+    운영자가 이미 읽은 화면을 임의 변조하고 승인을 유도하는 터미널 재작성 공격
+    (Loopjacking 완화)을 차단하기 위해, 모든 라벨은 `sanitize_terminal_text`, 모든 값은
+    `sanitize_terminal_lines`를 거친다. 개행(`LF`)만 실제 줄바꿈으로 유지하고 그 밖의 모든
+    0x20 미만 제어 문자는 가시적인 이스케이프 문자열(`[\x1B]`, `[\x09]`)로 치환하여
+    출력한다. 공백으로 숨기지 않고 이스케이프 시도 사실을 그대로 투영하며, 행 타입이
+    비공개(`type line = private`)로 보호되어 화면의 모든 행은 이 경계를 우회할 수 없다(#38478).
+  → [Approval_detail](../../bin/masc_tui_approval_detail.mli),
+  [Tui_decode](../../lib/tui_decode.mli)
+
 **Surface**
 : 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
   입구를 가리키며, 각 표면은 독립 상태를 소유하지 않는다.
+
+**Goals 블록 (Overview Goals)**
+: TUI Overview 최상단에서 fleet의 활성 작업이 목표를 실제로 진전시키고 있는지를
+  보여주는 자리(`Masc_tui_overview_goals`). Attention 패널 뒤, Team 블록 앞에
+  배치된다. 헤드라인은 전체 활성 태스크(진행 중이거나 검증 대기 중인 Task) 중 그려진
+  목표에 연결된 태스크 수 비율을 표시하고, 아직 일이 진행 중인 단계(`Executing`·
+  `Verifying`·`Awaiting_confirmation`)의 Goal마다 우선순위(낮은 숫자 우선) 및 마감일
+  순으로 한 줄씩 그린다(#38386).
+  - 각 행: 목표 제목, 연결 태스크 대비 완료 태스크 바(`done/linked task bar`), 정체
+    시간(`stagnation_seconds` 기준 idle 기간), 운영자의 로컬 캘린더 날짜 기준 마감
+    카운트다운(`D-N due countdown`).
+  - 관측 권위: 목표가 자체 지표(`metric`·`target`)를 가지고 있어도 측정값이 보고되지
+    않으면 지어내지 않고, 진행 바는 순수하게 연결된 태스크의 완료 수만 측정한다.
+  - 빈 상태: 활성 목표가 없거나 읽기 실패 시 헤드라인이 그 상태를 명시적으로 표시하며,
+    표시 예산(`rows`)을 초과하면 하단부터 생략하고 헤드라인에 그려진 목표 수를 남긴다.
+  → [Masc_tui_overview_goals](../../bin/masc_tui_overview_goals.mli)
 
 **Team 블록 (Overview Team)**
 : TUI Overview 에서 Keeper 한 명당 한 줄로 "누가 무엇을 하고 누가 막혔나" 를 보여주는
@@ -427,6 +459,10 @@ status: reference
   후보로 넘어가는지)가 같은 답을 해야 한다(#38045). `retry_after` 힌트도 한 규칙으로 읽는다 —
   `usable_retry_after`가 없거나 0·음수·무한·NaN인 힌트는 "대기 시간을 말하지 않음"으로 답하고,
   후보 backpressure·경로 휴식·quota 재개·드라이버가 모두 이 한 규칙에서 답한다(#38065).
+  `Retry_after_observed`의 retry class 중 공급자 자체 과부하(HTTP 529, CapacityExhausted 풀)는
+  MASC 자체의 슬롯 대기가 아니라 시도한 런타임 후보의 실패(Server_error와 같은 층위)로 분류되며,
+  클래스 라벨은 `provider_capacity`다(#38290). 이 실패는 다음 런타임 후보로 walk하며 503 과 같이
+  다음 후보로 넘기고 이 후보를 뒤로 미룬다.
   `Exact-output route`·`Fusion Route`
   (실행 경로 이름)와 이름이 겹치지만 다른 축이다.
   → [keeper_runtime_failure_route](../../lib/keeper_runtime/keeper_runtime_failure_route.mli)
@@ -594,7 +630,11 @@ status: reference
   공식 클라이언트가 turn을 도는 경로는 **Official Client Lane**이다.
   `Keeper_memory_lane`은 Keeper 하나의 Librarian 작업을 줄 세우는 **Memory queue**다.
   `Keeper_lane.t`는 Keeper 하나가 turn을 도는 fiber다. 넷 다 이름만 같고 이 항목의
-  Lane과는 다른 개념이다. Memory queue에서 기다리던 일은 나중에 `Librarian` lane에서 돈다.
+  Lane과는 다른 개념이다. Keeper 레인은 turn이나 request보다 오래 살아야 하는 서버
+  소유(server-owned) 자원으로, 호출자의 switch가 아니라 서버 root switch에만 매달린다
+  (`fork_server_owned`). 서버 root switch가 없거나 종료 중일 때는 turn switch로
+  fallback하지 않고 typed 시작 오류 `Server_root_switch_unavailable`로 거절된다(#38426).
+  Memory queue에서 기다리던 일은 나중에 `Librarian` lane에서 돈다.
   → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
 
 **Runtime Candidate Order (런타임 후보 순서)**
@@ -877,7 +917,8 @@ status: reference
   `drop`으로 `Dropped`로, `reopen`으로 `Executing`으로 옮길 수 있다. 그 뒤에
   도착한 verdict는 거절된다. 완료 verdict는 verifier가 기록하고, 사람의
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
-  `admits_self_directed_progress`가 이 경계를 정의한다.
+  `admits_self_directed_progress`가 이 경계를 정의한다. TUI Overview 투영은
+  `Goals 블록 (Overview Goals)`를 따른다.
 
 **Schedule (예약)**
 : 정한 시각에 Keeper를 깨우라는 요청. 저장되므로 서버를 다시 켜도 남는다. 만들기·조회·
@@ -1089,12 +1130,43 @@ status: reference
   출처·패키지·이름·문서 revision으로 식별한다.
   Memory OS의 Fact와 별개다. `validated_approach`나 `lesson`을 기억했다고 Skill이
   생성되지는 않는다. 현재 발행·사용 경로는 [Skills](../SKILLS.md)를 따른다.
-  `keeper_skill_validate`는 export한 문서를 정적 검증하며, 실행 성공·안전성·발행을
-  뜻하지 않는다. 입력과 발행 경계도 위 [Skills](../SKILLS.md) 문서를 따른다.
+  `keeper_skill_validate`는 export한 문서를 정적 검증(`validation = "static"`)하며,
+  실행 성공·안전성·발행을 뜻하지 않는다. 검증 판정은 정규화된 아티팩트 참조(`artifact`)가
+  아니라 검증기가 읽은 실제 바이트에서 직접 계산한 다이제스트(`source {sha256, bytes, filename}`)로
+  대상을 지칭한다 — 정규화된 아티팩트 참조가 결과에 실리면 durable result manifest 부재로
+  인해 `tool output artifact storage failed`로 실패하거나 빈 미리보기 blob으로 치환되기
+  때문이다(#37493·#38514). 입력과 발행 경계도 위 [Skills](../SKILLS.md) 문서를 따른다.
   `keeper_skill_publish`는 Keeper가 `project-agents` source에 새 Skill을 만들고
   바로 발행하는 도구다. 이미 있는 이름은 덮어쓰지 않고, 지우는 건 운영자가 한다.
   → [Keeper_skill_catalog](../../lib/keeper/keeper_skill_catalog.mli),
   [Skill_reference](../../lib/skill_reference/skill_reference.mli)
+
+**Skill Source**
+: `runtime.toml`의 `[[skills.sources]]`에 선언되어 Skill 패키지를 탐색·적재하는 디렉터리
+  경로 SSOT(`Skill_source_config.t`). 각 소스는 고유 식별자(`id`), 기준점(`anchor` —
+  `Base_path`·`User_home`·`Absolute`), 설정 경로(`configured_path`), 접근 권한
+  (`access` — `Read_only`·`Read_write`)을 소유한다. 소스 탐색과 읽기 작업은
+  `Skill_catalog_snapshot.source_operation`(`Inspect_source`·`Read_source_directory`)이
+  관찰한다.
+  - **준비 거절 사유 (`source_not_ready`)**: `keeper_skill_publish` 또는 Skill 에디터가
+    소스 폴더 결함이나 미선언으로 요청을 수행할 수 없을 때 단순 오류 문자열이 아니라
+    닫힌 열 가지 variant(`Server_skill_editor.source_not_ready`)와 해결된 경로를 구조화된
+    `reason` 객체로 반환한다 —
+    1. `Source_not_in_catalog` (`runtime.toml`에 소스 ID 미선언)
+    2. `Source_index_out_of_range` (스냅샷 범위를 벗어난 소스 인덱스)
+    3. `Source_root_missing` (해결된 디렉터리 경로 부재)
+    4. `Source_root_not_directory` (해당 경로가 디렉터리가 아님)
+    5. `Source_root_unavailable` (소스 디렉터리 검사/읽기 작업 실패)
+    6. `Source_root_unresolved` (`Skill_source_config.resolution` — 앵커 가용 불가, 잘못된 앵커, 잘못된 경로로 인한 해석 실패)
+    7. `Source_root_create_failed` (누락된 선언 폴더 자동 생성 실패)
+    8. `Source_root_refresh_failed` (폴더 생성 후 카탈로그 갱신 실패)
+    9. `Source_root_moved` (쓰기 락 획득 도중 소스 경로 변경)
+    10. `Recovery_directory_missing` (복구 디렉터리 부재)
+    누락된 폴더(`Source_root_missing`)로 인한 거절을 미선언(`Source_not_in_catalog`)으로
+    오진하여 `runtime.toml` 설정을 의심하거나 운영자에게 불필요한 질의(`masc_ask`)를 남기지
+    않아야 한다(#38381).
+  → [Skill_source_config](../../lib/skill_config/skill_source_config.mli),
+  [Server_skill_editor](../../lib/server/server_skill_editor.mli)
 
 **Instruction Skill**
 : Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.

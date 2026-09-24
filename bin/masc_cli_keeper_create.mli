@@ -9,6 +9,7 @@ type flags =
   { name : string
   ; instructions : string
   ; sandbox_profile : string
+  ; sandbox_image : string option
   ; network_mode : string option
   ; microvm_backend : string option
   ; remote_endpoint : string option

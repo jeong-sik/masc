@@ -53,6 +53,12 @@ def run(executable: str) -> None:
         h.wait_for_output(process, fd, output, b"MASC Overview", start=0,
                           timeout=15)
         h.palette_go(process, fd, output, b"go keepers", TITLE)
+        # The roster is read off .masc/keepers on a refresh tick, so the
+        # first frame can still say "(not loaded)". Every resize below is a
+        # reading of what the roster holds, so wait for it to hold something:
+        # on a Linux runner the scenario read an unloaded roster and asked
+        # why its rows were missing.
+        h.wait_for_output(process, fd, output, LAST, start=0, timeout=20)
 
         # Tall: every keeper has a row, so there is nothing for the line to
         # say that the rows do not.
@@ -101,6 +107,9 @@ def run(executable: str) -> None:
     h.run_terminal_scenario(executable,
                             description="keeper roster window line",
                             interact=interact,
+                            # The roster comes off disk on a tick; the
+                            # default minute is longer than this scenario.
+                            refresh=0.5,
                             http_fixtures=h.keeper_runtime_http_fixtures(),
                             prepare_workspace=prepare)
 

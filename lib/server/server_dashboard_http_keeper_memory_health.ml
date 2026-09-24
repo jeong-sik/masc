@@ -32,6 +32,16 @@ type librarian_health =
           [last_success_at], or after the journal's start when the Librarian
           never committed. A failure older than the last success is not
           shown: the pass after it committed. *)
+  ; stalled :
+      ( Keeper_carried_front.librarian_gap option
+        , Keeper_next_request_forecast.librarian_gap_unmeasured )
+        result
+      (** RFC librarian-lifecycle §4.10, rule 3: the atoms the Keeper's
+          requests skip because the Librarian stands behind the start the
+          provider last accepted. An alarm, not a Gate: nothing waits on it.
+          [Ok None] while the Librarian point is at or past the accepted
+          start, or when there is no accepted start yet. [Error] when a file
+          the gap is read from did not read: neither "no gap" nor a gap. *)
   }
 
 type context_cycle =
@@ -284,6 +294,21 @@ let librarian_health ~config ~keepers_dir keeper_id ~continuity_saved =
         continuity_saved
   ; last_success_at
   ; last_failure_kind
+  (* The gap, from small files alone, so a server that just started shows it
+     before any drain has run here ({!Keeper_next_request_forecast.librarian_gap},
+     the one rule {!Keeper_carried_front.librarian_gap}). The accepted start is
+     the newest response-observed turn record, whichever lane recorded it: an
+     official client's byte window cut counts the same way. A size refusal
+     records no accepted start, so a turn that ended on one never raises this
+     alarm.
+
+     A read that fails goes into the payload as its own state, not onto the
+     keeper's log. This is computed again on every health read, because the
+     payload is a projection of the files and holds nothing between reads; a
+     file that stays broken is one standing fact, and a log line per read would
+     repeat it once per poll. The operator reads this screen, so the cause is
+     carried where they look. *)
+  ; stalled = Keeper_next_request_forecast.librarian_gap ~config ~keeper_name:keeper_id
   }
 ;;
 
@@ -670,6 +695,27 @@ let keeper_health_entry_to_json (h : keeper_health) =
             , match h.librarian.last_failure_kind with
               | Some kind -> `String kind
               | None -> `Null )
+          ; ( "stalled"
+            , match h.librarian.stalled with
+              | Ok (Some { Keeper_carried_front.gap_start_atom; gap_end_atom }) ->
+                `Assoc
+                  [ "kind", `String "gap"
+                  ; "gap_start_atom", `Int gap_start_atom
+                  ; "gap_end_atom", `Int gap_end_atom
+                  ]
+              | Ok None -> `Null
+              | Error unmeasured ->
+                `Assoc
+                  [ "kind", `String "unmeasured"
+                  ; ( "cause"
+                    , `String
+                        (Keeper_next_request_forecast.librarian_gap_unmeasured_cause
+                           unmeasured) )
+                  ; ( "detail"
+                    , `String
+                        (Keeper_next_request_forecast.librarian_gap_unmeasured_detail
+                           unmeasured) )
+                  ] )
           ] )
     ; "librarian_failures", `Int h.librarian_failures
     ; "vision_ingest_errors", `Int h.vision_ingest_errors

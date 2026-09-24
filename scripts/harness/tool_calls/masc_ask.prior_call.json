@@ -1,0 +1,25 @@
+{
+  "user": "오늘 배포 시각을 운영자가 정해야 한다. 18시와 22시 중 하나다.",
+  "arguments": {
+    "questions": [
+      {
+        "question_id": "deploy_window_0919",
+        "header": "배포 창",
+        "prompt": "오늘 배포를 몇 시에 할까요?",
+        "mode": "single",
+        "choices": [
+          {
+            "choice_id": "slot_18",
+            "label": "오늘 18시"
+          },
+          {
+            "choice_id": "slot_22",
+            "label": "오늘 22시"
+          }
+        ]
+      }
+    ],
+    "context": "릴리스 준비"
+  },
+  "result": "{\"ask_id\":\"ask-7f2c\",\"state\":\"open\"}"
+}

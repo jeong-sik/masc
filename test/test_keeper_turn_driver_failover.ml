@@ -180,6 +180,98 @@ max-concurrent = 1
 max-concurrent = 1
 |}
 
+(* The head declares a large prompt ceiling, the fallback a small one, and a
+   third binding declares none. [roomy] and [tight] are the declared
+   ceilings the briefing-budget tests read back. Both declare through a
+   Claude Code provider, which reads [max-prompt-bytes]. [unread] is the
+   smallest number in the file, declared on a model bound through an HTTP
+   provider that never reads it, so no lane minimum may pick it. *)
+let roomy_max_prompt_bytes = 1_048_576
+let tight_max_prompt_bytes = 131_072
+let unread_max_prompt_bytes = 65_536
+
+let runtime_toml_with_uneven_prompt_ceilings =
+  Printf.sprintf
+    {|
+[runtime]
+default = "primary.roomy_model"
+
+[runtime.lanes.uneven]
+candidates = [ "primary.roomy_model", "fallback.tight_model" ]
+
+[runtime.lanes.undeclared_head]
+candidates = [ "open.open_model", "fallback.tight_model" ]
+
+[runtime.lanes.undeclared_only]
+candidates = [ "open.open_model" ]
+
+[runtime.lanes.three_deep]
+candidates = [ "open.open_model", "primary.roomy_model", "fallback.tight_model" ]
+
+[runtime.lanes.unread_declaration]
+candidates = [ "primary.roomy_model", "open.unread_model" ]
+
+[providers.primary]
+display-name = "Primary Provider"
+protocol = "claude-code"
+command = "/fixture-must-not-run-a-model"
+is-non-interactive = true
+
+[providers.fallback]
+display-name = "Fallback Provider"
+protocol = "claude-code"
+command = "/fixture-must-not-run-a-model"
+is-non-interactive = true
+
+[providers.open]
+display-name = "Open Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:3"
+
+[models.roomy_model]
+api-name = "roomy-model"
+max-context = 200000
+max-prompt-bytes = %d
+tools-support = true
+streaming = true
+
+[models.tight_model]
+api-name = "tight-model"
+max-context = 200000
+max-prompt-bytes = %d
+tools-support = true
+streaming = true
+
+[models.open_model]
+api-name = "open-model"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[models.unread_model]
+api-name = "unread-model"
+max-context = 200000
+max-prompt-bytes = %d
+tools-support = true
+streaming = true
+
+[primary.roomy_model]
+is-default = true
+max-concurrent = 1
+
+[fallback.tight_model]
+max-concurrent = 1
+
+[open.open_model]
+max-concurrent = 1
+
+[open.unread_model]
+max-concurrent = 1
+|}
+    roomy_max_prompt_bytes
+    tight_max_prompt_bytes
+    unread_max_prompt_bytes
+
 let runtime_toml_quota_lane_with_shared_credential shared_credential =
   Printf.sprintf
     {|
@@ -616,6 +708,104 @@ let test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens () =
       "the lane name itself names no binding, which is why this exists"
       true
       (Option.is_none (Runtime.get_runtime_by_id "resilient")))
+
+(* The briefing is rendered before the lane walk picks a candidate, and a
+   failed head is demoted behind its siblings, so the fallback can serve the
+   turn. Its budget must fit the smallest ceiling the lane declares, not the
+   head's: sized from the head, the fallback receives a briefing no cut of
+   history can bring under its own ceiling. *)
+let briefing_share_of cap =
+  cap * Masc.Keeper_config.keeper_context_briefing_share_percent () / 100
+
+module Budget = Masc.Keeper_turn_runtime_budget
+
+let briefing_budget_of_route route =
+  Budget.world_state_briefing_budget_bytes (Budget.Lane_of_route route)
+
+let test_briefing_budget_fits_the_smallest_lane_ceiling () =
+  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
+    Alcotest.(check (option int))
+      "the lane's smallest declared ceiling"
+      (Some tight_max_prompt_bytes)
+      (Runtime.smallest_max_prompt_bytes_of_route "uneven");
+    match briefing_budget_of_route "uneven" with
+    | None -> Alcotest.fail "a lane whose candidates declare ceilings is bounded"
+    | Some budget ->
+      Alcotest.(check int)
+        "the briefing is a share of the fallback's ceiling"
+        (briefing_share_of tight_max_prompt_bytes)
+        budget)
+
+(* A candidate that declares no ceiling has none in any admission path. It
+   adds no bound, and it must not erase the bound a sibling declares. *)
+let test_briefing_budget_an_undeclared_candidate_adds_no_bound () =
+  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
+    Alcotest.(check (option int))
+      "an undeclared head does not erase the fallback's ceiling"
+      (Some (briefing_share_of tight_max_prompt_bytes))
+      (briefing_budget_of_route "undeclared_head");
+    Alcotest.(check (option int))
+      "a lane whose candidates declare none gets no bound"
+      None
+      (briefing_budget_of_route "undeclared_only");
+    Alcotest.(check (option int))
+      "a bare runtime route is bounded by its own ceiling"
+      (Some (briefing_share_of roomy_max_prompt_bytes))
+      (briefing_budget_of_route "primary.roomy_model");
+    Alcotest.(check (option int))
+      "a route that names nothing gets no bound"
+      None
+      (briefing_budget_of_route "no-such-route"))
+
+(* Lane [open (none); roomy; tight]. The undeclared head failed and the
+   deferred hint names roomy next with tight after it. The walk dispatches
+   both, so the briefing must fit tight, not only the next candidate. *)
+let test_briefing_budget_spans_the_whole_deferred_suffix () =
+  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
+    let hint =
+      Driver.restore_deferred_runtime_lane
+        ~assignment_id:"three_deep"
+        ~failed_runtime_id:"open.open_model"
+        ~next_runtime_id:"primary.roomy_model"
+        ~later_runtime_ids:[ "fallback.tight_model" ]
+        ~failure:(Agent_core.Error.Internal "head refused")
+    in
+    let candidates =
+      Masc.Keeper_unified_turn.briefing_candidates_for_turn
+        ~deferred_runtime_lane:(Some hint)
+        ~assigned_route:"three_deep"
+    in
+    Alcotest.(check (option int))
+      "the briefing fits the last candidate of the deferred walk"
+      (Some (briefing_share_of tight_max_prompt_bytes))
+      (Budget.world_state_briefing_budget_bytes candidates);
+    Alcotest.(check (option int))
+      "without a hint the whole lane of the assignment bounds it"
+      (Some (briefing_share_of tight_max_prompt_bytes))
+      (Budget.world_state_briefing_budget_bytes
+         (Masc.Keeper_unified_turn.briefing_candidates_for_turn
+            ~deferred_runtime_lane:None
+            ~assigned_route:"three_deep")))
+
+(* Only Claude Code and Antigravity read [max-prompt-bytes]. A number declared
+   on an HTTP candidate bounds nothing that provider checks, so it must not
+   become the lane's minimum: counted, it would shrink every turn's briefing
+   even while the Claude Code head serves. Two reading candidates still give
+   their minimum ([uneven]). *)
+let test_briefing_budget_ignores_a_ceiling_its_runtime_does_not_read () =
+  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
+    Alcotest.(check (option int))
+      "the HTTP declaration does not become the lane minimum"
+      (Some roomy_max_prompt_bytes)
+      (Runtime.smallest_max_prompt_bytes_of_route "unread_declaration");
+    Alcotest.(check (option int))
+      "a lone HTTP declaration bounds nothing"
+      None
+      (Runtime.smallest_max_prompt_bytes_of_runtime_ids [ "open.unread_model" ]);
+    Alcotest.(check (option int))
+      "two reading candidates give their minimum"
+      (Some tight_max_prompt_bytes)
+      (Runtime.smallest_max_prompt_bytes_of_route "uneven"))
 
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
@@ -5028,6 +5218,60 @@ let test_exhausted_access_errors_rotate_and_deterministic_requests_remain_termin
     | Ok _ -> Alcotest.fail "exhausted lane unexpectedly succeeded") cases
 ;;
 
+
+(* The pipeline answers a request it refused to send with [Attempt_rejected].
+   Only when no request of the attempt was serialized for sending did no
+   provider see it; a refusal after an earlier request went out, and every
+   provider answer, stay dispatched. *)
+let test_a_pipeline_refusal_is_not_a_dispatched_attempt () =
+  let dispatch = Driver.For_testing.provider_attempt_dispatch in
+  let pipeline_refusal =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message = "output reservation unknown"
+         ; reason = Llm_provider.Retry.Attempt_rejected
+         })
+  in
+  let provider_refusal =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message = "bad parameter"
+         ; reason = Llm_provider.Retry.Unknown_invalid_request
+         })
+  in
+  Alcotest.check dispatch_disposition "refused before any request went out"
+    Masc.Keeper_attempt_dispatch.Rejected_before_dispatch
+    (dispatch ~request_serialized:false (Error pipeline_refusal));
+  Alcotest.check dispatch_disposition "refused after an earlier request went out"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch ~request_serialized:true (Error pipeline_refusal));
+  Alcotest.check dispatch_disposition "a provider's refusal"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch ~request_serialized:true (Error provider_refusal));
+  Alcotest.check dispatch_disposition "a network failure after sending"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch ~request_serialized:true (Error (retryable_network_error "reset")));
+  let window_counted_locally =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.ContextOverflow { message = "window"; limit = None })
+  in
+  Alcotest.check dispatch_disposition "a window the pipeline counted before sending"
+    Masc.Keeper_attempt_dispatch.Rejected_before_dispatch
+    (dispatch ~request_serialized:false (Error window_counted_locally));
+  Alcotest.check dispatch_disposition "the same window refused by the provider"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch ~request_serialized:true (Error window_counted_locally));
+  Alcotest.check dispatch_disposition "no declared context limit"
+    Masc.Keeper_attempt_dispatch.Rejected_before_dispatch
+    (dispatch ~request_serialized:false
+       (Error
+          (Agent_core.Error.Config
+             (Agent_core.Error.InvalidConfig { field = "max_context"; detail = "none" }))));
+  Alcotest.check dispatch_disposition "a transport failure with no request serialized"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch ~request_serialized:false (Error (retryable_network_error "count")))
+;;
+
 let () =
   Alcotest.run
     "keeper_turn_driver_failover"
@@ -5062,6 +5306,22 @@ let () =
             "entry_runtime_id_of_route resolves a route to the binding it opens"
             `Quick
             test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens;
+          Alcotest.test_case
+            "the briefing budget fits the smallest lane ceiling"
+            `Quick
+            test_briefing_budget_fits_the_smallest_lane_ceiling;
+          Alcotest.test_case
+            "an undeclared candidate adds no bound and erases none"
+            `Quick
+            test_briefing_budget_an_undeclared_candidate_adds_no_bound;
+          Alcotest.test_case
+            "the briefing budget spans the whole deferred suffix"
+            `Quick
+            test_briefing_budget_spans_the_whole_deferred_suffix;
+          Alcotest.test_case
+            "the briefing budget ignores a ceiling its runtime does not read"
+            `Quick
+            test_briefing_budget_ignores_a_ceiling_its_runtime_does_not_read;
           Alcotest.test_case
             "a bare runtime assignment walks only itself"
             `Quick
@@ -5396,5 +5656,9 @@ let () =
             "initial lane exhaustion cannot escape declared candidates"
             `Quick
             test_initial_lane_exhaustion_cannot_escape_declared_candidates;
+          Alcotest.test_case
+            "a pipeline refusal is not a dispatched attempt"
+            `Quick
+            test_a_pipeline_refusal_is_not_a_dispatched_attempt;
         ] );
     ]

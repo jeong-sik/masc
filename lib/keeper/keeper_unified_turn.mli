@@ -34,6 +34,15 @@ val turn_tool_event_integrity_error
 (** Project the initial keeper turn context budget from the routed runtime's
     prevalidated resolution, so lifecycle context math matches the provider
     that will receive the first request. Exposed for regression tests. *)
+val briefing_candidates_for_turn
+  :  deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option
+  -> assigned_route:string
+  -> Keeper_turn_runtime_budget.briefing_candidates
+(** The candidates the turn's walk may dispatch, for sizing the pinned
+    briefing: the deferred suffix [Keeper_turn_driver.deferred_runtime_ids]
+    when a hint is present, otherwise the lane [assigned_route] names.
+    Exposed for regression tests. *)
+
 val resolved_max_context_for_turn
   :  meta:Keeper_meta_contract.keeper_meta
   -> Keeper_context_runtime.max_context_resolution

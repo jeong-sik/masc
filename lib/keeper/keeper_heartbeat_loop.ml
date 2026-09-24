@@ -193,30 +193,6 @@ type keepalive_turn_outcome = {
           the plain cadence. *)
 }
 
-let consume_deferred_runtime_lane_hint hint_ref expected =
-  match !hint_ref with
-  | Some current
-    when Keeper_turn_driver.equal_deferred_runtime_lane expected current ->
-    hint_ref := None;
-    true
-  | None | Some _ -> false
-;;
-
-(* A deferred runtime lane was recorded for one runtime assignment. A config
-   update that changes [runtime_id] while a turn holds the slot does not
-   restart the lane, so the loop-local hint can outlive its assignment; the
-   next cycle would keep walking the old assignment's candidates. The hint is
-   dropped once the current assignment differs, as a lane restart does. *)
-let deferred_runtime_lane_for_assignment hint_ref ~assignment_id =
-  match !hint_ref with
-  | Some (hint : Keeper_turn_driver.deferred_runtime_lane)
-    when String.equal hint.assignment_id assignment_id -> Some hint
-  | Some _ ->
-    hint_ref := None;
-    None
-  | None -> None
-;;
-
 (* The loop-local hint is the in-process view of
    [Keeper_deferred_runtime_lane_store]. The provider checkpoint the suffix
    escapes survives a restart, so the suffix must too: without the file a
@@ -228,14 +204,19 @@ let deferred_runtime_lane_for_assignment hint_ref ~assignment_id =
 module Deferred_lane_slot = struct
   module Store = Keeper_deferred_runtime_lane_store
 
+  (* [Held] is a suffix the next cycle walks. [Dispatched] means a dispatch
+     consumed it and its cycle has not settled; the file still names the suffix
+     that dispatch runs. *)
+  type state =
+    | Idle
+    | Held of Keeper_turn_driver.deferred_runtime_lane
+    | Dispatched
+
   type t =
     { base_path : string
     ; keepers_dir : string
     ; keeper_name : string
-    ; hint : Keeper_turn_driver.deferred_runtime_lane option ref
-    ; dispatched : bool ref
-        (** The held hint was consumed by a dispatch whose cycle has not
-            settled yet; its file still names the suffix that dispatch runs. *)
+    ; state : state ref
     }
 
   let log_store_error slot ~action error =
@@ -296,7 +277,7 @@ module Deferred_lane_slot = struct
 
   let restore ~lane_now ~base_path ~keepers_dir ~keeper_name =
     let slot =
-      { base_path; keepers_dir; keeper_name; hint = ref None; dispatched = ref false }
+      { base_path; keepers_dir; keeper_name; state = ref Idle }
     in
     (match Store.load ~keepers_dir ~keeper_name with
      | Ok None -> ()
@@ -316,7 +297,7 @@ module Deferred_lane_slot = struct
             restored.assignment_id
             restored.failed_runtime_id
             restored.next_runtime_id;
-          slot.hint := Some restored)
+          slot.state := Held restored)
      | Error error ->
        (* The file is kept as evidence, so this warning repeats on every
           start until an operator acts on it or the next deferral replaces
@@ -341,34 +322,44 @@ module Deferred_lane_slot = struct
      with
      | Ok () -> ()
      | Error error -> log_store_error slot ~action:"save" error);
-    slot.hint := Some hint;
-    slot.dispatched := false
+    slot.state := Held hint
   ;;
 
   (* The driver consumes the hint at dispatch, before the next runtime is
      called. The file stays until that cycle settles: a restart while B runs
      must still start from B, not walk back to the runtime just rejected. *)
   let consume slot expected =
-    if consume_deferred_runtime_lane_hint slot.hint expected
-    then slot.dispatched := true
+    match !(slot.state) with
+    | Held current when Keeper_turn_driver.equal_deferred_runtime_lane expected current ->
+      slot.state := Dispatched
+    | Held _ | Idle | Dispatched -> ()
   ;;
 
   (* Once the cycle ends, the suffix it ran is either replaced by the one it
      left behind or settled. *)
-  let settle slot = function
-    | Some hint -> record slot hint
-    | None ->
-      if !(slot.dispatched)
-      then (
-        clear_durable slot;
-        slot.dispatched := false)
+  let settle slot left_behind =
+    match left_behind, !(slot.state) with
+    | Some hint, (Idle | Held _ | Dispatched) -> record slot hint
+    | None, Dispatched ->
+      clear_durable slot;
+      slot.state := Idle
+    | None, (Idle | Held _) -> ()
   ;;
 
+  (* A hint was recorded for one runtime assignment. A config update that
+     changes [runtime_id] while a turn holds the slot does not restart the
+     lane, so the hint can outlive its assignment; the next cycle would keep
+     walking the old assignment's candidates. It is dropped, file and all,
+     once the current assignment differs, as a lane restart does. *)
   let for_assignment slot ~assignment_id =
-    let held = Option.is_some !(slot.hint) in
-    let current = deferred_runtime_lane_for_assignment slot.hint ~assignment_id in
-    if held && Option.is_none !(slot.hint) then clear_durable slot;
-    current
+    match !(slot.state) with
+    | Held (hint : Keeper_turn_driver.deferred_runtime_lane)
+      when String.equal hint.assignment_id assignment_id -> Some hint
+    | Held _ ->
+      clear_durable slot;
+      slot.state := Idle;
+      None
+    | Idle | Dispatched -> None
   ;;
 end
 

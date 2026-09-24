@@ -22,6 +22,13 @@ module Tabs = struct
   ;;
 
   let page_of_id t id = Hashtbl.find_opt t.by_id id
+
+  (* [next] is kept: an id handed out for a page of an earlier session is
+     never handed out again. *)
+  let forget_pages t =
+    Hashtbl.reset t.by_page;
+    Hashtbl.reset t.by_id
+  ;;
 end
 
 type call = Wire.call -> (Yojson.Safe.t, Session.call_failure) result

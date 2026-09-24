@@ -39,7 +39,7 @@ APPROVAL = "/api/v1/keepers/tool-approval"
 
 
 def open_chat(process: subprocess.Popen[bytes], fd: int, output: bytearray) -> None:
-    h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+    h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
     h.select_keeper_row(process, fd, output, b"alpha")
     h.send_and_wait(process, fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
 
@@ -250,7 +250,7 @@ def quiet_leave_belongs_to_the_chat_surface(binary: str) -> None:
         # selected, and only then the focus key. Pressing i on a surface whose
         # roster has not arrived focuses a row with nothing to send to, and
         # the letters below would land nowhere.
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
         h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
         h.send_and_wait(process, fd, output, b"zqx", b"zqx")

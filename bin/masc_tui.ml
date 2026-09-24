@@ -24437,6 +24437,8 @@ and is loaded on demand through keeper_skill.
                  state.task_detail_id <- None;
                  state.task_focus <- Right_pane;
                  state.task_selected_id <- None)
+        | Some ("p" | "P") when state.view = Planning ->
+            goto_surface state ~mailbox:async_messages Approvals
         | Some "t" | Some "T" ->
            (* Focus the Overview task panel. The list is always on screen, but
               j/k move nothing until the operator asks for tasks. *)

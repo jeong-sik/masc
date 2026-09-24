@@ -23,7 +23,7 @@ System reaches Runtime with `9` (Esc returns to System), Resources with `s` and 
 reaches the server log with `l`. Task Review, Task Verdicts, Schedules,
 Fusion, Lanes, Clients, Runtime, Changes, Code, Resources, Tools, and Logs
 also keep `go <name>` palette entries, and each Config pane has
-`go Config / <pane>` (`runtime.toml`, `models`, `params`, `prompts`,
+`go System / <pane>` (`runtime.toml`, `models`, `params`, `prompts`,
 `presets`, `themes`, `voice`). Changes follows the Keeper selected on
 Keepers. Keeper operations are reached from their parent only.
 
@@ -310,7 +310,8 @@ Usage screen.
 `t` switches between Goals and Tasks. On Tasks, `j`/`k`, paging, Home/End,
 search, `Enter`, and `Esc` operate on the visible Task rows and detail. Goal
 details retain their criterion, measurement and linked Task references.
-`v` opens Task Review and Task Verdicts, then returns to Goals.
+`v` opens Task Review and Task Verdicts, then returns to Goals. `p` opens
+operator Approvals and Keeper questions; `Esc` returns to Work.
 
 ### Usage
 

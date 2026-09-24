@@ -75,7 +75,7 @@ def scenario(binary: str, columns: int) -> None:
                               needle=b"MASC Dashboard")
             h.resize_and_wait(process, master, output, rows=30, columns=columns,
                               needle=b"MASC Dashboard")
-            h.send_and_wait(process, master, output, b"2", b"MASC Keepers")
+            h.send_and_wait(process, master, output, b"3", b"MASC Keepers")
             h.select_keeper_row(process, master, output, b"alpha")
             h.send_and_wait(process, master, output, b"c",
                             b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")

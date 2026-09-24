@@ -2135,7 +2135,7 @@ def navigate_with_arrows_and_quit(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
     # The header is drawn before the asynchronous roster, and Down on a list
     # that has not arrived moves nothing, so the wait for beta ran out on the
     # Linux runner while a faster machine got the roster first. Start from a
@@ -2311,7 +2311,7 @@ def keeper_runtime_phase_and_identity_interaction(
         process,
         master_fd,
         output,
-        b"2",
+        b"3",
         b"anthropic.claude-opus-5",
     )
     wait_for_output(
@@ -2385,7 +2385,7 @@ def keeper_long_runtime_identity_interaction(
         process,
         master_fd,
         output,
-        b"2",
+        b"3",
         b"flash-thinking-preview",
     )
     wait_for_output(
@@ -2423,7 +2423,7 @@ def wheel_scrolls_and_clicks_do_not(
         process, master_fd, output, b"\x1b[?1006;1000h", start=0, timeout=3.0
     )
     wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
-    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
     # The header is drawn before the asynchronous roster; a wheel report on a
     # list that has not arrived moves nothing. Start from alpha's row, which
     # presses nothing when alpha is already selected.
@@ -2539,7 +2539,7 @@ def wheel_scrolls_and_clicks_do_not(
         termios.TIOCSWINSZ,
         struct.pack("HHHH", 14, 100, 0, 0),
     )
-    os.write(master_fd, b"2")
+    os.write(master_fd, b"3")
     os.killpg(process.pid, signal.SIGCONT)
     wait_for_terminal_input_consumed(slave_fd)
     wait_for_output(
@@ -2574,7 +2574,7 @@ def wheel_scrolls_and_clicks_do_not(
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25l",
     )
-    os.write(master_fd, b"2")
+    os.write(master_fd, b"3")
     wait_for_terminal_input_consumed(slave_fd)
     resize_and_wait(
         process,
@@ -2764,7 +2764,7 @@ def keeper_detail_overscroll_interaction(
                 start=cluster_end,
                 timeout=3.0,
             )
-            send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+            send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
             # Confirm which row Enter will open rather than assuming the list
             # opens on its first entry. The roster order is a property of the
             # fixture and of whatever the live read returned, so pressing
@@ -2890,7 +2890,7 @@ def keeper_selection_identity_interaction(
         start=cluster_end,
         timeout=3.0,
     )
-    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
     # j on a roster that has not arrived moves nothing and redraws
     # nothing, so the wait for beta's band times out. Ask for the row.
     select_keeper_row(process, master_fd, output, b"beta")
@@ -2991,7 +2991,7 @@ def cli_base_path_overrides_environment_interaction(
         process,
         master_fd,
         output,
-        b"2",
+        b"3",
         keeper_row_selected(b"alpha"),
     )
     if b"env-only" in frame:
@@ -3213,7 +3213,7 @@ def send_on_stop_from_the_composer_row_interaction(requests: HttpRequests) -> In
         output: bytearray,
         _base_path: str,
     ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"i", COMPOSER_FOCUSED)
         os.write(master_fd, b"\x19")
@@ -3245,7 +3245,7 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
         output: bytearray,
         _base_path: str,
     ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(
             process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
@@ -3272,7 +3272,7 @@ def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interac
         output: bytearray,
         base_path: str,
     ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         # j on a roster that has not arrived moves nothing and redraws
         # nothing, so the wait for beta's band times out. Ask for the row.
         select_keeper_row(process, master_fd, output, b"beta")
@@ -3372,7 +3372,7 @@ def keeper_message_unreliable_roster_interaction(
         output: bytearray,
         base_path: str,
     ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         # j on a roster that has not arrived moves nothing and redraws
         # nothing, so the wait for beta's band times out. Ask for the row.
         select_keeper_row(process, master_fd, output, b"beta")
@@ -3474,7 +3474,7 @@ def quit_from_compact_message(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
@@ -5281,7 +5281,7 @@ def paste_into_a_field_interaction() -> Interaction:
         wait_for_output(
             process, master_fd, output, BRACKETED_PASTE_ON, start=0, timeout=5.0
         )
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
 
         # Row search draws its query in the footer, so the pasted characters
         # are asserted where they landed rather than through what they did.
@@ -5370,7 +5370,7 @@ def bracketed_paste_interaction(requests: HttpRequests) -> Interaction:
             process, master_fd, output, BRACKETED_PASTE_ON, start=0, timeout=5.0
         )
 
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(
             process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
@@ -5446,7 +5446,7 @@ def word_delete_interaction(requests: HttpRequests) -> Interaction:
         wait_for_output(
             process, master_fd, output, BRACKETED_PASTE_ON, start=0, timeout=5.0
         )
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(
             process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
@@ -5561,7 +5561,7 @@ def image_view_interaction() -> Interaction:
                     f"the capability query never went out; missing {expected!r}"
                 )
 
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(
             process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
@@ -5667,7 +5667,7 @@ def paste_spill_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(
             process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
@@ -5787,7 +5787,7 @@ def paste_to_file_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         base_path: str,
     ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(
             process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
@@ -5999,7 +5999,7 @@ def keeper_chat_error_detail_interaction() -> Interaction:
         resize_and_wait(
             process, master_fd, output, rows=24, columns=100, needle=b"MASC Dashboard"
         )
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         send_and_wait(process, master_fd, output, b"trigger-error", b"trigger-error")
@@ -6175,7 +6175,7 @@ class AtomicChatFixture:
 
 def open_atomic_chat(process: subprocess.Popen[bytes], master_fd: int, output: bytearray) -> None:
     resize_and_wait(process, master_fd, output, rows=40, columns=120, needle=b"MASC Dashboard")
-    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
     # Establish the detail return target used by the scenario's Escape checks.
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
@@ -6454,7 +6454,7 @@ def chat_reconcile_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(
             process,
@@ -6544,7 +6544,7 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(
             process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
@@ -7129,7 +7129,7 @@ def autonomous_turn_history_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         pane_start = len(output)
@@ -7278,7 +7278,7 @@ def memory_journal_timeline_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         start = len(output)
@@ -7805,7 +7805,7 @@ def context_inspector_interaction() -> Interaction:
         resize_and_wait(
             process, master_fd, output, rows=50, columns=140, needle=b"MASC Dashboard"
         )
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(
             process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
@@ -8024,7 +8024,7 @@ def clipboard_paste_key_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(
             process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
@@ -8067,7 +8067,7 @@ def chat_visibility_modes_interaction(
             columns=180,
             needle=b"MASC Dashboard",
         )
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         # Keep the roster cursor on beta, then open alpha through the palette.
         # Durable call details belong to the chat target, not that unrelated
         # cursor; the old response guard discarded this successful GET.
@@ -9019,7 +9019,7 @@ def live_markdown_interaction(
         columns=90,
         needle=b"MASC Dashboard",
     )
-    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     pane_start = len(output)
@@ -9107,7 +9107,7 @@ def message_origin_badge_interaction(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     pane_start = len(output)
@@ -9265,7 +9265,7 @@ def viewport_gap_interaction(
         columns=100,
         needle=b"MASC Dashboard",
     )
-    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
     # The opened title row renders "Keepers ▸ alpha" plainly now (the bold
     # run was dropped from the renderer); asserting the old \x1b[1m spelling
@@ -9399,7 +9399,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             process,
             master_fd,
             output,
-            b"2",
+            b"3",
             b"anthropic.claude-opus-5",
         )
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
@@ -9623,7 +9623,7 @@ def keeper_calls_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         # The header is drawn before the asynchronous roster, so t can land
         # while nothing is selected and open no keeper's log at all.
         select_keeper_row(process, master_fd, output, b"alpha")
@@ -11452,7 +11452,7 @@ def run_keeper_unbind_all_channels_regression(executable: str) -> None:
 
     def interact(process: subprocess.Popen[bytes], master_fd: int,
                  _slave_fd: int, output: bytearray, _base_path: str) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"\r", b"\xe2\x96\xb8Info")
         # [ from Info wraps to Runs; Channels is two further back.
@@ -11510,7 +11510,7 @@ def run_pause_offers_channel_unbind_regression(executable: str) -> None:
 
     def pause_alpha(process: subprocess.Popen[bytes], master_fd: int,
                     output: bytearray) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         # Pause is not a two-press action; one p sends it.
         send_and_wait(process, master_fd, output, b"p",
@@ -11589,7 +11589,7 @@ def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
                 f"the acting pane did not open at 150 columns: {screen_text(completed)!r}"
             )
         # Keeper detail: [ from Info wraps to Runs, the last of nine tabs.
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"\r", b"\xe2\x96\xb8Info")
         send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8Runs")
@@ -14422,7 +14422,7 @@ def composer_newline_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
@@ -16665,7 +16665,7 @@ def mermaid_chat_interaction(
     wait_for_output(
         process, master_fd, output, b"MASC Dashboard", start=0, timeout=5.0
     )
-    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
     select_keeper_row(process, master_fd, output, b"alpha")
     # Enter opens the keeper's Info tabs; the transcript hangs off the palette.
     # The wait needle is a node label because the fallback prints the source,
@@ -18301,19 +18301,21 @@ def dashboard_usage_interaction(
     send_and_wait(process, master_fd, output, b"\r", b"Actual: 3 (reported)")
     wait_for_output(process, master_fd, output, b"artifact:fixture-checks", start=0, timeout=5.0)
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Work")
+    send_and_wait(process, master_fd, output, b"p", b"MASC Approvals")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Work")
     send_and_wait(process, master_fd, output, b"t", b"MASC Work / Tasks")
     usage = tab_until(process, master_fd, output, b"MASC Usage")
     if b"MASC Usage" not in usage:
         raise AssertionError(f"Usage is not on the main ring: {usage!r}")
     wait_for_output(
-        process, master_fd, output, b"Quota scope trend", start=0, timeout=10.0
+        process, master_fd, output, b"UTC days reported", start=0, timeout=10.0
     )
     plain = unwrapped(screen_text(bytes(output)))
     if b"UTC days reported" not in plain or b"Keeper usage" not in plain:
         raise AssertionError(f"Usage evidence and coverage missing: {plain!r}")
     print("USAGE_PTY_SCREEN=" + json.dumps(plain.decode("utf-8", errors="replace")), flush=True)
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
-    send_and_wait(process, master_fd, output, b"3", b"Memory & Gate Safety")
+    send_and_wait(process, master_fd, output, b"3", b"Gate Governance")
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage")
     send_and_wait(process, master_fd, output, b"w", b"7 UTC days")
     system = tab_until(process, master_fd, output, b"MASC System")

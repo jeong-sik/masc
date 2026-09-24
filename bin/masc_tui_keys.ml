@@ -566,6 +566,8 @@ let for_surface = function
       [ b Navigate "j/k" "move"
       ; b Navigate "t" "Goals / Tasks"
           ~help:"switch between Goals and the active task list"
+      ; b Navigate "p" "Approvals"
+          ~help:"open operator approvals and Keeper questions; Esc returns to Work"
       ; b Navigate "v" "next Work tab"
           ~help:"Goals, then the two task surfaces: Task Review and \
                  Task Verdicts. Not stages of one flow"

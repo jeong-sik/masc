@@ -30,7 +30,7 @@ def run(executable: str) -> None:
         h.drain_until_quiet(process, master_fd, output)
         # Keeper detail: [ from Info wraps to Runs, the last of nine tabs. The
         # strip must cut its far end rather than the entry it marks.
-        h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, master_fd, output, b"3", b"MASC Keepers")
         h.select_keeper_row(process, master_fd, output, b"alpha")
         h.send_and_wait(process, master_fd, output, b"\r", CURRENT + b"Info")
         h.send_and_wait(process, master_fd, output, b"[", CURRENT + b"Runs")

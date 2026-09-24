@@ -1,4 +1,4 @@
-"""The Overview's Tasks title stops at the frame, like every row around it."""
+"""The Work / Tasks summary stops at the frame, like every row around it."""
 import os
 import re
 import sys
@@ -9,10 +9,8 @@ import test_tui_keyboard_input as h
 # suite when a pull request changes a path the suite names.
 SOURCE_MODULES = ("bin/masc_tui_render.ml",)
 
-# The title is written "Tasks" bold, then the counts, so the two are not
-# contiguous bytes. The first count is, and only this row carries it: the
-# line under it that says nothing is held reads "no task in progress".
-TITLE = b"0 in progress"
+# The active Task count belongs to this row, above the task list.
+TITLE = b"Open tasks"
 SGR = re.compile(rb"\x1b\[[0-9;]*m")
 OSC = re.compile(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
@@ -31,9 +29,8 @@ def cells(row: bytes) -> int:
 def run(executable: str) -> None:
     def interact(process, fd, _slave, output, _base_path):
         h.wait_for_output(process, fd, output, b"MASC Dashboard", start=0, timeout=15)
-        # Five todo tasks and none held; the title draws
-        # " Tasks (0 in progress . 0 awaiting . 0 claimed . 0 done 24h)",
-        # which is 60 cells.
+        h.send_and_wait(process, fd, output, b"\t", b"MASC Work")
+        h.send_and_wait(process, fd, output, b"t", b"MASC Work / Tasks")
         h.wait_for_output(process, fd, output, TITLE, start=0, timeout=20)
         for columns in (50, 56, 100):
             # Wait on the row this measures, not on the title above it: the
@@ -46,7 +43,7 @@ def run(executable: str) -> None:
             index = h.screen_row_of(rows, TITLE)
             if index < 0:
                 raise AssertionError(
-                    f"at {columns} columns the Overview drew no Tasks title")
+                    f"at {columns} columns Work drew no Tasks summary")
             row = rows[index]
             width = cells(row)
             if width > columns:

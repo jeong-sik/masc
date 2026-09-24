@@ -11207,11 +11207,11 @@ let palette_entries (state : state) =
   @ List.map
       (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
       surface_ring
-  (* After the ring, so "go config" still leads with the Config surface: the
+  (* After the ring, so "go system" still leads with the System surface: the
      ranks tie on a label that starts with the query, and a tie keeps entry
      order. *)
   @ List.map
-      (fun (pane, label) -> ("go Config / " ^ label, Palette_config pane))
+      (fun (pane, label) -> ("go System / " ^ label, Palette_config pane))
       config_panes
   @ List.map
       (fun (keeper : keeper) ->

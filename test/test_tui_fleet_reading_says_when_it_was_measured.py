@@ -69,7 +69,7 @@ def run(executable: str) -> None:
         raise AssertionError(f"the Work section never showed {needle!r}")
 
     def interact(process, fd, _slave, output, _base):
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.wait_for_output(process, fd, output, FLEET_LINE, start=0, timeout=10)
         h.read_available(fd, output)
         if b"fleet reading:" in screen_text(output):

@@ -182,7 +182,7 @@ def run_git_changes_overlay(executable: str) -> None:
 
     def interact(process, fd, _slave, output, _base):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=15)
-        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.send_and_wait(process, fd, output, b"3", b"MASC Keepers")
         h.wait_for_output(process, fd, output, b"alpha", start=0, timeout=5)
         h.send_and_wait(process, fd, output, b"d", b"MASC Git Changes")
         h.wait_for_output(process, fd, output, b"lib/zebra.ml", start=0, timeout=5)

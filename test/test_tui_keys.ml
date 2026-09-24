@@ -815,7 +815,7 @@ let test_every_detail_surface_steps_through_its_list () =
 
 let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
-    "j/k:move  t:Goals / Tasks  v:next Work tab  f:filter  s:sort  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  a:confirm proof  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  t:Goals / Tasks  p:Approvals  v:next Work tab  f:filter  s:sort  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  a:confirm proof  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints ~detail_open:false Planning)
 
 let test_board_footer_names_reversible_hearth_navigation () =
@@ -1973,21 +1973,21 @@ let test_the_sheet_carries_the_fact_detail_keys () =
     Masc_tui_keys.memory_fact_detail_hints
 
 let test_keepers_jump_uses_one_binding_for_dispatch_and_help () =
-  let global_twos =
+  let global_threes =
     List.filter
-      (fun (binding : Masc_tui_keys.binding) -> String.equal binding.key "2")
+      (fun (binding : Masc_tui_keys.binding) -> String.equal binding.key "3")
       Masc_tui_keys.global
   in
-  Alcotest.(check int) "Global declares 2 once" 1 (List.length global_twos);
-  Alcotest.(check bool) "2 opens Keepers after local input declines it" true
-    (Masc_tui_keys.opens_keepers ~message_mode:false "2");
-  Alcotest.(check bool) "message input keeps printable 2" false
-    (Masc_tui_keys.opens_keepers ~message_mode:true "2");
+  Alcotest.(check int) "Global declares 3 once" 1 (List.length global_threes);
+  Alcotest.(check bool) "3 opens Keepers after local input declines it" true
+    (Masc_tui_keys.opens_keepers ~message_mode:false "3");
+  Alcotest.(check bool) "message input keeps printable 3" false
+    (Masc_tui_keys.opens_keepers ~message_mode:true "3");
   Alcotest.(check bool) "another key does not open Keepers" false
     (Masc_tui_keys.opens_keepers ~message_mode:false "x");
   Alcotest.(check string) "Help states the local-owner boundary"
-    "jump to Keepers when the active field or panel does not use 2"
-    (List.assoc "2" (section "Global"));
+    "jump to Keepers when the active field or panel does not use 3"
+    (List.assoc "3" (section "Global"));
   let overview_keys =
     List.map
       (fun (binding : Masc_tui_keys.binding) -> binding.key)

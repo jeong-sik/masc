@@ -433,14 +433,19 @@ let test_every_surface_and_config_pane_has_a_row () =
         (Printf.sprintf "a row opens the %s pane" label)
         true
         (List.exists
-           (function _, Palette_config target -> target = pane | _ -> false)
+           (function
+             | entry, Palette_config target ->
+               entry = "go System / " ^ label && target = pane
+             | _ -> false)
            entries);
       (* Typed the way the other destinations are: "go" and the name. *)
-      state.palette_query <- "go " ^ label;
+      state.palette_query <- "go System / " ^ label;
       match palette_matches state with
       | (_, Palette_config target) :: _ when target = pane -> ()
       | _ ->
-        Alcotest.fail (Printf.sprintf "%S does not lead with its pane" ("go " ^ label)))
+        Alcotest.fail
+          (Printf.sprintf "%S does not lead with its pane"
+             ("go System / " ^ label)))
     config_panes;
   state.palette_query <- "go system";
   match palette_matches state with

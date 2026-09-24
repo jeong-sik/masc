@@ -6380,7 +6380,7 @@ let rec decode_overview_goal_node json =
       (fun task -> malformed (required_string_field task "id"))
       tasks_json
   in
-  let* children_json = malformed (optional_list_field json "children") in
+  let* children_json = malformed (required_list_field json "children") in
   let* children =
     decode_overview_goal_items decode_overview_goal_node children_json
   in

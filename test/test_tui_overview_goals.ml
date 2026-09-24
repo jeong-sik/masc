@@ -343,6 +343,28 @@ let test_the_countdown_uses_the_operator_calendar () =
   check bool "the countdown is from the local date" true
     (contains ~sub:"due 10-07 (D-13)" (find_row ~sub:"v0.37.0" rows))
 
+let test_a_goal_without_children_is_refused () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"tree":[{"id":"goal-x","title":"x","phase":"executing","priority":1,
+          "due_date":null,"task_count":0,"task_done_count":0,
+          "stagnation_seconds":null,"tasks":[]}]}|}
+  in
+  match Tui_decode.decode_overview_goals json with
+  | Error (Tui_decode.Overview_goals_malformed _) -> ()
+  | Error other ->
+      failf "refused for another reason: %s"
+        (Tui_decode.overview_goals_error_to_string other)
+  | Ok _ -> fail "a goal with no children field decoded"
+
+let test_an_empty_tree_is_one_headline () =
+  let empty = Types.Goals_read [] in
+  check int "an empty tree asks for one row" 1 (Goals.wanted_rows empty);
+  check (list string) "the headline says no goal is open"
+    [ "GOALS   active work toward a goal: 0 of 13 tasks  \xc2\xb7 no goal is \
+       executing, verifying or awaiting confirmation" ]
+    (draw empty)
+
 let test_an_unknown_phase_is_refused () =
   let json =
     Yojson.Safe.from_string
@@ -374,6 +396,10 @@ let () =
             test_an_unread_backlog_is_not_a_zero
         ; test_case "the countdown uses the operator calendar" `Quick
             test_the_countdown_uses_the_operator_calendar
+        ; test_case "a goal without children is refused" `Quick
+            test_a_goal_without_children_is_refused
+        ; test_case "an empty tree is one headline" `Quick
+            test_an_empty_tree_is_one_headline
         ; test_case "an unknown phase is refused" `Quick
             test_an_unknown_phase_is_refused
         ] )

@@ -495,9 +495,9 @@ let omits label text needle =
 
 let test_a_keeper_starts_from_the_build_promoted_now () =
   with_dir (fun config_root ->
-    write_catalog config_root promoted_ocaml;
+    write_catalog config_root host_promoted_ocaml;
     check string "promoted" ocaml_now (starts_from "first" ~config_root ~store:apple (Some "ocaml"));
-    let catalog, seen = for_change "promote" ~config_root ~shipped:None in
+    let catalog, seen = for_change "promote" ~config_root ~shipped:shipped_names in
     let newer = "masc-sandbox-ocaml:20260925T0800Z-5c2e7a10" in
     saved "promote"
       (save ~config_root ~expected:seen
@@ -512,10 +512,10 @@ let test_a_keeper_that_cannot_start_says_why () =
       Resolver.error_to_string (refused_start label ~config_root ~store declared)
     in
     (match refused_start "no catalog" ~config_root ~store:apple (Some "ocaml") with
-     | Resolver.Catalog_unreadable (Missing _) as e ->
+     | Resolver.Not_built_on_host _ as e ->
        mentions "no catalog" (Resolver.error_to_string e) "masc sandbox-image promote"
      | e -> fail ("no catalog: " ^ Resolver.error_to_string e));
-    write_catalog config_root promoted_ocaml;
+    write_catalog config_root host_promoted_ocaml;
     (match refused_start "absent" ~config_root ~store:apple None with
      | Resolver.Not_declared -> ()
      | e -> fail ("absent: " ^ Resolver.error_to_string e));

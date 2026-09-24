@@ -21,11 +21,6 @@ let error_to_string = function
   | Not_declared ->
     "sandbox_image is not set. A Keeper whose sandbox_profile starts a container \
      names an image from the host's image catalog (sandbox-images.toml)."
-  | Catalog_unreadable (Catalog.Missing { path }) ->
-    Printf.sprintf
-      "no image catalog at %s. Build an image with `masc sandbox-image`, then \
-       `masc sandbox-image promote <name> <tag>` writes the catalog."
-      path
   | Catalog_unreadable error -> Catalog.load_error_to_string error
   | Unknown_image { name; known } ->
     Printf.sprintf "sandbox_image %S is not in the image catalog (it has: %s)." name
@@ -43,7 +38,17 @@ let resolve ~config_root ~store declared =
   | None -> Error Not_declared
   | Some name when String.equal (String.trim name) "" -> Error Not_declared
   | Some name ->
-    (match Catalog.load ~config_root with
+    let loaded =
+      match Embedded_config.read Catalog.file_name with
+      | None ->
+        Error
+          (Catalog.Unreadable
+             { path = "config/sandbox-images.toml (shipped)"
+             ; detail = "embedded image name catalog is unavailable"
+             })
+      | Some shipped -> Catalog.load ~config_root ~shipped
+    in
+    (match loaded with
      | Error error -> Error (Catalog_unreadable error)
      | Ok catalog ->
        (match Catalog.resolve catalog ~name ~store with

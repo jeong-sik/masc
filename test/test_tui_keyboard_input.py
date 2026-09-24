@@ -9800,6 +9800,20 @@ def planning_review_hierarchy_interaction() -> Interaction:
                     f"Task Verdicts did not explain itself ({needle!r}): "
                     f"{verdicts_plain!r}"
                 )
+        # And it keeps its footer. The surface declared its chrome as a
+        # constant that said seven where the head draws nine, so it ran three
+        # rows past its budget; a surface that overruns loses its last rows,
+        # and the last row here is the footer. The screen drew no key hints at
+        # all, at every terminal height. "y / x" is this surface's own pair, so
+        # a row left over from another screen cannot stand in for it.
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(
+            bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        if screen_row_of(rows, b"y / x:agree / overrule") < 0:
+            raise AssertionError(
+                "Task Verdicts drew no key hints: its footer was cut. Screen: "
+                + repr(screen_text(bytes(output)))
+            )
         # Planning's [v] strip has exactly three stops — Goals, Task Review,
         # Task Verdicts — and wraps back round to Goals. The walk used to
         # keep two extra children, Schedules and Fusion, but Schedules was

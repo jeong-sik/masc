@@ -1026,6 +1026,54 @@ let test_rate_limits_read_without_turn () =
           (List.map (fun json -> json |> member "method" |> to_string) requests)))
 ;;
 
+(* The read after a quota refusal is asked for by a turn that ends at once.
+   It must outlive that turn: a fiber on the turn's switch would be
+   cancelled when the turn returns, before the app-server answered. A
+   second ask while the first is still reading starts nothing. *)
+let test_background_read_outlives_the_turn () =
+  with_fixture [init_result; account_chatgpt;
+    {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000}},"rateLimitsByLimitId":null}}|}]
+    (fun path ->
+      let scope = Runtime_quota_window.scope_of_credential ~provider_id:"background-read-test" None in
+      let saved = Eio_context.snapshot_state () in
+      Fun.protect ~finally:(fun () -> Eio_context.restore_state saved) (fun () ->
+        Eio_main.run (fun env ->
+          let clock = Eio.Stdenv.clock env in
+          let cwd = Eio.Path.(Eio.Stdenv.fs env / "/tmp") in
+          let codex =
+            ({ cli_path = path; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
+          in
+          let recorded =
+            Eio.Switch.run (fun root_sw ->
+              Eio_context.set_switch root_sw;
+              let first, second =
+                Eio.Switch.run (fun turn_sw ->
+                  Eio_context.with_turn_switch turn_sw (fun () ->
+                    let first =
+                      Runtime_provider_usage_read.read_codex_in_background ~clock ~cwd ~scope codex
+                    in
+                    let second =
+                      Runtime_provider_usage_read.read_codex_in_background ~clock ~cwd ~scope codex
+                    in
+                    first, second))
+              in
+              check bool "the first ask starts a read" true
+                (first = Runtime_provider_usage_read.Started);
+              check bool "a second ask while it runs starts nothing" true
+                (second = Runtime_provider_usage_read.Already_reading);
+              let rec wait tries =
+                match Runtime_provider_usage_window.state ~scope with
+                | Runtime_provider_usage_window.Reported _ -> true
+                | Runtime_provider_usage_window.Not_reported_since_start when tries > 0 ->
+                  Eio.Time.sleep clock 0.05;
+                  wait (tries - 1)
+                | Runtime_provider_usage_window.Not_reported_since_start -> false
+              in
+              wait 100)
+          in
+          check bool "the window is recorded after the turn ended" true recorded)))
+;;
+
 let test_thread_resume_skips_history_injection () =
   let history =
     [ { Runtime_codex_app_server.role = User; text = "already in official thread" } ]
@@ -5257,6 +5305,7 @@ let () =
             test_subscription_probe_stops_before_thread
         ; test_case "metadata listing pages without turn" `Quick test_metadata_listing_pages_without_turn
         ; test_case "rate limits read without turn" `Quick test_rate_limits_read_without_turn
+        ; test_case "background read outlives the turn" `Quick test_background_read_outlives_the_turn
         ; test_case "declared cwd reaches spawn" `Quick test_declared_cwd_reaches_spawn
         ; test_case
             "protocol and spawn share cwd authority"

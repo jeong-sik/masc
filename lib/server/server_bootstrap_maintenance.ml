@@ -420,6 +420,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~sw
     ~on_error:(log_server_fiber_crash "provider_usage_read")
     (fun () ->
+      (* While setup is still required the runtime catalogue is empty, and a
+         read now would ask no account. Read when it becomes available, as
+         the completion authority starts. *)
+      if Runtime_startup_state.requires_setup () then Runtime_startup_state.await_available ();
       Runtime_provider_usage_read.read_all
         ~mgr:Posix_spawn_process_mgr.mgr
         ~net:env#net

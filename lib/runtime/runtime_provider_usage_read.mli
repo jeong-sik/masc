@@ -34,3 +34,18 @@ val read_all :
     failed read is logged with its scope (and shape for an HTTP read) and
     leaves that scope as it was; neither the response body nor the key is
     logged. *)
+
+type background =
+  | Started  (** A read was forked on the server's root switch. *)
+  | Already_reading  (** A read for this scope is still running. *)
+  | No_root_switch  (** No server root switch is installed (outside a server). *)
+
+val read_codex_in_background :
+  clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  scope:Runtime_quota_window.scope ->
+  Runtime_execution.codex_app_server ->
+  background
+(** {!read_codex} in a fiber on the server's root switch, so it outlives the
+    turn that asked for it, with at most one read per scope at a time. Its
+    failure is logged. *)

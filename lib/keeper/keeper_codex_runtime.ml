@@ -232,32 +232,23 @@ let record_usage_windows ~keeper_name ~runtime_id report =
 (* A turn refused for spent usage carries no reset time
    ([turn_failure_to_provider_error]), and the router stops picking the
    account, so no later turn will report its windows either. The account
-   can still say when it resets without a turn: ask it once, in a fiber of
-   its own, so the refused turn returns without waiting on the read. *)
+   can still say when it resets without a turn, so ask it once. The read
+   outlives this turn ({!Runtime_provider_usage_read.read_codex_in_background}),
+   and the refused turn returns without waiting on it. *)
 let read_usage_after_quota_refusal ~keeper_name ~runtime_id ~clock ~cwd config =
-  match Runtime.quota_scope_of_runtime_id runtime_id, Eio_context.get_switch_opt () with
-  | Some scope, Some sw ->
-    Eio.Fiber.fork_daemon ~sw (fun () ->
-      (match
-         Runtime_provider_usage_read.read_codex
-           ~mgr:Posix_spawn_process_mgr.mgr ~clock ~cwd ~scope config
-       with
-       | Ok () -> ()
-       | Error detail ->
-         Log.Keeper.warn
-           ~keeper_name
-           "Codex usage read after a quota refusal failed: %s"
-           detail);
-      `Stop_daemon)
-  | None, _ ->
+  match Runtime.quota_scope_of_runtime_id runtime_id with
+  | None ->
     Log.Keeper.warn
       ~keeper_name
       "Codex usage not read after a quota refusal: runtime %s has no quota scope"
       runtime_id
-  | Some _, None ->
-    Log.Keeper.warn
-      ~keeper_name
-      "Codex usage not read after a quota refusal: no Eio switch in this context"
+  | Some scope ->
+    (match Runtime_provider_usage_read.read_codex_in_background ~clock ~cwd ~scope config with
+     | Runtime_provider_usage_read.Started | Runtime_provider_usage_read.Already_reading -> ()
+     | Runtime_provider_usage_read.No_root_switch ->
+       Log.Keeper.warn
+         ~keeper_name
+         "Codex usage not read after a quota refusal: no server root switch")
 ;;
 
 (* Always installed so usage-window reports are recorded. A turn nobody

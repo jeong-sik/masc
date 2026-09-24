@@ -21,9 +21,9 @@
     ahead of the restart:
 
     - [masc_keeper_clear] empties a history, not as part of a turn, and appends
-      the line once the emptied checkpoint is saved. A checkpoint it cannot
-      read is moved aside instead, which leaves the store with none; the next
-      turn then writes the line as below.
+      the line once the emptied checkpoint is saved. A checkpoint whose bytes
+      do not decode is deleted instead, which leaves the store with none; the
+      next turn then writes the line as below.
     - A turn that starts from no atom, and knows the saved history holds none
       (it loaded an empty one, or the store has none), appends the line before
       it runs. Nothing can be saved ahead of it, so the record is there even

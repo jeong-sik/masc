@@ -197,15 +197,33 @@ let checkpoint_path config (meta : Keeper_meta_contract.keeper_meta) =
     ~session_id:trace_id
 ;;
 
-(* A checkpoint no turn can read fails every turn, so the operator's clear
-   moves it aside: the bytes stay on disk under the archive name, the
-   canonical is gone, and the next turn starts from no checkpoint. *)
-let test_unreadable_checkpoint_is_archived fault () =
+let session_dir_of config (meta : Keeper_meta_contract.keeper_meta) =
+  Keeper_types_support.keeper_session_dir config
+    (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+;;
+
+let is_absent path =
+  match Unix.lstat path with
+  | _ -> false
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true
+;;
+
+let is_symlink path = (Unix.lstat path).Unix.st_kind = Unix.S_LNK
+
+let session_entries session_dir =
+  Sys.readdir session_dir |> Array.to_list |> List.sort String.compare
+;;
+
+(* A checkpoint no turn can decode fails every turn, so the operator's clear
+   deletes it: the canonical is gone, nothing else in the session directory
+   changes (the history window included), and the next turn starts from no
+   checkpoint. *)
+let test_undecodable_checkpoint_is_removed fault () =
   with_keeper ~paused:false ~install_owner:true
   @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
   let path = checkpoint_path config meta in
-  let missing_target = path ^ ".missing" in
-  let unreadable_bytes =
+  let session_dir = session_dir_of config meta in
+  let undecodable_bytes =
     match fault with
     | `Malformed -> "{broken-checkpoint"
     | `Newer_version ->
@@ -220,36 +238,28 @@ let test_unreadable_checkpoint_is_archived fault () =
                    else key, value)
                 fields))
        | _ -> fail "checkpoint is not a JSON object")
-    | `Unreadable_path -> missing_target
   in
   Unix.unlink path;
-  (match fault with
-   | `Malformed | `Newer_version -> Fs_compat.save_file path unreadable_bytes
-   | `Unreadable_path -> Unix.symlink missing_target path);
+  Fs_compat.save_file path undecodable_bytes;
+  let others_before =
+    List.filter (fun entry -> not (String.equal entry (Filename.basename path)))
+      (session_entries session_dir)
+  in
   ignore (Keeper_turn_failure_streak.increment
     ~base_path:config.base_path ~keeper_name:meta.name);
   let result = clear () in
   check bool (Tool_result.message result) true (Tool_result.is_success result);
-  let archived =
-    Tool_result.data result |> Yojson.Safe.Util.member "unreadable_checkpoint_archived"
+  let removed =
+    Tool_result.data result |> Yojson.Safe.Util.member "undecodable_checkpoint_removed"
   in
-  let field name = Yojson.Safe.Util.(member name archived |> to_string) in
-  check string "result names the checkpoint it moved" path (field "checkpoint_path");
-  let archive_path = field "archive_path" in
-  check string "archive sits beside the checkpoint"
-    (Unix.realpath (Filename.dirname path)) (Filename.dirname archive_path);
-  (match fault with
-   | `Malformed | `Newer_version ->
-     check string "archive holds the original bytes" unreadable_bytes
-       (Fs_compat.load_file archive_path)
-   | `Unreadable_path ->
-     check string "archive is the original link" unreadable_bytes
-       (Unix.readlink archive_path));
-  check bool "the canonical checkpoint is gone" true
-    (match Unix.lstat path with
-     | _ -> false
-     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true);
-  check bool "a moved checkpoint counts as found" true
+  check string "result names the checkpoint it removed" path
+    Yojson.Safe.Util.(member "checkpoint_path" removed |> to_string);
+  check bool "result carries the decode error" true
+    (String.length Yojson.Safe.Util.(member "decode_error" removed |> to_string) > 0);
+  check bool "the canonical checkpoint is gone" true (is_absent path);
+  check (list string) "nothing else in the session directory changed" others_before
+    (session_entries session_dir);
+  check bool "a removed checkpoint counts as found" true
     Yojson.Safe.Util.(Tool_result.data result |> member "checkpoint_found" |> to_bool);
   check_official_session_cleared official_session;
   check int "clear resets the failure streak" 0
@@ -269,116 +279,102 @@ let test_unreadable_checkpoint_is_archived fault () =
   | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
 ;;
 
-let session_dir_of config (meta : Keeper_meta_contract.keeper_meta) =
-  Keeper_types_support.keeper_session_dir config
-    (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-;;
-
 let with_mode path mode f =
   let before = (Unix.stat path).Unix.st_perm in
   Unix.chmod path mode;
   Fun.protect ~finally:(fun () -> Unix.chmod path before) f
 ;;
 
-let unreadable_archives session_dir =
-  Sys.readdir session_dir |> Array.to_list
-  |> List.filter (fun name ->
-    String.starts_with ~prefix:(Filename.basename session_dir ^ ".json.unreadable-") name)
-;;
-
 let malformed = "{broken-checkpoint"
 
-(* One fixed time, so the archive name is known before the call. *)
-let archived_at = 1.0
-
-let archive config meta =
-  let session_dir = session_dir_of config meta in
-  Keeper_checkpoint_store.archive_unreadable_canonical ~session_dir
-    ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~archived_at
+let remove config meta =
+  Keeper_checkpoint_store.remove_undecodable_canonical ~session_dir:(session_dir_of config meta)
+    ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
 ;;
 
-let archive_error_message = function
+let removal_message = function
   | Ok _ -> "Ok"
-  | Error error -> Keeper_checkpoint_store.unreadable_archive_error_to_string error
+  | Error error -> Keeper_checkpoint_store.undecodable_removal_error_to_string error
 ;;
 
-let test_archive_leaves_a_loadable_checkpoint () =
+let test_removal_leaves_a_loadable_checkpoint () =
   with_keeper ~paused:false ~install_owner:false
   @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
   let path = checkpoint_path config meta in
   let original = Fs_compat.load_file path in
-  (match archive config meta with
+  (match remove config meta with
    | Ok Keeper_checkpoint_store.Canonical_loadable -> ()
-   | other -> failf "a readable checkpoint was not left alone: %s" (archive_error_message other));
-  check string "the readable checkpoint is untouched" original (Fs_compat.load_file path);
-  check (list string) "nothing was archived" [] (unreadable_archives (session_dir_of config meta))
+   | other -> failf "a readable checkpoint was not left alone: %s" (removal_message other));
+  check string "the readable checkpoint is untouched" original (Fs_compat.load_file path)
 ;;
 
-let test_archive_reports_absence () =
+let test_removal_reports_absence () =
   with_keeper ~paused:false ~install_owner:false
   @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
   Unix.unlink (checkpoint_path config meta);
-  match archive config meta with
+  match remove config meta with
   | Ok Keeper_checkpoint_store.Canonical_absent -> ()
-  | other -> failf "absence was not reported: %s" (archive_error_message other)
+  | other -> failf "absence was not reported: %s" (removal_message other)
 ;;
 
-let test_archive_moves_the_bytes () =
+let test_removal_deletes_undecodable_bytes () =
   with_keeper ~paused:false ~install_owner:false
   @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
   let path = checkpoint_path config meta in
+  let session_dir = session_dir_of config meta in
   Fs_compat.save_file path malformed;
-  match archive config meta with
-  | Ok (Keeper_checkpoint_store.Archived { archive_path; unreadable = Parse_error _ }) ->
-    check string "archive name carries the given time in epoch ms"
-      (Filename.basename path ^ ".unreadable-1000") (Filename.basename archive_path);
-    check string "archive holds the bytes" malformed (Fs_compat.load_file archive_path);
-    check bool "canonical is gone" false (Sys.file_exists path)
-  | other -> failf "malformed checkpoint was not archived: %s" (archive_error_message other)
+  let others_before =
+    List.filter (fun entry -> not (String.equal entry (Filename.basename path)))
+      (session_entries session_dir)
+  in
+  match remove config meta with
+  | Ok (Keeper_checkpoint_store.Removed { undecodable = Parse_error _ }) ->
+    check bool "canonical is gone" true (is_absent path);
+    check (list string) "no other file was created or removed" others_before
+      (session_entries session_dir)
+  | other -> failf "malformed checkpoint was not removed: %s" (removal_message other)
 ;;
 
-let test_archive_refuses_a_taken_name () =
-  with_keeper ~paused:false ~install_owner:false
-  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
-  let path = checkpoint_path config meta in
-  Fs_compat.save_file path malformed;
-  let occupant = path ^ ".unreadable-1000" in
-  Fs_compat.save_file occupant "earlier archive";
-  (match archive config meta with
-   | Error (Keeper_checkpoint_store.Archive_not_moved _) -> ()
-   | other -> failf "a taken name was not refused: %s" (archive_error_message other));
-  check string "the earlier archive is not overwritten" "earlier archive"
-    (Fs_compat.load_file occupant);
-  check string "the canonical stays" malformed (Fs_compat.load_file path)
-;;
-
-let test_archive_refuses_an_os_read_failure () =
+let test_removal_refuses_an_os_read_failure () =
   with_keeper ~paused:false ~install_owner:false
   @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
   let path = checkpoint_path config meta in
   let original = Fs_compat.load_file path in
   with_mode path 0o000 (fun () ->
-    match archive config meta with
-    | Error (Keeper_checkpoint_store.Archive_read_failed { cause = Os_error Unix.EACCES; _ }) -> ()
-    | other -> failf "an OS read failure was not refused: %s" (archive_error_message other));
-  check string "the checkpoint stays" original (Fs_compat.load_file path);
-  check (list string) "nothing was archived" [] (unreadable_archives (session_dir_of config meta))
+    match remove config meta with
+    | Error
+        (Keeper_checkpoint_store.Removal_refused
+           (Read_failed { cause = Os_error Unix.EACCES; _ })) -> ()
+    | other -> failf "an OS read failure was not refused: %s" (removal_message other));
+  check string "the checkpoint stays" original (Fs_compat.load_file path)
 ;;
 
-(* A directory that can be written and entered but not opened: the rename
-   lands, the directory fsync cannot open it. *)
-let test_archive_reports_an_unconfirmed_move () =
+(* A path that is not a regular file was never read, so it says nothing
+   about any bytes and is left in place. *)
+let test_removal_refuses_a_path_that_is_not_a_regular_file () =
   with_keeper ~paused:false ~install_owner:false
   @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
   let path = checkpoint_path config meta in
-  let session_dir = session_dir_of config meta in
+  Unix.unlink path;
+  Unix.symlink (path ^ ".missing") path;
+  (match remove config meta with
+   | Error (Keeper_checkpoint_store.Removal_refused (Io_error _)) -> ()
+   | other -> failf "a non-regular path was not refused: %s" (removal_message other));
+  check bool "the link stays" true (is_symlink path)
+;;
+
+(* A directory that can be written and entered but not opened: the unlink
+   lands, the directory fsync cannot open it. *)
+let test_removal_reports_an_unconfirmed_delete () =
+  with_keeper ~paused:false ~install_owner:false
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  let path = checkpoint_path config meta in
   Fs_compat.save_file path malformed;
-  let result = with_mode session_dir 0o333 (fun () -> archive config meta) in
+  let result = with_mode (session_dir_of config meta) 0o333 (fun () -> remove config meta) in
   (match result with
-   | Error (Keeper_checkpoint_store.Archive_durability_unknown _) -> ()
-   | other -> failf "an unsynced move was not reported: %s" (archive_error_message other));
-  check (list string) "the move itself happened"
-    [ Filename.basename path ^ ".unreadable-1000" ] (unreadable_archives session_dir)
+   | Error (Keeper_checkpoint_store.Removal_durability_unknown _) -> ()
+   | other -> failf "an unsynced delete was not reported: %s" (removal_message other));
+  check bool "the delete itself happened" true (is_absent path)
 ;;
 
 let test_clear_refuses_an_os_read_failure () =
@@ -392,11 +388,21 @@ let test_clear_refuses_an_os_read_failure () =
     (String.starts_with ~prefix:"os_error"
        Yojson.Safe.Util.(Tool_result.data result |> member "read_failure" |> to_string));
   check bool "the official session is kept" true (Option.is_some (official_session ()));
-  check string "the checkpoint stays" original (Fs_compat.load_file path);
-  check (list string) "nothing was archived" [] (unreadable_archives (session_dir_of config meta))
+  check string "the checkpoint stays" original (Fs_compat.load_file path)
 ;;
 
-let test_clear_reports_a_move_that_did_not_happen () =
+let test_clear_refuses_a_path_that_is_not_a_regular_file () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
+  let path = checkpoint_path config meta in
+  Unix.unlink path;
+  Unix.symlink (path ^ ".missing") path;
+  check_refused (clear ());
+  check bool "the official session is kept" true (Option.is_some (official_session ()));
+  check bool "the link stays" true (is_symlink path)
+;;
+
+let test_clear_reports_a_delete_that_did_not_happen () =
   with_keeper ~paused:false ~install_owner:true
   @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session:_ ->
   let path = checkpoint_path config meta in
@@ -468,16 +474,16 @@ let () =
     [ "owner", [ test_case "active turn, clear, next turn" `Quick test_clear_does_not_race_the_active_turn
                ; test_case "paused keeper remains paused" `Quick test_paused_keeper_can_clear_without_resuming
                ; test_case "missing owner leaves history" `Quick test_missing_owner_does_not_clear
-               ; test_case "malformed checkpoint is moved aside" `Quick
-                   (test_unreadable_checkpoint_is_archived `Malformed)
-               ; test_case "newer-version checkpoint is moved aside" `Quick
-                   (test_unreadable_checkpoint_is_archived `Newer_version)
-               ; test_case "unreadable path is moved aside" `Quick
-                   (test_unreadable_checkpoint_is_archived `Unreadable_path)
+               ; test_case "malformed checkpoint is deleted" `Quick
+                   (test_undecodable_checkpoint_is_removed `Malformed)
+               ; test_case "newer-version checkpoint is deleted" `Quick
+                   (test_undecodable_checkpoint_is_removed `Newer_version)
                ; test_case "OS read failure refuses the clear" `Quick
                    test_clear_refuses_an_os_read_failure
-               ; test_case "a failed move is a failed clear" `Quick
-                   test_clear_reports_a_move_that_did_not_happen
+               ; test_case "non-regular path refuses the clear" `Quick
+                   test_clear_refuses_a_path_that_is_not_a_regular_file
+               ; test_case "a failed delete is a failed clear" `Quick
+                   test_clear_reports_a_delete_that_did_not_happen
                ; test_case "absent checkpoint clears only the official session" `Quick
                    test_absent_checkpoint_is_a_noop
                ; test_case "superseded checkpoint clears like an absent one" `Quick
@@ -485,13 +491,15 @@ let () =
                ; test_case "paused stale epoch clears without resume" `Quick
                    test_paused_keeper_clears_stale_epoch_without_resuming
                ]
-    ; "archive", [ test_case "loadable checkpoint is left alone" `Quick
-                     test_archive_leaves_a_loadable_checkpoint
-                 ; test_case "absence is reported" `Quick test_archive_reports_absence
-                 ; test_case "bytes move to the timed name" `Quick test_archive_moves_the_bytes
-                 ; test_case "taken name is refused" `Quick test_archive_refuses_a_taken_name
+    ; "removal", [ test_case "loadable checkpoint is left alone" `Quick
+                     test_removal_leaves_a_loadable_checkpoint
+                 ; test_case "absence is reported" `Quick test_removal_reports_absence
+                 ; test_case "undecodable bytes are deleted" `Quick
+                     test_removal_deletes_undecodable_bytes
                  ; test_case "OS read failure is refused" `Quick
-                     test_archive_refuses_an_os_read_failure
-                 ; test_case "unsynced move is reported" `Quick
-                     test_archive_reports_an_unconfirmed_move
+                     test_removal_refuses_an_os_read_failure
+                 ; test_case "non-regular path is refused" `Quick
+                     test_removal_refuses_a_path_that_is_not_a_regular_file
+                 ; test_case "unsynced delete is reported" `Quick
+                     test_removal_reports_an_unconfirmed_delete
                  ] ]

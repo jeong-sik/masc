@@ -113,12 +113,8 @@ let encode_checkpoint_string_off_scheduler (ckpt : Agent_core.Checkpoint.t) :
     string =
   offload_checkpoint_cpu (fun () -> Agent_core.Checkpoint.to_string ckpt)
 
-(* Store file names carry a time as whole epoch milliseconds, from the same
-   [Time_compat.now] seconds a checkpoint's [created_at] holds. *)
-let epoch_ms_of_seconds (seconds : float) : int = max 0 (int_of_float (seconds *. 1000.0))
-
 let agent_core_history_snapshot_id_of_checkpoint (ckpt : Agent_core.Checkpoint.t) : string =
-  let created_ms = epoch_ms_of_seconds ckpt.created_at in
+  let created_ms = max 0 (int_of_float (ckpt.created_at *. 1000.0)) in
   Printf.sprintf "%s%013d%s"
     agent_core_history_prefix created_ms agent_core_history_suffix
 
@@ -755,78 +751,92 @@ let known_watermark ~canonical_path
          (Option.map (fun (existing : Agent_core.Checkpoint.t) ->
             { session_id = existing.session_id; turn_count = existing.turn_count }))
 
-(* ── Moving an unreadable canonical aside ([masc_keeper_clear]) ──────
-   A canonical no turn can read fails every turn (#37089), and nothing the
-   store writes may replace it. The operator's clear moves it to a sibling
-   name so the bytes stay on disk and the next turn finds no checkpoint. The
-   name does not end in [.json], so neither the history listing nor its prune
-   ever sees it. *)
+(* ── Removing an undecodable canonical ([masc_keeper_clear]) ─────────
+   A canonical no turn can decode fails every turn (#37089), and nothing the
+   store writes may replace it. The operator's clear deletes it, so the next
+   turn starts from no checkpoint. Every save hardlinks the canonical it
+   installs into the history window ([save_agent_core_history]), so the
+   bytes last saved there stay exactly as long as that window keeps them,
+   the same as for a clear of a readable checkpoint.
 
-let unreadable_archive_infix = ".unreadable-"
+   Only bytes that were read and then did not decode are removed. A read
+   that returned no bytes (an OS failure, a file that changed during the
+   read, a path that is not a regular file inside the owned chain) says
+   nothing about the content, and the canonical stays. The step that failed
+   decides this, not the [checkpoint_load_error] label: other readers in this
+   module report OS failures as [Io_error]. *)
 
-let unreadable_archive_path ~canonical_path ~archived_at =
-  canonical_path ^ unreadable_archive_infix
-  ^ string_of_int (epoch_ms_of_seconds archived_at)
-
-type unreadable_archive_outcome =
-  | Archived of { archive_path : string; unreadable : checkpoint_load_error }
+type undecodable_removal_outcome =
+  | Removed of { undecodable : checkpoint_load_error }
   | Canonical_absent
   | Canonical_loadable
 
-type unreadable_archive_error =
-  | Archive_read_failed of { cause : checkpoint_read_failure; detail : string }
-  | Archive_not_moved of string
-  | Archive_durability_unknown of { archive_path : string; detail : string }
+type undecodable_removal_error =
+  | Removal_refused of checkpoint_load_error
+  | Removal_failed of string
+  | Removal_durability_unknown of string
 
-let unreadable_archive_error_to_string = function
-  | Archive_read_failed { detail; _ } ->
-    "the checkpoint read failed at the OS level, so it was not moved: " ^ detail
-  | Archive_not_moved detail -> "unreadable checkpoint was not moved: " ^ detail
-  | Archive_durability_unknown { archive_path; detail } ->
-    Printf.sprintf
-      "unreadable checkpoint was moved to %s, but the directory sync failed: %s"
-      archive_path detail
+let undecodable_removal_error_to_string = function
+  | Removal_refused error ->
+    "the checkpoint was not removed, because reading it did not show bytes that fail to decode: "
+    ^ checkpoint_load_error_to_string error
+  | Removal_failed detail -> "the undecodable checkpoint was not removed: " ^ detail
+  | Removal_durability_unknown detail ->
+    "the undecodable checkpoint was removed, but the directory sync failed: " ^ detail
 
-let archive_unreadable_canonical ~(session_dir : string) ~(session_id : string)
-    ~(archived_at : float)
-  : (unreadable_archive_outcome, unreadable_archive_error) result =
+let remove_undecodable_canonical ~(session_dir : string) ~(session_id : string)
+  : (undecodable_removal_outcome, undecodable_removal_error) result =
   if not (leaf_is_real_segment session_id) then
-    Error (Archive_not_moved "session_id is not a real path segment")
+    Error (Removal_failed "session_id is not a real path segment")
   else
     let locked =
       with_session_lock ~session_dir (fun session_dir ->
         let canonical_path = agent_core_checkpoint_path ~session_dir ~session_id in
-        (* Read again under the lock, with the reader and classification a
-           turn uses: only what a turn cannot read now is moved, and an OS
-           read failure says nothing about the bytes. *)
-        match load_agent_core ~session_dir ~session_id with
+        let read_failed cause exn =
+          Error (Removal_refused (Read_failed { cause; detail = Printexc.to_string exn }))
+        in
+        let remove undecodable =
+          let unlink_and_sync () =
+            Unix.unlink canonical_path;
+            match Keeper_fs_durable_directory.fsync_directory session_dir with
+            | () -> Ok (Removed { undecodable })
+            | exception ((Unix.Unix_error _ | Fun.Finally_raised _) as exn) ->
+              Error (Removal_durability_unknown (Printexc.to_string exn))
+          in
+          match
+            Eio_guard.run_in_systhread ~label:"keeper.checkpoint.remove-undecodable"
+              unlink_and_sync
+          with
+          | result -> result
+          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+          | exception (Unix.Unix_error _ as exn) ->
+            Error (Removal_failed (Printexc.to_string exn))
+        in
+        (* The read and the decode a turn uses ([load_agent_core]), taken one
+           step at a time so the failed step is known. *)
+        match read_checkpoint_bytes ~session_dir canonical_path with
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception (Unix.Unix_error (errno, _, _) as exn) -> read_failed (Os_error errno) exn
+        | exception exn -> read_failed Read_raised exn
         | Error Not_found -> Ok Canonical_absent
-        | Ok _ | Error (Superseded_version _) -> Ok Canonical_loadable
-        | Error (Read_failed { cause; detail }) -> Error (Archive_read_failed { cause; detail })
-        | Error ((Store_error _ | Parse_error _ | Io_error _ | Agent_core_error _) as unreadable) ->
-          let archive_path =
-            unreadable_archive_path ~canonical_path ~archived_at
-          in
-          let move () =
-            match Unix.lstat archive_path with
-            | _ -> Error (Archive_not_moved ("archive name is taken: " ^ archive_path))
-            | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-              Unix.rename canonical_path archive_path;
-              (match Keeper_fs_durable_directory.fsync_directory session_dir with
-               | () -> Ok (Archived { archive_path; unreadable })
-               | exception ((Unix.Unix_error _ | Fun.Finally_raised _) as exn) ->
-                 Error (Archive_durability_unknown
-                          { archive_path; detail = Printexc.to_string exn }))
-          in
-          (match Eio_guard.run_in_systhread ~label:"keeper.checkpoint.archive-unreadable" move with
-           | result -> result
+        | Error error -> Error (Removal_refused error)
+        | Ok bytes ->
+          (match decode_checkpoint_off_scheduler bytes with
            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-           | exception (Unix.Unix_error _ as exn) ->
-             Error (Archive_not_moved (Printexc.to_string exn))))
+           | exception exn -> read_failed Read_raised exn
+           | Ok _ -> Ok Canonical_loadable
+           | Error core_error ->
+             (match classify_core_error core_error with
+              (* A turn starts without it and its first save replaces it. *)
+              | Superseded_version _ -> Ok Canonical_loadable
+              | (Parse_error _ | Store_error _) as undecodable -> remove undecodable
+              (* The decode failed for a reason that is not the content. *)
+              | (Not_found | Io_error _ | Read_failed _ | Agent_core_error _) as error ->
+                Error (Removal_refused error))))
     in
     match locked with
     | Ok result -> result
-    | Error detail -> Error (Archive_not_moved detail)
+    | Error detail -> Error (Removal_failed detail)
 
 type checkpoint_identity_error =
   | Session_id_invalid of string

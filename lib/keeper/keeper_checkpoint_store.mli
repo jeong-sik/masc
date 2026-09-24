@@ -95,8 +95,6 @@ val save_agent_core_classified_with_encoding_memo :
 val with_session_lock :
   session_dir:string -> (string -> 'a) -> ('a, string) result
 
-(** Load failure classification used by callers to distinguish
-    cold-start absence from real I/O / parse / agent-core errors. *)
 (** Why reading the bytes failed, when the failure says nothing about what
     the file holds. *)
 type checkpoint_read_failure =
@@ -104,6 +102,8 @@ type checkpoint_read_failure =
   | Changed_while_read  (** The file or its directory changed during the read. *)
   | Read_raised  (** The read or decode raised an exception. *)
 
+(** Load failure classification used by callers to distinguish
+    cold-start absence from real I/O / parse / agent-core errors. *)
 type checkpoint_load_error =
   | Not_found
   | Store_error of string
@@ -116,10 +116,17 @@ type checkpoint_load_error =
       newer binary can still read. *)
   | Superseded_version of { expected : int; got : int }
   | Io_error of string
-      (** The file is where it may not be read from: not a regular file, or
-          outside the owned directory chain. *)
+      (** From {!load_agent_core}: the path is not a regular file, or lies
+          outside the owned directory chain, so nothing was read. Elsewhere it
+          also carries OS read failures: the canonical read under a save or a
+          retained-reference lookup, an exception in
+          {!load_agent_core_history_file}, and {!classify_core_error} of an
+          agent-core [FileOpFailed]. Only from {!load_agent_core} does it mean
+          the path, not the read, is at fault. *)
   | Read_failed of { cause : checkpoint_read_failure; detail : string }
-      (** The read itself failed; the same bytes may read fine next time. *)
+      (** The owned-file read behind {!load_agent_core} and
+          {!load_agent_core_history_file} failed itself; the same bytes may
+          read fine next time. The other readers report this as [Io_error]. *)
   | Agent_core_error of string
 
 val checkpoint_load_error_to_string : checkpoint_load_error -> string
@@ -174,43 +181,43 @@ val canonical_byte_count :
   session_id:string ->
   (int option, checkpoint_load_error) result
 
-(** What {!archive_unreadable_canonical} found under the session lock. *)
-type unreadable_archive_outcome =
-  | Archived of { archive_path : string; unreadable : checkpoint_load_error }
-      (** The canonical could not be read and now sits at [archive_path], its
-          bytes unchanged. [unreadable] is the error the read gave. *)
+(** What {!remove_undecodable_canonical} found under the session lock. *)
+type undecodable_removal_outcome =
+  | Removed of { undecodable : checkpoint_load_error }
+      (** The canonical was read, did not decode, and was deleted.
+          [undecodable] is the decode error. *)
   | Canonical_absent
   | Canonical_loadable
       (** The canonical decodes, or was written by an earlier version: a
-          turn can start from it, so nothing was moved. *)
+          turn can start from it, so nothing was removed. *)
 
-type unreadable_archive_error =
-  | Archive_read_failed of { cause : checkpoint_read_failure; detail : string }
-      (** The read under the lock failed at the OS level, so nothing is known
-          about the bytes and they were not moved. *)
-  | Archive_not_moved of string
-      (** The canonical was left where it was. *)
-  | Archive_durability_unknown of { archive_path : string; detail : string }
-      (** The rename happened, but the directory sync that makes it durable
+type undecodable_removal_error =
+  | Removal_refused of checkpoint_load_error
+      (** The read under the lock returned no bytes (an OS failure, a change
+          during the read, a path that is not a regular file inside the owned
+          chain), or the decode failed for a reason that is not the content.
+          Nothing is known against the bytes, and the canonical stays. *)
+  | Removal_failed of string
+      (** The lock or the unlink failed; the canonical stays. *)
+  | Removal_durability_unknown of string
+      (** The unlink happened, but the directory sync that makes it durable
           failed. *)
 
-val unreadable_archive_error_to_string : unreadable_archive_error -> string
+val undecodable_removal_error_to_string : undecodable_removal_error -> string
 
-(** Move a canonical checkpoint no turn can read to
-    [<canonical>.unreadable-<epoch ms>] in the same directory, the
-    milliseconds of [archived_at] (epoch seconds from [Time_compat.now], the
-    clock a checkpoint's [created_at] comes from), for the
-    operator's [masc_keeper_clear]. The file is renamed, never rewritten or
-    deleted. The read ({!load_agent_core}, the reader a turn uses) and the
-    rename run under the same session lock the writers take, and a name already taken is refused rather than
-    overwritten. A later-version checkpoint is unreadable here too; an
-    earlier-version one is not, since a turn replaces it. The archive name
-    does not end in [.json], so history listing and pruning skip it. *)
-val archive_unreadable_canonical :
+(** Delete a canonical checkpoint whose bytes no turn can decode, for the
+    operator's [masc_keeper_clear]. The read and decode are the ones
+    {!load_agent_core} uses, taken step by step under the session lock the
+    writers take, and the unlink runs under the same lock. Only bytes that
+    were read and failed to decode are deleted; the error label is not
+    consulted for that. A later-version checkpoint does not decode here and
+    is deleted; an earlier-version one is not, since a turn replaces it. The
+    bytes the store last saved there remain in the history window, which
+    every save hardlinks the canonical into. *)
+val remove_undecodable_canonical :
   session_dir:string ->
   session_id:string ->
-  archived_at:float ->
-  (unreadable_archive_outcome, unreadable_archive_error) result
+  (undecodable_removal_outcome, undecodable_removal_error) result
 
 type checkpoint_identity_error =
   | Session_id_invalid of string

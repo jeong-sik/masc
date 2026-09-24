@@ -20,6 +20,9 @@ val api_provider_to_string : api_provider -> string
 
 type config =
   { cli_path : string
+  ; account_home : string option
+    (** Selected CLI configuration and login directory. [None] inherits the
+        operator's ordinary Claude Code environment. *)
   ; cwd : string
   ; model : string option
   ; system_prompt : string option

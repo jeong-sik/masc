@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import { fetchRuntimeModelMetrics, type DashboardRuntimeModelMetricsResponse } from '../../api/dashboard-runtime'
+import { fetchRuntimeModelMetrics, type DashboardRuntimeModelMetricsResponse, type DashboardRuntimeProviderSnapshot } from '../../api/dashboard-runtime'
+import { loadRuntimeCatalog, runtimeCatalogState } from '../../lib/runtime-catalog-resource'
 import { setupVisibleAutoRefresh, DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 import { RouteLink } from '../common/route-link'
 
@@ -16,6 +17,7 @@ export function OverviewRuntimeStats() {
   const [windowMinutes, setWindowMinutes] = useState(60)
   const [generation, setGeneration] = useState(0)
   const [state, setState] = useState<State>({ kind: 'loading' })
+  useEffect(() => { loadRuntimeCatalog() }, [])
   useEffect(() => {
     const controller = new AbortController()
     let inFlight = false
@@ -37,6 +39,16 @@ export function OverviewRuntimeStats() {
     const stopRefresh = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
     return () => { stopRefresh(); controller.abort() }
   }, [windowMinutes, generation])
+  const accounts = new Map<string, DashboardRuntimeProviderSnapshot>()
+  const catalog = runtimeCatalogState.value
+  if (catalog.status === 'loaded') {
+    for (const provider of catalog.data) {
+      if (provider.protocol !== 'claude-code' && provider.protocol !== 'codex-app-server') continue
+      const id = provider.provider_id ?? provider.provider
+      if (!accounts.has(id)) accounts.set(id, provider)
+    }
+  }
+  const clients = [...accounts.values()]
   const data = state.kind === 'ready' || state.kind === 'pending' ? state.value : null
   const ledger = data?.cost_ledger_read
   const cache = data?.cache
@@ -52,6 +64,17 @@ export function OverviewRuntimeStats() {
       </div>
     </div>
     <p class="text-sm text-text-muted">Keeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.</p>
+    ${clients.length > 0 ? html`
+      <div class="flex flex-wrap gap-2" aria-label="공식 Client 계정별 런타임" data-testid="overview-official-client-accounts">
+        ${clients.map(client => html`
+          <span class="rounded border border-border px-2 py-1 text-xs" key=${client.provider_id ?? client.provider}>
+            ${client.provider_display_name ?? client.provider_id ?? client.provider}
+            · 설정됨 · 로그인 미측정
+          </span>
+        `)}
+      </div>
+      <p class="text-xs text-text-muted">계정별 로그인은 Monitoring의 공식 CLI 인증 검사에서 확인합니다. 아래 사용량은 런타임 ID별 기록입니다.</p>
+    ` : null}
     ${state.kind === 'loading' ? html`<p role="status">런타임 통계를 읽고 있습니다.</p>` : null}
     ${state.kind === 'error' ? html`<p role="alert">통계를 읽지 못했습니다: ${state.message}</p>` : null}
     ${data ? html`

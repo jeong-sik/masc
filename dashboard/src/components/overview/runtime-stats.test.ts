@@ -5,14 +5,34 @@ import { get } from '../../api/core'
 import { DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 import { route } from '../../router'
 import { OverviewRuntimeStats } from './runtime-stats'
+import { runtimeCatalogState } from '../../lib/runtime-catalog-resource'
 vi.mock('../../api/core', () => ({ get: vi.fn() }))
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.resetAllMocks() })
+vi.mock('../../lib/runtime-catalog-resource', () => ({
+  runtimeCatalogState: { value: { status: 'idle' } },
+  loadRuntimeCatalog: vi.fn(),
+}))
+afterEach(() => { cleanup(); runtimeCatalogState.value = { status: 'idle' }; vi.useRealTimers(); vi.restoreAllMocks(); vi.resetAllMocks() })
 const response = { window_minutes: 60,
   cost_ledger_read: { state: 'available', malformed_rows: 0, schema_violation_rows: 2, identity_conflict_rows: 1 },
   models: [{ model_id: 'runtime_lane_example', success_count: 8, error_count: 2,
     total_input_tokens: 1234, total_output_tokens: 0, p50_latency_ms: 125, p95_latency_ms: 900,
     usage_sample_count: 6, usage_missing_count: 2, telemetry_sample_count: 5, telemetry_missing_count: 3 }],
 }
+it('shows each official client account once beside per-runtime usage', async () => {
+  runtimeCatalogState.value = { status: 'loaded', data: [
+    { provider: 'claude_one.shared', provider_id: 'claude_one', provider_display_name: 'Claude · one', protocol: 'claude-code', available: true, models: [] },
+    { provider: 'claude_one.other', provider_id: 'claude_one', provider_display_name: 'Claude · one', protocol: 'claude-code', available: true, models: [] },
+    { provider: 'codex_two.shared', provider_id: 'codex_two', provider_display_name: 'Codex · two', protocol: 'codex-app-server', available: false, models: [] },
+  ] }
+  vi.mocked(get).mockResolvedValue(response)
+  const view = render(html`<${OverviewRuntimeStats} />`)
+  await waitFor(() => expect(view.getByText('runtime_lane_example')).toBeTruthy())
+  const accounts = view.getByTestId('overview-official-client-accounts')
+  expect(accounts.textContent).toContain('Claude · one')
+  expect(accounts.textContent).toContain('Codex · two')
+  expect(accounts.textContent?.match(/Claude · one/g)).toHaveLength(1)
+  expect(accounts.textContent).toContain('로그인 미측정')
+})
 it('keeps stale values explicit until a refresh returns fresh cache metadata', async () => {
   vi.mocked(get).mockResolvedValueOnce({ ...response,
     cache: { state: 'stale_refreshing', generated_at: 10000, age_s: 2228.4,

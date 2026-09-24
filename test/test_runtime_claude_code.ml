@@ -183,6 +183,7 @@ let with_fixture ?auth_json ?before_initialize_response ?close_before_user steps
 let window_outlasting_process_start_s = 5.0
 
 let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
+    ?account_home
     ?admission_timeout_s ?(no_turn_deadline = false) ?on_session_ready_delay_s
     ?on_turn_started_delay_s ?on_stream_event ?on_prompt_sent
     ?(prompt = "Return the fixture marker") ?(images = []) path =
@@ -191,6 +192,7 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
     let config =
       { (Runtime_claude_code.default_config ~cwd:"/tmp") with
         cli_path = path
+      ; account_home
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
       }
@@ -222,6 +224,22 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
       config
       ~prompt
       ~images)
+;;
+
+let test_selected_account_home_reaches_claude_child () =
+  with_fixture [ Emit assistant; Emit result ] (fun fixture ->
+    let wrapper = Filename.temp_file "masc-claude-account-" ".sh" in
+    Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+      let output = open_out_bin wrapper in
+      output_string output "#!/bin/sh\nset -eu\n";
+      output_string output "[ \"$CLAUDE_CONFIG_DIR\" = /tmp/claude-account-one ] || exit 71\n";
+      output_string output "[ -z \"${ANTHROPIC_API_KEY:-}\" ] || exit 72\n";
+      output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+      close_out output;
+      Unix.chmod wrapper 0o700;
+      match run_fixture ~account_home:"/tmp/claude-account-one" wrapper with
+      | Ok _ -> ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)))
 ;;
 
 let test_validation_is_process_free () =
@@ -2102,6 +2120,8 @@ let () =
             "subscription auth and env scrub"
             `Quick
             test_subscription_turn_and_env_scrub
+        ; test_case "selected account home reaches CLI" `Quick
+            test_selected_account_home_reaches_claude_child
         ; test_case
             "long turn with many progress messages completes"
             `Quick

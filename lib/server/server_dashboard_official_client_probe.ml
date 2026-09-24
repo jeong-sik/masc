@@ -112,7 +112,7 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime_id ~model
     (config : Runtime_execution.codex_app_server) =
   let probe_config : Runtime_codex_app_server.config =
     { cli_path = config.cli_path
-    ; isolated_home = None
+    ; isolated_home = config.account_home
     ; model = config.model
     ; native = Runtime_native_tools.codex_default
     ; developer_instructions = None
@@ -177,6 +177,7 @@ let probe_claude ~mgr ~clock ~cwd ~process_cwd ~runtime_id ~model
     (config : Runtime_execution.claude_code) =
   let probe_config : Runtime_claude_code.config =
     { cli_path = config.cli_path
+    ; account_home = config.account_home
     ; cwd
     ; model = config.model
     ; native = Runtime_native_tools.claude_code_default

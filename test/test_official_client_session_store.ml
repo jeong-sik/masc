@@ -1545,7 +1545,13 @@ let test_tool_surface_fingerprint_is_canonical () =
     (not
        (String.equal
           (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ alpha ])
-          (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ changed ])))
+          (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ changed ])));
+  check bool "changing the selected account starts a new vendor session" true
+    (not (String.equal
+      (tool_surface_sha256 ~account_home:"/tmp/one"
+         ~native_posture:Runtime_native_tools.Native_none [ alpha ])
+      (tool_surface_sha256 ~account_home:"/tmp/two"
+         ~native_posture:Runtime_native_tools.Native_none [ alpha ])))
 ;;
 
 let test_cooperative_resume_preserves_thread_after_newer_steering () =

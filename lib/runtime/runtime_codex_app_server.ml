@@ -1730,16 +1730,22 @@ let configured_auth_environment_keys home =
       Error (Invalid_config "Cannot read declared Codex provider credential environment names from the user config; inspect config.toml")
 ;;
 
-let client_environment () =
+let client_environment account_home =
   (* Resolve before the child changes cwd; admission and execution must read
      the same credential declarations and CLI store. *)
-  let home = resolved_codex_home () in
+  let home = match account_home with
+    | Some path -> Some path
+    | None -> resolved_codex_home () in
   let* configured = configured_auth_environment_keys home in
   Unix.environment ()
   |> Array.to_list
   |> List.filter (fun entry ->
     let name = env_key entry in
-    name <> "CODEX_HOME" && (child_environment_key_allowed name || List.mem name configured))
+    name <> "CODEX_HOME"
+    && (match account_home with
+        | None -> true
+        | Some _ -> not (List.mem name [ "OPENAI_API_KEY"; "OPENAI_BASE_URL"; "CODEX_API_KEY"; "CODEX_ACCESS_TOKEN" ]))
+    && (child_environment_key_allowed name || List.mem name configured))
   |> fun entries ->
     Option.fold ~none:entries ~some:(fun path -> ("CODEX_HOME=" ^ path) :: entries) home
   |> Array.of_list
@@ -1817,7 +1823,7 @@ let client_argv (config : config) =
 ;;
 
 let with_spawned_client ~mgr ~clock ~cwd config run =
-  let* environment = client_environment () in
+  let* environment = client_environment config.isolated_home in
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in

@@ -9,6 +9,7 @@
 
 type codex_app_server =
   { cli_path : string
+  ; account_home : string option
   ; model : string option
   ; timeout_s : float
   }
@@ -27,6 +28,7 @@ type antigravity_cli =
 
 type claude_code =
   { cli_path : string
+  ; account_home : string option
   ; model : string option
   ; timeout_s : float
   }

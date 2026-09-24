@@ -804,6 +804,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     let tool_surface_sha256 =
       Keeper_official_client_session_store.tool_surface_sha256
+        ?account_home:config.account_home
         ~native_posture
         tools
     in
@@ -1032,7 +1033,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     let client_config =
       { Runtime_codex_app_server.cli_path = config.cli_path
-      ; isolated_home = None
+      ; isolated_home = config.account_home
       ; model = config.model
       ; native = native_posture
       ; developer_instructions

@@ -18,6 +18,7 @@ let api_provider_to_string = function
 
 type config =
   { cli_path : string
+  ; account_home : string option
   ; cwd : string
   ; model : string option
   ; system_prompt : string option
@@ -42,6 +43,7 @@ let mcp_server_name = "masc"
 
 let default_config ~cwd =
   { cli_path = "claude"
+  ; account_home = None
   ; cwd
   ; model = None
   ; system_prompt = None
@@ -358,7 +360,7 @@ let optional_int stage name fields =
     protocol_error stage (Printf.sprintf "field %S must be an integer or null" name)
 ;;
 
-let client_environment () =
+let client_environment account_home =
   let inherited_names =
     [ "HOME"
     ; "USER"
@@ -395,10 +397,20 @@ let client_environment () =
     ]
   in
   inherited_names
+  |> List.filter (fun name ->
+    match account_home with
+    | None -> true
+    | Some _ -> List.mem name
+        [ "HOME"; "USER"; "PATH"; "TMPDIR"; "XDG_CONFIG_HOME"
+        ; "XDG_DATA_HOME"; "XDG_CACHE_HOME"; "SSL_CERT_FILE"
+        ; "SSL_CERT_DIR"; "LANG"; "LC_ALL"; "LC_CTYPE"
+        ; "TERM"; "NO_COLOR" ])
   |> List.filter_map (fun name ->
     Option.map (fun value -> name ^ "=" ^ value) (Sys.getenv_opt name))
   |> fun inherited ->
-  ("CLAUDE_CODE_ENTRYPOINT=masc" :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml" :: inherited)
+  ("CLAUDE_CODE_ENTRYPOINT=masc" :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml"
+   :: (match account_home with None -> inherited
+       | Some home -> ("CLAUDE_CONFIG_DIR=" ^ home) :: inherited))
   |> Array.of_list
 ;;
 
@@ -430,7 +442,7 @@ let read_subscription ~mgr ~cwd config =
       Eio.Buf_read.take_all
       ~is_success:(fun code -> code = 0 || code = 1)
       ~cwd
-      ~env:(client_environment ())
+      ~env:(client_environment config.account_home)
       [ config.cli_path
       ; Runtime_native_tools.claude_setting_sources_arg config.setting_sources
       ; "auth"; "status"; "--json" ]
@@ -1560,7 +1572,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
           ~sw
           mgr
           ~cwd
-          ~env:(client_environment ())
+          ~env:(client_environment config.account_home)
           ~stdin:stdin_r
           ~stdout:stdout_w
           ~stderr:stderr_w

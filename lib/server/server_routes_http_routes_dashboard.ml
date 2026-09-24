@@ -8,7 +8,7 @@ open Server_auth
 open Server_dashboard_http
 open Server_routes_http_common
 open Server_routes_http_keeper_stream
-open Server_dashboard_runtime_request
+module Runtime_request = Server_dashboard_runtime_request
 
 include Server_routes_http_routes_dashboard_setup
 
@@ -555,8 +555,8 @@ let runtime_config_path_error_status message =
 
 type runtime_config_write_operation =
   | Runtime_config_raw_save
-  | Runtime_config_routing of runtime_route_lane * string option
-  | Runtime_config_routing_list of runtime_route_lane * string list
+  | Runtime_config_routing of Runtime_request.runtime_route_lane * string option
+  | Runtime_config_routing_list of Runtime_request.runtime_route_lane * string list
   | Runtime_config_lane_created of string * string list
   | Runtime_config_lane_removed of string
   | Runtime_config_lane_renamed of string * string
@@ -567,7 +567,9 @@ type runtime_config_write_operation =
   | Runtime_config_assignment of string * string option
   | Runtime_config_fusion of string
 
-let runtime_config_write_operation_details = function
+let runtime_config_write_operation_details =
+  let open Runtime_request in
+  function
   | Runtime_config_raw_save -> [ ("operation", `String "raw_save") ]
   | Runtime_config_routing (lane, runtime_id) ->
     [ ("operation", `String "routing")
@@ -835,7 +837,7 @@ let respond_runtime_config_commit
 
 let handle_runtime_assignment_post_with ~set_assignment state agent_name req reqd
     body_str =
-  match parse_runtime_assignment_body body_str with
+  match Runtime_request.parse_runtime_assignment_body body_str with
   | Error msg ->
     respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
   | Ok (keeper_name, runtime_id, expected) ->
@@ -902,6 +904,7 @@ let handle_runtime_assignment_post state agent_name req reqd body_str =
 (* POST /api/v1/runtime/config/routing, after authentication: one routing
    body, parsed to a variant, answered by the Runtime writer it names. *)
 let handle_runtime_routing_post state agent_name req reqd body_str =
+  let open Runtime_request in
   match parse_runtime_route_body body_str with
   | Error msg ->
     respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
@@ -1085,10 +1088,11 @@ module For_testing = struct
   (* The request decoder is private to the server library; the named-lane
      array shape is a wire contract, so the parser test asserts it directly
      instead of through an HTTP round trip. *)
-  let lane_string = runtime_route_lane_to_string
+  let lane_string = Runtime_request.runtime_route_lane_to_string
 
   let parse_runtime_route_body body =
-    match parse_runtime_route_body body with
+    let open Runtime_request in
+    match Runtime_request.parse_runtime_route_body body with
     | Error detail -> Error detail
     | Ok (Runtime_route_runtime_id (lane, runtime_id)) ->
         Ok

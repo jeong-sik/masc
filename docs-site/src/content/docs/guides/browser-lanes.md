@@ -1,9 +1,9 @@
 ---
 title: Browser Lane Guide
-description: Connect Firefox or Zen, read and interact with pages, and use the Browser Lane TUI.
+description: Connect Firefox or Zen or the Stagehand Chromium, read and interact with pages, and use the Browser Lane TUI.
 ---
 
-MASC has two browser sources:
+MASC has three browser sources:
 
 - **live** connects the operator's Firefox or Zen through the browser extension
   and OCaml native-messaging host. It uses that browser's existing tabs and login
@@ -15,6 +15,13 @@ MASC has two browser sources:
   operator's logins. Session open/close and direct URL navigation belong here.
   The server owns this session; coordinate its use before closing a session
   another task is using.
+- **stagehand** is a Chromium the server starts with the
+  [Stagehand](https://github.com/browserbase/stagehand) v4 extension loaded and
+  reaches over the Chrome DevTools Protocol. A Keeper tells it in one sentence
+  what to act on, observe or extract, and the Stagehand runtime chooses the
+  elements. The model it asks is answered by MASC, through an exact-output
+  lane. Like automation, the server owns the session and the browser starts
+  with an empty profile unless one is configured.
 
 ## Setup: live
 
@@ -64,18 +71,58 @@ requires `geckodriver`. When omitted, geckodriver discovers the browser; set it
 explicitly to select Firefox or Zen. Changing it does not select a live
 connection. Automation opens headless by default.
 
+## Setup: stagehand
+
+Install the pinned Stagehand extension into the workspace. The script checks
+the npm package against the registry's integrity hash and prints the lines for
+`runtime.toml`:
+
+```bash
+bash connectors/browser/install-stagehand-extension.sh --base-path /path/to/workspace
+```
+
+Add them under `[browser.stagehand]` with a Chromium-family executable, then
+restart MASC:
+
+```toml
+[browser.stagehand]
+chrome = "/absolute/path/to/chrome"
+extension = "/absolute/path/printed/by/the/installer"
+# Optional: a profile you own, kept between sessions (for logins).
+# profile = "/absolute/path/to/profile"
+```
+
+All three are absolute paths. MASC loads the extension over the debugging
+connection (`Extensions.loadUnpacked`), which was verified with Chrome Canary
+156; branded Chrome refuses `--load-extension` from version 137, and whether a
+given build accepts the CDP load depends on the build. The debugging port
+listens on loopback and admits only the extension's own origin. Without
+`profile`, each session starts from a server-owned profile that is emptied
+first; a configured profile is kept. Either way the directory is owner-only.
+
+The Stagehand runtime asks for a model through `llm.generate`. MASC answers it
+with the `browser_stagehand_exact` exact-output lane in `runtime.toml`: its
+slots are walked in order and a slot whose model takes no system prompt is
+skipped. A lane that declares CLI slots is refused. The answer is checked to be one JSON value;
+the extension checks its shape against its own schema.
+
+The browser starts when `BrowserSession` opens with `lane="stagehand"` and
+stops on close, when the session fails, or when the server stops. A Chromium a
+crashed server left is stopped at the next start.
+
 ## Keeper and MCP tools
 
 Keeper-facing names use CamelCase; the MCP registration names use `masc_browser_*`.
 
 | Keeper tool | MCP name | Source and behavior |
 | --- | --- | --- |
-| `BrowserTabs` | `masc_browser_tabs` | Both: list tabs and discover the live connection identity |
-| `BrowserRead` | `masc_browser_read` | Both: text, visible elements, or a viewport PNG |
-| `BrowserInteract` | `masc_browser_interact` | Both: click, fill, or scroll one explicit tab |
-| `BrowserSession` | `masc_browser_session` | Automation: open, close, or check the session |
-| `BrowserGoto` | `masc_browser_goto` | Automation: navigate to an HTTP(S) URL |
+| `BrowserTabs` | `masc_browser_tabs` | All three: list tabs and discover the live connection identity |
+| `BrowserRead` | `masc_browser_read` | Live and automation: text, visible elements, or a viewport PNG |
+| `BrowserInteract` | `masc_browser_interact` | Live and automation: click, fill, or scroll one explicit tab |
+| `BrowserSession` | `masc_browser_session` | Automation or stagehand: open, close, or check the session |
+| `BrowserGoto` | `masc_browser_goto` | Automation or stagehand: navigate to an HTTP(S) URL |
 | `BrowserAct` | `masc_browser_act` | Automation: open/close tabs, click, fill, press, select, scroll, back, forward, or reload |
+| `BrowserInstruct` | `masc_browser_instruct` | Stagehand: act on, observe, or extract from a tab with one sentence |
 
 After discovery, pass the observed `clientId` and `tabId` to live reads and
 interactions. A `clientId` is required when several live browsers are connected;
@@ -88,6 +135,13 @@ selectors. `format="image"` requires an explicit `tabId`; Keeper calls return a
 durable artifact handle for image analysis. Text and element reads describe the
 current rendered page, not every hidden or virtualized item.
 
+`BrowserInstruct` takes `action` (`act`, `observe` or `extract`), an
+`instruction` sentence (required for act and extract), a `tabId` from
+`BrowserTabs lane="stagehand"`, and for extract an optional `schema`: JSON
+Schema text for the data to return. It returns Stagehand's `data` and
+`metadata`. An act can change the page, so read or capture it afterwards; a
+failed act may have acted. observe and extract only read.
+
 Use observed selectors for `BrowserInteract` click/fill and `BrowserAct` element
 actions; a selector must match exactly one element. For `BrowserInteract`, pass
 `expectedUrl` from the last read to reject intervening navigation. Fill emits page
@@ -97,7 +151,7 @@ an action, including an error, before deciding whether to retry.
 ## TUI reader
 
 Press `Ctrl-^` (Ctrl-Shift-6), use `:` → `go Browser Lane`, or press `B` from
-Connectors. The reader starts on live. Use `b` to choose Firefox or Zen, move with
+Connectors. The reader shows the live and automation sources and starts on live. Use `b` to choose Firefox or Zen, move with
 `j`/`k`, and confirm with Enter; `r` reloads the chooser and Esc returns. Reads and
 screenshots pin the selected connection. A disconnected selection requires an
 explicit new choice.

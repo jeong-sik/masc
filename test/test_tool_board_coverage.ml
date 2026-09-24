@@ -1611,8 +1611,8 @@ let test_post_get_comment_pages_carry_their_range () =
     ~next_offset:None;
   (* A reader that finished the thread asks at its end to learn whether
      anything new arrived. That is a page, not a failure: it names the
-     thread's size and where newer comments will start, so it cannot read as
-     a thread that lost its comments. Past the end is still refused. *)
+     thread's size, so it cannot read as a thread without comments. Past the
+     end is still refused. *)
   let end_page = read ~label:"end of the thread" [ "comment_offset", `Int 105 ] in
   check_page
     ~label:"the end of the thread"
@@ -1621,9 +1621,8 @@ let test_post_get_comment_pages_carry_their_range () =
     ~returned:0
     ~total:105
     ~next_offset:None;
-  Alcotest.(check bool) "the end page names the thread's size and where newer comments start"
-    true
-    (contains end_page.body "the thread has 105. Newer comments will start at comment_offset=105.");
+  Alcotest.(check bool) "the end page names the thread's size" true
+    (contains end_page.body "[no comments from offset 105: the thread has 105 now.]");
   Alcotest.(check bool) "the end page does not say the thread has no comments" false
     (contains end_page.body "No comments.");
   check_get_rejected
@@ -1947,8 +1946,9 @@ let test_post_get_a_body_larger_than_the_page_still_advances () =
 
 (* The TTL sweep is the one thing that removes a comment from a live thread.
    An offset is a position, so a sweep between two reads moves the thread under
-   it; the next page counts the thread as it is now, an offset past the new end
-   says so, and the sweep schedules its removal for the next flush. *)
+   it; the next page counts the thread as it is now, the old last offset reads
+   as the new end, one past it is refused, and the sweep schedules its removal
+   for the next flush. *)
 let test_post_get_a_sweep_between_pages_shows_in_the_next_page () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1998,10 +1998,23 @@ let test_post_get_a_sweep_between_pages_shows_in_the_next_page () =
       [ "comment_offset", `Int page_limit; "comment_limit", `Int page_limit ]
   in
   Alcotest.(check int) "the next page counts the thread as it is now" remaining next.total;
-  check_get_rejected
+  (* The old last offset is the new end: an empty page that counts the
+     thread as it is now. One past it is refused. *)
+  check_page
     ~label:"the old last offset"
+    (read_page
+       ~result_boundary:Tool_output.Sent_to_client
+       ~label:"the old last offset"
+       post_id
+       [ "comment_offset", `Int remaining ])
+    ~offset:remaining
+    ~returned:0
+    ~total:remaining
+    ~next_offset:None;
+  check_get_rejected
+    ~label:"past the new end"
     post_id
-    [ "comment_offset", `Int remaining ]
+    [ "comment_offset", `Int (remaining + 1) ]
     (Printf.sprintf
        "the thread now has %d comments, at offsets 0-%d"
        remaining

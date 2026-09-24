@@ -2694,7 +2694,7 @@ let test_model_visible_masc_ask_records_the_question () =
       let json = parse_json result.raw_output in
       check string "recorded under the asking keeper" meta.name
         Yojson.Safe.Util.(member "keeper_name" json |> to_string);
-      check int "the reply says one question is open" 1
+      check int "the reply says one ask is open" 1
         Yojson.Safe.Util.(member "open_count" json |> to_int);
       match
         Masc.Keeper_ask_store.rows ~base_path:config.base_path ~keeper_name:meta.name

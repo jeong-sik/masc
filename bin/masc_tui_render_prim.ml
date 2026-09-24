@@ -1680,18 +1680,22 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
    | Some Ask_projection.Draft_skipped ->
        box_line buf cols (Printf.sprintf "      %sskipped%s" Ansi.dim Ansi.reset)
    | Some (Ask_projection.Draft_chose _) | None -> ());
-  let slot = Ask_projection.free_text_slot question in
+  let ask_id = row.Masc.Tui_decode.ar_id in
+  let slot = Ask_projection.free_text_slot ~ask_id question in
   let aft_hint = Ask_projection.free_text_hint slot in
   (
-      (* The editor belongs to one question, and the slot it holds names
-         which. Matching on that rather than on the cursor means a snapshot
-         arriving mid-sentence cannot move the typing onto another row. *)
+      (* The editor belongs to one question of one ask, and the slot it holds
+         names both. Matching on that rather than on the cursor means a
+         snapshot arriving mid-sentence cannot move the typing onto another
+         row -- nor onto another ask's question of the same id, since
+         masc_ask numbers every ask from q1. *)
       let editing_here =
         match state.ask_text_entry with
         | Some entry
-          when String.equal
-                 (Ask_projection.free_text_question_id entry.ate_slot)
-                 question.Masc.Tui_decode.aq_id ->
+          when String.equal (Ask_projection.free_text_ask_id entry.ate_slot) ask_id
+               && String.equal
+                    (Ask_projection.free_text_question_id entry.ate_slot)
+                    question.Masc.Tui_decode.aq_id ->
             Some entry
         | Some _ | None -> None
       in

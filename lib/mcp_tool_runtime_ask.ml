@@ -58,10 +58,13 @@ let mapi_results f items =
 
 (* A question's id and a choice's id are how an answer finds its way back to
    them, and they only have to be unique inside one ask. Nothing a Keeper
-   calls later takes one: masc_ask_status and masc_ask_withdraw name the ask,
-   and an answer reaches the Keeper with each id already turned back into its
-   header and label. So the ids are numbered here by position rather than
-   asked of the model. Asking cost more than it bought: a missing question_id
+   calls later takes one: masc_ask_status and masc_ask_withdraw name the ask.
+   The wake that delivers an answer turns each id back into its header and
+   label, and masc_ask_status lists the ids beside the questions and choices
+   they name in the same row. So the ids are numbered here by position rather
+   than asked of the model. Every ask now has a q1, so a surface that edits
+   an answer binds to the ask as well as the question (the TUI's
+   free_text_slot). Asking cost more than it bought: a missing question_id
    was the most common first-call failure in the September ledger, and
    models that tried to make an id unique could loop inside the string until
    it never closed. *)

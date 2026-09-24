@@ -197,6 +197,12 @@ type t =
        than the fabricated 200K. This is the keeper conversation ceiling
        ([max_context]), not the provider's per-request num-ctx cap (an
        Ollama-only transport detail). *)
+  ; provider_context_tokens : int option
+    (** The official client's latest active context size; distinct from
+        [usage.input_tokens], which counts the latest request's input. *)
+  ; provider_context_window : int option
+    (** The same client's model window. This never replaces [context_window],
+        the MASC shaping ceiling used for ctx-fill. *)
   ; price_input_per_million : float option
     (* RFC-0233 §8 — USD per 1M input tokens declared on the runtime
        binding in runtime.toml. [None] when the operator left it unset;

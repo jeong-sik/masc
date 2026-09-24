@@ -81,11 +81,10 @@ type thread_mode =
   | Start
   | Resume of { thread_id : string }
 
-(* The per-turn counts the app-server reports on thread/tokenUsage/updated,
-   its [last] breakdown. OpenAI counting: [input_tokens] already includes the
-   cached prefix and [output_tokens] already includes reasoning, the same
-   reading Backend_openai_parse makes of the API wire. [cache_write_input_tokens]
-   defaults to 0 on the wire. *)
+(* The app-server's [last] breakdown is its latest active context reading;
+   [total] is cumulative thread spend. [input_tokens] includes cached input,
+   [output_tokens] includes reasoning, and [total_tokens] is the client's
+   active context size, separate from MASC's effective shaping ceiling. *)
 type token_usage =
   { input_tokens : int
   ; cached_input_tokens : int
@@ -93,6 +92,7 @@ type token_usage =
   ; output_tokens : int
   ; reasoning_output_tokens : int
   ; total_tokens : int
+  ; model_context_window : int option
   }
 
 type turn_result =

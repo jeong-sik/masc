@@ -25,6 +25,8 @@ let sample_record
       ?(absolute_turn = 4071)
       ?(input_tokens = Some 18_000)
       ?(context_window = Some 131_072)
+      ?(provider_context_tokens = None)
+      ?(provider_context_window = None)
       ?(usage_scope = Runtime_usage_scope.Per_request)
       ()
   : Turn_record.t
@@ -48,6 +50,8 @@ let sample_record
   ; selected_model = Some "glm-5-turbo"
   ; finish_reason = Some "completed"
   ; context_window
+  ; provider_context_tokens
+  ; provider_context_window
   ; price_input_per_million = None
   ; price_output_per_million = None
   ; request_latency_ms = Some 1234
@@ -294,8 +298,10 @@ let test_per_request_overflow_is_unavailable_not_clamped () =
     append_record
       config
       (sample_record
-         ~input_tokens:(Some 128_001)
-         ~context_window:(Some 128_000)
+         ~input_tokens:(Some 310_209)
+         ~context_window:(Some 272_000)
+         ~provider_context_tokens:(Some 310_500)
+         ~provider_context_window:(Some 272_000)
          ());
     let fields =
       Projection.context_fields
@@ -308,7 +314,7 @@ let test_per_request_overflow_is_unavailable_not_clamped () =
     | Ok
         (Masc.Tui_decode.Context_unavailable
           (Context_tokens_exceed_window
-            { raw_input_tokens = 128_001; context_window = 128_000 })) -> ()
+            { raw_input_tokens = 310_209; context_window = 272_000 })) -> ()
     | Ok _ -> fail "per-request overflow was clamped or lost"
     | Error detail -> fail detail)
 ;;

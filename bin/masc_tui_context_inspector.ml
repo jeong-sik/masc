@@ -32,6 +32,8 @@ type recent_turn =
   { turn : int
   ; ts : float
   ; input_tokens : int option
+  ; provider_context_tokens : int option
+  ; provider_context_window : int option
   ; cache_read : int option
   ; output_tokens : int option
   ; turn_output_tokens : int option
@@ -222,6 +224,8 @@ let decode_turn_records = function
                       { turn = record.absolute_turn
                       ; ts = record.ts
                       ; input_tokens = per_request_tokens record
+                      ; provider_context_tokens = record.provider_context_tokens
+                      ; provider_context_window = record.provider_context_window
                       ; cache_read = record.usage.cache_read_input_tokens
                       ; output_tokens = record.usage.output_tokens
                       ; turn_output_tokens = record.turn_output_tokens

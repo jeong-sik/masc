@@ -107,6 +107,8 @@ let sample_record () : Turn_record.t =
   ; selected_model = Some "deepseek-v4-flash"
   ; finish_reason = Some "completed"
   ; context_window = Some 131072
+  ; provider_context_tokens = None
+  ; provider_context_window = None
   ; price_input_per_million = Some 0.15
   ; price_output_per_million = Some 0.6
   ; request_latency_ms = Some 1234
@@ -181,6 +183,31 @@ let test_turn_output_tokens_round_trip_and_stay_optional () =
   | `Assoc fields ->
     check bool "no turn output leaves the key out" false
       (List.mem_assoc "turn_output_tokens" fields)
+  | _ -> fail "turn record is not an object"
+;;
+
+let test_provider_context_stays_separate_from_turn_budget () =
+  let record =
+    { (sample_record ()) with
+      context_window = Some 128_000
+    ; provider_context_tokens = Some 310_500
+    ; provider_context_window = Some 272_000
+    }
+  in
+  (match Turn_record.of_json (Turn_record.to_json record) with
+   | Error detail -> fail detail
+   | Ok decoded ->
+     check (option int) "MASC shaping ceiling" (Some 128_000)
+       decoded.context_window;
+     check (option int) "provider active context" (Some 310_500)
+       decoded.provider_context_tokens;
+     check (option int) "provider model window" (Some 272_000)
+       decoded.provider_context_window);
+  match Turn_record.to_json (sample_record ()) with
+  | `Assoc fields ->
+    check bool "old records need no provider context keys" false
+      (List.mem_assoc "provider_context_tokens" fields
+       || List.mem_assoc "provider_context_window" fields)
   | _ -> fail "turn record is not an object"
 ;;
 
@@ -1174,6 +1201,8 @@ let () =
             test_context_window_absent_on_the_error_path
         ; test_case "turn output tokens round-trip and stay optional" `Quick
             test_turn_output_tokens_round_trip_and_stay_optional
+        ; test_case "provider context stays separate from turn budget" `Quick
+            test_provider_context_stays_separate_from_turn_budget
         ; test_case "tool surface ref round trips and stays optional" `Quick
             test_tool_surface_ref_round_trips_and_stays_optional
         ; test_case "the tool surface payload round trips" `Quick

@@ -51,6 +51,9 @@ type recent_turn =
             the provider reported a conversation-cumulative figure instead,
             which is a number about the whole conversation and not a fact
             about this turn. *)
+  ; provider_context_tokens : int option
+        (** Official-client active context size, separate from request input. *)
+  ; provider_context_window : int option
   ; cache_read : int option
   ; output_tokens : int option
   ; turn_output_tokens : int option

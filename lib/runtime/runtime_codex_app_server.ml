@@ -89,11 +89,11 @@ type thread_mode =
   | Start
   | Resume of { thread_id : string }
 
-(* The per-turn counts the app-server reports on thread/tokenUsage/updated,
-   its [last] breakdown. OpenAI counting: [input_tokens] already includes the
-   cached prefix and [output_tokens] already includes reasoning, the same
-   reading Backend_openai_parse makes of the API wire. [cache_write_input_tokens]
-   defaults to 0 on the wire. *)
+(* The app-server's [last] breakdown is its latest active context reading;
+   [total] is the cumulative thread spend. OpenAI counting: [input_tokens]
+   includes the cached prefix and [output_tokens] includes reasoning.
+   [total_tokens] is the client-reported active context size, separate from
+   MASC's effective shaping ceiling. [cache_write_input_tokens] defaults to 0. *)
 type token_usage =
   { input_tokens : int
   ; cached_input_tokens : int
@@ -101,6 +101,7 @@ type token_usage =
   ; output_tokens : int
   ; reasoning_output_tokens : int
   ; total_tokens : int
+  ; model_context_window : int option
   }
 
 type turn_result =
@@ -1106,6 +1107,13 @@ let token_usage_notification ~thread_id ~turn_id params =
       | None -> Ok 0
       | Some _ -> required_count stage "cacheWriteInputTokens" last
     in
+    let* model_context_window =
+      match List.assoc_opt "modelContextWindow" usage_fields with
+      | None | Some `Null -> Ok None
+      | Some (`Int window) when window > 0 -> Ok (Some window)
+      | Some _ ->
+        protocol_error stage "field \"modelContextWindow\" must be a positive integer or null"
+    in
     Ok
       (Some
          { input_tokens
@@ -1114,6 +1122,7 @@ let token_usage_notification ~thread_id ~turn_id params =
          ; output_tokens
          ; reasoning_output_tokens
          ; total_tokens
+         ; model_context_window
          })
 ;;
 

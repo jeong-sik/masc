@@ -1463,6 +1463,10 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              (match turn.usage with
               | Some _ -> Runtime_usage_scope.Per_request
               | None -> Runtime_usage_scope.Usage_scope_unavailable)
+           ?reported_context_tokens:
+             (Option.map (fun usage -> usage.total_tokens) turn.usage)
+           ?reported_context_window:
+             (Option.bind turn.usage (fun usage -> usage.model_context_window))
            ()
        in
        Ok

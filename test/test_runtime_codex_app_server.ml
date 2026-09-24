@@ -810,6 +810,7 @@ let fixture_last_usage : Runtime_codex_app_server.token_usage =
   ; output_tokens = 80
   ; reasoning_output_tokens = 30
   ; total_tokens = 1280
+  ; model_context_window = Some 272000
   }
 ;;
 
@@ -4613,8 +4614,29 @@ let test_production_keeper_reports_codex_token_usage () =
                | Some observation ->
                  check bool "observation scope" true
                    (observation.Runtime_observation.usage_scope
-                    = Runtime_usage_scope.Per_request)
-               | None -> fail "production turn recorded no runtime observation")))
+                    = Runtime_usage_scope.Per_request);
+                 check (option int) "vendor context window" (Some 272000)
+                   observation.Runtime_observation.reported_context_window;
+                 check (option int) "vendor active context size" (Some 1280)
+                   observation.Runtime_observation.reported_context_tokens
+               | None -> fail "production turn recorded no runtime observation");
+              let rows =
+                Keeper_types_support.keeper_turn_record_store
+                  (Workspace.default_config base_path) "codex-production-fixture"
+                |> fun store -> Dated_jsonl.read_recent store 1
+              in
+              (match rows with
+               | [json] ->
+                 (match Turn_record.of_json json with
+                  | Ok record ->
+                    check (option int) "record keeps MASC's shaping ceiling"
+                      (Some result.max_context) record.context_window;
+                    check (option int) "recorded provider active context"
+                      (Some 1280) record.provider_context_tokens;
+                    check (option int) "recorded provider model window"
+                      (Some 272000) record.provider_context_window
+                  | Error detail -> fail detail)
+               | _ -> fail "production turn did not persist one record")))
 ;;
 
 let test_production_keeper_resumes_across_trace_rotation () =

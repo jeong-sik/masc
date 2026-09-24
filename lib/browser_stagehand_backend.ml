@@ -169,10 +169,9 @@ let status t =
    whole verb the same way. *)
 let page t verb =
   Eio.Semaphore.acquire t.verbs;
-  (* fun-protect-finally-ok: [Eio.Semaphore.release] does not suspend, and
-     the verb slot must come back on return, exception and cancellation
-     alike; the semaphore, unlike [Eio.Mutex], is not poisoned by an
-     exception. *)
+  (* fun-protect-finally-ok: [Eio.Semaphore.release] does not suspend; the
+     slot comes back on return, exception and cancellation, and unlike
+     [Eio.Mutex] the semaphore is not poisoned by an exception. *)
   Fun.protect ~finally:(fun () -> Eio.Semaphore.release t.verbs) (fun () ->
     match t.state with
     | Open opened -> Executor.execute ~tabs:t.tabs ~call:(t.call opened.session) verb

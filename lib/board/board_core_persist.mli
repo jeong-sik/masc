@@ -63,6 +63,8 @@ val sub_boards_path : unit -> string
 val ensure_dir : string -> unit
 val ensure_masc_dir : unit -> unit
 
+val save_posts_snapshot : store -> string -> (unit, board_error) result
+val save_comments_snapshot : store -> string -> (unit, board_error) result
 val rewrite_posts : store -> unit
 val rewrite_comments : store -> unit
 val reactions_jsonl_unlocked : store -> string

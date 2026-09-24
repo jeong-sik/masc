@@ -92,7 +92,8 @@ def run(executable: str) -> None:
             raise AssertionError(f"Connector list lost the failure cause: {frame!r}")
         if frame.count(b"load failed") != 1:
             raise AssertionError(f"Connector title repeated the body verdict: {frame!r}")
-        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        # Connectors Esc returns to the selected Keeper detail.
+        h.send_and_wait(process, fd, output, b"\x1b", b"Current Work")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

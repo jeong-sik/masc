@@ -23,7 +23,14 @@ export function RuntimeExactLaneEditor({ sourceText, lanes, runtimes, slotsDisab
     if (right.laneId === 'librarian_exact') return 1
     return left.laneId.localeCompare(right.laneId)
   }), [lanes])
-  const runtimeById = new Map(runtimes.map(runtime => [runtime.id, runtime]))
+  const runtimeIds = new Set(runtimes.map(runtime => runtime.id))
+  // runtime/resolved.provider is a display name. Runtime ids are
+  // <provider-id>.<model-id>, and provider ids cannot contain dots.
+  const providerIdOfSlot = (slot: string) => {
+    if (!runtimeIds.has(slot)) return null
+    const boundary = slot.indexOf('.')
+    return boundary > 0 ? slot.slice(0, boundary) : null
+  }
 
   return html`<div class="space-y-4" data-testid="runtime-exact-lane-editor">
     <p class="text-xs text-[var(--color-fg-secondary)]">
@@ -51,7 +58,7 @@ export function RuntimeExactLaneEditor({ sourceText, lanes, runtimes, slotsDisab
           <h3 class="text-xs font-semibold">${group.label}</h3>
           ${group.slots.length === 0 ? html`<p class="text-xs text-[var(--color-fg-muted)]">후보 없음</p>` : null}
           ${group.slots.map((slot, index) => {
-            const providerId = runtimeById.get(slot)?.provider
+            const providerId = providerIdOfSlot(slot)
             const bodyDeadline = group.kind === 'slots' && providerId
               ? getRuntimeTomlKey(sourceText, `providers.${providerId}`, 'exact-body-timeout-s')
               : undefined

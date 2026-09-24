@@ -204,9 +204,9 @@ describe('RuntimeTomlEditor', () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValue(baseConfig)
     apiMocks.fetchStandaloneLanes.mockResolvedValue(laneSnapshot())
     apiMocks.fetchRuntimeResolved.mockResolvedValue({ runtimes: [
-      { id: 'runpod_mtp.qwen', provider: 'runpod_mtp' },
-      { id: 'openai.gpt', provider: 'openai' },
-      { id: 'codex_subscription.luna', provider: 'codex_subscription' },
+      { id: 'runpod_mtp.qwen', provider: 'RunPod' },
+      { id: 'openai.gpt', provider: 'OpenAI' },
+      { id: 'codex_subscription.luna', provider: 'Codex Subscription' },
     ] })
     apiMocks.patchRuntimeExactSlot.mockImplementation(async () =>
       committedRuntimeTomlConfigFixture(richConfig))

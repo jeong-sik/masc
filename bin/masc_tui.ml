@@ -1842,6 +1842,8 @@ type http_scoped_surface_results = {
   http_repository_pulls:
     (overview_pulls_reading, string) result
     option;
+  (* [None] off the Overview, the one surface that draws the GOALS section. *)
+  http_overview_goals: (Tui_decode.overview_goal list, string) result option;
 }
 
 type http_surface_results = {
@@ -10563,6 +10565,13 @@ let apply_repository_pulls_load state = function
   | Ok reading -> state.overview_pulls <- reading
   | Error err -> state.overview_pulls <- Overview_pulls_failed err
 
+(* A failed read replaces the last good one, as the quota reading does: goals
+   drawn after the read that listed them stopped arriving would be rows nobody
+   observed this refresh. *)
+let apply_overview_goals_load state = function
+  | Ok goals -> state.overview_goals <- Goals_read goals
+  | Error err -> state.overview_goals <- Goals_failed err
+
 let apply_keeper_roster_load state = function
   | Ok roster ->
       state.keeper_roster <- roster;
@@ -10809,6 +10818,13 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
   in
+  let http_overview_goals =
+    when_needed needs.needs_overview_goals (fun () ->
+        match Masc_tui_loader.load_overview_goals ~host ~port with
+        | result -> result
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn -> Error (Printexc.to_string exn))
+  in
   { http_transport
   ; http_approvals
   ; http_asks
@@ -10820,6 +10836,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   ; http_keeper_roster
   ; http_runtime_quota
   ; http_repository_pulls
+  ; http_overview_goals
   }
 
 let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
@@ -10865,7 +10882,8 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   Option.iter (apply_runtime_quota_load state) results.http_runtime_quota;
-  Option.iter (apply_repository_pulls_load state) results.http_repository_pulls
+  Option.iter (apply_repository_pulls_load state) results.http_repository_pulls;
+  Option.iter (apply_overview_goals_load state) results.http_overview_goals
 
 (* This is a current reading, not a last-known cache. A failed probe makes
    the projection unread; every following refresh asks again, so a same-port

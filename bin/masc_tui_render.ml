@@ -28,6 +28,7 @@ module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Overview_team = Masc_tui_overview_team
+module Overview_goals = Masc_tui_overview_goals
 module Repository_pulls = Masc_tui_repository_pulls
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
@@ -580,6 +581,7 @@ let overview_layout (state : state) ~terminal_rows =
   let allocate attention_items =
     Render_schedule.allocate_overview ~terminal_rows
       ~attention_count:(List.length attention_items)
+      ~goal_count:(Overview_goals.wanted_rows state.overview_goals)
       ~team_count
       ~task_count:(List.length state.tasks)
       ~has_task_error:(Option.is_some tasks_error)
@@ -730,6 +732,10 @@ let render_overview (state : state) =
   let attention_items, tasks_error, row_budget =
     overview_layout state ~terminal_rows:rows
   in
+  Overview_goals.draw buf ~cols ~rows:row_budget.goal_rows
+    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime
+    ~tasks:(Option.fold ~none:(Ok state.tasks) ~some:Result.error tasks_error)
+    state.overview_goals;
   (* The panel spans the band the rest of the screen's rows cover: one cell of
      margin on each side of the frame. *)
   let panel_width = cols - 2 in
@@ -1214,8 +1220,13 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
    no second screen. This is that screen. *)
 let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_row) buf =
   let width = max 8 (cols - 6) in
-  let fields =
-    match row with
+  (* The fields are handed to [Approval_detail.of_fields] as they are built,
+     not bound first: it is where every value is made terminal-safe, and the
+     field guard in test_tui_http_ast.ml reads a wire field as sanitised only
+     inside that call. *)
+  let lines =
+    Approval_detail.of_fields ~width
+      (match row with
     | Keeper_tool_row held ->
       [ "keeper", held.Tui_decode.kta_keeper
       ; "tool", held.Tui_decode.kta_tool
@@ -1237,8 +1248,7 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
           [ ( "reason"
             , Option.value
                 ~default:"(the server recorded no detail)"
-                pending.Tui_decode.gp_auto_judge_detail
-              |> Keeper_chat.terminal_safe_text ~preserve_newlines:true )
+                pending.Tui_decode.gp_auto_judge_detail )
           ; ( "next"
             , match pending.Tui_decode.gp_retry_request with
               | Some _ -> "R: retry Auto Judge; y/n: decide now"
@@ -1265,9 +1275,7 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
       @ (match pending.Tui_decode.gp_input_rows with
          | Tui_decode.Rows (_ :: _ as fields) ->
            List.map
-             (fun (key, value) ->
-               ( Terminal_text.single_line key
-               , Keeper_chat.terminal_safe_text ~preserve_newlines:true value ))
+             (fun (key, value) -> (Terminal_text.single_line key, value))
              fields
          | Tui_decode.Rows [] -> [ "input", "(the stored input object is empty)" ]
          | Tui_decode.Flattened preview ->
@@ -1282,9 +1290,8 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
       ; "summary", a.Masc_tui_operator_projection.ap_summary
       ; "payload",
         Yojson.Safe.pretty_to_string a.Masc_tui_operator_projection.ap_payload
-      ]
+      ])
   in
-  let lines = Approval_detail.of_fields ~width fields in
   box_top buf cols;
   (* Opens on MASC and its name, like every other surface; the way out is the
      footer's to say, and saying it here too spelled the same key twice in two
@@ -1322,10 +1329,13 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
            now, and bolding the whole of it would weight the value too. *)
         let drawn = fit_width text (cols - 6) in
         let name = String.length label in
+        (* Split only where the whole name survived the cut. A narrow pane
+           can end the row inside the name, and [fit_width]'s ellipsis is
+           three bytes: splitting at the name's byte length there would cut
+           the ellipsis and send half a character to the terminal. *)
         box_line buf cols
-          (if String.length drawn >= name then
-             Printf.sprintf "  %s%s%s%s" Ansi.bold (String.sub drawn 0 name)
-               Ansi.reset
+          (if String.starts_with ~prefix:label drawn then
+             Printf.sprintf "  %s%s%s%s" Ansi.bold label Ansi.reset
                (String.sub drawn name (String.length drawn - name))
            else Printf.sprintf "  %s%s%s" Ansi.bold drawn Ansi.reset)
       | None ->

@@ -1848,6 +1848,14 @@ let render_approvals (state : state) =
     | Some _ -> ", held calls stale"
     | None -> ""
   in
+  (* The questions have the same two ways to be wrong. A failed questions
+     poll reached the event log once and nothing on this screen. *)
+  let question_note =
+    match Masc_tui_types.approvals_questions_reading state with
+    | Masc_tui_types.Questions_unread -> ", questions unread"
+    | Masc_tui_types.Questions_stale -> ", questions stale"
+    | Masc_tui_types.Questions_current -> ""
+  in
   let action_badge = if action_inflight then "  [submitting]" else "" in
   (* The count and where it came from, naming only the lists that have a row
      on the screen. It read "3 [0 held · 0 gate · 3 op]": two zeros for lists
@@ -1887,9 +1895,9 @@ let render_approvals (state : state) =
   in
   let header =
     Printf.sprintf
-      "%s (%s%s%s)  %s  %s%s"
+      "%s (%s%s%s%s)  %s  %s%s"
       (screen_title " MASC Approvals")
-      count_text queue_note held_note timestamp
+      count_text queue_note held_note question_note timestamp
       (connection_badge state) action_badge
   in
 

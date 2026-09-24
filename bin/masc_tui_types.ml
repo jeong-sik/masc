@@ -10244,6 +10244,21 @@ let approvals_open_question_count (state : state) =
         0 rows
   | None -> 0
 
+(* Whether the rows behind [approvals_open_question_count] are the server's
+   current answer. Before the first poll answers there are no rows, so the
+   count holds no question because none was read; a failed poll keeps the
+   previous rows, as [apply_asks_load] replaces them only on [Ok]. *)
+type questions_reading =
+  | Questions_current
+  | Questions_unread
+  | Questions_stale
+
+let approvals_questions_reading (state : state) =
+  match (state.asks_snapshot, state.asks_error) with
+  | None, _ -> Questions_unread
+  | Some _, Some _ -> Questions_stale
+  | Some _, None -> Questions_current
+
 let approvals_surface_pending (state : state) =
   List.length (approval_items state) + approvals_open_question_count state
 

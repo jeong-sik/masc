@@ -816,7 +816,10 @@ let test_a_lane_named_event_is_attributed_by_its_trace () =
 let test_elapsed_text_picks_a_unit () =
   check (list string) "ms, seconds, minutes"
     [ "32ms"; "1.2s"; "2m05s" ]
-    (List.map Acting.elapsed_text [ 32.; 1200.; 125_000. ])
+    (List.map Acting.elapsed_text [ 32.; 1200.; 125_000. ]);
+  (* A feed clock that disagreed with itself is not an instant call. *)
+  check string "a negative duration is the missing-value dash, not 0ms"
+    "\xe2\x80\x94" (Acting.elapsed_text (-4.))
 
 (* The feed used to render keeper_skill and keeper_compose_* as anonymous
    "call"/"returned" rows, so skill use was invisible in the chat-side surfaces

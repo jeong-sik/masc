@@ -156,11 +156,18 @@ type row = {
 
 (* The feed measures a call in milliseconds; the spelling is the TUI's one
    duration ladder, which takes seconds. This ladder used to stop at minutes,
-   so a run over an hour read "62m03s". *)
+   so a run over an hour read "62m03s".
+
+   A negative duration has no spelling on the ladder. Every row here places
+   the duration beside other words, so it draws the dash the TUI uses for a
+   missing value rather than a "0ms" that reads as an instant call. *)
 let milliseconds_in_a_second = 1000.
+let no_duration = "\xe2\x80\x94"
 
 let elapsed_text ms =
-  Masc_tui_message_layout.elapsed_text (ms /. milliseconds_in_a_second)
+  match Masc_tui_message_layout.elapsed_text (ms /. milliseconds_in_a_second) with
+  | Some text -> text
+  | None -> no_duration
 
 let turn_number_text turn = Printf.sprintf "turn %d" turn
 

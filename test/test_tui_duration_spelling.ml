@@ -38,24 +38,27 @@ let test_the_drawing_is_read () =
     (List.mem layout drawing_modules)
 ;;
 
+(* Any literal that carries the conversion counts, not only one that is the
+   conversion and nothing else. Two of the five draws this replaced wrapped it
+   in their own words -- " · p50 latency %.1fs" and "  ·  %.1fs" --
+   and a guard that asked for the bare format read them as clean, so the next
+   " · took %.1fs" would have passed. *)
 let test_the_tenths_are_spelled_in_one_place () =
   let spellers =
     List.filter
       (fun module_path ->
-        Ast_grep.count_exact_string_literals ~module_path ~needle:tenths_of_a_second
-        > 0)
+        Ast_grep.count_string_literals ~module_path ~needle:tenths_of_a_second > 0)
       drawing_modules
   in
   Alcotest.(check (list string)) "only the ladder holds it" [ layout ] spellers;
   Alcotest.(check int) "and holds it once" 1
-    (Ast_grep.count_exact_string_literals ~module_path:layout
-       ~needle:tenths_of_a_second)
+    (Ast_grep.count_string_literals ~module_path:layout ~needle:tenths_of_a_second)
 ;;
 
 (* The ladder's own rung, so the guard above is measuring the thing the
    surfaces read rather than a literal that happens to match. *)
 let test_the_ladder_draws_the_tenths () =
-  Alcotest.(check string) "under a minute" "16.2s"
+  Alcotest.(check (option string)) "under a minute" (Some "16.2s")
     (Masc_tui_message_layout.elapsed_text 16.23)
 ;;
 

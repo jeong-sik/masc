@@ -5232,7 +5232,10 @@ let standalone_lane_row ~now ~frame ~(columns : Lane_table.columns) width
   let p50 =
     match lane.sl_p50_elapsed_s with
     | None -> "—"
-    | Some seconds -> Message_layout.elapsed_text seconds
+    | Some seconds -> (
+        match Message_layout.elapsed_text seconds with
+        | Some text -> text
+        | None -> "—")
   in
   let prefix = standalone_lane_status_style lane.sl_status in
   let line =
@@ -5373,14 +5376,16 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
         float_of_int lane.sl_succeeded_count /. float_of_int total *. 100.0
       in
       let p50_str =
-        (* One decimal, the way the P50 column above draws the same
-           [sl_p50_elapsed_s]: the row read "8.0s" and this line "8.00s" of
-           one number on one screen, which leaves the reader deciding whether
-           they are the same figure. The column is the constrained one -- six
-           cells -- so the detail follows it rather than the other way. *)
+        (* The P50 column above draws the same [sl_p50_elapsed_s] through
+           the same ladder. The two used to differ -- "8.0s" in the row,
+           "8.00s" here -- which left the reader deciding whether they were
+           one figure. A reading the ladder has no spelling for leaves the
+           clause out, as a missing one does. *)
         match lane.sl_p50_elapsed_s with
-        | Some s ->
-            Printf.sprintf " · p50 latency %s" (Message_layout.elapsed_text s)
+        | Some s -> (
+            match Message_layout.elapsed_text s with
+            | Some text -> Printf.sprintf " · p50 latency %s" text
+            | None -> "")
         | None -> ""
       in
       Printf.sprintf "Runs: %d retained (%d ok / %d fail / %d cancel) · %.1f%% success%s"
@@ -5876,7 +5881,10 @@ let render_lane_run_list (state : state) ~lane_id =
           let elapsed =
             match run.lrs_elapsed_s with
             | None -> "—"
-            | Some seconds -> Message_layout.elapsed_text seconds
+            | Some seconds -> (
+                match Message_layout.elapsed_text seconds with
+                | Some text -> text
+                | None -> "—")
           in
           let line =
             "  "
@@ -6179,8 +6187,10 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
   let elapsed =
     match detail.lrd_elapsed_s with
     | None -> ""
-    | Some seconds ->
-        Printf.sprintf "  ·  %s" (Message_layout.elapsed_text seconds)
+    | Some seconds -> (
+        match Message_layout.elapsed_text seconds with
+        | Some text -> Printf.sprintf "  ·  %s" text
+        | None -> "")
   in
   let slot =
     match detail.lrd_answer_source, detail.lrd_selected_slot with

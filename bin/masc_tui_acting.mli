@@ -237,7 +237,8 @@ val duration_of_completion :
 val elapsed_text : float -> string
 (** A duration in milliseconds, spelled by
     {!Masc_tui_message_layout.elapsed_text}: [32ms], [1.2s], [2m05s],
-    [1h02m]. *)
+    [1h02m]. A negative duration, which that ladder has no spelling for,
+    draws the em dash the TUI uses for a missing value. *)
 
 val evidence_fields : entry -> (string * string option) list
 (** Producer references from one immutable observer event. Missing IDs and

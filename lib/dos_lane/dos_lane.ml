@@ -64,6 +64,29 @@ let peek_max_bytes = 256
 let max_keys_per_call = 64
 let max_text_length = 256
 
+(* ---------- which core ---------- *)
+
+type core = {
+  source_digest : string;
+  pinned_source_digest : string;
+  matches_pin : bool;
+}
+[@@deriving yojson]
+
+(* The digest ocaml-dos reports for the sources at OCAML_DOS_SHA in
+   scripts/opam-pin-external-deps.sh. Bump the two together: CI links the
+   pinned core, and test_dos_tools checks that the linked digest equals this
+   one, so a SHA bumped alone turns that test red with the new digest in its
+   message. Read the digest of a commit from its build:
+   _build/default/lib/identity/dos_core_identity.ml. *)
+let pinned_core_source_digest = "9140e64dd08b4f9b8931115af9ebf200"
+
+let core =
+  { source_digest = Dos_core_identity.source_digest
+  ; pinned_source_digest = pinned_core_source_digest
+  ; matches_pin = String.equal Dos_core_identity.source_digest pinned_core_source_digest
+  }
+
 type ran = {
   steps_run : int;
   settled : bool;

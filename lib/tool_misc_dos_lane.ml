@@ -63,12 +63,18 @@ let of_lane ?(extra = []) ~tool_name ~start_time
       (Dos_lane.error_to_string e)
 ;;
 
-let of_lane_run ~tool_name ~start_time
+let of_lane_run ?(extra = []) ~tool_name ~start_time
     (result : (Dos_lane.observation * Dos_lane.ran, Dos_lane.error) result) =
   match result with
-  | Ok (o, r) -> of_lane ~tool_name ~start_time ~extra:(ran_fields r) (Ok o)
+  | Ok (o, r) -> of_lane ~tool_name ~start_time ~extra:(ran_fields r @ extra) (Ok o)
   | Error e -> of_lane ~tool_name ~start_time (Error e)
 ;;
+
+(* Which DOS core this server was built with, on the two answers a caller
+   reads first: the load and the screen. A black screen from a core that
+   lacks a fix looks the same as a game bug until this says the core differs
+   from the CI pin. *)
+let core_field = ("core", Dos_lane.core_to_yojson Dos_lane.core)
 
 (* The lane's files live under <.masc>/dos: the ledger, and programs/ — the
    inventory an operator fills by hand. A DOS game is rarely one file, so a
@@ -375,7 +381,7 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
                (announce ~author:agent_name
                   (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name)))
        in
-       after_announcing (of_lane_run ~tool_name ~start_time loaded))
+       after_announcing (of_lane_run ~extra:[ core_field ] ~tool_name ~start_time loaded))
 ;;
 
 let handle_eject ~tool_name ~start_time ~agent_name _args =
@@ -429,7 +435,7 @@ let handle_pass ~tool_name ~start_time ~agent_name args =
 ;;
 
 let handle_screen ~tool_name ~start_time _args =
-  of_lane ~tool_name ~start_time (off_domain Dos_lane.screen)
+  of_lane ~extra:[ core_field ] ~tool_name ~start_time (off_domain Dos_lane.screen)
 ;;
 
 (* The whole per-call ceiling: a call that settles stops early, so a large

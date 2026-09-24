@@ -180,6 +180,43 @@ let test_load_runs_to_the_first_key_request () =
     check bool "and has not exited" false (bool_field "exited" result))
 ;;
 
+(* The load and the screen say which DOS core answered. Two servers built
+   from one masc commit can link different cores; a black screen from the
+   older one otherwise looks like a game bug. *)
+let test_load_and_screen_name_the_core () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    let expected = Dos_lane.core_to_yojson Dos_lane.core in
+    let core_of name result =
+      match member "core" (Tool_result.data result) with
+      | Some core -> core
+      | None -> fail (Printf.sprintf "%s carries no core: %s" name (Tool_result.message result))
+    in
+    let loaded = load ~base_path "hello.com" in
+    check bool "load succeeds" true (is_completed loaded);
+    check string "the load names the linked core"
+      (Yojson.Safe.to_string expected) (Yojson.Safe.to_string (core_of "load" loaded));
+    let screen = dispatch ~base_path "masc_dos_screen" [] in
+    check string "the screen names the linked core"
+      (Yojson.Safe.to_string expected) (Yojson.Safe.to_string (core_of "screen" screen));
+    check string "the digest is the one the core baked at its build"
+      Dos_core_identity.source_digest Dos_lane.core.Dos_lane.source_digest)
+;;
+
+(* CI links the core at OCAML_DOS_SHA. This fails when the SHA moved without
+   Dos_lane's pinned digest, and locally when the build linked another core
+   (an older opam install, a vendored checkout on another branch). *)
+let test_the_linked_core_is_the_pinned_one () =
+  let core = Dos_lane.core in
+  if not core.Dos_lane.matches_pin then
+    fail
+      (Printf.sprintf
+         "linked ocaml-dos source digest %s differs from the pinned %s: either this \
+          build linked a core other than OCAML_DOS_SHA, or the SHA moved and \
+          Dos_lane.pinned_core_source_digest must become %s"
+         core.source_digest core.pinned_source_digest core.source_digest)
+;;
+
 let test_press_reaches_the_guest_and_the_ledger () =
   with_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
@@ -757,6 +794,10 @@ let () =
         ; test_case "click no machine" `Quick test_click_without_a_machine_is_refused
         ; test_case "inventory" `Quick test_inventory_when_unnamed
         ; test_case "load" `Quick test_load_runs_to_the_first_key_request
+        ; test_case "load and screen name the core" `Quick
+            test_load_and_screen_name_the_core
+        ; test_case "linked core is the pinned one" `Quick
+            test_the_linked_core_is_the_pinned_one
         ; test_case "press" `Quick test_press_reaches_the_guest_and_the_ledger
         ; test_case "click reaches the guest" `Quick
             test_click_reaches_the_guest_and_the_ledger

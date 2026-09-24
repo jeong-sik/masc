@@ -95,6 +95,26 @@ val boot_steps : int
     if the program asks for a key. A DOS program reaches its title screen in
     its own time; this is the budget for getting there. *)
 
+type core = {
+  source_digest : string;
+      (** the linked ocaml-dos core's own identity: a digest of its [lib/]
+          sources, computed by its build ([Dos_core_identity]). Not a
+          commit — an opam install has no history to ask. *)
+  pinned_source_digest : string;
+      (** the digest of the core at the CI pin, [OCAML_DOS_SHA] in
+          [scripts/opam-pin-external-deps.sh]. *)
+  matches_pin : bool;
+      (** the two digests are equal. [false] means this server runs a
+          different core from the one CI builds against — an older opam
+          copy, or a vendored checkout on another branch. *)
+}
+[@@deriving yojson]
+(** Which DOS core this server was built with. A server built without its
+    vendored copy links whatever opam installed, which can lack a fix the
+    games depend on while every masc build field stays the same. *)
+
+val core : core
+
 type ran = {
   steps_run : int;  (** instructions actually advanced *)
   settled : bool;

@@ -426,11 +426,141 @@ let resume_wire ~max_prompt_bytes =
       (List.length resumes) (List.length turns))
 
 let test_undeclared_limit_sends_whole_history () =
-  (* (c) The operator's decision (ask7a9c2dbf75c6a2fa): nothing declared, no
-     limit. The Resume carries every message, as it did before #37353. *)
+  (* (c) Nothing declared and no completed turn on this history: the carried
+     range is the whole history, so the Resume carries every message. *)
   let instructions, _ = resume_wire ~max_prompt_bytes:None in
   let kept = snapshot_of_instructions instructions |> member "messages" |> items in
-  check int "nothing declared: every message is carried" 64 (List.length kept)
+  check int "no completed turn: every message is carried" 64 (List.length kept)
+
+let snapshot_carries kept index =
+  List.exists
+    (fun item ->
+       String_util.contains_substring (Yojson.Safe.to_string item)
+         (Printf.sprintf "\"%d:xxxx" index))
+    kept
+
+let test_resume_after_start_carries_the_range () =
+  (* The turn after a bounded Start is a Resume, and it puts its history on
+     the wire too, as the canonical snapshot in [developerInstructions]. It
+     carries the same range a Start does: nothing is declared, the last
+     completed turn ended at atom 60, so the snapshot holds atoms 60..63 and
+     nothing before. *)
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let attempt, rows = resume_large_history ~capture
+    ~start:(fun () -> run ~instructions:"Keeper instructions" ~world:"world" ())
+    ~resume:(fun checkpoint -> run ~initial_messages:large_history
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 60 })
+      ~official_client_continuation:checkpoint ~official_client_original_turn:checkpoint
+      ~instructions:"Keeper instructions" ~world:"world" ()) in
+  successful attempt;
+  match params_of "thread/resume" rows with
+  | [resume] ->
+    let kept =
+      resume |> member "developerInstructions" |> text |> snapshot_of_instructions
+      |> member "messages" |> items
+    in
+    check (list bool) "atoms 60..63 are in the snapshot" [ true; true; true; true ]
+      (List.map (snapshot_carries kept) [ 60; 61; 62; 63 ]);
+    check bool "nothing before the range is in the snapshot" false
+      (snapshot_carries kept 59 || snapshot_carries kept 0);
+    check int "only the range goes" 4 (List.length kept)
+  | rows -> fail (Printf.sprintf "expected one Resume, saw %d" (List.length rows))
+
+(* The composition both modes share, driven directly. *)
+let carried_indices messages =
+  List.filter_map
+    (fun (message : Agent_core.Types.message) ->
+       match message.content with
+       | [ Agent_core.Types.Text text ] ->
+         (match String.index_opt text ':' with
+          | Some colon -> int_of_string_opt (String.sub text 0 colon)
+          | None -> None)
+       | _ -> None)
+    messages
+
+let carried ?carried_front_seed ?librarian_front ?(capacity_bytes = Keeper_codex_runtime.For_testing.unbounded_capacity_bytes) turn_start =
+  match
+    Keeper_codex_runtime.For_testing.carried_projection
+      ~capacity_bytes ?carried_front_seed ?librarian_front ~turn_start
+      ~keeper_name:"context-fixture" ~runtime_id:"codex.context" large_history
+  with
+  | Ok messages -> carried_indices messages
+  | Error error -> fail (Agent_core.Error.to_string error)
+
+let seed_at first_atom () =
+  let front_digest =
+    match Runtime_model_input_tail_window.atom_opening_digest large_history first_atom with
+    | Some digest -> digest
+    | None -> fail "the history opens that atom"
+  in
+  { Keeper_carried_front.seed =
+      Some { Keeper_carried_front.first_atom; front_digest; source = Keeper_carried_front.Ledger }
+  ; unreadable = None
+  ; boundary_error = None
+  }
+
+let from index = List.init (64 - index) (fun offset -> index + offset)
+
+let test_the_seed_decides_the_range () =
+  (* A seed holds even when it is older than the turn start: the range the
+     last answered request carried is this lane's continuity. *)
+  check (list int) "the range opens on the seed" (from 50)
+    (carried ~carried_front_seed:(seed_at 50)
+       (Keeper_carried_front.Turn_boundary { end_atom = 60 }))
+
+let test_a_later_librarian_position_decides_the_range () =
+  check (list int) "the Librarian's read position is past the seed" (from 62)
+    (carried ~carried_front_seed:(seed_at 50)
+       ~librarian_front:(fun _ ->
+         Ok (Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 62 }))
+       (Keeper_carried_front.Turn_boundary { end_atom = 60 }))
+
+let test_a_declared_limit_cuts_inside_the_range () =
+  (* Room for the omission preamble and two of the ~4 KiB messages: the
+     declared ceiling cuts deeper than the range's own front at atom 60, and
+     the later front wins. *)
+  let measure message = String.length (Keeper_official_client_host.encode_history_message message) in
+  let framing =
+    match Runtime_model_input_tail_window.minimum_capacity_bytes ~measure_message_bytes:measure large_history with
+    | Some bytes -> bytes
+    | None -> fail "a history this long has a framed floor"
+  in
+  let capacity_bytes =
+    framing + measure (List.nth large_history 62) + measure (List.nth large_history 63)
+  in
+  check (list int) "the ceiling keeps the newest two" [ 62; 63 ]
+    (carried ~capacity_bytes
+       (Keeper_carried_front.Turn_boundary { end_atom = 60 }))
+
+let test_an_unknown_turn_start_carries_the_newest_atom () =
+  check (list int) "the newest atom alone" [ 63 ]
+    (carried (Keeper_carried_front.Turn_boundary_unknown { reason = "fixture" }))
+
+let turn_start_to_string = Keeper_carried_front.turn_start_to_string
+
+let test_a_turn_without_a_session_trace_opens_on_the_newest_atom () =
+  (* A turn with no session trace, or with a recovery view, cannot read where
+     the last completed turn ended. [Turn_boundary { end_atom = 0 }] would
+     claim a history with no completed turn and send all of it. *)
+  let read = Keeper_carried_front.Turn_boundary { end_atom = 60 } in
+  let start ~session_id ~recovery_view =
+    Keeper_turn_driver.For_testing.official_client_turn_start ~session_id ~recovery_view
+      ~read_boundary:(fun () -> read)
+  in
+  let unknown = function
+    | Keeper_carried_front.Turn_boundary_unknown _ -> true
+    | Keeper_carried_front.Turn_boundary _ -> false
+  in
+  check string "a session trace reads the boundary" (turn_start_to_string read)
+    (turn_start_to_string (start ~session_id:(Some "trace-1") ~recovery_view:None));
+  check bool "no session trace: unknown" true
+    (unknown (start ~session_id:None ~recovery_view:None));
+  check bool "a recovery view: unknown" true
+    (unknown (start ~session_id:(Some "trace-1") ~recovery_view:(Some ())));
+  check bool "no session trace with a recovery view: unknown" true
+    (unknown (start ~session_id:None ~recovery_view:(Some ())));
+  check (list int) "and a Codex Start without a trace carries the newest atom" [ 63 ]
+    (carried (start ~session_id:None ~recovery_view:None))
 
 let test_declared_limit_above_history_changes_nothing () =
   (* (b) A limit the history fits under sends exactly what an undeclared lane
@@ -445,6 +575,12 @@ let () = run "Keeper current Codex context" ["native requests",[
   test_case "a declared prompt limit windows a Resume before it is sent" `Quick test_declared_limit_windows_resume_before_send;
   test_case "a declared prompt limit windows a Start" `Quick test_declared_limit_windows_start;
   test_case "a Start carries the range, not the whole history" `Quick test_start_carries_the_range_not_the_whole_history;
+  test_case "a Resume after a Start carries the range" `Quick test_resume_after_start_carries_the_range;
+  test_case "the seed decides the range" `Quick test_the_seed_decides_the_range;
+  test_case "a later Librarian position decides the range" `Quick test_a_later_librarian_position_decides_the_range;
+  test_case "a declared limit cuts inside the range" `Quick test_a_declared_limit_cuts_inside_the_range;
+  test_case "an unknown turn start carries the newest atom" `Quick test_an_unknown_turn_start_carries_the_newest_atom;
+  test_case "a turn without a session trace opens on the newest atom" `Quick test_a_turn_without_a_session_trace_opens_on_the_newest_atom;
   test_case "no declared prompt limit sends the whole history" `Quick test_undeclared_limit_sends_whole_history;
   test_case "a prompt limit above the history changes nothing" `Quick test_declared_limit_above_history_changes_nothing;
   test_case "resumed context overflow shrinks replacement configuration" `Quick test_resumed_context_overflow_shrinks_configuration;

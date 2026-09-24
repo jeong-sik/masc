@@ -384,6 +384,9 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"
                       ~base_path
+                      (* A trace with no completed turn: the range is the whole
+                         history, which the prompt checks below read. *)
+                      ~session_id:"fixture-trace-no-completed-turn"
                       ~goal:"Call masc_probe once"
                       ~system_prompt:"pre-dispatch fixture system prompt"
                       ~tools:[ tool ]

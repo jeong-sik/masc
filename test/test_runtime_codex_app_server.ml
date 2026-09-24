@@ -3023,8 +3023,14 @@ supports_native_streaming = false
    composition would run the turn under Codex's built-in instructions with
    masc's tool surface attached (#33165). The sibling suites for the other two
    official clients name a fixture prompt the same way. *)
+(* A session trace whose boundary store holds no completed turn: the
+   official-client lanes read the turn boundary as atom 0, so the whole
+   offered history is the carried range. A turn with no trace carries the
+   newest atom alone ([Keeper_turn_driver.For_testing.official_client_turn_start]). *)
+let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
+
 let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
-    ?(initial_messages = []) ?base_path ?raw_trace_path
+    ?(initial_messages = []) ?base_path ?raw_trace_path ?session_id
     ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
@@ -3085,6 +3091,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       ?context_injector
                       ?context
                       ?raw_trace
+                      ?session_id
                       ?on_event
                       ?on_request_attribution
                       ~sw
@@ -3211,6 +3218,7 @@ let test_keeper_shrinks_history_after_typed_context_error () =
             match
               run_keeper_turn
                 ~initial_messages
+                ~session_id:fixture_trace_with_no_completed_turn
                 ~keeper_name:"codex-fixture-same-size-shrink"
                 ~cli_path
                 ~model:"gpt-fixture"
@@ -3295,6 +3303,7 @@ let test_keeper_shrinks_lopsided_history_at_atom_boundary () =
             match
               run_keeper_turn
                 ~initial_messages
+                ~session_id:fixture_trace_with_no_completed_turn
                 ~keeper_name:"codex-fixture-lopsided-shrink"
                 ~cli_path
                 ~model:"gpt-fixture"
@@ -4312,6 +4321,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
                 ~tools:[tool]
                 ~base_path
                 ~initial_messages:native_history
+                ~session_id:fixture_trace_with_no_completed_turn
                 ~hooks:(hooks "UPDATED_CONTEXT")
                 ~goal
                 ~system_prompt:"UPDATED_SYSTEM_PROMPT"

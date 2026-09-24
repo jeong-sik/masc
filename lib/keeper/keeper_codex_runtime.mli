@@ -61,23 +61,23 @@ val run :
     history this turn carried. Without it the turn record is written with no
     window and no input composition, which is what [/context] reads.
 
-    A [Start] injects the carried range, not the whole history
-    ({!Keeper_official_client_host.carried_start_range}): the range the last
-    answered request carried ([carried_front_seed]), the turn's Librarian
-    position ([librarian_front]) when that is later, else the end of the last
-    completed turn ([turn_start]). [on_carried_front] reports the front a
-    Start sent. A [Resume] keeps the whole-history projection.
+    Both modes carry the carried range, not the whole history
+    ({!Keeper_official_client_host.carried_start_range}): a [Start] injects
+    it into the new thread, a [Resume] sends it as the canonical snapshot in
+    [developerInstructions]. The range starts where the last answered
+    request's range did ([carried_front_seed]), at the turn's Librarian
+    position ([librarian_front]) when that is later, else at [turn_start].
+    [on_carried_front] reports the front each composition cut, before the
+    write, as on the Claude Code lane.
 
     [on_transmitted_model_input] fires once per attempt, after context injection
     is acknowledged and the complete turn/start input is written. Required
     rather than optional: a lane that reports nothing is what wrote every
     turn's input attribution on this lane as zero (masc#32995).
 
-    It reports [Whole_input_transmitted] only on a [Start], the one branch
-    that injects the history into the thread. A [Resume] reports
-    [Held_by_client_session]: MASC injects the current Keeper instructions and
-    developer context before the new turn, but the app-server holds the prior
-    conversation, so its full model input cannot be measured here. *)
+    It reports [Whole_input_transmitted] with the carried range in both
+    modes, since both write it. On a [Resume] the app-server also holds the
+    thread's own prior conversation, which this report does not measure. *)
 
 module For_testing : sig
   val note_transport_uncertainty : Keeper_provider_attempt_effect.t Atomic.t -> unit
@@ -122,7 +122,7 @@ module For_testing : sig
     gate_continuation:bool -> base_path:string -> keeper_name:string -> runtime_id:string ->
     unit -> unit
 
-  val start_projection
+  val carried_projection
     :  capacity_bytes:int
     -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
     -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
@@ -135,8 +135,8 @@ module For_testing : sig
     -> runtime_id:string
     -> Agent_core.Types.message list
     -> (Agent_core.Types.message list, Agent_core.Error.t) result
-  (** The history a [Start] injects: the carried range, cut again by a
-      declared ceiling when there is one. *)
+  (** The history an attempt carries in either mode: the carried range,
+      cut again by a declared ceiling when there is one. *)
 
   val unbounded_capacity_bytes : int
   (** [capacity_bytes] for a runtime that declares no max-prompt-bytes. *)

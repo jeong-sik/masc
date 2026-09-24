@@ -16176,10 +16176,16 @@ let agenda_lines (state : state) =
     ~cols:(framed_inner_width cols)
     (Masc_tui_types.agenda state)
 
+(* The panel's rows and the viewport that shows them, the way
+   [help_viewport] answers for the sheet: one pair for the keypress that
+   bounds the cursor and the frame that draws it, and one row off the height
+   when the panel has more rows than it can show. *)
 let agenda_viewport (state : state) =
   let terminal_rows, _cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  (List.length (agenda_lines state), framed_content_height ~rows)
+  let count = List.length (agenda_lines state) in
+  let height = framed_content_height ~rows in
+  (count, if count > height then max 1 (height - 1) else height)
 
 let answering_viewport (state : state) =
   let terminal_rows, _cols = get_terminal_size () in
@@ -16313,16 +16319,28 @@ let render_agenda (state : state) =
     ~frame:Chrome_overlay
     ~title:(screen_title " MASC Agenda")
     ~hints
-    ~body:(fun ~budget c ->
+    (* [agenda_viewport] rather than the budget it is derived from: the
+       keypress bounds the cursor against that pair. *)
+    ~body:(fun ~budget:_ c ->
+      let count, height = agenda_viewport state in
       let scroll =
-        Masc_tui_scroll.normalize
-          ~count:(List.length lines) ~height:budget state.agenda_scroll
+        Masc_tui_scroll.normalize ~count ~height state.agenda_scroll
       in
       List.iteri
         (fun index line ->
-          if index >= scroll && index < scroll + budget then
+          if index >= scroll && index < scroll + height then
             c.push (paint ~selected:(index = state.agenda_cursor) line))
-        lines)
+        lines;
+      (* What falls off this panel is not more of the same: measured at 24
+         rows and 100 columns, the panel drew sixteen of its twenty coming
+         rows and neither of the two sections under them, and nothing said
+         "Waiting on you" and "Stuck on you" were there. *)
+      if count > height then
+        c.push
+          (Theme.recede ()
+          ^ Printf.sprintf "  [lines %s]"
+              (Masc_tui_scroll.window_text ~scroll ~height count)
+          ^ Ansi.reset))
 ;;
 
 let render_terminal_too_small state ~rows ~cols =

@@ -1,4 +1,4 @@
-"""The cheat sheet says which of its lines these are.
+"""The overlays say which of their lines these are.
 
 The sheet is longer than any terminal -- at 150x78 the later sections are
 still off screen -- and it drew no reading of where the viewport stood, so a
@@ -8,6 +8,14 @@ live server: 670 lines at 24x80, 568 at 46x120.
 It also pins the pair the keypress and the drawing share. [G] bounds the
 scroll through Masc_tui_render.help_viewport; a drawing that used a
 different height would leave the last line off screen after [G].
+
+The Agenda panel draws the same reading through the same helper. Its
+overflow was measured on the live server -- sixteen of thirty-two lines at
+24x100, and neither of the two sections under them -- and is not reproduced
+here: the panel is fed by the scheduled-automation endpoint, whose rows
+carry fifteen required fields each, and this scenario's workspace holds
+seven agenda lines. What it pins is the other half: a panel that fits draws
+no reading at all.
 """
 import os
 import re
@@ -69,14 +77,26 @@ def run(executable: str) -> None:
                 f"{g_last - g_first + 1} after G")
 
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+
+        # The Agenda panel holds seven lines here and its viewport is taller
+        # than that at every size this scenario uses, so it has nothing to
+        # say and says nothing.
+        drawn = h.send_and_wait(process, fd, output, b";", b"MASC Agenda")
+        screen = b"\n".join(h.screen_rows(drawn).values())
+        found = WINDOW.search(screen)
+        if found:
+            raise AssertionError(
+                "the Agenda fits its viewport, so the reading says nothing "
+                f"the rows do not: {found.group(0)!r}")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable,
-                            description="cheat sheet window reading",
+                            description="overlay window reading",
                             interact=interact,
                             http_fixtures=h.keeper_runtime_http_fixtures())
 
 
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
-    print("the cheat sheet says which lines these are: PASS")
+    print("the overlays say which lines these are: PASS")

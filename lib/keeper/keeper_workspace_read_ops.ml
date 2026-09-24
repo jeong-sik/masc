@@ -58,12 +58,30 @@ let try_handle_with_outcome
          e)
   in
   let read_target () =
-    match Keeper_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
+    (* A path under the endpoint's declared roots (#38593) is the endpoint's
+       own name, not one in the keeper's host tree, so the host resolver and
+       containment check do not apply to it; the backend reads it as itself.
+       [path] and [cwd] are read from [args] exactly as
+       [resolve_tool_read_path] reads them. *)
+    let arg key = Safe_ops.json_string ~default:"" key args |> String.trim in
+    let cwd =
+      match arg "cwd" with
+      | "" -> None
+      | cwd -> Some cwd
+    in
+    match
+      Keeper_sandbox_remote_lane.declared_endpoint_path_of_args
+        ~config ~meta ~path:(arg "path") ~cwd
+    with
     | Error e -> Read_target_error e
-    | Ok target ->
-      (match containment_check target with
-       | Error msg -> Read_target_error msg
-       | Ok () -> Read_target target)
+    | Ok (Some endpoint_path) -> Read_target endpoint_path
+    | Ok None ->
+      (match Keeper_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
+       | Error e -> Read_target_error e
+       | Ok target ->
+         (match containment_check target with
+          | Error msg -> Read_target_error msg
+          | Ok () -> Read_target target))
   in
   (* TEL-OK: read-op adapter delegates to Keeper_tooling.Execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)

@@ -58,6 +58,30 @@ val workspace_root :
 (** The resolved workspace used for path translation:
     [<endpoint_root>/<sanitized keeper name>]. *)
 
+val declared_endpoint_path :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  string ->
+  (string option, string) result
+(** [Ok (Some p)] when an OpenSSH keeper names an absolute path outside its
+    own host bookkeeping tree that lies under one of its endpoint's declared
+    roots ([allowed_paths], {!Exec_policy_paths.extra_root_path}); [p] is the
+    endpoint path, lexically normalized, to read as itself. [Ok None] for a
+    relative path, a path in the keeper's own tree, a path under no declared
+    root, and every Docker or Micro_vm keeper (neither declares roots).
+    [Error] when the keeper's endpoint cannot be resolved. *)
+
+val declared_endpoint_path_of_args :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  path:string ->
+  cwd:string option ->
+  (string option, string) result
+(** {!declared_endpoint_path} of what a file tool's [path] and [cwd] name
+    together: an absolute [path] as itself, a relative [path] under an
+    absolute [cwd] joined to it. A relative [path] with no [cwd] or a
+    relative one is a name in the keeper's tree and is [Ok None]. *)
+
 val is_guest_booted :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

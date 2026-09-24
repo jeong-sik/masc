@@ -10,7 +10,6 @@ type 'session opener =
 
 type 'session opened =
   { session : 'session
-  ; tabs : Executor.Tabs.t
   ; release : unit Eio.Promise.u
   ; stopped : unit Eio.Promise.t
   ; ended : string option ref  (* the first reason the session stopped working *)
@@ -32,6 +31,8 @@ type 'session t =
   ; pid : 'session -> int
   ; log : Session.event -> unit
   ; requests : request Eio.Stream.t
+  ; tabs : Executor.Tabs.t  (* for the backend's life, so an id is never reused *)
+  ; verbs : Eio.Semaphore.t  (* one page verb at a time *)
   ; mutable state : 'session state
   }
 
@@ -96,7 +97,8 @@ let run_session t ~headless ~opened ~resolve_opened =
         not_opened detail
       | Ok (session, _init) ->
         let released, release = Eio.Promise.create () in
-        t.state <- Open { session; tabs = Executor.Tabs.create (); release; stopped; ended };
+        Executor.Tabs.forget_pages t.tabs;
+        t.state <- Open { session; release; stopped; ended };
         Eio.Promise.resolve resolve_opened (Ok ());
         Eio.Promise.await released)
   with
@@ -160,10 +162,21 @@ let status t =
   answered (`Assoc fields)
 ;;
 
+(* A verb's calls -- a pointer's guard, input and receipt, a navigation and
+   its summary -- must not interleave with another verb's, which the
+   session's one-call slot alone allows: a click would land on a page its
+   guard never checked. The automation lane holds its session lock for a
+   whole verb the same way. *)
 let page t verb =
-  match t.state with
-  | Open opened -> Executor.execute ~tabs:opened.tabs ~call:(t.call opened.session) verb
-  | Closed | Opening | Closing -> no_session
+  Eio.Semaphore.acquire t.verbs;
+  (* fun-protect-finally-ok: [Eio.Semaphore.release] does not suspend, and
+     the verb slot must come back on return, exception and cancellation
+     alike; the semaphore, unlike [Eio.Mutex], is not poisoned by an
+     exception. *)
+  Fun.protect ~finally:(fun () -> Eio.Semaphore.release t.verbs) (fun () ->
+    match t.state with
+    | Open opened -> Executor.execute ~tabs:t.tabs ~call:(t.call opened.session) verb
+    | Closed | Opening | Closing -> no_session)
 ;;
 
 (* A verb's exception answers its own request instead of failing the switch
@@ -233,6 +246,8 @@ let create ~sw ~clock ~open_session ~call ~pid ~log =
     ; pid
     ; log
     ; requests = Eio.Stream.create max_int
+    ; tabs = Executor.Tabs.create ()
+    ; verbs = Eio.Semaphore.make 1
     ; state = Closed
     }
   in

@@ -181,6 +181,51 @@ let test_sentence_caller_retires_its_session () =
   check int "two distinct sessions existed" 2 (List.length !(h.sessions))
 ;;
 
+(* A tab id read before a close reaches no page after the next open, even
+   when the new session's first page has the same page id. *)
+let test_tab_ids_do_not_cross_sessions () =
+  with_backend
+  @@ fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  ignore (data (Backend.execute h.backend Lane.Session_close));
+  ignore (data (Backend.execute h.backend open_));
+  (match data (Backend.execute h.backend Lane.Tabs_list) with
+   | `List [ tab ] -> check int "the new session's page gets a new id" 1 Yojson.Safe.Util.(member "id" tab |> to_int)
+   | _ -> fail "the new session lists its page");
+  match Backend.execute h.backend (Lane.Page_goto { url = "http://127.0.0.1:1/next"; tab_id = Some 0 }) with
+  | Lane.Rejected_before_effect _ -> ()
+  | _ -> fail "an id from the closed session is refused before effect"
+;;
+
+(* A page verb waits while another is in flight: the session's one-call slot
+   alone would let a second verb's calls run between a first verb's. *)
+let test_page_verbs_take_turns () =
+  with_backend
+  @@ fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  Eio.Switch.run
+  @@ fun sw ->
+  let leave, left = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    try
+      Eio.Switch.run (fun caller ->
+        Eio.Fiber.fork ~sw:caller (fun () ->
+          ignore (Backend.execute h.backend (Lane.Page_instruct { tab_id = 0; instruction = "click Buy" })));
+        Eio.Promise.await leave;
+        Eio.Switch.fail caller Exit)
+    with
+    | Exit -> ());
+  h.settle ();
+  let listed = Eio.Fiber.fork_promise ~sw (fun () -> Backend.execute h.backend Lane.Tabs_list) in
+  h.settle ();
+  check bool "the second verb waits for the first" false (Eio.Promise.is_resolved listed);
+  Eio.Promise.resolve left ();
+  h.settle ();
+  check bool "and runs once the first has ended" true (Eio.Promise.is_resolved listed)
+;;
+
 let test_close_does_not_wait_forever () =
   with_backend ~configure:(fun behaviour -> behaviour.close_answers <- false)
   @@ fun h ->
@@ -218,6 +263,8 @@ let () =
       test_case "a failed or raising open leaves the backend usable" `Quick test_open_failures;
       test_case "an open finishes after its caller leaves" `Quick test_open_outlives_its_caller;
       test_case "close waits for the runtime only so long" `Quick test_close_does_not_wait_forever;
+      test_case "tab ids do not cross sessions" `Quick test_tab_ids_do_not_cross_sessions;
+      test_case "page verbs take turns" `Quick test_page_verbs_take_turns;
       test_case "status reports why a session ended" `Quick test_status_reports_an_ended_session;
       test_case "status reports an answer the session could not deliver" `Quick test_status_reports_an_undelivered_answer;
     ];

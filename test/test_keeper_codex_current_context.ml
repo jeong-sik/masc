@@ -91,7 +91,8 @@ default = "codex.context"
     | Some {execution=Runtime_execution.Codex_app_server config;_} -> config
     | Some _ | None -> fail "fixture runtime missing" in
   let reports = ref [] in
-  let run ?official_task_reference ?model_input_projection ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"]) ?official_client_continuation ?official_client_original_turn ?(goal="Continue from current World State.") ~instructions ~world () =
+  let run ?official_task_reference ?model_input_projection
+      ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"]) ?official_client_continuation ?official_client_original_turn ?(goal="Continue from current World State.") ~instructions ~world () =
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
@@ -99,6 +100,7 @@ default = "codex.context"
     Keeper_codex_runtime.run
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime:(Runtime.get_runtime_by_id "codex.context" |> Option.get)) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
+      ~turn_start
       ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_task_reference ?official_client_continuation ?official_client_original_turn
       ~goal_blocks:None ~system_prompt:instructions ~tools:[]
       ~initial_messages
@@ -379,6 +381,33 @@ let test_declared_limit_windows_start () =
          (Yojson.Safe.to_string (List.nth injected (List.length injected - 1))) "63:xxxx")
   | rows -> fail (Printf.sprintf "expected one inject_items request, saw %d" (List.length rows))
 
+let test_start_carries_the_range_not_the_whole_history () =
+  (* A fresh thread is seeded with the carried range the other official
+     clients send, not with every message the keeper holds. Nothing is
+     declared here, so no byte window cuts anything and only the range can
+     bound the seed. The last completed turn ended at atom 60, so the range
+     is atoms 60..63. *)
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  successful
+    (run ~initial_messages:large_history
+       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 60 })
+       ~instructions:"Keeper instructions" ~world:"world" ());
+  match params_of "thread/inject_items" (read_requests capture) with
+  | [injected] ->
+    let seeded =
+      injected |> member "items" |> items |> List.map Yojson.Safe.to_string
+    in
+    let carries index =
+      List.exists
+        (fun item -> String_util.contains_substring item (Printf.sprintf "\"%d:xxxx" index))
+        seeded
+    in
+    check (list bool) "atoms 60..63 are seeded" [ true; true; true; true ]
+      (List.map carries [ 60; 61; 62; 63 ]);
+    check bool "nothing before the range is seeded" false (carries 59 || carries 0);
+    check int "only the range goes" 4 (List.length seeded)
+  | rows -> fail (Printf.sprintf "expected one inject_items request, saw %d" (List.length rows))
+
 let resume_wire ~max_prompt_bytes =
   with_fixture ?max_prompt_bytes @@ fun ~run ~capture ~reports:_ ->
   let attempt, rows = resume_large_history ~capture
@@ -415,6 +444,7 @@ let test_declared_limit_above_history_changes_nothing () =
 let () = run "Keeper current Codex context" ["native requests",[
   test_case "a declared prompt limit windows a Resume before it is sent" `Quick test_declared_limit_windows_resume_before_send;
   test_case "a declared prompt limit windows a Start" `Quick test_declared_limit_windows_start;
+  test_case "a Start carries the range, not the whole history" `Quick test_start_carries_the_range_not_the_whole_history;
   test_case "no declared prompt limit sends the whole history" `Quick test_undeclared_limit_sends_whole_history;
   test_case "a prompt limit above the history changes nothing" `Quick test_declared_limit_above_history_changes_nothing;
   test_case "resumed context overflow shrinks replacement configuration" `Quick test_resumed_context_overflow_shrinks_configuration;

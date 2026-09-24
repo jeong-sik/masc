@@ -8985,6 +8985,7 @@ default = "official.primary"
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime:(Runtime.get_runtime_by_id "official.gate" |> Option.get)) ?official_client_continuation:continuation
         ~runtime_id:"official.gate" ~keeper_name:meta.Masc.Keeper_meta_contract.name
+        ~turn_start:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 })
         ~pre_tool_rejects:(ref []) ~base_path:config.base_path ~goal ~goal_blocks
         ~system_prompt:"Inspect the exact Gate result and continue the original operation after its resolution."
         ~tools:[tool] ~initial_messages:[] ~model_input_projection:None

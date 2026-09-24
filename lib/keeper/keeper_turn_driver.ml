@@ -2228,6 +2228,11 @@ let run_named
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            ~carried_front_seed:official_client_carried_front_seed
+            ~librarian_front:
+              (official_client_librarian_front ~attempt_messages:initial_messages)
+            ~on_carried_front:(record_official_client_continuity ~runtime_id:attempt_runtime_id)
+            ~turn_start:(Eio.Lazy.force turn_boundary)
             ~pre_tool_rejects
             ~base_path
             ~goal

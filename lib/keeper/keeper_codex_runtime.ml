@@ -147,6 +147,46 @@ let measure_declared_prompt_message_bytes (message : Agent_core.Types.message) =
   max resume_bytes start_bytes
 ;;
 
+(* The next structural retry boundary, computed from the bounded history
+   before source projections append synthetic evidence (for example Gate
+   replay). Using the bounded view also means the oracle reaches [None] at the
+   newest-atom floor instead of authorizing an identical provider retry from
+   the original unwindowed history. *)
+let record_next_shrink_capacity
+    ~measure_message_bytes
+    ~capacity_bytes
+    ~reserved_bytes
+    ~observed_next_shrink_capacity_bytes
+    windowed =
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    let full_bytes =
+      List.fold_left
+        (fun total message ->
+           total + measure_message_bytes message)
+        0
+        windowed
+    in
+    let target_capacity_bytes =
+      if capacity_bytes = unbounded_model_input_capacity_bytes
+      then
+        Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+          ~capacity:full_bytes
+      else
+        Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+          ~capacity:(capacity_bytes - reserved_bytes)
+    in
+    (* The oracle sizes a history view; the next attempt charges the same
+       reservation against its capacity again, so it is added back here.
+       Without it every retry would narrow twice. *)
+    observed_next_shrink_capacity_bytes :=
+      Option.map
+        (fun history_bytes -> history_bytes + reserved_bytes)
+        (Runtime_model_input_tail_window.next_shrink_capacity_bytes
+           ~measure_message_bytes
+           ~target_capacity_bytes
+           windowed))
+;;
+
 (* The provider-bound copy is windowed; the durable conversation is not
    rewritten. [reserved_bytes] is what the attempt sends besides history --
    system prompt, posture note, goal, the Resume preamble and snapshot
@@ -210,46 +250,125 @@ let model_input_projection_for_capacity
             (Runtime_model_input_tail_window.budget_error_to_core_error error))
   in
   let* windowed = windowed in
-  (* Compute the next structural retry boundary from the current bounded
-     history before source projections append synthetic evidence (for example
-     Gate replay). Using the current window also means the oracle reaches
-     [None] at the newest-atom floor instead of authorizing an identical
-     provider retry from the original unwindowed history. *)
-  let () =
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
-      let full_bytes =
-        List.fold_left
-          (fun total message ->
-             total + measure_message_bytes message)
-          0
-          windowed
-      in
-      let target_capacity_bytes =
-        if capacity_bytes = unbounded_model_input_capacity_bytes
-        then
-          Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-            ~capacity:full_bytes
-        else
-          Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-            ~capacity:(capacity_bytes - reserved_bytes)
-      in
-      (* The oracle sizes a history view; the next attempt charges the same
-         reservation against its capacity again, so it is added back here.
-         Without it every retry would narrow twice. *)
-      observed_next_shrink_capacity_bytes :=
-        Option.map
-          (fun history_bytes -> history_bytes + reserved_bytes)
-          (Runtime_model_input_tail_window.next_shrink_capacity_bytes
-             ~measure_message_bytes
-             ~target_capacity_bytes
-             windowed))
+  record_next_shrink_capacity
+    ~measure_message_bytes
+    ~capacity_bytes
+    ~reserved_bytes
+    ~observed_next_shrink_capacity_bytes
+    windowed;
+  match source_projection with
+  | None -> Ok windowed
+  | Some project -> project windowed
+;;
+
+(* What a [Start] seeds a new thread with ([thread/inject_items]): the range
+   the other official-client lanes carry ([Host.carried_start_range]), not
+   the whole checkpoint history. The whole history of a long-lived keeper is
+   far past any model window, and the provider refuses it only after
+   receiving all of it.
+
+   The range starts where the last answered request's range did (the
+   seed), at the Librarian's absorbed point when that is later, and
+   otherwise at the end of the last completed turn, exactly as on the
+   Claude Code and Antigravity lanes. A declared max-prompt-bytes still cuts
+   first and names a front of its own; the later front wins, so the shrink
+   ladder that answers a typed overflow keeps narrowing instead of being
+   widened back by the seed. *)
+let start_model_input_projection
+    ~measure_message_bytes
+    ~capacity_bytes
+    ~reserved_bytes
+    ~observed_next_shrink_capacity_bytes
+    ?on_model_input_window_observation
+    ?carried_front_seed
+    ?librarian_front
+    ?on_carried_front
+    ~turn_start
+    ~keeper_name
+    ~runtime_id
+    source_projection
+    messages =
+  let* capacity_cut =
+    if capacity_bytes = unbounded_model_input_capacity_bytes
+    then Ok None
+    else
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        match
+          Runtime_model_input_tail_window.project_with_drop
+            ~measure_message_bytes
+            ~capacity_bytes
+            ~reserved_bytes
+            messages
+        with
+        | Ok projection -> Ok (Some projection)
+        | Error error ->
+          Error
+            (Runtime_model_input_tail_window.budget_error_to_core_error error))
   in
-  let* projected =
-    match source_projection with
-    | None -> Ok windowed
-    | Some project -> project windowed
+  let own_first_atom =
+    match capacity_cut with
+    | Some projection -> projection.Runtime_model_input_tail_window.dropped_atoms
+    | None -> 0
   in
-  Ok projected
+  let* librarian_front = Host.read_librarian_front librarian_front messages in
+  let carried_front_seed = Host.read_seed_once carried_front_seed in
+  let compose librarian_front =
+    let carried =
+      Host.carried_start_range
+        ~keeper_name
+        ~runtime_id
+        ~carried_front_seed
+        ~librarian_front
+        ~own_first_atom
+        ~turn_start
+        messages
+    in
+    match capacity_cut with
+    | None ->
+      Ok
+        { Host.carried
+        ; sent = carried.Host.messages
+        ; atoms_kept = Host.carried_atoms carried
+        }
+    | Some _ ->
+      Host.window_carried_range
+        ~measure_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes
+        carried
+  in
+  let* windowed =
+    Host.compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
+  in
+  let sent = windowed.Host.sent in
+  Option.iter
+    (fun observe ->
+       Option.iter
+         observe
+         (Runtime_model_input_tail_window.observe
+            ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+            ~history_atom_count:windowed.Host.carried.Host.history_atom_count
+            (Host.windowed_projection windowed)))
+    on_model_input_window_observation;
+  Option.iter
+    (fun observe ->
+       observe
+         windowed.Host.carried.Host.front
+         ~transmitted_bytes:
+           (List.fold_left
+              (fun total message -> total + measure_message_bytes message)
+              0
+              sent))
+    on_carried_front;
+  record_next_shrink_capacity
+    ~measure_message_bytes
+    ~capacity_bytes
+    ~reserved_bytes
+    ~observed_next_shrink_capacity_bytes
+    sent;
+  match source_projection with
+  | None -> Ok sent
+  | Some project -> project sent
 ;;
 
 let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_completion
@@ -856,7 +975,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~initial_messages
         ~model_input_projection:
           (match declared_max_prompt_bytes with
-           | None -> Some (project_history ~reserved_bytes:0)
+           | None -> Some (project_history ~thread_mode ~reserved_bytes:0)
            | Some _ -> None)
         ~hooks:(Some hooks)
     in
@@ -925,7 +1044,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                   capacity_bytes))
         else
           let* messages =
-            try project_history ~reserved_bytes prepared.messages with
+            try project_history ~thread_mode ~reserved_bytes prepared.messages with
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->
               Error
@@ -1626,6 +1745,10 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ~context_injector ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
+    ?carried_front_seed
+    ?librarian_front
+    ?on_carried_front
+    ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
@@ -1702,17 +1825,33 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
           ~initial_messages
           ~declared_max_prompt_bytes
           ~capacity_bytes
-          ~project_history:(fun ~reserved_bytes ->
-            model_input_projection_for_capacity
-              ~measure_message_bytes
-              ~capacity_bytes
-              ~reserved_bytes
-              ~observed_next_shrink_capacity_bytes
-              ?on_model_input_window_observation
-              model_input_projection)
+          ~project_history:(fun ~thread_mode ~reserved_bytes ->
+            match thread_mode with
+            | Runtime_codex_app_server.Start ->
+              start_model_input_projection
+                ~measure_message_bytes
+                ~capacity_bytes
+                ~reserved_bytes
+                ~observed_next_shrink_capacity_bytes
+                ?on_model_input_window_observation
+                ?carried_front_seed
+                ?librarian_front
+                ?on_carried_front
+                ~turn_start
+                ~keeper_name
+                ~runtime_id
+                model_input_projection
+            | Runtime_codex_app_server.Resume _ ->
+              model_input_projection_for_capacity
+                ~measure_message_bytes
+                ~capacity_bytes
+                ~reserved_bytes
+                ~observed_next_shrink_capacity_bytes
+                ?on_model_input_window_observation
+                model_input_projection)
           (* Reported inside the attempt rather than from the projection. The
-             projection cannot see [thread_mode], and that is what decides
-             whether its result is injected into the thread or dropped. A lane
+             projection measures what it cuts, not whether the attempt reaches
+             the wire with it. A lane
              that reports nothing wrote every Codex turn's input attribution
              as zero (masc#32995); a lane that reports the projection on a
              resume attributes history the thread already holds. *)
@@ -1767,4 +1906,25 @@ module For_testing = struct
   let recovery_failure_of_client_error = recovery_failure_of_client_error
   let recovery_failure_of_attempt = recovery_failure_of_attempt
   let conclude_exhausted_gate_resume = conclude_exhausted_gate_resume
+
+  let start_projection ~capacity_bytes ?carried_front_seed ?librarian_front
+        ?on_carried_front ~turn_start ?on_model_input_window_observation
+        ~keeper_name ~runtime_id messages =
+    start_model_input_projection
+      ~measure_message_bytes:measure_model_input_message_bytes
+      ~capacity_bytes
+      ~reserved_bytes:0
+      ~observed_next_shrink_capacity_bytes:(ref None)
+      ?on_model_input_window_observation
+      ?carried_front_seed
+      ?librarian_front
+      ?on_carried_front
+      ~turn_start
+      ~keeper_name
+      ~runtime_id
+      None
+      messages
+  ;;
+
+  let unbounded_capacity_bytes = unbounded_model_input_capacity_bytes
 end

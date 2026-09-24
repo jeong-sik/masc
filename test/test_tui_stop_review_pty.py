@@ -73,10 +73,16 @@ def open_agenda(process, master_fd, output):
     )
 
 
+def move_agenda(process, master_fd, output, steps):
+    # Cursor-only redraws do not repeat the title. Waiting for "MASC Agenda"
+    # after each j can time out even though the key moved the selection.
+    h.write_all(master_fd, output, b"j" * steps)
+    h.drain_until_quiet(process, master_fd, output)
+
+
 def full_queue(process, master_fd, _slave_fd, output, _base_path):
     open_agenda(process, master_fd, output)
-    for _ in range(3):
-        h.send_and_wait(process, master_fd, output, b"j", b"MASC Agenda")
+    move_agenda(process, master_fd, output, 3)
     h.send_and_wait(process, master_fd, output, b"\r", b"awaiting 7")
     frame = h.screen_text(bytes(output))
     if b"task-stop-6" not in frame:
@@ -84,8 +90,8 @@ def full_queue(process, master_fd, _slave_fd, output, _base_path):
     if b"stop for specific test-0" in frame:
         raise AssertionError("the full queue opened an arbitrary detail")
     capture_screen("full_queue", output)
-    for _ in range(6):
-        h.send_and_wait(process, master_fd, output, b"j", b"Task Review")
+    h.write_all(master_fd, output, b"j" * 6)
+    h.drain_until_quiet(process, master_fd, output)
     h.send_and_wait(process, master_fd, output, b"\r", b"stop for specific test-6")
     detail = h.screen_text(bytes(output))
     for needle in (b"task-stop-6", b"vr-stop-6", b"stop for specific test-6"):
@@ -107,7 +113,7 @@ def exact_jump(gate):
                       b"held without actor 0", b"unreadable producer 0"):
             if count not in narrow:
                 raise AssertionError(f"narrow agenda clipped {count!r}: {narrow!r}")
-        h.send_and_wait(process, master_fd, output, b"j", b"MASC Agenda")
+        move_agenda(process, master_fd, output, 1)
         h.send_and_wait(process, master_fd, output, b"\r", b"Task Review")
         if not h.wait_for_fixture_event(process, master_fd, output, gate.requested, timeout=3.0):
             raise AssertionError("Task Review queue was not requested")
@@ -130,7 +136,7 @@ def exact_jump(gate):
 def changed_request(gate, requests):
     def interact(process, master_fd, _slave_fd, output, _base_path):
         open_agenda(process, master_fd, output)
-        h.send_and_wait(process, master_fd, output, b"j", b"MASC Agenda")
+        move_agenda(process, master_fd, output, 1)
         h.send_and_wait(process, master_fd, output, b"\r", b"Task Review")
         if not h.wait_for_fixture_event(process, master_fd, output, gate.requested, timeout=3.0):
             raise AssertionError("Task Review queue was not requested")

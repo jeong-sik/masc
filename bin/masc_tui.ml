@@ -14433,7 +14433,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.github_token_save_status <-
              Some ((Theme.ok ()) ^ "✓ Token saved successfully" ^ Ansi.reset);
            state.github_identity_view <-
-             Some (keeper_name, Masc_tui_loader.github_identity_lines json);
+             Some
+               ( keeper_name
+               , Masc_tui_github_identity.view_lines
+                   ~sanitize:Masc.Tui_decode.sanitize_terminal_text json );
            state.github_identity_view_error <- None
        | Error detail ->
            report_action state "error" (keeper_name ^ ": github token save: " ^ detail);

@@ -1870,7 +1870,7 @@ Next: start your first conversation with imp:
   ${c_dim}# $DEST keeper-create --help${c_off}
 
   ${c_dim}# for Docker Keepers, build the general file/Git tools image:${c_off}
-  "$DEST" sandbox-image
+  "$DEST" sandbox-image --tag masc-sandbox:general
   ${c_dim}# microVM uses a separate runtime/image store; see the platform guide:${c_off}
   # https://github.com/$REPO/blob/$VERSION/docs/INSTALL.md
 

@@ -1,0 +1,7 @@
+# Sandbox images a Keeper can name in `sandbox_image`, and the build this
+# host promoted for each image store. `masc sandbox-image promote` and
+# `rollback` rewrite this file. RFC keeper-sandbox-images-have-versions.
+
+[images.base]
+
+[images.ocaml]

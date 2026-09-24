@@ -3228,6 +3228,188 @@ let sandbox_image_ensure_exit runtime =
        let labels = Keeper_sandbox_image_version.labels ~version:tag ~built_at recipe in
        sandbox_image_build ~builder ~recipe ~tag ~labels)
 
+(* Which image store --runtime names: Docker's when it is omitted, otherwise
+   the named microVM runtime's own. *)
+let sandbox_image_runtime_term =
+  let runtime =
+    let doc =
+      "microVM runtime whose image store to use (one of "
+      ^ String.concat ", " Keeper_microvm_backend.valid_strings
+      ^ "). Omit for Docker's store, which is where sandbox_profile = \"docker\" \
+         keepers look. Each runtime keeps its images apart from Docker's, so a \
+         microvm keeper cannot see one built without this."
+    in
+    Arg.(value & opt (some string) None & info [ "runtime" ] ~docv:"RUNTIME" ~doc)
+  in
+  Term.(
+    const (fun named ->
+        match named with
+        | None -> Ok None
+        | Some name ->
+          (match Keeper_microvm_backend.of_string name with
+           | Some backend -> Ok (Some backend)
+           | None ->
+             Error
+               (Printf.sprintf
+                  "sandbox-image: --runtime %S names no microVM runtime. One \
+                   of: %s."
+                  name
+                  (String.concat ", " Keeper_microvm_backend.valid_strings))))
+    $ runtime)
+
+let sandbox_image_store = function
+  | None -> Keeper_sandbox_image_catalog.Docker_daemon
+  | Some backend -> Keeper_sandbox_image_catalog.Microvm backend
+
+let sandbox_image_read_stdout argv =
+  match argv with
+  | [] -> Error "no image command resolved"
+  | bin :: _ ->
+    (match Unix.open_process_args_in bin (Array.of_list argv) with
+     | exception Unix.Unix_error (error, _, _) ->
+       Error (Printf.sprintf "%s: %s" bin (Unix.error_message error))
+     | ic ->
+       let output = In_channel.input_all ic in
+       (match Unix.close_process_in ic with
+        | Unix.WEXITED 0 -> Ok output
+        | Unix.WEXITED code ->
+          Error (Printf.sprintf "%s exited %d" (String.concat " " argv) code)
+        | Unix.WSIGNALED n | Unix.WSTOPPED n ->
+          Error (Printf.sprintf "%s stopped by signal %d" (String.concat " " argv) n)))
+
+(* The digest each store reports for the image a running guest uses, so the
+   catalog and a running guest can be compared later (RFC §2.4): Docker's
+   image ID, and Apple container's image index digest. *)
+let sandbox_image_store_digest ~builder ~store ~reference =
+  let ( let* ) = Result.bind in
+  let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None in
+  match store with
+  | Keeper_sandbox_image_catalog.Docker_daemon ->
+    Result.map String.trim
+      (sandbox_image_read_stdout
+         (builder.build_command @ [ "image"; "inspect"; "--format"; "{{.Id}}"; reference ]))
+  | Keeper_sandbox_image_catalog.Microvm Keeper_microvm_backend.Apple_container ->
+    let* output =
+      sandbox_image_read_stdout (builder.build_command @ [ "image"; "inspect"; reference ])
+    in
+    (match Yojson.Safe.from_string output with
+     | exception Yojson.Json_error detail ->
+       Error ("container image inspect did not answer JSON: " ^ detail)
+     | json ->
+       let first = match json with `List (first :: _) -> Some first | other -> Some other in
+       (match
+          Option.bind first (field "configuration")
+          |> Fun.flip Option.bind (field "descriptor")
+          |> Fun.flip Option.bind (field "digest")
+        with
+        | Some (`String digest) -> Ok digest
+        | Some _ | None ->
+          Error "container image inspect has no configuration.descriptor.digest"))
+  | Keeper_sandbox_image_catalog.Microvm
+      (Keeper_microvm_backend.Nerdctl_kata | Keeper_microvm_backend.Microsandbox) ->
+    Error
+      (Printf.sprintf
+         "reading an image digest from the %s store is not supported yet"
+         (Keeper_sandbox_image_catalog.store_to_string store))
+
+let sandbox_image_config_root base_path =
+  Config_dir_resolver.base_path_config_root
+    ~cwd:(Config_dir_resolver.current_working_dir ())
+    base_path
+
+(* Load this host's catalog (or the shipped one it starts from), apply one
+   change, and write it back. *)
+let sandbox_image_change_catalog ~base_path change =
+  let ( let* ) = Result.bind in
+  let config_root = sandbox_image_config_root base_path in
+  let* catalog =
+    Result.map_error
+      (fun error -> "sandbox-image: " ^ Keeper_sandbox_image_catalog.load_error_to_string error)
+      (Keeper_sandbox_image_catalog.load_or_shipped ~config_root
+         ~shipped:(Embedded_config.read Keeper_sandbox_image_catalog.file_name))
+  in
+  let* next =
+    Result.map_error
+      (fun error ->
+         "sandbox-image: " ^ Keeper_sandbox_image_catalog.change_error_to_string error)
+      (change catalog)
+  in
+  Result.map_error
+    (fun error -> "sandbox-image: " ^ Keeper_sandbox_image_catalog.save_error_to_string error)
+    (Keeper_sandbox_image_catalog.save ~config_root next)
+  |> Result.map (fun () -> Filename.concat config_root Keeper_sandbox_image_catalog.file_name)
+
+let sandbox_image_exit_of = function
+  | Ok message ->
+    print_endline message;
+    Cmd.Exit.ok
+  | Error message ->
+    prerr_endline message;
+    Cmd.Exit.some_error
+
+let sandbox_image_promote_exit base_path runtime name reference =
+  let ( let* ) = Result.bind in
+  sandbox_image_exit_of
+    (let* runtime = runtime in
+     let* builder = sandbox_image_builder runtime in
+     let store = sandbox_image_store runtime in
+     let* digest =
+       Result.map_error
+         (fun detail -> Printf.sprintf "sandbox-image: cannot read the digest of %s: %s" reference detail)
+         (sandbox_image_store_digest ~builder ~store ~reference)
+     in
+     let* path =
+       sandbox_image_change_catalog ~base_path (fun catalog ->
+         Keeper_sandbox_image_catalog.promote catalog ~name ~store ~reference ~digest)
+     in
+     Ok
+       (Printf.sprintf "%s on %s is now %s (%s), recorded in %s." name
+          (Keeper_sandbox_image_catalog.store_to_string store) reference digest path))
+
+let sandbox_image_rollback_exit base_path runtime name =
+  let ( let* ) = Result.bind in
+  sandbox_image_exit_of
+    (let* runtime = runtime in
+     let store = sandbox_image_store runtime in
+     let* path =
+       sandbox_image_change_catalog ~base_path (fun catalog ->
+         Keeper_sandbox_image_catalog.rollback catalog ~name ~store)
+     in
+     Ok
+       (Printf.sprintf "%s on %s is back on its previous build, recorded in %s." name
+          (Keeper_sandbox_image_catalog.store_to_string store) path))
+
+let sandbox_image_name_arg =
+  let doc = "Image name from the catalog (config/sandbox-images.toml), such as base or ocaml." in
+  Arg.(required & pos 0 (some string) None & info [] ~docv:"NAME" ~doc)
+
+let sandbox_image_promote_cmd =
+  let doc = "Make a built image the current build of a catalog name on this host." in
+  let man =
+    [ `S Manpage.s_description
+    ; `P
+        "Reads the digest the image store reports for REFERENCE, records \
+         REFERENCE and that digest as NAME's current build for the store \
+         --runtime names, and keeps the build it replaces so rollback can \
+         return to it. The name has to be in the catalog already."
+    ]
+  in
+  let reference =
+    let doc = "Image reference in that store, as printed by `masc sandbox-image`." in
+    Arg.(required & pos 1 (some string) None & info [] ~docv:"REFERENCE" ~doc)
+  in
+  Cmd.v (Cmd.info "promote" ~doc ~man)
+    Term.(
+      const sandbox_image_promote_exit $ base_path $ sandbox_image_runtime_term
+      $ sandbox_image_name_arg $ reference)
+
+let sandbox_image_rollback_cmd =
+  let doc = "Put a catalog name back on the build it had before the last promote." in
+  Cmd.v (Cmd.info "rollback" ~doc)
+    Term.(
+      const sandbox_image_rollback_exit $ base_path $ sandbox_image_runtime_term
+      $ sandbox_image_name_arg)
+
 let sandbox_image_cmd =
   let doc = "Build a Keeper sandbox image under a tag that names that one build." in
   let man =
@@ -3286,38 +3468,13 @@ let sandbox_image_cmd =
     let doc = "Checkout to read the recipe and its inputs from." in
     Arg.(value & opt (some dir) None & info [ "source" ] ~docv:"DIR" ~doc)
   in
-  let runtime =
-    let doc =
-      "microVM runtime whose image store to build into (one of "
-      ^ String.concat ", " Keeper_microvm_backend.valid_strings
-      ^ "). Omit for Docker's store, which is where sandbox_profile = \"docker\" \
-         keepers look. Each runtime keeps its images apart from Docker's, so a \
-         microvm keeper cannot see one built without this."
-    in
-    Arg.(value & opt (some string) None & info [ "runtime" ] ~docv:"RUNTIME" ~doc)
-  in
-  let resolved_runtime =
-    Term.(
-      const (fun named ->
-          match named with
-          | None -> Ok None
-          | Some name ->
-            (match Keeper_microvm_backend.of_string name with
-             | Some backend -> Ok (Some backend)
-             | None ->
-               Error
-                 (Printf.sprintf
-                    "sandbox-image: --runtime %S names no microVM runtime. One \
-                     of: %s."
-                    name
-                    (String.concat ", " Keeper_microvm_backend.valid_strings))))
-      $ runtime)
-  in
-  Cmd.v
+  Cmd.group
+    ~default:
+      Term.(
+        const sandbox_image_cmd_exit $ print_only $ tag $ sandbox_image_runtime_term
+        $ recipe_name $ source)
     (Cmd.info "sandbox-image" ~doc ~man)
-    Term.(
-      const sandbox_image_cmd_exit $ print_only $ tag $ resolved_runtime $ recipe_name
-      $ source)
+    [ sandbox_image_promote_cmd; sandbox_image_rollback_cmd ]
 
 (* Catalog model families are selectable suggestions, not account entitlement.
    Do not expose broad fallback rows such as [gpt], [cc:] or [claude_code]

@@ -214,6 +214,14 @@ let load ~config_root =
     | exception Sys_error detail -> Error (Unreadable { path; detail })
     | text -> Result.map_error (fun error -> Invalid { path; error }) (parse text)
 
+let load_or_shipped ~config_root ~shipped =
+  match load ~config_root, shipped with
+  | Error (Missing { path }), Some text ->
+    Result.map_error
+      (fun error -> Invalid { path = path ^ " (shipped copy)"; error })
+      (parse text)
+  | result, (Some _ | None) -> result
+
 type change_error =
   | No_such_image of { name : string; known : string list }
   | Invalid_pin of parse_error

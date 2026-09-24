@@ -220,6 +220,47 @@ let test_save_then_load () =
     | Ok loaded -> check bool "same catalog" true (entries loaded = entries catalog)
     | Error e -> fail (load_error_to_string e))
 
+let test_a_host_without_a_catalog_starts_from_the_shipped_one () =
+  with_dir (fun config_root ->
+    let shipped = Some "[images.base]\n" in
+    (match load_or_shipped ~config_root ~shipped with
+     | Ok catalog -> check (list string) "names" [ "base" ] (List.map (fun e -> e.name) (entries catalog))
+     | Error e -> fail (load_error_to_string e));
+    (match load_or_shipped ~config_root ~shipped:None with
+     | Error (Missing _) -> ()
+     | _ -> fail "no host file and nothing shipped should be Missing");
+    Out_channel.with_open_bin (Filename.concat config_root file_name) (fun oc ->
+      output_string oc promoted_ocaml);
+    match load_or_shipped ~config_root ~shipped with
+    | Ok catalog -> check int "the host file wins" 2 (List.length (entries catalog))
+    | Error e -> fail (load_error_to_string e))
+
+(* The shipped catalog names exactly the recipes the repository has, so a
+   recipe cannot be added without a name a Keeper can use, nor a name without
+   a recipe that builds it. *)
+let rec find_source_root dir hops =
+  if Sys.file_exists (Filename.concat dir "config/sandbox-images.toml") then Some dir
+  else if hops = 0 then None
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else find_source_root parent (hops - 1)
+
+let test_the_shipped_catalog_names_every_recipe () =
+  match find_source_root (Sys.getcwd ()) 8 with
+  | None -> fail ("config/sandbox-images.toml not found above " ^ Sys.getcwd ())
+  | Some root ->
+    let text = In_channel.with_open_bin (Filename.concat root "config/sandbox-images.toml") In_channel.input_all in
+    let names = List.map (fun e -> e.name) (entries (parsed text)) in
+    let recipes_dir = Filename.concat root "sandbox-images" in
+    let recipes =
+      Sys.readdir recipes_dir |> Array.to_list
+      |> List.filter (fun d -> Sys.file_exists (Filename.concat (Filename.concat recipes_dir d) "Dockerfile"))
+      |> List.sort String.compare
+    in
+    check (list string) "catalog names = recipe directories" recipes (List.sort String.compare names);
+    check bool "nothing is promoted in the shipped copy" true
+      (List.for_all (fun e -> e.promoted = []) (entries (parsed text)))
+
 let () =
   run "Sandbox image catalog"
     [ ( "resolve"
@@ -245,5 +286,9 @@ let () =
             test_first_promotion_and_other_stores
         ; test_case "changes are refused with reasons" `Quick test_changes_are_refused_with_reasons
         ; test_case "save then load" `Quick test_save_then_load
+        ; test_case "a host without a catalog starts from the shipped one" `Quick
+            test_a_host_without_a_catalog_starts_from_the_shipped_one
+        ; test_case "the shipped catalog names every recipe" `Quick
+            test_the_shipped_catalog_names_every_recipe
         ] )
     ]

@@ -1,8 +1,12 @@
-; The sandbox image catalog: parse and resolve. No daemon; the load case uses
-; a temporary directory as its config root.
+; The sandbox image catalog: parse, resolve, change and save. No daemon; the
+; load cases use a temporary config root. The shipped catalog and the recipe
+; directories are deps so the suite can check they name the same images.
 
 (test
  (name test_sandbox_image_catalog)
  (modules test_sandbox_image_catalog)
+ (deps
+  %{workspace_root}/config/sandbox-images.toml
+  (source_tree %{workspace_root}/sandbox-images))
  (action (run %{test}))
  (libraries alcotest masc))

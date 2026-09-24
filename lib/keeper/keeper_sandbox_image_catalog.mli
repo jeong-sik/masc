@@ -87,6 +87,12 @@ val load_error_to_string : load_error -> string
 
 val load : config_root:string -> (t, load_error) result
 
+val load_or_shipped :
+  config_root:string -> shipped:string option -> (t, load_error) result
+(** The host's catalog, or, when this host has not written one yet, the
+    [shipped] text: the copy of [config/sandbox-images.toml] the binary
+    carries. A host's own file is never merged with the shipped one. *)
+
 (** {1 Changing what a name means on this host} *)
 
 type change_error =

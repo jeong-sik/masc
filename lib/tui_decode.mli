@@ -2824,6 +2824,39 @@ val decode_planning_snapshot :
     {!goal_store_unavailable_view_to_string} line as the [Error]; RFC-0444 PR-4
     lifts it into a [Planning_unavailable] constructor. *)
 
+(** One goal of [GET /api/v1/dashboard/goals] as the Overview's GOALS
+    section reads it. [og_task_count] and [og_task_done_count] count the
+    goal's linked tasks; a goal has no measured metric value, so nothing here
+    stands in for one. [og_stagnation_seconds] is the server's time since the
+    goal's last activity, [None] when it has none to measure from. *)
+type overview_goal = {
+  og_id : string;
+  og_title : string;
+  og_phase : Goal_phase.t;
+  og_priority : int;
+  og_due_date : string option;
+  og_task_count : int;
+  og_task_done_count : int;
+  og_stagnation_seconds : int option;
+  og_task_ids : string list;  (** Ids of [tasks[]], in server order. *)
+}
+
+type overview_goals_error =
+  | Overview_goal_phase_unknown of { goal_id : string; phase : string }
+      (** A goal named a phase {!Goal_phase.parse} does not know. The whole
+          reading is refused rather than the goal dropped or given a phase. *)
+  | Overview_goals_source_unavailable of string
+      (** The server answered, and said it could not read its goals. *)
+  | Overview_goals_malformed of string
+
+val overview_goals_error_to_string : overview_goals_error -> string
+
+val decode_overview_goals :
+  Yojson.Safe.t -> (overview_goal list, overview_goals_error) result
+(** Every goal in the body's [tree], each node before its [children], in
+    server order. Goals of every phase are returned; which ones a surface
+    draws is the surface's decision. *)
+
 val decode_fleet_safety : Yojson.Safe.t -> (fleet_safety, string) result
 (** Reads the [keeper_fleet_safety] section out of a [/health?full=1] body.
     A body without the section is an error rather than an empty reading: an

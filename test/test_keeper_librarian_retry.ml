@@ -797,7 +797,14 @@ let test_a_restated_memory_retracted_during_the_pass_stays_retracted_and_keeps_i
    with [keeper_facts] and record [keeper_events], then commit the answer and
    write its Revised events the way the runtime does, from the revisions the
    commit carried out. *)
-let librarian_round ~name ~answer ?keeper_facts ?(keeper_events = []) () =
+let librarian_round
+      ~name
+      ~answer
+      ?keeper_facts
+      ?(keeper_events = [])
+      ?(inspect = fun ~keepers_dir:_ ~keeper_id:_ -> ())
+      ()
+  =
   let keepers_dir = Filename.temp_dir ("librarian-" ^ name ^ "-") "" in
   Fun.protect ~finally:(fun () -> rm_rf keepers_dir) (fun () ->
     let keeper_id = name in
@@ -861,7 +868,25 @@ let librarian_round ~name ~answer ?keeper_facts ?(keeper_events = []) () =
       | Error detail -> fail detail
       | Ok lines -> List.length lines
     in
+    inspect ~keepers_dir ~keeper_id;
     selection, disposition, events, absorbed_rows)
+;;
+
+(* The drops the newest journal line names, which must be a committed
+   Librarian pass that states its drops. *)
+let journaled_drop_ids ~keepers_dir ~keeper_id =
+  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
+  | [ Ok
+        (Current.Journal_committed
+           { source = { kind = Current.Librarian; _ }; dropped = Some statements; _ })
+    ] ->
+    List.map (fun (statement : Memory.dropped_statement) -> statement.memory_id) statements
+  | [ Ok (Current.Journal_committed _) ] ->
+    fail "the newest journal line is not a Librarian pass that states its drops"
+  | [ Ok (Current.Journal_failed _ | Current.Journal_quarantined _) ] ->
+    fail "the newest journal line is not a committed pass"
+  | [ Error detail ] -> fail ("the newest journal line does not decode: " ^ detail)
+  | [] | _ :: _ :: _ -> fail "expected exactly one journal line"
 ;;
 
 let successors_of identity (events : Events.event list) =
@@ -894,7 +919,11 @@ let superseding_b = selection_json ~new_claims:[ superseding_claim (`String "m2"
    is stored and B gets that one Revised event. *)
 let test_a_supersede_of_a_memory_still_current_is_stored () =
   let selection, disposition, events, _ =
-    librarian_round ~name:"supersede-kept" ~answer:superseding_b ()
+    librarian_round ~name:"supersede-kept" ~answer:superseding_b
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal names B, which the commit dropped"
+          [ current_b_id ] (journaled_drop_ids ~keepers_dir ~keeper_id))
+      ()
   in
   let successor = the_one_new_claim selection in
   check (list string) "A stays and B's successor is stored"
@@ -921,6 +950,9 @@ let test_a_supersede_of_a_memory_the_keeper_superseded_during_the_pass_is_not_st
           ; kind = Events.Revised { superseded_by = keeper_successor_id }
           }
         ]
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal leaves B to the keeper's own revision" []
+          (journaled_drop_ids ~keepers_dir ~keeper_id))
       ()
   in
   let successor = the_one_new_claim selection in
@@ -948,6 +980,9 @@ let test_a_supersede_of_a_memory_the_keeper_retracted_during_the_pass_is_not_sto
           ; kind = Events.Retracted
           }
         ]
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal leaves B to the keeper's retraction" []
+          (journaled_drop_ids ~keepers_dir ~keeper_id))
       ()
   in
   let successor = the_one_new_claim selection in
@@ -997,6 +1032,9 @@ let test_a_memory_whose_only_successor_is_not_stored_stays_current () =
              ]
            ())
       ~keeper_facts:[ current_a ]
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal does not say A was dropped" []
+          (journaled_drop_ids ~keepers_dir ~keeper_id))
       ()
   in
   let successor = the_one_new_claim selection in
@@ -1015,6 +1053,9 @@ let test_a_memory_superseded_by_a_restatement_the_keeper_retracted_stays_current
     librarian_round ~name:"restated-successor-retracted"
       ~answer:(selection_json ~new_claims:[ superseding_claim ~claim:"keep A" (`String "m2") () ] ())
       ~keeper_facts:[ current_b ]
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal does not say B was dropped" []
+          (journaled_drop_ids ~keepers_dir ~keeper_id))
       ()
   in
   check (list string) "the answer did supersede B with A"

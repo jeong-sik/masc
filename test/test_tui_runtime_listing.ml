@@ -525,7 +525,7 @@ let test_narrow_target_column_still_tells_the_variants_apart () =
    admitted list alone cannot say where that is, and the editor moves and
    drops by position. *)
 let standalone_lane ?(declared_cli = []) ?(admitted_cli = [])
-    ~lane_id ~declared ~admitted : Masc.Tui_decode.standalone_lane =
+    ~lane_id ~declared ~admitted () : Masc.Tui_decode.standalone_lane =
   { Masc.Tui_decode.sl_lane_id = lane_id
   ; sl_label = lane_id
   ; sl_purpose = None
@@ -565,7 +565,7 @@ let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])
       ; sls_exact_run_projection_truncated = false
       ; sls_lanes =
           [ standalone_lane ~lane_id:"librarian_exact" ~declared ~admitted
-              ~declared_cli ~admitted_cli ]
+              ~declared_cli ~admitted_cli () ]
       };
   state.slot_editor <-
     Some { se_target = Exact_lane_slots "librarian_exact"; se_cursor = cursor };

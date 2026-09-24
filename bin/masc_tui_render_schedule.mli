@@ -93,8 +93,8 @@ val allocate_overview :
   task_count:int ->
   has_task_error:bool ->
   overview_allocation
-(** The Providers section is sized after the Team block and before the tasks:
-    it takes up to [providers_count] rows of what is left once the one task row
+(** The Providers section is sized after GOALS and before the Team block: it
+    takes up to [providers_count] rows of what is left once the one task row
     held back is kept. With no room for one row besides its chrome it is not
     drawn at all. *)
 

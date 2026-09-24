@@ -43,7 +43,7 @@ let resolved state_word =
 }|}
        state_word)
 
-let runtime ~scope ~exhausted id : Tui_decode.runtime_option =
+let runtime ?resets ~scope ~exhausted id : Tui_decode.runtime_option =
   { ro_id = id
   ; ro_provider = "p"
   ; ro_model = id
@@ -54,7 +54,7 @@ let runtime ~scope ~exhausted id : Tui_decode.runtime_option =
   ; ro_is_local = false
   ; ro_is_default = false
   ; ro_quota_exhausted = exhausted
-  ; ro_quota_resets_at = None
+  ; ro_quota_resets_at = resets
   ; ro_quota_scope = Some scope
   }
 
@@ -70,7 +70,7 @@ let code_points text =
       if Char.code byte land 0xC0 = 0x80 then count else count + 1)
     0 text
 
-let width = 120
+let width = 160
 
 (* The meter between the row's opening edge and its last closing edge, and
    its width in cells (one code point per cell). *)
@@ -96,7 +96,8 @@ let test_section_draws_three_line_shapes () =
   in
   let runtimes =
     Types.Quota_read
-      [ runtime ~scope:"provider:kimi" ~exhausted:true "kimi.k3"
+      [ runtime ~scope:"provider:kimi" ~exhausted:true
+          ~resets:(now +. 7200.0) "kimi.k3"
       ; runtime ~scope:"provider:claude_code" ~exhausted:false "claude_code.sonnet"
       ]
   in
@@ -118,7 +119,11 @@ let test_section_draws_three_line_shapes () =
     (contains ~affix:"reported by the provider" (plain section.title)
      && contains ~affix:"since server start" (plain section.title));
   match lines with
-  | [ five_hour; seven_day; kimi; codex; ollama ] ->
+  | [ kimi; five_hour; seven_day; codex; ollama ] ->
+      (* The exhausted account comes first: a budget cut from the bottom
+         keeps the reason a Keeper is stuck. *)
+      check bool "the exhausted account is the first row" true
+        (contains ~affix:"kimi" kimi);
       (* A reported account: meter, value in its own unit, countdown, age. *)
       check bool "claude 5h row" true
         (contains ~affix:"claude_code" five_hour
@@ -140,7 +145,10 @@ let test_section_draws_three_line_shapes () =
         (contains ~affix:"reset time passed \xc2\xb7 no newer report" kimi
          && contains ~affix:"100%" kimi
          && contains ~affix:"5h" kimi
-         && contains ~affix:"exhausted (observed)" kimi);
+         && contains ~affix:"exhausted (observed)" kimi
+         (* The catalogue's reopen time, apart from the provider's reset. *)
+         && contains ~affix:"catalogue reopens " kimi
+         && contains ~affix:" in 2h0m" kimi);
       (* The box cuts from the right, so the tag sits before the reset text. *)
       check bool "the tag comes before the reset text" true
         (match

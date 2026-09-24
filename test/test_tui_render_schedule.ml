@@ -450,16 +450,19 @@ let test_overview_providers_section_sits_before_backlog () =
   check int "every provider row fits" 4 live.providers_rows;
   check int "the backlog takes what is left" 3 live.task_rows;
   check int "40-row frame is exact" 40 (overview_frame_rows live);
-  let short =
-    Schedule.allocate_overview ~terminal_rows:17 ~attention_count:6
+  (* Either side of the chrome: 19 rows leave the section its title and
+     divider and no row, so it is not drawn; 20 rows leave it one. *)
+  let at rows =
+    Schedule.allocate_overview ~terminal_rows:rows ~attention_count:6
       ~goal_count:0 ~team_count:0 ~providers_count:4 ~task_count:20
       ~has_task_error:false
   in
-  check int "a short viewport gives Providers no half section" 0
-    short.providers_rows;
-  check int "the backlog keeps its held row" 1 short.task_rows
+  check int "chrome with no row is no section" 0 (at 19).providers_rows;
+  check int "the backlog keeps its held row" 1 (at 19).task_rows;
+  check int "one row past the chrome draws one row" 1 (at 20).providers_rows;
+  check int "20-row frame is exact" 20 (overview_frame_rows (at 20))
 
-(* GOALS, Team and Providers together: each is paid in that order, and the
+(* GOALS, Providers and Team together: each is paid in that order, and the
    frame still reaches exactly the bottom of the terminal. *)
 let test_overview_goals_and_providers_share_the_viewport () =
   let tall =
@@ -477,8 +480,12 @@ let test_overview_goals_and_providers_share_the_viewport () =
       ~goal_count:6 ~team_count:13 ~providers_count:4 ~task_count:687
       ~has_task_error:false
   in
-  check int "goals and Team are served before Providers" 0
+  (* The viewport that used to cut the reason a Keeper is stuck. *)
+  check int "Providers keeps its rows in a crowded viewport" 4
     crowded.providers_rows;
+  check int "Team takes what Providers left" 8 crowded.team_rows;
+  check int "the backlog keeps its held row" 1 crowded.task_rows;
+  check int "40-row frame is exact" 40 (overview_frame_rows crowded);
   List.iter
     (fun (goal_count, team_count, providers_count) ->
       for terminal_rows = 14 to 80 do

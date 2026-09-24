@@ -221,35 +221,35 @@ let allocate_overview ~terminal_rows ~attention_count ~goal_count
   let goal_block_rows =
     if goal_rows > 0 then goal_rows + overview_goal_chrome_rows else 0
   in
-  let team_rows =
-    if team_count <= 0 then 0
-    else
-      let room =
-        available - attention_rows - goal_block_rows - reserved_task_rows
-        - overview_team_chrome_rows
-      in
-      if room <= 0 then 0 else min team_count room
-  in
-  let team_block_rows =
-    if team_rows > 0 then team_rows + overview_team_chrome_rows else 0
-  in
-  (* The Providers section is served after GOALS and Team and before the
-     tasks, in the order it is drawn. GOALS and Team say what the fleet is
-     doing; how full each provider account is explains a stuck Keeper in
-     Team, so it is read after Team and is worth nothing without it. Nothing
-     in the backlog below says it, so it comes ahead of the tasks. *)
+  (* The Providers section is served after GOALS and before Team, in the
+     order it is drawn. A shut provider account is the reason a Keeper in
+     Team is stuck; served after Team, a crowded viewport drew the stuck
+     Keeper and cut the reason. Exhausted accounts sort first inside the
+     section, so the rows it keeps are the ones that explain Team. *)
   let providers_rows =
     if providers_count <= 0 then 0
     else
       let room =
         available - attention_rows - reserved_task_rows - goal_block_rows
-        - team_block_rows - overview_providers_chrome_rows
+        - overview_providers_chrome_rows
       in
       if room <= 0 then 0 else min providers_count room
   in
   let providers_block_rows =
     if providers_rows > 0 then providers_rows + overview_providers_chrome_rows
     else 0
+  in
+  let team_rows =
+    if team_count <= 0 then 0
+    else
+      let room =
+        available - attention_rows - goal_block_rows - providers_block_rows
+        - reserved_task_rows - overview_team_chrome_rows
+      in
+      if room <= 0 then 0 else min team_count room
+  in
+  let team_block_rows =
+    if team_rows > 0 then team_rows + overview_team_chrome_rows else 0
   in
   let task_block_rows =
     min desired_task_block_rows

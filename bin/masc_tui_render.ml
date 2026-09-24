@@ -519,7 +519,8 @@ let overview_attention (state : state) =
   | None -> []
   | Some overview -> overview.ov_attention_items
 
-(* The Providers section, drawn between the Team block and the tasks. *)
+(* The Providers section, drawn between the Attention panel and the Team
+   block. *)
 let overview_providers_section (state : state) ~cols =
   Overview_providers.section ~providers:state.overview_providers
     ~runtimes:state.overview_quota ~now:(Unix.gettimeofday ())
@@ -811,6 +812,18 @@ let render_overview (state : state) =
 
   box_divider buf cols;
 
+  (* Providers section: each provider account's usage windows, as reported.
+     Drawn above Team, whose stuck Keepers a shut account explains. *)
+  (match overview_providers_section state ~cols with
+   | Some section when row_budget.providers_rows > 0 ->
+       Buffer.add_string buf (fit_width section.Overview_providers.title cols ^ "\n");
+       List.iter (box_line buf cols)
+         (List.filteri
+            (fun index _ -> index < row_budget.providers_rows)
+            section.Overview_providers.lines);
+       box_divider buf cols
+   | Some _ | None -> ());
+
   (* Team block: who is doing what, who is stuck. The allocation gave it
      [team_rows] rows plus its title and closing divider, or nothing. *)
   (match overview_team state with
@@ -823,17 +836,6 @@ let render_overview (state : state) =
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;
-       box_divider buf cols
-   | Some _ | None -> ());
-
-  (* Providers section: each provider account's usage windows, as reported. *)
-  (match overview_providers_section state ~cols with
-   | Some section when row_budget.providers_rows > 0 ->
-       Buffer.add_string buf (fit_width section.Overview_providers.title cols ^ "\n");
-       List.iter (box_line buf cols)
-         (List.filteri
-            (fun index _ -> index < row_budget.providers_rows)
-            section.Overview_providers.lines);
        box_divider buf cols
    | Some _ | None -> ());
 

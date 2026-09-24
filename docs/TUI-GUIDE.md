@@ -332,7 +332,8 @@ Tasks show terminal states in Planning rollups but not in this list. A task
 detail that is open when its task turns terminal stays open - the detail reads
 the full backlog rows, not the active projection.
 
-The Providers section sits between the Team block and the tasks. It reads
+The Providers section sits above the Team block, so the reason a Keeper there
+is stuck stays on screen with it. It reads
 `provider_usage_windows` from `GET /api/v1/runtime/resolved` and draws one
 strip per provider account: a meter per usage window, the value as a whole
 percent (a fraction is multiplied by 100 and floored), the reset time, and how long ago the provider said so.
@@ -348,7 +349,8 @@ A meter is drawn in the exhausted style only when the value reaches the full
 value of its own unit (`1.0` for a fraction, `100` for a percent). A reset time
 that has passed reads `reset time passed · no newer report`; the meter keeps
 the last reported value. An account whose runtime rows carry
-`quota_exhausted` wears `exhausted (observed)`. A failed read is one line,
+`quota_exhausted` wears `exhausted (observed)` with the catalogue's own reopen
+time, and is listed first. A failed read is one line,
 `providers unavailable: <reason>`.
 
 ### Activity

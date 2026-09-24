@@ -182,38 +182,72 @@ let account_name (account : Tui_decode.provider_usage_account) =
   | [] -> Terminal_text.single_line account.pua_scope
   | providers -> Terminal_text.single_line (String.concat "," providers)
 
-(* The runtime catalogue's own [quota_exhausted], joined by quota scope. *)
-let observed_exhausted ~runtimes scope =
+(* The runtime catalogue's own [quota_exhausted], joined by quota scope,
+   with the reopen time the catalogue states for it. That time is the
+   catalogue's, not the provider's window reset, and is drawn apart from it. *)
+type observed =
+  | Not_observed_exhausted
+  | Observed_exhausted of float option
+      (** The latest [quota_resets_at] among the scope's exhausted runtimes;
+          [None] when none of them states one. *)
+
+let later left right =
+  match (left, right) with
+  | Some l, Some r -> Some (Float.max l r)
+  | Some at, None | None, Some at -> Some at
+  | None, None -> None
+
+let observed_exhaustion ~runtimes scope =
   match (runtimes : Types.overview_quota_reading) with
   | Types.Quota_read options ->
-      List.exists
-        (fun (option : Tui_decode.runtime_option) ->
-          option.ro_quota_exhausted
-          && Option.equal String.equal option.ro_quota_scope (Some scope))
-        options
-  | Types.Quota_unread | Types.Quota_failed _ -> false
+      List.fold_left
+        (fun observed (option : Tui_decode.runtime_option) ->
+          if
+            option.ro_quota_exhausted
+            && Option.equal String.equal option.ro_quota_scope (Some scope)
+          then
+            match observed with
+            | Not_observed_exhausted -> Observed_exhausted option.ro_quota_resets_at
+            | Observed_exhausted at ->
+                Observed_exhausted (later at option.ro_quota_resets_at)
+          else observed)
+        Not_observed_exhausted options
+  | Types.Quota_unread | Types.Quota_failed _ -> Not_observed_exhausted
 
-let exhausted_tag = "exhausted (observed)"
+let exhausted_tag ~now = function
+  | Not_observed_exhausted -> None
+  | Observed_exhausted None ->
+      Some "exhausted (observed) \xc2\xb7 catalogue reopen time not stated"
+  | Observed_exhausted (Some at) when at <= now ->
+      Some "exhausted (observed) \xc2\xb7 catalogue reopen time passed"
+  | Observed_exhausted (Some at) ->
+      Some
+        (Printf.sprintf "exhausted (observed) \xc2\xb7 catalogue reopens %s in %s"
+           (clock_text ~now at) (span_text (at -. now)))
 
 type row =
   | Window_row of {
       name : string;
       window : Tui_decode.provider_usage_window;
       heard : string option;
-      tagged : bool;
+      tag : string option;
     }
-  | Silent_row of { name : string; tagged : bool }
+  | Silent_row of { name : string; tag : string option }
 
-let reported_rank (account : Tui_decode.provider_usage_account) =
-  match account.pua_state with
-  | Tui_decode.Account_reported _ -> 0
-  | Tui_decode.Account_not_reported_since_start -> 1
+(* Exhausted accounts first: a short budget cuts the section from the bottom,
+   and the rows it keeps should be the ones that explain a stuck Keeper. Then
+   accounts that reported, then the silent ones. *)
+let account_rank observed (account : Tui_decode.provider_usage_account) =
+  match (observed, account.pua_state) with
+  | Observed_exhausted _, _ -> 0
+  | Not_observed_exhausted, Tui_decode.Account_reported _ -> 1
+  | Not_observed_exhausted, Tui_decode.Account_not_reported_since_start -> 2
 
-let account_rows ~runtimes ~now (account : Tui_decode.provider_usage_account) =
+let account_rows ~now (observed, (account : Tui_decode.provider_usage_account)) =
   let name = account_name account in
-  let tagged = observed_exhausted ~runtimes account.pua_scope in
+  let tag = exhausted_tag ~now observed in
   match account.pua_state with
-  | Tui_decode.Account_not_reported_since_start -> [ Silent_row { name; tagged } ]
+  | Tui_decode.Account_not_reported_since_start -> [ Silent_row { name; tag } ]
   | Tui_decode.Account_reported (first, rest) ->
       (* Windows of one report share its hearing time; a window heard at
          another time says its own. *)
@@ -221,7 +255,7 @@ let account_rows ~runtimes ~now (account : Tui_decode.provider_usage_account) =
         { name
         ; window = first
         ; heard = Some (heard_text ~now first.puw_observed_at)
-        ; tagged
+        ; tag
         }
       :: List.map
            (fun (window : Tui_decode.provider_usage_window) ->
@@ -230,7 +264,7 @@ let account_rows ~runtimes ~now (account : Tui_decode.provider_usage_account) =
                  None
                else Some (heard_text ~now window.puw_observed_at)
              in
-             Window_row { name = ""; window; heard; tagged = false })
+             Window_row { name = ""; window; heard; tag = None })
            rest
 
 let widest cells_of_row rows =
@@ -256,12 +290,13 @@ let draw_rows ~now ~width rows =
         snd (reset_text ~now window.puw_resets_at))
   in
   let gap = "  " in
-  let tag_cell = gap ^ exhausted_tag in
+  let tag_cells = function
+    | None -> 0
+    | Some tag -> cells_of gap + cells_of tag
+  in
   let tag_w =
     widest
-      (function
-        | Window_row { tagged; _ } | Silent_row { tagged; _ } ->
-            if tagged then cells_of tag_cell else 0)
+      (function Window_row { tag; _ } | Silent_row { tag; _ } -> tag_cells tag)
       rows
   in
   let heard_w =
@@ -280,10 +315,9 @@ let draw_rows ~now ~width rows =
     + heard_w
   in
   let meter_cells = max 1 (width - columns) in
-  let tag_part tagged =
-    if tagged then
-      gap ^ Theme.bad () ^ exhausted_tag ^ Ansi.reset
-    else ""
+  let tag_part = function
+    | None -> ""
+    | Some tag -> gap ^ Theme.bad () ^ tag ^ Ansi.reset
   in
   let styled style text =
     match style with
@@ -292,11 +326,11 @@ let draw_rows ~now ~width rows =
   in
   List.map
     (function
-      | Silent_row { name; tagged } ->
+      | Silent_row { name; tag } ->
           " " ^ pad_right name name_w ^ gap
           ^ styled (Some Ansi.dim) "no report since server start"
-          ^ tag_part tagged
-      | Window_row { name; window; heard; tagged } ->
+          ^ tag_part tag
+      | Window_row { name; window; heard; tag } ->
           let tone =
             if at_or_past_full window.puw_utilization then Some (Theme.bad ())
             else None
@@ -307,7 +341,7 @@ let draw_rows ~now ~width rows =
             | None -> ""
             | Some heard -> gap ^ styled (Some Ansi.dim) heard
           in
-          let tag_pad = String.make (tag_w - cells_of (if tagged then tag_cell else "")) ' ' in
+          let tag_pad = String.make (tag_w - tag_cells tag) ' ' in
           " " ^ pad_right name name_w ^ gap
           ^ pad_right (window_label window) label_w
           ^ " "
@@ -316,7 +350,7 @@ let draw_rows ~now ~width rows =
               ^ meter ~cells:meter_cells (share_of_full window.puw_utilization)
               ^ meter_close ^ " "
               ^ pad_left (utilization_text window.puw_utilization) value_w)
-          ^ tag_part tagged ^ tag_pad ^ gap
+          ^ tag_part tag ^ tag_pad ^ gap
           ^ styled reset_tone (pad_right reset reset_w)
           ^ heard_part)
     rows
@@ -340,14 +374,16 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~now ~widt
         }
   | Types.Providers_read { Tui_decode.puws_since; puws_accounts } ->
       let ordered =
-        List.stable_sort
-          (fun a b ->
-            match Int.compare (reported_rank a) (reported_rank b) with
-            | 0 -> String.compare (account_name a) (account_name b)
-            | order -> order)
+        List.map
+          (fun (account : Tui_decode.provider_usage_account) ->
+            (observed_exhaustion ~runtimes account.pua_scope, account))
           puws_accounts
+        |> List.stable_sort (fun (oa, a) (ob, b) ->
+               match Int.compare (account_rank oa a) (account_rank ob b) with
+               | 0 -> String.compare (account_name a) (account_name b)
+               | order -> order)
       in
-      let rows = List.concat_map (account_rows ~runtimes ~now) ordered in
+      let rows = List.concat_map (account_rows ~now) ordered in
       (* Without the runtime rows the exhausted tag cannot be drawn; the
          section says so instead of drawing every account untagged. *)
       let runtimes_note =

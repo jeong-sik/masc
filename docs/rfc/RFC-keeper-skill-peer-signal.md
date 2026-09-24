@@ -1,6 +1,6 @@
 ---
 title: "키퍼가 발행한 Skill 에 다른 키퍼의 의견을 남기는 방법"
-status: Draft
+status: Accepted
 created: 2026-09-24
 updated: 2026-09-24
 author: claude-main

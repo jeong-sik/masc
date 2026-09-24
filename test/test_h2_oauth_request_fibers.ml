@@ -159,7 +159,7 @@ let test_oauth_body_progress completion =
     check int "OAuth rejection status" 400 (H2.Status.to_code response.status);
     let expected_json = Server_oauth_service.oauth_error_json
       (Auth_oauth.Invalid_request message) |> Yojson.Safe.to_string in
-    let expected_body, expected_headers = Http_response_payload.compress_body
+    let expected_body, expected_headers = Masc.Http_response_payload.compress_body
       ~accept_encoding:(Some "gzip") expected_json in
     check string "OAuth rejection body" expected_body actual_body;
     check (option string) "OAuth compression headers"

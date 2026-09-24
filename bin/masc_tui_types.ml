@@ -5995,12 +5995,11 @@ type state = {
   mutable runtime_surface_scroll: int;
   mutable runtime_detail_target: runtime_detail_target option;
   mutable runtime_detail_scroll: int;
-  (* The lane a fallback is being added to, and where the picker sits in the
-     runtime catalogue with the filter typed over it. Both are cleared when
-     the picker closes: a cursor kept across visits opens the list part-way
-     down for no reason the reader gave. *)
-  mutable runtime_lane_pick: runtime_lane_pick option;
-  mutable runtime_lane_pick_list: Masc_tui_pick_list.t;
+  (* The lane a fallback is being added to, with where the picker sits in
+     the runtime catalogue and the filter typed over it. One value, so a
+     closed picker has no cursor to leave behind: the next one opens on the
+     first row with no filter. *)
+  mutable runtime_lane_pick: (runtime_lane_pick * Masc_tui_pick_list.t) option;
   mutable runtime_lane_notice: runtime_lane_notice option;
   (* Per list: whether it was read back after the last lane write. *)
   mutable runtime_surface_lane_freshness: runtime_lane_list_freshness;
@@ -6657,8 +6656,9 @@ let text_input_target (state : state) ~compact_viewport =
   (* The runtime picker's filter, after [/]: its letter keys (j/k, e) are
      the filter's text until Esc, and so are the Runtime surface's. *)
   else if (state.view = Runtime || state.view = Lanes) && not compact_viewport
-          && Option.is_some state.runtime_lane_pick
-          && Option.is_some state.runtime_lane_pick_list.Masc_tui_pick_list.query
+          && (match state.runtime_lane_pick with
+              | Some (_, list) -> Option.is_some list.Masc_tui_pick_list.query
+              | None -> false)
   then Some Text_runtime_picker_filter
   else if state.view = Connectors && not compact_viewport
           && Option.is_some (Option.bind (browser_lane_on_screen state) (fun view -> view.Browser_lane_view.url_draft))
@@ -7994,7 +7994,6 @@ let create_state
   runtime_detail_target = None;
   runtime_detail_scroll = 0;
   runtime_lane_pick = None;
-  runtime_lane_pick_list = Masc_tui_pick_list.closed;
   runtime_lane_notice = None;
   runtime_surface_lane_freshness = Lane_list_read;
   standalone_lanes_lane_freshness = Lane_list_read;
@@ -9289,11 +9288,18 @@ type runtime_picker_projection = {
    it. The listing under it gives these rows up while it is open. *)
 let runtime_picker_page = 3
 
-(* The text a runtime's picker row draws before its notes, and the text the
-   typed filter matches: the operator filters by what they read. *)
+(* The text a runtime's picker row draws before its notes, made terminal
+   safe here, and the text the typed filter matches: the operator filters by
+   exactly what they read. *)
 let runtime_picker_label (runtime : Tui_decode.runtime_option) =
-  Printf.sprintf "%s   %s / %s" runtime.Tui_decode.ro_id runtime.Tui_decode.ro_provider
-    runtime.Tui_decode.ro_model
+  Tui_decode.sanitize_terminal_text
+    (Printf.sprintf "%s   %s / %s" runtime.Tui_decode.ro_id
+       runtime.Tui_decode.ro_provider runtime.Tui_decode.ro_model)
+
+(* The picker opens on the first row with no filter, and closing it drops
+   both. *)
+let open_runtime_lane_pick (state : state) pick =
+  state.runtime_lane_pick <- Some (pick, Masc_tui_pick_list.closed)
 
 (* A conversation lane's candidates as the runtime surface last resolved
    them. *)
@@ -9382,11 +9388,11 @@ let runtime_picker_keys enter = function
   | None -> Printf.sprintf "j/k move, PgUp/PgDn page, %s, e cancel" enter
   | Some _ -> Printf.sprintf "\xe2\x86\x91/\xe2\x86\x93 move, %s, Esc clear filter" enter
 let runtime_picker_projection (state : state) =
-  Option.map (fun pick ->
+  Option.map (fun (pick, list) ->
     let already, providers, catalog = runtime_picker_rows state pick in
     let view =
       Masc_tui_pick_list.view ~page:runtime_picker_page ~label:runtime_picker_label
-        catalog state.runtime_lane_pick_list
+        catalog list
     in
     { rlp_lane = runtime_lane_pick_name pick; rlp_pick = pick; rlp_already = already;
       rlp_providers = providers; rlp_choices = view.Masc_tui_pick_list.rows;

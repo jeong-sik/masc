@@ -23,13 +23,14 @@ let check_layout state expected =
   | None -> Alcotest.fail "runtime list has no scroll geometry"
   | Some layout -> expect "keyboard shares rendering chrome" expected layout.sc_chrome
 
-(* The picker's list after these keys, read through the same list the key
-   handler reads. *)
-let pick_list_after state keys =
+(* Press these keys in the open picker, over the same rows the key handler
+   reads. *)
+let press state keys =
   match state.runtime_lane_pick with
   | None -> Alcotest.fail "no picker is open"
-  | Some pick ->
+  | Some (pick, list) ->
       let _, _, catalog = runtime_picker_rows state pick in
+      let moved =
       List.fold_left
         (fun list key ->
           match
@@ -44,13 +45,15 @@ let pick_list_after state keys =
               | Masc_tui_pick_list.Stay list -> list
               | Masc_tui_pick_list.Chosen _ | Masc_tui_pick_list.Dismissed ->
                   Alcotest.failf "key %S left the picker" key))
-        state.runtime_lane_pick_list keys
+        list keys
+      in
+      state.runtime_lane_pick <- Some (pick, moved)
 
 let test_picker_and_refusal_keep_footer_space () =
   let state = state () in
   state.runtime_catalog <- [runtime "a"; runtime "b"; runtime "c"];
   check_layout state 12;
-  state.runtime_lane_pick <- Some (Pick_conversation_lane "primary");
+  open_runtime_lane_pick state (Pick_conversation_lane "primary");
   (* Three choices, prompt and divider consume five additional rows. *)
   check_layout state 17;
   state.runtime_lane_notice <- Some (Lane_write_refused "route write rejected");
@@ -59,14 +62,14 @@ let test_picker_and_refusal_keep_footer_space () =
   check_layout state 21;
   (* The cursor on the last runtime keeps the window a full page: the rows
      the listing gave up stay given up while the cursor moves. *)
-  state.runtime_lane_pick_list <- pick_list_after state [ "end" ];
+  press state [ "end" ];
   check_layout state 21;
   state.runtime_lane_pick <- None;
   check_layout state 16
 
 let test_empty_picker_keeps_its_explanation () =
   let state = state () in
-  state.runtime_lane_pick <- Some (Pick_conversation_lane "primary");
+  open_runtime_lane_pick state (Pick_conversation_lane "primary");
   check_layout state 15
 
 (* The lane editor's prompt row -- a name being typed, a lane armed for
@@ -83,7 +86,7 @@ let test_lane_prompt_keeps_footer_space () =
   check_layout state 16;
   state.runtime_lane_remove_armed <- None;
   state.runtime_lane_notice <- None;
-  state.runtime_lane_pick <- Some (Pick_new_lane "coding");
+  open_runtime_lane_pick state (Pick_new_lane "coding");
   (* A lane being created has no candidates to note, and the catalogue is
      unread here: prompt, divider and the explanation row. *)
   check_layout state 15
@@ -839,7 +842,7 @@ let catalogue_state () =
   state.runtime_catalog <-
     [ runtime "anthropic.claude"; runtime "openai.gpt"; runtime "ollama.qwen";
       runtime "zai.glm"; runtime "kimi.k2" ];
-  state.runtime_lane_pick <- Some (Pick_conversation_lane "primary");
+  open_runtime_lane_pick state (Pick_conversation_lane "primary");
   state.view <- Runtime;
   state
 
@@ -857,7 +860,7 @@ let drawn state =
    that carry it; the header says how many of the catalogue those are. *)
 let test_a_typed_filter_narrows_the_drawn_choices () =
   let state = catalogue_state () in
-  state.runtime_lane_pick_list <- pick_list_after state [ "/"; "o"; "l" ];
+  press state [ "/"; "o"; "l" ];
   let rows, selected, picker = drawn state in
   Alcotest.(check (list string)) "only the ids with ol" [ "ollama.qwen" ] rows;
   Alcotest.(check (option string)) "and it is under the cursor" (Some "ollama.qwen") selected;
@@ -872,23 +875,39 @@ let test_a_typed_filter_narrows_the_drawn_choices () =
    unread catalogue draws: the fix for one is typing, for the other waiting. *)
 let test_an_empty_match_is_not_an_unread_catalogue () =
   let filtered = catalogue_state () in
-  filtered.runtime_lane_pick_list <- pick_list_after filtered [ "/"; "x"; "y" ];
+  press filtered [ "/"; "x"; "y" ];
   let rows, selected, picker = drawn filtered in
   Alcotest.(check (list string)) "nothing is drawn" [] rows;
   Alcotest.(check (option string)) "nothing is selected" None selected;
   Alcotest.(check string) "the note says the filter kept nothing"
     "  (no runtime among 5 matches the filter)" (runtime_picker_empty_note picker);
   let unread = state () in
-  unread.runtime_lane_pick <- Some (Pick_conversation_lane "primary");
+  open_runtime_lane_pick unread (Pick_conversation_lane "primary");
   let _, _, picker = drawn unread in
   Alcotest.(check string) "an unread catalogue still says unread"
     "  (runtime catalogue unread)" (runtime_picker_empty_note picker)
+
+(* The filter matches the text the row draws. A model id carrying a control
+   byte is drawn with it escaped, and typing what is drawn finds it. *)
+let test_the_filter_matches_the_drawn_text () =
+  let state = catalogue_state () in
+  let odd = { (runtime "odd.id") with ro_model = "mod\nel" } in
+  state.runtime_catalog <- odd :: state.runtime_catalog;
+  (match state.runtime_lane_pick with
+   | None -> Alcotest.fail "no picker"
+   | Some (pick, list) ->
+       state.runtime_lane_pick <-
+         Some (pick, Masc_tui_pick_list.type_text list "mod\\x0Ael"));
+  let rows, _, _ = drawn state in
+  Alcotest.(check (list string)) "the escaped text finds it" [ "odd.id" ] rows;
+  Alcotest.(check string) "the label is the drawn, escaped text"
+    "odd.id   provider / mod\\x0Ael" (runtime_picker_label odd)
 
 (* A reload that shortens the catalogue under a cursor on its last row draws
    the new last row selected, never a cursor past the end. *)
 let test_the_drawn_cursor_clamps_to_a_shorter_catalogue () =
   let state = catalogue_state () in
-  state.runtime_lane_pick_list <- pick_list_after state [ "end" ];
+  press state [ "end" ];
   state.runtime_catalog <- [ runtime "anthropic.claude"; runtime "openai.gpt" ];
   let rows, selected, _ = drawn state in
   Alcotest.(check (list string)) "both are drawn" [ "anthropic.claude"; "openai.gpt" ] rows;
@@ -972,6 +991,8 @@ let () = Alcotest.run "runtime list geometry"
         test_a_typed_filter_narrows_the_drawn_choices;
       Alcotest.test_case "an empty match is not an unread catalogue" `Quick
         test_an_empty_match_is_not_an_unread_catalogue;
+      Alcotest.test_case "the filter matches the drawn text" `Quick
+        test_the_filter_matches_the_drawn_text;
       Alcotest.test_case "the drawn cursor clamps to a shorter catalogue" `Quick
         test_the_drawn_cursor_clamps_to_a_shorter_catalogue;
       Alcotest.test_case "picker keys and rows go through the shared list" `Quick

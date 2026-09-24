@@ -52,8 +52,8 @@ let action_of_key ~close_keys t key =
   match t.query with
   | Some _ -> (
       match key with
-      | "up" -> Some (Move Prev)
-      | "down" -> Some (Move Next)
+      | "up" | "wheel-up" -> Some (Move Prev)
+      | "down" | "wheel-down" -> Some (Move Next)
       | "pageup" -> Some (Move Page_prev)
       | "pagedown" -> Some (Move Page_next)
       | "home" -> Some (Move First)
@@ -66,8 +66,8 @@ let action_of_key ~close_keys t key =
       | _unbound -> None)
   | None -> (
       match key with
-      | "up" | "k" -> Some (Move Prev)
-      | "down" | "j" -> Some (Move Next)
+      | "up" | "k" | "wheel-up" -> Some (Move Prev)
+      | "down" | "j" | "wheel-down" -> Some (Move Next)
       | "pageup" -> Some (Move Page_prev)
       | "pagedown" -> Some (Move Page_next)
       | "home" -> Some (Move First)

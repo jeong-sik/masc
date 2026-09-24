@@ -5887,8 +5887,7 @@ let render_lanes_overview (state : state) =
               box_line buf cols
                 (Printf.sprintf "  %s %s%s%s%s"
                    mark
-                   (Terminal_text.single_line
-                      (Masc_tui_types.runtime_picker_label runtime))
+                   (Masc_tui_types.runtime_picker_label runtime)
                    ctx def
                    (Ansi.dim ^ note ^ Ansi.reset)))
            picker.Masc_tui_types.rlp_choices);
@@ -12369,7 +12368,7 @@ let render_runtime (state : state) =
            c.push
              (Printf.sprintf "  %s %s%s%s%s"
                 (if picker.rlp_selected_row = Some offset then ">" else " ")
-                (Terminal_text.single_line (Masc_tui_types.runtime_picker_label runtime))
+                (Masc_tui_types.runtime_picker_label runtime)
                 ctx def
                 (Ansi.dim ^ note ^ Ansi.reset))) picker.rlp_choices;
        c.push_divider ());

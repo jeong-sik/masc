@@ -241,10 +241,12 @@ let test_the_fusion_launch_form_claims_while_open () =
 let test_the_runtime_picker_filter_claims_once_opened () =
   let state = fresh_state () in
   state.Tui_types.view <- Tui_types.Runtime;
-  state.Tui_types.runtime_lane_pick <- Some (Tui_types.Pick_conversation_lane "primary");
+  Tui_types.open_runtime_lane_pick state (Tui_types.Pick_conversation_lane "primary");
   check target "the open picker takes no text" None (resolved state);
-  state.Tui_types.runtime_lane_pick_list <-
-    Masc_tui_pick_list.type_text Masc_tui_pick_list.closed "gl";
+  state.Tui_types.runtime_lane_pick <-
+    Some
+      ( Tui_types.Pick_conversation_lane "primary"
+      , Masc_tui_pick_list.type_text Masc_tui_pick_list.closed "gl" );
   check target "the filter claims typing" (Some Tui_types.Text_runtime_picker_filter)
     (resolved state);
   state.Tui_types.view <- Tui_types.Lanes;

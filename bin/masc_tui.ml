@@ -15317,7 +15317,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match result with
        | Ok () ->
            state.runtime_lane_pick <- None;
-           state.runtime_lane_pick_list <- Masc_tui_pick_list.closed;
            Option.iter
              (fun row ->
                 match written, state.slot_editor with
@@ -18447,8 +18446,10 @@ and is loaded on demand through keeper_skill.
             (* A pasted runtime id narrows the picker the way typing it
                would. *)
             | Some Text_runtime_picker_filter ->
-                state.runtime_lane_pick_list <-
-                  Masc_tui_pick_list.type_text state.runtime_lane_pick_list text
+                state.runtime_lane_pick <-
+                  Option.map
+                    (fun (pick, list) -> (pick, Masc_tui_pick_list.type_text list text))
+                    state.runtime_lane_pick
             | Some Text_row_search ->
                 let longer =
                   Option.value state.search ~default:"" ^ text
@@ -19066,8 +19067,8 @@ and is loaded on demand through keeper_skill.
                    | Masc_tui_types.Naming_new_lane _ ->
                      (* A lane is its candidates, so it comes to exist with
                         one: the picker that opens here declares it. *)
-                     state.runtime_lane_pick <- Some (Masc_tui_types.Pick_new_lane name);
-                     state.runtime_lane_pick_list <- Masc_tui_pick_list.closed
+                     Masc_tui_types.open_runtime_lane_pick state
+                       (Masc_tui_types.Pick_new_lane name)
                    | Masc_tui_types.Renaming_lane { lane; _ } ->
                      (* The rename lands in one write, references and all, so
                         there is nothing to pick and nothing to follow. *)
@@ -20288,13 +20289,13 @@ and is loaded on demand through keeper_skill.
                | _ -> ()))
        | Some k
          when (state.view = Runtime || state.view = Lanes)
-              && Option.is_some state.runtime_lane_pick
-              && (Option.is_some
-                    (Masc_tui_pick_list.action_of_key
-                       ~close_keys:runtime_picker_close_keys
-                       state.runtime_lane_pick_list k)
-                  || text_input_target state ~compact_viewport
-                     = Some Text_runtime_picker_filter) ->
+              && (match state.runtime_lane_pick with
+                  | None -> false
+                  | Some (_, list) ->
+                      Option.is_some
+                        (Masc_tui_pick_list.action_of_key
+                           ~close_keys:runtime_picker_close_keys list k)
+                      || Option.is_some list.Masc_tui_pick_list.query) ->
            (* The picker is open: arrows or j/k step, PgUp/PgDn page, Home/End
               jump, [/] types a filter over the drawn rows, Enter appends, and
               e or Esc drop the filter and then close. While the filter is
@@ -20302,14 +20303,15 @@ and is loaded on demand through keeper_skill.
               surface under it. The Runtime surface opens it for a
               conversation lane or a lane being created, the Lanes surface for
               a standalone lane's walk order. *)
-           (match
-              ( state.runtime_lane_pick
-              , Masc_tui_pick_list.action_of_key
-                  ~close_keys:runtime_picker_close_keys
-                  state.runtime_lane_pick_list k )
+           (match state.runtime_lane_pick with
+            | None -> ()
+            | Some (pick, list) ->
+            match
+              Masc_tui_pick_list.action_of_key
+                ~close_keys:runtime_picker_close_keys list k
             with
-            | None, (Some _ | None) | Some _, None -> ()
-            | Some pick, Some action ->
+            | None -> ()
+            | Some action ->
                 let already, _providers, catalog =
                   Masc_tui_types.runtime_picker_rows state pick
                 in
@@ -20317,17 +20319,16 @@ and is loaded on demand through keeper_skill.
                    Masc_tui_pick_list.apply
                      ~page:Masc_tui_types.runtime_picker_page
                      ~label:Masc_tui_types.runtime_picker_label catalog
-                     state.runtime_lane_pick_list action
+                     list action
                  with
                  | Masc_tui_pick_list.Stay list ->
-                     state.runtime_lane_pick_list <- list
+                     state.runtime_lane_pick <- Some (pick, list)
                  | Masc_tui_pick_list.Chosen runtime ->
                      launch_runtime_lane_pick state ~mailbox:async_messages
                        ~pick ~runtime_id:runtime.Masc.Tui_decode.ro_id
                        ~existing:already
                  | Masc_tui_pick_list.Dismissed ->
-                     state.runtime_lane_pick <- None;
-                     state.runtime_lane_pick_list <- Masc_tui_pick_list.closed))
+                     state.runtime_lane_pick <- None))
        | Some "e" | Some "E"
          when state.view = Runtime
               && state.runtime_mode = Masc_tui_types.Runtime_lanes
@@ -20345,11 +20346,9 @@ and is loaded on demand through keeper_skill.
                  with
                  | None -> ()
                  | Some row ->
-                     state.runtime_lane_pick <-
-                       Some
-                         (Masc_tui_types.Pick_conversation_lane
-                            row.Masc.Tui_decode.rcr_lane_id);
-                     state.runtime_lane_pick_list <- Masc_tui_pick_list.closed;
+                     Masc_tui_types.open_runtime_lane_pick state
+                       (Masc_tui_types.Pick_conversation_lane
+                          row.Masc.Tui_decode.rcr_lane_id);
                      Masc_tui_types.dismiss_runtime_lane_notice state;
                      launch_runtime_catalog_load state ~mailbox:async_messages))
        (* The route editor holds the Runtime reading's own keys while it is
@@ -20362,8 +20361,7 @@ and is loaded on demand through keeper_skill.
               && Option.is_none state.runtime_lane_pick ->
            (* [\[runtime\].default]: the runtime a keeper with no assignment
               walks. One entry, so the picker replaces it. *)
-           state.runtime_lane_pick <- Some Masc_tui_types.Pick_route_default;
-           state.runtime_lane_pick_list <- Masc_tui_pick_list.closed;
+           Masc_tui_types.open_runtime_lane_pick state Masc_tui_types.Pick_route_default;
            Masc_tui_types.dismiss_runtime_lane_notice state;
            launch_runtime_catalog_load state ~mailbox:async_messages
        | Some "m"
@@ -20388,8 +20386,7 @@ and is loaded on demand through keeper_skill.
          when state.view = Runtime
               && Option.is_some state.slot_editor
               && Option.is_none state.runtime_lane_pick ->
-           state.runtime_lane_pick <- Some Masc_tui_types.Pick_media_failover;
-           state.runtime_lane_pick_list <- Masc_tui_pick_list.closed;
+           Masc_tui_types.open_runtime_lane_pick state Masc_tui_types.Pick_media_failover;
            Masc_tui_types.dismiss_runtime_lane_notice state;
            launch_runtime_catalog_load state ~mailbox:async_messages
        | Some k
@@ -20467,9 +20464,8 @@ and is loaded on demand through keeper_skill.
            (match Masc_tui_types.selected_standalone_lane state with
             | None -> ()
             | Some lane ->
-                state.runtime_lane_pick <-
-                  Some (Masc_tui_types.Pick_exact_lane lane.Masc.Tui_decode.sl_lane_id);
-                state.runtime_lane_pick_list <- Masc_tui_pick_list.closed;
+                Masc_tui_types.open_runtime_lane_pick state
+                  (Masc_tui_types.Pick_exact_lane lane.Masc.Tui_decode.sl_lane_id);
                 Masc_tui_types.dismiss_runtime_lane_notice state;
                 state.lanes_action_error <- None;
                 launch_runtime_catalog_load state ~mailbox:async_messages)

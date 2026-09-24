@@ -505,6 +505,9 @@ def run_exact(executable: str) -> None:
     )
 
 
+# SGR mouse wheel notches at column 5, row 5, clear of the Activity pane.
+WHEEL_UP = b"\x1b[<64;5;5M"
+WHEEL_DOWN = b"\x1b[<65;5;5M"
 # The picker header's filter cursor, U+258F.
 FILTER_CURSOR = "▏".encode()
 
@@ -536,6 +539,12 @@ def run_filter(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"e", picker)
         h.wait_for_output(process, fd, output, b"> runtime-c", start=mark, timeout=5.0)
         h.wait_for_output(process, fd, output, "5 of 5 · / filter".encode(), start=mark, timeout=5.0)
+        # The wheel moves the picker, not the lane list under it: primary's
+        # rows are 0 and 1 there and degraded is 2, so two notches that
+        # leaked would leave the list on degraded (checked at the end).
+        h.send_and_wait(process, fd, output, WHEEL_DOWN, b"> runtime-d")
+        h.send_and_wait(process, fd, output, WHEEL_DOWN, b"> runtime-e")
+        h.send_and_wait(process, fd, output, WHEEL_UP, b"> runtime-d")
         h.send_and_wait(process, fd, output, b"\x1b[F", b"> runtime-b")
         h.send_and_wait(process, fd, output, b"\x1b[H", b"> runtime-c")
         h.send_and_wait(process, fd, output, b"\x1b[6~", b"> runtime-a")
@@ -573,6 +582,12 @@ def run_filter(executable: str) -> None:
             time.sleep(0.05)
         if posted != expected:
             raise AssertionError(f"routing posts: {posted!r}, expected {expected!r}")
+        # [e] opens the picker for the lane under the list's cursor: still
+        # primary, so no wheel notch moved it while the picker was open.
+        h.send_and_wait(process, fd, output, b"e", picker)
+        # Esc and q apart: written together they read as Alt-q.
+        os.write(fd, b"\x1b")
+        screen_lacks(process, fd, output, picker, timeout=5.0)
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

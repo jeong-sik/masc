@@ -451,7 +451,7 @@ let test_overview_providers_section_sits_before_backlog () =
   check int "the backlog takes what is left" 3 live.task_rows;
   check int "40-row frame is exact" 40 (overview_frame_rows live);
   let short =
-    Schedule.allocate_overview ~terminal_rows:18 ~attention_count:6
+    Schedule.allocate_overview ~terminal_rows:17 ~attention_count:6
       ~goal_count:0 ~team_count:0 ~providers_count:4 ~task_count:20
       ~has_task_error:false
   in

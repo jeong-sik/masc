@@ -15,7 +15,9 @@ type t
     operator configured is kept; otherwise the server's own profile is emptied
     first. A recorded Chromium from a previous server is stopped before that
     profile is prepared and before its owner record can be replaced. The
-    profile directory is made owner-only. *)
+    profile directory is made owner-only. An unreadable or malformed prior
+    owner record, or a browser group that cannot be confirmed stopped,
+    returns [Error] before resetting the profile or spawning a replacement. *)
 val open_ :
   sw:Eio.Switch.t
   -> env:Eio_unix.Stdenv.base
@@ -29,9 +31,9 @@ val open_ :
 val session : t -> Browser_stagehand_session.t
 val pid : t -> int
 
-(** Stops the Chromium a server that died before releasing left recorded for
-    this workspace, if that pid still runs the recorded executable on the
-    recorded profile, and removes the record. *)
+(** Startup cleanup for a Chromium left by a crashed server. Refuses to
+    erase the owner record when it cannot identify or stop that browser;
+    [open_] will then return [Error] before replacing its profile. *)
 val stop_left_behind : masc_root:string -> unit
 
 val attach_error_message : Browser_stagehand_session.attach_error -> string

@@ -34,7 +34,7 @@ package_version="$(sed -n 's/^(version \([^)]*\)).*/\1/p' dune-project | head -n
 roadmap_package_version="$(sed -n 's/^> Current package version: v\([^ ]*\).*/\1/p' ROADMAP.md | head -n1)"
 roadmap_changelog_entry="$(sed -n 's/^> Latest changelog entry: v\([^ ]*\).*/\1/p' ROADMAP.md | head -n1)"
 roadmap_published_release="$(sed -n 's/^> Latest published GitHub release: v\([^ ]*\).*/\1/p' ROADMAP.md | head -n1)"
-changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -n1)"
+changelog_latest_release="$(awk '/^## \[[0-9]/ { version = $0; sub(/^## \[/, "", version); sub(/\].*$/, "", version); print version; exit }' CHANGELOG.md)"
 opam_file="$(find . -maxdepth 1 -name '*.opam' -print | sed 's#^\./##' | sort | head -n1)"
 
 fail() {

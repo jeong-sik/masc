@@ -10,6 +10,24 @@ end
     with a [kind] label derived from the constructor. *)
 val rejection_to_telemetry : keeper_path_rejection -> unit
 
+(** The class a tool failure takes when this rejection refuses its path:
+    [Policy_rejection] for a path the caller can correct, [Runtime_failure]
+    when the keeper's own sandbox roots are unusable. *)
+val failure_class_of_rejection : keeper_path_rejection -> Tool_result.tool_failure_class
+
+(** A refused path as a tool reports it: the rejection's message and the
+    class {!failure_class_of_rejection} gives it. *)
+type path_refusal =
+  { failure_class : Tool_result.tool_failure_class
+  ; message : string
+  }
+
+val refusal_of_rejection : keeper_path_rejection -> path_refusal
+
+(** A refusal of a path the caller named, for a reason no rejection variant
+    carries (a cwd that is not a directory): [Policy_rejection]. *)
+val caller_refusal : string -> path_refusal
+
 (** Project a [Workspace.config] to its project root by stripping the
     trailing [.masc] base-path component when present. *)
 val project_root_of_config : Workspace.config -> string

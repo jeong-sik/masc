@@ -66,7 +66,11 @@ let with_staged_paths ?read_file ?turn_sandbox_factory ~config ~meta ~paths f =
   let rec resolve acc = function
     | [] -> Ok (List.rev acc)
     | raw_path :: rest ->
-      let* path = Keeper_tool_shared_runtime.resolve_keeper_read_path ~config ~meta ~raw_path in
+      let* path =
+        Keeper_tool_shared_runtime.resolve_keeper_read_path ~config ~meta ~raw_path
+        |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) ->
+          refusal.message)
+      in
       resolve ((raw_path,path) :: acc) rest in
   let* resolved = resolve [] paths in
   let files = List.map (fun (raw_path,host_path) ->

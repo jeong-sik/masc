@@ -20,6 +20,32 @@ let rejection_to_telemetry (r : keeper_path_rejection) : unit =
     ()
 ;;
 
+(* A path is refused for its spelling, or because the keeper's own roots are
+   unusable. Only the second is not the caller's to fix, so a tool surface
+   that reports a refusal takes its class from here rather than from the
+   message. *)
+let failure_class_of_rejection : keeper_path_rejection -> Tool_result.tool_failure_class
+  = function
+  | Path_required
+  | Invalid_lexical_endpoint
+  | Invalid_normalized_path_projection _
+  | Outside_sandbox _ -> Tool_result.Policy_rejection
+  | Sandbox_roots_normalized_empty _ -> Tool_result.Runtime_failure
+;;
+
+type path_refusal =
+  { failure_class : Tool_result.tool_failure_class
+  ; message : string
+  }
+
+let refusal_of_rejection rejection =
+  { failure_class = failure_class_of_rejection rejection
+  ; message = rejection_to_user_message rejection
+  }
+;;
+
+let caller_refusal message = { failure_class = Tool_result.Policy_rejection; message }
+
 let project_root_of_config (config : Workspace.config) : string =
   let base = config.base_path in
   if Filename.basename base = Common.masc_dirname then Filename.dirname base else base

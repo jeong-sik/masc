@@ -58,6 +58,7 @@ let attach_error_message = function
   | Session.Init_unanswered seconds -> Printf.sprintf "stagehand.init did not answer within %.0f s" seconds
   | Session.Init_failed failure -> "stagehand.init failed: " ^ Browser_stagehand_executor.failure_message failure
   | Session.Cdp failure -> "a CDP command failed: " ^ failure_message failure
+  | Session.Already_attached -> "the session was already attached"
 ;;
 
 let ( let* ) = Result.bind
@@ -296,6 +297,8 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
 ;;
 
 let log_event = function
+  | Session.Runtime_ready { protocol_version; runtime_version } ->
+    Log.Server.info "browser-lane stagehand: runtime %s ready, protocol %s" runtime_version protocol_version
   | Session.Model_request_refused { reason } -> Log.Server.info "browser-lane stagehand: model request refused: %s" reason
   | Session.Model_failed detail -> Log.Server.warn "browser-lane stagehand: the model failed: %s" detail
   | Session.Unsupported_request { method_ } ->
@@ -309,7 +312,8 @@ let log_event = function
   | Session.Unexpected_response { id } -> Log.Server.warn "browser-lane stagehand: response to %d, which no call waits for" id
   | Session.Abandoned_call_ended { method_; rejected } ->
     Log.Server.info "browser-lane stagehand: abandoned %s ended (%s)" method_ (if rejected then "rejected" else "answered")
-  | Session.Reply_not_delivered detail -> Log.Server.warn "browser-lane stagehand: reply not delivered: %s" detail
+  | Session.Reply_not_delivered detail ->
+    Log.Server.warn "browser-lane stagehand: an answer to the extension was not delivered, so the session ended: %s" detail
   | Session.Malformed_cdp_event { method_; detail } ->
     Log.Server.warn "browser-lane stagehand: malformed CDP event %s: %s" method_ detail
   | Session.Worker_detached -> Log.Server.warn "browser-lane stagehand: the service worker went away"

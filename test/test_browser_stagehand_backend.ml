@@ -70,7 +70,7 @@ let with_backend ?(configure = ignore) f =
        | exception (Eio.Cancel.Cancelled _ as exn) ->
          behaviour.act_cancelled <- true;
          raise exn)
-    | Wire.Init _ | Wire.Observe _ | Wire.Extract _ | Wire.Page_goto _ | Wire.Page_screenshot _ ->
+    | Wire.Observe _ | Wire.Extract _ | Wire.Page_goto _ | Wire.Page_screenshot _ ->
       failf "the backend sent %s" (Wire.method_name request)
   in
   let backend = Backend.create ~sw ~clock ~open_session ~call ~pid:(fun _ -> 42) ~log:ignore in
@@ -200,6 +200,16 @@ let test_status_reports_an_ended_session () =
   check string "why it stopped working" "the connection ended: Chromium exited" (text "ended" status)
 ;;
 
+let test_status_reports_an_undelivered_answer () =
+  with_backend
+  @@ fun h ->
+  ignore (data (Backend.execute h.backend open_));
+  (the_session h).log (Session.Reply_not_delivered "Execution context was destroyed.");
+  let status = data (Backend.execute h.backend Lane.Session_status) in
+  check string "why it stopped working" "an answer to the extension was not delivered: Execution context was destroyed."
+    (text "ended" status)
+;;
+
 let () =
   run "browser_stagehand_backend" [
     "lifecycle", [
@@ -209,6 +219,7 @@ let () =
       test_case "an open finishes after its caller leaves" `Quick test_open_outlives_its_caller;
       test_case "close waits for the runtime only so long" `Quick test_close_does_not_wait_forever;
       test_case "status reports why a session ended" `Quick test_status_reports_an_ended_session;
+      test_case "status reports an answer the session could not deliver" `Quick test_status_reports_an_undelivered_answer;
     ];
     "callers", [ test_case "a sentence whose caller leaves retires its session" `Quick test_sentence_caller_retires_its_session ];
   ]

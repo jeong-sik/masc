@@ -323,40 +323,64 @@ let authoritative_schema_parts = function
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> [], []
 ;;
 
+(* Nested objects and array items are held to the same required/type/enum/const
+   rule as the root, and every violation is reported in one result. Stopping
+   at the root let a nested shape error reach the tool handler, which names
+   only its first problem, so a caller fixed one field per round trip. *)
+let rec object_errors ~prefix schema fields =
+  let required, properties = authoritative_schema_parts schema in
+  let names =
+    List.map fst properties
+    @ List.filter (fun name -> not (List.mem_assoc name properties)) required
+  in
+  List.concat_map
+    (fun name ->
+       let path = prefix ^ "/" ^ name in
+       let property = List.assoc_opt name properties in
+       match List.assoc_opt name fields, property with
+       | None, _ when List.mem name required ->
+         [ { path
+           ; expected =
+               Option.fold
+                 ~none:Expected_required
+                 ~some:(fun property -> expected_of_property property)
+                 property
+           ; actual = Missing
+           }
+         ]
+       | None, _ -> []
+       | Some value, Some property -> value_errors ~path property value
+       | Some _, None -> [])
+    names
+
+and value_errors ~path property value =
+  if not (property_matches property value)
+  then
+    [ { path
+      ; expected = expected_of_property ~against:value property
+      ; actual = Received (describe_json_value value)
+      }
+    ]
+  else (
+    match property, value with
+    | `Assoc _, `Assoc fields -> object_errors ~prefix:path property fields
+    | `Assoc schema, `List items ->
+      (match List.assoc_opt "items" schema with
+       | Some item_schema ->
+         List.concat
+           (List.mapi
+              (fun index item ->
+                 value_errors ~path:(path ^ "/" ^ string_of_int index) item_schema item)
+              items)
+       | None -> [])
+    | `Assoc _, (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _), _ -> [])
+;;
+
 let validate_authoritative input_schema input =
   match input with
   | `Assoc fields ->
-    let required, properties = authoritative_schema_parts input_schema in
-    let names =
-      List.map fst properties
-      @ List.filter (fun name -> not (List.mem_assoc name properties)) required
-    in
-    let errors =
-      List.filter_map
-        (fun name ->
-           let path = "/" ^ name in
-           let property = List.assoc_opt name properties in
-           match List.assoc_opt name fields, property with
-           | None, _ when List.mem name required ->
-             Some
-               { path
-               ; expected =
-                   Option.fold
-                   ~none:Expected_required
-                   ~some:(fun property -> expected_of_property property)
-                   property
-               ; actual = Missing
-               }
-           | None, _ -> None
-           | Some value, Some property when not (property_matches property value) ->
-             Some
-               { path
-               ; expected = expected_of_property ~against:value property
-               ; actual = Received (describe_json_value value)
-               }
-           | Some _, _ -> None)
-        names
-    in
+    let errors = object_errors ~prefix:"" input_schema fields in
     if errors = [] then Valid input else Invalid errors
   | other ->
     Invalid

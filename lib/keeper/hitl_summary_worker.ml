@@ -6,7 +6,7 @@ module Registry = Runtime_exact_output_registry
 module Schema = Keeper_structured_output_schema
 
 let summary_version = current_hitl_context_summary_version
-let lane_id = "hitl_auto_judge"
+let lane_id = Standalone_lane.to_id Standalone_lane.Hitl_auto_judge
 
 let system_prompt () =
   Prompt_registry.render_prompt_template Prompt_names.judge_effect []

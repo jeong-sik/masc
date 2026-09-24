@@ -28,14 +28,6 @@ val core_termination_semantics
 
 val core_termination_semantics_to_string : core_termination_semantics -> string
 
-(** Snake_case wire label for a provider network error kind
-    ([Connection_refused] -> ["connection_refused"], [Dns_failure] ->
-    ["dns_failure"], [Tls_error] -> ["tls_error"], [Timeout] ->
-    ["timeout"], [Local_resource_exhaustion] ->
-    ["local_resource_exhaustion"], [End_of_file] -> ["end_of_file"],
-    [Unknown] -> ["unknown"]). *)
-val network_error_kind_to_wire : Llm_provider.Http_client.network_error_kind -> string
-
 (** Snake_case wire label for the disposition carried by a closed terminal
     tool effect: ["proven_pre_effect"], ["proven_post_effect"] or
     ["effect_outcome_unknown"]. *)

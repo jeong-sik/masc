@@ -117,6 +117,7 @@ let sandbox_endpoint ~base_path (endpoint : Exec_ssh_endpoint.t)
   ; remote_root = endpoint.remote_root
   ; connect_timeout_sec = endpoint.connect_timeout_sec
   ; env_allowlist = endpoint.env_allowlist
+  ; allowed_paths = endpoint.allowed_paths
   }
 ;;
 

@@ -29,6 +29,10 @@ val prepare_source : ?end_atom:int -> config:Workspace.config -> keeper_name:str
     an unpublished exact Memory receipt takes precedence over either choice.
     Pending in-flight atoms are excluded.
 
+    A snapshot file that cannot be decoded is logged with its decode reason
+    and treated as absent: the source starts at atom 0 and {!commit} replaces
+    the file. A snapshot file that cannot be read stays an [Error].
+
     The {!no_source} reason is carried because one caller acts on it: a pass
     that narrowed its reads releases that limit when the backlog is
     {!Drained}, and an unreadable source is not evidence that it was. *)

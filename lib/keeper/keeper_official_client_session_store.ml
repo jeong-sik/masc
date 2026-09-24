@@ -1320,6 +1320,21 @@ let restored_phase previous_settlement =
   | Some settlement -> Settled settlement
 ;;
 
+(* The frontier to store when an incomplete claim goes back to
+   [previous_settlement]. A claim clears [acknowledged_turn] and only [settle]
+   sets it again, so a claim that ends without settling must restore it, or
+   the next [Canonical_source_guard] claim finds [Context_frontier_missing] and
+   opens a fresh conversation. The claim's frontier carries the digest
+   [previous_settlement] was acknowledged with: under [Canonical_source_guard]
+   a claim keeps a previous settlement only when [reconcile_context] found the
+   prepared snapshot equal to the acknowledged one, and every other claim
+   plans [previous_settlement = None]. *)
+let frontier_restored_to previous_settlement frontier =
+  match frontier.delivery with
+  | Canonical_source_guard -> { frontier with acknowledged_turn = previous_settlement }
+  | Prepared_start_context | Replaced_configuration | Held_by_vendor_session -> frontier
+;;
+
 let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
   let* () =
     match failure_disposition failure with
@@ -1340,10 +1355,8 @@ let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
       ~expected:(Some expected)
       { expected with
         phase = restored_phase previous_settlement
-      ; context_frontier = Option.map (fun frontier -> match frontier.delivery with
-          | Canonical_source_guard -> {frontier with acknowledged_turn=previous_settlement}
-          | Prepared_start_context | Replaced_configuration | Held_by_vendor_session -> frontier)
-          expected.context_frontier
+      ; context_frontier =
+          Option.map (frontier_restored_to previous_settlement) expected.context_frontier
       ; turn_count
       ; last_transient_release = Some { failure; owner_epoch; released_at }
       ; updated_at = released_at
@@ -1398,7 +1411,7 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
     | Some _ | None -> Error Recovery_not_required
   in
   let apply directory (current : t) (recovery : recovery_required) =
-    let* phase, turn_count =
+    let* restored_settlement, turn_count =
       match resolution with
       | Retry_previous ->
         (* The conversation is kept, so only the turn that failed is dropped and
@@ -1414,7 +1427,7 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
          | ( ( Transient_spawn_failed | Owner_stopped_turn | Transport_interrupted
              | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
              | State_persistence_failed | Process_restarted )
-           , Some settlement ) -> Ok (Settled settlement, current.turn_count - 1))
+           , Some settlement ) -> Ok (Some settlement, current.turn_count - 1))
       | Restart_fresh ->
         (* Restart abandons the conversation, so the ordinal restarts with it and
            the next claim asks for ordinal 1 -- what a fresh provider conversation
@@ -1424,11 +1437,15 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
            explicit restart counting from a conversation that no longer exists,
            and since the observed provider count became authoritative it also
            made the next turn fail [mark_turn_started]'s regression guard. *)
-        Ok (Ready, 0)
+        Ok (None, 0)
     in
     let resolved =
       { current with
-        phase
+        phase = restored_phase restored_settlement
+        (* Retry_previous continues the settled conversation, so its frontier
+           acknowledgement comes back with it, as in [release_transient]. *)
+      ; context_frontier =
+          Option.map (frontier_restored_to restored_settlement) current.context_frontier
       ; turn_count
       ; last_recovery_resolution =
           Some

@@ -243,6 +243,8 @@ def test_http_endpoint(
                 fixture = fixtures[path_only]
             elif path_only == DASHBOARD_GOALS_PATH:
                 fixture = empty_goals_fixture()
+            elif path_only == RUNTIME_RESOLVED_PATH:
+                fixture = empty_runtime_resolved_fixture()
             else:
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
@@ -1209,18 +1211,62 @@ def empty_goals_fixture() -> HttpResponse:
     })
 
 
+def empty_runtime_resolved_fixture() -> HttpResponse:
+    """A runtime catalogue with no runtime, the shape the server sends for a
+    workspace that configured none.
+
+    The Overview reads it for its Providers section. Unmocked, the 503
+    sentinel would draw "providers unavailable" in every Overview scenario
+    and take its rows from the tasks. With no provider account the section
+    draws nothing. A scenario that is about runtimes keys this path itself.
+    """
+    return (200, {
+        "generated_at_iso": "2026-09-23T00:00:00Z",
+        "source": RUNTIME_RESOLVED_PATH,
+        "config_path": None,
+        "default_runtime": None,
+        "media_failover": [],
+        "media_failover_declared": [],
+        "runtimes": [],
+        "lanes": [],
+        "assignments": [],
+        "provider_usage_windows_since": 1790179140.2,
+        "provider_usage_windows": [],
+    })
+
+
 def fleet_safety_fixture() -> HttpResponse:
     """A fleet reading the TUI can decode.
 
     Without it the poll fails and the TUI records a "fleet safety data
     unreliable" event, which is correct behaviour but adds a row to scenarios
-    that are counting the event list. The current session-recovery fields
-    are explicit: a missing observation must not become a zero count.
+    that are counting the event list. Every field the TUI reads is here,
+    with the schema that marks a reading: the TUI requires each one, because
+    a missing observation must not become a zero count.
     """
     return (200, {"keeper_fleet_safety": {
+        "schema": "masc.keeper_fleet_operator.v1",
         "status": "ok",
+        "blocker": None,
+        "operator_action_required": False,
+        "bootable_keeper_count": 0,
+        "bootable_keeper_names": [],
+        "running_keeper_fiber_count": 0,
+        "running_keeper_names": [],
+        "executable_keeper_fiber_count": 0,
+        "executable_keeper_names": [],
+        "failing_keeper_fiber_count": 0,
+        "recovering_keeper_fiber_count": 0,
+        "turn_configuration_error_keeper_count": 0,
+        "turn_configuration_error_keeper_names": [],
         "official_client_recovery_required_keeper_count": 0,
         "official_client_recovery_required_keeper_names": [],
+        "paused_keeper_count": 0,
+        "target_reaction_capacity_count": 0,
+        "reaction_capacity_shortfall_count": 0,
+        "active_task_owner_without_executable_fiber_count": 0,
+        "completion_authority_pending_task_count": 0,
+        "active_task_owner_scan_error_count": 0,
     }})
 
 
@@ -1399,6 +1445,7 @@ def planning_goal(goal_id: str, title: str) -> dict[str, object]:
         "metric": f"metric-{goal_id}",
         "target_value": "100%",
         "verification": {"completion": {"state": "idle"}},
+        "verifier_unreconciled": None,
     }
 
 
@@ -3530,7 +3577,7 @@ def assert_row_budgeted_surfaces(
         process,
         master_fd,
         output,
-        b"task-5",
+        b"5 todo",
         start=0,
         timeout=3.0,
     )
@@ -3552,7 +3599,7 @@ def assert_row_budgeted_surfaces(
     # third item is the last one drawn and the fourth is not. GOALS is served
     # after the panel and the one held task row, so at this height it gets no
     # row (4 spare rows: 3 attention + 1 task) and the count is unchanged.
-    for expected in (b"attention-1", b"attention-3", b"task-1", b"q:quit"):
+    for expected in (b"attention-1", b"attention-3", b"5 todo", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
     if b"attention-4" in overview:
@@ -3891,6 +3938,9 @@ def blocked_gate_detail_http_fixtures() -> HttpFixtures:
                     },
                     "summary_status": {"status": "failed", "reason": reason},
                     "summary_attempt_disposition": {"code": "settled"},
+                    # What the server derives from a settled attempt whose
+                    # summary failed (phase_of_disposition_and_summary).
+                    "phase": "blocked",
                 }
             ],
             "approval_queue_state": {"state": "ready"},
@@ -4015,6 +4065,90 @@ def concealed_input_detail_interaction() -> Interaction:
             raise AssertionError(
                 "the detail pane drew a raw ESC: the input value reached the"
                 f" terminal unsanitized: {frame!r}"
+            )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+# A held Keeper tool call asks "Run <tool> on <subject>?", and the subject is
+# the command the model wrote. ESC [ 1 A ESC [ 2 K in it moves the cursor up
+# a row and clears it, so the detail the operator reads before pressing y
+# could be rewritten by the ask itself. The question is the field under test;
+# the args carry a marker past the list row's cut, so only the detail pane can
+# draw it and the frame that holds it is the detail's.
+ESCAPED_QUESTION_INJECTED = b"ok\x1b[1A\x1b[2Krm"
+ESCAPED_QUESTION_TAIL = b"rm -rf /tmp/forged?"
+ESCAPED_QUESTION_VISIBLE = b"ok\\x1B[1A\\x1B[2Krm"
+ESCAPED_QUESTION_DETAIL_MARKER = b"detail-only-marker"
+
+
+def escaped_question_http_fixtures() -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    command = "echo " + "x" * 120 + " " + ESCAPED_QUESTION_DETAIL_MARKER.decode()
+    fixtures["/api/v1/keepers/tool-approvals"] = (
+        200,
+        {
+            "pending": [
+                {
+                    "keeper": "alpha",
+                    "tool_call_id": "tool-escaped-question",
+                    "tool": "Bash",
+                    "args": json.dumps({"command": command}),
+                    "question": "Run Bash on echo "
+                    + ESCAPED_QUESTION_INJECTED.decode()
+                    + " -rf /tmp/forged?",
+                    "because": None,
+                    "asked_at": 1787766400.0,
+                    "timeout_sec": 300.0,
+                }
+            ]
+        },
+    )
+    return fixtures
+
+
+def escaped_question_detail_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=40,
+            columns=100,
+            needle=b"MASC Overview",
+        )
+        tab_until(process, master_fd, output, b"MASC Approvals")
+        wait_for_output(
+            process, master_fd, output, b"tool-escaped-question", start=0, timeout=5.0
+        )
+        detail = send_and_wait(
+            process, master_fd, output, b"\r", ESCAPED_QUESTION_DETAIL_MARKER
+        )
+        frame = frame_containing(detail, ESCAPED_QUESTION_DETAIL_MARKER)
+        plain = CSI_RE.sub(b"", frame)
+        # Asked of the raw frame: CSI_RE strips exactly the bytes under test.
+        if ESCAPED_QUESTION_INJECTED in frame:
+            raise AssertionError(
+                "the approval detail drew the question's escapes raw, so the"
+                f" ask could rewrite the rows above it: {frame!r}"
+            )
+        # The escape is drawn as text where it sat, so the operator sees one
+        # was tried instead of a blank that reads as spacing.
+        if ESCAPED_QUESTION_VISIBLE not in plain:
+            raise AssertionError(
+                f"the question's escapes are not drawn visibly: {frame!r}"
+            )
+        # The words the escape surrounded are still on the pane.
+        if ESCAPED_QUESTION_TAIL not in plain:
+            raise AssertionError(
+                f"the question's tail is missing from the detail: {frame!r}"
             )
         os.write(master_fd, b"q")
 
@@ -5605,7 +5739,8 @@ def seed_playground_workspace(base_path: str) -> None:
     all."""
     Path(base_path, ".masc", "config", "keepers").mkdir(parents=True, exist_ok=True)
     Path(base_path, ".masc", "config", "keepers", "alpha.toml").write_text(
-        '[keeper]\nsandbox_profile = "docker"\n', encoding="utf-8"
+        '[keeper]\nsandbox_profile = "docker"\nsandbox_image = "masc-sandbox:general"\n',
+        encoding="utf-8"
     )
     Path(base_path, ".masc", "playground", "docker", "alpha").mkdir(
         parents=True, exist_ok=True
@@ -6654,6 +6789,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                         "continuity_unread_atoms": 0,
                         "last_success_at": 1700000000.0,
                         "last_failure_kind": None,
+                        "stalled": None,
                     },
                     "librarian_failures": 0,
                     "vision_ingest_errors": 0,
@@ -8529,6 +8665,7 @@ def run_tools_request_identity_regression(executable: str) -> None:
                 "skill_snapshot_revision": "c" * 64,
                 "instruction_skills": [], "composition_skills": [], "skill_profiles": [],
                 "skill_discovery_bytes": 0, "skill_eager_body_bytes": 0, "skills_left_out": [],
+                "unavailable_skill_names": [],
                 "count": 1, "tools": [{"name": tool, "origin": {"kind": "descriptor"}}],
                 "tool_surface_sha256": None,
             },
@@ -8650,6 +8787,7 @@ def run_tools_purpose_regression(executable: str) -> None:
         "native_posture": None, "skill_snapshot_revision": "c" * 64,
         "instruction_skills": [], "composition_skills": [], "skill_profiles": [],
         "skill_discovery_bytes": 0, "skill_eager_body_bytes": 0, "skills_left_out": [],
+        "unavailable_skill_names": [],
         "count": 1, "tools": [{"name": "keeper_status", "origin": {"kind": "descriptor"}}],
         "tool_surface_sha256": None,
     }
@@ -10070,6 +10208,11 @@ def verification_request_row(task_id: str) -> dict[str, object]:
         # thing on every request ever drawn. Nothing reads them now.
         "submitted_by": "keeper-alpha",
         "created_at": "2026-08-25T14:00:00+09:00",
+        # Both keys ride every row. The awaiting view joins the backlog, so
+        # its rows always name the verdict they wait on; a completion keeps
+        # no cancellation reason.
+        "intent": "complete",
+        "cancellation_reason": None,
         "required_artifacts": ["diff"],
         "submitted_evidence": ["diff"],
     }
@@ -12232,6 +12375,9 @@ def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpRe
             # the declared list is what the editor writes back.
             "media_failover": [],
             "media_failover_declared": [],
+            # The Overview's Providers section decodes these two strictly.
+            "provider_usage_windows_since": 1790179140.2,
+            "provider_usage_windows": [],
             "runtimes": [
                 runtime_a,
                 runtime_resolved_runtime("runtime-b", "Resolved B", "model-b"),
@@ -14923,6 +15069,12 @@ def run_keyboard_regression(executable: str) -> None:
         description="A concealing escape in the input draws as text in approval detail",
         interact=concealed_input_detail_interaction(),
         http_fixtures=concealed_input_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="A cursor escape in a held call's question draws as text in approval detail",
+        interact=escaped_question_detail_interaction(),
+        http_fixtures=escaped_question_http_fixtures(),
     )
     run_terminal_scenario(
         executable,

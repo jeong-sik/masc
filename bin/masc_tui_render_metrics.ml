@@ -137,8 +137,13 @@ let format_megawords words =
 let repeat_glyph glyph count =
   if count <= 0 then "" else String.concat "" (List.init count (fun _ -> glyph))
 
+(* The probe word comes off the wire, and this pane draws it beside its own
+   prose. One place to escape it, so the three rows that ask for it cannot
+   each forget. *)
 let scheduler_probe_text probe =
-  match String.trim probe with "" -> "unreported" | value -> value
+  match String.trim probe with
+  | "" -> "unreported"
+  | value -> Terminal_text.single_line value
 
 let pulse_line ~cols (state : state) kpis =
   let inner_width = max 10 (framed_inner_width cols) in
@@ -521,7 +526,9 @@ let render_section_resources ~cols (state : state) =
   in
   let safety_lines = match state.fleet_safety with
     | None -> [ "    Execution readiness not observed" ]
-    | Some safety ->
+    | Some (Decode.Fleet_not_measured { status }) ->
+      [ "    Execution readiness " ^ Masc_tui_fleet_line.not_measured_text ~status ]
+    | Some (Decode.Fleet_measured safety) ->
       [ Printf.sprintf "    Executable %d / target %d · shortfall %d · failing %d · paused %d"
           safety.fs_executable_count safety.fs_target_reaction_capacity
           safety.fs_reaction_capacity_shortfall safety.fs_failing_count safety.fs_paused_count ]
@@ -580,7 +587,9 @@ let render_section_tools ~cols (state : state) : string list =
                 let pct = if total_facts = 0 then 0 else (k.mkh_facts * 100) / total_facts in
                 let bar = Chart.gauge ~width:16 ~value:pct ~max_value:100 ~label:"" () in
                 Printf.sprintf "    %-16s  %4d facts  %s  %s tok%s"
-                  (Layout.fit_width k.mkh_keeper_id 16)
+                  (Layout.fit_width
+                     (Terminal_text.single_line k.mkh_keeper_id)
+                     16)
                   k.mkh_facts
                   bar
                   (Masc_tui_token_scale.format_estimate
@@ -612,13 +621,13 @@ let render_section_tools ~cols (state : state) : string list =
   let counts = Hashtbl.create 16 in
   Option.iter (List.iter
     (fun (gp : Decode.gate_pending) ->
-      let tool = gp.gp_display_tool in
+      let tool = Terminal_text.single_line gp.gp_display_tool in
       let current = Option.value (Hashtbl.find_opt counts tool) ~default:0 in
       Hashtbl.replace counts tool (current + 1)))
     (current_value gate);
   Option.iter (List.iter
     (fun (kta : Decode.keeper_tool_approval) ->
-      let tool = kta.kta_tool in
+      let tool = Terminal_text.single_line kta.kta_tool in
       let current = Option.value (Hashtbl.find_opt counts tool) ~default:0 in
       Hashtbl.replace counts tool (current + 1)))
     (current_value held);

@@ -509,12 +509,12 @@ def run_exact_slot_editor(executable: str) -> None:
     """bin/masc_tui_types.ml and bin/masc_tui_render.ml: Librarian's CLI
     candidates share the visible slot editor with its HTTP candidates."""
     store = LaneStore()
-    store.exact_lane(EXACT_LANE)["cli_slots"] = [
+    cli_candidates = [
         "codex_subscription.gpt-6-luna-xhigh", "claude_code.claude-sonnet-5",
+        *(f"codex_subscription.fixture-{index}" for index in range(3, 11)),
     ]
-    store.exact_lane(EXACT_LANE)["declared_cli_slots"] = [
-        "codex_subscription.gpt-6-luna-xhigh", "claude_code.claude-sonnet-5",
-    ]
+    store.exact_lane("librarian_exact")["cli_slots"] = cli_candidates
+    store.exact_lane("librarian_exact")["declared_cli_slots"] = cli_candidates
     fixtures = h.overview_event_http_fixtures()
     fixtures[h.RUNTIME_PROBE_PATH] = h.runtime_probe_response(fresh=True)
     fixtures[h.RUNTIME_PROBE_FORCE_PATH] = h.runtime_probe_response(fresh=True)
@@ -528,10 +528,14 @@ def run_exact_slot_editor(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"s", b"slots of librarian_exact")
         h.wait_for_output(process, fd, output, b"CLI  codex_subscription.gpt-6-luna-xhigh", start=0, timeout=5)
         h.wait_for_output(process, fd, output, b"CLI  claude_code.claude-sonnet-5", start=0, timeout=5)
-        # Two HTTP rows precede the CLI row. Crossing that boundary is a
+        h.resize_and_wait(process, fd, output, rows=15, columns=100,
+                          needle=b"CLI  claude_code.claude-sonnet-5")
+        # One HTTP row precedes the first CLI row. Crossing that boundary is a
         # refusal with the execution reason, and must send no routing write.
-        os.write(fd, b"jj")
+        os.write(fd, b"j")
         h.send_and_wait(process, fd, output, b"K", b"HTTP slots run before CLI slots")
+        h.send_and_wait(process, fd, output, b"j" * 9,
+                        b"> 11  CLI  codex_subscription.fixture-10")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(

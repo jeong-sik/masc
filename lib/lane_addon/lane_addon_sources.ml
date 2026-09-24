@@ -103,7 +103,7 @@ let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = 
   | Misc_msx_load | Misc_msx_eject | Misc_msx_restore | Misc_msx_change_disk
   | Misc_msx_press | Misc_msx_step | Misc_msx_step_until_change -> Msx_changed
   | Misc_browser_session | Misc_browser_goto | Misc_browser_act
-  | Misc_browser_interact -> Browser_changed
+  | Misc_browser_interact | Misc_browser_instruct -> Browser_changed
   | Misc_msx_save | Misc_msx_screen | Misc_msx_peek | Misc_msx_ram_diff
   | Misc_browser_tabs | Misc_browser_read
   | Misc_dos_load | Misc_dos_eject | Misc_dos_screen | Misc_dos_step

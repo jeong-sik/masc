@@ -241,6 +241,8 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some (Tool_misc_browser_lane.handle_goto ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_browser_act ->
       Some (Tool_misc_browser_lane.handle_act ~base_path:ctx.config.base_path ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_browser_instruct ->
+      Some (Tool_misc_browser_lane.handle_instruct ~tool_name:name ~start_time:start args)
   | Some Tool_schemas_misc.Misc_msx_load ->
       Some
         (Tool_misc_msx_lane.handle_load ~tool_name:name ~start_time:start
@@ -361,6 +363,7 @@ let is_read_only = function
     Tool_schemas_misc.Misc_browser_goto
   | Tool_schemas_misc.Misc_browser_act
   | Tool_schemas_misc.Misc_browser_interact
+  | Tool_schemas_misc.Misc_browser_instruct
   | Tool_schemas_misc.Misc_web_fetch
   | Tool_schemas_misc.Misc_web_search -> false
 

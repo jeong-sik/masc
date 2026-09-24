@@ -294,7 +294,14 @@ open Alcotest
    BrowserTabs says a stagehand tab has no clientId, so a Keeper can open and
    drive the Stagehand browser (RFC-browser-lane-stagehand §3.8). No
    headroom. *)
-let ceiling_bytes = 122_347
+(* 2026-09-24: +739 rendered bytes for BrowserInstruct, the production
+   renderer's rules replayed on config/tools/masc_browser_instruct.toml under
+   its public name (the replay gives 561/1,102/779 for the three tools the CI
+   run logs, as that run measured them; not a CI reading of this tool). A
+   Keeper tells the Stagehand browser in one sentence what to act on, observe
+   or extract, instead of choosing selectors (RFC-browser-lane-stagehand
+   §3.8). No headroom. *)
+let ceiling_bytes = 123_086
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -350,6 +357,7 @@ let measured () =
 let all_surface_golden_names =
   [ "BrowserAct"
   ; "BrowserGoto"
+  ; "BrowserInstruct"
   ; "BrowserInteract"
   ; "BrowserRead"
   ; "BrowserSession"

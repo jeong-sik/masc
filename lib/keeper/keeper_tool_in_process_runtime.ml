@@ -501,6 +501,12 @@ let handle_browser_goto_with_outcome ~args =
     (Tool_misc_browser_lane.handle_goto ~tool_name:"masc_browser_goto" ~start_time:0.0 args)
 ;;
 
+let handle_browser_instruct_with_outcome ~args =
+  let result, failure_effect_disposition =
+    Tool_misc_browser_lane.handle_instruct_with_phase ~tool_name:"masc_browser_instruct" ~start_time:0.0 args in
+  Keeper_tool_execution.of_tool_result ~failure_effect_disposition result
+;;
+
 let handle_browser_act_with_outcome ~turn_sandbox_factory ~(config : Workspace.config) ~meta ~args =
   let invoke ?upload_paths () =
     let result, failure_effect_disposition =

@@ -393,3 +393,66 @@ let handle_interact_with_phase ~base_path ~tool_name ~start_time args =
 ;;
 let handle_interact ~base_path ~tool_name ~start_time args =
   fst (handle_interact_with_phase ~base_path ~tool_name ~start_time args)
+
+(* A sentence waits for the model the runtime asks through the exact-output
+   lane, one call for act and observe and two for extract, each of which may
+   fall back to the lane's next slot, and then for the page work. *)
+let instruct_timeout_sec = 120.
+
+let instruct_arguments = [ "action"; "instruction"; "tabId"; "schema" ]
+
+let instruct_verb fields =
+  let ( let* ) = Result.bind in
+  let* instruction =
+    match List.assoc_opt "instruction" fields with
+    | None -> Ok None
+    | Some (`String text) when String.trim text <> "" -> Ok (Some text)
+    | Some _ -> Error "instruction must be a nonempty string"
+  in
+  let* tab_id =
+    match List.assoc_opt "tabId" fields with
+    | Some (`Int id) when id >= 0 -> Ok id
+    | Some _ | None -> Error "tabId must be an observed BrowserTabs id on lane stagehand"
+  in
+  let* schema =
+    match List.assoc_opt "schema" fields with
+    | None -> Ok None
+    | Some (`String text) ->
+      (match Yojson.Safe.from_string text with
+       | `Assoc _ as schema -> Ok (Some schema)
+       | _ -> Error "schema must be a JSON object"
+       | exception Yojson.Json_error detail -> Error ("schema is not JSON: " ^ detail))
+    | Some _ -> Error "schema must be JSON Schema text"
+  in
+  match List.assoc_opt "action" fields, instruction, schema with
+  | Some (`String "act"), Some instruction, None -> Ok (Browser_lane.Page_instruct { tab_id; instruction })
+  | Some (`String "observe"), instruction, None -> Ok (Browser_lane.Page_locate { tab_id; instruction })
+  | Some (`String "extract"), Some instruction, schema -> Ok (Browser_lane.Page_extract { tab_id; instruction; schema })
+  | Some (`String ("act" | "extract")), None, _ -> Error "act and extract need an instruction"
+  | Some (`String ("act" | "observe")), _, Some _ -> Error "schema is for extract only"
+  | (Some _ | None), _, _ -> Error "action must be one of: act, observe, extract"
+;;
+
+(* The Stagehand lane only: the sentence verbs are refused everywhere else. *)
+let handle_instruct_with_phase ~tool_name ~start_time args =
+  let refused_as_input detail = make_input_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect in
+  match args with
+  | `Assoc fields when List.for_all (fun (key, _) -> List.mem key instruct_arguments) fields ->
+    (match instruct_verb fields with
+     | Error detail -> refused_as_input detail
+     | Ok verb ->
+       let answer = Browser_lane.issue_stagehand ~verb ~timeout_sec:instruct_timeout_sec in
+       (* observe and extract read the page; a failed act may have acted. *)
+       let phase =
+         match answer, Browser_lane.verb_is_read verb with
+         | (Browser_lane.Rejected_before_effect _ | Browser_lane.Lane_absent), _ -> Tool_result.Proven_pre_effect
+         | (Browser_lane.Refused _ | Browser_lane.Timed_out | Browser_lane.Answered _), true -> Tool_result.Proven_pre_effect
+         | (Browser_lane.Refused _ | Browser_lane.Timed_out | Browser_lane.Answered _), false ->
+           Tool_result.Effect_outcome_unknown
+       in
+       answer_to_result ~lane:Browser_lane.Lane_name.Stagehand ~tool_name ~start_time answer, phase)
+  | `Assoc _ -> refused_as_input "unknown browser instruct argument"
+  | _ -> refused_as_input "browser arguments must be an object"
+;;
+
+let handle_instruct ~tool_name ~start_time args = fst (handle_instruct_with_phase ~tool_name ~start_time args)

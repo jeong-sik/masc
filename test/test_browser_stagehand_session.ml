@@ -232,7 +232,7 @@ let attached h =
 
 let error_code message = Yojson.Safe.Util.(message |> member "error" |> member "code" |> to_int)
 let has_result message = Yojson.Safe.Util.member "result" message <> `Null
-let act = Wire.Act { page_id = "P"; instruction = "click the Submit order button" }
+let act = Wire.Act { page_id = "P"; instruction = "click the Submit order button"; timeout = Wire.sentence_timeout }
 let goto = Wire.Page_goto { page_id = "P"; url = "http://127.0.0.1:1/" }
 let logged h wanted = List.exists wanted !(h.events)
 
@@ -428,6 +428,23 @@ let test_model_answer_after_the_caller_left () =
   goto_succeeds h
 ;;
 
+(* The model can remain blocked after the extension has asked for an answer.
+   The call's own deadline must refuse that request and release the session. *)
+let test_model_answer_deadline () =
+  let never, _ = Eio.Promise.create () in
+  with_session ~answer:(fun _ -> Eio.Promise.await never)
+  @@ fun h ->
+  attached h;
+  (match Session.call h.session act with
+   | Error (Session.Rejected _) -> ()
+   | Ok _ | Error _ -> fail "the extension should reject act after the model deadline");
+  check int "the model was asked" 1 !(h.model_calls);
+  check int "the extension receives a typed refusal" Wire.host_refused (error_code (only_answer h));
+  check bool "the model deadline is logged" true
+    (logged h (function Session.Model_request_refused { reason } -> String.ends_with ~suffix:"reached its deadline" reason | _ -> false));
+  goto_succeeds h
+;;
+
 let test_model_that_raises () =
   with_session ~answer:(fun _ -> raise Model_bug)
   @@ fun h ->
@@ -507,6 +524,7 @@ let () =
       test_case "a reply read before the cancelled caller resumes settles the call" `Quick
         test_reply_read_before_the_cancelled_caller_resumes;
       test_case "a model answer after the caller left is not delivered" `Quick test_model_answer_after_the_caller_left;
+      test_case "a model blocked past the call deadline is refused" `Quick test_model_answer_deadline;
       test_case "a model that raises refuses only its request" `Quick test_model_that_raises;
       test_case "a detached worker loses the call" `Quick test_worker_detached;
       test_case "an unsupported request is refused by name" `Quick test_unsupported_request;

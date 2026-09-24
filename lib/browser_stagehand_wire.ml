@@ -127,12 +127,20 @@ let decode payload =
      | Some _, _ | None, None -> Error "Stagehand message is neither a request, a notification nor a response")
 ;;
 
+type sentence_timeout_ms = Sentence_timeout_ms of int
+
+(* BrowserInstruct formerly abandoned the caller at 120 s. Keep that one
+   operation limit, but let the extension and the model responder see it
+   before the longer Browser Lane transport wait ends. *)
+let sentence_timeout = Sentence_timeout_ms 120_000
+let timeout_ms (Sentence_timeout_ms timeout) = timeout
+
 type call =
   | Init of { client_version : string; browser_cdp_url : string }
   | Close
-  | Act of { page_id : string; instruction : string }
-  | Observe of { page_id : string; instruction : string option }
-  | Extract of { page_id : string; instruction : string; schema : Yojson.Safe.t option }
+  | Act of { page_id : string; instruction : string; timeout : sentence_timeout_ms }
+  | Observe of { page_id : string; instruction : string option; timeout : sentence_timeout_ms }
+  | Extract of { page_id : string; instruction : string; schema : Yojson.Safe.t option; timeout : sentence_timeout_ms }
   | Context_pages
   | Context_active_page
   | Page_goto of { page_id : string; url : string }
@@ -154,6 +162,12 @@ let method_name = function
 
 let optional key = function None -> [] | Some value -> [ key, value ]
 let page page_id = [ "page_id", `String page_id ]
+let sentence_options timeout = [ "options", `Assoc [ "timeout", `Int (timeout_ms timeout) ] ]
+
+let sentence_timeout_of_call = function
+  | Act { timeout; _ } | Observe { timeout; _ } | Extract { timeout; _ } -> Some timeout
+  | Init _ | Close | Context_pages | Context_active_page | Page_goto _ | Page_screenshot _ | Page_evaluate _ -> None
+;;
 
 let call_params = function
   | Init { client_version; browser_cdp_url } ->
@@ -165,11 +179,12 @@ let call_params = function
       ; "browser_cdp_url", `String browser_cdp_url
       ]
   | Close | Context_pages | Context_active_page -> `Assoc []
-  | Act { page_id; instruction } -> `Assoc (page page_id @ [ "instruction", `String instruction ])
-  | Observe { page_id; instruction } ->
-    `Assoc (page page_id @ optional "instruction" (Option.map (fun text -> `String text) instruction))
-  | Extract { page_id; instruction; schema } ->
-    `Assoc (page page_id @ [ "instruction", `String instruction ] @ optional "schema" schema)
+  | Act { page_id; instruction; timeout } ->
+    `Assoc (page page_id @ [ "instruction", `String instruction ] @ sentence_options timeout)
+  | Observe { page_id; instruction; timeout } ->
+    `Assoc (page page_id @ optional "instruction" (Option.map (fun text -> `String text) instruction) @ sentence_options timeout)
+  | Extract { page_id; instruction; schema; timeout } ->
+    `Assoc (page page_id @ [ "instruction", `String instruction ] @ optional "schema" schema @ sentence_options timeout)
   | Page_goto { page_id; url } -> `Assoc (page page_id @ [ "url", `String url ])
   | Page_screenshot { page_id } -> `Assoc (page page_id)
   | Page_evaluate { page_id; expression } -> `Assoc (page page_id @ [ "expression", `String expression ])

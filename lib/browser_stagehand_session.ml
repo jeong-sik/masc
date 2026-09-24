@@ -46,7 +46,7 @@ type link_state = Unattached | Initialising of link | Attached of link | Worker_
 
 type call_state =
   | Idle
-  | In_flight of { id : int; call : Wire.call; ended : unit Eio.Promise.t }
+  | In_flight of { id : int; call : Wire.call; ended : unit Eio.Promise.t; deadline_s : float option }
       (* [ended] resolves when the call finishes or is abandoned, which
          cancels a model answer still being computed for it. *)
   | Abandoned of { id : int; call : Wire.call }
@@ -54,6 +54,7 @@ type call_state =
 type t =
   { sw : Eio.Switch.t
   ; sleep : float -> unit
+  ; now : unit -> float
   ; worker_wait_s : float
   ; init_answer_s : float
   ; model : model
@@ -72,6 +73,7 @@ let worker_poll_s = 0.1
 let create ~sw ~clock ~worker_wait_s ~init_answer_s ~model ~log =
   { sw
   ; sleep = Eio.Time.sleep clock
+  ; now = (fun () -> Eio.Time.now clock)
   ; worker_wait_s
   ; init_answer_s
   ; model
@@ -162,21 +164,33 @@ let ask_model t params =
 
 let answer_model t id params =
   match t.calls with
-  | In_flight { id = owner; call; ended } when Wire.uses_model call ->
+  | In_flight { id = owner; call; ended; deadline_s } when Wire.uses_model call ->
     fork t (fun () ->
       (* The answer is sent only while the call that asked for it is still
          out; the call ending cancels the model. *)
       let outcome =
         Watched_work.run
           ~watcher:(fun () ->
-            Eio.Promise.await ended;
-            `Call_over)
+            match deadline_s with
+            | None ->
+              Eio.Promise.await ended;
+              `Call_over
+            | Some deadline_s ->
+              Eio.Fiber.first
+                (fun () ->
+                   Eio.Promise.await ended;
+                   `Call_over)
+                (fun () ->
+                   t.sleep (max 0. (deadline_s -. t.now ()));
+                   `Timed_out))
           (fun () -> `Answered (ask_model t params))
       in
       match outcome, t.calls with
       | `Answered result, In_flight { id = current; _ } when current = owner -> send_reply t id result
       | `Answered _, (Idle | In_flight _ | Abandoned _) | `Call_over, (Idle | In_flight _ | Abandoned _) ->
-        refuse_model t id "the call that asked for the model is over")
+        refuse_model t id "the call that asked for the model is over"
+      | `Timed_out, (Idle | In_flight _ | Abandoned _) ->
+        refuse_model t id "the call that asked for the model reached its deadline")
   | In_flight _ -> refuse_model t id "the call in flight does not use the model"
   | Idle -> refuse_model t id "no call is in flight"
   | Abandoned _ -> refuse_model t id "the call that asked for the model was abandoned"
@@ -252,7 +266,12 @@ let send_call t link call =
   let reply, resolver = Eio.Promise.create () in
   let ended, end_call = Eio.Promise.create () in
   Hashtbl.replace t.pending id resolver;
-  t.calls <- In_flight { id; call; ended };
+  let deadline_s =
+    Option.map
+      (fun timeout -> t.now () +. (float_of_int (Wire.timeout_ms timeout) /. 1000.))
+      (Wire.sentence_timeout_of_call call)
+  in
+  t.calls <- In_flight { id; call; ended; deadline_s };
   let finish () =
     Hashtbl.remove t.pending id;
     t.calls <- Idle;

@@ -42,8 +42,10 @@ extension = match.group(1)
 # changes when the click the model chose reached this page.
 FIXTURE = b"""<!doctype html><html><head><meta charset="utf-8"><title>Stagehand fixture</title></head><body>
 <h1>Order form</h1><p>Plan price: 42 USD</p>
-<label for="email">Email</label><input id="email" type="email">
-<button id="submit" onclick="document.body.dataset.clicked='yes';document.title='clicked'">Submit order</button>
+<label for="email">Email</label><input id="email" type="email"
+  oninput="document.title=this.value==='probe@example.test'?'filled':'unexpected fill'">
+<button id="submit" style="position:fixed;left:20vw;top:20vh;width:100px;height:40px;box-sizing:border-box"
+  onclick="document.body.dataset.clicked='yes';document.title='clicked'">Submit order</button>
 </body></html>"""
 
 

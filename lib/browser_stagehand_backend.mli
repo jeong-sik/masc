@@ -8,7 +8,9 @@
     deadline leaves a browser half started or half stopped. A sentence whose
     caller leaves retires its session if the extension has not answered, so
     a later open can start a fresh browser. Callers may run on any fiber or
-    domain. *)
+    domain. Page verbs are serialized for the whole verb, including guard,
+    input and receipt; a caller cancelled before its turn does not close the
+    session. *)
 
 (** Starts one session whose browser lives on [sw]: releasing [sw] stops it.
     Answers the session and the [stagehand.init] result. *)

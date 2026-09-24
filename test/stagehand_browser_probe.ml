@@ -168,6 +168,22 @@ let () =
   let tabs () = tool "BrowserTabs" (Tools.handle_tabs ~base_path:out ~tool_name:"masc_browser_tabs" ~start_time:0.0 (args [ lane ])) in
   let session action = tool "BrowserSession" (Tools.handle_session ~tool_name:"masc_browser_session" ~start_time:0.0 (args [ "action", `String action; lane ])) in
   let instruct fields = tool "BrowserInstruct" (Tools.handle_instruct ~tool_name:"masc_browser_instruct" ~start_time:0.0 (args fields)) in
+  let interact fields =
+    tool "BrowserInteract"
+      (Tools.handle_interact ~base_path:out ~tool_name:"masc_browser_interact" ~start_time:0.0 (args (lane :: fields)))
+  in
+  let goto_fixture () =
+    tool "BrowserGoto"
+      (Tools.handle_goto ~tool_name:"masc_browser_goto" ~start_time:0.0 (args [ "url", `String fixture_url; lane ]))
+  in
+  let title_at tab_id expected =
+    let* listed = tabs () in
+    let* _, observed = tab_for ~url:fixture_url listed in
+    match string_at [ "title" ] observed with
+    | Some title when String.equal title expected -> Ok observed
+    | Some title -> Error (Printf.sprintf "tab %d has title %s, expected %s" tab_id title expected)
+    | None -> Error "the tab has no title"
+  in
   record "open" (session "open");
   let pid =
     match session "status" with
@@ -175,7 +191,7 @@ let () =
     | Error _ -> None
   in
   record "status names the browser" (Option.to_result ~none:"no pid in status" pid);
-  record "goto" (tool "BrowserGoto" (Tools.handle_goto ~tool_name:"masc_browser_goto" ~start_time:0.0 (args [ "url", `String fixture_url; lane ])));
+  record "goto" (goto_fixture ());
   let tab = Result.bind (tabs ()) (tab_for ~url:fixture_url) in
   record "the fixture is a tab" tab;
   (match tab with
@@ -206,6 +222,37 @@ let () =
         match string_at [ "data"; "heading" ] data, string_at [ "data"; "price" ] data with
         | Some "Order form", Some "42 USD" -> Ok data
         | _ -> Error ("extract answered " ^ Yojson.Safe.to_string data));
+     record "BrowserInteract fill runs the page script and input event"
+       (let* _ = interact
+          [ "action", `String "fill"; "selector", `String "#email"
+          ; "text", `String "probe@example.test"; "tabId", `Int tab_id
+          ]
+        in
+        title_at tab_id "filled");
+     record "reset after BrowserInteract fill" (goto_fixture ());
+     record "BrowserInteract click_at sends native Stagehand input"
+       (let* capture =
+          match Masc.Browser_surface.capture { Masc.Browser_surface.route = Browser_lane.Stagehand_route; tab_id = Some tab_id } with
+          | Ok data -> Ok data
+          | Error failure -> Error (Masc.Browser_surface.failure_message failure)
+        in
+        let viewport = Yojson.Safe.Util.member "viewport" capture in
+        let* geometry = Browser_lane.Pointer.viewport_of_json viewport in
+        (* The fixture's fixed button starts at 20vw/20vh and is 100×40 CSS
+           pixels; this point is its centre in the observed viewport. *)
+        let x = 0.2 +. (50. /. geometry.width)
+        and y = 0.2 +. (20. /. geometry.height) in
+        if x >= 1. || y >= 1. then Error "the viewport is too small for the fixture button"
+        else
+          let* _ = interact
+            [ "action", `String "click_at"; "tabId", `Int tab_id
+            ; "expectedUrl", `String fixture_url
+            ; "viewport", viewport
+            ; "point", `Assoc [ "x", `Float x; "y", `Float y ]
+            ]
+          in
+          title_at tab_id "clicked");
+     record "reset after BrowserInteract click_at" (goto_fixture ());
      record "act clicks the button the model chose"
        (let* _ = instruct [ "action", `String "act"; "instruction", `String "click the Submit order button"; "tabId", `Int tab_id ] in
         let* tabs = tabs () in

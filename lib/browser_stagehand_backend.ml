@@ -11,6 +11,7 @@ type 'session opener =
 type 'session opened =
   { session : 'session
   ; tabs : Executor.Tabs.t
+  ; page_slot : Eio.Semaphore.t
   ; release : unit Eio.Promise.u
   ; stopped : unit Eio.Promise.t
   ; ended : string option ref  (* the first reason the session stopped working *)
@@ -95,7 +96,7 @@ let run_session t ~headless ~opened ~resolve_opened =
         not_opened detail
       | Ok (session, _init) ->
         let released, release = Eio.Promise.create () in
-        t.state <- Open { session; tabs = Executor.Tabs.create (); release; stopped; ended };
+        t.state <- Open { session; tabs = Executor.Tabs.create (); page_slot = Eio.Semaphore.make 1; release; stopped; ended };
         Eio.Promise.resolve resolve_opened (Ok ());
         Eio.Promise.await released)
   with
@@ -159,9 +160,21 @@ let status t =
   answered (`Assoc fields)
 ;;
 
-let page t verb =
+(* One page verb may make several Stagehand calls. Keep its guard, native
+   input and receipt together, as well as goto and its summary. A caller
+   cancelled while queued never starts its verb or retires the session. *)
+let page t ~mark_started verb =
   match t.state with
-  | Open opened -> Executor.execute ~tabs:opened.tabs ~call:(t.call opened.session) verb
+  | Open opened ->
+    Eio.Semaphore.acquire opened.page_slot;
+    (* [release] does not suspend; unlike a mutex, a cancelled or raising
+       page verb cannot poison the slot for later callers. *)
+    Fun.protect ~finally:(fun () -> Eio.Semaphore.release opened.page_slot) (fun () ->
+      match t.state with
+      | Open current when current == opened ->
+        mark_started ();
+        Executor.execute ~tabs:opened.tabs ~call:(t.call opened.session) verb
+      | Closed | Opening | Closing | Open _ -> no_session)
   | Closed | Opening | Closing -> no_session
 ;;
 
@@ -209,6 +222,7 @@ let serve t { verb; reply; caller_left } =
   | Browser_lane.Page_elements _ | Browser_lane.Page_act _ | Browser_lane.Page_context _ | Browser_lane.Page_instruct _
   | Browser_lane.Page_locate _ | Browser_lane.Page_extract _ ->
     let requested_session = match t.state with Open opened -> Some opened | Closed | Opening | Closing -> None in
+    let call_started = ref false in
     (* A caller that leaves cancels the call it asked for; the session then
        holds it as abandoned until the runtime answers it or the sentence
        session is retired below. *)
@@ -217,10 +231,10 @@ let serve t { verb; reply; caller_left } =
          ~watcher:(fun () ->
            Eio.Promise.await caller_left;
            None)
-         (fun () -> Some (guarded (fun () -> page t verb)))
+         (fun () -> Some (guarded (fun () -> page t ~mark_started:(fun () -> call_started := true) verb)))
      with
      | Some answer -> Eio.Promise.resolve reply answer
-     | None -> if is_sentence verb then retire_sentence_session t requested_session)
+     | None -> if is_sentence verb && !call_started then retire_sentence_session t requested_session)
 ;;
 
 let create ~sw ~clock ~open_session ~call ~pid ~log =

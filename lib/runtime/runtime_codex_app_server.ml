@@ -118,7 +118,6 @@ type turn_result =
     (* [None] when no thread/tokenUsage/updated for this turn arrived before
        turn/completed; the host then reports the usage scope as unavailable
        rather than a count of zero. *)
-  ; context_window : int option
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -1109,22 +1108,15 @@ let token_usage_notification ~thread_id ~turn_id params =
       | None -> Ok 0
       | Some _ -> required_count stage "cacheWriteInputTokens" last
     in
-    let* context_window =
-      match List.assoc_opt "modelContextWindow" usage_fields with
-      | None | Some `Null -> Ok None
-      | Some (`Int window) when window > 0 -> Ok (Some window)
-      | Some _ -> protocol_error stage "modelContextWindow must be a positive integer or null"
-    in
     Ok
       (Some
-         ( { input_tokens
-           ; cached_input_tokens
-           ; cache_write_input_tokens
-           ; output_tokens
-           ; reasoning_output_tokens
-           ; total_tokens
-           }
-         , context_window ))
+         { input_tokens
+         ; cached_input_tokens
+         ; cache_write_input_tokens
+         ; output_tokens
+         ; reasoning_output_tokens
+         ; total_tokens
+         })
 ;;
 
 (* Codex MCP requests include approvals and forms, independently of shell
@@ -1645,7 +1637,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
   in
   emit_stream_event on_stream_event (Turn_started { turn_id; model });
   let tool_call_count = ref 0 in
-  let* text, usage_report =
+  let* text, usage =
     await_turn_terminal
       io
       ~tools:dynamic_tools
@@ -1659,11 +1651,6 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
       ~on_stream_event
   in
   emit_stream_event on_stream_event (Turn_finished { text });
-  let usage, context_window =
-    match usage_report with
-    | Some (usage, context_window) -> Some usage, context_window
-    | None -> None, None
-  in
   Ok
     { thread_id
     ; turn_id
@@ -1674,7 +1661,6 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
     ; user_agent
     ; resumed
     ; usage
-    ; context_window
     }
 ;;
 

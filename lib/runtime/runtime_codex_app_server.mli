@@ -111,9 +111,6 @@ type turn_result =
     (* [None] when no thread/tokenUsage/updated for this turn arrived before
        turn/completed; the host then reports the usage scope as unavailable
        rather than a count of zero. *)
-  ; context_window : int option
-    (** [modelContextWindow] from the latest usage notification for this turn.
-        [None] means the app-server did not report a positive window. *)
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =

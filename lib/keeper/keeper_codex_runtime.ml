@@ -1455,7 +1455,6 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                 { input_tokens = usage.input_tokens
                 ; cache_creation_input_tokens = usage.cache_write_input_tokens
                 ; cache_read_input_tokens = usage.cached_input_tokens
-                ; context_window = turn.context_window
                 })
              turn.usage
          in

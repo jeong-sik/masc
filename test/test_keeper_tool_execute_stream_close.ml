@@ -238,11 +238,11 @@ let () =
     "keeper-tool-execute-stream-close"
     [ ( "rejected-dispatch-finalization"
       , List.map
-          (fun (name, _, dispatch) ->
+          (fun ((name, _, _) as case) ->
             test_case
               (name ^ " finalizes the execute stream")
               `Quick
-              (test_rejected_branch_finalizes_stream (name, `String name, dispatch)))
+              (test_rejected_branch_finalizes_stream case))
           rejected_cases )
     ]
 ;;

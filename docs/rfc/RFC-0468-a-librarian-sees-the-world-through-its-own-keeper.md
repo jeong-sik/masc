@@ -1,14 +1,14 @@
 ---
 rfc: "0468"
 title: "Librarian 은 자기 Keeper 의 눈으로 본다 — 나는 누구이고, 각 말은 누가 했는가"
-status: Draft
+status: Active
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0223-typed-connector-surfaces-presence-pull-speaker", "0456-librarian-output-contract", "librarian-lifecycle"]
-implementation_prs: []
+implementation_prs: ["#38378", "#38383", "#38467"]
 ---
 
 # RFC-0468 — Librarian 은 자기 Keeper 의 눈으로 본다

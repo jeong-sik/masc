@@ -28,8 +28,12 @@ existing timeout. Review response moved it inside and added coverage:
   never write the invalid thread request.
 - Fixture EOF exits before recording an empty request.
 
-`git diff --check` passed. No local build or test execution. The focused
-`test_runtime_codex_app_server` CI is required for execution evidence.
+`git diff --check` passed. No local build.
+[Focused CI 36024682156](https://github.com/jeong-sik/masc/actions/runs/36024682156)
+at `2f344e41975d24d1e04452415f190069f0de169b` ran all 107
+`test_runtime_codex_app_server` cases successfully, including worker-encoded
+transmission, worker saturation bounds, invalid UTF-8 refusal and dynamic tool
+callback ownership.
 
 This is a scheduler isolation change. Small-message queue overhead, sustained
 throughput, live scheduler latency and the overall 0.1ms target are unmeasured.

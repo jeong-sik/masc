@@ -6186,7 +6186,7 @@
 (test
  (name test_tui_msx_tick)
  (modules test_tui_msx_tick)
- (libraries masc_test_deps))
+ (libraries masc_test_deps masc_tui_machine_live))
 
 (test
  (name test_tui_msx_graphics)

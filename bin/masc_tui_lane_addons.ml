@@ -469,12 +469,23 @@ let move_lane view delta =
            | None -> view
            | Some (row_cursor, _) -> {view with row_cursor;scroll=0;document_key=None})
   | _ -> view
-(* What the status row says while a read is in flight. The row claimed a
-   previous reading whatever the view held, so a first read said one remained
+(* What the status row says about the reading. Kept whole here rather than
+   inside the row it draws, so a view can be asked what the row would say.
+
+   The row used to match on [loading] alone, so a read in flight claimed a
+   previous reading whatever the view held: a first read said one remained
    visible while the rows under it said "No reading yet" in the same frame. *)
-let reading_in_flight_text ~held =
-  if held then "Refreshing · previous reading remains visible"
-  else "Reading · nothing held yet"
+let status_text (view : t) =
+  match view.loading, view.snapshot, view.error with
+  | _, Some _, Some error -> "Error: " ^ error ^ " · previous reading retained"
+  | true, Some _, None -> "Refreshing · previous reading remains visible"
+  (* A read that failed and is being tried again holds nothing either, and
+     the failure is the part an operator can act on. *)
+  | true, None, Some error -> "Load failed: " ^ error ^ " · reading again"
+  | true, None, None -> "Reading · nothing held yet"
+  | false, None, Some error -> "Load failed: " ^ error
+  | false, None, None -> "No reading yet · r:refresh"
+  | false, Some _, _ -> "Recorded observations · r:refresh"
 
 let visual_lines ?(failed_note = "") ~height ~width view =
   let clean = Masc.Tui_decode.sanitize_terminal_text in
@@ -489,17 +500,15 @@ let visual_lines ?(failed_note = "") ~height ~width view =
   let tabs = line ~tone:Accent (String.concat " " (List.map (fun (focus,label) ->
     if view.focus=focus then "[" ^ label ^ "]" else label)
     [Timeline,"1:Time";Connections,"2:Links";Configurations,"3:TOML";Instances,"4:Workers";Rows,"5:Rows"])) in
-  let status = match view.loading, view.snapshot, view.error with
-    | _, Some _, Some error -> [line ~tone:Attention ("Error: " ^ error ^ " · previous reading retained")]
-    | true, Some _, None -> [line ~tone:Dim (reading_in_flight_text ~held:true)]
-    (* A read that failed and is being tried again holds nothing either, and
-       the failure is the part an operator can act on. *)
-    | true, None, Some error ->
-      wrap ~tone:Attention ("Load failed: " ^ error ^ " · reading again")
-    | true, None, None -> [line ~tone:Dim (reading_in_flight_text ~held:false)]
-    | false, None, Some error -> wrap ~tone:Attention ("Load failed: " ^ error)
-    | false, None, None -> [line ~tone:Dim "No reading yet · r:refresh"]
-    | false, Some _, _ -> [line ~tone:Dim "Recorded observations · r:refresh"] in
+  let status =
+    let text = status_text view in
+    match view.error, view.snapshot with
+    (* A failure with nothing behind it is the row's whole message, so it
+       wraps rather than being cut to one line. *)
+    | Some _, None -> wrap ~tone:Attention text
+    | Some _, Some _ -> [line ~tone:Attention text]
+    | None, (Some _ | None) -> [line ~tone:Dim text]
+  in
   let notifications =
     (match view.draft with None -> [] | Some draft -> wrap ((if view.naming then "New TOML filename: " else ":") ^ draft))
     @ (match selected_document view with None -> [] | Some document -> List.concat_map wrap (Document.summary document))

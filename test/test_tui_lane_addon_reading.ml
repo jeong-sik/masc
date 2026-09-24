@@ -46,20 +46,44 @@ let test_a_read_that_found_some_counts_them () =
   check bool "two declarations" true
     (UI.installed (view_of [ declaration; declaration ]) = UI.Installed 2)
 
-(* The status row while a read is in flight. Measured on the live server at
-   150 columns: pressing [o] drew
+(* The status row's reading of the view. Measured on the live server at 150
+   columns: pressing [o] drew
 
      Refreshing · previous reading remains visible
      No reading yet · r:refresh
 
-   two rows apart, in the frame before the first read landed. A view that
-   holds nothing has no previous reading to keep visible. *)
+   two rows apart, in the frame before the first read landed. The row matched
+   on [loading] alone, so a read in flight claimed a previous reading whatever
+   the view held. *)
+let reading_of view = UI.status_text view
+
+let loading view = { view with UI.loading = true }
+
 let test_a_first_read_has_no_previous_reading () =
   check string "nothing held yet" "Reading · nothing held yet"
-    (UI.reading_in_flight_text ~held:false);
-  check string "and a refresh over a reading says so"
+    (reading_of (loading UI.initial));
+  check string "a refresh over a reading says so"
     "Refreshing · previous reading remains visible"
-    (UI.reading_in_flight_text ~held:true)
+    (reading_of (loading (view_of [ declaration ])))
+
+(* A retry after a failure holds nothing either, and the failure is the part
+   an operator can act on. *)
+let test_a_retry_after_a_failure_keeps_the_failure () =
+  check string "the failure, and that it is being tried again"
+    "Load failed: boom · reading again"
+    (reading_of { (loading UI.initial) with UI.error = Some "boom" })
+
+(* The readings this change does not touch. *)
+let test_the_other_readings_are_unchanged () =
+  check string "nothing asked for yet" "No reading yet · r:refresh"
+    (reading_of UI.initial);
+  check string "a reading in hand" "Recorded observations · r:refresh"
+    (reading_of (view_of [ declaration ]));
+  check string "a failed read with nothing behind it" "Load failed: boom"
+    (reading_of { UI.initial with UI.error = Some "boom" });
+  check string "a failure over a reading keeps both"
+    "Error: boom · previous reading retained"
+    (reading_of { (view_of [ declaration ]) with UI.error = Some "boom" })
 
 let () =
   run "tui lane addon reading"
@@ -74,5 +98,9 @@ let () =
             test_a_read_that_found_some_counts_them
         ; test_case "a first read has no previous reading" `Quick
             test_a_first_read_has_no_previous_reading
+        ; test_case "a retry after a failure keeps the failure" `Quick
+            test_a_retry_after_a_failure_keeps_the_failure
+        ; test_case "the other readings are unchanged" `Quick
+            test_the_other_readings_are_unchanged
         ] )
     ]

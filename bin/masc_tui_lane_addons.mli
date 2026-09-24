@@ -95,11 +95,12 @@ val submit_evidence : t -> (t * request, string) result
 (** Close the choice and build the exact request: the frozen bundle alone, or
     with [keeper_name] when a Keeper was chosen. *)
 val evidence_receipt_lines : Yojson.Safe.t -> string list
-
-val reading_in_flight_text : held:bool -> string
-(** What the Add-ons status row says while a read is in flight. A view that
-    holds nothing has no previous reading to keep visible, and the rows under
-    the status row say "No reading yet" in that same frame. *)
 (** What an evidence receipt says in one or two readable lines: rows frozen
     and, separately, whether the optional Keeper delivery succeeded. Empty for
     receipts of other operations. *)
+
+val status_text : t -> string
+(** What the Add-ons status row says about the reading: whether one is in
+    flight, what the view holds, and what the last read said. A view that
+    holds nothing has no previous reading to keep visible, and the rows under
+    the status row say "No reading yet" in that same frame. *)

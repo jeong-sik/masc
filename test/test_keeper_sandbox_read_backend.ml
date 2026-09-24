@@ -1327,11 +1327,14 @@ let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =
        | Error error -> Alcotest.fail error
        | Ok (request, _stdin) -> request.argv)
   in
+  let window path =
+    Keeper_sandbox_read_backend.read_window_argv ~start_line:1 ~max_bytes:4096 ~path
+  in
   Alcotest.(check (list string)) "an absolute declared path"
-    [ "head"; "-c"; "4096"; "/app/drift_monitor/windowing.py" ]
+    (window "/app/drift_monitor/windowing.py")
     (read ~path:"/app/drift_monitor/windowing.py" ());
   Alcotest.(check (list string)) "a relative path under a declared cwd"
-    [ "head"; "-c"; "4096"; "/app/data/reference_embeddings.npy" ]
+    (window "/app/data/reference_embeddings.npy")
     (read ~cwd:"/app" ~path:"data/reference_embeddings.npy" ())
 
 let test_sandbox_container_label_args_include_owner_scope () =
@@ -1965,7 +1968,10 @@ let test_read_asks_the_sandbox_for_a_bounded_prefix () =
       Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
   | Ok echoed_command ->
       Alcotest.(check string) "the sandbox is asked for the prefix, not the file"
-        (Printf.sprintf "head -c 4096 %s\n" container_path)
+        (String.concat " "
+           (Keeper_sandbox_read_backend.read_window_argv ~start_line:1 ~max_bytes:4096
+              ~path:container_path)
+         ^ "\n")
         echoed_command
 
 let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
@@ -2813,18 +2819,33 @@ let test_read_window_line_one_is_a_byte_prefix () =
     | Unix.WEXITED 0, out -> Alcotest.(check string) "prefix" "line-1\nli" out
     | _, out -> Alcotest.fail ("prefix read failed: " ^ out))
 
+(* The script names why it read nothing with its own exit code, which is how
+   an endpoint's missing file reaches the caller as path_not_found instead of
+   a runtime failure. Both line 1 and a later line take the same checks. *)
 let test_read_window_missing_file_fails () =
   (* A fresh name, removed, so the path is known to be absent. *)
   let path = Filename.temp_file "read-window-missing-" ".txt" in
   Sys.remove path;
-  match run_read_window ~start_line:10 ~max_bytes:64 path with
-  | Unix.WEXITED 0, _ -> Alcotest.fail "a missing file read as an empty window"
-  | _, out -> Alcotest.(check string) "no bytes" "" out
+  List.iter
+    (fun start_line ->
+      match run_read_window ~start_line ~max_bytes:64 path with
+      | Unix.WEXITED code, out ->
+        Alcotest.(check int) "the missing-file exit"
+          Keeper_sandbox_read_backend.read_window_missing_exit code;
+        Alcotest.(check string) "no bytes" "" out
+      | (Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> Alcotest.fail "read window was signalled")
+    [ 1; 10 ]
 
 let test_read_window_directory_fails () =
-  match run_read_window ~start_line:10 ~max_bytes:64 (Filename.get_temp_dir_name ()) with
-  | Unix.WEXITED 0, _ -> Alcotest.fail "a directory read as an empty window"
-  | _, out -> Alcotest.(check string) "no bytes" "" out
+  List.iter
+    (fun start_line ->
+      match run_read_window ~start_line ~max_bytes:64 (Filename.get_temp_dir_name ()) with
+      | Unix.WEXITED code, out ->
+        Alcotest.(check int) "the not-a-file exit"
+          Keeper_sandbox_read_backend.read_window_not_a_file_exit code;
+        Alcotest.(check string) "no bytes" "" out
+      | (Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> Alcotest.fail "read window was signalled")
+    [ 1; 10 ]
 
 let run_tests ~clock () =
   Alcotest.run "Keeper_sandbox_read_backend"
@@ -2835,9 +2856,9 @@ let run_tests ~clock () =
             test_read_window_reaches_lines_past_the_prefix;
           Alcotest.test_case "line 1 stays a byte prefix" `Quick
             test_read_window_line_one_is_a_byte_prefix;
-          Alcotest.test_case "missing file exits non-zero" `Quick
+          Alcotest.test_case "missing file exits with its own code" `Quick
             test_read_window_missing_file_fails;
-          Alcotest.test_case "directory exits non-zero" `Quick
+          Alcotest.test_case "directory exits with its own code" `Quick
             test_read_window_directory_fails;
         ] );
       ( "raw_prefix", [Alcotest.test_case "command bounded before binary transport" `Quick

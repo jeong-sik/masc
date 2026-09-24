@@ -459,31 +459,36 @@ let read_error_to_string = function
    applies to the window and not to the file's prefix. Bounding the prefix
    left every line after the first [max_bytes] unreachable to Read.
 
+   The script runs where the file is, so it is the one place that can say
+   whether the path the caller named exists and is a file. It says so with
+   exit codes it chooses; the reader classifies by them, never by stderr.
    The path and numbers are positional arguments of [sh], never spliced into
-   the script. A pipeline's status is its last command's, so the script
-   refuses a directory and opens the file with [exec <] first: a redirection
-   error on a special built-in exits the non-interactive shell non-zero, as
-   [head -c] on a missing file did; [|| exit 1] keeps that true for a shell
-   that does not follow POSIX there (bash not started as sh). *)
+   the script. [exec <] opens the file before the pipeline, whose status is
+   its last command's, so an unreadable file still exits non-zero. *)
+let read_window_missing_exit = 3
+let read_window_not_a_file_exit = 4
+
 let read_window_argv ~start_line ~max_bytes ~path =
-  let bytes = string_of_int (max 0 max_bytes) in
-  if start_line <= 1
-  then [ "head"; "-c"; bytes; path ]
-  else
-    [ "sh"
-    ; "-c"
-    ; {|if [ -d "$2" ]; then echo "$2: is a directory" >&2; exit 1; fi; exec < "$2" || exit 1; tail -n +"$1" | head -c "$3"|}
-    ; "sh"
-    ; string_of_int start_line
-    ; path
-    ; bytes
-    ]
+  [ "sh"
+  ; "-c"
+  ; Printf.sprintf
+      {|if [ ! -e "$2" ]; then exit %d; fi; if [ ! -f "$2" ]; then exit %d; fi; exec < "$2" || exit 1; if [ "$1" -le 1 ]; then head -c "$3"; else tail -n +"$1" | head -c "$3"; fi|}
+      read_window_missing_exit
+      read_window_not_a_file_exit
+  ; "sh"
+  ; string_of_int start_line
+  ; path
+  ; string_of_int (max 0 max_bytes)
+  ]
 
 let read_file ?turn_sandbox_factory ?(start_line = 1) ~config ~(meta : keeper_meta)
     ~host_path ~(max_bytes : int) ~(timeout_sec : float) () : (string, read_error) result =
   match container_path_of_host ~config ~meta ~host_path with
   | Error detail -> Error (Read_failed detail)
   | Ok backend_path ->
+    let profile_label =
+      Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile
+    in
     let read () =
       (* [max_bytes] used to be spent on [cat]'s finished output: the child
          wrote the whole file and the drainer read every byte to EOF, and only
@@ -501,21 +506,44 @@ let read_file ?turn_sandbox_factory ?(start_line = 1) ~config ~(meta : keeper_me
 
          Same shape, and same reason, as the bounded [od -N] chunk read in
          Keeper_browser_upload. *)
-      run_command ?turn_sandbox_factory ~config ~meta
-        ~command_argv:(read_window_argv ~start_line ~max_bytes ~path:backend_path)
-        ~max_bytes ~timeout_sec ()
-      |> Result.map_error (fun detail -> Read_failed detail)
+      match
+        run_command_with_status ?turn_sandbox_factory
+          ~ok_exit_codes:[ 0; read_window_missing_exit; read_window_not_a_file_exit ]
+          ~config ~meta
+          ~command_argv:(read_window_argv ~start_line ~max_bytes ~path:backend_path)
+          ~max_bytes ~timeout_sec ()
+      with
+      | Error detail -> Error (Read_failed detail)
+      | Ok (Unix.WEXITED 0, body) -> Ok body
+      | Ok (Unix.WEXITED code, _) when code = read_window_missing_exit ->
+        Error
+          (Missing_file
+             (Printf.sprintf
+                "%s_read_failed: path_not_found: %s (no file there; verify the path \
+                 before calling Read)"
+                profile_label host_path))
+      | Ok (Unix.WEXITED code, _) when code = read_window_not_a_file_exit ->
+        Error
+          (Not_a_file
+             (Printf.sprintf
+                "%s_read_failed: path_is_not_a_file: %s (Read requires a regular \
+                 file; to list a directory use Execute with ls, e.g. \
+                 argv=['ls','-la','%s'])"
+                profile_label host_path host_path))
+      (* [ok_exit_codes] admits only the codes above. *)
+      | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
+        Error
+          (Read_failed
+             (Printf.sprintf "%s_read_failed: unexpected status for %s"
+                profile_label host_path))
     in
     if
       Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile
       = Keeper_types_profile_sandbox.Endpoint_owned
     then read ()
     else
-      let profile_label =
-        Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile
-      in
-      (* Only shared trees can be classified from host filesystem evidence.
-         Transport and access failures must not become missing-file advice. *)
+      (* A shared tree is also on this host, so a missing path is refused
+         before a sandbox process is spent on it. *)
       match Unix.stat host_path with
       | { Unix.st_kind = Unix.S_DIR; _ } ->
         Error

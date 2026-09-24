@@ -24,6 +24,14 @@ let load_ledger ~base_path =
   | Error error ->
     Error (World_constitution_store.read_error_to_string error)
 
+(* A ledger that moved since this call read it is a state to read again; a
+   directory or write failure is the runtime's. *)
+let append_failure_class : World_constitution_store.append_error -> Tool_result.tool_failure_class
+  = function
+  | World_constitution_store.Ledger_moved _ -> Tool_result.Workflow_rejection
+  | World_constitution_store.Directory_unavailable _
+  | World_constitution_store.Write_failed _ -> Tool_result.Runtime_failure
+
 (* Lines the ledger could not decode are the store's to report and this tool's
    to pass on. A keeper calling these tools is the one reader in a position to
    act, and saying nothing here is what would make the store's own contract a
@@ -54,9 +62,11 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
   match string_arg args "text" with
   | None ->
     Keeper_tool_execution.failure
+      ~class_:Tool_result.Policy_rejection
       "text is required and must be a string: the sentence the world agreed on"
   | Some text when String.length text > article_byte_cap ->
     Keeper_tool_execution.failure
+      ~class_:Tool_result.Policy_rejection
       (Printf.sprintf
          "this norm is %d bytes, over the %d-byte limit for one article: say it \
           in one sentence"
@@ -74,10 +84,11 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
     with
     | Error invalid ->
       Keeper_tool_execution.failure
+        ~class_:Tool_result.Policy_rejection
         (World_constitution_types.invalid_to_string invalid)
     | Ok article -> (
       match load_ledger ~base_path with
-      | Error detail -> Keeper_tool_execution.failure detail
+      | Error detail -> Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure detail
       | Ok ledger ->
         let held = ledger.World_constitution_store.articles in
         let projected =
@@ -85,6 +96,7 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
         in
         if String.length projected > render_byte_ceiling then
           Keeper_tool_execution.failure
+            ~class_:Tool_result.Workflow_rejection
             (Printf.sprintf
                "the world's articles would reach %d bytes, over the %d-byte \
                 ceiling; it holds %d: remove one with \
@@ -99,6 +111,7 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
           with
           | Error error ->
             Keeper_tool_execution.failure
+              ~class_:(append_failure_class error)
               (World_constitution_store.append_error_to_string error)
           | Ok () ->
             Keeper_tool_execution.success_data
@@ -117,13 +130,14 @@ let remove_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args
   match string_arg args "article_id" with
   | None ->
     Keeper_tool_execution.failure
+      ~class_:Tool_result.Policy_rejection
       "article_id is required and must be a string"
   | Some raw -> (
     match World_constitution_types.Article_id.of_string raw with
-    | Error detail -> Keeper_tool_execution.failure detail
+    | Error detail -> Keeper_tool_execution.failure ~class_:Tool_result.Policy_rejection detail
     | Ok id -> (
       match load_ledger ~base_path with
-      | Error detail -> Keeper_tool_execution.failure detail
+      | Error detail -> Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure detail
       | Ok ledger ->
         let held = ledger.World_constitution_store.articles in
         let is_held =
@@ -134,6 +148,7 @@ let remove_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args
         in
         if not is_held then
           Keeper_tool_execution.failure
+            ~class_:Tool_result.Policy_rejection
             (Printf.sprintf
                "no article %s is held by this world; nothing was removed" raw)
         else (
@@ -145,6 +160,7 @@ let remove_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args
           with
           | Error error ->
             Keeper_tool_execution.failure
+              ~class_:(append_failure_class error)
               (World_constitution_store.append_error_to_string error)
           | Ok () ->
             Keeper_tool_execution.success_data

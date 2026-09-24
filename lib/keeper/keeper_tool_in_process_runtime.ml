@@ -511,7 +511,14 @@ let handle_browser_act_with_outcome ~turn_sandbox_factory ~(config : Workspace.c
     (match Keeper_browser_upload.with_staged_paths ?turn_sandbox_factory
        ~config ~meta ~paths (fun upload_paths -> invoke ~upload_paths ()) with
      | Ok outcome -> outcome
-     | Error message -> Keeper_tool_execution.failure
+     | Error (Keeper_browser_upload.Path_refused refusal) ->
+       Keeper_tool_execution.failure
+         ~class_:refusal.Keeper_alerting_path.failure_class
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         (Keeper_tool_shared_runtime.error_json refusal.message)
+     | Error (Keeper_browser_upload.Staging_failed message) ->
+       Keeper_tool_execution.failure
+         ~class_:Tool_result.Runtime_failure
          ~effect_disposition:Tool_result.Proven_pre_effect
          (Keeper_tool_shared_runtime.error_json message))
   | _ -> invoke ()
@@ -1777,7 +1784,10 @@ let dispatch_option_to_execution ?failure_effect_disposition ~name = function
   | Some result ->
     Keeper_tool_execution.of_tool_result ?failure_effect_disposition result
   | None ->
+    (* A descriptor the dispatcher does not know is this runtime's mapping,
+       not the caller's name. *)
     Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
       (Yojson.Safe.to_string
          (`Assoc
             [ "error"
@@ -2080,6 +2090,7 @@ let handle_keeper_spawn_with_outcome
        |> dispatch_option_to_execution ~failure_effect_disposition ~name)
   | (Some _ | None), (Some _ | None) ->
     Keeper_tool_execution.failure
+      ~class_:Tool_result.Workflow_rejection
       (Yojson.Safe.to_string
          (`Assoc
              [ "error", `String "spawn is only available inside a keeper turn"

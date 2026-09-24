@@ -968,6 +968,7 @@ let handle_tool_execute_typed
                  (Keeper_execute_output_files.error_to_string detail);
                authorized
                  (Keeper_tool_execution.failure
+                    ~class_:Tool_result.Runtime_failure
                     ~effect_disposition:Tool_result.Proven_post_effect
                     (error_json
                        ~fields:
@@ -1028,6 +1029,7 @@ let handle_tool_execute_typed
                     Keeper_tool_execution.of_tool_result result
                   | Error _ ->
                     Keeper_tool_execution.failure
+                      ~class_:Tool_result.Runtime_failure
                       ~effect_disposition:Tool_result.Proven_post_effect
                       (error_json
                          ~fields:

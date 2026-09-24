@@ -113,11 +113,17 @@ let try_handle_with_outcome
         | None -> []
         | Some path -> [ "path", `String path ]
     in
+    (* The command is built here from the caller's pattern and path, so a gate
+       or path refusal is about what the caller named, while a command this
+       module built and cannot parse is its own. *)
     match dispatch_host_shell_ir ~workdir ir with
     | Error (Gate_reject diagnostic) ->
-      Keeper_tool_execution.failure (error_json ~fields diagnostic)
+      Keeper_tool_execution.failure
+        ~class_:Tool_result.Policy_rejection
+        (error_json ~fields diagnostic)
     | Error (Cannot_parse reason) ->
       Keeper_tool_execution.failure
+        ~class_:Tool_result.Runtime_failure
         (error_json
            ~fields
            (Printf.sprintf
@@ -125,6 +131,7 @@ let try_handle_with_outcome
               (Keeper_tooling.Execute_shell_ir.parse_reason_tag reason)))
     | Error (Too_complex reason) ->
       Keeper_tool_execution.failure
+        ~class_:Tool_result.Runtime_failure
         (error_json
            ~fields
            (Printf.sprintf
@@ -134,6 +141,7 @@ let try_handle_with_outcome
                  (Keeper_tooling.Subset_rewrite.of_reason reason))))
     | Error (Path_reject e) ->
       Keeper_tool_execution.failure
+        ~class_:Tool_result.Policy_rejection
         (error_json ~fields:[ "blocked_cmd", `String cmd ] e)
     | Ok result -> on_ok result
   in
@@ -151,16 +159,20 @@ let try_handle_with_outcome
       && not (Sys.file_exists target)
     then
       Error
-        (sandbox_read_error ~target
-           (Printf.sprintf
-              "path_not_found: %s (host path does not exist; list your \
-               workspace root to see what is actually there before searching)"
-              target))
+        ( Tool_result.Policy_rejection
+        , sandbox_read_error ~target
+            (Printf.sprintf
+               "path_not_found: %s (host path does not exist; list your \
+                workspace root to see what is actually there before searching)"
+               target) )
     else
+      (* An admitted path the backend cannot map, or a backend command that
+         failed, is not claimed as the caller's: a declared endpoint path maps
+         only through the endpoint's configuration. *)
       match
         Keeper_sandbox_read_runner.container_path_of_host ~config ~meta ~host_path:target
       with
-      | Error e -> Error (sandbox_read_error ~target e)
+      | Error e -> Error (Tool_result.Runtime_failure, sandbox_read_error ~target e)
       | Ok cpath -> (
           match
             Keeper_sandbox_read_runner.run_command_with_status
@@ -168,7 +180,7 @@ let try_handle_with_outcome
               ~ok_exit_codes ~config ~meta ~command_argv:(command_argv cpath)
               ~max_bytes ~timeout_sec ()
           with
-          | Error msg -> Error (sandbox_read_error ~target msg)
+          | Error msg -> Error (Tool_result.Runtime_failure, sandbox_read_error ~target msg)
           | Ok payload -> Ok payload)
   in
   let host_search_workdir target =
@@ -212,7 +224,7 @@ let try_handle_with_outcome
                     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
                     ()
                 with
-                | Error response -> Keeper_tool_execution.failure response
+                | Error (class_, response) -> Keeper_tool_execution.failure ~class_ response
                 | Ok (st, out) ->
                   let is_ok =
                     match st with
@@ -239,7 +251,12 @@ let try_handle_with_outcome
                   in
                   if is_ok
                   then Keeper_tool_execution.success_data payload
-                  else Keeper_tool_execution.failure (Yojson.Safe.to_string payload))
+                  else
+                    (* rg's own error exit: the cause is in its stderr, which
+                       is passed on as [error_detail] and not parsed here. *)
+                    Keeper_tool_execution.failure
+                      ~class_:Tool_result.Runtime_failure
+                      (Yojson.Safe.to_string payload))
            in
            match read_target () with
            | Read_target_error refusal ->
@@ -315,6 +332,9 @@ let try_handle_with_outcome
                    in
                    if is_ok
                    then Keeper_tool_execution.success_data payload
-                   else Keeper_tool_execution.failure (Yojson.Safe.to_string payload))))))
+                   else
+                     Keeper_tool_execution.failure
+                       ~class_:Tool_result.Runtime_failure
+                       (Yojson.Safe.to_string payload))))))
   | _ -> None
 ;;

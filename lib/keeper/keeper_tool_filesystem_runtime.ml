@@ -681,9 +681,12 @@ let default_owned_target ~ownership_root ~path =
         | _ -> (ownership_root, path)))
 [@@coverage off]
 
+(* Every refusal here names the caller's path or cwd: an empty path, a cwd
+   outside the ownership root or not a directory, or a cwd that does not
+   exist. *)
 let resolve_owned_read_target ~ownership_root ~path ~cwd =
   if String.equal path ""
-  then Error "path is required"
+  then Error (Keeper_alerting_path.caller_refusal "path is required")
   else
     let cwd_abs, target_rel =
       match cwd with
@@ -695,9 +698,13 @@ let resolve_owned_read_target ~ownership_root ~path ~cwd =
     in
     match Fs_compat.inspect_owned_directory_chain ~ownership_root cwd_abs with
     | Error rejection ->
-      Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+      Error
+        (Keeper_alerting_path.caller_refusal
+           (Fs_compat.owned_directory_chain_rejection_to_string rejection))
     | Ok Fs_compat.Owned_directory_missing ->
-      Error (fs_guidance_text (Cwd_not_directory { cwd = cwd_abs }))
+      Error
+        (Keeper_alerting_path.caller_refusal
+           (fs_guidance_text (Cwd_not_directory { cwd = cwd_abs })))
     | Ok (Fs_compat.Owned_directory _) ->
       let target =
         if Filename.is_relative target_rel
@@ -708,7 +715,10 @@ let resolve_owned_read_target ~ownership_root ~path ~cwd =
 ;;
 
 let read_owned_bytes ~ownership_root ~path ?cwd ~max_bytes () =
-  let* target = resolve_owned_read_target ~ownership_root ~path ~cwd in
+  let* target =
+    resolve_owned_read_target ~ownership_root ~path ~cwd
+    |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message)
+  in
   match Fs_compat.load_owned_regular_file_prefix ~ownership_root ~max_bytes target with
   | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
   | Ok None -> Error "owned file is missing"
@@ -716,11 +726,25 @@ let read_owned_bytes ~ownership_root ~path ?cwd ~max_bytes () =
 ;;
 
 let read_complete_owned_bytes ~ownership_root ~path ?cwd () =
-  let* target = resolve_owned_read_target ~ownership_root ~path ~cwd in
+  let* target =
+    resolve_owned_read_target ~ownership_root ~path ~cwd
+    |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message)
+  in
   match Fs_compat.load_owned_regular_file ~ownership_root target with
   | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
   | Ok None -> Error "owned file is missing"
   | Ok (Some bytes) -> Ok bytes
+;;
+
+(* A path that crosses the ownership boundary or names no regular file is the
+   caller's to correct; a file that changed under the read or an I/O error is
+   the runtime's. *)
+let owned_read_failure_class (error : Fs_compat.owned_regular_file_read_error) =
+  match error.failure with
+  | Fs_compat.Ownership_boundary_rejected _ | Fs_compat.Path_is_not_regular_file _ ->
+    Tool_result.Policy_rejection
+  | Fs_compat.Filesystem_identity_changed _ | Fs_compat.Owned_file_operation_failed _ ->
+    Tool_result.Runtime_failure
 ;;
 
 let handle_owned_read_file_with_outcome
@@ -731,8 +755,10 @@ let handle_owned_read_file_with_outcome
   let max_bytes = read_file_default_max_bytes in
   let cwd = string_opt_nonempty "cwd" args in
   match read_line_window_of_args args, resolve_owned_read_target ~ownership_root ~path ~cwd with
-  | Error window_error, _ -> Keeper_tool_execution.failure (error_json window_error)
-  | Ok _, Error detail -> Keeper_tool_execution.failure (error_json detail)
+  | Error window_error, _ ->
+    Keeper_tool_execution.failure ~class_:Tool_result.Policy_rejection (error_json window_error)
+  | Ok _, Error (refusal : Keeper_alerting_path.path_refusal) ->
+    Keeper_tool_execution.failure ~class_:refusal.failure_class (error_json refusal.message)
   | Ok window, Ok target ->
     let fetch_bytes = read_window_fetch_bytes ~max_bytes window in
     (match
@@ -743,11 +769,13 @@ let handle_owned_read_file_with_outcome
      with
      | Error error ->
        Keeper_tool_execution.failure
+         ~class_:(owned_read_failure_class error)
          (error_json
             ~fields:[ "path", `String target ]
             (Fs_compat.owned_regular_file_read_error_to_string error))
      | Ok None ->
        Keeper_tool_execution.failure
+         ~class_:Tool_result.Policy_rejection
          (missing_file_error_json
             ~cwd
             ~raw_path:(Some path)
@@ -764,6 +792,7 @@ let handle_owned_read_file_with_outcome
         with
         | Error `Offset_beyond_scan ->
           Keeper_tool_execution.failure
+            ~class_:Tool_result.Policy_rejection
             (error_json
                ~fields:
                  [ "path", `String target
@@ -2730,8 +2759,13 @@ let handle_file_write_content_with_outcome
            run
        with
        | Ok attempt -> file_write_attempt_to_execution ~config attempt
+       (* The path was admitted above, and a refusal the write can name comes
+          back as [Ok (Write_failed _)] with its class. What arrives here is
+          the rest: the sandbox isolation invariant, the parent chain, file
+          permissions, the effect projection. *)
        | Error msg ->
          Keeper_tool_execution.failure
+           ~class_:Tool_result.Runtime_failure
            (error_json ~fields:[ "path", `String target ] msg))
   in
   let handle_append () =
@@ -2857,8 +2891,13 @@ let handle_file_write_content_with_outcome
            run
        with
        | Ok attempt -> file_write_attempt_to_execution ~config attempt
+       (* The path was admitted above, and a refusal the write can name comes
+          back as [Ok (Write_failed _)] with its class. What arrives here is
+          the rest: the sandbox isolation invariant, the parent chain, file
+          permissions, the effect projection. *)
        | Error msg ->
          Keeper_tool_execution.failure
+           ~class_:Tool_result.Runtime_failure
            (error_json ~fields:[ "path", `String target ] msg))
   in
   if String.trim path = ""
@@ -3182,8 +3221,11 @@ let handle_file_write_content_with_outcome
                    run
                with
                | Ok attempt -> file_write_attempt_to_execution ~config attempt
+               (* As for the atomic and append writes above: what is not an
+                  [Ok (Write_failed _)] is the runtime's. *)
                | Error msg ->
                  Keeper_tool_execution.failure
+                   ~class_:Tool_result.Runtime_failure
                    (error_json ~fields:[ "path", `String target ] msg))))
     | Ok Overwrite ->
       handle_atomic_content_write

@@ -38,6 +38,15 @@ let failed execution =
 
 let output execution = execution.Execution.raw_output
 
+(* Whose it is to fix: a refused sentence or id is the caller's
+   (policy_rejection), a full world is a state to change first
+   (workflow_rejection). *)
+let failure_class execution =
+  match execution.Execution.disposition with
+  | Tool_result.Failed failure_class ->
+    Some (Tool_result.tool_failure_class_to_string failure_class)
+  | Tool_result.Completed () | Tool_result.Deferred () -> None
+
 let write ~base_path ?(keeper = "lane-smith") args =
   Tools.write_with_outcome
     ~config:(Masc.Workspace.default_config base_path)
@@ -132,12 +141,14 @@ let test_a_written_norm_reaches_the_turn_prompt () =
 
 let test_an_empty_norm_is_refused () =
   with_world (fun base_path ->
-      Alcotest.(check bool)
-        "a blank sentence is refused" true
-        (failed (write ~base_path (`Assoc [ "text", `String "   " ])));
-      Alcotest.(check bool)
-        "a missing sentence is refused" true
-        (failed (write ~base_path (`Assoc [])));
+      Alcotest.(check (option string))
+        "a blank sentence is refused as the caller's to correct"
+        (Some "policy_rejection")
+        (failure_class (write ~base_path (`Assoc [ "text", `String "   " ])));
+      Alcotest.(check (option string))
+        "a missing sentence is refused as the caller's to correct"
+        (Some "policy_rejection")
+        (failure_class (write ~base_path (`Assoc [])));
       Alcotest.(check int) "nothing was written" 0
         (List.length (held ~base_path)))
 
@@ -146,13 +157,17 @@ let test_the_byte_ceiling_blocks_the_write_that_would_cross_it () =
       let line = String.make 200 'x' in
       let rec fill written =
         let execution = write ~base_path (`Assoc [ "text", `String line ]) in
-        if failed execution then written
+        if failed execution then (written, execution)
         else if written > 100 then
           Alcotest.fail "the ceiling never blocked a write"
         else fill (written + 1)
       in
-      let written = fill 0 in
+      let written, blocked = fill 0 in
       Alcotest.(check bool) "some writes landed first" true (written > 0);
+      Alcotest.(check (option string))
+        "a full world is a state to change first, not a bad sentence"
+        (Some "workflow_rejection")
+        (failure_class blocked);
       let rendered = Render.articles (held ~base_path) in
       Alcotest.(check bool)
         (Printf.sprintf "held articles stay under the ceiling (%d bytes)"
@@ -255,11 +270,14 @@ let test_removing_takes_the_norm_out () =
 let test_removing_an_id_the_world_does_not_hold_is_a_failure () =
   with_world (fun base_path ->
       let execution = remove ~base_path ("a-" ^ String.make 32 'f') in
-      Alcotest.(check bool)
-        "an id nobody wrote does not report success" true (failed execution);
-      Alcotest.(check bool)
-        "a hand-written id is refused before the ledger is touched" true
-        (failed (remove ~base_path "a-placeholder")))
+      Alcotest.(check (option string))
+        "an id nobody wrote does not report success"
+        (Some "policy_rejection")
+        (failure_class execution);
+      Alcotest.(check (option string))
+        "a hand-written id is refused before the ledger is touched"
+        (Some "policy_rejection")
+        (failure_class (remove ~base_path "a-placeholder")))
 
 (* #38354: a ledger that exists but cannot be read is not a world without
    norms. The prompt builder used to log and render the same text a fresh

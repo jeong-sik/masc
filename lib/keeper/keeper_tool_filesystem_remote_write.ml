@@ -102,8 +102,8 @@ let handle_content_with_endpoint
   =
   let content () = match content with Some bytes -> bytes | None -> invalid_arg "Patch has no replacement content" in
   let path = Safe_ops.json_string ~default:"" "path" args in
-  let failure ?class_ ~target message =
-    Keeper_tool_execution.failure ?class_ (error_json ~fields:[ "path", `String target ] message)
+  let failure ~class_ ~target message =
+    Keeper_tool_execution.failure ~class_ (error_json ~fields:[ "path", `String target ] message)
   in
   if String.trim path = ""
   then

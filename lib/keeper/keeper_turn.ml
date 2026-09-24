@@ -425,6 +425,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
    reaching this function. *)
 let run_keeper_invocation_turn_admitted_inner
       ~operation_id
+      ~(input_speaker : Keeper_input_speaker.t)
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -696,7 +697,7 @@ let run_keeper_invocation_turn_admitted_inner
              | Workspace_memory_publication.Unavailable detail ->
                Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
              | Missing | Available _ -> ());
-            let build_turn_prompt ~base_system_prompt ~messages:_
+            let build_turn_prompt ~base_system_prompt:_ ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
               (* Durable memory arrives from Memory OS facts recall
@@ -764,14 +765,10 @@ let run_keeper_invocation_turn_admitted_inner
                   ~telemetry_feedback_text
                   ~turn_instructions_text
               in
-              (* === HARD CONSTRAINTS (stay in system_prompt) === *)
-              (* The model-facing stable contract is shared with autonomous
-                 turns. [base_system_prompt] is the checkpoint bootstrap
-                 prompt assembled by [Keeper_run_context]; using it here was
-                 the last production split between direct and autonomous
-                 Keeper behavior. Channel-specific input remains below in
-                 [dynamic_context] and the persisted user message. *)
-              { system_prompt = base_system_prompt; dynamic_context; dynamic_context_for_tools = None }
+              (* The system prompt is the base prompt [Keeper_run_context]
+                 built, shared with autonomous turns. Channel-specific input
+                 stays in [dynamic_context] and the persisted user message. *)
+              { dynamic_context; dynamic_context_for_tools = None }
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();
@@ -830,6 +827,11 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~user_message:(match official_checkpoint_resume with
                                       | Some _ -> Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id
                                       | None -> message)
+		                                ~input_speaker:(match official_checkpoint_resume with
+                                      | Some _ ->
+                                        Keeper_input_speaker.Host_prompt
+                                          Keeper_input_speaker.Official_client_resume
+                                      | None -> input_speaker)
 		                                ~turn_kind:Turn_record.Direct
                                 ~repetition_execution
 		                                ~skill_snapshot
@@ -1090,6 +1092,7 @@ let run_keeper_invocation_turn_admitted_inner
    autonomous lane's turn cleanup does. *)
 let run_keeper_invocation_turn_admitted
       ~operation_id
+      ~input_speaker
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -1132,6 +1135,7 @@ let run_keeper_invocation_turn_admitted
   match
     run_keeper_invocation_turn_admitted_inner
       ~operation_id
+      ~input_speaker
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -1155,6 +1159,7 @@ let run_keeper_invocation_turn_admitted
 let handle_keeper_msg_admitted
       ~operation_id
       ~admission_token:_
+      ~input_speaker
       ?on_text_delta
       ?on_event
       ?on_tool_stream_observation
@@ -1170,6 +1175,7 @@ let handle_keeper_msg_admitted
   in
   run_keeper_invocation_turn_admitted
     ~operation_id
+    ~input_speaker
     ?on_text_delta
     ?on_event
     ?on_tool_stream_observation

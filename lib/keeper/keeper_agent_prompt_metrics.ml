@@ -3,14 +3,12 @@
 module Canonical_tool = Agent_core.Canonical_tool
 
 (** Structured prompt result from [build_turn_prompt] callback.
-    [system_prompt] contains hard constraints (identity, policy guards,
-    tool guidance, direct-reply mode) that must stay in the system prompt.
     [dynamic_context] contains soft context (continuity, skill route,
     worktree changes, turn instructions) injected via AGENT_CORE
-    [extra_system_context] at request assembly. *)
+    [extra_system_context] at request assembly. The system prompt is the
+    run context's base prompt and is not returned here (#38354). *)
 type turn_prompt =
-  { system_prompt : string
-  ; dynamic_context : string
+  { dynamic_context : string
   ; dynamic_context_for_tools : (Agent_core.Tool.t list -> string) option
       (** Optional transmission view, evaluated only after the actual offered
           tool surface is known. [dynamic_context] remains the full source. *)

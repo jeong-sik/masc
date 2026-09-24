@@ -64,7 +64,10 @@ type error =
       { line : int
       ; error : Keeper_turn_boundaries.read_error
       }
-      (** A refused line beyond the official position (RFC §4.4 row 2c). *)
+      (** A refused line beyond the official position (RFC §4.4 row 2c). It
+          holds the official lines only (RFC §4.10): a pass whose atom part
+          has a range reads it and advances the atom position, and a pass
+          answers with this error once its atom part has nothing to read. *)
   | Fragment_store_unreadable of
       { trace_id : string
       ; file : Keeper_turn_fragments.file

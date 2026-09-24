@@ -95,6 +95,7 @@ val surface_context_to_instructions : Yojson.Safe.t -> string option
 val handle_keeper_msg_admitted :
   operation_id:Keeper_chat_operation.Operation_id.t ->
   admission_token:Keeper_turn_dispatch_authority.token ->
+  input_speaker:Keeper_input_speaker.t ->
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_tool_stream_observation:
@@ -108,7 +109,8 @@ val handle_keeper_msg_admitted :
   dispatch
 (** Execute a direct message under an already-held chat admission token. Only
     the Owner operation child uses this path, after atomically claiming the
-    latest durable operation body. *)
+    latest durable operation body. [input_speaker] is who sent it, decided by
+    the route from the typed request (RFC-0468 §3.2). *)
 
 (** Stop a running keeper agent. *)
 val handle_keeper_down : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result

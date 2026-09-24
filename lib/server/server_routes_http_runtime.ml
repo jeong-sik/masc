@@ -297,7 +297,9 @@ let make_health_probe_fields ?timing ?(listener = "http/1.1") ?full_health_url
       ("startup", Server_startup_state.to_yojson ());
       ("schedule_runner", schedule_runner_status_json ());
       ("runtime_startup_degradation",
-       Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ()));
+       Runtime.startup_degradation_to_yojson
+         ~exact_slot_body_deadline_gaps:(Runtime.exact_slot_body_deadline_gaps ())
+         (Runtime.startup_degradation ()));
       ("dashboard_surface",
        measure_health_phase timing Server_timing.Health_dashboard_surface
          Web_dashboard.surface_status_json);
@@ -519,7 +521,9 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
       (Otel_metric_store.metric_total "masc_lazy_task_boot_guard_fired_total")
   in
   let runtime_startup_degradation_json =
-    Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ())
+    Runtime.startup_degradation_to_yojson
+         ~exact_slot_body_deadline_gaps:(Runtime.exact_slot_body_deadline_gaps ())
+         (Runtime.startup_degradation ())
   in
   let keeper_config_operator_action_required = keeper_config_schema_blocking in
   (* The sections come first and the rollup reads them, rather than the rollup

@@ -140,7 +140,7 @@ type provider =
         this provider, including connection, response headers and the full
         response body. [None] declares no body deadline; an exact-output
         lane slot on this provider is then refused when the configuration is
-        read or saved ([Runtime.Exact_slot_body_deadline_absent], #38779),
+        read or saved ([Runtime.Exact_slot_body_deadlines_absent], #38779),
         and a target that reaches plan admission without one is refused there
         (Missing_deadline). This does not replace [connect_timeout_s] or
         ordinary Keeper per-call body deadlines. *)

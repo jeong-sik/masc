@@ -982,6 +982,64 @@ let test_first_run_runtime_binds_supporting_lanes () =
     Alcotest.(check string) "failed setup does not change any lane" before (read_file path))
 ;;
 
+(* A connection an older setup wrote declares no [exact-body-timeout-s], and
+   rendering it again yields the same id, so the setup batch keeps its table
+   as it is. Selecting it again points the exact lanes at it; setup writes the
+   key on that provider instead of leaving a file no save would accept
+   (#38779). *)
+let runtime_config_without_exact_deadline =
+  {|
+[runtime]
+default = "openai.gpt"
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.example/v1"
+
+[models.gpt]
+api-name = "gpt"
+max-context = 64000
+tools-support = true
+streaming = true
+
+[openai.gpt]
+|}
+;;
+
+let test_first_run_writes_the_exact_deadline_on_a_provider_without_one () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) @@ fun () ->
+  Masc_test_deps.with_process_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
+  with_model_catalog_content runtime_route_model_catalog @@ fun () ->
+  with_temp_dir "runtime-first-run-exact-deadline" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path runtime_config_without_exact_deadline;
+  (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.failf "setup must add the missing key, got: %s" detail);
+  match Runtime_toml.parse_string (read_file path) with
+  | Error _ -> Alcotest.fail "the config setup wrote must parse"
+  | Ok config ->
+    Alcotest.(check (option (list string))) "setup pointed the Librarian lane at it"
+      (Some [ "openai.gpt" ])
+      (List.find_map
+         (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+            if String.equal lane.id (Standalone_lane.to_id Runtime.Librarian)
+            then Some lane.slot_ids
+            else None)
+         config.exact_output_lane_decls);
+    (match
+       List.find_opt
+         (fun (provider : Runtime_schema.provider) -> String.equal provider.id "openai")
+         config.providers
+     with
+     | None -> Alcotest.fail "setup dropped the provider"
+     | Some provider ->
+       Alcotest.(check bool) "setup declared the exact body deadline" true
+         (Option.is_some provider.exact_body_timeout_s))
+;;
+
 let test_first_run_cli_runtime_binds_supporting_lanes () =
   let snapshot = Runtime.For_testing.snapshot () in
   Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) (fun () ->
@@ -3461,6 +3519,8 @@ let () =
             test_runtime_route_writer_updates_default
         ; Alcotest.test_case "first-run HTTP runtime owns supporting lanes" `Quick
             test_first_run_runtime_binds_supporting_lanes
+        ; Alcotest.test_case "first run writes the exact deadline on a provider without one" `Quick
+            test_first_run_writes_the_exact_deadline_on_a_provider_without_one
         ; Alcotest.test_case "first-run fallback ordering and atomic preservation" `Quick
             test_first_run_fallback_order_and_preservation
         ; Alcotest.test_case "first-run imp binding requires explicit selection" `Quick

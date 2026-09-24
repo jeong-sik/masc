@@ -82,7 +82,7 @@ let expected_plan ~connect ~body =
   |> fun admitted -> EO.admitted_target_with_max_tokens admitted 4096
   |> ready
 
-let with_runtime f =
+let with_runtime_root f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
   Masc_test_deps.with_process_env "OPENAI_API_KEY" (Some "synthetic-no-network") @@ fun () ->
@@ -130,7 +130,9 @@ let with_runtime f =
     | Ok { selected_slots = [ slot ]; _ } -> slot.admitted_target
     | _ -> fail "expected one admitted Librarian slot"
   in
-  f load
+  f ~root load
+
+let with_runtime f = with_runtime_root (fun ~root:_ load -> f load)
 
 let test_body_only_declaration_reaches_exact () =
   with_runtime @@ fun load ->
@@ -174,22 +176,38 @@ let contains ~needle haystack =
 
 (* A connect deadline ends at the response headers, so a provider that
    declares only [connect-timeout-s] would read the Exact body with no
-   deadline (#36979). The file that names such a slot does not load, and the
-   refusal names the slot and its provider (#38779). *)
-let test_connect_only_declaration_is_refused_at_load () =
-  with_runtime @@ fun _load ->
-  let path = Filename.temp_file "exact-runtime-connect-only-" ".toml" in
-  Fun.protect ~finally:(fun () -> Sys.remove path) @@ fun () ->
-  Out_channel.with_open_bin path (fun oc ->
-    output_string oc (runtime_toml ~connect:(Some 17.5) ~body:None));
-  match Runtime.load_list ~config_path:path with
-  | Ok _ -> fail "a connect-only provider behind an Exact slot loaded"
-  | Error (Runtime.Exact_slot_body_deadline_absent { slot_id; provider_id; _ }) ->
-    check string "the refusal names the slot" "openai-responses.probe" slot_id;
-    check string "the refusal names the provider" "openai-responses" provider_id
-  | Error failure ->
-    failf "expected the Exact body deadline refusal, got: %s"
-      (Runtime.to_diagnostic_text ~config_path:path failure)
+   deadline (#36979). Boot loads the file anyway and records the slot as left
+   out, naming it and its provider (#38779). Every lane here names only that
+   slot, so leaving it out empties the mandatory lanes, and the registry is
+   not published: the rule the server already has for a mandatory lane with
+   no usable slot ([Runtime_exact_output_registry.validate_required_lanes],
+   caught at boot as "Exact-output authority unavailable"). *)
+let test_connect_only_declaration_is_left_out_at_boot () =
+  with_runtime_root @@ fun ~root _load ->
+  let path = Filename.concat root "runtime.toml" in
+  Fs_compat.save_file path (runtime_toml ~connect:(Some 17.5) ~body:None);
+  (match Runtime.init_default ~config_path:path with
+   | Ok () -> ()
+   | Error detail -> failf "boot must not refuse a connect-only provider: %s" detail);
+  let gaps = Runtime.exact_slot_body_deadline_gaps () in
+  check bool "every lane's slot is recorded as left out" true (gaps <> []);
+  List.iter
+    (fun (gap : Runtime.exact_slot_body_deadline_gap) ->
+       check string "the record names the slot" "openai-responses.probe" gap.slot_id;
+       check string "the record names the provider" "openai-responses" gap.provider_id)
+    gaps;
+  (match
+     Server_runtime_bootstrap.For_testing.configure_exact_output_registry
+       ~config_root:(Filename.dirname path)
+       ()
+   with
+   | () -> fail "mandatory lanes emptied by rule 3 were published"
+   | exception Env_config_core.Config_error detail ->
+     check bool "publication stops at a mandatory lane with no admitted target" true
+       (contains ~needle:"has no admitted target" detail));
+  match Registry.current () with
+  | Error Registry.Registry_not_published -> ()
+  | Error _ | Ok _ -> fail "the registry must stay unpublished"
 
 (* Plan admission still refuses a target that reaches it without a body
    deadline -- through a replacement catalog row, or a binding built outside
@@ -213,7 +231,7 @@ let test_missing_body_deadline_refusal_names_provider_and_key () =
          check bool (Printf.sprintf "the refusal says %S" needle) true
            (contains ~needle reason))
       [ "wire_admission_rejected:missing_deadline"
-      ; "\"openai-responses\""
+      ; "provider openai-responses declares no whole-request deadline"
       ; Runtime_schema.exact_body_timeout_s_key
       ; Runtime_schema.connect_timeout_s_key
       ; "response headers"
@@ -229,7 +247,7 @@ let () =
           test_body_only_declaration_reaches_exact;
         test_case "connection and body deadlines remain independent and frozen" `Quick
           test_deadlines_are_independent_and_frozen;
-        test_case "connect-only declaration is refused at load" `Quick
-          test_connect_only_declaration_is_refused_at_load;
+        test_case "connect-only declaration is left out at boot" `Quick
+          test_connect_only_declaration_is_left_out_at_boot;
         test_case "missing body deadline refusal names provider and key" `Quick
           test_missing_body_deadline_refusal_names_provider_and_key ] ]

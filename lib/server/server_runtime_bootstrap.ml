@@ -11,8 +11,6 @@ let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
 
-let agent_core_model_catalog_env_var_name = Runtime.agent_core_model_catalog_env_var_name
-
 (* Seconds withheld from tool-blob maintenance so the boot stages that follow
    it (Runtime_params restore, credential audit, Domain_pool, Keeper gate
    replay, lazy task groups, Discord/Slack/gRPC/WebSocket listeners) still fit
@@ -20,12 +18,14 @@ let agent_core_model_catalog_env_var_name = Runtime.agent_core_model_catalog_env
    reserve carries them at the ~10x slowdown observed when a concurrent build
    saturates the disk, which is the condition under which maintenance
    overran its host's watchdog. *)
-let nonempty_env env name =
-  match env name with
-  | Some value ->
-    let value = String.trim value in
-    if String.equal value "" then None else Some value
-  | None -> None
+(* Whether AGENT_CORE_MODEL_CATALOG names a full replacement is one answer,
+   [Runtime.exact_output_target_source]: installing the catalog, warning
+   about retired config-root catalogs, choosing where the exact targets come
+   from, and whether rule 3 applies to runtime.toml all read it there. *)
+let replacement_catalog_path ?env () =
+  match Runtime.exact_output_target_source ?env () with
+  | Runtime.Replacement_catalog_targets { path } -> Some path
+  | Runtime.Runtime_binding_targets -> None
 
 let existing_file path =
   let path = String.trim path in
@@ -44,13 +44,13 @@ let install_runtime_model_catalog_override ~load_catalog ~set_catalog path =
     raise (Env_config_core.Config_error (Printf.sprintf "catalog %s: %s" path detail))
 
 let configure_agent_core_model_catalog_env
-      ?(env = Sys.getenv_opt)
+      ?env
       ?(agent_core_catalog = Llm_provider.Model_catalog.global)
       ?(load_catalog = Llm_provider.Model_catalog.load_file)
       ?(set_catalog = Llm_provider.Model_catalog.set_global)
       ()
   =
-  match nonempty_env env agent_core_model_catalog_env_var_name with
+  match replacement_catalog_path ?env () with
   | Some path ->
     install_runtime_model_catalog_override ~load_catalog ~set_catalog path;
     Log.Misc.info
@@ -68,11 +68,11 @@ let configure_agent_core_model_catalog_env
     None
 
 let warn_ignored_config_root_full_catalogs
-      ?(env = Sys.getenv_opt)
+      ?env
       ~config_root
       ()
   =
-  if Option.is_none (nonempty_env env agent_core_model_catalog_env_var_name)
+  if Option.is_none (replacement_catalog_path ?env ())
   then
     [ "models.toml"; "agent-core-models.toml" ]
     |> List.iter (fun filename ->
@@ -221,7 +221,22 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
 ;;
 
 let warn_rejected_exact_output_slots registry =
-  let rejected = Runtime_exact_output_registry.rejected_slots registry in
+  (* A slot left out for rule 3 is rejected here too, because its target was
+     never handed to the resolver. Its cause is already named, one WARN per
+     slot, by [warn_exact_slot_body_deadline_gaps]; diagnosing it again would
+     call it a subscription CLI or a typo. It is counted in the summary. *)
+  let gaps = Runtime.exact_slot_body_deadline_gaps () in
+  let left_out_for_deadline (slot : Runtime_exact_output_registry.rejected_slot) =
+    List.exists
+      (fun (gap : Runtime.exact_slot_body_deadline_gap) ->
+         String.equal gap.lane_id slot.lane_id && String.equal gap.slot_id slot.slot_id)
+      gaps
+  in
+  let all_rejected = Runtime_exact_output_registry.rejected_slots registry in
+  let deadline_rejected = List.filter left_out_for_deadline all_rejected in
+  let rejected =
+    List.filter (fun slot -> not (left_out_for_deadline slot)) all_rejected
+  in
   let configured_runtime slot_id =
     Option.map
       (fun (rt : Runtime.t) ->
@@ -283,11 +298,11 @@ let warn_rejected_exact_output_slots registry =
      targets for days on 2026-08-28 while the warnings repeated unread. The
      count per cause and the lane list make the standing config debt visible
      once per publish. *)
-  (match rejected with
+  (match all_rejected with
    | [] -> ()
-   | rejected ->
+   | all_rejected ->
      let lanes =
-       rejected
+       all_rejected
        |> List.map (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
               slot.lane_id)
        |> List.sort_uniq String.compare
@@ -296,8 +311,8 @@ let warn_rejected_exact_output_slots registry =
        List.length (List.filter (fun (_, diagnosis) -> predicate diagnosis) diagnoses)
      in
      Log.Server.error
-       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d naming no enabled binding, %d naming a binding that does no exact output, %d whose binding resolved to no catalog row — fix runtime.toml"
-       (List.length rejected)
+       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d naming no enabled binding, %d naming a binding that does no exact output, %d whose binding resolved to no catalog row, %d whose provider declares no %s — fix runtime.toml"
+       (List.length all_rejected)
        (List.length lanes)
        (String.concat ", " lanes)
        (count (function
@@ -311,7 +326,9 @@ let warn_rejected_exact_output_slots registry =
        (count (function
           | Runtime_exact_output_registry.Declared_target_binding_rejected -> true
           | Runtime_exact_output_registry.Unknown_to_both_registries
-          | Runtime_exact_output_registry.Configured_runtime_only _ -> false)))
+          | Runtime_exact_output_registry.Configured_runtime_only _ -> false))
+       (List.length deadline_rejected)
+       Runtime_schema.exact_body_timeout_s_key)
 ;;
 
 (* Publication carries [verifier_exact] cli ids verbatim, because only
@@ -445,6 +462,21 @@ let exact_output_targets_of_runtimes () =
     runtimes
 ;;
 
+(* Rule 3 (#38779) at boot: the server starts, and each exact slot whose HTTP
+   provider declares no [exact-body-timeout-s] is left out of its lane, with
+   one line per slot naming the lane, slot, provider and the key to add. The
+   same list is in the startup degradation report. Logged before the registry
+   is published, so it is said even when leaving the slots out empties a
+   mandatory lane and publication fails. *)
+let warn_exact_slot_body_deadline_gaps gaps =
+  List.iter
+    (fun gap ->
+       Log.Server.warn
+         "exact_output: slot left out until its provider declares a whole-request deadline: %s (connect-timeout-s ends at the response headers and does not bound the body)"
+         (Runtime.exact_slot_body_deadline_gap_to_string gap))
+    gaps
+;;
+
 let configure_exact_output_registry ?config_root () =
   let config_path, lanes =
     load_exact_output_lane_declarations ?config_root ()
@@ -458,7 +490,19 @@ let configure_exact_output_registry ?config_root () =
     | Runtime.Replacement_catalog_targets { path } ->
       Exact_output.Full_replacement_file path, " from full replacement " ^ path
     | Runtime.Runtime_binding_targets ->
-      let targets = exact_output_targets_of_runtimes () in
+      let gaps = Runtime.exact_slot_body_deadline_gaps () in
+      warn_exact_slot_body_deadline_gaps gaps;
+      (* A target that is not handed to the resolver is a slot the registry
+         does not admit; the lane keeps its other slots and its cli_slots. *)
+      let targets =
+        exact_output_targets_of_runtimes ()
+        |> List.filter (fun (target : Exact_output.declared_target) ->
+          not
+            (List.exists
+               (fun (gap : Runtime.exact_slot_body_deadline_gap) ->
+                  String.equal gap.slot_id target.target_ref)
+               gaps))
+      in
       ( Exact_output.Embedded_with_targets targets
       , Printf.sprintf
           " from AGENT_CORE embedded catalog with %d runtime binding(s) as targets"

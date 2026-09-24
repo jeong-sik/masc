@@ -231,6 +231,18 @@ type resolution_failure =
     reason when one was declared under that id, [None] when nothing declared
     it. *)
 
+type exact_slot_body_deadline_gap =
+  { lane_id : string
+  ; slot_id : string
+  ; provider_id : string
+  }
+(** One [\[runtime.exact_output_lanes.<lane>\]] [slots] entry that names an
+    HTTP runtime whose provider declares no [exact-body-timeout-s] (rule 3,
+    #38779). Not collected under {!Replacement_catalog_targets}. *)
+
+val exact_slot_body_deadline_gap_to_string : exact_slot_body_deadline_gap -> string
+(** One line naming the lane table, the slot, the provider and the key to add. *)
+
 type load_failure =
   | Toml_unparsable of Runtime_toml.parse_error list
   | Undeclared_bindings of (string * drop_reason) list
@@ -250,16 +262,11 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
-  | Exact_slot_body_deadline_absent of
-      { lane_id : string
-      ; slot_id : string
-      ; provider_id : string
-      }
-      (** An exact-output lane's [slots] entry names an HTTP runtime whose
-          provider declares no [exact-body-timeout-s]. Every request on that
-          slot would be refused at plan admission; the load refuses the file
-          instead, naming lane, slot and provider. Not checked under
-          {!Replacement_catalog_targets}. *)
+  | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
+      (** Every exact-output slot whose HTTP provider declares no
+          [exact-body-timeout-s]. Only a save refuses with it; a load keeps
+          the same list as degraded state ({!exact_slot_body_deadline_gaps})
+          and the exact-output registry leaves those slots out. *)
   | Context_marks_exceed_max_context of
       { runtime_id : string
       ; high_water_tokens : int
@@ -357,7 +364,14 @@ type strict_init_error =
 
 val strict_init_error_to_string : strict_init_error -> string
 val startup_degradation_to_string : startup_degradation -> string
-val startup_degradation_to_yojson : startup_degradation option -> Yojson.Safe.t
+val startup_degradation_to_yojson :
+  exact_slot_body_deadline_gaps:exact_slot_body_deadline_gap list ->
+  startup_degradation option ->
+  Yojson.Safe.t
+(** The one startup report health, the runtime inventory and the dashboard
+    read. Catalog-missing bindings and exact slots without a body deadline
+    both make it [degraded]; [exact_slot_body_deadline_gaps] is listed in
+    every shape. *)
 
 val load_list :
   config_path:string
@@ -454,6 +468,11 @@ val get_runtimes : unit -> t list
 val get_runtime_ids : unit -> string list
 val startup_degradation : unit -> startup_degradation option
 val startup_degraded : unit -> bool
+
+val exact_slot_body_deadline_gaps : unit -> exact_slot_body_deadline_gap list
+(** The exact slots the loaded file declares on a provider without
+    [exact-body-timeout-s], computed when the file was loaded. Boot does not
+    refuse the file for them; the exact-output registry leaves them out. *)
 val runtimes_and_media_failover : unit -> t list * string list
 (** Atomically consistent snapshot of configured runtimes plus
     [\[runtime\].media_failover]. Use when both values drive one routing

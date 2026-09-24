@@ -3714,84 +3714,104 @@ let with_runtime_binding_targets f =
   Masc_test_deps.with_process_env Runtime.agent_core_model_catalog_env_var_name None f
 ;;
 
-let test_exact_slot_without_body_deadline_fails_the_load () =
+(* Two lanes on the same deadline-less provider, so a report that stops at
+   the first slot shows up as one entry where two are owed. *)
+let two_http_slot_lanes =
+  http_slot_lane
+  ^ "\n[runtime.exact_output_lanes.hitl_auto_judge]\nslots = [\"local.sample\"]\n"
+;;
+
+(* Load the file the way boot does and hand back the degraded record it left,
+   with the runtime state restored afterwards. *)
+let gaps_after_boot_load content =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) @@ fun () ->
+  with_temp_runtime_toml content (fun path ->
+    (match Runtime.init_default ~config_path:path with
+     | Ok () -> ()
+     | Error detail -> failf "boot must not refuse the file for rule 3: %s" detail);
+    ( Runtime.exact_slot_body_deadline_gaps ()
+    , Runtime.startup_degradation_to_yojson
+        ~exact_slot_body_deadline_gaps:(Runtime.exact_slot_body_deadline_gaps ())
+        (Runtime.startup_degradation ()) ))
+;;
+
+let gap_triples gaps =
+  List.map
+    (fun (gap : Runtime.exact_slot_body_deadline_gap) ->
+       Printf.sprintf "%s/%s/%s" gap.lane_id gap.slot_id gap.provider_id)
+    gaps
+;;
+
+(* Boot does not stop for rule 3 (owner decision, #38779): the file loads,
+   and every offending slot is kept as a degraded record the startup report
+   names, with the key to add. *)
+let test_exact_slot_without_body_deadline_loads_degraded () =
   with_runtime_binding_targets @@ fun () ->
-  with_temp_runtime_toml
-    (exact_deadline_runtime_toml ~body_timeout:None ~lane:http_slot_lane)
-    (fun path ->
-       match Runtime.load_list ~config_path:path with
-       | Ok _ -> fail "an exact slot whose provider declares no body deadline must not load"
-       | Error
-           (Runtime.Exact_slot_body_deadline_absent { lane_id; slot_id; provider_id } as
-            failure) ->
-         check string "names the lane" "librarian_exact" lane_id;
-         check string "names the slot" "local.sample" slot_id;
-         check string "names the provider" "local" provider_id;
-         let text = Runtime.to_diagnostic_text ~config_path:path failure in
-         List.iter
-           (fun needle ->
-              check bool
-                (Printf.sprintf "the diagnostic says %S" needle)
-                true
-                (String_util.contains_substring text needle))
-           [ "[runtime.exact_output_lanes.librarian_exact]"
-           ; "\"local.sample\""
-           ; "[providers.local]"
-           ; Runtime_schema.exact_body_timeout_s_key
-           ; Runtime_schema.connect_timeout_s_key
-           ]
-       | Error failure ->
-         failf
-           "expected the exact body deadline failure, got: %s"
-           (Runtime.to_diagnostic_text ~config_path:path failure))
+  let gaps, report =
+    gaps_after_boot_load
+      (exact_deadline_runtime_toml ~body_timeout:None ~lane:two_http_slot_lanes)
+  in
+  check (list string) "every offending lane, slot and provider is recorded"
+    [ "librarian_exact/local.sample/local"; "hitl_auto_judge/local.sample/local" ]
+    (gap_triples gaps);
+  let open Yojson.Safe.Util in
+  check string "the startup report is degraded" "degraded"
+    (report |> member "status" |> to_string);
+  check string "and says why" "exact_slot_body_deadline_absent"
+    (report |> member "terminal_reason" |> to_string);
+  check int "and lists each slot" 2
+    (report |> member "exact_slot_body_deadline_gaps" |> to_list |> List.length);
+  check bool "the message names the key to add" true
+    (String_util.contains_substring
+       (report |> member "message" |> to_string)
+       Runtime_schema.exact_body_timeout_s_key)
 ;;
 
 let test_exact_slot_with_body_deadline_loads () =
   with_runtime_binding_targets @@ fun () ->
-  with_temp_runtime_toml
-    (exact_deadline_runtime_toml
-       ~body_timeout:(Some exact_deadline_body_timeout_s)
-       ~lane:http_slot_lane)
-    (fun path ->
-       match load_list_text ~config_path:path with
-       | Ok _ -> ()
-       | Error msg -> failf "the declared body deadline must admit the slot: %s" msg)
+  let gaps, report =
+    gaps_after_boot_load
+      (exact_deadline_runtime_toml
+         ~body_timeout:(Some exact_deadline_body_timeout_s)
+         ~lane:two_http_slot_lanes)
+  in
+  check (list string) "a declared body deadline leaves nothing out" [] (gap_triples gaps);
+  check string "and the startup report stays ok" "ok"
+    Yojson.Safe.Util.(report |> member "status" |> to_string)
 ;;
 
 (* Official clients are not HTTP targets: the rule reads [slots] of HTTP
-   runtimes only, so the same provider without the key still loads when the
-   lane walks official clients. *)
+   runtimes only, so the same provider without the key records nothing when
+   the lane walks official clients. *)
 let test_exact_cli_slots_carry_no_body_deadline_rule () =
   with_runtime_binding_targets @@ fun () ->
-  with_temp_runtime_toml
-    (exact_deadline_runtime_toml
-       ~body_timeout:None
-       ~lane:
-         "[runtime.exact_output_lanes.librarian_exact]\n\
-          slots = []\n\
-          cli_slots = [\"subscription.seeded\"]\n")
-    (fun path ->
-       match load_list_text ~config_path:path with
-       | Ok _ -> ()
-       | Error msg -> failf "cli_slots must not require a body deadline: %s" msg)
+  let gaps, _report =
+    gaps_after_boot_load
+      (exact_deadline_runtime_toml
+         ~body_timeout:None
+         ~lane:
+           "[runtime.exact_output_lanes.librarian_exact]\n\
+            slots = []\n\
+            cli_slots = [\"subscription.seeded\"]\n")
+  in
+  check (list string) "cli_slots carry no body deadline rule" [] (gap_triples gaps)
 ;;
 
 (* Under a replacement catalog the exact targets are its [[targets]] rows,
    which carry their own body_timeout_s; this file's providers are not the
-   targets, so requiring the key here would refuse a file for a value nothing
-   reads. The path is never opened by the load. *)
+   targets, so recording them would report a value nothing reads. The path is
+   never opened by the load. *)
 let test_replacement_catalog_targets_skip_the_body_deadline_rule () =
   Masc_test_deps.with_process_env
     Runtime.agent_core_model_catalog_env_var_name
     (Some "/nonexistent/replacement-catalog.toml")
   @@ fun () ->
-  with_temp_runtime_toml
-    (exact_deadline_runtime_toml ~body_timeout:None ~lane:http_slot_lane)
-    (fun path ->
-       match load_list_text ~config_path:path with
-       | Ok _ -> ()
-       | Error msg ->
-         failf "a replacement catalog owns the target deadlines: %s" msg)
+  let gaps, _report =
+    gaps_after_boot_load
+      (exact_deadline_runtime_toml ~body_timeout:None ~lane:two_http_slot_lanes)
+  in
+  check (list string) "a replacement catalog owns the target deadlines" [] (gap_triples gaps)
 ;;
 
 let test_saving_an_exact_slot_without_body_deadline_is_refused () =
@@ -3802,17 +3822,20 @@ let test_saving_an_exact_slot_without_body_deadline_is_refused () =
       ~body_timeout:(Some exact_deadline_body_timeout_s)
       ~lane:""
   in
-  let refused = exact_deadline_runtime_toml ~body_timeout:None ~lane:http_slot_lane in
+  let refused = exact_deadline_runtime_toml ~body_timeout:None ~lane:two_http_slot_lanes in
   let snapshot = Runtime.For_testing.snapshot () in
   Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) @@ fun () ->
   with_temp_runtime_toml baseline (fun path ->
     (match Runtime.save_config_text ~runtime_config_path:path refused with
      | Ok _receipt -> fail "a save that leaves an exact slot without a body deadline must fail"
      | Error detail ->
-       check bool "the refusal names the lane" true
-         (String_util.contains_substring
-            detail
-            "[runtime.exact_output_lanes.librarian_exact]");
+       List.iter
+         (fun lane_table ->
+            check bool ("the refusal names " ^ lane_table) true
+              (String_util.contains_substring detail lane_table))
+         [ "[runtime.exact_output_lanes.librarian_exact]"
+         ; "[runtime.exact_output_lanes.hitl_auto_judge]"
+         ];
        check bool "the refusal names the missing key" true
          (String_util.contains_substring detail Runtime_schema.exact_body_timeout_s_key));
     check string "the refused save leaves the file as it was" baseline
@@ -4525,7 +4548,9 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check bool "runtime records startup degradation" true
            (Runtime.startup_degraded ());
          let json =
-           Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ())
+           Runtime.startup_degradation_to_yojson
+         ~exact_slot_body_deadline_gaps:(Runtime.exact_slot_body_deadline_gaps ())
+         (Runtime.startup_degradation ())
          in
          let rendered = Yojson.Safe.to_string json in
          check bool "json is operator-visible degraded" true
@@ -5901,8 +5926,8 @@ let () =
             test_verifier_exact_slot_must_name_a_configured_route;
           test_case "sibling exact lanes keep catalog-only slots" `Quick
             test_sibling_exact_lanes_keep_catalog_only_slots;
-          test_case "exact slot without a body deadline fails the load" `Quick
-            test_exact_slot_without_body_deadline_fails_the_load;
+          test_case "exact slot without a body deadline loads degraded" `Quick
+            test_exact_slot_without_body_deadline_loads_degraded;
           test_case "exact slot with a body deadline loads" `Quick
             test_exact_slot_with_body_deadline_loads;
           test_case "exact cli_slots carry no body deadline rule" `Quick

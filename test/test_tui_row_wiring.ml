@@ -59,6 +59,24 @@ let test_the_detail_height_is_read_off_the_line_it_draws () =
   Alcotest.(check int) "and asks that same line for its height" 1
     (calls "approval_detail_rows")
 
+(* A window reading is a position, not a key. The footer fitter reads the
+   hints as key items and gives them up from the back, so a reading packed
+   into that string is the first thing a crowded row drops -- and the verdict
+   detail is the one screen that exists for reading a ruling in full. It said
+   nothing about which part of the ruling was on screen at a hundred, a
+   hundred and thirty or a hundred and sixty columns. [footer_line] carries a
+   [?position] for this, and the pane hands its reading up as an option so the
+   caller cannot spell it back into the hints. *)
+let test_the_verdict_detail_reading_is_a_position_not_a_key () =
+  let calls callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:"render_harness_detail" ~callee
+  in
+  Alcotest.(check int) "the surface draws one footer" 1 (calls "footer_line");
+  Alcotest.(check int) "and does not join the reading onto its keys" 0
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"render_harness_detail" ~literals:[ "%s  %s" ])
+
 (* Whether the reading is live. Forty-two surface renderers in this file end
    their title with [connection_badge]; the roster was the one that did not,
    and it is the surface an operator watches to see which keepers are up. "1
@@ -1101,6 +1119,8 @@ let () =
             `Quick test_the_detail_pane_keeps_the_blocked_gate_reason
         ; Alcotest.test_case "the detail height is read off the line it draws"
             `Quick test_the_detail_height_is_read_off_the_line_it_draws
+        ; Alcotest.test_case "the verdict detail reading is a position" `Quick
+            test_the_verdict_detail_reading_is_a_position_not_a_key
         ; Alcotest.test_case "the title does not count another queue" `Quick
             test_the_title_does_not_count_another_queue
         ; Alcotest.test_case "the Overview row counts every approval list"

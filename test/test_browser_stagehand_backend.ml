@@ -166,15 +166,19 @@ let test_open_outlives_its_caller () =
   check bool "its browser is running" false (the_session h).stopped
 ;;
 
-let test_page_verb_follows_its_caller () =
+let test_sentence_caller_retires_its_session () =
   with_backend
   @@ fun h ->
   ignore (data (Backend.execute h.backend open_));
   ignore (data (Backend.execute h.backend Lane.Tabs_list));
+  let first = the_session h in
   leave_during h (Lane.Page_instruct { tab_id = 0; instruction = "click Buy" });
   h.settle ();
   check bool "the call was cancelled with its caller" true h.behaviour.act_cancelled;
-  check bool "the session stays open" true (is_open h)
+  check bool "the abandoned session was stopped" true first.stopped;
+  check bool "the backend is closed" false (is_open h);
+  check bool "the next open makes a new session" false (flag "reused" (data (Backend.execute h.backend open_)));
+  check int "two distinct sessions existed" 2 (List.length !(h.sessions))
 ;;
 
 let test_close_does_not_wait_forever () =
@@ -206,6 +210,6 @@ let () =
       test_case "close waits for the runtime only so long" `Quick test_close_does_not_wait_forever;
       test_case "status reports why a session ended" `Quick test_status_reports_an_ended_session;
     ];
-    "callers", [ test_case "a page verb is cancelled with its caller" `Quick test_page_verb_follows_its_caller ];
+    "callers", [ test_case "a sentence whose caller leaves retires its session" `Quick test_sentence_caller_retires_its_session ];
   ]
 ;;

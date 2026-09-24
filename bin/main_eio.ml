@@ -3364,7 +3364,10 @@ let sandbox_image_promote_exit base_path runtime name reference =
    catalog has no [base] build for the chosen store, it builds one under a new
    tag and promotes it. A promoted build is left alone. One the catalog names
    and the store no longer has is not rebuilt behind the operator's back:
-   the catalog would then name a build nobody promoted. *)
+   the catalog would then name a build nobody promoted. A catalog with no
+   [base] name at all is refused rather than built for: promote only adds
+   builds to names the catalog has, and a catalog started from the shipped
+   one always has [base], so that one was edited by hand. *)
 let sandbox_image_ensure_exit ~base_path runtime =
   let ( let* ) = Result.bind in
   let recipe = Keeper_sandbox_image_version.base_embedded in

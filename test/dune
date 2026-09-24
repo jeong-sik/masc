@@ -2887,6 +2887,8 @@
 
 (include stanzas/test_local_review_script.inc)
 
+(include stanzas/test_review_approve_guard.inc)
+
 (include stanzas/test_masc_dirname_ssot.inc)
 
 (include stanzas/test_masc_error_dashboard_auth_code.inc)
@@ -2952,6 +2954,7 @@
 
 (include stanzas/test_keeper_shutdown_reconciliation_settlement.inc)
 (include stanzas/test_keeper_shutdown_blocked_purge_release.inc)
+(include stanzas/test_keeper_shutdown_fence_stage.inc)
 
 (include stanzas/test_keeper_shutdown_ownerless_admission_release.inc)
 (include stanzas/test_keeper_shutdown_reconciliation_http.inc)

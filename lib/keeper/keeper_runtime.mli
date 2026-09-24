@@ -20,6 +20,7 @@ type boot_meta_failure_cause =
   | Meta_read_error
   | Config_invalid
   | Sandbox_profile_required
+  | Sandbox_image_required
   | Materialization_failed
 (** Structured cause for the last boot/materialization failure.  Labels are
     rendered only at JSON/log boundaries; fleet recovery policy should pattern

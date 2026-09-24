@@ -938,7 +938,7 @@ let test_keeper_up_accepts_live_traffic_fields () =
     `Assoc
       [ "name", `String "alpha"
       ; "instructions", `String "do the thing"
-      ; "sandbox_profile", `String "docker"
+      ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
       ; "mention_targets", `List [ `String "alpha" ]
       ; "activation_mode", `String "autonomous"
       ; "runtime_id", `String "rt"

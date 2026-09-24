@@ -9893,6 +9893,7 @@ let test_decode_connector_row_holds_a_korean_body_whole () =
       [ ("id", `String "appr-9");
         ("keeper_name", `String "messenger");
         ("tool_name", `String "connector_post");
+        ("phase", `String "queued");
         ("input_preview", `String "{\"connector\":\"discord\",\"channel_id\"");
         ( "input",
           `Assoc

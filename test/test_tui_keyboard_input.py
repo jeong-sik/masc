@@ -3939,6 +3939,9 @@ def blocked_gate_detail_http_fixtures() -> HttpFixtures:
                     },
                     "summary_status": {"status": "failed", "reason": reason},
                     "summary_attempt_disposition": {"code": "settled"},
+                    # What the server derives from a settled attempt whose
+                    # summary failed (phase_of_disposition_and_summary).
+                    "phase": "blocked",
                 }
             ],
             "approval_queue_state": {"state": "ready"},
@@ -5737,7 +5740,8 @@ def seed_playground_workspace(base_path: str) -> None:
     all."""
     Path(base_path, ".masc", "config", "keepers").mkdir(parents=True, exist_ok=True)
     Path(base_path, ".masc", "config", "keepers", "alpha.toml").write_text(
-        '[keeper]\nsandbox_profile = "docker"\n', encoding="utf-8"
+        '[keeper]\nsandbox_profile = "docker"\nsandbox_image = "masc-sandbox:general"\n',
+        encoding="utf-8"
     )
     Path(base_path, ".masc", "playground", "docker", "alpha").mkdir(
         parents=True, exist_ok=True

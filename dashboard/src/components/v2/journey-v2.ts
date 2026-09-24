@@ -87,7 +87,6 @@ const EV_BADGE: Readonly<Record<string, readonly [string, string, string]>> = {
   agent_core_tool: ['TOOL', 'warn', 'tool'],
   keeper_tool_call: ['TOOL', 'warn', 'tool'],
   agent_core_event: ['Agent Core', 'info', 'lifecycle'],
-  keeper_handoff: ['HAND', 'info', 'lifecycle'],
   keeper_phase_changed: ['PHASE', 'info', 'lifecycle'],
   broadcast: ['CAST', 'info', 'message'],
   board_post: ['POST', 'info', 'message'],

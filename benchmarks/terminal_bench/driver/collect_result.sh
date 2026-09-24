@@ -171,6 +171,17 @@ fi
 source "$BENCH/driver/endpoint_env.sh"
 left_out_json="$(bench_env_left_out_json "$BENCH/endpoint-env-left-out.tsv")" || left_out_json='[]'
 
+# --- which runtime answered each keeper turn ---
+# The candidates a trial declared are in its config; this is which of them
+# actually answered (answered_by.sh). null when nothing was recorded or a row
+# could not be read, never a partial count.
+# shellcheck source-path=SCRIPTDIR source=answered_by.sh
+source "$BENCH/driver/answered_by.sh"
+answers_json="$(bench_answered_by_json "$MASC_BASE_PATH/.masc/keepers")" || answers_json='null'
+if ! printf '%s' "$answers_json" | jq -e 'type == "object" or type == "null"' >/dev/null 2>&1; then
+  answers_json='null'
+fi
+
 # Belt-and-suspenders: --argjson needs each value to be exactly one JSON text.
 # A multi-line/invalid `final` (or a non-numeric counter) must degrade to a
 # placeholder instead of killing the episode with jq's exit 2.
@@ -207,6 +218,7 @@ jq -n \
   --argjson duplicate_tool_calls "${dup_calls:-0}" \
   --argjson usage "$usage_json" \
   --argjson endpoint_env_left_out "$left_out_json" \
+  --argjson answers "$answers_json" \
   --slurpfile final_raw "$final_file" \
   '{state:$state, interrupted:$interrupted, keepers_stopped:$keepers_stopped,
     duration_ms:$duration_ms,
@@ -217,6 +229,9 @@ jq -n \
     cache_creation_tokens:($usage.cache_creation_tokens // null),
     cache_read_tokens:($usage.cache_read_tokens // null),
     endpoint_env_left_out:$endpoint_env_left_out,
+    answered_by:($answers.answered_by // null),
+    failed_on:($answers.failed_on // null),
+    turns_unanswered:($answers.turns_unanswered // null),
     final:($final_raw | map(select(type=="object")) | last // {})}' \
   > "$tmp_result"
 if episode_reported_interrupted; then

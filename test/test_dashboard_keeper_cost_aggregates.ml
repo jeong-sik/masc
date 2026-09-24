@@ -5,7 +5,6 @@ module Dashboard_http_keeper = Dashboard_http_keeper
 module Keeper_types = Keeper_types
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_metrics_record = Masc.Keeper_metrics_record
-module Keeper_snapshot_unread = Masc.Keeper_snapshot_unread
 
 let test_counter = ref 0
 
@@ -140,7 +139,7 @@ let test_only_current_turn_rows_count_as_cost_samples () =
          ]);
     ]);
   let aggregate =
-    Dashboard_http_keeper.keeper_cost_aggregates_json ~unread_keepers:[]
+    Dashboard_http_keeper.keeper_cost_aggregates_json
       ~config ~keepers:[ meta ] ~window_minutes:60 ~now_ts:(Unix.gettimeofday ())
     |> keeper_item
   in
@@ -186,7 +185,7 @@ let run_keeper_aggregate ~prefix ~keeper_name rows =
   let config = Workspace.default_config base_dir in
   ignore (Workspace.init config ~agent_name:None);
   List.iter (append_metric config keeper_name) rows;
-  Dashboard_http_keeper.keeper_cost_aggregates_json ~unread_keepers:[]
+  Dashboard_http_keeper.keeper_cost_aggregates_json
     ~config ~keepers:[ make_meta keeper_name ] ~window_minutes:60
     ~now_ts:(Unix.gettimeofday ())
   |> keeper_item
@@ -270,33 +269,27 @@ let test_unread_turn_rows_are_counted () =
   check (float 0.0001) "the sum covers that turn only" 0.25
     (float_field "total_cost_usd" aggregate)
 
-(* #38718: a Keeper whose meta could not be read has no row, so the reply
-   lists it apart with the reason rather than drawing the rest as the whole
-   fleet. *)
-let test_unread_keepers_are_listed () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Masc_test_deps.init_eio_clock env;
-  let config = Workspace.default_config (temp_dir "keeper_cost_unread_meta") in
-  ignore (Workspace.init config ~agent_name:None);
-  let unread =
-    { Keeper_snapshot_unread.name = "ghost"
-    ; reason = Keeper_snapshot_unread.Meta_read_failed "meta.json: unexpected end of input"
-    }
+(* A row whose kind this build cannot read -- another schema, or no
+   record_kind -- may have been a turn, so it is counted with the turn rows
+   that did not read; a heartbeat is not a turn and counts nowhere. *)
+let test_rows_of_an_unreadable_kind_are_counted () =
+  let ts = Unix.gettimeofday () -. 1.0 in
+  let with_field key value fields = (key, value) :: List.remove_assoc key fields in
+  let turn = turn_row ~ts ~cost:(`Float 0.25) ~latency_ms:100 ~total_tokens:10 in
+  let aggregate =
+    run_keeper_aggregate ~prefix:"keeper_cost_unread_kind" ~keeper_name:"kinds"
+      [ turn
+      ; with_field "schema" (`String "keeper.metrics.v0") turn
+      ; List.remove_assoc "record_kind" turn
+      ; Keeper_metrics_record.fields Keeper_metrics_record.Heartbeat
+        @ [ ("ts_unix", `Float ts) ]
+      ]
   in
-  let json =
-    Dashboard_http_keeper.keeper_cost_aggregates_json ~config ~keepers:[]
-      ~unread_keepers:[ unread ] ~window_minutes:60 ~now_ts:(Unix.gettimeofday ())
-  in
-  (* The operator snapshot's shape, so one reader reads both endpoints. *)
-  match
-    Keeper_snapshot_unread.list_of_json (Yojson.Safe.Util.member "keepers_unread" json)
-  with
-  | Ok [ decoded ] ->
-      check string "name" "ghost" decoded.name;
-      check bool "reason" true (decoded.reason = unread.reason)
-  | Ok other -> failf "expected one unread keeper, got %d" (List.length other)
-  | Error err -> fail ("keepers_unread is not the snapshot shape: " ^ err)
+  let read = Yojson.Safe.Util.member "metrics_read" aggregate in
+  check int "another schema and no kind are counted" 2
+    (int_field "unread_turn_rows" read);
+  check int "the readable turn is the one sample" 1
+    (int_field "sample_count" aggregate)
 
 let row_with ~ts ~latency_ms ~cost ~usage =
   Keeper_metrics_record.fields Keeper_metrics_record.Turn
@@ -476,7 +469,7 @@ let aggregate_of_workspace ?(now_ts = Unix.gettimeofday ()) ~prefix ~keeper_name
   let config = Workspace.default_config (temp_dir prefix) in
   ignore (Workspace.init config ~agent_name:None);
   write config;
-  Dashboard_http_keeper.keeper_cost_aggregates_json ~unread_keepers:[]
+  Dashboard_http_keeper.keeper_cost_aggregates_json
     ~config ~keepers:[ make_meta keeper_name ] ~window_minutes ~now_ts
   |> keeper_item
 
@@ -641,7 +634,7 @@ let () =
             test_unreadable_usage_is_unread;
           test_case "unread turn rows are counted" `Quick
             test_unread_turn_rows_are_counted;
-          test_case "unread keepers are listed" `Quick
-            test_unread_keepers_are_listed;
+          test_case "rows of an unreadable kind are counted" `Quick
+            test_rows_of_an_unreadable_kind_are_counted;
         ] );
     ]

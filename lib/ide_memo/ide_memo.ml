@@ -119,6 +119,25 @@ let of_comment comment =
   | Some inner -> parse_body inner
 ;;
 
+let contains ~sub text =
+  let n = String.length text and m = String.length sub in
+  let rec at i = i + m <= n && (String.equal (String.sub text i m) sub || at (i + 1)) in
+  m > 0 && at 0
+;;
+
+(* What ends a line for some reader a memo lands in. A lone CR ends a [//]
+   comment in JS and TS, which also end one at U+2028 and U+2029; NEL
+   (U+0085) is a line end in Unicode-aware readers. The other C0 controls
+   and DEL have no place in one line of text. A tab is text. *)
+let line_break_in text =
+  String.exists
+    (fun c -> (not (Char.equal c '\t')) && (Char.code c < 0x20 || Char.code c = 0x7f))
+    text
+  || contains ~sub:"\xc2\x85" text
+  || contains ~sub:"\xe2\x80\xa8" text
+  || contains ~sub:"\xe2\x80\xa9" text
+;;
+
 let make ~author ~kind ~text =
   let text = String.trim text in
   if String.equal author ""
@@ -127,9 +146,24 @@ let make ~author ~kind ~text =
   then Error "the author may use letters, digits, _ . -"
   else if String.equal text ""
   then Error "the memo has no text"
-  else if String.contains text '\n'
-  then Error "a memo is one line"
+  else if line_break_in text
+  then Error "a memo is one line: the text has a line break or a control character"
   else Ok { author; kind; text }
+;;
+
+(* A line comment runs to the end of the line, and [make] keeps line breaks
+   out of the text. A block comment ends at its closer, and in OCaml a
+   second opener nests, so either inside the text leaves the rest of the
+   line, or of the file, outside the comment. *)
+let breaks_comment markers t =
+  match markers with
+  | Line _ -> None
+  | Block { opens; closes } ->
+    if contains ~sub:closes t.text
+    then Some (Printf.sprintf "the text has %s, which ends the comment early" closes)
+    else if contains ~sub:opens t.text
+    then Some (Printf.sprintf "the text has %s, which opens a comment inside the memo" opens)
+    else None
 ;;
 
 let to_body t =

@@ -67,8 +67,15 @@ val make
   -> text:string
   -> (t, string) result
 (** A memo a writer can print. Refused with the reason when the author has
-    a character outside [A-Za-z0-9_.-], or the text is empty or spans
-    lines. *)
+    a character outside [A-Za-z0-9_.-], or the text is empty or would not
+    stay on one line: a C0 control other than tab (CR included), DEL, NEL,
+    or the Unicode line and paragraph separators. *)
+
+val breaks_comment : markers -> t -> string option
+(** Why the memo's text would not stay inside a comment spelled with
+    [markers]: a block comment's closer ends it early, and its opener nests
+    another one (OCaml) or reads as one. [None] when the text stays inside.
+    {!to_line} prints what it is given; a writer asks this first. *)
 
 val to_body : t -> string
 (** The comment body, without markers: ["masc(alpha) question: why"]. A

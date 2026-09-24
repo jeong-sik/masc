@@ -322,8 +322,8 @@ let test_every_language_with_comments_writes_a_memo_it_reads_back () =
    | Ok line ->
      check string "markdown spells it as an html comment"
        "<!-- masc(alpha) question: why three -->" line
-   | Error refusal ->
-     Alcotest.fail (Lsp_process_manager.memo_line_refusal_to_string refusal));
+   | Error error ->
+     Alcotest.fail (Lsp_process_manager.memo_line_error_to_string error));
   (match Lsp_process_manager.memo_markers_of_path "init.lua" with
    | Ok (Ide_memo.Line "--") -> ()
    | Ok markers ->
@@ -332,17 +332,70 @@ let test_every_language_with_comments_writes_a_memo_it_reads_back () =
    | Error refusal ->
      Alcotest.fail (Lsp_process_manager.memo_line_refusal_to_string refusal));
   (match Lsp_process_manager.memo_line ~path:"data.json" memo with
-   | Error (Lsp_process_manager.No_comment_syntax Lsp_process_manager.Json) -> ()
-   | Error refusal ->
+   | Error (Lsp_process_manager.Unwritable
+              (Lsp_process_manager.No_comment_syntax Lsp_process_manager.Json)) -> ()
+   | Error error ->
      Alcotest.failf "json: wrong refusal: %s"
-       (Lsp_process_manager.memo_line_refusal_to_string refusal)
+       (Lsp_process_manager.memo_line_error_to_string error)
    | Ok line -> Alcotest.failf "json took a memo: %s" line);
   (match Lsp_process_manager.memo_line ~path:"notes.COBOL" memo with
-   | Error (Lsp_process_manager.Extension_unknown ".cobol") -> ()
-   | Error refusal ->
+   | Error (Lsp_process_manager.Unwritable (Lsp_process_manager.Extension_unknown ".cobol")) -> ()
+   | Error error ->
      Alcotest.failf "cobol: wrong refusal: %s"
-       (Lsp_process_manager.memo_line_refusal_to_string refusal)
+       (Lsp_process_manager.memo_line_error_to_string error)
    | Ok line -> Alcotest.failf "cobol took a memo: %s" line)
+;;
+
+(* A memo is inserted into a real source file, so text that ends its
+   comment early turns the rest of the line into code, and in OCaml a
+   string opener turns the rest of the file into a string. Each case is a
+   text the writer used to print as-is. *)
+let test_memo_text_that_would_leave_its_comment_is_refused () =
+  let memo text =
+    { Ide_memo.author = "alpha"; kind = Agent_observation.Comment; text }
+  in
+  let refused path text =
+    match Lsp_process_manager.memo_line ~path (memo text) with
+    | Error (Lsp_process_manager.Breaks_comment _) -> ()
+    | Error error ->
+      Alcotest.failf "%s %S: wrong refusal: %s" path text
+        (Lsp_process_manager.memo_line_error_to_string error)
+    | Ok line -> Alcotest.failf "%s %S was written as %s" path text line
+  in
+  let written path text =
+    match Lsp_process_manager.memo_line ~path (memo text) with
+    | Ok _ -> ()
+    | Error error ->
+      Alcotest.failf "%s %S: refused: %s" path text
+        (Lsp_process_manager.memo_line_error_to_string error)
+  in
+  refused "lib/a.ml" "closes here *) then code";
+  refused "lib/a.ml" "nests (* a second comment";
+  refused "lib/a.ml" "an unmatched \" quote";
+  refused "lib/a.ml" "a {| quoted string";
+  refused "lib/a.ml" "a {id| quoted string";
+  refused "lib/a.ml" "a {%ext| quoted extension";
+  refused "notes/readme.md" "ends --> early";
+  (* The same texts are plain words where the comment runs to the line's
+     end or the language lexes no strings in it. *)
+  written "src/a.ts" "closes here *) then code";
+  written "src/a.ts" "an unmatched \" quote";
+  written "notes/readme.md" "a {| brace and a \" quote";
+  written "lib/a.ml" "a record { x = 1 } and a pipe |> f"
+;;
+
+let test_memo_text_with_a_line_break_is_refused () =
+  List.iter
+    (fun text ->
+      match Ide_memo.make ~author:"alpha" ~kind:Agent_observation.Comment ~text with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.failf "%S was taken as one line" text)
+    [ "two\nlines"; "carriage\rreturn"; "form\012feed"; "del\127ete"; "nel\xc2\x85here"
+    ; "line\xe2\x80\xa8separator"; "paragraph\xe2\x80\xa9separator"
+    ];
+  match Ide_memo.make ~author:"alpha" ~kind:Agent_observation.Comment ~text:"a\ttab" with
+  | Ok _ -> ()
+  | Error why -> Alcotest.failf "a tab was refused: %s" why
 ;;
 
 let () =
@@ -389,6 +442,10 @@ let () =
             test_covered_extensions_are_the_table
         ; test_case "every language with comments writes a memo it reads back" `Quick
             test_every_language_with_comments_writes_a_memo_it_reads_back
+        ; test_case "memo text that would leave its comment is refused" `Quick
+            test_memo_text_that_would_leave_its_comment_is_refused
+        ; test_case "memo text with a line break is refused" `Quick
+            test_memo_text_with_a_line_break_is_refused
         ] )
     ]
 ;;

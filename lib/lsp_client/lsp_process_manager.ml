@@ -267,21 +267,71 @@ let memo_line_refusal_to_string = function
       (lang_id_of_language language)
 ;;
 
-(* The comment line a memo becomes in the file at [path]. One function, so
-   the tool that writes the line and the projection that records the call
-   spell it the same way. *)
-let memo_markers_of_path path =
+(* The language and comment markers of the file at [path]: what the writer
+   spells a memo with and the reader looks for. *)
+let memo_language_of_path path =
   let extension = String.lowercase_ascii (Filename.extension path) in
   match language_of_extension extension with
   | None -> Error (Extension_unknown extension)
   | Some language ->
     (match memo_markers_of_language language with
      | None -> Error (No_comment_syntax language)
-     | Some markers -> Ok markers)
+     | Some markers -> Ok (language, markers))
+;;
+
+let memo_markers_of_path path = Result.map snd (memo_language_of_path path)
+
+type memo_line_error =
+  | Unwritable of memo_line_refusal
+  | Breaks_comment of string
+
+let memo_line_error_to_string = function
+  | Unwritable refusal -> memo_line_refusal_to_string refusal
+  | Breaks_comment why -> "the memo would not stay inside its comment: " ^ why
+;;
+
+(* OCaml lexes string literals inside comments, so a ["] or a quoted-string
+   opener ([{|], [{id|], [{%ext|]) in the text starts a string the comment's
+   closer cannot end, and the rest of the file is read as that string. *)
+let ocaml_string_opener_in text =
+  let n = String.length text in
+  let rec quoted_id_then_bar i =
+    i < n
+    &&
+    match text.[i] with
+    | '|' -> true
+    | 'a' .. 'z' | '_' -> quoted_id_then_bar (i + 1)
+    | _ -> false
+  in
+  let rec from i =
+    i < n
+    &&
+    match text.[i] with
+    | '"' -> true
+    | '{' -> (i + 1 < n && Char.equal text.[i + 1] '%') || quoted_id_then_bar (i + 1) || from (i + 1)
+    | _ -> from (i + 1)
+  in
+  from 0
+;;
+
+let language_breaks_comment language (memo : Ide_memo.t) =
+  match language with
+  | Ocaml ->
+    if ocaml_string_opener_in memo.text
+    then Some "the text has \" or {|, which OCaml reads as a string inside the comment"
+    else None
+  | Typescript | Javascript | Rust | Go | C | Cpp | Swift | Java | Kotlin | Php | Zig | Dart
+  | Scala | Csharp | Python | Ruby | Bash | Yaml | Elixir | Lua | Haskell | Markdown | Json ->
+    None
 ;;
 
 let memo_line ~path (memo : Ide_memo.t) =
-  Result.map (fun markers -> Ide_memo.to_line markers memo) (memo_markers_of_path path)
+  match memo_language_of_path path with
+  | Error refusal -> Error (Unwritable refusal)
+  | Ok (language, markers) ->
+    (match Ide_memo.breaks_comment markers memo, language_breaks_comment language memo with
+     | Some why, _ | None, Some why -> Error (Breaks_comment why)
+     | None, None -> Ok (Ide_memo.to_line markers memo))
 ;;
 
 let covered_extensions () = List.concat_map extensions_of_language all_languages

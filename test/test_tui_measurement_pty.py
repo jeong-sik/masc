@@ -496,6 +496,8 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
                 b"synthetic provider HTTP 503",
             ):
                 assert needle in screen, (needle, screen)
+            assert screen.count(b"JUDGE FAILED") == 1, screen
+            assert b"CAUSE  synthetic provider HTTP 503" in screen, screen
         elif scenario == "malformed":
             assert b"not JSON" in screen and b"must-not-render" not in screen, screen
         elif scenario == "integrity":

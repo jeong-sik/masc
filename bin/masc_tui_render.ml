@@ -6535,8 +6535,10 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
     | R.Provided text -> [ "QUESTION PROVIDED"; text ]
     | R.Generated value -> generation "QUESTION GENERATED" value
   in
-  let failed_generation label (value : R.failed_generation) =
-    [ label ^ " FAILED  " ^ value.error
+  (* The sample header already names which stage failed. Keep the cause on
+     its own line without repeating that status. *)
+  let failed_generation (value : R.failed_generation) =
+    [ "CAUSE  " ^ value.error
     ; "REQUESTED  " ^ value.request.requested_model ^ "  ·  runtime " ^ value.request.runtime_id
     ] @ prepared value.request
     @ (match value.incomplete_response with
@@ -6561,16 +6563,16 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
   let samples = List.concat_map (fun (sample : R.sample) ->
       let style, status, lines = match sample.progress with
         | R.Not_started -> Theme.muted (), "NOT STARTED", []
-        | R.Question_failed failed -> Theme.bad (), "QUESTION FAILED", failed_generation "QUESTION" failed
+        | R.Question_failed failed -> Theme.bad (), "QUESTION FAILED", failed_generation failed
         | R.Question_ready question -> Theme.info (), "INCOMPLETE · QUESTION READY", question_lines question
         | R.Answer_failed (question, failed) -> Theme.bad (), "ANSWER FAILED",
-            question_lines question @ failed_generation "ANSWER" failed
+            question_lines question @ failed_generation failed
         | R.Answer_ready { question; answer } -> Theme.info (), "INCOMPLETE · ANSWER READY",
             question_lines question @ generation "ANSWER" answer
         | R.Judge_failed { question; answer; failure } -> Theme.bad (), "JUDGE FAILED",
             question_lines question @ generation "ANSWER" answer
             @ [ "JUDGE REQUESTED  " ^ failure.request.model ^ "  ·  " ^ failure.request.endpoint
-              ; "JUDGE FAILED  " ^ failure.error ]
+              ; "CAUSE  " ^ failure.error ]
         | R.Scored { question; answer; judgment } -> Ansi.reset, "SCORED",
             question_lines question @ generation "ANSWER" answer
             @ [ "JUDGE  " ^ judgment.response_model ^ "  ·  " ^ judgment.request.endpoint

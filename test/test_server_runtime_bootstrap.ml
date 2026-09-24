@@ -3962,10 +3962,6 @@ let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
     Alcotest.(check bool) "the TUI names the timeout" true
       (String_util.contains_substring err "refresh timed out")
 
-(* With no snapshot yet the health body carries the fleet section as the
-   "warming" placeholder. The TUI reads that exact body as not measured, so a
-   renamed placeholder key fails here rather than turning every rebuild into
-   a decode error on the operator's screen. *)
 (* The TUI reads the fleet out of this same body. After a refresh that timed
    out, the section is still the last good scan, and only the snapshot beside
    it says so: the reading must decode as stale, measured when the last good
@@ -4019,6 +4015,10 @@ let test_the_tui_reads_a_last_good_snapshot_as_stale () =
     Alcotest.fail "the last good reading decoded as not measured"
   | Error err -> Alcotest.fail err
 
+(* With no snapshot yet the health body carries the fleet section as the
+   "warming" placeholder. The TUI reads that exact body as not measured, so a
+   renamed placeholder key fails here rather than turning every rebuild into
+   a decode error on the operator's screen. *)
 let test_the_tui_reads_a_rebuilding_snapshot_as_not_measured () =
   Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
   let request = Httpun.Request.create `GET "/health?full=1" in

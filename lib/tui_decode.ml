@@ -9909,8 +9909,10 @@ let decode_fleet_placeholder section =
    latest refresh. A [stale] snapshot keeps serving the last reading it
    measured -- after a refresh timed out or raised, or when none has run
    within the time to live -- so the fleet it carries is a past one (#38499).
-   The server always writes [computed_at_unix] and [stale_reason], null only
-   when there is no snapshot at all, which a stale one never is. *)
+   The server always writes [computed_at_unix] and [stale_reason], and a
+   stale snapshot fills both. A time before 1970 is refused with the rest that
+   are not times: the age drawn from it would overflow the integer it is
+   counted in. *)
 let decode_fleet_reading_freshness json =
   let* snapshot = required_object_field json "full_health_snapshot" in
   let* status = required_string_field snapshot "status" in
@@ -9920,7 +9922,8 @@ let decode_fleet_reading_freshness json =
     let* computed_at = required_nullable_float_field snapshot "computed_at_unix" in
     let* stale_reason = required_nullable_string_field snapshot "stale_reason" in
     match computed_at, stale_reason with
-    | Some measured_at_unix, Some stale_reason when Float.is_finite measured_at_unix ->
+    | Some measured_at_unix, Some stale_reason
+      when Float.is_finite measured_at_unix && measured_at_unix >= 0.0 ->
       Ok (Fleet_last_good { measured_at_unix; stale_reason })
     | Some measured_at_unix, Some _ ->
       Error

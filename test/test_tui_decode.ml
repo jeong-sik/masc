@@ -1452,6 +1452,10 @@ let test_decode_fleet_safety_reads_how_current_the_reading_is () =
   in
   refused "a stale snapshot without its time" (stale ~computed_at:`Null ());
   refused "a stale snapshot without its reason" (stale ~reason:`Null ());
+  refused "a stale snapshot whose time is not a number"
+    (stale ~computed_at:(`Float Float.nan) ());
+  (* Its age would overflow the integer the span is counted in. *)
+  refused "a stale snapshot measured before 1970" (stale ~computed_at:(`Float (-1e300)) ());
   refused "a stale snapshot missing the time key"
     (`Assoc [ "status", `String "stale"; "stale_reason", `String "ttl_expired" ]);
   refused "a snapshot without a status" (`Assoc [ "computed_at_unix", `Float 1.0 ]);

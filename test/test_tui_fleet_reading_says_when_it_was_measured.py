@@ -21,7 +21,8 @@ FLEET_PATH = "/health?full=1"
 FLEET_LINE = b"turn capacity 0/0"
 STALE_TAG = b"fleet reading: stale \xc2\xb7 measured 4m"
 REASON = b"(last_good_refresh_timeout)"
-# Old enough that the age reads in minutes however long the TUI takes to ask.
+# Four minutes back, so the age reads "4m…" for the first minute after the
+# fixture is swapped; the scenario reaches both checks within seconds.
 STALE_AGE_SEC = 240
 MAX_SCROLL_STEPS = 40
 

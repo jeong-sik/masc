@@ -210,7 +210,16 @@ let test_the_servers_reason_is_drawn_as_text () =
          { measured_at_unix = 1_000.0; stale_reason = "x\027[2Jy" })
   with
   | None -> fail "a stale reading drew no tag"
-  | Some text -> check bool "no raw escape" false (String.contains text '\027')
+  | Some text -> (
+      check bool "no raw escape in the reason" false (String.contains text '\027');
+      match
+        Masc_tui_fleet_line.freshness_text ~now:0.0
+          (Tui_decode.Unrecognised_snapshot_status "x\027[2Jy")
+      with
+      | None -> fail "an unknown snapshot word drew no tag"
+      | Some word ->
+          check bool "no raw escape in an unknown word" false
+            (String.contains word '\027'))
 
 let () =
   run "tui fleet line"

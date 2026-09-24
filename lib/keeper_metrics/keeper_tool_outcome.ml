@@ -58,24 +58,17 @@ let of_json (json : Yojson.Safe.t) : t option =
            | Some (`String "No_eligible_tasks") ->
              (match List.assoc_opt "exclusions" reason_fields with
               | Some (`Assoc exc_fields) ->
-                let get_int key =
-                  match List.assoc_opt key exc_fields with
-                  | Some (`Int n) -> n
-                  | _ -> 0
-                in
-                let get_bool key =
-                  match List.assoc_opt key exc_fields with
-                  | Some (`Bool b) -> b
-                  | _ -> false
-                in
-                Some
-                  (No_progress
-                     { reason =
-                         No_eligible_tasks
-                           { scope_excluded_count = get_int "scope_excluded_count"
-                           ; all_goals_excluded = get_bool "all_goals_excluded"
-                           }
-                     })
+                (match List.assoc_opt "scope_excluded_count" exc_fields,
+                       List.assoc_opt "all_goals_excluded" exc_fields with
+                 | Some (`Int scope_excluded_count), Some (`Bool all_goals_excluded)
+                   when scope_excluded_count >= 0 ->
+                   Some
+                     (No_progress
+                        { reason =
+                            No_eligible_tasks
+                              { scope_excluded_count; all_goals_excluded }
+                        })
+                 | _ -> None)
               | _ -> None)
            | Some (`String "Resource_conflict") ->
              (match List.assoc_opt "resource" reason_fields with
@@ -93,4 +86,3 @@ let of_json (json : Yojson.Safe.t) : t option =
      | _ -> None)
   | _ -> None
 ;;
-

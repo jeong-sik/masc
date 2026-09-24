@@ -17,8 +17,6 @@ let compact_receipt_runtime_json = Server_dashboard_compact_receipt_json.compact
 
 let json_number = Server_dashboard_http_json_utils.json_number
 let json_assoc = Server_dashboard_http_json_utils.json_assoc
-let string_has_prefix = Server_dashboard_http_json_utils.string_has_prefix
-
 let tool_call_output_text json =
   match json_member "output" json with
   | `String value -> Some value
@@ -38,22 +36,82 @@ let parse_tool_call_output json =
     | Error _ -> None)
 ;;
 
-let claim_status_of_output output =
-  let result = Option.value ~default:"" (json_string "result" output) |> String.trim in
+type claim_status =
+  | Claim_not_observed
+  | Claim_log_unavailable
+  | Claimed
+  | No_eligible
+  | No_unclaimed
+  | Claim_error
+  | Observed
+  | Unknown
+
+let claim_status_to_wire = function
+  | Claim_not_observed -> "not_observed"
+  | Claim_log_unavailable -> "tool_log_unavailable"
+  | Claimed -> "claimed"
+  | No_eligible -> "no_eligible"
+  | No_unclaimed -> "no_unclaimed"
+  | Claim_error -> "error"
+  | Observed -> "observed"
+  | Unknown -> "unknown"
+;;
+
+let claim_status_of_wire = function
+  | "not_observed" -> Some Claim_not_observed
+  | "tool_log_unavailable" -> Some Claim_log_unavailable
+  | "claimed" -> Some Claimed
+  | "no_eligible" -> Some No_eligible
+  | "no_unclaimed" -> Some No_unclaimed
+  | "error" -> Some Claim_error
+  | "observed" -> Some Observed
+  | "unknown" -> Some Unknown
+  | _ -> None
+;;
+
+let claimed_task_of_output output =
   match json_assoc "claimed_task" output with
-  | Some _ -> "claimed"
-  | None when string_has_prefix ~prefix:"No eligible tasks" result -> "no_eligible"
-  | None when string_has_prefix ~prefix:"No unclaimed tasks" result -> "no_unclaimed"
-  | None when string_has_prefix ~prefix:"Error:" result -> "error"
-  | None when result = "" -> "unknown"
-  | None -> "observed"
+  | Some task when
+      Option.is_some
+        (Option.bind (json_string "task_id" task) String_util.trim_nonempty) ->
+    Some task
+  | Some _ | None -> None
+;;
+
+let claim_status_of_output ~claimed_task ~recorded_outcome output =
+  (* The claim payload describes the domain result. A wire failure can follow
+     a committed claim, so it classifies only an untyped row with no task.
+     The result sentence is display text and never decides no-work or error. *)
+  match claimed_task,
+        Json_util.assoc_member_opt "typed_outcome" output with
+  | Some _, None -> Claimed
+  | Some _, Some _ -> Unknown
+  | None, Some outcome ->
+    (match Keeper_tool_outcome.of_json outcome with
+     | Some (Keeper_tool_outcome.No_progress
+               { reason = Keeper_tool_outcome.No_eligible_tasks _ }) -> No_eligible
+     | Some (Keeper_tool_outcome.No_progress
+               { reason = Keeper_tool_outcome.No_work_available }) -> No_unclaimed
+     | Some (Keeper_tool_outcome.Error _) -> Claim_error
+     | Some (Keeper_tool_outcome.No_progress
+               { reason = Keeper_tool_outcome.Resource_conflict _ })
+     | Some Keeper_tool_outcome.Progress
+     | None -> Unknown)
+  | None, None ->
+    (match recorded_outcome with
+     | Tool_result.Recorded_failed -> Claim_error
+     | Tool_result.Recorded_deferred | Tool_result.Recorded_malformed -> Unknown
+     | Tool_result.Recorded_succeeded | Tool_result.Recorded_unsettled ->
+       (match json_string "result" output with
+        | Some result when String.trim result <> "" -> Observed
+        | Some _ | None -> Unknown))
 ;;
 
 let composite_claim_attempt_absent =
   `Assoc
     [ "present", `Bool false
     ; "source", `String "keeper_task_claim_tool_call"
-    ; "status", `String "not_observed"
+    ; "status", `String (claim_status_to_wire Claim_not_observed)
     ; "result", `Null
     ; "claimed_task_id", `Null
     ; "claimed_goal_id", `Null
@@ -152,7 +210,7 @@ let composite_claim_attempt_unavailable detail =
   `Assoc
     [ "present", `Bool false
     ; "source", `String "keeper_task_claim_tool_call"
-    ; "status", `String "tool_log_unavailable"
+    ; "status", `String (claim_status_to_wire Claim_log_unavailable)
     ; "detail", `String detail
     ; "result", `Null
     ; "claimed_task_id", `Null
@@ -171,11 +229,26 @@ let composite_claim_attempt_json ~claim_window ~keeper_name =
       | Some (`Assoc _ as output) -> output
       | _ -> `Assoc []
     in
-    let claimed_task = json_assoc "claimed_task" output in
+    let declared_claimed_task = claimed_task_of_output output in
+    let status =
+      claim_status_of_output ~claimed_task:declared_claimed_task
+        ~recorded_outcome:(Tool_result.recorded_call_outcome call) output
+    in
+    let claimed_task =
+      match status with
+      | Claimed -> declared_claimed_task
+      | Claim_not_observed
+      | Claim_log_unavailable
+      | No_eligible
+      | No_unclaimed
+      | Claim_error
+      | Observed
+      | Unknown -> None
+    in
     `Assoc
       [ "present", `Bool true
       ; "source", `String "keeper_task_claim_tool_call"
-      ; "status", `String (claim_status_of_output output)
+      ; "status", `String (claim_status_to_wire status)
       ; "result", Json_util.string_opt_to_json (json_string "result" output)
       ; ( "claimed_task_id",
           match claimed_task with
@@ -352,7 +425,17 @@ let composite_execution_config_blocked execution =
 let composite_execution_claim_no_eligible execution =
   match json_member "claim_attempt" execution with
   | `Assoc _ as claim_attempt ->
-    string_opt_is_any (json_string "status" claim_attempt) [ "no_eligible" ]
+    (match Option.bind (json_string "status" claim_attempt) claim_status_of_wire with
+     | Some No_eligible -> true
+     | Some
+         ( Claim_not_observed
+         | Claim_log_unavailable
+         | Claimed
+         | No_unclaimed
+         | Claim_error
+         | Observed
+         | Unknown )
+     | None -> false)
   | _ -> false
 ;;
 

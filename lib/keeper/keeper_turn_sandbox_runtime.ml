@@ -346,6 +346,10 @@ let github_identity_secret_files t =
 
 let host_root t = t.host_root
 let normalize_path path = Keeper_alerting_path.normalize_path_for_check_stripped path
+let container_root_of_meta (meta : keeper_meta) =
+  Keeper_sandbox.container_root meta.name
+  |> Keeper_alerting_path.strip_trailing_slashes
+;;
 
 let create
       ~(config : Workspace.config)
@@ -363,9 +367,7 @@ let create
   ; image
   ; raw_host_root
   ; host_root = raw_host_root |> normalize_path
-  ; container_root =
-      Keeper_sandbox.container_root meta.name
-      |> Keeper_alerting_path.strip_trailing_slashes
+  ; container_root = container_root_of_meta meta
   ; uid = Unix.getuid ()
   ; gid = Unix.getgid ()
   ; network_mode
@@ -739,8 +741,8 @@ let is_microvm (t : t) =
    reachable. It is a refusal rather than an assumed runtime: naming Apple
    here is how a keeper that declared microsandbox booted under container
    and was then stopped with msb (#32837). *)
-let microvm_backend_of (t : t) =
-  match t.meta.microvm_backend with
+let microvm_backend_of_meta (meta : keeper_meta) =
+  match meta.microvm_backend with
   | Some backend -> Ok backend
   | None ->
     Error
@@ -748,9 +750,11 @@ let microvm_backend_of (t : t) =
          "microvm_backend_unresolved: keeper %s declares sandbox_profile=microvm \
           and no microvm_backend, so there is no runtime to boot it on. Next: \
           set microvm_backend in the keeper's TOML to one of: %s"
-         t.meta.name
+         meta.name
          (String.concat ", " Keeper_microvm_backend.valid_strings))
 ;;
+
+let microvm_backend_of (t : t) = microvm_backend_of_meta t.meta
 
 (* The Docker exec prefix: [docker exec [-i] --user u:g -w cwd [env...]].
    Only the Docker lane execs into a mounted tree. A microvm guest owns its
@@ -2016,47 +2020,54 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
     root, the GitHub identity is the snapshot the guest already mounts, and
     the config env names the config mount the guest was booted with. Pure
     given a running guest, so the argv contract is testable. *)
-let microvm_remote_endpoint_of_running (t : t) ~container_name =
-  if not (is_microvm t)
+let microvm_remote_endpoint_of_running_fields
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~container_root
+      ~uid
+      ~gid
+      ~container_name
+  =
+  if meta.sandbox_profile <> Keeper_types_profile_sandbox.Micro_vm
   then
     Error
       (Printf.sprintf
          "microvm_remote_endpoint_requires_microvm: keeper %s runs sandbox_profile=%s"
-         t.meta.name
-         (Keeper_types_profile_sandbox.sandbox_profile_to_string t.meta.sandbox_profile))
+         meta.name
+         (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile))
   else
     let gh_config_dir =
       Keeper_github_identity.container_config_dir
         ~container_masc_dir:
           (Keeper_sandbox_runtime_setup.container_masc_dir
-             ~container_root:t.container_root)
-        ~keeper_name:t.meta.name
+             ~container_root)
+        ~keeper_name:meta.name
     in
     (* The exec prefix is the declaring runtime's, built here because this is
        where the runtime, the work root and the shim config path are all in
        hand. *)
-    Result.bind (microvm_backend_of t) (fun backend ->
+    Result.bind (microvm_backend_of_meta meta) (fun backend ->
       Result.bind
         (Keeper_sandbox_microvm.shim_exec_prefix_for
            ~stdin:true
            backend
            ~container_name
-           ~uid:t.uid
-           ~gid:t.gid
+           ~uid
+           ~gid
            ~remote_root:Keeper_sandbox_microvm.work_volume_guest_root
            ~shim_config_path:Keeper_sandbox_microvm.shim_config_guest_path)
         (fun prefix ->
           Result.map
             (fun probe_prefix ->
               Keeper_sandbox_remote.of_container_exec
-                ~base_path:t.config.base_path
-                ~keeper_name:t.meta.name
+                ~base_path:config.base_path
+                ~keeper_name:meta.name
                 ~remote_root:Keeper_sandbox_microvm.work_volume_guest_root
                 ~gh_config_dir
                 ~injected_env:
                   (Keeper_sandbox_runtime.docker_config_env
-                     ~base_path:t.config.base_path
-                     ~container_root:t.container_root)
+                     ~base_path:config.base_path
+                     ~container_root)
                 ~env_allowlist:Keeper_sandbox_microvm.remote_env_allowlist
                 ~connect_timeout_sec:Keeper_sandbox_microvm.remote_connect_timeout_sec
                 ~max_concurrent_sessions:
@@ -2070,10 +2081,20 @@ let microvm_remote_endpoint_of_running (t : t) ~container_name =
                ~stdin:false
                backend
                ~container_name
-               ~uid:t.uid
-               ~gid:t.gid
+               ~uid
+               ~gid
                ~remote_root:Keeper_sandbox_microvm.work_volume_guest_root
                ~shim_config_path:Keeper_sandbox_microvm.shim_config_guest_path)))
+;;
+
+let microvm_remote_endpoint_of_running (t : t) ~container_name =
+  microvm_remote_endpoint_of_running_fields
+    ~config:t.config
+    ~meta:t.meta
+    ~container_root:t.container_root
+    ~uid:t.uid
+    ~gid:t.gid
+    ~container_name
 ;;
 
 (* The keeper's root on the volume is made at boot, so a guest this process
@@ -2105,8 +2126,8 @@ let microvm_remote_endpoint ?timeout_sec (t : t) =
 (* Reading a keeper's tree needs the guest, not the turn that happens to be
    using it. The guest name is a function of the keeper and the base path,
    and the guest is keeper-lifetime, so a caller holding no lifecycle
-   authority can still name and reach one that is up. [create] here computes
-   paths and reads the process uid; it starts nothing, and this function
+   authority can still name and reach one that is up. The endpoint builder
+   computes paths and reads the process uid; it starts nothing, and this function
    deliberately never calls [ensure_started]. Booting on behalf of a reader
    would spend a VM start, write the identity snapshot and make the work
    root -- effects that belong to the keeper's own turn.
@@ -2115,14 +2136,19 @@ let microvm_remote_endpoint ?timeout_sec (t : t) =
    on its own. The probe is [microvm_guest_absence_reason], which the caller
    runs only to name a failure it already has. *)
 let microvm_attached_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) () =
-  let t = create ~config ~meta () in
   let container_name =
     microvm_container_name
       ~config
       ~keeper_name:meta.name
       ~network_mode:meta.network_mode
   in
-  microvm_remote_endpoint_of_running t ~container_name
+  microvm_remote_endpoint_of_running_fields
+    ~config
+    ~meta
+    ~container_root:(container_root_of_meta meta)
+    ~uid:(Unix.getuid ())
+    ~gid:(Unix.getgid ())
+    ~container_name
 ;;
 
 (* [Some reason] when the guest is not running, so a caller can replace a raw

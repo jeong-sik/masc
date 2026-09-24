@@ -82,6 +82,18 @@ let valid_name name =
   let word w = String.length w > 0 && String.for_all (function 'a' .. 'z' | '0' .. '9' -> true | _ -> false) w in
   List.for_all word (String.split_on_char '-' name)
 
+let is_name = valid_name
+
+let name_error ~field value =
+  if valid_name value then None
+  else
+    Some
+      (Printf.sprintf
+         "%s %S is not an image catalog name (lowercase letters and digits, words \
+          joined by single '-', such as base or ocaml). A Keeper names an image \
+          from sandbox-images.toml; the catalog says which build that name is."
+         field value)
+
 let digest_prefix = "sha256:"
 let sha256_hex_length = 64
 

@@ -2475,6 +2475,22 @@ let test_a_name_the_catalog_lacks_reaches_the_preflight_as_its_reason () =
   | None -> fail "the preflight was not consulted"
 ;;
 
+(* A tag where a name belongs is refused where the call is read, not looked
+   up in the catalog and missed. *)
+let test_a_tag_in_sandbox_image_is_refused () =
+  with_test_context
+  @@ fun ctx ->
+  match
+    parse_stating_a_profile ctx
+      (`Assoc [ "name", `String "tagged"; "sandbox_image", `String "masc-sandbox:general" ])
+  with
+  | Ok _ -> fail "an image tag was accepted as a sandbox_image name"
+  | Error result ->
+    check bool "the refusal says it is not a catalog name" true
+      (contains "is not an image catalog name"
+         (Keeper_types_profile.tool_result_body result))
+;;
+
 let test_docker_preflight_receives_sandbox_image_from_profile_defaults () =
   with_test_context
   @@ fun ctx ->
@@ -2812,6 +2828,8 @@ let () =
             "docker preflight is consulted only for the docker profile"
             `Quick
             test_docker_preflight_is_consulted_only_for_the_docker_profile
+        ; test_case "a tag in sandbox_image is refused" `Quick
+            test_a_tag_in_sandbox_image_is_refused
         ; test_case
             "a name the catalog lacks reaches the preflight as its reason"
             `Quick

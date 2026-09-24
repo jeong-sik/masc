@@ -387,6 +387,35 @@ let test_a_keeper_that_cannot_start_says_why () =
     | Resolver.Catalog_unreadable (Invalid _) -> ()
     | e -> fail ("malformed: " ^ Resolver.error_to_string e))
 
+(* A Keeper TOML that still holds a tag is refused when it is read, with the
+   reason, instead of loading and failing its first container. *)
+let test_a_keeper_toml_naming_a_tag_does_not_load () =
+  let toml sandbox_image =
+    Printf.sprintf
+      "[keeper]\ninstructions = \"x\"\nsandbox_profile = \"docker\"\nsandbox_image = %S\n"
+      sandbox_image
+  in
+  (match Keeper_types_profile_toml_io.inspect_keeper_toml_content ~path:"k.toml" (toml "ocaml") with
+   | Ok _ -> ()
+   | Error e -> fail (Keeper_types_profile_toml_io.keeper_toml_load_error_to_string e));
+  match
+    Keeper_types_profile_toml_io.inspect_keeper_toml_content ~path:"k.toml"
+      (toml "masc-keeper-sandbox:local")
+  with
+  | Ok _ -> fail "a Keeper TOML naming a tag loaded"
+  | Error e ->
+    mentions "refusal" (Keeper_types_profile_toml_io.keeper_toml_load_error_to_string e)
+      "is not an image catalog name"
+
+let test_name_error_accepts_names_only () =
+  check (option string) "a name" None (name_error ~field:"f" "ocaml");
+  List.iter
+    (fun value ->
+      match name_error ~field:"f" value with
+      | Some _ -> ()
+      | None -> fail (value ^ " was taken for a name"))
+    [ "masc-sandbox:general"; ""; "Base"; "a--b"; "-a"; "registry/x" ]
+
 let () =
   run "Sandbox image catalog"
     [ ( "resolve"
@@ -428,5 +457,8 @@ let () =
             test_a_keeper_starts_from_the_build_promoted_now
         ; test_case "a keeper that cannot start says why" `Quick
             test_a_keeper_that_cannot_start_says_why
+        ; test_case "a keeper TOML naming a tag does not load" `Quick
+            test_a_keeper_toml_naming_a_tag_does_not_load
+        ; test_case "name_error accepts names only" `Quick test_name_error_accepts_names_only
         ] )
     ]

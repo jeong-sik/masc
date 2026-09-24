@@ -874,8 +874,11 @@ let validate_dashboard_config_field key value =
   else if key = "sandbox_image" then
     (match value with
      | `Null -> Ok ()
-     | `String image when String.trim image <> "" -> Ok ()
-     | other -> dashboard_field_type_error key "a nonblank string or null" other)
+     | `String image ->
+       (match Keeper_sandbox_image_catalog.name_error ~field:key image with
+        | None -> Ok ()
+        | Some detail -> Error detail)
+     | other -> dashboard_field_type_error key "an image catalog name or null" other)
   else if key = remote_endpoint_field then
     (* Shape only. Whether the name is declared under [exec.ssh.endpoints], and
        whether the profile admits an endpoint at all, are decided by

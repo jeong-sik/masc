@@ -40,6 +40,15 @@ type pinned = private
   }
 (** Only {!parse} and {!promote} make one, so a [pinned] is always valid. *)
 
+val is_name : string -> bool
+(** Whether a string is a catalog name: words of lowercase letters and digits
+    joined by single ['-'], the directory names under [sandbox-images/]. *)
+
+val name_error : field:string -> string -> string option
+(** [None] for a catalog name; otherwise why [value], read from [field], is
+    not one. A Keeper names its image by catalog name, so a tag here (it has a
+    [':']) is refused where it is read rather than looked up and missed. *)
+
 val is_reference : string -> bool
 (** Whether a string is a [repository:tag] {!pinned} accepts. A caller that
     hands a reference to an image store's CLI checks it first, so a value

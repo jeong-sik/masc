@@ -39,8 +39,11 @@ let parse_sandbox_image_patch args =
   match Json_util.assoc_member_opt "sandbox_image" args with
   | None -> Ok None
   | Some `Null -> Ok (Some None)
-  | Some (`String image) when String.trim image <> "" -> Ok (Some (Some image))
-  | Some _ -> Error "sandbox_image must be a nonblank string or null"
+  | Some (`String image) ->
+    (match Keeper_sandbox_image_catalog.name_error ~field:"sandbox_image" image with
+     | None -> Ok (Some (Some image))
+     | Some detail -> Error detail)
+  | Some _ -> Error "sandbox_image must be an image catalog name or null"
 
 let parse_tools_patch args =
   match Json_util.assoc_member_opt "tools" args with

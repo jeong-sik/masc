@@ -17,8 +17,7 @@ let codex_config (exec : Runtime_execution.codex_app_server) =
 ;;
 
 type http_read =
-  { provider_id : string
-  ; credential : Runtime_schema.credential option
+  { credential : Llm_provider.Provider_config.credential_source * Llm_provider.Secret.t
   ; usage_read : Runtime_schema.usage_read
   }
 
@@ -31,19 +30,22 @@ type readable =
   ; how : how
   }
 
-(* A provider that declares [usage-read] is read over HTTP whatever its
-   execution; otherwise only a Codex app-server can answer without a turn. *)
+(* An HTTP runtime whose provider declares [usage-read] is read with the key
+   its execution was materialized with: the same load that froze the
+   runtime's quota scope (Runtime.quota_scope_of_materialized), so the
+   windows land on the account the dispatch uses.  Re-resolving the
+   credential here would re-run alias selection against the process
+   environment of the read.  runtime.toml refuses [usage-read] on an
+   official-client protocol; a Codex app-server answers without a turn. *)
 let how_of_runtime (rt : Runtime.t) =
-  match rt.provider.usage_read, rt.execution with
-  | Some usage_read, _ ->
-    Some
-      (Http
-         { provider_id = rt.provider.id; credential = rt.provider.credentials; usage_read })
-  | None, Runtime_execution.Codex_app_server codex -> Some (Codex codex)
-  | ( None
-    , ( Runtime_execution.Agent_core _
-      | Runtime_execution.Antigravity_cli _
-      | Runtime_execution.Claude_code _ ) ) -> None
+  match rt.execution with
+  | Runtime_execution.Agent_core config ->
+    Option.map
+      (fun usage_read ->
+        Http { credential = config.credential_source, config.api_key; usage_read })
+      rt.provider.usage_read
+  | Runtime_execution.Codex_app_server codex -> Some (Codex codex)
+  | Runtime_execution.Antigravity_cli _ | Runtime_execution.Claude_code _ -> None
 ;;
 
 (* One runtime per account: every runtime of a quota scope shares the
@@ -74,7 +76,7 @@ let read_codex ~mgr ~clock ~cwd ~scope codex =
 ;;
 
 type http_error =
-  | Credential_unavailable of string
+  | Credential_unavailable
   | Request_failed of Llm_provider.Http_client.http_error
   | Http_status of int
   | Body_not_json
@@ -94,7 +96,7 @@ let request_error_to_string : Llm_provider.Http_client.http_error -> string = fu
 ;;
 
 let http_error_to_string = function
-  | Credential_unavailable detail -> "credential: " ^ detail
+  | Credential_unavailable -> "the runtime's credential is empty or could not be refreshed"
   | Request_failed error -> request_error_to_string error
   | Http_status status -> Printf.sprintf "status %d" status
   | Body_not_json -> "the body is not JSON"
@@ -137,42 +139,90 @@ let get_usage ~net ~clock ~api_key url =
   | Ok response -> Error (Http_status response.status)
 ;;
 
-let read_http ~net ~clock ~scope { provider_id; credential; usage_read } =
+(* A refreshable credential (an OAuth token) is refreshed like a dispatch
+   would; a static one is the key the execution was built with. *)
+let api_key_of_credential : Llm_provider.Provider_config.credential_source * _ -> _ =
+  function
+  | Static_credential, api_key -> Ok api_key
+  | Refreshable_credential refresh, _ ->
+    Result.map_error (fun (_ : Llm_provider.Provider_config.credential_refresh_error) ->
+      Credential_unavailable)
+      (refresh ())
+;;
+
+let usage_report ~fetch { credential; usage_read } =
   let ( let* ) = Result.bind in
-  let* api_key =
-    Runtime_adapter.resolve_api_key ~provider_id ~credential
-    |> Result.map_error (fun detail -> Credential_unavailable detail)
+  let* api_key = api_key_of_credential credential in
+  let* () =
+    if Llm_provider.Secret.is_empty api_key then Error Credential_unavailable else Ok ()
   in
-  let* body = get_usage ~net ~clock ~api_key usage_read.url in
+  let* body = fetch ~api_key usage_read.url in
   let* json = parse_json body in
-  let* report =
-    decoder_of_shape usage_read.shape json
-    |> Result.map_error (fun error -> Decode_failed error)
-  in
-  Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report;
+  decoder_of_shape usage_read.shape json
+  |> Result.map_error (fun error -> Decode_failed error)
+;;
+
+let shape_label (http : http_read) =
+  Runtime_schema.usage_read_shape_to_string http.usage_read.shape
+;;
+
+let read_http ~fetch ~scope http =
+  let ( let* ) = Result.bind in
+  let* (report : Runtime_provider_usage_window.report) = usage_report ~fetch http in
+  (match report.windows with
+   | [] ->
+     Log.Runtime_agent.info
+       "provider usage read for %s (shape %s) stated no windows"
+       (Runtime_quota_window.scope_to_string scope)
+       (shape_label http)
+   | _ :: _ ->
+     Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report);
   Ok ()
 ;;
 
+(* One scope's read, with its failure logged.  A read that raises is logged
+   with its scope too, so it never skips the scopes after it; only a
+   cancellation passes through.  An HTTP read that raises logs only the
+   exception's constructor: the request carried the key, and nothing
+   bounds what an HTTP client's exception message quotes. *)
+let read_scope ~codex ~fetch { scope; how } =
+  let scope_label = Runtime_quota_window.scope_to_string scope in
+  match how with
+  | Codex exec ->
+    (match codex ~scope exec with
+     | Ok () -> ()
+     | Error detail ->
+       Log.Runtime_agent.warn "provider usage read failed for %s: %s" scope_label detail
+     | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+     | exception exn ->
+       Log.Runtime_agent.warn
+         "provider usage read raised for %s: %s"
+         scope_label
+         (Printexc.to_string exn))
+  | Http http ->
+    (match read_http ~fetch ~scope http with
+     | Ok () -> ()
+     | Error error ->
+       Log.Runtime_agent.warn
+         "provider usage read failed for %s (shape %s): %s"
+         scope_label
+         (shape_label http)
+         (http_error_to_string error)
+     | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+     | exception exn ->
+       Log.Runtime_agent.warn
+         "provider usage read raised for %s (shape %s): %s"
+         scope_label
+         (shape_label http)
+         (Printexc.exn_slot_name exn))
+;;
+
+let read_scopes ~codex ~fetch readables = List.iter (read_scope ~codex ~fetch) readables
+
 let read_all ~mgr ~net ~clock ~cwd =
-  List.iter
-    (fun { scope; how } ->
-      let scope_label = Runtime_quota_window.scope_to_string scope in
-      match how with
-      | Codex codex ->
-        (match read_codex ~mgr ~clock ~cwd ~scope codex with
-         | Ok () -> ()
-         | Error detail ->
-           Log.Runtime_agent.warn "provider usage read failed for %s: %s" scope_label detail)
-      | Http http ->
-        (match read_http ~net ~clock ~scope http with
-         | Ok () -> ()
-         | Error error ->
-           Log.Runtime_agent.warn
-             "provider usage read failed for %s (shape %s): %s"
-             scope_label
-             (Runtime_schema.usage_read_shape_to_string http.usage_read.shape)
-             (http_error_to_string error)))
-    (readable_scopes ())
+  let codex ~scope exec = read_codex ~mgr ~clock ~cwd ~scope exec in
+  let fetch ~api_key url = get_usage ~net ~clock ~api_key url in
+  read_scopes ~codex ~fetch (readable_scopes ())
 ;;
 
 (* Scopes a background read is running for. Keepers sharing one account are

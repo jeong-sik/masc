@@ -75,6 +75,13 @@ type decode_error =
       ; message : string option
       }
       (** The response says it failed ([success] false), with its [msg]. *)
+  | Duplicate_window of
+      { path : string
+      ; limit_id : string option
+      ; kind : window_kind
+      }
+      (** An HTTP usage report states two windows with the same
+          [(limit_id, kind)], the key {!record} keeps one row under. *)
 
 val decode_error_to_string : decode_error -> string
 val source_to_string : source -> string
@@ -102,30 +109,38 @@ val decode_codex_rate_limits_read : Yojson.Safe.t -> (report, decode_error) resu
 
 val decode_openrouter_key : Yojson.Safe.t -> (report, decode_error) result
 (** OpenRouter [GET /api/v1/key].  A numeric [data.limit] above 0 gives one
-    {!Provider_label} window "credit limit" (", resets <limit_reset>" when
-    that is a string) used by [(limit - limit_remaining) / limit]; a null
-    [limit] means no cap and no window.  [data.free_model_daily_requests]
-    gives "free model requests, daily" as [used / limit].  Neither states a
-    reset time. *)
+    {!Provider_label} window "credit limit" used by
+    [(limit - limit_remaining) / limit], with [limit_remaining] within
+    [0..limit]; a null [limit] means no cap and no window.  [limit_reset] is
+    not read.  [data.free_model_daily_requests] gives "free model requests,
+    daily" as [used / limit], with [used] within [0..limit].  Neither states
+    a reset time.
+
+    Each HTTP decoder below refuses a report that states the same
+    [(limit_id, kind)] twice ({!Duplicate_window}), and a value outside its
+    stated range with {!Unexpected_value}. *)
 
 val decode_zai_quota_limit : Yojson.Safe.t -> (report, decode_error) result
 (** Z.AI [GET /api/monitor/usage/quota/limit].  [success] must be [true].
     Each [data.limits[]] row is one window with [limit_id] its [type],
-    {!Percent} its [percentage] and [resets_at] its [nextResetTime] in
-    seconds.  [unit] 3 is hours, so [number] hours is mapped like a Codex
+    {!Percent} its [percentage] (within [0..100]) and [resets_at] its
+    [nextResetTime] in seconds.  [number] must be above 0.  [unit] 3 is
+    hours, so [number] hours is mapped like a Codex
     length; any other unit keeps "<type>, <number> x unit <unit>". *)
 
 val decode_kimi_coding_usages : Yojson.Safe.t -> (report, decode_error) result
 (** Kimi [GET /coding/v1/usages].  Each [limits[]] row is one window whose
-    [window.timeUnit] must be [TIME_UNIT_MINUTE]; its length maps like a
-    Codex length.  [detail.used] and [detail.limit] are decimal strings read
-    as integers.  The top-level [usage] is one more window labelled
+    [window.timeUnit] must be [TIME_UNIT_MINUTE] and [window.duration]
+    above 0; its length maps like a Codex length.  [detail.used] and
+    [detail.limit] are decimal strings read as integers, [used] within
+    [0..limit].  The top-level [usage] is one more window labelled
     "plan period".  [usages.*.used_ratio] is not read. *)
 
 val decode_ollama_usage : Yojson.Safe.t -> (report, decode_error) result
 (** Ollama [GET https://ollama.com/api/usage].  [limits] is required;
     [limits.session.usage] is a {!Provider_label} "session" window and
-    [limits.weekly.usage] a {!Seven_day} window, each a 0-1 {!Fraction}.  No
+    [limits.weekly.usage] a {!Seven_day} window, each a {!Fraction} that
+    must be within [0..1].  No
     reset time is stated. *)
 
 type recorded =

@@ -46,6 +46,18 @@ type decode_error =
       { path : string
       ; message : string option
       }
+  | Duplicate_window of
+      { path : string
+      ; limit_id : string option
+      ; kind : window_kind
+      }
+
+let window_kind_to_string = function
+  | Five_hour -> "5h"
+  | Seven_day -> "7d"
+  | Duration_minutes minutes -> Printf.sprintf "%d minutes" minutes
+  | Provider_label label -> Printf.sprintf "label %S" label
+;;
 
 let decode_error_to_string = function
   | Expected_object { path } -> Printf.sprintf "%s must be an object" path
@@ -55,6 +67,14 @@ let decode_error_to_string = function
   | Not_successful { path; message = Some message } ->
     Printf.sprintf "%s is not true: %s" path message
   | Not_successful { path; message = None } -> Printf.sprintf "%s is not true" path
+  | Duplicate_window { path; limit_id = Some limit_id; kind } ->
+    Printf.sprintf
+      "%s states the window (limit %s, %s) twice"
+      path
+      limit_id
+      (window_kind_to_string kind)
+  | Duplicate_window { path; limit_id = None; kind } ->
+    Printf.sprintf "%s states the window (%s) twice" path (window_kind_to_string kind)
 ;;
 
 let source_to_string = function
@@ -302,9 +322,55 @@ let positive_number ~path value =
 
 let fraction_of_counts ~used ~limit = Fraction (Float.of_int used /. Float.of_int limit)
 
+let within ~path ~expected ~low ~high value =
+  if Float.compare value low >= 0 && Float.compare value high <= 0
+  then Ok value
+  else Error (Unexpected_value { path; expected })
+;;
+
+(* A count of [limit]: [used] or [remaining] outside 0..limit would read as a
+   fraction below 0 or above 1. *)
+let count_within_limit ~path ~limit value =
+  within
+    ~path
+    ~expected:(Printf.sprintf "within 0..%d" limit)
+    ~low:0.0
+    ~high:(Float.of_int limit)
+    (Float.of_int value)
+  |> Result.map (fun (_ : float) -> value)
+;;
+
+let equal_window_kind left right =
+  match left, right with
+  | Five_hour, Five_hour | Seven_day, Seven_day -> true
+  | Duration_minutes a, Duration_minutes b -> Int.equal a b
+  | Provider_label a, Provider_label b -> String.equal a b
+  | (Five_hour | Seven_day | Duration_minutes _ | Provider_label _), _ -> false
+;;
+
+(* {!record} keeps one row per (limit_id, kind), so a report that states the
+   same key twice would keep whichever came last.  Such a report is refused
+   instead. *)
+let distinct_windows ~path (report : report) =
+  let same (a : window) (b : window) =
+    Option.equal String.equal a.limit_id b.limit_id && equal_window_kind a.kind b.kind
+  in
+  let rec first_duplicate = function
+    | [] -> None
+    | (window : window) :: rest ->
+      if List.exists (same window) rest then Some window else first_duplicate rest
+  in
+  match first_duplicate report.windows with
+  | None -> Ok report
+  | Some window ->
+    Error (Duplicate_window { path; limit_id = window.limit_id; kind = window.kind })
+;;
+
 (* OpenRouter, GET /api/v1/key (openrouter.ai/docs/api-reference/limits).
    [limit] null means the key has no credit cap, so there is no credit
-   window.  The response states no reset time. *)
+   window.  The response states no reset time.  [limit_reset] is not read:
+   the label is part of the row key in {!record}, so a label carrying the
+   reset period would leave the old row behind when the period changes. *)
 let openrouter_credit_window ~path fields =
   match List.assoc_opt "limit" fields with
   | None | Some `Null -> Ok None
@@ -313,16 +379,18 @@ let openrouter_credit_window ~path fields =
     let* limit = number_at ~path:limit_path limit_json in
     let* limit = positive_number ~path:limit_path limit in
     let* remaining = required_as number_at ~path "limit_remaining" fields in
-    let* reset = optional_string ~path "limit_reset" fields in
-    let label =
-      match reset with
-      | Some reset -> Printf.sprintf "credit limit, resets %s" reset
-      | None -> "credit limit"
+    let* remaining =
+      within
+        ~path:(member_path path "limit_remaining")
+        ~expected:(Printf.sprintf "within 0..%g" limit)
+        ~low:0.0
+        ~high:limit
+        remaining
     in
     Ok
       (Some
          { limit_id = None
-         ; kind = Provider_label label
+         ; kind = Provider_label "credit limit"
          ; utilization = Fraction ((limit -. remaining) /. limit)
          ; resets_at = None
          })
@@ -336,6 +404,7 @@ let openrouter_free_requests_window ~path fields =
     let* used = required_as int_at ~path "used" free_fields in
     let* limit = required_as int_at ~path "limit" free_fields in
     let* limit = positive_int ~path:(member_path path "limit") limit in
+    let* used = count_within_limit ~path:(member_path path "used") ~limit used in
     Ok
       (Some
          { limit_id = None
@@ -353,7 +422,9 @@ let decode_openrouter_key json =
   let* data_fields = fields_at ~path data in
   let* credit = openrouter_credit_window ~path data_fields in
   let* free = openrouter_free_requests_window ~path data_fields in
-  Ok { source = Openrouter_key_read; windows = List.filter_map Fun.id [ credit; free ] }
+  distinct_windows
+    ~path
+    { source = Openrouter_key_read; windows = List.filter_map Fun.id [ credit; free ] }
 ;;
 
 (* Z.AI [unit] codes.  Only [3] is known to be hours: the TOKENS_LIMIT row
@@ -362,6 +433,7 @@ let decode_openrouter_key json =
 let zai_unit_hours = 3
 let minutes_per_hour = 60
 let ms_per_second = 1000
+let percent_whole = 100
 
 let zai_window_kind ~limit_type ~unit ~number =
   if Int.equal unit zai_unit_hours
@@ -374,7 +446,11 @@ let zai_limit ~path json =
   let* limit_type = required_as string_at ~path "type" fields in
   let* unit = required_as int_at ~path "unit" fields in
   let* number = required_as int_at ~path "number" fields in
+  let* number = positive_int ~path:(member_path path "number") number in
   let* percentage = required_as int_at ~path "percentage" fields in
+  let* percentage =
+    count_within_limit ~path:(member_path path "percentage") ~limit:percent_whole percentage
+  in
   let* next_reset_ms = optional_int ~path "nextResetTime" fields in
   Ok
     { limit_id = Some limit_type
@@ -404,7 +480,7 @@ let decode_zai_quota_limit json =
   let* data_fields = fields_at ~path data in
   let* limits = required_as list_at ~path "limits" data_fields in
   let* windows = map_indexed ~path:(member_path path "limits") zai_limit limits in
-  Ok { source = Zai_quota_limit_read; windows }
+  distinct_windows ~path { source = Zai_quota_limit_read; windows }
 ;;
 
 (* Kimi writes counts as decimal strings ("100").  Only plain digits are a
@@ -440,6 +516,7 @@ let kimi_count_window ~path ~kind fields =
   let* used = required_as decimal_string_at ~path "used" fields in
   let* limit = required_as decimal_string_at ~path "limit" fields in
   let* limit = positive_int ~path:(member_path path "limit") limit in
+  let* used = count_within_limit ~path:(member_path path "used") ~limit used in
   let* resets_at = optional_rfc3339 ~path "resetTime" fields in
   Ok { limit_id = None; kind; utilization = fraction_of_counts ~used ~limit; resets_at }
 ;;
@@ -452,7 +529,9 @@ let kimi_window_minutes ~path fields =
   let* window_fields = fields_at ~path window in
   let* time_unit = required_as string_at ~path "timeUnit" window_fields in
   if String.equal time_unit kimi_minute_unit
-  then required_as int_at ~path "duration" window_fields
+  then (
+    let* duration = required_as int_at ~path "duration" window_fields in
+    positive_int ~path:(member_path path "duration") duration)
   else
     Error (Unexpected_value { path = member_path path "timeUnit"; expected = kimi_minute_unit })
 ;;
@@ -484,7 +563,7 @@ let decode_kimi_coding_usages json =
       let* window = kimi_count_window ~path ~kind:(Provider_label "plan period") plan_fields in
       Ok [ window ]
   in
-  Ok { source = Kimi_coding_usages_read; windows = windows @ plan_windows }
+  distinct_windows ~path { source = Kimi_coding_usages_read; windows = windows @ plan_windows }
 ;;
 
 (* Ollama, GET https://ollama.com/api/usage (undocumented; the vendor's own
@@ -497,6 +576,9 @@ let ollama_window ~path ~kind name fields =
   | None -> Ok None
   | Some (path, entry_fields) ->
     let* usage = required_as number_at ~path "usage" entry_fields in
+    let* usage =
+      within ~path:(member_path path "usage") ~expected:"within 0..1" ~low:0.0 ~high:1.0 usage
+    in
     Ok (Some { limit_id = None; kind; utilization = Fraction usage; resets_at = None })
 ;;
 
@@ -508,7 +590,9 @@ let decode_ollama_usage json =
   let* limit_fields = fields_at ~path limits in
   let* session = ollama_window ~path ~kind:(Provider_label "session") "session" limit_fields in
   let* weekly = ollama_window ~path ~kind:Seven_day "weekly" limit_fields in
-  Ok { source = Ollama_usage_read; windows = List.filter_map Fun.id [ session; weekly ] }
+  distinct_windows
+    ~path
+    { source = Ollama_usage_read; windows = List.filter_map Fun.id [ session; weekly ] }
 ;;
 
 type recorded =

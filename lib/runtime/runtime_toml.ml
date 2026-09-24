@@ -642,11 +642,35 @@ let usage_read_url_field ~path tbl =
             (Printf.sprintf "url must be an absolute https:// URL, got %S" url)))
 ;;
 
+(* The read sends the API key the runtime's HTTP execution was built with,
+   and its windows are recorded under the quota scope of that key.  An
+   official-client runtime (Codex, Claude Code, Antigravity) logs in with the
+   vendor's subscription and its quota scope names no key, so an API-key
+   read there would file one account's usage under another. *)
+let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
+  match api_format with
+  | Runtime_schema.Messages_api
+  | Runtime_schema.Chat_completions_api
+  | Runtime_schema.Ollama_api
+  | Runtime_schema.Gemini_api
+  | Runtime_schema.Vertex_gemini_api -> []
+  | Runtime_schema.Codex_app_server_runtime
+  | Runtime_schema.Antigravity_cli_runtime
+  | Runtime_schema.Claude_code_runtime ->
+    error
+      path
+      "usage-read is only for an API-key HTTP provider; this protocol runs an \
+       official client"
+;;
+
 (** Parse [providers.<id>.usage-read]. Every key must be one of
     {!usage_read_keys}. The read authenticates with the provider's own
     credentials, so a provider that declares none is refused here rather
     than sending an unauthenticated request at start. *)
-let parse_usage_read ~(path : string) ~(credentials : Runtime_schema.credential option)
+let parse_usage_read
+    ~(path : string)
+    ~(api_format : Runtime_schema.api_format)
+    ~(credentials : Runtime_schema.credential option)
     (tbl : Otoml.t)
   : (Runtime_schema.usage_read option, parse_error list) result
   =
@@ -674,8 +698,9 @@ let parse_usage_read ~(path : string) ~(credentials : Runtime_schema.credential 
       | None ->
         error path "usage-read needs the provider's [credentials]; none are declared"
     in
+    let execution_errors = usage_read_execution_errors ~path api_format in
     (match
-       ( unknown_key_errors @ credential_errors
+       ( unknown_key_errors @ execution_errors @ credential_errors
        , usage_read_shape_field ~path usage_tbl
        , usage_read_url_field ~path usage_tbl )
      with
@@ -772,7 +797,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
            Error
              (error (path ^ ".healthcheck") "healthcheck must be a TOML table")
        in
-       let usage_read_result = parse_usage_read ~path ~credentials tbl in
+       let usage_read_result = parse_usage_read ~path ~api_format ~credentials tbl in
        let headers =
          match Otoml.find_opt tbl Fun.id [ "headers" ] with
          | None -> None

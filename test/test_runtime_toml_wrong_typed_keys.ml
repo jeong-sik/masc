@@ -139,6 +139,30 @@ let cases =
       "providers.p.usage-read without credentials"
       "[providers.p.usage-read]\nshape = \"ollama-usage\"\nurl = \"https://example.invalid/usage\""
       "providers.p.usage-read: usage-read needs the provider's [credentials]"
+  ; { label = "providers.p.usage-read on codex-app-server"
+    ; toml =
+        config
+          ~provider_lines:
+            "protocol = \"codex-app-server\"\ncommand = \"/usr/bin/true\"\n\
+             is-non-interactive = true\n\
+             [providers.p.usage-read]\nshape = \"ollama-usage\"\n\
+             url = \"https://example.invalid/usage\""
+          ~model_lines:""
+    ; refusal_names =
+        "providers.p.usage-read: usage-read is only for an API-key HTTP provider"
+    }
+  ; { label = "providers.p.usage-read on claude-code"
+    ; toml =
+        config
+          ~provider_lines:
+            "protocol = \"claude-code\"\ncommand = \"/usr/bin/true\"\n\
+             is-non-interactive = true\n\
+             [providers.p.usage-read]\nshape = \"ollama-usage\"\n\
+             url = \"https://example.invalid/usage\""
+          ~model_lines:""
+    ; refusal_names =
+        "providers.p.usage-read: usage-read is only for an API-key HTTP provider"
+    }
   ; provider_case
       "providers.p.usage-read unknown key"
       (with_credentials

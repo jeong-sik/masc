@@ -263,8 +263,8 @@ let test_openrouter_key () =
     ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        openrouter_key_response);
-  check (list string) "a stated reset period is part of the label; no cap is no credit window"
-    [ "limit=- label \"credit limit, resets monthly\" fraction 0.25 resets=-" ]
+  check (list string) "a stated reset period is not part of the label, which keys the row"
+    [ "limit=- label \"credit limit\" fraction 0.25 resets=-" ]
     (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
        {|{"data":{"limit":20,"limit_reset":"monthly","limit_remaining":15}}|});
   check (list string) "a null limit has no credit window" []
@@ -273,7 +273,17 @@ let test_openrouter_key () =
   check string "limit_remaining as a string is refused with its path"
     "openrouter-key.data.limit_remaining must be a number"
     (refused Usage.decode_openrouter_key
-       {|{"data":{"limit":100,"limit_remaining":"0"}}|})
+       {|{"data":{"limit":100,"limit_remaining":"0"}}|});
+  check string "limit_remaining above limit is refused"
+    "openrouter-key.data.limit_remaining must be within 0..100"
+    (refused Usage.decode_openrouter_key {|{"data":{"limit":100,"limit_remaining":150}}|});
+  check string "a negative limit_remaining is refused"
+    "openrouter-key.data.limit_remaining must be within 0..100"
+    (refused Usage.decode_openrouter_key {|{"data":{"limit":100,"limit_remaining":-1}}|});
+  check string "free requests used above limit is refused"
+    "openrouter-key.data.free_model_daily_requests.used must be within 0..1000"
+    (refused Usage.decode_openrouter_key
+       {|{"data":{"limit":null,"free_model_daily_requests":{"used":1001,"limit":1000}}}|})
 ;;
 
 let test_zai_quota_limit () =
@@ -290,7 +300,23 @@ let test_zai_quota_limit () =
   check string "a missing percentage is refused with its path"
     "zai-quota-limit.data.limits[0].percentage is missing"
     (refused Usage.decode_zai_quota_limit
-       {|{"success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","unit":3,"number":5}]}}|})
+       {|{"success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","unit":3,"number":5}]}}|});
+  check string "a percentage above 100 is refused"
+    "zai-quota-limit.data.limits[0].percentage must be within 0..100"
+    (refused Usage.decode_zai_quota_limit
+       {|{"success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":101}]}}|});
+  check string "a negative percentage is refused"
+    "zai-quota-limit.data.limits[0].percentage must be within 0..100"
+    (refused Usage.decode_zai_quota_limit
+       {|{"success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":-1}]}}|});
+  check string "a number of 0 is refused"
+    "zai-quota-limit.data.limits[0].number must be greater than 0"
+    (refused Usage.decode_zai_quota_limit
+       {|{"success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","unit":3,"number":0,"percentage":4}]}}|});
+  check string "two rows with one (limit_id, kind) are refused, not last-wins"
+    "zai-quota-limit.data states the window (limit TOKENS_LIMIT, 5h) twice"
+    (refused Usage.decode_zai_quota_limit
+       {|{"success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":4},{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":90}]}}|})
 ;;
 
 let test_kimi_coding_usages () =
@@ -311,7 +337,23 @@ let test_kimi_coding_usages () =
   check string "a count that is not all digits is refused"
     "kimi-coding-usages.limits[0].detail.used must be a decimal integer string"
     (refused Usage.decode_kimi_coding_usages
-       {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"12a"}}]}|})
+       {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"12a"}}]}|});
+  check string "used above limit is refused"
+    "kimi-coding-usages.limits[0].detail.used must be within 0..100"
+    (refused Usage.decode_kimi_coding_usages
+       {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"101"}}]}|});
+  check string "plan usage above limit is refused"
+    "kimi-coding-usages.usage.used must be within 0..10"
+    (refused Usage.decode_kimi_coding_usages
+       {|{"limits":[],"usage":{"limit":"10","used":"11"}}|});
+  check string "a duration of 0 is refused"
+    "kimi-coding-usages.limits[0].window.duration must be greater than 0"
+    (refused Usage.decode_kimi_coding_usages
+       {|{"limits":[{"window":{"duration":0,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"20"}}]}|});
+  check string "two limits of one length are refused, not last-wins"
+    "kimi-coding-usages states the window (5h) twice"
+    (refused Usage.decode_kimi_coding_usages
+       {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"20"}},{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"90"}}]}|})
 ;;
 
 let test_ollama_usage () =
@@ -325,7 +367,63 @@ let test_ollama_usage () =
     (decoded_windows Usage.decode_ollama_usage ~source:"ollama.usage"
        {|{"limits":{"weekly":{"usage":0.42}}}|});
   check string "a missing limits object is refused" "ollama-usage.limits is missing"
-    (refused Usage.decode_ollama_usage {|{"activity":{}}|})
+    (refused Usage.decode_ollama_usage {|{"activity":{}}|});
+  check string "usage above 1 is refused" "ollama-usage.limits.weekly.usage must be within 0..1"
+    (refused Usage.decode_ollama_usage {|{"limits":{"weekly":{"usage":1.5}}}|});
+  check string "a negative usage is refused" "ollama-usage.limits.session.usage must be within 0..1"
+    (refused Usage.decode_ollama_usage {|{"limits":{"session":{"usage":-0.1}}}|})
+;;
+
+(* --- Reading scopes: the fetch is injected, so no request leaves. --- *)
+
+module Read = Runtime_provider_usage_read
+
+let http_readable ~provider_id ~url ~key =
+  { Read.scope = Runtime_quota_window.scope_of_credential ~provider_id None
+  ; how =
+      Http
+        { credential = Llm_provider.Provider_config.Static_credential, Llm_provider.Secret.of_string key
+        ; usage_read = { shape = Runtime_schema.Ollama_usage; url }
+        }
+  }
+;;
+
+let reported scope =
+  match Usage.state ~scope with
+  | Usage.Reported _ -> true
+  | Usage.Not_reported_since_start -> false
+;;
+
+let codex_exec : Runtime_execution.codex_app_server =
+  { Runtime_execution.cli_path = "/usr/bin/true"; model = None; timeout_s = 1.0 }
+
+(* One scope raising, over HTTP or through Codex, is logged and the scopes
+   after it are still read. *)
+let test_a_raising_scope_does_not_stop_the_rest () =
+  let raising = http_readable ~provider_id:"usage_read_raises" ~url:"https://raise.invalid" ~key:"k" in
+  let codex_raising =
+    { Read.scope = Runtime_quota_window.scope_of_credential ~provider_id:"usage_read_codex_raises" None
+    ; how = Codex codex_exec
+    }
+  in
+  let after = http_readable ~provider_id:"usage_read_after" ~url:"https://ok.invalid" ~key:"k" in
+  let fetch ~api_key:_ url =
+    if String.equal url "https://ok.invalid"
+    then Ok ollama_usage_response
+    else failwith "connection closed by peer"
+  in
+  let codex ~scope:_ _ = failwith "codex app-server died" in
+  Read.read_scopes ~codex ~fetch [ raising; codex_raising; after ];
+  check bool "the raising scope recorded nothing" false (reported raising.scope);
+  check bool "the scope after it was read" true (reported after.scope)
+;;
+
+(* An empty key is refused before any request. *)
+let test_an_empty_key_sends_no_request () =
+  let empty = http_readable ~provider_id:"usage_read_empty_key" ~url:"https://ok.invalid" ~key:"" in
+  let fetch ~api_key:_ _ = fail "a request was sent with an empty key" in
+  Read.read_scopes ~codex:(fun ~scope:_ _ -> Ok ()) ~fetch [ empty ];
+  check bool "nothing recorded" false (reported empty.scope)
 ;;
 
 let () =
@@ -344,6 +442,11 @@ let () =
         ; test_case "zai-quota-limit" `Quick test_zai_quota_limit
         ; test_case "kimi-coding-usages" `Quick test_kimi_coding_usages
         ; test_case "ollama-usage" `Quick test_ollama_usage
+        ] )
+    ; ( "reading scopes"
+      , [ test_case "a raising scope does not stop the rest" `Quick
+            test_a_raising_scope_does_not_stop_the_rest
+        ; test_case "an empty key sends no request" `Quick test_an_empty_key_sends_no_request
         ] )
     ]
 ;;

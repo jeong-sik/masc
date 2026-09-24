@@ -811,6 +811,25 @@ let box_line_styled buf cols ~style content =
   Buffer.add_string buf
     (Printf.sprintf "  %s%s%s  \n" style content Ansi.reset)
 
+(* A row of three parts: a lead, one field that takes what the row has left,
+   and a tail. [fit_width] pads as well as cuts, so a field fitted to a
+   hand-counted width carries the row past {!framed_inner_width} whenever the
+   count is short; [box_line] then cuts the row and draws the cut mark over
+   the field's own padding, so the row says it dropped something when what it
+   dropped was spaces.
+
+   The width is measured from the lead and the tail rather than counted here,
+   the way [tab_strip_width] measures the strip's. When the two leave the
+   field nothing, the field keeps one cell and the cut is real: something was
+   dropped and the mark is the row saying so. *)
+let row_with_field ~cols ~lead ~field ~tail =
+  let cells text =
+    Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
+  in
+  lead
+  ^ fit_width field (max 1 (framed_inner_width cols - cells lead - cells tail))
+  ^ tail
+
 (* The selected row of a borderless list: one reverse-video band across the
    full row, box_line's geometry (two margin cells each side, content width
    {!framed_inner_width}). Reverse survives NO_COLOR by contract, so this is also the

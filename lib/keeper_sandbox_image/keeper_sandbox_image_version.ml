@@ -28,6 +28,8 @@ let load_error_to_string = function
        starting with '-'"
       name
   | Recipe_missing { path } -> Printf.sprintf "no recipe at %s" path
+  | Source_file_outside_source { path } ->
+    Printf.sprintf "%s resolves outside the source checkout" path
   | Input_path_rejected { listed_in; path } ->
     Printf.sprintf
       "%s lists %S, which is absolute, empty, climbs out with '..' or is the \
@@ -50,11 +52,6 @@ let valid_name name =
   && (not (Char.equal name.[0] '-'))
   && String.for_all allowed name
 
-let read_file path =
-  match In_channel.with_open_bin path In_channel.input_all with
-  | contents -> Ok contents
-  | exception Sys_error detail -> Error (Unreadable { path; detail })
-
 (* One path per line; blank lines and '#' comments are for the reader. *)
 let listed_paths text =
   String.split_on_char '\n' text
@@ -72,29 +69,64 @@ let path_stays_inside path =
   && (not (String.equal path recipe_file_name))
   && not (List.exists (String.equal "..") (String.split_on_char '/' path))
 
-(* A path can be spelled inside the checkout and still resolve outside it
-   through a symbolic link on the way. Both sides are resolved, so a checkout
-   that is itself reached through a link still contains its own files. *)
-let resolves_inside ~source full =
-  match Unix.realpath source, Unix.realpath full with
-  | root, target ->
-    let prefix = if String.ends_with ~suffix:"/" root then root else root ^ "/" in
-    String.starts_with ~prefix target
-  | exception Unix.Unix_error _ -> false
+(* Resolve the checkout once. A symlink used to reach the checkout is fine,
+   but subsequent reads use this canonical root, not a movable link. *)
+let source_root source =
+  match Unix.realpath source with
+  | root -> Ok root
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (Unreadable { path = source; detail = Unix.error_message error })
+
+let file_present path =
+  match Unix.lstat path with
+  | _ -> Ok true
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (Unreadable { path; detail = Unix.error_message error })
+
+(* Resolve a link inside the checkout before opening the file. The owned-file
+   reader then checks the canonical path's directory chain and descriptor
+   identity before and after reading, so swapping the original link cannot
+   make the opened file escape the root. *)
+let read_inside ~root ~path ~outside =
+  let ( let* ) = Result.bind in
+  let* target =
+    match Unix.realpath path with
+    | target ->
+      let prefix = if String.ends_with ~suffix:"/" root then root else root ^ "/" in
+      if String.starts_with ~prefix target then Ok target else Error outside
+    | exception Unix.Unix_error (error, _, _) ->
+      Error (Unreadable { path; detail = Unix.error_message error })
+  in
+  match Fs_compat.load_owned_regular_file ~ownership_root:root target with
+  | Ok (Some contents) -> Ok contents
+  | Ok None -> Error (Unreadable { path; detail = "file disappeared while reading" })
+  | Error error ->
+    Error (Unreadable
+             { path; detail = Fs_compat.owned_regular_file_read_error_to_string error })
 
 let load ~source ~name =
   let ( let* ) = Result.bind in
   let* () = if valid_name name then Ok () else Error (Invalid_name name) in
-  let dir = Filename.concat (Filename.concat source "sandbox-images") name in
+  let* root = source_root source in
+  let dir = Filename.concat (Filename.concat root "sandbox-images") name in
   let dockerfile_path = Filename.concat dir "Dockerfile" in
+  let* dockerfile_present = file_present dockerfile_path in
   let* () =
-    if Sys.file_exists dockerfile_path then Ok ()
+    if dockerfile_present then Ok ()
     else Error (Recipe_missing { path = dockerfile_path })
   in
-  let* dockerfile = read_file dockerfile_path in
+  let* dockerfile =
+    read_inside ~root ~path:dockerfile_path
+      ~outside:(Source_file_outside_source { path = dockerfile_path })
+  in
   let inputs_path = Filename.concat dir "inputs" in
+  let* inputs_present = file_present inputs_path in
   let* listed =
-    if Sys.file_exists inputs_path then Result.map listed_paths (read_file inputs_path)
+    if inputs_present then
+      Result.map listed_paths
+        (read_inside ~root ~path:inputs_path
+           ~outside:(Source_file_outside_source { path = inputs_path }))
     else Ok []
   in
   let read_input path =
@@ -102,16 +134,17 @@ let load ~source ~name =
       if path_stays_inside path then Ok ()
       else Error (Input_path_rejected { listed_in = inputs_path; path })
     in
-    let full = Filename.concat source path in
+    let full = Filename.concat root path in
+    let* input_present = file_present full in
     let* () =
-      if Sys.file_exists full then Ok ()
+      if input_present then Ok ()
       else Error (Input_missing { listed_in = inputs_path; path })
     in
-    let* () =
-      if resolves_inside ~source full then Ok ()
-      else Error (Input_outside_source { listed_in = inputs_path; path })
+    let* contents =
+      read_inside ~root ~path:full
+        ~outside:(Input_outside_source { listed_in = inputs_path; path })
     in
-    Result.map (fun contents -> { path; contents }) (read_file full)
+    Ok { path; contents }
   in
   let* inputs =
     List.fold_left

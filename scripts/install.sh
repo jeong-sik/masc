@@ -1741,14 +1741,7 @@ seed_team() {
     --retry "$MASC_INSTALL_CURL_RETRIES" \
     -o "$manifest_tmp" "$manifest_url" \
     || die "team preset '$preset' manifest fetch failed ($manifest_url)"
-  fetch_release_checksums
-  # Releases before the manifest entered SHA256SUMS only list the files it
-  # names; each of those is still verified below.
-  if [ "$CHECKSUMS_AVAILABLE" -eq 1 ] && [ -z "$(expected_hash "presets/$preset/manifest.txt")" ]; then
-    warn "SHA256SUMS has no entry for presets/$preset/manifest.txt; verifying the listed files only"
-  else
-    verify_checksum "$manifest_tmp" "presets/$preset/manifest.txt"
-  fi
+  verify_checksum "$manifest_tmp" "presets/$preset/manifest.txt"
 
   local rel dest tmp raw
   while IFS= read -r rel || [ -n "$rel" ]; do

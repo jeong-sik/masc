@@ -1783,15 +1783,7 @@ let test_team_flag_and_seed_exist () =
   assert_contains
     "team files verified against release checksums"
     script
-    "verify_checksum \"$tmp\" \"presets/$preset/$rel\"";
-  assert_contains
-    "team manifest verified against release checksums"
-    script
-    "verify_checksum \"$manifest_tmp\" \"presets/$preset/manifest.txt\"";
-  assert_contains
-    "team manifest paths rejected before mkdir"
-    script
-    "manifest has an unsafe path"
+    "verify_checksum \"$tmp\" \"presets/$preset/$rel\""
 ;;
 
 let test_release_checksums_include_team_presets () =

@@ -268,7 +268,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
+let run_fixture ?account_home ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = [])
     ?(developer_context = []) ?developer_instructions ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?wall_clock_ceiling_s ?(no_turn_deadline = false)
     ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
@@ -279,6 +279,7 @@ let run_fixture ?isolated_home ?(dynamic_tools = []) ?thread_mode ?(history = []
     let config =
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
+      ; account_home
       ; isolated_home
       ; native
       ; developer_instructions
@@ -2692,6 +2693,25 @@ let test_readiness_home_overrides_inherited_home () =
         match run_fixture ~isolated_home wrapper with
         | Error error -> fail (Runtime_codex_app_server.error_to_string error)
         | Ok _ -> ()))
+;;
+
+let test_account_home_does_not_apply_readiness_overrides () =
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+    (fun fixture ->
+      let wrapper = Filename.temp_file "masc-codex-account-wrapper-" ".sh" in
+      Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+        let output = open_out_bin wrapper in
+        output_string output "#!/bin/sh\nset -eu\n";
+        output_string output "[ \"$CODEX_HOME\" = /tmp/codex-account-one ] || exit 75\n";
+        output_string output "[ -z \"${OPENAI_API_KEY:-}\" ] || exit 76\n";
+        output_string output "case \"$*\" in *'cli_auth_credentials_store'*) exit 77;; esac\n";
+        output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+        close_out output;
+        Unix.chmod wrapper 0o700;
+        match run_fixture ~account_home:"/tmp/codex-account-one" wrapper with
+        | Ok _ -> ()
+        | Error error -> fail (Runtime_codex_app_server.error_to_string error)))
 ;;
 
 let write_fixture_file path content =
@@ -5319,6 +5339,8 @@ let () =
             "readiness private home overrides inherited home"
             `Quick
             test_readiness_home_overrides_inherited_home
+        ; test_case "selected account home keeps normal CLI configuration" `Quick
+            test_account_home_does_not_apply_readiness_overrides
         ; test_case
             "child environment is allowlisted"
             `Quick

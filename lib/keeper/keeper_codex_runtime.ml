@@ -1033,7 +1033,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     let client_config =
       { Runtime_codex_app_server.cli_path = config.cli_path
-      ; isolated_home = config.account_home
+      ; account_home = config.account_home
+      ; isolated_home = None
       ; model = config.model
       ; native = native_posture
       ; developer_instructions
@@ -1448,12 +1449,23 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
          ~latency_ms:(Some latency_ms)
          ~error:None;
        let runtime_observation =
+         let request_context =
+           Option.map
+             (fun (usage : Runtime_codex_app_server.token_usage) : Runtime_observation.request_context ->
+                { input_tokens = usage.input_tokens
+                ; cache_creation_input_tokens = usage.cache_write_input_tokens
+                ; cache_read_input_tokens = usage.cached_input_tokens
+                ; context_window = turn.context_window
+                })
+             turn.usage
+         in
          Runtime_observation.runtime_observation_with_metrics
            ~runtime_id
            ~selected_model_raw:(Some turn.model)
            ~capture
            ~attempt_details_source:"codex_app_server"
            ~agent_core_internal_runtime_allowed:false
+           ?request_context
            ~usage_scope:
              (match turn.usage with
               | Some _ -> Runtime_usage_scope.Per_request

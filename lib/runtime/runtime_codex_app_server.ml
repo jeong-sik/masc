@@ -21,6 +21,7 @@ type probe_result =
 
 type config =
   { cli_path : string
+  ; account_home : string option
   ; isolated_home : string option
   ; model : string option
   ; developer_instructions : string option
@@ -47,6 +48,7 @@ let client_version = Runtime_build_version.current
 
 let default_config () =
   { cli_path = "codex"
+  ; account_home = None
   ; isolated_home = None
   ; model = None
   ; developer_instructions = None
@@ -116,6 +118,7 @@ type turn_result =
     (* [None] when no thread/tokenUsage/updated for this turn arrived before
        turn/completed; the host then reports the usage scope as unavailable
        rather than a count of zero. *)
+  ; context_window : int option
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -1106,15 +1109,22 @@ let token_usage_notification ~thread_id ~turn_id params =
       | None -> Ok 0
       | Some _ -> required_count stage "cacheWriteInputTokens" last
     in
+    let* context_window =
+      match List.assoc_opt "modelContextWindow" usage_fields with
+      | None | Some `Null -> Ok None
+      | Some (`Int window) when window > 0 -> Ok (Some window)
+      | Some _ -> protocol_error stage "modelContextWindow must be a positive integer or null"
+    in
     Ok
       (Some
-         { input_tokens
-         ; cached_input_tokens
-         ; cache_write_input_tokens
-         ; output_tokens
-         ; reasoning_output_tokens
-         ; total_tokens
-         })
+         ( { input_tokens
+           ; cached_input_tokens
+           ; cache_write_input_tokens
+           ; output_tokens
+           ; reasoning_output_tokens
+           ; total_tokens
+           }
+         , context_window ))
 ;;
 
 (* Codex MCP requests include approvals and forms, independently of shell
@@ -1635,7 +1645,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
   in
   emit_stream_event on_stream_event (Turn_started { turn_id; model });
   let tool_call_count = ref 0 in
-  let* text, usage =
+  let* text, usage_report =
     await_turn_terminal
       io
       ~tools:dynamic_tools
@@ -1649,6 +1659,11 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
       ~on_stream_event
   in
   emit_stream_event on_stream_event (Turn_finished { text });
+  let usage, context_window =
+    match usage_report with
+    | Some (usage, context_window) -> Some usage, context_window
+    | None -> None, None
+  in
   Ok
     { thread_id
     ; turn_id
@@ -1659,6 +1674,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
     ; user_agent
     ; resumed
     ; usage
+    ; context_window
     }
 ;;
 
@@ -1823,7 +1839,10 @@ let client_argv (config : config) =
 ;;
 
 let with_spawned_client ~mgr ~clock ~cwd config run =
-  let* environment = client_environment config.isolated_home in
+  let selected_home = match config.isolated_home with
+    | Some home -> Some home
+    | None -> config.account_home in
+  let* environment = client_environment selected_home in
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -1979,6 +1998,12 @@ let native_cwd cwd =
 let validate_process_config config =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
+  else if Option.is_some config.account_home && Option.is_some config.isolated_home
+  then Error (Invalid_config "account_home and isolated_home cannot both be selected")
+  else if (match config.account_home with
+      | None -> false
+      | Some home -> home = "" || home <> String.trim home || Filename.is_relative home)
+  then Error (Invalid_config "account_home must be a non-empty absolute path")
   else if
     not (Float.is_finite config.admission_timeout_s)
     || config.admission_timeout_s <= 0.0

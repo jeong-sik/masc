@@ -1666,6 +1666,10 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
 let validate_process_config config =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
+  else if (match config.account_home with
+      | None -> false
+      | Some home -> home = "" || home <> String.trim home || Filename.is_relative home)
+  then Error (Invalid_config "account_home must be a non-empty absolute path")
   else if String.trim config.cwd = "" || Filename.is_relative config.cwd
   then Error (Invalid_config "cwd must be an absolute path")
   else if

@@ -19,9 +19,12 @@ type probe_result =
 
 type config =
   { cli_path : string
+  ; account_home : string option
+    (** Operator-selected Codex login and configuration directory for normal
+        client turns. [None] inherits the process's ordinary Codex home. *)
   ; isolated_home : string option
-    (** Selected account's CODEX_HOME, or a verification-only private home.
-        [None] retains the user's configured home. *)
+    (** Verification-only private CODEX_HOME prepared with projected auth and
+        provider configuration. Its safe CLI overrides apply only here. *)
   ; model : string option
   ; developer_instructions : string option
   ; native : Runtime_native_tools.posture
@@ -108,6 +111,9 @@ type turn_result =
     (* [None] when no thread/tokenUsage/updated for this turn arrived before
        turn/completed; the host then reports the usage scope as unavailable
        rather than a count of zero. *)
+  ; context_window : int option
+    (** [modelContextWindow] from the latest usage notification for this turn.
+        [None] means the app-server did not report a positive window. *)
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =

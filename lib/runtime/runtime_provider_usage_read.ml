@@ -9,7 +9,7 @@ let codex_config (exec : Runtime_execution.codex_app_server) =
   let bound = Float.min read_timeout_s exec.timeout_s in
   { (Runtime_codex_app_server.default_config ()) with
     cli_path = exec.cli_path
-  ; isolated_home = exec.account_home
+  ; account_home = exec.account_home
   ; model = exec.model
   ; admission_timeout_s = bound
   ; timeout_s = Some bound

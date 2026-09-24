@@ -133,7 +133,7 @@ let decode_live_query fields =
   if List.length names <> List.length (List.sort_uniq String.compare names)
   then Error "duplicate query field"
   else
-    match List.find_opt (fun name -> not (List.mem name ["source_kind"; "since"])) names with
+    match List.find_opt (fun name -> not (List.mem name ["source_kind"; "since"; "incarnation"])) names with
     | Some name -> Error ("unknown live parameter: " ^ name)
     | None ->
         let* source = match List.assoc_opt "source_kind" fields with
@@ -142,12 +142,18 @@ let decode_live_query fields =
               Error (kind ^ " has no screen to watch; live accepts msx_capture")
           | Some kind -> Error ("unknown source_kind: " ^ kind)
           | None -> Error "live requires source_kind" in
-        let* since = match List.assoc_opt "since" fields with
-          | None -> Ok None
-          | Some value ->
-              (match int_of_string_opt value with
-               | Some count when count >= 0 -> Ok (Some count)
-               | Some _ | None -> Error "since must be a nonnegative integer") in
+        (* Decimal digits only: int_of_string_opt also reads 0x10 and 1_000. *)
+        let count_of value =
+          if value <> "" && String.for_all (function '0' .. '9' -> true | _ -> false) value
+          then int_of_string_opt value else None in
+        let* since = match List.assoc_opt "since" fields, List.assoc_opt "incarnation" fields with
+          | None, None -> Ok None
+          | Some value, Some incarnation when incarnation <> "" ->
+              (match count_of value with
+               | Some count -> Ok (Some { Msx_lane.count; incarnation })
+               | None -> Error "since must be a nonnegative decimal integer")
+          | Some _, (Some _ | None) | None, Some _ ->
+              Error "since and incarnation come together: a count alone can repeat after a server restart" in
         Ok (source, since)
 
 (* Reads the machine and encodes the pixels. It takes the machine's stdlib

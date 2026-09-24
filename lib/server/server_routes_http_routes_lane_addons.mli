@@ -12,8 +12,10 @@ val decode_inspect_query : (string * string) list -> (Yojson.Safe.t, string) res
 type screen_source = Msx_screen
 
 val decode_live_query :
-  (string * string) list -> (screen_source * int option, string) result
-(** [source_kind] (required) and [since] (optional, a nonnegative change
-    count). A kind with no screen ([snapshot_file], [lane_output],
-    [browser_document]), an unknown kind, an unknown or repeated parameter,
-    and a [since] that is not a nonnegative integer are errors. *)
+  (string * string) list -> (screen_source * Msx_lane.change_mark option, string) result
+(** [source_kind] (required), and [since] with [incarnation] (optional, always
+    together: a nonnegative decimal change count and the incarnation it was
+    read under). A kind with no screen ([snapshot_file], [lane_output],
+    [browser_document]), an unknown kind, an unknown or repeated parameter, a
+    [since] that is not decimal digits, and [since] or [incarnation] alone are
+    errors. *)

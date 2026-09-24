@@ -246,19 +246,21 @@ type change_mark = {
           already raised it. A call refused as an {!error} before it touches
           the machine leaves it. Nothing resets it -- eject and the next load
           keep counting -- so a value never names two screens while the server
-          runs. A restarted server counts from 0 again, under a fresh
-          incarnation; a watcher pairs the two. *)
+          runs. A restarted server counts from 0 again, so the count alone
+          can repeat across restarts; {!live} answers [Unchanged] only when
+          the incarnation matches too. *)
   incarnation : string;  (** as in {!identified_capture} *)
 }
 
 type live =
   | Nothing_loaded  (** no machine: nothing to watch *)
-  | Unchanged of change_mark  (** [since] names the current count *)
+  | Unchanged of change_mark
+      (** [since] names the current count and the current incarnation *)
   | Changed of change_mark * frame
-      (** [since] was absent or names an older count *)
+      (** [since] was absent, or its count or incarnation differs *)
 
-val live : since:int option -> live
-(** Reads the count, the incarnation and, when they differ from [since], the
+val live : since:change_mark option -> live
+(** Reads the count, the incarnation and, when either differs from [since], the
     pixels under one hold of the machine lock, the same lock a call that
     advances the machine holds. Never steps or writes anything. The lock is a
     stdlib mutex that a step can hold for a whole call, so an Eio caller runs

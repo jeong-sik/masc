@@ -95,9 +95,10 @@ let test_counter_moves_on_every_change () =
     let c = rises "restore" c in
     check bool "restore names a new incarnation" true
       (not (String.equal incarnation (mark ()).Lane.incarnation));
+    let before_eject = mark () in
     ok "eject" (Lane.eject ());
     check bool "an ejected machine reads as nothing loaded" true
-      (match Lane.live ~since:(Some c) with
+      (match Lane.live ~since:(Some { before_eject with Lane.count = c }) with
        | Lane.Nothing_loaded -> true
        | Lane.Unchanged _ | Lane.Changed _ -> false);
     ok "reload" (Lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None);
@@ -121,20 +122,24 @@ let test_counter_moves_on_every_change () =
 let test_since_answers_unchanged () =
   with_machine (fun ~dir:_ ~ledger_dir:_ ->
     let m = mark () in
-    (match Lane.live ~since:(Some m.Lane.count) with
+    (match Lane.live ~since:(Some m) with
      | Lane.Unchanged same ->
          check int "unchanged carries the count" m.Lane.count same.Lane.count;
          check string "unchanged carries the incarnation" m.Lane.incarnation
            same.Lane.incarnation
      | Lane.Changed _ | Lane.Nothing_loaded -> fail "the current count must answer unchanged");
-    (match Lane.live ~since:(Some (m.Lane.count - 1)) with
+    (match Lane.live ~since:(Some { m with Lane.incarnation = "another-incarnation" }) with
+     | Lane.Changed _ -> ()
+     | Lane.Unchanged _ | Lane.Nothing_loaded ->
+         fail "the same count under another incarnation must get the frame");
+    (match Lane.live ~since:(Some { m with Lane.count = m.Lane.count - 1 }) with
      | Lane.Changed (again, frame) ->
          check int "an older count gets the current count" m.Lane.count again.Lane.count;
          check int "the frame is width*height*3 RGB bytes"
            (frame.Lane.width * frame.Lane.height * 3) (String.length frame.Lane.rgb)
      | Lane.Unchanged _ | Lane.Nothing_loaded -> fail "an older count must get the frame");
     ok "step" (Lane.step ~frames:1);
-    match Lane.live ~since:(Some m.Lane.count) with
+    match Lane.live ~since:(Some m) with
     | Lane.Changed (after, _) ->
         check bool "a step makes the old count stale" true (after.Lane.count > m.Lane.count)
     | Lane.Unchanged _ | Lane.Nothing_loaded -> fail "a step must change the answer")
@@ -149,7 +154,8 @@ let test_decode_live_query () =
   check bool "msx_capture with no since" true
     (decode ["source_kind", "msx_capture"] = Ok (Routes.Msx_screen, None));
   check bool "msx_capture with a since" true
-    (decode ["since", "7"; "source_kind", "msx_capture"] = Ok (Routes.Msx_screen, Some 7));
+    (decode ["since", "7"; "incarnation", "inc-a"; "source_kind", "msx_capture"]
+     = Ok (Routes.Msx_screen, Some { Lane.count = 7; incarnation = "inc-a" }));
   let refused what fields expected =
     match decode fields with
     | Ok _ -> fail (what ^ " must be refused")
@@ -162,8 +168,14 @@ let test_decode_live_query () =
     ["snapshot_file"; "lane_output"; "browser_document"];
   refused "an unknown kind" ["source_kind", "vcr_capture"] "unknown source_kind";
   refused "a missing kind" [] "requires source_kind";
-  refused "a negative since" ["source_kind", "msx_capture"; "since", "-1"] "since";
-  refused "a text since" ["source_kind", "msx_capture"; "since", "latest"] "since";
+  let with_inc fields = ("incarnation", "inc-a") :: fields in
+  refused "a negative since" (with_inc ["source_kind", "msx_capture"; "since", "-1"]) "since";
+  refused "a text since" (with_inc ["source_kind", "msx_capture"; "since", "latest"]) "since";
+  refused "a hex since" (with_inc ["source_kind", "msx_capture"; "since", "0x10"]) "since";
+  refused "an underscored since" (with_inc ["source_kind", "msx_capture"; "since", "1_000"]) "since";
+  refused "a since without an incarnation" ["source_kind", "msx_capture"; "since", "7"] "together";
+  refused "an incarnation without a since" ["source_kind", "msx_capture"; "incarnation", "inc-a"]
+    "together";
   refused "a repeated kind" ["source_kind", "msx_capture"; "source_kind", "msx_capture"]
     "duplicate";
   refused "an unknown parameter" ["source_kind", "msx_capture"; "until", "3"] "unknown live parameter"
@@ -293,7 +305,8 @@ let test_live_route () =
             (int_member "width" screen * int_member "height" screen * 3)
             (String.length (Base64.decode_exn (string_member "rgb_base64" screen)));
           let files_before = tree base_path in
-          let same = get (live ^ "&since=" ^ string_of_int n) in
+          let since n = "&since=" ^ string_of_int n ^ "&incarnation=" ^ incarnation in
+          let same = get (live ^ since n) in
           let json = body_json same in
           check string "since at the current count is unchanged" "unchanged"
             (string_member "state" json);
@@ -302,7 +315,7 @@ let test_live_route () =
             (string_member "incarnation" json);
           check bool "unchanged sends no screen" true (member "screen" json = None);
           ok "step" (Lane.step ~frames:1);
-          let moved = body_json (get (live ^ "&since=" ^ string_of_int n)) in
+          let moved = body_json (get (live ^ since n)) in
           check string "a step makes the old since stale" "changed" (string_member "state" moved);
           check bool "the new count is larger" true (int_member "change_count" moved > n);
           List.iter
@@ -312,7 +325,8 @@ let test_live_route () =
             ; "/api/v1/lane-addons/live?source_kind=browser_document", "a browser document is a 400"
             ; "/api/v1/lane-addons/live?source_kind=vcr_capture", "an unknown kind is a 400"
             ; "/api/v1/lane-addons/live", "a missing kind is a 400"
-            ; live ^ "&since=soon", "a text since is a 400" ];
+            ; live ^ "&since=soon&incarnation=" ^ incarnation, "a text since is a 400"
+            ; live ^ "&since=" ^ string_of_int n, "a since without its incarnation is a 400" ];
           check (list string) "live reads write no file under the workspace" files_before
             (tree base_path)))))
 

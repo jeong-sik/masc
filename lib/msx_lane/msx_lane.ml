@@ -660,7 +660,8 @@ let live ~since =
     | Some st ->
       let mark = { count = !change_count; incarnation = st.incarnation } in
       (match since with
-       | Some seen when seen = mark.count -> Unchanged mark
+       | Some seen when seen.count = mark.count
+                        && String.equal seen.incarnation mark.incarnation -> Unchanged mark
        | Some _ | None -> Changed (mark, frame_of st)))
 ;;
 

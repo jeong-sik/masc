@@ -1,9 +1,9 @@
-(** Read whether a newer, claimable person-chat operation is waiting for this
-    Keeper's turn slot. An autonomous turn can use this before its first
-    provider event. A claimed direct turn uses it after a settled tool result,
-    then retains a continuation before handing over the turn slot. *)
+(** An autonomous turn yields to any claimable person-chat operation. A
+    direct turn passes its claimed operation ID and yields only to an original
+    chat admitted later, never to an older queued continuation. *)
 
 val request :
+  ?after_operation_id:Keeper_chat_operation.Operation_id.t ->
   base_path:string ->
   keeper_name:string ->
   (Keeper_agent_run.autonomous_yield_request option, string) result

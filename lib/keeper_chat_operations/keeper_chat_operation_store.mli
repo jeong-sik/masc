@@ -209,6 +209,11 @@ val semantic_apply :
     claimable; the scheduled wake re-offers it once the backoff passes. *)
 val has_claimable_queued : t -> now:float -> (bool, error) result
 
+(** True only if a still-queued original chat was admitted after the named
+    running operation. Queued direct continuations are excluded even when a
+    cooperative checkpoint moved them behind later operations. *)
+val has_newer_original_queued : t -> operation_id:Operation.Operation_id.t -> (bool, error) result
+
 val next_runtime_retry_wake : t -> now:float -> (float option, error) result
 (** Earliest future [not_before] among cooling deferred runtime retries, so the
     owner can re-arm the drain wake after a restart (the defer-time sleeper

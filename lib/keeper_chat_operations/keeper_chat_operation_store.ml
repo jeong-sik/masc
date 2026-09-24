@@ -1177,6 +1177,43 @@ let has_claimable_queued store ~now =
   let* () = ensure_open store in
   claimable_queued_with_db store.db ~now |> Result.map Option.is_some
 
+(* A direct turn may hand its slot to a later person's original input, but a
+   yielded continuation must not make the next turn yield back to it. The
+   immutable admission time establishes which input is later even when a
+   checkpoint moves the original operation to the end of the queue. A queued
+   operation with a semantic execution has already been claimed and is a
+   continuation, regardless of its current queue position. *)
+let has_newer_original_queued store ~operation_id =
+  let* () = ensure_open store in
+  let* running = operation_or_unknown store.db operation_id in
+  match running.Operation.state with
+  | Operation.Queued | Operation.Succeeded _ | Operation.Failed _
+  | Operation.Cancelled _ -> Error (Not_running operation_id)
+  | Operation.Running _ ->
+    let* executions = semantic_rows store.db ~active_only:false in
+    with_statement store.db ~operation:"read newer original chat operations"
+      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' AND created_at > ? "
+       ^ "AND NOT EXISTS (SELECT 1 FROM operation_batch_members b "
+       ^ "WHERE b.operation_id = operations.operation_id AND b.execution_id <> b.operation_id) "
+       ^ "ORDER BY sequence")
+      (fun statement ->
+        let* () = bind_float store.db statement ~operation:"bind running admission time"
+          1 running.created_at in
+        let rec read () =
+          let rc = Sqlite3.step statement in
+          if rc = Sqlite3.Rc.DONE then Ok false
+          else if rc = Sqlite3.Rc.ROW then
+            let* candidate = decode_operation statement in
+            if List.exists (fun (execution : Semantic.t) ->
+                Keeper_execution_scope_id.equal execution.id
+                  (Keeper_execution_scope_id.direct_operation candidate.operation_id)) executions
+            then read () else Ok true
+          else Error (Store_unavailable
+            (sqlite_error store.db "read newer original chat operations" rc))
+        in
+        read ())
+;;
+
 (* The wake scheduled at defer time rides the process's pool switch and dies
    with it, and the Owner never polls: after a restart, a persisted future
    [not_before] would sit until an unrelated mailbox event unless the owner

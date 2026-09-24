@@ -243,6 +243,31 @@ let test_cooperative_checkpoint_preserves_identity_and_yields_to_steering () = w
     check bool "actual answer settles semantic execution" true (Semantic.is_terminal (execution store));
     check bool "success releases original input" true ((current store).input = None)))
 
+let test_direct_yield_ignores_older_continuation () = with_path (fun path ->
+  with_open path (fun store ->
+    let first = admitted store in
+    let second = Operation.Operation_id.of_string "second-direct-chat" |> string_ok in
+    let third = Operation.Operation_id.of_string "third-direct-chat" |> string_ok in
+    check bool "no newer chat yet" false
+      (Store.has_newer_original_queued store ~operation_id |> ok);
+    ignore (Store.submit store ~now:12. ~operation_id:second ~source ~input |> ok);
+    check bool "A yields to B's original chat" true
+      (Store.has_newer_original_queued store ~operation_id |> ok);
+    ignore (Store.defer_direct_checkpoint store ~now:13. ~operation_id
+      ~execution_digest:first.execution_digest
+      ~checkpoint:(Semantic.Agent_core (checkpoint "A's settled tool result")) |> ok);
+    let claimed = Store.claim_next store ~now:14. |> ok |> Option.get in
+    check bool "B claims before A's continuation" true
+      (Operation.Operation_id.equal second claimed.operation_id);
+    check bool "A's continuation is claimable" true
+      (Store.has_claimable_queued store ~now:14. |> ok);
+    check bool "B does not yield back to older A" false
+      (Store.has_newer_original_queued store ~operation_id:second |> ok);
+    ignore (Store.submit store ~now:15. ~operation_id:third ~source ~input |> ok);
+    check bool "B still yields to a later original C" true
+      (Store.has_newer_original_queued store ~operation_id:second |> ok)))
+;;
+
 let test_cooperative_checkpoint_commit_fault_and_cancel () = with_path (fun path ->
   with_open path (fun store ->
     let first = admitted store in
@@ -295,6 +320,7 @@ let test_official_checkpoint_retains_session_input_and_cancel_boundary () = with
 let () = run "Keeper direct runtime continuation" ["durable owner journal", [
   test_case "official checkpoint preserves original conversation without native replay" `Quick test_official_checkpoint_retains_session_input_and_cancel_boundary;
   test_case "cooperative checkpoint yields to steering and survives claim crash" `Quick test_cooperative_checkpoint_preserves_identity_and_yields_to_steering;
+  test_case "B ignores A's older continuation after A yields" `Quick test_direct_yield_ignores_older_continuation;
   test_case "cooperative checkpoint commit fault and cancel" `Quick test_cooperative_checkpoint_commit_fault_and_cancel;
   test_case "batch retry freezes members and excludes new arrivals" `Quick test_batch_runtime_retry_keeps_frozen_members;
   test_case "same operation survives and completes" `Quick test_same_operation_survives_and_completes;

@@ -835,6 +835,7 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~turn_kind:Turn_record.Direct
                                 ~autonomous_yield_requested:(fun () ->
                                   Keeper_chat_yield_request.request
+                                    ~after_operation_id:operation_id
                                     ~base_path:ctx.config.base_path
                                     ~keeper_name:meta.name)
                                 ~repetition_execution

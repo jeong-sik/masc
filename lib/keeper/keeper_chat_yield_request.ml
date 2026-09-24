@@ -1,4 +1,4 @@
-let request ~base_path ~keeper_name =
+let request ?after_operation_id ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
   | Some _ ->
@@ -10,6 +10,15 @@ let request ~base_path ~keeper_name =
          Log.Keeper.warn ~keeper_name
            "chat readiness unavailable; retaining current turn progress";
          Ok None)
-       else if operations.has_claimable_queued
-       then Ok (Some Keeper_agent_run.{ reason = Operation_queued })
-       else Ok None)
+       else
+         let ready = match after_operation_id with
+           | None -> Ok operations.has_claimable_queued
+           | Some operation_id ->
+             Keeper_owner_registry.has_newer_original_queued
+               ~base_path ~keeper_name ~operation_id
+             |> Result.map_error Keeper_owner_registry.command_error_to_string
+         in
+         match ready with
+         | Error _ as error -> error
+         | Ok true -> Ok (Some Keeper_agent_run.{ reason = Operation_queued })
+         | Ok false -> Ok None)

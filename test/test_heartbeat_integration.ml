@@ -2274,7 +2274,8 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
 
       let stale_name = "stale-up-does-not-resume-operator-pause" in
       let stale_meta =
-        Shutdown_finalize.For_testing.paused_meta (make_meta stale_name)
+        Shutdown_finalize.For_testing.paused_meta
+          { (make_meta stale_name) with sandbox_image = Some "masc-sandbox:general" }
       in
       create_owner_meta_exn config stale_meta;
       let stale_parsed =

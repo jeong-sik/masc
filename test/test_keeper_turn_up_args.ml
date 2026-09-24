@@ -2665,7 +2665,22 @@ let test_sandbox_image_persistence () =
     (apply ["instructions", `String "new instructions"]);
   check (option string) "image replacement materializes" (Some "registry.example/documents:v2")
     (apply ["sandbox_image", `String "registry.example/documents:v2"]);
-  check (option string) "explicit clear removes override" None (apply ["sandbox_image", `Null]);
+  (* A docker Keeper cannot drop its image (#37523): the explicit clear is
+     refused before anything is written, and the stored image stays. *)
+  (match parse_stating_a_profile ctx
+      (`Assoc [ "name", `String name; "sandbox_profile", `String "docker"
+              ; "sandbox_image", `Null ]) with
+   | Error result ->
+     check bool "the refusal names the missing image" true
+       (contains "sandbox_image is required"
+          (Keeper_types_profile.tool_result_body result))
+   | Ok _ -> fail "clearing a docker Keeper's image was accepted");
+  (match Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+     ~base_path:ctx.config.base_path name with
+   | Ok defaults ->
+     check (option string) "refused clear keeps the stored image"
+       (Some "registry.example/documents:v2") defaults.sandbox_image
+   | Error e -> fail (Keeper_types_profile.keeper_toml_load_error_to_string e));
   List.iter (fun image ->
     match parse_stating_a_profile ctx (`Assoc ["name", `String name; "sandbox_image", image]) with
     | Error _ -> () | Ok _ -> fail "invalid image accepted") [`String " "; `Int 1; `Bool true]

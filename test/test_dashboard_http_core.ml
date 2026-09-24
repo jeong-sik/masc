@@ -5397,12 +5397,12 @@ let expect_http_status label status raw =
   if not (String.starts_with ~prefix raw)
   then failf "%s: expected %s, got %s" label prefix raw
 
-let config_reconciliation_response ~name error =
+let config_refusal_response ~name refusal =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
-      Keeper_config_post.For_testing.respond_config_reconciliation
-        ~request:(Httpun.Reqd.request reqd) reqd ~name ~error)
+      Keeper_config_post.For_testing.respond_config_refusal
+        ~request:(Httpun.Reqd.request reqd) reqd ~name ~refusal ~receipt:None)
   in
   let request = "POST /api/v1/keepers/test/config HTTP/1.1\r\nHost: x\r\n\r\n" in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
@@ -5448,20 +5448,11 @@ let test_composite_reconciliation_response_preserves_both_authorities () =
     ; detail = "runtime restore durability unconfirmed"
     }
   in
-  let error =
-    Masc.Keeper_turn_up_update.For_testing.composite_reconciliation_required_data
-      { manifest = Some manifest; runtime_assignment = Some runtime_assignment }
+  let raw, json =
+    config_refusal_response ~name:"alpha"
+      (Masc.Keeper_turn_up_update.Composite_reconciliation_required
+         { manifest = Some manifest; runtime_assignment = Some runtime_assignment })
   in
-  let result =
-    Masc.Keeper_types_profile.tool_result_error_data
-      ~class_:Tool_result.Runtime_failure error
-  in
-  let projected =
-    match Masc.Keeper_turn_up_update.config_reconciliation_required_of_result result with
-    | Some projected -> projected
-    | None -> fail "composite reconciliation was not classified"
-  in
-  let raw, json = config_reconciliation_response ~name:"alpha" projected in
   expect_http_status "composite reconciliation" 503 raw;
   let open Yojson.Safe.Util in
   check string "typed composite reconciliation code"
@@ -5941,11 +5932,21 @@ let test_config_post_mid_turn_without_lane_still_fails () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-mid-turn-no-lane" in
   prepare_config_sync_keeper ~sw config name;
-  let (_ : string) = write_config_sync_toml config name in
+  let toml_path = write_config_sync_toml config name in
   post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name
     {|{"activation_mode":"autonomous"}|}
   |> expect_mid_turn_sync_failure ~label:"no running lane"
-       ~message_needle:"no keepalive lane is running"
+       ~message_needle:"no keepalive lane is running";
+  (* [config_applied: true] above is only right if the write stayed. *)
+  match
+    Keeper_toml_loader.parse_toml
+      (In_channel.with_open_bin toml_path In_channel.input_all)
+  with
+  | Error error -> fail error
+  | Ok doc ->
+    check (option string) "the refused sync left the write committed"
+      (Some "autonomous")
+      (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
 
 let test_config_post_mid_turn_policy_needs_the_lanes_proxy () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -6044,6 +6045,42 @@ let test_config_post_rolls_back_missing_runtime_assignment () =
   in
   check (option string) "TOML is rolled back" (Some "manual")
     (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
+
+(* The route's own validation lets an unknown network_mode through, and the
+   update refuses it before writing anything. Nothing changed and no lane was
+   touched, so the refusal must say so. *)
+let test_config_post_refused_before_write_says_not_applied () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-refused-before-write" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:config.base_path
+  in
+  let read path = In_channel.with_open_bin path In_channel.input_all in
+  let toml_before = read toml_path in
+  let runtime_before = read runtime_path in
+  let raw, json =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"activation_mode":"autonomous","network_mode":"not-a-mode"}|}
+  in
+  expect_http_status "a profile the update cannot resolve is HTTP 400" 400 raw;
+  let open Yojson.Safe.Util in
+  check bool "nothing was written" false
+    (json |> member "config_applied" |> to_bool);
+  check string "runtime sync was not attempted" "not_attempted"
+    (json |> member "runtime_sync" |> to_string);
+  check string "refusal names the profile, not a runtime sync failure"
+    "keeper_config_profile_refused"
+    (json |> member "error" |> member "code" |> to_string);
+  check bool "refusal names the rejected value" true
+    (String_util.contains_substring
+       (json |> member "error" |> member "detail" |> to_string)
+       "not-a-mode");
+  check string "keeper TOML is untouched" toml_before (read toml_path);
+  check string "runtime.toml is untouched" runtime_before (read runtime_path)
 
 let test_config_post_rejects_invalid_activation_mode () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -6847,6 +6884,8 @@ let () =
             test_config_post_rolls_back_missing_runtime_assignment;
           test_case "mixed invalid request commits nothing" `Quick
             test_config_post_prevalidates_mixed_request;
+          test_case "config refused before the write says not applied" `Quick
+            test_config_post_refused_before_write_says_not_applied;
           test_case "config rejects invalid activation mode" `Quick
             test_config_post_rejects_invalid_activation_mode;
           test_case "typed tools patch round-trips and previews admission" `Quick

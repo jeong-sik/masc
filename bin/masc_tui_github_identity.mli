@@ -15,7 +15,16 @@ type scopes =
   | Not_listed_by_github
       (** [null]: a fine-grained PAT or an App token GitHub lists no scopes
           for. Not the same as an empty list, which reads as "none". *)
-  | Scopes_unreported  (** No key at all: a server that does not report scopes. *)
+  | Scopes_unreported
+      (** No key, or a value that is neither a list nor [null]: the server did
+          not say which of the two above holds. Drawn as nothing. *)
+
+(** The token environment variable names projected into the keeper. *)
+type token_env =
+  | Token_env_listed of string list  (** Drawn as "(none)" when empty. *)
+  | Token_env_unreported
+      (** No key, or a value that is not a list: the server did not say, which
+          is not the same as saying none. Drawn as "not reported". *)
 
 type reading = {
   sign_in : sign_in;
@@ -32,7 +41,7 @@ type probe_scope =
 type t = {
   hostname : string;
   config_dir : string option;
-  token_env_names : string list;
+  token_env : token_env;
   stored : reading option;
   effective : reading option;
   probe_scope : probe_scope;

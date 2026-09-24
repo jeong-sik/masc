@@ -7,18 +7,20 @@ let reading ?(authenticated = Some (`Bool true)) ?(login = `String "pangyo-preac
     ((match authenticated with Some value -> [ "authenticated", value ] | None -> [])
      @ [ "login", login; "scopes", scopes; "error", `Null ])
 
-let payload ~stored ~effective =
+let payload ?(token_env = Some (`List [])) ~stored ~effective () =
   `Assoc
-    [ "ok", `Bool true
+    ([ "ok", `Bool true
     ; "keeper", `String "code-reviewer"
     ; "hostname", `String "github.com"
     ; "config_dir", `String "/keepers/code-reviewer/github-cli"
-    ; "projected_token_env_names", `List []
     ; "stored", stored
     ; "effective", effective
     ; "effective_probe_scope", `String "host_process_credential_only"
     ; "checked_at_unix", `Float 0.
     ]
+    @ (match token_env with
+       | Some value -> [ "projected_token_env_names", value ]
+       | None -> []))
 
 let rows json = Masc_tui_github_identity.view_lines ~sanitize:Fun.id json
 
@@ -35,7 +37,7 @@ let test_agreeing_readings_share_one_row () =
   Alcotest.(check (list string))
     "one row, both labels"
     [ "  stored and effective (this host): signed in as pangyo-preachers \xc2\xb7 scopes: repo, workflow" ]
-    (identity_rows (payload ~stored:(reading ()) ~effective:(reading ())))
+    (identity_rows (payload ~stored:(reading ()) ~effective:(reading ()) ()))
 
 (* The second row exists to show a difference, so a difference keeps it. *)
 let test_differing_readings_take_a_row_each () =
@@ -46,7 +48,7 @@ let test_differing_readings_take_a_row_each () =
     ]
     (identity_rows
        (payload ~stored:(reading ())
-          ~effective:(reading ~scopes:(`List [ `String "repo" ]) ())))
+          ~effective:(reading ~scopes:(`List [ `String "repo" ]) ()) ()))
 
 (* A server that leaves "authenticated" out has not said no. Drawing it as
    "not signed in" sends the operator to sign in a Keeper that already is. *)
@@ -56,7 +58,27 @@ let test_a_missing_sign_in_is_unreported_not_refused () =
   Alcotest.(check (list string))
     "missing and refused read differently"
     [ "  stored: sign-in not reported"; "  effective (this host): not signed in" ]
-    (identity_rows (payload ~stored:missing ~effective:refused))
+    (identity_rows (payload ~stored:missing ~effective:refused ()))
+
+(* An empty list is the server saying no names were projected; a missing
+   key is the server not saying. Drawing both as "(none)" would state a
+   negative the payload never gave. *)
+let test_token_env_rows () =
+  let token_env_row token_env =
+    List.filter
+      (fun row -> String.starts_with ~prefix:"  token env" row)
+      (rows (payload ~token_env ~stored:(reading ()) ~effective:(reading ()) ()))
+  in
+  Alcotest.(check (list string))
+    "empty list" [ "  token env: (none)" ] (token_env_row (Some (`List [])));
+  Alcotest.(check (list string))
+    "names" [ "  token env: GH_TOKEN" ]
+    (token_env_row (Some (`List [ `String "GH_TOKEN" ])));
+  Alcotest.(check (list string))
+    "missing key" [ "  token env: not reported" ] (token_env_row None);
+  Alcotest.(check (list string))
+    "wrong type" [ "  token env: not reported" ]
+    (token_env_row (Some (`String "GH_TOKEN")))
 
 (* A payload without a hostname, such as an error envelope, is drawn whole
    rather than as an empty tab. *)
@@ -76,6 +98,8 @@ let () =
             test_differing_readings_take_a_row_each
         ; Alcotest.test_case "a missing sign-in is unreported, not refused" `Quick
             test_a_missing_sign_in_is_unreported_not_refused
+        ; Alcotest.test_case "token env: listed, empty, unreported" `Quick
+            test_token_env_rows
         ; Alcotest.test_case "an unknown shape is drawn whole" `Quick
             test_an_unknown_shape_is_drawn_whole
         ] )

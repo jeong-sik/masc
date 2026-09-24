@@ -7,6 +7,10 @@ type scopes =
   | Not_listed_by_github
   | Scopes_unreported
 
+type token_env =
+  | Token_env_listed of string list
+  | Token_env_unreported
+
 type reading = {
   sign_in : sign_in;
   login : string option;
@@ -22,7 +26,7 @@ type probe_scope =
 type t = {
   hostname : string;
   config_dir : string option;
-  token_env_names : string list;
+  token_env : token_env;
   stored : reading option;
   effective : reading option;
   probe_scope : probe_scope;
@@ -67,10 +71,12 @@ let decode (json : Yojson.Safe.t) : t option =
     match string_field fields "hostname" with
     | None -> None
     | Some hostname ->
-      let token_env_names =
+      (* A missing or wrong-typed list is a server that did not say, not a
+         server that said none. *)
+      let token_env =
         match List.assoc_opt "projected_token_env_names" fields with
-        | Some (`List items) -> strings items
-        | Some _ | None -> []
+        | Some (`List items) -> Token_env_listed (strings items)
+        | Some _ | None -> Token_env_unreported
       in
       let probe_scope =
         match string_field fields "effective_probe_scope" with
@@ -81,7 +87,7 @@ let decode (json : Yojson.Safe.t) : t option =
       Some
         { hostname
         ; config_dir = string_field fields "config_dir"
-        ; token_env_names
+        ; token_env
         ; stored = decode_reading (List.assoc_opt "stored" fields)
         ; effective = decode_reading (List.assoc_opt "effective" fields)
         ; probe_scope
@@ -135,9 +141,10 @@ let lines t =
         optional_row "stored" t.stored @ optional_row effective_label t.effective
   in
   let token_env_row =
-    match t.token_env_names with
-    | [] -> "  token env: (none)"
-    | names -> "  token env: " ^ String.concat ", " names
+    match t.token_env with
+    | Token_env_listed [] -> "  token env: (none)"
+    | Token_env_listed names -> "  token env: " ^ String.concat ", " names
+    | Token_env_unreported -> "  token env: not reported"
   in
   [ Printf.sprintf "GitHub (%s)" t.hostname ]
   @ identity_rows

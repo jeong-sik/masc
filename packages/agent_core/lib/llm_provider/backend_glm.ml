@@ -45,7 +45,9 @@ type glm_error =
     - 1300: policy block (terminal)
     - 1301: unsafe content (terminal)
     - 1302,1303,1305,1312: rate/load limit
-    - 1304,1308,1310: quota exhausted
+    - 1304,1308,1310: quota exhausted. 1304 is not in the docs.z.ai or
+      docs.bigmodel.cn code tables (checked 2026-09-24); its only record
+      here is the inline test naming it a daily limit.
     - 1309,1311,1313: subscription/plan (quota)
     - 1230,1234,500: server error *)
 let classify_glm_error ~code : glm_error_class =

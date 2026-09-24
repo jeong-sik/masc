@@ -18,8 +18,10 @@ val validate : Yojson.Safe.t -> (unit, string) result
 type kind = Snapshot_file_kind | Msx_capture_kind | Dos_capture_kind
   | Lane_output_kind | Browser_document_kind
 val kind_of_string : string -> kind option
+val kind_to_string : kind -> string
 (** The wire name of a source kind, as a binding's ["kind"] spells it. *)
 type live_reader = Msx_screen | Dos_screen
+val kind_of_live_reader : live_reader -> kind
 val live_screen_of_kind : kind -> live_reader option
 (** [Some] for machine kinds with a current screen; [None] for all other kinds.
     A new source kind must choose a live behavior here. *)

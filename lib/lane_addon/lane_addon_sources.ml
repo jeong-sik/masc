@@ -24,6 +24,13 @@ type source =
 type kind = Snapshot_file_kind | Msx_capture_kind | Dos_capture_kind
   | Lane_output_kind | Browser_document_kind
 
+let kind_to_string = function
+  | Snapshot_file_kind -> "snapshot_file"
+  | Msx_capture_kind -> "msx_capture"
+  | Dos_capture_kind -> "dos_capture"
+  | Lane_output_kind -> "lane_output"
+  | Browser_document_kind -> "browser_document"
+
 let kind_of_string = function
   | "snapshot_file" -> Some Snapshot_file_kind
   | "msx_capture" -> Some Msx_capture_kind
@@ -97,6 +104,10 @@ let parse = function
 let source_id = function Snapshot_file {id;_} | Msx_capture {id} | Dos_capture {id}
   | Lane_output {id;_} | Browser_document {id;_} -> id
 type live_reader = Msx_screen | Dos_screen
+
+let kind_of_live_reader = function
+  | Msx_screen -> Msx_capture_kind
+  | Dos_screen -> Dos_capture_kind
 
 let live_screen_of_kind = function
   | Msx_capture_kind -> Some Msx_screen

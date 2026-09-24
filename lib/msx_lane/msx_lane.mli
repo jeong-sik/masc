@@ -240,13 +240,11 @@ val capture_with_identity : unit -> (identified_capture, error) result
 
 type change_mark = {
   count : int;
-      (** The machine change counter. It rises each time frames run, before
-          the first of them -- step, step_until_change, press and step_frame
-          all run frames through one primitive that raises it -- and right
+      (** The machine change counter. It rises once after a call runs frames,
+          including a call that raises after partial progress, and right
           after load, eject, restore or change_disk installs or removes a
-          machine. A call that raises after running frames has already raised
-          it. A call refused as an {!error} before it runs a frame leaves it.
-          One call can raise it more than once. Nothing resets it -- eject and the next load
+          machine. A call refused before it runs frames leaves it alone.
+          Nothing resets it -- eject and the next load
           keep counting -- so a value never names two screens while the server
           runs. A restarted server counts from 0 again, so the count alone
           can repeat across restarts; {!live} answers [Unchanged] only when
@@ -254,15 +252,17 @@ type change_mark = {
   incarnation : string;  (** as in {!identified_capture} *)
 }
 
-val current_mark : unit -> change_mark option
-(** The current count and incarnation, [None] with no machine, read without
-    the machine lock and without blocking: every call that moves either half
-    publishes the new mark before it lets go of the lock. A spectator whose
-    [since] equals this has nothing new to read and needs neither the lock
-    nor a systhread. A call that runs frames publishes its new mark
-    before the first frame, so this never matches a [since] whose
-    pixels a running call is changing; reading those pixels then waits for
-    the call in {!live}. *)
+type published_state =
+  | No_screen
+  | Stable of change_mark
+  | Running of change_mark
+
+val current_publication : unit -> published_state
+(** An atomic, lock-free read. [Running] is published before frames mutate
+    the machine; a spectator then uses {!live} on a systhread and waits for
+    the final frame. [Stable mark] permits an immediate unchanged answer for
+    the same count and incarnation. A failed run returns to [Stable] with a
+    raised count after any partial progress. *)
 
 type live =
   | Nothing_loaded  (** no machine: nothing to watch *)
@@ -277,8 +277,8 @@ val live : since:change_mark option -> live
     advances the machine holds, so a [Changed] mark always names its pixels.
     Never steps or writes anything. The lock is a stdlib mutex that a step can
     hold for a whole call, so an Eio caller compares [since] with
-    {!current_mark} first and runs this, in [Eio_unix.run_in_systhread], only
-    when they differ. *)
+    {!current_publication} first and runs this, in
+    [Eio_unix.run_in_systhread], when the mark differs or frames are running. *)
 
 (** {b RAM introspection} — the state sensor. The screen is the expensive
     detour a human eye needs; the game's truth is in memory, and the core

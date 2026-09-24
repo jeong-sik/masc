@@ -125,9 +125,8 @@ let get_action request reqd =
    current screen before the live route can decode it. *)
 type screen_source = Lane_addon_sources.live_reader = Msx_screen | Dos_screen
 
-let screen_source_kind = function
-  | Msx_screen -> "msx_capture"
-  | Dos_screen -> "dos_capture"
+let screen_source_kind source =
+  Lane_addon_sources.(kind_to_string (kind_of_live_reader source))
 
 type since = { count : int; incarnation : string }
 
@@ -148,7 +147,10 @@ let decode_live_query fields =
                    (match Lane_addon_sources.live_screen_of_kind kind with
                     | Some screen -> Ok screen
                     | None ->
-                        Error (raw ^ " has no screen to watch; live accepts msx_capture and dos_capture"))) in
+                        Error
+                          (raw ^ " has no screen to watch; live accepts "
+                           ^ screen_source_kind Msx_screen ^ " and "
+                           ^ screen_source_kind Dos_screen))) in
         (* Decimal digits only: int_of_string_opt also reads 0x10 and 1_000.
            Digits it still cannot read overflow an int. *)
         let count_of value =
@@ -180,31 +182,36 @@ let screen_json ~width ~height ~rgb =
 
 type live_answer = Answered of Yojson.Safe.t | Needs_locked_read
 
-(* The lock-free half of a live read. A stable matching mark answers on the
-   request fiber. A running DOS machine needs the locked read even when its
-   last stable mark matches: its pixels may be changing. *)
-let answer_from_mark source ~since ~current =
-  match current, since with
-  | None, (Some _ | None) -> Answered (no_machine_json source)
-  | Some (count, incarnation), Some seen
-    when seen.count = count && String.equal seen.incarnation incarnation ->
-      Answered (`Assoc (marked_json source "unchanged" ~count ~incarnation))
-  | Some _, (Some _ | None) -> Needs_locked_read
+(* Both lanes publish the same three states. A running machine cannot answer
+   unchanged from a mark it published before finishing the current run. *)
+type screen_publication = No_screen | Stable of since | Running
 
-let dos_answer_from_publication ~since = function
-  | Dos_lane.No_screen -> answer_from_mark Dos_screen ~since ~current:None
-  | Dos_lane.Stable { count; incarnation } ->
-      answer_from_mark Dos_screen ~since ~current:(Some (count, incarnation))
-  | Dos_lane.Running _ -> Needs_locked_read
+let answer_from_publication source ~since = function
+  | No_screen -> Answered (no_machine_json source)
+  | Stable { count; incarnation } ->
+      (match since with
+       | Some seen when seen.count = count && String.equal seen.incarnation incarnation ->
+           Answered (`Assoc (marked_json source "unchanged" ~count ~incarnation))
+       | Some _ | None -> Needs_locked_read)
+  | Running -> Needs_locked_read
+
+let msx_publication = function
+  | Msx_lane.No_screen -> No_screen
+  | Msx_lane.Stable { count; incarnation } -> Stable { count; incarnation }
+  | Msx_lane.Running _ -> Running
+
+let dos_publication = function
+  | Dos_lane.No_screen -> No_screen
+  | Dos_lane.Stable { count; incarnation } -> Stable { count; incarnation }
+  | Dos_lane.Running _ -> Running
 
 let live_from_published_mark source ~since =
-  match source with
-  | Msx_screen ->
-      let current =
-        Option.map (fun { Msx_lane.count; incarnation } -> (count, incarnation))
-          (Msx_lane.current_mark ()) in
-      answer_from_mark source ~since ~current
-  | Dos_screen -> dos_answer_from_publication ~since (Dos_lane.current_publication ())
+  let publication =
+    match source with
+    | Msx_screen -> msx_publication (Msx_lane.current_publication ())
+    | Dos_screen -> dos_publication (Dos_lane.current_publication ())
+  in
+  answer_from_publication source ~since publication
 
 (* The locked half: the lane compares again and copies under one hold, so a
    Changed mark always names its pixels. It writes nothing. *)

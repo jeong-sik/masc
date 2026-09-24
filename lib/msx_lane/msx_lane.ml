@@ -124,26 +124,30 @@ type change_mark = { count : int; incarnation : string }
 (* The machine change counter a spectator compares against. Process-wide and
    written only while holding [lock]. Nothing resets it: an eject and the
    next load keep counting, so one value never names two different screens
-   while the server runs. Running frames marks in [advance], before the first
-   frame, so a call that raises after running frames has already moved it; a
-   call that replaces the machine marks right after installing the new one.
+   while the server runs. [advance] publishes Running before the first frame;
+   the enclosing operation raises the count on completion, including when it
+   raises after partial progress. A call that replaces the machine marks
+   right after installing the new one.
 
-   [published] is the same count with the incarnation of [!state], or [None]
-   with no machine. It is set only here, under [lock], every time either
-   half changes, so a reader holding neither the lock nor a systhread sees a
-   mark some lock holder left behind. That is what lets a spectator whose
-   [since] still matches be answered without waiting for a step that holds
-   the lock. *)
+   [published] carries the same count and incarnation, plus whether frames
+   are still running. A matching Stable mark may answer without the lock;
+   Running always waits for the final frame. Both transitions are published
+   under [lock], including when a step raises after partial progress. *)
 let change_count = ref 0
-let published : change_mark option Atomic.t = Atomic.make None
+type published_state = No_screen | Stable of change_mark | Running of change_mark
+let published : published_state Atomic.t = Atomic.make No_screen
 
-let mark_change () =
-  incr change_count;
+let publish make =
   Atomic.set published
-    (Option.map (fun (st : machine) -> { count = !change_count; incarnation = st.incarnation }) !state)
+    (match !state with
+     | None -> No_screen
+     | Some st -> make { count = !change_count; incarnation = st.incarnation })
 ;;
 
-let current_mark () = Atomic.get published
+let publish_stable () = publish (fun mark -> Stable mark)
+let publish_running () = publish (fun mark -> Running mark)
+let mark_change () = incr change_count; publish_stable ()
+let current_publication () = Atomic.get published
 (* Used only while holding [lock]. An incarnation names a newly installed
    history, including a restore of the exact same checkpoint. *)
 let fresh_incarnation () = Random_id.uuid_v7 ()
@@ -152,7 +156,13 @@ let with_machine f =
   locked (fun () ->
     match !state with
     | None -> Error No_machine
-    | Some st -> f st)
+    | Some st ->
+      Fun.protect
+        ~finally:(fun () ->
+          match Atomic.get published with
+          | Running _ -> mark_change ()
+          | Stable _ | No_screen -> ())
+        (fun () -> f st))
 ;;
 
 let hex2 = Printf.sprintf "%02x"
@@ -452,13 +462,12 @@ let check_frames ~what n =
   else Ok ()
 ;;
 
-(* The only place frames run on the installed machine, so every call that runs
-   frames marks here, before the first frame, and a new caller cannot forget
-   to. Callers reach it only after their own validation, so a call refused as
-   an [Error] never marks. [st] is [!state]'s machine: every caller got it from
-   [with_machine]. *)
+(* The only place frames run on the installed machine. [Running] is published
+   before mutation; [with_machine] raises the mark and publishes Stable after
+   all frames finish or an exception leaves. A call refused before this point
+   leaves the mark alone. [st] is [!state]'s machine, from [with_machine]. *)
 let advance st n =
-  mark_change ();
+  publish_running ();
   (* Invalidate before mutating even if stepping raises after partial progress. *)
   st.pixels <- None;
   Msx.step st.m ~frames:n;

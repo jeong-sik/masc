@@ -51,7 +51,7 @@ let count () = (mark ()).Lane.count
 let published_matches what =
   let m = mark () in
   check bool (what ^ ": the published mark is the locked one") true
-    (Lane.current_mark () = Some m)
+    (Lane.current_publication () = Lane.Stable m)
 
 let rises what before =
   let after = count () in
@@ -78,11 +78,15 @@ let test_counter_moves_on_every_change () =
     let c = rises "step_until_change" c in
     ok "chord press"
       (Lane.press ~who:"live-test" ~keys:[space] ~hold_frames:1 ~step_frames:2 ~sequence:false);
+    let previous = c in
     let c = rises "a chord press" c in
+    check int "a chord publishes one completed mark" (previous + 1) c;
     ok "sequence press"
       (Lane.press ~who:"live-test" ~keys:[space; return] ~hold_frames:1 ~step_frames:2
          ~sequence:true);
+    let previous = c in
     let c = rises "a sequence press" c in
+    check int "a multi-tap press publishes one completed mark" (previous + 1) c;
     ok "step_frame" (Lane.step_frame ~frames:1);
     let c = rises "step_frame (the tick)" c in
     (* Reads and refusals leave it. *)
@@ -105,7 +109,8 @@ let test_counter_moves_on_every_change () =
       (not (String.equal incarnation (mark ()).Lane.incarnation));
     let before_eject = mark () in
     ok "eject" (Lane.eject ());
-    check bool "an ejected machine publishes no mark" true (Lane.current_mark () = None);
+    check bool "an ejected machine publishes no mark" true
+      (Lane.current_publication () = Lane.No_screen);
     check bool "an ejected machine reads as nothing loaded" true
       (match Lane.live ~since:(Some { before_eject with Lane.count = c }) with
        | Lane.Nothing_loaded -> true
@@ -114,10 +119,10 @@ let test_counter_moves_on_every_change () =
     let c = rises "eject and a new load (the count is never reused)" c in
     (* A press that raises: the ledger file is now a directory, so recording
        the first edge raises before any frame runs, and the keys go back up.
-       Nothing a watcher sees moved, so the count stays: it moves where frames
-       run, in the one primitive that runs them, before the first frame. No
-       test can make a later edge fail; a raise after frames ran finds the
-       count moved because that primitive marked first. *)
+       Nothing a watcher sees moved, so the count stays. No test can make a
+       later edge fail; a raise after frames ran finds the count moved because
+       the enclosing operation publishes its final mark when it releases the
+       machine lock. *)
     let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
     Sys.remove ledger_path;
     Sys.mkdir ledger_path 0o755;
@@ -162,6 +167,14 @@ let contains ~sub text =
 
 let test_decode_live_query () =
   let decode = Routes.decode_live_query in
+  List.iter
+    (fun reader ->
+      let kind = Lane_addon_sources.kind_of_live_reader reader in
+      let wire = Lane_addon_sources.kind_to_string kind in
+      check bool (wire ^ " maps back to its live reader") true
+        (Lane_addon_sources.kind_of_string wire = Some kind
+         && Lane_addon_sources.live_screen_of_kind kind = Some reader))
+    [Routes.Msx_screen; Routes.Dos_screen];
   check bool "msx_capture with no since" true
     (decode ["source_kind", "msx_capture"] = Ok (Routes.Msx_screen, None));
   check bool "msx_capture with a since" true
@@ -525,14 +538,14 @@ let test_live_route () =
             Some
               { Routes.count = int_member "change_count" json
               ; incarnation = string_member "incarnation" json } in
-          let running_mark : Dos_lane.change_mark =
-            { count = int_member "change_count" json
-            ; incarnation = string_member "incarnation" json } in
-          check bool "a running machine never answers unchanged from its old mark" true
-            (match Routes.dos_answer_from_publication ~since:dos_since
-                     (Dos_lane.Running running_mark) with
-             | Routes.Needs_locked_read -> true
-             | Routes.Answered _ -> false);
+          List.iter
+            (fun source ->
+              check bool "a running machine never answers unchanged from its old mark" true
+                (match Routes.answer_from_publication source ~since:dos_since
+                         Routes.Running with
+                 | Routes.Needs_locked_read -> true
+                 | Routes.Answered _ -> false))
+            [Routes.Msx_screen; Routes.Dos_screen];
           (* Decided while [pass] holds the machine lock: an unchanged answer
              must come from the published mark. Taking the lock on this
              thread raises (the stdlib mutex checks its owner). The request

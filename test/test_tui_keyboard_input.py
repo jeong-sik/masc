@@ -11623,11 +11623,10 @@ def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
 
 
 def run_activity_logs_tab_pane_regression(executable: str) -> None:
-    """The Logs tab is the Activity screen, so the acting pane stays off it.
+    """Dashboard, Work, Usage, Activity, and Logs keep the Recent pane off.
 
-    The pane exempted the event feed's view alone. Pressing 2 on Activity
-    then opened the pane beside the log table and took 56 of its columns,
-    and 1 closed it again: one screen, two widths, a tab apart.
+    Activity lives under System and the first three destinations use their
+    width for measured progress and usage.
     """
 
     def pane_row(output: bytearray) -> int:
@@ -11636,20 +11635,27 @@ def run_activity_logs_tab_pane_regression(executable: str) -> None:
 
     def interact(process: subprocess.Popen[bytes], master_fd: int,
                  _slave_fd: int, output: bytearray, _base_path: str) -> None:
-        # Wide enough for the pane (its threshold is 132 columns), and the
-        # Overview shows it is there to be kept off: the tab strip is not
-        # the thing that hides it.
+        # Wide enough for the pane (its threshold is 132 columns). The first
+        # screen explicitly suppresses it even when it could fit.
         resize_and_wait(process, master_fd, output, rows=38, columns=150,
                         needle=b"MASC Dashboard", final_cursor=b"\x1b[?25l")
         drain_until_quiet(process, master_fd, output)
-        if pane_row(output) < 0:
+        if pane_row(output) >= 0:
             raise AssertionError(
-                f"the acting pane did not open on Overview at 150 columns: {screen_text(bytes(output))!r}"
+                f"Dashboard still drew Recent at 150 columns: {screen_text(bytes(output))!r}"
             )
+        tab_until(process, master_fd, output, b"MASC Work")
+        drain_until_quiet(process, master_fd, output)
+        if pane_row(output) >= 0:
+            raise AssertionError("Work still drew the Recent activity pane")
+        tab_until(process, master_fd, output, b"MASC Usage")
+        drain_until_quiet(process, master_fd, output)
+        if pane_row(output) >= 0:
+            raise AssertionError("Usage still drew the Recent activity pane")
         tab_until(process, master_fd, output, b"MASC System")
         send_and_wait(process, master_fd, output, b"A", b"MASC Activity")
-        for key, tab in ((b"2", b"\xe2\x96\xb8Logs"), (b"1", b"\xe2\x96\xb8Events"),
-                         (b"2", b"\xe2\x96\xb8Logs")):
+        for key, tab in ((b"l", b"\xe2\x96\xb8Logs"), (b"e", b"\xe2\x96\xb8Events"),
+                         (b"l", b"\xe2\x96\xb8Logs")):
             send_and_wait(process, master_fd, output, key, tab)
             drain_until_quiet(process, master_fd, output)
             if pane_row(output) >= 0:
@@ -11691,13 +11697,13 @@ def enter_outside_changes_interaction(
         raise AssertionError(f"did not reach Activity: {acting!r}")
     # System logs hang off Activity under [l]; Esc walks back to the parent.
     send_and_wait(process, master_fd, output, b"l", b"\xe2\x96\xb8Logs")
-    events = send_and_wait(process, master_fd, output, b"1", b"\xe2\x96\xb8Events")
+    events = send_and_wait(process, master_fd, output, b"e", b"\xe2\x96\xb8Events")
     # The same capitals, on the feed's own columns.
     if b"TIME" not in CSI_RE.sub(b"", events):
         raise AssertionError(
             f"the Activity feed did not name its columns in capitals: {events!r}"
         )
-    send_and_wait(process, master_fd, output, b"2", b"\xe2\x96\xb8Logs")
+    send_and_wait(process, master_fd, output, b"l", b"\xe2\x96\xb8Logs")
     send_and_wait(process, master_fd, output, b"\x1b", b"\xe2\x96\xb8Events")
     os.write(master_fd, b"\r")
     back = open_changes(process, master_fd, output)
@@ -13272,7 +13278,7 @@ def fusion_list_detail_interaction(
     ) -> None:
         # Task Verdicts belongs to Planning; Tab cycles top-level families,
         # whereas v selects the three Planning tabs without skipping coverage.
-        palette_go(process, master_fd, output, b"go planning", b"MASC Work")
+        palette_go(process, master_fd, output, b"go Work", b"MASC Work")
         send_and_wait(process, master_fd, output, b"v", b"Task Review")
         send_and_wait(process, master_fd, output, b"v", b"automatic Gate rulings")
         # One full repaint, because the pane redraws only the rows that change

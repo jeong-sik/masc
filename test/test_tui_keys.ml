@@ -218,7 +218,7 @@ let test_plain_listing_footer_shape () =
 
 let test_system_logs_footer_names_browser_controls () =
   check str "logs names filters and detail"
-    ("1 / 2:Events / Logs  j/k:move / scroll  PgUp/PgDn:detail page"
+    ("e:Events  j/k:move / scroll  PgUp/PgDn:detail page"
      ^ "  [ / ]:previous / next  Home/End:top/bottom  l:level floor  v:verbose"
      ^ "  c:category  Right / Enter:detail  Left / Esc:back  /:find"
      ^ "  n / N:next / previous match  r:refresh  Tab:next  q:quit")

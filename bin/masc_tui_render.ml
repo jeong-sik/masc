@@ -121,6 +121,7 @@ let acting_pane_suppressed (state : state) =
   in
   modal
   || Masc_tui_types.on_activity_screen state.view
+  || List.mem state.view [ Overview; Planning; Metrics ]
   || Option.is_some (browser_lane_on_screen state)
 
 let acting_pane_columns (state : state) ~terminal_cols =
@@ -12660,7 +12661,7 @@ let provider_history_lines (state : state) =
           state.provider_history_days (Terminal_text.single_line reason) ]
   | Provider_history_read history ->
       let days = history.puh_days in
-      let as_of = Unix.localtime history.puh_generated_at in
+      let as_of = Unix.gmtime history.puh_generated_at in
       let last_day = int_of_float (floor (history.puh_generated_at /. 86400.0)) in
       let first_day = last_day - days + 1 in
       let key (point : Tui_decode.provider_usage_history_point) =
@@ -12714,7 +12715,7 @@ let provider_history_lines (state : state) =
           (Terminal_text.single_line kind) marks !observed days
       in
       (Printf.sprintf
-         " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d · · means no report"
+         " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d UTC · · means no report"
          days
          (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday
          as_of.Unix.tm_hour as_of.Unix.tm_min)

@@ -347,7 +347,7 @@ let resolve_read_file_target
               { Keeper_alerting_path.failure_class = Tool_result.Runtime_failure; message })))
 ;;
 
-(* A Read that did not return content says whose it is to fix: a path, offset
+(* A Read that did not return content says whose it is to fix: a path, limit
    or file the caller named is a [Policy_rejection]; a backend or host I/O
    failure is a [Runtime_failure]. *)
 type read_file_attempt =

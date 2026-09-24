@@ -9,6 +9,9 @@
     version in its readiness marker; another major is refused. *)
 val supported_protocol_major : int
 
+(** The protocol version this client implements, sent in [stagehand.init]. *)
+val protocol_version : string
+
 (** The CDP binding the extension calls with each message for the host. *)
 val send_to_host_binding : string
 
@@ -25,7 +28,7 @@ type marker = { protocol_version : string; runtime_version : string }
 
 val marker_of_json : Yojson.Safe.t -> (marker, string) result
 
-(** The leading number of [protocol_version]. *)
+(** The leading number of the marker's [protocol_version], digits only. *)
 val protocol_major : marker -> (int, string) result
 
 (** Chrome's id for an unpacked extension whose directory has this real path:
@@ -44,9 +47,10 @@ type extension_request =
   | Llm_generate of { id : id; params : Yojson.Safe.t }
   | Unsupported_request of { id : id; method_ : string }
 
+(** A notification's [params], when it has any. *)
 type extension_notification =
-  | Log of Yojson.Safe.t
-  | Page_event of Yojson.Safe.t
+  | Log of Yojson.Safe.t option
+  | Page_event of Yojson.Safe.t option
   | Unsupported_notification of { method_ : string }
 
 type incoming =
@@ -58,7 +62,7 @@ type incoming =
 val decode : string -> (incoming, string) result
 
 type call =
-  | Init of { protocol_version : string; client_version : string; browser_cdp_url : string }
+  | Init of { client_version : string; browser_cdp_url : string }
   | Close
   | Act of { page_id : string; instruction : string }
   | Observe of { page_id : string; instruction : string option }

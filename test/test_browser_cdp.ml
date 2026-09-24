@@ -38,15 +38,18 @@ let test_decode () =
    | Cdp.Reply { id = 4; result = Error (-32601, "no") } -> ()
    | _ -> fail "an error reply");
   (match ok (Cdp.decode {|{"method":"Target.targetDestroyed","sessionId":"S"}|}) with
-   | Cdp.Event { method_ = "Target.targetDestroyed"; session = Some "S"; params = `Assoc [] } -> ()
-   | _ -> fail "an event without params has empty params");
+   | Cdp.Event { method_ = "Target.targetDestroyed"; session = Some "S"; params = None } -> ()
+   | _ -> fail "an event without params says so");
+  (match Cdp.event_of ~method_:"Target.targetDestroyed" ~session:None None with
+   | Cdp.Malformed_event { method_ = "Target.targetDestroyed"; _ } -> ()
+   | _ -> fail "an event this module reads is malformed without params");
   List.iter (fun frame -> check bool frame true (Result.is_error (Cdp.decode frame)))
     [ "not json"; {|{"id":1}|}; {|{"id":1,"result":{},"error":{"code":1,"message":"x"}}|};
       {|{"id":1,"error":{"message":"no code"}}|}; {|{"params":{}}|} ]
 ;;
 
 let test_events () =
-  let event method_ params = Cdp.event_of ~method_ ~session:(Some "W") (Yojson.Safe.from_string params) in
+  let event method_ params = Cdp.event_of ~method_ ~session:(Some "W") (Some (Yojson.Safe.from_string params)) in
   (match event "Runtime.bindingCalled" {|{"name":"__stagehandSendToHost","payload":"{}","executionContextId":1}|} with
    | Cdp.Binding_called { session = Some "W"; name = "__stagehandSendToHost"; payload = "{}" } -> ()
    | _ -> fail "binding call");

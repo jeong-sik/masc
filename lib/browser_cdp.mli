@@ -16,9 +16,15 @@ type target_kind =
   | Service_worker
   | Other_kind of string  (** Any other CDP target type, kept by name. *)
 
+type target_info = { target_id : string; kind : target_kind; url : string }
+
+(** One CDP [TargetInfo] object, as [Target.getTargets] lists it and
+    [Target.targetCreated] carries it. *)
+val target_info_of_json : Yojson.Safe.t -> (target_info, string) result
+
 type event =
   | Binding_called of { session : session_id option; name : string; payload : string }
-  | Target_created of { target_id : string; kind : target_kind; url : string }
+  | Target_created of target_info
   | Target_detached of { session : session_id }
   | Target_destroyed of { target_id : string }
   | Malformed_event of { method_ : string; detail : string }
@@ -39,7 +45,8 @@ type failure =
 
 type envelope =
   | Reply of { id : int; result : (Yojson.Safe.t, int * string) result }
-  | Event of { method_ : string; session : session_id option; params : Yojson.Safe.t }
+  | Event of { method_ : string; session : session_id option; params : Yojson.Safe.t option }
+      (** CDP omits [params] for an event that has none. *)
 
 (** One inbound text frame. [Error] for anything that is neither a reply nor an
     event. *)
@@ -47,8 +54,9 @@ val decode : string -> (envelope, string) result
 
 val encode_command : id:int -> ?session:session_id -> string -> Yojson.Safe.t -> string
 
-(** [event_of ~method_ ~session params] reads the events this module names. *)
-val event_of : method_:string -> session:session_id option -> Yojson.Safe.t -> event
+(** [event_of ~method_ ~session params] reads the events this module names.
+    One of them without [params] is malformed. *)
+val event_of : method_:string -> session:session_id option -> Yojson.Safe.t option -> event
 
 (** {1 Connection} *)
 

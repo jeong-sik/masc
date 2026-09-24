@@ -752,23 +752,32 @@ let chat_title_row ~inner_cells ~title ~mode_suffix =
 (* At the newest row the arrows answer the composer's history. Once PgUp has
    moved into the transcript they adjust it one row at a time, so the hint can
    name them without risking a draft replacement. *)
-let scroll_hint ~scrolled_back ~older_exist =
+let scroll_hint ~scrolled_back ~older_exist:_ =
   if scrolled_back <= 0 then "PgUp:scroll back"
+  else "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest"
+
+(* Where the pane stands, which is not a key and cannot be looked up: it
+   travels to the row as [Masc_tui_footer.line]'s [?position], not on the end
+   of the key hints, because the fitter reads those as items and gives up the
+   last one first. Spelled among the keys it was never drawn -- measured on
+   the live fleet at eighty columns, where the row kept Ctrl-R and Ctrl-D and
+   dropped this.
+
+   [None] at the newest row: there is no distance to say, and the hint beside
+   it already names the key that starts one.
+
+   The marker answers the other half of the question. How far back is one
+   number; whether pressing up keeps finding history is the other. At the
+   oldest row with nothing more to fetch, that it is the start is the more
+   useful fact than the distance -- an operator pressing up against a pane
+   that will not move should know it is the beginning of the conversation
+   rather than a stuck key -- and there the distance says what "start"
+   already says. *)
+let scroll_position ~scrolled_back ~older_exist =
+  if scrolled_back <= 0 then None
   else if older_exist then
-    (* The marker answers the other half of the position question: how far
-       back is one number, whether pressing up keeps finding history is the
-       other. The start variant below says the opposite end. *)
-    Printf.sprintf
-      "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (%d back \xc2\xb7 more\xe2\x86\x91)"
-      scrolled_back
-  else
-    (* At the oldest row with nothing more to fetch that is the more useful
-       fact than the distance: an operator pressing up against a pane that will
-       not move should know it is the start of the conversation rather than a
-       stuck key, and at the start the distance says what "start" already
-       says. Saying both is also what would have made this hint wider than the
-       one it replaced. *)
-    "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (start)"
+    Some (Printf.sprintf "(%d back \xc2\xb7 more\xe2\x86\x91)" scrolled_back)
+  else Some "(start)"
 
 let input_cursor_column ~terminal_cols ~input =
   let last_column = max 1 (terminal_cols - 1) in

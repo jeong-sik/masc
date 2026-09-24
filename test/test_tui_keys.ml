@@ -2063,6 +2063,7 @@ let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
   ; sl_cli_slots = []
   ; sl_dropped_slots = []
   ; sl_declared_slots = []
+  ; sl_declared_cli_slots = []
   ; sl_admission_error = None
   ; sl_retained_run_count = 0
   ; sl_running_count = 0

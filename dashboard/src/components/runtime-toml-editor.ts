@@ -19,6 +19,7 @@ import {
   enabledRuntimeIds,
   parseRuntimeTomlEnvironment,
   runtimeTomlImpactSummary,
+  setRuntimeTomlExactLaneSlots,
   setRuntimeTomlBindingField,
   setRuntimeTomlModelField,
   setRuntimeTomlProviderCredential,
@@ -41,6 +42,7 @@ import {
   type RuntimeProviderTransportEditableField,
   type RuntimeStructuredSection,
 } from './runtime-environment-editor'
+import { RuntimeExactLaneEditor } from './runtime-exact-lane-editor'
 
 type LoadState = 'idle' | 'loading' | 'loaded'
 
@@ -135,6 +137,7 @@ const editorFocusClasses = ringFocusClasses({
 // the prototype uses these literal glyphs.
 type RuntimeSectionId =
   | 'routing'
+  | 'lanes'
   | 'providers'
   | 'models'
   | 'bindings'
@@ -149,6 +152,7 @@ interface RuntimeSection {
 
 const RUNTIME_SECTIONS: readonly RuntimeSection[] = [
   { id: 'routing', label: '라우팅', glyph: '◷' },
+  { id: 'lanes', label: 'Lane 후보', glyph: '⇄' },
   { id: 'providers', label: '프로바이더', glyph: '◇' },
   { id: 'models', label: '모델', glyph: '▤' },
   { id: 'bindings', label: '바인딩 · 런타임 id', glyph: '◈' },
@@ -320,6 +324,24 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   ) {
     if (saving || loadState !== 'loaded') return
     setDraft(current => setRuntimeTomlBindingField(current, runtimeId, field, value))
+    setNotice(null)
+    setError(null)
+  }
+
+  function handleExactLaneSlotsChange(laneId: string, kind: 'slots' | 'cli_slots', slots: string[]) {
+    if (saving || loadState !== 'loaded') return
+    try {
+      setDraft(setRuntimeTomlExactLaneSlots(draft, laneId, kind, slots))
+      setNotice(null)
+      setError(null)
+    } catch (err: unknown) {
+      setError(errorToString(err))
+    }
+  }
+
+  function handleExactBodyDeadlineChange(providerId: string, seconds: number | null) {
+    if (saving || loadState !== 'loaded') return
+    setDraft(current => setRuntimeTomlProviderField(current, providerId, 'exact-body-timeout-s', seconds))
     setNotice(null)
     setError(null)
   }
@@ -524,11 +546,11 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   // × Binding state to the runtime.toml draft. The toml section keeps the raw
   // textarea + toolbar. All section bodies stay mounted in the DOM and visibility
   // is toggled via the nav, so the editor wiring is never torn down on switch.
-  const structuredActive = section !== 'toml'
+  const structuredActive = section !== 'toml' && section !== 'lanes'
   const tomlActive = section === 'toml'
   // When the toml section is active, RuntimeEnvironmentEditor is hidden anyway;
   // fall back to 'routing' so its `section` prop stays a valid structured id.
-  const structuredSection: RuntimeStructuredSection = section === 'toml' ? 'routing' : section
+  const structuredSection: RuntimeStructuredSection = section === 'toml' || section === 'lanes' ? 'routing' : section
 
   const toolbar = html`
     <div class="v2-monitoring-toolbar sticky top-0 z-10 -mx-1 bg-[var(--color-bg-surface)]/95 px-1 py-2 backdrop-blur">
@@ -758,6 +780,12 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                 onProviderCredentialChange=${handleProviderCredentialChange}
                 onProviderOptionChange=${handleProviderOptionChange}
               />` : null}
+            </div>
+
+            <div class=${section === 'lanes' ? '' : 'hidden'} data-testid="runtime-toml-lanes">
+              <${RuntimeExactLaneEditor} sourceText=${draft} disabled=${saving || loadState !== 'loaded'}
+                onSlotsChange=${handleExactLaneSlotsChange}
+                onDeadlineChange=${handleExactBodyDeadlineChange} />
             </div>
 
             <div class=${tomlActive ? 'flex flex-col gap-3' : 'hidden'} data-testid="runtime-toml-section">

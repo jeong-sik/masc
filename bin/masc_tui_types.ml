@@ -5147,9 +5147,9 @@ type local_intervention =
   | Awaiting_control of { generation : int; target : Masc_tui_keeper_chat_projection.interactive_target option }
   | Retained_after_stop
 
-(* What the slot editor edits: an exact-output lane's declared [slots], or
-   [\[runtime\].media_failover]. Both are an ordered list of runtime ids that
-   something walks in turn, and neither is a conversation lane. *)
+(* What the slot editor edits: an exact-output lane's HTTP and CLI candidates,
+   or [\[runtime\].media_failover]. The two exact lists are walked in that
+   order and each can be reordered without rewriting the other. *)
 type slot_editor_target =
   | Exact_lane_slots of string
   | Media_failover_slots
@@ -9320,8 +9320,7 @@ let lane_picker_existing_slots (state : state) = function
          |> List.find_opt (fun (row : Tui_decode.standalone_lane) ->
               String.equal row.Tui_decode.sl_lane_id name)
          |> Option.map (fun row ->
-              row.Tui_decode.sl_admitted_slots @ row.Tui_decode.sl_cli_slots
-              @ row.Tui_decode.sl_dropped_slots)
+              row.Tui_decode.sl_declared_slots @ row.Tui_decode.sl_declared_cli_slots)
          |> Option.value ~default:[])
   | Pick_conversation_lane lane -> conversation_lane_candidates state lane
   | Pick_new_lane _ -> []
@@ -9544,6 +9543,7 @@ let plan_runtime_lane_edit (state : state) = function
 type slot_editor_row =
   { sr_slot : string
   ; sr_admitted : bool
+  ; sr_kind : [ `Http | `Cli | `Media ]
   }
 
 let slot_editor_rows (state : state) =
@@ -9562,8 +9562,15 @@ let slot_editor_rows (state : state) =
                  { sr_slot = slot
                  ; sr_admitted =
                      List.exists (String.equal slot) lane.Tui_decode.sl_admitted_slots
+                 ; sr_kind = `Http
                  })
-              lane.Tui_decode.sl_declared_slots)
+              lane.Tui_decode.sl_declared_slots
+            @ List.map
+                (fun slot ->
+                   { sr_slot = slot
+                   ; sr_admitted = List.exists (String.equal slot) lane.Tui_decode.sl_cli_slots
+                   ; sr_kind = `Cli })
+                lane.Tui_decode.sl_declared_cli_slots)
        |> Option.value ~default:[])
   | Some { se_target = Media_failover_slots; _ } ->
     (* Edit the file's declaration, not the shorter active fleet. A rejected
@@ -9577,6 +9584,7 @@ let slot_editor_rows (state : state) =
          (fun runtime_id ->
             { sr_slot = runtime_id
             ; sr_admitted = List.exists (String.equal runtime_id) admitted
+            ; sr_kind = `Media
             })
          snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_declared)
 ;;
@@ -9682,6 +9690,12 @@ let plan_slot_edit (state : state) edit =
            then
              Refuse_slot_edit
                (Lane_write_refused (Printf.sprintf "%s is already %s in %s" slot edge name))
+           else if (match target with Exact_lane_slots _ ->
+              (List.nth rows moved_to).sr_kind <> row.sr_kind
+              | Media_failover_slots -> false)
+           then Refuse_slot_edit
+             (Lane_write_refused
+                "HTTP slots run before CLI slots; reorder within a transport group")
            else (
              let request =
                match target with

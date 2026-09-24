@@ -16,6 +16,7 @@ let lane ?(running = 0) ?(vendor_system_one = 0) ?(server_restarted = 0) ?(no_sl
   ; sl_cli_slots = []
   ; sl_dropped_slots = []
   ; sl_declared_slots = []
+  ; sl_declared_cli_slots = []
   ; sl_admission_error = None
   ; sl_retained_run_count = succeeded + failed + cancelled + running
   ; sl_running_count = running

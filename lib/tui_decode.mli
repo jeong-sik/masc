@@ -1598,6 +1598,9 @@ type standalone_lane = {
           admitted or not. The two lists above are an admission reading and
           lose file order once a sibling was rejected; the slot editor moves
           and drops by position, so it reads this one. *)
+  sl_declared_cli_slots : string list;
+      (** The CLI declaration in file order, including verifier slots rejected
+          by judgement admission. *)
   sl_admission_error : string option;
   sl_retained_run_count : int;
   sl_running_count : int;

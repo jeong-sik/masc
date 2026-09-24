@@ -10433,6 +10433,7 @@ def standalone_lane_fixture(
         "configured": True,
         "configuration_state": "ready",
         "declared_slots": ["glm-coding.glm-5-turbo"],
+        "declared_cli_slots": [],
         "admitted_slots": ["glm-coding.glm-5-turbo"],
         # The projection writes four slot lists, not one: what the lane
         # declares, what admission kept, what it reaches over a CLI, and what

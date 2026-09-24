@@ -678,60 +678,60 @@ let with_http_worker_pool env sw f =
 let serve_json_over_wire ?(worker_pool = false) ?if_none_match ?(headers = []) ?(respond = fun ~request body reqd -> Response.json ~request body reqd) body =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let run () =
-    let response_buf = Buffer.create 1024 in
-    let conn =
-      Httpun.Server_connection.create (fun reqd ->
-        respond ~request:(Httpun.Reqd.request reqd) body reqd)
-    in
-    let headers =
-      let base = ("host", "127.0.0.1") :: headers in
-      match if_none_match with
-      | None -> base
-      | Some tag -> ("if-none-match", tag) :: base
-    in
-    let request =
-      Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/probe"
-    in
-    let request_head =
-      Printf.sprintf
-        "%s %s HTTP/1.1\r\n%s"
-        (Httpun.Method.to_string request.Httpun.Request.meth)
-        request.Httpun.Request.target
-        (Httpun.Headers.to_string request.Httpun.Request.headers)
-    in
-    let bytes =
-      Bigstringaf.of_string ~off:0 ~len:(String.length request_head) request_head
-    in
-    let rec feed off =
-      let remaining = Bigstringaf.length bytes - off in
-      if remaining > 0
-      then (
-        let consumed = Httpun.Server_connection.read conn bytes ~off ~len:remaining in
-        if consumed <= 0 then Alcotest.fail "httpun test feed made no progress";
-        feed (off + consumed))
-    in
-    feed 0;
-    let rec flush () =
-      match Httpun.Server_connection.next_write_operation conn with
-      | `Write iovecs ->
-        List.iter
-          (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
-             Buffer.add_string
-               response_buf
-               (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
-          iovecs;
-        let written =
-          List.fold_left
-            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len)
-            0
-            iovecs
-        in
-        Httpun.Server_connection.report_write_result conn (`Ok written);
-        flush ()
-      | `Yield | `Close _ -> ()
-    in
-    flush ();
-    Buffer.contents response_buf
+      let response_buf = Buffer.create 1024 in
+      let conn =
+        Httpun.Server_connection.create (fun reqd ->
+          respond ~request:(Httpun.Reqd.request reqd) body reqd)
+      in
+      let headers =
+        let base = ("host", "127.0.0.1") :: headers in
+        match if_none_match with
+        | None -> base
+        | Some tag -> ("if-none-match", tag) :: base
+      in
+      let request =
+        Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/probe"
+      in
+      let request_head =
+        Printf.sprintf
+          "%s %s HTTP/1.1\r\n%s"
+          (Httpun.Method.to_string request.Httpun.Request.meth)
+          request.Httpun.Request.target
+          (Httpun.Headers.to_string request.Httpun.Request.headers)
+      in
+      let bytes =
+        Bigstringaf.of_string ~off:0 ~len:(String.length request_head) request_head
+      in
+      let rec feed off =
+        let remaining = Bigstringaf.length bytes - off in
+        if remaining > 0
+        then (
+          let consumed = Httpun.Server_connection.read conn bytes ~off ~len:remaining in
+          if consumed <= 0 then Alcotest.fail "httpun test feed made no progress";
+          feed (off + consumed))
+      in
+      feed 0;
+      let rec flush () =
+        match Httpun.Server_connection.next_write_operation conn with
+        | `Write iovecs ->
+          List.iter
+            (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+               Buffer.add_string
+                 response_buf
+                 (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+            iovecs;
+          let written =
+            List.fold_left
+              (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len)
+              0
+              iovecs
+          in
+          Httpun.Server_connection.report_write_result conn (`Ok written);
+          flush ()
+        | `Yield | `Close _ -> ()
+      in
+      flush ();
+      Buffer.contents response_buf
     in
     if worker_pool then with_http_worker_pool env sw run else run ()))
 ;;

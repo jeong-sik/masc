@@ -1,4 +1,4 @@
-# HTTP response compression worker
+# HTTP/1 response compression worker
 
 ## Observed source of scheduler work
 
@@ -17,8 +17,8 @@ scheduler domain. It does not attribute all HTTP/MCP latency to compression.
 
 ## Change
 
-H1 JSON, lazy JSON and cached HTML, plus the shared H2 response helper,
-submit only immutable compression inputs to the existing `Domain_pool` CPU
+H1 JSON, lazy JSON and cached HTML submit only immutable compression inputs
+to the existing `Domain_pool` CPU
 path. Request selection, lazy body closures, response objects and writes stay
 on the caller. Already-running executor jobs do not resubmit to their own
 pool. `Http_response_payload.prepare` remains a synchronous producer helper.
@@ -30,14 +30,30 @@ Responses with compression disabled, identity negotiation, or bodies below
 This follows the existing shared-pool policy and the
 [Eio executor interface](https://github.com/ocaml-multicore/eio/blob/main/lib_eio/executor_pool.mli).
 
+## H2 follow-up boundary
+
+H2 compression is outside this change. `Server_bootstrap_http.serve_h2` and
+the H2 branch of `serve_auto` create one fiber per connection. The installed
+`h2-eio` adapter passes the route callback directly to
+`H2.Server_connection.create`; `H2.Server_connection.read` calls it while
+processing incoming frames. Awaiting a shared compression worker in that
+callback stops the connection reader from processing later streams, PING,
+WINDOW_UPDATE and RST_STREAM until the worker responds. Sequential wire
+parity cannot establish multiplexing progress.
+
+H2 worker compression requires a follow-up that gives each request its own
+fiber with appropriate stream/connection cancellation ownership, then proves
+sibling-stream and control-frame progress while the worker pool is occupied.
+The shared H2 helper and its test retain their base implementation here.
+The existing `h2_respond_json_value_on_cpu` already awaits an executor from
+the route callback; its connection-progress risk also belongs in that follow-up.
+
 ## Verification scope
 
 - `test_http_server_eio`: single occupied worker; caller fiber progress;
   cancellation before response writes and after a worker barrier; unqueued
   small, identity, disabled and matching-validator responses; lazy closure
   owner domain; complete H1 identity/gzip/zstd wire parity with a real pool.
-- `test_h2_json_worker`: complete H2 payload and header parity with and without
-  an installed one-domain pool, including nested value serialization.
 - Existing `test_compression`: negotiation, gzip decoding and snapshot
   representations remain the pure-codec regression coverage.
 - Local `ocamlformat --check` and `git diff --check` passed. No local OCaml
@@ -47,6 +63,10 @@ This follows the existing shared-pool policy and the
 
 Pool queueing can add delay, especially for bodies just above the codec
 minimum; this change has no demonstrated end-to-end latency improvement yet.
+H1 callbacks also run in the connection reader/writer fibers, so waiting for
+compression delays that connection's next request. HTTPun dispatches those
+requests in order; other connections have separate fibers. Same-connection
+pipelining latency under worker saturation remains unmeasured.
 It does not remove allocation or cross-domain GC pauses. Snapshot caches are
 still preferable for repeated immutable responses. This slice does not
 change authentication, deployment, TUI frame policy or the 0.1ms target status.

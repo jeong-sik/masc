@@ -76,12 +76,7 @@ type encoder = Inline | Worker
 let test_wire_parity () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
-  let previous_pool = Domain_pool_ref.get () in
-  Eio.Switch.on_release sw (fun () ->
-    match previous_pool with
-    | None -> Domain_pool_ref.clear_for_tests ()
-    | Some previous -> Domain_pool_ref.set previous);
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
   let extra_headers = ["access-control-allow-origin", "https://dashboard.example";
                        "x-snapshot", "current"] in
   let payload revision = `Assoc ["revision", `Int revision;
@@ -94,11 +89,7 @@ let test_wire_parity () =
         | Worker -> Response.h2_respond_json_value_on_cpu
             ~status:`Accepted ~extra_headers ~compress reqd json) in
   List.iter (fun installed ->
-    (match installed with
-    | None -> Domain_pool_ref.clear_for_tests ()
-    | Some pool -> Domain_pool_ref.set pool);
-    Executor_pool_ref.For_testing.with_pool_option
-      (Option.map Domain_pool.executor_pool installed) @@ fun () ->
+    Executor_pool_ref.For_testing.with_pool_option installed @@ fun () ->
     List.iter (fun (encoding, compress, expected_encoding) ->
       let first = payload 1 in
       let old_status, old_headers, old_body =

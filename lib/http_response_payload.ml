@@ -155,21 +155,21 @@ let negotiate_encoding accept_encoding =
   else Identity_only
 
 let compress_encoded_body ~level encoding body =
-    match encoding with
-    | Identity_only -> body, [ vary_accept_encoding ]
-    | Prefer_zstd -> (
-      match Compression_codec.compress ~level body with
-      | Compression_codec.Unchanged payload -> payload, [ vary_accept_encoding ]
-      | Compression_codec.Compressed { payload; encoding } ->
-        ( payload
-        , [ ("content-encoding", Compression_codec.content_encoding encoding)
-          ; vary_accept_encoding
-          ] ))
-    | Prefer_gzip -> (
-      match Compression_gzip.compress body with
-      | Compression_gzip.Unchanged payload -> payload, [ vary_accept_encoding ]
-      | Compression_gzip.Compressed payload ->
-        (payload, [ ("content-encoding", "gzip"); vary_accept_encoding ]))
+  match encoding with
+  | Identity_only -> body, [ vary_accept_encoding ]
+  | Prefer_zstd -> (
+    match Compression_codec.compress ~level body with
+    | Compression_codec.Unchanged payload -> payload, [ vary_accept_encoding ]
+    | Compression_codec.Compressed { payload; encoding } ->
+      ( payload
+      , [ ("content-encoding", Compression_codec.content_encoding encoding)
+        ; vary_accept_encoding
+        ] ))
+  | Prefer_gzip -> (
+    match Compression_gzip.compress body with
+    | Compression_gzip.Unchanged payload -> payload, [ vary_accept_encoding ]
+    | Compression_gzip.Compressed payload ->
+      (payload, [ ("content-encoding", "gzip"); vary_accept_encoding ]))
 
 let compress_body ?(level = 3) ?(compress = true) ~accept_encoding body =
   if not compress then body, []

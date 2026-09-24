@@ -158,10 +158,10 @@ module Response : sig
       [Httpun.Reqd.t]. *)
 
   (** JSON response with optional negotiated zstd or gzip compression.
-      Default status [`OK]. Compression runs on the shared CPU pool when
-      available; bodies below the codec minimum, identity responses and
-      matching validators do not submit work. Socket writes remain on the
-      caller fiber. Without a pool, compression runs inline.
+      Default status [`OK]. Compression from an Eio fiber runs on the shared
+      CPU pool when available; bodies below the codec minimum, identity
+      responses and matching validators do not submit work. Socket writes remain on the
+      caller fiber. Without a pool or outside Eio, compression runs inline.
 
       A [`OK] response to a GET or HEAD also carries a weak [ETag] over the
       uncompressed body and [Cache-Control: no-cache], and answers
@@ -222,8 +222,9 @@ module Response : sig
   (** HTML response with ETag + conditional 304 support.  When
       the request If-None-Match header matches the quoted etag
       value, returns [`Not_modified] with no body; otherwise
-      serves the full response with ETag + zstd compression
-      when the client accepts it.  Used for static dashboard
+      serves the full response with ETag and negotiated compression on the
+      shared CPU pool, with the same inline cases as [json]. Used for static
+      dashboard
       HTML. *)
   val html_cached
     :  ?status:Httpun.Status.t

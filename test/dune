@@ -2882,6 +2882,8 @@
 
 (include stanzas/test_local_review_script.inc)
 
+(include stanzas/test_review_approve_guard.inc)
+
 (include stanzas/test_masc_dirname_ssot.inc)
 
 (include stanzas/test_masc_error_dashboard_auth_code.inc)

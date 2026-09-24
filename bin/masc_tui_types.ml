@@ -5093,6 +5093,10 @@ type runtime_config_reading = {
    RGB plus what to title it. The spectator downsamples the pixels itself. *)
 type msx_menu_mode = Boot_game | Change_disk
 
+(* A DOS live read belongs to the view and server port that asked for it.
+   A reopened screen may start a fresh read while an old one is still ending. *)
+type machine_live_request = { live_view : unit ref; live_port : int }
+
 type msx_meta = {
   msx_mode : string;
   msx_cartridge : string option;
@@ -5415,6 +5419,7 @@ type state = {
      it resets [msx_live] to [Unread] and the next read asks for a picture. *)
   mutable msx_live: Masc_tui_machine_live.view;
   mutable dos_live: Masc_tui_machine_live.view;
+  mutable dos_live_in_flight: machine_live_request option;
   (* The load menu (RFC-0439 §3.7): the human picks a game from the cartridge
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
@@ -7726,6 +7731,7 @@ let create_state
   machine_source = Masc_tui_machine_live.Msx;
   msx_live = Masc_tui_machine_live.Unread;
   dos_live = Masc_tui_machine_live.Unread;
+  dos_live_in_flight = None;
   msx_menu_open = false;
   msx_notice = None;
   msx_menu_mode = Boot_game;

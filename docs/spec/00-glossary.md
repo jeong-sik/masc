@@ -1047,6 +1047,30 @@ status: reference
   채팅의 결정 행은 wake 가 살아 있는 Keeper 에게 닿을 때 한 번만 적힌다.
   → [Keeper_approval_queue.delivery_occasion](../../lib/keeper/keeper_approval_queue.ml)
 
+**Approval Queue Phase (승인 큐 진행 단계)**
+: Human-in-the-Loop (HITL) 승인 큐에서 각 승인 요청 항목이 거치고 있는 진행 단계를
+  서버가 단일 wire 문자열로 투영한 닫힌 네 값(`approval_queue_phase`: `Phase_queued` ·
+  `Phase_judging` · `Phase_human_required` · `Phase_blocked`). TUI와 웹 대시보드가
+  개별적으로 수행하던 취약하고 중복된 4문자열 휴리스틱 매칭을 대체하고, 서버
+  SSE/REST 엔드포인트(`pending_entry`, `hitl_rows`)가 직접 방출한다(#38404). wire 값은
+  각각 `"queued"` · `"judging"` · `"human_required"` · `"blocked"`다.
+  - `blocked`: 준비 단계 워커 부재(`Summary_attempt_pre_worker_unavailable`),
+    식별자 언바운드(`Summary_attempt_identity_unbound`), 지속성 불확실
+    (`Summary_attempt_persistence_uncertain`), 심판 실행 실패(`Summary_failed`)인 경우.
+    특히 `Summary_pre_worker_start_reserved` 상태는 초기 폴링 중 대시보드와 서버가
+    `judging`이 아닌 `blocked`로 투영하여 불필요한 대기 혼선을 막는다.
+  - `judging`: 자동 심판 워커가 실행 중(`Summary_attempt_in_flight`)이거나 요약 대기
+    (`Summary_pending`)인 경우.
+  - `human_required`: 모델 심판 결과 명시적인 사람 개입이 필요하다고 판정된 경우
+    (`advisory_judgment = Require_human`).
+  - `queued`: 심판 전 대기 중(`Summary_attempt_ready`)이며 아직 심판이 요청되지
+    않았거나(`Summary_not_requested`) 모델 판정(`Approve` | `Deny`)이 대기 중인 경우.
+  - **비영속 투영 경계**: 승인 큐의 durable 저널 직렬화(`pending_entry_to_yojson` /
+    `pending_entry_of_yojson`)에는 파생값인 `phase` 필드를 저장하지 않고, 오직
+    클라이언트 관측을 위한 wire 프로젝션에서만 유지한다.
+  → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli),
+  [Keeper_approval_queue](../../lib/keeper/keeper_approval_queue.mli)
+
 ## Task Lifecycle
 
 **Created By**

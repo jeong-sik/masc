@@ -262,6 +262,47 @@ let only_a_keeper_is_answered_on_its_queue () =
          (Ops.delegate_continuation_channel ~config ~submitted_by:"operator")))
 ;;
 
+(* RFC-0468 §3.2: the recipient records a Keeper's masc_keeper_msg /
+   delegate as that Keeper. Registry membership decides it, as it decides the
+   reply route above; an operator driving the tool is not a Keeper. The typed
+   sender then survives the durable operation source. *)
+let only_a_registered_keeper_is_the_sender () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    (match Ops.sender_keeper_of_submitter ~config ~submitted_by:asker with
+     | Some keeper_id ->
+       check string "a registered Keeper is the sender" asker
+         (Masc.Keeper_identity.Keeper_id.to_string keeper_id)
+     | None -> fail "a registered Keeper must be recorded as the sender");
+    check bool "an operator is not a sender Keeper" true
+      (Option.is_none
+         (Ops.sender_keeper_of_submitter ~config ~submitted_by:"operator"));
+    let thread_id = "keeper:" ^ delegate in
+    let continuation_channel =
+      match Keeper_continuation_channel.keeper ~keeper_name:asker with
+      | Ok channel -> channel
+      | Error detail -> fail detail
+    in
+    let sender_keeper = Ops.sender_keeper_of_submitter ~config ~submitted_by:asker in
+    let encoded =
+      match
+        Masc.Keeper_chat_operation_payload.source_to_json
+          ~submitted_by:asker ~thread_id ~continuation_channel
+          ~surface:Masc.Surface_ref.Agent ~channel:"agent" ~channel_user_id:""
+          ~channel_user_name:"" ~channel_workspace_id:"" ~conversation_id:None
+          ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+          ~sender_keeper ~user_row_origin:Masc.Keeper_chat_store.Needs_append
+      with
+      | Ok encoded -> encoded
+      | Error detail -> fail detail
+    in
+    match Masc.Keeper_chat_operation_payload.source_of_json encoded with
+    | Error detail -> fail detail
+    | Ok decoded ->
+      check (option string) "the sender Keeper survives the source" (Some asker)
+        (Option.map Masc.Keeper_identity.Keeper_id.to_string decoded.sender_keeper))
+;;
+
 let () =
   run
     "keeper delegate completion wake"
@@ -282,6 +323,10 @@ let () =
             "only a Keeper is answered on its queue"
             `Quick
             only_a_keeper_is_answered_on_its_queue
+        ; test_case
+            "only a registered Keeper is the sender"
+            `Quick
+            only_a_registered_keeper_is_the_sender
         ] )
     ]
 ;;

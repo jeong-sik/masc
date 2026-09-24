@@ -178,6 +178,7 @@ let speaker_with authority : Store.speaker option =
 
 let owner = speaker_with Store.Owner
 let external_ = speaker_with Store.External
+let keeper_speaker = speaker_with Store.Keeper
 
 (* Fleet layer: keeper broadcasts projected into this keeper's transcript.
    The two reactive lanes admit only rows addressed to this keeper, so without
@@ -209,6 +210,35 @@ let test_addressed_row_is_not_fleet () =
     (fleet_contents (fleet ~limit:10 messages));
   check (list string) "and it is still a pending mention" [ "@alice take this" ]
     (contents (MS.pending_mentions_of_messages ~targets messages))
+;;
+
+(* RFC-0468 §3.2: another Keeper's direct message is Keeper speech, not the
+   operator's, but it was still sent to this Keeper: it stays a watermarked
+   scope line, so an unanswered one is raised again, and it is not fleet
+   context. A Keeper's broadcast is fleet context and not a scope line. *)
+let test_keeper_direct_row_is_scope_not_fleet () =
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 ~surface:agent_surface
+        ~speaker:keeper_speaker "can you take task-12?"
+    ]
+  in
+  check (list string) "a direct Keeper line is a scope line"
+    [ "can you take task-12?" ]
+    (contents (MS.pending_scope_of_messages ~targets messages));
+  check (list string) "and it is not fleet context" []
+    (fleet_contents (fleet ~limit:10 messages))
+;;
+
+let test_keeper_broadcast_row_is_fleet_not_scope () =
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:10.0 ~surface:(Some Masc.Surface_ref.Broadcast)
+        ~speaker:keeper_speaker "deploy is green"
+    ]
+  in
+  check (list string) "a Keeper broadcast is fleet context" [ "deploy is green" ]
+    (fleet_contents (fleet ~limit:10 messages));
+  check (list string) "and it is not a scope line" []
+    (contents (MS.pending_scope_of_messages ~targets messages))
 ;;
 
 let test_owner_row_is_not_fleet () =
@@ -543,6 +573,10 @@ let () =
             test_projected_broadcast_reaches_the_layer
         ; test_case "addressed_row_not_fleet" `Quick test_addressed_row_is_not_fleet
         ; test_case "owner_row_not_fleet" `Quick test_owner_row_is_not_fleet
+        ; test_case "keeper_direct_row_scope_not_fleet" `Quick
+            test_keeper_direct_row_is_scope_not_fleet
+        ; test_case "keeper_broadcast_row_fleet_not_scope" `Quick
+            test_keeper_broadcast_row_is_fleet_not_scope
         ; test_case "connector_row_not_fleet" `Quick test_connector_row_is_not_fleet
         ; test_case "own_assistant_not_fleet" `Quick test_own_assistant_line_is_not_fleet
         ; test_case "zero_limit_disables" `Quick test_zero_limit_disables_the_layer

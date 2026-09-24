@@ -17,6 +17,7 @@ type observation = {
   frame_nonblack : int;
   frame_ascii : string;
   program : string option;
+  controller : string option;
   files : string list;
 }
 
@@ -26,11 +27,21 @@ type error =
   | No_machine
   | Invalid_request of string
   | Unreadable of string
+  | Held_by of string
+  | Guest_fault of string
 
 let error_to_string = function
   | No_machine -> "no DOS machine is loaded: call masc_dos_load first"
   | Invalid_request message -> message
   | Unreadable message -> message
+  | Held_by holder ->
+    Printf.sprintf
+      "%s holds the controller, so nothing was done: wait until they pass it with \
+       masc_dos_pass. masc_dos_screen needs no controller"
+      holder
+  | Guest_fault message ->
+    "the program ran something this machine does not implement, and stopped there: "
+    ^ message
 ;;
 
 (* The core runs about 24 million instructions a second on this hardware
@@ -58,6 +69,7 @@ type ran = {
   settled : bool;
   input_requests : int;
   keys_pressed : int;
+  unsaved : string list;
 }
 
 (* How far the machine runs between two screen readings. Measured on ZZT: the
@@ -70,6 +82,17 @@ type machine = {
   program : string;
   ledger_path : string;
   mutable entries : entry list;  (* newest first *)
+  saves_dir : string;
+  kept : (string, string) Hashtbl.t;
+      (* DOS name -> the contents last known to be on disk, either in the
+         inventory or in [saves_dir]. A file whose mounted contents differ
+         from this is one the program wrote since. *)
+  mutable controller : string option;
+      (* Who may move this machine's time. See [with_control]. *)
+  incarnation : string;
+      (* A fresh identity per load: an observer holding an older one knows
+         the machine it read was replaced, even when the step count is back
+         where it was. *)
 }
 
 let state : machine option ref = ref None
@@ -81,6 +104,49 @@ let with_machine f =
     match !state with
     | None -> Error No_machine
     | Some st -> f st)
+;;
+
+(* The controller is the hotseat's pad. A hotseat game such as 삼국지3 asks
+   each human ruler in turn at the same keyboard; on one shared machine a
+   second Keeper's keys land in whoever's turn is on screen. The MSX lane had
+   no such hand-off, and Keepers there swapped the program and restored slots
+   under each other mid-campaign.
+
+   Whoever moves the machine first holds it; everyone else is refused before
+   anything happens and can still watch. The holder hands it on with [pass].
+   A refused call takes nothing. *)
+(* A call that runs the guest can fail two ways that are not the caller's
+   arguments: the core meets an instruction it does not implement (ocaml-dos
+   raises rather than misbehave quietly), or the ledger file will not take a
+   line. Both come back as errors, not exceptions out of the tool. *)
+let running f =
+  match f () with
+  | result -> result
+  | exception Cpu86.Unsupported message -> Error (Guest_fault message)
+  | exception Sys_error message -> Error (Unreadable message)
+;;
+
+let refuse_other st ~who =
+  match st.controller with
+  | Some holder when not (String.equal holder who) -> Error (Held_by holder)
+  | Some _ | None -> Ok ()
+;;
+
+let with_control ~who f =
+  with_machine (fun st ->
+    match refuse_other st ~who with
+    | Error e -> Error e
+    | Ok () ->
+      (* Taken before the call so the observation it returns names the new
+         holder, and given back if the call is refused. *)
+      let before = st.controller in
+      st.controller <- Some who;
+      let result = running (fun () -> f st) in
+      (match result with
+       | Ok _ | Error (Unreadable _ | Guest_fault _) -> ()
+         (* the call ran: the machine may have moved *)
+       | Error (No_machine | Invalid_request _ | Held_by _) -> st.controller <- before);
+      result)
 ;;
 
 (* ---------- observation ---------- *)
@@ -142,6 +208,7 @@ let observe st =
     frame_nonblack = nonblack;
     frame_ascii = ascii;
     program = Some st.program;
+    controller = st.controller;
     files = Dos_machine.mounted_names m;
   }
 ;;
@@ -168,13 +235,6 @@ let append_entry st e =
   st.entries <- e :: st.entries
 ;;
 
-let rec mkdir_p dir =
-  if not (Sys.file_exists dir) then begin
-    mkdir_p (Filename.dirname dir);
-    Sys.mkdir dir 0o755
-  end
-;;
-
 (* ---------- time ---------- *)
 
 let clamp_steps steps =
@@ -194,6 +254,7 @@ let advance_blind st ~budget =
   ; settled = false
   ; input_requests = Dos_machine.input_requests st.m - before
   ; keys_pressed = 0
+  ; unsaved = []
   }
 ;;
 
@@ -232,11 +293,106 @@ let advance_until_ready st ~budget =
   ; settled = !settled
   ; input_requests = Dos_machine.input_requests m - requests_before
   ; keys_pressed = 0
+  ; unsaved = []
   }
 ;;
 
 let advance st ~budget ~until_ready =
   if until_ready then advance_until_ready st ~budget else advance_blind st ~budget
+;;
+
+(* ---------- the program's own saves ---------- *)
+
+(* A DOS game saves by writing a file, and Dos_machine keeps what the guest
+   wrote only in its mount table. Without this a server restart, an eject or
+   the next load took every campaign with it: the MSX 삼국지2 lane lost its
+   Keepers' games that way. After every call that ran the guest, a file whose
+   mounted contents differ from what is on disk is written to [saves_dir],
+   and the next load of the same program mounts it over the inventory copy.
+
+   A file the program deletes is not carried: the inventory copy comes back
+   at the next load. None of the games this lane runs delete their saves. *)
+
+let write_atomically ~dir name contents =
+  let path = Filename.concat dir name in
+  let tmp = Filename.concat dir ("." ^ name ^ ".tmp") in
+  Out_channel.with_open_bin tmp (fun oc -> output_string oc contents);
+  Sys.rename tmp path
+;;
+
+let rec mkdir_p dir =
+  if not (Sys.file_exists dir) then begin
+    mkdir_p (Filename.dirname dir);
+    Sys.mkdir dir 0o755
+  end
+;;
+
+(* A name a file may be kept under: one plain name, never a path or a drive.
+   The inventory's names pass the same test, and so does every name a guest
+   creates before it reaches [saves_dir] -- DOS accepts "/" as a separator,
+   and a guest asked for a save name will take "../../X". *)
+let escapes name =
+  String.contains name '/'
+  || String.contains name '\\'
+  || String.contains name ':'
+  || String.equal name ".."
+  || String.starts_with ~prefix:"." name
+;;
+
+(* Writes every changed file and returns what did not reach disk, one line
+   per file. A file is recorded as kept only once it is on disk, so a failed
+   write is tried again after the next call. A name that is a path is never
+   written; it is recorded as seen so it is reported once, not on every call. *)
+let keep_writes st =
+  List.filter_map
+    (fun name ->
+      match Dos_machine.read_mounted st.m name with
+      | None -> None
+      | Some now ->
+        (match Hashtbl.find_opt st.kept name with
+         | Some before when String.equal before now -> None
+         | _ when escapes name ->
+           Hashtbl.replace st.kept name now;
+           Some (name ^ ": a path, not a file name; it stays in this machine only")
+         | _ ->
+           (match
+              mkdir_p st.saves_dir;
+              write_atomically ~dir:st.saves_dir name now
+            with
+            | () ->
+              Hashtbl.replace st.kept name now;
+              None
+            | exception Sys_error message -> Some (name ^ ": " ^ message))))
+    (Dos_machine.mounted_names st.m)
+;;
+
+(* Every call that ran the guest ends here. The guest has moved whatever the
+   disk did, so the observation always comes back; a save that did not reach
+   disk rides along in [unsaved] instead of turning the call into an error a
+   caller would answer by sending the same keys again. *)
+let ran_then_kept st ran = Ok (observe st, { ran with unsaved = keep_writes st })
+
+(* The saves over the inventory, matched the way DOS matches names. Read
+   under the machine's lock by [load], so a save the running machine writes
+   cannot land between this read and the new machine's first record of it. *)
+let with_saves ~saves_dir files =
+  match
+    if Sys.file_exists saves_dir && Sys.is_directory saves_dir then
+      Sys.readdir saves_dir
+      |> Array.to_list
+      |> List.filter (fun f -> not (escapes f))
+      |> List.filter (fun f -> not (Sys.is_directory (Filename.concat saves_dir f)))
+      |> List.map (fun f ->
+        (f, In_channel.with_open_bin (Filename.concat saves_dir f) In_channel.input_all))
+    else []
+  with
+  | exception Sys_error message -> Error (Unreadable message)
+  | saved ->
+    let folded (name, _) = String.uppercase_ascii name in
+    let inventory_only =
+      List.filter (fun f -> not (List.exists (fun s -> folded s = folded f) saved)) files
+    in
+    Ok (inventory_only @ saved)
 ;;
 
 (* ---------- lifecycle ---------- *)
@@ -262,8 +418,14 @@ let is_mz image =
   String.length image >= 2 && Char.equal image.[0] 'M' && Char.equal image.[1] 'Z'
 ;;
 
-let load ~ledger_dir ~program_name ~program_bytes ~files ~announce =
+let load ~who ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announce =
   locked (fun () ->
+    match Option.map (refuse_other ~who) !state with
+    | Some (Error e) -> Error e
+    | Some (Ok ()) | None ->
+    match with_saves ~saves_dir files with
+    | Error e -> Error e
+    | Ok files ->
     if String.length program_bytes = 0 then
       Error (Invalid_request (Printf.sprintf "%s is empty" program_name))
     else
@@ -273,7 +435,15 @@ let load ~ledger_dir ~program_name ~program_bytes ~files ~announce =
           (Invalid_request
              (Printf.sprintf "%s and %s are one name to DOS; the guest can only see one"
                 earlier later))
-      | None -> begin
+      | None ->
+        (* A new machine starts a new ledger. *)
+        let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+        match
+          mkdir_p ledger_dir;
+          Out_channel.with_open_bin ledger_path (fun _ -> ())
+        with
+        | exception Sys_error message -> Error (Unreadable message)
+        | () -> begin
         let m = Dos_machine.create () in
         List.iter (fun (name, contents) -> Dos_machine.mount_file m name contents) files;
         (* The image's own bytes choose the loader, not its name: an MZ header is
@@ -281,39 +451,102 @@ let load ~ledger_dir ~program_name ~program_bytes ~files ~announce =
            file still boots the way DOS would boot it. *)
         if is_mz program_bytes then Dos_machine.load_exe m program_bytes
         else Dos_machine.load_com m program_bytes;
-        mkdir_p ledger_dir;
-        let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
-        (* A new machine starts a new ledger. *)
-        Out_channel.with_open_bin ledger_path (fun _ -> ());
+        let kept = Hashtbl.create (List.length files) in
+        List.iter
+          (fun (name, contents) -> Hashtbl.replace kept (String.uppercase_ascii name) contents)
+          files;
         let st =
-          { m; steps = 0; program = program_name; ledger_path; entries = [] }
+          { m; steps = 0; program = program_name; ledger_path; entries = []; saves_dir; kept
+          ; controller = Some who; incarnation = Random_id.uuid_v7 () }
         in
         state := Some st;
+        let booted =
+          running (fun () ->
+            let ran = advance st ~budget:boot_steps ~until_ready:true in
+            ran_then_kept st ran)
+        in
+        (* Announced once the machine is the workspace's and has booted as far
+           as it will, still under the lock so announcements keep machine
+           order. *)
         announce ();
-        let ran = advance st ~budget:boot_steps ~until_ready:true in
-        Ok (observe st, ran)
+        booted
       end)
 ;;
 
-let eject ~announce () =
+let eject ~who ~announce () =
   locked (fun () ->
     match !state with
     | None -> Error No_machine
-    | Some _ ->
-      state := None;
+    | Some st ->
+      (match refuse_other st ~who with
+       | Error e -> Error e
+       | Ok () ->
+         state := None;
+         announce ();
+         Ok ()))
+;;
+
+let pass ~who ~to_ ~announce =
+  with_machine (fun st ->
+    match refuse_other st ~who with
+    | Error e -> Error e
+    | Ok () ->
+      st.controller <- to_;
       announce ();
-      Ok ())
+      Ok (observe st))
+;;
+
+(* A holder that can no longer act cannot pass. The caller, which can read
+   Keeper state (this module cannot), names the holder it found gone; the
+   controller is freed only if that holder still has it, so a hand-off that
+   landed in between is kept. *)
+let release_left ~holder ~announce =
+  with_machine (fun st ->
+    match st.controller with
+    | Some current when String.equal current holder ->
+      st.controller <- None;
+      announce ();
+      Ok true
+    | Some _ | None -> Ok false)
 ;;
 
 let screen () = with_machine (fun st -> Ok (observe st))
 
-let step ~steps ~until_ready =
+type frame = { width : int; height : int; rgb : string }
+
+let capture () =
   with_machine (fun st ->
+    let width, height = Dos_machine.frame_dims st.m in
+    Ok (observe st, { width; height; rgb = Dos_machine.frame_rgb st.m }))
+;;
+
+type identified_capture = {
+  incarnation : string;
+  observation : observation;
+  frame : frame;
+  input_count : int;
+  input_ledger : entry list;
+}
+
+let capture_with_identity () =
+  with_machine (fun st ->
+    let width, height = Dos_machine.frame_dims st.m in
+    Ok
+      { incarnation = st.incarnation
+      ; observation = observe st
+      ; frame = { width; height; rgb = Dos_machine.frame_rgb st.m }
+      ; input_count = List.length st.entries
+      ; input_ledger = st.entries
+      })
+;;
+
+let step ~who ~steps ~until_ready =
+  with_control ~who (fun st ->
     match clamp_steps steps with
     | Error e -> Error e
     | Ok budget ->
       let ran = advance st ~budget ~until_ready in
-      Ok (observe st, ran))
+      ran_then_kept st ran)
 ;;
 
 (* ---------- input ---------- *)
@@ -347,7 +580,15 @@ let press_resolved st ~who ~keys ~budget =
   List.iter
     (fun (name, word) ->
       let left = max_steps_per_call - !total in
-      if left > 0 then begin
+      (* A key goes in only when the machine is ready for it. If the previous
+         key left the program busy -- a fade, a load, an AI turn -- the next
+         one would land in whatever loop is running, and a "press any key"
+         wait or a skip check eats it. On 삼국지3 that turned a copy-protection
+         code typed during the fade into a wrong code, and the game exited.
+         The rest of the sequence is not sent; keys_pressed says where it
+         stopped. *)
+      let ready = !pressed = 0 || !last_settled in
+      if left > 0 && ready then begin
         append_entry st { at_step = st.steps; who; key_name = name };
         Dos_machine.push_key st.m word;
         let ran = advance_until_ready st ~budget:(min budget left) in
@@ -361,11 +602,12 @@ let press_resolved st ~who ~keys ~budget =
   ; settled = !last_settled
   ; input_requests = !requests
   ; keys_pressed = !pressed
+  ; unsaved = []
   }
 ;;
 
 let press ~who ~keys ~steps =
-  with_machine (fun st ->
+  with_control ~who (fun st ->
     if keys = [] then Error (Invalid_request "keys must name at least one key")
     else if List.length keys > max_keys_per_call then
       Error
@@ -382,7 +624,7 @@ let press ~who ~keys ~steps =
          | Error e -> Error e
          | Ok resolved ->
            let ran = press_resolved st ~who ~keys:resolved ~budget in
-           Ok (observe st, ran)))
+           ran_then_kept st ran))
 ;;
 
 (* The mouse is state, not a queue. A key enters the ring and is gone; the
@@ -395,7 +637,7 @@ let press ~who ~keys ~steps =
    whatever the down half saw, or the button would stay held for the next
    caller. A move ([buttons = 0]) sets the position and runs once. *)
 let click ~who ~x ~y ~buttons ~steps =
-  with_machine (fun st ->
+  with_control ~who (fun st ->
     let width, height = Dos_machine.frame_dims st.m in
     if x < 0 || y < 0 || x >= width || y >= height then
       Error
@@ -413,25 +655,25 @@ let click ~who ~x ~y ~buttons ~steps =
         Dos_machine.set_mouse st.m ~x ~y ~buttons;
         if buttons = 0 then begin
           let ran = advance st ~budget ~until_ready:true in
-          Ok (observe st, ran)
+          ran_then_kept st ran
         end
         else begin
           let half = max 1 (budget / 2) in
           let down = advance st ~budget:half ~until_ready:true in
           Dos_machine.set_mouse st.m ~x ~y ~buttons:0;
           let up = advance st ~budget:(budget - down.steps_run) ~until_ready:true in
-          Ok
-            ( observe st
-            , { steps_run = down.steps_run + up.steps_run
+          ran_then_kept st
+            { steps_run = down.steps_run + up.steps_run
               ; settled = down.settled && up.settled
               ; input_requests = down.input_requests + up.input_requests
               ; keys_pressed = 0
-              } )
+              ; unsaved = []
+              }
         end)
 ;;
 
 let type_text ~who ~text ~steps =
-  with_machine (fun st ->
+  with_control ~who (fun st ->
     if String.length text = 0 then Error (Invalid_request "text must not be empty")
     else if String.length text > max_text_length then
       Error
@@ -447,7 +689,7 @@ let type_text ~who ~text ~steps =
          | Error e -> Error e
          | Ok resolved ->
            let ran = press_resolved st ~who ~keys:resolved ~budget in
-           Ok (observe st, ran)))
+           ran_then_kept st ran))
 ;;
 
 (* ---------- introspection ---------- *)

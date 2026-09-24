@@ -66,7 +66,9 @@ let _every_position_is_listed : Boundaries.position -> unit = function
 ;;
 
 let _every_history_at_start_is_listed : Boundaries.history_at_start -> unit = function
-  | Boundaries.Fresh_history | Boundaries.Continued_history -> ()
+  | Boundaries.Fresh_history
+  | Boundaries.Continued_history
+  | Boundaries.Continued_history_from _ -> ()
 ;;
 
 let every_position =
@@ -77,7 +79,12 @@ let every_position =
   ]
 ;;
 
-let every_history_at_start = [ Boundaries.Fresh_history; Boundaries.Continued_history ]
+let every_history_at_start =
+  [ Boundaries.Fresh_history
+  ; Boundaries.Continued_history
+  ; Boundaries.Continued_history_from { start_atom = 2; start_atom_digest = "digest" }
+  ]
+;;
 
 let print_record fmt written =
   Format.pp_print_string fmt (Yojson.Safe.to_string (Boundaries.record_to_json written))
@@ -138,7 +145,16 @@ let test_the_line_a_turn_writes () =
     {|{"kind":"turn_ended","recorded_at":200.0,"turn_ref":"trace#1","history_at_start":"fresh","position":{"kind":"stale_noop"}}|}
     (Yojson.Safe.to_string
        (Boundaries.record_to_json
-          (record ~history_at_start:Boundaries.Fresh_history Boundaries.Stale_noop)))
+          (record ~history_at_start:Boundaries.Fresh_history Boundaries.Stale_noop)));
+  check string "a continued turn that states its start position"
+    {|{"kind":"turn_ended","recorded_at":200.0,"turn_ref":"trace#1","history_at_start":{"kind":"continued_from","start_atom":2,"start_atom_digest":"digest"},"position":{"kind":"atom_history","end_atom":2,"last_atom_digest":"digest"}}|}
+    (Yojson.Safe.to_string
+       (Boundaries.record_to_json
+          (record
+             ~history_at_start:
+               (Boundaries.Continued_history_from
+                  { start_atom = 2; start_atom_digest = "digest" })
+             atom_history)))
 ;;
 
 (* The line is not a turn's, so it names the trace and nothing of a turn: no
@@ -325,9 +341,17 @@ let test_a_history_with_no_atom_is_a_fresh_start () =
     (Boundaries.history_at_start_of_messages []);
   check history_at_start_t "pinned messages only" Boundaries.Fresh_history
     (Boundaries.history_at_start_of_messages [ message ~role:Types.System "system" ]);
-  check history_at_start_t "one atom" Boundaries.Continued_history
-    (Boundaries.history_at_start_of_messages
-       [ message ~role:Types.System "system"; message ~role:Types.User "question" ])
+  let one_atom =
+    [ message ~role:Types.System "system"; message ~role:Types.User "question" ]
+  in
+  let start_atom_digest =
+    match Window.atom_opening_digest one_atom 0 with
+    | Some digest -> digest
+    | None -> failf "the fixture has no atom 0"
+  in
+  check history_at_start_t "one atom"
+    (Boundaries.Continued_history_from { start_atom = 1; start_atom_digest })
+    (Boundaries.history_at_start_of_messages one_atom)
 ;;
 
 (* A turn that reaches the boundary line with no saved checkpoint is one of two

@@ -252,7 +252,7 @@ let seed_keeper_sandbox_profile ~base_dir name =
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.save_file
     (Filename.concat keepers_dir (name ^ ".toml"))
-    ("[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"# " ^ name ^ "\"\n")
+    ("[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\ninstructions = \"# " ^ name ^ "\"\n")
 
 let dashboard_purge_cleanup requested_name
     (meta : Keeper_meta_contract.keeper_meta)
@@ -958,6 +958,7 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
       Eio.Switch.run @@ fun sw ->
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let ctx : _ Keeper_types_profile.context =
         {
           config;
@@ -996,6 +997,54 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
          | Some (`Crashed reason) ->
            fail ("expected stopped promise, got crashed: " ^ reason)
          | None -> fail "expected done_p to resolve on stop"))
+
+(* #38175: a Keeper lane must outlive whatever asked for it. With no server
+   root switch installed, start_keepalive used to fork the lane on [ctx.sw]
+   and log a WARN, so a lane started from a turn died with that turn. Now
+   there is no owner to borrow: the lane is refused as a typed start error and
+   settled, and nothing runs on the caller's switch. *)
+let test_direct_start_without_server_root_refuses_the_lane () =
+  Eio_main.run @@ fun env ->
+  install_test_env env;
+  R.For_testing.clear ();
+  Eio_context.For_testing.clear_root_switch ();
+  let base_dir = temp_dir "direct-keepalive-no-root" in
+  let keeper_name = "direct-no-root" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      ensure_default_runtime ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
+      Eio.Switch.run @@ fun caller_sw ->
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "tester"
+        ; sw = caller_sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env caller_sw config)
+        }
+      in
+      match Masc.Keeper_keepalive.start_keepalive ctx meta with
+      | Masc.Keeper_keepalive.Keepalive_fork_rejected
+          Lane.Server_root_switch_unavailable ->
+        (match R.get ~base_path:config.base_path keeper_name with
+         | None -> fail "the refused lane left no registry entry to settle"
+         | Some entry ->
+           check bool "the refused lane is settled" true (R.lane_has_exited entry))
+      | outcome ->
+        failf
+          "a lane with no server root switch was not refused: %s"
+          (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome))
 
 let test_cross_domain_start_keepalive_and_swap () =
   Eio_main.run @@ fun env ->
@@ -1046,8 +1095,10 @@ let test_cross_domain_start_keepalive_and_swap () =
              check string "swapped keeper name matches" keeper_name new_entry.name
            | Ok (_, rejected) ->
              fail ("swap keepalive rejected: " ^ Masc.Keeper_keepalive.start_keepalive_outcome_to_string rejected)
-           | Error error ->
-             fail ("swap keepalive tool error: " ^ Tool_result.message error));
+           | Error (Masc.Keeper_turn_up_update.Swap_failed error) ->
+             fail ("swap keepalive tool error: " ^ Tool_result.message error)
+           | Error (Masc.Keeper_turn_up_update.Swap_turn_in_flight _) ->
+             fail "swap keepalive found a turn in flight");
           (match Masc.Keeper_keepalive.stop_keepalive_and_await ~base_path:config.base_path keeper_name with
            | Masc.Keeper_keepalive.Keeper_joined { terminal = `Stopped; _ } -> ()
            | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
@@ -1201,6 +1252,7 @@ let test_direct_stop_ignores_a_dead_librarian_executor () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
       Eio.Switch.run @@ fun keeper_sw ->
+      Masc_test_deps.with_server_root_switch ~sw:keeper_sw @@ fun () ->
       Masc.Keeper_process_switch.set keeper_sw;
       install_owner_inventory_exn ~sw:keeper_sw config;
       ensure_owner_meta_exn config meta;
@@ -1262,6 +1314,190 @@ let test_direct_stop_ignores_a_dead_librarian_executor () =
         fail ("stop carried Librarian evidence it does not own: " ^ detail)
       | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
         fail ("a dead Librarian executor changed explicit stop into crash: " ^ reason))
+
+(* A schedule wake to a Keeper whose fiber is not running is accepted into its
+   durable queue and nothing on the schedule side wakes the fiber (#38523).
+   Property: a launched lane serves an already-queued Schedule_due in its
+   first cycle after warmup, without any wakeup. While warmup has not elapsed
+   a cycle reads nothing ([run_keepalive_unified_turn] returns before intake),
+   and the lane sleeps until the initial cadence boundary, which is the
+   warmup itself ([Initial_due warmup]).
+
+   The launch clears the wakeup flag ([Keeper_registry.prepare_fiber_launch])
+   and this test never sets it. The lane runs with a nonzero warmup, and the
+   test requires that no turn has started at [fresh_lane_warmup_check_sec]
+   (a third of the warmup) and that one has started before
+   [first_cycle_deadline_sec]. That fails for:
+   - a lane that ignores warmup and dispatches at once;
+   - a lane that serves the queue only after a wakeup;
+   - a lane that waits a full keepalive interval before the first cycle that
+     reads the queue (for example one that consumes the initial cadence
+     boundary during a warmup cycle).
+   It does not tell "cycle, then sleep" from "sleep [periodic_remaining], then
+   cycle": with [Initial_due warmup] both serve the wake at the warmup
+   boundary, so the two orders are the same at this boundary.
+
+   The warmup check compares the wall clock ([Time_compat.now]) with the
+   monotonic cadence clock; a wall clock step backwards during the test could
+   defer the first reading cycle by an interval. *)
+let fresh_lane_warmup_sec = 6
+(* A third of the warmup: the early check fails as too late only after a
+   scheduler stall of the remaining two thirds (4 s). *)
+let fresh_lane_warmup_check_sec = 2.0
+(* Must stay below one keepalive interval (checked) so a lane that sleeps a
+   full cadence fails, and far above the warmup so a cycle's own work on a
+   slow runner does not fail the test. *)
+let first_cycle_deadline_sec = 30.0
+let first_cycle_poll_interval_sec = 0.05
+
+let test_fresh_lane_serves_queued_schedule_wake_after_warmup () =
+  Eio_main.run @@ fun env ->
+  install_test_env env;
+  R.For_testing.clear ();
+  let base_dir = temp_dir "fresh-lane-schedule-wake" in
+  let keeper_name = "fresh-lane-schedule-wake" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      check bool "the deadline is shorter than one keepalive interval" true
+        (first_cycle_deadline_sec
+         < Float.of_int (Masc.Keeper_heartbeat_snapshot.keepalive_interval_sec ()));
+      ensure_default_runtime ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      Eio.Switch.run @@ fun keeper_sw ->
+      Masc_test_deps.with_server_root_switch ~sw:keeper_sw @@ fun () ->
+      Masc.Keeper_process_switch.set keeper_sw;
+      install_owner_inventory_exn ~sw:keeper_sw config;
+      ensure_owner_meta_exn config meta;
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "tester"
+        ; sw = keeper_sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env keeper_sw config)
+        }
+      in
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
+      let stimulus : Keeper_event_queue.stimulus =
+        { post_id = "schedule-due:fresh-lane-occurrence"
+        ; urgency = Keeper_event_queue.Normal
+        ; arrived_at = 1234.5
+        ; payload =
+            Keeper_event_queue.Schedule_due
+              { occurrence_id = "schedule-due:fresh-lane-occurrence"
+              ; schedule_instance_id = "fresh-lane-instance"
+              ; schedule_id = "fresh-lane-schedule"
+              ; due_at = 1200.0
+              ; payload_digest = "fresh-lane-digest"
+              ; title = None
+              ; message = "wake queued while the fiber was not running"
+              ; result_delivery = None
+              }
+        }
+      in
+      (* The same two writes [accept_keeper_wake_occurrence] makes for an
+         owner whose fiber is not running: the durable queue entry and its
+         reaction-ledger stimulus row. No wakeup is signaled. *)
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
+           ~base_path:config.base_path
+           keeper_name
+           stimulus
+       with
+       | Masc.Keeper_registry_event_queue.Stimulus_enqueued -> ()
+       | Masc.Keeper_registry_event_queue.Stimulus_already_present ->
+         fail "the schedule wake was already queued in a fresh workspace"
+       | Masc.Keeper_registry_event_queue.Stimulus_storage_error detail ->
+         fail ("the schedule wake could not be queued: " ^ detail));
+      Masc.Keeper_reaction_ledger.record_event_queue_stimulus
+        ~base_path:config.base_path
+        ~keeper_name
+        stimulus;
+      let stimulus_id =
+        Masc.Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus
+      in
+      let turn_started () =
+        match
+          Masc.Keeper_reaction_ledger.event_queue_reaction_evidence_result
+            ~base_path:config.base_path
+            ~keeper_name
+            ~stimulus_id
+        with
+        | Ok (Masc.Keeper_reaction_ledger.Evidence_complete evidence) ->
+          evidence.Masc.Keeper_reaction_ledger.turn_started_seen
+        | Ok (Masc.Keeper_reaction_ledger.Evidence_quarantined _) ->
+          fail "the schedule wake's reaction evidence was quarantined"
+        | Error error ->
+          fail
+            (Masc.Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+               error)
+      in
+      check bool "no turn has started before the lane launches" false
+        (turn_started ());
+      let warmup = Float.of_int fresh_lane_warmup_sec in
+      (* Taken before the launch: the lane's own warmup starts no earlier, so
+         its warmup ends no earlier than [launched_at +. warmup]. *)
+      let launched_at = Eio.Time.now ctx.clock in
+      (match
+         Masc.Keeper_keepalive.start_keepalive
+           ~proactive_warmup_sec:fresh_lane_warmup_sec
+           ctx
+           meta
+       with
+       | Masc.Keeper_keepalive.Keepalive_started _ -> ()
+       | outcome ->
+         failf
+           "fresh lane failed to start: %s"
+           (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
+      let mid_warmup = launched_at +. fresh_lane_warmup_check_sec in
+      Eio.Time.sleep ctx.clock
+        (Float.max 0.0 (mid_warmup -. Eio.Time.now ctx.clock));
+      let observed_at = Eio.Time.now ctx.clock in
+      let started_mid_warmup = turn_started () in
+      if observed_at -. launched_at >= warmup
+      then
+        failf
+          "the mid-warmup observation came %.2fs after launch, past the %ds \
+           warmup; it cannot show the warmup was respected"
+          (observed_at -. launched_at)
+          fresh_lane_warmup_sec;
+      check bool "no turn starts while the warmup has not elapsed" false
+        started_mid_warmup;
+      let rec await_first_turn () =
+        if turn_started ()
+        then ()
+        else if Eio.Time.now ctx.clock -. launched_at >= first_cycle_deadline_sec
+        then
+          failf
+            "the queued schedule wake started no turn within %.0fs of launch \
+             (warmup %ds, no wakeup); the lane did not read its queue in its \
+             first cycle after warmup"
+            first_cycle_deadline_sec
+            fresh_lane_warmup_sec
+        else (
+          Eio.Time.sleep ctx.clock first_cycle_poll_interval_sec;
+          await_first_turn ())
+      in
+      await_first_turn ();
+      match
+        Masc.Keeper_keepalive.stop_keepalive_and_await
+          ~base_path:config.base_path
+          keeper_name
+      with
+      | Masc.Keeper_keepalive.Keeper_not_registered ->
+        fail "fresh lane disappeared before joined stop"
+      | Masc.Keeper_keepalive.Keeper_joined { terminal = `Stopped; _ } -> ()
+      | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
+        fail ("fresh lane crashed instead of stopping: " ^ reason))
 
 let test_keeper_lane_join_waits_for_children_and_cleanup () =
   Eio_main.run @@ fun _env ->
@@ -1707,6 +1943,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let base_dir = temp_dir "shutdown-supersession" in
   Fun.protect
     ~finally:(fun () ->
@@ -2140,6 +2377,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some live_meta.sandbox_profile
+        ; sandbox_image = Some "masc-sandbox:general"
         }
       in
       let parsed : Turn_up_args.parsed_args =
@@ -2220,7 +2458,8 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
 
       let stale_name = "stale-up-does-not-resume-operator-pause" in
       let stale_meta =
-        Shutdown_finalize.For_testing.paused_meta (make_meta stale_name)
+        Shutdown_finalize.For_testing.paused_meta
+          { (make_meta stale_name) with sandbox_image = Some "masc-sandbox:general" }
       in
       create_owner_meta_exn config stale_meta;
       let stale_parsed =
@@ -2302,16 +2541,28 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         , meta_snapshot () )
       in
       let before_stale_update = authority_snapshot () in
-      let stale_result =
-        Turn_up_update.update_keeper
+      let stale_outcome =
+        Turn_up_update.update_keeper_outcome
           ~expected_config_revision:initial_revision
           ctx
           stale_parsed
           stale_meta
       in
       check bool "stale paused update is rejected by manifest CAS" true
-        (Option.is_some
-           (Turn_up_update.config_revision_conflict_of_result stale_result));
+        (match stale_outcome with
+         | Turn_up_update.Update_refused
+             { refusal = Turn_up_update.Revision_conflict _; _ } -> true
+         | Turn_up_update.Update_refused
+             { refusal =
+                 ( Turn_up_update.Profile_resolution_refused _
+                 | Turn_up_update.Shutdown_preflight_failed _
+                 | Turn_up_update.Publication_rolled_back _
+                 | Turn_up_update.Manifest_reconciliation_required _
+                 | Turn_up_update.Composite_reconciliation_required _
+                 | Turn_up_update.Failed_after_commit _ )
+             ; _
+             }
+         | Turn_up_update.Runtime_synced _ -> false);
       check bool
         "stale paused update leaves manifest, receipt, runtime, checkpoint, and meta unchanged"
         true
@@ -2322,7 +2573,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        | Ok None -> fail "stale update removed paused metadata"
        | Error detail -> fail detail);
       let before_profile_failure = authority_snapshot () in
-      let profile_failure_result =
+      let profile_failure_outcome =
         Turn_up_update.For_testing.update_keeper_with_apply_profile
           ~apply_profile:(fun ~base_path:_ ~keeper_name _command ->
             Error
@@ -2333,11 +2584,24 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
           stale_parsed
           stale_meta
       in
-      check bool "owner publication failure is not a created/running success" false
-        (Keeper_types_profile.tool_result_success profile_failure_result);
-      check bool "committed configuration is not reported as rolled back" true
-        (Option.is_none
-           (Turn_up_update.config_publication_rollback_of_result profile_failure_result));
+      let profile_failure_result =
+        match profile_failure_outcome with
+        | Turn_up_update.Update_refused
+            { refusal = Turn_up_update.Failed_after_commit _; result } -> result
+        | Turn_up_update.Update_refused
+            { refusal =
+                ( Turn_up_update.Profile_resolution_refused _
+                | Turn_up_update.Shutdown_preflight_failed _
+                | Turn_up_update.Revision_conflict _
+                | Turn_up_update.Publication_rolled_back _
+                | Turn_up_update.Manifest_reconciliation_required _
+                | Turn_up_update.Composite_reconciliation_required _ )
+            ; _
+            } ->
+          fail "owner publication failure was not refused after the commit"
+        | Turn_up_update.Runtime_synced _ ->
+          fail "owner publication failure reported a runtime sync"
+      in
       let receipt = match Tool_result.metadata profile_failure_result with
         | Some json -> Yojson.Safe.Util.member "keeper_config_write" json
         | None -> fail "missing committed configuration receipt" in
@@ -2409,10 +2673,11 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
            stopped_name
           : Masc.Keeper_keepalive.joined_stop_result))
 
-let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
+let test_update_keeper_defers_lane_swap_while_turn_in_flight () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let base_dir = temp_dir "update-turn-in-flight" in
   Fun.protect
     ~finally:(fun () ->
@@ -2429,6 +2694,7 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some meta.sandbox_profile
+        ; sandbox_image = Some "masc-sandbox:general"
         }
       in
       let parsed : Turn_up_args.parsed_args =
@@ -2471,7 +2737,12 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
       in
       (* A keeper's own turn holds the slot while its tools run: invoking
          the update from inside the admitted closure reproduces the
-         mid-turn self masc_keeper_up of #26542 structurally. *)
+         mid-turn self masc_keeper_up of #26542 structurally. The lane that
+         keeper runs on is registered; a deferral promises that lane reads
+         the update on its next turn. *)
+      let running_lane =
+        Masc.Keeper_registry.register_offline ~base_path:config.base_path name meta
+      in
       (match
          Keeper_owner_registry.run_maintenance_if_idle
            ~base_path:config.base_path
@@ -2486,12 +2757,12 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
        | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
        | Ok (`Busy _) -> fail "Owner unexpectedly busy before the test turn"
        | Ok (`Ran result) ->
-         check bool "mid-turn update is rejected" false
+         check bool "mid-turn update succeeds with the lane swap deferred" true
            (Keeper_types_profile.tool_result_success result);
          let data = Tool_result.data result in
-         check (option string) "rejection is typed"
-           (Some "keeper_turn_in_flight")
-           (Json_util.get_string data "error");
+         check (option string) "deferral is typed"
+           (Some "deferred_until_turn_end")
+           (Json_util.get_string data "runtime_sync");
          check bool "rejection rolls the fence back inside the turn" true
            (Option.is_none
               (owner_shutdown_operation_id_exn
@@ -2503,9 +2774,12 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
         | Ok None -> fail "keeper metadata disappeared"
         | Error detail -> fail detail
       in
-      check string "metadata commit preceded the rejection"
+      check string "metadata commit preceded the deferral"
         "rejected mid-turn intent"
         after.instructions;
+      ignore
+        (Masc.Keeper_registry.unregister_exact running_lane
+          : Masc.Keeper_registry.unregister_exact_result);
       (match Keeper_meta_store.read_effective_meta config name with
        | Ok (Some effective) ->
          check (option string) "new image is materialized for the next turn"
@@ -2556,6 +2830,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       seed_keeper_sandbox_profile ~base_dir name;
       Eio.Switch.run @@ fun root_sw ->
+      Masc_test_deps.with_server_root_switch ~sw:root_sw @@ fun () ->
       install_owner_inventory_exn ~sw:root_sw config;
       Memory_lane.init ~sw:root_sw;
       let clock = Eio.Stdenv.clock env in
@@ -2610,6 +2885,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some meta.sandbox_profile
+        ; sandbox_image = Some "masc-sandbox:general"
         }
       in
       let parsed : Turn_up_args.parsed_args =
@@ -4916,6 +5192,7 @@ let test_running_librarian_does_not_block_start_keepalive () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
       Eio.Switch.run @@ fun sw ->
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       Memory_lane.init ~sw;
       let librarian_started, resolve_librarian_started = Eio.Promise.create () in
       let librarian_release, resolve_librarian_release = Eio.Promise.create () in
@@ -5059,6 +5336,7 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
            (KSM.Turn_failed { consecutive = 1 }));
       resolve_done_for_test original (`Crashed "provider runtime error");
       Eio.Switch.run @@ fun sw ->
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let ctx : _ Keeper_types_profile.context =
         {
           config;
@@ -5375,6 +5653,7 @@ let test_field_only_update_honors_toml_declared_profile () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let base_dir = temp_dir "update-toml-profile" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -5390,6 +5669,7 @@ let test_field_only_update_honors_toml_declared_profile () =
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some Keeper_types_profile.Docker
+        ; sandbox_image = Some "masc-sandbox:general"
         }
       in
       let parsed : Turn_up_args.parsed_args =
@@ -5510,6 +5790,8 @@ let () =
     "direct_keepalive", [
       test_case "stop resolves done after lane exit" `Quick
         test_direct_start_keepalive_resolves_done_on_stop;
+      test_case "no server root switch refuses the lane" `Quick
+        test_direct_start_without_server_root_refuses_the_lane;
       test_case "cross-domain start keepalive and swap" `Quick
         test_cross_domain_start_keepalive_and_swap;
       test_case "cross-domain shutdown submit" `Quick
@@ -5518,6 +5800,8 @@ let () =
         test_direct_start_rolls_back_when_the_launch_owner_is_already_cancelled;
       test_case "stop ignores a dead Librarian executor" `Quick
         test_direct_stop_ignores_a_dead_librarian_executor;
+      test_case "fresh lane serves a queued schedule wake right after warmup" `Quick
+        test_fresh_lane_serves_queued_schedule_wake_after_warmup;
       test_case "lane join waits for children and cleanup" `Quick
         test_keeper_lane_join_waits_for_children_and_cleanup;
       test_case "lane join surfaces cleanup failure" `Quick
@@ -5534,8 +5818,8 @@ let () =
         test_operator_update_supersedes_exact_blocked_shutdown;
       test_case "field-only update honors TOML-declared profile" `Quick
         test_field_only_update_honors_toml_declared_profile;
-      test_case "update rejects lane swap while turn in flight" `Quick
-        test_update_keeper_rejects_lane_swap_while_turn_in_flight;
+      test_case "update defers lane swap while turn in flight" `Quick
+        test_update_keeper_defers_lane_swap_while_turn_in_flight;
       test_case "cancelled update finishes lane swap" `Quick
         test_update_keeper_cancellation_finishes_lane_swap;
       test_case "keeper up shared boundary outlives calling turn" `Quick

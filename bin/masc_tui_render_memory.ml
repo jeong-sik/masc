@@ -191,6 +191,34 @@ let memory_context_lines ~cols (k : memory_keeper_health) =
     ; Printf.sprintf "failed %d since server start" k.mkh_librarian_failures
     ]
   in
+  (* RFC librarian-lifecycle §4.10: the atoms requests skip while the
+     Librarian stands behind the start the provider last accepted. An alarm,
+     not a state anything waits on. On its own row, under the Librarian line,
+     so the frame cutting a long Librarian line never cuts its atom numbers.
+     A file the gap is read from that did not read gets the same row, naming
+     which file: it is neither "no gap" nor a gap. *)
+  let librarian_stalled_lines =
+    match k.mkh_librarian.mlh_stalled with
+    | Some (Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }) ->
+      let atoms =
+        if mls_gap_end_atom - mls_gap_start_atom = 1
+        then Printf.sprintf "atom %d is" mls_gap_start_atom
+        else Printf.sprintf "atoms %d-%d are" mls_gap_start_atom (mls_gap_end_atom - 1)
+      in
+      [ Printf.sprintf "  Librarian stalled · %s in neither the request nor memory" atoms ]
+    | Some (Stalled_unmeasured { mls_cause; mls_detail }) ->
+      let cause =
+        match mls_cause with
+        | Stall_meta_unreadable -> "keeper meta unreadable"
+        | Stall_turn_records_unreadable -> "turn records unreadable"
+        | Stall_turn_boundary_refused -> "turn boundaries unreadable"
+        | Stall_snapshot_unreadable -> "continuity snapshot unreadable"
+        | Stall_read_position_unreadable -> "read position unreadable"
+      in
+      [ Printf.sprintf "  Librarian stalled · not measured, %s · %s" cause
+          (Terminal_text.preview_line mls_detail) ]
+    | None -> []
+  in
   let librarian_cause_lines =
     (* The cause is drawn on its own row because it is the part of the
        Librarian row an operator acts on. *)
@@ -235,10 +263,14 @@ let memory_context_lines ~cols (k : memory_keeper_health) =
               value.mcpo_end_atom (Terminal_text.single_line value.mcpo_trace_id)
           | Context_without_snapshot -> "no snapshot: this turn only"
           | Context_not_applied -> "saved context not applied" in
+        (* The size as a size. The row drew the digit count -- one live block
+           read "446558 request bytes" -- while every other size on this TUI
+           goes through the shared ladder and reads "436.1 KB". The heading a
+           line above already says what was prepared, so the figure needs no
+           noun of its own. *)
         Printf.sprintf "%s · %s · %s"
           (memory_updated_text (Some value.mcp_prepared_at))
-          (Masc_tui_message_layout.count_noun value.mcp_request_bytes
-             "request byte")
+          (Masc_tui_context_inspector.format_bytes value.mcp_request_bytes)
           (Terminal_text.single_line value.mcp_runtime_id), input in
     let synthesis = match cycle.mcc_synthesis with
       | None -> "not observed since server start"
@@ -310,6 +342,7 @@ let memory_context_lines ~cols (k : memory_keeper_health) =
      likely to have. *)
   [ current_line; facts_line; source_line ]
   @ clause_rows ~cols librarian_clauses
+  @ librarian_stalled_lines
   @ librarian_cause_lines @ context_lines
   @ (vision_line :: read_error_lines)
   @ List.concat_map (fun sentence -> clause_rows ~cols [ sentence ]) alert_lines

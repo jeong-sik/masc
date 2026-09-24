@@ -129,6 +129,12 @@ val read_meta_resolved :
   string ->
   ((string * Keeper_meta_contract.keeper_meta) option, string) result
 
+(** [read_meta] with the presence kept: the same path and the same blank-name
+    answer ([Meta_absent]), but a file this binary does not decode is
+    [Meta_not_current] instead of folding into absence. Readers that decide
+    on absence use this. *)
+val read_meta_presence : Workspace.config -> string -> (meta_presence, string) result
+
 (** Like [read_meta_resolved] but discards the filename component. *)
 val read_meta :
   Workspace.config -> string -> (Keeper_meta_contract.keeper_meta option, string) result
@@ -152,6 +158,14 @@ val read_effective_meta :
     decode. *)
 val read_effective_meta_presence :
   Workspace.config -> string -> (meta_presence, string) result
+
+(** The presence together with the Keeper identity minted from the requested
+    name. The name is parsed once, here: a blank name is [Error] and every
+    [Ok] carries an identity (RFC-0468 §3.1). *)
+val read_effective_meta_presence_named :
+  Workspace.config ->
+  string ->
+  (Keeper_identity.Keeper_id.t * meta_presence, string) result
 
 (** Durably replace the complete current snapshot. The per-Keeper Owner is the
     only production caller and therefore the only write authority. Any failed

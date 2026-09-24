@@ -63,6 +63,9 @@ type observation = {
           title screen, map and menus read here the way text programs read
           in [screen_text]. *)
   program : string option;  (** the loaded program's name *)
+  controller : string option;
+      (** who may move this machine's time now; [None] until someone does.
+          See {!pass}. *)
   files : string list;  (** file names the guest can open, sorted *)
 }
 
@@ -74,6 +77,11 @@ type error =
   | Unreadable of string
       (** a file that is there and will not read. A path that does not exist
           is [Invalid_request] — the caller named it. *)
+  | Held_by of string
+      (** another caller holds the controller; nothing was done. *)
+  | Guest_fault of string
+      (** the program ran an instruction the emulator does not implement.
+          The machine stays loaded, stopped at that instruction. *)
 
 val error_to_string : error -> string
 
@@ -99,16 +107,29 @@ type ran = {
   keys_pressed : int;
       (** keys this call delivered. {!step} and {!load} press nothing, so it
           is zero there. Below the number {!press} or {!type_text} was given,
-          it means the call reached its step ceiling: the rest were not
-          recorded and never reached the ring, so the caller sends them
-          again. *)
+          a key left the program busy (not settled) or the call reached its
+          step ceiling: the rest were not recorded and never reached the
+          ring. Wait for [settled] with {!step}, then send them again. *)
+  unsaved : string list;
+      (** files the program wrote during this call that did not reach the
+          saves directory, one line each with the reason. Empty when every
+          save is on disk. The call itself happened: the guest moved either
+          way, so this is not a reason to send the same keys again. *)
 }
 
 val settle_chunk : int
 (** Instructions between two screen readings while waiting for {!ran.settled}. *)
 
+val escapes : string -> bool
+(** A name that is a path or a drive rather than one plain file name: a
+    separator, a colon, [..] or a leading dot. The program inventory refuses
+    such names, and a file the guest creates under one is never written to
+    the saves directory. *)
+
 val load :
+  who:string ->
   ledger_dir:string ->
+  saves_dir:string ->
   program_name:string ->
   program_bytes:string ->
   files:(string * string) list ->
@@ -127,17 +148,78 @@ val load :
     Two names that differ only in case are refused: DOS folds filenames, so
     the guest would see one of them and the observation would list both.
 
-    [announce] runs while the machine's lock is still held, right after this
-    machine becomes the workspace's. Announcements therefore reach whoever
+    [saves_dir] holds what this program wrote on earlier machines. Its files
+    are mounted over [files] of the same DOS name, and every call that runs
+    the guest writes a file whose contents changed back to it, so a game's
+    own save survives an eject and a server restart. A save that cannot be
+    written is listed in {!ran.unsaved}. A file the program deletes is not
+    carried: the next load mounts the inventory copy again. A save directory
+    that will not read is [Unreadable].
+
+    [announce] runs while the machine's lock is still held, once this machine
+    is the workspace's and has booted. Announcements therefore reach whoever
     reads them in the order the machines actually changed. It must not call
     back into this module — the lock is not reentrant. *)
 
-val eject : announce:(unit -> unit) -> unit -> (unit, error) result
+val eject : who:string -> announce:(unit -> unit) -> unit -> (unit, error) result
 (** Drops the workspace machine. [announce] runs under the same lock as
     {!load}'s, with the same restriction. *)
+val release_left : holder:string -> announce:(unit -> unit) -> (bool, error) result
+(** Frees the controller if [holder] still has it, and says whether it did.
+    For a holder whose Keeper stopped and so can never pass: the caller
+    decides that from Keeper state, which this module does not read.
+    [announce] runs under the machine's lock, as {!load}'s does. *)
+
 val screen : unit -> (observation, error) result
 
-val step : steps:int -> until_ready:bool -> (observation * ran, error) result
+type frame = { width : int; height : int; rgb : string }
+(** The frame as the display would show it: [width * height] pixels, three
+    bytes each, rows top to bottom. *)
+
+val capture : unit -> (observation * frame, error) result
+(** {!screen} and the frame it describes, read under one lock, so the two
+    cannot come from different moments. The frame is what a Keeper with
+    vision reads: a VGA game's Korean menus are glyphs in pixels, which
+    [frame_ascii]'s luminance cells cannot spell. *)
+
+type identified_capture = {
+  incarnation : string;
+      (** Fresh on every load. Reads and time leave it alone. *)
+  observation : observation;
+  frame : frame;
+  input_count : int;
+  input_ledger : entry list;
+      (** Newest first, every input through [input_count], read with the
+          frame under the same lock. *)
+}
+
+val capture_with_identity : unit -> (identified_capture, error) result
+(** {!capture} with the machine's identity and input history, for a Lane
+    Add-on source ([dos_capture]). Never advances the machine. *)
+
+val entry_json : entry -> Yojson.Safe.t
+(** One ledger line: [{"step", "who", "key"}], the shape written to
+    [ledger.jsonl]. *)
+
+(** {1 The controller}
+
+    One machine, several players: a hotseat game such as 삼국지3 asks each
+    human ruler in turn at the same keyboard. The controller says whose hands
+    are on it. {!load}, {!eject}, {!step}, {!press}, {!click} and
+    {!type_text} from anyone but the holder are refused with [Held_by] before
+    anything happens; reading ({!screen}, {!capture}, {!peek}) needs no
+    controller. A free controller goes to whoever next moves the machine
+    successfully, and {!load} gives the new machine's to its loader. *)
+
+val pass :
+  who:string -> to_:string option -> announce:(unit -> unit) ->
+  (observation, error) result
+(** The holder (or anyone, while it is free) hands the controller to [to_],
+    or frees it with [None]. [announce] runs under the machine's lock, as
+    {!load}'s does. *)
+
+val step :
+  who:string -> steps:int -> until_ready:bool -> (observation * ran, error) result
 (** Advances up to [steps] (1..{!max_steps_per_call}) with no key pressed.
     With [until_ready], stops as soon as the machine is ready for input —
     the normal way to hand a turn back. Without it, runs the whole budget,
@@ -146,7 +228,9 @@ val step : steps:int -> until_ready:bool -> (observation * ran, error) result
 val press :
   who:string -> keys:string list -> steps:int -> (observation * ran, error) result
 (** Puts each key in the BIOS ring in turn and runs until the machine is
-    ready again, or [steps] runs out for that key. Key names
+    ready again, or [steps] runs out for that key. A key that leaves the
+    machine busy ends the sequence: the next key goes in only once the
+    program is waiting for it. Key names
     are {!Dos_machine.key_of_string}'s: the arrows, home and page keys,
     insert, delete, enter, esc, space, tab, backspace, F1-F10, or one
     character. A name the machine has no key for is refused before anything

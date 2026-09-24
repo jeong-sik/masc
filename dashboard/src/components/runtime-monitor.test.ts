@@ -519,7 +519,6 @@ describe('RuntimeMonitor', () => {
       models: [
         {
           model_id: 'runtime_lane_cache',
-          provider: null,
           entry_count: 1,
           success_count: 1,
           error_count: 0,
@@ -584,7 +583,6 @@ describe('RuntimeMonitor', () => {
       models: [
         {
           model_id: 'runtime_lane_missing_cache',
-          provider: null,
           entry_count: 1,
           success_count: 1,
           error_count: 0,

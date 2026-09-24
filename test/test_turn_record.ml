@@ -155,6 +155,7 @@ let sample_record () : Turn_record.t =
       ; cache_read_input_tokens = Some 15000
       ; scope = Runtime_usage_scope.Per_request
       }
+  ; turn_output_tokens = None
   ; ts = 1781200000.5
   }
 
@@ -167,6 +168,22 @@ let sample_record () : Turn_record.t =
    round trip is the marker text exactly -- a re-encoded or trimmed marker
    would not resolve, and the blob maintenance scan would stop counting the
    record as a reference and collect the bytes it points at. *)
+(* A Claude Code turn records the newest request under [usage] and the whole
+   turn's output apart; the TUI reads that output from this field. *)
+let test_turn_output_tokens_round_trip_and_stay_optional () =
+  let record = { (sample_record ()) with turn_output_tokens = Some 270 } in
+  (match Turn_record.of_json (Turn_record.to_json record) with
+   | Error e -> failf "decode failed: %s" e
+   | Ok decoded ->
+     check (option int) "the turn's output survives" (Some 270)
+       decoded.turn_output_tokens);
+  match Turn_record.to_json (sample_record ()) with
+  | `Assoc fields ->
+    check bool "no turn output leaves the key out" false
+      (List.mem_assoc "turn_output_tokens" fields)
+  | _ -> fail "turn record is not an object"
+;;
+
 let test_tool_surface_ref_round_trips_and_stays_optional () =
   (* Built through the codec that owns the grammar, not spelled here: a
      hand-typed marker would round-trip through JSON just as happily while
@@ -1155,6 +1172,8 @@ let () =
             test_context_window_records_the_turn_budget
         ; test_case "absent on the error path" `Quick
             test_context_window_absent_on_the_error_path
+        ; test_case "turn output tokens round-trip and stay optional" `Quick
+            test_turn_output_tokens_round_trip_and_stay_optional
         ; test_case "tool surface ref round trips and stays optional" `Quick
             test_tool_surface_ref_round_trips_and_stays_optional
         ; test_case "the tool surface payload round trips" `Quick

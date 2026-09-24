@@ -295,5 +295,9 @@ run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
   "LibrarianRead-live-without-bad-lines.cfg" "live-without-bad-lines"
 run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
   "LibrarianRead-purge-trim-at-end-live.cfg" "purge-trim-at-end-live"
+# The stall cfg (masc#37061) was a buggy cfg until the fix landed; it is the
+# live reader now and expects no violation.
+run_tlc_cfg "$REPO_ROOT/specs/bug-models" "LibrarianRead.tla" \
+  "LibrarianRead-stop-forever-live.cfg" "stop-forever-live"
 
 echo "All TLA+ checks passed."

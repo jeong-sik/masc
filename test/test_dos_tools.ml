@@ -20,13 +20,24 @@ let dispatch ~base_path ?(agent = "dos-test") name assoc =
   | None -> fail (name ^ " is not dispatched by the misc tool owner")
 ;;
 
+(* Ejects whatever machine is there, as whoever holds it: the machine is
+   process-global and one test must not hand it to the next. *)
+let eject_held () =
+  let who =
+    match Dos_lane.screen () with
+    | Ok { Dos_lane.controller = Some holder; _ } -> holder
+    | Ok _ | Error _ -> "test-cleanup"
+  in
+  ignore (Dos_lane.eject ~who ~announce:ignore () : (unit, Dos_lane.error) result)
+;;
+
 let with_workspace f =
   let base_path = Filename.temp_dir "masc-dos-tools-" "" in
   Fun.protect
     ~finally:(fun () ->
       (* The machine is process-global: a test that leaves one loaded would
          hand it to the next one. *)
-      ignore (Dos_lane.eject ~announce:(fun () -> ()) () : (unit, Dos_lane.error) result);
+      eject_held ();
       Fs_compat.remove_tree base_path)
     (fun () -> f base_path)
 ;;
@@ -120,7 +131,10 @@ let load ~base_path name = dispatch ~base_path "masc_dos_load" [ ("program", `St
 
 (* Setup for the tests that are about what happens after a load. The load's
    own result has its own test. *)
-let boot ~base_path name = ignore (load ~base_path name : Tool_result.result)
+let boot ?(agent = "dos-test") ~base_path name =
+  ignore
+    (dispatch ~base_path ~agent "masc_dos_load" [ ("program", `String name) ]
+      : Tool_result.result)
 
 let test_no_machine () =
   with_workspace (fun base_path ->
@@ -169,7 +183,7 @@ let test_load_runs_to_the_first_key_request () =
 let test_press_reaches_the_guest_and_the_ledger () =
   with_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
-    boot ~base_path "hello.com";
+    boot ~agent:"vincent" ~base_path "hello.com";
     let result =
       dispatch ~base_path ~agent:"vincent" "masc_dos_press"
         [ ("keys", `List [ `String "enter" ]) ]
@@ -194,7 +208,7 @@ let test_press_reaches_the_guest_and_the_ledger () =
 let test_click_reaches_the_guest_and_the_ledger () =
   with_workspace (fun base_path ->
     install_program ~base_path "mouse.com" mouse_click_com;
-    boot ~base_path "mouse.com";
+    boot ~agent:"vincent" ~base_path "mouse.com";
     let result =
       dispatch ~base_path ~agent:"vincent" "masc_dos_click"
         [ ("x", `Int 1); ("y", `Int 1); ("steps", `Int 1_000) ]
@@ -257,6 +271,53 @@ let test_a_link_out_of_the_inventory_is_refused () =
           (is_completed (load ~base_path "game"))))
 ;;
 
+(* A game directory often holds several programs: 삼국지3 boots KOEI.COM,
+   which runs OPEN.EXE and MAIN.EXE beside it, and the setup and editor sit
+   there too. The refusal used to ask the caller to name one with no argument
+   to name it by. [boot] is that argument; it names a file inside the
+   directory, folded the way DOS folds, and nothing else. *)
+let test_boot_names_the_program_inside_a_directory () =
+  with_workspace (fun base_path ->
+    let game = Filename.concat (programs_dir ~base_path) "arcade" in
+    mkdir_p game;
+    write_file (Filename.concat game "LOADER.COM") hello_com;
+    write_file (Filename.concat game "SETUP.COM") spinner_com;
+    let unnamed = load ~base_path "arcade" in
+    check bool "two programs and no boot is a question" false (is_completed unnamed);
+    check bool "the question names the argument" true
+      (contains "boot" (Tool_result.message unnamed));
+    let booted =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "loader.com") ]
+    in
+    check bool "boot picks the loader, folded like DOS" true (is_completed booted);
+    check string "the loader is what runs" "LOADER.COM" (string_field "program" booted);
+    check bool "the loader reaches its first key request" true
+      (bool_field "waiting_for_key" booted);
+    let missing =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "MAIN.EXE") ]
+    in
+    check bool "a boot the directory does not hold is refused" false (is_completed missing);
+    write_file (Filename.concat game "SAVE.DAT") "not a program";
+    let data =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "SAVE.DAT") ]
+    in
+    check bool "a boot that is not a program is refused" false (is_completed data);
+    let climbing =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "../LOADER.COM") ]
+    in
+    check bool "boot is a file name, not a path" false (is_completed climbing);
+    install_program ~base_path "hello.com" hello_com;
+    let single =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "hello.com"); ("boot", `String "hello.com") ]
+    in
+    check bool "boot on a single file is refused" false (is_completed single))
+;;
+
 (* The step budget is declared per key. Multiplied by a caller-controlled
    number of keys it stopped bounding anything: sixty-four keys at four
    million each is a quarter of a billion instructions run under the
@@ -273,7 +334,10 @@ let test_a_sequence_spends_one_ceiling_not_one_per_key () =
     check bool "the press is accepted" true (is_completed result);
     check bool "the call stops at one budget, not two" true
       (int_field "steps_run" result <= 4_000_000);
-    check int "and says how many keys landed" 1 (int_field "keys_pressed" result))
+    check int "and says how many keys landed" 1 (int_field "keys_pressed" result);
+    (* The first key left the program busy, so the second was never put in
+       the ring: a key typed into a running loop is eaten by it. *)
+    check int "the unsent key is not in the ledger" 1 (List.length (Dos_lane.ledger ())))
 ;;
 
 (* The ceiling bounds the machine's time, not the call's work: a program that
@@ -302,14 +366,312 @@ let test_two_names_that_differ_only_in_case_are_refused () =
   with_workspace (fun base_path ->
     let announced = ref 0 in
     let result =
-      Dos_lane.load
+      Dos_lane.load ~who:"dos-test"
         ~ledger_dir:(Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos")
+        ~saves_dir:(Filename.concat base_path "saves")
         ~program_name:"game.com" ~program_bytes:hello_com
         ~files:[ ("GAME.COM", hello_com); ("DATA.DAT", "upper"); ("data.dat", "lower") ]
         ~announce:(fun () -> incr announced)
     in
     check bool "the load is refused" true (Result.is_error result);
     check int "and nothing was announced" 0 !announced)
+;;
+
+(* A game in miniature: if SAVE.DAT opens it prints it, otherwise it writes
+   "NEW$" there -- create, write, close -- and waits for a key either way.
+
+   100 mov ax,3D00h / mov dx,fname / int 21h / jc create
+   10A mov bx,ax / mov ah,3Fh / mov cx,16 / mov dx,buf / int 21h
+   116 mov ah,3Eh / int 21h / mov ah,9 / mov dx,buf / int 21h / jmp wait
+   123 create: mov ah,3Ch / xor cx,cx / mov dx,fname / int 21h / mov bx,ax
+       mov ah,40h / mov cx,4 / mov dx,msg / int 21h / mov ah,3Eh / int 21h
+   13C wait: mov ah,0 / int 16h / or ax,ax / jz wait / int 20h
+   146 fname "SAVE.DAT",0   14F msg "NEW$"   153 buf 16 x "$" *)
+let saver_com_named fname =
+  let word n = String.init 2 (fun i -> Char.chr ((n lsr (8 * i)) land 0xff)) in
+  let fname_at = 0x146 in
+  let msg_at = fname_at + String.length fname + 1 in
+  let buf_at = msg_at + 4 in
+  "\xb8\x00\x3d\xba" ^ word fname_at ^ "\xcd\x21\x72\x19"
+  ^ "\x89\xc3\xb4\x3f\xb9\x10\x00\xba" ^ word buf_at ^ "\xcd\x21"
+  ^ "\xb4\x3e\xcd\x21\xb4\x09\xba" ^ word buf_at ^ "\xcd\x21\xeb\x19"
+  ^ "\xb4\x3c\x31\xc9\xba" ^ word fname_at ^ "\xcd\x21\x89\xc3"
+  ^ "\xb4\x40\xb9\x04\x00\xba" ^ word msg_at ^ "\xcd\x21\xb4\x3e\xcd\x21"
+  ^ "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20"
+  ^ fname ^ "\000" ^ "NEW$" ^ String.make 16 '$'
+;;
+
+let saver_com = saver_com_named "SAVE.DAT"
+
+let saves_of ~base_path name =
+  Filename.concat
+    (Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos") "saves")
+    name
+;;
+
+let install_game ~base_path name files =
+  let dir = Filename.concat (programs_dir ~base_path) name in
+  mkdir_p dir;
+  List.iter (fun (f, contents) -> write_file (Filename.concat dir f) contents) files
+;;
+
+let eject () = eject_held ()
+
+(* A game saves by writing a file, and the machine kept what the guest wrote
+   only in memory: an eject or a server restart took the campaign with it,
+   as the MSX 삼국지2 lane's Keepers found. What the program wrote is now on
+   disk after the call that wrote it, and the next load mounts it. *)
+let test_a_save_outlives_its_machine () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com) ];
+    let first = load ~base_path "quest" in
+    check bool "the first run boots" true (is_completed first);
+    let kept = Filename.concat (saves_of ~base_path "quest") "SAVE.DAT" in
+    check bool "the save is on disk after the call that wrote it" true (Sys.file_exists kept);
+    check string "with what the program wrote" "NEW$"
+      (In_channel.with_open_bin kept In_channel.input_all);
+    eject ();
+    let second = load ~base_path "quest" in
+    check bool "the next machine finds the save and prints it" true
+      (contains "NEW" (string_field "screen_text" second)))
+;;
+
+(* A save made earlier stands in for the inventory's copy of the same file,
+   matched the way DOS matches names. *)
+let test_a_save_is_mounted_over_the_inventory_copy () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com); ("SAVE.DAT", "OLD$") ];
+    let saves = saves_of ~base_path "quest" in
+    mkdir_p saves;
+    write_file (Filename.concat saves "save.dat") "MINE$";
+    let loaded = load ~base_path "quest" in
+    let text = string_field "screen_text" loaded in
+    check bool "the save wins" true (contains "MINE" text);
+    check bool "the inventory copy is not what the guest opened" false (contains "OLD" text))
+;;
+
+let unsaved result =
+  match member "unsaved" (Tool_result.data result) with
+  | Some (`List items) -> List.map (function `String u -> u | _ -> fail "unsaved item") items
+  | _ -> fail (Printf.sprintf "no unsaved in %s" (Tool_result.message result))
+;;
+
+(* When the save cannot be written the call still returns what the guest did
+   -- it moved either way, and an error would be answered by sending the same
+   keys again -- and lists the save that did not reach disk. *)
+let test_a_save_that_cannot_be_written_is_reported () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com) ];
+    let saves = saves_of ~base_path "quest" in
+    mkdir_p (Filename.dirname saves);
+    write_file saves "a file where the save directory would be";
+    let loaded = load ~base_path "quest" in
+    check bool "the call returns the screen" true (is_completed loaded);
+    (match unsaved loaded with
+     | [ line ] -> check bool "naming the save" true (contains "SAVE.DAT" line)
+     | lines -> fail (Printf.sprintf "expected one unsaved line, got %d" (List.length lines)));
+    let next = dispatch ~base_path "masc_dos_screen" [] in
+    check bool "the machine is still there" true (is_completed next))
+;;
+
+(* DOS takes "/" as a separator, so a guest asked for a save name can create
+   "../OUT.DAT". That name never reaches the host: it stays in the machine,
+   is reported once, and nothing lands beside the saves directory. *)
+let test_a_guest_path_never_reaches_the_host () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com_named "../OUT.DAT") ];
+    let loaded = load ~base_path "quest" in
+    check bool "the call returns" true (is_completed loaded);
+    check bool "the path is reported" true
+      (List.exists (contains "a path, not a file name") (unsaved loaded));
+    let saves = saves_of ~base_path "quest" in
+    check bool "nothing beside the saves directory" false
+      (Sys.file_exists (Filename.concat (Filename.dirname saves) "OUT.DAT"));
+    check bool "nothing in it either" false
+      (Sys.file_exists saves && Array.length (Sys.readdir saves) > 0);
+    let again = dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1000) ] in
+    check (list string) "reported once, not on every call" [] (unsaved again))
+;;
+
+let controller result =
+  match member "controller" (Tool_result.data result) with
+  | Some (`String who) -> Some who
+  | Some `Null | None -> None
+  | Some _ -> fail "controller is neither a name nor null"
+;;
+
+let press_as ~base_path who key =
+  dispatch ~base_path ~agent:who "masc_dos_press" [ ("keys", `List [ `String key ]) ]
+;;
+
+(* A hotseat game asks each human ruler in turn at one keyboard. Without a
+   controller a second Keeper's key lands in whoever's turn is on screen, and
+   on the MSX lane Keepers swapped programs and restored slots under each
+   other mid-campaign. Whoever loads holds the machine; others are refused
+   before anything happens and can still watch. *)
+let test_only_the_holder_moves_the_machine () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    let loaded = dispatch ~base_path ~agent:"liu-bei" "masc_dos_load" [ ("program", `String "hello.com") ] in
+    check (option string) "the loader holds it" (Some "liu-bei") (controller loaded);
+    let refused = press_as ~base_path "cao-cao" "a" in
+    check bool "another player's key is refused" false (is_completed refused);
+    check bool "the refusal names the holder" true
+      (contains "liu-bei" (Tool_result.message refused));
+    check int "and nothing reached the ledger" 0 (List.length (Dos_lane.ledger ()));
+    check bool "watching needs no controller" true
+      (is_completed (dispatch ~base_path ~agent:"cao-cao" "masc_dos_screen" []));
+    check bool "nor may another player eject it" false
+      (is_completed (dispatch ~base_path ~agent:"cao-cao" "masc_dos_eject" []));
+    check bool "or load over it" false
+      (is_completed
+         (dispatch ~base_path ~agent:"cao-cao" "masc_dos_load" [ ("program", `String "hello.com") ])))
+;;
+
+let test_pass_hands_the_machine_on () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    let not_mine =
+      dispatch ~base_path ~agent:"cao-cao" "masc_dos_pass" [ ("to", `String "cao-cao") ]
+    in
+    check bool "only the holder passes" false (is_completed not_mine);
+    let passed =
+      dispatch ~base_path ~agent:"dos-test" "masc_dos_pass" [ ("to", `String "cao-cao") ]
+    in
+    check (option string) "the controller moves" (Some "cao-cao") (controller passed);
+    check bool "the new holder plays" true (is_completed (press_as ~base_path "cao-cao" "a"));
+    check bool "the old holder no longer does" false
+      (is_completed (press_as ~base_path "dos-test" "a")))
+;;
+
+(* A freed controller goes to whoever next moves the machine and succeeds; a
+   call that is refused for its own arguments takes nothing. *)
+let test_a_free_controller_goes_to_the_next_successful_mover () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    let freed = dispatch ~base_path ~agent:"dos-test" "masc_dos_pass" [] in
+    check (option string) "freed" None (controller freed);
+    let typo = press_as ~base_path "sun-quan" "no-such-key" in
+    check bool "a bad key is refused" false (is_completed typo);
+    let after_typo = dispatch ~base_path "masc_dos_screen" [] in
+    check (option string) "and took nothing" None (controller after_typo);
+    let moved = press_as ~base_path "sun-quan" "a" in
+    check (option string) "the next successful mover holds it" (Some "sun-quan")
+      (controller moved))
+;;
+
+(* A hotseat game runs for hours, and the Keeper holding the controller can
+   stop in that time. It will never pass, so a stopped holder is let go the
+   next time a Keeper moves the machine. A finished stop removes the Keeper
+   from the registry and keeps its meta, so that is the case pinned here. A
+   Keeper that is running, or launching, keeps it, and so does a name that
+   is not a Keeper. The check reads Keeper state, so it sits on the Keeper's
+   own tool path, not the generic dispatch. *)
+let keeper_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ ("name", `String name); ("activation_mode", `String "manual") ])
+  with
+  | Ok meta -> meta
+  | Error error -> fail error
+;;
+
+type holder_state =
+  | Stopped_and_gone
+  | Running
+  | Launching
+  | Not_a_keeper
+
+let with_holder ~base_path state name f =
+  let config = Workspace.default_config base_path in
+  let meta = keeper_meta name in
+  let store_meta () =
+    match Keeper_meta_store.replace_snapshot config meta with
+    | Ok () -> ()
+    | Error error -> fail error
+  in
+  (match state with
+   | Stopped_and_gone -> store_meta ()
+   | Running ->
+     store_meta ();
+     ignore (Keeper_registry.For_testing.register ~base_path name meta : Keeper_registry.registry_entry)
+   | Launching ->
+     store_meta ();
+     ignore (Keeper_registry.register_offline ~base_path name meta : Keeper_registry.registry_entry)
+   | Not_a_keeper -> ());
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path name)
+    f
+;;
+
+let keeper_press ~base_path who key =
+  let execution =
+    Keeper_tool_in_process_runtime.handle_masc_misc_with_outcome
+      ~config:(Workspace.default_config base_path) ~meta:(keeper_meta who)
+      ~name:"masc_dos_press" ~args:(`Assoc [ ("keys", `List [ `String key ]) ])
+  in
+  match execution.disposition with
+  | Tool_result.Failed _ -> false
+  | _ -> true
+;;
+
+let current_controller () =
+  match Dos_lane.screen () with
+  | Ok o -> o.Dos_lane.controller
+  | Error e -> fail (Dos_lane.error_to_string e)
+;;
+
+let test_a_stopped_holders_controller_is_let_go () =
+  List.iter
+    (fun (state, label, released) ->
+      with_workspace (fun base_path ->
+        install_program ~base_path "hello.com" hello_com;
+        with_holder ~base_path state "cao-cao" (fun () ->
+          boot ~agent:"cao-cao" ~base_path "hello.com";
+          check bool (label ^ ": the next Keeper moves") released
+            (keeper_press ~base_path "liu-bei" "a");
+          check (option string) (label ^ ": holder")
+            (Some (if released then "liu-bei" else "cao-cao"))
+            (current_controller ()))))
+    [ (Stopped_and_gone, "a stopped Keeper", true)
+    ; (Running, "a running Keeper", false)
+    ; (Launching, "a launching Keeper", false)
+    ; (Not_a_keeper, "a name that is not a Keeper", false)
+    ]
+;;
+
+(* A pass to a name no caller can ever have -- "@liu-bei", "liu bei" --
+   would leave the machine held by nobody who can move or eject it again. It
+   is refused, and the controller stays where it was. *)
+let test_a_pass_to_an_impossible_name_is_refused () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    List.iter
+      (fun bad ->
+        let refused =
+          dispatch ~base_path ~agent:"dos-test" "masc_dos_pass" [ ("to", `String bad) ]
+        in
+        check bool (bad ^ " is refused") false (is_completed refused))
+      [ "@liu-bei"; "liu bei"; "\xec\x9c\xa0\xeb\xb9\x84" ];
+    check (option string) "the holder still holds it" (Some "dos-test")
+      (controller (dispatch ~base_path "masc_dos_screen" [])))
+;;
+
+(* lea ax, ax: an instruction the emulator does not implement. The core
+   raises instead of misbehaving; the lane turns that into an error the
+   caller can read, and keeps the stopped machine loaded. *)
+let test_an_unimplemented_instruction_is_an_error () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "fault.com" "\x8d\xc0";
+    let loaded = load ~base_path "fault.com" in
+    check bool "the load reports the fault" false (is_completed loaded);
+    check bool "and says what happened" true
+      (contains "does not implement" (Tool_result.message loaded));
+    check bool "the stopped machine stays loaded" true
+      (is_completed (dispatch ~base_path "masc_dos_screen" [])))
 ;;
 
 let test_unknown_key_is_refused () =
@@ -384,7 +746,8 @@ let test_every_tool_is_declared () =
            check string "schema name" name schema.name
          | None -> fail (name ^ " registers no schema")))
     [ "masc_dos_load"; "masc_dos_eject"; "masc_dos_screen"; "masc_dos_step";
-      "masc_dos_press"; "masc_dos_click"; "masc_dos_type"; "masc_dos_peek" ]
+      "masc_dos_press"; "masc_dos_click"; "masc_dos_type"; "masc_dos_peek";
+      "masc_dos_pass" ]
 ;;
 
 let () =
@@ -399,9 +762,26 @@ let () =
             test_click_reaches_the_guest_and_the_ledger
         ; test_case "inventory only" `Quick test_only_inventory_names_resolve
         ; test_case "linked out" `Quick test_a_link_out_of_the_inventory_is_refused
+        ; test_case "boot inside a directory" `Quick
+            test_boot_names_the_program_inside_a_directory
         ; test_case "one ceiling" `Quick test_a_sequence_spends_one_ceiling_not_one_per_key
         ; test_case "sequence length" `Quick test_a_sequence_has_a_length
         ; test_case "case collision" `Quick test_two_names_that_differ_only_in_case_are_refused
+        ; test_case "save outlives machine" `Quick test_a_save_outlives_its_machine
+        ; test_case "save over inventory" `Quick
+            test_a_save_is_mounted_over_the_inventory_copy
+        ; test_case "save not written" `Quick test_a_save_that_cannot_be_written_is_reported
+        ; test_case "guest path" `Quick test_a_guest_path_never_reaches_the_host
+        ; test_case "holder only" `Quick test_only_the_holder_moves_the_machine
+        ; test_case "pass" `Quick test_pass_hands_the_machine_on
+        ; test_case "free controller" `Quick
+            test_a_free_controller_goes_to_the_next_successful_mover
+        ; test_case "pass to an impossible name" `Quick
+            test_a_pass_to_an_impossible_name_is_refused
+        ; test_case "stopped holder is let go" `Quick
+            test_a_stopped_holders_controller_is_let_go
+        ; test_case "unimplemented instruction" `Quick
+            test_an_unimplemented_instruction_is_an_error
         ; test_case "unknown key" `Quick test_unknown_key_is_refused
         ; test_case "step cap" `Quick test_step_cap
         ; test_case "peek" `Quick test_peek_reads_the_text_page

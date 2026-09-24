@@ -13,6 +13,7 @@ type rate_limit =
 
 type attempt_failure =
   | Server_error
+  | Provider_capacity
   | Network_transient
   | Provider_timeout
 (** The failure routes that say the candidate did not answer, and that are

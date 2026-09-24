@@ -325,6 +325,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
       ; mlh_continuity_unread_atoms = Some 0
       ; mlh_last_success_at = None
       ; mlh_last_failure_kind = None
+      ; mlh_stalled = None
       }
   ; mkh_librarian_failures = 0
   ; mkh_vision_ingest_errors = 0
@@ -629,7 +630,10 @@ let test_render_memory_body_with_keepers () =
   check bool "the read position sits beside the cut" true
     (contains "read to atom 11, 6 atoms past the cut" text);
   check bool "prepared context names observation boundary" true (contains "Request prepared (not provider success)" text);
-  check bool "serialized request bytes shown" true (contains "2048 request bytes" text);
+  (* As a size, through the ladder every other size on this TUI reads. One
+     live block drew "446558 request bytes"; 2048 bytes is 2.0 KB. *)
+  check bool "the request size reads as a size" true (contains "2.0 KB" text);
+  check bool "and not as a digit count" false (contains "2048" text);
   check bool "an absorbed front names the position and says nothing summarizes it" true
     (contains "absorbed to atom 3" text && contains "no summary" text);
   check bool "selected row was called" true !selected_called;
@@ -705,6 +709,64 @@ let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
     (contains "1 keeper not measured" both);
   check bool "and a count that is not one keeps the plural" true
     (contains "3 atoms behind" both)
+;;
+
+(* RFC librarian-lifecycle §4.10: the Librarian_stalled gap prints on its
+   own row under the Librarian line, as the atoms it covers, and a keeper with
+   no gap prints nothing for it. *)
+let test_the_librarian_line_names_a_stalled_gap () =
+  let with_beta stalled =
+    { fleet_health with
+      Decode.mhs_keepers =
+        List.map
+          (fun (keeper : Decode.memory_keeper_health) ->
+             if String.equal keeper.mkh_keeper_id "beta"
+             then
+               { keeper with
+                 mkh_librarian = { keeper.mkh_librarian with Decode.mlh_stalled = Some stalled } }
+             else keeper)
+          fleet_health.mhs_keepers }
+  in
+  let render ?(stalled = Decode.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 })
+      cursor =
+    let state = make_state () in
+    state.memory_health <- Some (with_beta stalled);
+    state.memory_health_cursor <- cursor;
+    let lines = ref [] in
+    Render_memory.render_memory_body ~cols:100 ~budget:20 state
+      ~push:(fun line -> lines := line :: !lines)
+      ~push_styled:(fun ~style:_ line -> lines := line :: !lines)
+      ~push_selected:(fun line -> lines := line :: !lines)
+      ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    String.concat "\n" (List.rev !lines)
+  in
+  let row = "Librarian stalled · atoms 2-7 are in neither the request nor memory" in
+  check bool "the stalled keeper names the atoms its requests skip" true
+    (contains row (render 1));
+  check bool "a keeper with no gap prints none" false (contains "Librarian stalled" (render 0));
+  (* The row is its own line, and at the 100 columns the PTY harness opens it
+     fits whole: the frame cuts long lines, and a cut atom number is a wrong
+     one. *)
+  check bool "the row fits the frame at 100 columns" true
+    (List.exists
+       (fun line -> contains row line && String.length line <= 96)
+       (String.split_on_char '\n' (render 1)));
+  check bool "a gap of one atom names that atom, not a range" true
+    (contains "Librarian stalled · atom 5 is in neither the request nor memory"
+       (render ~stalled:(Decode.Stalled_gap { mls_gap_start_atom = 5; mls_gap_end_atom = 6 }) 1));
+  (* A file the gap is read from that did not read is drawn, and drawn as
+     not measured: a silent row would read as no gap. *)
+  let unmeasured =
+    render
+      ~stalled:
+        (Decode.Stalled_unmeasured
+           { mls_cause = Decode.Stall_read_position_unreadable; mls_detail = "bad \027[31mjson" })
+      1
+  in
+  check bool "an unreadable read position is drawn as not measured" true
+    (contains "Librarian stalled · not measured, read position unreadable" unmeasured);
+  check bool "the reader's message is escaped" false (contains "\027[31m" unmeasured)
 ;;
 
 (* #36497. The fleet header is the block above the sort row, and it used to be
@@ -1809,6 +1871,8 @@ let () =
             test_the_fact_filter_bar_names_the_query_it_counted
         ; test_case "the librarian line says when the continuity lag is unknown" `Quick
             test_the_librarian_line_says_when_the_continuity_lag_is_unknown
+        ; test_case "the librarian line names a stalled gap" `Quick
+            test_the_librarian_line_names_a_stalled_gap
         ; test_case "the fleet header fits the frame it is drawn in" `Quick
             test_the_fleet_header_fits_the_frame_it_is_drawn_in
         ; test_case "the header keeps each count with the phrase that dates it"

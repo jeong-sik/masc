@@ -77,6 +77,28 @@ CPU 24개가 필요하다. CPU 가 16개인 Mac 에서는 로컬 docker 로 동�
 - `--agent-setup-timeout-multiplier 5` 는 설치 단계용이다. harbor 기본 설치 타임아웃은
   360s 이고 에이전트 작업 시간에 들어가지 않는다.
 
+### 도구가 어디서 틀렸나
+
+점수가 낮을 때 모델이 과제를 못 푼 건지, 도구가 모델을 막은 건지(경로 거절, 스키마 오류)를
+가르려고 trial 마다 도구 호출 결과를 남긴다(`driver/tool_outcomes.sh`).
+
+- `tool_calls` 는 원장의 `tool_call` 행만 센다. 조합(composition)이 돌린 단계도 각각
+  `tool_call` 행으로 남는다. `composition_run` 행은 그 단계들을 요약한 줄이라 세면 두 번
+  센다. `lifecycle_event` 행은 호출이 아니다. 대시보드는 `composition_run` 행도 세서, 조합을
+  쓴 trial 은 여기 수가 조합 실행 수만큼 적다.
+- `failed_tool_calls` 는 실패한 호출 수다. 실패는 저장소 규칙을 따른다: `disposition` 이
+  `failed` 이거나, `disposition` 이 없을 때 `wire_outcome` 이 `error` 인 호출. `unknown` 은
+  실패가 아니다.
+- harbor metadata 의 `tool_outcomes` 에 도구별 호출 수·실패 수·결과 바이트·가장 흔한 실패
+  문장(줄바꿈은 ` / `, 200자)이 실패가 많은 순서로 들어간다. 그 도구의 호출 중 하나라도
+  `result_bytes` 가 없으면 결과 바이트는 `null` 이다.
+- 원장이 없거나 읽을 수 없는 줄이 하나라도 있으면 세 값 모두 `null` 이다. 0 이 아니다.
+  `record_kind` 가 없거나 세 값 밖인 줄, `tool` 이 없는 호출 줄도 읽을 수 없는 줄이다.
+  `disposition` 이 `completed`·`deferred`·`failed` 밖이거나 `wire_outcome` 이
+  `ok`·`error`·`unknown` 밖인 줄도 성공으로 세지 않고 읽을 수 없는 줄로 본다.
+- `aggregate.py` CSV 끝에 `failed_tool_calls` 와 `failed_by_tool`(`도구=실패 수` 를 `;` 로)
+  칸이 붙는다.
+
 ## arm
 
 | arm | 구성 |
@@ -138,8 +160,17 @@ Anthropic 요청에서는 `tool_choice.disable_parallel_tool_use`, OpenAI 요청
 - 후보는 같은 provider 의 서로 다른 모델이어야 한다. 컨테이너에 넘기는 키가 하나이고,
   같은 모델을 두 번 넣으면 이 거절을 못 넘긴다. official client(`claude_code`)는 받지 않는다.
 - 다른 arm 에 fallback 을 주면 렌더 단계에서 거절한다. arm 하나는 처치 하나로 남긴다.
-- 지금 `aggregate.py` 는 어느 후보가 답했는지 따로 세지 않는다. 넘어갔는지는 trial 의
-  keeper trace 에서 본다.
+- 후보 순서를 따라 넘어가는 arm 은 L 하나다. 나머지 arm(b–h, k)은 모델 하나만 재므로
+  리더보드 비교에는 그쪽을 쓴다.
+- trial 결과에 후보가 남는다. harbor metadata 의 `candidates` 는 선언한 후보 순서(masc 가
+  해소하는 id), `route` 는 keeper 가 배정받은 값(lane `bench` 또는 runtime 하나)이다.
+  `answered_by` 는 실제로 답한 runtime 별 turn 수, `failed_on` 은 실패한 turn 을 마지막으로
+  보낸 runtime 별 수, `turns_unanswered` 는 어느 후보에도 보내지 못하고 실패한 turn 수다.
+  셋 다 keeper 의 decision log(`outcome`, `provider_context.executed_runtime_id`)에서 센다
+  (`driver/answered_by.sh`). 측정하지 못했으면 셋 다 `null` 이다. 타임아웃으로 중간에
+  취소된 turn 은 log 에 행이 남지 않아 어느 수에도 들어가지 않는다.
+- `aggregate.py` CSV 끝에 `arm`, `candidates`(`a > b` 처럼 순서대로), `answered_by`,
+  `failed_on`(둘 다 `runtime=turn 수` 를 `;` 로), `turns_unanswered` 칸이 붙는다.
 
 렌더만 확인할 때(모델 호출 없음, OpenRouter endpoint 목록은 읽는다):
 

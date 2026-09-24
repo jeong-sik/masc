@@ -134,30 +134,25 @@ let init_prompt_config_for_tests () =
 
 let user_message observation =
   let turn_decision = WO.keeper_cycle_decision ~meta observation in
-  let config = Masc.Workspace.default_config "/tmp/unused" in
   let { Prompt.world_state = user; _ } =
-    Prompt.build_prompt ~meta ~config ~turn_decision
+    Prompt.build_prompt ~turn_decision
       ~current_task:Inputs.No_current_task ~observation ()
   in
   user
 
 let user_message_within ~budget observation =
   let turn_decision = WO.keeper_cycle_decision ~meta observation in
-  let config = Masc.Workspace.default_config "/tmp/unused" in
   let { Prompt.world_state = user; _ } =
-    Prompt.build_prompt ~meta ~config ~turn_decision
+    Prompt.build_prompt ~turn_decision
       ~current_task:Inputs.No_current_task ~context_budget_bytes:budget ~observation ()
   in
   user
 
-let system_prompt ?profile_defaults observation =
-  let turn_decision = WO.keeper_cycle_decision ~meta observation in
+let system_prompt ?profile_defaults () =
   let config = Masc.Workspace.default_config "/tmp/unused" in
-  let { Prompt.system_prompt = system; _ } =
-    Prompt.build_prompt ~meta ~config ?profile_defaults
-      ~turn_decision ~current_task:Inputs.No_current_task ~observation ()
-  in
-  system
+  match Prompt.build_system_prompt ~meta ~config ?profile_defaults () with
+  | Ok system -> system
+  | Error error -> fail (Masc.World_constitution_store.read_error_to_string error)
 
 let contains ~needle haystack =
   let n = String.length needle and h = String.length haystack in
@@ -681,7 +676,7 @@ let test_profile_defaults_feed_identity_prompt () =
     }
   in
   let system =
-    system_prompt ~profile_defaults base_observation
+    system_prompt ~profile_defaults ()
   in
   check bool "profile instructions in system prompt" true
     (contains ~needle:"<role>\nsoul instructions\n</role>" system)
@@ -694,17 +689,10 @@ let sandbox_root_for profile =
   let meta = { meta with Masc.Keeper_meta_contract.sandbox_profile = profile } in
   let base_path = "/tmp/unused" in
   let config = Masc.Workspace.default_config base_path in
-  let turn_decision =
-    WO.keeper_cycle_decision ~meta base_observation
-  in
-  let { Prompt.system_prompt; _ } =
-    Prompt.build_prompt
-      ~meta
-      ~config
-      ~turn_decision
-      ~current_task:Inputs.No_current_task
-      ~observation:base_observation
-      ()
+  let system_prompt =
+    match Prompt.build_system_prompt ~meta ~config () with
+    | Ok system -> system
+    | Error error -> fail (Masc.World_constitution_store.read_error_to_string error)
   in
   (system_prompt, Masc.Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
 

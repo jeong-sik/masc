@@ -155,8 +155,10 @@ let started_trace (written : B.record) =
   | B.History_restarted { trace_id } -> Some trace_id
   | B.Turn_ended { turn_ref; history_at_start = B.Fresh_history; position = _ } ->
     Some (Ids.Turn_ref.trace_id turn_ref)
-  | B.Turn_ended { turn_ref = _; history_at_start = B.Continued_history; position = _ } ->
-    None
+  | B.Turn_ended
+      { turn_ref = _
+      ; history_at_start = B.Continued_history | B.Continued_history_from _; position = _
+      } -> None
 ;;
 
 (* Row 1b (#37362). The traces that started after [trace_id], in the order
@@ -220,17 +222,19 @@ let traces_started_after ~trace_id ~current_trace_id lines =
 
    Only the version this build supersedes is that error: the file holds turns
    this build will not read, and for a retired trace no newer file replaces
-   it. The others are not passed. A parse error is an older binary reading a
-   newer workspace as often as it is damage, a store or IO failure can be a
-   disk that comes back, and an agent-core failure is neither classified here;
+   it. The others are not passed. A later version's file reads once that
+   version is deployed, a parse error can be damage an operator repairs, a
+   store or IO failure can be a disk that comes back, and an agent-core failure is neither classified here;
    a deploy or an operator makes those readable, so the pass keeps saying what
    it cannot read instead of walking past turns it could have read. *)
 let retired_checkpoint_never_becomes_readable = function
   | Keeper_checkpoint_store.Superseded_version _ -> true
   | Keeper_checkpoint_store.Not_found
+  | Keeper_checkpoint_store.Newer_version _
   | Keeper_checkpoint_store.Store_error _
   | Keeper_checkpoint_store.Parse_error _
   | Keeper_checkpoint_store.Io_error _
+  | Keeper_checkpoint_store.Read_failed _
   | Keeper_checkpoint_store.Agent_core_error _ -> false
 ;;
 
@@ -556,12 +560,14 @@ let read_positions ~config ~keeper_name =
   Ok { runtime_keepers_dir; memory_keepers_dir; lines; progress; official_cursor }
 ;;
 
+(* The Keeper identity comes from the same read that refuses a blank name,
+   so a pass that has its metadata also has the id the Librarian is told. *)
 let read_meta ~config ~keeper_name =
   match Domain_pool_ref.submit_io_or_inline (fun () ->
-    Keeper_meta_store.read_effective_meta_presence config keeper_name) with
-  | Ok (Keeper_meta_store.Meta_present meta) -> Ok meta
-  | Ok Keeper_meta_store.Meta_absent -> Error Keeper_meta_absent
-  | Ok (Keeper_meta_store.Meta_not_current detail) -> Error (Keeper_meta_unreadable detail)
+    Keeper_meta_store.read_effective_meta_presence_named config keeper_name) with
+  | Ok (keeper_id, Keeper_meta_store.Meta_present meta) -> Ok (keeper_id, meta)
+  | Ok (_, Keeper_meta_store.Meta_absent) -> Error Keeper_meta_absent
+  | Ok (_, Keeper_meta_store.Meta_not_current detail) -> Error (Keeper_meta_unreadable detail)
   | Error detail -> Error (Keeper_meta_unreadable detail)
 ;;
 
@@ -583,7 +589,7 @@ type unread =
 let unread_turns ~config ~keeper_name =
   let ( let* ) = Result.bind in
   let* positions = read_positions ~config ~keeper_name in
-  let* meta = read_meta ~config ~keeper_name in
+  let* _keeper_id, meta = read_meta ~config ~keeper_name in
   let current_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let official =
     R.unread_official_turns ~lines:positions.lines ~cursor:positions.official_cursor
@@ -646,7 +652,7 @@ let consume_one_with_extent
   match recovered with
   | Some outcome -> Ok outcome
   | None ->
-  let* meta = read_meta ~config ~keeper_name in
+  let* keeper_id, meta = read_meta ~config ~keeper_name in
   let current_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let progress_is_current =
     match progress with
@@ -771,18 +777,27 @@ let consume_one_with_extent
       next
       outcome
   in
+  (* The two positions are independent (RFC §4.10). An official stop holds
+     the official lines only: no later line lifts it, so letting it hold the
+     atoms too would stand every round of the keeper at a line the atom path
+     has already settled (masc#37061). The stop is this pass's answer once the
+     atom part has nothing to do, so a drain that reads atoms ends on it. *)
   match selection, official with
-  | R.Stop stop, _ -> Error (Range_stopped stop)
-  | _, R.Official_stop { line; error } -> Error (Official_range_stopped { line; error })
-  | R.Position_in_other_trace position, _ -> Error (Position_in_other_trace position)
-  | R.Baseline _, _ ->
+  | R.Stop stop, (R.Nothing_official | R.Official_read _ | R.Official_stop _) ->
+    Error (Range_stopped stop)
+  | R.Position_in_other_trace position, (R.Nothing_official | R.Official_read _ | R.Official_stop _)
+    -> Error (Position_in_other_trace position)
+  | R.Baseline _, (R.Nothing_official | R.Official_read _ | R.Official_stop _) ->
     (* The atom position is set first; the official lines wait for the next
        call, which the caller makes while a call advances. *)
     (match R.progress_after ~trace_id selection with
      | None -> Ok Nothing_to_read
      | Some next -> write_atom next (fun progress -> Baseline_advanced progress))
+  | R.Nothing_to_read, R.Official_stop { line; error } ->
+    Error (Official_range_stopped { line; error })
   | R.Nothing_to_read, R.Nothing_official -> Ok Nothing_to_read
-  | (R.Nothing_to_read | R.Read _), (R.Nothing_official | R.Official_read _) ->
+  | R.Read _, (R.Nothing_official | R.Official_read _ | R.Official_stop _)
+  | R.Nothing_to_read, R.Official_read _ ->
     (* The atom part, when there is one: its range, the line that ends it,
        and the receipt identity the Memory commit records. *)
     let* atom =
@@ -1068,8 +1083,11 @@ let consume_one_with_extent
          interval. The official cursor is not replaced by this commit, so if
          it also sits after this range's end, the next range's bound is that
          same stamp and the rows between would be read by nobody. Then the
-         refusal stands: the pass stops without advancing, and an official
-         line or a clock that comes forward moves it again. Within one trace
+         refusal stands: the pass stops without advancing and the operator
+         sees [Counterpart_interval_non_monotone]. An official line read
+         later moves the official cursor and lifts it; while an official stop
+         holds those lines (RFC §4.10) none is read, so only a range that ends
+         after that stamp, or a purge of the keeper, lifts it. Within one trace
          the inversion says the position and its boundary disagree, and stops
          the pass as before. *)
       let carried_from_another_trace =
@@ -1102,6 +1120,7 @@ let consume_one_with_extent
       in
       let input : Keeper_librarian.input =
         { turn_ref
+        ; keeper_id
         (* Turn boundaries do not carry historical task identity. The current
            task can belong to a later turn, so borrowing it would attach an old
            range to an unrelated Goal. Exact historical identity must be added
@@ -1152,6 +1171,10 @@ let consume_one_with_progress_writer
   (match result, extent with
    | Ok (Nothing_to_read | Baseline_advanced _), _
    | Ok (Progress_advanced _ | Official_advanced _), R.All_unread -> clear_failed key
+   (* Returned only when the atom side has nothing to read: the atom backlog
+      is empty, and the official stop is no wide range that failed. Keeping
+      the marker would narrow every later pass to one turn for good. *)
+   | Error (Official_range_stopped _), _ -> clear_failed key
    | Ok (Progress_advanced _ | Official_advanced _), R.To_first_cut_point
    | Ok Memory_not_committed, _
    | Error _, _ -> ());

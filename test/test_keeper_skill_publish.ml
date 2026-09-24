@@ -48,7 +48,40 @@ let config_text =
     Server_keeper_skill_publish.project_agents_source_id
 ;;
 
-let with_workspace ?(source_root_exists = true) f =
+(* The live order: project-masc is declared before project-agents, so a name
+   it holds wins over a Keeper's package of the same name. *)
+let earlier_source_id = "project-masc"
+
+let config_text_with_earlier_source =
+  Printf.sprintf
+    "[skills]\n\
+     resource-read-max-bytes = %d\n\
+     [[skills.sources]]\n\
+     id = %S\n\
+     anchor = \"base-path\"\n\
+     path = \".masc/skills\"\n\
+     access = \"read-write\"\n\
+     [[skills.sources]]\n\
+     id = %S\n\
+     anchor = \"base-path\"\n\
+     path = \".agents/skills\"\n\
+     access = \"read-write\"\n"
+    resource_read_max_bytes
+    earlier_source_id
+    Server_keeper_skill_publish.project_agents_source_id
+;;
+
+type source_root_fixture =
+  | Root_directory
+  | Root_absent
+  | Root_regular_file
+
+let with_workspace
+      ?(source_root = Root_directory)
+      ?(config_text = config_text)
+      ?(before_publish = fun ~base_path:_ -> ())
+      f
+  =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -60,10 +93,15 @@ let with_workspace ?(source_root_exists = true) f =
       Service.retire ~workspace;
       remove_tree base_path)
     (fun () ->
-      if source_root_exists
-      then (
-        Unix.mkdir (Filename.concat base_path ".agents") 0o700;
-        Unix.mkdir (Filename.concat base_path ".agents/skills") 0o700);
+      (match source_root with
+       | Root_absent -> ()
+       | Root_directory ->
+         Unix.mkdir (Filename.concat base_path ".agents") 0o700;
+         Unix.mkdir (Filename.concat base_path ".agents/skills") 0o700
+       | Root_regular_file ->
+         Unix.mkdir (Filename.concat base_path ".agents") 0o700;
+         Out_channel.with_open_bin (Filename.concat base_path ".agents/skills") (fun _ -> ()));
+      before_publish ~base_path;
       let refresh () =
         Ok
           (Service.refresh
@@ -184,6 +222,31 @@ let test_outcomes_project_typed () =
     ~effect_disposition:Tool_result.Proven_post_effect
     unpublished;
   check string "reason" "refresh failed" (string_field "reason" (snd unpublished));
+  let winner =
+    Skill_reference.make_identity
+      ~source_id:
+        (Skill_source_config.source_id_of_string earlier_source_id |> require "source id")
+      ~package_id:(Skill_reference.package_id_of_directory "proposed" |> require "package id")
+      ~name:"proposed"
+  in
+  ignore
+    (install_stub (fun _ ->
+       Ok
+         (Publish.Created_but_shadowed
+            { reference; snapshot_revision = "rev-2"; winner })));
+  let shadowed = call config (args source_text) in
+  (* The write and the republish committed, so the call completes and the
+     status says the rest. Every failure class carries a next move the model
+     reads, and none of them is true of a package that was written. *)
+  check bool "shadowed publish completes" true
+    ((fst shadowed).disposition = Tool_result.Completed ());
+  check string "shadowed status" "created_but_shadowed" (string_field "status" (snd shadowed));
+  check bool "names the winner" true
+    (Yojson.Safe.Util.member "winner" (snd shadowed) = Skill_reference.identity_to_yojson winner);
+  check bool "keeps the exact reference" true
+    (Yojson.Safe.Util.member "reference" (snd shadowed) = Skill_reference.to_yojson reference);
+  check string "shadowed snapshot revision" "rev-2"
+    (string_field "snapshot_revision" (snd shadowed));
   ignore
     (install_stub (fun _ ->
        Error
@@ -296,7 +359,7 @@ let test_editor_publishes_and_never_overwrites () =
    the live one did not: every publish was refused as source_not_ready. The
    first publish makes the declared folder and lands the package. *)
 let test_first_publish_creates_the_source_folder () =
-  with_workspace ~source_root_exists:false
+  with_workspace ~source_root:Root_absent
   @@ fun ~base_path ~workspace:_ ~config ~refresh ->
   Atomic.set Workspace_hooks.keeper_skill_publish_fn
     (Server_keeper_skill_publish.publish ~refresh);
@@ -307,6 +370,101 @@ let test_first_publish_creates_the_source_folder () =
   check string "status" "created_and_published" (string_field "status" data);
   check string "SKILL.md bytes" original
     (read_file (Filename.concat base_path ".agents/skills/first/SKILL.md"))
+;;
+
+let mkdir_if_missing path = if not (Sys.file_exists path) then Unix.mkdir path 0o700
+
+(* The live runtime.toml declares project-masc before project-agents. A Keeper
+   that publishes a name project-masc already declares gets its package
+   written and published, yet Keeper turns list Skills by name and see the
+   project-masc one, so the answer has to say so and name it. *)
+let test_publish_behind_an_earlier_source_names_the_winner () =
+  let operator_text = instruction ~description:"The operator's procedure." "shared" in
+  with_workspace
+    ~config_text:config_text_with_earlier_source
+    ~before_publish:(fun ~base_path ->
+      let root = Filename.concat base_path ".masc/skills" in
+      mkdir_if_missing (Filename.concat base_path ".masc");
+      mkdir_if_missing root;
+      Unix.mkdir (Filename.concat root "shared") 0o700;
+      Out_channel.with_open_bin (Filename.concat root "shared/SKILL.md") (fun channel ->
+        Out_channel.output_string channel operator_text))
+  @@ fun ~base_path ~workspace:_ ~config ~refresh ->
+  Atomic.set Workspace_hooks.keeper_skill_publish_fn
+    (Server_keeper_skill_publish.publish ~refresh);
+  let original = instruction "shared" in
+  let result, data = call config (args ~package_id:"shared" original) in
+  if result.Keeper_tool_execution.disposition <> Tool_result.Completed ()
+  then fail ("shadowed publish did not complete: " ^ Yojson.Safe.to_string data);
+  check string "shadowed status" "created_but_shadowed" (string_field "status" data);
+  let winner = Yojson.Safe.Util.member "winner" data in
+  check string "winner source" earlier_source_id (string_field "source_id" winner);
+  check string "winner package" "shared" (string_field "package_id" winner);
+  check bool "reference names the Keeper's package" true
+    (Yojson.Safe.Util.member "reference" data
+     = Skill_reference.to_yojson (reference_of "shared" original));
+  check string "the Keeper's SKILL.md is written" original
+    (read_file (Filename.concat base_path ".agents/skills/shared/SKILL.md"));
+  (match
+     Audit_log.read_entries config
+     |> List.filter (fun (entry : Audit_log.audit_entry) ->
+       entry.action = Audit_log.Custom "skill_write")
+   with
+   | [ entry ] ->
+     check string "audit status" "created_but_shadowed" (string_field "status" entry.details)
+   | entries -> fail (Printf.sprintf "expected one skill_write row, got %d" (List.length entries)));
+  (* Control: the same two sources, a name project-masc does not declare. *)
+  let fresh = instruction "fresh" in
+  let result, data = call config (args ~package_id:"fresh" fresh) in
+  if result.Keeper_tool_execution.disposition <> Tool_result.Completed ()
+  then fail ("publish did not complete: " ^ Yojson.Safe.to_string data);
+  check string "unshadowed status" "created_and_published" (string_field "status" data)
+;;
+
+(* The live 09-23 refusal said only "Skill source is not ready", and the
+   Keeper guessed the source was undeclared when its folder was missing. A
+   folder is now made when missing, so the refusal that remains is a declared
+   path that is not a folder: the Keeper must be told which path and why. *)
+let test_refusal_names_the_path_and_why () =
+  with_workspace ~source_root:Root_regular_file
+  @@ fun ~base_path ~workspace:_ ~config ~refresh ->
+  let source_id =
+    Skill_source_config.source_id_of_string
+      Server_keeper_skill_publish.project_agents_source_id
+    |> require "source id"
+  in
+  let error =
+    match
+      Server_skill_editor.create
+        ~base_path
+        ~source_id
+        ~package_id:"blocked"
+        ~source_text:(instruction "blocked")
+        ~refresh
+    with
+    | Error error -> error
+    | Ok _ -> fail "a regular file in place of the source folder must refuse"
+  in
+  (match error with
+   | Server_skill_editor.Source_not_ready
+       (Source_root_not_directory { resolved_path; kind = Unix.S_REG }) ->
+     check string "names the declared path" "skills" (Filename.basename resolved_path)
+   | other -> fail ("unexpected refusal: " ^ Server_skill_editor.error_to_string other));
+  check bool "reason kind on the wire" true
+    (Yojson.Safe.Util.(
+       Server_skill_editor.error_to_yojson error |> member "reason" |> member "kind")
+     = `String "not_directory");
+  Atomic.set Workspace_hooks.keeper_skill_publish_fn
+    (Server_keeper_skill_publish.publish ~refresh);
+  let ((_, data) as outcome) = call config (args ~package_id:"blocked" (instruction "blocked")) in
+  failed_with
+    ~code:"source_not_ready"
+    ~class_:Tool_result.Dependency_unavailable
+    ~effect_disposition:Tool_result.Proven_pre_effect
+    outcome;
+  check string "Keeper reads the same reason"
+    (Server_skill_editor.error_to_string error)
+    (string_field "message" data)
 ;;
 
 let () =
@@ -322,6 +480,10 @@ let () =
             test_editor_publishes_and_never_overwrites
         ; test_case "first publish creates the source folder" `Quick
             test_first_publish_creates_the_source_folder
+        ; test_case "publish behind an earlier source names the winner" `Quick
+            test_publish_behind_an_earlier_source_names_the_winner
+        ; test_case "refusal names the path and why" `Quick
+            test_refusal_names_the_path_and_why
         ] )
     ]
 ;;

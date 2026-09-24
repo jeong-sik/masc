@@ -176,6 +176,87 @@ let dispatchable_lanes ~(config : Workspace.config) (default : Runtime.t option)
   @ List.map (fun lane -> lane, From_assignment) implicit
 ;;
 
+(* Provider-reported usage windows, for operators only
+   ([Runtime_provider_usage_window]). Nothing here says whether a provider is
+   available: codex-cli 0.156.0's schema tells clients not to infer recovery
+   from percentages or reset times, so the numbers are shown as reported.
+
+   The table lives in this process and is not persisted, so a scope that has
+   not reported since [provider_usage_windows_since] is shown as exactly that,
+   never as an empty or healthy window. Every configured quota scope gets a
+   row, plus any scope that reported and is no longer configured. *)
+module Usage = Runtime_provider_usage_window
+
+let usage_window_kind_json : Usage.window_kind -> Yojson.Safe.t = function
+  | Five_hour -> `Assoc [ "kind", `String "five_hour" ]
+  | Seven_day -> `Assoc [ "kind", `String "seven_day" ]
+  | Duration_minutes minutes ->
+    `Assoc [ "kind", `String "duration_minutes"; "minutes", `Int minutes ]
+  | Provider_label label -> `Assoc [ "kind", `String "provider_label"; "label", `String label ]
+;;
+
+let usage_utilization_json : Usage.utilization -> Yojson.Safe.t = function
+  | Fraction value -> `Assoc [ "unit", `String "fraction"; "value", `Float value ]
+  | Percent value -> `Assoc [ "unit", `String "percent"; "value", `Int value ]
+;;
+
+let usage_window_json ({ window; source; observed_at } : Usage.recorded) : Yojson.Safe.t =
+  `Assoc
+    [ "limit_id", string_opt_json window.limit_id
+    ; "window", usage_window_kind_json window.kind
+    ; "utilization", usage_utilization_json window.utilization
+    ; "resets_at", int_opt_json window.resets_at
+    ; "observed_at", `Float observed_at
+    ; "source", `String (Usage.source_to_string source)
+    ]
+;;
+
+(* Configured runtimes grouped by quota scope, in first-appearance order: rows
+   sharing a credential share one account and so one set of windows. *)
+let usage_scopes (runtimes : Runtime.t list) =
+  let add groups scope provider_id =
+    match List.find_opt (fun (known, _) -> Runtime_quota_window.scope_equal known scope) groups with
+    | Some _ ->
+      List.map
+        (fun (known, providers) ->
+           if Runtime_quota_window.scope_equal known scope
+              && not (List.exists (String.equal provider_id) providers)
+           then known, providers @ [ provider_id ]
+           else known, providers)
+        groups
+    | None -> groups @ [ scope, [ provider_id ] ]
+  in
+  let configured =
+    List.fold_left
+      (fun groups (rt : Runtime.t) -> add groups (Runtime.quota_scope_of_runtime rt) rt.provider.id)
+      []
+      runtimes
+  in
+  let unconfigured =
+    List.filter
+      (fun scope ->
+         not (List.exists (fun (known, _) -> Runtime_quota_window.scope_equal known scope) configured))
+      (Usage.recorded_scopes ())
+    |> List.sort (fun a b ->
+      String.compare (Runtime_quota_window.scope_to_string a) (Runtime_quota_window.scope_to_string b))
+  in
+  configured @ List.map (fun scope -> scope, []) unconfigured
+;;
+
+let usage_scope_json (scope, providers) : Yojson.Safe.t =
+  let state, windows =
+    match Usage.state ~scope with
+    | Not_reported_since_start -> "not_reported_since_start", []
+    | Reported (first, rest) -> "reported", List.map usage_window_json (first :: rest)
+  in
+  `Assoc
+    [ "scope", `String (Runtime_quota_window.scope_to_string scope)
+    ; "providers", Json_util.json_string_list providers
+    ; "state", `String state
+    ; "windows", `List windows
+    ]
+;;
+
 let build ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =
   let default = Runtime.get_default_runtime () in
   `Assoc
@@ -197,5 +278,8 @@ let build ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =
     ; "lanes", `List (List.map lane_json (dispatchable_lanes ~config default))
     ; ( "assignments"
       , `List (List.map (assignment_json default) (all_keeper_names ~config)) )
+    ; "provider_usage_windows_since", `Float Usage.recording_since
+    ; ( "provider_usage_windows"
+      , `List (List.map usage_scope_json (usage_scopes (Runtime.get_runtimes ()))) )
     ]
 ;;

@@ -5741,13 +5741,11 @@ let render_lanes_overview (state : state) =
                  names an action the message does not. *)
               (Theme.bad ()) ^ "  "
               ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset));
-  (* The slot editor is the active task. Give its candidate rows the space
-     normally occupied by the selected lane's read-only detail, so CLI rows
-     remain visible on an ordinary terminal. *)
-  (match state.slot_editor, selected_standalone_lane state with
-   | Some _, _ -> ()
-   | None, None -> ()
-   | None, Some lane ->
+  (* Use only the body's remaining rows. At small terminal heights the matrix
+     stays complete and the detail truncates explicitly. *)
+  (match selected_standalone_lane state with
+   | None -> ()
+   | Some lane ->
        let action_error_rows =
          (match state.lanes_action_error with None -> 0 | Some _ -> 1)
          + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
@@ -5795,43 +5793,6 @@ let render_lanes_overview (state : state) =
        box_line_styled buf cols ~style:(Theme.warn ())
          ("  " ^ Keeper_chat.terminal_safe_text line))
     (Masc_tui_types.runtime_lane_stale_lines state);
-  (* The slot editor the "s" key opens. Its rows are the lane's declared
-     order, which is what the lane walks; a slot publication rejected keeps
-     its place there and is marked rather than left out, because dropping it
-     from the drawing would put the numbers beside the other slots out of step
-     with the file. *)
-  (match state.slot_editor with
-   | None -> ()
-   | Some editor ->
-       box_line_styled buf cols ~style:(Theme.info ())
-         (Printf.sprintf "  slots of %s — HTTP first, then CLI"
-            (Terminal_text.single_line
-               (Masc_tui_types.slot_editor_target_name editor.Masc_tui_types.se_target)));
-       let slot_rows = Masc_tui_types.slot_editor_rows state in
-       if slot_rows = [] then
-         box_line_styled buf cols ~style:(Theme.recede ())
-           "  (this lane declares no slot; a slots array is what it walks)"
-       else
-         List.iteri
-           (fun index (row : Masc_tui_types.slot_editor_row) ->
-              let line =
-                Printf.sprintf "  %s %d  %s %s%s"
-                  (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
-                  (index + 1)
-                  (match row.Masc_tui_types.sr_kind with
-                   | `Http -> "HTTP"
-                   | `Cli -> "CLI "
-                   | `Media -> "    ")
-                  (Terminal_text.single_line row.Masc_tui_types.sr_slot)
-                  (if row.Masc_tui_types.sr_admitted then ""
-                   else Ansi.dim ^ "  (declared, not admitted)" ^ Ansi.reset)
-              in
-              if index = editor.Masc_tui_types.se_cursor then
-                box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
-              else box_line buf cols line)
-           slot_rows;
-       box_line_styled buf cols ~style:(Theme.recede ())
-         "  j/k select · a add · x drop · J/K reorder · d HTTP provider · Esc close");
   (* The runtime-candidate picker the "a" key opens. Same projection the
      Runtime surface draws; the row order both render and the key handler
      read is the picker's own, so the cursor and the drawing cannot drift. *)
@@ -5872,6 +5833,77 @@ let render_lanes_overview (state : state) =
            picker.Masc_tui_types.rlp_choices);
   let used_rows = count_frame_lines buf in
   for _ = 1 to max 0 (rows - used_rows - 2) do
+    box_empty buf cols
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+  finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
+
+let render_lanes_slot_editor (state : state) (editor : slot_editor) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 2048 in
+  let name = Terminal_text.single_line
+      (Masc_tui_types.slot_editor_target_name editor.se_target) in
+  box_top buf cols;
+  box_line buf cols (screen_title " MASC Lanes · Slot editor");
+  box_divider buf cols;
+  box_line_styled buf cols ~style:(Theme.info ())
+    (Printf.sprintf "  slots of %s — HTTP first, then CLI" name);
+  (match state.runtime_lane_notice with
+   | None -> ()
+   | Some notice ->
+     box_line_styled buf cols ~style:(runtime_lane_notice_style notice)
+       ("  " ^ Keeper_chat.terminal_safe_text
+          (Masc_tui_types.runtime_lane_notice_text notice)));
+  (match state.lanes_action_error with
+   | None -> ()
+   | Some detail ->
+     box_line_styled buf cols ~style:(Theme.warn ())
+       ("  " ^ Keeper_chat.terminal_safe_text detail));
+  let slot_rows = Masc_tui_types.slot_editor_rows state in
+  let count = List.length slot_rows in
+  let content_height = max 0 (rows - count_frame_lines buf - 3) in
+  let first =
+    min (max 0 (count - content_height))
+      (max 0 (editor.se_cursor - content_height + 1))
+  in
+  let window = Rows.of_list ~first ~height:content_height slot_rows in
+  if count = 0 then
+    box_line_styled buf cols ~style:(Theme.recede ())
+      "  (this lane declares no slot)"
+  else
+    for index = first to first + content_height - 1 do
+      match Rows.at window index with
+      | None -> ()
+      | Some (row : slot_editor_row) ->
+        let line =
+          Printf.sprintf "  %s %d  %s %s%s"
+            (if index = editor.se_cursor then ">" else " ")
+            (index + 1)
+            (match row.sr_kind with
+             | `Http -> "HTTP"
+             | `Cli -> "CLI "
+             | `Media -> "    ")
+            (Terminal_text.single_line row.sr_slot)
+            (if row.sr_admitted then ""
+             else Ansi.dim ^ "  (declared, not admitted)" ^ Ansi.reset)
+        in
+        if index = editor.se_cursor then
+          box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+        else box_line buf cols line
+    done;
+  let window_hint =
+    if count > content_height then
+      Printf.sprintf "  [%s]"
+        (Masc_tui_scroll.window_text ~scroll:first ~height:content_height count)
+    else ""
+  in
+  box_line_styled buf cols ~style:(Theme.recede ())
+    ("  j/k select · a add · x drop · J/K reorder · d HTTP provider · Esc close"
+     ^ window_hint);
+  for _ = 1 to max 0 (rows - count_frame_lines buf - 2) do
     box_empty buf cols
   done;
   box_bottom buf cols;
@@ -6909,11 +6941,12 @@ let render_clients (state : state) =
 ;;
 
 let render_lanes (state : state) =
-  match state.lanes_mode with
-  | Lanes_overview -> render_lanes_overview state
-  | Lanes_run_list lane_id -> render_lane_run_list state ~lane_id
-  | Lanes_run_detail (_, run_id) -> render_lane_run_detail state ~run_id
-  | Lanes_measurement_detail sha256 -> render_lane_run_detail state ~run_id:sha256
+  match state.lanes_mode, state.slot_editor with
+  | Lanes_overview, Some editor -> render_lanes_slot_editor state editor
+  | Lanes_overview, None -> render_lanes_overview state
+  | Lanes_run_list lane_id, _ -> render_lane_run_list state ~lane_id
+  | Lanes_run_detail (_, run_id), _ -> render_lane_run_detail state ~run_id
+  | Lanes_measurement_detail sha256, _ -> render_lane_run_detail state ~run_id:sha256
 
 (** Render keeper detail view with live context and scrolling *)
 (* The detail box alone -- borders, title, scrolled content -- written into

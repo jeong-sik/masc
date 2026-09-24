@@ -3,9 +3,6 @@
 type t
 val create : unit -> t
 
-val frame_of_json : Yojson.Safe.t -> Masc_tui_types.msx_frame option
-(** Decode a full frame, also used by the read-only GET. *)
-
 val fetch :
   t -> host:string -> port:int -> headers:(string * string) list ->
   request:(body:string -> (Yojson.Safe.t, string) result) ->

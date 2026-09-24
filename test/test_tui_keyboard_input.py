@@ -25,6 +25,7 @@ import tempfile
 import termios
 import threading
 import time
+import urllib.parse
 from typing import Any, assert_never, cast
 
 Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray, str], None]
@@ -77,6 +78,15 @@ class HeadersHttpResponse:
         self.resolve = resolve
 
 
+class PathHttpResponse:
+    """A fixture whose answer depends on the request's query. The live route
+    names the machine and the counter already drawn in its query string, and
+    the plain fixtures see only the path."""
+
+    def __init__(self, resolve: Callable[[str], HttpResponse]) -> None:
+        self.resolve = resolve
+
+
 class RequestHttpResponse:
     """A fixture whose JSON-RPC answer must echo fields from the POST body."""
 
@@ -93,6 +103,7 @@ HttpFixture = (
     | StreamingHttpResponse
     | RequestHttpResponse
     | HeadersHttpResponse
+    | PathHttpResponse
     | Callable[[], HttpResponse]
 )
 HttpFixtures = dict[str, HttpFixture]
@@ -249,6 +260,8 @@ def test_http_endpoint(
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
                 resolved = fixture.resolve(request_body or b"")
+            elif isinstance(fixture, PathHttpResponse):
+                resolved = fixture.resolve(self.path)
             elif isinstance(fixture, HeadersHttpResponse):
                 resolved = fixture.resolve({key.lower(): value for key, value in self.headers.items()})
             else:
@@ -17623,6 +17636,65 @@ def msx_loaded_frame_fixture() -> HttpResponse:
     )
 
 
+MACHINE_LIVE_PATH = "/api/v1/lane-addons/live"
+
+
+LiveMark = tuple[int, str]
+LIVE_INCARNATION = "fixture-incarnation"
+
+
+def machine_live_query(path: str) -> tuple[str, LiveMark | None]:
+    """The machine a live read names and the mark (change count and
+    incarnation) of the picture it already drew. #38733 takes the two
+    together or not at all, and so does this fixture."""
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query, strict_parsing=True)
+    if set(query) - {"source_kind", "since", "incarnation"} or len(query["source_kind"]) != 1:
+        raise AssertionError(f"unexpected live query: {path}")
+    since, incarnation = query.get("since"), query.get("incarnation")
+    if (since is None) != (incarnation is None):
+        raise AssertionError(f"since and incarnation must come together: {path}")
+    mark = None if since is None or incarnation is None else (int(since[0]), incarnation[0])
+    return query["source_kind"][0], mark
+
+
+def machine_live_answer(
+    kind: str, body: dict[str, object] | None, since: LiveMark | None, *,
+    count: int, frame_number: int | None,
+) -> HttpResponse:
+    """What #38733's live route answers for one machine, from its current
+    picture ([None]: no machine). [count] is the machine's change count, so a
+    machine that did not move answers "unchanged"."""
+    if body is None:
+        return 200, {"source_kind": kind, "state": "no_machine"}
+    marked = {"source_kind": kind, "change_count": count, "incarnation": LIVE_INCARNATION}
+    if since == (count, LIVE_INCARNATION):
+        return 200, dict(marked, state="unchanged")
+    answer: dict[str, object] = dict(marked, state="changed", screen={
+        "format": "rgb8", "width": body["width"], "height": body["height"],
+        "rgb_base64": body["rgb_base64"],
+    })
+    if frame_number is not None:
+        answer["frame_number"] = frame_number
+    return 200, answer
+
+
+def msx_live_fixture(frame: Callable[[], HttpResponse]) -> PathHttpResponse:
+    """The live route over an MSX frame fixture; no DOS machine is loaded."""
+
+    def resolve(path: str) -> HttpResponse:
+        kind, since = machine_live_query(path)
+        if kind == "dos_capture":
+            return 200, {"source_kind": kind, "state": "no_machine"}
+        if kind != "msx_capture":
+            raise AssertionError(f"unexpected source kind: {kind}")
+        status, body = frame()
+        assert status == 200 and isinstance(body, dict), body
+        number = int(body["number"])
+        return machine_live_answer(kind, body, since, count=number, frame_number=number)
+
+    return PathHttpResponse(resolve)
+
+
 def msx_spectator_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -17640,7 +17712,7 @@ def msx_spectator_interaction(
     start = len(output)
     os.write(master_fd, b":go msx\r")
     # A loaded machine puts a watch row at the top of the menu (RFC-0439 3.7).
-    wait_for_output(process, master_fd, output, b"watch split.rom", start=start,
+    wait_for_output(process, master_fd, output, b"watch MSX machine", start=start,
                     timeout=5.0)
     # Entering the spectator paints past the frame presenter too, so the wait
     # is on raw output; send_and_wait would starve on a frame-end marker that
@@ -17707,7 +17779,7 @@ def msx_size_interaction(
     read_available(master_fd, output)
     start = len(output)
     os.write(master_fd, b":go msx\r")
-    wait_for_output(process, master_fd, output, b"watch split.rom", start=start,
+    wait_for_output(process, master_fd, output, b"watch MSX machine", start=start,
                     timeout=5.0)
     watched_from = len(output)
     os.write(master_fd, b"\r")
@@ -17780,7 +17852,7 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
             wait_for_output(process, master, output, needle, start=start, timeout=5.0)
             return bytes(output[start:])
 
-        key(b":go msx\r", b"watch split.rom")
+        key(b":go msx\r", b"watch MSX machine")
         first = key(b"\r", b"F6: save quick")
         assert b"f=24" in first, "Kitty path was not negotiated"
         start = len(output)
@@ -17815,7 +17887,7 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
         assert b"f=24" in resized, "resize did not place pixels again"
         exited = key(b"\x1b", b"MASC Overview")
         assert b"d=I,i=32" in exited, "exit left the image behind"
-        key(b":go msx\r", b"watch split.rom")
+        key(b":go msx\r", b"watch MSX machine")
         reopened = key(b"\r", b"F6: save quick")
         assert b"f=24" in reopened, "reopening reused a deleted image"
         print(f"MSX PTY wire: first={len(first)} steady_three_polls={len(steady)} "
@@ -17828,7 +17900,7 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
         description=("MSX tick sends a reference for pixels the TUI already holds" if retained_tick
                      else "MSX retains Kitty pixels between live polls"),
         interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY,
-        http_fixtures={"/api/v1/msx/frame": (200, original),
+        http_fixtures={MACHINE_LIVE_PATH: msx_live_fixture(lambda: (200, original)),
                        "/api/v1/msx/tick": RequestHttpResponse(tick) if retained_tick else tick},
     )
     if retained_tick:
@@ -17896,7 +17968,7 @@ def run_msx_background_poll_regression(executable: str) -> None:
             read_available(master, output)
 
         try:
-            key(b":go msx\r", b"watch split.rom")
+            key(b":go msx\r", b"watch MSX machine")
             key(b"\r", b"F8: disk")
             assert wait_for_fixture_event(process, master, output, pending.requested, timeout=5.0)
             assert not pending.completed.is_set(), "fixture did not hold the tick"
@@ -17914,7 +17986,7 @@ def run_msx_background_poll_regression(executable: str) -> None:
             observe_for(0.8)  # More than two 0.3-second spectator poll intervals.
             assert len(calls) == 1, f"pending/closed view issued more ticks: {len(calls)}"
             before_get = len(get_frames)
-            key(b":go msx\r", b"watch split.rom")
+            key(b":go msx\r", b"watch MSX machine")
             assert len(get_frames) > before_get, "reopening skipped fresh observation"
             start = key(b"\r", b"F8: disk")
             assert b"f=24" in bytes(output[start:]), "fresh reopen did not restore image"
@@ -17955,7 +18027,7 @@ def run_msx_background_poll_regression(executable: str) -> None:
             assert b"frame 999 " not in failure_output, "failure resurrected stale response"
             key(b"\x1b", b"MASC Overview")
             before_get = len(get_frames)
-            key(b":go msx\r", b"watch split.rom")
+            key(b":go msx\r", b"watch MSX machine")
             assert len(get_frames) > before_get, "failure recovery skipped fresh GET"
             assert len(calls) == 2, "menu entry advanced the machine"
             key(b"\x1b", b"F8: disk")
@@ -17970,7 +18042,7 @@ def run_msx_background_poll_regression(executable: str) -> None:
 
     run_terminal_scenario(executable, description="MSX asynchronous poll preserves terminal input",
         interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY,
-        http_fixtures={"/api/v1/msx/frame": frame,
+        http_fixtures={MACHINE_LIVE_PATH: msx_live_fixture(frame),
                        "/api/v1/msx/tick": RequestHttpResponse(tick)})
 
 
@@ -17979,7 +18051,7 @@ def run_msx_size_regression(executable: str) -> None:
         executable,
         description="the size keys step the spectator's picture",
         interact=msx_size_interaction,
-        http_fixtures={"/api/v1/msx/frame": msx_loaded_frame_fixture()},
+        http_fixtures={MACHINE_LIVE_PATH: msx_live_fixture(msx_loaded_frame_fixture)},
     )
 
 
@@ -17988,7 +18060,118 @@ def run_msx_spectator_regression(executable: str) -> None:
         executable,
         description="the spectator draws the machine's frame in its own shape",
         interact=msx_spectator_interaction,
-        http_fixtures={"/api/v1/msx/frame": msx_loaded_frame_fixture()},
+        http_fixtures={MACHINE_LIVE_PATH: msx_live_fixture(msx_loaded_frame_fixture)},
+    )
+
+
+DOS_FRAME_WIDTH = 640
+DOS_FRAME_HEIGHT = 480
+DOS_RED = b"38;2;255;0;0"
+DOS_BLUE = b"38;2;0;0;255"
+
+
+def dos_flat_frame(rgb: bytes) -> dict[str, object]:
+    return {
+        "width": DOS_FRAME_WIDTH,
+        "height": DOS_FRAME_HEIGHT,
+        "rgb_base64": base64.b64encode(rgb * DOS_FRAME_WIDTH * DOS_FRAME_HEIGHT).decode("ascii"),
+    }
+
+
+def run_dos_live_regression(executable: str) -> None:
+    """Watch the DOS machine through the live route (RFC machine-spectating
+    stage 3). The menu offers it, the picture is drawn in its own shape, an
+    unchanged machine redraws nothing, a key reaches no machine, and a
+    changed machine is drawn at its new counter."""
+    picture: dict[str, Any] = {"frame": dos_flat_frame(bytes([255, 0, 0])), "steps": 100}
+    dos_reads: list[LiveMark | None] = []
+    posts: HttpRequests = []
+
+    def resolve(path: str) -> HttpResponse:
+        kind, since = machine_live_query(path)
+        if kind == "msx_capture":
+            return 200, {"source_kind": kind, "state": "no_machine"}
+        if kind != "dos_capture":
+            raise AssertionError(f"unexpected source kind: {kind}")
+        dos_reads.append(since)
+        return machine_live_answer(kind, picture["frame"], since,
+                                   count=int(picture["steps"]), frame_number=None)
+
+    def interact(process, master, _slave, output, _base):
+        def key(value, needle):
+            start = len(output)
+            os.write(master, value)
+            wait_for_output(process, master, output, needle, start=start, timeout=5.0)
+            return start
+
+        def observe_for(seconds):
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                read_available(master, output)
+                assert process.poll() is None, "TUI exited during observation"
+                select.select([master], [], [], min(0.05, max(0, deadline - time.monotonic())))
+            read_available(master, output)
+
+        key(b":go msx\r", b"watch DOS machine")
+        start = key(b"\r", b"Esc: back  +/-: 100%")
+        watching = bytes(output[start:])
+        if b"DOS \xe2\x80\x94 change 100" not in watching:
+            raise AssertionError(f"the DOS title is missing: {watching[:300]!r}")
+        if b"F6" in watching:
+            raise AssertionError("the DOS footer offers MSX keys")
+        drawn = [line for line in CSI_RE.sub(b"", watching).split(b"\n")
+                 if MSX_HALF_BLOCK in line]
+        # 640x480 has the MSX frame's 4:3 shape, so it scales down to the
+        # same 74 cells in this 100x30 window.
+        odd = [line.count(MSX_HALF_BLOCK) for line in drawn
+               if line.count(MSX_HALF_BLOCK) != MSX_EXPECTED_CELLS]
+        if not drawn or odd:
+            raise AssertionError(f"the DOS picture is not its own shape: {odd[:3]!r}")
+        if DOS_RED not in watching:
+            raise AssertionError("the red DOS picture was not drawn")
+
+        # Unchanged: the reads go on, each at the drawn counter, and nothing
+        # is drawn again.
+        reads_before = len(dos_reads)
+        still_from = len(output)
+        observe_for(1.2)
+        still = dos_reads[reads_before:]
+        if len(still) < 2 or any(since != (100, LIVE_INCARNATION) for since in still):
+            raise AssertionError(f"an unchanged machine was not read at its counter: {still!r}")
+        if bytes(output[still_from:]):
+            raise AssertionError(
+                f"an unchanged answer redrew the screen: {bytes(output[still_from:])[:200]!r}")
+
+        # A key is the spectator's, not a machine's: it repaints and posts nothing.
+        key(b"x", b"Esc: back  +/-: 100%")
+        pressed = [path for path, _ in posts if path.startswith("/api/v1/msx/")]
+        if pressed:
+            raise AssertionError(f"a key on the DOS screen reached the MSX machine: {pressed!r}")
+
+        # The machine moved: the next read carries the new picture.
+        changed_from = len(output)
+        picture["frame"] = dos_flat_frame(bytes([0, 0, 255]))
+        picture["steps"] = 200
+        wait_for_output(process, master, output, b"change 200", start=changed_from, timeout=5.0)
+        wait_for_output(process, master, output, b"Esc: back", start=changed_from, timeout=5.0)
+        changed = bytes(output[changed_from:])
+        if DOS_BLUE not in changed or DOS_RED in changed:
+            raise AssertionError("the changed DOS picture was not the new one")
+        observe_for(0.8)
+        if any(since != (200, LIVE_INCARNATION) for since in dos_reads[-2:]):
+            raise AssertionError(f"reads after the change did not ask at 200: {dos_reads[-4:]!r}")
+
+        key(b"\x1b", b"MASC Overview")
+        os.write(master, b"q")
+        print(json.dumps({"dos_reads": len(dos_reads),
+                          "unchanged_reads": len(still)}), flush=True)
+
+    run_terminal_scenario(
+        executable,
+        description="the DOS machine is watched through the live route",
+        interact=interact,
+        http_fixtures={MACHINE_LIVE_PATH: PathHttpResponse(resolve)},
+        http_requests=posts,
     )
 
 
@@ -18353,6 +18536,7 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ),
     ScenarioFamily("msx-background-poll", "MSX background poll regression", (run_msx_background_poll_regression,)),
     ScenarioFamily("msx-size", "MSX size regression", (run_msx_size_regression,)),
+    ScenarioFamily("dos-live", "DOS live spectator regression", (run_dos_live_regression,)),
     ScenarioFamily(
         "board-compose-footer",
         "board compose footer regression",

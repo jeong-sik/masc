@@ -1889,6 +1889,13 @@ type msx_poll_state = Poll_idle | Poll_pending of msx_poll_request | Poll_failed
 let msx_pending_poll = ref Poll_idle
 let invalidate_msx_poll () = msx_poll_view := ref ()
 
+(* A live read of the DOS screen. It changes nothing on the server, so a lost
+   answer is simply read again at the next interval; one is in flight at a
+   time. It belongs to the spectator view it was asked for, the same view
+   identity the MSX tick carries. *)
+type machine_live_request = { live_view : unit ref; live_port : int }
+let dos_live_pending = ref false
+
 type async_msg =
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
   | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list, string) result
@@ -1898,6 +1905,7 @@ type async_msg =
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request * (Masc_tui_types.msx_frame option, string) result
+  | Dos_live_loaded of machine_live_request * (Masc_tui_machine_live.answer, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
      roster cursor moves under a refresh, and a transcript that took several
@@ -3223,6 +3231,32 @@ let launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn -> enqueue_async mailbox
            (Msx_frame_loaded (request, Error (Printexc.to_string exn))))
+;;
+
+let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
+  if not !dos_live_pending then begin
+    dos_live_pending := true;
+    let request = { live_view = !msx_poll_view; live_port = state.port } in
+    let since = Masc_tui_machine_live.since state.dos_live in
+    let run () =
+      let result =
+        try
+          Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:request.live_port
+            Masc_tui_machine_live.Dos ~since
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Dos_live_loaded (request, result))
+    in
+    (try
+       match Eio_context.get_switch_opt () with
+       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+       | None -> enqueue_async mailbox (Dos_live_loaded (request, Error "Eio switch is unavailable"))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> enqueue_async mailbox (Dos_live_loaded (request, Error (Printexc.to_string exn))))
+  end
 ;;
 
 let launch_keeper_turns_load state ~mailbox =
@@ -8814,10 +8848,45 @@ let msx_surface_current () =
   S.current ()
 ;;
 
+let render_spectator (state : Masc_tui_types.state) =
+  match state.machine_source with
+  | Masc_tui_machine_live.Msx ->
+      Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
+        ~connection:state.connection_status ~live:state.msx_live state.msx_frame
+        (msx_surface_current ())
+  | Masc_tui_machine_live.Dos ->
+      Masc_tui_msx.render_live ~write:write_to_terminal ~connection:state.connection_status
+        Masc_tui_machine_live.Dos state.dos_live
+;;
+
+(* The MSX frame a live read stands for. It names no mode, media or players;
+   the next tick answer does. *)
+let msx_frame_of_live (view : Masc_tui_machine_live.view) =
+  match view with
+  | Masc_tui_machine_live.Showing ({ time = Masc_tui_machine_live.Frame number; _ } as p) ->
+      (view, Some { Masc_tui_types.msx_number = number; msx_width = p.width;
+                    msx_height = p.height; msx_rgb = p.rgb; msx_meta = None })
+  | Masc_tui_machine_live.Showing { time = Masc_tui_machine_live.Untimed; _ } ->
+      (Masc_tui_machine_live.Failed "an MSX answer carried no frame number", None)
+  | Masc_tui_machine_live.Unread | Masc_tui_machine_live.Not_loaded
+  | Masc_tui_machine_live.Failed _ -> (view, None)
+;;
+
+(* A read of the MSX screen through the live route, asked with the counter
+   of the picture drawn from the last one. An unchanged answer leaves the
+   frame alone. *)
 let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
-  state.msx_frame <-
-    Masc_tui_http.fetch_msx_frame ~host:server_peer_host ~port:state.port;
-  msx_surface_frame := state.msx_frame;
+  let result =
+    Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
+      Masc_tui_machine_live.Msx ~since:(Masc_tui_machine_live.since state.msx_live)
+  in
+  (match Masc_tui_machine_live.advance state.msx_live result with
+   | None -> ()
+   | Some view ->
+       let view, frame = msx_frame_of_live view in
+       state.msx_live <- view;
+       state.msx_frame <- frame;
+       msx_surface_frame := frame);
   (* An explicit fresh observation can rearm polling after a lost tick reply.
      It cannot settle an outstanding request whose result has yet to arrive. *)
   match !msx_pending_poll with
@@ -8848,6 +8917,14 @@ let open_msx_screen (state : Masc_tui_types.state) =
     state.image_open <- false
   end;
   observe_msx_frame ~clear_notice:true state;
+  (* The DOS screen is offered in the same menu, so it is read as well. *)
+  (match
+     Masc_tui_machine_live.advance state.dos_live
+       (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
+          Masc_tui_machine_live.Dos ~since:(Masc_tui_machine_live.since state.dos_live))
+   with
+   | None -> ()
+   | Some view -> state.dos_live <- view);
   state.msx_carts <-
     Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
@@ -14781,19 +14858,35 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                   if state.msx_menu_open then
                     Masc_tui_msx.render_menu ~write:write_to_terminal ~status:notice state
                   else
-                    Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                      ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+                    render_spectator state
             | Ok frame ->
                 msx_pending_poll := Poll_idle;
                 if request.poll_view == !msx_poll_view && request.poll_port = state.port
                    && state.msx_open && not state.msx_menu_open then begin
                   state.msx_frame <- frame;
+                  (* A tick answer carries no change counter, so the next live
+                     read must ask for a picture rather than compare. *)
+                  state.msx_live <- Masc_tui_machine_live.Unread;
                   msx_surface_frame := frame;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                  Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                    ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+                  render_spectator state
                 end)
        | Poll_pending _ | Poll_idle | Poll_failed -> ())
+  | Dos_live_loaded (request, result) ->
+      dos_live_pending := false;
+      let watching_dos =
+        match state.machine_source with
+        | Masc_tui_machine_live.Dos -> true
+        | Masc_tui_machine_live.Msx -> false
+      in
+      if request.live_view == !msx_poll_view && request.live_port = state.port
+         && state.msx_open && not state.msx_menu_open && watching_dos then
+        (* An unchanged answer draws nothing and decodes no pixels. *)
+        (match Masc_tui_machine_live.advance state.dos_live result with
+         | None -> ()
+         | Some view ->
+             state.dos_live <- view;
+             render_spectator state)
   | Keeper_chat_control_received (keeper_name, generation, token) ->
       if generation = keeper_chat_control_generation state keeper_name then begin
         (* [false] means no control was pending for this generation and
@@ -18122,8 +18215,7 @@ and is loaded on demand through keeper_skill.
           if state.msx_menu_open then
             Masc_tui_msx.render_menu ~write:write_to_terminal state
           else
-            Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-              ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+            render_spectator state
       end;
       if state.msx_open && not state.msx_menu_open then begin
         let now_ns = Mtime_clock.elapsed_ns () in
@@ -18133,10 +18225,13 @@ and is loaded on demand through keeper_skill.
           >= 0
         then begin
           state.msx_last_poll_ns <- now_ns;
-          (* The poll advances the machine a step and reads the frame it lands
-             on (RFC-0439 §3.2): a game flows while it is watched, even when no
-             keeper is pressing. A plain read would freeze between presses. *)
-          launch_msx_poll state ~mailbox:async_messages
+          (* The MSX poll advances the machine a step and reads the frame it
+             lands on (RFC-0439 §3.2): a game flows while it is watched, even
+             when no keeper is pressing. The DOS screen is only read, with the
+             counter of the picture already drawn. *)
+          match state.machine_source with
+          | Masc_tui_machine_live.Msx -> launch_msx_poll state ~mailbox:async_messages
+          | Masc_tui_machine_live.Dos -> launch_dos_live_poll state ~mailbox:async_messages
         end
       end;
       let input = read_input ~timeout:input_timeout input_reader () in
@@ -18162,8 +18257,7 @@ and is loaded on demand through keeper_skill.
              if state.msx_menu_open then
                Masc_tui_msx.render_menu ~write:write_to_terminal state
              else
-               Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                 ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+               render_spectator state
            end;
            (match state.browser_viewport with
             | Some (shot, bytes) -> draw_browser_viewport state shot bytes
@@ -18283,24 +18377,31 @@ and is loaded on demand through keeper_skill.
           | Masc_tui_msx.Stay -> ()
           | Closed ->
               state.msx_menu_open <- false;
-              if Option.is_some state.msx_frame then begin
+              let loaded =
+                match state.machine_source, state.dos_live with
+                | Masc_tui_machine_live.Msx, _ -> Option.is_some state.msx_frame
+                | Masc_tui_machine_live.Dos, Masc_tui_machine_live.Showing _ -> true
+                | Masc_tui_machine_live.Dos,
+                  (Masc_tui_machine_live.Unread | Masc_tui_machine_live.Not_loaded
+                  | Masc_tui_machine_live.Failed _) -> false
+              in
+              if loaded then begin
                 (* A game is loaded underneath: fall back to watching it, and
                    poll at once so the next tick refreshes it (parity with the
                    Watch arm). *)
                 state.msx_last_poll_ns <- 0L;
-                Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+                render_spectator state
               end
               else begin
                 state.msx_open <- false;
                 invalidate_frame_for_resize frame_presenter render_schedule
               end
-          | Watch ->
+          | Watch source ->
               state.msx_menu_open <- false;
+              state.machine_source <- source;
               (* Poll at once so the spectator opens on a fresh frame. *)
               state.msx_last_poll_ns <- 0L;
-              Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+              render_spectator state
           | (Load cart | Swap_disk cart) as choice -> (
               state.msx_notice <- None;
               match
@@ -18312,14 +18413,23 @@ and is loaded on demand through keeper_skill.
               | Ok () ->
                   (match choice with Swap_disk _ -> state.msx_notice <- Some "Disk changed; backup: before-disk-change" | _ -> ());
                   state.msx_menu_open <- false;
+                  state.machine_source <- Masc_tui_machine_live.Msx;
                   observe_msx_frame state;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                  Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+                  render_spectator state
               | Error message ->
                   (* Stay in the menu and say why, so the human can pick again. *)
                   Masc_tui_msx.render_menu ~write:write_to_terminal
                     ~status:((match choice with Swap_disk _ -> "disk change failed: " | _ -> "load failed: ") ^ message) state))
+      | Some name
+        when (match state.machine_source with
+              | Masc_tui_machine_live.Dos -> true
+              | Masc_tui_machine_live.Msx -> false)
+             && not (List.mem name [ "esc"; "+"; "="; "-"; "_" ]) ->
+          (* The DOS screen is watched, not driven: a key that is not the
+             spectator's own (leave, size) repaints and never reaches the MSX
+             machine -- not as a game key, a checkpoint or a disk change. *)
+          render_spectator state
       | Some "f8" ->
           state.msx_carts <- Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
           Masc_tui_msx.open_menu ~write:write_to_terminal ~mode:Masc_tui_types.Change_disk state
@@ -18332,8 +18442,7 @@ and is loaded on demand through keeper_skill.
             | Error message -> "Checkpoint failed: " ^ message);
           observe_msx_frame state;
           state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-          Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-            ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+          render_spectator state
       | Some "esc" ->
           (* esc closes the spectator; consume returns false and owes a repaint. *)
           if not (Masc_tui_msx.consume ~write:write_to_terminal state "esc")
@@ -18345,8 +18454,7 @@ and is loaded on demand through keeper_skill.
              terminal draws the cached frame and never reach the machine. *)
           Masc_tui_msx.adjust_size
             (if String.equal size_key "-" || String.equal size_key "_" then -1.0 else 1.0);
-          Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame (msx_surface_current ()))
+          render_spectator state)
       | Some name -> (
           (* A game key: send it to the shared server machine (RFC-0439 §3.3),
              then re-fetch so the human sees the result of their own press
@@ -18361,8 +18469,7 @@ and is loaded on demand through keeper_skill.
                | Ok _ | Error _ -> ());
               observe_msx_frame ~clear_notice:true state;
               state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-              Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
-                ~connection:state.connection_status state.msx_frame (msx_surface_current ())
+              render_spectator state
           (* See Masc_tui_msx.consume: a non-game key only repaints, always open. *)
           | None -> ignore (Masc_tui_msx.consume ~write:write_to_terminal state name)));
       let key =

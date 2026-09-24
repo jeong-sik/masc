@@ -23,16 +23,18 @@ let frame_with_rgb ?rgb json : Masc_tui_types.msx_frame option =
         { Masc_tui_types.msx_number = member "number" json |> to_int
         ; msx_width = member "width" json |> to_int
         ; msx_height = member "height" json |> to_int
-        ; msx_mode = member "mode" json |> to_string
-        ; msx_cartridge = member "cartridge" json |> to_string_option
-        ; msx_disk = member "disk" json |> to_string_option
         ; msx_rgb = (match rgb with Some bytes -> bytes | None ->
             member "rgb_base64" json |> to_string |> Base64.decode_exn)
-        ; msx_players =
-            (match member "players" json with
-             | `List items -> List.filter_map
-                 (fun it -> match member "who" it with `String w -> Some w | _ -> None) items
-             | _ -> [])
+        ; msx_meta = Some
+            { Masc_tui_types.msx_mode = member "mode" json |> to_string
+            ; msx_cartridge = member "cartridge" json |> to_string_option
+            ; msx_disk = member "disk" json |> to_string_option
+            ; msx_players =
+                (match member "players" json with
+                 | `List items -> List.filter_map
+                     (fun it -> match member "who" it with `String w -> Some w | _ -> None) items
+                 | _ -> [])
+            }
         } in
       if frame.msx_width > 0 && frame.msx_height > 0
          && frame.msx_width <= max_int / 3 / frame.msx_height

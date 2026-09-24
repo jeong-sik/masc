@@ -977,6 +977,19 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
           ~speaker_name:"hookbot"
           ~surface:(surface "gate" [ "label", `String "ops-room" ])
           "gated"));
+  (* A webhook or gate row without the name the server always sends is
+     malformed. It draws the speaker alone rather than the kind as a name. *)
+  check string "a webhook without its source is unlabelled" "hookbot"
+    (label
+       (addressed ~speaker_name:"hookbot" ~surface:(surface "webhook" []) "?"));
+  check string "a gate without its label is unlabelled" "hookbot"
+    (label (addressed ~speaker_name:"hookbot" ~surface:(surface "gate" []) "?"));
+  check string "a webhook goes by its source" "hookbot \xc2\xb7 github"
+    (label
+       (addressed
+          ~speaker_name:"hookbot"
+          ~surface:(surface "webhook" [ "source", `String "github" ])
+          "pushed"));
   (* A kind this build was not taught draws the name alone. Inventing a badge
      for it would say something the row does not. *)
   check string "an unknown surface is unlabelled, not guessed" "someone"

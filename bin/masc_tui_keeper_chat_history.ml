@@ -352,16 +352,18 @@ let surface_of_json : Yojson.Safe.t -> Surface.t option = function
                 { channel = channel_reference_of fields })
        | Some "slack" ->
            Some (Surface.Slack { channel = channel_reference_of fields })
+       (* The server requires [source] and [label] ([Surface_ref.of_json]).
+          A row without one is malformed and is left unlabelled like an
+          unknown kind; naming it after its kind would claim the server said
+          so. *)
        | Some "webhook" ->
-           Some
-             (Surface.Webhook
-                (Option.value ~default:"webhook" (string_field fields "source")))
+           Option.map
+             (fun source -> Surface.Webhook source)
+             (string_field fields "source")
        | Some "agent" -> Some Surface.Agent
        | Some "broadcast" -> Some Surface.Broadcast
        | Some "gate" ->
-           Some
-             (Surface.Gate
-                (Option.value ~default:"gate" (string_field fields "label")))
+           Option.map (fun label -> Surface.Gate label) (string_field fields "label")
        | Some _ | None -> None)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;

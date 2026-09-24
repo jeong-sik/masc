@@ -2738,32 +2738,68 @@ let route_reference_to_string = function
     Printf.sprintf "[fusion.presets.%s].%s" preset (Fusion_policy.seat_kind_key seat)
 ;;
 
+(* How a run fails at a seat on [route] under the config [validated], or
+   [None] when the seat resolves. The same order as [resolve_assignment] and
+   [Fusion_seat.resolve]: trimmed, a declared lane before a runtime, and a
+   runtime the model catalog cannot serve -- dropped from [validated] -- is
+   [Route_unavailable] rather than [Unknown_route]. The payloads are the ones
+   a run records. *)
+let fusion_seat_failure
+    ((runtimes, _, _, _, _, lanes, _, _), _, startup_degradation, _)
+    route
+  : Fusion_types.judge_failure option
+  =
+  let id = String.trim route in
+  if Option.is_some (find_declared_lane lanes id)
+     || List.exists (fun (runtime : t) -> String.equal runtime.id id) runtimes
+  then None
+  else (
+    match
+      Option.bind startup_degradation (fun (degradation : startup_degradation) ->
+        List.find_opt
+          (fun (missing : missing_catalog_model) -> String.equal missing.runtime_id id)
+          degradation.report.missing_models)
+    with
+    | Some missing ->
+      Some (Fusion_types.Route_unavailable (missing_catalog_model_to_string missing))
+    | None -> Some (Fusion_types.Unknown_route route))
+;;
+
 (* The Fusion seats of [toml] that the config [validated] would not resolve,
-   read the way a run resolves them: trimmed, then a declared lane before a
-   runtime ([resolve_assignment]). [validated] is what a save would publish,
-   runtimes the catalog cannot serve already dropped, so this is the answer
-   the next run gets. *)
-let unresolved_fusion_seats ((runtimes, _, _, _, _, lanes, _, _), _, _, _) toml =
-  let resolves route =
-    Option.is_some (find_declared_lane lanes route)
-    || List.exists (fun (runtime : t) -> String.equal runtime.id route) runtimes
-  in
+   each with how a run would fail there. *)
+let unresolved_fusion_seats validated toml =
   Result.map
-    (List.filter (fun (_, _, route) -> not (resolves (String.trim route))))
+    (List.filter_map (fun (preset, seat, route) ->
+       Option.map
+         (fun failure -> (preset, seat, route), failure)
+         (fusion_seat_failure validated route)))
     (Fusion_config.seat_routes_of_toml toml)
 ;;
 
-(* A save must not leave a Fusion seat on a route the file no longer
-   declares: every run of that preset would fail with unknown_route. Every
-   writer meets the seats here -- the lane editor, the Fusion editor, the raw
-   endpoint -- so removing [\[runtime.lanes.<id>\]] by hand is refused the
-   same as through the lane editor.
+(* Two seats are the same seat when a run would read them the same: same
+   preset, same kind, same trimmed route. *)
+let same_seat (preset, seat, route) (preset', seat', route') =
+  String.equal preset preset'
+  && Fusion_policy.equal_seat_kind seat seat'
+  && String.equal (String.trim route) (String.trim route')
+;;
+
+(* A save must not leave a Fusion seat on a route a run cannot resolve:
+   every run of that preset would fail there, with [unknown_route] when no
+   lane or runtime has the name and [route_unavailable] when it names a
+   runtime the model catalog cannot serve. Seats are checked whether or not
+   [fusion] is enabled, as the lane writers read them. Every writer meets the
+   seats here -- the lane editor, the Fusion editor, the raw endpoint -- so
+   removing [\[runtime.lanes.<id>\]] by hand is refused the same as through
+   the lane editor.
 
    A seat that already did not resolve in the file on disk is not judged, the
    way [validate_fusion_change] leaves an unchanged [fusion] alone, so a broken
-   seat does not block an unrelated save. The file on disk is read only when
-   the new text has a seat that does not resolve; a file that cannot be read
-   or does not load counts as resolving nothing, so every such seat is judged.
+   seat does not block an unrelated save. Seats are matched by [same_seat],
+   so re-spacing a broken route is not a new break. The file on disk is read
+   only when the new text has a seat that does not resolve; a file that cannot
+   be read or does not load counts as resolving nothing, so every such seat is
+   judged.
 
    Seats that cannot be read (a value of the wrong TOML type) pass here, and
    that is not a gap: [Fusion_config.of_toml] reads every value the seat
@@ -2789,14 +2825,17 @@ let validate_fusion_seats ~config_path ~validated content =
          with
          | Ok previous_toml, Ok previous ->
            (match unresolved_fusion_seats previous previous_toml with
-            | Ok seats -> seats
+            | Ok seats -> List.map fst seats
             | Error _ -> [])
          | Error _, _ | _, Error _ -> [])
     in
     let newly =
       List.fold_left
-        (fun found seat ->
-           if List.mem seat on_disk || List.mem seat found then found else found @ [ seat ])
+        (fun found ((seat, _) as unresolved) ->
+           if List.exists (same_seat seat) on_disk
+              || List.exists (fun (seen, _) -> same_seat seat seen) found
+           then found
+           else found @ [ unresolved ])
         []
         unresolved
     in
@@ -2805,16 +2844,18 @@ let validate_fusion_seats ~config_path ~validated content =
      | _ :: _ ->
        Error
          (Printf.sprintf
-            "a Fusion seat must name a declared lane or an available runtime: %s. \
-             Every run of the preset would fail with unknown_route"
+            "every Fusion seat, whether or not [fusion] is enabled, must name a \
+             declared lane or a runtime the model catalog can serve; a run fails \
+             at %s"
             (String.concat
                ", "
                (List.map
-                  (fun (preset, seat, route) ->
+                  (fun ((preset, seat, route), failure) ->
                      Printf.sprintf
-                       "%s names %S"
+                       "%s, which names %S, with %s"
                        (route_reference_to_string (Fusion_seat { preset; seat }))
-                       route)
+                       route
+                       (Fusion_types.judge_failure_tag failure))
                   newly))))
 ;;
 

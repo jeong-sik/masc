@@ -430,7 +430,7 @@ let test_a_raw_save_is_refused_while_a_seat_names_the_removed_lane () =
       List.iter
         (fun seat ->
            check bool (label ^ " names " ^ seat) true
-             (contains detail (seat ^ " names \"fusion-judge\"")))
+             (contains detail (seat ^ ", which names \"fusion-judge\", with unknown_route")))
         [ "[fusion.presets.trio].panel"
         ; "[fusion.presets.trio].judge"
         ; "[fusion.presets.trio].judges"
@@ -458,8 +458,8 @@ let test_a_raw_save_is_refused_while_a_seat_names_the_removed_lane () =
 
 (* A seat that already did not resolve on disk -- written by hand, past every
    writer -- does not block an unrelated save, the way an unchanged broken
-   [fusion] does not. A save that adds a second unresolved seat is refused and
-   names only the new one. *)
+   [fusion] does not, and neither does re-spacing its route. A save that adds
+   a second unresolved seat is refused and names only the new one. *)
 let test_a_seat_already_broken_on_disk_does_not_block_other_saves () =
   with_config (fun path ->
     let ghost =
@@ -473,6 +473,15 @@ let test_a_seat_already_broken_on_disk_does_not_block_other_saves () =
      with
      | Ok _ -> ()
      | Error detail -> failf "a seat already broken blocked an unrelated save: %s" detail);
+    (* A run trims a seat before it resolves it, so re-spacing the broken
+       route is the same broken seat, not a new one. *)
+    (match
+       Runtime.save_config_text ~runtime_config_path:path
+         (replace_once (read path) "judge = \"ghost\"\n" "judge = \" ghost \"\n")
+     with
+     | Ok _ -> ()
+     | Error detail -> failf "re-spacing a seat already broken was refused: %s" detail);
+    check string "the re-spaced ghost is on disk" " ghost " (preset_named path "trio").judge;
     let before = read path in
     let phantom =
       replace_once before "[fusion.presets.spare]\npanel = [\"stub-http.stub-model\"]\n"
@@ -482,7 +491,8 @@ let test_a_seat_already_broken_on_disk_does_not_block_other_saves () =
      | Ok _ -> fail "a save added a seat that resolves to nothing"
      | Error detail ->
        check bool "the refusal names the new seat" true
-         (contains detail "[fusion.presets.spare].panel names \"phantom\"");
+         (contains detail
+            "[fusion.presets.spare].panel, which names \"phantom\", with unknown_route");
        check bool "the refusal leaves the seat already broken out" false
          (contains detail "ghost"));
     check string "file untouched" before (read path))

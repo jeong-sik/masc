@@ -830,10 +830,12 @@ val save_config_text :
     the same write-stage rules apply to the runtime cache while the registry
     remains unpublished.
 
-    Refused when the text leaves a Fusion preset seat naming a route that is
-    no declared lane and no available runtime in the text, unless that seat
-    already did not resolve in the file on disk: every run of the preset would
-    fail with [unknown_route]. So removing or renaming a
+    Refused when the text leaves a Fusion preset seat, enabled or not, naming
+    a route a run cannot resolve in the text, unless that seat (same preset,
+    kind and trimmed route) already did not resolve in the file on disk: every
+    run of the preset would fail there, with [unknown_route] when no lane or
+    runtime has the name and [route_unavailable] when it names a runtime the
+    model catalog cannot serve. So removing or renaming a
     [\[runtime.lanes.<id>\]] table here is refused while a seat names it, as it
     is through {!remove_runtime_lane}. *)
 

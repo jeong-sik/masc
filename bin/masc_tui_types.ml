@@ -7204,8 +7204,13 @@ let promoted_inflight_for_keeper state keeper_name =
 
 let working_chat_for_keeper state keeper_name =
   List.find_opt (fun entry ->
+    let streaming =
+      match entry.phase with
+      | Turn_streaming -> true
+      | Turn_reconciling -> false
+    in
     String.equal entry.sent_request.keeper_name keeper_name
-    && entry.phase = Turn_streaming
+    && streaming
     && Masc_tui_keeper_chat_transcript.phase entry.log.tl_transcript = Working)
     state.msg_inflight
 
@@ -11002,7 +11007,11 @@ let keeper_message_inflight_drawn (state : state) =
           (turn_log_execution_id group.representative.log)
           execution_id
       in
-      let reconciling = if entry.phase = Turn_reconciling then 1 else 0 in
+      let reconciling =
+        match entry.phase with
+        | Turn_reconciling -> 1
+        | Turn_streaming -> 0
+      in
       if List.exists same_execution groups then
         List.map
           (fun group ->

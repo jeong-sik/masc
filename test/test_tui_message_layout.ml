@@ -2683,7 +2683,12 @@ let test_compact_count_reads_at_a_glance () =
   Alcotest.(check string) "millions the same way" "1.5M"
     (Layout.compact_count 1_500_000);
   Alcotest.(check string) "and the boundary belongs to the larger unit" "1.0k"
-    (Layout.compact_count 1_000)
+    (Layout.compact_count 1_000);
+  (* The rung changes where "%.1fk" would round past it. *)
+  Alcotest.(check string) "just under the rounding" "999.9k"
+    (Layout.compact_count 999_949);
+  Alcotest.(check string) "where the rounding reaches it" "1.0M"
+    (Layout.compact_count 999_950)
 
 let () =
   run "tui_message_layout"

@@ -619,8 +619,18 @@ let count_noun ?plural count singular =
 let thousand = 1_000
 let million = 1_000_000
 
+(* The smallest step ["%.1fk"] can draw is a tenth of a thousand, so it rounds
+   to the nearest hundred and every count within half of that below a million
+   prints as "1000.0k" -- four digits where the rung holds three, and a figure
+   that reads larger than the million it has not reached. The rung changes
+   where the rounding does.
+   [Masc_tui_context_inspector.format_tokens] draws its own columns by the
+   same rule. There is no rung above M here, so M has no such boundary: past
+   a thousand million it draws more digits rather than a wrong rung. *)
+let thousand_rounding_half = thousand / 10 / 2
+
 let compact_count n =
-  if n >= million then
+  if n >= million - thousand_rounding_half then
     Printf.sprintf "%.1fM" (float_of_int n /. float_of_int million)
   else if n >= thousand then
     Printf.sprintf "%.1fk" (float_of_int n /. float_of_int thousand)

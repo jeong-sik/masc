@@ -6065,6 +6065,11 @@ type state = {
   mutable memory_facts_error: string option;
   mutable memory_facts_cursor: int;
   mutable memory_facts_scroll: int;
+  (* One selected claim's wrapped rows. The cursor and renderer ask for the
+     same layout in one frame; retaining its immutable claim avoids wrapping
+     a long CJK fact twice and again on every redraw. *)
+  mutable memory_fact_claim_wrap:
+    (string * int * string list * int) option;
   mutable memory_facts_category: memory_category_filter;
   mutable memory_facts_sort: memory_sort_order;
   mutable memory_overview_sort: memory_overview_sort;
@@ -8034,6 +8039,7 @@ let create_state
   memory_facts_error = None;
   memory_facts_cursor = 0;
   memory_facts_scroll = 0;
+  memory_fact_claim_wrap = None;
   memory_facts_category = Category_all;
   memory_facts_sort = Sort_recency;
   memory_overview_sort = Mem_overview_facts;
@@ -8961,6 +8967,7 @@ let memory_back (state : state) =
         state.memory_facts_error <- None;
         state.memory_facts_cursor <- 0;
         state.memory_facts_scroll <- 0;
+        state.memory_fact_claim_wrap <- None;
         state.memory_facts_category <- Category_all;
         Memory_stays
     | None -> Memory_leaves

@@ -337,9 +337,9 @@ let test_a_tiny_viewport_never_draws_unbudgeted_detail () =
         ~push:row ~push_styled:(fun ~style:_ _ -> incr drawn)
         ~push_selected:row ~push_divider:(fun () -> incr drawn)
         ~push_empty:(fun () -> incr drawn);
-      check bool
-        (Printf.sprintf "budget %d contains every drawn fact row" budget)
-        true (!drawn <= budget))
+      check int
+        (Printf.sprintf "budget %d is exactly filled" budget)
+        budget !drawn)
     [ 10; 11; 12 ]
 ;;
 

@@ -5224,7 +5224,9 @@ let test_config_patch_remote_endpoint_shape () =
   check_error "the empty string is not a name" [ "remote_endpoint", `String "" ];
   check_error "a non-string, non-null value is refused"
     [ "remote_endpoint", `Int 1 ];
-  check_ok "sandbox image override" ["sandbox_image", `String "example/documents:v1"];
+  check_ok "sandbox image override" ["sandbox_image", `String "documents"];
+  check_error "an image tag is not a catalog name"
+    ["sandbox_image", `String "example/documents:v1"];
   check_ok "sandbox image clear" ["sandbox_image", `Null];
   check_error "blank image" ["sandbox_image", `String " "];
   check_error "numeric image" ["sandbox_image", `Int 42]

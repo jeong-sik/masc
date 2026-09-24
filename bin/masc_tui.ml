@@ -10597,7 +10597,8 @@ let apply_keeper_usage_load state = function
 let apply_provider_history_load state (days, result) =
   if days = state.provider_history_days then
     match result with
-    | Ok history when history.puh_days = days ->
+    | Ok (history : Tui_decode.provider_usage_history)
+      when history.puh_days = days ->
         state.provider_history <- Provider_history_read history
     | Ok _ ->
         state.provider_history <- Provider_history_error

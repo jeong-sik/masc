@@ -429,7 +429,12 @@ status: reference
 **Checkpoint Load**
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
   새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고
-  새 이력을 시작하며, 첫 저장이 받아들여진 뒤 재시작을 기록한다.
+  새 이력을 시작하며, 첫 저장이 받아들여진 뒤 재시작을 기록한다. 이전 버전 체크포인트는
+  턴 실행 시 저장된 이력 없음(`Saved_history_superseded`)으로 읽히며, 초기화 도구
+  (`masc_keeper_clear`)에서도 읽기 오류로 거절하지 않고 부재한 것으로 취급해 공식
+  클라이언트 세션과 함께 정상 비운다(#38223).
+  → [Keeper_checkpoint_store](../../lib/keeper/keeper_checkpoint_store.mli),
+  [Keeper_tool_surface](../../lib/keeper/keeper_tool_surface.ml)
 
 **Prepare Error (준비 오류)**
 : Keeper turn이 모델에 파견(dispatch)되기 전, 실행 컨텍스트를 구성하는 단계(`Keeper_run_context.prepare_run_context`)에서
@@ -1091,6 +1096,27 @@ status: reference
     클라이언트 관측을 위한 wire 프로젝션에서만 유지한다.
   → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli),
   [Keeper_approval_queue](../../lib/keeper/keeper_approval_queue.mli)
+
+**Late Tool Approval (늦은 도구 승인)**
+: Human-in-the-Loop (HITL) 실시간 대기(`await`)가 만료(타임아웃, `keeper_tool_approval_timeout_sec`: 180초)된
+  뒤 뒤늦게 도착한 운영자의 답변을 보존하는 인메모리 저장소(`Keeper_late_approval`). 키퍼가 다음 턴에 동일한
+  호출을 재시도할 때 같은 질문을 두 번 묻지 않고 늦은 답변으로 1회 해결한다.
+  - **동일 호출 엄격 매칭**: `(keeper_name, tool_name, canonical_args_fingerprint)`가 정확히 일치하는
+    호출에만 매칭된다. 인자가 조금이라도 다르면 매칭되지 않고 다시 묻는다.
+  - **1회성 소비(Single-use)**: 한 번 매칭(`take`)되면 메모리에서 즉시 제거된다. 운영자는 해당 단일 호출을
+    승인한 것이지, 동일한 형태를 지닌 모든 후속 호출을 영구 승인한 것이 아니다.
+  - **유효 시간 제한(TTL, 900초)**: 실시간 대기 창(180초)을 지나 도착한 결정은 최대 900초(15분) 동안만
+    유효하며, 초과된 항목은 다음 조회 시 회수(`reap`)되어 부재(`None`) 처리된다. 인간의 결정이 영구적인
+    호출 자격 증명으로 오남용되지 않도록 안전 상한을 둔다.
+  - **인증된 행위자 기록**: HTTP 경계에서 인증된 호출자(`actor`)를 필수 인자로 받아 기록하며, 클라이언트가
+    요청 본문으로 자체 보고하는 `actor_id`는 신뢰하지 않는다(#38038·#38230).
+  - **거부 결정 대칭 보존**: 승인(`Approve`)뿐 아니라 거부(`Deny`) 결정도 동일하게 기억하여 불필요한 재질문을
+    방지한다. 키퍼가 실제로 재시도하지 않은 호출은 자동 실행되지 않으며, 유효 시간 경과 시 안전하게 폐기된다.
+  - **판정 결과 상태**: `remember_outcome`은 `Remembered of { tool_name : string }` 또는 `No_matching_ask`로
+    나뉜다.
+  - **Yolo 모드 안전 불변식**: 키퍼가 `Yolo` 스탠스로 전환된 동안에는 승인 게이트를 묻지도 소비하지도 않아
+    항목이 쌓일 수 있으나, TTL 검사 덕분에 이전 결정이 스탠스 복귀 후 임의로 발화하지 않고 만료 폐기된다.
+  → [Keeper_late_approval](../../lib/keeper/keeper_late_approval.mli)
 
 ## Task Lifecycle
 
@@ -1947,6 +1973,13 @@ status: reference
     매 검색마다 이벤트 사이드카를 읽는 부하를 막기 위해 평소에는 흡수 원장(`memory-absorbed.jsonl`)만으로
     해결하고, 체인의 끝이 non-current일 때만 사이드카(`.memory-events.jsonl`)를 읽는다. 손상된
     이벤트 줄은 `event_unreadable_lines`로 분리 보고된다(#38543·#38552).
+  - **Keeper 삭제 시 사이드카 정리 및 캐시 무효화**: Keeper를 삭제(`purge_keeper_artifacts`)할 때 이
+    사이드카 파일(`<keeper>.memory-events.jsonl`)도 함께 삭제(`Keeper_memory_events_artifact`)되고
+    캐시된 파일 쓰기 핸들러(`Fs_compat.invalidate_cached_writer`)도 무효화된다. 따라서 동일 프로세스에서
+    같은 이름으로 다시 생성된 후속 키퍼가 이전의 조회·철회·대체 이벤트를 상속하거나 삭제된 inode에 쓰기
+    내용이 유실되는 결함을 원천 방지한다(#38235).
+  → [Keeper_shutdown_types](../../lib/keeper/keeper_shutdown_types.mli),
+  [Server_dashboard_http_delete_actions](../../lib/server/server_dashboard_http_delete_actions.ml)
 
 **Library**
 : `masc_library_add`로 수동 추가한 Markdown 문서를 읽는 지식 라이브러리.

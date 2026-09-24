@@ -554,13 +554,14 @@ let test_discord_surface_read_rest_failure_causes () =
   List.iter
     (fun (label, error, code, class_) -> check_failure label error code class_)
     [ "network", Rest.Network "dns", "external_service_unavailable", "dependency_unavailable"
+    ; "HTTP invalid form", http 400, "validation_error", "policy_rejection"
     ; "HTTP auth", http 401, "auth_required", "policy_rejection"
     ; "API permission", api 403, "permission_denied", "policy_rejection"
     ; "HTTP missing", http 404, "not_found", "policy_rejection"
+    ; "API conflict", api 409, "conflict", "workflow_rejection"
     ; "API rate limit", api 429, "rate_limited", "dependency_unavailable"
     ; "HTTP gateway timeout", http 504, "timeout", "dependency_unavailable"
     ; "API outage", api 503, "external_service_unavailable", "dependency_unavailable"
-    ; "HTTP unexplained bad request", http 400, "internal_error", "runtime_failure"
     ; ( "unusable response"
       , Rest.Other { request_id = "test"; reason = "body"; body_bytes = 0 }
       , "internal_error"

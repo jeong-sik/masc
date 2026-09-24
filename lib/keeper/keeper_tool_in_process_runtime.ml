@@ -609,9 +609,11 @@ let discord_rest_error (error : Discord_rest_client.error) =
     | Http_status { code = status; _ }
     | Discord_api { http_status = status; _ } ->
       (match status with
+       | 400 -> Tool_args.Validation_error
        | 401 -> Tool_args.Auth_required
        | 403 -> Tool_args.Permission_denied
        | 404 -> Tool_args.Not_found
+       | 409 -> Tool_args.Conflict
        | 408 | 504 -> Tool_args.Timeout
        | 429 -> Tool_args.Rate_limited
        | status when status >= 500 && status <= 599 ->

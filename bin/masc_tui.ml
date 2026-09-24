@@ -20366,7 +20366,7 @@ and is loaded on demand through keeper_skill.
               && Option.is_none state.runtime_detail_target
               && Option.is_none state.runtime_lane_pick ->
            (* [\[runtime\].media_failover]: the vision runtimes, in the order they
-              is called. Opened in the same editor an exact lane's slots use --
+              are called. Opened in the same editor an exact lane's slots use --
               both are an ordered list of runtime ids, and neither is a lane. *)
            (match state.slot_editor with
             | Some { se_target = Masc_tui_types.Media_failover_slots; _ } ->

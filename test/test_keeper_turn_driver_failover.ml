@@ -5028,6 +5028,37 @@ let test_exhausted_access_errors_rotate_and_deterministic_requests_remain_termin
     | Ok _ -> Alcotest.fail "exhausted lane unexpectedly succeeded") cases
 ;;
 
+
+(* The pipeline answers a request it refused to send with [Attempt_rejected].
+   No provider saw it, so the walk must not name this runtime as the one that
+   ran; every provider answer, success or failure, stays dispatched. *)
+let test_a_pipeline_refusal_is_not_a_dispatched_attempt () =
+  let dispatch = Driver.For_testing.provider_attempt_dispatch in
+  let pipeline_refusal =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message = "output reservation unknown"
+         ; reason = Llm_provider.Retry.Attempt_rejected
+         })
+  in
+  let provider_refusal =
+    Agent_core.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message = "bad parameter"
+         ; reason = Llm_provider.Retry.Unknown_invalid_request
+         })
+  in
+  Alcotest.check dispatch_disposition "the pipeline's own refusal"
+    Masc.Keeper_attempt_dispatch.Rejected_before_dispatch
+    (dispatch (Error pipeline_refusal));
+  Alcotest.check dispatch_disposition "a provider's refusal"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch (Error provider_refusal));
+  Alcotest.check dispatch_disposition "a network failure after sending"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (dispatch (Error (retryable_network_error "reset")))
+;;
+
 let () =
   Alcotest.run
     "keeper_turn_driver_failover"
@@ -5396,5 +5427,9 @@ let () =
             "initial lane exhaustion cannot escape declared candidates"
             `Quick
             test_initial_lane_exhaustion_cannot_escape_declared_candidates;
+          Alcotest.test_case
+            "a pipeline refusal is not a dispatched attempt"
+            `Quick
+            test_a_pipeline_refusal_is_not_a_dispatched_attempt;
         ] );
     ]

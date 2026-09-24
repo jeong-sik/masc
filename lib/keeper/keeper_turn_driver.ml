@@ -1444,6 +1444,18 @@ let official_client_dispatch ~provider_config_transform =
   | Some _ -> Keeper_attempt_dispatch.Rejected_before_dispatch
   | None -> Keeper_attempt_dispatch.Dispatched
 
+(* The agent_core pipeline answers a request it refused to send with
+   [Attempt_rejected] (a missing output ceiling, an invalid prepared request):
+   no provider saw it, so the attempt is not attributed to this runtime. Any
+   other outcome came back from the provider. *)
+let provider_attempt_dispatch = function
+  | Error
+      (Agent_core.Error.Api
+         (Llm_provider.Retry.InvalidRequest
+            { reason = Llm_provider.Retry.Attempt_rejected; _ })) ->
+    Keeper_attempt_dispatch.Rejected_before_dispatch
+  | Ok _ | Error _ -> Keeper_attempt_dispatch.Dispatched
+
 let run_named
     ?(input_policy = Keeper_input_policy.default)
     ~runtime_id
@@ -2726,7 +2738,7 @@ let run_named
           ( selected_runtime_result runtime ~lane_attempt_index:idx outcomes.turn_result
           , outcomes.checkpoint_after
           , Keeper_provider_attempt_effect.No_effect_observed
-          , Keeper_attempt_dispatch.Dispatched ))))
+          , provider_attempt_dispatch outcomes.turn_result ))))
        )))
     attempt_candidates
 
@@ -2761,6 +2773,7 @@ module For_testing = struct
     resolve_runtime_candidate_for_attempt
 
   let selected_runtime_result = selected_runtime_result
+  let provider_attempt_dispatch = provider_attempt_dispatch
   let apply_official_client_accept = apply_official_client_accept
 
 	  let media_degrade_manifest_decision = media_degrade_manifest_decision

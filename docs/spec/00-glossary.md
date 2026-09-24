@@ -388,6 +388,11 @@ status: reference
   후보로 넘어가는지)가 같은 답을 해야 한다(#38045). `retry_after` 힌트도 한 규칙으로 읽는다 —
   `usable_retry_after`가 없거나 0·음수·무한·NaN인 힌트는 "대기 시간을 말하지 않음"으로 답하고,
   후보 backpressure·경로 휴식·quota 재개·드라이버가 모두 이 한 규칙에서 답한다(#38065).
+  `Retry_after_observed`의 retry class 중 공급자 자체 과부하(HTTP 529, CapacityExhausted 풀)는
+  MASC 자체의 슬롯 대기가 아니라 시도한 런타임 후보의 실패(Server_error와 같은 층위)로 분류되며,
+  클래스 라벨은 `provider_capacity`다(#38290). 이 실패는 다음 런타임 후보로 walk하며 해당 후보는 503처럼
+  강등된다. 과거 MASC 내부 오류 엔벨로프·terminal reason·receipt reason으로 남아 있던 `capacity_backpressure`는
+  생성 주체가 없어 완전히 제거되었다(#38369).
   `Exact-output route`·`Fusion Route`
   (실행 경로 이름)와 이름이 겹치지만 다른 축이다.
   → [keeper_runtime_failure_route](../../lib/keeper_runtime/keeper_runtime_failure_route.mli)
@@ -537,7 +542,11 @@ status: reference
   공식 클라이언트가 turn을 도는 경로는 **Official Client Lane**이다.
   `Keeper_memory_lane`은 Keeper 하나의 Librarian 작업을 줄 세우는 **Memory queue**다.
   `Keeper_lane.t`는 Keeper 하나가 turn을 도는 fiber다. 넷 다 이름만 같고 이 항목의
-  Lane과는 다른 개념이다. Memory queue에서 기다리던 일은 나중에 `Librarian` lane에서 돈다.
+  Lane과는 다른 개념이다. Keeper 레인은 turn이나 request보다 오래 살아야 하는 서버
+  소유(server-owned) 자원으로, 호출자의 switch가 아니라 서버 root switch에만 매달린다
+  (`fork_server_owned`). 서버 root switch가 없거나 종료 중일 때는 turn switch로
+  fallback하지 않고 typed 시작 오류 `Server_root_switch_unavailable`로 거절된다(#38426).
+  Memory queue에서 기다리던 일은 나중에 `Librarian` lane에서 돈다.
   → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
 
 **Runtime Candidate Order (런타임 후보 순서)**

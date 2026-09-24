@@ -4892,8 +4892,9 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
              | None -> (Ansi.dim, dash))
          | Masc_tui_keeper_mark.No_turn_recorded -> (Ansi.dim, dash)
        in
-       Printf.sprintf " %s%*s%s" turn_color
-         Render_schedule.keeper_last_turn_width turn_age Ansi.reset)
+       Printf.sprintf " %s%s%s" turn_color
+         (Message_layout.pad_left turn_age Render_schedule.keeper_last_turn_width)
+         Ansi.reset)
     ; (if columns.kcol_show_runtime then
          " " ^ (Theme.recede ())
          ^ keeper_runtime_cell ~width:columns.kcol_runtime runtime

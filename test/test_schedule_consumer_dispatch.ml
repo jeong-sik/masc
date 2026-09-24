@@ -1768,6 +1768,19 @@ let test_consumed_occurrence_retry_does_not_enqueue_again () =
   ack_of_selection
     (pending_selection_exn ~base_path ~keeper_name)
     "displacing-ack";
+  let receipt_path =
+    Keeper_reaction_ledger.For_testing.schedule_occurrence_receipt_path
+      ~base_path ~keeper_name ~occurrence_id
+  in
+  (match
+     Keeper_reaction_ledger.schedule_occurrence_receipt_result
+       ~base_path ~keeper_name ~occurrence_id
+   with
+   | Ok (Some receipt) ->
+     check string "the retired receipt names the consumed occurrence"
+       occurrence_id receipt.post_id
+   | Ok None -> fail "the retired occurrence has no exact-id receipt"
+   | Error detail -> fail detail);
   let retried = tick_ok config ~now:203.0 in
   (match List.hd retried.dispatches with
    | { status = Schedule_runner.Dispatch_succeeded; _ } -> ()
@@ -1790,6 +1803,25 @@ let test_consumed_occurrence_retry_does_not_enqueue_again () =
      fail
        (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
           error));
+  (* A new occurrence must not rescan the ledger. The exact-id receipt still
+     answers after the ledger path becomes unreadable; a damaged receipt then
+     fails closed rather than reporting an unconsumed occurrence. *)
+  Sys.rename ledger_dir (ledger_dir ^ "-held");
+  write_empty_file ledger_dir;
+  (match
+     Server_schedule_consumers.resolve_keeper_wake_occurrence
+       ~base_path ~keeper_name ~stimulus_id:occurrence_id
+   with
+   | Ok (Server_schedule_consumers.Terminal_completed_at _) -> ()
+   | Ok _ -> fail "the exact-id receipt did not preserve the completed turn"
+   | Error detail -> fail detail);
+  write_file receipt_path "{";
+  (match
+     Server_schedule_consumers.resolve_keeper_wake_occurrence
+       ~base_path ~keeper_name ~stimulus_id:occurrence_id
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "a malformed exact-id receipt must not become absence");
   ignore request
 ;;
 
@@ -2048,31 +2080,15 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
           { detail; _ }) ->
      fail detail
    | Error detail -> fail detail);
-  (* #38527: the older terminal's compact witness no longer stays in the
-     queue's list -- the ledger row the projection wrote answers for it,
-     with the terminal kind and the source it acknowledged. *)
+  (* The older terminal left the queue list, but its exact-id compact witness
+     still answers without scanning every row of the reaction ledger. *)
   (match
-     Keeper_reaction_ledger.event_queue_reaction_evidence_result
-       ~base_path
-       ~keeper_name
-       ~stimulus_id
+     Keeper_reaction_ledger.schedule_occurrence_receipt_result
+       ~base_path ~keeper_name ~occurrence_id:stimulus_id
    with
-   | Ok
-       (Keeper_reaction_ledger.Evidence_complete
-          { event_queue_ack_terminal =
-              Some
-                (Keeper_reaction_ledger.Ack_turn_attempt_terminal
-                   "terminal before schedule retry")
-          ; _
-          }) -> ()
-   | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
-     fail "older schedule terminal did not reach the ledger"
-   | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
-     fail "older schedule terminal evidence was quarantined"
-   | Error error ->
-     fail
-       (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
-          error));
+   | Ok (Some { kind = Keeper_event_queue_state.Projected_turn_attempt_terminal; _ }) -> ()
+   | Ok (Some _) | Ok None -> fail "older terminal did not leave an exact-id witness"
+   | Error detail -> fail detail);
   let conflicting_wake, conflicting_stimulus =
     match original_stimulus.payload with
     | Keeper_event_queue.Schedule_due wake ->

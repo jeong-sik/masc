@@ -417,9 +417,8 @@ let project_accepted_transfer (transfer : accepted_transfer) state =
        Error "target transfer source identity is duplicated in durable state")
 ;;
 
-(* schema-compat: the removed [| Some receipt ->] line became a guarded
-   [Some] match. No persistence constructor, JSON field, or decoder changed;
-   existing projected_dispositions rows still decode with the same schema. *)
+(* schema-compat: projected_dispositions rows keep the same constructors and
+   JSON fields; only which prior receipts enter the list changed. *)
 let mark_transition_projected ~transition_id ~retain_previous state =
   match state.transition_outbox with
   | [ entry ] when String.equal entry.receipt.transition_id transition_id ->

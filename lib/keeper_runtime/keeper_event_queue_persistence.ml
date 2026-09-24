@@ -1401,7 +1401,7 @@ let project_transition_outbox_result
       match State.transition_outbox state with
       | [] -> Ok ()
       | [ entry ] ->
-        let* () = append_before_retire entry in
+        let* () = append_before_retire state entry in
         let* projected =
           mark_transition_projected_result
             state

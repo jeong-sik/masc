@@ -160,6 +160,110 @@ let store_for_base_path ~base_path ~keeper_name =
     ()
 ;;
 
+(* An occurrence whose queue witness was retired needs an exact, bounded
+   lookup. A new occurrence must not register itself in the dashboard's
+   per-identity ledger cache and rescan the whole append-only ledger. The
+   owner lock serializes writes; the hash is only a safe file name, while the
+   decoded receipt still has to name the requested occurrence. *)
+let schedule_occurrence_receipt_path ~base_path ~keeper_name ~occurrence_id =
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
+  let owner_dir =
+    Filename.concat
+      (Filename.concat masc_root Common.keepers_runtime_dirname)
+      keeper_name
+  in
+  let digest =
+    Digestif.SHA256.(digest_string occurrence_id |> to_hex)
+  in
+  Filename.concat
+    (Filename.concat owner_dir "consumed-schedule-occurrences-v1")
+    ("occurrence-" ^ digest ^ ".json")
+;;
+
+let schedule_occurrence_receipt_result ~base_path ~keeper_name ~occurrence_id =
+  let path =
+    schedule_occurrence_receipt_path ~base_path ~keeper_name ~occurrence_id
+  in
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
+  match Fs_compat.load_owned_regular_file ~ownership_root:masc_root path with
+  | Error error ->
+    Error
+      (Printf.sprintf "schedule occurrence receipt unreadable at %s: %s"
+         path (Fs_compat.owned_regular_file_read_error_to_string error))
+  | Ok None -> Ok None
+  | Ok (Some text) ->
+    let parsed =
+      try Ok (Yojson.Safe.from_string text) with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    (match parsed with
+     | Error detail -> Error (Printf.sprintf "schedule occurrence receipt malformed at %s: %s" path detail)
+     | Ok json ->
+       (match Keeper_event_queue_state.durable_disposition_of_yojson json with
+        | Error detail -> Error (Printf.sprintf "schedule occurrence receipt invalid at %s: %s" path detail)
+        | Ok (Keeper_event_queue_state.Projected_witness witness)
+          when String.equal witness.post_id occurrence_id
+               && witness.source_kind = Keeper_event_queue_state.Source_schedule_due ->
+          Ok (Some witness)
+        | Ok (Keeper_event_queue_state.Projected_witness _
+             | Keeper_event_queue_state.Current_receipt _) ->
+          Error (Printf.sprintf "schedule occurrence receipt identity mismatch at %s" path)))
+;;
+
+let save_schedule_occurrence_receipt ~base_path ~keeper_name
+      (receipt : Keeper_event_queue_state.transition_receipt) =
+  let source = Keeper_event_queue_state.transition_source receipt.Keeper_event_queue_state.transition in
+  match source.Keeper_event_queue.payload with
+  | Keeper_event_queue.Schedule_due _ ->
+    let occurrence_id = source.post_id in
+    let path = schedule_occurrence_receipt_path ~base_path ~keeper_name ~occurrence_id in
+    let ( let* ) = Result.bind in
+    let* previous =
+      schedule_occurrence_receipt_result ~base_path ~keeper_name ~occurrence_id
+    in
+    let compact = Keeper_event_queue_state.durable_of_projected_receipt receipt in
+    (match previous with
+     | Some previous ->
+       (match compact with
+        | Keeper_event_queue_state.Projected_witness witness when previous = witness -> Ok ()
+        | Keeper_event_queue_state.Projected_witness _
+        | Keeper_event_queue_state.Current_receipt _ ->
+          Error (Printf.sprintf "schedule occurrence receipt conflicts at %s" path))
+     | None ->
+       let* () =
+         try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> Error (Printf.sprintf "schedule occurrence receipt directory failed at %s: %s" path (Printexc.to_string exn))
+       in
+       let text =
+         Keeper_event_queue_state.durable_disposition_to_yojson compact
+         |> Yojson.Safe.to_string
+       in
+       (match Fs_compat.save_file_atomic_strict_staged path text with
+        | Ok () -> Ok ()
+        | Error error ->
+          let detail = Fs_compat.atomic_replace_failure_to_string error in
+          (match error.stage with
+           | Fs_compat.Before_rename ->
+             Error (Printf.sprintf "schedule occurrence receipt write failed at %s: %s" path detail)
+           | Fs_compat.After_rename ->
+             Error (Printf.sprintf "schedule occurrence receipt may be written at %s; inspect before retry: %s" path detail))))
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Ask_answered _
+  | Keeper_event_queue.Completion_authority_rejected _
+  | Keeper_event_queue.Task_outcome _
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _
+  | Keeper_event_queue.Delegate_completed _
+  | Keeper_event_queue.Composition_completed _ -> Ok ()
+;;
+
 let base_fields ~record_kind ~event_id ~keeper_name ~recorded_at =
   [ "schema", `String schema
   ; "record_kind", `String record_kind
@@ -492,6 +596,7 @@ let project_event_queue_transition_outbox_result
                        ~base_path
                        ~keeper_name)
     ~append_before_retire:(fun
+        (state : Keeper_event_queue_state.t)
         (entry : Keeper_event_queue_state.outbox_entry)
       ->
       let* () =
@@ -543,13 +648,25 @@ let project_event_queue_transition_outbox_result
                     (Printexc.to_string exn)))
         in
         let* () = append_sources 0 stimuli in
-        (match Atomic.get after_ledger_append_hook with
-         | None -> Ok ()
-         | Some hook -> hook ()))
+        let* () =
+          match Atomic.get after_ledger_append_hook with
+          | None -> Ok ()
+          | Some hook -> hook ()
+        in
+        (* The prior receipt is about to leave [last_transition]. Its ledger
+           append already succeeded in an earlier projection; commit a small
+           exact-id receipt before this owner snapshot can forget it. A
+           failed write keeps the outbox, so replay can finish this step. *)
+        match Keeper_event_queue_state.last_transition state with
+        | None -> Ok ()
+        | Some previous ->
+          save_schedule_occurrence_receipt ~base_path ~keeper_name previous)
     ~base_path
     ~keeper_name
 
 module For_testing = struct
+  let schedule_occurrence_receipt_path = schedule_occurrence_receipt_path
+
   let with_after_ledger_append ~after_ledger_append f =
     Stdlib.Mutex.lock after_ledger_append_hook_mutex;
     let previous =
@@ -985,15 +1102,6 @@ let decode_current_row ~keeper_name row =
   | _ -> Error Unknown_record_kind
 ;;
 
-(* #38527: what an ACK row's transition receipt acknowledged -- the fact a
-   re-presented occurrence is answered with. Set from the first ACK row for
-   the identity; [None] until one is seen. *)
-type event_queue_ack_terminal =
-  | Ack_turn_completed
-  | Ack_turn_attempt_terminal of string
-  | Ack_fusion_terminal
-  | Ack_hitl_terminal
-
 type event_queue_reaction_evidence =
   { keeper_name : string
   ; stimulus_id : string
@@ -1001,14 +1109,7 @@ type event_queue_reaction_evidence =
   ; turn_started_seen : bool
   ; turn_finished_seen : bool
   ; event_queue_ack_seen : bool
-  ; event_queue_ack_terminal : event_queue_ack_terminal option
-  ; event_queue_ack_source_ref : string option
-  ; event_queue_ack_source_arrived_at : float option
-  ; event_queue_ack_source_urgency : Keeper_event_queue.urgency option
   ; event_queue_cancelled_seen : bool
-  ; event_queue_cancelled_source_ref : string option
-  ; event_queue_cancelled_source_arrived_at : float option
-  ; event_queue_cancelled_source_urgency : Keeper_event_queue.urgency option
   ; stimulus_recorded_at : float option
   ; turn_started_recorded_at : float option
   ; turn_finished_recorded_at : float option
@@ -1048,14 +1149,7 @@ type event_queue_reaction_evidence_accumulator =
   ; mutable turn_started_seen : bool
   ; mutable turn_finished_seen : bool
   ; mutable event_queue_ack_seen : bool
-  ; mutable event_queue_ack_terminal : event_queue_ack_terminal option
-  ; mutable event_queue_ack_source_ref : string option
-  ; mutable event_queue_ack_source_arrived_at : float option
-  ; mutable event_queue_ack_source_urgency : Keeper_event_queue.urgency option
   ; mutable event_queue_cancelled_seen : bool
-  ; mutable event_queue_cancelled_source_ref : string option
-  ; mutable event_queue_cancelled_source_arrived_at : float option
-  ; mutable event_queue_cancelled_source_urgency : Keeper_event_queue.urgency option
   ; mutable stimulus_recorded_at : float option
   ; mutable turn_started_recorded_at : float option
   ; mutable turn_finished_recorded_at : float option
@@ -1073,14 +1167,7 @@ let empty_event_queue_reaction_evidence_accumulator () =
   ; turn_started_seen = false
   ; turn_finished_seen = false
   ; event_queue_ack_seen = false
-  ; event_queue_ack_terminal = None
-  ; event_queue_ack_source_ref = None
-  ; event_queue_ack_source_arrived_at = None
-  ; event_queue_ack_source_urgency = None
   ; event_queue_cancelled_seen = false
-  ; event_queue_cancelled_source_ref = None
-  ; event_queue_cancelled_source_arrived_at = None
-  ; event_queue_cancelled_source_urgency = None
   ; stimulus_recorded_at = None
   ; turn_started_recorded_at = None
   ; turn_finished_recorded_at = None
@@ -1138,78 +1225,10 @@ let note_event_queue_reaction_evidence_row ~keeper_name accumulator row =
          accumulator.turn_finished_seen <- true;
          accumulator.turn_finished_recorded_at
            <- max_recorded_at accumulator.turn_finished_recorded_at recorded_at
-       | Current_reaction
-           { reaction_kind = Event_queue_ack
-           ; transition_receipt = Some receipt
-           ; _
-           } ->
-         accumulator.event_queue_ack_seen <- true;
-         accumulator.event_queue_ack_recorded_at
-           <- max_recorded_at accumulator.event_queue_ack_recorded_at recorded_at;
-         (match accumulator.event_queue_ack_terminal with
-          | Some _ -> () (* the first ACK row names the original terminal *)
-          | None ->
-            accumulator.event_queue_ack_terminal
-            <- (match receipt.transition with
-                | Ack_source_terminal { source_receipt; _ } ->
-                  Some
-                    (match source_receipt with
-                     | Turn_completed -> Ack_turn_completed
-                     | Turn_attempt_terminal { detail } ->
-                       Ack_turn_attempt_terminal detail
-                     | Fusion_terminal _ -> Ack_fusion_terminal
-                     | Hitl_terminal _ -> Ack_hitl_terminal)
-                | Cancel_accepted _ | Transfer_accepted _ -> None);
-            accumulator.event_queue_ack_source_ref
-            <- (match receipt.transition with
-                | Ack_source_terminal _ ->
-                  Some
-                    (Keeper_event_queue_state.source_snapshot_ref
-                       (Keeper_event_queue_state.transition_source
-                          receipt.transition))
-                | Cancel_accepted _ | Transfer_accepted _ -> None);
-            accumulator.event_queue_ack_source_arrived_at
-            <- (match receipt.transition with
-                | Ack_source_terminal _ ->
-                  Some
-                    (Keeper_event_queue_state.transition_source
-                       receipt.transition)
-                       .Keeper_event_queue.arrived_at
-                | Cancel_accepted _ | Transfer_accepted _ -> None);
-            accumulator.event_queue_ack_source_urgency
-            <- (match receipt.transition with
-                | Ack_source_terminal _ ->
-                  Some
-                    (Keeper_event_queue_state.transition_source
-                       receipt.transition)
-                       .Keeper_event_queue.urgency
-                | Cancel_accepted _ | Transfer_accepted _ -> None))
        | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
          accumulator.event_queue_ack_seen <- true;
          accumulator.event_queue_ack_recorded_at
            <- max_recorded_at accumulator.event_queue_ack_recorded_at recorded_at
-       | Current_reaction
-           { reaction_kind = Event_queue_cancelled
-           ; transition_receipt = Some receipt
-           ; _
-           } ->
-         accumulator.event_queue_cancelled_seen <- true;
-         accumulator.event_queue_cancelled_recorded_at
-           <- max_recorded_at
-                accumulator.event_queue_cancelled_recorded_at
-                recorded_at;
-         (match accumulator.event_queue_cancelled_source_ref with
-          | Some _ -> () (* the first cancellation row names the source *)
-          | None ->
-            (match receipt.transition with
-             | Cancel_accepted { source; _ } ->
-               accumulator.event_queue_cancelled_source_ref
-               <- Some (Keeper_event_queue_state.source_snapshot_ref source);
-               accumulator.event_queue_cancelled_source_arrived_at
-               <- Some source.Keeper_event_queue.arrived_at;
-               accumulator.event_queue_cancelled_source_urgency
-               <- Some source.Keeper_event_queue.urgency
-             | _ -> ()))
        | Current_reaction { reaction_kind = Event_queue_cancelled; _ } ->
          accumulator.event_queue_cancelled_seen <- true;
          accumulator.event_queue_cancelled_recorded_at
@@ -1230,18 +1249,7 @@ let event_queue_reaction_evidence_of_accumulator
     ; turn_started_seen = accumulator.turn_started_seen
     ; turn_finished_seen = accumulator.turn_finished_seen
     ; event_queue_ack_seen = accumulator.event_queue_ack_seen
-    ; event_queue_ack_terminal = accumulator.event_queue_ack_terminal
-    ; event_queue_ack_source_ref = accumulator.event_queue_ack_source_ref
-    ; event_queue_ack_source_arrived_at =
-        accumulator.event_queue_ack_source_arrived_at
-    ; event_queue_ack_source_urgency = accumulator.event_queue_ack_source_urgency
     ; event_queue_cancelled_seen = accumulator.event_queue_cancelled_seen
-    ; event_queue_cancelled_source_ref =
-        accumulator.event_queue_cancelled_source_ref
-    ; event_queue_cancelled_source_arrived_at =
-        accumulator.event_queue_cancelled_source_arrived_at
-    ; event_queue_cancelled_source_urgency =
-        accumulator.event_queue_cancelled_source_urgency
     ; stimulus_recorded_at = accumulator.stimulus_recorded_at
     ; turn_started_recorded_at = accumulator.turn_started_recorded_at
     ; turn_finished_recorded_at = accumulator.turn_finished_recorded_at

@@ -116,12 +116,15 @@ val project_event_queue_transition_outbox_result :
     remain explicit [Error]. Retries are logically idempotent through
     deterministic per-source event ids. *)
 
-type event_queue_ack_terminal =
-  | Ack_turn_completed
-  | Ack_turn_attempt_terminal of string
-      (** The turn failed; the string is the attempt's own detail. *)
-  | Ack_fusion_terminal
-  | Ack_hitl_terminal
+val schedule_occurrence_receipt_result :
+  base_path:string ->
+  keeper_name:string ->
+  occurrence_id:string ->
+  (Keeper_event_queue_state.projected_disposition_witness option, string) result
+(** Read the exact durable receipt for a consumed scheduled occurrence after
+    its queue witness has been retired. [None] means the file is absent;
+    unreadable, malformed, and mismatched receipts are errors. The lookup
+    reads only the occurrence's hashed file, not the append-only ledger. *)
 
 type event_queue_reaction_evidence =
   { keeper_name : string
@@ -130,31 +133,7 @@ type event_queue_reaction_evidence =
   ; turn_started_seen : bool
   ; turn_finished_seen : bool
   ; event_queue_ack_seen : bool
-  ; event_queue_ack_terminal : event_queue_ack_terminal option
-      (** What the first ACK row's transition receipt acknowledged (#38527).
-          [None] until an ACK row exists. The queue's projected-dispositions
-          list no longer remembers consumed occurrences, so this is the fact
-          a re-presented occurrence's disposition is answered from. *)
-  ; event_queue_ack_source_ref : string option
-      (** The source snapshot digest that first ACK row acknowledged, the same
-          digest {!Keeper_event_queue_state.source_snapshot_ref} computes. A
-          re-presented occurrence whose digest differs is not the occurrence
-          the terminal answered and must be refused, not answered. *)
-  ; event_queue_ack_source_arrived_at : float option
-      (** The arrival time of the source that digest was taken over. A digest
-          comparison must substitute this into the re-presented source, the
-          way the queue's compact-source check did, or every retry with a
-          fresh arrival time reads as a conflict. *)
-  ; event_queue_ack_source_urgency : Keeper_event_queue.urgency option
-      (** The urgency of that same source, for rebuilding the compact source
-          the queue's exact-source check compares. *)
   ; event_queue_cancelled_seen : bool
-  ; event_queue_cancelled_source_ref : string option
-  ; event_queue_cancelled_source_arrived_at : float option
-  ; event_queue_cancelled_source_urgency : Keeper_event_queue.urgency option
-      (** The first cancellation row's acknowledged source, in the same shape
-          as the ACK fields above (#38527: a cancelled occurrence is answered
-          from the ledger, with the source its cancellation receipt named). *)
   ; stimulus_recorded_at : float option
   ; turn_started_recorded_at : float option
   ; turn_finished_recorded_at : float option
@@ -267,6 +246,9 @@ val unavailable_fleet_summary_json : unit -> Yojson.Safe.t
     Kept here so schema and field ownership remain single-source. *)
 
 module For_testing : sig
+  val schedule_occurrence_receipt_path :
+    base_path:string -> keeper_name:string -> occurrence_id:string -> string
+
   val with_after_ledger_append :
     after_ledger_append:(unit -> (unit, string) result) ->
     (unit -> 'a) ->

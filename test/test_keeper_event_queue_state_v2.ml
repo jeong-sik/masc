@@ -1371,7 +1371,7 @@ let test_durable_turn_attempt_terminal_restart () =
        Alcotest.fail
          "restart did not retain exactly one source-bearing failed turn receipt");
     Persistence.project_transition_outbox_result
-      ~append_before_retire:(fun _ -> Ok ())
+      ~append_before_retire:(fun _ _ -> Ok ())
       ~retain_previous:(fun _ -> true)
       ~base_path
       ~keeper_name

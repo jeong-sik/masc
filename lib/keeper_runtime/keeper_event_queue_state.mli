@@ -109,6 +109,12 @@ type durable_disposition =
   | Current_receipt of transition_receipt
   | Projected_witness of projected_disposition_witness
 
+val durable_of_projected_receipt : transition_receipt -> durable_disposition
+val durable_disposition_to_yojson : durable_disposition -> Yojson.Safe.t
+val durable_disposition_of_yojson : Yojson.Safe.t -> (durable_disposition, string) result
+(** The existing compact witness wire shape, also used by the exact-id
+    receipt when a consumed scheduled occurrence leaves the queue snapshot. *)
+
 type outbox_entry =
   { receipt : transition_receipt
   ; stimuli : Keeper_event_queue.stimulus list

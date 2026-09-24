@@ -50,11 +50,18 @@ REMOTE = "/opt/masc-bench"
 # remains is counting the tool-call store and the trace dumps.
 RESULT_RECOVERY_TIMEOUT_SEC = 600
 
-# The episode's tool-call ledger: every call's input and output, in order.
-# result.json keeps only counts, and the container is removed with the trial,
-# so without a copy a failed episode cannot say what the keeper read, changed
-# or ran. Same store collect_result.sh counts ($MASC_BASE_PATH/.masc/tool_calls).
-TOOL_CALL_LEDGER = f"{REMOTE}/base/.masc/tool_calls"
+# What the episode leaves in the container that result.json only counts: the
+# tool-call ledger (every call's input and output, in order) and the
+# agent-core trace dumps (the conversation, the keeper's replies included;
+# result.json's `final` names one only by outcome_ref). The container is
+# removed with the trial, so without a copy a failed episode cannot say what
+# the keeper read, changed or ran, or what it said when it stopped. These are
+# the stores collect_result.sh counts under $MASC_BASE_PATH/.masc. Each is
+# copied to agent/masc/<name>/.
+EPISODE_RECORDS = (
+    ("tool_calls", f"{REMOTE}/base/.masc/tool_calls"),
+    ("traces", f"{REMOTE}/base/.masc/traces"),
+)
 
 
 def _runtime_id_of_model(model: str) -> str:
@@ -222,17 +229,21 @@ class MascAgent(BaseInstalledAgent):
                 self.populate_context_post_run(context)
             except Exception:  # noqa: BLE001 - see above
                 self.logger.exception("recovering the episode result failed")
-            try:
-                await asyncio.wait_for(self._keep_tool_call_ledger(environment),
-                                       RESULT_RECOVERY_TIMEOUT_SEC)
-            except Exception:  # noqa: BLE001 - see above
-                self.logger.exception("copying the tool-call ledger failed")
+            # One try per record, so a record that cannot be copied does not
+            # take the other with it.
+            for name, remote in EPISODE_RECORDS:
+                try:
+                    await asyncio.wait_for(
+                        self._keep_episode_record(environment, name, remote),
+                        RESULT_RECOVERY_TIMEOUT_SEC)
+                except Exception:  # noqa: BLE001 - see above
+                    self.logger.exception("copying the episode's %s failed", name)
 
-    async def _keep_tool_call_ledger(self, environment: BaseEnvironment) -> None:
-        """Copy the ledger into the trial's agent logs; no ledger, no copy."""
-        if await environment.is_dir(TOOL_CALL_LEDGER):
-            await environment.download_dir(
-                TOOL_CALL_LEDGER, Path(self.logs_dir) / "masc" / "tool_calls")
+    async def _keep_episode_record(self, environment: BaseEnvironment,
+                                   name: str, remote: str) -> None:
+        """Copy one record into the trial's agent logs; none written, none copied."""
+        if await environment.is_dir(remote):
+            await environment.download_dir(remote, Path(self.logs_dir) / "masc" / name)
 
     def _cost_usd(self, usage) -> float | None:
         """What this episode cost, from the four token counts and litellm.

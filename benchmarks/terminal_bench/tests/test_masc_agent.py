@@ -306,7 +306,9 @@ def test_run_populates_context(tmp_path):
 
 
 LEDGER = "/opt/masc-bench/base/.masc/tool_calls"
+TRACES = "/opt/masc-bench/base/.masc/traces"
 LEDGER_ROW = '{"record_kind":"tool_call","tool":"Read","input":{"path":"/app/a.py"}}\n'
+TRACE = '{"session_id":"s1","messages":[{"role":"assistant","content":"done"}]}'
 
 
 def run_in(tmp_path, env):
@@ -318,18 +320,25 @@ def run_in(tmp_path, env):
     return logs, ctx
 
 
-def test_run_keeps_the_tool_call_ledger(tmp_path):
-    remote = tmp_path / "remote-ledger"
-    (remote / "2026-09").mkdir(parents=True)
-    (remote / "2026-09" / "24.jsonl").write_text(LEDGER_ROW)
+def remote_records(tmp_path):
+    ledger = tmp_path / "remote-ledger"
+    (ledger / "2026-09").mkdir(parents=True)
+    (ledger / "2026-09" / "24.jsonl").write_text(LEDGER_ROW)
+    traces = tmp_path / "remote-traces"
+    (traces / "s1").mkdir(parents=True)
+    (traces / "s1" / "trace-s1.json").write_text(TRACE)
+    return {LEDGER: ledger, TRACES: traces}
 
-    logs, ctx = run_in(tmp_path, FakeEnv(remote_dirs={LEDGER: remote}))
+
+def test_run_keeps_the_ledger_and_the_traces(tmp_path):
+    logs, ctx = run_in(tmp_path, FakeEnv(remote_dirs=remote_records(tmp_path)))
 
     assert (logs / "masc" / "tool_calls" / "2026-09" / "24.jsonl").read_text() == LEDGER_ROW
+    assert (logs / "masc" / "traces" / "s1" / "trace-s1.json").read_text() == TRACE
     assert ctx.metadata["masc_state"] == "Succeeded"
 
 
-def test_an_episode_without_a_ledger_copies_nothing(tmp_path):
+def test_an_episode_that_wrote_no_records_copies_nothing(tmp_path):
     env = FakeEnv()
 
     logs, ctx = run_in(tmp_path, env)
@@ -341,14 +350,18 @@ def test_an_episode_without_a_ledger_copies_nothing(tmp_path):
 
 class LedgerCopyFails(FakeEnv):
     async def download_dir(self, src, dst):
-        raise OSError("container already removed")
+        if src == LEDGER:
+            raise OSError("container already removed")
+        await super().download_dir(src, dst)
 
 
-def test_a_failed_ledger_copy_leaves_the_result_in_place(tmp_path):
-    env = LedgerCopyFails(remote_dirs={LEDGER: tmp_path})
+def test_a_failed_copy_keeps_the_other_record_and_the_result(tmp_path):
+    env = LedgerCopyFails(remote_dirs=remote_records(tmp_path))
 
     logs, ctx = run_in(tmp_path, env)
 
+    assert (logs / "masc" / "traces" / "s1" / "trace-s1.json").read_text() == TRACE
+    assert not (logs / "masc" / "tool_calls").exists()
     assert ctx.metadata["masc_state"] == "Succeeded"
     assert (logs / "result.json").exists()
 

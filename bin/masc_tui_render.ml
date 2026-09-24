@@ -697,9 +697,12 @@ let render_overview (state : state) =
   let attention_items, tasks_error, row_budget =
     overview_layout state ~terminal_rows:rows
   in
+  (* The rows reading, not [state.tasks]: before the first read that list is
+     [] with no error, and counting it would draw "0 of 0" over a section that
+     says it has not loaded. A note on rows that were read (backup recovery,
+     goal links) stays in the Tasks section below; GOALS counts the rows. *)
   Overview_goals.draw buf ~cols ~rows:row_budget.goal_rows
-    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime
-    ~tasks:(Option.fold ~none:(Ok state.tasks) ~some:Result.error tasks_error)
+    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime ~tasks:state.task_reading
     state.overview_goals;
   (* The panel spans the band the rest of the screen's rows cover: one cell of
      margin on each side of the frame. *)
@@ -851,6 +854,12 @@ let render_overview (state : state) =
         Printf.sprintf " · %s%d done 24h%s" (Theme.ok ())
           flow.Masc_tui_task_flow.recent.completed Ansi.reset
   in
+  (* The selection the pane's rows are windowed around. Read here because the
+     title above them says how many rows that window leaves out. *)
+  let task_selection =
+    Overview_tasks.selected_index state.tasks
+      ~selected:(Overview_tasks.selection state.task_focus)
+  in
   let task_header =
     (* A backlog with nothing open is when the completions are the whole
        story, so the empty header keeps them. *)
@@ -881,8 +890,22 @@ let render_overview (state : state) =
             | Claimed _ -> true
             | Todo | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ -> false)
       in
-      Printf.sprintf " %sTasks%s (%s%d in progress%s · %s%d awaiting%s · %s%d claimed%s%s)"
-        Ansi.bold Ansi.reset
+      (* How many held rows this height leaves out, beside the name the way
+         the Team title above carries its own. It was a line under the rows
+         until the pane was squeezed to one: a line costs a row, and that row
+         was spent on a task, so the pane drew one of twenty-three and said
+         nothing about the other twenty-two. The title is drawn whatever the
+         height. *)
+      let held_back =
+        Overview_tasks.held_back ~height:row_budget.task_rows
+          ~selected:task_selection state.tasks
+          (Overview_tasks.backlog state.tasks_domain)
+      in
+      let window =
+        if held_back > 0 then Printf.sprintf " +%d more" held_back else ""
+      in
+      Printf.sprintf " %sTasks%s%s (%s%d in progress%s · %s%d awaiting%s · %s%d claimed%s%s)"
+        Ansi.bold Ansi.reset window
         (Theme.info ()) in_progress_c Ansi.reset
         (Theme.warn ()) awaiting_c Ansi.reset
         (Theme.info ()) claimed_c Ansi.reset
@@ -917,10 +940,7 @@ let render_overview (state : state) =
        [Overview_tasks.rows], so a poll that drops a task above it cannot
        move the highlight onto another task. *)
     let now = Unix.gettimeofday () in
-    let selected =
-      Overview_tasks.selected_index state.tasks
-        ~selected:state.task_selected_id
-    in
+    let selected = task_selection in
     (* An unread or failed backlog has said so above; "no task in progress"
        would be a reading it never made. *)
     let lines =
@@ -937,8 +957,7 @@ let render_overview (state : state) =
               Some
                 (Overview_tasks.age_text ~age_text:keeper_lane_idle_text ~now
                    (Overview_tasks.held_since task))
-          | Overview_tasks.More_active _ | Overview_tasks.Nothing_active
-          | Overview_tasks.Todo_backlog _ ->
+          | Overview_tasks.Nothing_active | Overview_tasks.Todo_backlog _ ->
               None)
         lines
     in
@@ -963,13 +982,12 @@ let render_overview (state : state) =
                 Ansi.reset (task_line task)
             in
             if
-              state.task_focus = Right_pane
+              Overview_tasks.is_focused state.task_focus
               && Option.equal Int.equal selected (Some index)
             then
               box_line_selected buf cols (Masc_tui_theme.strip_sgr ("> " ^ row))
             else box_line buf cols ("  " ^ row)
-        | Overview_tasks.More_active _ | Overview_tasks.Nothing_active
-        | Overview_tasks.Todo_backlog _ ->
+        | Overview_tasks.Nothing_active | Overview_tasks.Todo_backlog _ ->
             Option.iter
               (fun text -> box_line buf cols (Ansi.dim ^ "  " ^ text ^ Ansi.reset))
               (Overview_tasks.summary_text ~age_text:keeper_lane_idle_text ~now
@@ -991,7 +1009,7 @@ let render_overview (state : state) =
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
        ~hints:
          (Masc_tui_keys.footer_hints_overview
-            ~task_focus:(state.task_focus = Right_pane)));
+            ~task_focus:(Overview_tasks.is_focused state.task_focus)));
 
   finish_surface state ~surface_key:"overview" ~rows:terminal_rows ~cols buf
 
@@ -1228,7 +1246,10 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
            row, not more of these, so there is no second number to draw. *)
         ~holding:None
         ~labels:
-          (List.map (fun (row : Tui_decode.task) -> row.title)
+          (List.map
+             (fun (row : Tui_decode.task) ->
+               Render_schedule.task_list_sidebar_label ~title:row.title
+                 ~task_id:row.id)
              (Overview_tasks.rows state.tasks))
         ~selection:(Overview_tasks.row_of state.tasks ~task_id:task.id);
       let answer =
@@ -1508,7 +1529,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
             ask_block (fun b -> draw_ask_context b cols ~row:selected)
           in
           let plan =
-            Ask_layout.plan ~budget ~spent:(ask_section_rows buf)
+            Ask_layout.plan ~budget ~spent:(rows_drawn buf)
               ~question_heights:(List.map snd question_blocks)
               ~question_cursor:state.ask_question_cursor
               ~context_height:why_rows ~other_asks:(count - 1)
@@ -1562,13 +1583,11 @@ let draw_ask_questions buf cols (state : state) ~budget =
    questions -- what is being asked, and why it was held -- and the ask runs
    the width of the pane, so at eighty columns the two cannot share a row.
 
-   Built here rather than inline so the surface can ask its height before it
-   spends the rows, the way [ask_section_rows] already measures the ask block
-   it is about to draw. The row budget and the drawing call this, so they
-   cannot disagree about how tall it is; until 2026-08-31 the second row was
-   spelled as a literal ["\\n"] -- backslash and n, printed as those two
-   characters -- because a real newline would have drawn a row nobody
-   counted. *)
+   Built here rather than inline so the surface draws it into the block it
+   then measures with [rows_drawn], which is where its height comes from.
+   Until 2026-08-31 the second row was spelled as a literal ["\\n"] --
+   backslash and n, printed as those two characters -- because a real newline
+   would have drawn a row nobody counted. *)
 let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
     match List.nth_opt approvals state.approval_cursor with
     | Some (Operator_row a) -> (
@@ -1671,13 +1690,6 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
 ;;
 
 
-(* Rows [approval_detail_line] draws. One newline is one extra row, counted the
-   same way [ask_section_rows] counts the block above it. *)
-let approval_detail_rows line =
-  let n = ref 1 in
-  String.iter (fun c -> if c = '\n' then incr n) line;
-  !n
-
 (* The two rows drawn under the approval queue: what the selected ask is, and
    its payload. Both sit below the box with the frame's own margins, so both
    belong inside [framed_inner_width]. The payload row always asked for that
@@ -1776,10 +1788,6 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
                (max 8 (cols - 10)))
             Ansi.reset )
   in
-  (* The rows are counted here rather than read back off the joined string.
-     [approval_detail_rows] answers that question for the detail line and the
-     surface pins it to one call; this row already holds its own rows as a
-     list, so its height is the length of what it is about to draw. *)
   let metadata_rows =
     match clauses with
     | [] -> [ "" ]
@@ -1787,7 +1795,7 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
         Message_layout.pack_clauses ~max_cells:(framed_inner_width cols) clauses
         |> List.map (fun row -> Printf.sprintf "  %s%s%s" Ansi.dim row Ansi.reset)
   in
-  String.concat "\n" metadata_rows, payload_line, List.length metadata_rows
+  String.concat "\n" metadata_rows, payload_line
 ;;
 
 
@@ -1797,49 +1805,15 @@ let render_approvals (state : state) =
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  (* Two extra chrome rows on this surface only, both always drawn between
-     the header and the divider: the Gate lane line, and the standing
-     always-allow rule line under it. *)
-  let gate_lane_rows = 2 in
   let approvals = approval_items state in
   let action_inflight =
     Masc_tui_operator_projection.Flow.action_inflight state.approval_flow
   in
-  (* Asked of the line itself, not declared beside it. [boxed_surface_chrome_rows]
-     budgets one row for this detail and every kind but one takes it; a held
-     tool call takes two. Reading the height off the string the pane is about
-     to draw is what keeps the two from drifting -- the same thing
-     [ask_section_rows] does for the block below. *)
   let detail_line =
     approval_detail_line state ~approvals ~cols ~action_inflight
   in
-  let detail_extra_rows = approval_detail_rows detail_line - 1 in
-  (* The same reading for the two rows under the queue. A metadata row that
-     breaks into two takes a row from the block below unless the budget knows
-     about it -- the drift [detail_extra_rows] is here to stop. *)
-  let metadata_line, payload_line, metadata_rows =
+  let metadata_line, payload_line =
     approval_metadata_lines state ~approvals ~cols
-  in
-  let metadata_extra_rows = metadata_rows - 1 in
-  (* What the questions may spend. The block is drawn last, and a surface that
-     overruns loses its final rows, so an unbudgeted question list does not
-     push the approval queue off the screen -- it pushes itself off, cursor and
-     all. One row is held back for the queue, which is what the [max 1] below
-     was already trying to promise and could not keep. *)
-  let ask_budget =
-    max 4
-      (rows - boxed_surface_chrome_rows - gate_lane_rows - detail_extra_rows
-       - metadata_extra_rows - 1)
-  in
-  (* Drawn before the queue's own budget is settled so its height is a measured
-     fact rather than a second estimate that can disagree with the drawing. *)
-  let ask_buf = Buffer.create 1024 in
-  draw_ask_questions ask_buf cols state ~budget:ask_budget;
-  let ask_rows = ask_section_rows ask_buf in
-  let approval_body_rows =
-    max 1
-      (rows - boxed_surface_chrome_rows - gate_lane_rows - ask_rows
-       - detail_extra_rows - metadata_extra_rows)
   in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -1985,6 +1959,44 @@ let render_approvals (state : state) =
             | None -> "")
            Ansi.reset);
   box_divider buf cols;
+
+  (* Every row the surface spends around the queue, read back off the buffers
+     they were drawn into. Declared beside the drawing instead, the rows above
+     the queue were subtracted twice -- once inside [boxed_surface_chrome_rows]
+     and again as the two Gate lane rows -- so the surface came out two rows
+     short of its budget. [finish_surface] pads a short surface under its last
+     row, and the last row here is the footer: it floated two rows above the
+     composer at every terminal height, and the queue drew two blank rows in
+     place of two approvals. *)
+  let head_rows = rows_drawn buf in
+  (* The rows under the queue: the frame's closing row, the selected row's
+     detail, the metadata rows, and the payload row beneath them. Drawn now so
+     their height is the same measured fact -- a metadata row that breaks into
+     two, or a held tool call whose detail takes two, is counted because it is
+     in the buffer, not because a reader remembered to add one. *)
+  let below_buf = Buffer.create 1024 in
+  box_bottom below_buf cols;
+  Buffer.add_string below_buf (Printf.sprintf "%s\n" detail_line);
+  Buffer.add_string below_buf
+    (Printf.sprintf "%s\n%s\n" metadata_line payload_line);
+  (* The footer ends its own row, so the buffer holds exactly the row it
+     draws. *)
+  let footer_buf = Buffer.create 256 in
+  Buffer.add_string footer_buf
+    (footer_line state ~max_cells:cols ~hints:(question_hints state));
+  let around_rows = head_rows + rows_drawn below_buf + rows_drawn footer_buf in
+  (* What the questions may spend. The block is drawn last, and a surface that
+     overruns loses its final rows, so an unbudgeted question list does not
+     push the approval queue off the screen -- it pushes itself off, cursor and
+     all. One row is held back for the queue, which is what the [max 1] below
+     was already trying to promise and could not keep. *)
+  let ask_budget = max 4 (rows - around_rows - 1) in
+  (* Drawn before the queue's own budget is settled so its height is a measured
+     fact rather than a second estimate that can disagree with the drawing. *)
+  let ask_buf = Buffer.create 1024 in
+  draw_ask_questions ask_buf cols state ~budget:ask_budget;
+  let ask_rows = rows_drawn ask_buf in
+  let approval_body_rows = max 1 (rows - around_rows - ask_rows) in
 
   let approvals_error =
     Terminal_text.optional_single_line state.approvals_error
@@ -2142,17 +2154,11 @@ let render_approvals (state : state) =
     done
   end;
 
-  box_bottom buf cols;
-
-  Buffer.add_string buf (Printf.sprintf "%s\n" detail_line);
-
-  Buffer.add_string buf (Printf.sprintf "%s\n%s\n" metadata_line payload_line);
+  Buffer.add_buffer buf below_buf;
 
   Buffer.add_buffer buf ask_buf;
 
-  let hints = question_hints state
-  in
-  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
+  Buffer.add_buffer buf footer_buf;
 
   finish_surface state ~surface_key:"approvals" ~rows:terminal_rows
       ~cols buf
@@ -2921,9 +2927,9 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
         | Board_detail.Loading ->
             [Ansi.dim ^ "  Loading Board detail..." ^ Ansi.reset]
         | Board_detail.Failed error ->
-            [ (Theme.bad ()) ^ "  Board detail unavailable: "
+            [ (Theme.bad ()) ^ "  "
               ^ fit_width (Terminal_text.single_line error)
-                  (max 1 (comment_wrap_cols - 32))
+                  (max 1 (framed_inner_width comment_wrap_cols - 2))
               ^ Ansi.reset
             ]
         | Board_detail.Ready (_, comments) ->
@@ -5235,8 +5241,15 @@ let render_keeper_list (state : state) =
      scroll the frame. *)
   let chrome_rows = count_frame_lines buf in
   let footer_rows = 3 in
-  let keeper_rows = max 0 (rows - chrome_rows - footer_rows) in
+  let list_rows = max 0 (rows - chrome_rows - footer_rows) in
   let keeper_count = List.length state.keepers in
+  (* A roster with more keepers than rows says which of them these are, the
+     way every other scrolled list on this screen does. The line costs one of
+     the rows it describes, so it is drawn only where there is something to
+     say, and only where there is a row to spend on it: with no rows left the
+     roster draws nothing and the line would push the frame past its budget. *)
+  let overflowing = list_rows > 0 && keeper_count > list_rows in
+  let keeper_rows = if overflowing then max 0 (list_rows - 1) else list_rows in
   let scroll_offset =
     if keeper_rows > 0 && state.keeper_cursor >= keeper_rows then
       state.keeper_cursor - keeper_rows + 1
@@ -5298,6 +5311,12 @@ let render_keeper_list (state : state) =
           else box_line buf cols row
       | Some _, None | None, Some _ | None, None -> box_empty buf cols
     done;
+
+  if overflowing then
+    box_line_styled buf cols ~style:(Theme.recede ())
+      (Printf.sprintf "[keepers %s]"
+         (Masc_tui_scroll.window_text ~scroll:scroll_offset ~height:keeper_rows
+            keeper_count));
 
   box_line buf cols (keeper_operations_preview state);
   (* A section rule, drawn by the helper the rest of this surface uses, so it
@@ -14289,9 +14308,8 @@ let render_runtime_params (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
-  let before = screen_title " MASC Config" ^ tab_strip_gap in
   box_line buf cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols ~name:(screen_title " MASC Config") state);
   (* Where the overrides live leads, because it is the only thing on this row
      the reader cannot get anywhere else, and it was what the row cut first:
      at eighty columns it read "overrides persist in .masc/run\xe2\x80\xa6" and at
@@ -14555,9 +14573,8 @@ let render_prompt_registry (state : state) =
         Printf.sprintf "%d/%d개" total all_prompt_count)
   in
   box_top buf cols;
-  let before =
-    Printf.sprintf "%s  %s%s · %s%s%s  "
-      (screen_title " MASC 프롬프트")
+  let reading =
+    Printf.sprintf "%s%s · %s%s%s"
       Ansi.dim count_text
       (if state.prompts_show_fragments then "내부 조각 포함" else "주 프롬프트")
       Ansi.reset
@@ -14568,7 +14585,7 @@ let render_prompt_registry (state : state) =
            (List.length entries) Ansi.reset)
   in
   box_line buf cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols ~name:(screen_title " MASC 프롬프트") ~reading state);
   box_divider buf cols;
   (* One row that says where the catalog is. An empty list used to mean both
      "still reading" and "nothing here". *)
@@ -14762,13 +14779,12 @@ let render_runtime_prompt_assets (state : state) =
     title_count_of_view prompts ~count:(fun _ -> Printf.sprintf "%d개" total)
   in
   box_top buf cols;
-  let before =
-    Printf.sprintf "%s  %s%s · 읽기 전용%s  "
-      (screen_title " MASC 런타임 프롬프트 자산")
-      Ansi.dim count_text Ansi.reset
+  let reading =
+    Printf.sprintf "%s%s · 읽기 전용%s" Ansi.dim count_text Ansi.reset
   in
   box_line buf cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols
+       ~name:(screen_title " MASC 런타임 프롬프트 자산") ~reading state);
   box_line_styled buf cols ~style:(Theme.recede ())
     "  배포된 .txt 지시문 · registry override 대상이 아님";
   box_divider buf cols;
@@ -14901,12 +14917,10 @@ let render_presets (state : state) =
     | None -> title_missing_reading ~error:state.presets_error
   in
   box_top buf cols;
-  let before =
-    Printf.sprintf "%s  %s%s%s  " (screen_title " MASC 프리셋") Ansi.dim count_text
-      Ansi.reset
-  in
+  let reading = Printf.sprintf "%s%s%s" Ansi.dim count_text Ansi.reset in
   box_line buf cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols ~name:(screen_title " MASC 프리셋") ~reading
+       state);
   box_divider buf cols;
   let error_rows = if Option.is_some state.presets_error then 1 else 0 in
   let entry_rows = if Option.is_some state.preset_save_draft then 1 else 0 in
@@ -15035,14 +15049,12 @@ let render_themes (state : state) =
   let lift_on = Masc_tui_theme.lift_is_enabled () in
   let name_width = theme_name_width ~cols in
   box_top buf cols;
-  let before =
-    screen_title
-      (Printf.sprintf " MASC Themes · %d themes · %d native-pass"
-         (List.length entries) native_count)
-    ^ tab_strip_gap
-  in
   box_line buf cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols ~name:(screen_title " MASC Themes")
+       ~reading:
+         (Printf.sprintf "%s%d themes · %d native-pass%s" Ansi.dim
+            (List.length entries) native_count Ansi.reset)
+       state);
   box_divider buf cols;
   box_line_styled buf cols ~style:Ansi.dim
     ("  " ^ fit_width "theme" (name_width + 2) ^ " "
@@ -15169,9 +15181,9 @@ let render_config_models (state : state) =
   let buf = Buffer.create 4096 in
   box_top buf cols;
   let path_note = config_path_note state in
-  let before = screen_title " MASC Models" ^ tab_strip_gap in
   box_line buf cols
-    (config_pane_title ~cols ~before ~note:path_note state);
+    (config_pane_title ~cols ~name:(screen_title " MASC Models") ~note:path_note
+       state);
   box_divider buf cols;
   let content_height = max 1 (rows_avail - 5) in
   (match state.runtime_config_view_error, state.runtime_config_view with
@@ -15362,9 +15374,8 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
     | None -> "?"
   in
   box_top head cols;
-  let before = screen_title " MASC Voice · setup" ^ tab_strip_gap in
   box_line head cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols ~name:(screen_title " MASC Voice · setup") state);
   box_line buf cols "";
   box_line buf cols
     (Printf.sprintf "  %sstep %s%s  %s" Ansi.dim position Ansi.reset
@@ -15476,9 +15487,8 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
         (Printf.sprintf "    %s%d of %d%s" Ansi.dim (cursor + 1) count Ansi.reset))
   in
   box_top head cols;
-  let before = screen_title " MASC Voice \xc2\xb7 keeper voices" ^ tab_strip_gap in
   box_line head cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols ~name:(screen_title " MASC Voice \xc2\xb7 keeper voices") state);
   box_line buf cols "";
   list_block "keeper  (j/k)" session.vas_agents session.vas_agent_cursor (fun agent ->
     Terminal_text.single_line agent);
@@ -15572,9 +15582,8 @@ let render_voice (state : state) =
     | lines -> List.iter (fun line -> box_line buf cols line) lines
   in
   box_top head cols;
-  let before = screen_title " MASC Voice" ^ tab_strip_gap in
   box_line head cols
-    (config_pane_title ~cols ~before state);
+    (config_pane_title ~cols ~name:(screen_title " MASC Voice") state);
   box_line buf cols "";
   (* Two independent reads feed this pane: the public config says what loaded,
      and the setup read says which endpoints are declared. They used to share
@@ -15659,9 +15668,8 @@ let render_config (state : state) =
   if state.runtime_config_status_open then render_runtime_config_status state else
   let terminal_rows, cols = get_terminal_size () in
   let path_note = config_path_note state in
-  let before = screen_title " MASC Config" ^ tab_strip_gap in
   let title =
-    config_pane_title ~cols ~before ~note:path_note
+    config_pane_title ~cols ~name:(screen_title " MASC Config") ~note:path_note
       ~clock:
         (Printf.sprintf "%s%s%s" Ansi.dim
            (let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -15820,7 +15828,7 @@ let render_surface (state : state) =
                         match Board_detail.view_for state.board_detail ~post_id with
                         | Board_detail.Failed detail ->
                             c.push_styled ~style:(Theme.bad ())
-                              ("  Board post load failed: " ^ Terminal_text.single_line detail)
+                              ("  " ^ Terminal_text.single_line detail)
                         | Board_detail.Absent -> c.push "  Board post has not been loaded. Press r to retry."
                         | Board_detail.Loading -> c.push "  Loading Board post..."
                         | Board_detail.Ready _ -> ())))
@@ -16067,17 +16075,41 @@ let render_context_inspector state =
             |> List.iter c.push
           end)
 
-(* What the help overlay can show right now: the rows its sheet folds to at
-   this width, and the height it draws them in. The key handler bounds its
-   step against this, so a press that the frame cannot spend is not taken. *)
+(* The height an overlay shows [count] rows in, for the overlays that say
+   which of their lines are showing: one row comes off when they overflow,
+   because the "[lines a-b/n]" row is drawn inside the same body.
+   [Masc_tui_scroll.content_height] owns that rule; the frame supplies the
+   chrome. *)
+let overlay_window_height ~rows ~count =
+  Masc_tui_scroll.content_height ~rows ~chrome:framed_chrome_rows ~count
+    ~preview_keep:None ~overflow_takes_row:true
+
+(* The "[lines a-b/n]" row an overflowing overlay draws under its rows, or
+   nothing when every row fits. The row's height is the one
+   [overlay_window_height] took off. *)
+let overlay_window_row ~scroll ~height count =
+  if count > height then
+    Some
+      (Theme.recede ()
+      ^ Printf.sprintf "  [lines %s]"
+          (Masc_tui_scroll.window_text ~scroll ~height count)
+      ^ Ansi.reset)
+  else None
+
+(* The sheet's rows and the viewport that shows them, at this width. One
+   answer for the two readers -- the keypress that bounds the scroll and the
+   frame that draws it -- so [G] cannot land the scroll a row past what the
+   frame is showing, and a press the frame cannot spend is not taken. *)
 let help_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let header = help_masthead state in
-  ( List.length
+  let count =
+    List.length
       (Masc_tui_help.sheet ~header ~cols
          (help_lines ~width:(Masc_tui_help.line_cells ~cols) state))
-  , framed_content_height ~rows )
+  in
+  (count, overlay_window_height ~rows ~count)
 
 (* The [:] palette: a typed filter over every jump the strip and roster
    offer. The list is the same [palette_matches] the Enter key resolves, so
@@ -16299,10 +16331,15 @@ let render_link_preview_modal (state : state) =
                 c.push line)
             content_lines)
 
+(* The record's rows and the viewport that shows them, the way
+   [help_viewport] answers for the sheet: one pair for the keypress that
+   bounds the scroll and the frame that draws it, and one row off the height
+   when the record has more rows than it can show. *)
 let keeper_deletions_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  List.length (keeper_deletions_lines state ~cols), framed_content_height ~rows
+  let count = List.length (keeper_deletions_lines state ~cols) in
+  (count, overlay_window_height ~rows ~count)
 
 (* The deletion record overlay drew its rows and closed the box under them,
    with nothing filling the rows between: on a short record the footer stood in
@@ -16311,24 +16348,28 @@ let keeper_deletions_viewport (state : state) =
 let render_keeper_deletions (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let lines = keeper_deletions_lines state ~cols in
-  let height =
-    framed_content_height ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
-  in
+  let count, height = keeper_deletions_viewport state in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"keeper-deletions"
     ~frame:Chrome_overlay
     ~title:
       (screen_title " 키퍼 삭제 기록"
        ^ (if state.keeper_deletions_loading then " · 조회/재시도 중" else ""))
-    ~hints:(keeper_deletions_hints state ~scrollable:(List.length lines > height))
-    ~body:(fun ~budget c ->
+    ~hints:(keeper_deletions_hints state ~scrollable:(count > height))
+    (* [keeper_deletions_viewport] rather than the budget it is derived from:
+       the keypress bounds the scroll against that pair. *)
+    ~body:(fun ~budget:_ c ->
       let scroll =
-        Masc_tui_scroll.normalize ~count:(List.length lines) ~height:budget
-          state.keeper_deletions_scroll
+        Masc_tui_scroll.normalize ~count ~height state.keeper_deletions_scroll
       in
       List.iteri
         (fun index text ->
-          if index >= scroll && index < scroll + budget then c.push text)
-        lines)
+          if index >= scroll && index < scroll + height then c.push text)
+        lines;
+      (* The record is one JSON document. Measured on the live server, it ran
+         past every height: at 44 rows it ended mid-object on "kind":
+         "delivered", and the footer named the scroll keys without saying how
+         far they had to go. *)
+      Option.iter c.push (overlay_window_row ~scroll ~height count))
 
 (* The cheat sheet, through the overlay contract. It drew its box and its rows
    by hand and closed the box under the last row, so a sheet shorter than the
@@ -16356,15 +16397,22 @@ let render_help (state : state) =
        pressing [j] forty times, and nothing said [G] exists. The keys are
        handled at masc_tui.ml: "pageup" | "pagedown", "g", "G". *)
     ~hints:"j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close"
-    ~body:(fun ~budget c ->
+    (* [help_viewport] rather than the budget it is derived from: the
+       keypress bounds the scroll against that pair, and a sheet whose
+       drawing used a different height would leave [G] one row short. *)
+    ~body:(fun ~budget:_ c ->
+      let count, height = help_viewport state in
       let scroll =
-        Masc_tui_scroll.normalize
-          ~count:(List.length rendered_rows) ~height:budget state.help_scroll
+        Masc_tui_scroll.normalize ~count ~height state.help_scroll
       in
       List.iteri
         (fun index line ->
-          if index >= scroll && index < scroll + budget then c.push line)
-        rendered_rows)
+          if index >= scroll && index < scroll + height then c.push line)
+        rendered_rows;
+      (* Which of them these are. The sheet is longer than any terminal --
+         at 150x78 the later sections are still off screen -- so a reader
+         pressing [j] had no way of telling a page from a hundred. *)
+      Option.iter c.push (overlay_window_row ~scroll ~height count))
 
 (* Rows the agenda panel can show, and how many it has. The keypress bounds
    the scroll from the same pair the frame draws with -- the shape
@@ -16381,10 +16429,15 @@ let agenda_lines (state : state) =
     ~cols:(framed_inner_width cols)
     (Masc_tui_types.agenda state)
 
+(* The panel's rows and the viewport that shows them, the way
+   [help_viewport] answers for the sheet: one pair for the keypress that
+   bounds the cursor and the frame that draws it, and one row off the height
+   when the panel has more rows than it can show. *)
 let agenda_viewport (state : state) =
   let terminal_rows, _cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  (List.length (agenda_lines state), framed_content_height ~rows)
+  let count = List.length (agenda_lines state) in
+  (count, overlay_window_height ~rows ~count)
 
 let answering_viewport (state : state) =
   let terminal_rows, _cols = get_terminal_size () in
@@ -16518,16 +16571,23 @@ let render_agenda (state : state) =
     ~frame:Chrome_overlay
     ~title:(screen_title " MASC Agenda")
     ~hints
-    ~body:(fun ~budget c ->
+    (* [agenda_viewport] rather than the budget it is derived from: the
+       keypress bounds the cursor against that pair. *)
+    ~body:(fun ~budget:_ c ->
+      let count, height = agenda_viewport state in
       let scroll =
-        Masc_tui_scroll.normalize
-          ~count:(List.length lines) ~height:budget state.agenda_scroll
+        Masc_tui_scroll.normalize ~count ~height state.agenda_scroll
       in
       List.iteri
         (fun index line ->
-          if index >= scroll && index < scroll + budget then
+          if index >= scroll && index < scroll + height then
             c.push (paint ~selected:(index = state.agenda_cursor) line))
-        lines)
+        lines;
+      (* What falls off this panel is not more of the same: measured at 24
+         rows and 100 columns, the panel drew sixteen of its twenty coming
+         rows and neither of the two sections under them, and nothing said
+         "Waiting on you" and "Stuck on you" were there. *)
+      Option.iter c.push (overlay_window_row ~scroll ~height count))
 ;;
 
 let render_terminal_too_small state ~rows ~cols =

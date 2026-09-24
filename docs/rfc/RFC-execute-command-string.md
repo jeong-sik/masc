@@ -3,7 +3,7 @@ rfc: "execute-command-string"
 title: "Execute 는 명령 하나를 받는다 — typed 파이프라인 객체는 걷어내고, 도구 표면은 캐시 접두사로 다룬다"
 status: Draft
 created: 2026-09-02
-updated: 2026-09-02
+updated: 2026-09-24
 author: vincent
 related: ["0091", "execute-subset-dispositions", "execute-boundary-is-the-sandbox", "tools-as-shell-commands", "skills-as-tools"]
 ---
@@ -13,12 +13,12 @@ related: ["0091", "execute-subset-dispositions", "execute-boundary-is-the-sandbo
 ## 0. Summary
 
 `Execute` 의 모델 입력을 벤더가 2026년에 내는 셸 도구 모양으로 줄인다. 받는 것은
-`argv`(프로세스 벡터) 또는 `script`(셸 한 줄) 중 하나와 `cwd`, `timeout_sec`, `shell`
-뿐이다. 파이프·리다이렉트·순차·환경변수는 `script` 문법으로만 받고, 그것을 JSON 객체로
+`argv`(프로세스 벡터) 또는 `command`(셸 한 줄) 중 하나와 `cwd`, `timeout_sec`, `shell`
+뿐이다. 파이프·리다이렉트·순차·환경변수는 `command` 문법으로만 받고, 그것을 JSON 객체로
 다시 쓰게 하던 `pipeline`, `then`, `stdin`, `stdout`, `stderr`, `env` 는 스키마에서
-사라진다. 런타임은 `script` 를 `shell`(기본 `sh`) `-c` 한 호출로 내린다
-(`keeper_tool_execute_typed_input.ml`, `script_to_shell`). 파서(`bash_subset.mly`)는 이 경로에
-없다. 파서를 `script` 판정에 넣는 것은 08-31 RFC(Draft)의 일이고, 이 RFC 는 그 앞을 막지
+사라진다. 런타임은 `command` 를 `shell`(기본 `sh`) `-c` 한 호출로 내린다
+(`keeper_tool_execute_typed_input.ml`, `command_to_shell`). 파서(`bash_subset.mly`)는 이 경로에
+없다. 파서를 `command` 판정에 넣는 것은 08-31 RFC(Draft)의 일이고, 이 RFC 는 그 앞을 막지
 않는다. 정책은 Gate·path jail·샌드박스가 진다. 스키마는 6.8 KB 에서 약 1.5 KB 로, 설명문은
 1,362 B 에서 694 B 로 준다.
 
@@ -34,23 +34,23 @@ related: ["0091", "execute-subset-dispositions", "execute-boundary-is-the-sandbo
 
 | 항목 | 값 | 근거 |
 |---|---|---|
-| 최상위 파라미터 | `argv`, `pipeline`, `then`, `env`, `cwd`, `timeout_sec`, `stdin`, `stdout`, `stderr`, `script`, `shell` (11개) | `config/tools/tool_execute.toml` |
+| 최상위 파라미터 | `argv`, `pipeline`, `then`, `env`, `cwd`, `timeout_sec`, `stdin`, `stdout`, `stderr`, 셸 한 줄 필드, `shell` (11개) | `config/tools/tool_execute.toml` |
 | 스키마 크기 | 6,776 B, 중첩 7단, exec 단계 shape 이 top·pipeline·then·then.pipeline 에 네 번 | agent-core 스냅샷, `test_keeper_tool_schema_bytes` 주석 |
 | 설명문 | 1,362 B. "typed stdin/stdout/stderr 객체로 리다이렉트하고 pipeline 필드로 파이프하라" 고 가르침 | TOML `description` |
 | TOML | 515줄 중 312줄이 `pipeline`·`then` 파라미터 | 같은 파일 |
 | OCaml | `keeper_tool_execute_typed_input.ml` 976줄, pipeline/then/redirect 언급 99곳 | rg |
-| 두 형태의 합류 | `argv`/`pipeline`/`then` 도 `script` 도 같은 `Shell_ir.t` 로 내려간다 | `keeper_tool_execute_typed_input.ml:851-911`, 626 |
+| 두 형태의 합류 | `argv`/`pipeline`/`then` 도 셸 한 줄도 같은 `Shell_ir.t` 로 내려간다 | `keeper_tool_execute_typed_input.ml:851-911`, 626 |
 
 ### 1.2 실측 (2026-09-01~02, Execute 866건)
 
 | 입력 형태 | 건수 | 비율 | 실패 |
 |---|---|---|---|
 | `argv` (+ `cwd`/`timeout_sec`) | 684 | 79.0% | 전부 인프라(remote_ssh 불통, docker 이미지) |
-| `script` (+ `cwd`/`shell`/`timeout_sec`) | 169 | 19.5% | 인프라 4, `cwd_not_directory` 2 |
+| 셸 한 줄 (+ `cwd`/`shell`/`timeout_sec`) | 169 | 19.5% | 인프라 4, `cwd_not_directory` 2 |
 | `pipeline`, `then`, typed `stdin` | 3 | 0.3% | 3건 중 2건이 `$.stdin must name exactly one of …` 스키마 오류 |
 | `env`, `stdout`, `stderr` 객체 | 0 | 0 | — |
 
-`script` 169건 안에서 모델이 쓴 문법: 파이프 149, 리다이렉트 134, `&&`/`||` 77, 제어문 16,
+셸 한 줄 169건 안에서 모델이 쓴 문법: 파이프 149, 리다이렉트 134, `&&`/`||` 77, 제어문 16,
 커맨드 치환 15. 즉 모델은 파이프와 리다이렉트를 셸 문법으로 쓴다. 같은 것을 JSON 으로
 쓰라는 두 번째 문법은 안 쓰이고, 썼을 때는 틀린다. 그 두 번째 문법이 매 요청 모든 keeper 에게
 약 5 KB 로 나간다.
@@ -62,12 +62,12 @@ related: ["0091", "execute-subset-dispositions", "execute-boundary-is-the-sandbo
   모델에게 쓰게 했다.
 - RFC-execute-subset-dispositions(08-24): 파서가 못 읽는 14가지를 한 답(거부)으로 접던 것을
   갈랐다. "파서를 버리고 OS 경계에서만 막자" 는 사람 없는 keeper 라서 기각했다.
-- RFC-execute-boundary-is-the-sandbox(08-31, Draft): `script` 는 파서가 판정만 하고 원문이
+- RFC-execute-boundary-is-the-sandbox(08-31, Draft): 셸 한 줄은 파서가 판정만 하고 원문이
   진짜 셸로 간다는 제안. 조사한 여섯 제품 중 masc 만 "파서 결과가 실행되는" 도구였다. 이
   RFC 는 "`argv` 와 `pipeline` 의 typed 경로는 유지" 라고 남겼다.
 
-0091 이 typed IR 을 도입한 이유는 "문자열을 읽을 파서가 없어서" 였다. 오늘 `script` 는 파서를
-지나지 않고 `shell -c` 한 호출로 내려간다(`script_to_shell`). 그런데 1.2 의 실측은 모델이 typed
+0091 이 typed IR 을 도입한 이유는 "문자열을 읽을 파서가 없어서" 였다. 오늘 `command` 는 파서를
+지나지 않고 `shell -c` 한 호출로 내려간다(`command_to_shell`). 그런데 1.2 의 실측은 모델이 typed
 IR 을 쓰지 않는다는 것이고, 정책 판정은 파서가 아니라 Gate·path jail·샌드박스가 진다. 남는
 typed IR 의 존재 이유는 없다. 이 RFC 는 08-31 RFC 의 마지막 유보를 거둔다. `argv` 는 남긴다.
 79% 가 쓰고, 셸을 거치지 않는 경로라 가장 안전하며, OpenAI `local_shell` 과 Codex
@@ -91,22 +91,27 @@ Codex 의 권한 승격 객체이고 명령 자체는 문자열이다. 샌드박
 ```toml
 # config/tools/tool_execute.toml (v2)
 [[params]] name = "argv"        # string[], 비어 있지 않음. 셸을 거치지 않는다
-[[params]] name = "script"      # string. 셸 한 줄. shell -c 한 호출로 샌드박스의 진짜 셸이 실행
-[[params]] name = "shell"       # "sh" | "bash" | "zsh" | "dash" | "ksh". script 에만. 기본 sh
+[[params]] name = "command"     # string. 셸 한 줄. shell -c 한 호출로 샌드박스의 진짜 셸이 실행
+[[params]] name = "shell"       # "sh" | "bash" | "zsh" | "dash" | "ksh". command 에만. 기본 sh
 [[params]] name = "cwd"         # string. 상대 경로, path jail 안
 [[params]] name = "timeout_sec" # number, > 0. 없으면 600
-# argv 와 script 중 정확히 하나
+# argv 와 command 중 정확히 하나
 ```
 
-- 파이프·리다이렉트·`;`/`&&`/`||`·환경변수 선행 대입은 `script` 로만. `script` 는
+- 파이프·리다이렉트·`;`/`&&`/`||`·환경변수 선행 대입은 `command` 로만. `command` 는
   `Simple { bin = shell; args = ["-c"; text] }` 하나로 내려가고 샌드박스의 진짜 셸이 읽는다
-  (`keeper_tool_execute_typed_input.ml`, `script_to_shell`). 파서 부분집합
-  (`lib/exec/parser/bash.mli`)은 이 경로에 없다. 파서를 `script` 판정에 넣는 것은 08-31
+  (`keeper_tool_execute_typed_input.ml`, `command_to_shell`). 파서 부분집합
+  (`lib/exec/parser/bash.mli`)은 이 경로에 없다. 파서를 `command` 판정에 넣는 것은 08-31
   RFC(Draft)의 일이며, 이 RFC 는 그 앞을 막지 않는다.
 - `stdin` literal 은 `printf '…' | cmd` 로. `env` 는 `FOO=1 cmd` 로.
+- 셸 한 줄 필드의 이름은 `command` 다. 1.4 의 Anthropic `bash_20250124` 와 Claude Code `Bash`
+  가 이 이름을 쓰고, 모델은 스키마를 보고도 익숙한 이름으로 부른다. 2026-09-23~24 도구 원장에서
+  다른 이름을 받던 스키마에 `command` 로 보낸 Execute 호출이 68건 거절됐고
+  (`fast-and-light` 29, `antigravity_subscription.gemini-3-8-flash-high` 29, `deepseek-first` 10),
+  그중 51건은 바로 다음 호출에서 고쳐 한 턴씩 더 썼다(#38704). 별칭은 두지 않는다.
 - 설명문은 694 B. 무엇을 하는가(path jail·샌드박스·Gate 경계, 프로그램 의미는 해석하지
-  않음), `argv` 와 `script` 중 언제 무엇을 쓰는가, `cwd` 는 상대 경로, 백그라운드 lifecycle
-  없음, `masc` 도구는 `argv:["masc", …]` 한 건. `script` 안의 `masc …` 줄은 오늘 라우팅되지
+  않음), `argv` 와 `command` 중 언제 무엇을 쓰는가, `cwd` 는 상대 경로, 백그라운드 lifecycle
+  없음, `masc` 도구는 `argv:["masc", …]` 한 건. `command` 안의 `masc …` 줄은 오늘 라우팅되지
   않으므로(rewrite 는 `Shell_ir.Simple.bin == "masc"` 만 본다,
   `keeper_shell_tool_command.ml`) `;`/`&&` 로 잇는 약속은 하지 않는다. Anthropic
   지침("3–4 sentences", "as you would describe your tool to a new hire")에 맞춘다.
@@ -116,7 +121,7 @@ Codex 의 권한 승격 객체이고 명령 자체는 문자열이다. 샌드박
   lowering 을 지운다(PR2·PR3). `Shell_ir` 과 샌드박스 레인 계약은 그대로다. 스키마 검증
   (`Tool_input_validation.validate_args`)이 `of_json` 보다 먼저 돌므로 PR1 만 병합돼도 모델이
   `pipeline` 을 보내면 `Tool 'Execute' received unsupported field(s): pipeline; accepted: argv,
-  script, shell, cwd, timeout_sec` 로 거절된다(class `Policy_rejection`, #32343 의 렌더).
+  command, shell, cwd, timeout_sec, intent` 로 거절된다(class `Policy_rejection`, #32343 의 렌더).
 - `$defs`/`$ref` 는 쓰지 않는다. 중복이 사라지면 필요 자체가 없고, Gemini `parameters` 와
   llama.cpp 의 중첩 ref 문제를 피한다(근거 기록 4번째 항목). `Json_schema_shared_defs` 는
   소비자 0 이 되므로 PR1 에서 마지막 호출부(`tool_bridge.ml`)와 같이 지운다.
@@ -126,8 +131,8 @@ Codex 의 권한 승격 객체이고 명령 자체는 문자열이다. 샌드박
 - Gate, path jail, 샌드박스 프로필, 원격 레인 프로토콜, `Shell_ir`.
 - `argv` 의 execve 의미. 메타문자는 데이터다.
 - RFC-tools-as-shell-commands 의 `masc` 예약 명령. 오늘 구현된 경로는 `argv:["masc", …]`
-  한 건뿐이고, `script` 안의 `masc …` 라우팅은 그 RFC 의 일이다. `;`/`&&` 로 잇던 유일한
-  typed 경로 `then`(Sequence, 사용 0건)이 사라지므로 결합 표면은 `script` 하나가 된다.
+  한 건뿐이고, `command` 안의 `masc …` 라우팅은 그 RFC 의 일이다. `;`/`&&` 로 잇던 유일한
+  typed 경로 `then`(Sequence, 사용 0건)이 사라지므로 결합 표면은 `command` 하나가 된다.
 
 ## 2. 도구 표면
 
@@ -219,14 +224,14 @@ Codex 의 권한 승격 객체이고 명령 자체는 문자열이다. 샌드박
 
 ## 5. 위험
 
-- `pipeline`/`then` 을 아는 모델이 계속 보낸다: 이틀간 3건. 거절 문장이 `script` 를 가리키면
+- `pipeline`/`then` 을 아는 모델이 계속 보낸다: 이틀간 3건. 거절 문장이 `command` 를 가리키면
   된다. 24h 안에 1%/일을 넘으면 되돌린다(근거 기록의 롤백 조건).
-- `script` 는 파서를 거치지 않고 `shell -c` 로 간다: 정책 판정은 Gate·path jail·샌드박스가
-  하고, 파서를 `script` 판정에 넣는 08-31 RFC(Draft)와 부분집합을 넓히는 RFC-shell-ir-* 은
+- `command` 는 파서를 거치지 않고 `shell -c` 로 간다: 정책 판정은 Gate·path jail·샌드박스가
+  하고, 파서를 `command` 판정에 넣는 08-31 RFC(Draft)와 부분집합을 넓히는 RFC-shell-ir-* 은
   그대로 진행한다. 이 RFC 는 그 앞을 막지 않는다.
 - typed 경로에만 있던 거절 두 층이 사라진다: 게스트 레인 typed `env` 거절과 remote_ssh 의 GH
   토큰 env 검사(`keeper_tool_execute_runtime.ml`), Docker Bound_mount 리다이렉트의 호스트 측
-  사전 거절. 둘 다 `script` 텍스트로는 오늘도 우회되는 층이라 08-31 RFC 입장과 같다. PR2·PR3
+  사전 거절. 둘 다 `command` 텍스트로는 오늘도 우회되는 층이라 08-31 RFC 입장과 같다. PR2·PR3
   본문에 별도 항목으로 적는다.
 - Gate 재생(`keeper_gate_replay.ml`)은 저장된 input 을 스키마 검증 없이 넣는다. 배포 경계에서
   `<base-path>/.masc/gate/pending.json` 에 pipeline/then/stdin 행이 0건임을 확인한다(운영
@@ -286,12 +291,12 @@ Codex 의 권한 승격 객체이고 명령 자체는 문자열이다. 샌드박
 
 **Execute 스키마 ≤ 1,600 도 미달이다.** 다섯 파라미터와 694 B 설명문으로 줄인 결과가 도구
 객체 5,212 B 다. 남은 무게는 파라미터 설명문이며, 더 줄이려면 설명을 깎아야 하는데 그건
-모델이 argv 와 script 를 가르는 근거라 이 RFC 의 범위 밖이다.
+모델이 argv 와 command 를 가르는 근거라 이 RFC 의 범위 밖이다.
 
 ### 남은 관찰
 
 - 09-03 09:28 에 rondo 가 `argv` 첫 칸에 `"ls && -la"` 를 두 번 넣었다. 셸 연산자를 argv
-  토큰에 쓴 것으로 설명문이 `script` 로 가라고 적어둔 자리다. 1,414건 중 2건, 한 keeper 의
+  토큰에 쓴 것으로 설명문이 셸 한 줄 필드로 가라고 적어둔 자리다. 1,414건 중 2건, 한 keeper 의
   한 턴이라 입구 검사를 붙이지 않았다. 다른 keeper 에서도 나오면 다시 본다.
 - `/api/v1/dashboard/tools` 는 재기동 뒤에도 `warming`, 도구 0개다(#29980). 이 측정은 turn
   record 의 `tool_surface_ref` blob 을 직접 읽어 우회했다.

@@ -135,13 +135,22 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
   let read_request ?(expect_version = false) () =
-    output_string output "IFS= read -r request\n";
+    output_string output "IFS= read -r request || exit 98\n";
     if expect_version
     then
       output_string output
         (Printf.sprintf
            "printf '%%s' \"$request\" | grep -F %s >/dev/null || exit 97\n"
            (shell_quote (Printf.sprintf {|"version":"%s"|} Runtime_build_version.current)));
+    Option.iter
+      (fun capture_path ->
+         output_string
+           output
+           ("printf '%s\\n' \"$request\" >> " ^ shell_quote capture_path ^ "\n"))
+      capture_path
+  in
+  let capture_request () =
+    output_string output "IFS= read -r request || exit 98\n";
     Option.iter
       (fun capture_path ->
          output_string
@@ -163,7 +172,7 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
   if close_before_turn then output_string output "exec 0<&-\n";
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 2) ^ "\n");
   if close_before_turn then output_string output "exit 62\n";
-  read_request ();
+  capture_request ();
   let remaining_lines =
     if inject_items then (
       (* Acknowledge thread/inject_items before reading/capturing turn/start.
@@ -992,7 +1001,7 @@ let test_metadata_listing_pages_without_turn () =
 let test_rate_limits_read_without_turn () =
   let capture = Filename.temp_file "masc-rate-limits-capture-" ".jsonl" in
   Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
-    with_fixture ~capture_path:capture [init_result; account_chatgpt;
+    with_fixture ~close_before_turn:true ~capture_path:capture [init_result; account_chatgpt;
       {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":null},"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":{"usedPercent":64,"windowDurationMins":10080,"resetsAt":1790800000}},"codex_other":{"primary":{"usedPercent":3,"windowDurationMins":300}}}}}|}]
       (fun path ->
         let outcome = Eio_main.run (fun env ->

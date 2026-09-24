@@ -519,7 +519,18 @@ let test_surface_read_rejects_duplicate_dispatch_fields () =
         (String_util.contains_substring duplicate_channel.raw_output "error_code");
       check string "duplicate channel is not silently selected"
         "keeper_surface_read arguments contains duplicate field \"channel_id\""
-        Yojson.Safe.Util.(member "message" (parse_json duplicate_channel.raw_output) |> to_string))
+        Yojson.Safe.Util.(member "message" (parse_json duplicate_channel.raw_output) |> to_string);
+      (* A refusal is a failed call, not a completed one carrying error text,
+         and a field the caller can correct is a policy rejection. *)
+      let failure_class (result : KET.executed_tool_result) =
+        match result.disposition with
+        | Tool_result.Failed class_ -> Some (Tool_result.tool_failure_class_to_string class_)
+        | Tool_result.Completed () | Tool_result.Deferred () -> None
+      in
+      check (option string) "a duplicate field is the caller's to fix"
+        (Some "policy_rejection") (failure_class duplicate_mode);
+      check (option string) "a blank lane label is the caller's to fix"
+        (Some "policy_rejection") (failure_class (run (`Assoc [ "surface", `String " " ]))))
 
 let test_board_runtime_rejects_unknown_route () =
   let meta = make_meta ~name:"keeper-board-runtime-guard" () in

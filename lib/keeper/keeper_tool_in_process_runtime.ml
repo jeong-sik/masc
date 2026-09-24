@@ -597,7 +597,9 @@ let strict_int_opt key args =
 ;;
 
 let discord_tool_error ~code message =
-  Tool_args.error_response_typed ~code message
+  Keeper_tool_execution.failure
+    ~class_:(Tool_args.failure_class_of_error_code code)
+    (Tool_args.error_response_typed ~code message)
 ;;
 
 let discord_rest_error error =
@@ -807,7 +809,7 @@ let discord_success ~mode ~resource ~(channel_id : Discord_rest_client.snowflake
       | Some count -> [ "data_count", `Int count ]
       | None -> []
   in
-  Yojson.Safe.to_string (Tool_args.ok_assoc fields)
+  Keeper_tool_execution.success (Yojson.Safe.to_string (Tool_args.ok_assoc fields))
 ;;
 
 let handle_discord_surface_read ~meta ~args ~mode =
@@ -1006,7 +1008,7 @@ let handle_discord_surface_read ~meta ~args ~mode =
       "Discord live read modes require surface='discord'"
 ;;
 
-let handle_surface_read ~config ~(meta : keeper_meta) ~args =
+let handle_surface_read_with_outcome ~config ~(meta : keeper_meta) ~args =
   match
     discord_validate_unique_object ~context:"keeper_surface_read arguments" args
   with
@@ -1056,10 +1058,17 @@ let handle_surface_read ~config ~(meta : keeper_meta) ~args =
                 { Keeper_surface_read.slack = bound_slack_channels;
                   discord = bound_discord_channels })
        in
-       Keeper_surface_read.respond ?bindings ~surface ~limit ~before
-         ~has_more:page.Keeper_chat_store.has_more
-         ~notes
-         page.Keeper_chat_store.messages)
+       (match
+          Keeper_surface_read.respond ?bindings ~surface ~limit ~before
+            ~has_more:page.Keeper_chat_store.has_more
+            ~notes
+            page.Keeper_chat_store.messages
+        with
+        | Ok body -> Keeper_tool_execution.success body
+        | Error refusal ->
+          Keeper_tool_execution.failure
+            ~class_:Tool_result.Policy_rejection
+            (Keeper_tool_shared_runtime.error_json refusal)))
 ;;
 
 let handle_person_note_set_with_outcome ~config ~(meta : keeper_meta) ~args =

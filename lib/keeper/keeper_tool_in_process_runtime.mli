@@ -184,11 +184,14 @@ val handle_library_search_with_outcome
 val handle_library_read_with_outcome
   : config:Workspace.config -> meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 
-val handle_surface_read
+val handle_surface_read_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta
   -> args:Yojson.Safe.t
-  -> string
+  -> Keeper_tool_execution.t
+(** A refusal is a failed outcome whose class comes from its error code
+    ({!Tool_args.failure_class_of_error_code}); a lane label the caller can
+    correct is a [Policy_rejection]. *)
 
 val handle_surface_post_with_outcome
   :  config:Workspace.config

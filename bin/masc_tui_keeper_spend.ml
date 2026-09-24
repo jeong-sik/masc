@@ -146,10 +146,14 @@ let window_text minutes =
     Printf.sprintf "%dh" (minutes / minutes_per_hour)
   else Printf.sprintf "%dm" minutes
 
+(* The age in the unit the window is named in once it passes an hour: a
+   refresh failing for a day read "1440m old" beside "24h". *)
 let age_text age_s =
   let seconds = int_of_float age_s in
   if seconds < seconds_per_minute then Printf.sprintf "%ds" seconds
-  else Printf.sprintf "%dm" (seconds / seconds_per_minute)
+  else if seconds < seconds_per_minute * minutes_per_hour then
+    Printf.sprintf "%dm" (seconds / seconds_per_minute)
+  else Printf.sprintf "%dh" (seconds / (seconds_per_minute * minutes_per_hour))
 
 let floor_prefix floor = if floor then floor_mark else ""
 

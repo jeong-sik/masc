@@ -233,11 +233,16 @@ let table : (Runtime_quota_window.scope, (string option * window_kind, recorded)
 
 let mu = Stdlib.Mutex.create ()
 
+let record_observer =
+  Atomic.make (fun ~scope:_ ~observed_at:_ (_ : report) -> ())
+
+let set_record_observer observer = Atomic.set record_observer observer
+
 let record ~scope ~observed_at (report : report) =
   match report.windows with
   | [] -> ()
   | windows ->
-    Stdlib.Mutex.protect mu (fun () ->
+    let accepted = Stdlib.Mutex.protect mu (fun () ->
       let by_window =
         match Hashtbl.find_opt table scope with
         | Some by_window -> by_window
@@ -246,14 +251,23 @@ let record ~scope ~observed_at (report : report) =
           Hashtbl.replace table scope by_window;
           by_window
       in
-      List.iter
+      List.filter
         (fun (window : window) ->
            let key = window.limit_id, window.kind in
            match Hashtbl.find_opt by_window key with
-           | Some held when Float.compare held.observed_at observed_at > 0 -> ()
+           | Some held when Float.compare held.observed_at observed_at >= 0 -> false
            | Some _ | None ->
-             Hashtbl.replace by_window key { window; source = report.source; observed_at })
+             Hashtbl.replace by_window key { window; source = report.source; observed_at };
+             true)
         windows)
+    in
+    if accepted <> [] then
+      (try (Atomic.get record_observer) ~scope ~observed_at
+             { report with windows = accepted }
+       with Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+              Log.Runtime.warn "provider usage history sink failed: %s"
+                (Printexc.to_string exn))
 ;;
 
 let kind_rank = function

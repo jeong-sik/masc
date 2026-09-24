@@ -203,6 +203,27 @@ let test_codex_read_falls_back_and_refuses_a_bad_map () =
   | Ok _ -> fail "a list map was accepted"
 ;;
 
+let test_durable_sink_receives_only_accepted_report () =
+  with_runtimes (fun () ->
+    let scope = scope_of "usage_codex.sol" in
+    let report =
+      decode_ok (Usage.decode_codex_rate_limits_updated
+                   (Yojson.Safe.from_string codex_exhausted_params))
+    in
+    let received = ref [] in
+    Fun.protect
+      ~finally:(fun () ->
+        Usage.set_record_observer (fun ~scope:_ ~observed_at:_ _ -> ()))
+      (fun () ->
+        Usage.set_record_observer (fun ~scope:_ ~observed_at report ->
+          received := (observed_at, List.length report.Usage.windows) :: !received);
+        Usage.record ~scope ~observed_at:1790400000.0 report;
+        Usage.record ~scope ~observed_at:1790400000.0 report;
+        check (list (pair (float 0.0) int))
+          "one durable report for one accepted observation"
+          [1790400000.0, 2] !received))
+;;
+
 let () =
   run
     "provider_usage_windows"
@@ -213,6 +234,8 @@ let () =
             test_malformed_window_is_a_typed_error
         ; test_case "codex read falls back and refuses a bad map" `Quick
             test_codex_read_falls_back_and_refuses_a_bad_map
+        ; test_case "sink receives accepted reports once" `Quick
+            test_durable_sink_receives_only_accepted_report
         ] )
     ]
 ;;

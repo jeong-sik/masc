@@ -239,6 +239,31 @@ let add_routes ~sw router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/provider-usage-history" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let days =
+           match query_param req "days" with
+           | None -> Some 14
+           | Some raw -> int_of_string_opt raw
+         in
+         let status, json =
+           match days with
+           | Some (1 | 7 | 14 as days) ->
+               let config = Mcp_server.workspace_config state in
+               (match Domain_pool_ref.submit_io_or_inline (fun () ->
+                  Server_provider_usage_history.read config
+                    ~now:(Unix.gettimeofday ()) ~days) with
+                | Ok json -> `OK, json
+                | Error detail ->
+                    `Service_unavailable,
+                    `Assoc [ "ok", `Bool false; "error", `String detail ])
+           | Some _ | None ->
+               `Bad_request,
+               `Assoc [ "ok", `Bool false
+                      ; "error", `String "days must be 1, 7, or 14" ]
+         in
+         Http.Response.json_value ~status ~compress:true ~request:req json reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/cost-latency" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let window = int_query_param req "window" ~default:1440 in

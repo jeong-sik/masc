@@ -104,6 +104,12 @@ val record : scope:Runtime_quota_window.scope -> observed_at:float -> report -> 
     [(scope, limit_id, kind)].  An older [observed_at] than the one held does
     not replace it.  A report with no windows changes nothing. *)
 
+val set_record_observer :
+  (scope:Runtime_quota_window.scope -> observed_at:float -> report -> unit) -> unit
+(** Install the server's durable observation sink. It receives accepted
+    provider reports after the in-memory table lock has been released. A sink
+    failure is logged and never changes the runtime's quota reading. *)
+
 val state : scope:Runtime_quota_window.scope -> scope_state
 (** The windows held for [scope], ordered by limit then kind. *)
 

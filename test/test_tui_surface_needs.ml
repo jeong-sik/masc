@@ -104,6 +104,7 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
       ; delta.needs_asks
       ; delta.needs_runtime_quota
       ; delta.needs_keeper_usage
+      ; delta.needs_provider_history
       ; delta.needs_repository_pulls
       ; delta.needs_overview_goals
       ]
@@ -114,7 +115,7 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
   let _, dataset_count =
     List.fold_left add_delta (needs Types.Overview, 0) destinations
   in
-  check int "only newly visible scoped requests are planned" 7 dataset_count
+  check int "only newly visible scoped requests are planned" 8 dataset_count
 ;;
 
 let test_equal_needs_have_no_delta () =
@@ -188,6 +189,8 @@ let test_only_the_overview_asks_for_the_goal_tree () =
 let test_usage_asks_for_keeper_usage () =
   check bool "Usage fetches Keeper metrics" true
     (needs Types.Metrics).Types.needs_keeper_usage;
+  check bool "Usage fetches provider history" true
+    (needs Types.Metrics).Types.needs_provider_history;
   check bool "Dashboard does not fetch Keeper detail" false
     (needs Types.Overview).Types.needs_keeper_usage
 ;;

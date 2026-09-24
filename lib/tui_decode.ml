@@ -5195,6 +5195,55 @@ let decode_provider_usage_windows json =
   in
   Ok { puws_since; puws_accounts }
 
+type provider_usage_history_point = {
+  puhp_account_id : string;
+  puhp_kind : string;
+  puhp_limit_id : string option;
+  puhp_unit : provider_usage_utilization;
+  puhp_observed_at : float;
+}
+
+type provider_usage_history = {
+  puh_days : int;
+  puh_generated_at : float;
+  puh_points : provider_usage_history_point list;
+}
+
+let decode_provider_usage_history_point json =
+  let* puhp_account_id = required_string_field json "account_id" in
+  let* puhp_kind = required_string_field json "kind" in
+  let* puhp_limit_id = required_nullable_string_field json "limit_id" in
+  let* puhp_observed_at = required_number_field json "observed_at" in
+  let* unit = required_string_field json "unit" in
+  let* puhp_unit =
+    match unit with
+    | "fraction" ->
+        let* value = required_number_field json "value" in
+        if Float.is_finite value then Ok (Utilization_fraction value)
+        else Error "provider usage history: non-finite fraction"
+    | "percent" ->
+        let* value = required_int_field json "value" in
+        Ok (Utilization_percent value)
+    | _ -> Error ("provider usage history: unknown unit " ^ unit)
+  in
+  Ok { puhp_account_id; puhp_kind; puhp_limit_id; puhp_unit; puhp_observed_at }
+
+let decode_provider_usage_history json =
+  let* puh_days = required_int_field json "days" in
+  if not (List.mem puh_days [ 1; 7; 14 ]) then
+    Error "provider usage history: unsupported day window"
+  else
+    let* puh_generated_at = required_number_field json "generated_at" in
+    let* sampling = required_string_field json "sampling" in
+    if sampling <> "latest_provider_report_per_utc_day" then
+      Error "provider usage history: unknown sampling contract"
+    else
+      let* points = required_list_field json "points" in
+      let* puh_points =
+        decode_list "points" decode_provider_usage_history_point points
+      in
+      Ok { puh_days; puh_generated_at; puh_points }
+
 type keeper_usage_coverage =
   | Keeper_usage_complete
   | Keeper_usage_partial of int

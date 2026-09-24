@@ -1844,6 +1844,8 @@ type http_scoped_surface_results = {
     * (Tui_decode.provider_usage_windows, string) result)
     option;
   http_keeper_usage: (Tui_decode.keeper_usage_window, string) result option;
+  http_provider_history:
+    (Tui_decode.provider_usage_history, string) result option;
   http_repository_pulls:
     (overview_pulls_reading, string) result
     option;
@@ -10584,6 +10586,10 @@ let apply_keeper_usage_load state = function
   | Ok usage -> state.keeper_usage <- Keeper_usage_read usage
   | Error reason -> state.keeper_usage <- Keeper_usage_error reason
 
+let apply_provider_history_load state = function
+  | Ok history -> state.provider_history <- Provider_history_read history
+  | Error reason -> state.provider_history <- Provider_history_error reason
+
 let apply_repository_pulls_load state = function
   | Ok reading -> state.overview_pulls <- reading
   | Error err -> state.overview_pulls <- Overview_pulls_failed err
@@ -10842,6 +10848,13 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
       | exception exn -> Error (Printexc.to_string exn))
   in
+  let http_provider_history =
+    when_needed needs.needs_provider_history (fun () ->
+      match Masc_tui_loader.load_provider_usage_history ~host ~port with
+      | result -> result
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+      | exception exn -> Error (Printexc.to_string exn))
+  in
   let http_repository_pulls =
     when_needed needs.needs_repository_pulls (fun () ->
         match Masc_tui_loader.load_repository_pulls ~host ~port with
@@ -10867,6 +10880,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   ; http_keeper_roster
   ; http_runtime_quota
   ; http_keeper_usage
+  ; http_provider_history
   ; http_repository_pulls
   ; http_overview_goals
   }
@@ -10915,6 +10929,7 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   Option.iter (apply_runtime_quota_load state) results.http_runtime_quota;
   Option.iter (apply_keeper_usage_load state) results.http_keeper_usage;
+  Option.iter (apply_provider_history_load state) results.http_provider_history;
   Option.iter (apply_repository_pulls_load state) results.http_repository_pulls;
   Option.iter (apply_overview_goals_load state) results.http_overview_goals
 

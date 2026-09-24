@@ -2898,6 +2898,23 @@ type provider_usage_windows = {
   puws_accounts : provider_usage_account list;
 }
 
+type provider_usage_history_point = {
+  puhp_account_id : string;
+  puhp_kind : string;
+  puhp_limit_id : string option;
+  puhp_unit : provider_usage_utilization;
+  puhp_observed_at : float;
+}
+
+type provider_usage_history = {
+  puh_days : int;
+  puh_generated_at : float;
+  puh_points : provider_usage_history_point list;
+}
+
+val decode_provider_usage_history :
+  Yojson.Safe.t -> (provider_usage_history, string) result
+
 val decode_provider_usage_windows :
   Yojson.Safe.t -> (provider_usage_windows, string) result
 (** Strict decoder for the [provider_usage_windows_since] and

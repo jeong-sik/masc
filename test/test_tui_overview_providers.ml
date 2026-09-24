@@ -221,6 +221,23 @@ let test_unknown_state_is_rejected () =
     (Result.is_error
        (Tui_decode.decode_provider_usage_windows (resolved "paused")))
 
+let test_history_preserves_reported_days_and_units () =
+  let json = Yojson.Safe.from_string
+    {|{"days":14,"generated_at":1780000000.0,"sampling":"latest_provider_report_per_utc_day","points":[{"account_id":"abc12345","kind":"five_hour","limit_id":null,"unit":"fraction","value":0.4,"observed_at":1779999900.0,"source":"codex.account_rate_limits_read","resets_at":null}]}|}
+  in
+  match Tui_decode.decode_provider_usage_history json with
+  | Error detail -> fail detail
+  | Ok history ->
+      check int "declared UTC days" 14 history.puh_days;
+      (match history.puh_points with
+       | [point] ->
+           check string "opaque account" "abc12345" point.puhp_account_id;
+           (match point.puhp_unit with
+            | Tui_decode.Utilization_fraction value ->
+                check (float 0.0001) "reported fraction" 0.4 value
+            | Tui_decode.Utilization_percent _ -> fail "unit changed")
+       | _ -> fail "expected one reported point")
+
 let () =
   run "tui_overview_providers"
     [ ( "providers"
@@ -229,5 +246,7 @@ let () =
         ; test_case "values read in one unit" `Quick test_values_read_in_one_unit
         ; test_case "failed read is one line" `Quick test_failed_read_is_one_line
         ; test_case "unknown state is rejected" `Quick test_unknown_state_is_rejected
+        ; test_case "history uses reported points" `Quick
+            test_history_preserves_reported_days_and_units
         ] )
     ]

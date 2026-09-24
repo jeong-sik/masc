@@ -177,11 +177,12 @@ let heard_text ~now observed_at =
 
 (* ---- accounts ----------------------------------------------------------- *)
 
+let account_id (account : Tui_decode.provider_usage_account) =
+  Digest.to_hex (Digest.string account.pua_scope)
+  |> fun hex -> String.sub hex 0 8
+
 let account_name (account : Tui_decode.provider_usage_account) =
-  let id =
-    Digest.to_hex (Digest.string account.pua_scope)
-    |> fun hex -> String.sub hex 0 8
-  in
+  let id = account_id account in
   match account.pua_providers with
   | [] -> "account " ^ id
   | providers -> Terminal_text.single_line (String.concat "," providers) ^ " · " ^ id

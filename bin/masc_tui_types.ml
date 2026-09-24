@@ -2002,6 +2002,11 @@ type keeper_usage_reading =
   | Keeper_usage_read of Tui_decode.keeper_usage_window
   | Keeper_usage_error of string
 
+type provider_history_reading =
+  | Provider_history_unread
+  | Provider_history_read of Tui_decode.provider_usage_history
+  | Provider_history_error of string
+
 (** One open pull request as [GET /api/v1/repositories/pulls] reports it
     (RFC-0465). The check and review words are parsed at decode; a word this
     build cannot name makes the row undecodable rather than a default. *)
@@ -2905,6 +2910,7 @@ type surface_needs = {
   needs_asks : bool;
   needs_runtime_quota : bool;
   needs_keeper_usage : bool;
+  needs_provider_history : bool;
   needs_repository_pulls : bool;
   needs_overview_goals : bool;
 }
@@ -2921,6 +2927,7 @@ let nothing =
     needs_asks = false;
     needs_runtime_quota = false;
     needs_keeper_usage = false;
+    needs_provider_history = false;
     needs_repository_pulls = false;
     needs_overview_goals = false;
   }
@@ -2989,6 +2996,7 @@ and surface_needs_of_surface : surface -> surface_needs = function
         ; needs_transport = true
         ; needs_runtime_quota = true
         ; needs_keeper_usage = true
+        ; needs_provider_history = true
       }
   | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
   | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
@@ -3015,6 +3023,8 @@ let surface_needs_delta ~previous ~next =
       next.needs_runtime_quota && not previous.needs_runtime_quota
   ; needs_keeper_usage =
       next.needs_keeper_usage && not previous.needs_keeper_usage
+  ; needs_provider_history =
+      next.needs_provider_history && not previous.needs_provider_history
   ; needs_repository_pulls =
       next.needs_repository_pulls && not previous.needs_repository_pulls
   ; needs_overview_goals =
@@ -5685,6 +5695,7 @@ type state = {
   mutable overview_quota: overview_quota_reading;
   mutable overview_providers: overview_providers_reading;
   mutable keeper_usage: keeper_usage_reading;
+  mutable provider_history: provider_history_reading;
   mutable overview_pulls: overview_pulls_reading;
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
@@ -7822,6 +7833,7 @@ let create_state
   overview_quota = Quota_unread;
   overview_providers = Providers_unread;
   keeper_usage = Keeper_usage_unread;
+  provider_history = Provider_history_unread;
   overview_pulls = Overview_pulls_unread;
   overview_goals = Goals_unread;
   runtime_lanes = [];

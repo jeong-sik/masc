@@ -12650,6 +12650,68 @@ let render_acting (state : state) =
     | Actions | Everything -> Acting_selection (scroll, cursor) in
   finish_surface state ~clamped ~surface_key:"acting" ~rows:terminal_rows ~cols buf
 
+let provider_history_lines (state : state) =
+  match state.provider_history with
+  | Provider_history_unread -> [ " Account trend · not observed" ]
+  | Provider_history_error reason ->
+      [ " Account trend · unavailable: " ^ Terminal_text.single_line reason ]
+  | Provider_history_read history ->
+      let days = history.puh_days in
+      let last_day = int_of_float (floor (history.puh_generated_at /. 86400.0)) in
+      let first_day = last_day - days + 1 in
+      let key (point : Tui_decode.provider_usage_history_point) =
+        point.puhp_account_id, point.puhp_kind, point.puhp_limit_id
+      in
+      let keys =
+        List.map key history.puh_points |> List.sort_uniq compare
+      in
+      let accounts =
+        match state.overview_providers with
+        | Providers_read reading -> reading.puws_accounts
+        | Providers_unread | Providers_failed _ -> []
+      in
+      let label account_id =
+        match List.find_opt
+                (fun account ->
+                  String.equal (Overview_providers.account_id account) account_id)
+                accounts with
+        | None -> "account " ^ account_id
+        | Some account -> Overview_providers.account_name account
+      in
+      let chart (account_id, kind, limit_id) =
+        let slots = Array.make days None in
+        List.iter
+          (fun (point : Tui_decode.provider_usage_history_point) ->
+            if key point = (account_id, kind, limit_id) then
+              let day = int_of_float (floor (point.puhp_observed_at /. 86400.0)) in
+              let index = day - first_day in
+              if index >= 0 && index < days then
+                slots.(index) <- Some point.puhp_unit)
+          history.puh_points;
+        let glyphs = [| "▁"; "▂"; "▃"; "▄"; "▅"; "▆"; "▇"; "█" |] in
+        let observed = ref 0 in
+        let marks =
+          Array.to_list slots
+          |> List.map (function
+               | None -> "·"
+               | Some value ->
+                   incr observed;
+                   let share = Overview_providers.share_of_full value in
+                   let index =
+                     int_of_float (floor (Float.min 1.0 (Float.max 0.0 share) *. 7.0))
+                   in
+                   glyphs.(index))
+          |> String.concat ""
+        in
+        let limit = Option.fold ~none:"" ~some:(fun id -> id ^ " ") limit_id in
+        Printf.sprintf "   %s · %s%s  %s  %d/%d UTC days reported"
+          (label account_id) (Terminal_text.single_line limit)
+          (Terminal_text.single_line kind) marks !observed days
+      in
+      " Account trend · latest provider report per UTC day · · means no report"
+      :: (if keys = [] then [ "   No reports recorded in this window" ]
+          else List.map chart keys)
+
 let usage_lines ~cols (state : state) =
   let accounts =
     match Overview_providers.section
@@ -12696,7 +12758,7 @@ let usage_lines ~cols (state : state) =
                   row.kur_cost_missing coverage)
               kuw_rows)
   in
-  accounts @ [ "" ] @ keepers
+  accounts @ [ "" ] @ provider_history_lines state @ [ "" ] @ keepers
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in

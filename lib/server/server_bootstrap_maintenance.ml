@@ -390,6 +390,7 @@ let recover_keeper_msg_requests_on_startup ~base_path =
 
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
+  Server_provider_usage_history.install config;
   Lane_addon_runtime.register_skill_export_handler
     Server_skill_snapshot_runtime.publish_lane_skills;
   Lane_addon_runtime.start_configuration_service ~config ~sw ~clock;

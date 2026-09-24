@@ -1470,16 +1470,21 @@ status: reference
   - durable 회차(`Keeper_librarian_durable_consumer`): 끝난 턴을 읽어 Memory OS에 적고
     읽은 위치(Read Position)를 옮긴다. Agent Core 턴은 checkpoint의 atom으로, 공식
     클라이언트 턴은 그 trace의 history 파일에서 `turn_ref`가 가리키는 조각으로 읽는다.
-    두 위치(atom 위치·공식 클라이언트 위치)를 각각 옮기며, `commit`이 Memory OS snapshot
-    커밋을 보고할 때만 옮긴다.
+    두 위치(atom 위치·공식 클라이언트 위치)는 각각 따로 옮기며, `commit`이 Memory OS snapshot
+    커밋을 보고할 때만 옮긴다. 공식 클라이언트 턴 쪽이 읽을 수 없는 거절 경계선에서
+    멈추더라도(`Keeper_librarian_range.Official_stop`), 이 정지는 공식 위치만 세우며 atom 쪽은
+    독립적으로 읽어 atom 위치를 전진시킨다. atom 쪽에 더 읽을 것이 없을 때 비로소 회차가
+    `Official_range_stopped`로 종료된다(#38475).
   - 연속성 회차(`Keeper_librarian_continuity`): 스냅숏이 덮은 앞부분을 다시 쓰는 회차.
     완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 커밋은 durable 회차의
     위치를 바꾸지 않는다.
   두 회차는 따로 밀리고(Continuity Lag), 실패 뒤 범위를 좁히는 방식도 다르다(RFC
-  librarian-lifecycle §4.3). durable 회차는 실패 종류를 보지 않고, 실패 표식을 루프
-  메모리에 두고 가장 오래된 한 턴으로 좁힌다. 연속성 회차는 실패 종류를 보고 크기
+  librarian-lifecycle §4.3). durable 회차는 실패 종류를 보지 않고, 실패 표식(wide-range
+  failure marker)을 루프 메모리에 두고 가장 오래된 한 턴으로 좁힌다. 단, 공식 정지
+  (`Official_range_stopped`)로 끝난 회차는 이 마커를 해제하여 이후 회차가 atom 백로그
+  전체를 정상적으로 읽도록 보장한다(#38475). 연속성 회차는 실패 종류를 보고 크기
   때문인 실패에서만 좁히며, 좁힌 폭(Continuity Width)을 다음 회차로 넘긴다.
-  → [keeper_librarian_durable_consumer](../../lib/keeper/keeper_librarian_durable_consumer.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
+  → [keeper_librarian_durable_consumer](../../lib/keeper/keeper_librarian_durable_consumer.mli) · [keeper_librarian_range](../../lib/keeper/keeper_librarian_range.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
 
 **Continuity Lag (요약이 밀린 정도)**
 : 연속성 회차가 얼마나 뒤처졌나 — Librarian의 읽은 위치(Read Position)의 `end_atom`에서

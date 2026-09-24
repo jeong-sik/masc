@@ -2974,58 +2974,74 @@ let build_commit_cmd =
   let doc = "Print the Git commit embedded in this server binary at build time." in
   Cmd.v (Cmd.info "build-commit" ~doc) Term.(const build_commit_cmd_exit $ const ())
 
-(* Build the general sandbox image from the recipe this binary carries. The
-   Dockerfile goes to docker on stdin against a [-] context, so this works the
-   same on a host that has no checkout -- which is the whole point, since the
-   only image MASC described before was one you could build from the repository
-   and nowhere else. *)
-(* Build the recipe into the store of a runtime that takes a directory, not
-   stdin. Apple's [container build] is the one: its usage line takes a
-   context directory and it has no [-], so the recipe is written to a
-   directory of its own and named with [-f]. Nothing else goes in that
-   directory, so the context stays what the stdin form's [-] gave docker:
-   the recipe and nothing else. *)
-let sandbox_image_build_in_a_directory_exit ~cli ~tag =
-  let context = Filename.temp_file "masc-sandbox-image-" ".d" in
-  Sys.remove context;
-  Unix.mkdir context 0o700;
-  let cleanup () =
-    (try Sys.remove (Filename.concat context "Dockerfile") with Sys_error _ -> ());
-    try Unix.rmdir context with Unix.Unix_error _ -> ()
-  in
-  Fun.protect ~finally:cleanup (fun () ->
-      let dockerfile = Keeper_sandbox_image.write_recipe_into ~dir:context in
-      let argv =
-        cli
-        :: Keeper_sandbox_image.context_directory_build_argv ~tag ~dockerfile
-             ~context
-      in
-      let pid =
-        Unix.create_process cli (Array.of_list argv) Unix.stdin Unix.stdout
-          Unix.stderr
-      in
-      let status = Masc_cli_setup.wait_for_child pid in
-      match status with
-      | Unix.WEXITED 0 ->
-        Printf.printf
-          "built %s into %s's image store\n\
-           Point a Keeper at it with sandbox_image = %S in its TOML.\n"
-          tag cli tag;
-        Cmd.Exit.ok
-      | Unix.WEXITED code ->
-        Printf.eprintf "sandbox-image: %s build exited %d\n" cli code;
-        Cmd.Exit.some_error
-      | Unix.WSIGNALED n | Unix.WSTOPPED n ->
-        Printf.eprintf "sandbox-image: %s build stopped by signal %d\n" cli n;
-        Cmd.Exit.some_error)
+(* Build one sandbox recipe into one image store, under a tag that names that
+   build. RFC keeper-sandbox-images-have-versions §2.2: the tag is never moved
+   to new content, so a tag already in the store refuses the build instead of
+   being rebuilt in place. *)
 
-let sandbox_image_build_exit ~command ~tag =
+let rec sandbox_image_remove_tree path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Array.iter
+      (fun entry -> sandbox_image_remove_tree (Filename.concat path entry))
+      (Sys.readdir path);
+    Unix.rmdir path
+  | _ -> Sys.remove path
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+
+let sandbox_image_report_build ~cli ~tag status =
+  match status with
+  | Unix.WEXITED 0 ->
+    Printf.printf
+      "built %s into %s's image store\n\
+       Point a Keeper at it with sandbox_image = %S in its TOML.\n"
+      tag cli tag;
+    Cmd.Exit.ok
+  | Unix.WEXITED code ->
+    Printf.eprintf "sandbox-image: %s build exited %d\n" cli code;
+    Cmd.Exit.some_error
+  | Unix.WSIGNALED n | Unix.WSTOPPED n ->
+    Printf.eprintf "sandbox-image: %s build stopped by signal %d\n" cli n;
+    Cmd.Exit.some_error
+
+(* A runtime that takes a directory rather than stdin, or a recipe whose
+   COPY lines need files: the recipe and its listed inputs are written to a
+   directory of their own, and nothing else goes in it. *)
+let sandbox_image_build_in_a_directory_exit ~command ~tag ~labels ~recipe =
+  match command with
+  | [] ->
+    prerr_endline "sandbox-image: no image build command resolved";
+    Cmd.Exit.some_error
+  | cli :: _ ->
+    let context = Filename.temp_file "masc-sandbox-image-" ".d" in
+    Sys.remove context;
+    Unix.mkdir context 0o700;
+    let cleanup () =
+      try sandbox_image_remove_tree context
+      with Unix.Unix_error _ | Sys_error _ -> ()
+    in
+    Fun.protect ~finally:cleanup (fun () ->
+        let dockerfile = Keeper_sandbox_image_version.write_context ~dir:context recipe in
+        let argv =
+          command
+          @ Keeper_sandbox_image.context_directory_build_argv ~labels ~tag
+              ~dockerfile ~context ()
+        in
+        let pid =
+          Unix.create_process cli (Array.of_list argv) Unix.stdin Unix.stdout
+            Unix.stderr
+        in
+        sandbox_image_report_build ~cli ~tag (Masc_cli_setup.wait_for_child pid))
+
+(* A recipe with no inputs, to a runtime that reads the Dockerfile on stdin
+   against a [-] context. *)
+let sandbox_image_build_on_stdin_exit ~command ~tag ~labels ~dockerfile =
   match command with
   | [] ->
     prerr_endline "sandbox-image: no image build command resolved";
     Cmd.Exit.some_error
   | bin :: _ ->
-    let argv = command @ Keeper_sandbox_image.build_argv ~tag in
+    let argv = command @ Keeper_sandbox_image.build_argv ~labels ~tag () in
     (* The runtime exiting first would otherwise kill this process mid-write, and
        the exit status we want to report is the runtime's own. *)
     let previous_sigpipe = Sys.signal Sys.sigpipe Sys.Signal_ignore in
@@ -3040,71 +3056,123 @@ let sandbox_image_build_exit ~command ~tag =
     Unix.close read_fd;
     let oc = Unix.out_channel_of_descr write_fd in
     (try
-       output_string oc Keeper_sandbox_image.dockerfile;
+       output_string oc dockerfile;
        close_out oc
      with Sys_error _ -> (try close_out_noerr oc with _ -> ()));  (* @observe-allowed: the write already failed; close_out_noerr is the no-raise form and there is no second failure to report *)
-    let status = Masc_cli_setup.wait_for_child pid in
-    (match status with
-     | Unix.WEXITED 0 ->
-       Printf.printf
-         "built %s via %s\n\
-          Point a Keeper at it with sandbox_image = %S in its TOML, or set \
-          MASC_KEEPER_SANDBOX_DOCKER_IMAGE to make it that Keeper's default.\n"
-         tag
-         (String.concat " " command)
-         tag;
-       Cmd.Exit.ok
-     | Unix.WEXITED code ->
-       Printf.eprintf "sandbox-image: %s build exited %d\n" bin code;
-       Cmd.Exit.some_error
-     | Unix.WSIGNALED n | Unix.WSTOPPED n ->
-       Printf.eprintf "sandbox-image: %s build stopped by signal %d\n" bin n;
-       Cmd.Exit.some_error))
+    sandbox_image_report_build ~cli:bin ~tag (Masc_cli_setup.wait_for_child pid))
+
+(* [<command> image inspect <tag>] answers 0 when the store holds the tag.
+   Any other answer reads as absent: a store that cannot answer at all also
+   cannot build, and the build that follows fails with the store's own
+   error rather than writing anything. *)
+let sandbox_image_tag_in_store ~command ~tag =
+  match command with
+  | [] -> false
+  | bin :: _ ->
+    let devnull = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
+    Fun.protect
+      ~finally:(fun () -> Unix.close devnull)
+      (fun () ->
+         let argv = command @ [ "image"; "inspect"; tag ] in
+         let pid = Unix.create_process bin (Array.of_list argv) Unix.stdin devnull devnull in
+         match Masc_cli_setup.wait_for_child pid with
+         | Unix.WEXITED 0 -> true
+         | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false)
+
+type sandbox_image_builder =
+  { build_command : string list
+  ; reads_stdin : bool
+  }
 
 (* Which store to build into. Docker stays the default because that is where
    [sandbox_profile = "docker"] keepers look and where this command has always
    put it. A microVM keeper looks somewhere else entirely -- each runtime
    keeps its images apart from Docker's -- so the image its gate wants can
    only be made by naming that runtime here. *)
-let sandbox_image_build_for_runtime ~runtime ~tag =
-  match runtime with
+let sandbox_image_builder = function
   | None ->
-    sandbox_image_build_exit
-      ~command:(Keeper_sandbox_runtime.docker_command_argv ()) ~tag
+    Ok
+      { build_command = Keeper_sandbox_runtime.docker_command_argv ()
+      ; reads_stdin = true
+      }
   | Some backend ->
+    let cli = Keeper_microvm_backend.cli_name backend in
     (match Keeper_microvm_backend.recipe_delivery backend with
      | Keeper_microvm_backend.On_stdin ->
-       sandbox_image_build_exit
-         ~command:[ Keeper_microvm_backend.cli_name backend ] ~tag
+       Ok { build_command = [ cli ]; reads_stdin = true }
      | Keeper_microvm_backend.In_a_context_directory ->
-       sandbox_image_build_in_a_directory_exit
-         ~cli:(Keeper_microvm_backend.cli_name backend)
-         ~tag
+       Ok { build_command = [ cli ]; reads_stdin = false }
      | Keeper_microvm_backend.Builds_no_images ->
-       Printf.eprintf
-         "sandbox-image: %s builds no images -- it has pull, load and save \
-          and no build. Next: build %s elsewhere, save it as an OCI archive, \
-          and `%s load` it.\n"
-         (Keeper_microvm_backend.cli_name backend)
-         tag
-         (Keeper_microvm_backend.cli_name backend);
-       Cmd.Exit.some_error)
+       Error
+         (Printf.sprintf
+            "sandbox-image: %s builds no images -- it has pull, load and save \
+             and no build. Next: build the image elsewhere, save it as an OCI \
+             archive, and `%s load` it."
+            cli cli))
 
-let sandbox_image_cmd_exit print_only tag runtime =
-  let tag = match tag with Some t -> t | None -> Keeper_sandbox_image.default_tag in
-  if print_only
-  then (
-    print_string Keeper_sandbox_image.dockerfile;
-    Cmd.Exit.ok)
-  else
-    match runtime with
-    | Error message ->
-      prerr_endline message;
-      Cmd.Exit.some_error
-    | Ok runtime -> sandbox_image_build_for_runtime ~runtime ~tag
+(* Only [base] travels inside the binary. Every other recipe names repository
+   files in its inputs, so it is read from a checkout. *)
+let sandbox_image_recipe ~recipe_name ~source =
+  match source with
+  | Some source ->
+    Result.map_error
+      (fun error ->
+         "sandbox-image: " ^ Keeper_sandbox_image_version.load_error_to_string error)
+      (Keeper_sandbox_image_version.load ~source ~name:recipe_name)
+  | None ->
+    let carried = Keeper_sandbox_image_version.base_embedded in
+    if String.equal recipe_name carried.Keeper_sandbox_image_version.name then Ok carried
+    else
+      Error
+        (Printf.sprintf
+           "sandbox-image: the %s recipe is read from a checkout; pass --source \
+            <checkout>. This binary carries only the %s recipe."
+           recipe_name carried.Keeper_sandbox_image_version.name)
+
+let sandbox_image_cmd_exit print_only tag runtime recipe_name source =
+  let ( let* ) = Result.bind in
+  let run =
+    let* recipe = sandbox_image_recipe ~recipe_name ~source in
+    if print_only
+    then (
+      print_string recipe.Keeper_sandbox_image_version.dockerfile;
+      Ok Cmd.Exit.ok)
+    else
+      let* runtime = runtime in
+      let* builder = sandbox_image_builder runtime in
+      let built_at = Unix.gettimeofday () in
+      let tag =
+        match tag with
+        | Some tag -> tag
+        | None -> Keeper_sandbox_image_version.tag ~built_at recipe
+      in
+      if sandbox_image_tag_in_store ~command:builder.build_command ~tag
+      then
+        Error
+          (Printf.sprintf
+             "sandbox-image: %s is already in the image store. A tag names one \
+              build and is not rebuilt in place; build again without --tag for \
+              a new one, or remove the old image first."
+             tag)
+      else
+        let labels = Keeper_sandbox_image_version.labels ~built_at recipe in
+        Ok
+          (match recipe.Keeper_sandbox_image_version.inputs, builder.reads_stdin with
+           | [], true ->
+             sandbox_image_build_on_stdin_exit ~command:builder.build_command ~tag ~labels
+               ~dockerfile:recipe.Keeper_sandbox_image_version.dockerfile
+           | [], false | _ :: _, _ ->
+             sandbox_image_build_in_a_directory_exit ~command:builder.build_command ~tag
+               ~labels ~recipe)
+  in
+  match run with
+  | Ok code -> code
+  | Error message ->
+    prerr_endline message;
+    Cmd.Exit.some_error
 
 let sandbox_image_cmd =
-  let doc = "Build the general Keeper sandbox image from the recipe in this binary." in
+  let doc = "Build a Keeper sandbox image under a tag that names that one build." in
   let man =
     [ `S Manpage.s_description
     ; `P
@@ -3126,6 +3194,13 @@ let sandbox_image_cmd =
          project needs that project's toolchain instead, named in its TOML \
          with sandbox_image; the container is read-only, so a turn cannot \
          install what is missing."
+    ; `P
+        "Without --tag the image is tagged \
+         masc-sandbox-<recipe>:<UTC build minute>-<input hash>, where the hash \
+         covers the Dockerfile and every file its inputs list. A tag already in \
+         the store is refused, with or without --tag: a tag names one build \
+         and is never moved to new content. Recipes other than base live under \
+         sandbox-images/ in a checkout and are read with --source."
     ]
   in
   let print_only =
@@ -3133,8 +3208,26 @@ let sandbox_image_cmd =
     Arg.(value & flag & info [ "print" ] ~doc)
   in
   let tag =
-    let doc = "Image tag to build (default: " ^ Keeper_sandbox_image.default_tag ^ ")." in
+    let doc =
+      "Image tag to build. The default names the build: \
+       masc-sandbox-<recipe>:<UTC minute>-<input hash>."
+    in
     Arg.(value & opt (some string) None & info [ "tag" ] ~docv:"TAG" ~doc)
+  in
+  let recipe_name =
+    let doc =
+      "Recipe under sandbox-images/ to build. The default, "
+      ^ Keeper_sandbox_image_version.(base_embedded.name)
+      ^ ", is carried in this binary; any other needs --source."
+    in
+    Arg.(
+      value
+      & opt string Keeper_sandbox_image_version.(base_embedded.name)
+      & info [ "recipe" ] ~docv:"NAME" ~doc)
+  in
+  let source =
+    let doc = "Checkout to read the recipe and its inputs from." in
+    Arg.(value & opt (some dir) None & info [ "source" ] ~docv:"DIR" ~doc)
   in
   let runtime =
     let doc =
@@ -3165,7 +3258,9 @@ let sandbox_image_cmd =
   in
   Cmd.v
     (Cmd.info "sandbox-image" ~doc ~man)
-    Term.(const sandbox_image_cmd_exit $ print_only $ tag $ resolved_runtime)
+    Term.(
+      const sandbox_image_cmd_exit $ print_only $ tag $ resolved_runtime $ recipe_name
+      $ source)
 
 (* Catalog model families are selectable suggestions, not account entitlement.
    Do not expose broad fallback rows such as [gpt], [cc:] or [claude_code]

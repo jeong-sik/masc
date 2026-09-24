@@ -401,6 +401,14 @@ masc sandbox-image --runtime apple_container
 masc sandbox-image --runtime nerdctl_kata
 ```
 
+빌드마다 태그가 따로 붙습니다. 형식은 `masc-sandbox-base:<UTC 분>-<입력 해시>`이고,
+명령이 태그를 출력하면 그 태그를 Keeper TOML 의 `sandbox_image` 에 적습니다.
+이미 저장소에 있는 태그는 다시 빌드하지 않고 거절하므로, Keeper 가 쓰는 이미지는
+같은 이름 아래에서 바뀌지 않습니다. `masc-sandbox:general` 을 적은 Keeper 는
+지금처럼 첫 부팅 때 런타임이 그 이미지를 빌드합니다. `base` 가 아닌 레시피는
+checkout 의 `sandbox-images/` 아래에 있고 `masc sandbox-image --recipe ocaml --source .`
+처럼 빌드합니다.
+
 Linux에서 실행 중인 서버와 같은 base path를 지정하여 Keeper를 생성합니다.
 먼저 위 Kata runtime·이미지와 서버의 모델 설정을 준비하고 admin credential로
 로그인해야 합니다. CLI가 선택한 backend를 서버에 전달하고 Keeper TOML에 저장합니다.

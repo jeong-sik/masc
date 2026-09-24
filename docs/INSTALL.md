@@ -433,6 +433,14 @@ masc sandbox-image --runtime apple_container
 masc sandbox-image --runtime nerdctl_kata
 ```
 
+Each build gets its own tag, `masc-sandbox-base:<UTC minute>-<input hash>`,
+and the command prints it; name that tag in the Keeper TOML's
+`sandbox_image`. A tag already in the store is refused rather than rebuilt,
+so an image a Keeper runs on never changes under the same name. A Keeper
+that names `masc-sandbox:general` still gets that image built by the
+runtime on its first boot. Recipes other than `base` live under
+`sandbox-images/` in a checkout: `masc sandbox-image --recipe ocaml --source .`.
+
 On Linux, create the Keeper with the same base path as the running server.
 First prepare the Kata runtime and image above and the server's model
 configuration, and sign in with an admin credential. The CLI passes the

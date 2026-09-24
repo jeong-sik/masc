@@ -116,8 +116,8 @@ let repository recipe = "masc-sandbox-" ^ recipe.name
 
 let build_minute built_at =
   let tm = Unix.gmtime built_at in
-  Printf.sprintf "%04d%02d%02dT%02d%02dZ" (tm.tm_year + 1900) (tm.tm_mon + 1)
-    tm.tm_mday tm.tm_hour tm.tm_min
+  Printf.sprintf "%04d%02d%02dT%02d%02dZ" (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
 
 let version ~built_at recipe =
   Printf.sprintf "%s-%s" (build_minute built_at)
@@ -128,8 +128,9 @@ let tag ~built_at recipe =
 
 let rfc3339_utc built_at =
   let tm = Unix.gmtime built_at in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ" (tm.tm_year + 1900)
-    (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min tm.tm_sec
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ" (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
+    tm.Unix.tm_sec
 
 let labels ~built_at recipe =
   [ "org.opencontainers.image.version", version ~built_at recipe

@@ -2506,6 +2506,7 @@
 (include stanzas/test_channel_gate_discord_state_in_process.inc)
 (include stanzas/test_discord_directory_failure.inc)
 (include stanzas/test_sandbox_image_recipe.inc)
+(include stanzas/test_sandbox_image_version.inc)
 (include stanzas/test_auth_token_inventory.inc)
 (include stanzas/test_config_root_embedded_seed.inc)
 (include stanzas/test_builtin_skill_package.inc)

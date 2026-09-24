@@ -64,18 +64,26 @@ type create_outcome =
       ; reason : string
       }
 
+type package_directory =
+  | Package_directory_removed
+  | Package_directory_kept_non_empty
+  | Package_directory_removed_unsynced of string
+  | Package_directory_remove_failed of string
+
 type delete_outcome =
   | Deleted_and_published of
       { reference : Skill_reference.t
       ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
       ; recovery_id : string
       ; disposition : recovery_disposition
+      ; package_directory : package_directory
       }
   | Deleted_but_unpublished of
       { reference : Skill_reference.t
       ; reason : delete_unpublished_reason
       ; recovery_id : string
       ; disposition : recovery_disposition
+      ; package_directory : package_directory
       }
 
 type source_not_ready =
@@ -1008,6 +1016,42 @@ let protect_quarantined_candidate quarantine operation =
          })
 ;;
 
+(* Runs only after the quarantined candidate verified: from then on the delete
+   never restores [SKILL.md] into the package folder, so removing the folder
+   cannot strand a restore. [rmdir] refuses a folder that still holds other
+   files, and that folder stays. *)
+let remove_empty_package_directory (target : target) =
+  let package_dir = Filename.dirname target.path in
+  match
+    Eio_guard.run_in_systhread ~label:"skill-editor-remove-empty-package-dir" (fun () ->
+      Unix.rmdir package_dir);
+    Eio_guard.check_if_ready ()
+  with
+  | exception Unix.Unix_error ((Unix.ENOTEMPTY | Unix.EEXIST), _, _) ->
+    Package_directory_kept_non_empty
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    let detail = Printexc.to_string exn in
+    Log.Dashboard.warn
+      "Skill delete left package folder %s in place: %s"
+      package_dir
+      detail;
+    Package_directory_remove_failed detail
+  | () ->
+    (match
+       run_quarantine_io (fun () ->
+         Keeper_fs_durable_directory.fsync_directory target.source_root)
+     with
+     | Ok () -> Package_directory_removed
+     | Error detail ->
+       Log.Dashboard.warn
+         "Skill delete removed package folder %s but did not sync %s: %s"
+         package_dir
+         target.source_root
+         detail;
+       Package_directory_removed_unsynced detail)
+;;
+
 let delete_with
       ~before_quarantine
       ~after_move
@@ -1117,6 +1161,7 @@ let delete_with
                        ; cause
                        })
                 | Ok () ->
+                  let package_directory = remove_empty_package_directory target in
                   let refresh_result =
                     try `Returned (refresh ()) with
                     | Eio.Cancel.Cancelled _ -> `Cancelled
@@ -1129,6 +1174,7 @@ let delete_with
                           ; reason = Publication_cancelled
                           ; recovery_id = quarantine.recovery_id
                           ; disposition = Quarantine_retained
+                          ; package_directory
                           })
                    | `Returned (Error reason) ->
                      Ok
@@ -1137,6 +1183,7 @@ let delete_with
                           ; reason = Publication_failed reason
                           ; recovery_id = quarantine.recovery_id
                           ; disposition = Quarantine_retained
+                          ; package_directory
                           })
                    | `Returned (Ok publication) ->
                      (match published_snapshot publication with
@@ -1147,6 +1194,7 @@ let delete_with
                              ; reason = Publication_failed reason
                              ; recovery_id = quarantine.recovery_id
                              ; disposition = Quarantine_retained
+                             ; package_directory
                              })
                       | Ok snapshot ->
                         (match
@@ -1160,6 +1208,7 @@ let delete_with
                                     Skill_catalog_snapshot.snapshot_revision snapshot
                                 ; recovery_id = quarantine.recovery_id
                                 ; disposition = Quarantine_retained
+                                ; package_directory
                                 })
                          | Ok _ ->
                            Ok
@@ -1170,6 +1219,7 @@ let delete_with
                                       "deleted reference remained present after publication"
                                 ; recovery_id = quarantine.recovery_id
                                 ; disposition = Quarantine_retained
+                                ; package_directory
                                 })))))))))
 ;;
 
@@ -1277,9 +1327,18 @@ let create_outcome_to_yojson = function
       ]
 ;;
 
+let package_directory_to_yojson = function
+  | Package_directory_removed -> `Assoc [ "kind", `String "removed" ]
+  | Package_directory_kept_non_empty -> `Assoc [ "kind", `String "kept_non_empty" ]
+  | Package_directory_removed_unsynced detail ->
+    `Assoc [ "kind", `String "removed_unsynced"; "detail", `String detail ]
+  | Package_directory_remove_failed detail ->
+    `Assoc [ "kind", `String "remove_failed"; "detail", `String detail ]
+;;
+
 let delete_outcome_to_yojson = function
   | Deleted_and_published
-      { reference; snapshot_revision; recovery_id; disposition } ->
+      { reference; snapshot_revision; recovery_id; disposition; package_directory } ->
     `Assoc
       [ "status", `String "deleted_and_published"
       ; "reference", Skill_reference.to_yojson reference
@@ -1288,8 +1347,10 @@ let delete_outcome_to_yojson = function
       ; "recovery_id", `String recovery_id
       ; ( "recovery_disposition"
         , `String (recovery_disposition_to_string disposition) )
+      ; "package_directory", package_directory_to_yojson package_directory
       ]
-  | Deleted_but_unpublished { reference; reason; recovery_id; disposition } ->
+  | Deleted_but_unpublished
+      { reference; reason; recovery_id; disposition; package_directory } ->
     `Assoc
       [ "status", `String "deleted_but_unpublished"
       ; "reference", Skill_reference.to_yojson reference
@@ -1297,6 +1358,7 @@ let delete_outcome_to_yojson = function
       ; "recovery_id", `String recovery_id
       ; ( "recovery_disposition"
         , `String (recovery_disposition_to_string disposition) )
+      ; "package_directory", package_directory_to_yojson package_directory
       ]
 ;;
 

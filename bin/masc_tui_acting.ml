@@ -154,12 +154,17 @@ type row = {
   detail : string;
 }
 
+(* The feed measures a call in milliseconds; the spelling is the TUI's one
+   duration ladder, which takes seconds. This ladder used to stop at minutes,
+   so a run over an hour read "62m03s".
+
+   A negative duration has no spelling on the ladder, and every row below
+   treats it as the feed giving no duration at all: the row a missing one
+   leaves is the row a negative one leaves. *)
+let milliseconds_in_a_second = 1000.
+
 let elapsed_text ms =
-  if ms < 1000. then Printf.sprintf "%.0fms" ms
-  else if ms < 60_000. then Printf.sprintf "%.1fs" (ms /. 1000.)
-  else
-    let seconds = int_of_float (ms /. 1000.) in
-    Printf.sprintf "%dm%02ds" (seconds / 60) (seconds mod 60)
+  Masc_tui_message_layout.elapsed_text (ms /. milliseconds_in_a_second)
 
 let turn_number_text turn = Printf.sprintf "turn %d" turn
 
@@ -208,6 +213,12 @@ let is_skill_tool tool =
   String.equal tool skill_read_tool_name
   || String.starts_with ~prefix:composition_tool_name_prefix tool
 
+(* A run's elapsed time as the words its row joins: none when the ladder has
+   no spelling for it, so a run reported with a negative time reads like one
+   the feed gave no time for. *)
+let run_elapsed elapsed_s =
+  Option.to_list (elapsed_text (elapsed_s *. milliseconds_in_a_second))
+
 let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
   let tool = Option.value ~default:"?" e.Observer.tool in
   let glyph, label, detail =
@@ -224,8 +235,8 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
         ( Call_returned
         , (if is_skill_tool tool then "skill returned" else "returned")
         , Printf.sprintf "%s%s%s" tool
-            (match duration_ms with
-             | Some ms -> " \xc2\xb7 " ^ elapsed_text ms
+            (match Option.bind duration_ms elapsed_text with
+             | Some text -> " \xc2\xb7 " ^ text
              | None -> "")
             (batch_text e.Observer.batch) )
     | Observer.Turn_started -> (Turn_boundary, "turn start", "")
@@ -237,18 +248,17 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
        error's code and text. *)
     | Observer.Agent_started -> (Turn_boundary, "agent start", "")
     | Observer.Agent_completed { elapsed_s } ->
-        (Turn_done, "agent done", elapsed_text (elapsed_s *. 1000.))
+        (Turn_done, "agent done", String.concat "" (run_elapsed elapsed_s))
     | Observer.Agent_failed { elapsed_s; error_code; error } ->
         ( Failure
         , "agent failed"
-        , String.concat " \xc2\xb7 "
-            [ elapsed_text (elapsed_s *. 1000.); error_code; error ] )
+        , String.concat " \xc2\xb7 " (run_elapsed elapsed_s @ [ error_code; error ]) )
     | Observer.Agent_yielded { elapsed_s } ->
-        (Quiet, "agent yielded", elapsed_text (elapsed_s *. 1000.))
+        (Quiet, "agent yielded", String.concat "" (run_elapsed elapsed_s))
     | Observer.Agent_input_required { elapsed_s; question } ->
         ( Attention
         , "waiting for input"
-        , String.concat " · " [ elapsed_text (elapsed_s *. 1000.); question ] )
+        , String.concat " · " (run_elapsed elapsed_s @ [ question ]) )
     (* Where the tool name is the whole detail, an event that carries none
        leaves the cell empty rather than printing the [?] the default stands
        for. A lone [?] in the Detail column reads as a failure marker and says
@@ -325,9 +335,11 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; label = "heartbeat"
       ; detail =
           (let phase = Option.value ~default:"" h.Observer.hb_phase in
-           match (h.Observer.hb_in_turn, h.Observer.hb_in_flight_ms) with
-           | Some true, Some ms ->
-               Printf.sprintf "%s \xc2\xb7 in turn for %s" phase (elapsed_text ms)
+           match
+             (h.Observer.hb_in_turn, Option.bind h.Observer.hb_in_flight_ms elapsed_text)
+           with
+           | Some true, Some in_flight ->
+               Printf.sprintf "%s \xc2\xb7 in turn for %s" phase in_flight
            | (Some true | Some false | None), (Some _ | None) -> phase)
       }
   | Observer.Keeper_tool_call c ->
@@ -347,8 +359,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
                if skill then "skill \xc2\xb7 " ^ word else word
            | None -> if skill then "skill call" else "tool call")
       ; detail =
-          (match c.Observer.kt_duration_ms with
-           | Some ms -> c.Observer.kt_tool ^ " \xc2\xb7 " ^ elapsed_text ms
+          (match Option.bind c.Observer.kt_duration_ms elapsed_text with
+           | Some text -> c.Observer.kt_tool ^ " \xc2\xb7 " ^ text
            | None -> c.Observer.kt_tool)
       }
   | Observer.Keeper_turn_complete t ->
@@ -714,8 +726,8 @@ let apply_member chunk ~at member =
 let chunk_tools_text tools =
   tools
   |> List.map (fun { ct_tool; ct_duration_ms; _ } ->
-      match ct_duration_ms with
-      | Some ms -> ct_tool ^ " " ^ elapsed_text ms
+      match Option.bind ct_duration_ms elapsed_text with
+      | Some text -> ct_tool ^ " " ^ text
       | None -> ct_tool)
   |> String.concat " \xc2\xb7 "
 

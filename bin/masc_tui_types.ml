@@ -10391,13 +10391,6 @@ let fleet_token_sparkline (state : state) =
   braille_sparkline tokens
 ;;
 
-(* The header's `$` reading. It is the same sum the Runtime authority row
-   says, so it comes from the same fold: a rule about what counts (dropping
-   cancelled turns, say) that lands in only one of them would compile. *)
-let fleet_total_cost_usd (state : state) =
-  let _, _, cost = aggregate_keeper_stats state.keepers in
-  cost
-;;
 
 let conversation_urls (state : state) : string list =
   let seen = Hashtbl.create 16 in

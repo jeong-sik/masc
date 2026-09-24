@@ -169,9 +169,10 @@ let test_authoritative_refresh_waits_for_both_owners_then_runs_once () =
     (cadence = Types.No_scoped_followup)
 ;;
 
-(* The fleet's cost is read for the Overview's Team title, only while
-   [/team-cost] shows it, and nowhere else: keeper-costs reads every day file
-   of every Keeper's metrics, so a hidden cost costs no request. *)
+(* On its own the Overview asks for the fleet's cost only while [/team-cost]
+   shows it on the Team title: keeper-costs rereads every day file of every
+   Keeper's metrics when its cache expires, so a hidden cost costs no
+   request. [/burn] is the other reader, below. *)
 let test_only_a_shown_overview_cost_is_fetched () =
   let shown surface =
     Types.surface_needs ~keeper_pane_drawn:false ~overview_cost_shown:true ~burn_hud_shown:false surface

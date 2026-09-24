@@ -378,6 +378,8 @@ let test_terminal_text_keeps_the_tags_that_spell_a_flag () =
   let tag_space = "\xf3\xa0\x80\xa0" (* U+E0020 *) in
   let tag_dash = "\xf3\xa0\x80\xad" (* U+E002D *) in
   let tag_slash = "\xf3\xa0\x80\xaf" (* U+E002F *) in
+  let tag_y = "\xf3\xa0\x81\xb9" (* U+E0079 *) in
+  let tag_z = "\xf3\xa0\x81\xba" (* U+E007A *) in
   let language_tag = "\xf3\xa0\x80\x81" (* U+E0001, deprecated *) in
   let scotland = flag ^ tag_g ^ tag_b ^ tag_s ^ tag_c ^ tag_t ^ cancel in
   let texas = flag ^ tag_u ^ tag_s ^ tag_t ^ tag_x ^ cancel in
@@ -398,6 +400,25 @@ let test_terminal_text_keeps_the_tags_that_spell_a_flag () =
   Alcotest.(check string) "a sequence that never closes is not a flag"
     (flag ^ "\\U000E0067\\U000E0062\\U000E0073\\U000E0063\\U000E0074")
     (Tui_decode.escape_invisible (flag ^ tag_g ^ tag_b ^ tag_s ^ tag_c ^ tag_t));
+  (* #38557 review: the opening flag is not a licence for the block behind it.
+     A reader sees one flag; without these the bytes under it could spell a
+     sentence, which is the smuggling this whole rule exists to stop. Only the
+     shape of a subdivision is kept -- lowercase and digits, three to seven. *)
+  Alcotest.(check string) "a command behind a flag is still drawn"
+    (flag
+     ^ "\\U000E0072\\U000E006D\\U000E0020\\U000E002D\\U000E0072\\U000E0066\\U000E0020\\U000E002F\\U000E007F")
+    (Tui_decode.escape_invisible
+       (flag ^ tag_r ^ tag_m ^ tag_space ^ tag_dash ^ tag_r ^ tag_f ^ tag_space
+        ^ tag_slash ^ cancel));
+  Alcotest.(check string) "a run too long to be a subdivision is drawn"
+    (flag
+     ^ "\\U000E0067\\U000E0062\\U000E0073\\U000E0063\\U000E0074\\U000E0078\\U000E0079\\U000E007A\\U000E007F")
+    (Tui_decode.escape_invisible
+       (flag ^ tag_g ^ tag_b ^ tag_s ^ tag_c ^ tag_t ^ tag_x ^ tag_y ^ tag_z
+        ^ cancel));
+  Alcotest.(check string) "a run too short to be a subdivision is drawn"
+    (flag ^ "\\U000E0067\\U000E0062\\U000E007F")
+    (Tui_decode.escape_invisible (flag ^ tag_g ^ tag_b ^ cancel));
   Alcotest.(check string) "a terminator with nothing to spell is drawn"
     (flag ^ "\\U000E007F")
     (Tui_decode.escape_invisible (flag ^ cancel));

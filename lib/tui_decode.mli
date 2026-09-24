@@ -52,9 +52,12 @@ val escape_invisible : string -> string
     ASCII in tag characters is the same trick without the bidi). Two
     exceptions are characters a reader can see the effect of, and each is
     admitted by its neighbours rather than by a list: a zero-width joiner
-    between two pictographs (UAX #29 GB11), and a complete emoji tag sequence
-    -- U+1F3F4, one or more tag bases, then the terminator U+E007F -- which is
-    kept whole or escaped whole. {!sanitize_terminal_text} and the Keeper chat
+    between two pictographs (UAX #29 GB11), and a subdivision flag -- U+1F3F4,
+    three to seven tag characters in the lowercase-and-digit shape UTS #51
+    gives a subdivision code, then the terminator U+E007F -- which is kept
+    whole or escaped whole. Tag characters outside that shape are drawn even
+    behind a flag: the wider grammar spells sentences, and a flag is all a
+    reader would see of them. {!sanitize_terminal_text} and the Keeper chat
     boundary both route through here, so the rule lives in one place. *)
 
 val sanitize_terminal_text : string -> string

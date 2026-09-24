@@ -935,25 +935,37 @@ let opens_pictograph text index =
   | None -> false
 
 (* The tags that are not hiding anything: the ones spelling a subregion flag.
-   U+1F3F4 opens the sequence, tag bases carry the subdivision, and U+E007F
-   closes it: U+1F3F4 U+E0067 U+E0062 U+E0073 U+E0063 U+E0074 U+E007F is
-   Scotland. [Masc_tui_message_layout] already counts that range as part of
-   one emoji cluster, so the same range is read the same way here rather than
-   judged twice. The sequence is admitted whole or not at
-   all: a run that never reaches the terminator is loose text spelled in
-   invisible characters, and the escaped flag in front of it stays visible. *)
-let tag_base_first = 0xE0020
-let tag_base_last = 0xE007E
+   U+1F3F4 opens the sequence, a subdivision code follows, and U+E007F closes
+   it: U+1F3F4 U+E0067 U+E0062 U+E0073 U+E0063 U+E0074 U+E007F is Scotland.
+   [Masc_tui_message_layout] counts that block as part of one emoji cluster,
+   and the exemption here is deliberately narrower than that block: only the
+   shape UTS #51 gives a subdivision, three to seven tag characters drawn
+   from lowercase letters and digits. The wider grammar would carry a
+   sentence -- tag space and tag punctuation spell one -- and a reader would
+   see a single flag where the hash covers words. The sequence is admitted
+   whole or not at all: a run that never reaches the terminator, or one
+   shaped like anything but a subdivision, is loose text spelled in invisible
+   characters, and the flag in front of it stays visible. *)
+let tag_small_letter_first = 0xE0061
+let tag_small_letter_last = 0xE007A
+let tag_digit_first = 0xE0030
+let tag_digit_last = 0xE0039
+let tag_spec_min = 3
+let tag_spec_max = 7
 let cancel_tag = 0xE007F
 let waving_black_flag = 0x1F3F4
 
-(* Bytes of a complete tag sequence starting at [index] -- the position just
-   past the flag -- not counting the flag itself. [None] when the run holds no
-   tag base, meets a character that is not one, or ends without the
-   terminator. *)
+let is_tag_spec code =
+  (code >= tag_small_letter_first && code <= tag_small_letter_last)
+  || (code >= tag_digit_first && code <= tag_digit_last)
+
+(* Bytes of a complete subdivision sequence starting at [index] -- the
+   position just past the flag -- not counting the flag itself. [None] when
+   the run is too short or too long for a subdivision, meets a tag character
+   outside the lowercase-and-digit shape, or ends without the terminator. *)
 let tag_sequence_bytes text index =
   let length = String.length text in
-  let rec scan position ~seen_base =
+  let rec scan position ~spec_count =
     if position >= length
     then None
     else (
@@ -964,12 +976,15 @@ let tag_sequence_bytes text index =
         let step = Uchar.utf_decode_length decoded in
         let code = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
         if code = cancel_tag
-        then (if seen_base then Some (position + step - index) else None)
-        else if code >= tag_base_first && code <= tag_base_last
-        then scan (position + step) ~seen_base:true
+        then (
+          if spec_count >= tag_spec_min && spec_count <= tag_spec_max
+          then Some (position + step - index)
+          else None)
+        else if is_tag_spec code && spec_count < tag_spec_max
+        then scan (position + step) ~spec_count:(spec_count + 1)
         else None))
   in
-  scan index ~seen_base:false
+  scan index ~spec_count:0
 
 (* [\uXXXX] has room for the basic plane only and the tag block needs five
    digits (U+E0061), so a wider fixed-width form of the same family carries

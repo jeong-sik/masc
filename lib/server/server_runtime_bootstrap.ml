@@ -5,13 +5,10 @@ open Server_routes_http
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 module Config_root_bootstrap = Server_runtime_config_root_bootstrap
-module Exact_output = Agent_core.Exact_output
 
 let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
-
-let agent_core_model_catalog_env_var_name = "AGENT_CORE_MODEL_CATALOG"
 
 (* Seconds withheld from tool-blob maintenance so the boot stages that follow
    it (Runtime_params restore, credential audit, Domain_pool, Keeper gate
@@ -20,12 +17,14 @@ let agent_core_model_catalog_env_var_name = "AGENT_CORE_MODEL_CATALOG"
    reserve carries them at the ~10x slowdown observed when a concurrent build
    saturates the disk, which is the condition under which maintenance
    overran its host's watchdog. *)
-let nonempty_env env name =
-  match env name with
-  | Some value ->
-    let value = String.trim value in
-    if String.equal value "" then None else Some value
-  | None -> None
+(* Whether AGENT_CORE_MODEL_CATALOG names a full replacement is one answer,
+   [Runtime.exact_output_target_source]: installing the catalog, warning
+   about retired config-root catalogs, choosing where the exact targets come
+   from, and whether rule 3 applies to runtime.toml all read it there. *)
+let replacement_catalog_path ?env () =
+  match Runtime.exact_output_target_source ?env () with
+  | Runtime.Replacement_catalog_targets { path } -> Some path
+  | Runtime.Runtime_binding_targets -> None
 
 let existing_file path =
   let path = String.trim path in
@@ -44,13 +43,13 @@ let install_runtime_model_catalog_override ~load_catalog ~set_catalog path =
     raise (Env_config_core.Config_error (Printf.sprintf "catalog %s: %s" path detail))
 
 let configure_agent_core_model_catalog_env
-      ?(env = Sys.getenv_opt)
+      ?env
       ?(agent_core_catalog = Llm_provider.Model_catalog.global)
       ?(load_catalog = Llm_provider.Model_catalog.load_file)
       ?(set_catalog = Llm_provider.Model_catalog.set_global)
       ()
   =
-  match nonempty_env env agent_core_model_catalog_env_var_name with
+  match replacement_catalog_path ?env () with
   | Some path ->
     install_runtime_model_catalog_override ~load_catalog ~set_catalog path;
     Log.Misc.info
@@ -68,11 +67,11 @@ let configure_agent_core_model_catalog_env
     None
 
 let warn_ignored_config_root_full_catalogs
-      ?(env = Sys.getenv_opt)
+      ?env
       ~config_root
       ()
   =
-  if Option.is_none (nonempty_env env agent_core_model_catalog_env_var_name)
+  if Option.is_none (replacement_catalog_path ?env ())
   then
     [ "models.toml"; "agent-core-models.toml" ]
     |> List.iter (fun filename ->
@@ -93,63 +92,6 @@ let config_load_failure_diagnostic ~detail =
      %s\n\
      Fix the configuration above or move the file aside. Run masc runtime-verify <RUNTIME_ID> to re-check a model connection afterwards."
     detail
-
-let exact_output_catalog_source_to_string = function
-  | Exact_output.Embedded_catalog -> "embedded"
-  | Exact_output.Full_replacement_catalog -> "full replacement"
-;;
-
-let exact_output_collision_to_string = function
-  | Exact_output.Duplicate_provider_identity -> "duplicate provider identity"
-  | Exact_output.Duplicate_model_identity -> "duplicate model identity"
-  | Exact_output.Duplicate_target_identity -> "duplicate target identity"
-  | Exact_output.Provider_alias_shadow -> "provider alias shadow"
-;;
-
-let exact_output_binding_component_to_string = function
-  | Exact_output.Target_provider -> "provider"
-  | Exact_output.Target_model -> "model"
-;;
-
-let exact_output_endpoint_error_to_string = function
-  | Exact_output.Malformed_base_url -> "malformed base URL"
-  | Exact_output.Base_url_userinfo_not_allowed -> "base URL userinfo is not allowed"
-  | Exact_output.Base_url_query_not_allowed -> "base URL query is not allowed"
-  | Exact_output.Base_url_fragment_not_allowed -> "base URL fragment is not allowed"
-  | Exact_output.Invalid_request_path -> "invalid request path"
-  | Exact_output.Unsupported_gemini_request_path ->
-    "Gemini exact targets require the generated endpoint surface"
-  | Exact_output.Invalid_gemini_model_path -> "invalid Gemini model path"
-;;
-
-let exact_output_snapshot_error_to_string = function
-  | Exact_output.Catalog_read_failed { path; detail } ->
-    Printf.sprintf "catalog read failed (%s): %s" path detail
-  | Exact_output.Catalog_parse_failed { source; detail } ->
-    Printf.sprintf
-      "%s catalog parse failed: %s"
-      (exact_output_catalog_source_to_string source)
-      detail
-  | Exact_output.Target_catalog_invalid { source; detail } ->
-    Printf.sprintf
-      "%s target catalog is invalid: %s"
-      (exact_output_catalog_source_to_string source)
-      detail
-  | Exact_output.Catalog_collision collision ->
-    exact_output_collision_to_string collision
-  | Exact_output.Target_binding_missing { target_ref; component } ->
-    Printf.sprintf
-      "target %S is missing its %s binding"
-      target_ref
-      (exact_output_binding_component_to_string component)
-  | Exact_output.Target_endpoint_invalid { target_ref; cause } ->
-    Printf.sprintf
-      "target %S endpoint is invalid: %s"
-      target_ref
-      (exact_output_endpoint_error_to_string cause)
-  | Exact_output.Environment_read_failed { environment_variable } ->
-    Printf.sprintf "failed to read environment variable %s" environment_variable
-;;
 
 let load_exact_output_lane_declarations ?config_root () =
   let runtime_config_path =
@@ -220,132 +162,6 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
     mandatory_exact_output_lane_ids
 ;;
 
-let warn_rejected_exact_output_slots registry =
-  let rejected = Runtime_exact_output_registry.rejected_slots registry in
-  let configured_runtime slot_id =
-    Option.map
-      (fun (rt : Runtime.t) ->
-         rt.Runtime.provider.Runtime_schema.id, rt.Runtime.model.Runtime_schema.api_name)
-      (Runtime.get_runtime_by_id slot_id)
-  in
-  let diagnoses =
-    List.map
-      (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
-         ( slot
-         , Runtime_exact_output_registry.diagnose_rejected_slot
-             registry
-             slot
-             ~configured_runtime ))
-      rejected
-  in
-  List.iter
-    (fun ((slot : Runtime_exact_output_registry.rejected_slot), diagnosis) ->
-       match diagnosis with
-       | Runtime_exact_output_registry.Declared_target_binding_rejected ->
-         Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because the binding it names resolved to no AGENT_CORE catalog row (see the target binding report above); an endpoint the install wizard created can never match one, so point the slot at a binding the catalog knows or add the row"
-           slot.lane_id
-           slot.position
-           slot.slot_id
-       | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name }
-         when String.equal slot.lane_id (Standalone_lane.to_id Standalone_lane.Verifier) ->
-         (* verifier_exact admits slots here, and judgement then admits each
-            id as a configured direct runtime
-            (Runtime.verifier_exact_slot_admission) and dispatches that id
-            alone, so its ids must exist in both registries; #32653 measured
-            the catalog-id form failing at dispatch 27 times on 2026-08-29. *)
-         Log.Server.warn
-           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by runtime id, so a slot must resolve as both a runtime and a target, and a subscription CLI resolves only as a runtime; give the lane an HTTP binding for model %S"
-           slot.lane_id
-           slot.position
-           slot.slot_id
-           provider_id
-           api_name
-           api_name
-       | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name } ->
-         Log.Server.warn
-           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by admitted target, and a subscription CLI has no endpoint to resolve against the catalog, so name an HTTP binding for model %S"
-           slot.lane_id
-           slot.position
-           slot.slot_id
-           provider_id
-           api_name
-           api_name
-       | Runtime_exact_output_registry.Unknown_to_both_registries ->
-         Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because no enabled binding carries that id; the binding is disabled, it was removed, or the id is mistyped"
-           slot.lane_id
-           slot.position
-           slot.slot_id)
-    diagnoses;
-  (* One consolidated line at ERROR, because per-slot WARNs read as
-     tolerable degradation and get discounted: four lanes carried retired
-     targets for days on 2026-08-28 while the warnings repeated unread. The
-     count per cause and the lane list make the standing config debt visible
-     once per publish. *)
-  (match rejected with
-   | [] -> ()
-   | rejected ->
-     let lanes =
-       rejected
-       |> List.map (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
-              slot.lane_id)
-       |> List.sort_uniq String.compare
-     in
-     let count predicate =
-       List.length (List.filter (fun (_, diagnosis) -> predicate diagnosis) diagnoses)
-     in
-     Log.Server.error
-       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d naming no enabled binding, %d naming a binding that does no exact output, %d whose binding resolved to no catalog row — fix runtime.toml"
-       (List.length rejected)
-       (List.length lanes)
-       (String.concat ", " lanes)
-       (count (function
-          | Runtime_exact_output_registry.Unknown_to_both_registries -> true
-          | Runtime_exact_output_registry.Configured_runtime_only _
-          | Runtime_exact_output_registry.Declared_target_binding_rejected -> false))
-       (count (function
-          | Runtime_exact_output_registry.Configured_runtime_only _ -> true
-          | Runtime_exact_output_registry.Unknown_to_both_registries
-          | Runtime_exact_output_registry.Declared_target_binding_rejected -> false))
-       (count (function
-          | Runtime_exact_output_registry.Declared_target_binding_rejected -> true
-          | Runtime_exact_output_registry.Unknown_to_both_registries
-          | Runtime_exact_output_registry.Configured_runtime_only _ -> false)))
-;;
-
-(* Publication carries [verifier_exact] cli ids verbatim, because only
-   [Runtime] holds the runtime table that answers whether an official client
-   can judge. A slot that cannot leaves the lane shorter than its declaration
-   instead of failing it (#37179), so the boot report has to name it or the
-   lane reads as configured. *)
-let report_verifier_exact_lane_admission () =
-  match Runtime.verifier_exact_lane_resolution () with
-  | Error detail ->
-    (* [verifier_exact] is not a mandatory lane, so an unconfigured one is a
-       supported shape; completion review reports the same sentence when it
-       refuses admission. *)
-    Log.Server.info
-      "exact_output: lane %S cannot judge: %s"
-      (Standalone_lane.to_id Standalone_lane.Verifier)
-      detail
-  | Ok (lane : Runtime.verifier_exact_lane_slots) ->
-    List.iter
-      (fun (rejection : Runtime.verifier_slot_rejection) ->
-         Log.Server.warn
-           "exact_output: lane %S %s; the lane runs its remaining slots without it"
-           (Standalone_lane.to_id Standalone_lane.Verifier)
-           (Runtime.verifier_slot_rejection_to_string rejection))
-      lane.Runtime.slot_rejections;
-    (match lane.Runtime.admitted_catalog_slot_ids, lane.Runtime.admitted_cli_slot_ids with
-     | [], [] ->
-       Log.Server.error
-         "exact_output: lane %S can judge through none of its %d declared slot(s); completion review refuses admission until runtime.toml names a slot it can judge"
-         (Standalone_lane.to_id Standalone_lane.Verifier)
-         (List.length lane.Runtime.slot_rejections)
-     | [], _ :: _ | _ :: _, _ -> ())
-;;
-
 (* Retracted (2026-08-28, hours after #31445): the classifier reuses
    Exact_output.admit_target_ref, whose authority is exact-output LANE
    admission. Keeper turn assignments resolve through a different path —
@@ -359,131 +175,33 @@ let report_verifier_exact_lane_admission () =
 let warn_catalog_absent_keeper_assignments _resolver_snapshot = ()
 ;;
 
-let warn_rejected_exact_output_bindings resolver_snapshot =
-  List.iter
-    (fun (binding : Exact_output.rejected_target_binding) ->
-       Log.Server.warn
-         "exact_output: target %S excluded from the frozen resolver because its %s binding is missing; lane admission will decide whether required targets remain"
-         binding.target_ref
-         (exact_output_binding_component_to_string binding.component))
-    (Exact_output.resolver_rejected_target_bindings resolver_snapshot)
-;;
-
-let warn_optional_exact_output_lane registry ~(lane : Runtime.exact_lane) ~feature =
-  let lane_id = Standalone_lane.to_id lane in
-  match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-  | Ok { selected_slots = _ :: _; _ } -> ()
-  | Ok { cli_slots = _ :: _; _ } when Runtime.exact_lane_supports_cli_tail lane -> ()
-  | Ok { selected_slots = []; _ }
-  | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
-    Log.Server.warn
-      "exact_output: %s is degraded because lane %S has no admitted target in the frozen catalog"
-      feature
-      lane_id
-  | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
-    Log.Server.warn
-      "exact_output: %s is degraded until [runtime.exact_output_lanes.%s] is configured with AGENT_CORE target refs"
-      feature
-      lane_id
-;;
-
-(* An exact-output slot names a runtime binding: the lane configuration and the
-   binding table use the same "<provider>.<model>" id. Restating that binding in
-   a second file is how a slot came to point at a declaration nobody had
-   written, and how a binding's declared connect timeout stopped reaching the
-   slot that runs on it (#37004). The slots are the bindings.
-
-   The binding itself travels, not a list of fields read off it. Handing over a
-   subset left the exact request without the connect deadline (#37004), then
-   without the declared effort (#37326), then on a different wire than the
-   Keeper's own requests (#37674) -- three turns of the same field going
-   missing at this boundary. *)
-let exact_output_targets_of_runtimes () =
-  let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
-  (* An exact-output slot resolves against the AGENT_CORE catalog, which speaks
-     only of endpoints. A subscription CLI has none — it is a local binary named
-     by [command] — so declaring one as a target only to have the binding
-     resolver reject it reports a missing catalog provider where the truth is
-     that this kind of runtime does no exact output. *)
-  List.filter_map
-    (fun (rt : Runtime.t) ->
-       match rt.execution with
-       | Runtime_execution.Agent_core config ->
-         Some
-           ({ target_ref = rt.id
-            ; (* [enable_thinking] is a per-turn control the Keeper path sets as
-                 it builds each request, so the binding config carries none yet.
-                 An exact request has one shape and asks once, here, from the
-                 same row the Keeper reads. *)
-              binding =
-                { config with
-                  Llm_provider.Provider_config.enable_thinking =
-                    rt.model.Runtime_schema.thinking_support
-                }
-            ; (* A slot's credential is the key its binding already resolved --
-                 the one the Keeper's requests carry, whatever source the
-                 binding named. Handing over the environment name instead sent
-                 the resolver back to read it a second time, and a binding fed
-                 from a file or an inline value had no name to hand over, so it
-                 reached the wire with no key at all. An environment name that
-                 resolved to nothing stays named, so the refusal can say which. *)
-              credential =
-                (let key = config.Llm_provider.Provider_config.api_key in
-                 match rt.provider.Runtime_schema.credentials with
-                 | Some (Runtime_schema.Env name) when Llm_provider.Secret.is_empty key ->
-                   Exact_output.Credential_unresolved { environment_variable = name }
-                 | Some (Runtime_schema.Env _ | Runtime_schema.File _ | Runtime_schema.Inline _)
-                   -> Exact_output.Credential_resolved key
-                 | None when Llm_provider.Secret.is_empty key ->
-                   Exact_output.Credential_not_declared
-                 | None -> Exact_output.Credential_resolved key)
-            ; body_timeout_s = rt.provider.Runtime_schema.exact_body_timeout_s
-            } : Exact_output.declared_target)
-       | Runtime_execution.Codex_app_server _
-       | Runtime_execution.Claude_code _
-       | Runtime_execution.Antigravity_cli _ -> None)
-    runtimes
-;;
-
 let configure_exact_output_registry ?config_root () =
   let config_path, lanes =
     load_exact_output_lane_declarations ?config_root ()
   in
   require_explicit_mandatory_exact_output_lanes ~config_path lanes;
-  let catalog, catalog_description =
-    match nonempty_env Sys.getenv_opt agent_core_model_catalog_env_var_name with
-    | Some path -> Exact_output.Full_replacement_file path, " from full replacement " ^ path
-    | None ->
-      let targets = exact_output_targets_of_runtimes () in
-      ( Exact_output.Embedded_with_targets targets
-      , Printf.sprintf
-          " from AGENT_CORE embedded catalog with %d runtime binding(s) as targets"
-          (List.length targets) )
-  in
-  let io : Exact_output.resolver_io =
-    { getenv =
-        (fun name ->
-          try Ok (Sys.getenv_opt name) with
-          | Sys_error _ | Invalid_argument _ -> Error ())
-    }
-  in
-  match
-    Exact_output.load_resolver_snapshot
-      ~io
-      ~target_binding_policy:Exact_output.Exclude_unbound_targets
-      ~catalog
-      ()
-  with
+  let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
+  let catalog = Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes in
+  (* Logged before the registry is published, so it is said even when
+     publication fails. *)
+  Runtime.warn_exact_slot_degradation catalog.Runtime.catalog_exact_slots;
+  match Runtime.load_exact_output_resolver_snapshot catalog.Runtime.catalog_input with
   | Error error ->
     raise
       (Env_config_core.Config_error
          ("exact-output resolver snapshot: "
-          ^ exact_output_snapshot_error_to_string error))
+          ^ Runtime_exact_output_registry.resolver_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
-    warn_rejected_exact_output_bindings resolver_snapshot;
+    (* A mandatory lane rule 3 emptied -- every slot a gap, no cli_slots --
+       is excused at this publication, so it alone is unavailable and every
+       other lane still publishes. A config commit excuses the same lanes from
+       the same derivation ([Runtime.exact_output_resolver_catalog]). A
+       mandatory lane empty for any other reason is still required and still
+       stops publication. *)
     (match
        Runtime.publish_exact_output_registry
          ~required_lane_ids:mandatory_exact_output_lane_ids
+         ~excused_lane_ids:catalog.Runtime.catalog_exact_slots.Runtime.emptied_lane_ids
          ~lanes
          resolver_snapshot
      with
@@ -492,20 +210,11 @@ let configure_exact_output_registry ?config_root () =
          (Env_config_core.Config_error
             ("exact-output resolver-and-lane registry: " ^ detail))
      | Ok registry ->
-       warn_rejected_exact_output_slots registry;
-       report_verifier_exact_lane_admission ();
+       Runtime.report_exact_output_registry registry;
        warn_catalog_absent_keeper_assignments resolver_snapshot;
        Log.Misc.info
          "exact_output: immutable resolver-and-lane registry published%s"
-         catalog_description;
-       warn_optional_exact_output_lane
-         registry
-         ~lane:Runtime.Librarian
-         ~feature:"librarian";
-       warn_optional_exact_output_lane
-         registry
-         ~lane:Runtime.Verifier
-         ~feature:"completion authority")
+         catalog.Runtime.catalog_description)
 ;;
 
 let install_domain_pool_references domain_pool =
@@ -515,7 +224,6 @@ let install_domain_pool_references domain_pool =
 
 module For_testing = struct
   let configure_exact_output_registry = configure_exact_output_registry
-  let exact_output_targets_of_runtimes = exact_output_targets_of_runtimes
   let install_domain_pool_references = install_domain_pool_references
 end
 
@@ -1610,7 +1318,7 @@ let resume_model_configuration () =
         in
         let withdrawn =
           if registry_published then Ok ()
-          else Runtime_exact_output_registry.unpublish ()
+          else Runtime.unpublish_exact_output_registry ()
         in
         match withdrawn with
         | Error _ -> Error "authority publication busy"

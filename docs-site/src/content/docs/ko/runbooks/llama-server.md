@@ -44,6 +44,9 @@ llama-server \
 display-name = "llama.cpp llama-server"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:8080/v1"
+# 이 provider 를 Exact 출력 레인 슬롯으로 쓰려면 요청 전체 상한이 있어야 해요.
+# connect-timeout-s 는 응답 헤더가 오면 끝나서 그 대신이 되지 않아요.
+exact-body-timeout-s = 1200.0
 
 [providers.llama_server.healthcheck]
 path = "/models"
@@ -79,6 +82,10 @@ default = "llama_server.qwen-2-5-coder-32b"
 [runtime.exact_output_lanes.verifier_exact]
 slots = ["llama_server.qwen-2-5-coder-32b"]
 ```
+
+슬롯의 provider 에는 `exact-body-timeout-s` 가 있어야 해요. 이 키가 없는 슬롯을
+새로 더하는 저장은 거절되고, 부팅 때는 그런 슬롯을 레인에서 빼고 런타임 시작 보고에
+레인·슬롯·provider 이름을 남겨요.
 
 설치 스크립트는 설정할 때 `healthcheck.path` 를 찔러 보므로, 서버가 안 떠 있으면
 마법사에 `not running` 으로 보입니다. 나중에 조용히 실패하지 않습니다. 전체 스키마는

@@ -17,14 +17,14 @@ python3 scripts/harness/tool_calls/first_call_validity.py \
   --masc-dir "$MASC_BASE_PATH/.masc" \
   --from-wire-capture masc_ask \
   --scenarios scripts/harness/tool_calls/masc_ask.scenarios.json \
-  --lanes glm-coding.glm-5.3-flash,kimi_coding.kimi-k3 \
+  --lanes glm-coding.glm-5.3-flash,glm-coding.glm-5-3 \
   --reps 5 --out /tmp/masc_ask.jsonl
 
 # Candidate: an edited definition, same scenarios, same lanes, same output file.
 python3 scripts/harness/tool_calls/first_call_validity.py \
   --masc-dir "$MASC_BASE_PATH/.masc" --tool-json /tmp/masc_ask.candidate.json --variant-name candidate \
   --scenarios scripts/harness/tool_calls/masc_ask.scenarios.json \
-  --lanes glm-coding.glm-5.3-flash,kimi_coding.kimi-k3 \
+  --lanes glm-coding.glm-5.3-flash,glm-coding.glm-5-3 \
   --reps 5 --out /tmp/masc_ask.jsonl
 
 python3 scripts/harness/tool_calls/first_call_validity.py --summary-only --out /tmp/masc_ask.jsonl
@@ -51,5 +51,11 @@ python3 scripts/harness/tool_calls/first_call_validity.py --summary-only --out /
 - The request carries the model's `temperature` from `runtime.toml`, but not
   masc's thinking or reasoning-effort controls. The provider's defaults apply
   to those.
+- On 2026-09-24 kimi-k3 looped inside a string argument here (a `prompt` of
+  `끝. 끝. 끝. …` until the output ran out) in about half its calls under
+  every definition, while the September ledger's 8,003 Kimi tool calls show
+  no such argument. Without masc's streaming and thinking settings this
+  harness does not reproduce that lane, so do not read Kimi's rates as a
+  comparison of definitions.
 - `TOOL_RULES["masc_ask"]` copies the checks in `lib/keeper/keeper_ask.ml`.
   Update it when those checks change.

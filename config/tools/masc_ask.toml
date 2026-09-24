@@ -26,12 +26,6 @@ type = "object"
 additional_properties = false
 
 [[params.items.params]]
-name = "question_id"
-type = "string"
-required = true
-description = "Stable question id."
-
-[[params.items.params]]
 name = "header"
 type = "string"
 required = true
@@ -68,12 +62,6 @@ description = "Named choices (required unless free_text is true)."
 [params.items.params.items]
 type = "object"
 additional_properties = false
-
-[[params.items.params.items.params]]
-name = "choice_id"
-type = "string"
-required = true
-description = "Stable choice id."
 
 [[params.items.params.items.params]]
 name = "label"

@@ -45,15 +45,30 @@ let list_field key json =
 
 let ( let* ) = Result.bind
 
-let rec map_results f = function
-  | [] -> Ok []
-  | x :: rest ->
-      let* y = f x in
-      let* ys = map_results f rest in
-      Ok (y :: ys)
+(* [f] sees each item's zero-based position. *)
+let mapi_results f items =
+  let rec go index = function
+    | [] -> Ok []
+    | x :: rest ->
+        let* y = f ~index x in
+        let* ys = go (index + 1) rest in
+        Ok (y :: ys)
+  in
+  go 0 items
 
-let choice_of_json json =
-  let* choice_id = string_field "choice_id" json in
+(* A question's id and a choice's id are how an answer finds its way back to
+   them, and they only have to be unique inside one ask. Nothing a Keeper
+   calls later takes one: masc_ask_status and masc_ask_withdraw name the ask,
+   and an answer reaches the Keeper with each id already turned back into its
+   header and label. So the ids are numbered here by position rather than
+   asked of the model. Asking cost more than it bought: a missing question_id
+   was the most common first-call failure in the September ledger, and
+   models that tried to make an id unique could loop inside the string until
+   it never closed. *)
+let position_id ~prefix index = Printf.sprintf "%s%d" prefix (index + 1)
+
+let choice_of_json ~index json =
+  let choice_id = position_id ~prefix:"c" index in
   let* label = string_field "label" json in
   let description = string_option_field "description" json in
   Result.map_error Keeper_ask.invalid_choice_to_string
@@ -64,14 +79,14 @@ let mode_of_string = function
   | "multi" -> Ok Keeper_ask.Multi
   | other -> Error (Printf.sprintf "mode must be single or multi, got %s" other)
 
-let question_of_json json =
-  let* question_id = string_field "question_id" json in
+let question_of_json ~index json =
+  let question_id = position_id ~prefix:"q" index in
   let* header = string_field "header" json in
   let* prompt = string_field "prompt" json in
   let* mode_label = string_field "mode" json in
   let* mode = mode_of_string mode_label in
   let* choice_items = list_field "choices" json in
-  let* choices = map_results choice_of_json choice_items in
+  let* choices = mapi_results choice_of_json choice_items in
   let free_text =
     if bool_field "free_text" json then
       Keeper_ask.Free_text_allowed { hint = string_option_field "free_text_hint" json }
@@ -128,7 +143,7 @@ let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result optio
   | Error detail -> reject detail
   | Ok [] -> reject "at least one question is required"
   | Ok question_items -> (
-      match map_results question_of_json question_items with
+      match mapi_results question_of_json question_items with
       | Error detail -> reject detail
       | Ok questions -> (
           let context = string_option_field "context" ctx.arguments in

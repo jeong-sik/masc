@@ -277,7 +277,8 @@ let quota_scope_of_materialized
   | Runtime_execution.Claude_code client ->
     Runtime_quota_window.scope_of_claude_code_home client.account_home
   | Runtime_execution.Codex_app_server client ->
-    Runtime_quota_window.scope_of_codex_home client.account_home
+    Runtime_quota_window.scope_of_codex_home
+      (Runtime_codex_app_server.effective_account_home client.account_home)
   | Runtime_execution.Agent_core _ | Runtime_execution.Antigravity_cli _ ->
     Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential
 ;;

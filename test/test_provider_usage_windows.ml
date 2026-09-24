@@ -255,6 +255,55 @@ default = "usage_shared_one.sonnet"
          Yojson.Safe.Util.(retained_row |> member "providers" |> to_list |> List.map to_string))
 ;;
 
+let test_codex_default_and_explicit_home_share_scope () =
+  let home =
+    match Runtime_codex_app_server.effective_account_home None with
+    | Some path -> path
+    | None -> fail "Codex default home cannot be resolved without HOME or CODEX_HOME"
+  in
+  let source =
+    Printf.sprintf
+      {|[providers.usage_codex_default]
+protocol = "codex-app-server"
+command = "/usr/bin/true"
+is-non-interactive = true
+
+[providers.usage_codex_explicit]
+protocol = "codex-app-server"
+command = "/usr/bin/true"
+is-non-interactive = true
+account-home = %S
+
+[models.sol]
+api-name = "gpt-5.6-sol"
+max-context = 400000
+
+[usage_codex_default.sol]
+[usage_codex_explicit.sol]
+
+[runtime]
+default = "usage_codex_default.sol"
+|}
+      home
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_temp_file ~suffix:".toml" source (fun path ->
+         match Runtime.init_default ~config_path:path with
+         | Ok () -> ()
+         | Error msg -> failf "fixture runtime.toml should load: %s" msg);
+       let implicit = scope_of "usage_codex_default.sol" in
+       let explicit = scope_of "usage_codex_explicit.sol" in
+       check bool "Codex implicit home and explicit same home share scope" true
+         (Runtime_quota_window.scope_equal implicit explicit);
+       let row = usage_row (resolved ()) (Runtime_quota_window.scope_to_string implicit) in
+       check (list string) "one row names both providers"
+         [ "usage_codex_default"; "usage_codex_explicit" ]
+         Yojson.Safe.Util.(row |> member "providers" |> to_list |> List.map to_string))
+;;
+
 (* A read without the per-limit map falls back to the single [rateLimits];
    a map of the wrong type is refused with its path, not skipped. *)
 let test_codex_read_falls_back_and_refuses_a_bad_map () =
@@ -283,6 +332,8 @@ let () =
             test_malformed_window_is_a_typed_error
         ; test_case "official client home owns usage" `Quick
             test_official_client_home_owns_usage_across_provider_rows
+        ; test_case "Codex default and explicit home share scope" `Quick
+            test_codex_default_and_explicit_home_share_scope
         ; test_case "codex read falls back and refuses a bad map" `Quick
             test_codex_read_falls_back_and_refuses_a_bad_map
         ] )

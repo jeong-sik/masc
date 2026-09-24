@@ -13,7 +13,7 @@ type scope =
   | Credential_env of string
   | Credential_file of string
   | Official_client_home of string * string
-  | Official_client_default of string
+  | Official_client_default of string * string option
 
 (* Two facts, not one duration. [Until] is the provider's own reset time.
    [Observed] is a hard-quota rejection that stated no reset. It claims no end
@@ -94,7 +94,8 @@ let scope_to_string = function
   | Credential_env name -> "env:" ^ name
   | Credential_file path -> "file:" ^ path
   | Official_client_home (client, home) -> "official:" ^ client ^ ":home:" ^ home
-  | Official_client_default client -> "official:" ^ client ^ ":default"
+  | Official_client_default (client, home) ->
+    "official:" ^ client ^ ":default:" ^ Option.value home ~default:"home-unset"
 
 let scope_equal left right =
   match left, right with
@@ -103,7 +104,8 @@ let scope_equal left right =
   | Credential_file a, Credential_file b -> String.equal a b
   | Official_client_home (a_client, a_home), Official_client_home (b_client, b_home) ->
     String.equal a_client b_client && String.equal a_home b_home
-  | Official_client_default a, Official_client_default b -> String.equal a b
+  | Official_client_default (a_client, a_home), Official_client_default (b_client, b_home) ->
+    String.equal a_client b_client && a_home = b_home
   | (Provider_row _ | Credential_env _ | Credential_file _
     | Official_client_home _ | Official_client_default _), _ -> false
 ;;
@@ -119,7 +121,7 @@ let official_client_scope ~client ~env_name account_home =
   in
   match home with
   | Some path -> Official_client_home (client, path)
-  | None -> Official_client_default client
+  | None -> Official_client_default (client, Sys.getenv_opt "HOME")
 ;;
 
 let scope_of_claude_code_home =

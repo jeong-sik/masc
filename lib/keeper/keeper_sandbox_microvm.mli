@@ -443,45 +443,91 @@ val ensure_apple_build_volume
     measurement set the default at 128 GiB against one keeper's real 87 GB
     across three checkouts; the image itself is sparse. *)
 
-val build_link_state_of_path : string -> build_link_state
-(** [lstat]s the path. Anything neither absent nor a symlink -- a real
-    directory, or a plain file -- reads as {!Build_real_directory}, the
-    conservative answer that only ever leaves the path alone. Never raises. *)
+(** {3 Finding checkouts and their [_build] state inside the guest}
 
-val apply_build_link
-  :  path:string
-  -> build_link_plan
-  -> ([ `Linked | `Relinked | `Unchanged ], string) result
-(** Carries out one plan. The link points at a guest path, so on the host it
-    dangles by construction; the host never follows it. Never raises. *)
+    A [Micro_vm] keeper's tree is [Endpoint_owned]
+    ({!Keeper_types_profile_sandbox.tree_location_of_profile}): the host
+    keeps only a bookkeeping bundle, and a host-side file operation on it
+    would silently miss the tree. So, unlike RFC-0399's original (host
+    [Unix.lstat]/[Sys.readdir]/[Unix.symlink]), the walk, the [_build] state
+    read, and the symlink itself all run inside the guest over
+    [container exec]. Only the decision ({!plan_build_link}) stays host-side
+    and pure. *)
 
-val build_roots_under : playground_root:string -> string list
-(** Every directory at depth 0-3 under [playground_root] holding
-    [dune-project], [lstat]-walked so an installed [_build] symlink is never
-    followed (which would loop). Directories named [_build] or [.git] are not
-    descended into. [dune-project] is dune's marker and dune's alone; other
-    ecosystems' output directories ([node_modules], [target], [dist]) are not
-    handled by this walk. *)
+val build_root_scan_depth : int
+(** How far below the keeper's work root a checkout is looked for. Observed
+    layouts: depth 1 ([polisher/masc-t362]), depth 2
+    ([lane-smith/repos/wt-370]). *)
 
-val playground_relative : playground_root:string -> string -> string option
-(** [dir]'s path relative to [playground_root], or [None] when [dir] is not
-    below it. *)
+val build_root_marker : string
+(** [dune-project]: the marker for the build output this addresses.
+    [_build] is dune's name and dune's alone; other ecosystems' output
+    directories ([node_modules], [target], [dist]) are not handled here
+    (RFC-0399's own measured finding: npm deletes and replaces a
+    [node_modules] symlink on every install, defeating a symlink outright). *)
 
-type build_link_row =
-  { path : string
-  ; target : string option
-  ; outcome : ([ `Linked | `Relinked | `Unchanged ], string) result
+val build_output_dir_name : string
+
+val build_scan_argv_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
+  -> keeper_work_root:string
+  -> uid:int
+  -> gid:int
+  -> string list
+(** One [find | while] exec, cwd the keeper's work root: reports every
+    checkout's [_build] state without changing any of it. [find] without
+    [-L] does not descend through a symlink, so an installed link is never
+    walked into. [_build] and [.git] are pruned rather than descended -- one
+    measured [_build] held 61,602 entries. Runs as the keeper's own uid:gid,
+    the owner of everything under the work root. *)
+
+type build_scan_row =
+  { checkout : string
+  ; state : build_link_state
   }
 
-val ensure_build_links : playground_root:string -> build_link_row list
-(** Points every checkout's [_build] under [playground_root] at the build
-    volume and reports one row per checkout -- a single refusal must not hide
-    the checkouts that were linked. [target] carries the guest path so the
-    caller can create it; see {!build_target_mkdir_argv}. *)
+val build_scan_rows_of_output : string -> build_scan_row list
+(** Parses {!build_scan_argv_for}'s stdout. An unrecognized line is dropped,
+    not raised on -- the scan is read-only, so a malformed line costs one
+    missed checkout, not a crashed turn. *)
 
-val observe_build_links : playground_root:string -> (string * build_link_state) list
-(** The same walk as {!ensure_build_links} without acting: an operator
-    opening a status tab must not install links as a side effect of looking. *)
+type build_link_row =
+  { checkout : string
+  ; target : string option
+  ; plan : build_link_plan
+  }
+
+val build_link_rows_of_scan : build_scan_row list -> build_link_row list
+(** Every scanned checkout's target and plan, decided purely
+    ({!plan_build_link}) -- touches no guest state; only
+    {!build_link_apply_argv_for} does. *)
+
+val build_link_refusal_message : checkout:string -> string
+(** The message a caller reports for a row whose plan is
+    {!Link_refused_real_directory}: real build output this module did not
+    create, left in place rather than deleted. *)
+
+val build_link_actions : build_link_row list -> (string * string) list
+(** The [(checkout, target)] pairs that actually need a guest command --
+    input to {!build_link_apply_argv_for}. A row already correct, or
+    refused, needs none. *)
+
+val build_link_apply_argv_for
+  :  Keeper_microvm_backend.t
+  -> container_name:string
+  -> keeper_work_root:string
+  -> uid:int
+  -> gid:int
+  -> actions:(string * string) list
+  -> string list
+(** [ln -sfn] for every action, in one exec, as the keeper's own uid:gid.
+    [-f] makes each one atomic -- a stale link is replaced without a
+    separate unlink, and [ln] refuses outright rather than clobber a real,
+    non-empty directory, so a checkout that grew real build output between
+    the scan and this call is left alone rather than silently adopted.
+    Dynamic values travel as positional arguments after the script, never
+    interpolated into the script text. *)
 
 val build_target_mkdir_argv : container_name:string -> targets:string list -> string list
 (** [mkdir -p -m 0777] for every target, run as root inside the guest.
@@ -492,11 +538,6 @@ val build_target_mkdir_argv : container_name:string -> targets:string list -> st
     only to newly created directories, since Apple Container's user
     namespace refuses even guest root changing an existing one's mode. One
     command for every target; idempotent. *)
-
-val build_link_targets_to_create : build_link_row list -> string list
-(** The guest paths a caller must [mkdir], from {!ensure_build_links}'s rows.
-    A refused checkout contributes nothing -- it keeps its real [_build] on
-    the unified work volume, so there is no build-volume directory to need. *)
 
 val work_volume_search_argv_for :
   Keeper_microvm_backend.t -> container_name:string -> string list option

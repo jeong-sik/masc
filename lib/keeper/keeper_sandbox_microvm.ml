@@ -1509,59 +1509,20 @@ let ensure_apple_build_volume ~volume_name ~size ~timeout_sec =
             (output_for_log ~stdout ~stderr)))
 ;;
 
-(* ── Binding a checkout's _build to the volume (RFC-0399, unchanged) ── *)
+(* ── Finding checkouts and their _build state inside the guest ────────
+   RFC-0399's original walk and link used Unix.lstat/Sys.readdir/Unix.symlink
+   directly on a host-visible playground. That assumed the tree was on the
+   virtiofs share, which was true in RFC-0399's era and stopped being true
+   when RFC-0400 moved a Micro_vm keeper's tree onto its own ext4 volume:
+   Keeper_types_profile_sandbox.tree_location_of_profile now answers
+   [Endpoint_owned] for it, and that type's own doc comment says why a host
+   op does not reach it -- "the host keeps only a bookkeeping bundle... a
+   host-side file operation on the bundle would silently miss the tree."
+   So the walk, the [_build] state read, and the symlink itself all run
+   inside the guest over [container exec]; only the *decision*
+   ({!plan_build_link}, unchanged) stays host-side and pure. *)
 
-(** What [_build] is on the host right now.
-
-    Anything that is neither absent nor a symlink -- a directory, but also a
-    plain file -- reads as [Build_real_directory] so the plan refuses it. The
-    conservative reading is the safe one: the only action taken on that answer
-    is to leave the path alone. *)
-let build_link_state_of_path path =
-  match Unix.lstat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Build_absent
-  | exception Unix.Unix_error _ -> Build_real_directory
-  | { Unix.st_kind = Unix.S_LNK; _ } ->
-    (match Unix.readlink path with
-     | target -> Build_symlink target
-     | exception Unix.Unix_error _ -> Build_real_directory)
-  | _ -> Build_real_directory
-;;
-
-(** Carry out one plan.
-
-    The link points at a guest path, so on the host it dangles by
-    construction. [Unix.symlink] does not care, and the host never follows it:
-    the readers under [Playground_paths] read sources, not build output. *)
-let apply_build_link ~path plan =
-  match plan with
-  | Link_already_correct -> Ok `Unchanged
-  | Link_create target ->
-    (match Unix.symlink target path with
-     | () -> Ok `Linked
-     | exception Unix.Unix_error (err, _, _) ->
-       Error (Printf.sprintf "could not link %s: %s" path (Unix.error_message err)))
-  | Link_retarget target ->
-    (match
-       Unix.unlink path;
-       Unix.symlink target path
-     with
-     | () -> Ok `Relinked
-     | exception Unix.Unix_error (err, _, _) ->
-       Error (Printf.sprintf "could not relink %s: %s" path (Unix.error_message err)))
-  | Link_refused_real_directory ->
-    Error
-      (Printf.sprintf
-         "%s is a real directory holding build output this code did not create; \
-          it is left on the unified work volume rather than deleted. Next: \
-          remove or move it by hand if the build cache is not wanted, and the \
-          link is installed on the following turn."
-         path)
-;;
-
-(* ── Finding the checkouts that build (RFC-0399, unchanged) ─────────── *)
-
-(** How far below a keeper's playground a checkout is looked for.
+(** How far below a keeper's work root a checkout is looked for.
 
     Observed layouts put them at depth 1 ([polisher/masc-t362]) and depth 2
     ([lane-smith/repos/wt-370]). Three leaves room for one more level without
@@ -1581,109 +1542,149 @@ let build_root_marker = "dune-project"
 
 let build_output_dir_name = "_build"
 
-(** Directories skipped rather than descended.
-
-    [_build] because it is the thing being moved and holds the file counts
-    that make a walk expensive -- one measured at 61,602 entries. [.git]
-    because nothing under it builds. *)
-let build_scan_skipped = [ build_output_dir_name; ".git" ]
-
-let build_roots_under ~playground_root =
-  let rec walk dir depth acc =
-    if depth > build_root_scan_depth
-    then acc
-    else (
-      let acc =
-        if Sys.file_exists (Filename.concat dir build_root_marker)
-        then dir :: acc
-        else acc
-      in
-      match Sys.readdir dir with
-      | exception Sys_error _ -> acc
-      | entries ->
-        Array.sort String.compare entries;
-        Array.fold_left
-          (fun acc entry ->
-            if List.exists (String.equal entry) build_scan_skipped
-            then acc
-            else (
-              let child = Filename.concat dir entry in
-              (* [lstat], not [stat]: a symlink is never followed, which keeps
-                 the walk from looping and from descending through the very
-                 links this module installs. *)
-              match Unix.lstat child with
-              | { Unix.st_kind = Unix.S_DIR; _ } -> walk child (depth + 1) acc
-              | _ | (exception Unix.Unix_error _) -> acc))
-          acc
-          entries)
-  in
-  match Unix.lstat playground_root with
-  | { Unix.st_kind = Unix.S_DIR; _ } -> List.rev (walk playground_root 0 [])
-  | _ | (exception Unix.Unix_error _) -> []
+(** One [find] and one read loop, run with the keeper's work root as the
+    exec's [container_cwd] so every path [find] prints is already relative
+    (["./checkout"], not an absolute guest path the host would have to
+    strip). [find] without [-L] does not descend through a symlink -- an
+    installed link, or a dangling one pointing at the build volume, is never
+    walked into, matching RFC-0399's [lstat, not stat] guarantee. [_build]
+    and [.git] are pruned rather than descended: one measured [_build] held
+    61,602 entries. One line of output per checkout:
+    [<relative path>\tabsent], [<relative path>\treal], or
+    [<relative path>\tsymlink\t<current target>]. *)
+let build_scan_script =
+  Printf.sprintf
+    {sh|set -e
+find . -maxdepth %d \( -name %s -o -name .git \) -prune -o -type d -print |
+while IFS= read -r d; do
+  [ -e "$d/%s" ] || continue
+  rel=${d#./}
+  [ "$rel" = "." ] && continue
+  b="$d/%s"
+  if [ -L "$b" ]; then
+    printf '%%s\tsymlink\t%%s\n' "$rel" "$(readlink "$b")"
+  elif [ -e "$b" ]; then
+    printf '%%s\treal\n' "$rel"
+  else
+    printf '%%s\tabsent\n' "$rel"
+  fi
+done
+|sh}
+    build_root_scan_depth
+    build_output_dir_name
+    build_root_marker
+    build_output_dir_name
 ;;
 
-(** The path of [dir] relative to [playground_root], or [None] when it is not
-    below it. *)
-let playground_relative ~playground_root dir =
-  let root =
-    let n = String.length playground_root in
-    if n > 1 && Char.equal playground_root.[n - 1] '/'
-    then String.sub playground_root 0 (n - 1)
-    else playground_root
-  in
-  let root_slash = root ^ "/" in
-  let n = String.length root_slash in
-  if String.length dir > n && String.equal (String.sub dir 0 n) root_slash
-  then Some (String.sub dir n (String.length dir - n))
-  else None
+let build_scan_argv_for backend ~container_name ~keeper_work_root ~uid ~gid =
+  exec_argv_for
+    backend
+    ~container_name
+    ~uid
+    ~gid
+    ~container_cwd:keeper_work_root
+    ~stdin:false
+    ~command_argv:[ "sh"; "-c"; build_scan_script ]
 ;;
 
-type build_link_row =
-  { path : string
-  ; target : string option
-  ; outcome : ([ `Linked | `Relinked | `Unchanged ], string) result
+(** One checkout's raw scan result: where it is, relative to the keeper's
+    work root, and what [_build] is there right now. *)
+type build_scan_row =
+  { checkout : string
+  ; state : build_link_state
   }
 
-(** Point every checkout's [_build] at the volume, and report each one.
-
-    A row per checkout rather than a single verdict: one refusal must not hide
-    the checkouts that were linked, and the caller has to be able to say which
-    one stayed on the share. [target] carries the guest path so the caller can
-    create it -- see {!build_target_mkdir_argv} for why that is a separate
-    step. *)
-let ensure_build_links ~playground_root =
-  build_roots_under ~playground_root
-  |> List.map (fun root ->
-    let path = Filename.concat root build_output_dir_name in
-    match playground_relative ~playground_root root with
-    | None ->
-      { path
-      ; target = None
-      ; outcome = Error (Printf.sprintf "%s is not below %s" root playground_root)
-      }
-    | Some relative ->
-      (match build_link_target ~playground_relative:relative with
-       | Error message -> { path; target = None; outcome = Error message }
-       | Ok target ->
-         { path
-         ; target = Some target
-         ; outcome =
-             apply_build_link ~path (plan_build_link ~target (build_link_state_of_path path))
-         }))
+let build_scan_row_of_line line =
+  match String.split_on_char '\t' line with
+  | [ checkout; "absent" ] -> Some { checkout; state = Build_absent }
+  | [ checkout; "real" ] -> Some { checkout; state = Build_real_directory }
+  | [ checkout; "symlink"; target ] -> Some { checkout; state = Build_symlink target }
+  | _ -> None
 ;;
 
-(** What each checkout's [_build] is, without changing any of it.
+(** Parses {!build_scan_argv_for}'s stdout. A line this module does not
+    recognize is dropped rather than raised on: the scan is read-only, so a
+    malformed line costs one missed checkout, not a crashed turn. *)
+let build_scan_rows_of_output raw =
+  raw
+  |> String.split_on_char '\n'
+  |> List.filter_map (fun line ->
+    if String.equal (String.trim line) "" then None else build_scan_row_of_line line)
+;;
 
-    The status surface needs the same walk [ensure_build_links] does but must
-    not act: an operator opening a tab should not install links as a side
-    effect of looking. A checkout still holding a real [_build] is the row
-    that matters -- it is the one still writing to the unified work volume,
-    and the one a person has to clear by hand. *)
-let observe_build_links ~playground_root =
-  build_roots_under ~playground_root
-  |> List.map (fun root ->
-    let path = Filename.concat root build_output_dir_name in
-    path, build_link_state_of_path path)
+(** Every scanned checkout's target and plan, decided purely so the refusal
+    stays testable (see {!plan_build_link}) -- deciding never touches the
+    guest; only {!build_link_apply_argv_for} does. *)
+type build_link_row =
+  { checkout : string
+  ; target : string option
+  ; plan : build_link_plan
+  }
+
+let build_link_rows_of_scan rows =
+  List.map
+    (fun { checkout; state } ->
+      match build_link_target ~playground_relative:checkout with
+      | Error _ ->
+        (* No safe guest path to point at -- refuse the same way a real
+           directory is refused, rather than guess one. *)
+        { checkout; target = None; plan = Link_refused_real_directory }
+      | Ok target -> { checkout; target = Some target; plan = plan_build_link ~target state })
+    rows
+;;
+
+(** The refusal a caller reports for a row whose plan is
+    {!Link_refused_real_directory}: a real [_build] this module did not
+    create, left in place rather than deleted. *)
+let build_link_refusal_message ~checkout =
+  Printf.sprintf
+    "%s/%s is a real directory holding build output this code did not create; \
+     it is left on the unified work volume rather than deleted. Next: remove \
+     or move it by hand if the build cache is not wanted, and the link is \
+     installed on the following turn."
+    checkout
+    build_output_dir_name
+;;
+
+(** The [(checkout, target)] pairs a plan actually needs a guest command
+    for. A row already correct, or refused, needs none. *)
+let build_link_actions rows =
+  List.filter_map
+    (fun { checkout; target; plan } ->
+      match plan, target with
+      | (Link_create _ | Link_retarget _), Some target -> Some (checkout, target)
+      | _ -> None)
+    rows
+;;
+
+(** [ln -sfn] for every action, in one exec. [-f] makes each one atomic --
+    a stale link is replaced without a separate unlink, and [ln] refuses
+    outright rather than clobber a real, non-empty directory, so a checkout
+    that grew real build output between the scan and this call is left
+    alone rather than silently adopted. One guest command covers every
+    action, matching {!build_target_mkdir_argv}'s "one command for every
+    target". Dynamic values travel as positional arguments after the
+    script -- ["masc-build-link"] fills [$0] so the pairs start at [$1] --
+    never interpolated into the script text. *)
+let build_link_apply_script =
+  {sh|set -e
+while [ "$#" -ge 2 ]; do
+  p="$1"; t="$2"; shift 2
+  ln -sfn "$t" "$p/_build"
+done
+|sh}
+;;
+
+let build_link_apply_argv_for backend ~container_name ~keeper_work_root ~uid ~gid ~actions =
+  let positional = List.concat_map (fun (checkout, target) -> [ checkout; target ]) actions in
+  exec_argv_for
+    backend
+    ~container_name
+    ~uid
+    ~gid
+    ~container_cwd:keeper_work_root
+    ~stdin:false
+    ~command_argv:("sh" :: "-c" :: build_link_apply_script :: "masc-build-link" :: positional)
 ;;
 
 (** Create the link targets inside the guest.
@@ -1711,20 +1712,6 @@ let build_target_mkdir_argv ~container_name ~targets =
     ~container_cwd:build_volume_guest_root
     ~stdin:false
     ~command_argv:("mkdir" :: "-p" :: "-m" :: build_target_dir_mode :: targets)
-;;
-
-(** Targets that a build will write through, from the rows above.
-
-    A refused checkout contributes nothing: it keeps its real [_build] on the
-    unified work volume, so there is no build-volume directory for it to
-    need. *)
-let build_link_targets_to_create rows =
-  List.filter_map
-    (fun row ->
-      match row.outcome, row.target with
-      | Ok (`Linked | `Relinked | `Unchanged), Some target -> Some target
-      | _ -> None)
-    rows
 ;;
 
 (** The keeper's root on the work volume, created inside the guest.

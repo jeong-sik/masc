@@ -3770,7 +3770,7 @@ let test_sent_timeout_advances_once_to_successor deadline () =
              ()
          | Total_deadline ->
            catalog_entry
-             ~body_timeout_s:0.5
+             ~body_timeout_s:(Some 0.5)
              ~id:timed_out_id
              ~base_url
              ~native:true

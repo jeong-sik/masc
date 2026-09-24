@@ -76,6 +76,20 @@ let test_destruction_stages_keep_the_fence () =
     ]
 ;;
 
+(* The deciding case: one record, two phases that differ only in stage. The
+   old [Blocked _ -> true] answered the same for both, so a suite that never
+   put a released and a kept stage side by side could not catch it.
+   [requires_admission_fence] is the predicate autoboot admission and the
+   lifecycle tools consult, so this is the boot decision itself. *)
+let test_boot_decision_differs_by_stage_alone () =
+  let released = operation_with_stage Meta_update in
+  let kept =
+    { released with phase = Blocked { stage = Meta_remove; detail = "fixture" } }
+  in
+  check bool "a Meta_update record boots again" false (requires_admission_fence released);
+  check bool "a Meta_remove record stays fenced" true (requires_admission_fence kept)
+;;
+
 (* The predicate is total over the stage type, so a new stage cannot silently
    default to "retryable". The count pins the list to the type: adding a
    variant without classifying it fails here. *)

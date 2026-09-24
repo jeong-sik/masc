@@ -765,6 +765,7 @@ assert "read_file(*)" in settings["permissions"]["deny"]
 config = json.loads((home / ".gemini/config/mcp_config.json").read_text())
 assert list(config["mcpServers"]) == ["masc"]
 server = config["mcpServers"]["masc"]
+assert server["tools"] and all(v == {"eager": True} for v in server["tools"].values()), server.get("tools")
 headers = dict(server["headers"], **{"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
 
 def rpc(method, params, request_id=None):

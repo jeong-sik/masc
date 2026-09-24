@@ -24,7 +24,8 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~oauth_source ~config ~t
               { Runtime_official_client_mcp.success = result.success; content = result.content; content_blocks = result.content_blocks };
               after_response_sent = (fun () -> ()) }) () in
         match Runtime_antigravity_home.publish_mcp_config home
-          (Runtime_official_client_mcp_http.mcp_config_json bridge) with
+          (Runtime_official_client_mcp_http.mcp_config_json bridge
+             ~eager_tools:[ tool.Runtime_official_client_tool.name ]) with
         | Error _ -> Error Private_home_unavailable
         | Ok () ->
           Runtime_antigravity.run_turn ~home_dir:(Runtime_antigravity_home.home_dir home)

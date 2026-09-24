@@ -30,8 +30,17 @@ val start :
 
 (** Exact remote-MCP configuration measured against Antigravity CLI 1.1.11.
     The returned JSON contains the ephemeral capability and must not be logged
-    or persisted after the turn. *)
-val mcp_config_json : t -> Yojson.Safe.t
+    or persisted after the turn.
+
+    [eager_tools] are declared [tools.<name>.eager = true]. Antigravity lists
+    a tool without that declaration by name only and tells the model to read
+    its schema file before calling it through [call_mcp_tool]. A masc home
+    denies [read_file] outright ([Runtime_antigravity_home.settings_json]),
+    and a rule scoped to the schema folder is overridden by that deny, so such
+    a tool is called blind. An eager tool is registered with its schema
+    instead (agy 1.2.9, measured 2026-09-24). Pass every tool the bridge
+    serves. *)
+val mcp_config_json : t -> eager_tools:string list -> Yojson.Safe.t
 
 module For_testing : sig
   type snapshot =

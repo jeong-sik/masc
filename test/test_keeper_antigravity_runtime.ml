@@ -72,6 +72,9 @@ import urllib.request
 with open(os.path.join(os.environ["HOME"], ".gemini", "config", "mcp_config.json"), encoding="utf-8") as handle:
     server = json.load(handle)["mcpServers"]["masc"]
 
+# Every tool masc serves is declared eager, or the model sees its name only.
+assert server["tools"] and all(v == {"eager": True} for v in server["tools"].values()), server.get("tools")
+
 headers = dict(server["headers"])
 headers["Content-Type"] = "application/json"
 headers["Accept"] = "application/json, text/event-stream"

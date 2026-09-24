@@ -1,5 +1,26 @@
 open Masc
 
+(* The saved-app reply's scope count picks the TUI notice: 0 says the
+   service's own list will be asked for. A reply without [scopes] used to
+   count as 0 and so told the operator something the server never said. *)
+let test_decode_oauth_client_saved_reads_scopes_and_refuses_their_absence () =
+  let decode text =
+    Tui_decode.decode_oauth_client_saved (Yojson.Safe.from_string text)
+  in
+  let result = Alcotest.(result int string) in
+  Alcotest.check result "two scopes" (Ok 2)
+    (decode {|{"provider":"github","scopes":["repo","read:org"]}|});
+  Alcotest.check result "saved with none" (Ok 0)
+    (decode {|{"provider":"github","scopes":[]}|});
+  Alcotest.(check bool) "no scopes field is refused" true
+    (Result.is_error (decode {|{"provider":"github"}|}));
+  Alcotest.(check bool) "scopes that are not a list are refused" true
+    (Result.is_error (decode {|{"provider":"github","scopes":"repo"}|}));
+  Alcotest.(check bool) "a non-string scope after a valid scope is refused" true
+    (Result.is_error (decode {|{"provider":"github","scopes":["repo",null]}|}));
+  Alcotest.(check bool) "a reply that is not an object is refused" true
+    (Result.is_error (decode {|[]|}))
+
 (* #38205, #38411: a schedule row carries the occurrence the runner is holding
    back and when the runner read it. The hold is read, not guessed: the key is
    always sent and null is "not held"; an object must name the occurrence, its
@@ -5315,28 +5336,44 @@ let test_decode_memory_fact_reads_the_use_record () =
               ~last:(`Float 1_775_000_040.0) ~retracted:1 ~revised_from:[ "mem-0" ] ())
          ())
   in
-  Alcotest.(check int) "retrieved" 4 fact.Tui_decode.mf_events.Tui_decode.mfe_retrieved_count;
-  Alcotest.(check int) "days" 2 fact.Tui_decode.mf_events.Tui_decode.mfe_retrieved_distinct_days;
-  Alcotest.(check (option (float 0.0))) "last" (Some 1_775_000_040.0)
-    fact.Tui_decode.mf_events.Tui_decode.mfe_last_retrieved_at;
+  (match fact.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
+   | Tui_decode.Retrieved { count; distinct_days; last_at } ->
+       Alcotest.(check int) "retrieved" 4 count;
+       Alcotest.(check int) "days" 2 distinct_days;
+       Alcotest.(check (float 0.0)) "last" 1_775_000_040.0 last_at
+   | Tui_decode.Never_retrieved -> Alcotest.fail "a retrieved fact decoded as never retrieved");
   Alcotest.(check int) "retracted" 1 fact.Tui_decode.mf_events.Tui_decode.mfe_retracted_count;
   Alcotest.(check (list string)) "revised from" [ "mem-0" ]
     fact.Tui_decode.mf_events.Tui_decode.mfe_revised_from;
   let unused = only_fact (snapshot_with ~events:(memory_fact_events_json ()) ()) in
-  Alcotest.(check (option (float 0.0))) "never retrieved is None" None
-    unused.Tui_decode.mf_events.Tui_decode.mfe_last_retrieved_at;
+  (match unused.Tui_decode.mf_events.Tui_decode.mfe_retrieval with
+   | Tui_decode.Never_retrieved -> ()
+   | Tui_decode.Retrieved _ -> Alcotest.fail "0, 0 and null decoded as retrieved");
+  let rejected ~what ~needle snapshot =
+    match snapshot with
+    | Error error -> Alcotest.(check bool) what true (mentions needle error)
+    | Ok snapshot -> (
+        match snapshot.Tui_decode.mfs_ordinary with
+        | Tui_decode.Memory_store_read_error error ->
+            Alcotest.(check bool) what true (mentions needle error)
+        | Tui_decode.Memory_store_present _ -> Alcotest.failf "%s: the row was accepted" what
+        | Tui_decode.Memory_store_absent -> Alcotest.fail "ordinary store absent")
+  in
+  (* The server derives count, days and clock from one list of retrieval
+     times, so they are all empty or all present. A row where they disagree
+     is not a record this decoder knows. *)
+  rejected ~what:"a count without a clock is rejected" ~needle:"retrieved_count"
+    (snapshot_with ~events:(memory_fact_events_json ~retrieved:4 ~days:2 ()) ());
+  rejected ~what:"a clock without a count is rejected" ~needle:"retrieved_count"
+    (snapshot_with
+       ~events:(memory_fact_events_json ~last:(`Float 1_775_000_040.0) ())
+       ());
+  rejected ~what:"a count on no day is rejected" ~needle:"retrieved_count"
+    (snapshot_with
+       ~events:(memory_fact_events_json ~retrieved:4 ~last:(`Float 1_775_000_040.0) ())
+       ());
   (* A row without the record is a server this decoder does not know. *)
-  match snapshot_with () with
-  | Error error ->
-      Alcotest.(check bool) "the rejection names the field" true (mentions "events" error)
-  | Ok snapshot -> (
-      match snapshot.Tui_decode.mfs_ordinary with
-      | Tui_decode.Memory_store_read_error error ->
-          Alcotest.(check bool) "the store rejection names the field" true
-            (mentions "events" error)
-      | Tui_decode.Memory_store_present _ ->
-          Alcotest.fail "a row without events must be rejected"
-      | Tui_decode.Memory_store_absent -> Alcotest.fail "ordinary store absent")
+  rejected ~what:"a row without events is rejected" ~needle:"events" (snapshot_with ())
 
 (* The server writes a fact's category through [category_to_string], so a
    word outside the eight is a wire error -- not a ninth category for the
@@ -10278,9 +10315,9 @@ let test_decode_execute_gate_row_leads_with_the_command () =
     (Some "git clone --depth 1 https://github.com/jeong-sik/masc")
     preview
 
-let test_decode_execute_gate_row_shows_the_script_line () =
-  (* The script form carries the command line whole; the row shows it as
-     written rather than falling back to the serialized envelope. *)
+let test_decode_execute_gate_row_shows_the_command_line () =
+  (* The command form carries the line whole; the row shows it as written
+     rather than falling back to the serialized envelope. *)
   let preview =
     decoded_execute_preview
       ~preview:"{\"schema\":\"masc.keeper_gate.request.v1\"}"
@@ -10290,13 +10327,13 @@ let test_decode_execute_gate_row_shows_the_script_line () =
              ( "input",
                `Assoc
                  [ ("cwd", `String ".");
-                   ("script", `String "uname -a && id && pwd");
+                   ("command", `String "uname -a && id && pwd");
                  ] );
            ])
   in
   Alcotest.check
     Alcotest.(option string)
-    "the row shows the script line"
+    "the row shows the command line"
     (Some "uname -a && id && pwd")
     preview
 
@@ -11615,6 +11652,10 @@ let test_tool_approval_mode_unknown_word_fails () =
 
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_oauth_client_saved",
+      [ Alcotest.test_case "reads scopes and refuses their absence" `Quick
+          test_decode_oauth_client_saved_reads_scopes_and_refuses_their_absence
+      ] );
     ( "decode_tool_approval_mode_overrides",
       [ Alcotest.test_case "the wire word becomes the mode" `Quick
           test_tool_approval_mode_overrides_are_typed
@@ -12305,8 +12346,8 @@ let () =
           test_decode_gate_block_reason_and_retry_contract;
         Alcotest.test_case "an execute row leads with the command" `Quick
           test_decode_execute_gate_row_leads_with_the_command;
-        Alcotest.test_case "an execute row shows the script line" `Quick
-          test_decode_execute_gate_row_shows_the_script_line;
+        Alcotest.test_case "an execute row shows the command line" `Quick
+          test_decode_execute_gate_row_shows_the_command_line;
         Alcotest.test_case "an execute row carries where it would run" `Quick
           test_decode_execute_gate_row_carries_where_it_would_run;
         Alcotest.test_case "another operation has no execution site" `Quick

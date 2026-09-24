@@ -151,13 +151,34 @@ let test_deadline_terminates_command_once () =
       let done_log = Filename.concat dir "done.log" in
       let command =
         Printf.sprintf
-          "printf 'started' > %s; sleep 5; printf 'done' > %s"
+          "sleep 2; printf 'started' > %s; sleep 5; printf 'done' > %s"
           (Filename.quote started_log)
           (Filename.quote done_log)
       in
-      let env = ("CI_TEST_TIMEOUT_SEC", "1") :: base_env ci_log in
+      (* The one-second deadline measures command execution, not login-shell
+         startup. Keep its clock frozen until the first write, with a separate
+         bound so a broken fixture still fails. The two-second delay makes the
+         unguarded version fail before [started_log] exists. *)
+      let fixture_deadline = Unix.gettimeofday () +. 10.0 in
+      let clock_released = Filename.concat dir "clock-released" in
+      let clock =
+        Printf.sprintf
+          "fixture_now=$(date +%%s); if [[ -f %s ]] || [[ -s %s ]] || \
+           [[ $fixture_now -ge %.0f ]]; then touch %s; \
+           printf '%%s\n' \"$fixture_now\"; else printf '0\n'; fi"
+          (Filename.quote clock_released)
+          (Filename.quote started_log)
+          fixture_deadline
+          (Filename.quote clock_released)
+      in
+      let env =
+        ("CI_TEST_NOW_CMD", clock) :: ("CI_TEST_TIMEOUT_SEC", "1") :: base_env ci_log
+      in
       let code, stdout, stderr = run_ci ~cwd:dir ~env command in
       check int "timeout exit code" 124 code;
+      if not (Sys.file_exists started_log) then
+        failf "deadline fixture did not start\n%s\n%s\n%s"
+          (read_file ci_log) stdout stderr;
       check string "one command started" "started" (read_file started_log);
       check bool "timed-out command did not complete" false (Sys.file_exists done_log);
       let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in

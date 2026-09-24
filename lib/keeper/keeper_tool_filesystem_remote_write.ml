@@ -125,7 +125,10 @@ let handle_content_with_endpoint
       (match
          resolve_keeper_confined_write_path ~config ~meta ~endpoint:confined_endpoint ~raw_path:path
        with
-       | Error message -> Keeper_tool_execution.failure (error_json message)
+       | Error (refusal : Keeper_alerting_path.path_refusal) ->
+         Keeper_tool_execution.failure
+           ~class_:refusal.failure_class
+           (error_json refusal.message)
        | Ok confined ->
          let target = Keeper_alerting_path.confined_host_path confined in
          if not (confined_is_keeper_playground ~config ~meta confined)

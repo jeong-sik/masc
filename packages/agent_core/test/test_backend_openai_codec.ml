@@ -2407,7 +2407,7 @@ let test_responses_tool_choice_respects_capability_gate () =
 
 (* The chat-completions function schema refuses oneOf/anyOf/allOf/enum/const/not
    at the top level and answers 400 for the whole request, so masc's Execute
-   schema -- which carries a top-level oneOf for "argv or script, not both" --
+   schema -- which carries a top-level oneOf for "argv or command, not both" --
    took every openai lane down with it: 2,525 failures in six hours on
    2026-09-07, two keepers at 204 and 207 consecutive.
 
@@ -2422,7 +2422,7 @@ let test_top_level_unsupported_keywords_are_dropped () =
       ; ( "properties"
         , `Assoc
             [ "argv", `Assoc [ "type", `String "array" ]
-            ; "script", `Assoc [ "type", `String "string" ]
+            ; "command", `Assoc [ "type", `String "string" ]
             ; ( "shell"
               , `Assoc
                   [ "type", `String "string"
@@ -2432,7 +2432,7 @@ let test_top_level_unsupported_keywords_are_dropped () =
       ; ( "oneOf"
         , `List
             [ `Assoc [ "required", `List [ `String "argv" ] ]
-            ; `Assoc [ "required", `List [ `String "script" ] ]
+            ; `Assoc [ "required", `List [ `String "command" ] ]
             ] )
       ]
   in
@@ -2460,6 +2460,10 @@ let test_top_level_unsupported_keywords_are_dropped () =
     "the schema is otherwise untouched"
     "object"
     (params |> member "type" |> to_string);
+  check_bool
+    "command property remains in the function schema"
+    true
+    ((params |> member "properties" |> member "command") <> `Null);
   (* Nested enum is legal on this wire and carries the shell ladder. Dropping
      it would silently widen what the model may pass. *)
   check_string
@@ -2494,8 +2498,8 @@ let test_conformant_tool_description_is_unique_on_wire () =
             ; "default", `String "sh" ] @ description)
   in
   let cases =
-    [ "existing", [ "description", `String "Which shell runs script." ],
-      "Which shell runs script.; one of: sh | bash"
+    [ "existing", [ "description", `String "Which shell runs command." ],
+      "Which shell runs command.; one of: sh | bash"
     ; "empty", [ "description", `String "" ], "one of: sh | bash"
     ; "absent", [], "one of: sh | bash" ]
   in

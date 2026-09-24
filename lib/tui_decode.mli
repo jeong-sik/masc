@@ -1181,20 +1181,25 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
+(** Whether a search has ever returned the fact. The count, the number of
+    distinct UTC days and the last clock come from one list of retrieval
+    times on the server, so they are all absent or all present; the decoder
+    rejects a row where they disagree. *)
+type memory_fact_retrieval =
+  | Never_retrieved
+  | Retrieved of { count : int; distinct_days : int; last_at : float }
+
 (** What the keeper did with one fact, as the server projected it from the
-    memory-events sidecar (RFC-0418): how often a search returned it, on how
-    many distinct UTC days, when last, how often it was retracted, and
-    which dropped facts it continues. No strength or score; the numbers are
-    the record. *)
+    memory-events sidecar (RFC-0418): whether and how a search returned it,
+    how often it was retracted, and which dropped facts it continues. No
+    strength or score; the numbers are the record. *)
 type memory_fact_events = {
-  mfe_retrieved_count : int;
-  mfe_retrieved_distinct_days : int;
-  mfe_last_retrieved_at : float option;
+  mfe_retrieval : memory_fact_retrieval;
   mfe_retracted_count : int;
   mfe_revised_from : string list;
 }
 
-(** A fact nothing has used yet: every count zero, no retrieval, no
+(** A fact nothing has used yet: never retrieved, no retractions, no
     predecessors. Fixtures start here. *)
 val no_memory_fact_events : memory_fact_events
 
@@ -3630,3 +3635,12 @@ val schedule_hold_reading :
     succeeds, and a list kept after a failed reload is an earlier answer, so
     every other combination draws the hold at the time it was read
     (#38411). *)
+
+val decode_oauth_client_saved : Yojson.Safe.t -> (int, string) result
+(** Reads the reply of [POST /api/v1/keepers/oauth/client]: the number of
+    scopes the saved app will ask for, [0] being an app saved with none, so
+    the service's own list is asked for. The server always echoes [scopes];
+    a reply without it, or with a non-string scope, is refused rather than
+    read as a valid scope count. The server's refusals arrive as a non-2xx
+    status, which the HTTP client has already turned into an error before this
+    runs. *)

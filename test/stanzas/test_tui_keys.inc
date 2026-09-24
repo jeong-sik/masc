@@ -7,7 +7,7 @@
   masc.masc_schedule
   ;; [Standalone_lane.t] is what the lane rows and lane views carry.
   masc.runtime
-  masc_tui_mcp masc_tui_types
+  masc_tui_mcp masc_tui_types masc_tui_operator_projection
   masc_tui_keys masc_tui_keeper_mark masc_tui_memory_mark masc_tui_footer
   masc_tui_config_mark
   masc_tui_file_icon

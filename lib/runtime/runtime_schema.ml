@@ -21,18 +21,18 @@ type api_format =
 [@@deriving show, eq]
 
 (* The runtimes whose admission reads [max-prompt-bytes]: Claude Code cuts the
-   history it seeds a start turn with to it, and Antigravity refuses to send a
-   prompt above it. No other runtime reads the field, so a declaration there
-   bounds nothing the provider checks. Every arm is listed so a new format has
-   to be decided here. *)
+   history it seeds a start turn with to it, Antigravity refuses to send a
+   prompt above it, and Codex windows its Start and Resume to it from the
+   first attempt when one is declared (#37353). No other runtime reads the
+   field, so a declaration there bounds nothing the provider checks. Every arm
+   is listed so a new format has to be decided here. *)
 let api_format_reads_max_prompt_bytes = function
-  | Claude_code_runtime | Antigravity_cli_runtime -> true
+  | Claude_code_runtime | Antigravity_cli_runtime | Codex_app_server_runtime -> true
   | Messages_api
   | Chat_completions_api
   | Ollama_api
   | Gemini_api
-  | Vertex_gemini_api
-  | Codex_app_server_runtime -> false
+  | Vertex_gemini_api -> false
 ;;
 
 (** Which vendor dialect an endpoint speaks. [protocol] names the request
@@ -132,13 +132,18 @@ type provider =
       agent-core boundary, Agent Core contract I2: MASC declares the budget;
       AGENT_CORE owns enforcement and phase=Http_operation attribution.
       On an exact-output lane this key alone does not admit a target: it
-      ends at the response headers, so plan admission also requires
-      [exact_body_timeout_s] (Missing_deadline, #36979). *)
+      ends at the response headers, so an exact slot on this provider also
+      needs [exact_body_timeout_s] (Missing_deadline, #36979). Without it
+      boot leaves such a slot out and reports it, and a save that adds one
+      is refused (#38779). *)
   ; exact_body_timeout_s : float option
     (** Explicit total HTTP request deadline for Exact-output calls through
         this provider, including connection, response headers and the full
-        response body. [None] declares no body deadline, and every exact
-        target built from this provider is then refused at plan admission
+        response body. [None] declares no body deadline; boot then leaves an
+        exact-output lane slot on this provider out of its lane and reports
+        it ([Runtime.exact_slot_degradation]), a save that adds such a slot
+        is refused ([Runtime.Exact_slot_body_deadlines_absent], #38779), and
+        a target that reaches plan admission without one is refused there
         (Missing_deadline). This does not replace [connect_timeout_s] or
         ordinary Keeper per-call body deadlines. *)
   ; antigravity_cli : antigravity_cli_options option
@@ -322,7 +327,7 @@ type model_spec =
         bytes-per-token constant with nothing to justify it, and a wrong
         constant either truncates silently or overflows silently.
 
-        Only Claude Code and Antigravity runtimes read it
+        Only Claude Code, Antigravity and Codex runtimes read it
         ([api_format_reads_max_prompt_bytes]). Declared on a model bound
         through any other provider, it bounds nothing and no reader counts it.
 

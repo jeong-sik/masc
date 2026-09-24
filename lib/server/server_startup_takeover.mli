@@ -121,8 +121,9 @@ val base_path_lock_path :
 
 val status_line_is_healthy : string -> bool
 
-(** When [pid] started, as a source-tagged token: ["proc:<ticks>"] from field
-    22 of /proc/<pid>/stat where procfs is mounted, otherwise
+(** When [pid] started, as a source-tagged token: ["proc:<boot_id>:<ticks>"]
+    from /proc/sys/kernel/random/boot_id and field 22 of /proc/<pid>/stat
+    where procfs is mounted, otherwise
     ["ps:<lstart>"] from [ps -o lstart=] (C locale, UTC). [None] when neither
     can report it. The pid lock records its writer's token next to the pid,
     and a takeover signals a live, unresponsive holder only when the two are

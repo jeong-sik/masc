@@ -425,9 +425,23 @@ let ps_lstart pid =
   | _ -> None
 ;;
 
+(* starttime counts from boot, and the lock outlives a reboot, so the token
+   also names the boot: (boot, pid, ticks) cannot recur across reboots. A
+   boot_id that cannot be read leaves no token, which refuses takeover. *)
+let boot_id () =
+  match
+    In_channel.with_open_bin "/proc/sys/kernel/random/boot_id" In_channel.input_all
+  with
+  | exception Sys_error _ -> None
+  | raw ->
+    (match String.trim raw with
+     | "" -> None
+     | boot -> Some boot)
+;;
+
 let process_started pid =
   match proc_stat_starttime pid with
-  | Some ticks -> Some ("proc:" ^ ticks)
+  | Some ticks -> Option.map (fun boot -> Printf.sprintf "proc:%s:%s" boot ticks) (boot_id ())
   | None ->
     (match Sys.file_exists "/proc/self/stat" with
      | true ->

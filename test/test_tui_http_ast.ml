@@ -2574,7 +2574,8 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      single place a row label can reach the terminal unsanitized. Seven
      callers now pass titles that came off the wire. *)
   (* The list sidebar is drawn beside more than one surface, so it sits with
-     the shared primitives. *)
+     the shared primitives. [write_list_sidebar] hands its labels to this
+     one, so this is where a row label reaches the terminal. *)
   check_identifiers ~module_path:"bin/masc_tui_render_prim.ml"
     ~binding:"write_list_sidebar_selection" ~callees:sanitizer_calls [ "label" ];
   check_fields "render_planning_list"

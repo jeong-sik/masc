@@ -931,7 +931,7 @@ let test_the_board_title_counts_through_the_helper_that_knows_the_board () =
       ~binding_name:"render_board_list" ~callee
   in
   Alcotest.(check int) "the title asks what the board holds" 1
-    (asks "board_list_count_text")
+    (asks "list_count_text")
 
 (* The slot history and the run total sit one line apart in the lane detail,
    and the slots cover only the runs that named one -- on the live Board

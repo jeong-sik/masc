@@ -12,7 +12,8 @@ type raw =
   { approval_queue : approval_queue
   ; runtime_blocker_class :
       (Keeper_meta_contract.blocker_class, string) result option
-  ; receipt_operator_disposition : (string * string) option
+  ; receipt_operator_disposition :
+      (Keeper_execution_receipt.operator_disposition_kind * string) option
   ; attention_needs_attention : bool
   ; attention_reason : string option
   ; attention_next_human_action : string option
@@ -22,9 +23,11 @@ type raw =
 type t =
   { disposition : string
   ; disposition_reason : string
-  ; receipt_operator_disposition : (string * string) option
-  (** The operator disposition and reason of the receipt the snapshot shows,
-      as that receipt wrote them: [raw.receipt_operator_disposition] when the
+  ; receipt_operator_disposition :
+      (Keeper_execution_receipt.operator_disposition_kind * string) option
+  (** The operator disposition kind and reason of the receipt the snapshot
+      shows, parsed once where the receipt is read:
+      [raw.receipt_operator_disposition] when the
       approval queue reads empty. [None] when the snapshot shows its own
       verdict instead (a pending approval, an unreadable approval queue, or no
       receipt in [raw]): it has no classifier of its own, so it reports no

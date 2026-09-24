@@ -6,7 +6,8 @@ type raw =
   { approval_queue : approval_queue
   ; runtime_blocker_class :
       (Keeper_meta_contract.blocker_class, string) result option
-  ; receipt_operator_disposition : (string * string) option
+  ; receipt_operator_disposition :
+      (Keeper_execution_receipt.operator_disposition_kind * string) option
   ; attention_needs_attention : bool
   ; attention_reason : string option
   ; attention_next_human_action : string option
@@ -16,7 +17,8 @@ type raw =
 type t =
   { disposition : string
   ; disposition_reason : string
-  ; receipt_operator_disposition : (string * string) option
+  ; receipt_operator_disposition :
+      (Keeper_execution_receipt.operator_disposition_kind * string) option
   ; needs_attention : bool
   ; attention_reason : string option
   ; next_human_action : string option
@@ -52,9 +54,9 @@ let effective_disposition raw ~fallback_disposition ~fallback_reason =
     , (Some (operator_disposition, operator_reason) as receipt_operator_disposition) )
     ->
     let disposition, disposition_reason =
-      Keeper_operator_disposition_display.of_wire
-        ~operator_disposition
+      Keeper_operator_disposition_display.of_kind
         ~operator_disposition_reason:operator_reason
+        operator_disposition
     in
     disposition, disposition_reason, receipt_operator_disposition
   | Approval_queue_unavailable, _

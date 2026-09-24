@@ -1,6 +1,18 @@
 module K = Masc.Keeper_runtime_trust_snapshot
 module O = Masc.Keeper_status_detail_observability
 module P = Masc.Otel_metric_store
+module Receipt = Masc.Keeper_execution_receipt
+
+let receipt_disposition =
+  Alcotest.(
+    option
+      (pair
+         (testable
+            (fun ppf kind ->
+               Format.pp_print_string ppf (Receipt.operator_disposition_kind_to_string kind))
+            ( = ))
+         string))
+;;
 
 let rec remove_tree path =
   if Sys.file_exists path
@@ -143,7 +155,7 @@ let test_trust_blocker_uses_structured_state () =
      disposition to relay. A kind derived from the blocker would be a guess. *)
   List.iter
     (fun (label, (model : Core.t)) ->
-       Alcotest.(check (option (pair string string)))
+       Alcotest.check receipt_disposition
          (label ^ " relays no operator disposition")
          None
          model.receipt_operator_disposition)
@@ -152,7 +164,9 @@ let test_trust_blocker_uses_structured_state () =
 
 let test_trust_relays_only_a_shown_receipt_operator_disposition () =
   let module Core = Masc.Keeper_runtime_trust_snapshot_core in
-  let fenced_receipt = "effect_review_required", "provider_attempt_effect_fenced" in
+  let fenced_receipt =
+    Receipt.Disp_effect_review_required, "provider_attempt_effect_fenced"
+  in
   let decide approval_queue =
     Core.decide
       { approval_queue
@@ -165,7 +179,7 @@ let test_trust_relays_only_a_shown_receipt_operator_disposition () =
       }
   in
   let shown = decide (Core.Approval_queue_available 0) in
-  Alcotest.(check (option (pair string string)))
+  Alcotest.check receipt_disposition
     "a shown receipt's operator disposition is relayed as written"
     (Some fenced_receipt) shown.receipt_operator_disposition;
   Alcotest.(check string) "an effect review shows as an alert" "Alert" shown.disposition;
@@ -173,7 +187,7 @@ let test_trust_relays_only_a_shown_receipt_operator_disposition () =
   let pending = decide (Core.Approval_queue_available 2) in
   Alcotest.(check string) "a pending approval takes the display"
     "pending_operator_decision" pending.disposition_reason;
-  Alcotest.(check (option (pair string string)))
+  Alcotest.check receipt_disposition
     "a receipt the snapshot does not show is not relayed"
     None pending.receipt_operator_disposition
 ;;
@@ -747,45 +761,98 @@ let test_unknown_completion_observation_is_explicit () =
           |> to_string))
 ;;
 
-let test_operator_disposition_display_uses_typed_parser () =
-  let check_case ~operator_disposition ~operator_disposition_reason
-      ~expected_disposition ~expected_reason =
+let test_operator_disposition_display_reads_the_kind () =
+  let check_case kind ~operator_disposition_reason ~expected_disposition ~expected_reason =
+    let label = Receipt.operator_disposition_kind_to_string kind in
     let disposition, reason =
-      Masc.Keeper_operator_disposition_display.of_wire ~operator_disposition
-        ~operator_disposition_reason
+      Masc.Keeper_operator_disposition_display.of_kind ~operator_disposition_reason kind
     in
-    Alcotest.(check string)
-      (operator_disposition ^ " disposition")
-      expected_disposition disposition;
-    Alcotest.(check string)
-      (operator_disposition ^ " reason")
-      expected_reason reason
+    Alcotest.(check string) (label ^ " disposition") expected_disposition disposition;
+    Alcotest.(check string) (label ^ " reason") expected_reason reason
   in
-  check_case ~operator_disposition:"pass_next_model" ~operator_disposition_reason:""
+  check_case Receipt.Disp_pass_next_model ~operator_disposition_reason:""
     ~expected_disposition:"Pass" ~expected_reason:"runtime_fallback";
-  check_case ~operator_disposition:"fail_open_next_runtime"
-    ~operator_disposition_reason:"manual_review" ~expected_disposition:"Pass"
-    ~expected_reason:"manual_review";
-  check_case ~operator_disposition:"retry_later"
-    ~operator_disposition_reason:"transient_runtime_retry"
+  check_case Receipt.Disp_fail_open_next_runtime ~operator_disposition_reason:"manual_review"
+    ~expected_disposition:"Pass" ~expected_reason:"manual_review";
+  check_case Receipt.Disp_retry_later ~operator_disposition_reason:"transient_runtime_retry"
     ~expected_disposition:"Pass" ~expected_reason:"transient_runtime_retry";
-  check_case ~operator_disposition:"operator_action_required"
-    ~operator_disposition_reason:"config_invalid" ~expected_disposition:"Blocked"
-    ~expected_reason:"config_invalid";
-  check_case ~operator_disposition:"operator_action_required"
+  check_case Receipt.Disp_operator_action_required ~operator_disposition_reason:"config_invalid"
+    ~expected_disposition:"Blocked" ~expected_reason:"config_invalid";
+  check_case Receipt.Disp_operator_action_required
     ~operator_disposition_reason:"authorization_refused" ~expected_disposition:"Blocked"
     ~expected_reason:"authorization_refused";
-  (* The reason is left empty on purpose: a wire the parser rejected would
-     fall back to "unmapped_operator_disposition", so only a decoded kind
-     yields this reason. *)
-  check_case ~operator_disposition:"effect_review_required"
-    ~operator_disposition_reason:"" ~expected_disposition:"Alert"
-    ~expected_reason:"effect_review_required";
-  check_case ~operator_disposition:"blocked_runtime" ~operator_disposition_reason:""
-    ~expected_disposition:"Alert" ~expected_reason:"unmapped_operator_disposition";
-  check_case ~operator_disposition:"<missing operator_disposition field>"
-    ~operator_disposition_reason:"" ~expected_disposition:"Alert"
-    ~expected_reason:"unmapped_operator_disposition"
+  check_case Receipt.Disp_effect_review_required ~operator_disposition_reason:""
+    ~expected_disposition:"Alert" ~expected_reason:"effect_review_required"
+;;
+
+(* The receipt writer puts a kind and its reason on every row together, so a
+   row whose kind the parser does not know, or a kind with no reason, is
+   damaged. The snapshot relays neither and shows its own verdict. A row
+   written the way the writer writes it is relayed. *)
+let test_a_damaged_receipt_disposition_relays_nothing () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-damaged-receipt-disposition" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       let append ~ended_at disposition_fields =
+         Dated_jsonl.append
+           receipt_store
+           (`Assoc
+               ([ "ended_at", `String ended_at
+                ; "terminal_reason_code", `String "success"
+                ; "completion_contract_result", `String "not_dispatched"
+                ]
+                @ disposition_fields))
+       in
+       let relayed () =
+         let snapshot = snapshot_with_running_keeper ~config ~meta in
+         let open Yojson.Safe.Util in
+         snapshot |> member "operator_disposition", snapshot |> member "disposition_reason"
+       in
+       append
+         ~ended_at:"2026-06-01T00:00:00Z"
+         [ "operator_disposition", `String "blocked_runtime"
+         ; "operator_disposition_reason", `String "runtime_blocked"
+         ];
+       let disposition, reason = relayed () in
+       Alcotest.(check bool) "an unknown kind is not relayed" true (disposition = `Null);
+       Alcotest.(check string)
+         "the snapshot shows its own verdict"
+         "healthy"
+         (Yojson.Safe.Util.to_string reason);
+       append
+         ~ended_at:"2026-06-01T00:01:00Z"
+         [ "operator_disposition", `String "effect_review_required" ];
+       let disposition, _ = relayed () in
+       Alcotest.(check bool)
+         "a kind without its reason is not relayed"
+         true
+         (disposition = `Null);
+       append
+         ~ended_at:"2026-06-01T00:02:00Z"
+         [ "operator_disposition", `String "effect_review_required"
+         ; "operator_disposition_reason", `String "provider_attempt_effect_fenced"
+         ];
+       let disposition, reason = relayed () in
+       Alcotest.(check string)
+         "a whole pair is relayed"
+         "effect_review_required"
+         (Yojson.Safe.Util.to_string disposition);
+       Alcotest.(check string)
+         "its reason is the display reason"
+         "provider_attempt_effect_fenced"
+         (Yojson.Safe.Util.to_string reason))
 ;;
 
 let test_model_observability_uses_runtime_trust_selected_model () =
@@ -1083,6 +1150,8 @@ let () =
         ; Alcotest.test_case "trust relays only a shown receipt's operator disposition"
             `Quick
             test_trust_relays_only_a_shown_receipt_operator_disposition
+        ; Alcotest.test_case "a damaged receipt disposition relays nothing" `Quick
+            test_a_damaged_receipt_disposition_relays_nothing
         ; Alcotest.test_case
             "missing runtime attempt does not fabricate active_model"
             `Quick
@@ -1140,9 +1209,9 @@ let () =
             `Quick
             test_unknown_completion_observation_is_explicit
         ; Alcotest.test_case
-            "operator disposition display uses typed parser"
+            "operator disposition display reads the typed kind"
             `Quick
-            test_operator_disposition_display_uses_typed_parser
+            test_operator_disposition_display_reads_the_kind
         ; Alcotest.test_case
             "status model observability reuses runtime-trust execution selected model"
             `Quick

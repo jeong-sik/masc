@@ -275,14 +275,20 @@ let approval_queue_attention_of_projection
       ; reason = "approval queue projection has no current state"
       }
 
+(* A receipt writes both fields from one typed pair
+   ([Keeper_execution_receipt.to_json_with_operator_disposition]), so the pair
+   is parsed here once. A kind the parser does not know, or a kind without its
+   reason, is a damaged record: it relays nothing rather than a guessed kind or
+   an invented reason. *)
 let receipt_operator_disposition receipt =
   match
-    ( json_string_opt_member "operator_disposition" receipt,
+    ( Option.bind
+        (json_string_opt_member "operator_disposition" receipt)
+        Keeper_execution_receipt.operator_disposition_kind_of_string,
       json_string_opt_member "operator_disposition_reason" receipt )
   with
-  | Some disposition, Some reason -> Some (disposition, reason)
-  | Some disposition, None -> Some (disposition, "")
-  | None, _ -> None
+  | Some kind, Some reason -> Some (kind, reason)
+  | Some _, None | None, Some _ | None, None -> None
 
 let approval_queue_state_of_projection
     (projection : pending_approval_projection) =
@@ -319,7 +325,9 @@ let trust_model_of_observations ~pending_approval_projection
 let trust_model_json_fields (model : Trust_core.t) =
   let operator_disposition, operator_disposition_reason =
     match model.receipt_operator_disposition with
-    | Some (disposition, reason) -> `String disposition, `String reason
+    | Some (kind, reason) ->
+      ( `String (Keeper_execution_receipt.operator_disposition_kind_to_string kind),
+        `String reason )
     | None -> `Null, `Null
   in
   [ "disposition", `String model.disposition

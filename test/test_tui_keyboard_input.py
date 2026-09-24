@@ -6022,7 +6022,7 @@ def keeper_chat_error_detail_interaction() -> Interaction:
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         send_and_wait(process, master_fd, output, b"trigger-error", b"trigger-error")
-        failed = send_and_wait(
+        send_and_wait(
             process, master_fd, output, b"\r", ERROR_DETAIL_TAIL_WRAPPED
         )
         plain = unwrapped(screen_text(bytes(output)))
@@ -14368,6 +14368,59 @@ def show_cost(
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
 
 
+def priced_cost_reply(usd: float) -> HttpResponse:
+    status, body = keeper_costs_fixture()
+    assert isinstance(body, dict)
+    row = dict(body["keepers"][0])
+    row.update(total_cost_usd=usd, cost_reported_samples=3, cost_unreported_samples=0)
+    result = dict(body)
+    result["keepers"] = [row]
+    return status, result
+
+
+def cost_off_on_discards_old_reply_interaction(
+    gate: GatedHttpResponse, reads: list[str]
+) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        try:
+            show_cost(process, master_fd, output, reads)
+            if not wait_for_fixture_event(process, master_fd, output, gate.requested, timeout=10.0):
+                raise AssertionError("the first keeper-costs request did not start")
+
+            def toggle(expected: bytes) -> None:
+                send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+                select_keeper_row(process, master_fd, output, b"alpha")
+                send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
+                send_and_wait(process, master_fd, output, b"/cost", composer_showing(b"/cost"))
+                send_and_wait(process, master_fd, output, b"\r", expected)
+                send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+                send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+
+            toggle(b"Team block: hidden")
+            toggle(b"Team block: shown")
+            read_available(master_fd, output)
+            start = len(output)
+            gate.release.set()
+            if not wait_for_fixture_event(process, master_fd, output, gate.completed, timeout=10.0):
+                raise AssertionError("the held old cost reply did not complete")
+            wait_for_output(process, master_fd, output, b"$2.00", start=start, timeout=10.0)
+            if gate.calls < 2:
+                raise AssertionError("the new /cost generation made no replacement request")
+            if b"$1.00" in CSI_RE.sub(b"", bytes(output[start:])):
+                raise AssertionError("a pre-toggle cost was displayed after /cost was reenabled")
+            os.write(master_fd, b"q")
+        finally:
+            gate.release.set()
+
+    return interact
+
+
 def narrow_stuck_row_keeps_its_cause_interaction(reads: list[str]) -> Interaction:
     # The spend tag sits at the right of a Team row and only where the row
     # fits whole: at 56 columns a stuck Keeper's row keeps its cause, which
@@ -15208,6 +15261,26 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures={
             "/api/v1/dashboard/briefing": spend_title_briefing(),
             "/api/v1/dashboard/keeper-costs": counted(spend_title_costs_fixture(), cost_reads),
+        },
+    )
+    old_cost_reads: list[str] = []
+    old_cost_gate = GatedHttpResponse(
+        priced_cost_reply(1.0),
+        subsequent_response=priced_cost_reply(2.0),
+        hold_seconds=30.0,
+    )
+
+    def gated_cost() -> HttpResponse:
+        old_cost_reads.append("read")
+        return old_cost_gate()
+
+    run_terminal_scenario(
+        executable,
+        description="Cost off on discards old reply",
+        interact=cost_off_on_discards_old_reply_interaction(old_cost_gate, old_cost_reads),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": pull_requests_briefing(),
+            "/api/v1/dashboard/keeper-costs": gated_cost,
         },
     )
     cost_reads: list[str] = []

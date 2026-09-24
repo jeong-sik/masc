@@ -214,6 +214,31 @@ let test_only_a_shown_cost_is_fetched () =
     ]
 ;;
 
+let test_old_cost_reply_after_off_on_needs_a_new_read () =
+  let shown, first_generation =
+    Types.toggle_cost_visibility ~visible:false ~generation:0
+  in
+  let hidden, hidden_generation =
+    Types.toggle_cost_visibility ~visible:shown ~generation:first_generation
+  in
+  let shown_again, current_generation =
+    Types.toggle_cost_visibility ~visible:hidden ~generation:hidden_generation
+  in
+  check bool "first request is valid before toggling" true
+    (Types.cost_reply_is_current ~visible:shown
+       ~current_generation:first_generation ~reply_generation:first_generation);
+  check bool "old request is invalid after off then on" false
+    (Types.cost_reply_is_current ~visible:shown_again
+       ~current_generation ~reply_generation:first_generation);
+  check bool "discarding it leaves the new reading pending" true
+    (Types.cost_refresh_needed ~visible:shown_again Types.Overview_spend_unread);
+  check bool "new request is valid" true
+    (Types.cost_reply_is_current ~visible:shown_again
+       ~current_generation ~reply_generation:current_generation);
+  check bool "a settled reading needs no immediate retry" false
+    (Types.cost_refresh_needed ~visible:shown_again Types.Overview_spend_warming)
+;;
+
 let () =
   run "tui_surface_needs"
     [ ( "refresh scope"
@@ -223,6 +248,8 @@ let () =
             test_only_the_overview_asks_for_the_goal_tree
         ; test_case "only a shown cost is fetched" `Quick
             test_only_a_shown_cost_is_fetched
+        ; test_case "old cost reply after off on needs a new read" `Quick
+            test_old_cost_reply_after_off_on_needs_a_new_read
         ; test_case "every keeper sub-mode asks for the roster" `Quick
             test_every_keeper_sub_mode_still_asks_for_the_roster
         ; test_case "the keeper pane asks for the roster wherever it is drawn"

@@ -815,7 +815,6 @@ let () =
   let internal_error =
     Keeper_internal_error.Capacity_backpressure
       { runtime_id = "runtime-capacity"
-      ; source = Keeper_internal_error.Provider_capacity
       ; detail = "provider health cooldown active before dispatch"
       ; retry_after = Keeper_internal_error.No_retry_hint
       }

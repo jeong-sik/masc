@@ -28,8 +28,11 @@
 type retry_class =
   | Rate_limited  (** soft 429 throttle; declared runtimes remain eligible *)
   | Hard_quota  (** account-level quota/balance exhaustion (402 family) *)
-  | Capacity_backpressure
-      (** typed provider overload / capacity-exhausted pools *)
+  | Provider_capacity
+      (** the provider refused for its own capacity: an HTTP 529 overload,
+          a provider [CapacityExhausted] pool, or the MASC envelope that
+          carries one. A fact about the attempted candidate, like a server
+          error. *)
   | Empty_completion of { stop_reason : Llm_provider.Types.stop_reason }
       (** provider completed the request with no thinking, text, or tool calls;
           the typed stop reason remains available to scheduling policy and
@@ -252,7 +255,7 @@ val route_resumes_on_same_path : route -> bool
     operation whose last candidate failed after saving tool results continues
     on that same path (RFC last-path-resumes-after-progress §3.3).
 
-    [true]: [Rate_limited], [Capacity_backpressure], [Empty_completion] with
+    [true]: [Rate_limited], [Provider_capacity], [Empty_completion] with
     [EndTurn], [MaxTokens], or [StopSequence], [Server_error],
     [Network_transient], [Provider_timeout], and [Hard_quota] with a usable
     reset hint (positive, not NaN). The empty-completion reasons resume a

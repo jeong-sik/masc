@@ -102,14 +102,10 @@ rate-limited failure route; backing off next cycle by 600s (cadence 600s, cap 90
 
 | 실패가 넘긴 것 | 다음 경로 상태 | 다음 사이클 |
 |---|---|---|
-| route 가 `Capacity_backpressure` (suffix 와 무관) | — | 실패한 경로의 쉼만큼 기다리되 wake 는 잠을 끊는다 (지금과 같음) |
 | deferred suffix 있음 | 걷는 순서의 첫 경로가 쉬지 않음 | 기다리지 않는다. 남은 입력이 있으면 곧바로 그 suffix 로 턴을 잇는다 |
 | deferred suffix 있음 | 첫 경로가 쉼 | 다음 턴의 첫 경로가 쉬지 않게 되는 가장 이른 시각까지 기다린다 (3.3 끝) |
 | suffix 없음, route 가 `Rate_limited`·`Hard_quota` | 실패한 경로가 쉼 | 실패한 경로가 풀리는 시각과, assignment 를 새로 걸을 때 첫 경로가 쉬지 않게 되는 시각 중 늦은 쪽까지 기다린다 |
 | 그 밖 | — | 지금처럼 cadence |
-
-`Capacity_backpressure` 를 맨 위에 둔 이유: 이 신호는 MASC 자신의 slot·client 용량에서도
-오고 경로 하나의 사실이 아니다. 다른 경로로 곧바로 넘겨도 같은 용량 한도에 걸린다.
 
 suffix 가 없다는 것은 이 입력에 쓸 수 있는 경로를 이 턴이 이미 다 썼다는 뜻이다
 (마지막 후보였거나, 반복 생성으로 거부된 모델만 남았다). 그래서 이 경우는 실패한
@@ -137,16 +133,13 @@ type after_failure =
   | Continue_on_deferred_lane of { next_runtime_id : string }
   | Wait_for_path_release of
       { release_at : float
-      ; wake_policy : Keeper_keepalive_signal.wake_policy
       ; waiting_on : string  (* 풀리기를 기다리는 runtime 또는 assignment id *)
       }
 
 (* 두 lane 이 같이 읽는 결정 — Keeper_turn_driver *)
-type failure_wait = Capacity_release | Path_release
-
 type next_dispatch =
   | Dispatch_now of { runtime_id : string }
-  | Wait_until of { release_at : float; waiting_on : string; wait : failure_wait }
+  | Wait_until of { release_at : float; waiting_on : string }
 ```
 
 `keepalive_turn_outcome.provider_backoff : provider_backoff option` 을
@@ -171,9 +164,7 @@ type next_dispatch =
 `note_observed_exhausted` 호출처 13곳이 바뀌어 이번 범위에서 뺐다.
 
 실패한 턴이 방금 받은 route 는 저장소보다 새 사실이다. suffix 가 없을 때는 route 의
-`retry_class` 와 힌트로 같은 표를 적용한다. `Capacity_backpressure` 는 MASC 자신의 slot·
-client 용량에서도 오고 경로별 저장소가 없으므로 route 로만 정한다: 힌트가 있으면 그 값,
-없으면 floor 다.
+`retry_class` 와 힌트로 같은 표를 적용한다.
 
 풀리는 시각과 걷는 순서는 같이 움직이지 않을 수 있다. 다음 턴은
 `quota_ordered_deferred_runtime_lane` 순서로 걷고, 그 순서는 쉬는 증거가 있는 경로를
@@ -195,8 +186,8 @@ suffix 가 없으면 같은 규칙을 assignment 의 새 walk 순서(선언 순�
 ### 3.4 chat lane
 
 `Keeper_direct_runtime_continuation.retry_not_before` 는 3.1 의 같은 결정을 읽는다.
-suffix 의 walk 머리가 쉬지 않으면 곧바로 claim 할 수 있고, 머리가 쉬거나 capacity
-backpressure 면 그 시각까지 미룬다. 지금은 실패한 경로의 쉼을 기다린다.
+suffix 의 walk 머리가 쉬지 않으면 곧바로 claim 할 수 있고, 머리가 쉬면 그 시각까지
+미룬다. 지금은 실패한 경로의 쉼을 기다린다.
 
 ### 3.5 구현 범위
 
@@ -274,8 +265,8 @@ terminal 로 끝내게 한다. RFC-0433 의 "새 fail-closed 경로를 만들지
 - 결정 함수 테스트: 첫 경로가 쉬지 않는 suffix → 이어가기, 모두 쉬는 suffix → 순서가
   풀리는 가장 이른 시각, 순서가 안 풀리는 뒤 경로는 대기를 줄이지 않음, quota 리셋 시각,
   suffix 없는 rate limit → 실패 경로의 쉼, 새 walk 머리가 쉬면 그 머리까지, 힌트 5초 →
-  5초(cadence 무관), capacity → wake 가 끊는 대기, 그 밖 → cadence.
-- 채팅 lane: 쉬지 않는 머리 → 곧바로 claim, 쉬는 머리 → 풀릴 때까지, capacity → 그 쉼.
+  5초(cadence 무관), 그 밖 → cadence.
+- 채팅 lane: 쉬지 않는 머리 → 곧바로 claim, 쉬는 머리 → 풀릴 때까지.
 - #34653 회귀: 유일한 경로가 쉬는 동안 결정은 `Serve_wakeup_after_duration` 대기이고,
   `interruptible_sleep` 은 그 대기 중 wakeup 을 끝까지 미룬다(기존 테스트 유지).
 - 배포 뒤 실측: `rate-limited failure route` 대신 새 로그 줄의 `waiting_on` 과

@@ -471,7 +471,7 @@ with `c`; `Esc`, `Left`, or `p` returns to Runtime, and the palette keeps
 `go Clients`. `/` jumps the cursor to a matching name.
 
 ```
- MASC Config / Runtime / Clients (12 attached)  17:02:53  [connected]
+ MASC System / Runtime / Clients (12 attached)  17:02:53  [connected]
   STATUS    NAME                 TYPE        KEEPER           TASK      LAST SEEN
  >active   codex-mcp-client      codex       -                -         17:02:41
   busy     analyst-agent         keeper      analyst          task-845  17:02:50
@@ -1187,7 +1187,7 @@ comment body is a complete JSON object or array, Board pretty-prints it and
 uses the same JSON syntax colours as fenced code. Ordinary Markdown remains
 authored Markdown.
 
-### Planning
+### Work / Goals
 
 Planning is one workspace holding two different subjects, which is why its
 stops are not numbered. `Goals` is the goal lifecycle, judged against the
@@ -1201,7 +1201,7 @@ Each side carries its own count on the strip: `Goals·2` is goals with the
 completion judge, `Task Review·7` is tasks waiting for an operator.
 
 ```
- MASC Planning  ▸Goals·1  Task Review·2  Task Verdicts  10:44:57  [connected]
+ MASC Work  ▸Goals·1  Task Review·2  Task Verdicts  10:44:57  [connected]
    sort:phase/P1-P5  filter:active
    Executing: 3  Paused/Blocked: 1  Verifying: 0  Done: 24  Dropped: 22
    Backlog: todo=4  claimed=0  running=6  done=109  cancelled=37
@@ -1653,7 +1653,7 @@ probe's status, transport, timestamp, latency, HTTP result, and error when
 those observations exist. `PgUp`/`PgDn` pages the detail; Left or `Esc` returns
 to the same list row.
 
-### Config
+### System
 
 Config is five views over the runtime's settings. Press `p` to move through
 `runtime.toml`, `models`, typed `params`, prompt overrides, and themes.

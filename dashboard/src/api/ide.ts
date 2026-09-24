@@ -28,6 +28,8 @@ interface IdeBridgeEventBase {
   readonly keeper_id: string
   readonly turn_id: string
   readonly timestamp_ms: number
+  /** Stable opaque id supplied by current servers; absent on older servers. */
+  readonly event_id: string | null
 }
 
 export interface IdeToolEvent extends IdeBridgeEventBase {
@@ -143,6 +145,9 @@ function parseIdeBridgeEvent(raw: unknown): IdeBridgeEvent | null {
   const turnId = stringField(raw, 'turn_id')
   const timestampMs = numberField(raw, 'timestamp_ms')
   if (!isIdeEventKind(type) || !keeperId || !turnId || timestampMs === null) return null
+  const eventId = raw.event_id
+  if (eventId !== undefined && (typeof eventId !== 'string' || !/^[0-9a-f]{64}$/.test(eventId))) return null
+  const stableEventId = typeof eventId === 'string' ? eventId : null
 
   if (type === 'tool') {
     const toolName = stringField(raw, 'tool_name')
@@ -160,6 +165,7 @@ function parseIdeBridgeEvent(raw: unknown): IdeBridgeEvent | null {
       keeper_id: keeperId,
       turn_id: turnId,
       timestamp_ms: timestampMs,
+      event_id: stableEventId,
       tool_name: toolName,
       outcome,
       typed_outcome: typedOutcome,
@@ -176,6 +182,7 @@ function parseIdeBridgeEvent(raw: unknown): IdeBridgeEvent | null {
     keeper_id: keeperId,
     turn_id: turnId,
     timestamp_ms: timestampMs,
+    event_id: stableEventId,
     phase,
     model_used: stringField(raw, 'model_used'),
     tools_used: stringArrayField(raw, 'tools_used'),
@@ -211,4 +218,3 @@ function stringArrayField(record: Record<string, unknown>, key: string): Readonl
   const value = record[key]
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
-

@@ -286,13 +286,16 @@ function mergeRunActivityEvents(
 /**
  * The bridge rows carry no id of their own, so the id is built from what the
  * row says about itself. It must not depend on the row's position in the
- * page: a poll that brings one new event shifts every older one, and a
- * position-derived id then named a different row. The id is the focus
- * `source_id` a context jump carries and the timeline's tie-break, so a
- * jump taken before a poll pointed at another event after it. Rows that
- * say the same thing are told apart by their occurrence count instead.
+ * page: a poll that brings one new event shifts every older one. Current
+ * servers hash the stored row into an opaque event_id, including differences
+ * in tool outcome or output without placing output text in a URL. The id is
+ * the focus `source_id` a context jump carries and the timeline's tie-break.
+ * Older servers have no id; their fallback names the public coarse fields.
+ * Fully identical rows have no wire identity to tell apart, so only those
+ * use an occurrence count.
  */
 function bridgeEventKey(event: IdeBridgeEvent): string {
+  if (event.event_id !== null) return `ide-${event.event_id}`
   const what = event.type === 'tool'
     ? `${event.tool_name}-${event.file_path ?? ''}`
     : event.phase

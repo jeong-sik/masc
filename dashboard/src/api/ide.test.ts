@@ -39,6 +39,7 @@ describe('ide API', () => {
           summary: 'ran command',
           file_path: 'lib/a.ml',
           timestamp_ms: '1717400000000',
+          event_id: 'a'.repeat(64),
         }],
       },
     })
@@ -62,6 +63,7 @@ describe('ide API', () => {
       keeper_id: 'sangsu',
       turn_id: 'turn-1',
       timestamp_ms: 1717400000000,
+      event_id: 'a'.repeat(64),
     })])
   })
 

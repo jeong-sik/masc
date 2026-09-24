@@ -457,6 +457,52 @@ let create_goal ctx title =
   json_state created [ "goal_id" ]
 ;;
 
+let test_measurement_requires_current_criterion_and_evidence () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Measure actual work" in
+  let goal =
+    match Goal_store.find_goal config ~goal_id with
+    | Goal_store.Goal_found goal -> goal
+    | Goal_store.Goal_absent | Goal_store.Store_unavailable _ ->
+        fail "created Goal is not readable"
+  in
+  let args revision evidence =
+    [ "goal_id", `String goal_id
+    ; "criterion_revision", `String revision
+    ; "observed_value", `String "0"
+    ; "evidence", `String evidence
+    ]
+  in
+  ignore (must_fail "missing evidence"
+            (dispatch ctx ~name:"masc_goal_measure"
+               (args goal.criterion_revision "")));
+  let measured =
+    must_succeed "record explicit measurement"
+      (dispatch ctx ~name:"masc_goal_measure"
+         (args goal.criterion_revision "artifact:measured-count"))
+  in
+  check string "the tool calls it reported" "reported_only"
+    (json_state measured [ "verification" ]);
+  (match Goal_measurement.latest_for_goal config ~goal with
+   | Ok (Some row) ->
+       check string "actual is stored exactly" "0" row.observed_value;
+       check string "evidence survives" "artifact:measured-count" row.evidence
+   | Ok None | Error _ -> fail "explicit measurement was not retained");
+  let changed =
+    match Goal_store.upsert_goal config ~id:goal_id ~target_value:"2" () with
+    | Ok (goal, _) -> goal
+    | Error error -> fail (Goal_store.write_error_to_string error)
+  in
+  (match Goal_measurement.latest_for_goal config ~goal:changed with
+   | Ok None -> ()
+   | Ok (Some _) | Error _ -> fail "old criterion was presented as current");
+  ignore (must_fail "stale criterion"
+            (dispatch ctx ~name:"masc_goal_measure"
+               (args goal.criterion_revision "artifact:stale")))
+;;
+
 let transition ctx goal_id ?note ?evidence action =
   let args =
     [ "goal_id", `String goal_id; "action", `String action ]
@@ -1252,6 +1298,8 @@ let () =
             test_goal_list_joins_the_ledger
         ; test_case "goal list renders a ledger-error state" `Quick
             test_goal_list_renders_a_ledger_error_state
+        ; test_case "measurements require current criterion and evidence" `Quick
+            test_measurement_requires_current_criterion_and_evidence
         ] )
     ; ( "stage 2 gate"
       , [ test_case "reopen works before any completion request" `Quick

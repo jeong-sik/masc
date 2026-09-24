@@ -1,0 +1,28 @@
+name = "masc_goal_measure"
+description = """
+Record an explicit observation of a Goal's declared metric. Supply the exact
+current criterion_revision from masc_goal_list, the observed value, and the
+evidence that supports it. This records a reported value; it does not prove
+that the target was reached or change the Goal phase."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "goal_id"
+type = "string"
+required = true
+
+[[params]]
+name = "criterion_revision"
+type = "string"
+required = true
+
+[[params]]
+name = "observed_value"
+type = "string"
+required = true
+
+[[params]]
+name = "evidence"
+type = "string"
+required = true

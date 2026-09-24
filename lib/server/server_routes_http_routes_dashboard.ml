@@ -3231,6 +3231,38 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.post "/api/v1/dashboard/goals/measurements" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state actor req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let answer =
+               try
+                 let json = Yojson.Safe.from_string body in
+                 let config = Mcp_server.workspace_config state in
+                 Domain_pool_ref.submit_io_or_inline (fun () ->
+                   Goal_measurement.record_json config ~actor json)
+               with Yojson.Json_error detail ->
+                 Error (Goal_measurement.Invalid_request ("invalid JSON: " ^ detail))
+             in
+             match answer with
+             | Error error ->
+                 let status =
+                   match error with
+                   | Goal_measurement.Invalid_request _ -> `Bad_request
+                   | Goal_measurement.Conflict _ -> `Conflict
+                   | Goal_measurement.Store_error _ -> `Service_unavailable
+                 in
+                 respond_json_value_with_cors ~status req reqd
+                   (dashboard_error_json ~ok:false
+                      (Goal_measurement.error_to_string error))
+             | Ok measurement ->
+                 let base_path = (Mcp_server.workspace_config state).base_path in
+                 Dashboard_cache.invalidate ("goals_tree:" ^ base_path);
+                 Dashboard_cache.invalidate_prefix ("goal_detail:" ^ base_path ^ ":");
+                 respond_json_value_with_cors req reqd
+                   (`Assoc [ "ok", `Bool true
+                           ; "measurement", Goal_measurement.to_yojson measurement ])))
+         request reqd)
   |> Http.Router.get "/api/v1/dashboard/goals/detail" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let goal_id =

@@ -399,6 +399,25 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ])
 ;;
 
+let handle_goal_measure ~tool_name ~start_time (ctx : context) args
+    : Tool_result.result =
+  match Goal_measurement.record_json ctx.config ~actor:ctx.agent_name args with
+  | Ok measurement ->
+      ok_result ~tool_name ~start_time
+        [ "measurement", Goal_measurement.to_yojson measurement
+        ; "verification", `String "reported_only"
+        ]
+  | Error error ->
+      let code =
+        match error with
+        | Goal_measurement.Invalid_request _ -> Validation_error
+        | Goal_measurement.Conflict _ -> Conflict
+        | Goal_measurement.Store_error _ -> Internal_error
+      in
+      error_result_typed ~tool_name ~start_time ~code
+        (Goal_measurement.error_to_string error)
+;;
+
 (* RFC-0387 stage 2 — the completion gate.
 
    Ordering for every gated action: [Goal_phase.decide_transition] first (the

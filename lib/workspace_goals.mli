@@ -28,6 +28,15 @@ val handle_goal_upsert
   -> Yojson.Safe.t
   -> Tool_result.result
 
+(** Record an explicit Goal measurement with evidence for the current
+    success-criterion revision. This does not certify completion. *)
+val handle_goal_measure
+  :  tool_name:string
+  -> start_time:float
+  -> Workspace_types.context
+  -> Yojson.Safe.t
+  -> Tool_result.result
+
 (** [handle_goal_transition ctx args] handles
     [masc_goal_transition].  Required arg: [action] (one of
     {!Goal_phase.Public_action.all}). [request_complete] moves an executing

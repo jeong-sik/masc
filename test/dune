@@ -6974,6 +6974,11 @@
  (modules test_tui_fork_guard)
  (libraries alcotest masc_tui_fork_guard eio eio_main))
 
+(test
+ (name test_tui_async_read)
+ (modules test_tui_async_read)
+ (libraries alcotest masc_tui_async_read eio eio_main))
+
 (include stanzas/test_official_client_claim_cause.inc)
 
 (include stanzas/test_tui_keeper_current_failure_pty.inc)

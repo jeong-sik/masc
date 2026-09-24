@@ -32,6 +32,9 @@ type load_error =
       (** Not a directory name this layout uses: empty, or a character other
           than [a-z], [0-9] and [-], or a leading [-]. *)
   | Recipe_missing of { path : string }
+  | Source_file_outside_source of { path : string }
+      (** A recipe Dockerfile or its [inputs] manifest resolves outside the
+          selected checkout. *)
   | Input_path_rejected of { listed_in : string; path : string }
       (** Absolute, empty, with a [..] segment, or [Dockerfile] itself: it
           would reach outside the checkout, or land on the recipe in the
@@ -49,7 +52,10 @@ val load_error_to_string : load_error -> string
 val load : source:string -> name:string -> (recipe, load_error) result
 (** Read [<source>/sandbox-images/<name>/Dockerfile] and the files its
     [inputs] lists, relative to [source]. A recipe with no [inputs] file has
-    no inputs. *)
+    no inputs. Every file is resolved inside the checkout before it is read;
+    the resolved regular file is opened with ownership-boundary and inode
+    checks, so replacing a link during the read cannot substitute another
+    file. *)
 
 val tag_hash_prefix_length : int
 (** How many hex digits of {!inputs_sha256} the tag carries. The full hash is

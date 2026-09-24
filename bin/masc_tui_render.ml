@@ -3149,8 +3149,8 @@ let planning_next_step (goal : planning_goal) =
 let planning_proof_detail (goal : planning_goal) =
   match goal.pg_verifier_unreconciled with
   | Some blocked ->
-    (* The judge's last word is not what holds this goal: the verifier skips
-       it on every scan, and only this line says why. *)
+    (* The judge's last word is not what holds this goal: the latest verifier
+       scan could not settle it, and only this line says why. *)
     Some
       ( Theme.bad ()
       , Printf.sprintf "%s: %s"

@@ -81,7 +81,7 @@ let test_tone_separates_a_refusal_from_a_proof () =
   check_bool "historical evidence remains readable" true
     (List.mem "old target reached" (texts stale))
 
-(* A Verifying goal the verifier skips on every scan heads the detail with
+(* A Verifying goal the latest verifier scan could not settle heads the detail with
    which step failed and the store's reason, in the refusal tone, and the
    reason reaches the terminal escaped. *)
 let test_a_stuck_goal_says_which_step_and_why () =

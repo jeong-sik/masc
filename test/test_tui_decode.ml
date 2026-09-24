@@ -824,7 +824,7 @@ let test_planning_goal_separates_unreadable_from_unreviewed () =
      | _ -> false)
 ;;
 
-(* A Verifying goal the verifier skips on every scan: the row carries which
+(* A Verifying goal the latest verifier scan could not settle: the row carries which
    step failed and why, so the operator can see it is stuck rather than
    waiting. *)
 let test_planning_goal_carries_the_verifier_unreconciled_reason () =

@@ -75,7 +75,7 @@ let with_bundle
       ?(history = [])
       ?(attached = true)
       ?(with_loader = true)
-      ?(skill_catalog = Keeper_skill_catalog.empty)
+      ?skills
       f
   =
   Eio_main.run
@@ -91,16 +91,41 @@ let with_bundle
     ~registry_root:dir
   @@ fun registry ->
   let meta = make_meta () in
-  (* No skills unless a case passes a catalog, so the bundle carries no
-     composition tools and the only difference between the two shapes is the
-     one under test. *)
-  let snapshot =
-    match Skill_source_config.parse_text "" with
-    | Error _ -> failf "an empty skill source config must parse"
-    | Ok config ->
-      (match Skill_catalog_snapshot.configured ~config [] with
-       | Ok snapshot -> snapshot
-       | Error _ -> failf "an empty skill snapshot must build")
+  (* No skills unless a case passes a snapshot and its catalog, so the bundle
+     carries no composition tools and the only difference between the two
+     shapes is the one under test. A Skill-bearing bundle is refused without a
+     frozen activation context, so a case with skills gets one, built from the
+     same snapshot the catalog came from. *)
+  let snapshot, skill_catalog, skill_activation_context =
+    match skills with
+    | None ->
+      let snapshot =
+        match Skill_source_config.parse_text "" with
+        | Error _ -> failf "an empty skill source config must parse"
+        | Ok config ->
+          (match Skill_catalog_snapshot.configured ~config [] with
+           | Ok snapshot -> snapshot
+           | Error _ -> failf "an empty skill snapshot must build")
+      in
+      snapshot, Keeper_skill_catalog.empty, None
+    | Some (snapshot, catalog) ->
+      let trace_id = meta.Keeper_meta_contract.runtime.trace_id in
+      let context =
+        match
+          Keeper_skill_activation_recorder.make
+            ~trace_id
+            ~runtime_id:(fun () -> Some "test.runtime")
+            ~turn_ref:
+              (Ids.Turn_ref.make
+                 ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
+                 ~absolute_turn:1)
+            ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision snapshot)
+            ~task_selection:Keeper_task_skill_turn.empty
+        with
+        | Ok context -> context
+        | Error error -> fail (Keeper_skill_activation_recorder.error_to_string error)
+      in
+      snapshot, catalog, Some context
   in
   let capability_surface =
     Keeper_capability_surface.create
@@ -139,6 +164,7 @@ let with_bundle
           }
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"test")
       ?identity_surface
+      ?skill_activation_context
       ~capability_surface
       ()
   in
@@ -287,7 +313,7 @@ let composition_skill_document ~name ~defer_line =
     defer_line
 ;;
 
-let composition_skill_catalog documents =
+let composition_skill_snapshot documents =
   let config_text =
     {|[skills]
 resource-read-max-bytes = 65536
@@ -327,7 +353,7 @@ access = "read-write"
     | Error _ -> fail "composition Skill snapshot fixture was rejected"
   in
   match Keeper_skill_catalog.of_snapshot snapshot with
-  | catalog, [] -> catalog
+  | catalog, [] -> snapshot, catalog
   | _, diagnostic :: _ ->
     failf
       "composition fixture was rejected as a skill: %s"
@@ -350,8 +376,8 @@ let composition_tool_name catalog name =
 ;;
 
 let test_a_composition_that_declares_deferral_leaves_the_request () =
-  let skill_catalog =
-    composition_skill_catalog
+  let ((_, skill_catalog) as skills) =
+    composition_skill_snapshot
       [ ( "lane-deferred"
         , composition_skill_document ~name:"lane-deferred" ~defer_line:"defer_loading = true" )
       ; "lane-loaded", composition_skill_document ~name:"lane-loaded" ~defer_line:""
@@ -359,7 +385,7 @@ let test_a_composition_that_declares_deferral_leaves_the_request () =
   in
   let deferred = composition_tool_name skill_catalog "lane-deferred" in
   let loaded = composition_tool_name skill_catalog "lane-loaded" in
-  with_bundle ~skill_catalog (fun bundle ->
+  with_bundle ~skills (fun bundle ->
     let sent = tool_names bundle.Keeper_tools_agent_core.tools in
     let listed = tool_names bundle.Keeper_tools_agent_core.agent_core_tools in
     let held = listing_deferred_names bundle in

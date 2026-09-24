@@ -1594,27 +1594,49 @@ let path_effect_operation_of_write_mode = function
 
 (* A write to a path under an endpoint's declared roots (#38593) is outside
    the keeper's tree, so it takes the Gate decision a host write outside the
-   playground takes, with the same operation and the same input shape. *)
+   playground takes, with the same operation and the same input shape. The
+   effect carries the endpoint's configuration, not only its name: replay
+   rebuilds this input from the configuration current then, so an approval
+   given for one host is not spent on another that took the same name. *)
+let declared_root_write_gate_input
+      ~(endpoint : Exec_ssh_endpoint.t)
+      ~requested_target
+      ~mode
+      ~content_source
+      ~content
+      ~(patch : Keeper_tool_filesystem_remote_write.patch_request option)
+  =
+  let effect_json =
+    `Assoc
+      [ ( "operation"
+        , `String
+            (Keeper_alerting_path.path_effect_operation_to_string
+               (path_effect_operation_of_write_mode mode)) )
+      ; ( "endpoint"
+        , `Assoc
+            [ "name", `String endpoint.name
+            ; "host", `String endpoint.host
+            ; "user", `String endpoint.user
+            ; "port", `Int endpoint.port
+            ; "remote_root", `String endpoint.remote_root
+            ; "allowed_paths", `List (List.map (fun root -> `String root) endpoint.allowed_paths)
+            ] )
+      ; "endpoint_path", `String requested_target
+      ]
+  in
+  match patch with
+  | None -> file_write_gate_input ~effect_json ~requested_target ~content ~content_source ()
+  | Some { old_string; new_string; replace_all } ->
+    file_write_gate_input ~effect_json ~requested_target ~content ~old_string ~new_string
+      ~replace_all ()
+;;
+
 let declared_root_writes ~config ~meta ?continuation_channel ?gate_context ?gate_grant () =
   Keeper_tool_filesystem_remote_write.Authorize_declared_roots
     (fun ~endpoint ~requested_target ~mode ~content_source ~content ~patch ->
-      let effect_json =
-        `Assoc
-          [ ( "operation"
-            , `String
-                (Keeper_alerting_path.path_effect_operation_to_string
-                   (path_effect_operation_of_write_mode mode)) )
-          ; "endpoint", `String endpoint
-          ; "endpoint_path", `String requested_target
-          ]
-      in
       let input =
-        match patch with
-        | None ->
-          file_write_gate_input ~effect_json ~requested_target ~content ~content_source ()
-        | Some { Keeper_tool_filesystem_remote_write.old_string; new_string; replace_all } ->
-          file_write_gate_input ~effect_json ~requested_target ~content ~old_string
-            ~new_string ~replace_all ()
+        declared_root_write_gate_input ~endpoint ~requested_target ~mode ~content_source
+          ~content ~patch
       in
       decide_file_write ~config ~meta ?continuation_channel ?gate_context ?gate_grant
         ~requested_target ~input ())

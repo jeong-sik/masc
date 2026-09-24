@@ -53,6 +53,17 @@ let read_script =
 let stub_main () =
   let frame_path = Sys.argv.(2) in
   let mode = Sys.argv.(3) in
+  (* An OpenSSH endpoint probes the shim before its first request. *)
+  if Array.exists (String.equal "masc-exec-shim --probe") Sys.argv
+  then (
+    write_all Unix.stdout
+      (Exec_ssh_protocol.render_probe
+         { name = "masc-exec-shim"
+         ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
+         ; capabilities = []
+         ; release = None
+         });
+    exit 0);
   let header = read_exact Unix.stdin 8 in
   let body_len = Bytes.get_int64_be (Bytes.unsafe_of_string header) 0 |> Int64.to_int in
   let frame = header ^ read_exact Unix.stdin body_len in
@@ -332,26 +343,42 @@ let test_jail_and_mode_are_enforced_before_any_payload () =
 ;;
 
 (* #38593: a path the keeper's tree refuses may be under the endpoint's
-   declared roots ([allowed_paths]). The endpoint here declares /app. *)
-let declare_roots f roots =
-  save
-    (Filename.concat f.config.Workspace.base_path ".masc/config/runtime.toml")
-    (Exec_ssh_endpoint.to_toml
-       Exec_ssh_endpoint.
-         { name = "build-box"
-         ; host = "build-box.invalid"
-         ; user = "masc"
-         ; port = default_port
-         ; identity_file = default_identity_file ~name:"build-box"
-         ; known_hosts_file = default_known_hosts_file ~name:"build-box"
-         ; remote_root = "/srv/masc/playground"
-         ; connect_timeout_sec = 1
-         ; max_concurrent_sessions = 2
-         ; env_allowlist = []
-         ; capabilities = []
-         ; private_home = false
-         ; allowed_paths = roots
-         })
+   declared roots ([allowed_paths]). *)
+let endpoint_config ~host =
+  Exec_ssh_endpoint.
+    { name = "build-box"
+    ; host
+    ; user = "masc"
+    ; port = default_port
+    ; identity_file = default_identity_file ~name:"build-box"
+    ; known_hosts_file = default_known_hosts_file ~name:"build-box"
+    ; remote_root = "/srv/masc/playground"
+    ; connect_timeout_sec = 1
+    ; max_concurrent_sessions = 2
+    ; env_allowlist = []
+    ; capabilities = []
+    ; private_home = false
+    ; allowed_paths = [ "/app" ]
+    }
+;;
+
+(* The keeper's endpoint is an OpenSSH one declaring /app, reached through the
+   same stub as the guest fixture. *)
+let declared_fixture ~mode =
+  let f = fixture ~mode in
+  let base = f.config.Workspace.base_path in
+  let control_path_dir = Filename.concat base "ssh-control" in
+  Unix.mkdir control_path_dir 0o700;
+  let endpoint =
+    Keeper_sandbox_remote.of_openssh ~base_path:base ~keeper_name:"keeper-a"
+      { endpoint = endpoint_config ~host:"host-a.invalid"
+      ; ssh_bin = Filename.concat base ("cli-" ^ mode)
+      ; identity_file = Filename.concat base "id"
+      ; known_hosts_file = Filename.concat base "known_hosts"
+      ; control_path_dir
+      }
+  in
+  { f with endpoint }
 ;;
 
 (* Runs the handler with a Gate that answers [decision] and records what it
@@ -360,7 +387,7 @@ let handle_declared f ~decision args =
   let asked = ref [] in
   let authorize ~endpoint ~requested_target ~mode ~content_source:_ ~content ~patch =
     asked :=
-      ( endpoint
+      ( endpoint.Exec_ssh_endpoint.host
       , requested_target
       , Keeper_tool_write_mode.to_string mode
       , content
@@ -394,8 +421,7 @@ let nothing_written f = not (Sys.file_exists (f.frame_path ^ ".write"))
 
 let test_declared_root_write_lands_when_the_gate_allows () =
   with_eio @@ fun () ->
-  let f = fixture ~mode:"ok" in
-  declare_roots f [ "/app" ];
+  let f = declared_fixture ~mode:"ok" in
   let result, asked =
     handle_declared f ~decision:allow
       [ "path", `String "/app/out.txt"; "mode", `String "overwrite"; "content", `String "done\n" ]
@@ -404,7 +430,7 @@ let test_declared_root_write_lands_when_the_gate_allows () =
   check bool "the path is the endpoint's" true (member "path" result = `String "/app/out.txt");
   check bool "the authorization travels with the result" true (Option.is_some result.metadata);
   check asked_testable "the Gate was asked once, with the endpoint path and bytes"
-    [ (Keeper_sandbox_remote.name f.endpoint, "/app/out.txt"), ("overwrite", ("done\n", false)) ]
+    [ ("host-a.invalid", "/app/out.txt"), ("overwrite", ("done\n", false)) ]
     (asked_as_pairs asked);
   let request, stdin = write_frame f in
   check (list string) "written at the endpoint path as itself"
@@ -415,8 +441,7 @@ let test_declared_root_write_lands_when_the_gate_allows () =
 
 let test_declared_root_write_waits_when_the_gate_defers () =
   with_eio @@ fun () ->
-  let f = fixture ~mode:"ok" in
-  declare_roots f [ "/app" ];
+  let f = declared_fixture ~mode:"ok" in
   let deferred =
     Keeper_gate.Deferred
       { operation = Keeper_gate.filesystem_write_gate_operation
@@ -439,8 +464,7 @@ let test_declared_root_write_waits_when_the_gate_defers () =
 
 let test_undeclared_path_is_refused_without_asking () =
   with_eio @@ fun () ->
-  let f = fixture ~mode:"ok" in
-  declare_roots f [ "/app" ];
+  let f = declared_fixture ~mode:"ok" in
   let result, asked =
     handle_declared f ~decision:allow
       [ "path", `String "/etc/cron.d/x"; "mode", `String "overwrite"; "content", `String "x" ]
@@ -452,8 +476,7 @@ let test_undeclared_path_is_refused_without_asking () =
 
 let test_refused_declared_roots_keep_the_playground_jail () =
   with_eio @@ fun () ->
-  let f = fixture ~mode:"ok" in
-  declare_roots f [ "/app" ];
+  let f = declared_fixture ~mode:"ok" in
   let result =
     handle f [ "path", `String "/app/out.txt"; "mode", `String "overwrite"; "content", `String "x" ]
   in
@@ -463,8 +486,7 @@ let test_refused_declared_roots_keep_the_playground_jail () =
 
 let test_declared_root_patch_asks_with_the_patched_body () =
   with_eio @@ fun () ->
-  let f = fixture ~mode:"ok" in
-  declare_roots f [ "/app" ];
+  let f = declared_fixture ~mode:"ok" in
   save (f.frame_path ^ ".source") "a = 1\nb = 1\n";
   let result, asked =
     handle_declared f ~decision:allow
@@ -473,13 +495,56 @@ let test_declared_root_patch_asks_with_the_patched_body () =
   in
   check bool "completed" true (completed result);
   check asked_testable "the Gate sees the patched file"
-    [ (Keeper_sandbox_remote.name f.endpoint, "/app/conf.py"), ("patch", ("a = 2\nb = 1\n", true)) ]
+    [ ("host-a.invalid", "/app/conf.py"), ("patch", ("a = 2\nb = 1\n", true)) ]
     (asked_as_pairs asked);
   let request, stdin = write_frame f in
   check (list string) "replaced at the endpoint path"
     (Keeper_tool_filesystem_remote_write.write_argv ~mode:Replace_whole ~remote_path:"/app/conf.py")
     request.argv;
   check string "patched body" "a = 2\nb = 1\n" stdin
+;;
+
+(* Only the endpoint the write runs on can declare a root. A runtime.toml that
+   declares /app does not make a guest endpoint's refused path writable. *)
+let test_a_guest_endpoint_declares_no_roots () =
+  with_eio @@ fun () ->
+  let f = fixture ~mode:"ok" in
+  save
+    (Filename.concat f.config.Workspace.base_path ".masc/config/runtime.toml")
+    (Exec_ssh_endpoint.to_toml (endpoint_config ~host:"host-a.invalid"));
+  let result, asked =
+    handle_declared f ~decision:allow
+      [ "path", `String "/app/out.txt"; "mode", `String "overwrite"; "content", `String "x" ]
+  in
+  check bool "refused" true (failed_as Tool_result.Policy_rejection result);
+  check int "the Gate is not asked" 0 (List.length asked);
+  check bool "nothing written" true (nothing_written f)
+;;
+
+(* An approval is spent only on the Gate input it was given. Replay rebuilds
+   the input from the endpoint configuration current then, so the same name
+   pointing at another host is another input and needs its own approval. *)
+let test_another_host_behind_the_name_is_another_gate_input () =
+  let input host =
+    Keeper_tool_filesystem_runtime.declared_root_write_gate_input
+      ~endpoint:(endpoint_config ~host)
+      ~requested_target:"/app/out.txt"
+      ~mode:Keeper_tool_write_mode.Overwrite
+      ~content_source:(Keeper_write_content.Text "x")
+      ~content:"x"
+      ~patch:None
+  in
+  check bool "the same endpoint gives the same input" true
+    (Yojson.Safe.equal (input "host-a.invalid") (input "host-a.invalid"));
+  check bool "another host gives another input" false
+    (Yojson.Safe.equal (input "host-a.invalid") (input "host-b.invalid"));
+  match Keeper_tool_filesystem_runtime.approved_write_of_gate_input (input "host-a.invalid") with
+  | Error error -> fail error
+  | Ok approved ->
+    check string "replays the endpoint path" "/app/out.txt"
+      approved.Keeper_tool_filesystem_runtime.target;
+    check bool "replays the mode" true
+      (approved.Keeper_tool_filesystem_runtime.mode = Keeper_tool_write_mode.Overwrite)
 ;;
 
 let () =
@@ -505,6 +570,10 @@ let () =
               test_refused_declared_roots_keep_the_playground_jail
           ; test_case "declared root patch asks with the patched body" `Quick
               test_declared_root_patch_asks_with_the_patched_body
+          ; test_case "a guest endpoint declares no roots" `Quick
+              test_a_guest_endpoint_declares_no_roots
+          ; test_case "another host behind the name is another Gate input" `Quick
+              test_another_host_behind_the_name_is_another_gate_input
           ; test_case "patch without a source is a workflow rejection" `Quick
               test_patch_without_a_source_is_a_workflow_rejection
           ; test_case "endpoint failure is a runtime failure" `Quick

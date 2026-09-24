@@ -20,7 +20,7 @@ type declared_root_writes =
   | Refuse_declared_roots
       (** A path outside the keeper's tree is refused, declared or not. *)
   | Authorize_declared_roots of
-      (endpoint:string
+      (endpoint:Exec_ssh_endpoint.t
        -> requested_target:string
        -> mode:Keeper_tool_write_mode.t
        -> content_source:Keeper_write_content.t
@@ -29,9 +29,12 @@ type declared_root_writes =
        -> Keeper_gate.decision)
       (** A path under a declared root is written only when this decision
           allows it. It is asked right before the write, with the bytes that
-          would be written ([content]; for a patch, the patched file) and the
-          endpoint path as [requested_target]. [Deferred] answers with the
-          deferred receipt and writes nothing. *)
+          would be written ([content]; for a patch, the patched file), the
+          endpoint path as [requested_target], and the configuration of the
+          OpenSSH endpoint the write runs on -- the same one whose
+          [allowed_paths] declared the root. [Deferred] answers with the
+          deferred receipt and writes nothing. Only an OpenSSH endpoint
+          declares roots; a guest endpoint's refused path stays refused. *)
 
 val handle :
   declared_root_writes:declared_root_writes ->

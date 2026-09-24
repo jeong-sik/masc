@@ -104,7 +104,7 @@ type patch_request =
 type declared_root_writes =
   | Refuse_declared_roots
   | Authorize_declared_roots of
-      (endpoint:string
+      (endpoint:Exec_ssh_endpoint.t
        -> requested_target:string
        -> mode:Keeper_tool_write_mode.t
        -> content_source:Keeper_write_content.t
@@ -123,8 +123,9 @@ type remote_target =
       }
   | Declared_root_target of
       { endpoint_path : string
+      ; endpoint_config : Exec_ssh_endpoint.t
       ; authorize :
-          endpoint:string
+          endpoint:Exec_ssh_endpoint.t
           -> requested_target:string
           -> mode:Keeper_tool_write_mode.t
           -> content_source:Keeper_write_content.t
@@ -202,11 +203,17 @@ let handle_content_with_endpoint
         | (Ok _ as tree_target), _ -> tree_target
         | (Error _ as refused), Refuse_declared_roots -> refused
         | (Error _ as refused), Authorize_declared_roots authorize ->
-          (match Keeper_sandbox_remote_lane.declared_endpoint_path ~config ~meta path with
-           | Ok (Some endpoint_path) -> Ok (Declared_root_target { endpoint_path; authorize })
-           | Ok None -> refused
-           | Error message ->
-             Error (failure ~class_:Tool_result.Runtime_failure ~target:path message))
+          (* The endpoint this write runs on is the one whose roots decide it
+             and whose configuration the Gate is shown, so the decision cannot
+             name one host while the bytes go to another. *)
+          (match Keeper_sandbox_remote.transport endpoint with
+           | Keeper_sandbox_remote.Openssh { endpoint = endpoint_config; _ } ->
+             (match Keeper_sandbox_remote_lane.declared_path_of_endpoint endpoint_config path with
+              | Some endpoint_path ->
+                Ok (Declared_root_target { endpoint_path; endpoint_config; authorize })
+              | None -> refused)
+           | Keeper_sandbox_remote.Container_exec _ | Keeper_sandbox_remote.Docker_exec _ ->
+             refused)
       in
       (match resolved with
        | Error refused -> refused
@@ -256,10 +263,10 @@ let handle_content_with_endpoint
            in
            match remote_target with
            | Keeper_tree_target _ -> run_write ()
-           | Declared_root_target { authorize; _ } ->
+           | Declared_root_target { authorize; endpoint_config; _ } ->
              (match
                 authorize
-                  ~endpoint:(Keeper_sandbox_remote.name endpoint)
+                  ~endpoint:endpoint_config
                   ~requested_target:target
                   ~mode
                   ~content_source

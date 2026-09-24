@@ -692,11 +692,7 @@ let librarian_gap ~config ~keeper_name =
   let ( let* ) = Result.bind in
   (* Presence, not [read_meta]: [read_meta] folds a meta this binary cannot
      decode into [Ok None], which would read as "no gap". *)
-  match
-    Keeper_meta_store.read_meta_file_path_presence
-      ~ownership_root:config.Workspace.base_path
-      (Keeper_types_profile.keeper_meta_path config (String.trim keeper_name))
-  with
+  match Keeper_meta_store.read_meta_presence config keeper_name with
   | Error message | Ok (Keeper_meta_store.Meta_not_current message) ->
     Error (Meta_unreadable message)
   | Ok Keeper_meta_store.Meta_absent -> Ok None

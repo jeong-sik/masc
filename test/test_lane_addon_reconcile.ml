@@ -605,6 +605,9 @@ let test_historical_never_started_leaves_no_binding () =
     await_yield (fun () -> List.mem (Recovery_completed (old_id, None)) !(state.events));
     await_yield (fun () -> not (has_binding ()));
     check bool "a never-started binding is gone after restart recovery" false (has_binding ());
+    (* Recovery nudges configuration, but this test runs no configuration
+       service, so the declaration attaches again only on the next reconcile. *)
+    ignore (reconcile config directory);
     let new_id = declared_instance config "observer" |> text "instance_id" in
     await_ready clock config new_id;
     detach clock config new_id)

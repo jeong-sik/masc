@@ -49,6 +49,32 @@ let test_input_after_idle_renders_immediately () =
   check_render "input after idle"
     (Schedule.take schedule ~now_ns:(ms 1000))
 
+let test_input_does_not_wait_for_recent_frame () =
+  let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
+  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  List.iter
+    (fun now_ns ->
+      Schedule.request schedule Schedule.Input;
+      check (float 0.0) "processed input never sleeps before presentation" 0.0
+        (Schedule.input_timeout_seconds schedule ~now_ns ~maximum:0.1);
+      check_render "keypress immediately after a frame"
+        (Schedule.take schedule ~now_ns))
+    [ 1L; 100L; 1_000L ]
+
+let test_buffered_input_renders_when_drained () =
+  let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
+  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  Schedule.request schedule Schedule.Background;
+  Schedule.request schedule Schedule.Input;
+  (match Schedule.take ~input_pending:true schedule ~now_ns:1L with
+   | Schedule.Wait_until due -> check int64 "buffered burst deadline" (ms 16) due
+   | Schedule.Render -> fail "painted before buffered input was handled"
+   | Schedule.Idle -> fail "lost pending input");
+  Schedule.request schedule Schedule.Input;
+  check_render "the last byte need not wait for the deadline"
+    (Schedule.take ~input_pending:false schedule ~now_ns:2L);
+  check_idle "input frame consumed" (Schedule.take schedule ~now_ns:3L)
+
 let test_dirty_timeout_wakes_at_deadline () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
   check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
@@ -73,13 +99,13 @@ let test_input_burst_stays_inside_one_frame_window () =
   check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
   for offset = 1 to 1000 do
     Schedule.request schedule Schedule.Input;
-    match Schedule.take schedule ~now_ns:(Int64.of_int offset) with
+    match Schedule.take ~input_pending:true schedule ~now_ns:(Int64.of_int offset) with
     | Schedule.Wait_until due -> check int64 "input deadline" (ms 16) due
     | Schedule.Idle -> fail "input request became idle"
     | Schedule.Render -> fail "input byte burst rendered before the deadline"
   done;
   check_render "coalesced input frame"
-    (Schedule.take schedule ~now_ns:(ms 16))
+    (Schedule.take ~input_pending:true schedule ~now_ns:(ms 16))
 
 let test_terminal_size_cache_reprobes_only_after_invalidation () =
   let probes = ref 0 in
@@ -2200,6 +2226,10 @@ let () =
             test_burst_coalesces_to_one_frame
         ; test_case "input after idle is immediate" `Quick
             test_input_after_idle_renders_immediately
+        ; test_case "a recent frame does not delay a keypress" `Quick
+            test_input_does_not_wait_for_recent_frame
+        ; test_case "buffered input paints when drained" `Quick
+            test_buffered_input_renders_when_drained
         ; test_case "dirty input wait uses the frame deadline" `Quick
             test_dirty_timeout_wakes_at_deadline
         ; test_case "input preempts a pending background frame" `Quick

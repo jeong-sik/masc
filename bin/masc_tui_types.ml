@@ -1641,6 +1641,28 @@ type runtime_lane_pick =
       (* Replaces [\[runtime\].default] rather than appending: the entry holds
          one runtime, the one a keeper with no assignment walks. *)
 
+type exact_pick_destination = Exact_http_tail | Exact_cli_tail | Exact_cli_unavailable
+
+let exact_pick_destination ~lane_id = function
+  | Tui_decode.Exact_http_slots -> Exact_http_tail
+  | Tui_decode.Exact_cli_slots ->
+    (match Masc.Standalone_lane.of_id lane_id with
+     | Some lane when Masc.Runtime.exact_lane_supports_cli_tail lane -> Exact_cli_tail
+     | Some _ | None -> Exact_cli_unavailable)
+;;
+
+let runtime_lane_pick_refusal pick group =
+  match pick with
+  | Pick_exact_lane lane_id
+    when exact_pick_destination ~lane_id group = Exact_cli_unavailable ->
+    Some
+      (Printf.sprintf
+         "%s has no CLI fallback; choose an HTTP provider for this lane"
+         lane_id)
+  | Pick_exact_lane _ | Pick_conversation_lane _ | Pick_new_lane _
+  | Pick_media_failover | Pick_route_default -> None
+;;
+
 let runtime_lane_pick_name = function
   | Pick_conversation_lane lane | Pick_exact_lane lane | Pick_new_lane lane -> lane
   | Pick_media_failover -> "[runtime].media_failover"

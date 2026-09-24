@@ -5887,10 +5887,14 @@ let render_lanes_slot_editor (state : state) (editor : slot_editor) =
             in
             let destination =
               match editor.se_target with
-              | Exact_lane_slots _ ->
-                (match runtime.ro_exact_slot_group with
-                 | Exact_http_slots -> "[HTTP tail] "
-                 | Exact_cli_slots -> "[CLI tail] ")
+              | Exact_lane_slots lane_id ->
+                (match
+                   Masc_tui_types.exact_pick_destination ~lane_id
+                     runtime.ro_exact_slot_group
+                 with
+                 | Exact_http_tail -> "[HTTP tail] "
+                 | Exact_cli_tail -> "[CLI tail] "
+                 | Exact_cli_unavailable -> "[CLI unavailable here] ")
               | Media_failover_slots -> ""
             in
             let line =

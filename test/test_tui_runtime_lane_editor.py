@@ -610,8 +610,46 @@ def run_exact_slot_editor(executable: str) -> None:
     )
 
 
+def run_curator_cli_refusal(executable: str) -> None:
+    """A lane without CLI support must neither promise nor post a CLI append."""
+    store = LaneStore()
+    cli_id = "aaa_cli.fixture"
+    store.body["runtimes"].append({
+        **h.runtime_resolved_runtime(cli_id, "Official client", "model"),
+        "exact_slot_group": "cli_slots",
+    })
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_PROBE_PATH] = h.runtime_probe_response(fresh=True)
+    fixtures[h.RUNTIME_PROBE_FORCE_PATH] = h.runtime_probe_response(fresh=True)
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
+    requests: h.HttpRequests = []
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        h.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
+        os.write(fd, b"jjj")
+        h.send_and_wait(process, fd, output, b"s", b"slots of workspace_curator_exact")
+        h.send_and_wait(process, fd, output, b"a",
+                        b"[CLI unavailable here] aaa_cli.fixture")
+        h.send_and_wait(process, fd, output, b"\r",
+                        b"workspace_curator_exact has no CLI fallback")
+        if any(path == ROUTING_PATH for path, _body in requests):
+            raise AssertionError("unsupported curator CLI candidate sent a routing write")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Curator slot editor refuses unsupported CLI candidates",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
     run_exact(os.path.abspath(sys.argv[1]))
     run_exact_slot_editor(os.path.abspath(sys.argv[1]))
+    run_curator_cli_refusal(os.path.abspath(sys.argv[1]))
     print("runtime lane editor: PASS")

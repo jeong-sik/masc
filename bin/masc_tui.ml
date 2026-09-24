@@ -20351,9 +20351,17 @@ and is loaded on demand through keeper_skill.
                    , List.nth_opt catalog state.runtime_lane_pick_cursor )
                  with
                  | Some pick, Some runtime ->
-                     launch_runtime_lane_pick state ~mailbox:async_messages
-                       ~pick ~runtime_id:runtime.Masc.Tui_decode.ro_id
-                       ~existing:already
+                     (match
+                        Masc_tui_types.runtime_lane_pick_refusal pick
+                          runtime.Masc.Tui_decode.ro_exact_slot_group
+                      with
+                      | Some detail ->
+                        state.runtime_lane_notice <-
+                          Some (Masc_tui_types.Lane_write_refused detail)
+                      | None ->
+                        launch_runtime_lane_pick state ~mailbox:async_messages
+                          ~pick ~runtime_id:runtime.Masc.Tui_decode.ro_id
+                          ~existing:already)
                  | _ -> ())
             | Some "e" | Some "E" | Some "esc" ->
                 state.runtime_lane_pick <- None;

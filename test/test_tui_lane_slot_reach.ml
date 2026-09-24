@@ -96,6 +96,32 @@ let test_a_lane_without_any_slot_still_says_who_answered () =
   Alcotest.(check (list string)) "the answers are drawn without a slot history"
     [ "Vendor System One: 7" ] (parts jev_only)
 
+let test_exact_picker_only_promises_a_supported_cli_tail () =
+  let module Lane = Masc.Standalone_lane in
+  let cli = Masc.Tui_decode.Exact_cli_slots in
+  let http = Masc.Tui_decode.Exact_http_slots in
+  List.iter
+    (fun lane ->
+       let lane_id = Lane.to_id lane in
+       let expected =
+         match lane with
+         | Lane.Workspace_curator -> Exact_cli_unavailable
+         | Lane.Librarian | Lane.Hitl_auto_judge | Lane.Board_attention
+         | Lane.Verifier -> Exact_cli_tail
+       in
+       Alcotest.(check bool) (lane_id ^ " CLI destination") true
+         (exact_pick_destination ~lane_id cli = expected);
+       Alcotest.(check bool) (lane_id ^ " HTTP destination") true
+         (exact_pick_destination ~lane_id http = Exact_http_tail))
+    Lane.all;
+  let curator = Lane.to_id Lane.Workspace_curator in
+  Alcotest.(check bool) "curator CLI key is refused before a write" true
+    (Option.is_some (runtime_lane_pick_refusal (Pick_exact_lane curator) cli));
+  Alcotest.(check bool) "curator HTTP key remains available" true
+    (Option.is_none (runtime_lane_pick_refusal (Pick_exact_lane curator) http));
+  Alcotest.(check bool) "an unknown lane does not promise a CLI tail" true
+    (exact_pick_destination ~lane_id:"unknown_exact" cli = Exact_cli_unavailable)
+
 let () =
   Alcotest.run "masc_tui_lane_slot_reach"
     [ ( "slot history reach"
@@ -111,5 +137,7 @@ let () =
             test_counts_that_do_not_add_up_are_drawn
         ; Alcotest.test_case "a lane without any slot still says who answered"
             `Quick test_a_lane_without_any_slot_still_says_who_answered
+        ; Alcotest.test_case "exact picker respects CLI lane support" `Quick
+            test_exact_picker_only_promises_a_supported_cli_tail
         ] )
     ]

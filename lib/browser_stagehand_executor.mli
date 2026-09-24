@@ -6,16 +6,21 @@
     it is given, and turns the replies into the lane's answer. *)
 
 (** masc tab ids for Stagehand page ids (CDP target ids), one table per
-    session. A page keeps its id; an id is never given to another page, so a
-    tab id read before a page closed cannot reach a different page. *)
+    backend. A page keeps its id; an id is never given to another page, in
+    the same session or a later one, so a tab id read before a page closed
+    cannot reach a different page. *)
 module Tabs : sig
   type t
 
   val create : unit -> t
   val id_of_page : t -> string -> int
 
-  (** [None] for an id this table never gave. *)
+  (** [None] for an id this table never gave, and for one given to a page
+      it has since forgotten. *)
   val page_of_id : t -> int -> string option
+
+  (** Forgets every page, for a new session, and keeps counting ids. *)
+  val forget_pages : t -> unit
 end
 
 type call =

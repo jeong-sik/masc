@@ -1060,7 +1060,7 @@ let test_one_unreconcilable_goal_does_not_stop_the_scan () =
        [ "rearm_proof" ]
        (List.map
           (fun (failure : Agent.reconcile_failure) ->
-             Goal_verification_agent.reconcile_step_to_string failure.step)
+             Goal_reconcile_step.to_string failure.step)
           unreconciled)
    | Error failure -> fail (Agent.scan_failure_to_string failure));
   with_lane_and_reviewer

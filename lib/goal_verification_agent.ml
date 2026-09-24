@@ -71,24 +71,9 @@ let scan_failure_to_string = function
    re-arm. The scan skips that goal and keeps collecting the others; its
    pending row stays durable, and the Goal rows the operator reads carry the
    failure until a scan no longer finds it. *)
-type reconcile_step =
-  | Reconcile_proof
-  | Rearm_proof
-
-let reconcile_step_to_string = function
-  | Reconcile_proof -> "reconcile_proof"
-  | Rearm_proof -> "rearm_proof"
-;;
-
-let reconcile_step_of_string = function
-  | "reconcile_proof" -> Some Reconcile_proof
-  | "rearm_proof" -> Some Rearm_proof
-  | _ -> None
-;;
-
 type reconcile_failure =
   { failed_goal_id : string
-  ; step : reconcile_step
+  ; step : Goal_reconcile_step.t
   ; failure : Goal_store.write_error
   }
 
@@ -103,13 +88,13 @@ let collect_pending config : (scan, scan_failure) result =
   | Ok goals ->
     let collect_goal (goal : Goal_store.goal) =
       match Workspace_goals.reconcile_committed_proof config ~goal_id:goal.id with
-      | Error failure -> Error (Reconcile_proof, failure)
+      | Error failure -> Error (Goal_reconcile_step.Reconcile_proof, failure)
       | Ok (Workspace_goals.Reconciled _ | Workspace_goals.Reconciliation_not_needed _) ->
         Ok None
       | Ok Workspace_goals.No_committed_proof ->
         Workspace_goals.recover_current_proof config ~goal_id:goal.id
         |> Result.map (fun rearmed -> if rearmed then Some { goal_id = goal.id } else None)
-        |> Result.map_error (fun failure -> Rearm_proof, failure)
+        |> Result.map_error (fun failure -> Goal_reconcile_step.Rearm_proof, failure)
     in
     let collected, unreconciled =
       List.fold_left
@@ -136,7 +121,7 @@ let publish_unreconciled failures =
     (fun { failed_goal_id; step; failure } ->
        Log.Misc.error
          "goal verifier ledger %s failed goal_id=%s; its pending row stays undrained: %s"
-         (reconcile_step_to_string step)
+         (Goal_reconcile_step.to_string step)
          failed_goal_id
          (Goal_store.write_error_to_string failure))
     failures
@@ -154,7 +139,7 @@ let unreconciled_to_yojson (goal : Goal_store.goal) =
   | Some _ when goal.phase <> Goal_phase.Verifying -> `Null
   | Some { step; failure; _ } ->
     `Assoc
-      [ "step", `String (reconcile_step_to_string step)
+      [ "step", `String (Goal_reconcile_step.to_string step)
       ; "detail", `String (Goal_store.write_error_to_string failure)
       ]
 ;;
@@ -824,7 +809,7 @@ module For_testing = struct
 
   type nonrec reconcile_failure = reconcile_failure =
     { failed_goal_id : string
-    ; step : reconcile_step
+    ; step : Goal_reconcile_step.t
     ; failure : Goal_store.write_error
     }
 

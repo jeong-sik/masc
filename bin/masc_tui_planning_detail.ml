@@ -22,11 +22,19 @@ type line =
 (* Every row this module wraps is wire text: a judge's reason, a keeper's
    note, a timeline event, a store error. It is split on LF first and each
    line escaped on its own, so a control byte reaches the pane as its escape
-   while a line break stays a new row instead of a printed "\x0A". *)
+   while a line break stays a new row instead of a printed "\x0A". A CRLF
+   line ending loses its CR here too, or every row would end in "\x0D". *)
+let without_line_end_cr line =
+  let length = String.length line in
+  if length > 0 && Char.equal line.[length - 1] '\r'
+  then String.sub line 0 (length - 1)
+  else line
+
 let wrapped ~width tone text =
   String.split_on_char '\n' text
   |> List.concat_map (fun line ->
-       Message_layout.wrap_words ~max_cells:width (Tui_decode.sanitize_terminal_text line))
+       Message_layout.wrap_words ~max_cells:width
+         (Tui_decode.sanitize_terminal_text (without_line_end_cr line)))
   |> List.map (fun row -> { tone; text = row })
 
 type confirmation = {
@@ -118,12 +126,27 @@ let verdict ~width tone headline reason =
       | None -> []
       | Some reason -> wrapped ~width tone reason)
 
-(* The verifier skips this goal on every scan, so the judge's last word is not
-   what holds it. The heading says which step failed; the store's reason
-   wraps under it like a verdict's. *)
+(* The latest verifier scan could not settle this goal, so the judge's last
+   word is not what holds it: no judge model runs in either step, only goal
+   store and ledger reads and writes. The heading says which step failed;
+   the store's reason wraps under it like a verdict's. *)
 let unreconciled_heading = function
-  | Masc.Goal_verification_agent.Reconcile_proof -> "judge stuck replaying its committed proof"
-  | Masc.Goal_verification_agent.Rearm_proof -> "judge stuck re-arming its request"
+  | Goal_reconcile_step.Reconcile_proof -> "verifier could not apply the committed proof"
+  | Goal_reconcile_step.Rearm_proof -> "verifier could not re-arm the request"
+
+(* [c] on a Verifying goal sends [request_complete] again, the explicit retry
+   of RFC-0387 §5: under the goal lock it applies a committed proof or
+   re-arms a missing request -- the two steps a scan can fail -- and answers
+   with the reason when it still cannot. [o] reopens the goal, which archives
+   a committed proof, so it is offered as taking the goal back, never as the
+   way to unstick it. *)
+let verifying_next_step = function
+  | Some (_ : Tui_decode.verifier_unreconciled) ->
+    ( Refused
+    , "the verifier could not settle it - [c] retries and shows why; [o] takes it back, [x] drops it" )
+  | None ->
+    ( Waiting
+    , "with the completion judge - [c] re-arms the request; [o] takes it back, [x] drops it" )
 
 let unreconciled_lines ~width (blocked : Tui_decode.verifier_unreconciled) =
   verdict ~width:(max 1 width) Refused (unreconciled_heading blocked.vu_step)

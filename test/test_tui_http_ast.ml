@@ -2602,6 +2602,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"planning_detail_pane"
        ~callee:"Planning_detail.unreconciled_lines");
+  check int "the Verifying next step comes from the tested sentence" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"planning_next_step"
+       ~callee:"Planning_detail.verifying_next_step");
   check_fields "render_keeper_list" [ "keepers_error" ];
   (* The Memory pane draws from its own file. The guard reaches other files
      by name -- the primitives and the chat pane each have entries -- but no

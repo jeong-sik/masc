@@ -3113,6 +3113,13 @@ let planning_stage_rail (phase : Goal_phase.t) =
       ]
 ;;
 
+let planning_detail_tone (tone : Planning_detail.tone) =
+  match tone with
+  | Planning_detail.Proven -> (Theme.ok ())
+  | Planning_detail.Refused -> (Theme.bad ())
+  | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
+  | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
+
 (* What moves this goal next, in one sentence, from the pair the operator can
    see separately but had to combine themselves: the phase and the judge's
    last word. [executing] with a refusal on the ledger is a different
@@ -3128,13 +3135,8 @@ let planning_next_step (goal : planning_goal) =
     ( Ansi.dim
     , "work the linked tasks, then [c] to submit it for verification" )
   | Goal_phase.Verifying, _ ->
-    (match goal.pg_verifier_unreconciled with
-     | Some _ ->
-       ( (Theme.bad ())
-       , "the completion judge cannot settle it - [o] takes it back, [x] drops it" )
-     | None ->
-       ( (Theme.warn ())
-       , "with the completion judge - [c] re-arms the request; [o] takes it back, [x] drops it" ))
+    let tone, text = Planning_detail.verifying_next_step goal.pg_verifier_unreconciled in
+    (planning_detail_tone tone, text)
   | Goal_phase.Awaiting_confirmation, _ ->
     (Theme.warn (), "proof passed - [a] reads the proof for your final confirmation")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
@@ -3572,13 +3574,6 @@ let render_planning_list (state : state) =
 (* One more than it was: the stage rail took the phase word's row and the
    next-step sentence is a row of its own. Counted here, drawn below. *)
 let planning_detail_fixed_rows = 12
-
-let planning_detail_tone (tone : Planning_detail.tone) =
-  match tone with
-  | Planning_detail.Proven -> (Theme.ok ())
-  | Planning_detail.Refused -> (Theme.bad ())
-  | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
-  | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
 
 let planning_detail_pane (state : state)
     ~(armed : Goal_phase.Public_action.t option) ~confirmation ~rows ~cols

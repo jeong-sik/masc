@@ -26,15 +26,6 @@ val scan_skipped_log_prefix : string
     line count = skipped scan count). The same scan appends one
     {!Goal_verification_run_registry.Scan_skipped} row. *)
 
-(** Which scan step could not settle a Verifying goal: replaying the proof
-    already committed, or re-arming its pending request. *)
-type reconcile_step =
-  | Reconcile_proof
-  | Rearm_proof
-
-val reconcile_step_to_string : reconcile_step -> string
-val reconcile_step_of_string : string -> reconcile_step option
-
 val unreconciled_to_yojson : Goal_store.goal -> Yojson.Safe.t
 (** [null], or [{step; detail}] when the latest completed scan could not
     settle this still-Verifying goal. Recomputed by every scan and never
@@ -63,7 +54,7 @@ module For_testing : sig
       row stays durable. *)
   type reconcile_failure =
     { failed_goal_id : string
-    ; step : reconcile_step
+    ; step : Goal_reconcile_step.t
     ; failure : Goal_store.write_error
     }
 

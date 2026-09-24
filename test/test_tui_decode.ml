@@ -840,9 +840,9 @@ let test_planning_goal_carries_the_verifier_unreconciled_reason () =
       ()
   in
   match goal.Tui_decode.pg_verifier_unreconciled with
-  | Some { Tui_decode.vu_step = Goal_verification_agent.Rearm_proof; vu_detail } ->
+  | Some { Tui_decode.vu_step = Goal_reconcile_step.Rearm_proof; vu_detail } ->
     Alcotest.(check string) "the reason is decoded" "criterion already proven" vu_detail
-  | Some { Tui_decode.vu_step = Goal_verification_agent.Reconcile_proof; _ } ->
+  | Some { Tui_decode.vu_step = Goal_reconcile_step.Reconcile_proof; _ } ->
     Alcotest.fail "the step was decoded as the wrong one"
   | None -> Alcotest.fail "the unreconciled reason was dropped"
 ;;

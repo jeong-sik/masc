@@ -494,7 +494,7 @@ type goal_proof =
   | Proof_unreadable of string option
 
 type verifier_unreconciled = {
-  vu_step : Goal_verification_agent.reconcile_step;
+  vu_step : Goal_reconcile_step.t;
   vu_detail : string;
 }
 
@@ -1913,7 +1913,7 @@ let decode_verifier_unreconciled json =
   | Some (`Assoc _ as blocked) ->
     let* raw_step = required_string_field blocked "step" in
     let* vu_detail = required_string_field blocked "detail" in
-    (match Goal_verification_agent.reconcile_step_of_string raw_step with
+    (match Goal_reconcile_step.of_string raw_step with
      | Some vu_step -> Ok (Some { vu_step; vu_detail })
      | None -> Error (Printf.sprintf "unknown verifier reconcile step %S" raw_step))
   | Some other ->

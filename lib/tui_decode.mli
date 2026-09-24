@@ -97,11 +97,12 @@ type goal_proof =
           disguise corruption as quiet. *)
 
 type verifier_unreconciled = {
-  vu_step : Goal_verification_agent.reconcile_step;
+  vu_step : Goal_reconcile_step.t;
   vu_detail : string;
 }
-(** The latest verifier scan could not settle this Verifying goal, so it will
-    not move until the operator takes it back or drops it. *)
+(** The latest verifier scan could not settle this Verifying goal. It stays
+    Verifying until [request_complete] retries it or a later scan settles it,
+    or the operator takes it back or drops it. *)
 
 type planning_goal = {
   pg_id : string;

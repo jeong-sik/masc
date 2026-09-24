@@ -211,15 +211,10 @@ let with_tab_id tab_id method_ = function
 ;;
 
 let read_text ~tabs ~call ~tab_id ~max_chars =
-  let cap = match max_chars with Some cap -> cap | None -> Browser_page_script.default_text_chars in
-  if cap < 1 || cap > Browser_page_script.max_text_chars then
-    Error
-      (Browser_lane.Rejected_before_effect
-         (Printf.sprintf "maxChars must be between 1 and %d" Browser_page_script.max_text_chars))
-  else
-    let* tab_id, page_id = page_or_active ~tabs ~call tab_id in
-    let* text = evaluate ~runtime:No_runtime ~send:(send call) ~args:(`Int cap) page_id Browser_page_script.text in
-    with_tab_id tab_id "a text observation" text
+  let* cap = Result.map_error (fun detail -> Browser_lane.Rejected_before_effect detail) (Browser_page_script.text_cap max_chars) in
+  let* tab_id, page_id = page_or_active ~tabs ~call tab_id in
+  let* text = evaluate ~runtime:No_runtime ~send:(send call) ~args:(`Int cap) page_id Browser_page_script.text in
+  with_tab_id tab_id "a text observation" text
 ;;
 
 let read_elements ~tabs ~call ~tab_id =

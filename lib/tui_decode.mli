@@ -82,6 +82,12 @@ val preview_line : string -> string
     bytes, this one is for text whose breaks are content: a file's edit, a
     tool call's arguments. *)
 
+val short_timestamp_of_unix_for_terminal :
+  localtime:(float -> Unix.tm) -> float -> string
+(** [YYYY-MM-DD HH:MM:SS] of a Unix time in the zone [localtime] converts to.
+    The same shape {!short_timestamp_for_terminal} draws, for a time the wire
+    carries as a number. *)
+
 val short_timestamp_for_terminal :
   localtime:(float -> Unix.tm) -> string -> string
 (** [YYYY-MM-DD HH:MM:SS] of an RFC 3339 timestamp in the zone [localtime]
@@ -2318,8 +2324,32 @@ type fleet_safety = {
     alive, its durable demand is not admissible. Collapsing the two reads a
     live fleet as a stopped one. *)
 
+type fleet_reading_freshness =
+  | Fleet_current
+      (** The health snapshot is [ready]: the latest refresh measured it, and
+          within the snapshot's time to live. *)
+  | Fleet_last_good of { measured_at_unix : float; stale_reason : string }
+      (** The snapshot is [stale]: the refreshes since have timed out or
+          raised, or none has run within the time to live, so the server
+          serves the last reading it measured. [measured_at_unix] is when
+          (unix seconds on the server's clock); [stale_reason] is the
+          server's word for why ([last_good_refresh_timeout],
+          [last_good_refresh_error], [ttl_expired]). *)
+  | Unrecognised_snapshot_status of string
+      (** A snapshot status this build has no reading for, beside a fleet
+          reading, kept as the server spelled it. The server's other words
+          ([warming], [timeout], [error]) do not arrive here: it writes them
+          only when it holds no last good snapshot, and then the fleet
+          section is the placeholder, not a reading
+          ([Server_routes_http_runtime.full_health_snapshot_metadata]). *)
+(** How current a fleet reading is. The fleet section does not say: the
+    [full_health_snapshot] beside it in the same body does. *)
+
 type fleet_safety_reading =
-  | Fleet_measured of fleet_safety
+  | Fleet_measured of
+      { fleet : fleet_safety
+      ; freshness : fleet_reading_freshness
+      }
   | Fleet_not_measured of { status : string }
       (** The health snapshot has no fleet reading and nothing failed: it is
           being rebuilt, at boot and again after a change invalidates it.
@@ -3012,10 +3042,13 @@ val decode_fleet_safety :
 
     A section carrying [schema = Keeper_fleet_blocker.reading_schema] is a
     reading, and every field of {!fleet_safety} is required: a missing count
-    is an error, not zero. A section without [schema] is the health
-    snapshot's placeholder: {!Fleet_not_measured} when it carries no
-    [error], and an error with the server's reason when it does (the refresh
-    timed out or the scan raised). *)
+    is an error, not zero. A reading also takes its {!fleet_reading_freshness}
+    from the body's [full_health_snapshot], which is required: a stale
+    snapshot serves a past reading as it was, and without the snapshot's
+    word the TUI would draw it as the present. A section without [schema] is
+    the health snapshot's placeholder: {!Fleet_not_measured} when it carries
+    no [error], and an error with the server's reason when it does (the
+    refresh timed out or the scan raised). *)
 val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :
@@ -3537,13 +3570,22 @@ val keeper_of_declaration : Keeper_declared_roster.t -> keeper
 
 type schedule_runner_hold =
   { srh_occurrence_id : string
-      (** The occurrence the schedule runner held back on its newest tick. *)
+      (** The occurrence the schedule runner held back on its newest
+          successful tick. *)
   ; srh_due_at_iso : string
       (** When that occurrence came due. *)
+  ; srh_observed_at : float
+      (** When that tick decided to hold it: the newest time the hold is known
+          to have stood. *)
   }
 (** A schedule the runner is holding because its target Keeper has not yet
     taken the previous occurrence. The server reads it from the same runner
     status [/health] reports as [schedule_runner.held]. *)
+
+val latest_drawable_unix_seconds : float
+(** 9999-12-31T23:59:59Z, the latest [observed_at] {!decode_schedule_runner_hold}
+    accepts. Far below where [Unix.localtime] fails, so a hold the decoder
+    accepts can always be drawn. *)
 
 val decode_schedule_runner_hold :
   Yojson.Safe.t -> (schedule_runner_hold option, string) result
@@ -3619,3 +3661,46 @@ type fleet_cost = {
 }
 
 val fleet_cost_of_keeper_costs : keeper_costs -> fleet_cost
+(** Reads a schedule row's [runner_hold]. The key is required: [null] is a
+    schedule the runner is not holding, and a row without the key is refused
+    rather than read as one. An object must carry all three fields, with
+    [observed_at] a time from 1970 to {!latest_drawable_unix_seconds}. *)
+
+type schedule_runner_status =
+  | Runner_status of Schedule_contract_values.runner_status
+  | Runner_unrecognised of string
+      (** A word outside {!Schedule_contract_values.runner_status}, kept as
+          itself. *)
+(** The schedule list's [schedule_runner.status]. *)
+
+val decode_schedule_runner_status :
+  Yojson.Safe.t -> (schedule_runner_status, string) result
+(** Reads [schedule_runner.status] from the schedule list. The object and its
+    [status] are required; a word this build does not know is
+    [Runner_unrecognised] rather than a failure of the whole list. *)
+
+type schedule_list_freshness =
+  | List_latest
+      (** The newest request for the schedule list succeeded, and this is its
+          answer. *)
+  | List_kept
+      (** The newest request failed; the list on screen is an earlier answer,
+          kept so the screen is not emptied. *)
+
+type schedule_hold_reading =
+  | Hold_current
+      (** The latest list, from a runner whose status is [ok]: the hold is
+          the runner's reading now. *)
+  | Hold_as_of of float
+      (** The hold stood at this time and may not now. *)
+
+val schedule_hold_reading :
+  freshness:schedule_list_freshness ->
+  runner:schedule_runner_status ->
+  schedule_runner_hold ->
+  schedule_hold_reading
+(** How a hold may be drawn. Only [List_latest] with [Runner_status Runner_ok]
+    draws it as the present. The runner re-reads its holds only on a tick that
+    succeeds, and a list kept after a failed reload is an earlier answer, so
+    every other combination draws the hold at the time it was read
+    (#38411). *)

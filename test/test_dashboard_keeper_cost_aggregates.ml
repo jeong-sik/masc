@@ -5,6 +5,7 @@ module Dashboard_http_keeper = Dashboard_http_keeper
 module Keeper_types = Keeper_types
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_metrics_record = Masc.Keeper_metrics_record
+module Keeper_snapshot_unread = Masc.Keeper_snapshot_unread
 
 let test_counter = ref 0
 
@@ -238,11 +239,71 @@ let test_all_unreported_cost_leaves_total_unknown () =
           ^ Yojson.Safe.to_string other));
   check int "tokens are still counted" 3000 (int_field "total_tokens" aggregate)
 
-(* The TUI Team block reads this endpoint through [Tui_decode]. A keeper row
-   the encoder writes decodes to the same reading: the reported sum and its
-   sample count, and the turns that sent no price counted apart. The [cache]
-   field is the route's, added here the way the route adds it. *)
-let test_the_tui_decoder_reads_the_encoders_row () =
+(* #38718: a turn row the window may hold but whose ts_unix or latency_ms
+   has a shape the writer never produces was dropped without a count, so
+   the sum beside it read as exact. It is counted apart now. A row whose
+   time places it before the window start is outside it and counts nowhere,
+   whatever its latency. *)
+let test_unread_turn_rows_are_counted () =
+  let ts = Unix.gettimeofday () -. 1.0 in
+  let before_window = ts -. 7200.0 in
+  let with_field key value fields = (key, value) :: List.remove_assoc key fields in
+  let aggregate =
+    run_keeper_aggregate ~prefix:"keeper_cost_unread_rows" ~keeper_name:"odd"
+      [ turn_row ~ts ~cost:(`Float 0.25) ~latency_ms:100 ~total_tokens:10
+      ; with_field "ts_unix" (`String "yesterday")
+          (turn_row ~ts ~cost:(`Float 1.0) ~latency_ms:100 ~total_tokens:10)
+      ; with_field "latency_ms" (`Float 1.5)
+          (turn_row ~ts ~cost:(`Float 1.0) ~latency_ms:100 ~total_tokens:10)
+      ; turn_row ~ts:before_window ~cost:(`Float 9.0) ~latency_ms:100
+          ~total_tokens:10
+      ; with_field "latency_ms" (`Float 1.5)
+          (turn_row ~ts:before_window ~cost:(`Float 9.0) ~latency_ms:100
+             ~total_tokens:10)
+      ]
+  in
+  let read = Yojson.Safe.Util.member "metrics_read" aggregate in
+  check int "an unplaceable row and an in-window row with no latency" 2
+    (int_field "unread_turn_rows" read);
+  check int "only the readable in-window turn is a sample" 1
+    (int_field "sample_count" aggregate);
+  check (float 0.0001) "the sum covers that turn only" 0.25
+    (float_field "total_cost_usd" aggregate)
+
+(* #38718: a Keeper whose meta could not be read has no row, so the reply
+   lists it apart with the reason rather than drawing the rest as the whole
+   fleet. *)
+let test_unread_keepers_are_listed () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_test_deps.init_eio_clock env;
+  let config = Workspace.default_config (temp_dir "keeper_cost_unread_meta") in
+  ignore (Workspace.init config ~agent_name:None);
+  let unread =
+    { Keeper_snapshot_unread.name = "ghost"
+    ; reason = Keeper_snapshot_unread.Meta_read_failed "meta.json: unexpected end of input"
+    }
+  in
+  let json =
+    Dashboard_http_keeper.keeper_cost_aggregates_json ~config ~keepers:[]
+      ~unread_keepers:[ unread ] ~window_minutes:60 ~now_ts:(Unix.gettimeofday ())
+  in
+  (* The operator snapshot's shape, so one reader reads both endpoints. *)
+  match
+    Keeper_snapshot_unread.list_of_json (Yojson.Safe.Util.member "keepers_unread" json)
+  with
+  | Ok [ decoded ] ->
+      check string "name" "ghost" decoded.name;
+      check bool "reason" true (decoded.reason = unread.reason)
+  | Ok other -> failf "expected one unread keeper, got %d" (List.length other)
+  | Error err -> fail ("keepers_unread is not the snapshot shape: " ^ err)
+
+(* The TUI Team block reads this endpoint through [Tui_decode]. The whole
+   reply the encoder writes decodes to the same reading: the reported sum
+   and its sample count, the turns that sent no price counted apart, and the
+   Keepers whose meta did not read. The [cache] field is the route's, added
+   here the way the route adds it. *)
+let test_the_tui_decoder_reads_the_encoders_reply () =
   let ts = Unix.gettimeofday () -. 1.0 in
   let encoded =
     Eio_main.run @@ fun env ->
@@ -257,7 +318,11 @@ let test_the_tui_decoder_reads_the_encoders_row () =
       ];
     Dashboard_http_keeper.keeper_cost_aggregates_json ~config
       ~keepers:[ make_meta "mixed-keeper" ]
-      ~unread_keepers:[ ("ghost", "meta unreadable") ]
+      ~unread_keepers:
+        [ { Keeper_snapshot_unread.name = "ghost"
+          ; reason = Keeper_snapshot_unread.Meta_read_failed "meta unreadable"
+          }
+        ]
       ~window_minutes:60 ~now_ts:(Unix.gettimeofday ())
   in
   let reply =
@@ -271,6 +336,10 @@ let test_the_tui_decoder_reads_the_encoders_row () =
   match Masc.Tui_decode.decode_keeper_costs reply with
   | Error err -> fail ("the TUI decoder refused the encoder's reply: " ^ err)
   | Ok costs -> (
+      check (list string) "unread keepers" [ "ghost" ]
+        (List.map
+           (fun (unread : Keeper_snapshot_unread.t) -> unread.name)
+           costs.kcs_keepers_unread);
       match costs.kcs_keepers with
       | [ row ] ->
           (match row.kc_cost with
@@ -280,58 +349,8 @@ let test_the_tui_decoder_reads_the_encoders_row () =
            | Masc.Tui_decode.Cost_not_reported ->
                fail "a reported cost decoded as not reported");
           check int "unreported samples" 1 row.kc_unreported_samples;
-          check int "unread samples" 0 row.kc_unread_samples;
-          check (list (pair string string)) "unread keepers"
-            [ ("ghost", "meta unreadable") ] costs.kcs_keepers_unread
+          check int "unread samples" 0 row.kc_unread_samples
       | rows -> failf "expected one keeper row, got %d" (List.length rows))
-
-(* #38718: a turn row whose ts_unix or latency_ms has a shape the writer
-   never produces cannot be placed in or out of the window. It was dropped
-   without a count, so the sum beside it read as exact. It is counted apart
-   now; a well-formed row before the window start is outside it and counts
-   nowhere. *)
-let test_unplaced_turn_rows_are_counted () =
-  let ts = Unix.gettimeofday () -. 1.0 in
-  let with_field key value fields = (key, value) :: List.remove_assoc key fields in
-  let aggregate =
-    run_keeper_aggregate ~prefix:"keeper_cost_unplaced" ~keeper_name:"odd"
-      [ turn_row ~ts ~cost:(`Float 0.25) ~latency_ms:100 ~total_tokens:10
-      ; with_field "ts_unix" (`String "yesterday")
-          (turn_row ~ts ~cost:(`Float 1.0) ~latency_ms:100 ~total_tokens:10)
-      ; with_field "latency_ms" (`Float 1.5)
-          (turn_row ~ts ~cost:(`Float 1.0) ~latency_ms:100 ~total_tokens:10)
-      ; turn_row ~ts:(ts -. 7200.0) ~cost:(`Float 9.0) ~latency_ms:100
-          ~total_tokens:10
-      ]
-  in
-  let read = Yojson.Safe.Util.member "metrics_read" aggregate in
-  check int "two rows could not be placed" 2 (int_field "unplaced_turn_rows" read);
-  check int "only the placed in-window turn is a sample" 1
-    (int_field "sample_count" aggregate);
-  check (float 0.0001) "the sum covers the placed turn only" 0.25
-    (float_field "total_cost_usd" aggregate)
-
-(* #38718: a Keeper whose meta could not be read has no row, so the reply
-   lists it apart with the reason rather than drawing the rest as the whole
-   fleet. *)
-let test_unread_keepers_are_listed () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Masc_test_deps.init_eio_clock env;
-  let config = Workspace.default_config (temp_dir "keeper_cost_unread_meta") in
-  ignore (Workspace.init config ~agent_name:None);
-  let json =
-    Dashboard_http_keeper.keeper_cost_aggregates_json ~config ~keepers:[]
-      ~unread_keepers:[ ("ghost", "meta.json: unexpected end of input") ]
-      ~window_minutes:60 ~now_ts:(Unix.gettimeofday ())
-  in
-  match Yojson.Safe.Util.member "keepers_unread" json with
-  | `List [ `Assoc fields ] ->
-      check string "name" "ghost"
-        (Yojson.Safe.Util.to_string (List.assoc "keeper_name" fields));
-      check string "reason" "meta.json: unexpected end of input"
-        (Yojson.Safe.Util.to_string (List.assoc "reason" fields))
-  | other -> fail ("keepers_unread: " ^ Yojson.Safe.to_string other)
 
 let row_with ~ts ~latency_ms ~cost ~usage =
   Keeper_metrics_record.fields Keeper_metrics_record.Turn
@@ -674,11 +693,11 @@ let () =
             test_int_cost_is_reported_and_missing_cost_is_unread;
           test_case "unreadable usage is unread" `Quick
             test_unreadable_usage_is_unread;
-          test_case "the TUI decoder reads the encoder's row" `Quick
-            test_the_tui_decoder_reads_the_encoders_row;
-          test_case "unplaced turn rows are counted" `Quick
-            test_unplaced_turn_rows_are_counted;
+          test_case "unread turn rows are counted" `Quick
+            test_unread_turn_rows_are_counted;
           test_case "unread keepers are listed" `Quick
             test_unread_keepers_are_listed;
+          test_case "the TUI decoder reads the encoder's reply" `Quick
+            test_the_tui_decoder_reads_the_encoders_reply;
         ] );
     ]

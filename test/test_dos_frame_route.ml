@@ -152,10 +152,11 @@ let test_a_half_named_frame_is_refused () =
     ]
 ;;
 
-let test_the_frame_is_public_read_like_the_msx_frame () =
-  check bool "MSX frame is public read" true
-    (Server_auth.is_public_read_path "/api/v1/msx/frame");
-  check bool "DOS frame gets the same treatment" true
+(* Each answer can render and compress a 1.2 MB frame, so under strict HTTP
+   auth the route needs read auth and its rate limit; the TUI sends its
+   token. *)
+let test_the_frame_needs_read_auth () =
+  check bool "DOS frame is not public read" false
     (Server_auth.is_public_read_path "/api/v1/dos/frame")
 ;;
 
@@ -169,8 +170,8 @@ let () =
             test_a_known_frame_is_answered_without_pixels
         ; test_case "a half-named frame is refused" `Quick
             test_a_half_named_frame_is_refused
-        ; test_case "the frame is public read like the MSX frame" `Quick
-            test_the_frame_is_public_read_like_the_msx_frame
+        ; test_case "the frame needs read auth" `Quick
+            test_the_frame_needs_read_auth
         ] )
     ]
 ;;

@@ -2,14 +2,18 @@
 
     [GET /api/v1/dos/frame] returns the current screen of the one machine
     [Dos_lane] holds, so an operator at the TUI can watch Keepers play a DOS
-    game the way the MSX spectator watches the MSX machine. Public-read like
-    the MSX frame: it exposes a game screen, not workspace state.
+    game the way the MSX spectator watches the MSX machine.
 
     It is a read and nothing else. DOS time moves only through the tool calls
     ([Dos_lane.step], [press], [click], [type_text]); this route calls
     [Dos_lane.capture_with_identity], which reads the machine under its lock
     and never advances it. Unlike the MSX spectator, watching a DOS game does
-    not make it run.
+    not make it run. Both reads run on a system thread: the lock can be held
+    by a Keeper's move for a whole call.
+
+    It needs read auth under strict HTTP auth, like other workspace reads:
+    each answer can render and compress a 1.2 MB frame, and the TUI sends
+    its token anyway.
 
     When no machine is loaded the answer is [{loaded:false}] with 200, the
     same explicit "nothing to watch" the MSX frame gives.
@@ -93,8 +97,8 @@ let lane_error e =
     `Internal_server_error, error_json (Dos_lane.error_to_string e)
 ;;
 
-(* [capture] renders the frame; the route passes one that runs off the
-   request fiber, the test passes the lane's own. *)
+(* [capture] renders the frame. The route runs this whole function on a
+   system thread; a test can pass its own. *)
 let frame_response ?(capture = Dos_lane.capture_with_identity) ~incarnation ~steps () =
   match decode_known ~incarnation ~steps with
   | Error message -> `Bad_request, error_json message
@@ -113,12 +117,15 @@ let add_routes router =
   |> Http.Router.get "/api/v1/dos/frame" (fun request reqd ->
        with_public_read
          (fun _state req reqd ->
+           let incarnation = Server_utils.query_param req "incarnation" in
+           let steps = Server_utils.query_param req "steps" in
+           (* Both lane reads, [identify] and the render, take the lane's
+              stdlib lock, which a Keeper's move holds for up to a whole
+              call. On a system thread the wait blocks only that thread,
+              not every fiber of this domain. *)
            let status, json =
-             frame_response
-               ~capture:(fun () ->
-                 Eio_unix.run_in_systhread Dos_lane.capture_with_identity)
-               ~incarnation:(Server_utils.query_param req "incarnation")
-               ~steps:(Server_utils.query_param req "steps") ()
+             Eio_unix.run_in_systhread (fun () ->
+               frame_response ~incarnation ~steps ())
            in
            Http.Response.json_value_on_cpu ~status ~compress:true ~request:req json reqd)
          request reqd)

@@ -790,7 +790,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     in
     let tool_surface_sha256 =
       Keeper_official_client_session_store.tool_surface_sha256
-        ?account_home:config.account_home
+        ?account_home:(Runtime_codex_app_server.effective_account_home config.account_home)
         ~native_posture
         tools
     in

@@ -106,19 +106,20 @@ let scope_equal left right =
 ;;
 
 let official_client_scope ~client ~env_name ~default_subdir account_home =
-  let home =
+  let selected =
     match account_home with
-    | Some _ -> account_home
+    | Some path -> Runtime_account_home.of_string path
     | None ->
       (match Env_config_core.raw_value_opt env_name with
-       | Some path when path <> "" -> Some path
+       | Some path when path <> "" -> Runtime_account_home.of_inherited path
        | Some _ | None ->
-         Option.map (fun path -> Filename.concat path default_subdir)
-           (Env_config_core.raw_value_opt "HOME"))
+         (match Env_config_core.raw_value_opt "HOME" with
+          | Some path -> Runtime_account_home.of_string (Filename.concat path default_subdir)
+          | None -> Error "HOME is absent"))
   in
-  match home with
-  | Some path when Runtime_account_home.is_valid path -> Official_client_home (client, path)
-  | Some _ | None ->
+  match selected with
+  | Ok path -> Official_client_home (client, path)
+  | Error _ ->
     invalid_arg ("official client " ^ client ^ " has no absolute account home")
 ;;
 

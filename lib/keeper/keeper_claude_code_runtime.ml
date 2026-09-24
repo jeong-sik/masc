@@ -680,7 +680,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let setting_sources = [] in
     (* Before the plan is read; see the same note in keeper_codex_runtime.ml. *)
     let tool_surface_sha256 =
-      Session_store.tool_surface_sha256 ?account_home:config.account_home ~native_posture tools
+      Session_store.tool_surface_sha256
+        ?account_home:(Runtime_claude_code.effective_account_home config.account_home)
+        ~native_posture tools
     in
     let* () = match official_client_continuation with
       | None -> Ok ()

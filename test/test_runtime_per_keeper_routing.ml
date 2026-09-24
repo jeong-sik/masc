@@ -1646,6 +1646,30 @@ tools-support = true
        Alcotest.(check bool) "the account path is refused" true
          (List.exists (fun e -> e.Runtime_toml.path = "providers.bad.account-home") errors)
      | Ok _ -> Alcotest.fail "relative account home was accepted");
+  Masc_test_deps.with_process_env "CLAUDE_CONFIG_DIR" (Some "relative-claude-account") (fun () ->
+    let source = {|[providers.claude]
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+[models.shared]
+api-name = "shared-model"
+max-context = 100000
+tools-support = true
+[claude.shared]
+|} in
+    match Runtime_toml.parse_string source with
+    | Error errors -> Alcotest.failf "inherited CLI home config refused: %s"
+        (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors))
+    | Ok config ->
+      let binding = List.hd config.Runtime_schema.bindings in
+      (match Runtime.of_binding config binding with
+       | Error reason -> Alcotest.failf "relative inherited home dropped runtime: %s"
+           (Runtime.string_of_drop_reason reason)
+       | Ok runtime ->
+         let expected = Filename.concat (Sys.getcwd ()) "relative-claude-account" in
+         Alcotest.(check string) "runtime quota uses the selected child home"
+           ("official:claude-code:home:" ^ expected)
+           (Runtime_quota_window.scope_to_string (Runtime.quota_scope_of_runtime runtime))));
   Masc_test_deps.with_process_env "HOME" (Some "") (fun () ->
     Masc_test_deps.with_process_env "CODEX_HOME" (Some "") (fun () ->
       match Runtime_toml.parse_string

@@ -287,6 +287,18 @@ let test_official_client_without_home_has_no_shared_scope () =
          ; "Codex", (fun () -> Q.scope_of_codex_home None)
          ])
 
+let test_explicit_claude_path_spelling_remains_login_identity () =
+  let direct = "/tmp/masc-claude-account" in
+  let alias = direct ^ "/." in
+  (match Runtime_account_home.of_string alias with
+   | Ok selected ->
+     Alcotest.(check string) "configured home spelling is preserved" alias selected
+   | Error reason -> Alcotest.fail reason);
+  Alcotest.(check bool) "different Keychain path spellings stay distinct" false
+    (Q.scope_equal (Q.scope_of_claude_code_home (Some direct))
+       (Q.scope_of_claude_code_home (Some alias)))
+;;
+
 let () =
   Alcotest.run
     "runtime_quota_window"
@@ -345,5 +357,9 @@ let () =
             "official client without home has no shared scope"
             `Quick
             test_official_client_without_home_has_no_shared_scope
+        ; Alcotest.test_case
+            "explicit Claude home path spelling remains account identity"
+            `Quick
+            test_explicit_claude_path_spelling_remains_login_identity
         ] )
     ]

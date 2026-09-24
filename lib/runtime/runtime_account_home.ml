@@ -6,4 +6,13 @@ let of_string home =
   then Error "account_home must be a non-empty absolute path without surrounding whitespace"
   else Ok home
 
+let of_inherited home =
+  if home = "" || home <> String.trim home
+  then Error "inherited CLI home must be non-empty without surrounding whitespace"
+  else
+    let absolute =
+      if Filename.is_relative home then Filename.concat (Sys.getcwd ()) home else home
+    in
+    of_string absolute
+
 let is_valid home = Result.is_ok (of_string home)

@@ -60,7 +60,8 @@ let effective_account_home = function
   | Some path -> Some path
   | None ->
     (match Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
-     | Some path when path <> "" -> Some path
+     | Some path when path <> "" ->
+       Result.to_option (Runtime_account_home.of_inherited path)
      | Some _ | None ->
        Option.map
          (fun home -> Filename.concat home ".claude")
@@ -417,7 +418,16 @@ let client_environment account_home =
     | None -> true
     | Some _ -> List.mem name base_names)
   |> List.filter_map (fun name ->
-    Option.map (fun value -> name ^ "=" ^ value) (Sys.getenv_opt name))
+    let value =
+      match name, account_home with
+      | "CLAUDE_CONFIG_DIR", None ->
+        (match Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
+         | Some path when path <> "" -> effective_account_home None
+         | Some _ -> Some ""
+         | None -> None)
+      | _ -> Sys.getenv_opt name
+    in
+    Option.map (fun value -> name ^ "=" ^ value) value)
   |> fun inherited ->
   ("CLAUDE_CODE_ENTRYPOINT=masc" :: "CLAUDE_AGENT_SDK_VERSION=masc-ocaml"
    :: (match account_home with None -> inherited

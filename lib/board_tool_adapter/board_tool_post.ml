@@ -330,8 +330,8 @@ let handle_post_list ~tool_name ~start_time args : Tool_result.result =
 let render_thread ~post_block ~total ~comment_lines =
   match comment_lines, total with
   | [], 0 -> Printf.sprintf "%s\n\nNo comments." post_block
-  (* The end of a thread that has comments: the position line already says
-     none are newer and where they will start. *)
+  (* The end of a thread that has comments: the position line names the
+     offset and the thread's size at the read, so the body adds nothing. *)
   | [], _ -> post_block
   | _ :: _, _ ->
     Printf.sprintf "%s\n\n**Comments**:\n%s" post_block (String.concat "\n" comment_lines)

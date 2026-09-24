@@ -6678,7 +6678,7 @@ let row_list (state : state) : row_list option =
      it. An open detail is a reading rather than a list; [reading_pane] has
      it. *)
   | Overview
-    when state.task_focus = Right_pane
+    when Masc_tui_overview_tasks.is_focused state.task_focus
          && Option.is_none (task_detail_on_screen state) ->
       (* The row list is positional; the selection is an id, placed by the
          row it is on now. With nothing selected, movement starts from the
@@ -6687,10 +6687,11 @@ let row_list (state : state) : row_list option =
         ~cursor:
           (Option.value ~default:0
              (Masc_tui_overview_tasks.selected_index state.tasks
-                ~selected:state.task_selected_id))
+                ~selected:(Masc_tui_overview_tasks.selection state.task_focus)))
         (fun index ->
-          state.task_selected_id <-
-            Masc_tui_overview_tasks.id_at state.tasks index)
+          state.task_focus <-
+            Masc_tui_overview_tasks.Task_focus
+              { selected = Masc_tui_overview_tasks.id_at state.tasks index })
   (* Under the Actions and Everything filters the ring is read by a cursor,
      not by a scroll: [render_acting] recomputes the scroll from
      [acting_cursor] every frame and reports both back, so a key that moved
@@ -8952,7 +8953,7 @@ let selected_surface_reference state =
            Option.map
              (fun (row : Tui_decode.task) -> Link.reference Task row.id)
              (Masc_tui_overview_tasks.selected_task state.tasks
-                ~selected:state.task_selected_id))
+                ~selected:(Masc_tui_overview_tasks.selection state.task_focus)))
   | Keepers _ ->
       Option.map
         (fun (keeper : Tui_decode.keeper) -> Link.reference Keeper keeper.k_name)
@@ -11686,7 +11687,7 @@ let toggle_ask_choice state index =
 let begin_ask_text_entry state =
   match (selected_ask_row state, selected_ask_question state) with
   | Some row, Some question ->
-      let slot = Ask.free_text_slot question in
+      let slot = Ask.free_text_slot ~ask_id:row.Tui_decode.ar_id question in
       let existing =
         match Ask.response_for (Ask.draft_for state.ask_draft ~row) ~question with
         | Some (Ask.Draft_wrote text) -> text
@@ -11707,13 +11708,27 @@ let commit_ask_text_entry state =
   match state.ask_text_entry with
   | None -> ()
   | Some entry ->
-      (* Through the slot, which names its own question: the cursor may have
-         been moved by a snapshot arriving while the operator typed, and the
-         answer belongs to the question the editor was opened on. Blank text
-         clears the response rather than recording one -- an editor emptied by
-         backspaces means unanswered, and the domain refuses a blank write. *)
-      with_ask_draft state (fun draft _question ->
-          Ask.set_text draft ~slot:entry.ate_slot ~text:entry.ate_text);
+      (* Through the slot, which names its own ask and question: a snapshot
+         arriving while the operator typed may have moved the cursor, even to
+         another ask whose question carries the same id (masc_ask numbers
+         every ask from q1), and the answer belongs to the question the editor
+         was opened on. So the ask is looked up by the slot's id, not taken
+         from the cursor. Blank text clears the response rather than recording
+         one -- an editor emptied by backspaces means unanswered, and the
+         domain refuses a blank write. *)
+      let ask_id = Ask.free_text_ask_id entry.ate_slot in
+      (match
+         List.find_opt
+           (fun (row : Tui_decode.ask_row) -> String.equal row.Tui_decode.ar_id ask_id)
+           (open_ask_rows state)
+       with
+       | Some row ->
+           let draft = Ask.draft_for state.ask_draft ~row in
+           state.ask_draft <- Some (Ask.set_text draft ~slot:entry.ate_slot ~text:entry.ate_text);
+           state.pending_ask_submit <- None
+       | None ->
+           report_action state "system"
+             "The question you were writing to is no longer open; the text was not recorded");
       state.ask_text_entry <- None
 
 let cancel_ask_text_entry state = state.ask_text_entry <- None
@@ -14433,7 +14448,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.github_token_save_status <-
              Some ((Theme.ok ()) ^ "✓ Token saved successfully" ^ Ansi.reset);
            state.github_identity_view <-
-             Some (keeper_name, Masc_tui_loader.github_identity_lines json);
+             Some
+               ( keeper_name
+               , Masc_tui_github_identity.view_lines
+                   ~sanitize:Masc.Tui_decode.sanitize_terminal_text json );
            state.github_identity_view_error <- None
        | Error detail ->
            report_action state "error" (keeper_name ^ ": github token save: " ^ detail);
@@ -17527,29 +17545,67 @@ and is loaded on demand through keeper_skill.
                 with
                 | Error detail -> report_action state "error" ("Skill create failed: " ^ detail)
                 | Ok json ->
-                  (* The server answers exactly created_and_published or
+                  (* The server answers exactly created_and_published,
+                     created_but_shadowed(+winner) or
                      created_but_unpublished(+reason). The old "created"
                      default reported a status the server never sends and
                      swallowed the not-published reason — the save path
                      below already reports it; the create path now does
-                     the same. *)
+                     the same, in the footer of the surface [c] was pressed
+                     on, as #32069 meant for every editor-backed outcome.
+                     The event log escapes an entry where it draws it, the
+                     footer draws what it is given, and [source_id] and the
+                     receipt come from the server, so every receipt outcome
+                     crosses [Terminal_text.single_line] here. *)
+                  let report event_type text =
+                    report_action state event_type (Terminal_text.single_line text)
+                  in
                   (match json_assoc_member_opt "status" json with
                    | Some (`String "created_and_published") ->
-                     report_action
-                       state
+                     report
                        "system"
                        (Printf.sprintf
                           "created and published · %s/%s"
                           source_id
                           package_id)
+                   | Some (`String "created_but_shadowed") ->
+                     (* A package earlier in the catalog declares the same
+                        name, so Keepers listing by name see that one; the
+                        winner leads because the footer cuts the tail
+                        first. *)
+                     let winner_field field =
+                       match json_assoc_member_opt "winner" json with
+                       | Some winner ->
+                         (match json_assoc_member_opt field winner with
+                          | Some (`String value) -> Some value
+                          | Some _ | None -> None)
+                       | None -> None
+                     in
+                     (match winner_field "source_id", winner_field "package_id" with
+                      | Some winner_source, Some winner_package ->
+                        report
+                          "error"
+                          (Printf.sprintf
+                             "shadowed by %s/%s: %s/%s was created and \
+                              published, but Keepers see that one by name"
+                             winner_source
+                             winner_package
+                             source_id
+                             package_id)
+                      | None, _ | _, None ->
+                        report
+                          "error"
+                          (Printf.sprintf
+                             "%s/%s: shadowed create receipt named no winner"
+                             source_id
+                             package_id))
                    | Some (`String "created_but_unpublished") ->
                      let reason =
                        match json_assoc_member_opt "reason" json with
                        | Some (`String reason) -> reason
                        | _ -> "(no reason reported)"
                      in
-                     report_action
-                       state
+                     report
                        "error"
                        (Printf.sprintf
                           "%s/%s was created but NOT published: %s"
@@ -17557,8 +17613,7 @@ and is loaded on demand through keeper_skill.
                           package_id
                           reason)
                    | Some (`String other) ->
-                     report_action
-                       state
+                     report
                        "error"
                        (Printf.sprintf
                           "%s/%s: unrecognized create status %S"
@@ -17566,8 +17621,7 @@ and is loaded on demand through keeper_skill.
                           package_id
                           other)
                    | Some _ | None ->
-                     report_action
-                       state
+                     report
                        "error"
                        (Printf.sprintf
                           "%s/%s: create receipt carried no status"
@@ -19784,7 +19838,9 @@ and is loaded on demand through keeper_skill.
                          state.task_detail_id <- Some task_id;
                          state.task_detail_scroll <- 0;
                          state.task_history <- None;
-                         state.task_selected_id <- Some task_id;
+                         state.task_focus <-
+                           Masc_tui_overview_tasks.land_on state.tasks
+                             ~task_id;
                          launch_task_history_load state
                            ~mailbox:async_messages task_id))
             | _ -> ())
@@ -20121,7 +20177,8 @@ and is loaded on demand through keeper_skill.
                      state.task_history <- None;
                      launch_task_history_load state ~mailbox:async_messages
                        task_id;
-                     state.task_selected_id <- Some task_id
+                     state.task_focus <-
+                       Masc_tui_overview_tasks.land_on state.tasks ~task_id
                  | Some (_, Masc_tui_types.Palette_board_hearth hearth) ->
                      state.board_hearth <- hearth;
                      state.board_cursor <- 0;
@@ -22052,7 +22109,8 @@ and is loaded on demand through keeper_skill.
                  | Overview, Some task_id ->
                      state.task_detail_id <- Some task_id;
                      state.task_history <- None;
-                     state.task_selected_id <- Some task_id;
+                     state.task_focus <-
+                       Masc_tui_overview_tasks.land_on state.tasks ~task_id;
                      launch_task_history_load state ~mailbox:async_messages
                        task_id
                  | Planning, Some goal_id ->
@@ -22722,7 +22780,7 @@ and is loaded on demand through keeper_skill.
                   state.task_detail_id <- None;
                   state.task_detail_scroll <- 0
                 end
-                else state.task_focus <- Left_pane
+                else state.task_focus <- Masc_tui_overview_tasks.No_task_focus
             | Schedules ->
                 if Option.is_some state.schedule_detail_id then begin
                   state.schedule_detail_id <- None;
@@ -22914,7 +22972,7 @@ and is loaded on demand through keeper_skill.
                   state.task_detail_id <- None;
                   state.task_detail_scroll <- 0
                 end
-                else state.task_focus <- Left_pane
+                else state.task_focus <- Masc_tui_overview_tasks.No_task_focus
             | Schedules ->
                 state.schedule_detail_id <- None;
                 state.schedule_scroll <- 0
@@ -23166,10 +23224,9 @@ and is loaded on demand through keeper_skill.
             | Overview ->
                 if Option.is_some state.task_detail_id then
                   state.task_detail_scroll <- Masc_tui_types.scroll_down_from state.task_detail_scroll ~by:1
-                else if state.task_focus = Right_pane then
-                  state.task_selected_id <-
-                    Masc_tui_overview_tasks.step state.tasks
-                      ~selected:state.task_selected_id
+                else
+                  state.task_focus <-
+                    Masc_tui_overview_tasks.move state.tasks state.task_focus
                       Masc_tui_overview_tasks.Next
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
@@ -23519,10 +23576,9 @@ and is loaded on demand through keeper_skill.
                   if state.task_detail_scroll > 0 then
                     state.task_detail_scroll <- state.task_detail_scroll - 1
                 end
-                else if state.task_focus = Right_pane then
-                  state.task_selected_id <-
-                    Masc_tui_overview_tasks.step state.tasks
-                      ~selected:state.task_selected_id
+                else
+                  state.task_focus <-
+                    Masc_tui_overview_tasks.move state.tasks state.task_focus
                       Masc_tui_overview_tasks.Previous
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
@@ -23860,19 +23916,25 @@ and is loaded on demand through keeper_skill.
                  | None -> state.view <- Keepers Keeper_list)
             | Overview ->
                 (* Only under task focus: Enter while the events own j/k would
-                   open whatever row the cursor happens to rest on. *)
-                if state.task_focus = Right_pane then
-                  (match
-                     Masc_tui_overview_tasks.selected_task state.tasks
-                       ~selected:state.task_selected_id
-                   with
-                   | Some task ->
-                       state.task_detail_id <- Some task.id;
-                       state.task_detail_scroll <- 0;
-                       state.task_history <- None;
-                       launch_task_history_load state
-                         ~mailbox:async_messages task.id
-                   | None -> ())
+                   open whatever row the cursor happens to rest on. Under task
+                   focus with no row chosen the footer says why nothing
+                   opened. *)
+                (match
+                   Masc_tui_overview_tasks.opening state.tasks state.task_focus
+                 with
+                 | Some (Masc_tui_overview_tasks.Open task) ->
+                     state.task_detail_id <- Some task.id;
+                     state.task_detail_scroll <- 0;
+                     state.task_history <- None;
+                     launch_task_history_load state
+                       ~mailbox:async_messages task.id
+                 | Some Masc_tui_overview_tasks.No_held_task ->
+                     report_action state "system"
+                       "Enter: no task is held, so there is no row to open"
+                 | Some Masc_tui_overview_tasks.No_selection ->
+                     report_action state "system"
+                       "Enter: no task row is chosen; j/k chooses one"
+                 | None -> ())
             | Keepers Keeper_list ->
                 (match List.nth_opt state.keepers state.keeper_cursor with
                  | Some keeper ->
@@ -24280,24 +24342,23 @@ and is loaded on demand through keeper_skill.
                  state.task_detail_scroll <- 0;
                  state.task_history <- None;
                  launch_task_history_load state ~mailbox:async_messages tid;
-                 state.task_selected_id <- Some tid;
-                 state.task_focus <- Right_pane
+                 state.task_focus <-
+                   Masc_tui_overview_tasks.land_on state.tasks ~task_id:tid
              | None ->
                  state.task_detail_id <- None;
-                 state.task_focus <- Right_pane;
-                 state.task_selected_id <- None)
+                 state.task_focus <-
+                   Masc_tui_overview_tasks.focus_list state.tasks)
         | Some "t" | Some "T" ->
            (* Focus the Overview task panel. The list is always on screen, but
-              j/k move nothing until the operator asks for tasks. *)
+              j/k move nothing until the operator asks for tasks. Focus
+              lands on the first held row, so Enter opens something at once;
+              pressing [t] again lets go of the list and its choice. *)
            (match state.view with
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Overview when Option.is_none state.task_detail_id ->
                 state.task_focus <-
-                  (match state.task_focus with
-                   | Left_pane -> Right_pane
-                   | Right_pane -> Left_pane);
-                if state.task_focus = Left_pane then state.task_selected_id <- None
+                  Masc_tui_overview_tasks.toggle state.tasks state.task_focus
             | Keepers (Keeper_list | Keeper_detail) ->
                 (* Tool calls, from the roster and from detail, the way logs
                    are: the keeper under the cursor is the one asked about. *)

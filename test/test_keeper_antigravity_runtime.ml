@@ -95,6 +95,9 @@ post({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":v
 post({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}, version)
 tools = post({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}, version)
 assert [tool["name"] for tool in tools["result"]["tools"]] == ["masc_probe"]
+# Every tool masc serves is declared eager and nothing else is, or the model sees its name only.
+assert sorted(server["tools"]) == sorted(tool["name"] for tool in tools["result"]["tools"]), server.get("tools")
+assert all(v == {"eager": True} for v in server["tools"].values()), server["tools"]
 called = post({"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"masc_probe","arguments":{"marker":"from-antigravity"}}}, version)
 assert called["result"]["content"][0]["text"] == "MASC_TOOL_RESULT"
 PY
@@ -377,7 +380,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                   |> Result.map_error (fun error -> fail error)
                   |> Result.get_ok;
                   match
-                    Keeper_turn_driver.run_named
+                    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"
                       ~base_path
@@ -506,7 +509,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                            (Filename.concat base_path "antigravity-prompt.txt")
                            In_channel.input_all);
                     match
-                      Keeper_turn_driver.run_named
+                      Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                         ~runtime_id:"antigravity.gemini"
                         ~keeper_name:"antigravity-fixture"
                         ~base_path
@@ -557,7 +560,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         | Ok _ | Error _ -> fail "resumed session did not settle" in
                       let prompt_before_gate = In_channel.with_open_bin
                         (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
-                      (match Keeper_turn_driver.run_named
+                      (match Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
                           ~base_path ~goal:"Resume the approved call"
                           ~official_client_continuation:gate_checkpoint
@@ -577,7 +580,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                          reports 1. The control resume runs last, so the
                          checks below read a session settled at ordinal 73. *)
                       let run_context ~goal (system_prompt, initial_messages) =
-                        match Keeper_turn_driver.run_named
+                        match Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
                           ~base_path ~goal
                           ~system_prompt ~tools:[tool] ~agent_core_tools:[tool]
@@ -780,7 +783,7 @@ let test_blank_success_requires_fresh_conversation () =
                 (fun () ->
                   Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
                   let run () =
-                    Keeper_turn_driver.run_named
+                    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"
                       ~base_path

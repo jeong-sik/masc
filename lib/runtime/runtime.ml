@@ -120,11 +120,37 @@ type config_durability =
   | Durable
   | Durability_unconfirmed of { detail : string }
 
+(* Where the exact-output registry reads its targets. The server builds them
+   from this file's HTTP bindings, unless [AGENT_CORE_MODEL_CATALOG] names a
+   full replacement catalog, whose [[targets]] rows are then the whole set and
+   carry their own [body_timeout_s] ([exact_output_resolver_catalog] reads
+   this same answer for boot and every config commit). An empty or blank
+   value names no file, as it always has for this variable. *)
+type exact_output_target_source =
+  | Runtime_binding_targets
+  | Replacement_catalog_targets of { path : string }
+
+type exact_output_registry_application =
+  | Exact_output_registry_replaced of { origin : exact_output_target_source }
+  | Exact_output_registry_unpublished
+  | Exact_output_registry_kept of
+      { reason : Runtime_exact_output_registry.publication_error }
+
+(* The registry a config commit kept because neither the committed text nor
+   the file it replaced rebuilds one. It keeps serving, but the file on disk
+   now publishes no registry at the next boot, so health reports it until a
+   later commit replaces the registry. *)
+type exact_output_registry_stale =
+  { stale_reason : Runtime_exact_output_registry.publication_error
+  ; stale_since_commit : config_commit_order
+  }
+
 type config_commit_receipt =
   { observation : config_observation
   ; durability : config_durability
   ; order : config_commit_order
   ; lock_warnings : config_lock_warning list
+  ; exact_output_registry : exact_output_registry_application
   }
 
 and config_lock_warning =
@@ -434,6 +460,23 @@ type resolution_failure =
   ; runtime_count : int
   }
 
+(* One exact-output lane slot whose HTTP provider declares no
+   [exact-body-timeout-s] (rule 3 of RFC-runtime-two-layers, #38779). *)
+type exact_slot_body_deadline_gap =
+  { lane_id : string
+  ; slot_id : string
+  ; provider_id : string
+  }
+
+(* What rule 3 left out of a loaded file: every gap, and the exact lanes
+   those gaps emptied -- a lane whose every slot is a gap and that declares
+   no cli_slots. Such a lane is unavailable on its own; the other lanes
+   still publish. *)
+type exact_slot_degradation =
+  { gaps : exact_slot_body_deadline_gap list
+  ; emptied_lane_ids : string list
+  }
+
 (* The ways loading runtime.toml fails, closed so a consumer decides per case
    instead of matching rendered text — the contract [drop_reason] already keeps
    one level down. [Toml_unparsable] is the single case whose text comes from
@@ -458,6 +501,7 @@ type load_failure =
       ; execution_model : string
       ; declared_model : string
       }
+  | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
   | Context_marks_exceed_max_context of
       { runtime_id : string
       ; high_water_tokens : int
@@ -496,6 +540,30 @@ let resolution_suffix (resolution : resolution_failure) : string =
       ": binding is defined but could not be materialized as a runtime — %s"
       (string_of_drop_reason reason)
   | None -> Printf.sprintf " not found among %d runtimes" resolution.runtime_count
+;;
+
+(* One line per slot: the lane table, the slot, the provider and the key to
+   add where it goes. The save refusal lists these, and so do the boot WARN
+   and the startup degradation report. *)
+let exact_slot_body_deadline_gap_to_string (gap : exact_slot_body_deadline_gap) =
+  Printf.sprintf
+    "[runtime.exact_output_lanes.%s] slot %S runs on provider %S; add %s to \
+     [providers.%s]"
+    gap.lane_id
+    gap.slot_id
+    gap.provider_id
+    Runtime_schema.exact_body_timeout_s_key
+    gap.provider_id
+;;
+
+let exact_slot_body_deadline_gap_to_yojson (gap : exact_slot_body_deadline_gap) =
+  `Assoc
+    [ "lane_id", `String gap.lane_id
+    ; "slot_id", `String gap.slot_id
+    ; "provider_id", `String gap.provider_id
+    ; "missing_key", `String Runtime_schema.exact_body_timeout_s_key
+    ; "message", `String (exact_slot_body_deadline_gap_to_string gap)
+    ]
 ;;
 
 let to_diagnostic_text ~(config_path : string) : load_failure -> string = function
@@ -573,6 +641,19 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       high_water_tokens
       max_context
+  | Exact_slot_body_deadlines_absent gaps ->
+    Printf.sprintf
+      "%s: this change adds %d exact-output slot(s) on a provider that declares \
+       no %s. %s ends when the response headers arrive and does not bound the \
+       response body, so %s is the only deadline on the whole request:\n%s"
+      config_path
+      (List.length gaps)
+      Runtime_schema.exact_body_timeout_s_key
+      Runtime_schema.connect_timeout_s_key
+      Runtime_schema.exact_body_timeout_s_key
+      (gaps
+       |> List.map (fun gap -> "  " ^ exact_slot_body_deadline_gap_to_string gap)
+       |> String.concat "\n")
 ;;
 
 (* The same account, minus the one part this repository did not write. A parse
@@ -595,7 +676,8 @@ let to_operator_text ~(config_path : string) (failure : load_failure) : string =
   | Reference_unresolved _
   | Lane_candidate_unresolved _
   | Max_context_absent _
-  | Context_marks_exceed_max_context _ -> to_diagnostic_text ~config_path failure
+  | Context_marks_exceed_max_context _
+  | Exact_slot_body_deadlines_absent _ -> to_diagnostic_text ~config_path failure
 ;;
 
 (* The list is carried out whole rather than counted here: the caller decides
@@ -801,43 +883,159 @@ let missing_catalog_model_to_yojson (entry : missing_catalog_model) =
     ]
 ;;
 
-let startup_degradation_to_yojson = function
-  | None ->
+(* Rule 2 (catalog-missing bindings) and rule 3 (exact slots without a body
+   deadline) both leave the server running with less than the file declared,
+   so both are said here, the one report health, the runtime inventory and
+   the dashboard already read. The key set is the same in every case so a
+   reader never has to guess which shape it got. [status_reasons] and
+   [operator_action_reasons] name every cause present, so the health rollup
+   says both when both happen; [terminal_reason] keeps naming the catalog
+   when it is one of them. *)
+let catalog_degradation_reason = "missing_agent_core_catalog_models"
+let exact_slot_degradation_reason = "exact_slot_body_deadline_absent"
+let exact_registry_stale_reason = "exact_output_registry_stale"
+
+(* Set by a config commit that keeps the registry, cleared by one that
+   replaces it or leaves none published, and by a boot publication. *)
+let exact_output_registry_stale_ref : exact_output_registry_stale option Atomic.t =
+  Atomic.make None
+
+let exact_output_registry_stale () = Atomic.get exact_output_registry_stale_ref
+
+let exact_output_registry_stale_message (stale : exact_output_registry_stale) =
+  Printf.sprintf
+    "the exact-output registry kept since config commit %s no longer matches \
+     runtime.toml, and the file on disk publishes no registry at the next boot: %s"
+    (config_commit_order_to_string stale.stale_since_commit)
+    (Runtime_exact_output_registry.publication_error_to_string stale.stale_reason)
+;;
+
+let exact_output_registry_stale_to_yojson = function
+  | None -> `Null
+  | Some (stale : exact_output_registry_stale) ->
     `Assoc
-      [ "schema", `String "masc.runtime_startup_degradation.v1"
-      ; "status", `String "ok"
-      ; "degraded", `Bool false
-      ; "operator_action_required", `Bool false
-      ; "terminal_reason", `String "none"
-      ; "missing_catalog_model_count", `Int 0
-      ; "disabled_runtime_ids", `List []
+      [ ( "reason"
+        , `String (Runtime_exact_output_registry.publication_error_to_string stale.stale_reason) )
+      ; ( "kept_since_commit"
+        , `String (config_commit_order_to_string stale.stale_since_commit) )
+      ; "message", `String (exact_output_registry_stale_message stale)
       ]
-  | Some degradation ->
+;;
+
+let startup_degradation_to_yojson
+    ~(exact_slots : exact_slot_degradation)
+    ~(exact_registry_stale : exact_output_registry_stale option)
+    (degradation : startup_degradation option)
+  =
+  let gaps_json =
+    [ ( "exact_slot_body_deadline_gaps"
+      , `List (List.map exact_slot_body_deadline_gap_to_yojson exact_slots.gaps) )
+    ; ( "exact_lanes_emptied_by_body_deadline_gaps"
+      , `List (List.map (fun id -> `String id) exact_slots.emptied_lane_ids) )
+    ]
+  in
+  let gaps_message =
+    let slots = List.map exact_slot_body_deadline_gap_to_string exact_slots.gaps in
+    let lanes =
+      List.map
+        (Printf.sprintf
+           "exact-output lane %S is unavailable: every slot is left out and it \
+            declares no cli_slots")
+        exact_slots.emptied_lane_ids
+    in
+    String.concat "; " (slots @ lanes)
+  in
+  let gaps_next_action =
+    Printf.sprintf
+      "Add %s to each named provider. Until then those exact-output slots are \
+       left out of their lanes; a lane with nothing left walks its cli_slots, \
+       and a lane with no cli_slots is unavailable."
+      Runtime_schema.exact_body_timeout_s_key
+  in
+  let reasons_json reasons =
+    let json = `List (List.map (fun reason -> `String reason) reasons) in
+    [ "status_reasons", json; "operator_action_reasons", json ]
+  in
+  let exact_json =
+    gaps_json
+    @ [ "exact_output_registry_stale", exact_output_registry_stale_to_yojson exact_registry_stale ]
+  in
+  (* Each exact-output cause present, in the order its reason is listed:
+     (reason, message, next action). *)
+  let exact_parts =
+    (match exact_slots.gaps with
+     | [] -> []
+     | _ :: _ -> [ exact_slot_degradation_reason, gaps_message, gaps_next_action ])
+    @
+    match exact_registry_stale with
+    | None -> []
+    | Some stale ->
+      [ ( exact_registry_stale_reason
+        , exact_output_registry_stale_message stale
+        , "Fix runtime.toml so it rebuilds the exact-output registry and save it; \
+           a restart before that leaves exact output unavailable." )
+      ]
+  in
+  let reasons parts = List.map (fun (reason, _, _) -> reason) parts in
+  let messages parts = List.map (fun (_, message, _) -> message) parts in
+  let next_actions parts = List.map (fun (_, _, next_action) -> next_action) parts in
+  match degradation, exact_parts with
+  | None, [] ->
     `Assoc
-      [ "schema", `String "masc.runtime_startup_degradation.v1"
-      ; "status", `String "degraded"
-      ; "degraded", `Bool true
-      ; "operator_action_required", `Bool true
-      ; "terminal_reason", `String "missing_agent_core_catalog_models"
-      ; "message", `String (startup_degradation_to_string degradation)
-      ; "config_path", `String degradation.report.config_path
-      ; "configured_default_runtime_id"
-        , `String degradation.configured_default_runtime_id
-      ; "missing_catalog_model_count", `Int (List.length degradation.report.missing_models)
-      ; ( "missing_catalog_models"
-        , `List (List.map missing_catalog_model_to_yojson degradation.report.missing_models)
-        )
-      ; ( "disabled_runtime_ids"
-        , `List (List.map (fun id -> `String id) degradation.disabled_runtime_ids)
-        )
-      ; ( "unavailable_assignments"
-        , `List (List.map unavailable_assignment_to_yojson degradation.unavailable_assignments)
-        )
-      ; ( "next_action"
-        , `String
-            "Inspect the unavailable configured runtime IDs and their capability catalog entries. \
-             Explicit Keeper assignments remain unchanged and unavailable assignments cannot dispatch." )
-      ]
+      ([ "schema", `String "masc.runtime_startup_degradation.v1"
+       ; "status", `String "ok"
+       ; "degraded", `Bool false
+       ; "operator_action_required", `Bool false
+       ; "terminal_reason", `String "none"
+       ; "missing_catalog_model_count", `Int 0
+       ; "disabled_runtime_ids", `List []
+       ]
+       @ reasons_json []
+       @ exact_json)
+  | None, ((terminal_reason, _, _) :: _ as parts) ->
+    `Assoc
+      ([ "schema", `String "masc.runtime_startup_degradation.v1"
+       ; "status", `String "degraded"
+       ; "degraded", `Bool true
+       ; "operator_action_required", `Bool true
+       ; "terminal_reason", `String terminal_reason
+       ; "message", `String (String.concat "; " (messages parts))
+       ; "missing_catalog_model_count", `Int 0
+       ; "disabled_runtime_ids", `List []
+       ]
+       @ reasons_json (reasons parts)
+       @ exact_json
+       @ [ "next_action", `String (String.concat " " (next_actions parts)) ])
+  | Some degradation, parts ->
+    let catalog_message = startup_degradation_to_string degradation in
+    let catalog_next_action =
+      "Inspect the unavailable configured runtime IDs and their capability catalog entries. \
+       Explicit Keeper assignments remain unchanged and unavailable assignments cannot dispatch."
+    in
+    `Assoc
+      ([ "schema", `String "masc.runtime_startup_degradation.v1"
+       ; "status", `String "degraded"
+       ; "degraded", `Bool true
+       ; "operator_action_required", `Bool true
+       ; "terminal_reason", `String catalog_degradation_reason
+       ; "message", `String (String.concat "; " (catalog_message :: messages parts))
+       ; "config_path", `String degradation.report.config_path
+       ; "configured_default_runtime_id"
+         , `String degradation.configured_default_runtime_id
+       ; "missing_catalog_model_count", `Int (List.length degradation.report.missing_models)
+       ; ( "missing_catalog_models"
+         , `List (List.map missing_catalog_model_to_yojson degradation.report.missing_models)
+         )
+       ; ( "disabled_runtime_ids"
+         , `List (List.map (fun id -> `String id) degradation.disabled_runtime_ids)
+         )
+       ; ( "unavailable_assignments"
+         , `List (List.map unavailable_assignment_to_yojson degradation.unavailable_assignments)
+         )
+       ]
+       @ reasons_json (catalog_degradation_reason :: reasons parts)
+       @ exact_json
+       @ [ "next_action", `String (String.concat " " (catalog_next_action :: next_actions parts)) ])
 ;;
 
 let capabilities_for_runtime (rt : t) =
@@ -929,36 +1127,16 @@ let validate_runtime_context_marks (runtimes : t list) : (unit, load_failure) re
   | Some failure -> Error failure
 ;;
 
-(* [runtime.exact_output_lanes.verifier_exact] (RFC-0361 D7(a)) is the single
-   selector for completion-authority judgement calls: admitted slots in frozen
-   declaration order, fail over in that order. *)
-let verifier_exact_lane_id = "verifier_exact"
-
-type exact_lane =
+(* The lanes and their ids are [Standalone_lane]'s. The Verifier lane
+   (RFC-0361 D7(a)) is the single selector for completion-authority judgement
+   calls: admitted slots in frozen declaration order, fail over in that
+   order. *)
+type exact_lane = Standalone_lane.t =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
   | Workspace_curator
   | Verifier
-
-let all_exact_lanes = [ Librarian; Hitl_auto_judge; Board_attention; Workspace_curator; Verifier ]
-
-let exact_lane_id = function
-  | Librarian -> "librarian_exact"
-  | Hitl_auto_judge -> "hitl_auto_judge"
-  | Board_attention -> "board_attention_exact"
-  | Workspace_curator -> "workspace_curator_exact"
-  | Verifier -> verifier_exact_lane_id
-;;
-
-let exact_lane_of_id = function
-  | "librarian_exact" -> Some Librarian
-  | "hitl_auto_judge" -> Some Hitl_auto_judge
-  | "board_attention_exact" -> Some Board_attention
-  | "workspace_curator_exact" -> Some Workspace_curator
-  | "verifier_exact" -> Some Verifier
-  | _ -> None
-;;
 
 (* [Server_workspace_memory_curator.execute] refuses a run whose lane declares
    any CLI slot, so [false] here is that refusal read in advance. The two are
@@ -998,7 +1176,7 @@ let verifier_exact_slot_references
          { site =
              Printf.sprintf
                "[runtime.exact_output_lanes.%s].%s"
-               verifier_exact_lane_id
+               (Standalone_lane.to_id Verifier)
                key
          ; shape = List_entry
          ; id
@@ -1009,12 +1187,112 @@ let verifier_exact_slot_references
   match
     List.find_opt
       (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal lane.id verifier_exact_lane_id)
+         String.equal lane.id (Standalone_lane.to_id Verifier))
       decls
   with
   | None -> []
   | Some lane ->
     references "slots" lane.slot_ids @ references "cli_slots" lane.cli_slot_ids
+;;
+
+let agent_core_model_catalog_env_var_name = "AGENT_CORE_MODEL_CATALOG"
+
+let exact_output_target_source ?(env = Env_config_core.raw_value_opt) () =
+  match Env_config_core.trim_opt (env agent_core_model_catalog_env_var_name) with
+  | None -> Runtime_binding_targets
+  | Some path -> Replacement_catalog_targets { path }
+;;
+
+(* Rule 3 of RFC-runtime-two-layers. An HTTP slot of an exact-output lane is
+   built from its binding, and its whole-request deadline is the provider's
+   [exact-body-timeout-s]. Without it plan admission refuses every request on
+   that slot ([Missing_deadline]) and the lane falls to its cli_slots with one
+   WARN line per request, while this file loaded as valid: 1,002 such
+   refusals in one restart log on 2026-09-24 (#38779). The provider's
+   [connect-timeout-s] does not stand in for it, because that deadline ends
+   at the response headers.
+
+   Only a slot that names a configured HTTP runtime carries the rule. A slot
+   naming no runtime is a catalog id: the registry resolves or drops it, and
+   [verifier_exact_slot_references] already refuses one on the verifier lane.
+   An official-client runtime is not an HTTP target (cli_slots are not read
+   here at all). Under a replacement catalog the bindings are not the
+   targets, so this file's providers say nothing about the deadline.
+
+   Every offending slot is returned, not the first: an operator fixing one
+   provider per save or per restart is the round trip this report exists to
+   remove. A save refuses the gaps it adds, all of them
+   ([validate_exact_slot_body_deadline_change]); a boot keeps every gap as
+   degraded state ([set_loaded]) and the exact-output registry leaves those
+   slots out. *)
+let exact_slot_body_deadline_gaps_of
+    ~(target_source : exact_output_target_source)
+    (runtimes : t list)
+    (decls : Runtime_schema.exact_output_lane_decl list)
+  : exact_slot_body_deadline_gap list
+  =
+  let gap_of (lane : Runtime_schema.exact_output_lane_decl) slot_id =
+    match List.find_opt (fun (r : t) -> String.equal r.id slot_id) runtimes with
+    | None -> None
+    | Some r ->
+      (match r.execution, r.provider.Runtime_schema.exact_body_timeout_s with
+       | Runtime_execution.Agent_core _, None ->
+         Some
+           ({ lane_id = lane.id; slot_id; provider_id = r.provider.Runtime_schema.id }
+            : exact_slot_body_deadline_gap)
+       | Runtime_execution.Agent_core _, Some (_ : float) -> None
+       | ( Runtime_execution.Codex_app_server _
+         | Runtime_execution.Claude_code _
+         | Runtime_execution.Antigravity_cli _ ), (Some _ | None) -> None)
+  in
+  match target_source with
+  | Replacement_catalog_targets { path = _ } -> []
+  | Runtime_binding_targets ->
+    List.concat_map
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         List.filter_map (gap_of lane) lane.slot_ids)
+      decls
+;;
+
+let same_exact_slot_body_deadline_gap
+    (left : exact_slot_body_deadline_gap)
+    (right : exact_slot_body_deadline_gap)
+  =
+  String.equal left.lane_id right.lane_id
+  && String.equal left.slot_id right.slot_id
+  && String.equal left.provider_id right.provider_id
+;;
+
+(* A lane the gaps empty: it declares slots, every one of them is a gap, and
+   it declares no cli_slots to walk instead. The registry would have nothing
+   to admit for it, so boot publishes without requiring it and the startup
+   report names it, while every other lane keeps working. *)
+let exact_lanes_emptied_by_gaps
+    (decls : Runtime_schema.exact_output_lane_decl list)
+    (gaps : exact_slot_body_deadline_gap list)
+  =
+  let is_gap (lane : Runtime_schema.exact_output_lane_decl) slot_id =
+    List.exists
+      (fun (gap : exact_slot_body_deadline_gap) ->
+         String.equal gap.lane_id lane.id && String.equal gap.slot_id slot_id)
+      gaps
+  in
+  List.filter_map
+    (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+       match lane.slot_ids, lane.cli_slot_ids with
+       | _ :: _, [] when List.for_all (is_gap lane) lane.slot_ids -> Some lane.id
+       | _ :: _, [] | [], _ | _ :: _, _ :: _ -> None)
+    decls
+;;
+
+(* What rule 3 leaves out of [runtimes] and [decls]: the gaps, and the lanes
+   they empty. [set_loaded] records it for the startup report and
+   [exact_output_resolver_catalog] builds the registry's targets and excused
+   lanes from it, so what health reports and what the registry leaves out
+   are one answer. *)
+let exact_slot_degradation_of ~target_source runtimes decls =
+  let gaps = exact_slot_body_deadline_gaps_of ~target_source runtimes decls in
+  { gaps; emptied_lane_ids = exact_lanes_emptied_by_gaps decls gaps }
 ;;
 
 (* Every runtime binding's provider/model pair must be known to the AGENT_CORE
@@ -1443,6 +1721,11 @@ type loaded_state =
   ; lsp_servers : (string * (string * string list)) list
   ; config_path : string option
   ; startup_degradation : startup_degradation option
+  ; exact_slots : exact_slot_degradation
+        (* Exact slots this file declares on a provider without
+           [exact-body-timeout-s], and the lanes they empty. Boot keeps them
+           here instead of refusing the file; the exact-output registry
+           leaves them out and the startup report names them. *)
   }
 
 let empty_loaded_state =
@@ -1456,6 +1739,7 @@ let empty_loaded_state =
   ; lsp_servers = []
   ; config_path = None
   ; startup_degradation = None
+  ; exact_slots = { gaps = []; emptied_lane_ids = [] }
   }
 
 let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
@@ -1471,6 +1755,7 @@ let set_loaded
     ?startup_degradation
     ?declared_media_failover
     ~config_path
+    ~(exact_output_lane_decls : Runtime_schema.exact_output_lane_decl list)
     ( runtimes
     , rt
     , default_route
@@ -1513,28 +1798,166 @@ let set_loaded
     ; lsp_servers
     ; config_path = Some config_path
     ; startup_degradation
+    ; exact_slots =
+        exact_slot_degradation_of
+          ~target_source:(exact_output_target_source ())
+          runtimes
+          exact_output_lane_decls
     };
   Runtime_typesafeai_policy.publish typesafeai;
   Runtime_startup_state.note_runtime_loaded ()
 
 let init_default ~config_path =
-  let* loaded, _exact_output_lane_decls =
+  let* loaded, exact_output_lane_decls =
     load_list_internal ~config_path ~validate_max_context:true
     |> Result.map_error (to_diagnostic_text ~config_path)
   in
-  set_loaded ~config_path loaded;
+  set_loaded ~config_path ~exact_output_lane_decls loaded;
   Ok ()
 
-let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
+(* An exact-output slot names a runtime binding: the lane configuration and the
+   binding table use the same "<provider>.<model>" id. Restating that binding in
+   a second file is how a slot came to point at a declaration nobody had
+   written, and how a binding's declared connect timeout stopped reaching the
+   slot that runs on it (#37004). The slots are the bindings.
+
+   The binding itself travels, not a list of fields read off it. Handing over a
+   subset left the exact request without the connect deadline (#37004), then
+   without the declared effort (#37326), then on a different wire than the
+   Keeper's own requests (#37674) -- three turns of the same field going
+   missing at this boundary. *)
+let exact_output_targets runtimes =
+  (* An exact-output slot resolves against the AGENT_CORE catalog, which speaks
+     only of endpoints. A subscription CLI has none — it is a local binary named
+     by [command] — so declaring one as a target only to have the binding
+     resolver reject it reports a missing catalog provider where the truth is
+     that this kind of runtime does no exact output. *)
+  List.filter_map
+    (fun (rt : t) ->
+       match rt.execution with
+       | Runtime_execution.Agent_core config ->
+         Some
+           ({ target_ref = rt.id
+            ; (* [enable_thinking] is a per-turn control the Keeper path sets as
+                 it builds each request, so the binding config carries none yet.
+                 An exact request has one shape and asks once, here, from the
+                 same row the Keeper reads. *)
+              binding =
+                { config with
+                  Llm_provider.Provider_config.enable_thinking =
+                    rt.model.Runtime_schema.thinking_support
+                }
+            ; (* A slot's credential is the key its binding already resolved --
+                 the one the Keeper's requests carry, whatever source the
+                 binding named. Handing over the environment name instead sent
+                 the resolver back to read it a second time, and a binding fed
+                 from a file or an inline value had no name to hand over, so it
+                 reached the wire with no key at all. An environment name that
+                 resolved to nothing stays named, so the refusal can say which. *)
+              credential =
+                (let key = config.Llm_provider.Provider_config.api_key in
+                 match rt.provider.Runtime_schema.credentials with
+                 | Some (Runtime_schema.Env name) when Llm_provider.Secret.is_empty key ->
+                   Agent_core.Exact_output.Credential_unresolved
+                     { environment_variable = name }
+                 | Some (Runtime_schema.Env _ | Runtime_schema.File _ | Runtime_schema.Inline _)
+                   -> Agent_core.Exact_output.Credential_resolved key
+                 | None when Llm_provider.Secret.is_empty key ->
+                   Agent_core.Exact_output.Credential_not_declared
+                 | None -> Agent_core.Exact_output.Credential_resolved key)
+            ; body_timeout_s = rt.provider.Runtime_schema.exact_body_timeout_s
+            } : Agent_core.Exact_output.declared_target)
+       | Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Antigravity_cli _ -> None)
+    runtimes
+;;
+
+type exact_output_catalog =
+  { catalog_input : Agent_core.Exact_output.resolver_catalog_input
+  ; catalog_origin : exact_output_target_source
+  ; catalog_description : string
+  ; catalog_exact_slots : exact_slot_degradation
+  }
+
+(* The one place a registry build decides what rule 3 leaves out: boot, every
+   config commit, the save preview and the on-disk rebuild check call this
+   with the runtimes and lanes they are about to publish. Under the runtime
+   bindings, a gap slot (its provider declares no [exact-body-timeout-s]) is
+   not handed to the resolver, so the registry leaves it out and the lane
+   keeps its other slots and its cli_slots; a lane the gaps empty is excused
+   from the required lanes ([catalog_exact_slots.emptied_lane_ids]), so it
+   alone is unavailable. *)
+let exact_output_resolver_catalog ~exact_output_lane_decls runtimes =
+  let target_source = exact_output_target_source () in
+  let exact_slots =
+    exact_slot_degradation_of ~target_source runtimes exact_output_lane_decls
+  in
+  match target_source with
+  | Replacement_catalog_targets { path } ->
+    { catalog_input = Agent_core.Exact_output.Full_replacement_file path
+    ; catalog_origin = target_source
+    ; catalog_description = " from full replacement " ^ path
+    ; catalog_exact_slots = exact_slots
+    }
+  | Runtime_binding_targets ->
+    let targets =
+      exact_output_targets runtimes
+      |> List.filter (fun (target : Agent_core.Exact_output.declared_target) ->
+        not
+          (List.exists
+             (fun (gap : exact_slot_body_deadline_gap) ->
+                String.equal gap.slot_id target.target_ref)
+             exact_slots.gaps))
+    in
+    { catalog_input = Agent_core.Exact_output.Embedded_with_targets targets
+    ; catalog_origin = target_source
+    ; catalog_description =
+        Printf.sprintf
+          " from AGENT_CORE embedded catalog with %d runtime binding(s) as targets"
+          (List.length targets)
+    ; catalog_exact_slots = exact_slots
+    }
+;;
+
+let load_exact_output_resolver_snapshot catalog =
+  (* The resolver reads base-URL environment names through the config
+     boundary, the same reader the runtime bindings resolve against. *)
+  let io : Agent_core.Exact_output.resolver_io =
+    { getenv =
+        (fun name ->
+          try Ok (Env_config_core.raw_value_opt name) with
+          | Invalid_argument _ -> Error ())
+    }
+  in
+  Agent_core.Exact_output.load_resolver_snapshot
+    ~io
+    ~target_binding_policy:Agent_core.Exact_output.Exclude_unbound_targets
+    ~catalog
+    ()
+;;
+
+let publish_exact_output_registry ?required_lane_ids ?excused_lane_ids ~lanes resolver_snapshot =
   match
     Runtime_exact_output_registry.publish
       ?required_lane_ids
+      ?excused_lane_ids
       ~lanes
       resolver_snapshot
   with
-  | Ok registry -> Ok registry
+  | Ok registry ->
+    Atomic.set exact_output_registry_stale_ref None;
+    Ok registry
   | Error error ->
     Error (Runtime_exact_output_registry.publication_error_to_string error)
+;;
+
+(* Withdrawing the registry also ends any stale state: nothing kept is
+   serving any more. Setup resume withdraws through here when it cannot
+   publish. *)
+let unpublish_exact_output_registry () =
+  Runtime_exact_output_registry.unpublish ()
+  |> Result.map (fun () -> Atomic.set exact_output_registry_stale_ref None)
 ;;
 
 (* Fail-closed startup entry point: [load_list] (RFC-0206 routing validation)
@@ -1545,11 +1968,11 @@ let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error failure -> Error (Runtime_config_error (to_diagnostic_text ~config_path failure))
-  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
-       set_loaded ~config_path loaded;
+       set_loaded ~config_path ~exact_output_lane_decls loaded;
        Ok ())
 
 let init_default_strict ~config_path =
@@ -1590,7 +2013,7 @@ let initialize_degraded_loaded ~config_path parsed =
       (fun failure -> Runtime_config_error (to_diagnostic_text ~config_path failure))
       parsed
   in
-  let* loaded, _, startup_degradation, declared_media_failover =
+  let* loaded, exact_output_lane_decls, startup_degradation, declared_media_failover =
     prepare_degraded_loaded ~config_path parsed
     |> Result.map_error (fun msg -> Runtime_config_error msg)
   in
@@ -1598,6 +2021,7 @@ let initialize_degraded_loaded ~config_path parsed =
     ?startup_degradation
     ~declared_media_failover
     ~config_path
+    ~exact_output_lane_decls
     loaded;
   Ok (match startup_degradation with
     | None -> Initialized
@@ -1624,6 +2048,8 @@ let get_runtimes () = (runtime_state ()).runtimes
 let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes
 let startup_degradation () = (runtime_state ()).startup_degradation
 let startup_degraded () = Option.is_some (startup_degradation ())
+let exact_slot_degradation () = (runtime_state ()).exact_slots
+let exact_slot_body_deadline_gaps () = (exact_slot_degradation ()).gaps
 
 let default_runtime_id_or_fail () =
   match (runtime_state ()).default_runtime with
@@ -1867,7 +2293,7 @@ let verifier_exact_lane_resolution () =
     (match
        Runtime_exact_output_registry.resolve_lane
          registry
-         ~lane_id:verifier_exact_lane_id
+         ~lane_id:(Standalone_lane.to_id Verifier)
      with
      | Error error ->
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error)
@@ -1875,7 +2301,7 @@ let verifier_exact_lane_resolution () =
        (match
           Runtime_exact_output_registry.declared_lane
             registry
-            ~lane_id:verifier_exact_lane_id
+            ~lane_id:(Standalone_lane.to_id Verifier)
         with
         | None ->
           (* [resolve_lane] answered [Ok], so the registry admitted this lane
@@ -1883,7 +2309,7 @@ let verifier_exact_lane_resolution () =
           Error
             (Runtime_exact_output_registry.lane_resolution_error_to_string
                (Runtime_exact_output_registry.Exact_lane_unconfigured
-                  { lane_id = verifier_exact_lane_id }))
+                  { lane_id = Standalone_lane.to_id Verifier }))
         | Some declared ->
           Ok
             (verifier_exact_lane_admission
@@ -1973,7 +2399,7 @@ let verifier_exact_slot_admission ~runtime_id =
   | Error Runtime_exact_output_registry.Registry_not_published -> direct ()
   | Error error -> Error (Runtime_exact_output_registry.publication_error_to_string error)
   | Ok registry ->
-    (match Runtime_exact_output_registry.resolve_lane registry ~lane_id:verifier_exact_lane_id with
+    (match Runtime_exact_output_registry.resolve_lane registry ~lane_id:(Standalone_lane.to_id Verifier) with
      | Ok {cli_slots; _} when List.mem runtime_id cli_slots -> verifier_cli_slot_admission ~runtime_id
      | Ok _ | Error _ -> direct ())
 ;;
@@ -2000,8 +2426,7 @@ let max_context_of_runtime (rt : t) : int =
    alone.
    [Unavailable] retains a configured ID whose capability catalog entry is
    absent; [Missing] means no configured lane or runtime has that ID. *)
-let resolve_assignment (assigned_id : string) =
-  let state = runtime_state () in
+let resolve_assignment_in (state : loaded_state) (assigned_id : string) =
   match find_declared_lane state.lanes assigned_id with
   | Some lane -> `Lane lane
   | None ->
@@ -2013,6 +2438,10 @@ let resolve_assignment (assigned_id : string) =
             String.equal missing.runtime_id assigned_id) degradation.report.missing_models) with
         | Some missing -> `Unavailable missing
         | None -> `Missing))
+;;
+
+let resolve_assignment (assigned_id : string) =
+  resolve_assignment_in (runtime_state ()) assigned_id
 ;;
 
 (* A keeper assignment and a route id are routing labels: each names a declared
@@ -2030,6 +2459,59 @@ let entry_runtime_id_of_route (route : string) : string option =
      (* A lane with no candidates is refused while loading the configuration. *)
      | [] -> None)
   | `Unavailable _ | `Missing -> None
+;;
+
+(* A lane walks past its head: a candidate that fails is demoted behind its
+   siblings (RFC-0458 §3.4, #36935), so any candidate the walk holds may
+   serve the turn. A request sized for the whole walk therefore fits the
+   smallest ceiling any of those candidates declares, not the entry's alone.
+
+   A candidate that declares no [max-prompt-bytes] has no byte ceiling in
+   any admission path: Claude Code starts unbounded and shrinks only on the
+   provider's own refusal, Antigravity refuses such a binding before
+   sending, Codex sends unbounded as it did before #37353 (operator decision
+   ask7a9c2dbf75c6a2fa), and no other runtime reads the field. It adds no
+   bound here, and
+   it does not erase a bound a sibling declares.
+
+   A declaration on a runtime that does not read it
+   ([Runtime_schema.api_format_reads_max_prompt_bytes]) is not a ceiling
+   either: that provider never checks the number, so counting it would shrink
+   the whole lane's budget for nothing.
+
+   An id the loaded catalog does not hold adds no bound either: the walk
+   cannot dispatch it, so it cannot serve the turn. *)
+let smallest_declared_max_prompt_bytes (runtimes : t list) candidate_ids =
+  let declared =
+    List.filter_map
+      (fun (runtime : t) ->
+         if List.mem runtime.id candidate_ids
+            && api_format_reads_max_prompt_bytes runtime.provider.api_format
+         then runtime.model.max_prompt_bytes
+         else None)
+      runtimes
+  in
+  match declared with
+  | [] -> None
+  | first :: rest -> Some (List.fold_left min first rest)
+;;
+
+(* One snapshot answers both the lane and its bindings: [validate_lanes]
+   refuses a configuration whose lane names a runtime it does not declare,
+   so every candidate of a lane resolved from [state] is in
+   [state.runtimes]. *)
+let smallest_max_prompt_bytes_of_route (route : string) : int option =
+  let state = runtime_state () in
+  match resolve_assignment_in state route with
+  | `Lane lane ->
+    smallest_declared_max_prompt_bytes
+      state.runtimes
+      (Runtime_lane.ordered_candidates lane)
+  | `Unavailable _ | `Missing -> None
+;;
+
+let smallest_max_prompt_bytes_of_runtime_ids (ids : string list) : int option =
+  smallest_declared_max_prompt_bytes (runtime_state ()).runtimes ids
 ;;
 
 let resolve_max_context_of_runtime_id (id : string)
@@ -2549,7 +3031,7 @@ let materialize_runtime_config_text ~config_path content =
 let runtime_config_commit_order = ref Int64.zero
 let runtime_config_commit_order_mu = Stdlib.Mutex.create ()
 
-let committed_receipt ~observation ~durability =
+let committed_receipt ~observation ~durability ~exact_output_registry =
   let order =
     (* Process-global publication order spans every runtime.toml authority.
        The file lock is path-scoped, so distinct config paths can commit on
@@ -2562,6 +3044,7 @@ let committed_receipt ~observation ~durability =
   ; durability
   ; order = Config_commit_order order
   ; lock_warnings = []
+  ; exact_output_registry
   }
 ;;
 
@@ -2627,6 +3110,7 @@ let with_manifest_config_lock ~runtime_config_path ~manifest_path action =
 let runtime_config_atomic_failure
     ~replacement_visible
     ~observation
+    ~exact_output_registry
     (failure : Fs_compat.atomic_replace_failure)
   =
   if replacement_visible
@@ -2635,7 +3119,8 @@ let runtime_config_atomic_failure
     Ok
       (committed_receipt
          ~observation
-         ~durability:(Durability_unconfirmed { detail }))
+         ~durability:(Durability_unconfirmed { detail })
+         ~exact_output_registry)
   else
     match failure.Fs_compat.exception_ with
     | Eio.Cancel.Cancelled _ ->
@@ -2717,15 +3202,613 @@ let validate_fusion_change ~config_path content =
          ^ String.concat "; " (List.map Fusion_config.config_error_message errors)))
 ;;
 
+(* A place in runtime.toml that names a lane. [resolve_assignment] reads a lane
+   before a runtime of the same id, and each of these is resolved that way: a
+   keeper's route is its assignment or, without one, the default, and a Fusion
+   run resolves each seat when it reaches it. [\[runtime\].media_failover] and
+   [verifier_exact] slots name runtimes only and never reach a lane, so they
+   are not here. *)
+type route_reference =
+  | Keeper_assignment of string
+  | Default_runtime
+  | Fusion_seat of
+      { preset : string
+      ; seat : Fusion_policy.seat_kind
+      }
+
+let route_reference_to_string = function
+  | Keeper_assignment keeper_name -> Printf.sprintf "[runtime.assignments].%s" keeper_name
+  | Default_runtime -> "[runtime].default, which every keeper without an assignment walks"
+  | Fusion_seat { preset; seat } ->
+    Printf.sprintf "[fusion.presets.%s].%s" preset (Fusion_policy.seat_kind_key seat)
+;;
+
+(* How a run fails at a seat on [route] under the config [validated], or
+   [None] when the seat resolves. The same order as [resolve_assignment] and
+   [Fusion_seat.resolve]: trimmed, a declared lane before a runtime, and a
+   runtime the model catalog cannot serve -- dropped from [validated] -- is
+   [Route_unavailable] rather than [Unknown_route]. The payloads are the ones
+   a run records. *)
+let fusion_seat_failure
+    ((runtimes, _, _, _, _, lanes, _, _), _, startup_degradation, _)
+    route
+  : Fusion_types.judge_failure option
+  =
+  let id = String.trim route in
+  if Option.is_some (find_declared_lane lanes id)
+     || List.exists (fun (runtime : t) -> String.equal runtime.id id) runtimes
+  then None
+  else (
+    match
+      Option.bind startup_degradation (fun (degradation : startup_degradation) ->
+        List.find_opt
+          (fun (missing : missing_catalog_model) -> String.equal missing.runtime_id id)
+          degradation.report.missing_models)
+    with
+    | Some missing ->
+      Some (Fusion_types.Route_unavailable (missing_catalog_model_to_string missing))
+    | None -> Some (Fusion_types.Unknown_route route))
+;;
+
+(* The Fusion seats of [toml] that the config [validated] would not resolve,
+   each with how a run would fail there. *)
+let unresolved_fusion_seats validated toml =
+  Result.map
+    (List.filter_map (fun (preset, seat, route) ->
+       Option.map
+         (fun failure -> (preset, seat, route), failure)
+         (fusion_seat_failure validated route)))
+    (Fusion_config.seat_routes_of_toml toml)
+;;
+
+(* Two seats are the same seat when a run would read them the same: same
+   preset, same kind, same trimmed route. *)
+let same_seat (preset, seat, route) (preset', seat', route') =
+  String.equal preset preset'
+  && Fusion_policy.equal_seat_kind seat seat'
+  && String.equal (String.trim route) (String.trim route')
+;;
+
+(* A save must not leave a Fusion seat on a route a run cannot resolve:
+   every run of that preset would fail there, with [unknown_route] when no
+   lane or runtime has the name and [route_unavailable] when it names a
+   runtime the model catalog cannot serve. Seats are checked whether or not
+   [fusion] is enabled, as the lane writers read them. Every writer meets the
+   seats here -- the lane editor, the Fusion editor, the raw endpoint -- so
+   removing [\[runtime.lanes.<id>\]] by hand is refused the same as through
+   the lane editor.
+
+   A seat that already did not resolve in the file on disk is not judged, the
+   way [validate_fusion_change] leaves an unchanged [fusion] alone, so a broken
+   seat does not block an unrelated save. Seats are matched by [same_seat],
+   so re-spacing a broken route is not a new break. The file on disk is read
+   only when the new text has a seat that does not resolve; a file that cannot
+   be read or does not load counts as resolving nothing, so every such seat is
+   judged.
+
+   Seats that cannot be read (a value of the wrong TOML type) pass here, and
+   that is not a gap: [Fusion_config.of_toml] reads every value the seat
+   reader does, so [validate_fusion_change] has already refused such a
+   [fusion] if this save changes it, and an unchanged one is the table on
+   disk. *)
+let validate_fusion_seats ~config_path ~validated content =
+  let* toml =
+    Result.map_error
+      (fun detail -> "runtime config parse failed: " ^ detail)
+      (Otoml.Parser.from_string_result content)
+  in
+  match unresolved_fusion_seats validated toml with
+  | Error _ | Ok [] -> Ok ()
+  | Ok unresolved ->
+    let on_disk =
+      match load_file_result config_path with
+      | Error _ -> []
+      | Ok text ->
+        (match
+           ( Otoml.Parser.from_string_result text
+           , parse_and_validate_config_text ~config_path text )
+         with
+         | Ok previous_toml, Ok previous ->
+           (match unresolved_fusion_seats previous previous_toml with
+            | Ok seats -> List.map fst seats
+            | Error _ -> [])
+         | Error _, _ | _, Error _ -> [])
+    in
+    let newly =
+      List.fold_left
+        (fun found ((seat, _) as unresolved) ->
+           if List.exists (same_seat seat) on_disk
+              || List.exists (fun (seen, _) -> same_seat seat seen) found
+           then found
+           else found @ [ unresolved ])
+        []
+        unresolved
+    in
+    (match newly with
+     | [] -> Ok ()
+     | _ :: _ ->
+       Error
+         (Printf.sprintf
+            "every Fusion seat, whether or not [fusion] is enabled, must name a \
+             declared lane or a runtime the model catalog can serve; a run fails \
+             at %s"
+            (String.concat
+               ", "
+               (List.map
+                  (fun ((preset, seat, route), failure) ->
+                     Printf.sprintf
+                       "%s, which names %S, with %s"
+                       (route_reference_to_string (Fusion_seat { preset; seat }))
+                       route
+                       (Fusion_types.judge_failure_tag failure))
+                  newly))))
+;;
+
 (* The save precondition, shared by the writer and the preview endpoint, so a
    [can_save] preview cannot diverge from what [commit_runtime_config_text]
    enforces. Boot does not come through here: it loads through
    [load_list_internal], and a broken [fusion] must not stop every Keeper turn
    with it; Fusion reports its own section per call. *)
+let exact_slot_body_deadline_gaps_of_validated
+    ((runtimes, _, _, _, _, _, _, _), exact_output_lane_decls, _, _)
+  =
+  exact_slot_body_deadline_gaps_of
+    ~target_source:(exact_output_target_source ())
+    runtimes
+    exact_output_lane_decls
+;;
+
+(* Rule 3 at save judges the change, as [validate_fusion_change] does: a gap
+   the file on disk already has does not block a keeper assignment, a
+   default-runtime change or a setup commit, because boot already keeps it as
+   degraded and says so. Only a gap this text adds -- a (lane, slot,
+   provider) the on-disk text does not have -- is refused, so an operator
+   editing lanes is told before the write rather than after the next
+   restart. A file on disk that cannot be read or does not validate offers
+   nothing to compare against, so every gap in the new text counts as added,
+   the same way [validate_fusion_change] judges a fusion table whose
+   previous text it cannot read. *)
+let validate_exact_slot_body_deadline_change ~config_path ~validated =
+  let on_disk_gaps =
+    match load_file_result config_path with
+    | Error _ -> []
+    | Ok text ->
+      (match parse_and_validate_config_text ~config_path text with
+       | Ok previous -> exact_slot_body_deadline_gaps_of_validated previous
+       | Error _ -> [])
+  in
+  match
+    List.filter
+      (fun gap -> not (List.exists (same_exact_slot_body_deadline_gap gap) on_disk_gaps))
+      (exact_slot_body_deadline_gaps_of_validated validated)
+  with
+  | [] -> Ok ()
+  | added -> Error (Exact_slot_body_deadlines_absent added)
+;;
+
 let validate_save_text ~config_path content =
   let* validated = parse_and_validate_config_text ~config_path content in
+  let* () =
+    validate_exact_slot_body_deadline_change ~config_path ~validated
+    |> Result.map_error (to_diagnostic_text ~config_path)
+  in
   let* () = validate_fusion_change ~config_path content in
+  let* () = validate_fusion_seats ~config_path ~validated content in
   Ok validated
+;;
+
+(* Rule 3 (#38779): each exact slot whose HTTP provider declares no
+   [exact-body-timeout-s] is left out of its lane, one line per slot naming
+   the lane, slot, provider and the key to add, and one line per lane that
+   leaves empty. The same lists are in the startup degradation report. Boot
+   logs it before publishing, so it is said even when publication fails; a
+   config commit logs it after replacing or keeping the registry, because a
+   save may keep a gap the file already had. *)
+let warn_exact_slot_degradation (degradation : exact_slot_degradation) =
+  List.iter
+    (fun gap ->
+       Log.Server.warn
+         "exact_output: slot left out until its provider declares a whole-request deadline: %s (connect-timeout-s ends at the response headers and does not bound the body)"
+         (exact_slot_body_deadline_gap_to_string gap))
+    degradation.gaps;
+  List.iter
+    (fun lane_id ->
+       Log.Server.warn
+         "exact_output: lane %S is unavailable: every slot is left out because its provider declares no %s, and the lane declares no cli_slots"
+         lane_id
+         Runtime_schema.exact_body_timeout_s_key)
+    degradation.emptied_lane_ids
+;;
+
+let warn_rejected_exact_output_slots registry =
+  (* A slot left out for rule 3 is rejected here too, because its target was
+     never handed to the resolver. Its cause is already named, one WARN per
+     slot, by [warn_exact_slot_degradation]; diagnosing it again would
+     call it a subscription CLI or a typo. It is counted in the summary. *)
+  let gaps = exact_slot_body_deadline_gaps () in
+  let left_out_for_deadline (slot : Runtime_exact_output_registry.rejected_slot) =
+    List.exists
+      (fun (gap : exact_slot_body_deadline_gap) ->
+         String.equal gap.lane_id slot.lane_id && String.equal gap.slot_id slot.slot_id)
+      gaps
+  in
+  let all_rejected = Runtime_exact_output_registry.rejected_slots registry in
+  let deadline_rejected = List.filter left_out_for_deadline all_rejected in
+  let rejected =
+    List.filter (fun slot -> not (left_out_for_deadline slot)) all_rejected
+  in
+  let configured_runtime slot_id =
+    Option.map
+      (fun (rt : t) ->
+         rt.provider.Runtime_schema.id, rt.model.Runtime_schema.api_name)
+      (get_runtime_by_id slot_id)
+  in
+  let diagnoses =
+    List.map
+      (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
+         ( slot
+         , Runtime_exact_output_registry.diagnose_rejected_slot
+             registry
+             slot
+             ~configured_runtime ))
+      rejected
+  in
+  List.iter
+    (fun ((slot : Runtime_exact_output_registry.rejected_slot), diagnosis) ->
+       match diagnosis with
+       | Runtime_exact_output_registry.Declared_target_binding_rejected ->
+         Log.Server.warn
+           "exact_output: lane %S slot %d (%S) ignored because the binding it names resolved to no AGENT_CORE catalog row (see the target binding report above); an endpoint the install wizard created can never match one, so point the slot at a binding the catalog knows or add the row"
+           slot.lane_id
+           slot.position
+           slot.slot_id
+       | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name }
+         when String.equal slot.lane_id (Standalone_lane.to_id Standalone_lane.Verifier) ->
+         (* verifier_exact admits slots here, and judgement then admits each
+            id as a configured direct runtime
+            (verifier_exact_slot_admission) and dispatches that id
+            alone, so its ids must exist in both registries; #32653 measured
+            the catalog-id form failing at dispatch 27 times on 2026-08-29. *)
+         Log.Server.warn
+           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by runtime id, so a slot must resolve as both a runtime and a target, and a subscription CLI resolves only as a runtime; give the lane an HTTP binding for model %S"
+           slot.lane_id
+           slot.position
+           slot.slot_id
+           provider_id
+           api_name
+           api_name
+       | Runtime_exact_output_registry.Configured_runtime_only { provider_id; api_name } ->
+         Log.Server.warn
+           "exact_output: lane %S slot %d (%S) names a binding (provider %S, api-name %S) that is not an exact-output target; this lane dispatches by admitted target, and a subscription CLI has no endpoint to resolve against the catalog, so name an HTTP binding for model %S"
+           slot.lane_id
+           slot.position
+           slot.slot_id
+           provider_id
+           api_name
+           api_name
+       | Runtime_exact_output_registry.Unknown_to_both_registries ->
+         Log.Server.warn
+           "exact_output: lane %S slot %d (%S) ignored because no enabled binding carries that id; the binding is disabled, it was removed, or the id is mistyped"
+           slot.lane_id
+           slot.position
+           slot.slot_id)
+    diagnoses;
+  (* One consolidated line at ERROR, because per-slot WARNs read as
+     tolerable degradation and get discounted: four lanes carried retired
+     targets for days on 2026-08-28 while the warnings repeated unread. The
+     count per cause and the lane list make the standing config debt visible
+     once per publish. *)
+  (match all_rejected with
+   | [] -> ()
+   | all_rejected ->
+     let lanes =
+       all_rejected
+       |> List.map (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
+              slot.lane_id)
+       |> List.sort_uniq String.compare
+     in
+     let count predicate =
+       List.length (List.filter (fun (_, diagnosis) -> predicate diagnosis) diagnoses)
+     in
+     Log.Server.error
+       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d naming no enabled binding, %d naming a binding that does no exact output, %d whose binding resolved to no catalog row, %d whose provider declares no %s — fix runtime.toml"
+       (List.length all_rejected)
+       (List.length lanes)
+       (String.concat ", " lanes)
+       (count (function
+          | Runtime_exact_output_registry.Unknown_to_both_registries -> true
+          | Runtime_exact_output_registry.Configured_runtime_only _
+          | Runtime_exact_output_registry.Declared_target_binding_rejected -> false))
+       (count (function
+          | Runtime_exact_output_registry.Configured_runtime_only _ -> true
+          | Runtime_exact_output_registry.Unknown_to_both_registries
+          | Runtime_exact_output_registry.Declared_target_binding_rejected -> false))
+       (count (function
+          | Runtime_exact_output_registry.Declared_target_binding_rejected -> true
+          | Runtime_exact_output_registry.Unknown_to_both_registries
+          | Runtime_exact_output_registry.Configured_runtime_only _ -> false))
+       (List.length deadline_rejected)
+       Runtime_schema.exact_body_timeout_s_key)
+;;
+
+(* Publication carries [verifier_exact] cli ids verbatim, because only
+   [Runtime] holds the runtime table that answers whether an official client
+   can judge. A slot that cannot leaves the lane shorter than its declaration
+   instead of failing it (#37179), so the boot report has to name it or the
+   lane reads as configured. *)
+let report_verifier_exact_lane_admission () =
+  match verifier_exact_lane_resolution () with
+  | Error detail ->
+    (* [verifier_exact] is not a mandatory lane, so an unconfigured one is a
+       supported shape; completion review reports the same sentence when it
+       refuses admission. *)
+    Log.Server.info
+      "exact_output: lane %S cannot judge: %s"
+      (Standalone_lane.to_id Standalone_lane.Verifier)
+      detail
+  | Ok (lane : verifier_exact_lane_slots) ->
+    List.iter
+      (fun (rejection : verifier_slot_rejection) ->
+         Log.Server.warn
+           "exact_output: lane %S %s; the lane runs its remaining slots without it"
+           (Standalone_lane.to_id Standalone_lane.Verifier)
+           (verifier_slot_rejection_to_string rejection))
+      lane.slot_rejections;
+    (match lane.admitted_catalog_slot_ids, lane.admitted_cli_slot_ids with
+     | [], [] ->
+       Log.Server.error
+         "exact_output: lane %S can judge through none of its %d declared slot(s); completion review refuses admission until runtime.toml names a slot it can judge"
+         (Standalone_lane.to_id Standalone_lane.Verifier)
+         (List.length lane.slot_rejections)
+     | [], _ :: _ | _ :: _, _ -> ())
+;;
+
+let warn_rejected_exact_output_bindings registry =
+  List.iter
+    (fun (binding : Agent_core.Exact_output.rejected_target_binding) ->
+       Log.Server.warn
+         "exact_output: target %S excluded from the frozen resolver because its %s binding is missing; lane admission will decide whether required targets remain"
+         binding.target_ref
+         (Runtime_exact_output_registry.binding_component_to_string binding.component))
+    (Runtime_exact_output_registry.rejected_target_bindings registry)
+;;
+
+let warn_optional_exact_output_lane registry ~(lane : exact_lane) ~feature =
+  let lane_id = Standalone_lane.to_id lane in
+  match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+  | Ok { selected_slots = _ :: _; _ } -> ()
+  | Ok { cli_slots = _ :: _; _ } when exact_lane_supports_cli_tail lane -> ()
+  | Ok { selected_slots = []; _ }
+  | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
+    Log.Server.warn
+      "exact_output: %s is degraded because lane %S has no admitted target in the frozen catalog"
+      feature
+      lane_id
+  | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
+    Log.Server.warn
+      "exact_output: %s is degraded until [runtime.exact_output_lanes.%s] is configured with AGENT_CORE target refs"
+      feature
+      lane_id
+;;
+
+(* What boot logs after it publishes a registry, logged again after every
+   config commit that replaces it, so a saved slot the new registry drops is
+   named where an operator reads the boot report. *)
+let report_exact_output_registry registry =
+  warn_rejected_exact_output_bindings registry;
+  warn_rejected_exact_output_slots registry;
+  report_verifier_exact_lane_admission ();
+  warn_optional_exact_output_lane registry ~lane:Librarian ~feature:"librarian";
+  warn_optional_exact_output_lane registry ~lane:Verifier ~feature:"completion authority"
+;;
+
+(* How a config commit meets the exact-output registry. *)
+type exact_output_commit_plan =
+  | Commit_without_registry
+  | Commit_with_registry of
+      Runtime_exact_output_registry.prepared_replacement
+      * exact_output_registry_application
+
+let prepare_exact_output_replacement ~runtimes ~lanes =
+  let catalog = exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes in
+  Runtime_exact_output_registry.prepare_replacement
+    ~lanes
+    ~excused_lane_ids:catalog.catalog_exact_slots.emptied_lane_ids
+    ~load_resolver_snapshot:(fun () ->
+      load_exact_output_resolver_snapshot catalog.catalog_input)
+  |> Result.map (fun prepared -> prepared, catalog.catalog_origin)
+;;
+
+(* Whether the text on disk -- the one this commit replaces -- rebuilds the
+   registry. A file that cannot be read or does not load rebuilds nothing. *)
+let on_disk_text_rebuilds_exact_output_registry ~config_path =
+  match load_file_result config_path with
+  | Error (_ : string) -> false
+  | Ok text ->
+    (match parse_and_validate_config_text ~config_path text with
+     | Error (_ : string) -> false
+     | Ok (loaded, lanes, _, _) ->
+       let runtimes, _, _, _, _, _, _, _ = loaded in
+       Result.is_ok (prepare_exact_output_replacement ~runtimes ~lanes))
+;;
+
+(* The registry is rebuilt from the runtimes the committed text loads, the
+   same derivation boot publishes from, so a saved binding reaches exact
+   requests with the write rather than at the next restart (#38779).
+
+   A text the registry cannot be rebuilt from is refused only when the text it
+   replaces can be: then the fault is this text's. When the file on disk
+   cannot be rebuilt either -- the replacement catalog moved, a hand-edited
+   binding the resolver refuses -- the fault predates this commit, and
+   refusing would stop every keeper assignment and credential save until
+   someone edits the file by hand, the way [validate_fusion_change] leaves a
+   broken [fusion] alone. That commit goes through and keeps the published
+   registry, and the receipt says it was kept and why. Pure: the preview runs
+   it as well. *)
+let plan_exact_output_commit ~config_path ~runtimes ~lanes =
+  match prepare_exact_output_replacement ~runtimes ~lanes with
+  | Error Runtime_exact_output_registry.Registry_not_published ->
+    Ok Commit_without_registry
+  | Ok (prepared, origin) ->
+    (match Runtime_exact_output_registry.replacement_outcome prepared with
+     | Runtime_exact_output_registry.Registry_replaced ->
+       Ok (Commit_with_registry (prepared, Exact_output_registry_replaced { origin }))
+     | Runtime_exact_output_registry.Registry_unpublished ->
+       Ok (Commit_with_registry (prepared, Exact_output_registry_unpublished)))
+  | Error reason ->
+    if on_disk_text_rebuilds_exact_output_registry ~config_path
+    then
+      Error
+        ("exact-output registry replacement rejected: "
+         ^ Runtime_exact_output_registry.publication_error_to_string reason)
+    else (
+      match Runtime_exact_output_registry.prepare_retention () with
+      | None -> Ok Commit_without_registry
+      | Some prepared ->
+        Ok (Commit_with_registry (prepared, Exact_output_registry_kept { reason })))
+;;
+
+let exact_output_registry_application_to_string = function
+  | Exact_output_registry_replaced { origin = Runtime_binding_targets } ->
+    "replaced; targets are the runtime bindings"
+  | Exact_output_registry_replaced { origin = Replacement_catalog_targets { path } } ->
+    Printf.sprintf
+      "replaced; targets come from the full replacement catalog %s, so binding \
+       fields such as exact-body-timeout-s do not reach them"
+      path
+  | Exact_output_registry_unpublished ->
+    "unpublished; exact lanes stay unavailable until a restart publishes one"
+  | Exact_output_registry_kept { reason } ->
+    "kept as published; neither this text nor the file it replaced rebuilds it, \
+     so the file on disk publishes no registry at the next boot: "
+    ^ Runtime_exact_output_registry.publication_error_to_string reason
+;;
+
+(* After a commit that replaced or kept the registry: what the committed
+   text leaves out under rule 3 ([exact_slot_degradation], just recorded by
+   [set_loaded]), then what the published registry leaves out. For a kept
+   registry that second report is about the registry still serving, which no
+   longer describes the file. *)
+let report_published_after_commit ~path =
+  warn_exact_slot_degradation (exact_slot_degradation ());
+  match Runtime_exact_output_registry.current () with
+  | Ok registry -> report_exact_output_registry registry
+  | Error error ->
+    Log.Misc.warn
+      "exact_output: registry after committing %s cannot be reported: %s"
+      path
+      (Runtime_exact_output_registry.publication_error_to_string error)
+;;
+
+(* The registry a kept commit leaves serving was built from an earlier text,
+   so its rejected slots are listed, not diagnosed: the diagnosis reads the
+   committed text's runtimes and gaps, which that registry was not built
+   from. *)
+let report_kept_registry ~path =
+  warn_exact_slot_degradation (exact_slot_degradation ());
+  match Runtime_exact_output_registry.current () with
+  | Ok registry ->
+    let rejected = Runtime_exact_output_registry.rejected_slots registry in
+    Log.Misc.warn
+      "exact_output: the kept registry, built from a text earlier than %s, leaves out %d slot(s)%s; they are not diagnosed against the committed text"
+      path
+      (List.length rejected)
+      (match rejected with
+       | [] -> ""
+       | _ :: _ ->
+         " ("
+         ^ String.concat
+             ", "
+             (List.map
+                (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
+                   slot.lane_id ^ "/" ^ slot.slot_id)
+                rejected)
+         ^ ")")
+  | Error error ->
+    Log.Misc.warn
+      "exact_output: the kept registry after committing %s cannot be reported: %s"
+      path
+      (Runtime_exact_output_registry.publication_error_to_string error)
+;;
+
+let report_exact_output_commit ~path application =
+  match application with
+  | Exact_output_registry_replaced _ -> report_published_after_commit ~path
+  | Exact_output_registry_unpublished ->
+    (* Boot already warned that no registry is published; a commit does not
+       change that, and processes that never publish one (the TUI) commit too. *)
+    Log.Misc.info
+      "exact_output: %s committed; registry %s"
+      path
+      (exact_output_registry_application_to_string application)
+  | Exact_output_registry_kept _ ->
+    Log.Misc.warn
+      "exact_output: %s committed; registry %s"
+      path
+      (exact_output_registry_application_to_string application);
+    report_kept_registry ~path
+;;
+
+(* What the exact-output reports are about: the published registry's rejected
+   slots and bindings, the loaded text's gaps and emptied lanes, and the stale
+   reason. A commit logs the reports only when this changed, so a keeper
+   assignment save does not repeat the whole per-slot report. *)
+let exact_output_report_view () =
+  let registry =
+    match Runtime_exact_output_registry.current () with
+    | Ok registry ->
+      Some
+        ( List.sort
+            compare
+            (List.map
+               (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
+                  slot.lane_id, slot.slot_id)
+               (Runtime_exact_output_registry.rejected_slots registry))
+        , List.sort
+            String.compare
+            (List.map
+               (fun (binding : Agent_core.Exact_output.rejected_target_binding) ->
+                  binding.target_ref)
+               (Runtime_exact_output_registry.rejected_target_bindings registry)) )
+    | Error (_ : Runtime_exact_output_registry.publication_error) -> None
+  in
+  let degradation = exact_slot_degradation () in
+  ( registry
+  , List.sort
+      compare
+      (List.map
+         (fun (gap : exact_slot_body_deadline_gap) -> gap.lane_id, gap.slot_id, gap.provider_id)
+         degradation.gaps)
+  , List.sort String.compare degradation.emptied_lane_ids
+  , Option.map
+      (fun (stale : exact_output_registry_stale) -> stale.stale_reason)
+      (exact_output_registry_stale ()) )
+;;
+
+(* After a commit's write is visible: record whether the registry now serving
+   is stale, then report when anything the reports are about changed. A kept
+   registry stays stale since the first commit that kept it. *)
+let record_exact_output_commit ~path ~previous_view (receipt : config_commit_receipt) =
+  let application = receipt.exact_output_registry in
+  Atomic.set
+    exact_output_registry_stale_ref
+    (match application with
+     | Exact_output_registry_kept { reason } ->
+       let stale_since_commit =
+         match exact_output_registry_stale () with
+         | Some previous -> previous.stale_since_commit
+         | None -> receipt.order
+       in
+       Some { stale_reason = reason; stale_since_commit }
+     | Exact_output_registry_replaced _ | Exact_output_registry_unpublished -> None);
+  if exact_output_report_view () <> previous_view
+  then report_exact_output_commit ~path application
+  else
+    Log.Misc.debug
+      "exact_output: %s committed; registry %s; nothing it leaves out changed"
+      path
+      (exact_output_registry_application_to_string application);
+  receipt
 ;;
 
 let commit_runtime_config_text
@@ -2737,52 +3820,53 @@ let commit_runtime_config_text
   let* loaded, exact_output_lanes, startup_degradation, declared_media_failover =
     validate_save_text ~config_path:path content
   in
-  match
-    Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
-  with
-  | Error Runtime_exact_output_registry.Registry_not_published ->
+  let previous_view = exact_output_report_view () in
+  let committed = record_exact_output_commit ~path ~previous_view in
+  let publish_runtimes () =
+    set_loaded
+      ?startup_degradation
+      ~declared_media_failover
+      ~config_path:path
+      ~exact_output_lane_decls:exact_output_lanes
+      loaded
+  in
+  let runtimes, _, _, _, _, _, _, _ = loaded in
+  let* plan =
+    plan_exact_output_commit ~config_path:path ~runtimes ~lanes:exact_output_lanes
+  in
+  match plan with
+  | Commit_without_registry ->
+    let exact_output_registry = Exact_output_registry_unpublished in
     (match replace_file path content with
      | Ok () ->
-       set_loaded
-         ?startup_degradation
-         ~declared_media_failover
-         ~config_path:path
-         loaded;
-       Ok (committed_receipt ~observation ~durability:Durable)
+       publish_runtimes ();
+       Ok
+         (committed
+            (committed_receipt ~observation ~durability:Durable ~exact_output_registry))
      | Error (failure : Fs_compat.atomic_replace_failure) ->
        (match failure.stage with
         | Fs_compat.Before_rename ->
           runtime_config_atomic_failure
             ~replacement_visible:false
             ~observation
+            ~exact_output_registry
             failure
         | Fs_compat.After_rename ->
-          set_loaded
-            ?startup_degradation
-            ~declared_media_failover
-            ~config_path:path
-            loaded;
+          publish_runtimes ();
           runtime_config_atomic_failure
             ~replacement_visible:true
             ~observation
-            failure))
-  | Error error ->
-    Error
-      ("exact-output registry replacement rejected: "
-       ^ Runtime_exact_output_registry.publication_error_to_string error)
-  | Ok prepared_replacement ->
+            ~exact_output_registry
+            failure
+          |> Result.map committed))
+  | Commit_with_registry (prepared_replacement, exact_output_registry) ->
     (match
        Runtime_exact_output_registry.transact_replacement
          prepared_replacement
          ~apply_write:
            (runtime_config_write_outcome
               ~replace_file
-              ~on_replacement_visible:(fun () ->
-                set_loaded
-                  ?startup_degradation
-                  ~declared_media_failover
-                  ~config_path:path
-                  loaded)
+              ~on_replacement_visible:publish_runtimes
               ~path
               content)
      with
@@ -2794,16 +3878,21 @@ let commit_runtime_config_text
        runtime_config_atomic_failure
          ~replacement_visible:false
          ~observation
+         ~exact_output_registry
          failure
      | Ok (Runtime_exact_output_registry.Committed `Durable) ->
-       Ok (committed_receipt ~observation ~durability:Durable)
+       Ok
+         (committed
+            (committed_receipt ~observation ~durability:Durable ~exact_output_registry))
      | Ok
          (Runtime_exact_output_registry.Committed
            (`Durability_unconfirmed failure)) ->
        runtime_config_atomic_failure
          ~replacement_visible:true
          ~observation
-         failure)
+         ~exact_output_registry
+         failure
+       |> Result.map committed)
 ;;
 
 let save_config_text_with_replace_file
@@ -2847,8 +3936,14 @@ let edit_config_text ?runtime_config_path edit =
 
 let validate_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
-  let* _loaded, _exact_output_lanes, _degradation, _declared_media_failover =
+  let* loaded, exact_output_lanes, _degradation, _declared_media_failover =
     validate_save_text ~config_path:path content
+  in
+  let runtimes, _, _, _, _, _, _, _ = loaded in
+  (* The commit's registry decision, without the write, so a preview cannot
+     promise a save the commit then refuses. *)
+  let* (_ : exact_output_commit_plan) =
+    plan_exact_output_commit ~config_path:path ~runtimes ~lanes:exact_output_lanes
   in
   Ok ()
 ;;
@@ -3210,18 +4305,20 @@ let set_runtime_default ?runtime_config_path ~runtime_id () =
    quotes. Either spelling names the same table to [Toml_line_editor.is_table],
    which compares the key path the grammar reads, so the choice is only what
    the operator sees in the file. *)
-let lane_table_path lane_id =
+let table_path_under prefix id =
   let bare =
     String.for_all
       (function 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' -> true | _ -> false)
-      lane_id
+      id
   in
-  if bare && not (String.equal lane_id "")
-  then Printf.sprintf "runtime.lanes.%s" lane_id
+  if bare && not (String.equal id "")
+  then Printf.sprintf "%s.%s" prefix id
   else
     (* [escape_string] escapes the contents; the quotes are the caller's. *)
-    Printf.sprintf "runtime.lanes.\"%s\"" (Toml_line_editor.escape_string lane_id)
+    Printf.sprintf "%s.\"%s\"" prefix (Toml_line_editor.escape_string id)
 ;;
+
+let lane_table_path lane_id = table_path_under "runtime.lanes" lane_id
 
 let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bind_imp = false) ~runtime_id () =
   let runtime_id = String.trim runtime_id in
@@ -3264,6 +4361,29 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           | Runtime_execution.Antigravity_cli _ -> [], [ runtime_id ]
         in
         let next = update_runtime_scalar_text content ~key:"default" ~runtime_id:(Some runtime_id) in
+        (* The HTTP runtime chosen here becomes an exact-output slot below, and
+           a slot whose provider declares no [exact-body-timeout-s] cannot be
+           saved (rule 3, #38779). A connection an older setup wrote has none,
+           and rendering it again yields the same id, so the batch keeps the
+           old table as it is. Setup is what points the lanes at it, so setup
+           writes the key, with the value it writes on a new connection. *)
+        let next =
+          match
+            runtime.execution,
+            runtime.provider.Runtime_schema.exact_body_timeout_s,
+            exact_output_target_source ()
+          with
+          | Runtime_execution.Agent_core _, None, Runtime_binding_targets ->
+            Toml_line_editor.edit_table_float next
+              ~path:(table_path_under "providers" runtime.provider.Runtime_schema.id)
+              ~key:Runtime_schema.exact_body_timeout_s_key
+              ~value:Runtime_setup_spec.setup_exact_body_timeout_s
+          | Runtime_execution.Agent_core _, Some (_ : float), (Runtime_binding_targets | Replacement_catalog_targets _)
+          | Runtime_execution.Agent_core _, None, Replacement_catalog_targets _
+          | ( Runtime_execution.Codex_app_server _
+            | Runtime_execution.Claude_code _
+            | Runtime_execution.Antigravity_cli _ ), (Some _ | None), (Runtime_binding_targets | Replacement_catalog_targets _) -> next
+        in
         let next =
           Toml_line_editor.edit_table_multiline_array next
             ~path:(lane_table_path runtime_id) ~key:"candidates" ~values:candidate_ids
@@ -3290,7 +4410,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
         let declared_verifier_lane =
           List.find_opt
             (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-               String.equal lane.id verifier_exact_lane_id)
+               String.equal lane.id (Standalone_lane.to_id Verifier))
             config.exact_output_lane_decls
         in
         let declared_lane_ids =
@@ -3335,7 +4455,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
         let next =
           List.fold_left
             (fun content lane ->
-              let lane_id = exact_lane_id lane in
+              let lane_id = Standalone_lane.to_id lane in
               let path = "runtime.exact_output_lanes." ^ lane_id in
               let lane_slots, lane_cli_slots = lane_slot_values lane in
               if lane_slots = [] && lane_cli_slots = []
@@ -3348,7 +4468,11 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
             next
             (* Shared-memory curation is explicitly configured, not enabled by
                provisioning a general-purpose runtime. *)
-            (List.filter (function Workspace_curator -> false | _ -> true) all_exact_lanes)
+            (List.filter
+               (function
+                 | Workspace_curator -> false
+                 | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true)
+               Standalone_lane.all)
         in
         commit_runtime_config_text ~path next)
     in
@@ -3444,40 +4568,107 @@ let create_runtime_lane ?runtime_config_path ~lane_id ~runtime_ids () =
     else Ok (write_lane_candidates ~content ~lane_id ~runtime_ids))
 ;;
 
-(* What still reaches a lane through its id. A keeper's route is its
-   assignment or, without one, the default, and [resolve_assignment] reads a
-   lane before a runtime of the same id -- so removing the lane would hand the
-   keeper the bare runtime of that id, or nothing at all. media_failover and
-   verifier_exact slots name runtimes only and never reach a lane. *)
-type lane_reference =
-  | Keeper_assignment of string
-  | Default_runtime
-
-let lane_reference_to_string = function
-  | Keeper_assignment keeper_name -> Printf.sprintf "[runtime.assignments].%s" keeper_name
-  | Default_runtime -> "[runtime].default, which every keeper without an assignment walks"
+(* Every place the config names a lane, with the route it names. The Fusion
+   seats come from [Fusion_config.seat_routes_of_toml], which reads them
+   without validating the presets. *)
+let route_references (config : Runtime_schema.config) seats =
+  List.map (fun (keeper_name, target) -> Keeper_assignment keeper_name, target)
+    config.keeper_assignments
+  @ (match config.default_runtime_id with
+     | Some id -> [ Default_runtime, id ]
+     | None -> [])
+  @ List.map
+      (fun (preset, seat, route) -> Fusion_seat { preset; seat }, String.trim route)
+      seats
 ;;
 
-let lane_references (config : Runtime_schema.config) ~lane_id =
-  let names id = String.equal id lane_id in
-  let assignments =
+(* A preset naming the lane at two panel seats is one reference to report. *)
+let lane_references config seats ~lane_id =
+  List.fold_left
+    (fun found (reference, route) ->
+       if String.equal route lane_id && not (List.mem reference found)
+       then found @ [ reference ]
+       else found)
+    []
+    (route_references config seats)
+;;
+
+let lane_edit_toml content =
+  Result.map_error
+    (fun detail -> "runtime config parse failed: " ^ detail)
+    (Otoml.Parser.from_string_result content)
+;;
+
+(* The seats are read from the text under the lock, without validating the
+   presets: a preset that does not validate still names what it names, so an
+   error in another preset does not block a lane edit. Only a [fusion] whose
+   values have the wrong TOML type hides its seats, and then a lane edit
+   refuses rather than leave them pointing at a name that is gone. *)
+let lane_fusion_seats toml ~lane_id =
+  Fusion_config.seat_routes_of_toml toml
+  |> Result.map_error (fun error ->
+    Printf.sprintf
+      "lane %S cannot be edited while the seats of [fusion] cannot be read (%s): \
+       they may name the lane. Fix [fusion] first"
+      lane_id
+      (Fusion_config.config_error_message error))
+;;
+
+(* A seat is a route, so a rename rewrites every preset with a seat on the
+   lane through the Fusion writer, in the same text as the header. The writer
+   takes validated presets, so this needs [fusion] to load -- but only when a
+   seat names the lane; otherwise [fusion] is not read. A preset the writer
+   cannot address refuses the rename, and the refusal says the lane rename is
+   what reached it. *)
+let rename_fusion_seats text toml references ~lane_id ~new_lane_id =
+  let seat_presets =
     List.filter_map
-      (fun (keeper_name, target) ->
-         if names target then Some (Keeper_assignment keeper_name) else None)
-      config.keeper_assignments
+      (function
+        | Fusion_seat { preset; _ } -> Some preset
+        | Keeper_assignment _ | Default_runtime -> None)
+      references
   in
-  let default =
-    match config.default_runtime_id with
-    | Some id when names id -> [ Default_runtime ]
-    | Some _ | None -> []
-  in
-  assignments @ default
+  match seat_presets with
+  | [] -> Ok text
+  | _ :: _ ->
+    let* (fusion : Fusion_policy.t) =
+      Fusion_config.of_toml toml
+      |> Result.map_error (fun errors ->
+        Printf.sprintf
+          "renaming lane %S rewrites Fusion seats that name it, and [fusion] does not \
+           load (%s). Fix [fusion] first"
+          lane_id
+          (String.concat "; " (List.map Fusion_config.config_error_message errors)))
+    in
+    List.fold_left
+      (fun acc validated ->
+         let* text = acc in
+         let preset = Fusion_policy.Validated_preset.preset validated in
+         if not (List.mem preset.name seat_presets)
+         then Ok text
+         else (
+           let rename route =
+             if String.equal (String.trim route) lane_id then new_lane_id else route
+           in
+           let* renamed =
+             Fusion_policy.Validated_preset.of_preset
+               (Fusion_policy.map_seat_routes rename preset)
+             |> Result.map_error (fun invalid ->
+               Printf.sprintf "preset %s %s after the rename" preset.name
+                 (Fusion_policy.Validated_preset.invalid_to_string invalid))
+           in
+           Fusion_config_writer.upsert_preset text renamed
+           |> Result.map_error (fun error ->
+             Printf.sprintf "renaming lane %S rewrites a seat of preset %s, and %s"
+               lane_id preset.name (Fusion_config_writer.error_message error))))
+      (Ok text)
+      fusion.presets
 ;;
 
-(* A lane's name is its routing key: [\[runtime.assignments\]] entries and
-   [\[runtime\].default] name it as a string, and {!resolve_assignment} reads
-   those before it reads a runtime of the same id. So a rename is not a rename
-   of one table -- it is that header and every reference to it, and any file
+(* A lane's name is its routing key: [\[runtime.assignments\]] entries,
+   [\[runtime\].default] and Fusion seats name it as a string, and
+   {!resolve_assignment} reads those before it reads a runtime of the same id.
+   So a rename is not a rename of one table -- it is that header and every reference to it, and any file
    written with some of them changed routes the keepers whose reference was
    missed to a lane that is no longer there. All of it goes in the one
    validated write {!edit_runtime_lanes} already commits, which is why this is
@@ -3518,7 +4709,12 @@ let rename_runtime_lane ?runtime_config_path ~lane_id ~new_lane_id () =
                 renamed here"
                lane_id)
         | Toml_line_editor.Table_renamed renamed ->
-          Ok
+          let* toml = lane_edit_toml content in
+          let* seats = lane_fusion_seats toml ~lane_id in
+          let references = lane_references config seats ~lane_id in
+          rename_fusion_seats
+            ~lane_id
+            ~new_lane_id
             (List.fold_left
                (fun text reference ->
                   match reference with
@@ -3536,9 +4732,12 @@ let rename_runtime_lane ?runtime_config_path ~lane_id ~new_lane_id () =
                     update_runtime_scalar_text
                       text
                       ~key:"default"
-                      ~runtime_id:(Some new_lane_id))
+                      ~runtime_id:(Some new_lane_id)
+                  | Fusion_seat _ -> text)
                renamed
-               (lane_references config ~lane_id)))
+               references)
+            toml
+            references)
 ;;
 
 let remove_runtime_lane ?runtime_config_path ~lane_id () =
@@ -3547,13 +4746,15 @@ let remove_runtime_lane ?runtime_config_path ~lane_id () =
     if not (lane_is_declared config lane_id)
     then Error (Printf.sprintf "lane %S is not declared in [runtime.lanes]" lane_id)
     else
-      match lane_references config ~lane_id with
+      let* toml = lane_edit_toml content in
+      let* seats = lane_fusion_seats toml ~lane_id in
+      match lane_references config seats ~lane_id with
       | _ :: _ as references ->
         Error
           (Printf.sprintf
              "lane %S is in use by %s"
              lane_id
-             (String.concat ", " (List.map lane_reference_to_string references)))
+             (String.concat ", " (List.map route_reference_to_string references)))
       | [] ->
         (match Toml_line_editor.remove_table content ~path:(lane_table_path lane_id) with
          | Toml_line_editor.Table_removed next -> Ok next
@@ -3569,12 +4770,12 @@ let remove_runtime_lane ?runtime_config_path ~lane_id () =
    walks a CLI tail, in [cli_slots] after them; the routing API edits them the
    same way conversation lanes edit [candidates]. Every exact lane id is a bare
    key. *)
-let exact_lane_table_path lane = "runtime.exact_output_lanes." ^ exact_lane_id lane
+let exact_lane_table_path lane = "runtime.exact_output_lanes." ^ Standalone_lane.to_id lane
 
 let exact_lane_decl (config : Runtime_schema.config) lane =
   List.find_opt
     (fun (decl : Runtime_schema.exact_output_lane_decl) ->
-       String.equal decl.id (exact_lane_id lane))
+       String.equal decl.id (Standalone_lane.to_id lane))
     config.exact_output_lane_decls
 ;;
 
@@ -3595,7 +4796,7 @@ let exact_lane_editable ~content (config : Runtime_schema.config) lane =
       (Printf.sprintf
          "exact-output lane %s is not written as its own [%s] table, so it cannot be \
           edited here"
-         (exact_lane_id lane)
+         (Standalone_lane.to_id lane)
          path)
 ;;
 
@@ -3659,7 +4860,7 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
          publication then fails for every lane. *)
       match List.find_opt (fun slot -> List.mem slot cli_slots) slots with
       | Some slot ->
-        Error (Printf.sprintf "%s is already a CLI slot of %s" slot (exact_lane_id lane))
+        Error (Printf.sprintf "%s is already a CLI slot of %s" slot (Standalone_lane.to_id lane))
       | None ->
         (match
            List.find_opt
@@ -3678,7 +4879,7 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
                    "%s is an official client and %s does not walk a CLI tail, so it \
                     has no list to go in")
                 slot
-                (exact_lane_id lane))
+                (Standalone_lane.to_id lane))
          | None ->
            Ok
              (Toml_line_editor.edit_table_multiline_array
@@ -3698,7 +4899,7 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
    duplicate too, but only as a lane it cannot publish. *)
 let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
   let slot = String.trim slot in
-  let lane_id = exact_lane_id lane in
+  let lane_id = Standalone_lane.to_id lane in
   if String.equal slot ""
   then Error "slot must not be empty"
   else if contains_newline slot
@@ -3755,7 +4956,7 @@ type exact_slot_move =
    order decides the rest. *)
 let with_declared_exact_slots ~lane ~slot decide =
   let slot = String.trim slot in
-  let lane_id = exact_lane_id lane in
+  let lane_id = Standalone_lane.to_id lane in
   if String.equal slot ""
   then Error "slot must not be empty"
   else if contains_newline slot

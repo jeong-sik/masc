@@ -216,16 +216,33 @@ let handle_keeper_reset ctx args : tool_result =
   keeper_reset_body ~config:ctx.config args
 
 (* What [masc_keeper_clear] found before either durable store is changed. A
-   keeper meta or checkpoint that cannot be read is not a keeper with nothing
-   to clear. *)
+   keeper meta that cannot be read is not a keeper with nothing to clear. A
+   checkpoint whose bytes the decoder rejects fails every turn, so the clear
+   deletes it ([Keeper_checkpoint_store.remove_undecodable_canonical]) instead
+   of refusing. A checkpoint a build that bumped [checkpoint_version] wrote
+   is readable by that build, and a judgement that stopped before any bytes were decoded says
+   nothing against them; both clears are refused and nothing changes. *)
 type keeper_clear_report =
   | Clear_meta_unreadable of string
   | Clear_meta_missing
-  | Clear_checkpoint_unreadable of
+  | Clear_checkpoint_undecodable of { path : string; session : session_context }
+  | Clear_checkpoint_newer of { path : string; expected : int; got : int }
+  | Clear_checkpoint_not_removable of
       { path : string; error : Keeper_checkpoint_store.checkpoint_load_error }
   | Clear_no_checkpoint
   | Clear_checkpoint_loaded of
       keeper_meta * session_context * working_context
+
+(* What a confirmed [masc_keeper_clear] did to the saved history. [line_error]:
+   the history was emptied and its [history_restarted] line could not be
+   written. That does not fail the clear, as a turn's line does not fail the
+   turn: it is logged, counted and named in the result. *)
+type keeper_clear_history =
+  | History_emptied of { cleared_message_count : int; line_error : string option }
+  | History_removed of
+      { checkpoint_path : string
+      ; undecodable : Keeper_checkpoint_store.checkpoint_load_error
+      }
 
 (* A clear the store did not report as saved. [effect_disposition] says what is
    known of the checkpoint on disk: untouched, or not known. *)
@@ -290,21 +307,23 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             Keeper_context_runtime.create_session ~session_id:trace_id
               ~base_dir
           in
-          (match Keeper_checkpoint_store.load_agent_core
+          let path =
+            Keeper_checkpoint_store.agent_core_checkpoint_path
+              ~session_dir:session.session_dir ~session_id:trace_id
+          in
+          (match Keeper_checkpoint_store.judge_canonical
                    ~session_dir:session.session_dir ~session_id:trace_id with
-           | Error Not_found -> Clear_no_checkpoint
+           | Keeper_checkpoint_store.Judged_absent -> Clear_no_checkpoint
            (* A checkpoint an earlier build wrote is one no turn loads: the
               turn starts without saved history (Saved_history_superseded)
               and its first save replaces the file. Clear reads it the same
               way, so a version bump does not leave the keeper uncleanable
               with its official-client session still in place. *)
-           | Error (Superseded_version _) -> Clear_no_checkpoint
-           | Error error ->
-             Clear_checkpoint_unreadable
-               { path = Keeper_checkpoint_store.agent_core_checkpoint_path
-                   ~session_dir:session.session_dir ~session_id:trace_id
-               ; error }
-           | Ok checkpoint ->
+           | Keeper_checkpoint_store.Judged_superseded _ -> Clear_no_checkpoint
+           | Keeper_checkpoint_store.Judged_newer { expected; got } -> Clear_checkpoint_newer { path; expected; got }
+           | Keeper_checkpoint_store.Judged_undecodable _ -> Clear_checkpoint_undecodable { path; session }
+           | Keeper_checkpoint_store.Judged_inconclusive error -> Clear_checkpoint_not_removable { path; error }
+           | Keeper_checkpoint_store.Judged_decoded checkpoint ->
              let wctx = Keeper_context_runtime.context_of_agent_core_checkpoint checkpoint in
              Clear_checkpoint_loaded (meta, session, wctx))
       in
@@ -313,15 +332,13 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         | Clear_checkpoint_loaded _ -> true
         | ( Clear_meta_unreadable _
           | Clear_meta_missing
-          | Clear_checkpoint_unreadable _
+          | Clear_checkpoint_undecodable _
+          | Clear_checkpoint_newer _
+          | Clear_checkpoint_not_removable _
           | Clear_no_checkpoint ) ->
           false
       in
-      (* [line_error]: the history was emptied and its [history_restarted] line
-         could not be written. That does not fail the clear, as a turn's line
-         does not fail the turn: it is logged, counted and named in the
-         result. *)
-      let cleared ?line_error ~cleared_message_count () =
+      let cleared history =
         (* Only a confirmed clear resets the prior turn failure observation. *)
         Keeper_context_runtime.dispatch_keeper_phase_event
           ~config ~keeper_name:name
@@ -331,14 +348,39 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
           (Keeper_turn_failure_streak.reset
              ~base_path:config.base_path
              ~keeper_name:name);
-        Log.Keeper.warn
-          "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
-          name reason preserve_system cleared_message_count;
+        let history_fields =
+          match history with
+          | History_emptied { cleared_message_count; line_error } ->
+            Log.Keeper.warn
+              "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
+              name reason preserve_system cleared_message_count;
+            (match line_error with
+             | None -> []
+             | Some detail -> [ "history_restart_line_error", `String detail ])
+            @ [ "cleared_message_count", `Int cleared_message_count
+              ; "checkpoint_found", `Bool checkpoint_found
+              ; "preserve_system_prompt", `Bool preserve_system
+              ]
+          (* No message was counted and no system prompt was kept: the file
+             that held them did not decode and is gone. *)
+          | History_removed { checkpoint_path; undecodable } ->
+            let decode_error =
+              Keeper_checkpoint_store.checkpoint_load_error_to_string undecodable
+            in
+            Log.Keeper.warn
+              "%s: context cleared by operator (reason=%s): deleted the undecodable checkpoint %s: %s"
+              name reason checkpoint_path decode_error;
+            [ ( "undecodable_checkpoint_removed"
+              , `Assoc
+                  [ "checkpoint_path", `String checkpoint_path
+                  ; "decode_error", `String decode_error
+                  ] )
+            ; "checkpoint_found", `Bool true
+            ]
+        in
         tool_result_ok_data
           (`Assoc
-            ((match line_error with
-              | None -> []
-              | Some detail -> [ "history_restart_line_error", `String detail ])
+            (history_fields
              @ [
                  ("name", `String name);
                  ("phase_before", `String phase_before);
@@ -347,13 +389,10 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                      (match Keeper_registry.get ~base_path:config.base_path name with
                       | Some entry -> Keeper_state_machine.phase_to_string entry.phase
                       | None -> "unknown") );
-                 ("cleared_message_count", `Int cleared_message_count);
-                 ("checkpoint_found", `Bool checkpoint_found);
                  (* Only a confirmed session-store removal reaches [cleared]. *)
                  ("official_client_session_cleared", `Bool true);
-                 ("preserve_system_prompt", `Bool preserve_system);
-              ("reason", `String reason);
-            ]))
+                 ("reason", `String reason);
+               ]))
       in
       let clear_official_client_session_then after_clear =
         match
@@ -383,20 +422,114 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
          message count. *)
       let result =
         match report with
-        | Clear_checkpoint_unreadable { path; error } ->
+        | Clear_checkpoint_undecodable { path; session } ->
+          clear_official_client_session_then (fun () ->
+            let not_removed ~class_ ~effect_disposition ~code detail =
+              Log.Keeper.error
+                "%s: operator clear removed the official-client session but did not confirm the undecodable checkpoint %s was deleted (reason=%s): %s"
+                name path reason detail;
+              keeper_clear_failure ~class_ ~effect_disposition ~code
+                ~message:
+                  (Printf.sprintf
+                     "the official-client session was cleared, but the undecodable checkpoint at %s was not confirmed deleted: %s. Run masc_keeper_clear again."
+                     path detail)
+                [ "checkpoint_path", `String path
+                ; "official_client_session_cleared", `Bool true
+                ]
+            in
+            match
+              Keeper_checkpoint_store.remove_undecodable_canonical
+                ~session_dir:session.session_dir ~session_id:session.session_id
+            with
+            | Ok (Keeper_checkpoint_store.Removed { undecodable }) ->
+              cleared (History_removed { checkpoint_path = path; undecodable })
+            | Ok Keeper_checkpoint_store.Canonical_absent ->
+              cleared (History_emptied { cleared_message_count = 0; line_error = None })
+            | Ok Keeper_checkpoint_store.Canonical_loadable ->
+              not_removed ~class_:Tool_result.Workflow_rejection
+                ~effect_disposition:Tool_result.Proven_post_effect ~code:Tool_args.Conflict
+                "it decoded, or was written by an earlier version, when read again under the lock, so history was left unchanged"
+            | Error
+                (Keeper_checkpoint_store.Removal_refused
+                   (Keeper_checkpoint_store.Newer_version { expected; got })) ->
+              Log.Keeper.error
+                "%s: operator clear removed the official-client session but left the checkpoint %s (reason=%s): it is version %d, written by a later binary; this one reads %d"
+                name path reason got expected;
+              keeper_clear_failure
+                ~class_:Tool_result.Workflow_rejection
+                ~effect_disposition:Tool_result.Proven_post_effect
+                ~code:Tool_args.Precondition_failed
+                ~message:
+                  (Printf.sprintf
+                     "the official-client session was cleared, but the checkpoint at %s is version %d, written by a later binary than this one (which reads version %d). That binary can still read it, so it was left in place. Run masc_keeper_clear from a binary that reads version %d."
+                     path got expected got)
+                [ "checkpoint_path", `String path
+                ; "official_client_session_cleared", `Bool true
+                ; "checkpoint_version", `Int got
+                ; "readable_version", `Int expected
+                ]
+            | Error
+                (( Keeper_checkpoint_store.Removal_refused _
+                 | Keeper_checkpoint_store.Removal_failed _ ) as removal_error) ->
+              not_removed ~class_:Tool_result.Runtime_failure
+                ~effect_disposition:Tool_result.Proven_post_effect ~code:Tool_args.Internal_error
+                (Keeper_checkpoint_store.undecodable_removal_error_to_string removal_error)
+            | Error (Keeper_checkpoint_store.Removal_durability_unknown _ as removal_error) ->
+              not_removed ~class_:Tool_result.Runtime_failure
+                ~effect_disposition:Tool_result.Effect_outcome_unknown ~code:Tool_args.Internal_error
+                (Keeper_checkpoint_store.undecodable_removal_error_to_string removal_error))
+        | Clear_checkpoint_newer { path; expected; got } ->
+          Log.Keeper.error
+            "%s: history not cleared (reason=%s): the checkpoint at %s is version %d, written by a later binary; this one reads %d"
+            name reason path got expected;
+          keeper_clear_failure
+            ~class_:Tool_result.Workflow_rejection
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            ~code:Tool_args.Precondition_failed
+            ~message:
+              (Printf.sprintf
+                 "history not cleared: the checkpoint at %s is version %d, written by a later binary than this one (which reads version %d). That binary can still read it, so it and the official-client session were left in place. Run masc_keeper_clear from a binary that reads version %d."
+                 path got expected got)
+            [ "name", `String name
+            ; "checkpoint_path", `String path
+            ; "checkpoint_version", `Int got
+            ; "readable_version", `Int expected
+            ]
+        | Clear_checkpoint_not_removable { path; error } ->
           let detail = Keeper_checkpoint_store.checkpoint_load_error_to_string error in
           Log.Keeper.error
-            "%s: history not cleared: checkpoint could not be read at %s: %s"
-            name path detail;
+            "%s: history not cleared: reading the checkpoint at %s did not show bytes that fail to decode (reason=%s): %s"
+            name path reason detail;
           keeper_clear_failure
             ~class_:Tool_result.Runtime_failure
             ~effect_disposition:Tool_result.Proven_pre_effect
             ~code:Tool_args.Internal_error
             ~message:
               (Printf.sprintf
-                 "history not cleared: checkpoint could not be read at %s: %s"
+                 "history not cleared: reading the checkpoint at %s failed before its bytes could be judged, so it was left in place: %s. Fix the cause and run masc_keeper_clear again."
                  path detail)
-            [ "name", `String name; "checkpoint_path", `String path ]
+            ([ "name", `String name
+             ; "checkpoint_path", `String path
+             ; "read_error", `String detail
+             ]
+             @
+             match error with
+             | Keeper_checkpoint_store.Read_failed { cause; _ } ->
+               [ ( "read_failure"
+                 , `String
+                     (match cause with
+                      | Keeper_checkpoint_store.Os_error errno ->
+                        "os_error: " ^ Unix.error_message errno
+                      | Keeper_checkpoint_store.Changed_while_read -> "changed_while_read"
+                      | Keeper_checkpoint_store.Read_raised -> "read_raised") )
+               ]
+             | Keeper_checkpoint_store.Not_found
+             | Keeper_checkpoint_store.Store_error _
+             | Keeper_checkpoint_store.Parse_error _
+             | Keeper_checkpoint_store.Superseded_version _
+             | Keeper_checkpoint_store.Newer_version _
+             | Keeper_checkpoint_store.Io_error _
+             | Keeper_checkpoint_store.Agent_core_error _ -> [])
         | Clear_meta_unreadable detail ->
           Log.Keeper.error
             "%s: operator clear did not look for a checkpoint (reason=%s): keeper meta \
@@ -425,7 +558,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             []
         | Clear_no_checkpoint ->
           clear_official_client_session_then (fun () ->
-            cleared ~cleared_message_count:0 ())
+            cleared (History_emptied { cleared_message_count = 0; line_error = None }))
         | Clear_checkpoint_loaded (meta, session, wctx) ->
           clear_official_client_session_then (fun () ->
             match
@@ -439,7 +572,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             with
             | Keeper_history_clear.Cleared
                 { cleared_message_count; marker = Ok () } ->
-              cleared ~cleared_message_count ()
+              cleared (History_emptied { cleared_message_count; line_error = None })
             | Keeper_history_clear.Cleared
                 { cleared_message_count; marker = Error detail } ->
               Log.Keeper.error
@@ -450,7 +583,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                 Keeper_metrics.(to_string TurnBoundaryFailures)
                 ~labels:[ "keeper", name; "site", "clear" ]
                 ();
-              cleared ~line_error:detail ~cleared_message_count ()
+              cleared (History_emptied { cleared_message_count; line_error = Some detail })
             | Keeper_history_clear.Superseded
                 { incoming_turn_count; known_turn_count } ->
               Log.Keeper.warn

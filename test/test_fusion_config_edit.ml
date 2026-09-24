@@ -238,6 +238,381 @@ let test_rename_follows_the_default () =
     | Error _ -> fail "renamed config must load")
 ;;
 
+(* The lane editor and the Fusion editor read one list of seats. A preset
+   naming the fixture's lane at each kind of seat: a panel member, the judge
+   and a first judge. *)
+let first_judge jmodel : Fusion_policy.judge_spec =
+  { jmodel
+  ; jlabel = ""
+  ; jsystem_prompt = "First."
+  ; jweb_tools = false
+  ; jmax_output_tokens = None
+  ; jtimeout_s = None
+  }
+;;
+
+let seats_on ~route ~panel ~judge ~judges (trio : Fusion_policy.preset) =
+  let pick named other = if named then route else other in
+  { trio with
+    Fusion_policy.panels =
+      List.map
+        (fun (group : Fusion_policy.panel_group) ->
+           { group with
+             models = [ pick panel "stub-http.stub-model"; "stub-http.stub-alt" ]
+           })
+        trio.panels
+  ; judge = pick judge "stub-http.stub-model"
+  ; judges = [ first_judge (pick judges "stub-http.stub-model"); first_judge "stub-http.stub-alt" ]
+  }
+;;
+
+let seat_trio path =
+  let trio =
+    seats_on ~route:"fusion-judge" ~panel:true ~judge:true ~judges:true
+      (preset_named path "trio")
+  in
+  (match apply path (Masc.Fusion_config_edit.Upsert_preset trio) with
+   | Ok _ -> ()
+   | Error error -> failf "seating trio: %s" (Masc.Fusion_config_edit.error_message error));
+  trio
+;;
+
+let contains text needle =
+  let n = String.length needle and h = String.length text in
+  let rec go i = i + n <= h && (String.equal (String.sub text i n) needle || go (i + 1)) in
+  go 0
+;;
+
+let test_lane_rename_rewrites_fusion_seats () =
+  with_config (fun path ->
+    let trio = seat_trio path in
+    (match
+       Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge"
+         ~new_lane_id:"arbiter" ()
+     with
+     | Ok _ -> ()
+     | Error detail -> failf "rename refused: %s" detail);
+    check (testable Fusion_policy.pp_preset Fusion_policy.equal_preset)
+      "every seat on the lane took the new name"
+      (seats_on ~route:"arbiter" ~panel:true ~judge:true ~judges:true trio)
+      (preset_named path "trio");
+    check bool "no seat names the old lane" false (contains (read path) "\"fusion-judge\"");
+    (* The Fusion editor resolves every seat the way a run does, so saving
+       trio again proves a run would find the renamed lane. *)
+    match apply path (Masc.Fusion_config_edit.Upsert_preset (preset_named path "trio")) with
+    | Ok _ -> ()
+    | Error error ->
+      failf "a renamed seat does not resolve: %s" (Masc.Fusion_config_edit.error_message error))
+;;
+
+let test_lane_remove_is_refused_while_a_seat_names_it () =
+  with_config (fun path ->
+    let _ = seat_trio path in
+    let before = read path in
+    (match Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge" () with
+     | Ok _ -> fail "a lane a Fusion seat names was removed"
+     | Error detail ->
+       List.iter
+         (fun seat ->
+            check bool ("the refusal names " ^ seat) true (contains detail seat))
+         [ "[fusion.presets.trio].panel"
+         ; "[fusion.presets.trio].judge"
+         ; "[fusion.presets.trio].judges"
+         ]);
+    check string "file untouched" before (read path))
+;;
+
+let replace_once text needle by =
+  let n = String.length needle and h = String.length text in
+  let rec find i =
+    if i + n > h then failf "the text has no %S" needle
+    else if String.equal (String.sub text i n) needle then i
+    else find (i + 1)
+  in
+  let at = find 0 in
+  String.sub text 0 at ^ by ^ String.sub text (at + n) (h - at - n)
+;;
+
+let without text needle = replace_once text needle ""
+
+(* Put [line] into spare, under its header, and write the file. *)
+let into_spare path line =
+  let header = "[fusion.presets.spare]\n" in
+  let edited = replace_once (read path) header (header ^ line) in
+  write_file path edited;
+  edited
+;;
+
+(* The lane writers read the seats without validating the presets, so an
+   invalid preset elsewhere -- spare's quorum above its one seat -- does not
+   hide trio's seats. A lane no seat names is renamed and removed; a lane trio
+   seats is refused by remove with the seats named, and by rename, which must
+   rewrite the seats through the Fusion writer, with the load error named. *)
+let test_an_invalid_preset_elsewhere_does_not_hide_the_seats () =
+  with_config (fun path ->
+    let _ = seat_trio path in
+    let broken = into_spare path "min_answered = 9\n" in
+    (match Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge" () with
+     | Ok _ -> fail "a lane a Fusion seat names was removed"
+     | Error detail ->
+       check bool "remove names trio's judge seat" true
+         (contains detail "[fusion.presets.trio].judge"));
+    (match
+       Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge"
+         ~new_lane_id:"arbiter" ()
+     with
+     | Ok _ -> fail "a rename rewrote seats of a [fusion] that does not load"
+     | Error detail ->
+       check bool "rename names the load error" true
+         (contains detail
+            (Fusion_config.config_error_message
+               (Fusion_config.Invalid_min_answered ("spare", 9))));
+       check bool "rename sends no one to a path that skips the seats" false
+         (contains detail "config/raw"));
+    check string "file untouched" broken (read path);
+    (* A lane no seat names: both writers go through. *)
+    (match
+       Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"spare-lane"
+         ~runtime_ids:[ "stub-http.stub-alt" ] ()
+     with
+     | Ok _ -> ()
+     | Error detail -> failf "creating an unseated lane: %s" detail);
+    (match
+       Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"spare-lane"
+         ~new_lane_id:"other-lane" ()
+     with
+     | Ok _ -> ()
+     | Error detail -> failf "renaming a lane no seat names: %s" detail);
+    match Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"other-lane" () with
+    | Ok _ -> ()
+    | Error detail -> failf "removing a lane no seat names: %s" detail)
+;;
+
+(* A [fusion] value of the wrong TOML type -- spare's [web_tools] as a string
+   -- hides every seat, so neither lane writer can know which ones name the
+   lane; both refuse rather than guess none do. *)
+let test_lane_edits_refuse_while_the_seats_cannot_be_read () =
+  with_config (fun path ->
+    let broken = into_spare path "web_tools = \"yes\"\n" in
+    let refused label result =
+      match result with
+      | Ok _ -> failf "%s went through with the seats unreadable" label
+      | Error detail ->
+        check bool (label ^ " names the cause") true
+          (contains detail "the seats of [fusion] cannot be read");
+        check bool (label ^ " sends no one to a path that skips the seats") false
+          (contains detail "config/raw")
+    in
+    refused "remove"
+      (Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge" ());
+    refused "rename"
+      (Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge"
+         ~new_lane_id:"arbiter" ());
+    check string "file untouched" broken (read path))
+;;
+
+let lane_table =
+  "[runtime.lanes.fusion-judge]\n\
+   candidates = [\"stub-http.stub-model\", \"stub-http.stub-alt\"]\n"
+;;
+
+(* The raw save path meets the seats too. Deleting only the lane table in a
+   hand edit, with trio seated on it, is refused by the preview and the save,
+   and the file keeps the lane; before, it saved and every trio run failed with
+   unknown_route. Once no seat names the lane, the same deletion saves, so the
+   refusal is the seat check and not something else in the text. *)
+let test_a_raw_save_is_refused_while_a_seat_names_the_removed_lane () =
+  with_config (fun path ->
+    let trio = seat_trio path in
+    let before = read path in
+    let edited = without before lane_table in
+    let names_the_seats label detail =
+      List.iter
+        (fun seat ->
+           check bool (label ^ " names " ^ seat) true
+             (contains detail (seat ^ ", which names \"fusion-judge\", with unknown_route")))
+        [ "[fusion.presets.trio].panel"
+        ; "[fusion.presets.trio].judge"
+        ; "[fusion.presets.trio].judges"
+        ]
+    in
+    (match Runtime.validate_config_text ~runtime_config_path:path edited with
+     | Ok () -> fail "the preview accepted a lane a Fusion seat names going away"
+     | Error detail -> names_the_seats "preview" detail);
+    (match Runtime.save_config_text ~runtime_config_path:path edited with
+     | Ok _ -> fail "a raw save removed a lane a Fusion seat names"
+     | Error detail -> names_the_seats "save" detail);
+    check string "file untouched" before (read path);
+    (match
+       apply path
+         (Masc.Fusion_config_edit.Upsert_preset
+            (seats_on ~route:"stub-http.stub-model" ~panel:true ~judge:true ~judges:true
+               trio))
+     with
+     | Ok _ -> ()
+     | Error error -> failf "unseating trio: %s" (Masc.Fusion_config_edit.error_message error));
+    match Runtime.save_config_text ~runtime_config_path:path (without (read path) lane_table) with
+    | Ok _ -> ()
+    | Error detail -> failf "removing a lane no seat names by hand: %s" detail)
+;;
+
+(* A seat that already did not resolve on disk -- written by hand, past every
+   writer -- does not block an unrelated save, the way an unchanged broken
+   [fusion] does not, and neither does re-spacing its route. A save that adds
+   a second unresolved seat is refused and names only the new one. *)
+let test_a_seat_already_broken_on_disk_does_not_block_other_saves () =
+  with_config (fun path ->
+    let ghost =
+      replace_once (read path) "# judge note\njudge = \"stub-http.stub-model\"\n"
+        "# judge note\njudge = \"ghost\"\n"
+    in
+    write_file path ghost;
+    check string "trio's judge is the ghost on disk" "ghost" (preset_named path "trio").judge;
+    (match
+       Runtime.save_config_text ~runtime_config_path:path ("# an unrelated note\n" ^ ghost)
+     with
+     | Ok _ -> ()
+     | Error detail -> failf "a seat already broken blocked an unrelated save: %s" detail);
+    (* A run trims a seat before it resolves it, so re-spacing the broken
+       route is the same broken seat, not a new one. *)
+    (match
+       Runtime.save_config_text ~runtime_config_path:path
+         (replace_once (read path) "judge = \"ghost\"\n" "judge = \" ghost \"\n")
+     with
+     | Ok _ -> ()
+     | Error detail -> failf "re-spacing a seat already broken was refused: %s" detail);
+    check string "the re-spaced ghost is on disk" " ghost " (preset_named path "trio").judge;
+    let before = read path in
+    let phantom =
+      replace_once before "[fusion.presets.spare]\npanel = [\"stub-http.stub-model\"]\n"
+        "[fusion.presets.spare]\npanel = [\"phantom\"]\n"
+    in
+    (match Runtime.save_config_text ~runtime_config_path:path phantom with
+     | Ok _ -> fail "a save added a seat that resolves to nothing"
+     | Error detail ->
+       check bool "the refusal names the new seat" true
+         (contains detail
+            "[fusion.presets.spare].panel, which names \"phantom\", with unknown_route");
+       check bool "the refusal leaves the seat already broken out" false
+         (contains detail "ghost"));
+    check string "file untouched" before (read path))
+;;
+
+(* A run trims a seat before it resolves it, so a padded seat names the lane
+   too: the rename rewrites it and the remove refuses on it. The refusal is
+   the server's own sentence, pinned here word for word. *)
+let test_a_padded_seat_names_the_lane () =
+  with_config (fun path ->
+    let trio = { (preset_named path "trio") with Fusion_policy.judge = " fusion-judge " } in
+    (match apply path (Masc.Fusion_config_edit.Upsert_preset trio) with
+     | Ok _ -> ()
+     | Error error -> failf "seating trio: %s" (Masc.Fusion_config_edit.error_message error));
+    check string "the padded seat is on disk" " fusion-judge " (preset_named path "trio").judge;
+    (match Runtime.remove_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge" () with
+     | Ok _ -> fail "a lane a padded seat names was removed"
+     | Error detail ->
+       check string "the server's refusal"
+         "lane \"fusion-judge\" is in use by [fusion.presets.trio].judge" detail);
+    (match
+       Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge"
+         ~new_lane_id:"arbiter" ()
+     with
+     | Ok _ -> ()
+     | Error detail -> failf "rename refused: %s" detail);
+    check string "the padded seat took the new name" "arbiter" (preset_named path "trio").judge)
+;;
+
+(* A preset the Fusion writer cannot address -- here, inline [judges] --
+   refuses the rename, and the refusal says a lane rename reached it. *)
+let test_an_unaddressable_seat_refuses_the_rename () =
+  with_config (fun path ->
+    let marker = "judge = \"stub-http.stub-model\"\n" in
+    let text = read path in
+    (* The first such line is trio's: the fixture writes trio before spare. *)
+    let at =
+      let n = String.length marker in
+      let rec find i =
+        if i + n > String.length text then fail "fixture has no trio judge line"
+        else if String.equal (String.sub text i n) marker then i
+        else find (i + 1)
+      in
+      find 0
+    in
+    let seated =
+      String.sub text 0 at
+      ^ marker
+      ^ "judges = [ { model = \"fusion-judge\", system_prompt = \"First.\" } ]\n"
+      ^ String.sub text (at + String.length marker)
+          (String.length text - at - String.length marker)
+    in
+    write_file path seated;
+    check string "the inline seat loads" "fusion-judge"
+      (match (preset_named path "trio").judges with
+       | [ judge ] -> judge.jmodel
+       | _ -> fail "trio must read one inline first judge");
+    (match
+       Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge"
+         ~new_lane_id:"arbiter" ()
+     with
+     | Ok _ -> fail "a rename rewrote a preset the writer cannot address"
+     | Error detail ->
+       check bool "the refusal says the lane rename reached the preset" true
+         (contains detail "renaming lane \"fusion-judge\" rewrites a seat of preset trio"));
+    check string "file untouched" seated (read path))
+;;
+
+(* For each kind of seat alone, the lane references and the Fusion route check
+   both see it: the lane check reports that seat, and the Fusion check refuses
+   the same route while no lane or runtime declares it. *)
+let test_fusion_and_lane_checks_see_the_same_seats () =
+  with_config (fun path ->
+    let config =
+      match Runtime_toml.parse_string (read path) with
+      | Ok config -> config
+      | Error _ -> fail "fixture must parse"
+    in
+    List.iter
+      (fun (seat, panel, judge, judges) ->
+         let label = Fusion_policy.seat_kind_key seat in
+         let probe =
+           seats_on ~route:"ghost" ~panel ~judge ~judges (preset_named path "trio")
+         in
+         let validated =
+           match Fusion_policy.Validated_preset.of_preset probe with
+           | Ok validated -> validated
+           | Error _ -> failf "%s probe must validate" label
+         in
+         (* The lane writers read the seats from the text, so the probe is
+            written the way the Fusion writer would write it and read back. *)
+         let seats =
+           match Fusion_config_writer.upsert_preset (read path) validated with
+           | Error error ->
+             failf "%s probe must write: %s" label (Fusion_config_writer.error_message error)
+           | Ok text ->
+             (match Fusion_config.seat_routes_of_toml (Otoml.Parser.from_string text) with
+              | Ok seats -> seats
+              | Error error ->
+                failf "%s probe seats: %s" label (Fusion_config.config_error_message error))
+         in
+         let on_ghost =
+           List.filter_map
+             (fun (reference, route) ->
+                if String.equal route "ghost" then Some reference else None)
+             (Runtime.route_references config seats)
+         in
+         check bool (label ^ ": the lane check reports the seat") true
+           (on_ghost = [ Runtime.Fusion_seat { preset = "trio"; seat } ]);
+         match apply path (Masc.Fusion_config_edit.Upsert_preset probe) with
+         | Error (Masc.Fusion_config_edit.Route_unresolved { route = "ghost"; _ }) -> ()
+         | Error error ->
+           failf "%s: unexpected refusal %s" label (Masc.Fusion_config_edit.error_message error)
+         | Ok _ -> failf "%s: the Fusion check saved a seat on an unknown route" label)
+      [ Fusion_policy.Panel_member, true, false, false
+      ; Fusion_policy.Judge, false, true, false
+      ; Fusion_policy.First_judge, false, false, true
+      ])
+;;
+
 let test_operation_json_is_strict () =
   let refuses label json =
     match Masc.Fusion_config_edit.operation_of_yojson json with
@@ -274,6 +649,25 @@ let () =
         ; test_case "invalid preset is refused" `Quick test_invalid_preset_is_refused
         ; test_case "deleting the default is refused" `Quick test_deleting_the_default_is_refused
         ; test_case "rename follows the default" `Quick test_rename_follows_the_default
+        ] )
+    ; ( "lane references"
+      , [ test_case "a lane rename rewrites the Fusion seats" `Quick
+            test_lane_rename_rewrites_fusion_seats
+        ; test_case "a lane remove is refused while a seat names it" `Quick
+            test_lane_remove_is_refused_while_a_seat_names_it
+        ; test_case "a padded seat names the lane" `Quick test_a_padded_seat_names_the_lane
+        ; test_case "an unaddressable seat refuses the rename" `Quick
+            test_an_unaddressable_seat_refuses_the_rename
+        ; test_case "an invalid preset elsewhere does not hide the seats" `Quick
+            test_an_invalid_preset_elsewhere_does_not_hide_the_seats
+        ; test_case "lane edits refuse while the seats cannot be read" `Quick
+            test_lane_edits_refuse_while_the_seats_cannot_be_read
+        ; test_case "a raw save is refused while a seat names the removed lane" `Quick
+            test_a_raw_save_is_refused_while_a_seat_names_the_removed_lane
+        ; test_case "a seat already broken on disk does not block other saves" `Quick
+            test_a_seat_already_broken_on_disk_does_not_block_other_saves
+        ; test_case "the Fusion and lane checks see the same seats" `Quick
+            test_fusion_and_lane_checks_see_the_same_seats
         ] )
     ; ( "json", [ test_case "operation JSON is strict" `Quick test_operation_json_is_strict ] )
     ]

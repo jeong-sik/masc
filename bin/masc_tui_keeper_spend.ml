@@ -78,8 +78,12 @@ let decode_keeper json =
   let* spend =
     match read_state with
     | "read" ->
+        (* Rows that were not JSON and turn rows the server could not read
+           the time or latency of (#38728) are the same fact here: a row of
+           the window that may have been a turn, so a known sum is a floor. *)
         let* malformed_rows = decode_count metrics_read "malformed_rows" in
-        decode_turns json ~malformed_rows
+        let* unread_turn_rows = decode_count metrics_read "unread_turn_rows" in
+        decode_turns json ~malformed_rows:(malformed_rows + unread_turn_rows)
     | "failed" ->
         let* reason = required_string_field metrics_read "reason" in
         Ok (Spend_unread reason)
@@ -87,8 +91,26 @@ let decode_keeper json =
   in
   Ok (name, spend)
 
+(* A Keeper whose meta the server could not read has no row (#38728). It is
+   drawn unknown with the server's reason, like a Keeper whose metrics store
+   could not be read: its turns are in no sum. *)
+let unread_keeper_spend (unread : Masc.Keeper_snapshot_unread.t) =
+  let reason =
+    match unread.reason with
+    | Masc.Keeper_snapshot_unread.Meta_read_failed detail ->
+        "metadata unread: " ^ detail
+    | Masc.Keeper_snapshot_unread.Row_raised detail -> "row raised: " ^ detail
+  in
+  (unread.name, Spend_unread reason)
+
 let decode_rows json ~freshness =
   let* window_minutes = required_int_field json "window_minutes" in
+  let* unread_json = required_list_field json "keepers_unread" in
+  let* unread_keepers =
+    Result.map_error
+      (fun err -> "keepers_unread: " ^ err)
+      (Masc.Keeper_snapshot_unread.list_of_json (`List unread_json))
+  in
   let* rows = required_list_field json "keepers" in
   (* Row by row: a row this build cannot read leaves that Keeper unknown
      instead of blanking every other Keeper's tag. *)
@@ -100,7 +122,13 @@ let decode_rows json ~freshness =
         | Error _ -> (keepers, undecodable + 1))
       rows ([], 0)
   in
-  Ok (Overview_spend_read { window_minutes; keepers; undecodable; freshness })
+  Ok
+    (Overview_spend_read
+       { window_minutes
+       ; keepers = keepers @ List.map unread_keeper_spend unread_keepers
+       ; undecodable
+       ; freshness
+       })
 
 let decode_reading json =
   let* cache = required_object_field json "cache" in

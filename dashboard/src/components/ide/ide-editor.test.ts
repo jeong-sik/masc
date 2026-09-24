@@ -274,6 +274,36 @@ describe('IdeEditor', () => {
     container.remove()
   })
 
+  it('keeps the find mark when a layer remounts CodeMirror for the same file', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+    const props = {
+      documentStore,
+      ownershipStore,
+      diffRows: () => [],
+      findOpen: true,
+    }
+
+    render(h(IdeEditor, props), container)
+    const input = container.querySelector<HTMLInputElement>('[aria-label="Find query"]')!
+    fireEvent.input(input, { target: { value: 'runtime' } })
+    await waitFor(() => {
+      expect(container.querySelector('.cm-masc-find-match')?.textContent).toBe('runtime')
+    })
+    const firstView = EditorView.findFromDOM(container.querySelector<HTMLElement>('.cm-editor')!)
+
+    render(h(IdeEditor, { ...props, activeLayers: new Set(['keeper-trace']) }), container)
+    await waitFor(() => {
+      const nextView = EditorView.findFromDOM(container.querySelector<HTMLElement>('.cm-editor')!)
+      expect(nextView).not.toBe(firstView)
+      expect(container.querySelector('.cm-masc-find-match')?.textContent).toBe('runtime')
+    })
+  })
+
   it('includes keeper trace in active layer summary and count', () => {
     const documentStore = createCodeDocumentStore({
       file_path: 'runtime.ts',

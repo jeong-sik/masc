@@ -440,29 +440,35 @@ function CodeMirrorEditor({
   // Find in file: select the current match and bring it into view. Focus
   // stays in the find box so Enter keeps walking the matches.
   const findReveal = useSignalValue(ideFindReveal)
-  // A remount (view switch, layer toggle) must not re-apply a reveal the
-  // operator has since moved away from.
-  const appliedRevealSeq = useRef<number | null>(null)
+  // A new CodeMirror view needs the mark again, but a remount must not
+  // re-select or re-scroll to a reveal the operator has since moved away from.
+  const appliedReveal = useRef<{ seq: number; view: EditorView } | null>(null)
   useEffect(() => {
     const view = editorRef.current
     if (!view || !ready) return
     if (findReveal === null) {
-      appliedRevealSeq.current = null
+      appliedReveal.current = null
       view.dispatch({ effects: setFindMatch.of(null) })
       return
     }
-    if (appliedRevealSeq.current === findReveal.seq) return
+    if (appliedReveal.current?.seq === findReveal.seq
+      && appliedReveal.current.view === view) return
     if (findReveal.filePath !== documentStore.document().file_path) return
     if (findReveal.line < 1 || findReveal.line > view.state.doc.lines) return
     const line = view.state.doc.line(findReveal.line)
     const from = Math.min(line.from + findReveal.column, line.to)
     const to = Math.min(from + findReveal.length, line.to)
-    appliedRevealSeq.current = findReveal.seq
-    view.dispatch({
-      selection: { anchor: from, head: to },
-      effects: [setFindMatch.of({ from, to }), EditorView.scrollIntoView(from, { y: 'center' })],
-      annotations: Transaction.userEvent.of(FIND_REVEAL_USER_EVENT),
-    })
+    const firstReveal = appliedReveal.current?.seq !== findReveal.seq
+    appliedReveal.current = { seq: findReveal.seq, view }
+    if (firstReveal) {
+      view.dispatch({
+        selection: { anchor: from, head: to },
+        effects: [setFindMatch.of({ from, to }), EditorView.scrollIntoView(from, { y: 'center' })],
+        annotations: Transaction.userEvent.of(FIND_REVEAL_USER_EVENT),
+      })
+    } else {
+      view.dispatch({ effects: setFindMatch.of({ from, to }) })
+    }
   }, [documentStore, findReveal, ready])
 
   // Closing find hands focus back to the code it was searching.

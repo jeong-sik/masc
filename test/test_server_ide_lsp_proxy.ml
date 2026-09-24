@@ -239,9 +239,15 @@ let test_file_uri_resolution_rejects_symlink_escape () =
   let outside = Filename.temp_dir "masc-lsp-outside-" "" in
   let outside_file = Filename.concat outside "secret.ml" in
   let link = Filename.concat base "link.ml" in
+  let linked_dir = Filename.concat base "linked-dir" in
+  let inside_dir = Filename.concat base "inside" in
+  let inside_link = Filename.concat base "inside-link" in
   Fun.protect
     ~finally:(fun () ->
       (try Unix.unlink link with _ -> ());
+      (try Unix.unlink linked_dir with _ -> ());
+      (try Unix.unlink inside_link with _ -> ());
+      (try Unix.rmdir inside_dir with _ -> ());
       (try Unix.unlink outside_file with _ -> ());
       (try Unix.rmdir outside with _ -> ());
       (try Unix.rmdir base with _ -> ()))
@@ -249,11 +255,65 @@ let test_file_uri_resolution_rejects_symlink_escape () =
        let oc = open_out outside_file in
        close_out oc;
        Unix.symlink outside_file link;
+       Unix.symlink outside linked_dir;
+       Unix.mkdir inside_dir 0o700;
+       Unix.symlink inside_dir inside_link;
        check
          (option string)
-         "symlink target outside workspace rejected"
+         "existing document through outside symlink rejected"
          None
-         (Lsp.resolve_relative ~base ("file://" ^ link)))
+         (Lsp.resolve_relative ~base ("file://" ^ link));
+       check
+         (option string)
+         "unsaved document through outside symlink rejected"
+         None
+         (Lsp.resolve_relative
+            ~base
+            ("file://" ^ Filename.concat linked_dir "new.ml"));
+       check
+         (option string)
+         "relative unsaved document through outside symlink rejected"
+         None
+         (Lsp.resolve_relative ~base "linked-dir/new.ml");
+       check
+         (option string)
+         "symlink before parent segment cannot be normalized away"
+         None
+         (Lsp.resolve_relative ~base "linked-dir/../new.ml");
+       check
+         string
+         "rootUri through outside symlink keeps base"
+         base
+         (Lsp.workspace_root_for_initialize ~base_path:base ("file://" ^ linked_dir));
+       check
+         string
+         "missing rootUri below outside symlink keeps base"
+         base
+         (Lsp.workspace_root_for_initialize
+            ~base_path:base
+            ("file://" ^ Filename.concat linked_dir "new-project"));
+       check
+         string
+         "rootUri symlink before parent segment keeps base"
+         base
+         (Lsp.workspace_root_for_initialize
+            ~base_path:base
+            ("file://" ^ Filename.concat linked_dir ".."));
+       check
+         (option string)
+         "ordinary unsaved document stays inside base"
+         (Some "new.ml")
+         (Lsp.resolve_relative ~base "new.ml");
+       check
+         (option string)
+         "unsaved document through inside symlink resolves to its target"
+         (Some "inside/new.ml")
+         (Lsp.resolve_relative ~base "inside-link/new.ml");
+       check
+         string
+         "inside symlink rootUri uses its resolved target"
+         (Unix.realpath inside_dir)
+         (Lsp.workspace_root_for_initialize ~base_path:base ("file://" ^ inside_link)))
 ;;
 
 let document_params ~uri line =

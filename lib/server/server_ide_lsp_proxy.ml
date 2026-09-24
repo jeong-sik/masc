@@ -556,24 +556,40 @@ let relative_to_string rel =
   if String.equal s "." then "" else s
 ;;
 
-let realpath_scoped_relative ~base relative =
-  let lexical =
-    if String.equal relative ""
-    then Fpath.v base
-    else Fpath.append (Fpath.v base) (Fpath.v relative)
-  in
-  try
-    let resolved = Fs_compat.realpath (Fpath.to_string lexical) in
-    match fpath_within ~base resolved with
-    | Some rel -> Some (relative_to_string rel)
-    | None -> None
-  with
+(* Resolve the existing prefix of an IDE path before appending absent leaves.
+   Unsaved buffers may not exist yet, but an absent leaf below a symlink must
+   still be checked against the symlink's real target. A dangling symlink or
+   any error other than ENOENT is not an absent buffer. *)
+let rec physical_path_allow_missing path =
+  try Some (Fs_compat.realpath path) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _ ->
-    (* Unsaved IDE buffers often have no filesystem target yet.  Lexical
-       containment is still enough in that case; the realpath guard applies
-       when a target exists and can resolve symlinks. *)
-    Some relative
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+    let absent =
+      try
+        ignore (Unix.lstat path);
+        false
+      with
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> true
+      | _ -> false
+    in
+    if not absent
+    then None
+    else (
+      let parent = Filename.dirname path in
+      if String.equal parent path
+      then None
+      else
+        Option.map
+          (fun resolved -> Filename.concat resolved (Filename.basename path))
+          (physical_path_allow_missing parent))
+  | _ -> None
+;;
+
+let physical_relative_within ~base candidate =
+  match physical_path_allow_missing base, physical_path_allow_missing candidate with
+  | Some physical_base, Some physical_candidate ->
+    fpath_within ~base:physical_base physical_candidate
+  | _ -> None
 ;;
 
 let workspace_root_for_initialize ~base_path root_uri =
@@ -585,12 +601,22 @@ let workspace_root_for_initialize ~base_path root_uri =
      than [Option.bind] (which expects a [string option]). *)
   match
     (match Fpath.of_string candidate with
-     | Ok p when Fpath.is_abs p -> Some (Fpath.rem_empty_seg (Fpath.normalize p))
+     | Ok p when Fpath.is_abs p -> Some p
      | _ -> None)
   with
   | Some candidate ->
+    (* Keep the original segments until realpath: [link/..] is not generally
+       the same path as removing those segments before following [link]. *)
     (match fpath_within ~base:base_path (Fpath.to_string candidate) with
-     | Some _ -> Fpath.to_string candidate
+     | Some _ ->
+       (match
+          physical_path_allow_missing base_path,
+          physical_path_allow_missing (Fpath.to_string candidate)
+        with
+        | Some physical_base, Some physical_candidate
+          when Option.is_some (fpath_within ~base:physical_base physical_candidate) ->
+          physical_candidate
+        | _ -> base_path)
      | None -> base_path)
   | None -> base_path
 ;;
@@ -643,7 +669,8 @@ let document_address_of_uri uri =
 let resolve_relative ~base uri =
   let contained candidate =
     match fpath_within ~base candidate with
-    | Some rel -> realpath_scoped_relative ~base (relative_to_string rel)
+    | Some _ ->
+      Option.map relative_to_string (physical_relative_within ~base candidate)
     | None -> None
   in
   match document_address_of_uri uri with

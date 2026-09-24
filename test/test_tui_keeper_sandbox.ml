@@ -410,6 +410,40 @@ let test_an_unknown_image_source_is_refused () =
 
 (* A backend the server does not send is still refused, so the reader is
    strict rather than merely wide. *)
+(* The live instance's State row. [running] is this reader's word for the
+   bool the projection sends; [status] is the runtime's own. They are
+   different facts -- a stopped container can say "exited (0)" -- so both are
+   drawn where they differ. Where they agree the row said the same word
+   twice: on the live fleet all fourteen drawn containers read
+   "running \xc2\xb7 running". *)
+let sandbox_with ~status ~running =
+  Printf.sprintf
+    {|{
+      "sandbox_live": {
+        "sandbox_profile": "microvm",
+        "containers": [{
+          "id": "vm-1",
+          "name": "masc-alpha",
+          "image": "masc/sandbox:latest",
+          "status": %s,
+          "running": %b
+        }],
+        "container_error": null
+      }
+    }|}
+    (Printf.sprintf "%S" status) running
+  |> Yojson.Safe.from_string
+
+let test_the_state_row_says_one_word_where_the_two_agree () =
+  let rendered = render (sandbox_with ~status:"running" ~running:true) in
+  Alcotest.(check bool) "the state is still there" true
+    (contains rendered "running");
+  Alcotest.(check bool) "and not twice" false
+    (contains rendered "running \xc2\xb7 running");
+  let differing = render (sandbox_with ~status:"Up 2 minutes" ~running:true) in
+  Alcotest.(check bool) "a runtime word of its own still reads" true
+    (contains differing "running \xc2\xb7 Up 2 minutes")
+
 let test_an_unknown_backend_is_still_refused () =
   let json =
     Yojson.Safe.from_string
@@ -524,6 +558,9 @@ let () =
             test_the_reader_accepts_every_runtime_the_server_can_name
         ; Alcotest.test_case "an unknown backend is still refused" `Quick
             test_an_unknown_backend_is_still_refused
+        ; Alcotest.test_case
+            "the state row says one word where the two agree" `Quick
+            test_the_state_row_says_one_word_where_the_two_agree
         ; Alcotest.test_case
             "the reader accepts every image source the server can name" `Quick
             test_the_reader_accepts_every_image_source_the_server_can_name

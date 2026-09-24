@@ -67,6 +67,7 @@ type create_outcome =
 type package_directory =
   | Package_directory_removed
   | Package_directory_kept_non_empty
+  | Package_directory_removed_unsynced of string
   | Package_directory_remove_failed of string
 
 type delete_outcome =
@@ -1029,7 +1030,13 @@ let remove_empty_package_directory (target : target) =
   | exception Unix.Unix_error ((Unix.ENOTEMPTY | Unix.EEXIST), _, _) ->
     Package_directory_kept_non_empty
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception exn -> Package_directory_remove_failed (Printexc.to_string exn)
+  | exception exn ->
+    let detail = Printexc.to_string exn in
+    Log.Dashboard.warn
+      "Skill delete left package folder %s in place: %s"
+      package_dir
+      detail;
+    Package_directory_remove_failed detail
   | () ->
     (match
        run_quarantine_io (fun () ->
@@ -1037,8 +1044,12 @@ let remove_empty_package_directory (target : target) =
      with
      | Ok () -> Package_directory_removed
      | Error detail ->
-       Package_directory_remove_failed
-         (Printf.sprintf "%s was removed but its parent was not synced: %s" package_dir detail))
+       Log.Dashboard.warn
+         "Skill delete removed package folder %s but did not sync %s: %s"
+         package_dir
+         target.source_root
+         detail;
+       Package_directory_removed_unsynced detail)
 ;;
 
 let delete_with
@@ -1319,6 +1330,8 @@ let create_outcome_to_yojson = function
 let package_directory_to_yojson = function
   | Package_directory_removed -> `Assoc [ "kind", `String "removed" ]
   | Package_directory_kept_non_empty -> `Assoc [ "kind", `String "kept_non_empty" ]
+  | Package_directory_removed_unsynced detail ->
+    `Assoc [ "kind", `String "removed_unsynced"; "detail", `String detail ]
   | Package_directory_remove_failed detail ->
     `Assoc [ "kind", `String "remove_failed"; "detail", `String detail ]
 ;;

@@ -79,6 +79,9 @@ type package_directory =
   | Package_directory_kept_non_empty
       (** Other files (for example [references/]) are still in the folder,
           so it stays. *)
+  | Package_directory_removed_unsynced of string
+      (** The folder is gone, but syncing its parent failed, so a crash may
+          bring it back. *)
   | Package_directory_remove_failed of string
 
 type delete_outcome =

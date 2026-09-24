@@ -406,6 +406,7 @@ let test_delete_removes_empty_package_and_id_is_reusable () =
   (match delete_package_directory ~base_path ~reference ~refresh with
    | Editor.Package_directory_removed -> ()
    | Package_directory_kept_non_empty -> fail "an empty package folder was kept"
+   | Package_directory_removed_unsynced detail -> fail detail
    | Package_directory_remove_failed detail -> fail detail);
   check bool "package folder removed" false (Sys.file_exists package_dir);
   let source_id =
@@ -439,6 +440,7 @@ let test_delete_keeps_package_with_other_files () =
   (match delete_package_directory ~base_path ~reference ~refresh with
    | Editor.Package_directory_kept_non_empty -> ()
    | Package_directory_removed -> fail "a folder with other files was removed"
+   | Package_directory_removed_unsynced detail -> fail detail
    | Package_directory_remove_failed detail -> fail detail);
   check bool "SKILL.md moved out" false (Sys.file_exists skill_path);
   check string "other file untouched" "kept" (read_file note)

@@ -240,11 +240,13 @@ val capture_with_identity : unit -> (identified_capture, error) result
 
 type change_mark = {
   count : int;
-      (** The machine change counter. It rises before any call touches the
-          machine: step, step_until_change, press, step_frame, load, eject,
-          restore, change_disk. A call that raises after running frames has
-          already raised it. A call refused as an {!error} before it touches
-          the machine leaves it. Nothing resets it -- eject and the next load
+      (** The machine change counter. It rises each time frames run, before
+          the first of them -- step, step_until_change, press and step_frame
+          all run frames through one primitive that raises it -- and right
+          after load, eject, restore or change_disk installs or removes a
+          machine. A call that raises after running frames has already raised
+          it. A call refused as an {!error} before it runs a frame leaves it.
+          One call can raise it more than once. Nothing resets it -- eject and the next load
           keep counting -- so a value never names two screens while the server
           runs. A restarted server counts from 0 again, so the count alone
           can repeat across restarts; {!live} answers [Unchanged] only when
@@ -257,8 +259,8 @@ val current_mark : unit -> change_mark option
     the machine lock and without blocking: every call that moves either half
     publishes the new mark before it lets go of the lock. A spectator whose
     [since] equals this has nothing new to read and needs neither the lock
-    nor a systhread. A call that runs the machine publishes its new mark
-    before it touches the machine, so this never matches a [since] whose
+    nor a systhread. A call that runs frames publishes its new mark
+    before the first frame, so this never matches a [since] whose
     pixels a running call is changing; reading those pixels then waits for
     the call in {!live}. *)
 

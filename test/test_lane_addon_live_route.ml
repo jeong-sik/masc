@@ -113,10 +113,11 @@ let test_counter_moves_on_every_change () =
     ok "reload" (Lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None);
     let c = rises "eject and a new load (the count is never reused)" c in
     (* A press that raises: the ledger file is now a directory, so recording
-       the first edge raises, before any frame runs. No test can make a later
-       edge fail, so this pins the order instead: the count moves before the
-       press touches the machine, so a raise after frames ran finds it moved
-       too. *)
+       the first edge raises before any frame runs, and the keys go back up.
+       Nothing a watcher sees moved, so the count stays: it moves where frames
+       run, in the one primitive that runs them, before the first frame. No
+       test can make a later edge fail; a raise after frames ran finds the
+       count moved because that primitive marked first. *)
     let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
     Sys.remove ledger_path;
     Sys.mkdir ledger_path 0o755;
@@ -126,7 +127,8 @@ let test_counter_moves_on_every_change () =
      with
      | exception Sys_error _ -> ()
      | Ok _ | Error _ -> fail "a press over a directory ledger must raise");
-    ignore (rises "a press that raised" c : int))
+    stays "a press that raised before any frame" c;
+    published_matches "a press that raised before any frame")
 
 let test_since_answers_unchanged () =
   with_machine (fun ~dir:_ ~ledger_dir:_ ->
@@ -185,6 +187,10 @@ let test_decode_live_query () =
   refused "a text since" (with_inc ["source_kind", "msx_capture"; "since", "latest"]) "since";
   refused "a hex since" (with_inc ["source_kind", "msx_capture"; "since", "0x10"]) "since";
   refused "an underscored since" (with_inc ["source_kind", "msx_capture"; "since", "1_000"]) "since";
+  refused "a since past the largest int"
+    (with_inc ["source_kind", "msx_capture"; "since", "99999999999999999999999"]) "too large";
+  refused "an empty incarnation"
+    ["source_kind", "msx_capture"; "since", "7"; "incarnation", ""] "incarnation must be non-empty";
   refused "a since without an incarnation" ["source_kind", "msx_capture"; "since", "7"] "together";
   refused "an incarnation without a since" ["source_kind", "msx_capture"; "incarnation", "inc-a"]
     "together";
@@ -510,12 +516,25 @@ let test_live_route () =
             ^ "&incarnation=" ^ string_member "incarnation" json in
           (* Asked while [pass] holds the machine lock: an unchanged answer
              must come from the published mark. Taking the lock on this
-             thread would raise; waiting for it in a systhread would never
-             return. *)
+             thread would raise. Waiting for it in a systhread cannot be cut
+             short: [Eio_unix.run_in_systhread] ignores cancellation once the
+             job is handed over, so a timeout would hang with it. Instead the
+             GET runs in its own fiber, which runs until it first suspends.
+             The lock-free answer never suspends, so it is in [held] before
+             [announce] returns. A route that waits for the lock suspends
+             there; [announce] then returns, [pass] lets go of the lock, the
+             systhread takes it and answers, and the switch joins the fiber,
+             so the test fails instead of hanging. *)
           let held = ref None in
-          dos_ok "pass"
-            (Dos_lane.pass ~who ~to_:(Some who)
-               ~announce:(fun () -> held := Some (get (dos_live ^ since))));
+          let answered_under_lock = ref false in
+          Eio.Switch.run (fun get_sw ->
+            dos_ok "pass"
+              (Dos_lane.pass ~who ~to_:(Some who)
+                 ~announce:(fun () ->
+                   Eio.Fiber.fork ~sw:get_sw (fun () ->
+                     held := Some (get (dos_live ^ since)));
+                   answered_under_lock := Option.is_some !held)));
+          check bool "unchanged is answered while the lock is held" true !answered_under_lock;
           (match !held with
            | Some response ->
                check int "unchanged under a held lock is a 200" 200 (status_of_response response);

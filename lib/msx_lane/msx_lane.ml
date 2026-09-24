@@ -124,10 +124,9 @@ type change_mark = { count : int; incarnation : string }
 (* The machine change counter a spectator compares against. Process-wide and
    written only while holding [lock]. Nothing resets it: an eject and the
    next load keep counting, so one value never names two different screens
-   while the server runs. A call that runs the machine marks before it
-   touches it, so a call that raises after running frames has already moved
-   it; a call that replaces the machine marks right after installing the new
-   one.
+   while the server runs. Running frames marks in [advance], before the first
+   frame, so a call that raises after running frames has already moved it; a
+   call that replaces the machine marks right after installing the new one.
 
    [published] is the same count with the incarnation of [!state], or [None]
    with no machine. It is set only here, under [lock], every time either
@@ -453,7 +452,13 @@ let check_frames ~what n =
   else Ok ()
 ;;
 
+(* The only place frames run on the installed machine, so every call that runs
+   frames marks here, before the first frame, and a new caller cannot forget
+   to. Callers reach it only after their own validation, so a call refused as
+   an [Error] never marks. [st] is [!state]'s machine: every caller got it from
+   [with_machine]. *)
 let advance st n =
+  mark_change ();
   (* Invalidate before mutating even if stepping raises after partial progress. *)
   st.pixels <- None;
   Msx.step st.m ~frames:n;
@@ -465,7 +470,6 @@ let step ~frames =
     match check_frames ~what:"frames" frames with
     | Error e -> Error e
     | Ok () ->
-      mark_change ();
       advance st frames;
       Ok (observe st))
 ;;
@@ -488,7 +492,6 @@ let step_until_change ~max_frames =
     match check_frames ~what:"frames" max_frames with
     | Error e -> Error e
     | Ok () ->
-      mark_change ();
       let cfg = Screen_change.default in
       let start = observe st in
       let base = start.screen_view in
@@ -573,7 +576,6 @@ let press ~who ~keys ~hold_frames ~step_frames ~sequence =
         match press_all st keys with
         | Error e -> Error e
         | Ok () when sequence ->
-          mark_change ();
           (* [press_all] left the keys down with no frame advanced; release them
              and tap each in turn, so ["down"; "return"] is a menu sequence, not
              a chord held together. *)
@@ -583,7 +585,6 @@ let press ~who ~keys ~hold_frames ~step_frames ~sequence =
             List.iter (tap_one st ~who ~hold_frames ~step_frames) keys;
             Ok (observe st))
         | Ok () ->
-          mark_change ();
           releasing_on_raise st keys (fun () ->
             List.iter
               (fun k ->
@@ -639,7 +640,6 @@ let step_frame ~frames =
     match check_frames ~what:"frames" frames with
     | Error _ as error -> error
     | Ok () ->
-        mark_change ();
         advance st frames;
         Ok (frame_of st, List.rev st.entries))
 ;;

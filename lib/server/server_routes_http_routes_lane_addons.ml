@@ -147,17 +147,21 @@ let decode_live_query fields =
               Error (kind ^ " has no screen to watch; live accepts msx_capture and dos_capture")
           | Some kind -> Error ("unknown source_kind: " ^ kind)
           | None -> Error "live requires source_kind" in
-        (* Decimal digits only: int_of_string_opt also reads 0x10 and 1_000. *)
+        (* Decimal digits only: int_of_string_opt also reads 0x10 and 1_000.
+           Digits it still cannot read overflow an int. *)
         let count_of value =
-          if value <> "" && String.for_all (function '0' .. '9' -> true | _ -> false) value
-          then int_of_string_opt value else None in
+          if value = "" || not (String.for_all (function '0' .. '9' -> true | _ -> false) value)
+          then Error "since must be a nonnegative decimal integer"
+          else match int_of_string_opt value with
+            | Some count -> Ok count
+            | None -> Error "since is too large to be a change count" in
         let* since = match List.assoc_opt "since" fields, List.assoc_opt "incarnation" fields with
           | None, None -> Ok None
-          | Some value, Some incarnation when incarnation <> "" ->
-              (match count_of value with
-               | Some count -> Ok (Some { count; incarnation })
-               | None -> Error "since must be a nonnegative decimal integer")
-          | Some _, (Some _ | None) | None, Some _ ->
+          | Some _, Some "" -> Error "incarnation must be non-empty"
+          | Some value, Some incarnation ->
+              let* count = count_of value in
+              Ok (Some { count; incarnation })
+          | Some _, None | None, Some _ ->
               Error "since and incarnation come together: a count alone can repeat after a server restart" in
         Ok (source, since)
 

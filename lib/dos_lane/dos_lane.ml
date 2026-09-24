@@ -118,6 +118,10 @@ type change_mark = { count : int; incarnation : string }
 let change_count = ref 0
 let published : change_mark option Atomic.t = Atomic.make None
 
+(* Each call that runs the machine marks at its own call site for now, unlike
+   Msx_lane, which marks in its one run primitive. PR #38715 is rewriting the
+   advance_* lines those marks sit next to; once it lands, a follow-up moves
+   them into one run_until wrapper. *)
 let mark_change () =
   incr change_count;
   Atomic.set published

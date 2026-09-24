@@ -440,7 +440,6 @@ jobs:
             # ${arr[@]+"${arr[@]}"} expands an empty array to nothing under
             # set -u on every bash, not only 4.4 and later.
             env MASC_BASE_PATH= GRAPHQL_API_KEY= ZAI_API_KEY= \
-                DUNE_SOURCEROOT="${repo_root}" \
                 MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false \
                 MASC_KEEPER_DOCKER_PLAYGROUND=false \
                 ALCOTEST_VERBOSE=1 ${suite_env[@]+"${suite_env[@]}"} \

@@ -220,7 +220,7 @@ let test_of_json_exec () =
     } ->
     Alcotest.(check (list string)) "argv" [ "rg"; "pattern"; "lib/" ] argv;
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd
-  | { Execute_input.source = Script _; _ } ->
+  | { Execute_input.source = Command _; _ } ->
     Alcotest.fail "expected the argv form"
 ;;
 
@@ -322,7 +322,7 @@ let test_of_json_accepts_single_argv_ssot () =
       "one argv owns program and arguments"
       [ "git"; "status"; "--short" ]
       argv
-  | { Execute_input.source = Script _; _ } ->
+  | { Execute_input.source = Command _; _ } ->
     Alcotest.fail "expected the argv form"
 ;;
 
@@ -355,7 +355,7 @@ let test_of_json_preserves_repeated_argument () =
       "argv remains caller-authored"
       [ "cat"; "cat"; "repos/masc/README.md" ]
       argv
-  | { Execute_input.source = Script _; _ } ->
+  | { Execute_input.source = Command _; _ } ->
     Alcotest.fail "expected the argv form"
 ;;
 
@@ -371,12 +371,12 @@ let test_of_json_keeps_empty_argv_for_typed_validation () =
   | Ok () -> Alcotest.fail "empty process vector must be rejected"
 ;;
 
-let test_of_json_rejects_argv_and_script () =
+let test_of_json_rejects_argv_and_command () =
   let msg =
     parse_json_error
       (`Assoc
           [ "argv", `List [ `String "echo"; `String "hello" ]
-          ; "script", `String "echo hello"
+          ; "command", `String "echo hello"
           ])
   in
   Alcotest.(check bool)
@@ -400,14 +400,14 @@ let test_of_json_keeps_empty_exec_for_validation () =
       [ ""; "gh"; "pr"; "list" ]
       argv;
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd
-  | { Execute_input.source = Script _; _ } ->
+  | { Execute_input.source = Command _; _ } ->
     Alcotest.fail "expected the argv form"
 ;;
 
-let test_script_goes_to_a_shell_whole () =
-  let input = parse_json_exn (`Assoc [ "script", `String "cat a.txt | wc -l" ]) in
+let test_command_goes_to_a_shell_whole () =
+  let input = parse_json_exn (`Assoc [ "command", `String "cat a.txt | wc -l" ]) in
   match input.Execute_input.source with
-  | Execute_input.Script { shell; text } ->
+  | Execute_input.Command { shell; text } ->
     Alcotest.(check string) "carried verbatim" "cat a.txt | wc -l" text;
     Alcotest.(check string) "sh unless the caller says otherwise" "sh" shell;
     (match Execute_input.to_shell_ir input with
@@ -423,19 +423,19 @@ let test_script_goes_to_a_shell_whole () =
      | Ok _ -> Alcotest.fail "the shell form lowers to one Simple"
      | Error e ->
        Alcotest.failf "%a" Execute_input.pp_validation_error e)
-  | Execute_input.Argv _ -> Alcotest.fail "expected the script form"
+  | Execute_input.Argv _ -> Alcotest.fail "expected the command form"
 ;;
 
 (* §4.1, one door: the same text through either field produces the same child,
    and the costume keeps the shell its argv named. *)
-let test_an_argv_shaped_shell_normalises_to_the_script_form () =
+let test_an_argv_shaped_shell_normalises_to_the_command_form () =
   let line = "ls *.ml && echo $(pwd)" in
   let via_costume =
     parse_json_exn
       (`Assoc [ "argv", `List [ `String "bash"; `String "-c"; `String line ] ])
   in
-  let via_script =
-    parse_json_exn (`Assoc [ "script", `String line; "shell", `String "bash" ])
+  let via_command =
+    parse_json_exn (`Assoc [ "command", `String line; "shell", `String "bash" ])
   in
   let argv_of input =
     match Execute_input.to_shell_ir input with
@@ -447,7 +447,7 @@ let test_an_argv_shaped_shell_normalises_to_the_script_form () =
   in
   Alcotest.(check (list string))
     "the costume and the field produce the same child"
-    (argv_of via_script)
+    (argv_of via_command)
     (argv_of via_costume);
   Alcotest.(check (list string))
     "and it is the shell the caller named"
@@ -459,7 +459,7 @@ let test_an_argv_shaped_shell_normalises_to_the_script_form () =
 let test_an_unknown_shell_is_refused () =
   match
     Execute_input.of_json
-      (`Assoc [ "script", `String "true"; "shell", `String "python3" ])
+      (`Assoc [ "command", `String "true"; "shell", `String "python3" ])
   with
   | Ok _ -> Alcotest.fail "python3 is not a shell this tool runs"
   | Error message ->
@@ -469,11 +469,11 @@ let test_an_unknown_shell_is_refused () =
       (Astring.String.is_infix ~affix:"sh, bash, zsh, dash, ksh" message)
 ;;
 
-let test_script_carries_cwd_to_the_shell () =
+let test_command_carries_cwd_to_the_shell () =
   let input =
     parse_json_exn
       (`Assoc
-        [ "script", `String "cat a.txt | wc -l"; "cwd", `String "/tmp" ])
+        [ "command", `String "cat a.txt | wc -l"; "cwd", `String "/tmp" ])
   in
   match Execute_input.to_shell_ir input with
   | Ok (Masc_exec.Shell_ir.Simple simple) ->
@@ -492,7 +492,7 @@ let test_script_carries_cwd_to_the_shell () =
 let test_the_shell_reads_its_own_operators () =
   List.iter
     (fun line ->
-       let input = parse_json_exn (`Assoc [ "script", `String line ]) in
+       let input = parse_json_exn (`Assoc [ "command", `String line ]) in
        match Execute_input.to_shell_ir input with
        | Ok (Masc_exec.Shell_ir.Simple simple) ->
          Alcotest.(check (list string))
@@ -511,7 +511,7 @@ let test_the_shell_reads_its_own_operators () =
    the script lowers to one Simple whose arg is the Subst, and the judge
    classifies it Representable rather than naming a refusal. *)
 let test_a_substitution_lowers_and_classifies_representable () =
-  let input = parse_json_exn (`Assoc [ "script", `String "cat $(echo foo)" ]) in
+  let input = parse_json_exn (`Assoc [ "command", `String "cat $(echo foo)" ]) in
   (match Execute_input.to_shell_ir input with
    | Ok (Masc_exec.Shell_ir.Simple _) -> ()
    | Ok _ -> Alcotest.fail "the shell form lowers to one Simple"
@@ -544,7 +544,7 @@ let test_the_advice_names_the_construct_the_script_contains () =
     "echo cmd=build > ev.txt && git rev-parse HEAD >> ev.txt 2>&1; dune build \
      >> ev.txt 2>&1; echo exit=$? >> ev.txt"
   in
-  let input = parse_json_exn (`Assoc [ "script", `String script ]) in
+  let input = parse_json_exn (`Assoc [ "command", `String script ]) in
   (match Execute_input.to_shell_ir input with
    | Ok _ -> ()
    | Error e ->
@@ -588,7 +588,7 @@ let test_the_advice_names_the_construct_the_script_contains () =
    separator. *)
 let test_a_separator_goes_to_the_shell () =
   let line = "ls docs 2>/dev/null; echo done" in
-  let input = parse_json_exn (`Assoc [ "script", `String line ]) in
+  let input = parse_json_exn (`Assoc [ "command", `String line ]) in
   match Execute_input.to_shell_ir input with
   | Ok (Masc_exec.Shell_ir.Simple simple) ->
     Alcotest.(check (list string))
@@ -605,11 +605,11 @@ let test_a_separator_goes_to_the_shell () =
       e
 ;;
 
-let test_script_and_argv_together_are_refused () =
+let test_command_and_argv_together_are_refused () =
   let msg =
     parse_json_error
       (`Assoc
-        [ "script", `String "ls"
+        [ "command", `String "ls"
         ; "argv", `List [ `String "ls" ]
         ])
   in
@@ -619,16 +619,30 @@ let test_script_and_argv_together_are_refused () =
     (String_util.contains_substring_ci msg "one form")
 ;;
 
+(* The shell form is [command]. A call that still says [script] is refused
+   like any other unknown field, and the refusal lists [command]. *)
+let test_of_json_refuses_the_script_field () =
+  let msg = parse_json_error (`Assoc [ "script", `String "ls" ]) in
+  Alcotest.(check bool)
+    "script is not a field"
+    true
+    (String_util.contains_substring_ci msg "$.script is not a supported");
+  Alcotest.(check bool)
+    "the refusal names the shell form"
+    true
+    (String_util.contains_substring_ci msg "command")
+;;
+
 let test_of_json_rejects_cmd_string_only () =
   let msg =
     parse_json_error (`Assoc [ "cmd", `String "rg pattern lib/" ])
   in
-  (* [cmd] is still not a field. What changed is why: the shell form exists
-     now and is named [script], so the refusal points at it. *)
+  (* [cmd] is not a field. The refusal lists the accepted fields, and the
+     shell form among them is [command]. *)
   Alcotest.(check bool)
     "the refusal names the field that does exist"
     true
-    (String_util.contains_substring_ci msg "script")
+    (String_util.contains_substring_ci msg "command")
 ;;
 
 let test_of_json_rejects_cmd_string_with_argv () =
@@ -639,12 +653,12 @@ let test_of_json_rejects_cmd_string_with_argv () =
         ; "argv", `List [ `String "rg"; `String "pattern"; `String "lib/" ]
         ])
   in
-  (* [cmd] is still not a field. What changed is why: the shell form exists
-     now and is named [script], so the refusal points at it. *)
+  (* [cmd] is not a field. The refusal lists the accepted fields, and the
+     shell form among them is [command]. *)
   Alcotest.(check bool)
     "the refusal names the field that does exist"
     true
-    (String_util.contains_substring_ci msg "script")
+    (String_util.contains_substring_ci msg "command")
 ;;
 
 let test_of_json_rejects_non_string_argv () =
@@ -1012,11 +1026,11 @@ let test_hidden_script_findings_ignores_what_hides_nothing () =
    longer crosses one — it goes to a shell — so this is the only place its
    construct gets named, and the advice that rides back is the whole of what
    the judge is for. *)
-let test_hidden_script_findings_judges_the_script_field () =
+let test_hidden_script_findings_judges_the_command_field () =
   Alcotest.(check (list (pair string string)))
-    "the script field is judged, and the construct is named"
+    "the command field is judged, and the construct is named"
     [ "sh", "glob_brace" ]
-    (findings_of (`Assoc [ "script", `String "ls {a,b}.txt" ]))
+    (findings_of (`Assoc [ "command", `String "ls {a,b}.txt" ]))
 ;;
 
 let lowered_bin json =
@@ -1215,9 +1229,9 @@ let suite =
           `Quick
           test_of_json_keeps_empty_argv_for_typed_validation
       ; Alcotest.test_case
-          "of_json_rejects_argv_and_script"
+          "of_json_rejects_argv_and_command"
           `Quick
-          test_of_json_rejects_argv_and_script
+          test_of_json_rejects_argv_and_command
       ; Alcotest.test_case
           "of_json_keeps_empty_exec_for_validation"
           `Quick
@@ -1226,21 +1240,21 @@ let suite =
 
 
       ; Alcotest.test_case
-          "script_goes_to_a_shell_whole"
+          "command_goes_to_a_shell_whole"
           `Quick
-          test_script_goes_to_a_shell_whole
+          test_command_goes_to_a_shell_whole
       ; Alcotest.test_case
-          "an_argv_shaped_shell_normalises_to_the_script_form"
+          "an_argv_shaped_shell_normalises_to_the_command_form"
           `Quick
-          test_an_argv_shaped_shell_normalises_to_the_script_form
+          test_an_argv_shaped_shell_normalises_to_the_command_form
       ; Alcotest.test_case
           "an_unknown_shell_is_refused"
           `Quick
           test_an_unknown_shell_is_refused
       ; Alcotest.test_case
-          "script_carries_cwd_to_the_shell"
+          "command_carries_cwd_to_the_shell"
           `Quick
-          test_script_carries_cwd_to_the_shell
+          test_command_carries_cwd_to_the_shell
       ; Alcotest.test_case
           "the_shell_reads_its_own_operators"
           `Quick
@@ -1258,9 +1272,9 @@ let suite =
           `Quick
           test_a_separator_goes_to_the_shell
       ; Alcotest.test_case
-          "script_and_argv_together_are_refused"
+          "command_and_argv_together_are_refused"
           `Quick
-          test_script_and_argv_together_are_refused      ; Alcotest.test_case
+          test_command_and_argv_together_are_refused      ; Alcotest.test_case
           "of_json_rejects_cmd_string_only"
           `Quick
           test_of_json_rejects_cmd_string_only
@@ -1332,9 +1346,9 @@ let suite =
           `Quick
           test_hidden_script_findings_ignores_what_hides_nothing
       ; Alcotest.test_case
-          "hidden_script_findings_judges_the_script_field"
+          "hidden_script_findings_judges_the_command_field"
           `Quick
-          test_hidden_script_findings_judges_the_script_field
+          test_hidden_script_findings_judges_the_command_field
 
 
       ; Alcotest.test_case

@@ -62,7 +62,7 @@ let test_properties_are_the_six_fields_in_order () =
   check
     (list string)
     "properties in order"
-    [ "argv"; "script"; "shell"; "cwd"; "timeout_sec"; "intent" ]
+    [ "argv"; "command"; "shell"; "cwd"; "timeout_sec"; "intent" ]
     properties;
   check
     bool
@@ -84,8 +84,8 @@ let test_properties_are_the_six_fields_in_order () =
    description}. With one forbidden name the loader writes [not: {required:
    [x]}] directly (Tool_definition_toml.alternative_json). Two branches, each
    requiring one field and forbidding the other, is what makes argv and
-   script exactly-one-of. *)
-let test_one_of_is_argv_xor_script () =
+   command exactly-one-of. *)
+let test_one_of_is_argv_xor_command () =
   let branches =
     match member execute_schema.input_schema "oneOf" with
     | `List branches -> branches
@@ -98,7 +98,7 @@ let test_one_of_is_argv_xor_script () =
   check
     (list (pair (list string) (list string)))
     "oneOf branches as (required, forbidden)"
-    [ [ "argv" ], [ "script" ]; [ "script" ], [ "argv" ] ]
+    [ [ "argv" ], [ "command" ]; [ "command" ], [ "argv" ] ]
     (List.map required_and_forbidden branches);
   List.iter
     (fun branch ->
@@ -167,7 +167,7 @@ let () =
             "properties are the six fields in order"
             `Quick
             test_properties_are_the_six_fields_in_order
-        ; test_case "oneOf is argv xor script" `Quick test_one_of_is_argv_xor_script
+        ; test_case "oneOf is argv xor command" `Quick test_one_of_is_argv_xor_command
         ; test_case
             "serialized schema carries no retired name"
             `Quick

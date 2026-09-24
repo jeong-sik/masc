@@ -1,18 +1,18 @@
 module Shell_gate = Masc_exec_command_gate.Shell_command_gate
 
-type script = {
+type command = {
   shell : string;
   text : string;
 }
 
-(* POSIX, because a script that says nothing should get the shell every image
+(* POSIX, because a command that says nothing should get the shell every image
    has. A caller that needs bash says so, and a normalised costume says what
    its argv said. *)
-let default_script_shell = "sh"
+let default_command_shell = "sh"
 
 type source =
   | Argv of string list
-  | Script of script
+  | Command of command
 
 type intent = Auto | Request_effect
 
@@ -60,11 +60,15 @@ let assoc_fields ~path (json : Yojson.Safe.t) =
 let member fields key = List.assoc_opt key fields
 
 let reject_unknown_fields ~path ~allowed fields =
-  let allowed key = List.exists (String.equal key) allowed in
-  match List.find_opt (fun (key, _) -> not (allowed key)) fields with
+  let is_allowed key = List.exists (String.equal key) allowed in
+  match List.find_opt (fun (key, _) -> not (is_allowed key)) fields with
   | None -> Ok ()
   | Some (key, _) ->
-    result_errorf "%s.%s is not a supported typed Execute field" path key
+    result_errorf
+      "%s.%s is not a supported typed Execute field; accepted: %s"
+      path
+      key
+      (String.concat ", " allowed)
 ;;
 
 let optional_string ~path fields key =
@@ -135,21 +139,21 @@ let source_of_fields ~path fields =
     | None | Some `Null -> false
     | Some _ -> true
   in
-  match named "script", named "argv" with
+  match named "command", named "argv" with
   | true, true ->
-    result_errorf "%s names both script and argv; a call takes one form" path
+    result_errorf "%s names both command and argv; a call takes one form" path
   | true, false ->
-    let* script = optional_string ~path fields "script" in
-    (* [named "script"] is what put us in this arm, so the field is present;
-       a default here would turn "not a string" into an empty script. *)
-    (match script with
-     | None -> result_errorf "%s.script must be a string" path
-     | Some script ->
-       if String.trim script = ""
-       then result_errorf "%s.script is empty" path
+    let* command = optional_string ~path fields "command" in
+    (* [named "command"] is what put us in this arm, so the field is present;
+       a default here would turn "not a string" into an empty command. *)
+    (match command with
+     | None -> result_errorf "%s.command must be a string" path
+     | Some command ->
+       if String.trim command = ""
+       then result_errorf "%s.command is empty" path
        else
          let* shell = optional_string ~path fields "shell" in
-         let shell = Option.value shell ~default:default_script_shell in
+         let shell = Option.value shell ~default:default_command_shell in
          (* A closed list, and the same one [Shell_costume.of_argv] recognises,
             because an argv-shaped shell normalises into this field and the two
             have to agree on what a shell is. An arbitrary string here would be
@@ -157,32 +161,24 @@ let source_of_fields ~path fields =
          if not (Keeper_tooling.Shell_costume.names_a_shell shell)
          then
            result_errorf
-             "%s.shell is %S; a script runs under one of: %s"
+             "%s.shell is %S; a command runs under one of: %s"
              path
              shell
              (String.concat ", " Keeper_tooling.Shell_costume.shells)
-         else Ok (Script { shell; text = script }))
+         else Ok (Command { shell; text = command }))
   | false, true ->
     let* argv = required_string_list ~path fields "argv" in
     Ok (Argv argv)
-  | false, false -> result_errorf "%s.argv or %s.script is required" path path
+  | false, false -> result_errorf "%s.argv or %s.command is required" path path
 ;;
 
 let of_json (json : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let* fields = assoc_fields ~path:"$" json in
   let* () =
-    if Option.is_some (member fields "cmd")
-    then
-      Error
-        "cmd is not a field of this tool; the shell form is named \
-         script"
-    else Ok ()
-  in
-  let* () =
     reject_unknown_fields
       ~path:"$"
-      ~allowed:[ "argv"; "script"; "shell"; "cwd"; "timeout_sec"; "intent" ]
+      ~allowed:[ "argv"; "command"; "shell"; "cwd"; "timeout_sec"; "intent" ]
       fields
   in
   let* intent = match member fields "intent" with
@@ -237,7 +233,7 @@ let validate { source; cwd; timeout_sec = _; intent = _ } =
   let ( let* ) = Result.bind in
   let* () = check_cwd cwd in
   match source with
-  | Script _ -> Ok ()
+  | Command _ -> Ok ()
   | Argv argv -> check_exec ~argv ~cwd:None
 ;;
 
@@ -275,10 +271,10 @@ let shell_simple ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd argv =
 
    Recognition and classification only: nothing here changes what runs.
 
-   RFC execute-boundary-is-the-sandbox §6 adds the [Script] source. It used to
+   RFC execute-boundary-is-the-sandbox §6 adds the [Command] source. It used to
    yield nothing on the grounds that it "already crossed the gate", which was
    true while crossing the gate decided whether it ran. It no longer does. A
-   script that says [<<EOF] gets no advice any more: the stdin field is gone
+   command that says [<<EOF] gets no advice any more: the stdin field is gone
    from the schema and the shell runs the heredoc as written, so the finding
    is recognition and classification only. *)
 let hidden_script_findings ~sandbox { source; _ } =
@@ -291,7 +287,7 @@ let hidden_script_findings ~sandbox { source; _ } =
     , Keeper_tooling.Shell_costume.classify ~syntax_policy ~sandbox:gate_sandbox costume )
   in
   match source with
-  | Script { shell; text } ->
+  | Command { shell; text } ->
     (* Through [of_argv], not around it: the classifier's idea of a shell form
        is the one the normalisation in [to_shell_ir_unvalidated] uses, and two
        of them would drift. *)
@@ -302,11 +298,11 @@ let hidden_script_findings ~sandbox { source; _ } =
     Option.to_list (Option.map of_costume (Keeper_tooling.Shell_costume.of_argv argv))
 ;;
 
-(* RFC execute-boundary-is-the-sandbox §4. The script goes to a real shell on
+(* RFC execute-boundary-is-the-sandbox §4. The command goes to a real shell on
    the far side of the keeper's boundary, which is what [argv:["bash";"-c";S]]
    has always reached. [shell_simple] builds the same [Simple] that form
    builds, so the two fields produce the same child for the same text. *)
-let script_to_shell ~sandbox ~cwd { shell; text } =
+let command_to_shell ~sandbox ~cwd { shell; text } =
   shell_simple ~sandbox ?cwd [ shell; "-c"; text ]
 ;;
 
@@ -315,18 +311,18 @@ let to_shell_ir_unvalidated
       { source; cwd; timeout_sec = _; intent = _ }
   =
   (* RFC execute-boundary-is-the-sandbox §4.1. An argv whose program is a
-     shell with [-c] is a script wearing an argv costume: it normalises to the
-     script form and takes the same shell, so there is no second way to reach
+     shell with [-c] is a command line wearing an argv costume: it normalises
+     to the command form and takes the same shell, so there is no second way to reach
      one. Nothing is classified here any more. Whether the subset can
      represent the text decided which of two execution models it got, and that
      decision is now the field's, so the classifier speaks as a judge
      (telemetry, [escaped_shell] advice) rather than as a router. *)
   match source with
-  | Script script -> script_to_shell ~sandbox ~cwd script
+  | Command command -> command_to_shell ~sandbox ~cwd command
   | Argv argv ->
     (match Keeper_tooling.Shell_costume.of_argv argv with
      | Some costume ->
-       script_to_shell
+       command_to_shell
          ~sandbox
          ~cwd
          { shell = costume.Keeper_tooling.Shell_costume.shell
@@ -348,7 +344,8 @@ let pp_validation_error ppf = function
       "cd is the shell's own directory, not a program: %S would change the \
        directory of a child that exits immediately, and anything chained after \
        it would not run. Put the directory in the cwd field instead, and if you \
-       meant to run one command after another write them as a script."
+       meant to run one command after another put the whole line in the \
+       command field."
       requested
   | Empty_argv ->
     Format.pp_print_string ppf

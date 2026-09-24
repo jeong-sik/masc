@@ -8265,18 +8265,18 @@ let execute_gate_command envelope =
     | Some (_ :: _ as argv) -> Some (command_text argv)
     | Some [] | None -> None
   in
-  let script_command args =
-    (* The script form is already the command line the operator is
-       approving; there is nothing to assemble. *)
-    match member "script" args with
-    | `String script when String.trim script <> "" -> Some script
+  let line_command args =
+    (* The command form is already the line the operator is approving;
+       there is nothing to assemble. *)
+    match member "command" args with
+    | `String command when String.trim command <> "" -> Some command
     | _ -> None
   in
   match member "input" envelope with
   | `Assoc _ as args -> (
     match stage_command args with
     | Some command -> Some command
-    | None -> script_command args)
+    | None -> line_command args)
   | _ -> None
 
 (* Where the command would run. The same envelope carries it, and it decides

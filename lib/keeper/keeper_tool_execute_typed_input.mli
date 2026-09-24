@@ -21,7 +21,7 @@
       a program-internal wildcard pattern because the token is passed directly
       to that program rather than expanded by a shell.
     - **Pipes are shell syntax**.  A pipeline is a line, so it is written as
-      a [script]; no argv token is parsed or rewritten as shell syntax.
+      a [command]; no argv token is parsed or rewritten as shell syntax.
     - **Literal argv**.  [NUL] is the only rejected argument content because it
       cannot be represented at the process boundary.  Standalone [|], [|&],
       redirection-looking tokens, wildcard characters, and repeated argument
@@ -31,7 +31,7 @@
       which does not exist).  Absolute-path enforcement happens in
       {!validate}.  PR-3 may revisit when a path SSOT module lands. *)
 
-type script = {
+type command = {
   shell : string;
       (** the shell that runs [text], as one of the names
           {!Keeper_tooling.Shell_costume.names_a_shell} recognises, with any
@@ -49,16 +49,16 @@ type source =
   | Argv of string list
       (** one process, typed, reaching no shell. Piping, redirecting and
           running one command after another are a shell's job, so they are
-          written as a [script]. *)
-  | Script of script
+          written as a [command]. *)
+  | Command of command
       (** one command line, run by a real shell inside the keeper's sandbox.
 
           RFC execute-boundary-is-the-sandbox: the field the caller chose names
-          the execution model. [argv] is typed and reaches no shell; [script]
+          the execution model. [argv] is typed and reaches no shell; [command]
           is a shell. The bash subset still parses this text,
           but as a judge — for path classification, telemetry, and the rewrite
           advice that rides back — rather than as the thing that runs. *)
-(** Where the work comes from. The schema says [argv] and [script] exclude
+(** Where the work comes from. The schema says [argv] and [command] exclude
     each other; saying it here too makes "both" and "neither" unrepresentable
     rather than something {!validate} has to catch. *)
 
@@ -94,7 +94,7 @@ type validation_error =
 val of_json : Yojson.Safe.t -> (execute_input, string) result
 (** Parse the typed Execute JSON boundary.
 
-    [{argv}] is one process; [{script, shell?}] is one command line for a
+    [{argv}] is one process; [{command, shell?}] is one command line for a
     shell. Both together, raw command-string fields and other unsupported
     fields are rejected here. No compatibility normalization is applied at
     parse time. *)
@@ -127,7 +127,7 @@ val hidden_script_findings
 
     [argv:["sh";"-c";S]] arrives as one opaque program with two literal
     arguments, so S is counted as nothing at all while the guarantees that
-    apply to [script:S] -- path scope, gate policy -- stop applying inside it.
+    apply to [command:S] -- path scope, gate policy -- stop applying inside it.
     Each pair is
     the shell name and a closed-vocabulary tag from
     {!Keeper_tooling.Shell_costume.finding_tag}.

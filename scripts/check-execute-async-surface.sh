@@ -60,7 +60,7 @@ require_normalized_text \
 
 require_normalized_text \
   "lib/tool_surface/tool_shard_types_schemas_execute.ml" \
-  "Accepted fields: argv, script, shell, cwd, timeout_sec." \
+  "Accepted fields: argv, command, shell, cwd, timeout_sec." \
   "typed Execute accepted-field list"
 # The sentence is in the tool's description, in the TOML the model is handed.
 # Check it where it is.

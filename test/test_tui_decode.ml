@@ -10230,9 +10230,9 @@ let test_decode_execute_gate_row_leads_with_the_command () =
     (Some "git clone --depth 1 https://github.com/jeong-sik/masc")
     preview
 
-let test_decode_execute_gate_row_shows_the_script_line () =
-  (* The script form carries the command line whole; the row shows it as
-     written rather than falling back to the serialized envelope. *)
+let test_decode_execute_gate_row_shows_the_command_line () =
+  (* The command form carries the line whole; the row shows it as written
+     rather than falling back to the serialized envelope. *)
   let preview =
     decoded_execute_preview
       ~preview:"{\"schema\":\"masc.keeper_gate.request.v1\"}"
@@ -10242,13 +10242,13 @@ let test_decode_execute_gate_row_shows_the_script_line () =
              ( "input",
                `Assoc
                  [ ("cwd", `String ".");
-                   ("script", `String "uname -a && id && pwd");
+                   ("command", `String "uname -a && id && pwd");
                  ] );
            ])
   in
   Alcotest.check
     Alcotest.(option string)
-    "the row shows the script line"
+    "the row shows the command line"
     (Some "uname -a && id && pwd")
     preview
 
@@ -12251,8 +12251,8 @@ let () =
           test_decode_gate_block_reason_and_retry_contract;
         Alcotest.test_case "an execute row leads with the command" `Quick
           test_decode_execute_gate_row_leads_with_the_command;
-        Alcotest.test_case "an execute row shows the script line" `Quick
-          test_decode_execute_gate_row_shows_the_script_line;
+        Alcotest.test_case "an execute row shows the command line" `Quick
+          test_decode_execute_gate_row_shows_the_command_line;
         Alcotest.test_case "an execute row carries where it would run" `Quick
           test_decode_execute_gate_row_carries_where_it_would_run;
         Alcotest.test_case "another operation has no execution site" `Quick

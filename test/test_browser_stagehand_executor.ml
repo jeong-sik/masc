@@ -232,6 +232,15 @@ let test_interactions () =
   let expected_url = Some "http://127.0.0.1:1/shop" in
   let click = Lane.Click "#submit" in
   fake.sent <- [];
+  fake.evaluated <- Some
+    (`Assoc
+       [ "action", `String "click"
+       ; "urlBefore", `String "http://127.0.0.1:1/shop"
+       ; "url", `String "http://127.0.0.1:1/shop"
+       ; "title", `String "Shop"
+       ; "scrollX", `Int 0
+       ; "scrollY", `Int 0
+       ]);
   let receipt = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { tab_id = 0; expected_url; action = click })) in
   (match fake.sent with
    | [ Wire.Page_evaluate { expression; _ } ] ->
@@ -241,6 +250,14 @@ let test_interactions () =
        expression
    | _ -> fail "one page.evaluate");
   check int "the receipt names its tab" 0 Yojson.Safe.Util.(member "tabId" receipt |> to_int);
+  fake.evaluated <- Some (`Assoc []);
+  check bool "an empty scripted receipt is not success" true
+    (refused (Executor.execute ~tabs ~call:(call fake)
+       (Lane.Page_interact { tab_id = 0; expected_url; action = click })));
+  fake.evaluated <- Some (`Assoc [ "interactionFailure", `Bool true ]);
+  check bool "a malformed failure is not success" true
+    (refused (Executor.execute ~tabs ~call:(call fake)
+       (Lane.Page_interact { tab_id = 0; expected_url; action = click })));
   fake.evaluated <- Some (`Assoc [ "interactionFailure", `Assoc [ "message", `String "no element"; "effectStarted", `Bool false ] ]);
   check bool "a refusal before the click started is before effect" true
     (rejected_before_effect (Executor.execute ~tabs ~call:(call fake) (Lane.Page_interact { tab_id = 0; expected_url; action = click })));
@@ -255,6 +272,14 @@ let test_interactions () =
    | sent -> failf "guard, native click at the viewport point, receipt; sent %s"
                (String.concat ", " (List.map Wire.method_name sent)));
   check string "the receipt names the action" "click_at" Yojson.Safe.Util.(member "action" clicked |> to_string);
+  fake.evaluated <- Some (`Assoc [ "url", `String "http://127.0.0.1:1/shop"; "title", `Int 1 ]);
+  fake.sent <- [];
+  check bool "a malformed receipt after native input is refused" true
+    (refused (Executor.execute ~tabs ~call:(call fake)
+       (Lane.Page_interact { tab_id = 0; expected_url; action = Lane.Click_at { point; viewport = observed_viewport } })));
+  check bool "native input was sent before the malformed receipt" true
+    (List.exists (function Wire.Page_click _ -> true | _ -> false) fake.sent);
+  fake.evaluated <- None;
   fake.sent <- [];
   fake.failing <- (function Wire.Page_evaluate _ -> Some (Session.Rejected { code = -32603; message = "page_url_changed" }) | _ -> None);
   check bool "a guard that refused is before effect" true

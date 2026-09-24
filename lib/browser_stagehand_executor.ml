@@ -250,7 +250,14 @@ let interaction_receipt ~tab_id = function
        (match List.assoc_opt "effectStarted" failure with
         | Some (`Bool false) -> Error (Browser_lane.Rejected_before_effect message)
         | Some _ | None -> Error (Browser_lane.Refused message))
-     | Some _ | None -> Ok (`Assoc (("tabId", `Int tab_id) :: fields)))
+     | Some _ -> Error (malformed "page.evaluate" "a typed interaction failure")
+     | None ->
+       let receipt = `Assoc fields in
+       let* _ = string_field ~method_:"page.evaluate" "action" receipt in
+       let* _ = string_field ~method_:"page.evaluate" "urlBefore" receipt in
+       let* _ = string_field ~method_:"page.evaluate" "url" receipt in
+       let* _ = string_field ~method_:"page.evaluate" "title" receipt in
+       Ok (`Assoc (("tabId", `Int tab_id) :: fields)))
   | _ -> Error (malformed "page.evaluate" "an interaction receipt")
 ;;
 
@@ -267,6 +274,8 @@ let pointer ~call ~tab_id ~page_id ~args ~name input =
   let* after = evaluate ~send:(send_after_effect call) page_id Browser_interaction.pointer_receipt_script in
   match after with
   | `Assoc fields ->
+    let* _ = string_field ~method_:"page.evaluate" "url" after in
+    let* _ = string_field ~method_:"page.evaluate" "title" after in
     Ok (`Assoc (("tabId", `Int tab_id) :: ("urlBefore", `String url_before) :: ("action", `String name) :: fields))
   | _ -> Error (malformed "page.evaluate" "a pointer receipt")
 ;;

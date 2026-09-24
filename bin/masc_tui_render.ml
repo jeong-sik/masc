@@ -1529,7 +1529,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
             ask_block (fun b -> draw_ask_context b cols ~row:selected)
           in
           let plan =
-            Ask_layout.plan ~budget ~spent:(ask_section_rows buf)
+            Ask_layout.plan ~budget ~spent:(rows_drawn buf)
               ~question_heights:(List.map snd question_blocks)
               ~question_cursor:state.ask_question_cursor
               ~context_height:why_rows ~other_asks:(count - 1)
@@ -1583,13 +1583,11 @@ let draw_ask_questions buf cols (state : state) ~budget =
    questions -- what is being asked, and why it was held -- and the ask runs
    the width of the pane, so at eighty columns the two cannot share a row.
 
-   Built here rather than inline so the surface can ask its height before it
-   spends the rows, the way [ask_section_rows] already measures the ask block
-   it is about to draw. The row budget and the drawing call this, so they
-   cannot disagree about how tall it is; until 2026-08-31 the second row was
-   spelled as a literal ["\\n"] -- backslash and n, printed as those two
-   characters -- because a real newline would have drawn a row nobody
-   counted. *)
+   Built here rather than inline so the surface draws it into the block it
+   then measures with [rows_drawn], which is where its height comes from.
+   Until 2026-08-31 the second row was spelled as a literal ["\\n"] --
+   backslash and n, printed as those two characters -- because a real newline
+   would have drawn a row nobody counted. *)
 let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
     match List.nth_opt approvals state.approval_cursor with
     | Some (Operator_row a) -> (
@@ -1692,13 +1690,6 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
 ;;
 
 
-(* Rows [approval_detail_line] draws. One newline is one extra row, counted the
-   same way [ask_section_rows] counts the block above it. *)
-let approval_detail_rows line =
-  let n = ref 1 in
-  String.iter (fun c -> if c = '\n' then incr n) line;
-  !n
-
 (* The two rows drawn under the approval queue: what the selected ask is, and
    its payload. Both sit below the box with the frame's own margins, so both
    belong inside [framed_inner_width]. The payload row always asked for that
@@ -1797,10 +1788,6 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
                (max 8 (cols - 10)))
             Ansi.reset )
   in
-  (* The rows are counted here rather than read back off the joined string.
-     [approval_detail_rows] answers that question for the detail line and the
-     surface pins it to one call; this row already holds its own rows as a
-     list, so its height is the length of what it is about to draw. *)
   let metadata_rows =
     match clauses with
     | [] -> [ "" ]
@@ -1808,7 +1795,7 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
         Message_layout.pack_clauses ~max_cells:(framed_inner_width cols) clauses
         |> List.map (fun row -> Printf.sprintf "  %s%s%s" Ansi.dim row Ansi.reset)
   in
-  String.concat "\n" metadata_rows, payload_line, List.length metadata_rows
+  String.concat "\n" metadata_rows, payload_line
 ;;
 
 
@@ -1818,49 +1805,15 @@ let render_approvals (state : state) =
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  (* Two extra chrome rows on this surface only, both always drawn between
-     the header and the divider: the Gate lane line, and the standing
-     always-allow rule line under it. *)
-  let gate_lane_rows = 2 in
   let approvals = approval_items state in
   let action_inflight =
     Masc_tui_operator_projection.Flow.action_inflight state.approval_flow
   in
-  (* Asked of the line itself, not declared beside it. [boxed_surface_chrome_rows]
-     budgets one row for this detail and every kind but one takes it; a held
-     tool call takes two. Reading the height off the string the pane is about
-     to draw is what keeps the two from drifting -- the same thing
-     [ask_section_rows] does for the block below. *)
   let detail_line =
     approval_detail_line state ~approvals ~cols ~action_inflight
   in
-  let detail_extra_rows = approval_detail_rows detail_line - 1 in
-  (* The same reading for the two rows under the queue. A metadata row that
-     breaks into two takes a row from the block below unless the budget knows
-     about it -- the drift [detail_extra_rows] is here to stop. *)
-  let metadata_line, payload_line, metadata_rows =
+  let metadata_line, payload_line =
     approval_metadata_lines state ~approvals ~cols
-  in
-  let metadata_extra_rows = metadata_rows - 1 in
-  (* What the questions may spend. The block is drawn last, and a surface that
-     overruns loses its final rows, so an unbudgeted question list does not
-     push the approval queue off the screen -- it pushes itself off, cursor and
-     all. One row is held back for the queue, which is what the [max 1] below
-     was already trying to promise and could not keep. *)
-  let ask_budget =
-    max 4
-      (rows - boxed_surface_chrome_rows - gate_lane_rows - detail_extra_rows
-       - metadata_extra_rows - 1)
-  in
-  (* Drawn before the queue's own budget is settled so its height is a measured
-     fact rather than a second estimate that can disagree with the drawing. *)
-  let ask_buf = Buffer.create 1024 in
-  draw_ask_questions ask_buf cols state ~budget:ask_budget;
-  let ask_rows = ask_section_rows ask_buf in
-  let approval_body_rows =
-    max 1
-      (rows - boxed_surface_chrome_rows - gate_lane_rows - ask_rows
-       - detail_extra_rows - metadata_extra_rows)
   in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -2006,6 +1959,44 @@ let render_approvals (state : state) =
             | None -> "")
            Ansi.reset);
   box_divider buf cols;
+
+  (* Every row the surface spends around the queue, read back off the buffers
+     they were drawn into. Declared beside the drawing instead, the rows above
+     the queue were subtracted twice -- once inside [boxed_surface_chrome_rows]
+     and again as the two Gate lane rows -- so the surface came out two rows
+     short of its budget. [finish_surface] pads a short surface under its last
+     row, and the last row here is the footer: it floated two rows above the
+     composer at every terminal height, and the queue drew two blank rows in
+     place of two approvals. *)
+  let head_rows = rows_drawn buf in
+  (* The rows under the queue: the frame's closing row, the selected row's
+     detail, the metadata rows, and the payload row beneath them. Drawn now so
+     their height is the same measured fact -- a metadata row that breaks into
+     two, or a held tool call whose detail takes two, is counted because it is
+     in the buffer, not because a reader remembered to add one. *)
+  let below_buf = Buffer.create 1024 in
+  box_bottom below_buf cols;
+  Buffer.add_string below_buf (Printf.sprintf "%s\n" detail_line);
+  Buffer.add_string below_buf
+    (Printf.sprintf "%s\n%s\n" metadata_line payload_line);
+  (* The footer ends its own row, so the buffer holds exactly the row it
+     draws. *)
+  let footer_buf = Buffer.create 256 in
+  Buffer.add_string footer_buf
+    (footer_line state ~max_cells:cols ~hints:(question_hints state));
+  let around_rows = head_rows + rows_drawn below_buf + rows_drawn footer_buf in
+  (* What the questions may spend. The block is drawn last, and a surface that
+     overruns loses its final rows, so an unbudgeted question list does not
+     push the approval queue off the screen -- it pushes itself off, cursor and
+     all. One row is held back for the queue, which is what the [max 1] below
+     was already trying to promise and could not keep. *)
+  let ask_budget = max 4 (rows - around_rows - 1) in
+  (* Drawn before the queue's own budget is settled so its height is a measured
+     fact rather than a second estimate that can disagree with the drawing. *)
+  let ask_buf = Buffer.create 1024 in
+  draw_ask_questions ask_buf cols state ~budget:ask_budget;
+  let ask_rows = rows_drawn ask_buf in
+  let approval_body_rows = max 1 (rows - around_rows - ask_rows) in
 
   let approvals_error =
     Terminal_text.optional_single_line state.approvals_error
@@ -2163,17 +2154,11 @@ let render_approvals (state : state) =
     done
   end;
 
-  box_bottom buf cols;
-
-  Buffer.add_string buf (Printf.sprintf "%s\n" detail_line);
-
-  Buffer.add_string buf (Printf.sprintf "%s\n%s\n" metadata_line payload_line);
+  Buffer.add_buffer buf below_buf;
 
   Buffer.add_buffer buf ask_buf;
 
-  let hints = question_hints state
-  in
-  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
+  Buffer.add_buffer buf footer_buf;
 
   finish_surface state ~surface_key:"approvals" ~rows:terminal_rows
       ~cols buf
@@ -2942,9 +2927,9 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
         | Board_detail.Loading ->
             [Ansi.dim ^ "  Loading Board detail..." ^ Ansi.reset]
         | Board_detail.Failed error ->
-            [ (Theme.bad ()) ^ "  Board detail unavailable: "
+            [ (Theme.bad ()) ^ "  "
               ^ fit_width (Terminal_text.single_line error)
-                  (max 1 (comment_wrap_cols - 32))
+                  (max 1 (framed_inner_width comment_wrap_cols - 2))
               ^ Ansi.reset
             ]
         | Board_detail.Ready (_, comments) ->
@@ -15843,7 +15828,7 @@ let render_surface (state : state) =
                         match Board_detail.view_for state.board_detail ~post_id with
                         | Board_detail.Failed detail ->
                             c.push_styled ~style:(Theme.bad ())
-                              ("  Board post load failed: " ^ Terminal_text.single_line detail)
+                              ("  " ^ Terminal_text.single_line detail)
                         | Board_detail.Absent -> c.push "  Board post has not been loaded. Press r to retry."
                         | Board_detail.Loading -> c.push "  Loading Board post..."
                         | Board_detail.Ready _ -> ())))

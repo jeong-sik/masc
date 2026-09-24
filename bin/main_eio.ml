@@ -3351,7 +3351,16 @@ let sandbox_image_exit_of = function
 let sandbox_image_promote_exit base_path runtime name reference =
   let ( let* ) = Result.bind in
   sandbox_image_exit_of
-    (let* runtime = runtime in
+    (let* () =
+       if Keeper_sandbox_image_catalog.is_reference reference then Ok ()
+       else
+         Error
+           (Printf.sprintf
+              "sandbox-image: %S is not repository:tag (a lowercase repository and \
+               a tag; not a digest reference, not starting with '-')"
+              reference)
+     in
+     let* runtime = runtime in
      let* builder = sandbox_image_builder runtime in
      let store = sandbox_image_store runtime in
      let* digest =

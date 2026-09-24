@@ -100,7 +100,8 @@ class SandboxImageCatalogCliTest(unittest.TestCase):
                    TEST_RECEIPT=str(root / 'receipt.json'), TEST_EXIT='0',
                    TEST_INSPECT_EXIT='0', TEST_INSPECT_OUTPUT=inspect_output)
         env.pop('MASC_TEST_FAKE_DOCKER_PATH', None)
-        return subprocess.run([BINARY, 'sandbox-image', *args, '--base-path', str(base)],
+        subcommand, *rest = args
+        return subprocess.run([BINARY, 'sandbox-image', subcommand, '--base-path', str(base), *rest],
                               env=env, text=True, capture_output=True)
 
     def test_promote_then_rollback_on_apple_container(self):
@@ -150,9 +151,11 @@ sys.exit(0)
             self.assertNotEqual(unknown.returncode, 0)
             self.assertIn('no image "rust"', unknown.stderr)
 
-            flag = self.run_cli(root, base, 'promote', 'base', '--privileged:x',
-                                '--runtime', 'apple_container', inspect_output=inspect(digest_a))
+            # `--` ends the options, so the flag-shaped value reaches the reference check.
+            flag = self.run_cli(root, base, 'promote', '--runtime', 'apple_container', '--',
+                                'base', '--privileged:x', inspect_output=inspect(digest_a))
             self.assertNotEqual(flag.returncode, 0, 'a flag-shaped reference was promoted')
+            self.assertIn('is not repository:tag', flag.stderr)
 
     def test_rollback_without_a_previous_build_changes_nothing(self):
         with tempfile.TemporaryDirectory() as directory:

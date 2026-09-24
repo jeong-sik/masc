@@ -425,8 +425,10 @@ let resolve ~cursor ~basis ~observation ~observed_at =
              until the counter climbed past it, so one regression stopped
              the keeper's totals for many turns instead of losing one
              (#32463). Observations reach [resolve] one settled turn at a
-             time (keeper_unified_turn_success.ml), so a lower value is the
-             counter's current position, not a stale sample arriving late. *)
+             time (keeper_unified_turn_success.ml), so we trust a lower value
+             as the counter's new position. If it was a transient frame, the
+             next turn over-counts by at most (old peak - observed), once;
+             keeping the old peak instead under-counted without bound. *)
           ( { observation; basis; delta = None; status = Counter_regressed; observed_at }
           , next_cursor ))
      | Some _ | None ->

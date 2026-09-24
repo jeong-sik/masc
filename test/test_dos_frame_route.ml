@@ -116,9 +116,24 @@ let test_a_known_frame_is_answered_without_pixels () =
     check bool "so no pixels travel" true (member "rgb_base64" again = None);
     check (option string) "the controller is still reported" (Some loader)
       (match member "controller" again with Some (`String s) -> Some s | _ -> None);
+    let next_holder = "next-player" in
+    (match Dos_lane.pass ~who:loader ~to_:(Some next_holder) ~announce:ignore with
+     | Ok _ -> ()
+     | Error e -> fail (Dos_lane.error_to_string e));
+    let _, passed =
+      Route.frame_response ~incarnation:(Some incarnation)
+        ~steps:(Some (string_of_int steps))
+        ~capture:(fun () -> fail "a controller handoff must not render pixels")
+        ()
+    in
+    check string "the handoff keeps the frame" "unchanged"
+      (string_member "pixels" passed);
+    check (option string) "the handoff reports the current controller"
+      (Some next_holder)
+      (match member "controller" passed with Some (`String s) -> Some s | _ -> None);
     (* Time moved by a tool call: the held frame is stale and the whole frame
        comes back. *)
-    (match Dos_lane.step ~who:loader ~steps:1 ~until_ready:false with
+    (match Dos_lane.step ~who:next_holder ~steps:1 ~until_ready:false with
      | Ok _ -> ()
      | Error e -> fail (Dos_lane.error_to_string e));
     let _, moved =

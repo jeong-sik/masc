@@ -520,7 +520,32 @@ let capture () =
     Ok (observe st, { width; height; rgb = Dos_machine.frame_rgb st.m }))
 ;;
 
+type identity = {
+  id_incarnation : string;
+  id_steps : int;
+  id_program : string;
+  id_controller : string option;
+  id_video_mode : int;
+  id_width : int;
+  id_height : int;
+}
+
+let identity_of_machine st =
+  let id_width, id_height = Dos_machine.frame_dims st.m in
+  { id_incarnation = st.incarnation
+  ; id_steps = st.steps
+  ; id_program = st.program
+  ; id_controller = st.controller
+  ; id_video_mode = Dos_machine.video_mode st.m
+  ; id_width
+  ; id_height
+  }
+;;
+
+let identify () = with_machine (fun st -> Ok (identity_of_machine st))
+
 type identified_capture = {
+  identity : identity;
   incarnation : string;
   observation : observation;
   frame : frame;
@@ -530,11 +555,16 @@ type identified_capture = {
 
 let capture_with_identity () =
   with_machine (fun st ->
-    let width, height = Dos_machine.frame_dims st.m in
+    let identity = identity_of_machine st in
     Ok
-      { incarnation = st.incarnation
+      { identity
+      ; incarnation = st.incarnation
       ; observation = observe st
-      ; frame = { width; height; rgb = Dos_machine.frame_rgb st.m }
+      ; frame =
+          { width = identity.id_width
+          ; height = identity.id_height
+          ; rgb = Dos_machine.frame_rgb st.m
+          }
       ; input_count = List.length st.entries
       ; input_ledger = st.entries
       })

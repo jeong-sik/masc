@@ -182,7 +182,23 @@ val capture : unit -> (observation * frame, error) result
     vision reads: a VGA game's Korean menus are glyphs in pixels, which
     [frame_ascii]'s luminance cells cannot spell. *)
 
+type identity = {
+  id_incarnation : string;
+  id_steps : int;
+  id_program : string;
+  id_controller : string option;
+  id_video_mode : int;
+  id_width : int;
+  id_height : int;
+}
+
+val identify : unit -> (identity, error) result
+(** Reads the current machine's frame identity and metadata under its lock
+    without rendering pixels or advancing DOS time. The controller can change
+    without changing the frame identity. *)
+
 type identified_capture = {
+  identity : identity;
   incarnation : string;
       (** Fresh on every load. Reads and time leave it alone. *)
   observation : observation;
@@ -195,7 +211,8 @@ type identified_capture = {
 
 val capture_with_identity : unit -> (identified_capture, error) result
 (** {!capture} with the machine's identity and input history, for a Lane
-    Add-on source ([dos_capture]). Never advances the machine. *)
+    Add-on source ([dos_capture]). [identity] and [frame] come from the same
+    locked machine read. Never advances the machine. *)
 
 val entry_json : entry -> Yojson.Safe.t
 (** One ledger line: [{"step", "who", "key"}], the shape written to

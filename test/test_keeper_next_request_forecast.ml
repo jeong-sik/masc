@@ -354,6 +354,7 @@ let test_the_librarian_gap_is_read_from_small_files () =
         ; cache_read_input_tokens = None
         ; scope = Runtime_usage_scope.Usage_scope_unavailable
         }
+      ~turn_output_tokens:None
       ~execution_ids:[] ~blocks:[] ~input_components:None ~tool_surface_ref:None ()
   in
   let digest_at = Runtime_model_input_tail_window.atom_opening_digest persisted in
@@ -437,7 +438,13 @@ let test_the_librarian_gap_is_read_from_small_files () =
     (Keeper_turn_boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
     "{not-json\n";
   Alcotest.(check string) "a refused turn-boundary read is not no gap" "turn_boundary_refused"
-    (cause ())
+    (cause ());
+  (* A meta file this binary does not decode is not "no Keeper, no gap":
+     [read_meta] folds it into [Ok None], so the gap reads presence. *)
+  write_raw
+    (Keeper_types_profile.keeper_meta_path config keeper_name)
+    "{\"name\":\"librarian-gap\"}";
+  Alcotest.(check string) "an undecodable meta is not no gap" "meta_unreadable" (cause ())
 
 let component component bytes : Turn_record.input_component = { component; bytes }
 

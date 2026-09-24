@@ -690,10 +690,17 @@ let librarian_gap_unmeasured_detail = function
    accepted start to weigh it against. *)
 let librarian_gap ~config ~keeper_name =
   let ( let* ) = Result.bind in
-  match Keeper_meta_store.read_meta config keeper_name with
-  | Error message -> Error (Meta_unreadable message)
-  | Ok None -> Ok None
-  | Ok (Some meta) ->
+  (* Presence, not [read_meta]: [read_meta] folds a meta this binary cannot
+     decode into [Ok None], which would read as "no gap". *)
+  match
+    Keeper_meta_store.read_meta_file_path_presence
+      ~ownership_root:config.Workspace.base_path
+      (Keeper_types_profile.keeper_meta_path config (String.trim keeper_name))
+  with
+  | Error message | Ok (Keeper_meta_store.Meta_not_current message) ->
+    Error (Meta_unreadable message)
+  | Ok Keeper_meta_store.Meta_absent -> Ok None
+  | Ok (Keeper_meta_store.Meta_present meta) ->
     let trace_id = Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id in
     let read : Keeper_carried_front.seed_read =
       Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id

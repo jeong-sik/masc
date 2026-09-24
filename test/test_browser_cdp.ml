@@ -11,12 +11,13 @@ let with_connection f =
   @@ fun () ->
   let clock = Eio_mock.Clock.make () in
   Eio_mock.Clock.set_time clock 0.0;
-  let sent = ref [] and events = ref [] in
+  let sent = ref [] and events = ref [] and closes = ref 0 in
   let t =
-    Cdp.create ~send:(fun frame -> sent := Yojson.Safe.from_string frame :: !sent) ~clock
-      ~command_deadline_s:deadline_s ~on_event:(fun event -> events := event :: !events)
+    Cdp.create ~send:(fun frame -> sent := Yojson.Safe.from_string frame :: !sent)
+      ~close:(fun () -> incr closes) ~clock ~command_deadline_s:deadline_s
+      ~on_event:(fun event -> events := event :: !events)
   in
-  Eio.Switch.run @@ fun sw -> f ~sw ~clock ~t ~sent ~events
+  Eio.Switch.run @@ fun sw -> f ~sw ~clock ~t ~sent ~events ~closes
 ;;
 
 let member key json = Yojson.Safe.Util.member key json
@@ -67,7 +68,7 @@ let test_events () =
 ;;
 
 let test_replies_reach_their_commands () =
-  with_connection @@ fun ~sw ~clock:_ ~t ~sent ~events:_ ->
+  with_connection @@ fun ~sw ~clock:_ ~t ~sent ~events:_ ~closes:_ ->
   let first = Eio.Fiber.fork_promise ~sw (fun () -> Cdp.command t "Browser.getVersion" (`Assoc [])) in
   let second =
     Eio.Fiber.fork_promise ~sw (fun () -> Cdp.command t ~session:"W" "Runtime.enable" (`Assoc []))
@@ -87,7 +88,7 @@ let test_replies_reach_their_commands () =
 ;;
 
 let test_lost_ends_every_command () =
-  with_connection @@ fun ~sw ~clock:_ ~t ~sent ~events ->
+  with_connection @@ fun ~sw ~clock:_ ~t ~sent ~events ~closes ->
   let waiting = Eio.Fiber.fork_promise ~sw (fun () -> Cdp.command t "Extensions.loadUnpacked" (`Assoc [])) in
   Cdp.lost t "CDP websocket EOF";
   Cdp.lost t "a second reason is ignored";
@@ -96,6 +97,7 @@ let test_lost_ends_every_command () =
   check reply "later command" (Error (Cdp.Connection_lost "CDP websocket EOF"))
     (Cdp.command t "Target.getTargets" (`Assoc []));
   check int "a later command writes nothing" written (List.length !sent);
+  check int "the transport is let go once" 1 !closes;
   Cdp.receive t {|{"method":"Target.targetDestroyed","params":{"targetId":"T"}}|};
   match !events with
   | [ Cdp.Connection_ended { reason = "CDP websocket EOF" } ] -> ()
@@ -103,7 +105,7 @@ let test_lost_ends_every_command () =
 ;;
 
 let test_deadline_ends_the_connection () =
-  with_connection @@ fun ~sw ~clock ~t ~sent:_ ~events:_ ->
+  with_connection @@ fun ~sw ~clock ~t ~sent:_ ~events:_ ~closes:_ ->
   let waiting = Eio.Fiber.fork_promise ~sw (fun () -> Cdp.command t "Runtime.evaluate" (`Assoc [])) in
   Eio_mock.Clock.set_time clock deadline_s;
   check reply "no reply by the deadline" (Error (Cdp.Connection_lost "CDP command deadline exceeded"))
@@ -111,8 +113,37 @@ let test_deadline_ends_the_connection () =
   check (option string) "the connection is over" (Some "CDP command deadline exceeded") (Cdp.lost_reason t)
 ;;
 
+(* The deadline's wake-up and the reply land in the same pass: the reply
+   stands and the connection stays for the next command. *)
+let test_a_reply_at_the_deadline_keeps_the_connection () =
+  with_connection @@ fun ~sw ~clock ~t ~sent ~events:_ ~closes:_ ->
+  let first = Eio.Fiber.fork_promise ~sw (fun () -> Cdp.command t "Browser.getVersion" (`Assoc [])) in
+  Eio_mock.Clock.set_time clock 1.0;
+  let second = Eio.Fiber.fork_promise ~sw (fun () -> Cdp.command t "Target.getTargets" (`Assoc [])) in
+  let first_id = sent_id (List.nth (List.rev !sent) 0) in
+  Eio_mock.Clock.set_time clock deadline_s;
+  Cdp.receive t (Printf.sprintf {|{"id":%d,"result":{}}|} first_id);
+  check reply "the reply stands" (Ok (`Assoc [])) (Eio.Promise.await_exn first);
+  check (option string) "the connection stays" None (Cdp.lost_reason t);
+  Eio_mock.Clock.set_time clock (1.0 +. deadline_s);
+  check reply "the unanswered command still meets its own deadline"
+    (Error (Cdp.Connection_lost "CDP command deadline exceeded")) (Eio.Promise.await_exn second)
+;;
+
+let test_a_cancelled_caller_ends_the_connection () =
+  with_connection @@ fun ~sw:_ ~clock:_ ~t ~sent:_ ~events:_ ~closes ->
+  (try
+     Eio.Switch.run (fun caller ->
+       Eio.Fiber.fork ~sw:caller (fun () -> ignore (Cdp.command t "Runtime.evaluate" (`Assoc [])));
+       Eio.Switch.fail caller Exit)
+   with
+   | Exit -> ());
+  check (option string) "its outcome is unknown" (Some "a command's caller was cancelled") (Cdp.lost_reason t);
+  check int "the transport is let go" 1 !closes
+;;
+
 let test_protocol_violations_end_the_connection () =
-  with_connection @@ fun ~sw:_ ~clock:_ ~t ~sent:_ ~events ->
+  with_connection @@ fun ~sw:_ ~clock:_ ~t ~sent:_ ~events ~closes:_ ->
   Cdp.receive t {|{"method":"Target.targetDestroyed","params":{"targetId":"T"}}|};
   (match !events with
    | [ Cdp.Target_destroyed { target_id = "T" } ] -> ()
@@ -131,6 +162,8 @@ let () =
       test_case "replies reach their commands" `Quick test_replies_reach_their_commands;
       test_case "an ended connection ends every command" `Quick test_lost_ends_every_command;
       test_case "a missed deadline ends the connection" `Quick test_deadline_ends_the_connection;
+      test_case "a reply at the deadline keeps it" `Quick test_a_reply_at_the_deadline_keeps_the_connection;
+      test_case "a cancelled caller ends it" `Quick test_a_cancelled_caller_ends_the_connection;
       test_case "a reply nobody asked for ends it" `Quick test_protocol_violations_end_the_connection;
     ];
   ]

@@ -1,9 +1,14 @@
 ---
-rfc: "0468"
+rfc: "keeper-build-output-returns-to-a-disposable-volume"
+title: "Keeper build output returns to a disposable volume"
 status: Draft
+created: 2026-09-24
+updated: 2026-09-24
+author: vincent
+related: []
 ---
 
-# RFC-0468 — Keeper build output returns to a disposable volume
+# Keeper build output returns to a disposable volume
 
 - Status: Draft
 - Decision driver: measured 2026-09-24 on the live fleet (14 running microVM
@@ -309,9 +314,3 @@ directory dune already knows it doesn't need.
   this RFC has measurements for. A generic disk-pressure sweep across
   arbitrary guest paths is a different, larger RFC — RFC-0122 already flags
   "purge 정책" for later work explicitly, and this is that work, narrowly.
-
-## Number allocation note
-
-Allocated as RFC-0468. `docs/rfc/` highest present number was 0467 at
-allocation time (0466 absent — reserved against reuse per README policy,
-same convention RFC-0122 §8 documents).

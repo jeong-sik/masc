@@ -1341,13 +1341,11 @@ let error_exn = function
   | Error e -> e
 ;;
 
-(* ── The build volume (RFC-0468), ported from RFC-0399 ─────────────
-   RFC-0400 deleted this section's originals (37d26eab2f) when it moved the
-   whole checkout onto ext4 and no longer needed _build split out to solve
-   the virtiofs FD leak. Restored because the split's other property --
-   a volume holding only derived output can be deleted and recreated with
-   zero data-loss risk -- is what host disk reclaim needs and the unified
-   work volume cannot offer. Apple_container only; see the .mli. *)
+(* ── The build volume (RFC-keeper-build-output-returns-to-a-disposable-volume)
+   A volume holding only derived output can be deleted and recreated with
+   zero data-loss risk, which is what host disk reclaim needs and the work
+   volume holding the checkout cannot offer. Apple_container only; see the
+   .mli. *)
 
 let test_build_volume_name_is_keeper_scoped () =
   Alcotest.(check string)
@@ -1378,18 +1376,106 @@ let test_build_volume_mount_targets_the_guest_root () =
        (M.build_volume_mount_args ~volume_name:"masc-keeper-build-polisher"))
 ;;
 
-let test_apple_build_volume_create_argv_carries_a_size () =
-  let argv = M.apple_build_volume_create_argv ~volume_name:"masc-keeper-build-x" ~size:"64g" in
-  Alcotest.(check bool) "goes through container" true (contains "container" argv);
-  Alcotest.(check bool) "creates a volume" true (adjacent ~flag:"volume" ~value:"create" argv);
-  Alcotest.(check bool) "size is passed" true (adjacent ~flag:"-s" ~value:"64g" argv)
-;;
-
 let test_apple_build_volume_delete_argv_names_the_volume () =
   let argv = M.apple_build_volume_delete_argv ~volume_name:"masc-keeper-build-x" in
   Alcotest.(check bool) "goes through container" true (contains "container" argv);
   Alcotest.(check bool) "deletes a volume" true (adjacent ~flag:"volume" ~value:"delete" argv);
   Alcotest.(check bool) "names it" true (contains "masc-keeper-build-x" argv)
+;;
+
+(* The build volume goes through the same [container volume] probe and
+   sized create as the work volume; only the error code differs. A fake
+   [container] on PATH records every call and keeps the volume's existence
+   in a marker file, so the delete-then-create order and the create's [-s]
+   are read off the log, and a probe fault (inspect exit 2) must be
+   reported under each volume's own code. *)
+let test_recreate_apple_build_volume_shares_the_work_volume_commands () =
+  with_eio_fs @@ fun () ->
+  let context = Eio_context.snapshot_state () in
+  let dir = temp_dir "apple-build-volume-cli-" in
+  let cli = Filename.concat dir "container" in
+  let log = Filename.concat dir "calls" in
+  let marker = Filename.concat dir "present" in
+  let volume_name = "masc-keeper-build-fixture" in
+  let previous_path = Sys.getenv "PATH" in
+  Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_context.restore_state context;
+      Unix.putenv "PATH" previous_path;
+      List.iter (fun p -> if Sys.file_exists p then Unix.unlink p) [ cli; log; marker ];
+      Unix.rmdir dir)
+  @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let install ~inspect_absent_exit =
+    let oc = open_out cli in
+    Printf.fprintf
+      oc
+      "#!/bin/sh\n\
+       printf '%%s\\n' \"$*\" >> %s\n\
+       case \"$*\" in\n\
+       'volume inspect %s') [ -e %s ] && exit 0; exit %d;;\n\
+       'volume list --format json') printf '[]\\n'; exit 0;;\n\
+       'volume delete %s') rm -f %s; exit 0;;\n\
+       'volume create -s 128g %s') : > %s; exit 0;;\n\
+       *) exit 99;;\n\
+       esac\n"
+      (Filename.quote log)
+      volume_name
+      (Filename.quote marker)
+      inspect_absent_exit
+      volume_name
+      (Filename.quote marker)
+      volume_name
+      (Filename.quote marker);
+    close_out oc;
+    Unix.chmod cli 0o755;
+    if Sys.file_exists log then Unix.unlink log
+  in
+  let calls () =
+    let ic = open_in log in
+    let text = In_channel.input_all ic in
+    close_in ic;
+    text
+  in
+  install ~inspect_absent_exit:1;
+  close_out (open_out marker);
+  (match M.recreate_apple_build_volume ~volume_name ~size:"128g" ~timeout_sec:5.0 with
+   | Ok `Created -> ()
+   | Ok `Already_present -> Alcotest.fail "a present build volume must be recreated"
+   | Error message -> Alcotest.failf "recreate failed: %s" message);
+  Alcotest.(check string)
+    "delete, then the work volume's probe and sized create"
+    (String.concat
+       ""
+       [ "volume inspect masc-keeper-build-fixture\n"
+       ; "volume delete masc-keeper-build-fixture\n"
+       ; "volume inspect masc-keeper-build-fixture\n"
+       ; "volume list --format json\n"
+       ; "volume create -s 128g masc-keeper-build-fixture\n"
+       ])
+    (calls ());
+  install ~inspect_absent_exit:2;
+  if Sys.file_exists marker then Unix.unlink marker;
+  let expect_error ~prefix = function
+    | Error message ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%S starts with %S" message prefix)
+        true
+        (String.starts_with ~prefix message)
+    | Ok _ -> Alcotest.fail "an ambiguous probe must not be read as a volume"
+  in
+  expect_error
+    ~prefix:"microvm_build_volume_probe_failed: "
+    (M.recreate_apple_build_volume ~volume_name ~size:"128g" ~timeout_sec:5.0);
+  expect_error
+    ~prefix:"microvm_work_volume_probe_failed: "
+    (M.ensure_work_volume_for
+       Masc.Keeper_microvm_backend.Apple_container
+       ~volume_name
+       ~size:"128g"
+       ~timeout_sec:5.0)
 ;;
 
 let test_plan_build_link_never_deletes_real_build_output () =
@@ -2610,17 +2696,17 @@ let () =
         ; Alcotest.test_case "ambiguity is never read as absence" `Quick
             test_volume_probe_refuses_to_guess
         ] )
-    ; ( "build volume (RFC-0468)"
+    ; ( "build volume"
       , [ Alcotest.test_case "build volume is named and mounted at its root" `Quick
             test_build_volume_name_is_keeper_scoped
         ; Alcotest.test_case "build volume name refuses unsafe names" `Quick
             test_build_volume_name_refuses_unsafe_names
         ; Alcotest.test_case "build volume mount targets the guest root" `Quick
             test_build_volume_mount_targets_the_guest_root
-        ; Alcotest.test_case "apple build volume create argv carries a size" `Quick
-            test_apple_build_volume_create_argv_carries_a_size
         ; Alcotest.test_case "apple build volume delete argv names the volume" `Quick
             test_apple_build_volume_delete_argv_names_the_volume
+        ; Alcotest.test_case "recreate shares the work volume's commands" `Quick
+            test_recreate_apple_build_volume_shares_the_work_volume_commands
         ; Alcotest.test_case "plan never deletes real build output" `Quick
             test_plan_build_link_never_deletes_real_build_output
         ; Alcotest.test_case "build link target is flat and unique per checkout" `Quick

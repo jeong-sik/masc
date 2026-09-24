@@ -1194,7 +1194,8 @@ let classify_volume_probe ~volume_name ~inspect ~listing =
     is known and the inspect and list that settle existence are not, and
     creating over a volume that already holds a keeper's tree is exactly what
     that check exists to prevent; for [nerdctl] there is no size flag to
-    establish. Error codes are [microvm_work_volume_*]. *)
+    establish. Error codes are [microvm_work_volume_*], or
+    [microvm_build_volume_*] for Apple's build volume. *)
 let apple_volume_probe ~volume_name ~timeout_sec =
   let cli = command_argv_for Backend.Apple_container in
   let inspect_argv = cli @ [ "volume"; "inspect"; volume_name ] in
@@ -1209,6 +1210,18 @@ let apple_volume_probe ~volume_name ~timeout_sec =
   classify_volume_probe ~volume_name ~inspect ~listing
 ;;
 
+(** Which of a keeper's two Apple volumes a call is about. The probe and the
+    create are the same [container volume] commands for both; only the error
+    code a failure is reported under differs. *)
+type apple_volume_role =
+  | Work_volume
+  | Build_volume
+
+let apple_volume_error_code = function
+  | Work_volume -> "microvm_work_volume"
+  | Build_volume -> "microvm_build_volume"
+;;
+
 (** Create the volume when it is absent, and say so when it cannot be
     established either way.
 
@@ -1216,11 +1229,12 @@ let apple_volume_probe ~volume_name ~timeout_sec =
     "already exists" -- so existence is settled by the probe above rather than
     by reading that message. The size is a ceiling: the image is sparse, and
     4 GiB nominal measured 84 MB on disk. *)
-let ensure_apple_work_volume ~volume_name ~size ~timeout_sec =
+let ensure_apple_volume role ~volume_name ~size ~timeout_sec =
+  let error_code = apple_volume_error_code role in
   match apple_volume_probe ~volume_name ~timeout_sec with
   | Volume_present -> Ok `Already_present
   | Volume_probe_failed message ->
-    Error (Printf.sprintf "microvm_work_volume_probe_failed: %s" message)
+    Error (Printf.sprintf "%s_probe_failed: %s" error_code message)
   | Volume_absent ->
     let argv = apple_volume_create_argv ~volume_name ~size in
     (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
@@ -1228,7 +1242,8 @@ let ensure_apple_work_volume ~volume_name ~size ~timeout_sec =
      | status, stdout, stderr ->
        Error
          (Printf.sprintf
-            "microvm_work_volume_create_failed: %s (%s; %s)"
+            "%s_create_failed: %s (%s; %s)"
+            error_code
             volume_name
             (match status with
              | Unix.WEXITED code -> Printf.sprintf "exit %d" code
@@ -1371,12 +1386,13 @@ let ensure_nerdctl_work_volume ~volume_name ~size ~timeout_sec =
     behavior. All backends keep the working tree off the host playground. *)
 let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
   match (backend : Backend.t) with
-  | Backend.Apple_container -> ensure_apple_work_volume ~volume_name ~size ~timeout_sec
+  | Backend.Apple_container ->
+    ensure_apple_volume Work_volume ~volume_name ~size ~timeout_sec
   | Backend.Microsandbox -> ensure_msb_work_volume ~volume_name ~timeout_sec
   | Backend.Nerdctl_kata -> ensure_nerdctl_work_volume ~volume_name ~size ~timeout_sec
 ;;
 
-(* ── The build volume (RFC-0468) ─────────────────────────────────────
+(* ── The build volume (RFC-keeper-build-output-returns-to-a-disposable-volume)
    Apple_container only: msb's named volume is a host directory ([--kind
    dir]), and nerdctl's managed volume is also a host directory with
    `capacity_enforced=false` (see ensure_msb_work_volume,
@@ -1387,27 +1403,19 @@ let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
    (2026-09-24) to keep its allocated size after the guest deletes
    everything inside it -- `fstrim` inside the guest, run as root, answers
    "Operation not permitted": container 1.3.1's virtio-blk backend
-   advertises no discard/unmap. A keeper's `_build` living on its own
-   disposable volume, instead of folded into the unified work volume
-   RFC-0400 gave every checkout, is what makes "delete the volume, make a
-   new one" a real host-disk reclaim path again for Apple, the same way
-   RFC-0399 built it before RFC-0400's tree unification removed it as an
-   unrelated side effect (RFC-0468's "What the codebase already says"). *)
+   advertises no discard/unmap. A keeper's `_build` on its own disposable
+   volume, apart from the work volume that holds the checkout, is what
+   makes "delete the volume, make a new one" a host-disk reclaim path on
+   Apple. *)
 
-(** Guest mount point of the per-keeper build volume, RFC-0399's original
-    choice, distinct from {!work_volume_guest_root}. *)
+(** Guest mount point of the per-keeper build volume, distinct from
+    {!work_volume_guest_root}. *)
 let build_volume_guest_root = "/masc-build"
 
 let build_volume_name ~keeper_name =
   if valid_volume_segment keeper_name
   then Ok ("masc-keeper-build-" ^ keeper_name)
   else Error ("unsupported keeper name for a build volume: " ^ keeper_name)
-;;
-
-(** Apple's sized-volume spelling, the build-volume sibling of
-    {!apple_volume_create_argv}. *)
-let apple_build_volume_create_argv ~volume_name ~size =
-  command_argv_for Backend.Apple_container @ [ "volume"; "create"; "-s"; size; volume_name ]
 ;;
 
 let build_volume_mount_args ~volume_name =
@@ -1420,7 +1428,7 @@ let build_volume_mount_args ~volume_name =
     parent directories -- the guest cannot [mkdir -p] through a symlink whose
     parent is missing, and the host cannot write into the disk image at all.
     A path segment already containing [:] would make two checkouts share one
-    build directory, so it is refused instead. Unchanged from RFC-0399. *)
+    build directory, so it is refused instead. *)
 let build_link_separator = ':'
 
 let build_link_target ~playground_relative =
@@ -1469,46 +1477,6 @@ let plan_build_link ~target = function
   | Build_real_directory -> Link_refused_real_directory
 ;;
 
-(** Apple's build-volume probe and provisioning, the build-volume sibling of
-    {!apple_volume_probe} / {!ensure_apple_work_volume}. Reuses
-    {!classify_volume_probe} and {!volume_names_of_json} above unchanged --
-    those are pure [container volume] JSON/exit-code parsing, independent of
-    which named volume is being asked about. *)
-let apple_build_volume_probe ~volume_name ~timeout_sec =
-  let cli = command_argv_for Backend.Apple_container in
-  let inspect_argv = cli @ [ "volume"; "inspect"; volume_name ] in
-  let inspect = Process_eio.run_argv_with_status_split ~timeout_sec inspect_argv in
-  let listing =
-    match inspect with
-    | Unix.WEXITED 1, _, _ ->
-      let list_argv = cli @ [ "volume"; "list"; "--format"; "json" ] in
-      Some (Process_eio.run_argv_with_status_split ~timeout_sec list_argv)
-    | _ -> None
-  in
-  classify_volume_probe ~volume_name ~inspect ~listing
-;;
-
-let ensure_apple_build_volume ~volume_name ~size ~timeout_sec =
-  match apple_build_volume_probe ~volume_name ~timeout_sec with
-  | Volume_present -> Ok `Already_present
-  | Volume_probe_failed message ->
-    Error (Printf.sprintf "microvm_build_volume_probe_failed: %s" message)
-  | Volume_absent ->
-    let argv = apple_build_volume_create_argv ~volume_name ~size in
-    (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
-     | Unix.WEXITED 0, _, _ -> Ok `Created
-     | status, stdout, stderr ->
-       Error
-         (Printf.sprintf
-            "microvm_build_volume_create_failed: %s (%s; %s)"
-            volume_name
-            (match status with
-             | Unix.WEXITED code -> Printf.sprintf "exit %d" code
-             | Unix.WSIGNALED n -> Printf.sprintf "signalled %d" n
-             | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
-            (output_for_log ~stdout ~stderr)))
-;;
-
 let apple_build_volume_delete_argv ~volume_name =
   command_argv_for Backend.Apple_container @ [ "volume"; "delete"; volume_name ]
 ;;
@@ -1524,18 +1492,21 @@ let apple_build_volume_delete_argv ~volume_name =
     deleting on an ambiguous answer risks a volume this call did not create
     the record for. *)
 let recreate_apple_build_volume ~volume_name ~size ~timeout_sec =
-  match apple_build_volume_probe ~volume_name ~timeout_sec with
+  let error_code = apple_volume_error_code Build_volume in
+  match apple_volume_probe ~volume_name ~timeout_sec with
   | Volume_probe_failed message ->
-    Error (Printf.sprintf "microvm_build_volume_probe_failed: %s" message)
-  | Volume_absent -> ensure_apple_build_volume ~volume_name ~size ~timeout_sec
+    Error (Printf.sprintf "%s_probe_failed: %s" error_code message)
+  | Volume_absent -> ensure_apple_volume Build_volume ~volume_name ~size ~timeout_sec
   | Volume_present ->
     let argv = apple_build_volume_delete_argv ~volume_name in
     (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
-     | Unix.WEXITED 0, _, _ -> ensure_apple_build_volume ~volume_name ~size ~timeout_sec
+     | Unix.WEXITED 0, _, _ ->
+       ensure_apple_volume Build_volume ~volume_name ~size ~timeout_sec
      | status, stdout, stderr ->
        Error
          (Printf.sprintf
-            "microvm_build_volume_delete_failed: %s (%s; %s)"
+            "%s_delete_failed: %s (%s; %s)"
+            error_code
             volume_name
             (match status with
              | Unix.WEXITED code -> Printf.sprintf "exit %d" code
@@ -1545,17 +1516,14 @@ let recreate_apple_build_volume ~volume_name ~size ~timeout_sec =
 ;;
 
 (* ── Finding checkouts and their _build state inside the guest ────────
-   RFC-0399's original walk and link used Unix.lstat/Sys.readdir/Unix.symlink
-   directly on a host-visible playground. That assumed the tree was on the
-   virtiofs share, which was true in RFC-0399's era and stopped being true
-   when RFC-0400 moved a Micro_vm keeper's tree onto its own ext4 volume:
-   Keeper_types_profile_sandbox.tree_location_of_profile now answers
-   [Endpoint_owned] for it, and that type's own doc comment says why a host
-   op does not reach it -- "the host keeps only a bookkeeping bundle... a
+   A Micro_vm keeper's tree is on its own ext4 work volume:
+   Keeper_types_profile_sandbox.tree_location_of_profile answers
+   [Endpoint_owned] for it, and that type's doc comment says why a host op
+   does not reach it -- "the host keeps only a bookkeeping bundle... a
    host-side file operation on the bundle would silently miss the tree."
    So the walk, the [_build] state read, and the symlink itself all run
    inside the guest over [container exec]; only the *decision*
-   ({!plan_build_link}, unchanged) stays host-side and pure. *)
+   ({!plan_build_link}) stays host-side and pure. *)
 
 (** How far below a keeper's work root a checkout is looked for.
 
@@ -1569,9 +1537,9 @@ let build_root_scan_depth = 3
     That is the marker for the build output this addresses: [_build] is
     dune's name and dune's alone. Other ecosystems pin host descriptors the
     same way through their own output directories -- [node_modules],
-    [target], [dist] -- and are {i not} handled here (RFC-0399's own measured
-    finding: npm deletes and replaces a [node_modules] symlink on every
-    install, defeating this mechanism outright). Naming that gap is
+    [target], [dist] -- and are {i not} handled here (measured: npm deletes
+    and replaces a [node_modules] symlink on every install, defeating this
+    mechanism outright). Naming that gap is
     deliberate, so a reader does not read this as covering every keeper. *)
 let build_root_marker = "dune-project"
 
@@ -1582,7 +1550,7 @@ let build_output_dir_name = "_build"
     (["./checkout"], not an absolute guest path the host would have to
     strip). [find] without [-L] does not descend through a symlink -- an
     installed link, or a dangling one pointing at the build volume, is never
-    walked into, matching RFC-0399's [lstat, not stat] guarantee. [_build]
+    walked into: the state read is [lstat], not [stat]. [_build]
     and [.git] are pruned rather than descended: one measured [_build] held
     61,602 entries. One line of output per checkout:
     [<relative path>\tabsent], [<relative path>\treal], or

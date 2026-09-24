@@ -980,7 +980,8 @@ let microvm_work_volume ~backend ~keeper_name ~timeout_sec =
      | Ok _ -> Ok volume_name)
 ;;
 
-(** The build volume (RFC-0468), `Apple_container` only: `msb` and `nerdctl`
+(** The build volume (RFC-keeper-build-output-returns-to-a-disposable-volume),
+    `Apple_container` only: `msb` and `nerdctl`
     back their named work volumes with a host directory, so a guest [rm -rf
     _build] already returns host disk immediately there and this volume is
     not provisioned for them -- [None], not a refusal, since its absence
@@ -1058,7 +1059,7 @@ let prepare_microvm_shim_dir (t : t) =
 type microvm_guest_provisions =
   { work_volume_name : string
   ; build_volume_name : string option
-        (** [Some] on `Apple_container` (RFC-0468); [None] on backends whose
+        (** [Some] on `Apple_container`; [None] on backends whose
             work volume already returns host disk on a guest delete. *)
   ; shim_host_dir : string
   }
@@ -1170,26 +1171,25 @@ let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_nam
 ;;
 
 (** Point every checkout's [_build] under the keeper's work root at its
-    build volume (RFC-0468), `Apple_container` only. Best-effort: unlike
+    build volume (RFC-keeper-build-output-returns-to-a-disposable-volume),
+    `Apple_container` only. Best-effort: unlike
     {!ensure_microvm_keeper_work_root}, a failure here does not fail the
     turn. The keeper has a tree either way -- a checkout this cannot link
     keeps writing to the unified work volume, which is correct, just not
-    disposable, the same fallback RFC-0399's own refusal already chose for
-    a checkout occupied by real output. Logged, not surfaced, because there
+    disposable, the same fallback {!Keeper_sandbox_microvm.plan_build_link}
+    takes for a checkout occupied by real output. Logged, not surfaced, because there
     is no caller decision for an operator or a keeper to make from inside a
     turn; the volume-provisioning refusal in {!microvm_guest_provisions}
     (which does fail the boot) is where a genuinely unusable build volume
     is reported.
 
-    Run once per guest adoption, not literally every turn as RFC-0399's
-    original per-checkout refresh was: {!microvm_remote_endpoint} already
+    Run once per guest adoption, not every turn: {!microvm_remote_endpoint} already
     memoizes {!ensure_microvm_keeper_work_root} the same way, and doing
     this scan on every tool call inside a turn would be an exec per call
     for a guest whose checkouts rarely change mid-turn. The gap this
     leaves: a checkout the keeper creates after this guest's first
     adoption keeps writing to the unified work volume until the guest
-    restarts. Stated, not hidden -- the same posture RFC-0399 already took
-    for npm and cargo. *)
+    restarts. *)
 let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
   match (backend : Keeper_microvm_backend.t) with
   | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> ()
@@ -1592,7 +1592,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                 @ Keeper_sandbox_microvm.work_volume_mount_args
                     ~volume_name:provisions.work_volume_name
                 (* Derived build output, on its own disposable volume
-                   (RFC-0468) so it can be deleted and recreated without
+                   so it can be deleted and recreated without
                    touching the checkout above -- absent on backends whose
                    work volume already returns host disk on a guest
                    delete. *)

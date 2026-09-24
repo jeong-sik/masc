@@ -376,7 +376,7 @@ val ensure_work_volume_for
   -> timeout_sec:float
   -> ([ `Created | `Already_present | `Ensured ], string) result
 
-(** {2 The build volume (RFC-0468)}
+(** {2 The build volume (RFC-keeper-build-output-returns-to-a-disposable-volume)}
 
     [Apple_container] only. Msb's and nerdctl's named work volumes are host
     directories -- deleting a file inside either returns host disk
@@ -385,23 +385,18 @@ val ensure_work_volume_for
     measurement). Apple's is a sparse virtio-blk image with no discard/unmap
     exposed to the guest (measured 2026-09-24: [fstrim] as root answers
     "Operation not permitted"), so a guest [rm -rf _build] frees nothing on
-    the host. A keeper's [_build] on its own disposable volume, rather than
-    folded into {!work_volume_guest_root} the way RFC-0400 unified every
-    checkout, means that volume can be deleted and recreated -- zero
-    data-loss risk, since it holds nothing but derived build output -- to
-    reclaim that host space. This restores RFC-0399's mechanism, which
-    RFC-0400 deleted as an unrelated side effect of solving the virtiofs
-    host-descriptor leak; see RFC-0468. *)
+    the host. A keeper's [_build] on its own disposable volume, apart from
+    {!work_volume_guest_root} where the checkout lives, means that volume can
+    be deleted and recreated -- zero data-loss risk, since it holds nothing
+    but derived build output -- to reclaim that host space. *)
 
 val build_volume_guest_root : string
-(** [/masc-build], RFC-0399's original mountpoint, distinct from
-    {!work_volume_guest_root}. *)
+(** [/masc-build], distinct from {!work_volume_guest_root}. *)
 
 val build_volume_name : keeper_name:string -> (string, string) result
 (** [masc-keeper-build-<keeper_name>], or an error when the name carries
     anything outside [A-Za-z0-9._-]. *)
 
-val apple_build_volume_create_argv : volume_name:string -> size:string -> string list
 val build_volume_mount_args : volume_name:string -> string list
 
 (** What [_build] is right now, as far as the plan cares. *)
@@ -430,19 +425,6 @@ val plan_build_link : target:string -> build_link_state -> build_link_plan
     and the checkout keeps building on the unified work volume. Retargeting a
     stale symlink is different: removing a symlink loses no data. *)
 
-val apple_build_volume_probe : volume_name:string -> timeout_sec:float -> volume_probe_outcome
-
-val ensure_apple_build_volume
-  :  volume_name:string
-  -> size:string
-  -> timeout_sec:float
-  -> ([ `Created | `Already_present ], string) result
-(** [container volume create] is not idempotent -- a second call errors
-    "already exists" -- so existence is settled by {!apple_build_volume_probe}
-    rather than by reading that message. The size is a ceiling: RFC-0399's own
-    measurement set the default at 128 GiB against one keeper's real 87 GB
-    across three checkouts; the image itself is sparse. *)
-
 val apple_build_volume_delete_argv : volume_name:string -> string list
 
 val recreate_apple_build_volume
@@ -450,8 +432,12 @@ val recreate_apple_build_volume
   -> size:string
   -> timeout_sec:float
   -> ([ `Created | `Already_present ], string) result
-(** Delete the volume if present, then {!ensure_apple_build_volume}. Called
-    once per fresh guest boot (RFC-0468): [_build] is entirely derived, so
+(** Delete the volume if present, then create it with
+    {!apple_volume_create_argv}. [container volume create] is not idempotent,
+    so existence is settled by a [container volume] probe rather than by
+    reading its "already exists" message. Called once per fresh guest boot
+    (RFC-keeper-build-output-returns-to-a-disposable-volume): [_build] is
+    entirely derived, so
     starting the volume empty every time costs one cold build and is the
     only host-disk reclaim path that exists -- Apple's virtio-blk exposes
     no discard, and `container volume` has no attach/detach to swap the
@@ -464,9 +450,8 @@ val recreate_apple_build_volume
     A [Micro_vm] keeper's tree is [Endpoint_owned]
     ({!Keeper_types_profile_sandbox.tree_location_of_profile}): the host
     keeps only a bookkeeping bundle, and a host-side file operation on it
-    would silently miss the tree. So, unlike RFC-0399's original (host
-    [Unix.lstat]/[Sys.readdir]/[Unix.symlink]), the walk, the [_build] state
-    read, and the symlink itself all run inside the guest over
+    would silently miss the tree. So the walk, the [_build] state read, and
+    the symlink itself all run inside the guest over
     [container exec]. Only the decision ({!plan_build_link}) stays host-side
     and pure. *)
 
@@ -479,8 +464,8 @@ val build_root_marker : string
 (** [dune-project]: the marker for the build output this addresses.
     [_build] is dune's name and dune's alone; other ecosystems' output
     directories ([node_modules], [target], [dist]) are not handled here
-    (RFC-0399's own measured finding: npm deletes and replaces a
-    [node_modules] symlink on every install, defeating a symlink outright). *)
+    (measured: npm deletes and replaces a [node_modules] symlink on every
+    install, defeating a symlink outright). *)
 
 val build_output_dir_name : string
 

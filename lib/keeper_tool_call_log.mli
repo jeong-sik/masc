@@ -252,7 +252,8 @@ val log_call :
     second physical invocation. [Lifecycle_event] is an opening or progress
     marker, not an invocation outcome, and quality aggregators exclude it. A
     step inside an invocation, such as a vision candidate arm starting or
-    ending, is one even when it carries the step's own outcome.
+    ending, is one even when it carries the step's own outcome, so a reader
+    branches on [record_kind] before it reads an outcome.
     [skill_reference], when present, is the exact published Skill revision
     that produced the run; clients must not infer it from the mutable
     composition tool name.

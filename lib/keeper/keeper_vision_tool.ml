@@ -131,11 +131,12 @@ let record_vision_analyze_result ~result ~reason =
    terminates (ok/error/skipped), and the cancelled row when the parent
    kills the in-flight provider call -- so the repro's exact shape
    (start, then a parent cancel minutes later) still leaves the
-   joinable pair. Every candidate row is a [Lifecycle_event]: the parent
-   [keeper_analyze_image] row is the invocation and carries its outcome,
-   so a candidate's end is progress inside it, not a second call. Written
-   as tool calls they were 4,312 [system] rows in the week to 2026-09-24,
-   342 of them failures, inside the tool-quality denominator. *)
+   joinable pair. Every candidate row is a [Lifecycle_event]: a candidate
+   is a step inside one [keeper_analyze_image] call, not a call of its own,
+   and it carries its own outcome only for the join. Readers that count
+   calls skip it by kind. The parent row is written by the post-tool hook,
+   so a walk the parent cancelled, or the eager ingest path that passes no
+   [tool_use_id], leaves candidate rows with no parent row to join. *)
 let record_vision_candidate_attempt
       ?tool_use_id
       ?trace_id

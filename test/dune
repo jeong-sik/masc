@@ -235,6 +235,11 @@
  (libraries alcotest masc_tui_keeper_config yojson str))
 
 (test
+ (name test_tui_github_identity)
+ (modules test_tui_github_identity)
+ (libraries alcotest masc_tui_github_identity yojson))
+
+(test
  (name test_tui_keeper_sandbox)
  (modules test_tui_keeper_sandbox)
  ; masc.config for Env_config_sandbox.Runtime.image_source_strings: the
@@ -3623,6 +3628,13 @@
  (libraries alcotest yojson masc_tui_types))
 
 (test
+ (name test_tui_no_value_mark)
+ (modules test_tui_no_value_mark)
+ (libraries alcotest ast_grep masc_tui_theme tui_source)
+ (deps
+  (source_tree ../bin)))
+
+(test
  (name test_tui_ask_selection_wiring)
  (modules test_tui_ask_selection_wiring)
  (libraries alcotest ast_grep)
@@ -4263,6 +4275,7 @@
   masc_types
   masc_tui_types
   masc_tui_overview_goals
+  masc_tui_overview_tasks
   unix
   yojson))
 
@@ -5607,6 +5620,8 @@
 (include stanzas/test_tui_planning_summary_rows.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
+
+(include stanzas/test_tui_overlay_window_reading.inc)
 (include stanzas/test_tui_approvals_footer_matches_the_sheet.inc)
 (include stanzas/test_tui_sheet_names_every_palette_destination.inc)
 (include stanzas/test_tui_keeper_detail_key_help_names_the_tabs.inc)
@@ -5617,6 +5632,7 @@
 (include stanzas/test_tui_overview_transport_item.inc)
 (include stanzas/test_tui_schedules_empty_row_names_its_key.inc)
 (include stanzas/test_tui_activity_title_dot_belongs_to_the_strip.inc)
+(include stanzas/test_tui_keeper_roster_window.inc)
 (include stanzas/test_tui_feed_row_counts_events.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_runtime_lane_editor.inc)
@@ -7013,3 +7029,5 @@
  ; it asserts is gone.
  (deps %{workspace_root}/bin/masc_tui_render.ml)
  (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
+
+(include stanzas/test_tui_sidebar_index_fold.inc)

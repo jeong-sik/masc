@@ -19,9 +19,9 @@ type api_format =
 [@@deriving show, eq]
 
 val api_format_reads_max_prompt_bytes : api_format -> bool
-(** Whether a runtime of this format reads [max-prompt-bytes]: Claude Code and
-    Antigravity do; no other format does, so a declaration on any other
-    runtime bounds nothing the provider checks. *)
+(** Whether a runtime of this format reads [max-prompt-bytes]: Claude Code,
+    Antigravity and Codex do; no other format does, so a declaration on any
+    other runtime bounds nothing the provider checks. *)
 
 type transport =
   | Http of string

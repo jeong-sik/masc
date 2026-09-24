@@ -208,6 +208,9 @@ memory/
 # Local sandbox builds vendor the pinned ocaml-msx here (never commit).
 /vendor/
 # dune-project declares ocaml-msx for that vendored copy, so the first build
-# generates its opam file. Left in the tree, `opam install .` would treat it as
-# an empty local package and shadow the git pin lib/msx_lane needs.
+# generates its opam file. Ignoring it only keeps it out of commits: `opam
+# install .` still reads every *.opam in the directory, ignored or not, and
+# would take it for an empty local package that shadows the git pin
+# lib/msx_lane needs. Install from a built checkout with
+# `opam install ./masc.opam`, as the README and the repair hints do.
 /ocaml-msx.opam

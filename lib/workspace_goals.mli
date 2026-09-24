@@ -50,6 +50,11 @@ type proof_reconciliation =
   | Reconciled of Goal_phase.t
   | Reconciliation_not_needed of Goal_phase.t
 
+val verifier_authority : Masc_domain.completion_authority
+(** The fixed authority of the Goal verifier: every proof verdict it commits
+    and every stalled-review notice it posts carries this value. It is built
+    inside the application boundary and is never read from a caller. *)
+
 (** Commit one verdict from the application-owned Goal verifier. The fixed
     [verifier_exact] authority is constructed inside this boundary; callers
     cannot supply or impersonate it. The ledger commit precedes any phase

@@ -83,36 +83,54 @@ type stall_disposition =
   | Retry_scheduled of { delay : retry_delay }
   | No_retry_armed
 
+(** Which review stopped. A Task review is keyed by its verification id and
+    carries what its scheduling owner did about a retry; a Goal review is
+    keyed by the durable request it answers and carries no disposition,
+    because the Goal verifier arms no retry — its post always reads as
+    [No_retry_armed]. Both stops are the same event — a verifier ended a
+    review without a verdict — so both go through
+    {!notify_stalled_verification} and share its channel, metadata and
+    repeat rule. *)
+type stalled_subject =
+  | Task_review of
+      { task_id : string
+      ; verification_id : string
+      ; disposition : stall_disposition
+      }
+  | Goal_review of { goal_id : string; request_id : string }
+
 val notify_stalled_verification :
   authority:Masc_domain.completion_authority ->
-  task_id:string ->
-  verification_id:string ->
+  subject:stalled_subject ->
   gate:string ->
   detail:string ->
-  disposition:stall_disposition ->
   unit
 (** Board projection for every review that stopped without a verdict —
-    [Not_reviewed], [Infrastructure_unavailable], [Commit_failed], [Raised] —
-    whether or not a retry is armed: without this post the only surface is
-    the bounded run registry and the task waits invisibly. The post names
-    the task, the verification id, the gate, and what happens next. Under
-    [Retry_scheduled] it says a retry is armed and how soon; under
-    [No_retry_armed] it names the two forward paths that exist today — the
-    assignee resubmitting through [submit_for_verification] (a legal
-    transition from [AwaitingVerification] that supersedes this
-    verification), or an operator HITL verdict — and the sweep that reviews
-    it again without either. The caller passes the disposition the
-    scheduling owner reported after recording the run and arming the retry,
-    so the post follows the timer, never the other way round.
+    for a Task: [Not_reviewed], [Infrastructure_unavailable],
+    [Commit_failed], [Raised]; for a Goal: every deferral of a request that
+    still stands — whether or not a retry is armed: without this post the
+    only surface is the bounded run registry and the subject waits
+    invisibly. The post names the subject, its request, the gate, and what
+    happens next. Under [Retry_scheduled] it says a retry is armed and how
+    soon. Under [No_retry_armed] a Task post names the two forward paths
+    that exist today — the assignee resubmitting through
+    [submit_for_verification] (a legal transition from
+    [AwaitingVerification] that supersedes this verification), or an
+    operator HITL verdict — and the sweep that reviews it again without
+    either; a Goal post names a Keeper calling [request_complete] on the
+    Goal. A Task caller passes, inside [Task_review], the disposition the
+    scheduling owner reported after it acted, so the post follows the
+    timer, never the other way round.
 
-    One post per disposition change: for a (task, verification, gate) the
-    notice compares against the disposition of the latest post on the Board
+    One post per disposition change: for a (subject, gate) the notice
+    compares against the disposition of the latest post on the Board
     (chronological by [created_at]) and posts only when that differs or no
-    post decodes. [detail] travels as evidence and is not part of the
-    comparison. Visibility only: the post schedules nothing. A board write
-    that returns an error is logged here and does not affect the review
-    outcome; an exception out of the Board is the caller's to contain
-    ([Completion_authority_agent] does, after its WARN is written). *)
+    post decodes. The subject is compared by its identity fields —
+    [task_id]/[verification_id] or [goal_id]/[request_id]. [detail] travels
+    as evidence and is not part of the comparison. Visibility only: the
+    post schedules nothing and gates nothing. A board write that returns an
+    error is logged here and does not affect the review outcome; an
+    exception out of the Board is the caller's to contain. *)
 
 module For_testing : sig
   val verdict_event_json :
@@ -125,20 +143,16 @@ module For_testing : sig
     Yojson.Safe.t
 
   val stalled_board_content :
-    task_id:string ->
-    verification_id:string ->
+    subject:stalled_subject ->
     gate:string ->
     detail:string ->
-    disposition:stall_disposition ->
     string
 
   val stalled_metadata :
     authority:Masc_domain.completion_authority ->
-    task_id:string ->
-    verification_id:string ->
+    subject:stalled_subject ->
     gate:string ->
     detail:string ->
-    disposition:stall_disposition ->
     Yojson.Safe.t
 
   val stall_disposition_of_json : Yojson.Safe.t -> stall_disposition option

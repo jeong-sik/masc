@@ -467,6 +467,10 @@ let validate_verification_run_id verification_run_id =
 (* The authority is constructed inside the application boundary. It is not a
    field accepted from an MCP caller and cannot be replaced by a Keeper/session
    name. [Runtime.verifier_exact_lane_id] is the runtime configuration SSOT. *)
+let verifier_authority =
+  Masc_domain.System_llm_agent { agent_run_id = Runtime.verifier_exact_lane_id }
+;;
+
 let gate_verdict
       (outcome : Goal_verification.verdict_outcome)
       ~verification_run_id
@@ -479,9 +483,7 @@ let gate_verdict
   ; verification_run_id
   ; request_id
   ; criterion
-  ; authority =
-      Masc_domain.System_llm_agent
-        { agent_run_id = Runtime.verifier_exact_lane_id }
+  ; authority = verifier_authority
   ; evidence
   ; recorded_at = Masc_domain.now_iso ()
   }

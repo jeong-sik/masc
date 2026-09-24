@@ -24,9 +24,13 @@ type path_refusal =
 
 val refusal_of_rejection : keeper_path_rejection -> path_refusal
 
-(** A refusal of a path the caller named, for a reason no rejection variant
-    carries (a cwd that is not a directory): [Policy_rejection]. *)
-val caller_refusal : string -> path_refusal
+(** A caller-supplied cwd that is absent or names a file. The optional hint is
+    the Read tool's available-cwd guidance; it does not change the class. *)
+type caller_cwd_refusal =
+  | Missing_cwd of { cwd : string; read_hint : string option }
+  | Cwd_is_file of { cwd : string }
+
+val caller_refusal : caller_cwd_refusal -> path_refusal
 
 (** Project a [Workspace.config] to its project root by stripping the
     trailing [.masc] base-path component when present. *)

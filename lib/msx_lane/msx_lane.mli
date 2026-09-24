@@ -210,10 +210,6 @@ val frame : unit -> frame option
     Repeated reads of the same machine state reuse immutable rendered pixels.
     Advancing, loading, restoring, or replacing media invalidates that snapshot. *)
 
-val step_frame : frames:int -> (frame * entry list, error) result
-(** Advance once and capture the resulting pixels, metadata and oldest-first
-    input ledger under one machine lock. Encoding happens outside that lock. *)
-
 val capture : unit -> (observation * frame, error) result
 (** Copy observation and pixels under the same machine lock. Does not advance
     the machine. Consumers encode/persist the immutable copy outside the lock. *)
@@ -279,6 +275,12 @@ val live : since:change_mark option -> live
     hold for a whole call, so an Eio caller compares [since] with
     {!current_mark} first and runs this, in [Eio_unix.run_in_systhread], only
     when they differ. *)
+
+val step_frame : frames:int -> (frame * entry list * change_mark, error) result
+(** Advance once and capture pixels, metadata, ledger and the change mark
+    under one machine lock. The tick response uses this mark so a concurrent
+    press cannot attach a newer mark to older pixels. Encoding happens outside
+    that lock. *)
 
 (** {b RAM introspection} — the state sensor. The screen is the expensive
     detour a human eye needs; the game's truth is in memory, and the core

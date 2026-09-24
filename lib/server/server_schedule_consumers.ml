@@ -1431,8 +1431,9 @@ let cancel_keeper_schedules config ~keeper_name =
    a single catch-up rather than backfilling them.
 
    Only heartbeat interval schedules self-clock. A schedule that delivers a
-   result, and every non-interval kind, keeps firing on each due — each of their
-   occurrences is distinct work whose accumulation is intended. The pending
+   result, and every non-interval kind, keeps firing on each due; each new
+   firing supersedes the earlier pending occurrence of the same schedule
+   ([accept_keeper_wake_occurrence]). The pending
    check reads the keeper's own event queue (the authoritative unconsumed
    signal), so it does not depend on the reaction-ledger ack transition. A queue
    read failure is fail-open (fire as before) so a transient read never starves

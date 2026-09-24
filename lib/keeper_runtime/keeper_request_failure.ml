@@ -365,7 +365,7 @@ let cause_to_yojson = function
           | Some provider -> `String provider
           | None -> `Null )
       ; ( "network_kind"
-        , `String (Keeper_internal_error.network_error_kind_to_string kind) )
+        , `String (Llm_provider.Http_client.network_error_kind_to_string kind) )
       ; "detail", `String detail
       ]
   | Context_overflow { limit } ->
@@ -520,7 +520,7 @@ let cause_of_yojson (json : Yojson.Safe.t) =
                 (labelled
                    kind
                    "network_kind"
-                   Keeper_internal_error.network_error_kind_of_string
+                   Llm_provider.Http_client.network_error_kind_of_string
                    fields)
                 (fun network_kind ->
                    Result.map

@@ -95,6 +95,9 @@ post({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":v
 post({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}, version)
 tools = post({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}, version)
 assert [tool["name"] for tool in tools["result"]["tools"]] == ["masc_probe"]
+# Every tool masc serves is declared eager and nothing else is, or the model sees its name only.
+assert sorted(server["tools"]) == sorted(tool["name"] for tool in tools["result"]["tools"]), server.get("tools")
+assert all(v == {"eager": True} for v in server["tools"].values()), server["tools"]
 called = post({"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"masc_probe","arguments":{"marker":"from-antigravity"}}}, version)
 assert called["result"]["content"][0]["text"] == "MASC_TOOL_RESULT"
 PY

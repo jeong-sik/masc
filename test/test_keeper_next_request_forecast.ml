@@ -401,6 +401,166 @@ max-concurrent = 1
   Alcotest.(check (list string)) "another Keeper's mark sends the head behind"
     [ "forecast.fallback"; "forecast.head" ] (forecast_order ())
 
+(* RFC librarian-lifecycle §4.10: the Librarian_stalled gap, from the files a
+   server that just started holds -- the keeper's meta, checkpoint, turn
+   boundaries, Librarian position and turn records -- through the driver's
+   own choice of where the next request starts. *)
+let test_the_librarian_gap_is_read_from_small_files () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let previous_fs = Fs_compat.get_fs_opt () in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.on_release sw (fun () ->
+    match previous_fs with
+    | Some fs -> Fs_compat.set_fs fs
+    | None -> Fs_compat.clear_fs ());
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace base_path);
+  let config = Workspace.default_config base_path in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String "librarian-gap" ])
+    with
+    | Ok meta -> meta
+    | Error detail -> Alcotest.fail detail
+  in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  let keeper_name = meta.name in
+  let gap () =
+    match Keeper_next_request_forecast.librarian_gap ~config ~keeper_name with
+    | Ok gap ->
+      Option.map
+        (fun (g : Keeper_carried_front.librarian_gap) -> g.gap_start_atom, g.gap_end_atom)
+        gap
+    | Error unmeasured ->
+      Alcotest.fail (Keeper_next_request_forecast.librarian_gap_unmeasured_detail unmeasured)
+  in
+  Alcotest.(check (option (pair int int))) "no files, no gap" None (gap ());
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let persisted = history ~exchanges:5 ~text_bytes:100 in
+  let keepers_dir = Workspace.keepers_runtime_dir config in
+  let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
+  Eio.Switch.on_release sw (fun () -> Dated_jsonl.prepare_for_directory_removal store);
+  let _, total_atoms = Runtime_model_input_tail_window.annotate persisted in
+  let accepted_at ~turn first_atom =
+    let window : Turn_record.model_input_window =
+      { transmitted_atoms = total_atoms - first_atom
+      ; total_atoms
+      ; measurement = Turn_record.Wire_shape
+      ; front_atom_digest = (seed ~messages:persisted first_atom).front_digest
+      }
+    in
+    Keeper_turn_record_writer.write
+      ~config ~keeper_name ~agent_name:keeper_name ~turn_kind:Turn_record.Direct
+      ~trace_id ~absolute_turn:turn ~runtime_profile:"librarian-gap"
+      ~selected_model:None ~finish_reason:None ~context_window:None
+      ~price_input_per_million:None ~price_output_per_million:None
+      ~request_latency_ms:None ~ttfrc_ms:None ~request_wire_observation:None
+      ~model_input_window:(Some window)
+      ~response_observed_model_input:(Some { Turn_record.runtime_profile = "librarian-gap"; window })
+      ~raw_trace_run_ref:None
+      ~sampling:{ temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
+      ~usage:
+        { input_tokens = None
+        ; output_tokens = None
+        ; cache_creation_input_tokens = None
+        ; cache_read_input_tokens = None
+        ; scope = Runtime_usage_scope.Usage_scope_unavailable
+        }
+      ~turn_output_tokens:None
+      ~execution_ids:[] ~blocks:[] ~input_components:None ~tool_surface_ref:None ()
+  in
+  let digest_at = Runtime_model_input_tail_window.atom_opening_digest persisted in
+  let read_to end_atom =
+    let last_atom_digest = Option.get (digest_at (end_atom - 1)) in
+    match
+      Keeper_librarian_progress.write ~keepers_dir ~keeper_id:keeper_name
+        { Keeper_librarian_progress.position = { trace_id; end_atom; last_atom_digest }
+        ; boundary_lines_seen = 1
+        }
+    with
+    | Ok () -> ()
+    | Error error -> Alcotest.fail (Keeper_librarian_progress.write_error_to_string error)
+  in
+  read_to 2;
+  accepted_at ~turn:1 2;
+  Alcotest.(check (option (pair int int))) "a request from the Librarian point is no gap" None
+    (gap ());
+  accepted_at ~turn:2 8;
+  Alcotest.(check (option (pair int int))) "an accepted start past the point is the gap"
+    (Some (2, 8)) (gap ());
+  (* A position on another trace says nothing about this one. *)
+  (match
+     Keeper_librarian_progress.write ~keepers_dir ~keeper_id:keeper_name
+       { Keeper_librarian_progress.position =
+           { trace_id = "another-trace"; end_atom = 2; last_atom_digest = "d" }
+       ; boundary_lines_seen = 1
+       }
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Keeper_librarian_progress.write_error_to_string error));
+  Alcotest.(check (option (pair int int))) "a position on another trace is no coverage" None
+    (gap ());
+  read_to 8;
+  Alcotest.(check (option (pair int int))) "the Librarian at the accepted start closes it" None
+    (gap ());
+  read_to 9;
+  Alcotest.(check (option (pair int int))) "and past it" None (gap ());
+  (* Each file the gap is read from that does not read is its own answer:
+     not "no gap", which would hide the alarm exactly when a read broke, and
+     not "not covered", which would claim atoms are missing that may not
+     be. The Librarian stands at 2 and the request was accepted at 8, so a
+     clean read would be the gap (2, 8). *)
+  read_to 2;
+  Alcotest.(check (option (pair int int))) "the gap the failures below stand in front of"
+    (Some (2, 8)) (gap ());
+  let cause () =
+    match Keeper_next_request_forecast.librarian_gap ~config ~keeper_name with
+    | Ok None -> "no gap"
+    | Ok (Some _) -> "gap"
+    | Error unmeasured -> Keeper_next_request_forecast.librarian_gap_unmeasured_cause unmeasured
+  in
+  let write_raw path text =
+    Fs_compat.mkdir_p (Filename.dirname path);
+    let output = open_out path in
+    Fun.protect ~finally:(fun () -> close_out_noerr output) (fun () -> output_string output text)
+  in
+  let progress_path =
+    Keeper_librarian_progress.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name
+  in
+  write_raw progress_path "{not-json";
+  Alcotest.(check string) "an unreadable read position is not counted as uncovered"
+    "read_position_unreadable" (cause ());
+  read_to 2;
+  let snapshot_path = Keeper_librarian_continuity.path ~config ~keeper_name in
+  write_raw snapshot_path "{not-json";
+  Alcotest.(check string) "an unreadable snapshot is not counted as uncovered"
+    "snapshot_unreadable" (cause ());
+  Sys.remove snapshot_path;
+  Alcotest.(check (option (pair int int))) "the snapshot gone, the gap is back" (Some (2, 8))
+    (gap ());
+  (* A newer row that does not decode may be the newest accepted start, so
+     the one found under it is not taken as the answer. *)
+  Dated_jsonl.append store (`Assoc [ "trace_id", `String trace_id; "absolute_turn", `Int 3 ]);
+  Alcotest.(check string) "an undecodable turn record is not no gap" "turn_records_unreadable"
+    (cause ());
+  accepted_at ~turn:4 8;
+  Alcotest.(check (option (pair int int))) "a newer record that decodes answers again"
+    (Some (2, 8)) (gap ());
+  write_raw
+    (Keeper_turn_boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
+    "{not-json\n";
+  Alcotest.(check string) "a refused turn-boundary read is not no gap" "turn_boundary_refused"
+    (cause ());
+  (* A meta file this binary does not decode is not "no Keeper, no gap":
+     [read_meta] folds it into [Ok None], so the gap reads presence. *)
+  write_raw
+    (Keeper_types_profile.keeper_meta_path config keeper_name)
+    "{\"name\":\"librarian-gap\"}";
+  Alcotest.(check string) "an undecodable meta is not no gap" "meta_unreadable" (cause ())
+
 let component component bytes : Turn_record.input_component = { component; bytes }
 
 (* lane-smith turn 3646 on 2026-09-16: memory recall and dynamic context
@@ -984,5 +1144,7 @@ let () =
             test_forecast_reads_an_observed_front_beyond_unobserved_rows
         ; Alcotest.test_case "the recorder's forecast walks its marked head first" `Quick
             test_the_recorders_forecast_walks_its_marked_head_first
+        ; Alcotest.test_case "the Librarian gap is read from small files" `Quick
+            test_the_librarian_gap_is_read_from_small_files
         ] )
     ]

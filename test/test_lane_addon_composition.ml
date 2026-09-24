@@ -70,6 +70,7 @@ let with_fixture ?(produce=(fun ~binding:_ ~sources:_ -> output)) ?(allow_stop=r
                       if not !allow_stop then Error "fixture cleanup unavailable"
                       else (stopped := instance_id :: !stopped; Ok ()))} in
                   on_created connection; Ok connection);
+                image_ready=(fun ~package:_ -> Ok ());
                 acquire=Lane_addon_sources.acquire;
                 recover_stop=(fun ~instance_id:_ ~container_id:_ ~max_reply_bytes:_ -> Ok ())} in
               Runtime.For_testing.with_backend backend (fun () ->

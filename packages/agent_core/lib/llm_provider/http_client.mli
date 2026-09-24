@@ -32,13 +32,9 @@ type network_error_kind =
     keeper wire field alike. *)
 val network_error_kind_to_string : network_error_kind -> string
 
-(** Kind of a [Unix.error]; [Unknown] for a code no arm names. *)
-val classify_unix_error : Unix.error -> network_error_kind
-
-(** Kind of an Eio I/O error. A [Connection_reset] reads the Unix code it
-    carries; [Multiple_io] prefers a non-retryable kind; anything
-    unclassified is [Unknown]. *)
-val classify_eio_error : Eio.Exn.err -> network_error_kind
+(** Reads a label back into its kind; [None] for any spelling
+    {!network_error_kind_to_string} does not emit. *)
+val network_error_kind_of_string : string -> network_error_kind option
 
 (** [None] for [Unknown], [Some kind] otherwise. *)
 val known_network_error_kind : network_error_kind -> network_error_kind option

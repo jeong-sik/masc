@@ -45,6 +45,7 @@ type fake = {
   recovery_barrier : unit Eio.Promise.t option ref;
   startup_available : bool ref;
   cleanup_available : bool ref;
+  image_available : bool ref;
 }
 
 let output : Types.output = {
@@ -57,7 +58,8 @@ let output : Types.output = {
 
 let make_backend () =
   let state = { events = ref []; observations = ref []; recovery_barrier = ref None;
-                startup_available = ref true; cleanup_available = ref true } in
+                startup_available = ref true; cleanup_available = ref true;
+                image_available = ref true } in
   let record event = state.events := event :: !(state.events) in
   let backend : Runtime.For_testing.backend = {
     start = (fun ~sw:_ ~instance_id ~(package : Types.package) ~on_created ->
@@ -93,6 +95,8 @@ let make_backend () =
         Ok connection
       end);
     acquire = (fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
+    image_ready = (fun ~package:_ ->
+      if !(state.image_available) then Ok () else Error "image is not on the host");
     recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes:_ ->
       if Option.exists (fun id -> id <> Store.digest instance_id) container_id
       then Error "persisted container does not belong to instance"
@@ -715,6 +719,34 @@ let test_historical_recovery_failure_waits_for_maintenance () =
       (In_channel.with_open_bin path In_channel.input_all);
     detach real_clock config id)
 
+(* An image that is not on the host is looked for before any worker exists.
+   Each beat reports it on the declaration and creates nothing: no instance,
+   no startup failure, no binding (#37897). The same declaration attaches on
+   the first beat after the image appears, without a TOML rewrite. *)
+let test_missing_image_creates_nothing_until_it_is_built () =
+  with_fixture (fun env _sw config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    let bytes = declaration ~id:"observer" ~manifest () in
+    write path bytes;
+    state.image_available := false;
+    let reports = List.init 3 (fun _ -> reconcile config directory) in
+    check int "a missing image starts no worker" 0 (List.length (starts state));
+    check int "a missing image records no startup failure" 0 (List.length (failures state));
+    check int "a missing image leaves no instance behind" 0 (List.length (instances config));
+    List.iter (fun report ->
+      check bool "every beat reports the missing image" true (values "issues" report <> []))
+      reports;
+    state.image_available := true;
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    check int "the built image attaches on the next beat" 1 (List.length (starts state));
+    check string "attaching needed no TOML rewrite" bytes
+      (In_channel.with_open_bin path In_channel.input_all);
+    detach clock config id)
+
 let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension", [
   test_case "duplicate TOML keys preserve applied owners and report issues" `Quick
     test_duplicate_toml_keys_preserve_applied_workers;
@@ -724,6 +756,8 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_detach_preserves_newer_or_malformed_declaration;
   test_case "startup dependency recovery uses unchanged TOML" `Quick
     test_startup_dependency_recovers_without_editing_toml;
+  test_case "a missing image creates nothing until it is built" `Quick
+    test_missing_image_creates_nothing_until_it_is_built;
   test_case "historical missing container identity is recovered" `Quick
     test_historical_missing_container_identity_is_recovered;
   test_case "historical never-started binding leaves no file" `Quick

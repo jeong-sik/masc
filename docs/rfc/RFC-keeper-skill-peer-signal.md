@@ -39,53 +39,59 @@ author: claude-main
 | 리액션 이모지를 찬성·반대로 읽기 | `reaction.emoji` 는 문자열이에요. 뜻을 붙이려면 문자열 비교가 필요해요(constitution `string_matching`, `closed_sum_over_string`) |
 | 공지 글을 제목이나 `meta_json` 으로 찾기 | `meta_json` 은 타입이 없고 키퍼가 아무 글에나 넣을 수 있어요. 색인도 없어요 |
 | 모든 키퍼를 강제로 깨우는 `Broadcast` 공지 | 응답을 요구하는 것과 다르지 않아요 |
+| 발행 근거를 Board 글에 맡기기 | `masc_board_cleanup` 은 24시간 지나고 댓글·표가 0인 글을 `post_kind` 와 상관없이 지워요(`board_tool_handlers.ml` 의 `handle_board_cleanup`). 아무도 반응하지 않은 Skill 의 근거부터 사라져요 |
 
 ## 제안
 
-### 1. 발행 공지가 발행 근거의 영구 기록이다
+두 가지를 나눠요.
+- **발행 근거**는 Skill 과 수명이 같아야 해요. 그래서 Skill 패키지 폴더 안에 둬요.
+- **의견**은 Board 에서 나눠요. 공지 글은 토론하는 자리일 뿐이고, 근거를 보관하지 않아요.
 
-SKILL.md 가 디스크에 쓰이면 서버가 Board 에 공지 글 하나를 올려요.
+### 1. 발행 근거: 패키지 폴더의 `publication.json`
 
-- 올리는 경우: `Created_and_published`, `Created_but_unpublished`.
-  둘 다 SKILL.md 가 디스크에 있고, 다음 refresh 에서 카탈로그에 올라와요.
-- 올리지 않는 경우: `Write_outcome_unknown`. 쓰기가 끝났는지 모르는 상태예요. audit 에 `Attempted` 줄만 남아요. 이 Skill 이 나중에 카탈로그에 올라오면 공지가 없어요. 열린 질문 2 예요.
-- 글 종류는 `System_post` 예요. 서버가 쓰는 글을 키퍼 이름으로 서명하지 않아요.
-  발행한 키퍼는 본문과 origin 에 **발행자**로 적어요.
-  (`Workspace_skill_publish.request` 에는 턴 정보가 없어서 `keeper_authored_origin` 을 만들 수 없어요.)
-- 본문에는 Skill 이름, description, 발행자, 키퍼가 낸 evidence, `Skill_reference`(source_id, package_id, name, content_revision)가 들어가요.
-- Board 기본 TTL 은 0(영구)이에요. 그래서 30일 뒤 audit 이 지워져도 발행 근거는 이 글에 남아요.
+`keeper_skill_publish` 가 SKILL.md 를 쓰는 같은 패키지 폴더에 `publication.json` 을 써요.
 
-### 2. 새 필드 하나: 공지 글의 typed origin
+```
+<source>/masc-pr-adversarial-read/
+  SKILL.md
+  publication.json   ← 발행자, evidence, 발행 시점 Skill_reference, 공지 결과
+```
 
-공지 글을 찾을 때 제목이나 `meta_json` 을 훑지 않아요.
-Fusion 이 이미 쓰는 방식을 따라가요.
-- Fusion 은 `post_origin.fusion_run_id` 색인으로 O(1) 조회해요(`Board_dispatch.find_post_by_run_id`).
-- 한 번만 쓰기는 `create_post_once_by_fusion_run_id` 로 보장해요.
+- 담는 것: 발행자(키퍼 이름), 키퍼가 낸 evidence, 발행 시점 `Skill_reference`(source_id, package_id, name, content_revision), 공지 결과(아래 2).
+- 카탈로그 스캐너는 패키지 폴더에서 `SKILL.md` 만 읽어요(`inspect_skill_package`). 다른 파일은 이미 여러 Skill 에 있고(`references/` 등), 카탈로그에 영향이 없어요.
+- 새 색인도, Board 타입 변경도 없어요. 파일 하나예요.
+- 이 파일은 새 durable 기록이에요. 이 파일이 없으면 30일 뒤 발행 근거가 사라져요. projects 규칙의 "durable truth 가 손상되는 경우"에 해당해요.
+- `publication.json` 쓰기가 실패해도 발행은 막지 않아요. 도구 결과에 실패를 타입으로 알려요(아래 "실패").
 
-같은 방식으로 `post_origin` 에 `skill_identity`(source_id, package_id, name)를 더해요.
-- 서버가 공지를 올릴 때만 채워요. 키퍼 Board 도구는 이 필드를 채울 수 없어요.
-- 조회는 이 색인으로만 해요.
-- 쓰기는 identity 하나에 글 하나만 허용해요.
+**운영자 삭제도 같이 바꿔야 해요.**
+지금 `Server_skill_editor.delete` 는 `SKILL.md` 파일 하나만 격리 폴더로 옮겨요.
+그대로 두면 `publication.json` 이 빈 패키지 폴더에 남아요. 그러면 같은 package id 로 다시 발행할 수도 없어요(`create` 는 폴더가 있으면 `package_already_exists`).
+삭제할 때 `publication.json` 도 같은 `recovery_id` 아래로 함께 옮겨요. 이렇게 하면 지운 Skill 의 근거도 복구 자료에 같이 남아요.
 
-이 필드는 새로 생겨요. 이 필드가 없으면 발행 근거가 30일 뒤 사라지고, 공지 글도 정확히 찾을 수 없어요. projects 규칙의 "durable truth 가 손상되는 경우"에 해당해요.
+### 2. 발행 공지: Board 의 토론 자리
 
-**묶는 기준은 identity 예요. content_revision 이 아니에요.**
-운영자가 편집기로 본문을 고치면 content_revision 이 바뀌어요.
-revision 으로 묶으면, 고친 뒤에는 공지와 의견이 안 보이게 돼요.
-identity 로 묶고, 화면에서 공지의 revision 과 현재 revision 이 다르면 "이 의견은 이전 본문에 대한 것"이라고 표시해요.
+SKILL.md 가 디스크에 쓰이면(`Created_and_published`, `Created_but_unpublished`) 서버가 Board 에 공지 글 하나를 올려요.
 
-### 3. 누가 공지를 보나
+- 글 종류는 `System_post` 예요. 서버가 쓰는 글을 키퍼 이름으로 서명하지 않아요. 발행한 키퍼는 본문에 **발행자**로 적어요.
+- 본문에는 Skill 이름, description, 발행자, evidence, `Skill_reference` 가 들어가요.
+- 공지 `post_id` 는 `publication.json` 에 적어요. 화면은 이 `post_id` 로 글을 바로 찾아요. 새 색인이 필요 없어요.
+- 한 번 발행하면 공지도 하나예요. `create` 가 이미 있는 패키지를 거절하니, 같은 package id 로 두 번 발행되지 않아요.
+- `Write_outcome_unknown` 이면 공지하지 않아요. 쓰기가 끝났는지 모르는 상태예요.
 
+**공지가 cleanup 으로 지워져도 잃는 의견은 없어요.**
+cleanup 은 댓글 0, 표 0 인 글만 지워요. 지워진 공지에는 원래 의견이 없었어요.
+화면은 `publication.json` 의 `post_id` 로 글을 찾다가 없으면 "공지 지워짐"으로 보여 줘요.
+
+**누가 공지를 보나.**
 audience 는 `Discoverable` 이에요.
 - Board 관심사(`board_interests`)를 선언한 키퍼에게만 "볼지 말지 판단할 후보"가 생겨요.
 - 판단 결과가 `Not_relevant` 여도 돼요. 응답 의무가 없어요.
-- 이 후보 저장소는 이미 다른 `Discoverable` 글에 쓰이고 있어요. 새 종류의 상태가 아니에요.
+- 이 후보 저장소는 이미 다른 `Discoverable` 글에 쓰이고 있어요.
 - 발행 한 건마다 관심사를 선언한 키퍼 수만큼 후보와 판단 호출이 생겨요.
 
-sub_board 는 접근이 `Open` 인 곳이어야 해요.
-`Members_only`·`Owner_only` 에 올리면 누가 의견을 달 수 있는지가 제한되고, 그것도 게이트예요.
+sub_board 는 접근이 `Open` 인 곳이어야 해요. `Members_only`·`Owner_only` 에 올리면 누가 의견을 달 수 있는지가 제한되고, 그것도 게이트예요.
 
-### 4. 다른 키퍼의 의견
+### 3. 다른 키퍼의 의견
 
 새 도구를 만들지 않아요. 기존 Board 기능 두 가지만 신호로 써요.
 
@@ -95,43 +101,52 @@ sub_board 는 접근이 `Open` 인 곳이어야 해요.
 리액션은 신호로 쓰지 않아요.
 이 값들은 아무 행동도 막지 않아요. Skill 을 쓰는 것도, 목록에 뜨는 것도 그대로예요.
 
-### 5. 한 Skill 기준으로 모아 보기
+운영자가 편집기로 본문을 고치면 content_revision 이 바뀌어요.
+화면은 `publication.json` 의 발행 시점 revision 과 현재 revision 이 다르면 "이 의견은 이전 본문에 대한 것"이라고 표시해요.
+
+### 4. 한 Skill 기준으로 모아 보기
 
 Skill 하나를 볼 때 아래를 함께 보여 줘요. 모두 기존 기록에서 그때그때 계산하고, 화면이 따로 저장하지 않아요.
 
 | 보여 줄 것 | 어디서 계산하나 | 지금 가능한가 |
 |---|---|---|
-| 누가 어떤 근거로 발행했나 | 공지 글(영구). 30일 안이면 audit 줄로 대조 | 공지가 생기면 |
-| 다른 키퍼의 투표 | 공지 글의 vote 기록. 발행자 본인 표는 빼고 셈 | 공지가 생기면 |
-| 다른 키퍼의 댓글 | 공지 글의 댓글. 작성자가 키퍼인지 운영자인지는 author id 로 구분 | 공지가 생기면 |
+| 누가 어떤 근거로 발행했나 | `publication.json` | 구현 뒤 |
+| 다른 키퍼의 투표 | 공지 글의 vote 기록. 발행자 본인 표는 빼고 셈 | 구현 뒤 |
+| 다른 키퍼의 댓글 | 공지 글의 댓글. 작성자가 키퍼인지 운영자인지는 author id 로 구분 | 구현 뒤 |
 | 지금 얼마나 쓰이나 | 현재 trace 의 활성화 원장(이미 TUI·대시보드에 있음) | 지금 |
 | 세션을 넘는 누적 사용 | `RFC-skill-usage-rollup` 구현 | 롤업 구현 뒤 |
 
-보여 줄 곳은 운영자 화면(TUI Skill 화면, 대시보드 Skill Studio)부터예요.
+`publication.json` 이 없는 Skill(운영자가 직접 만든 Skill, `Write_outcome_unknown` 뒤 올라온 Skill)은 "발행 기록 없음"으로 보여요.
 
-## 공지 실패
+## 실패
 
-공지를 못 올려도 발행 결과는 바뀌지 않아요. SKILL.md 는 이미 쓰였어요.
-- 도구 결과에 공지 결과를 **타입으로** 실어요: `Announced of { post_id }` 또는 `Announcement_failed of { reason }`.
-  audit `status` 문자열에 새 값을 더하지 않아요.
+어느 단계가 실패해도 발행 결과는 바뀌지 않아요. SKILL.md 는 이미 쓰였어요.
+- 도구 결과에 두 결과를 **타입으로** 실어요.
+  - 근거 파일: `Recorded` 또는 `Record_failed of { reason }`
+  - 공지: `Announced of { post_id }` 또는 `Announcement_failed of { reason }`
+- audit `status` 문자열에 새 값을 더하지 않아요.
 - 재시도 장치나 "공지 대기" 상태는 만들지 않아요.
-- 공지가 빠진 키퍼 Skill 은 화면에서 "공지 없음"으로 보여요. 운영자가 다시 올릴 수 있는 길은 열린 질문 3 이에요.
+
+## 결정 (2026-09-24, 운영자)
+
+1. **키퍼의 Available 목록에는 붙이지 않아요.**
+   목록은 매 턴 모든 키퍼에게 실려서, 수치를 붙이면 매 턴 비용이 생겨요(`RFC-0411`).
+   운영자 화면(TUI Skill 화면, 대시보드 Skill Studio)부터 보여 줘요.
+   키퍼 쪽은 `keeper_capability_search` 결과처럼 **찾을 때만** 보이는 자리에 붙여요.
+2. **`publication.json` 이나 공지가 없는 Skill 은 화면 표시까지만 해요.**
+   "발행 기록 없음", "공지 지워짐"으로 보여 주고, 따로 복구하는 동작은 만들지 않아요.
+3. **공지를 다시 올리는 동작은 지금 만들지 않아요.**
+   공지 실패가 실제로 관측되면 그때 정해요.
 
 ## 알려진 부작용
 
 - 공지 글이 받은 Up 표는 글쓴이 karma 로 이어져요. 글쓴이가 서버 시스템 계정이면 어떻게 되는지 구현 때 `board_votes.ml` 로 확인해요.
-
-## 열린 질문
-
-1. **키퍼의 Available 목록에도 붙이나.**
-   목록은 매 턴 모든 키퍼에게 실려서, 수치를 붙이면 매 턴 비용이 생겨요(`RFC-0411`).
-   운영자 화면부터 붙이고, 키퍼 쪽은 `keeper_capability_search` 결과처럼 찾을 때만 보이는 자리부터 검토해요.
-2. **`Write_outcome_unknown` 뒤 카탈로그에 올라온 Skill.** 공지 없이 목록에 떠요. 화면의 "공지 없음" 표시로 충분한지 봐야 해요.
-3. **공지를 다시 올리는 길.** 공지가 실패했을 때 운영자가 한 번 더 올리는 동작이 필요한지 봐야 해요. identity 하나에 글 하나 규칙은 그대로예요.
+- `publication.json` 은 패키지 폴더 안에 있어서, Skill 리소스를 읽는 도구로 키퍼가 읽을 수 있어요. evidence 는 비밀이 아니라서 문제로 보지 않지만, 구현 때 리소스 목록에 뜨는지 확인해요.
 
 ## 확인 방법
 
-- 공지: SKILL.md 가 쓰인 발행 한 건마다 origin 에 `skill_identity` 가 든 `System_post` 가 정확히 하나 생기는지. 같은 identity 로 두 번 올리려 하면 기존 글이 돌아오는지.
-- 게이트 없음: 공지를 억지로 실패시켜도 발행 결과가 그대로인지. Down 표만 잔뜩 달린 Skill 이 목록에 남고 활성화되는지. 누군가 게이트를 넣으면 이 테스트가 깨져야 해요.
+- 근거: 발행 한 건마다 패키지 폴더에 `publication.json` 이 생기고, 발행자·evidence·revision·`post_id` 가 들어가는지. audit 을 지운 뒤에도 화면이 이 파일로 발행 근거를 보여 주는지.
+- 삭제: 운영자가 Skill 을 지우면 `publication.json` 도 같은 `recovery_id` 아래로 옮겨지는지. 그 뒤 같은 package id 로 다시 발행할 수 있는지.
+- cleanup: 공지 글에 댓글·표가 없을 때 `masc_board_cleanup dry_run=false` 로 지워져도 `publication.json` 은 남고, 화면이 "공지 지워짐"으로 보이는지.
+- 게이트 없음: 근거 파일 쓰기와 공지를 억지로 실패시켜도 발행 결과가 그대로인지. Down 표만 잔뜩 달린 Skill 이 목록에 남고 활성화되는지. 누군가 게이트를 넣으면 이 테스트가 깨져야 해요.
 - 투영: 공지 글의 투표·댓글을 바꾸면 화면 값이 따라 바뀌는지. 발행자 본인 표가 빠지는지.
-- 수명: audit 줄을 지운 뒤에도 화면이 공지 글로 발행 근거를 보여 주는지.

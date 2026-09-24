@@ -564,9 +564,11 @@ let test_a_free_controller_goes_to_the_next_successful_mover () =
 
 (* A hotseat game runs for hours, and the Keeper holding the controller can
    stop in that time. It will never pass, so a stopped holder is let go the
-   next time a Keeper moves the machine. A Keeper that is still running keeps
-   it. The check reads Keeper state, so it sits on the Keeper's own tool
-   path, not the generic dispatch. *)
+   next time a Keeper moves the machine. A finished stop removes the Keeper
+   from the registry and keeps its meta, so that is the case pinned here. A
+   Keeper that is running, or launching, keeps it, and so does a name that
+   is not a Keeper. The check reads Keeper state, so it sits on the Keeper's
+   own tool path, not the generic dispatch. *)
 let keeper_meta name =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -576,12 +578,29 @@ let keeper_meta name =
   | Error error -> fail error
 ;;
 
-let with_keeper ~base_path ~running name f =
+type holder_state =
+  | Stopped_and_gone
+  | Running
+  | Launching
+  | Not_a_keeper
+
+let with_holder ~base_path state name f =
+  let config = Workspace.default_config base_path in
   let meta = keeper_meta name in
-  ignore
-    ((if running then Keeper_registry.For_testing.register ~base_path name meta
-      else Keeper_registry.register_offline ~base_path name meta)
-      : Keeper_registry.registry_entry);
+  let store_meta () =
+    match Keeper_meta_store.replace_snapshot config meta with
+    | Ok () -> ()
+    | Error error -> fail error
+  in
+  (match state with
+   | Stopped_and_gone -> store_meta ()
+   | Running ->
+     store_meta ();
+     ignore (Keeper_registry.For_testing.register ~base_path name meta : Keeper_registry.registry_entry)
+   | Launching ->
+     store_meta ();
+     ignore (Keeper_registry.register_offline ~base_path name meta : Keeper_registry.registry_entry)
+   | Not_a_keeper -> ());
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path name)
     f
@@ -605,18 +624,22 @@ let current_controller () =
 ;;
 
 let test_a_stopped_holders_controller_is_let_go () =
-  with_workspace (fun base_path ->
-    install_program ~base_path "hello.com" hello_com;
-    with_keeper ~base_path ~running:false "cao-cao" (fun () ->
-      boot ~agent:"cao-cao" ~base_path "hello.com";
-      check bool "the next Keeper moves" true (keeper_press ~base_path "liu-bei" "a");
-      check (option string) "and holds it" (Some "liu-bei") (current_controller ()));
-    with_keeper ~base_path ~running:true "won-chik" (fun () ->
-      ignore
-        (dispatch ~base_path ~agent:"liu-bei" "masc_dos_pass" [ ("to", `String "won-chik") ]
-          : Tool_result.result);
-      check bool "a running holder keeps it" false (keeper_press ~base_path "sun-quan" "a");
-      check (option string) "still won-chik" (Some "won-chik") (current_controller ())))
+  List.iter
+    (fun (state, label, released) ->
+      with_workspace (fun base_path ->
+        install_program ~base_path "hello.com" hello_com;
+        with_holder ~base_path state "cao-cao" (fun () ->
+          boot ~agent:"cao-cao" ~base_path "hello.com";
+          check bool (label ^ ": the next Keeper moves") released
+            (keeper_press ~base_path "liu-bei" "a");
+          check (option string) (label ^ ": holder")
+            (Some (if released then "liu-bei" else "cao-cao"))
+            (current_controller ()))))
+    [ (Stopped_and_gone, "a stopped Keeper", true)
+    ; (Running, "a running Keeper", false)
+    ; (Launching, "a launching Keeper", false)
+    ; (Not_a_keeper, "a name that is not a Keeper", false)
+    ]
 ;;
 
 (* A pass to a name no caller can ever have -- "@liu-bei", "liu bei" --

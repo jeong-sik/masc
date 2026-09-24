@@ -1224,7 +1224,14 @@ let tools_display_lines (state : state) =
             (Terminal_text.single_line
                (Masc.Tui_decode.skills_catalog_state_to_string sc_state)) ]
     | Some
-        { Masc.Tui_decode.sc_surfaces; sc_rejections; sc_sources; sc_config; sc_usage_coverage; _ }
+        { Masc.Tui_decode.sc_surfaces
+        ; sc_rejections
+        ; sc_shadows
+        ; sc_sources
+        ; sc_config
+        ; sc_usage_coverage
+        ; _
+        }
       ->
         let used =
           List.filter
@@ -1356,7 +1363,38 @@ let tools_display_lines (state : state) =
                     :: diagnostics)
                  rejections
         in
-        heading @ rows @ rejection_rows
+        (* A Skill name two catalog entries declare. The first in catalog order
+           wins (Skill_catalog_snapshot.effective_projection); the other is
+           published but listed to no Keeper turn by that name, and this list
+           is where an operator sees it. The name leads, the shadowed package
+           follows it, and the winner stands on its own line so a narrow pane
+           cuts neither package. *)
+        let shadow_rows =
+          let identity_text identity =
+            Skill_reference.identity_source_id_to_string identity
+            ^ "/"
+            ^ Skill_reference.identity_package_id_to_string identity
+          in
+          match sc_shadows with
+          | [] -> []
+          | shadows ->
+            ( Ansi.bold,
+              Printf.sprintf " Shadowed Skills — %d" (List.length shadows) )
+            :: List.concat_map
+                 (fun (shadow : Masc.Tui_decode.skill_catalog_shadow) ->
+                    [ ( Theme.warn (),
+                        Printf.sprintf
+                          "   %s \xc2\xb7 %s"
+                          (Terminal_text.single_line
+                             shadow.scsh_shadowed.Skill_reference.name)
+                          (Terminal_text.single_line (identity_text shadow.scsh_shadowed)) )
+                    ; ( Ansi.dim,
+                        "     shadowed by "
+                        ^ Terminal_text.single_line (identity_text shadow.scsh_winner) )
+                    ])
+                 shadows
+        in
+        heading @ rows @ rejection_rows @ shadow_rows
     in
     error_lines @ reading_lines
     end

@@ -679,7 +679,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
     let default_phase = Option.value phase ~default:Goal_phase.Executing in
     let now = Masc_domain.now_iso () in
         let resolved_id = Option.value id ~default:(gen_goal_id ()) in
-        let was_created = ref false in
+        let upserted = ref None in
         let refusal = ref None in
         let state_result =
           update_state config (fun state ->
@@ -713,6 +713,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                     || not (Option.equal String.equal existing.metric next_goal.metric)
                     || not (Option.equal String.equal existing.target_value next_goal.target_value)
                   in
+                  upserted := Some (`updated existing.phase);
                   let next_goal =
                     if not criterion_changed then next_goal
                     else
@@ -765,7 +766,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         updated_at = now;
                       }
                   in
-                  was_created := true;
+                  upserted := Some `created;
                   {
                     version = state.version + 1;
                     updated_at = now;
@@ -778,10 +779,9 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
           (match !refusal with
            | Some msg -> Error (Rejected msg)
            | None ->
-          (match find_goal_in state.goals resolved_id with
-          | Some goal ->
-              Ok (goal, if !was_created then `created else `updated)
-          | None ->
+          (match find_goal_in state.goals resolved_id, !upserted with
+          | Some goal, Some upserted -> Ok (goal, upserted)
+          | Some _, None | None, (Some _ | None) ->
               Error (Rejected "failed to save goal"))))
 
 let compute_rollup goals =

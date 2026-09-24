@@ -913,7 +913,7 @@ let test_first_write_creates_the_store () =
   check bool "refused writers created no goals.json" false (Sys.file_exists primary);
   (match Goal_store.upsert_goal config ~title:"first" ~metric:"m" ~target_value:"1" () with
    | Ok (_, `created) -> ()
-   | Ok (_, `updated) -> fail "first write reported an update"
+   | Ok (_, `updated _) -> fail "first write reported an update"
    | Error error -> fail (write_error_msg error));
   let state = available config in
   check int "first write holds one goal" 1 (List.length state.goals);

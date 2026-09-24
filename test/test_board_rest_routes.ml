@@ -475,7 +475,7 @@ let test_goal_transition_uses_authenticated_actor () =
         ()
     with
     | Ok (goal, `created) -> goal
-    | Ok (_, `updated) -> fail "goal fixture unexpectedly updated an existing row"
+    | Ok (_, `updated _) -> fail "goal fixture unexpectedly updated an existing row"
     | Error error -> fail (Goal_store.write_error_to_string error)
   in
   let status, _ =

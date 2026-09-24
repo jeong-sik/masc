@@ -364,7 +364,7 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
           let action_name =
             match action with
             | `created -> "created"
-            | `updated -> "updated"
+            | `updated _ -> "updated"
           in
           (* A goal's creation emitted nothing, so goals.json -- which holds only
              the current set -- was the only record that one ever existed. A goal
@@ -379,7 +379,21 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
            | `created ->
              emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_created"
                ~payload:(Goal_store.goal_to_yojson goal)
-           | `updated -> ());
+           | `updated previous_phase ->
+             (* An edit to the success criterion takes a Verifying,
+                Awaiting_confirmation or Completed goal back to Executing
+                (Goal_store.upsert_goal). That is a phase move like any
+                other, so it enters the same ledger; without it a confirmed
+                goal could leave Completed with no record of when or who. *)
+             if previous_phase <> goal.phase then
+               emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_phase"
+                 ~payload:
+                   (`Assoc
+                      [ "phase", Goal_phase.to_yojson goal.phase
+                      ; "previous_phase", Goal_phase.to_yojson previous_phase
+                      ; "actor", `String ctx.agent_name
+                      ; "cause", `String "criterion_edit"
+                      ]));
           ok_result
             ~tool_name
             ~start_time

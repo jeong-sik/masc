@@ -170,7 +170,7 @@ taskmaster 의 18건은 한 턴에서 한 행이 되고 한 번에 사라진다.
 
 ## 5. 하지 않을 것
 
-- 배치 상한, 바이트 상한, 오래된 자극 자동 폐기, 도착 창(debounce).
+- 개수 상한(배치 건수), 오래된 자극 자동 폐기, 도착 창(debounce). 바이트 경계는 §7 이 정하는 방식(어드미션 시점 예산)만 허용한다.
 - 쓰기 시점 occurrence dedup (enqueue 가 기존 pending 을 보고 거르는 것).
 - "처리됨" 판정과 재큐잉.
 - 실패 횟수에 따른 자극 격리·지수 백오프.
@@ -182,3 +182,63 @@ taskmaster 의 18건은 한 턴에서 한 행이 되고 한 번에 사라진다.
 - RFC-0377 은 이 RFC 의 특수 사례가 된다 (대화 단위 규칙은 유지).
 - #29448 (수면 생략·urgency 정렬) 위에 선다. #29462 가 이 RFC 의 추적 이슈. 대시보드 `작업 대기열` 의 HEAD 표기
   역전(`keeper-lane-strip.ts`)은 #29473 에서 다룬다.
+
+## 7. 변경 (2026-09-24): 턴 어드미션 바이트 예산
+
+### 7.1 배경 — 개수 상한이 우연히 문맥을 지키고 있었다
+
+`MASC_KEEPER_ADMISSION_MAX_EVENTS`(기본 32, 상한 256, 환경변수 레지스트리)는 #29365 의 임시 장치로, 이 RFC §5 가
+명시적으로 두지 않기로 한 개수 상한이다. 그런데 조사(2026-09-24)에서 이 값이 **pinned 관찰 섹션의 유일한 바이트
+경계**로 밝혀졌다:
+
+- `render_board_observations`(`keeper_unified_prompt.ml`)는 행 수 제한이 없다.
+- `keeper_context_layers` 는 Required 섹션을 자르지 않는다 — 주석의 근거 "행 예산이 바이트를 묶는다" 가 어드미션
+  개수를 가리키고 있었다.
+- 라이브 런타임은 `max-prompt-bytes` 를 선언하지 않아 `assemble` 의 `budget_bytes` 가 `None` 이다. tail window 은
+  pinned 문맥을 자르지 못한다.
+- 실패한 턴은 batch 를 유지한다(`Batch_no_action`). 문맥을 넘는 백로그는 턴이 계속 실패하며 영원히 루프한다.
+
+실측 백로그 71건은 여유가 있고, 추정 파손점은 1,000–1,400건(미측정)이다. #38176 은 이 상한이 TOML 이 아니라
+환경변수로 조절되는 점도 부채로 지적했다.
+
+### 7.2 설계
+
+1. **단위**: 턴에 admit 되는 자극이 턴 문맥에 렌더하는 관찰 행의 UTF-8 바이트. 측정은 문맥 조립이 쓰는 것과 같은
+   렌더러로 한다 — 측정용 두 번째 인코딩을 만들지 않는다.
+2. **선언**: 런타임 TOML 키 `admission_budget_bytes`(keeper 공통). 기본 65,536, 범위 [8,192, 1,048,576],
+   범위 밖 값은 로드 오류(잘라내지 않는다). `MASC_KEEPER_ADMISSION_MAX_EVENTS`, `KeeperAdmissionBounds`,
+   설정 레지스트리 항목, 런타임 설정 표시줄은 삭제된다(#38176 의 선택 상한 절반).
+3. **시행 지점**: `consume_batch` 의 순차 admit 루프. 후보 selection 의 관찰 행을 먼저 재고, 예산 안이면 admit,
+   아니면 그 자리에서 중단한다. 중단 뒤의 selection 은 pending 에 남는다 — 오늘의 개수 상한과 같은 의미로,
+   버리지 않고 다음 턴에 간다. 이미 admit 한 행을 자르지 않는다.
+4. **바닥 규칙**: 첫 ready selection 은 행 하나가 예산을 넘어도 admit 한다. 깨움은 턴을 열어야 하고, 거부하면
+   깨움 자체가 사라진다. 이때 남는 예산과 함께 INFO 로 기록한다.
+5. **가시성**: 중단 시 INFO 로 withheld 건수와 바이트. 카운터는 이 하나만 둔다.
+6. **connector_attention**: recorded items 조회는 admit 된 접두사의 event id 로만 한다(현행
+   `Seq.take max_events` 대체).
+7. **경계는 바이트 하나뿐**: 32, 256, clamp 같은 개수 장치는 유지하지 않는다.
+
+### 7.3 이 변경 안에서 하지 않을 것
+
+- 렌더된 문맥을 자르는 사후 예산(`assemble` trim). Required 는 자를 수 없고, 문맥이 이미 커진 뒤라 늦다.
+- `max-prompt-bytes` 에서 예산을 파생하는 것. 그 키를 선언하지 않은 라이브에서 경계가 사라진다. briefing budget
+  선언은 별도 후속 이슈로만 남긴다.
+- 백로그의 우선순위 재정렬·재처리.
+
+### 7.4 검증
+
+1. 예산 초과 시 그 자리 중단, 잔여 pending 유지, INFO 1건(단위).
+2. 단일 초대형 행의 바닥 규칙 — 첫 selection admit + INFO(단위).
+3. connector items 조회가 admit 접두사만 본다(단위).
+4. `admission_budget_bytes` 범위 밖 값의 로드 오류(설정 suite).
+5. 환경변수·레지스트리 항목 삭제의 회귀(`test_env_config_keeper_admission_bounds` 재작성, 설정 레지스트리
+   스냅샷). 기존 4 suite(`test_keeper_board_unavailable`, `test_keeper_connector_attention_batch`,
+   `test_keeper_board_turn_ack`, `test_env_config_keeper_admission_bounds`)를 새 계약으로 다시 쓴다.
+6. 라이브 재측정(구현 PR 본문): 턴별 admit 바이트 분포, withheld 빈도(기대: 0에 가까움), 백로그 상한 변화.
+
+### 7.5 관계
+
+- §5 첫 줄을 이 절이 대체한다. `keeper_heartbeat_stimulus_intake.mli` 머리 주석에 어드미션 예산 한 줄이 함께
+  간다.
+- #38176 의 선택 상한 절반을 닫는다(간격 하한 60초 절반은 이 RFC 밖).
+- #29365 가 방어하던 "도착률이 백로그로 자라는" 문제를 같은 자리에서 계속 막는다.

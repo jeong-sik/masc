@@ -60,6 +60,21 @@ let test_scalar_remove () =
   Alcotest.(check bool) "sibling scalar retained" true
     (has_line out "judge_max_output_tokens = 4096")
 
+(* The quoted spelling setup writes for a provider id names the same table,
+   and the float keeps its decimal point so a float reader takes it back. *)
+let test_float_edit_on_a_quoted_table () =
+  let content =
+    "[\"providers\".\"setup_x\"]\n\"endpoint\" = \"http://h/v1\"\n\n[models.m]\n"
+  in
+  let out =
+    Toml_line_editor.edit_table_float content ~path:"providers.setup_x"
+      ~key:"exact-body-timeout-s" ~value:1200.0
+  in
+  Alcotest.(check bool) "float written in the provider table" true
+    (has_line out "exact-body-timeout-s = 1200.0");
+  Alcotest.(check bool) "no second provider table appended" false
+    (has_line out "[providers.setup_x]")
+
 let test_multiline_array_edit_preserves_comments () =
   let out =
     Toml_line_editor.edit_table_multiline_array fixture ~path:"fusion.presets.trio"
@@ -897,6 +912,8 @@ let () =
       , [ Alcotest.test_case "scalar edit preserves comments" `Quick
             test_scalar_edit_preserves_comments
         ; Alcotest.test_case "scalar remove" `Quick test_scalar_remove
+        ; Alcotest.test_case "float edit on a quoted table" `Quick
+            test_float_edit_on_a_quoted_table
         ; Alcotest.test_case "multi-line array edit preserves comments" `Quick
             test_multiline_array_edit_preserves_comments
         ; Alcotest.test_case "scalar edit is table-scoped" `Quick

@@ -16082,10 +16082,16 @@ let render_link_preview_modal (state : state) =
                 c.push line)
             content_lines)
 
+(* The record's rows and the viewport that shows them, the way
+   [help_viewport] answers for the sheet: one pair for the keypress that
+   bounds the scroll and the frame that draws it, and one row off the height
+   when the record has more rows than it can show. *)
 let keeper_deletions_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  List.length (keeper_deletions_lines state ~cols), framed_content_height ~rows
+  let count = List.length (keeper_deletions_lines state ~cols) in
+  let height = framed_content_height ~rows in
+  (count, if count > height then max 1 (height - 1) else height)
 
 (* The deletion record overlay drew its rows and closed the box under them,
    with nothing filling the rows between: on a short record the footer stood in
@@ -16094,24 +16100,33 @@ let keeper_deletions_viewport (state : state) =
 let render_keeper_deletions (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let lines = keeper_deletions_lines state ~cols in
-  let height =
-    framed_content_height ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
-  in
+  let count, height = keeper_deletions_viewport state in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"keeper-deletions"
     ~frame:Chrome_overlay
     ~title:
       (screen_title " 키퍼 삭제 기록"
        ^ (if state.keeper_deletions_loading then " · 조회/재시도 중" else ""))
-    ~hints:(keeper_deletions_hints state ~scrollable:(List.length lines > height))
-    ~body:(fun ~budget c ->
+    ~hints:(keeper_deletions_hints state ~scrollable:(count > height))
+    (* [keeper_deletions_viewport] rather than the budget it is derived from:
+       the keypress bounds the scroll against that pair. *)
+    ~body:(fun ~budget:_ c ->
       let scroll =
-        Masc_tui_scroll.normalize ~count:(List.length lines) ~height:budget
-          state.keeper_deletions_scroll
+        Masc_tui_scroll.normalize ~count ~height state.keeper_deletions_scroll
       in
       List.iteri
         (fun index text ->
-          if index >= scroll && index < scroll + budget then c.push text)
-        lines)
+          if index >= scroll && index < scroll + height then c.push text)
+        lines;
+      (* The record is one JSON document. Measured on the live server, it ran
+         past every height: at 44 rows it ended mid-object on "kind":
+         "delivered", and the footer named the scroll keys without saying how
+         far they had to go. *)
+      if count > height then
+        c.push
+          (Theme.recede ()
+          ^ Printf.sprintf "  [lines %s]"
+              (Masc_tui_scroll.window_text ~scroll ~height count)
+          ^ Ansi.reset))
 
 (* The cheat sheet, through the overlay contract. It drew its box and its rows
    by hand and closed the box under the last row, so a sheet shorter than the

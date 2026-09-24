@@ -31,6 +31,9 @@ SOURCE_MODULES = (
 
 SHEET = b"MASC Cheat Sheet"
 WINDOW = re.compile(rb"\[lines (\d+)-(\d+)/(\d+)\]")
+# The deletion record overlay's own title. [D] opens it and reads; the key
+# that deletes a keeper is [x].
+DELETIONS = "\ud0a4\ud37c \uc0ad\uc81c \uae30\ub85d".encode()
 
 
 def window_of(drawn: bytes, where: str) -> tuple[int, int, int]:
@@ -89,6 +92,20 @@ def run(executable: str) -> None:
                 "the Agenda fits its viewport, so the reading says nothing "
                 f"the rows do not: {found.group(0)!r}")
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+
+        # The deletion record overlay draws the same reading. Here the record
+        # is one row -- this workspace has no deletion inventory to read --
+        # so it fits and says nothing. On the live server the record is one
+        # JSON document that ran past every height measured.
+        h.palette_go(process, fd, output, b"go keepers", b"MASC Keepers")
+        drawn = h.send_and_wait(process, fd, output, b"D", DELETIONS)
+        screen = b"\n".join(h.screen_rows(drawn).values())
+        found = WINDOW.search(screen)
+        if found:
+            raise AssertionError(
+                "the deletion record fits its viewport, so the reading says "
+                f"nothing the rows do not: {found.group(0)!r}")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
         os.write(fd, b"q")
 
     h.run_terminal_scenario(executable,

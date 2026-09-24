@@ -17899,7 +17899,9 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
         assert b"f=24" in resized, "resize did not place pixels again"
         exited = key(b"\x1b", b"MASC Overview")
         assert b"d=I,i=32" in exited, "exit left the image behind"
-        key(b":go msx\r", b"watch MSX machine")
+        # Ticks named the cartridge, and a live read of the same machine keeps
+        # that name, so the reopened menu's watch row says it.
+        key(b":go msx\r", b"watch split.rom")
         reopened = key(b"\r", b"F6: save quick")
         assert b"f=24" in reopened, "reopening reused a deleted image"
         # The next explicit read starts at the mark of the tick picture, and
@@ -18105,6 +18107,8 @@ def run_dos_live_regression(executable: str) -> None:
     picture: dict[str, Any] = {"frame": dos_flat_frame(bytes([255, 0, 0])), "steps": 100}
     dos_reads: list[LiveMark | None] = []
     posts: HttpRequests = []
+    held: dict[str, Any] = {"armed": False, "entered": threading.Event(),
+                            "release": threading.Event()}
     first_read = GatedHttpResponse(
         machine_live_answer("dos_capture", picture["frame"], None,
                             count=999, frame_number=None), hold_seconds=20.0)
@@ -18118,6 +18122,11 @@ def run_dos_live_regression(executable: str) -> None:
         dos_reads.append(since)
         if len(dos_reads) == 1:
             return first_read()
+        if held["armed"]:
+            # Hold this one read until the scenario has pressed a key.
+            held["armed"] = False
+            held["entered"].set()
+            held["release"].wait(timeout=10.0)
         return machine_live_answer(kind, picture["frame"], since,
                                    count=int(picture["steps"]), frame_number=None)
 
@@ -18193,11 +18202,29 @@ def run_dos_live_regression(executable: str) -> None:
         if pressed:
             raise AssertionError(f"a key on the DOS screen reached the MSX machine: {pressed!r}")
 
-        # The machine moved: the next read carries the new picture.
+        # The machine moved: the next read carries the new picture. That read
+        # is held while a key is pressed on the DOS screen. The key must not
+        # disown the read in flight: its answer is the one drawn, and no
+        # second read starts while it is held (a disowned read is dropped and
+        # re-asked, so a steady stream of keys would freeze the picture).
         changed_from = len(output)
         picture["frame"] = dos_flat_frame(bytes([0, 0, 255]))
         picture["steps"] = 200
+        reads_before_change = len(dos_reads)
+        held["armed"] = True
+        try:
+            assert wait_for_fixture_event(process, master, output, held["entered"], timeout=5.0)
+            key(b"x", b"Esc: back  +/-: 100%")
+            observe_for(0.8)  # more than two poll intervals
+            # The key repainted the old picture; what follows is the answer.
+            changed_from = len(output)
+        finally:
+            held["release"].set()
         wait_for_output(process, master, output, b"change 200", start=changed_from, timeout=5.0)
+        after_change = dos_reads[reads_before_change:]
+        if len(after_change) != 1:
+            raise AssertionError(
+                f"a key on the DOS screen disowned the read in flight: {after_change!r}")
         wait_for_output(process, master, output, b"Esc: back", start=changed_from, timeout=5.0)
         changed = bytes(output[changed_from:])
         if DOS_BLUE not in changed or DOS_RED in changed:

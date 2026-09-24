@@ -7,6 +7,7 @@
    row so the executable can do the load. *)
 
 open Alcotest
+open Masc_tui_types [@@warning "-33"]
 
 let a_frame ?(cartridge = Some "xspelunker") ?(disk = None) () :
     Masc_tui_types.msx_frame =
@@ -116,7 +117,7 @@ let test_menu_watch_row_when_loaded () =
      | Masc_tui_msx.Watch Masc_tui_machine_live.Msx -> true
      | _ -> false);
   (* Row 1 is the one cartridge. *)
-  state.msx_menu_index <- 1;
+  ignore (Masc_tui_msx.menu_consume ~write state "down");
   check bool "row 1 loads the cartridge" true
     (is_load "dig-dug.rom" (Masc_tui_msx.menu_consume ~write state "\r"))
 
@@ -126,14 +127,15 @@ let test_menu_navigation_and_select () =
   state.msx_carts <- [ "a.rom"; "b.rom"; "c.rom" ];
   let write _ = () in
   Masc_tui_msx.open_menu ~write state;
-  check int "selection starts at the top" 0 state.msx_menu_index;
+  let selected () = state.msx_menu_selected in
+  check bool "selection starts at the top" true (selected () = Some (Menu_load "a.rom"));
   ignore (Masc_tui_msx.menu_consume ~write state "down");
   ignore (Masc_tui_msx.menu_consume ~write state "down");
-  check int "two downs move to row 2" 2 state.msx_menu_index;
+  check bool "two downs move to row 2" true (selected () = Some (Menu_load "c.rom"));
   ignore (Masc_tui_msx.menu_consume ~write state "down");
-  check int "down at the bottom stays clamped" 2 state.msx_menu_index;
+  check bool "down at the bottom stays clamped" true (selected () = Some (Menu_load "c.rom"));
   ignore (Masc_tui_msx.menu_consume ~write state "up");
-  check int "up moves back to row 1" 1 state.msx_menu_index;
+  check bool "up moves back to row 1" true (selected () = Some (Menu_load "b.rom"));
   check bool "enter loads the highlighted cartridge" true
     (is_load "b.rom" (Masc_tui_msx.menu_consume ~write state "\r"))
 
@@ -211,6 +213,58 @@ let test_dos_watch_row () =
   check bool "a disk change never offers the DOS machine" false
     (contains disk_menu "watch DOS")
 
+(* The DOS watch row follows an asynchronous read while the menu is open.
+   The highlight is the row, not its position, so a row appearing or going
+   away never turns Enter into a different action -- above all not into a
+   cartridge load that replaces the running MSX game. *)
+let test_dos_row_leaving_does_not_retarget_enter () =
+  let state = a_state () in
+  state.msx_carts <- [ "cart a" ];
+  state.dos_live <- Masc_tui_machine_live.Showing a_dos_picture;
+  let write _ = () in
+  Masc_tui_msx.open_menu ~write state;
+  check bool "the DOS row is highlighted first" true
+    (state.msx_menu_selected = Some (Menu_watch Masc_tui_machine_live.Dos));
+  List.iter
+    (fun (why, view) ->
+      state.dos_live <- view;
+      Masc_tui_msx.render_menu ~write state;
+      check bool (why ^ ": Enter does not load the cartridge") true
+        (match Masc_tui_msx.menu_consume ~write state "\r" with
+         | Masc_tui_msx.Stay -> true
+         | Masc_tui_msx.Load _ | Swap_disk _ | Watch _ | Closed -> false))
+    [ "no machine", Masc_tui_machine_live.Not_loaded;
+      "a failed read", Masc_tui_machine_live.Failed "HTTP 503" ];
+  ignore (Masc_tui_msx.menu_consume ~write state "down");
+  check bool "a move from the gone row picks a row on screen" true
+    (is_load "cart a" (Masc_tui_msx.menu_consume ~write state "\r"))
+
+let test_dos_row_arriving_keeps_the_highlight () =
+  let state = a_state () in
+  state.msx_carts <- [ "cart a"; "cart b" ];
+  let write _ = () in
+  Masc_tui_msx.open_menu ~write state;
+  ignore (Masc_tui_msx.menu_consume ~write state "down");
+  check bool "cart b is highlighted" true (state.msx_menu_selected = Some (Menu_load "cart b"));
+  state.dos_live <- Masc_tui_machine_live.Showing a_dos_picture;
+  let out = captured (fun write -> Masc_tui_msx.render_menu ~write state) in
+  check bool "the DOS row arrived" true (contains out "watch DOS machine");
+  check bool "the highlight stays on cart b" true (contains out "\027[7m   cart b");
+  check bool "Enter still loads cart b" true
+    (is_load "cart b" (Masc_tui_msx.menu_consume ~write state "\r"))
+
+let test_empty_menu_takes_the_first_arriving_row () =
+  let state = a_state () in
+  let write _ = () in
+  Masc_tui_msx.open_menu ~write state;
+  check bool "nothing to highlight yet" true (state.msx_menu_selected = None);
+  state.dos_live <- Masc_tui_machine_live.Showing a_dos_picture;
+  Masc_tui_msx.render_menu ~write state;
+  check bool "the first row that appears is highlighted and picked" true
+    (match Masc_tui_msx.menu_consume ~write state "\r" with
+     | Masc_tui_msx.Watch Masc_tui_machine_live.Dos -> true
+     | _ -> false)
+
 let test_dos_render () =
   let draw view = captured (fun write ->
       Masc_tui_msx.render_live ~write ~connection:Masc_tui_types.Connected
@@ -257,6 +311,12 @@ let () =
         ; test_case "esc closes" `Quick test_menu_esc_closes
         ; test_case "empty inventory" `Quick test_menu_empty_inventory
         ; test_case "DOS watch row" `Quick test_dos_watch_row
+        ; test_case "a DOS row leaving does not retarget Enter" `Quick
+            test_dos_row_leaving_does_not_retarget_enter
+        ; test_case "a DOS row arriving keeps the highlight" `Quick
+            test_dos_row_arriving_keeps_the_highlight
+        ; test_case "an empty menu takes the first arriving row" `Quick
+            test_empty_menu_takes_the_first_arriving_row
         ] )
     ; ( "live"
       , [ test_case "DOS picture, no machine, failure" `Quick test_dos_render

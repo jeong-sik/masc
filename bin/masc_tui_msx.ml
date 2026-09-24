@@ -327,25 +327,72 @@ type menu_action =
   | Load of string    (* plug this cartridge in *)
 
 (* The rows in order: a "watch current" row first when a machine is loaded,
-   then one row per cartridge. [msx_menu_index] indexes this list. *)
-let menu_entries (state : Masc_tui_types.state) : menu_action list =
-  let watch = if Option.is_some state.msx_frame then [ Watch Live.Msx ] else [] in
+   then one row per cartridge. *)
+let menu_entries (state : Masc_tui_types.state) : Masc_tui_types.msx_menu_entry list =
+  let watch = if Option.is_some state.msx_frame then [ Masc_tui_types.Menu_watch Live.Msx ] else [] in
   let media = match state.msx_menu_mode with
-    | Masc_tui_types.Boot_game -> List.map (fun c -> Load c) state.msx_carts
+    | Masc_tui_types.Boot_game -> List.map (fun c -> Masc_tui_types.Menu_load c) state.msx_carts
     | Change_disk -> state.msx_carts
         |> List.filter (fun c -> String.ends_with ~suffix:".dsk" (String.lowercase_ascii c))
-        |> List.map (fun c -> Swap_disk c) in
+        |> List.map (fun c -> Masc_tui_types.Menu_swap_disk c) in
   (* The DOS machine is watched from here too, the one door to a machine's
      screen; a disk change is MSX's alone. *)
   let dos = match state.msx_menu_mode, state.dos_live with
-    | Masc_tui_types.Boot_game, Live.Showing _ -> [ Watch Live.Dos ]
+    | Masc_tui_types.Boot_game, Live.Showing _ -> [ Masc_tui_types.Menu_watch Live.Dos ]
     | Masc_tui_types.Boot_game, (Live.Unread | Live.Not_loaded | Live.Failed _)
     | Change_disk, (Live.Unread | Live.Not_loaded | Live.Showing _ | Live.Failed _) -> [] in
   watch @ dos @ media
 
-let clamp_index (state : Masc_tui_types.state) =
-  let n = List.length (menu_entries state) in
-  state.msx_menu_index <- (if n = 0 then 0 else max 0 (min (n - 1) state.msx_menu_index))
+let same_entry (a : Masc_tui_types.msx_menu_entry) (b : Masc_tui_types.msx_menu_entry) =
+  match a, b with
+  | Menu_watch x, Menu_watch y -> (
+      match x, y with
+      | Live.Msx, Live.Msx | Live.Dos, Live.Dos -> true
+      | Live.Msx, Live.Dos | Live.Dos, Live.Msx -> false)
+  | Menu_load x, Menu_load y | Menu_swap_disk x, Menu_swap_disk y -> String.equal x y
+  | Menu_watch _, (Menu_load _ | Menu_swap_disk _)
+  | Menu_load _, (Menu_watch _ | Menu_swap_disk _)
+  | Menu_swap_disk _, (Menu_watch _ | Menu_load _) -> false
+
+let is_selected (state : Masc_tui_types.state) entry =
+  match state.msx_menu_selected with
+  | Some selected -> same_entry selected entry
+  | None -> false
+
+let action_of_entry : Masc_tui_types.msx_menu_entry -> menu_action = function
+  | Menu_watch source -> Watch source
+  | Menu_load cart -> Load cart
+  | Menu_swap_disk disk -> Swap_disk disk
+
+(* A menu that had no row to highlight takes its first row as soon as it has
+   one; nothing was highlighted, so no choice moves. A highlighted row that has
+   since gone stays the selection, so Enter picks nothing until a move key
+   picks a row that is on screen. *)
+let settle_selection (state : Masc_tui_types.state) entries =
+  match state.msx_menu_selected, entries with
+  | None, first :: _ -> state.msx_menu_selected <- Some first
+  | None, [] | Some _, ([] | _ :: _) -> ()
+
+let rec index_in entries entry i =
+  match entries with
+  | [] -> None
+  | e :: rest -> if same_entry e entry then Some i else index_in rest entry (i + 1)
+
+(* Move the highlight by [delta] rows among the rows on screen now. From a row
+   that has gone, a move lands on the first row. *)
+let move_selection (state : Masc_tui_types.state) delta =
+  let entries = menu_entries state in
+  match entries with
+  | [] -> ()
+  | first :: _ ->
+      let current = match state.msx_menu_selected with
+        | Some selected -> index_in entries selected 0
+        | None -> None in
+      state.msx_menu_selected <- (match current with
+        | None -> Some first
+        | Some i ->
+            let last = List.length entries - 1 in
+            List.nth_opt entries (max 0 (min last (i + delta))))
 
 let menu_title = " MSX \xe2\x80\x94 pick a game"
 
@@ -363,7 +410,7 @@ let menu_hints (mode : Masc_tui_types.msx_menu_mode) ~has_entries =
   if has_entries then String.concat "  " [ "j/k:move"; choose; leave ] else leave
 
 let entry_label (state : Masc_tui_types.state) = function
-  | Watch Live.Msx ->
+  | Masc_tui_types.Menu_watch Live.Msx ->
       let cart =
         match state.msx_frame with
         | Some { msx_meta = Some { msx_cartridge = Some c; _ }; _ } -> c
@@ -372,15 +419,14 @@ let entry_label (state : Masc_tui_types.state) = function
         | Some { msx_meta = None; _ } | None -> "MSX machine"
       in
       "> watch " ^ cart
-  | Watch Live.Dos -> "> watch DOS machine"
-  | Load c | Swap_disk c -> "  " ^ c
-  | Stay | Closed -> ""
+  | Menu_watch Live.Dos -> "> watch DOS machine"
+  | Menu_load c | Menu_swap_disk c -> "  " ^ c
 
 let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state) =
   invalidate ();
-  clamp_index state;
   let rows, cols = Masc_tui_ansi.get_terminal_size () in
   let entries = menu_entries state in
+  settle_selection state entries;
   let buf = Buffer.create 1024 in
   if !image_may_exist then Buffer.add_string buf delete_image;
   Buffer.add_string buf "\027[2J\027[H";
@@ -403,11 +449,11 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
             " no cartridges yet \xe2\x80\x94 an operator fills .masc/msx/carts/ with ROM or .dsk images");
        Buffer.add_string buf "\027[0K\r\n"
    | _ ->
-       List.iteri
-         (fun i entry ->
+       List.iter
+         (fun entry ->
            let label = entry_label state entry in
            let line =
-             if i = state.msx_menu_index then
+             if is_selected state entry then
                "\027[7m" ^ fit_line (max 1 (cols - 1)) (" " ^ label) ^ "\027[0m"
              else fit_line cols (" " ^ label)
            in
@@ -439,7 +485,7 @@ let open_menu ~(write : string -> unit) ?(mode = Masc_tui_types.Boot_game) (stat
   state.msx_menu_mode <- mode;
   state.msx_open <- true;
   state.msx_menu_open <- true;
-  state.msx_menu_index <- 0;
+  state.msx_menu_selected <- None;
   render_menu ~write state
 
 let menu_consume ~(write : string -> unit) (state : Masc_tui_types.state) key :
@@ -447,17 +493,19 @@ let menu_consume ~(write : string -> unit) (state : Masc_tui_types.state) key :
   match key with
   | "esc" -> Closed
   | "up" | "k" ->
-      state.msx_menu_index <- state.msx_menu_index - 1;
+      move_selection state (-1);
       render_menu ~write state;
       Stay
   | "down" | "j" ->
-      state.msx_menu_index <- state.msx_menu_index + 1;
+      move_selection state 1;
       render_menu ~write state;
       Stay
   | "\r" | "\n" | "enter" | "return" | " " | "space" -> (
-      match List.nth_opt (menu_entries state) state.msx_menu_index with
-      | Some ((Watch _ | Load _ | Swap_disk _) as a) -> a
-      | Some (Stay | Closed) | None ->
+      (* Enter picks the highlighted row only while it is on screen. *)
+      match state.msx_menu_selected with
+      | Some selected when List.exists (same_entry selected) (menu_entries state) ->
+          action_of_entry selected
+      | Some _ | None ->
           render_menu ~write state;
           Stay)
   | _ ->

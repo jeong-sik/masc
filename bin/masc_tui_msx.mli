@@ -91,7 +91,7 @@ type menu_action =
 val open_menu : write:(string -> unit) -> ?mode:Masc_tui_types.msx_menu_mode -> Masc_tui_types.state -> unit
 (** Take the terminal over and draw the picker over the cartridge inventory
     [state.msx_carts]. The caller fetches the inventory first. Selection starts
-    at the top row. *)
+    once the menu has one. *)
 
 val render_menu :
   write:(string -> unit) -> ?status:string -> Masc_tui_types.state -> unit

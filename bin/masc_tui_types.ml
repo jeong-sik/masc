@@ -5093,6 +5093,15 @@ type runtime_config_reading = {
    RGB plus what to title it. The spectator downsamples the pixels itself. *)
 type msx_menu_mode = Boot_game | Change_disk
 
+(* One row of the MSX load menu. The highlight is kept as the row itself, not
+   its position: rows come and go while the menu is open (the DOS watch row
+   follows an asynchronous read), and a position would then name whatever row
+   moved into it -- a cartridge load in place of a watch. *)
+type msx_menu_entry =
+  | Menu_watch of Masc_tui_machine_live.source
+  | Menu_load of string
+  | Menu_swap_disk of string
+
 (* A DOS live read belongs to the view and server port that asked for it.
    A reopened screen may start a fresh read while an old one is still ending. *)
 type machine_live_request = { live_view : unit ref; live_port : int }
@@ -5414,9 +5423,10 @@ type state = {
   mutable msx_last_poll_ns: int64;
   (* Which machine the spectator shows. The menu picks it. *)
   mutable machine_source: Masc_tui_machine_live.source;
-  (* The last live read of each machine. [msx_live] holds a counter only while
-     [msx_frame] is that read's picture: a tick answer carries no counter, so
-     it resets [msx_live] to [Unread] and the next read asks for a picture. *)
+  (* The last live read of each machine. [msx_live] is [Showing] the picture
+     [msx_frame] holds, with its change mark, whether a live read or a tick
+     answer drew it: the tick returns its picture and mark from one snapshot,
+     so the next live read sends that mark as [since]. *)
   mutable msx_live: Masc_tui_machine_live.view;
   mutable dos_live: Masc_tui_machine_live.view;
   mutable dos_live_in_flight: machine_live_request option;
@@ -5424,12 +5434,15 @@ type state = {
      inventory to plug into the shared machine. It is an overlay on the MSX
      screen -- while [msx_menu_open] the keyboard drives the picker, not the
      game, so its keys never reach the emulator. [msx_carts] is the inventory
-     the [/carts] poll cached; [msx_menu_index] is the highlighted row. *)
+     the [/carts] poll cached. [msx_menu_selected] is the highlighted row:
+     [None] until the menu has a row to highlight, then the row itself, kept
+     even after an asynchronous read removes it -- Enter then picks nothing
+     rather than the row that moved into its place. *)
   mutable msx_menu_open: bool;
   mutable msx_notice: string option;
   mutable msx_menu_mode: msx_menu_mode;
   mutable msx_carts: string list;
-  mutable msx_menu_index: int;
+  mutable msx_menu_selected: msx_menu_entry option;
   (* The [:] command palette: a typed filter over jump targets. Query and
      cursor live only while it is open. *)
   mutable palette_open: bool;
@@ -7736,7 +7749,7 @@ let create_state
   msx_notice = None;
   msx_menu_mode = Boot_game;
   msx_carts = [];
-  msx_menu_index = 0;
+  msx_menu_selected = None;
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;

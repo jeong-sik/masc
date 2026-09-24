@@ -18370,11 +18370,19 @@ and is loaded on demand through keeper_skill.
       (* Menu decisions, game input and closing own a new view. Pure size or
          non-game input keeps the snapshot current; completion renders using
          the geometry the UI owns at that later instant. *)
-      (match msx_key with
-       | Some _ when state.msx_menu_open -> invalidate_msx_poll ()
-       | Some ("esc" | "f6" | "f7" | "f8") -> invalidate_msx_poll ()
-       | Some name when Option.is_some (msx_server_key name) -> invalidate_msx_poll ()
-       | Some _ | None -> ());
+      (* On the DOS screen only Esc closes the view; every other key is a
+         repaint, and disowning the DOS read in flight there would drop its
+         answer, so keys typed steadily would freeze the picture. *)
+      (match msx_key, state.machine_source with
+       | Some _, (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos)
+         when state.msx_menu_open -> invalidate_msx_poll ()
+       | Some "esc", (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos) ->
+           invalidate_msx_poll ()
+       | Some ("f6" | "f7" | "f8"), Masc_tui_machine_live.Msx -> invalidate_msx_poll ()
+       | Some name, Masc_tui_machine_live.Msx when Option.is_some (msx_server_key name) ->
+           invalidate_msx_poll ()
+       | Some _, (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos)
+       | None, (Masc_tui_machine_live.Msx | Masc_tui_machine_live.Dos) -> ());
       (match msx_key with
       | None -> ()
       | Some name when state.msx_menu_open -> (

@@ -7569,9 +7569,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let channel_lines =
       match state.connectors_error, state.connectors with
       | Some detail, None ->
-          [ (Theme.bad ()) ^ "  channel transports unavailable: "
-            ^ Terminal_text.single_line detail ^ Ansi.reset
-          ]
+          [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
+            ^ Ansi.reset ]
       | _, None -> [ Ansi.dim ^ "  (loading channel transports…)" ^ Ansi.reset ]
       | error, Some snapshot ->
           let connectors = snapshot.cs_connectors in
@@ -7834,7 +7833,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           @ (match error with
              | None -> []
              | Some detail ->
-                 [ (Theme.bad ()) ^ "  refresh failed: "
+                 [ (Theme.bad ()) ^ "  STALE · "
                    ^ Terminal_text.single_line detail ^ Ansi.reset
                  ])
           @ transport_rows @ refused_rows @ selected_lines

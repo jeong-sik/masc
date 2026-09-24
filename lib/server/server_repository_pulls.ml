@@ -18,14 +18,11 @@ type mergeable =
 type pull_request =
   { repo_slug : string
   ; number : int
-  ; title : string
-  ; head_branch : string
   ; draft : bool
   ; checks : check_state
   ; review : review_state
   ; mergeable : mergeable
   ; author : string option
-  ; updated_at : float
   }
 
 type failure =
@@ -233,7 +230,7 @@ let query =
     pullRequests(states: OPEN, first: $first, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        number title headRefName isDraft updatedAt reviewDecision mergeable
+        number isDraft reviewDecision mergeable
         head: commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
         authored: commits(last: $authorWindow) { nodes { commit { parents { totalCount } author { name } } } }
       }
@@ -353,38 +350,11 @@ let decode_author node =
   | _ -> None
 
 let decode_pull ~repo_slug node =
-  match
-    ( field "number" node
-    , field "title" node
-    , field "headRefName" node
-    , field "isDraft" node
-    , field "updatedAt" node )
-  with
-  | ( Some (`Int number)
-    , Some (`String title)
-    , Some (`String head_branch)
-    , Some (`Bool draft)
-    , Some (`String updated_raw) ) ->
-    (match
-       ( Time_codec.parse_rfc3339_opt updated_raw
-       , decode_checks node
-       , decode_review node
-       , decode_mergeable node
-       , decode_author node )
-     with
-     | Some updated_at, Some checks, Some review, Some mergeable, Some author ->
-       Some
-         { repo_slug
-         ; number
-         ; title
-         ; head_branch
-         ; draft
-         ; checks
-         ; review
-         ; mergeable
-         ; author
-         ; updated_at
-         }
+  match field "number" node, field "isDraft" node with
+  | Some (`Int number), Some (`Bool draft) ->
+    (match decode_checks node, decode_review node, decode_mergeable node, decode_author node with
+     | Some checks, Some review, Some mergeable, Some author ->
+       Some { repo_slug; number; draft; checks; review; mergeable; author }
      | _ -> None)
   | _ -> None
 
@@ -706,15 +676,12 @@ let pull_request_to_yojson ~keepers pull =
   `Assoc
     [ "repo_slug", `String pull.repo_slug
     ; "number", `Int pull.number
-    ; "title", `String pull.title
-    ; "head_branch", `String pull.head_branch
     ; "draft", `Bool pull.draft
     ; "checks", `String (check_state_to_string pull.checks)
     ; "review", `String (review_state_to_string pull.review)
     ; "mergeable", `String (mergeable_to_string pull.mergeable)
     ; "author", string_or_null pull.author
     ; "keeper", string_or_null keeper
-    ; "updated_at", `Float pull.updated_at
     ]
 
 let failure_to_yojson = function

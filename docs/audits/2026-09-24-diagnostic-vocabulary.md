@@ -24,12 +24,17 @@ merged or deployed behavior claim.
 | --- | --- | --- |
 | Fusion failed-panel Board evidence | `reason_detail` and `reason` stored the same `panel_failure_text`. | #38825 keeps `reason_detail` and updates Board, Fusion, and chat readers. TUI already requires that field. |
 | TUI continuity measurement | The sample header and its cause line both said `QUESTION/ANSWER/JUDGE FAILED`. | #38829 keeps `FAILED` in the status and names the stage on its `CAUSE` line, including when the header scrolls away. |
-| Board reaction summary | `reacted` and `has_reacted` carried the same viewer boolean through the server, Dashboard normalizer, and UI type. | `fix/board-reaction-single-selected-20260925` keeps `reacted`; the producer test requires the alias key to be absent. |
-| Keeper status and Dashboard | `trace_history_count` and `handoff_count_total` were both `List.length m.runtime.trace_history`. | `fix/keeper-handoff-single-count-20260925` keeps `handoff_count_total` for KPI and briefing readers. |
+| Board reaction summary | `reacted` and `has_reacted` carried the same viewer boolean through the server, Dashboard normalizer, and UI type. | #38842 keeps `reacted`; the producer test requires the alias key to be absent. |
+| Keeper status and Dashboard | `trace_history_count` and `handoff_count_total` were both `List.length m.runtime.trace_history`. | #38843 keeps `handoff_count_total` for KPI and briefing readers. |
+| Keeper model label | `last_model_used_label` and `active_model_label` were populated from the same last runtime attempt, or both null. | #38844 keeps `active_model_label` and removes the duplicate producer and Dashboard fallback. |
 
 `handoff_count_total` still reports the number of prior trace IDs. This audit
 does not establish that it counts executed handoffs; that metric meaning needs
 separate source evidence.
+
+`active_model_label` is a redacted label derived from the last runtime attempt;
+it is not evidence that a model is running now. The model-label slice removes
+the identical alias without changing that existing meaning.
 
 ## Similar names that carry different facts
 
@@ -55,6 +60,6 @@ separate source evidence.
   `choice`, and `reason`. Its strict reader requires `notes`, and Task history
   displays that field; removing only the write would make existing decisions
   unreadable. This needs a storage and read-projection change together.
-- Keeper model labels and health version aliases need consumer and semantic
-  review before collapsing them: equal source strings alone do not prove that
-  their fields have the same meaning.
+- Health version aliases need consumer and semantic review before collapsing
+  them: equal source strings alone do not prove that their fields have the
+  same meaning.

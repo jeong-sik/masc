@@ -30,10 +30,15 @@ val store_to_string : store -> string
 
 val store_of_string : string -> store option
 
-type pinned =
-  { reference : string  (** [name:tag], as the store lists it. *)
-  ; digest : string  (** [sha256:<64 lowercase hex>], the image index digest. *)
+type pinned = private
+  { reference : string
+        (** [repository:tag]: a lowercase repository and a tag, never a
+            digest reference and never starting with ['-']. *)
+  ; digest : string
+        (** [sha256:<64 lowercase hex>], as the store reports it for a
+            running guest. *)
   }
+(** Only {!parse} and {!promote} make one, so a [pinned] is always valid. *)
 
 type promotion =
   { current : pinned
@@ -60,7 +65,7 @@ type parse_error =
   | Expected_string of { path : string list; field : string }
   | Invalid_digest of { path : string list; value : string }
   | Invalid_reference of { path : string list; value : string }
-      (** Empty, or a character outside [A-Z a-z 0-9 . _ / : @ -]. *)
+      (** Not [repository:tag] as {!pinned} describes it. *)
 
 val parse_error_to_string : parse_error -> string
 
@@ -87,6 +92,16 @@ val load_error_to_string : load_error -> string
 
 val load : config_root:string -> (t, load_error) result
 
+type snapshot
+(** The catalog file's bytes as they were read, or its absence. {!save}
+    compares against it. *)
+
+val load_for_change :
+  config_root:string -> shipped:string option -> (t * snapshot, load_error) result
+(** Read the host's catalog to change it. A host that has not written one yet
+    starts from [shipped], the copy of [config/sandbox-images.toml] the binary
+    carries; the two are never merged. *)
+
 (** {1 Changing what a name means on this host} *)
 
 type change_error =
@@ -112,10 +127,14 @@ val to_toml : t -> string
 (** The catalog as the file {!parse} reads, names in order, one table per
     promoted store. {!parse} of the result gives back the same catalog. *)
 
-type save_error = Unwritable of { path : string; detail : string }
+type save_error =
+  | Changed_since_read of { path : string }
+      (** Another writer changed the file after [expected] was read. Nothing
+          was written. *)
+  | Unwritable of { path : string; detail : string }
 
 val save_error_to_string : save_error -> string
 
-val save : config_root:string -> t -> (unit, save_error) result
-(** Write {!to_toml} beside the file and rename it into place, so a reader
-    never sees half a catalog. *)
+val save : config_root:string -> expected:snapshot -> t -> (unit, save_error) result
+(** Replace the file with {!to_toml} atomically (fsync, then rename), but
+    only if it still holds what [expected] read. *)

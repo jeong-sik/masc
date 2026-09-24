@@ -2,7 +2,9 @@ type store =
   | Docker_daemon
   | Microvm of Keeper_microvm_backend.t
 
-let docker_store_name = "docker"
+(* Docker's store is where a [sandbox_profile = "docker"] Keeper runs, and
+   the catalog spells it the way the profile is spelt. *)
+let docker_store_name = Keeper_sandbox_config.sandbox_profile_to_string Keeper_sandbox_config.Docker
 
 let store_to_string = function
   | Docker_daemon -> docker_store_name
@@ -42,7 +44,7 @@ type parse_error =
   | Invalid_digest of { path : string list; value : string }
   | Invalid_reference of { path : string list; value : string }
 
-let dotted path = String.concat "." path
+let dotted = function [] -> "the catalog" | path -> String.concat "." path
 
 let parse_error_to_string = function
   | Toml_syntax detail -> "not TOML: " ^ detail
@@ -51,14 +53,16 @@ let parse_error_to_string = function
     Printf.sprintf "%s has a key this catalog does not use: %s" (dotted path) key
   | Invalid_name name ->
     Printf.sprintf
-      "%S is not an image name: use lowercase letters, digits and '-', not \
-       starting with '-'"
+      "%S is not an image name: lowercase letters and digits, in words joined \
+       by single '-'"
       name
   | Unknown_store { image; store } ->
-    Printf.sprintf "images.%s names an image store MASC does not run: %s (known: %s)"
+    Printf.sprintf
+      "images.%s.%s is not an image store MASC runs (known: %s); a build goes \
+       under [images.%s.<store>]"
       image store
-      (String.concat ", "
-         (docker_store_name :: Keeper_microvm_backend.valid_strings))
+      (String.concat ", " (docker_store_name :: Keeper_microvm_backend.valid_strings))
+      image
   | Missing_field { path; field } -> Printf.sprintf "%s has no %s" (dotted path) field
   | Expected_string { path; field } ->
     Printf.sprintf "%s.%s is not a string" (dotted path) field
@@ -66,16 +70,17 @@ let parse_error_to_string = function
     Printf.sprintf "%s.digest %S is not sha256:<64 lowercase hex>" (dotted path) value
   | Invalid_reference { path; value } ->
     Printf.sprintf
-      "%s.reference %S is empty or has a character outside A-Z a-z 0-9 . _ / : @ -"
+      "%s.reference %S is not repository:tag (a lowercase repository, a tag of \
+       letters, digits, '_', '.', '-', no digest)"
       (dotted path) value
 
 let ( let* ) = Result.bind
 
+(* Words of lowercase letters and digits joined by single '-': the directory
+   names under sandbox-images/. *)
 let valid_name name =
-  let allowed = function 'a' .. 'z' | '0' .. '9' | '-' -> true | _ -> false in
-  String.length name > 0
-  && (not (Char.equal name.[0] '-'))
-  && String.for_all allowed name
+  let word w = String.length w > 0 && String.for_all (function 'a' .. 'z' | '0' .. '9' -> true | _ -> false) w in
+  List.for_all word (String.split_on_char '-' name)
 
 let digest_prefix = "sha256:"
 let sha256_hex_length = 64
@@ -87,14 +92,32 @@ let valid_digest value =
   && String.equal (String.sub value 0 prefix_length) digest_prefix
   && String.for_all hex (String.sub value prefix_length sha256_hex_length)
 
-(* The characters an OCI image reference is spelt with. Holding references to
-   them is also what lets {!to_toml} write one between quotes as it is. *)
+(* OCI's limit on a tag's length. *)
+let max_tag_length = 128
+
+(* [repository:tag]. The repository is lowercase path components, possibly
+   behind a registry host with a port; the tag is the part after the last
+   ':' and cannot hold '/', which is what tells a tag from a port. A digest
+   reference is refused because the digest has its own field. Neither part
+   may start with '-', so a reference placed in an argv cannot read as a
+   flag, and none of these characters needs escaping in {!to_toml}. *)
 let valid_reference value =
-  let allowed = function
-    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '/' | ':' | '@' | '-' -> true
-    | _ -> false
-  in
-  String.length value > 0 && String.for_all allowed value
+  match String.rindex_opt value ':' with
+  | None -> false
+  | Some colon ->
+    let repository = String.sub value 0 colon in
+    let tag = String.sub value (colon + 1) (String.length value - colon - 1) in
+    let lower_alnum = function 'a' .. 'z' | '0' .. '9' -> true | _ -> false in
+    let repository_char c = lower_alnum c || (match c with '.' | '_' | '/' | '-' | ':' -> true | _ -> false) in
+    let tag_start = function 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true | _ -> false in
+    let tag_char c = tag_start c || (match c with '.' | '-' -> true | _ -> false) in
+    String.length repository > 0
+    && lower_alnum repository.[0]
+    && String.for_all repository_char repository
+    && String.length tag > 0
+    && String.length tag <= max_tag_length
+    && tag_start tag.[0]
+    && String.for_all tag_char tag
 
 let table ~path = function
   | Otoml.TomlTable fields | Otoml.TomlInlineTable fields -> Ok fields
@@ -206,13 +229,51 @@ let load_error_to_string = function
   | Unreadable { path; detail } -> Printf.sprintf "cannot read %s: %s" path detail
   | Invalid { path; error } -> Printf.sprintf "%s: %s" path (parse_error_to_string error)
 
+type snapshot =
+  | Absent
+  | Read of string
+
+(* Opening is the existence check, so a file removed between a check and the
+   open cannot read as unreadable. *)
+let read_snapshot path =
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Absent
+  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+  | fd ->
+    let ic = Unix.in_channel_of_descr fd in
+    (match In_channel.input_all ic with
+     | text ->
+       close_in_noerr ic;
+       Ok (Read text)
+     | exception Sys_error detail ->
+       close_in_noerr ic;
+       Error detail)
+
+let read_snapshot_for_load path =
+  Result.map_error (fun detail -> Unreadable { path; detail }) (read_snapshot path)
+
+let catalog_path ~config_root = Filename.concat config_root file_name
+
+let parse_at ~path text = Result.map_error (fun error -> Invalid { path; error }) (parse text)
+
 let load ~config_root =
-  let path = Filename.concat config_root file_name in
-  if not (Sys.file_exists path) then Error (Missing { path })
-  else
-    match In_channel.with_open_bin path In_channel.input_all with
-    | exception Sys_error detail -> Error (Unreadable { path; detail })
-    | text -> Result.map_error (fun error -> Invalid { path; error }) (parse text)
+  let path = catalog_path ~config_root in
+  let* snapshot = read_snapshot_for_load path in
+  match snapshot with
+  | Absent -> Error (Missing { path })
+  | Read text -> parse_at ~path text
+
+let load_for_change ~config_root ~shipped =
+  let path = catalog_path ~config_root in
+  let* snapshot = read_snapshot_for_load path in
+  match snapshot, shipped with
+  | Read text, (Some _ | None) ->
+    let* catalog = parse_at ~path text in
+    Ok (catalog, snapshot)
+  | Absent, Some text ->
+    let* catalog = parse_at ~path:(path ^ " (shipped copy)") text in
+    Ok (catalog, snapshot)
+  | Absent, None -> Error (Missing { path })
 
 type change_error =
   | No_such_image of { name : string; known : string list }
@@ -294,17 +355,27 @@ let to_toml t =
     t;
   Buffer.contents buf
 
-type save_error = Unwritable of { path : string; detail : string }
+type save_error =
+  | Changed_since_read of { path : string }
+  | Unwritable of { path : string; detail : string }
 
-let save_error_to_string (Unwritable { path; detail }) =
-  Printf.sprintf "cannot write %s: %s" path detail
+let save_error_to_string = function
+  | Changed_since_read { path } ->
+    Printf.sprintf
+      "%s changed after it was read; nothing was written, run the command again"
+      path
+  | Unwritable { path; detail } -> Printf.sprintf "cannot write %s: %s" path detail
 
-let save ~config_root t =
-  let path = Filename.concat config_root file_name in
-  let staging = path ^ ".tmp" in
-  match
-    Out_channel.with_open_bin staging (fun oc -> Out_channel.output_string oc (to_toml t));
-    Sys.rename staging path
-  with
-  | () -> Ok ()
-  | exception Sys_error detail -> Error (Unwritable { path; detail })
+(* Compare-and-swap on the bytes: a second writer that read the same file
+   first finds it changed and writes nothing, rather than both writing and
+   one change vanishing. The check and the rename are not one atomic step;
+   the window between them is one fsync long. *)
+let save ~config_root ~expected t =
+  let path = catalog_path ~config_root in
+  match read_snapshot path with
+  | Error detail -> Error (Unwritable { path; detail })
+  | Ok current when current <> expected -> Error (Changed_since_read { path })
+  | Ok _ ->
+    Result.map_error
+      (fun detail -> Unwritable { path; detail })
+      (Fs_compat.save_file_atomic_strict path (to_toml t))

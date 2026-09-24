@@ -638,10 +638,27 @@ status: reference
   → [Runtime_execution.t](../../lib/runtime/runtime_execution.mli)
 
 **Exact-output route**
-: Librarian 같은 단독 모델 작업의 목적별 실행 경로. 해당 설정은 API slot과
-  후속 CLI 후보 순서를 선언한다. 코드 이름은 `exact_output_lane_decl`이다.
-  → [선언](../../lib/runtime/runtime_schema.mli),
-  [작업 기록](../../lib/exact_lane_run_registry.mli)
+: Librarian, Workspace memory curator, HITL auto judge, Board attention 같은 단독
+  모델 작업의 목적별 실행 경로(`Agent_core.Exact_output`). 설정은 API slot과 후속 CLI
+  후보 순서를 선언한다(`exact_output_lane_decl`). 도구를 쓰지 않고 단일 완결 응답을
+  받아 도메인 검증기가 유효성을 판정하며, 일반 턴 failover인 Runtime Candidate Order와
+  구분된다.
+  - **슬롯 전진 및 타임아웃 경계**: 요청이 wire로 나간 뒤 해당 바인딩의 헤더 기한
+    (`connect_timeout_s`, `Http_operation`) 또는 전체 기한(`body_timeout_s`,
+    `Wall_clock`) 안에 응답 헤더를 받지 못한 타임아웃(`Http_client.TimeoutError`)이
+    발생하면, 첫 슬롯에서 패스를 중단하지 않고 다음 후보 슬롯으로 전진
+    (`execution_failure_may_advance`)한다. 바인딩별 응답 속도와 기한은 슬롯 자체의
+    성질이므로 후속 슬롯이 동일 입력을 처리할 기회를 보장한다(#38437).
+  - **생성 발송 관측 권위 (`flow_evidence_generation_dispatch`)**: 걸음(walk)에 속한 어느
+    후보라도 외부 완료 생성 요청(`generation dispatch`)을 시작했는지 여부를 불변
+    증거(`Started`·`Not_started`)로 기록한다. 앞선 슬롯이 생성 요청을 보낸 뒤(예: 5xx
+    수신) 후속 슬롯으로 넘어가 최종 슬롯이 발송 전 실패하더라도, 걸음 전체의 영수증에는
+    `outward_effect=started`로 보존된다(마지막 실패 슬롯의 상태만 보고
+    `outward_effect=none`으로 오기록하지 않는다). 단, 사전 토큰 수 측정
+    (`token-count measurement`)은 별개 외부 호출이며 생성 발송 사실로 계수하지
+    않는다(#38525).
+  → [Exact_output](../../packages/agent_core/lib/llm_provider/exact_output.mli),
+  [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
 
 **Memory queue**
 : Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한
@@ -1339,6 +1356,10 @@ status: reference
   `Turn_boundary_unknown`이고, 요청은 가장 새 Atom 하나만 싣는다 — 모르는 시작을
   0으로 접어 History 전체를 보내지 않는다. 요청이 어디서 시작했는지는 `origin`이
   따로 적는다(`Turn_start`·`Turn_start_unknown`).
+  - **경고 발생 경계**: `turn_start` 조회나 다음 요청 예측(`next-request forecast`) 단계에서
+    무조건 경고를 남기지 않는다. 씨앗이나 앞머리 거절 폴백을 거쳐 실제로 알 수 없는
+    턴 시작으로 범위를 열어 wire로 전송한 요청에서만
+    `warn_range_opens_on_newest_atom` 경고를 낸다(#38365).
   **경고**: `turn_start`의 `Turn_boundary`·`Turn_boundary_unknown`과 `origin`의
   `Turn_start`·`Turn_start_unknown`은 `Turn Boundary Position`의 닫힌 넷
   (`Atom_history`·`Empty_atom_history`·`No_atom_history`·`Stale_noop`)과 **다른

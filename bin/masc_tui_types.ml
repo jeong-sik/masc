@@ -2102,6 +2102,7 @@ type system_log_entry = Tui_decode.system_log_entry
 type planning_goal = Tui_decode.planning_goal
   = {
   pg_id: string;
+  pg_criterion_revision: string option;
   pg_title: string;
   pg_phase: Goal_phase.t;
   pg_priority: int;

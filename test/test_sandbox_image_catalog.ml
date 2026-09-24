@@ -136,7 +136,7 @@ let test_references_are_repository_and_tag () =
     ];
   List.iter
     (fun value -> check int value 1 (List.length (entries (parsed (with_reference value)))))
-    [ "masc-sandbox:general"; "localhost:5000/team/img:v1.2_rc-3"; ocaml_now ]
+    [ "masc-sandbox:general"; "localhost:5000/team/img:v1.2_rc-3"; ocaml_now ];
   check bool "is_reference agrees" false (is_reference "--privileged:x");
   check bool "is_reference accepts a tag" true (is_reference "masc-sandbox:general")
 

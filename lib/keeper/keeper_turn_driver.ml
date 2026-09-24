@@ -279,10 +279,9 @@ let path_rest ~now runtime_id =
           ; failed_attempt = _
           } ->
         let promotes =
-          match retry_after with
-          | Some seconds when (not (Float.is_nan seconds)) && seconds > 0.0 ->
-            Float.compare seconds cap_sec <= 0
-          | Some _ | None -> false
+          match Keeper_runtime_failure_route.usable_retry_after retry_after with
+          | Some seconds -> Float.compare seconds cap_sec <= 0
+          | None -> false
         in
         Some
           ( noted_at +. rest_sec Keeper_runtime_failure_route.Rate_limited retry_after

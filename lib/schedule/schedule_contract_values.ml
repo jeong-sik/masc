@@ -161,6 +161,29 @@ let wake_status_of_string =
 
 let wake_status_strings = List.map wake_status_to_string wake_statuses
 
+type runner_status =
+  | Runner_not_started
+  | Runner_running
+  | Runner_stale
+  | Runner_degraded
+  | Runner_ok
+[@@deriving enumerate]
+
+let runner_status_to_string = function
+  | Runner_not_started -> "not_started"
+  | Runner_running -> "running"
+  | Runner_stale -> "stale"
+  | Runner_degraded -> "degraded"
+  | Runner_ok -> "ok"
+;;
+
+let runner_status_of_string =
+  decode_wire_value
+    ~field:"runner_status"
+    ~to_string:runner_status_to_string
+    all_of_runner_status
+;;
+
 (* Whose schedules [masc_schedule_list] reads. A schedule names two actors: the
    one that created it ([scheduled_by.id]) and the Keeper it wakes (the wake
    payload's [keeper_name]). They agree on most rows and are still different

@@ -290,13 +290,30 @@ type schedule_row_values = {
 
 val schedule_minimum_recurrence_width : int
 
+val schedule_minimum_delivery_width : int
+val schedule_maximum_delivery_width : int
+
+val schedule_delivery_width : string list -> int
+(** Cells the delivery column needs for [words]: the widest of them, never
+    under {!schedule_minimum_delivery_width} -- what the column drew before it
+    was measured -- and never over {!schedule_maximum_delivery_width}, so one
+    long word cannot take the recurrence's room. *)
+
 val schedule_recurrence_width :
-  inner_width:int -> target_width:int -> wake_width:int -> int
+  inner_width:int ->
+  target_width:int ->
+  wake_width:int ->
+  delivery_width:int ->
+  int
 (** Cells the recurrence may occupy: what the named columns leave, never below
     {!schedule_minimum_recurrence_width}. *)
 
 val schedule_header_row :
-  target_width:int -> wake_width:int -> recurrence_width:int -> string
+  target_width:int ->
+  wake_width:int ->
+  delivery_width:int ->
+  recurrence_width:int ->
+  string
 
 val schedule_row :
   ?status_style:string ->
@@ -304,6 +321,7 @@ val schedule_row :
   ?recurrence_style:string ->
   target_width:int ->
   wake_width:int ->
+  delivery_width:int ->
   recurrence_width:int ->
   schedule_row_values ->
   string
@@ -623,3 +641,20 @@ val schedule_fence_hold_reading :
 (** The same reading for a schedule held because its target Keeper is
     shutting down: it names the Keeper and the shutdown operation instead of
     the previous wake. *)
+
+val schedule_hold_as_of_tag : checked:string -> string
+(** The short form of a hold the runner has not read again since [checked]:
+    the time the hold was seen, in place of since when it has been due. It
+    leads {!schedule_hold_as_of_reading}. *)
+
+val schedule_hold_as_of_reading : checked:string -> string
+(** The same hold in the detail pane: that the keeper had not taken the
+    previous wake as of [checked]. Drawn instead of {!schedule_hold_reading}
+    when the runner status beside the list is not [ok], because a failed tick
+    does not re-read the hold (#38411). [checked] is already formatted. *)
+
+val schedule_fence_hold_as_of_reading :
+  checked:string -> target:string -> fence_owner:string -> string
+(** The fence hold ({!schedule_fence_hold_reading}) drawn as of [checked],
+    for the same failed-tick reason as {!schedule_hold_as_of_reading}.
+    [checked] is already formatted. *)

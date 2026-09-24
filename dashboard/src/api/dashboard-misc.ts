@@ -81,7 +81,27 @@ export interface KeeperMemoryHealthLibrarian {
   continuity_unread_atoms: number | null
   last_success_at: number | null
   last_failure_kind: string | null
+  /**
+   * RFC librarian-lifecycle §4.10: the atoms the keeper's requests skip
+   * because the Librarian stands behind the start the provider last
+   * accepted. `gap_end_atom` is that start; the gap ends just before it.
+   * `null` while the Librarian point is at or past it. `unmeasured` when a
+   * file the gap is read from did not read: neither no gap nor a gap.
+   * An alarm, not a gate.
+   */
+  stalled: KeeperMemoryHealthLibrarianStalled | null
 }
+
+export type KeeperMemoryHealthLibrarianStallCause =
+  | 'meta_unreadable'
+  | 'turn_records_unreadable'
+  | 'turn_boundary_refused'
+  | 'snapshot_unreadable'
+  | 'read_position_unreadable'
+
+export type KeeperMemoryHealthLibrarianStalled =
+  | { kind: 'gap'; gap_start_atom: number; gap_end_atom: number }
+  | { kind: 'unmeasured'; cause: KeeperMemoryHealthLibrarianStallCause; detail: string }
 
 export interface ContextFrontier {
   trace_id: string
@@ -276,6 +296,7 @@ function decodeKeeperMemoryHealthLibrarian(raw: unknown): KeeperMemoryHealthLibr
     'continuity_unread_atoms',
     'last_success_at',
     'last_failure_kind',
+    'stalled',
   ])) return null
   const state = raw.state === null
     ? null
@@ -309,6 +330,8 @@ function decodeKeeperMemoryHealthLibrarian(raw: unknown): KeeperMemoryHealthLibr
     ? null
     : nonEmptyString(raw.last_failure_kind)
   if (raw.last_failure_kind !== null && last_failure_kind === null) return null
+  const stalled = raw.stalled === null ? null : decodeLibrarianStalled(raw.stalled)
+  if (raw.stalled !== null && stalled === null) return null
   // A count with no time it was taken at has nothing to say how old it is.
   if (measured_at === null && (unread_atom_turns !== null || unread_official_turns !== null)) {
     return null
@@ -322,6 +345,42 @@ function decodeKeeperMemoryHealthLibrarian(raw: unknown): KeeperMemoryHealthLibr
     continuity_unread_atoms,
     last_success_at,
     last_failure_kind,
+    stalled,
+  }
+}
+
+const LIBRARIAN_STALL_CAUSES: readonly KeeperMemoryHealthLibrarianStallCause[] = [
+  'meta_unreadable',
+  'turn_records_unreadable',
+  'turn_boundary_refused',
+  'snapshot_unreadable',
+  'read_position_unreadable',
+]
+
+function decodeLibrarianStallCause(raw: unknown): KeeperMemoryHealthLibrarianStallCause | null {
+  return LIBRARIAN_STALL_CAUSES.find(cause => cause === raw) ?? null
+}
+
+function decodeLibrarianStalled(raw: unknown): KeeperMemoryHealthLibrarianStalled | null {
+  if (!isRecord(raw)) return null
+  switch (raw.kind) {
+    case 'gap': {
+      if (!exactKeys(raw, ['kind', 'gap_start_atom', 'gap_end_atom'])) return null
+      const gap_start_atom = nonNegativeInteger(raw.gap_start_atom)
+      const gap_end_atom = nonNegativeInteger(raw.gap_end_atom)
+      if (gap_start_atom === null || gap_end_atom === null || gap_end_atom <= gap_start_atom) {
+        return null
+      }
+      return { kind: 'gap', gap_start_atom, gap_end_atom }
+    }
+    case 'unmeasured': {
+      if (!exactKeys(raw, ['kind', 'cause', 'detail'])) return null
+      const cause = decodeLibrarianStallCause(raw.cause)
+      if (cause === null || typeof raw.detail !== 'string') return null
+      return { kind: 'unmeasured', cause, detail: raw.detail }
+    }
+    default:
+      return null
   }
 }
 

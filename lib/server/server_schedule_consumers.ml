@@ -1289,44 +1289,18 @@ let dispatch_keeper_wake
              activation_keeper_name
              stimulus_id)
     in
-    let* () =
-      match activation_outcome with
-      | Keeper_wake_activation_deferred
-          ((Keeper_wake_activation_not_running _) as reason) ->
-        let reason_label, reason_detail =
-          keeper_wake_activation_deferred_reason_fields reason
-        in
-        Log.Keeper.info
-          "schedule stimulus retained; owner activation deferred, dispatch \
-           will retry schedule_id=%s keeper=%s reason=%s%s"
-          request.schedule_id
-          activation_keeper_name
-          reason_label
-          (match reason_detail with
-           | Some detail -> " detail=" ^ detail
-           | None -> "");
-        retryable_dispatch_failure
-          (Printf.sprintf
-             "scheduled keeper wake deferred owner-not-running \
-              schedule_id=%s keeper=%s reason=%s%s"
-             request.schedule_id
-             activation_keeper_name
-             reason_label
-             (match reason_detail with
-              | Some detail -> " detail=" ^ detail
-              | None -> ""))
-      | Keeper_wake_activation_signaled
-      | Keeper_wake_activation_not_required
-      | Keeper_wake_activation_deferred
-          ( Keeper_wake_activation_lifecycle_denied _
-          | Keeper_wake_activation_autoboot_disabled
-          | Keeper_wake_activation_proactive_disabled
-          | Keeper_wake_activation_shutdown_fenced _
-          | Keeper_wake_activation_owner_unknown _
-          | Keeper_wake_activation_owner_not_current _
-          | Keeper_wake_activation_unregistered ) ->
-        Ok ()
-    in
+    (* Every outcome commits acceptance once the stimulus is durable, whatever
+       happened to the owner's activation. For a paused, offline, crashed,
+       restarting or draining owner the stimulus waits in its durable queue
+       and the first turn of its next fiber reads it, the same way a paused
+       owner reads it after resume. Nothing on the schedule side starts that
+       fiber; the wake receipt names the deferral reason for the operator.
+       Retrying the dispatch instead leaves the schedule to cycle
+       due -> running -> due on every runner tick for as long as the owner
+       stays down. Pending occurrences stay bounded per schedule: an interval
+       heartbeat holds its next firing in the runner ([defer_wake]), and any
+       other firing supersedes the earlier pending one
+       ([accept_keeper_wake_occurrence]). *)
     log_activation_outcome
       ~schedule_id:request.schedule_id
       ~keeper_name:activation_keeper_name
@@ -1457,8 +1431,9 @@ let cancel_keeper_schedules config ~keeper_name =
    a single catch-up rather than backfilling them.
 
    Only heartbeat interval schedules self-clock. A schedule that delivers a
-   result, and every non-interval kind, keeps firing on each due — each of their
-   occurrences is distinct work whose accumulation is intended. The pending
+   result, and every non-interval kind, keeps firing on each due; each new
+   firing supersedes the earlier pending occurrence of the same schedule
+   ([accept_keeper_wake_occurrence]). The pending
    check reads the keeper's own event queue (the authoritative unconsumed
    signal), so it does not depend on the reaction-ledger ack transition. A queue
    read failure is fail-open (fire as before) so a transient read never starves

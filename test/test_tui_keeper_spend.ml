@@ -251,6 +251,8 @@ let test_every_cache_state_decodes () =
   List.iter
     (fun state ->
       let label = Route.cache_state_to_string state in
+      check bool "route parses its serialized cache state" true
+        (Route.cache_state_of_string label = Some state);
       match state with
       | Route.Cache_fresh -> (
           match decode (server_json ~state ()) with
@@ -283,7 +285,9 @@ let test_every_cache_state_decodes () =
               check bool "the error is carried" true
                 (String.ends_with ~suffix:"EACCES" err)
           | _ -> failf "%s with an error decodes as a failure" label))
-    [ Route.Cache_fresh; Route.Cache_stale_refreshing; Route.Cache_warming ]
+    [ Route.Cache_fresh; Route.Cache_stale_refreshing; Route.Cache_warming ];
+  check bool "route rejects an unknown cache state" true
+    (Route.cache_state_of_string "future" = None)
 
 let test_not_read_draws_no_tag_and_one_line () =
   List.iter

@@ -17,6 +17,7 @@ type cache_state =
   | Cache_warming
 
 val cache_state_to_string : cache_state -> string
+val cache_state_of_string : string -> cache_state option
 
 (** The [cache] object a cached dashboard route appends. *)
 val cache_metadata :

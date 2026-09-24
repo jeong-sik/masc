@@ -106,9 +106,10 @@ let decode_reading json =
   let* cache = required_object_field json "cache" in
   let* cache_state = required_string_field cache "state" in
   let* last_error = optional_string_field cache "last_error" in
-  match cache_state with
-  | "fresh" -> decode_rows json ~freshness:Spend_fresh
-  | "stale_refreshing" ->
+  match Server_routes_http_routes_provider_runs.cache_state_of_string cache_state with
+  | Some Server_routes_http_routes_provider_runs.Cache_fresh ->
+      decode_rows json ~freshness:Spend_fresh
+  | Some Server_routes_http_routes_provider_runs.Cache_stale_refreshing ->
       let* age_s =
         match Yojson.Safe.Util.member "age_s" cache with
         | `Float age_s when Float.is_finite age_s && age_s >= 0.0 -> Ok age_s
@@ -116,13 +117,13 @@ let decode_reading json =
         | _ -> Error "a stale keeper-costs answer carries no age_s"
       in
       decode_rows json ~freshness:(Spend_stale { age_s; last_error })
-  | "warming" -> (
+  | Some Server_routes_http_routes_provider_runs.Cache_warming -> (
       (* The placeholder's rows are empty whatever the workspace spent. With
          an error, the server tried and failed to add it up. *)
       match last_error with
       | None -> Ok Overview_spend_warming
       | Some err -> Ok (Overview_spend_failed ("server could not add up spend: " ^ err)))
-  | other -> Error ("unknown keeper-costs cache state " ^ other)
+  | None -> Error ("unknown keeper-costs cache state " ^ cache_state)
 
 (* A failed load replaces the last good reading: a spend drawn after the
    reading that said so stopped arriving would be a number nobody observed. *)

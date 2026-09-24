@@ -282,6 +282,26 @@ let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cw
             (available_cwd_hint ~config ~meta)))
 ;;
 
+(* What a Read names. A remote keeper's file is either a name in its own
+   bookkeeping tree, which the lane translates to the endpoint, or an endpoint
+   path under one of the endpoint's declared roots ([allowed_paths], #38593),
+   which is already the endpoint's own name. *)
+type read_file_target =
+  | Keeper_tree_file of string
+  | Declared_endpoint_file of string
+
+let read_file_target_path = function
+  | Keeper_tree_file path | Declared_endpoint_file path -> path
+;;
+
+(* The host containment check guards a name in the keeper's bookkeeping tree.
+   A declared endpoint path is no host name at all: the endpoint account is its
+   boundary, as it is for the Execute command that may name the same path. *)
+let check_read_file_target ~config ~meta = function
+  | Keeper_tree_file target -> Keeper_sandbox_containment.check_read_target ~config ~meta ~target
+  | Declared_endpoint_file _ -> Ok ()
+;;
+
 let resolve_read_file_target
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -295,20 +315,31 @@ let resolve_read_file_target
     Error
       (Read_path_error
          (Keeper_alerting_path.rejection_to_user_message Keeper_alerting_path.Path_required))
-  else
-    let* cwd_abs =
-      resolve_read_file_cwd ~config ~meta ~cwd
-      |> Result.map_error (fun e -> Read_path_error e)
+  else (
+    let keeper_tree =
+      let* cwd_abs = resolve_read_file_cwd ~config ~meta ~cwd in
+      let candidate =
+        if Filename.is_relative raw_path then Filename.concat cwd_abs raw_path else raw_path
+      in
+      resolve_projected_keeper_read_path
+        ~config
+        ~meta
+        ~raw_for_error:raw_path
+        ~projected_path:candidate
     in
-    let candidate =
-      if Filename.is_relative raw_path then Filename.concat cwd_abs raw_path else raw_path
-    in
-    resolve_projected_keeper_read_path
-      ~config
-      ~meta
-      ~raw_for_error:raw_path
-      ~projected_path:candidate
-    |> Result.map_error (fun error -> Read_path_error error)
+    match keeper_tree with
+    | Ok path -> Ok (Keeper_tree_file path)
+    | Error refusal ->
+      (* Only what the keeper's own tree refused may be a path under the
+         endpoint's declared roots (#38593). Everything the tree accepts keeps
+         the meaning it had, however a declared root is spelled. *)
+      (match
+         Keeper_sandbox_remote_lane.declared_endpoint_path_of_args
+           ~config ~meta ~path:raw_path ~cwd
+       with
+       | Ok (Some endpoint_path) -> Ok (Declared_endpoint_file endpoint_path)
+       | Ok None -> Error (Read_path_error refusal)
+       | Error e -> Error (Read_path_error e)))
 ;;
 
 type read_file_attempt =
@@ -318,38 +349,38 @@ type read_file_attempt =
 
 let read_sandbox_bytes ?turn_sandbox_factory ?cwd ~config ~meta ~path ~max_bytes () =
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
-  let* target =
+  let* read_target =
     resolve_read_file_target ~config ~meta ~args ~raw_path:path
     |> Result.map_error (function Read_path_error detail -> detail)
   in
-  let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
+  let* () = check_read_file_target ~config ~meta read_target in
   Keeper_sandbox_read_runner.read_file ?turn_sandbox_factory ~config ~meta
-    ~host_path:target ~max_bytes
+    ~host_path:(read_file_target_path read_target) ~max_bytes
     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
   |> Result.map_error Keeper_sandbox_read_backend.read_error_to_string
 ;;
 
 let read_complete_sandbox_bytes ?turn_sandbox_factory ~config ~meta ~path ?cwd () =
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
-  let* target =
+  let* read_target =
     resolve_read_file_target ~config ~meta ~args ~raw_path:path
     |> Result.map_error (function Read_path_error detail -> detail)
   in
-  let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
+  let* () = check_read_file_target ~config ~meta read_target in
   Keeper_sandbox_read_backend.read_complete_file ?turn_sandbox_factory ~config ~meta
-    ~host_path:target
+    ~host_path:(read_file_target_path read_target)
     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
 ;;
 
 let read_sandbox_raw_prefix ?turn_sandbox_factory ~config ~meta ~path ?cwd ~max_bytes () =
   let args = `Assoc (match cwd with None -> [] | Some cwd -> [ "cwd", `String cwd ]) in
-  let* target =
+  let* read_target =
     resolve_read_file_target ~config ~meta ~args ~raw_path:path
     |> Result.map_error (function Read_path_error detail -> detail)
   in
-  let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
+  let* () = check_read_file_target ~config ~meta read_target in
   Keeper_sandbox_read_backend.read_raw_prefix ?turn_sandbox_factory ~config ~meta
-    ~host_path:target ~max_bytes
+    ~host_path:(read_file_target_path read_target) ~max_bytes
     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
 ;;
 
@@ -368,7 +399,8 @@ let handle_read_file_with_outcome
   match read_line_window_of_args args, resolve_read_file_target ~config ~meta ~args ~raw_path:path with
   | Error window_error, _ -> Keeper_tool_execution.failure (error_json window_error)
   | Ok _, Error (Read_path_error e) -> Keeper_tool_execution.failure (error_json e)
-  | Ok window, Ok target ->
+  | Ok window, Ok read_target ->
+    let target = read_file_target_path read_target in
     let payload_of_slice ~via ~file_bytes ~first_line ~scan_complete body =
       match slice_read_window ~window ~first_line ~max_bytes ~scan_complete body with
       (* Neither caller below reaches this arm. The sandbox body begins at
@@ -425,7 +457,7 @@ let handle_read_file_with_outcome
             The resolver-level sandbox_roots check is augmented by this
             strict containment so host FS cannot leak through Read
             while Execute is container-isolated. *)
-         let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
+         let* () = check_read_file_target ~config ~meta read_target in
          (* RFC-0006 Phase B-2: sandbox-backed keepers route the actual
             byte read through the backend read runner so the backend mount
             restrictions are the load-bearing isolation. The host containment
@@ -468,6 +500,16 @@ let handle_read_file_with_outcome
                   ~scan_complete
                   body))
          else (
+           match read_target with
+           (* An endpoint path is the endpoint's file; this host never holds
+              it, so a keeper whose reads are not routed cannot read one. *)
+           | Declared_endpoint_file endpoint_path ->
+             Error
+               (Printf.sprintf
+                  "declared_endpoint_path_needs_remote_lane: %s is an endpoint path and \
+                   this keeper's reads do not go through its endpoint"
+                  endpoint_path)
+           | Keeper_tree_file target ->
            match Safe_ops.read_file_result target with
            | Error (Safe_ops.File_not_found _ as err) ->
              Ok

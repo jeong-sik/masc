@@ -1181,20 +1181,25 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
+(** Whether a search has ever returned the fact. The count, the number of
+    distinct UTC days and the last clock come from one list of retrieval
+    times on the server, so they are all absent or all present; the decoder
+    rejects a row where they disagree. *)
+type memory_fact_retrieval =
+  | Never_retrieved
+  | Retrieved of { count : int; distinct_days : int; last_at : float }
+
 (** What the keeper did with one fact, as the server projected it from the
-    memory-events sidecar (RFC-0418): how often a search returned it, on how
-    many distinct UTC days, when last, how often it was retracted, and
-    which dropped facts it continues. No strength or score; the numbers are
-    the record. *)
+    memory-events sidecar (RFC-0418): whether and how a search returned it,
+    how often it was retracted, and which dropped facts it continues. No
+    strength or score; the numbers are the record. *)
 type memory_fact_events = {
-  mfe_retrieved_count : int;
-  mfe_retrieved_distinct_days : int;
-  mfe_last_retrieved_at : float option;
+  mfe_retrieval : memory_fact_retrieval;
   mfe_retracted_count : int;
   mfe_revised_from : string list;
 }
 
-(** A fact nothing has used yet: every count zero, no retrieval, no
+(** A fact nothing has used yet: never retrieved, no retractions, no
     predecessors. Fixtures start here. *)
 val no_memory_fact_events : memory_fact_events
 

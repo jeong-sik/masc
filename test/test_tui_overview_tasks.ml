@@ -199,6 +199,101 @@ let test_a_finished_selection_selects_nothing () =
   check (option string) "Enter and Ctrl-] name nothing" None
     (selected_id polled ~selected)
 
+(* The keys over one focus value. What is drawn highlighted, what Enter
+   opens and what Ctrl-] follows all read [Tasks.selection]; these check that
+   it names a task only while the list is focused on a row that exists. *)
+let focus_state focus = (Tasks.is_focused focus, Tasks.selection focus)
+
+let focus_pair = pair bool (option string)
+
+let test_esc_after_a_landing_follows_nothing () =
+  let landed = Tasks.land_on tasks ~task_id:"task-1710" in
+  check focus_pair "the palette lands focused on its row" (true, Some "task-1710")
+    (focus_state landed);
+  (* Esc with no detail open lets go of the list. *)
+  let after_esc = Tasks.No_task_focus in
+  check (option string) "Ctrl-] then follows nothing" None
+    (Option.map
+       (fun (task : Tui_decode.task) -> task.id)
+       (Tasks.selected_task tasks ~selected:(Tasks.selection after_esc)));
+  check bool "and Enter is not the list's" true
+    (Option.is_none (Tasks.opening tasks after_esc))
+
+let test_a_landing_on_a_todo_task_does_not_focus () =
+  check focus_pair "no focus, no id that can never be highlighted"
+    (false, None)
+    (focus_state (Tasks.land_on tasks ~task_id:"task-1501"))
+
+let test_t_chooses_the_first_row () =
+  let focused = Tasks.toggle tasks Tasks.No_task_focus in
+  check focus_pair "t focuses the first held row" (true, Some "task-1720")
+    (focus_state focused);
+  check focus_pair "t again lets go of the list and its choice" (false, None)
+    (focus_state (Tasks.toggle tasks focused));
+  check focus_pair "with nothing held, t focuses an empty list" (true, None)
+    (focus_state (Tasks.toggle [] Tasks.No_task_focus))
+
+let opening_name = function
+  | None -> "not the list's key"
+  | Some (Tasks.Open (task : Tui_decode.task)) -> "open " ^ task.id
+  | Some Tasks.No_held_task -> "no held task"
+  | Some Tasks.No_selection -> "no selection"
+
+let test_enter_says_why_nothing_opens () =
+  check string "an empty list says there is nothing held" "no held task"
+    (opening_name (Tasks.opening [] (Tasks.focus_list [])));
+  check string "rows without a choice say nothing is chosen" "no selection"
+    (opening_name (Tasks.opening tasks (Tasks.Task_focus { selected = None })));
+  check string "a chosen row opens" "open task-1710"
+    (opening_name (Tasks.opening tasks (Tasks.land_on tasks ~task_id:"task-1710")))
+
+let test_a_task_that_leaves_the_rows_is_dropped_once () =
+  let focus = Tasks.Task_focus { selected = Some "task-1700" } in
+  let polled = after_poll_without "task-1700" in
+  let focus, left = Tasks.reconcile polled focus in
+  check focus_pair "the choice becomes None, focus stays on the list"
+    (true, None) (focus_state focus);
+  check (option string) "the poll names the task that left" (Some "task-1700")
+    left;
+  let _, again = Tasks.reconcile polled focus in
+  check (option string) "the next poll says nothing more" None again;
+  let kept, unchanged =
+    Tasks.reconcile polled (Tasks.Task_focus { selected = Some "task-1710" })
+  in
+  check focus_pair "a task still held keeps its row" (true, Some "task-1710")
+    (focus_state kept);
+  check (option string) "and nothing is said" None unchanged
+
+(* The loader's path: [after_read] is what it applies to the focus on every
+   tasks load. A failed read is not an empty list, so the choice survives it
+   and the next good read finds the task where it was. *)
+let test_a_failed_read_keeps_the_choice () =
+  let chosen = Tasks.land_on tasks ~task_id:"task-1700" in
+  let after_failure, said =
+    Tasks.after_read (Tasks.Rows_unavailable "task backlog unavailable: x")
+      chosen
+  in
+  check focus_pair "the failed read keeps the choice" (true, Some "task-1700")
+    (focus_state after_failure);
+  check (option string) "and posts no notice" None said;
+  let after_good, said_again =
+    Tasks.after_read (Tasks.Rows_read tasks) after_failure
+  in
+  check focus_pair "the next good read still has it" (true, Some "task-1700")
+    (focus_state after_good);
+  check (option string) "still no notice" None said_again;
+  let _, unread = Tasks.after_read Tasks.Rows_unread chosen in
+  check (option string) "an unread reading says nothing either" None unread
+
+let test_a_good_read_without_the_task_drops_it () =
+  let chosen = Tasks.land_on tasks ~task_id:"task-1700" in
+  let focus, said =
+    Tasks.after_read (Tasks.Rows_read (after_poll_without "task-1700")) chosen
+  in
+  check focus_pair "read rows without it drop the choice" (true, None)
+    (focus_state focus);
+  check (option string) "and name it once" (Some "task-1700") said
+
 let () =
   run "tui_overview_tasks"
     [ ( "overview tasks",
@@ -216,5 +311,18 @@ let () =
             test_a_poll_does_not_move_the_selection
         ; test_case "a finished selection selects nothing" `Quick
             test_a_finished_selection_selects_nothing
+        ; test_case "Esc after a landing follows nothing" `Quick
+            test_esc_after_a_landing_follows_nothing
+        ; test_case "a landing on a todo task does not focus" `Quick
+            test_a_landing_on_a_todo_task_does_not_focus
+        ; test_case "t chooses the first row" `Quick test_t_chooses_the_first_row
+        ; test_case "Enter says why nothing opens" `Quick
+            test_enter_says_why_nothing_opens
+        ; test_case "a task that leaves the rows is dropped once" `Quick
+            test_a_task_that_leaves_the_rows_is_dropped_once
+        ; test_case "a failed read keeps the choice" `Quick
+            test_a_failed_read_keeps_the_choice
+        ; test_case "a good read without the task drops it" `Quick
+            test_a_good_read_without_the_task_drops_it
         ] )
     ]

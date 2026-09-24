@@ -1447,7 +1447,7 @@ let load_tools ~(host : string) ~(port : int) ?keeper () :
 let load_skills_catalog ~(host : string) ~(port : int) :
     (Tui_decode.skills_catalog, string) result =
   match fetch_skills_catalog ~host ~port with
-  | Error err -> Error ("skills catalog load failed: " ^ err)
+  | Error err -> Error err
   | Ok json -> Tui_decode.decode_skills_catalog json
 
 (** Load connector status from /api/v1/gate/connectors *)

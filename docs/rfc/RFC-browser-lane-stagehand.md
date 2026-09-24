@@ -180,6 +180,9 @@ service worker 찾기 → `Target.attachToTarget {flatten: true}` → `Runtime.e
 - service worker 는 로드한 뒤 `Target.getTargets` 를 0.1초마다 불러 찾는다. 확장 origin
   (`chrome-extension://<id>`, `Uri` 의 scheme·host 로 비교)에서 뜬 service worker 만 받는다.
   `targetCreated` 를 기다리면 이전 로드의 worker 를 잡을 수 있어서다. 기다리는 시간은 `worker_wait_s` 로 끝이 있다.
+- 준비 표식은 host 가 0.1초마다 읽는다. receiver 가 함수이고 marker 가 있어야 준비된 것이다(runtime 은 receiver 를 먼저 설치한다).
+  CDP 가 service worker 에서 평가하는 곳에는 `setTimeout` 이 없어서, 페이지 안에서 기다리는 식은 거절된다
+  (증거 `run-readiness-in-service-worker.txt`). 답에 `exceptionDetails` 가 있으면 값이 아니라 실패로 읽는다.
 - `init` 이 답하기 전(`Initialising`)에는 `init` 말고 다른 호출을 받지 않는다.
 - attach 가 어느 단계에서 실패하든 세션은 끝난다. 확장이 이미 올라갔거나 `init` 을 보냈을 수 있어서 다시 attach 하지 않는다.
 

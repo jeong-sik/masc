@@ -39,6 +39,16 @@ over the debugging websocket returns the computed id, and `extract`, `act` (the 
 reports the click) and `page.screenshot` answer. `stagehand.init` took 5.1 s on this
 first launch of a fresh download, against 0.6 s on Canary above.
 
+## No `setTimeout` where CDP evaluates in the service worker (`run-readiness-in-service-worker.txt`)
+
+`readiness.mjs` attaches the same way and evaluates the readiness check the first masc
+session used: a promise that re-checks with `setTimeout` until the receiver exists
+(`awaitPromise: true`). On Chrome for Testing 154 it rejects with
+`ReferenceError: setTimeout is not defined`, and the reply's `result.value` is `{}`.
+One second later a synchronous read returns the marker. So the host polls a check that
+answers at once, and a reply with `exceptionDetails` is read as a failure, not a value.
+The real-Chromium proof (#38760) found this; the mocked tests could not.
+
 ## What was measured (`run.txt`, `ORIGINS=extension`)
 
 | Step | Result |

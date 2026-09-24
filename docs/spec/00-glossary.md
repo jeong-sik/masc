@@ -633,6 +633,30 @@ status: reference
   [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
   [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.ml)
 
+**Quiz Lane (퀴즈 레인)**
+: 저장된 기록(Board·기억 OS·GitHub)에서 인용한 사실 묶음(`deck.json`, `snapshot_file`)을
+  바탕으로 문제를 내고 답을 채점하는 Lane Add-on 패키지 쌍(`quiz-questions`·`quiz-grader`).
+  출제와 채점의 권한을 엄격히 분리하고, 기록 인용과 완전 단어 일치를 강제한다(#38433, task-1688).
+  - **출제·채점 분리**: 출제 패키지(`quiz-questions`, `derive` 기여)는 팩트 덱에서 문제를
+    뽑아 `quiz/questions`로 내보낼 뿐 채점할 수 없다. 채점 패키지(`quiz-grader`, `derive`·
+    `act` 기여)는 출제 결과(`lane_output`)와 같은 팩트 덱을 함께 받아, `lane_act` 도구로
+    들어온 응답을 대조해 `quiz/grades` 판정과 `quiz/score` 누적 점수를 발행한다.
+  - **기록 인용 및 완전 단어 일치**: 문제는 임의의 요약이나 추정이 아니라 실제 저장된
+    기록 파일에 글자 그대로 존재하는 인용문(`quote`)이어야 하며, 정답(`answer`)은 그 인용문
+    안의 완전한 단어(whole-word)여야 한다(예: `"unmerged"` 속의 `"merged"` 매칭은 거절).
+    질문 대상 필드는 닫힌 6종(`author`·`claimant`·`status`·`merged_commit`·`cause`·
+    `decision`)이고, 필드마다 서로 다른 답을 가진 사실이 둘 이상 있어야 출제된다. 단 하나의
+    사실이라도 기록 인용 규칙을 어기면 덱 빌드(`build_deck.py`)는 덱 생성을 통째로 거절한다.
+  - **자칭 응답자 라벨 (Claimed Answerer)**: 채점 점수는 호스트가 인증한 호출자 정체성이
+    아니라 응답자가 액션 payload에 스스로 적어 낸 라벨(`answerer_basis = self_claimed_label`)을
+    기준으로 `by_claimed_label`에 집계한다. 호스트는 인증 요청자를 보존하되 워커에 넘기지
+    않는다. 응답자 자신에 관한 질문은 `excluding_claimed_about_answerer`로 가려진다.
+  - **덱 식별자 무효화**: 덱 빌드가 새 `deck-id`를 발급하면 이전 덱으로 출제된 질문들은
+    의도적으로 채점 불가(`ungradable`)가 되어 낡은 문제와 새 정답의 혼선을 막는다.
+  → [Quiz Deck Skill](../../addons/quiz-questions/skills/quiz-deck/SKILL.md),
+  [quiz-questions](../../addons/quiz-questions/lane.toml),
+  [quiz-grader](../../addons/quiz-grader/lane.toml)
+
 **Runtime execution**
 : 모델·도구·재개 상태를 Agent Core가 소유하는지 공식 클라이언트가 소유하는지의 구분.
   → [Runtime_execution.t](../../lib/runtime/runtime_execution.mli)

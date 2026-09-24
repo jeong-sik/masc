@@ -28,7 +28,7 @@ def run(executable: str) -> None:
         {"error": CAUSE.decode()},
     )
 
-    def check_frame(output: bytearray, layout: str) -> None:
+    def check_frame(output: bytearray, layout: str, *, no_list_post: bool = False) -> None:
         frame = h.unwrapped(h.screen_text(bytes(output)))
         if CAUSE not in frame:
             raise AssertionError(f"{layout} lost the Board cause: {frame!r}")
@@ -36,6 +36,13 @@ def run(executable: str) -> None:
             raise AssertionError(f"{layout} repeated the failure verdict: {frame!r}")
         if b"Board detail unavailable: Board post load failed:" in frame:
             raise AssertionError(f"{layout} repeated the failure state: {frame!r}")
+        if no_list_post:
+            if b"MASC Board / post-vocab" not in frame:
+                raise AssertionError(f"{layout} did not use the fallback page: {frame!r}")
+            if b"Failure vocabulary" in frame:
+                raise AssertionError(f"{layout} retained the removed list post: {frame!r}")
+            if b"r:retry Esc:back Tab:next" not in frame:
+                raise AssertionError(f"{layout} lost the fallback controls: {frame!r}")
 
     def interact(process, fd, _slave, output, _base_path):
         h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
@@ -71,7 +78,7 @@ def run(executable: str) -> None:
             start=h.end_of_needle(output, CAUSE, title_end),
             timeout=5,
         )
-        check_frame(output, "Board read without list post")
+        check_frame(output, "Board read without list post", no_list_post=True)
         h.send_and_wait(process, fd, output, b"\x1b", b"MASC Board")
         os.write(fd, b"q")
 

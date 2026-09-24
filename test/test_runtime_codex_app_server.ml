@@ -4634,6 +4634,10 @@ let test_production_keeper_reports_codex_token_usage () =
                   | Ok record ->
                     check (option int) "TurnRecord context input" (Some 1200)
                       record.usage.input_tokens;
+                    check (option int) "TurnRecord request output" (Some 80)
+                      record.usage.output_tokens;
+                    check (option int) "no separate turn total output" None
+                      record.turn_output_tokens;
                     check bool "TurnRecord context scope" true
                       (record.usage.scope = Runtime_usage_scope.Per_request)
                   | Error detail -> fail detail)

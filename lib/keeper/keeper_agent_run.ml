@@ -2154,17 +2154,24 @@ let run_turn
         let usage : Turn_record.usage =
           match turn_result with
           | Ok
-              { runtime_observation =
+              ({ runtime_observation =
                   Some { request_context = Some (context : Runtime_observation.request_context); _ }
               ; _
-              } ->
+              } as result) ->
             (* A runtime that reports the newest request's occupancy apart from
-               the turn's spend (Claude Code and Codex) records that request here: this
-               record's readers ask what one request carried. The request's
-               own output count is not known; the turn's output goes to
-               [turn_output_tokens] below, under its own scope. *)
+               the turn's spend records that request here: this record's
+               readers ask what one request carried. Codex reports the same
+               request's output; Claude Code reports a turn total separately. *)
+            let request_output_tokens =
+              match result.usage_reported, result.usage_scope with
+              | true, Runtime_usage_scope.Per_request -> Some result.usage.output_tokens
+              | false, _
+              | true, (Runtime_usage_scope.Turn_total
+                      | Runtime_usage_scope.Conversation_cumulative
+                      | Runtime_usage_scope.Usage_scope_unavailable) -> None
+            in
             { input_tokens = Some context.input_tokens
-            ; output_tokens = None
+            ; output_tokens = request_output_tokens
             ; cache_creation_input_tokens = Some context.cache_creation_input_tokens
             ; cache_read_input_tokens = Some context.cache_read_input_tokens
             ; scope = Runtime_usage_scope.Per_request

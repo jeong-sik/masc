@@ -241,6 +241,18 @@ val write_list_sidebar :
     board of a hundred and ninety-eight -- and the row spells the pair the way
     the surface's own header does. *)
 
+val write_list_sidebar_selection :
+  Buffer.t ->
+  rows:int ->
+  cols:int ->
+  title:string ->
+  focused:bool ->
+  labels:string list ->
+  selection:int option ->
+  unit
+(** {!write_list_sidebar} for a list the open item may not be in: [None]
+    highlights no row and leaves the list at its top. *)
+
 val data_unreliable_row : cols:int -> string -> string
 
 val overview_pulse_text : Masc_tui_types.state -> now:float -> string
@@ -325,10 +337,13 @@ val planning_phase_column : int
 
 val planning_phase_color : Goal_phase.t -> string
 
-val transport_summary : Masc.Tui_decode.transport_health -> string
-(** The transport tail of the Overview's cluster row: one entry per path, the
-    mark on the path carrying the traffic, then the queue's pressure and its
-    dropped count. *)
+val transport_attention_item :
+  Masc.Tui_decode.transport_health option ->
+  Masc_tui_types.attention_item option
+(** The one Overview Attention item about the transport: a warning while the
+    outbound queue's pressure is [Watch], bad while it is [High], and nothing
+    when it is [Steady] or unread. The readings themselves are on Metrics. *)
+
 
 val planning_rollup_row : cols:int -> Masc_tui_types.planning_rollup -> string
 (** The goal count; with any goals, also the completed share and a counter per

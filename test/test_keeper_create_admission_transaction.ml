@@ -109,6 +109,7 @@ let with_workspace f =
              | Ok () -> ()
              | Error error -> failf "runtime fixture rejected: %s" error);
             Eio.Switch.run @@ fun sw ->
+            Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
             (match
                Owner_registry.install_from_store
                  ~sw

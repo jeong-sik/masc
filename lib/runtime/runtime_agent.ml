@@ -830,6 +830,7 @@ let media_walk ~(candidates : Runtime.t list)
 
 let validate_content_blocks_for_config
     ?agent_core_checkpoint
+    ?(input_metadata = [])
     ~(config : config)
     (goal_blocks : Agent_core.Types.content_block list) =
   let validate ~checkpoint_messages ~initial_messages ~goal_blocks =
@@ -848,7 +849,7 @@ let validate_content_blocks_for_config
     let incoming = match goal_blocks with
       | [] -> canonical
       | _ -> canonical @ [Agent_core.Types.{role=User;content=goal_blocks;
-          name=None;tool_call_id=None;metadata=[]}] in
+          name=None;tool_call_id=None;metadata=input_metadata}] in
     let* projected = view.Runtime_recovery_projection.project incoming in
     validate ~checkpoint_messages:[] ~initial_messages:projected ~goal_blocks:[]
 
@@ -1208,8 +1209,12 @@ let config_with_boundary_response_capture
   { config with hooks = Some hooks }
 ;;
 
+(* [metadata] is stamped on the User message AGENT_CORE appends for [blocks]. *)
 type run_input =
-  | New_input of Agent_core.Types.content_block list
+  | New_input of
+      { blocks : Agent_core.Types.content_block list
+      ; metadata : Agent_core.Types.metadata
+      }
   | Continue_from_checkpoint
 
 let run_blocks_internal
@@ -1225,9 +1230,15 @@ let run_blocks_internal
     ~(run_input : run_input)
     (goal_blocks : Agent_core.Types.content_block list)
   : (run_result, Agent_core.Error.t) result =
+  let input_metadata =
+    match run_input with
+    | New_input { metadata; _ } -> metadata
+    | Continue_from_checkpoint -> []
+  in
   match
     validate_content_blocks_for_config
       ?agent_core_checkpoint
+      ~input_metadata
       ~config
       goal_blocks
   with
@@ -1290,7 +1301,7 @@ let run_blocks_internal
           match boundary_probe with
             | None ->
               (match run_input with
-               | New_input goal_blocks ->
+               | New_input { blocks = goal_blocks; metadata = input_metadata } ->
                  (match on_event with
                   | Some cb ->
                     Agent_core.Agent.run_stream_blocks
@@ -1298,6 +1309,7 @@ let run_blocks_internal
                       ?clock
                       ?on_yield
                       ?on_resume
+                      ~input_metadata
                       ~on_event:cb
                       agent
                       goal_blocks
@@ -1307,6 +1319,7 @@ let run_blocks_internal
                       ?clock
                       ?on_yield
                       ?on_resume
+                      ~input_metadata
                       agent
                       goal_blocks)
                  |> Result.map (fun response -> `Completed response)
@@ -1366,12 +1379,13 @@ let run_blocks_internal
               in
               let advanced_result =
                 match run_input with
-                | New_input goal_blocks ->
+                | New_input { blocks = goal_blocks; metadata = input_metadata } ->
                   Agent_core.Agent.Advanced.run_blocks
                     ~sw
                     ?clock
                     ?on_yield
                     ?on_resume
+                    ~input_metadata
                     ~api_strategy
                     ~on_tool_boundary
                     agent
@@ -1589,6 +1603,7 @@ let run_blocks
     ?on_resume
     ?agent_ref
     ?cooperative_yield_probe
+    ?(input_metadata = [])
     goal_blocks
   =
   run_blocks_internal
@@ -1601,7 +1616,7 @@ let run_blocks
     ?on_resume
     ?agent_ref
     ?cooperative_yield_probe
-    ~run_input:(New_input goal_blocks)
+    ~run_input:(New_input { blocks = goal_blocks; metadata = input_metadata })
     goal_blocks
 
 let continue_from_checkpoint
@@ -1639,10 +1654,11 @@ let run
     ?on_resume
     ?agent_ref
     ?cooperative_yield_probe
+    ?input_metadata
     (goal : string)
   : (run_result, Agent_core.Error.t) result =
   run_blocks ~sw ~net ~config ?agent_core_checkpoint ?on_event ?on_yield ?on_resume
-    ?agent_ref ?cooperative_yield_probe [Agent_core.Types.Text goal]
+    ?agent_ref ?cooperative_yield_probe ?input_metadata [Agent_core.Types.Text goal]
 
 (* ================================================================ *)
 (* Convenience: run_with_masc_tools                                  *)

@@ -2454,22 +2454,177 @@ let test_an_official_line_older_than_the_baseline_is_read () =
   | Consumer.Memory_not_committed -> fail "the older official line was not read"
 ;;
 
-(* A refused boundary line beyond the official position stops the pass and
-   keeps stopping it: the line may be an official turn's end line, whose
-   words are still on disk, so no later restart lifts it the way one lifts
-   the atom stop (row 2c'). The keeper waits for a purge; the lag shows. *)
-let test_a_refused_boundary_line_is_not_lifted_for_official_turns () =
-  with_workspace
-  @@ fun config ->
-  let trace_id = "trace-refused-then-restart" in
-  establish_progress config ~trace_id "t1";
+let append_refused_boundary_line config =
   let path =
     Boundaries.path_for_keepers_dir
       ~keepers_dir:(Workspace.keepers_runtime_dir config)
       ~keeper_id:keeper_name
   in
   Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 path (fun oc ->
-    Out_channel.output_string oc "{\n");
+    Out_channel.output_string oc "{\n")
+;;
+
+(* The official stop at [line], with nothing committed. *)
+let check_official_stop config ~line =
+  match
+    Consumer.consume_one ~config ~keeper_name ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+      fail "a pass read past a refused boundary line")
+  with
+  | Error (Consumer.Official_range_stopped { line = stopped; error = Boundaries.Not_json _ }) ->
+    check int "the official stop names the refused line" line stopped
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "the official stop was lifted or hidden"
+;;
+
+(* masc#37061 settles a refused line on the atom path when a continued turn
+   after it carries its start state. The official path still stands at that
+   line, and it must not take the atom part of the round with it: a keeper
+   that never ran an official-client turn has no official position, so every
+   refused line of its log is beyond it. The atoms are read and their
+   position moves; the official stop is the next pass's answer. *)
+let test_an_official_stop_does_not_hold_the_atom_part () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-refused-then-continued" in
+  establish_progress config ~trace_id "t1";
+  append_refused_boundary_line config;
+  let messages = [ message "t1"; message "t2" ] in
+  save_checkpoint config ~trace_id messages 2;
+  append_boundary
+    ~history_at_start:(Boundaries.history_at_start_of_messages [ message "t1" ])
+    config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  let carried = ref [] in
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id input ->
+         check bool "no official range is committed" true (Option.is_none official_range_id);
+         carried := text_markers input;
+         true)
+   with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check int "the atom position moves past the refused line" 2 progress.position.end_atom
+   | Ok
+       ( Consumer.Nothing_to_read
+       | Consumer.Baseline_advanced _
+       | Consumer.Official_advanced _
+       | Consumer.Memory_not_committed ) -> fail "the atom part did not advance"
+   | Error error -> fail (Consumer.error_to_string error));
+  check (list string) "the settled round reads from atom zero" [ "t1"; "t2" ] !carried;
+  check_official_stop config ~line:2
+;;
+
+(* Two turns end after the atom position; the pass after them reads both. *)
+let check_next_pass_reads_both config ~trace_id =
+  let messages = [ message "t1"; message "t2"; message "t3"; message "t4" ] in
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3.0
+    [ message "t1"; message "t2"; message "t3" ];
+  append_boundary config ~trace_id ~turn:4 ~recorded_at:4.0 messages;
+  save_checkpoint config ~trace_id messages 4;
+  let carried = ref [] in
+  (match
+     consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
+       carried := text_markers input;
+       true)
+   with
+   | Consumer.Progress_advanced progress ->
+     check int "both turns are reached" 4 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Memory_not_committed -> fail "the two turns were not read");
+  check (list string) "one pass carries both turns" [ "t3"; "t4" ] !carried
+;;
+
+(* The official stop is no failed wide range. A pass that ends on it has
+   drained the atom side, so the passes after it read the whole backlog
+   instead of one turn per model call. *)
+let test_an_official_stop_does_not_narrow_later_passes () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-official-stop-then-backlog" in
+  establish_progress config ~trace_id "t1";
+  append_refused_boundary_line config;
+  let messages = [ message "t1"; message "t2" ] in
+  save_checkpoint config ~trace_id messages 2;
+  append_boundary
+    ~history_at_start:(Boundaries.history_at_start_of_messages [ message "t1" ])
+    config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> true) with
+   | Consumer.Progress_advanced _ -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Memory_not_committed -> fail "the atom part did not advance");
+  check_official_stop config ~line:2;
+  check_next_pass_reads_both config ~trace_id
+;;
+
+(* Control: the same backlog with no refused line and no official stop. *)
+let test_a_drained_pass_does_not_narrow_later_passes () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-drained-then-backlog" in
+  establish_progress config ~trace_id "t1";
+  let messages = [ message "t1"; message "t2" ] in
+  save_checkpoint config ~trace_id messages 2;
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
+  (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> true) with
+   | Consumer.Progress_advanced _ -> ()
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Memory_not_committed -> fail "the atom part did not advance");
+  (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+     fail "a drained pass called commit") with
+   | Consumer.Nothing_to_read -> ()
+   | Consumer.Progress_advanced _
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Memory_not_committed -> fail "the drained pass was not quiet");
+  check_next_pass_reads_both config ~trace_id
+;;
+
+(* A position left in a retired trace answers before the official stop:
+   the atom side cannot move either, and its error names why. The hand-off
+   walk returns this error before the official selection is consulted; the
+   selector's own [Position_in_other_trace] is not reachable from a pass,
+   because every [select] call here passes a position of the trace it
+   names. *)
+let test_a_position_in_another_trace_answers_before_an_official_stop () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-other-then-refused-a" in
+  establish_progress config ~trace_id:trace_a "a";
+  let old_session_dir = Masc.Keeper_fs.keeper_session_dir config trace_a in
+  Sys.remove (Store.agent_core_checkpoint_path ~session_dir:old_session_dir ~session_id:trace_a);
+  append_refused_boundary_line config;
+  let trace_b = "trace-other-then-refused-b" in
+  let messages_b = [ message "b" ] in
+  append_boundary ~history_at_start:Boundaries.Continued_history config ~trace_id:trace_b
+    ~turn:1 ~recorded_at:2.0 messages_b;
+  write_meta config trace_b;
+  save_checkpoint config ~trace_id:trace_b messages_b 1;
+  match
+    Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+        fail "a pass in another trace called commit")
+  with
+  | Error (Consumer.Position_in_other_trace position) ->
+    check string "the retired trace is named" trace_a position.trace_id
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "a pass advanced with its position in another trace"
+;;
+
+(* A refused boundary line beyond the official position stops the official
+   part of every pass: the line may be an official turn's end line, whose
+   words are still on disk, so no later restart lifts it the way one lifts
+   the atom stop (row 2c'). The keeper waits for a purge; the lag shows. The
+   atoms the restart settles are still read. *)
+let test_a_refused_boundary_line_is_not_lifted_for_official_turns () =
+  with_workspace
+  @@ fun config ->
+  let trace_id = "trace-refused-then-restart" in
+  establish_progress config ~trace_id "t1";
+  append_refused_boundary_line config;
   (match
      Boundaries.append
        ~keepers_dir:(Workspace.keepers_runtime_dir config)
@@ -2481,13 +2636,14 @@ let test_a_refused_boundary_line_is_not_lifted_for_official_turns () =
   save_checkpoint config ~trace_id [ message "fresh" ] 3;
   append_boundary ~history_at_start:Boundaries.Fresh_history config ~trace_id ~turn:3
     ~recorded_at:4.0 [ message "fresh" ];
-  match
-    Consumer.consume_one ~config ~keeper_name ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
-      fail "a pass read past a refused boundary line")
-  with
-  | Error (Consumer.Official_range_stopped { line = 2; error = Boundaries.Not_json _ }) -> ()
-  | Error error -> fail (Consumer.error_to_string error)
-  | Ok _ -> fail "the restart lifted the official stop"
+  (match consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> true) with
+   | Consumer.Progress_advanced progress ->
+     check int "the restarted history is read" 1 progress.position.end_atom
+   | Consumer.Nothing_to_read
+   | Consumer.Baseline_advanced _
+   | Consumer.Official_advanced _
+   | Consumer.Memory_not_committed -> fail "the atom part did not advance");
+  check_official_stop config ~line:2
 ;;
 
 (* The same backwards clock, but an official-client line of the retired era
@@ -2666,6 +2822,14 @@ let () =
             test_an_official_line_older_than_the_baseline_is_read
         ; test_case "a refused boundary line is not lifted for official turns" `Quick
             test_a_refused_boundary_line_is_not_lifted_for_official_turns
+        ; test_case "an official stop does not hold the atom part" `Quick
+            test_an_official_stop_does_not_hold_the_atom_part
+        ; test_case "an official stop does not narrow later passes" `Quick
+            test_an_official_stop_does_not_narrow_later_passes
+        ; test_case "a drained pass does not narrow later passes" `Quick
+            test_a_drained_pass_does_not_narrow_later_passes
+        ; test_case "a position in another trace answers before an official stop" `Quick
+            test_a_position_in_another_trace_answers_before_an_official_stop
         ; test_case "official cursor above the range end refuses the hand-off" `Quick
             test_official_cursor_above_the_range_end_refuses_the_hand_off
         ] )

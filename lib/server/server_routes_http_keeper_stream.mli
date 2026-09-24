@@ -391,6 +391,7 @@ module For_testing : sig
   val message_for_request : keeper_chat_stream_request -> string
   val chat_surface_of_request : keeper_chat_stream_request -> Surface_ref.t
   val chat_speaker_of_request : keeper_chat_stream_request -> Keeper_chat_store.speaker
+  val input_speaker_of_request : keeper_chat_stream_request -> Keeper_input_speaker.t
   val turn_instructions_for_request : keeper_chat_stream_request -> string option
   val direct_message_of_request :
     keeper_chat_stream_request -> Keeper_invocation_contract.direct_message

@@ -2,27 +2,15 @@
     agent-core envelope parser.
 
     This is the structured *typed envelope* carried across the
-    [Agent_core.Error.Internal _] boundary for keeper turn failures.  It is the
-    re-homed successor of the deleted runtime dispatch error helpers
-    (RFC-0206 runtime purge): the dispatch engine that constructed many of these variants
-    is gone, but the envelope itself outlives it — provider/turn failures still
-    need structured carrying.
+    [Agent_core.Error.Internal _] boundary for keeper turn failures.
 
-    The originating-runtime field is now a plain [string] (the former
-    [Runtime_id.t] type is deleted).  JSON keys and the per-kind label
-    strings are preserved verbatim because the operator dashboard
-    ([dashboard/src]) parses [kind] / [runtime_id] off the wire. *)
+    The originating-runtime field is a plain [string]. The operator
+    dashboard ([dashboard/src]) parses [kind] / [runtime_id] off the wire. *)
 
-(* The originating runtime id is a plain string.  Kept as a named
-   identity helper so the JSON codec below reads identically to its pre-purge
-   form (each variant serialises the id under the historical ["runtime_id"]
-   key the dashboard still parses). *)
+(* The originating runtime id is a plain string. Each variant serialises it
+   under the ["runtime_id"] key the dashboard parses. *)
 let runtime_id_to_string (s : string) = s
 
-(* Canonical wire kind for the typed [Capacity_backpressure] envelope.  The
-   producer codec, receipt terminal projection, and consumer decoder share
-   this value so recoverability cannot drift through duplicated literals. *)
-let capacity_backpressure_kind = "capacity_backpressure"
 let incomplete_tool_transcript_kind = "incomplete_tool_transcript"
 let provider_attempt_effect_fenced_kind = "provider_attempt_effect_fenced"
 let tool_correction_lost_kind = "tool_correction_lost"
@@ -80,11 +68,6 @@ type provider_rejection = {
   provider_label : string;
   reason : string;
 }
-
-(** Provider-supplied retry-after hint for capacity backpressure. *)
-type capacity_retry_after =
-  | Explicit of float
-  | No_retry_hint
 
 type runtime_exhaustion_reason =
   | Connection_refused
@@ -291,11 +274,6 @@ and masc_internal_error =
       runtime_id : string;
       reason : runtime_exhaustion_reason;
     }
-  | Capacity_backpressure of {
-      runtime_id : string;
-      detail : string;
-      retry_after : capacity_retry_after;
-    }
   | Resumable_cli_session of {
       runtime_id : string;
       detail : string;
@@ -389,7 +367,7 @@ let runtime_runner_execute_site = "runtime_runner.execute"
    (keeper_unified_metrics_failure). *)
 let blocker_detail_narrative_max_chars = 200
 
-(* ~2000 chars fit the small variants whole. Two no longer fit reliably: a
+(* ~2000 chars fit the small variants whole. Two do not fit reliably: a
    terminal effect failure carries a composition's failure object as JSON
    (RFC-0454 P1a), and a fence carries a cause that can nest one (P1b), and
    neither is bounded. Those are truncated here, which cuts the JSON mid-key
@@ -482,20 +460,6 @@ and masc_internal_error_to_json = function
         ("runtime_id", `String runtime_id);
         ("reason", runtime_exhaustion_reason_to_json reason);
       ]
-  | Capacity_backpressure { runtime_id; detail; retry_after } ->
-    let runtime_id = runtime_id_to_string runtime_id in
-    let retry_after_fields =
-      match retry_after with
-      | Explicit s -> [ "retry_after_sec", `Float s ]
-      | No_retry_hint -> [ ("retry_after_sec", `Null) ]
-    in
-    `Assoc
-      ([
-         ("kind", `String capacity_backpressure_kind);
-         ("runtime_id", `String runtime_id);
-         ("detail", `String detail);
-       ]
-      @ retry_after_fields)
   | Resumable_cli_session { runtime_id; detail; exit_code } ->
     let runtime_id = runtime_id_to_string runtime_id in
     `Assoc
@@ -653,18 +617,6 @@ let accept_rejection_is_thinking_only_no_progress ~reason_kind ~response_shape =
 let summary_of_masc_internal_error = function
   | Official_client_recovery_required recovery ->
     Some (official_client_recovery_summary recovery)
-  | Capacity_backpressure { runtime_id; detail; retry_after } ->
-      let retry_after_suffix =
-        match retry_after with
-        | Explicit value -> Printf.sprintf "; retry_after=%.1fs" value
-        | No_retry_hint -> ""
-      in
-      Some
-        (Printf.sprintf
-           "Provider capacity refused runtime %s; detail=%s%s"
-           (runtime_id_to_string runtime_id)
-           detail
-           retry_after_suffix)
   | Accept_rejected
       { scope
       ; reason_kind = Some Accept_no_usable_progress
@@ -763,7 +715,6 @@ let summary_of_masc_internal_error = function
 type wire_kind =
   | Wire_official_client_recovery_required
   | Wire_runtime_exhausted
-  | Wire_capacity_backpressure
   | Wire_resumable_cli_session
   | Wire_accept_rejected
   | Wire_internal_unhandled_exception
@@ -782,7 +733,6 @@ type wire_kind =
 let wire_kind_of_masc_internal_error = function
   | Official_client_recovery_required _ -> Wire_official_client_recovery_required
   | Runtime_exhausted _ -> Wire_runtime_exhausted
-  | Capacity_backpressure _ -> Wire_capacity_backpressure
   | Resumable_cli_session _ -> Wire_resumable_cli_session
   | Accept_rejected _ -> Wire_accept_rejected
   | Internal_unhandled_exception _ -> Wire_internal_unhandled_exception
@@ -801,7 +751,6 @@ let wire_kind_of_masc_internal_error = function
 let wire_kind_to_string = function
   | Wire_official_client_recovery_required -> official_client_recovery_required_kind
   | Wire_runtime_exhausted -> "runtime_exhausted"
-  | Wire_capacity_backpressure -> capacity_backpressure_kind
   | Wire_resumable_cli_session -> "resumable_cli_session"
   | Wire_accept_rejected -> accept_rejected_kind
   | Wire_internal_unhandled_exception -> "internal_unhandled_exception"
@@ -823,7 +772,6 @@ let wire_kind_to_string = function
 let all_wire_kinds =
   [ Wire_official_client_recovery_required
   ; Wire_runtime_exhausted
-  ; Wire_capacity_backpressure
   ; Wire_resumable_cli_session
   ; Wire_accept_rejected
   ; Wire_internal_unhandled_exception
@@ -862,7 +810,6 @@ let kind_of_masc_internal_error error =
 let runtime_id_of_masc_internal_error = function
   | Official_client_recovery_required { runtime_id; _ }
   | Runtime_exhausted { runtime_id; _ }
-  | Capacity_backpressure { runtime_id; _ }
   | Resumable_cli_session { runtime_id; _ }
   | Provider_attempt_effect_fenced { runtime_id; _ }
   | Tool_correction_lost { runtime_id; _ }
@@ -940,7 +887,6 @@ let accept_no_progress_retry_kind = function
   | Accept_rejected _
   | Official_client_recovery_required _
   | Runtime_exhausted _
-  | Capacity_backpressure _
   | Resumable_cli_session _
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
@@ -1019,16 +965,6 @@ and parse_masc_internal_error_json (json : Yojson.Safe.t) :
         | _ -> None)
     | _ -> None
   in
-  let float_opt_of_assoc key = function
-    | `Assoc fields -> (
-        match List.assoc_opt key fields with
-        | Some (`Float value) -> Some value
-        | Some (`Int value) -> Some (float_of_int value)
-        | Some (`Intlit value) ->
-            Option.map float_of_int (int_of_string_opt value)
-        | _ -> None)
-    | _ -> None
-  in
   match json with
   | `Assoc fields -> (
       match List.assoc_opt "kind" fields with
@@ -1047,20 +983,6 @@ and parse_masc_internal_error_json (json : Yojson.Safe.t) :
                Some (Runtime_exhausted { runtime_id; reason })
              | None -> None)
           | None -> None)
-      | Some (`String kind) when String.equal kind capacity_backpressure_kind -> (
-          match
-            string_opt_of_assoc "runtime_id" json,
-            string_opt_of_assoc "detail" json
-          with
-          | Some runtime_id, Some detail
-            when exact_fields [ "kind"; "runtime_id"; "detail"; "retry_after_sec" ] fields ->
-            let retry_after =
-              match float_opt_of_assoc "retry_after_sec" json with
-              | None -> No_retry_hint
-              | Some s -> Explicit s
-            in
-            Some (Capacity_backpressure { runtime_id; detail; retry_after })
-          | _ -> None)
       | Some (`String "resumable_cli_session") -> (
           match string_opt_of_assoc "runtime_id" json, string_opt_of_assoc "detail" json with
           | Some runtime_id, Some detail ->
@@ -1328,7 +1250,6 @@ let is_preempted_before_first_token (err : Agent_core.Error.t) =
   | Some
       ( Official_client_recovery_required _
       | Runtime_exhausted _
-      | Capacity_backpressure _
       | Resumable_cli_session _
       | Accept_rejected _
       | Internal_unhandled_exception _

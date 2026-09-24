@@ -44,7 +44,7 @@ describe('keeper config save failure authority', () => {
       status: 503,
       errorCode: 'keeper_runtime_sync_failed',
       configApplied: true,
-      runtimeSync: false,
+      runtimeSync: 'failed',
     }))).toBe(true)
     expect(keeperConfigFailureRequiresAuthoritativeReload(new ApiRequestError({
       method: 'POST',
@@ -139,7 +139,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       override_field_sources: [],
     },
     metrics: {
-      generation: 3,
       total_turns: 12,
       total_input_tokens: 1200,
       total_output_tokens: 800,

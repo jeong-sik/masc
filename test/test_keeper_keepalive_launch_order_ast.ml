@@ -35,7 +35,7 @@ let test_launch_gate_dominates_launch_side_effects () =
             ~callee:side_effect))
     [ "bootstrap_live_keeper_meta"
     ; "publish_keeper_started"
-    ; "Keeper_lane.fork"
+    ; "Keeper_lane.fork_server_owned"
     ; "start_keeper_grpc_heartbeat"
     ; (* A lane reached through recovery used to carry the gRPC sidecar and no
          Board-attention worker, so its Board candidates were recorded and

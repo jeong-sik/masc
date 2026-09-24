@@ -85,7 +85,6 @@ let execution_boundary_of_turn_failure error =
     Keeper_runtime_failure_route.Masc_execution
   | Some
       ( Keeper_internal_error.Runtime_exhausted _
-      | Keeper_internal_error.Capacity_backpressure _
       | Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Accept_rejected _
       | Keeper_internal_error.Internal_unhandled_exception _
@@ -1294,12 +1293,8 @@ let run_keeper_cycle
                        else
                          (* Every remaining failure out of Streaming is reported as
                             a provider error, including the ones that are ours.
-                            [classify_masc_internal_error] used to be called here
-                            and its answer thrown away by a lone wildcard, which
-                            read as if the two were told apart.
-
-                            They are not, and nothing upstream stops them from
-                            being: {!Turn_fsm} admits every failure reason out of
+                            The two are not told apart here, and nothing upstream
+                            stops them from being: {!Turn_fsm} admits every failure reason out of
                             an active state through
                             [_, Any (Failed _) when is_active from_state], which
                             names the event [GenericFail]. A masc-internal failure

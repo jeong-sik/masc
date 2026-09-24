@@ -203,6 +203,131 @@ let test_codex_read_falls_back_and_refuses_a_bad_map () =
   | Ok _ -> fail "a list map was accepted"
 ;;
 
+(* --- HTTP usage endpoints: responses captured 2026-09-24, identifiers
+   removed. --- *)
+
+let openrouter_key_response =
+  {|{"data":{"label":"k","limit":100,"limit_reset":null,"limit_remaining":0,"usage":100.034,"usage_daily":0,"usage_weekly":33.86,"usage_monthly":100.03,"is_free_tier":false,"free_model_daily_requests":{"used":0,"limit":1000,"remaining":1000}}}|}
+;;
+
+let zai_quota_limit_response =
+  {|{"code":200,"msg":"Operation successful","success":true,"data":{"level":"max","limits":[{"type":"TIME_LIMIT","unit":5,"number":1,"usage":4000,"currentValue":270,"remaining":3730,"percentage":6,"nextResetTime":1790326488997,"usageDetails":[{"modelCode":"search-prime","usage":270}]},{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":4,"nextResetTime":1790259391823}]}}|}
+;;
+
+let kimi_coding_usages_response =
+  {|{"usage":{"limit":"100","used":"15","remaining":"85","resetTime":"2026-09-30T10:10:16.485718Z"},"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"20","remaining":"80","resetTime":"2026-09-24T15:10:16.485718Z"}}],"usages":{"limit_5h":{"used_ratio":0,"reset_time":"2026-09-24T15:10:15Z"},"limit_7d":{"used_ratio":0,"reset_time":"2026-09-30T10:10:15Z"}},"booster_wallet":{"balance":"0"}}|}
+;;
+
+let ollama_usage_response =
+  {|{"activity":{"requests":1},"limits":{"session":{"usage":0,"models":[]},"weekly":{"usage":1,"models":[{"name":"m","request_count":48876}]}}}|}
+;;
+
+let kind_to_string : Usage.window_kind -> string = function
+  | Five_hour -> "five_hour"
+  | Seven_day -> "seven_day"
+  | Duration_minutes minutes -> Printf.sprintf "%d minutes" minutes
+  | Provider_label label -> Printf.sprintf "label %S" label
+;;
+
+let utilization_to_string : Usage.utilization -> string = function
+  | Fraction value -> Printf.sprintf "fraction %g" value
+  | Percent value -> Printf.sprintf "percent %d" value
+;;
+
+(* Every field of a window, so a decoder that changes any of them fails. *)
+let window_to_string (window : Usage.window) =
+  Printf.sprintf
+    "limit=%s %s %s resets=%s"
+    (Option.value ~default:"-" window.limit_id)
+    (kind_to_string window.kind)
+    (utilization_to_string window.utilization)
+    (Option.fold ~none:"-" ~some:string_of_int window.resets_at)
+;;
+
+let decoded_windows decode ~source body =
+  let report = decode_ok (decode (Yojson.Safe.from_string body)) in
+  check string "source" source (Usage.source_to_string report.source);
+  List.map window_to_string report.windows
+;;
+
+let refused decode body =
+  match decode (Yojson.Safe.from_string body) with
+  | Error error -> Usage.decode_error_to_string error
+  | Ok (_ : Usage.report) -> failf "accepted: %s" body
+;;
+
+let test_openrouter_key () =
+  check (list string) "windows"
+    [ "limit=- label \"credit limit\" fraction 1 resets=-"
+    ; "limit=- label \"free model requests, daily\" fraction 0 resets=-"
+    ]
+    (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
+       openrouter_key_response);
+  check (list string) "a stated reset period is part of the label; no cap is no credit window"
+    [ "limit=- label \"credit limit, resets monthly\" fraction 0.25 resets=-" ]
+    (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
+       {|{"data":{"limit":20,"limit_reset":"monthly","limit_remaining":15}}|});
+  check (list string) "a null limit has no credit window" []
+    (decoded_windows Usage.decode_openrouter_key ~source:"openrouter.key"
+       {|{"data":{"limit":null,"limit_remaining":null}}|});
+  check string "limit_remaining as a string is refused with its path"
+    "openrouter-key.data.limit_remaining must be a number"
+    (refused Usage.decode_openrouter_key
+       {|{"data":{"limit":100,"limit_remaining":"0"}}|})
+;;
+
+let test_zai_quota_limit () =
+  check (list string) "windows"
+    [ "limit=TIME_LIMIT label \"TIME_LIMIT, 1 x unit 5\" percent 6 resets=1790326488"
+    ; "limit=TOKENS_LIMIT five_hour percent 4 resets=1790259391"
+    ]
+    (decoded_windows Usage.decode_zai_quota_limit ~source:"zai.quota_limit"
+       zai_quota_limit_response);
+  check string "success false is refused with its msg"
+    "zai-quota-limit.success is not true: Unauthorized"
+    (refused Usage.decode_zai_quota_limit
+       {|{"code":401,"msg":"Unauthorized","success":false,"data":null}|});
+  check string "a missing percentage is refused with its path"
+    "zai-quota-limit.data.limits[0].percentage is missing"
+    (refused Usage.decode_zai_quota_limit
+       {|{"success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","unit":3,"number":5}]}}|})
+;;
+
+let test_kimi_coding_usages () =
+  check (list string) "windows; usages.*.used_ratio is not read"
+    [ "limit=- five_hour fraction 0.2 resets=1790262616"
+    ; "limit=- label \"plan period\" fraction 0.15 resets=1790763016"
+    ]
+    (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
+       kimi_coding_usages_response);
+  check (list string) "10080 minutes is seven_day"
+    [ "limit=- seven_day fraction 0.5 resets=-" ]
+    (decoded_windows Usage.decode_kimi_coding_usages ~source:"kimi_coding.usages"
+       {|{"limits":[{"window":{"duration":10080,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"10","used":"5"}}]}|});
+  check string "an hour unit is refused, not converted"
+    "kimi-coding-usages.limits[0].window.timeUnit must be TIME_UNIT_MINUTE"
+    (refused Usage.decode_kimi_coding_usages
+       {|{"limits":[{"window":{"duration":5,"timeUnit":"TIME_UNIT_HOUR"},"detail":{"limit":"100","used":"20"}}]}|});
+  check string "a count that is not all digits is refused"
+    "kimi-coding-usages.limits[0].detail.used must be a decimal integer string"
+    (refused Usage.decode_kimi_coding_usages
+       {|{"limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"100","used":"12a"}}]}|})
+;;
+
+let test_ollama_usage () =
+  check (list string) "windows"
+    [ "limit=- label \"session\" fraction 0 resets=-"
+    ; "limit=- seven_day fraction 1 resets=-"
+    ]
+    (decoded_windows Usage.decode_ollama_usage ~source:"ollama.usage" ollama_usage_response);
+  check (list string) "a float usage is a fraction; a missing entry is no window"
+    [ "limit=- seven_day fraction 0.42 resets=-" ]
+    (decoded_windows Usage.decode_ollama_usage ~source:"ollama.usage"
+       {|{"limits":{"weekly":{"usage":0.42}}}|});
+  check string "a missing limits object is refused" "ollama-usage.limits is missing"
+    (refused Usage.decode_ollama_usage {|{"activity":{}}|})
+;;
+
 let () =
   run
     "provider_usage_windows"
@@ -213,6 +338,12 @@ let () =
             test_malformed_window_is_a_typed_error
         ; test_case "codex read falls back and refuses a bad map" `Quick
             test_codex_read_falls_back_and_refuses_a_bad_map
+        ] )
+    ; ( "http usage endpoints"
+      , [ test_case "openrouter-key" `Quick test_openrouter_key
+        ; test_case "zai-quota-limit" `Quick test_zai_quota_limit
+        ; test_case "kimi-coding-usages" `Quick test_kimi_coding_usages
+        ; test_case "ollama-usage" `Quick test_ollama_usage
         ] )
     ]
 ;;

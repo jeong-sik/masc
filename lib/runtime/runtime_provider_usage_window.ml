@@ -14,6 +14,10 @@ type source =
   | Claude_code_rate_limit_event
   | Codex_account_rate_limits_updated
   | Codex_account_rate_limits_read
+  | Openrouter_key_read
+  | Zai_quota_limit_read
+  | Kimi_coding_usages_read
+  | Ollama_usage_read
 
 type window =
   { limit_id : string option
@@ -34,17 +38,33 @@ type decode_error =
       { path : string
       ; expected : string
       }
+  | Unexpected_value of
+      { path : string
+      ; expected : string
+      }
+  | Not_successful of
+      { path : string
+      ; message : string option
+      }
 
 let decode_error_to_string = function
   | Expected_object { path } -> Printf.sprintf "%s must be an object" path
   | Missing_field { path } -> Printf.sprintf "%s is missing" path
   | Wrong_type { path; expected } -> Printf.sprintf "%s must be %s" path expected
+  | Unexpected_value { path; expected } -> Printf.sprintf "%s must be %s" path expected
+  | Not_successful { path; message = Some message } ->
+    Printf.sprintf "%s is not true: %s" path message
+  | Not_successful { path; message = None } -> Printf.sprintf "%s is not true" path
 ;;
 
 let source_to_string = function
   | Claude_code_rate_limit_event -> "claude_code.rate_limit_event"
   | Codex_account_rate_limits_updated -> "codex.account_rate_limits_updated"
   | Codex_account_rate_limits_read -> "codex.account_rate_limits_read"
+  | Openrouter_key_read -> "openrouter.key"
+  | Zai_quota_limit_read -> "zai.quota_limit"
+  | Kimi_coding_usages_read -> "kimi_coding.usages"
+  | Ollama_usage_read -> "ollama.usage"
 ;;
 
 let ( let* ) = Result.bind
@@ -132,10 +152,16 @@ let decode_claude_rate_limit_event json =
 let five_hour_minutes = 5 * 60
 let seven_day_minutes = 7 * 24 * 60
 
+let kind_of_minutes minutes =
+  if Int.equal minutes five_hour_minutes
+  then Five_hour
+  else if Int.equal minutes seven_day_minutes
+  then Seven_day
+  else Duration_minutes minutes
+;;
+
 let codex_window_kind ~slot = function
-  | Some minutes when Int.equal minutes five_hour_minutes -> Five_hour
-  | Some minutes when Int.equal minutes seven_day_minutes -> Seven_day
-  | Some minutes -> Duration_minutes minutes
+  | Some minutes -> kind_of_minutes minutes
   | None -> Provider_label slot
 ;;
 
@@ -210,6 +236,279 @@ let decode_codex_rate_limits_read response =
            { path = member_path path "rateLimitsByLimitId"; expected = "an object or null" })
   in
   Ok { source = Codex_account_rate_limits_read; windows }
+;;
+
+(* --- HTTP usage endpoints ---------------------------------------------- *)
+
+let index_path path index = Printf.sprintf "%s[%d]" path index
+
+let list_at ~path = function
+  | `List items -> Ok items
+  | _ -> Error (Wrong_type { path; expected = "an array" })
+;;
+
+let map_indexed ~path f items =
+  map_result
+    (fun (index, item) -> f ~path:(index_path path index) item)
+    (List.mapi (fun index item -> index, item) items)
+;;
+
+(* A JSON number either way: these endpoints write whole values as integers
+   ([0], [1], [100]) and others as floats. *)
+let number_at ~path = function
+  | `Int value -> Ok (Float.of_int value)
+  | `Float value -> Ok value
+  | _ -> Error (Wrong_type { path; expected = "a number" })
+;;
+
+let int_at ~path = function
+  | `Int value -> Ok value
+  | _ -> Error (Wrong_type { path; expected = "an integer" })
+;;
+
+let string_at ~path = function
+  | `String value -> Ok value
+  | _ -> Error (Wrong_type { path; expected = "a string" })
+;;
+
+let required_as read ~path name fields =
+  let* json = required ~path name fields in
+  read ~path:(member_path path name) json
+;;
+
+(* Absent and null both mean the provider stated no such object. *)
+let optional_object ~path name fields =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some json ->
+    let path = member_path path name in
+    let* object_fields = fields_at ~path json in
+    Ok (Some (path, object_fields))
+;;
+
+let greater_than_zero = "greater than 0"
+
+let positive_int ~path value =
+  if value > 0
+  then Ok value
+  else Error (Unexpected_value { path; expected = greater_than_zero })
+;;
+
+let positive_number ~path value =
+  if Float.compare value 0.0 > 0
+  then Ok value
+  else Error (Unexpected_value { path; expected = greater_than_zero })
+;;
+
+let fraction_of_counts ~used ~limit = Fraction (Float.of_int used /. Float.of_int limit)
+
+(* OpenRouter, GET /api/v1/key (openrouter.ai/docs/api-reference/limits).
+   [limit] null means the key has no credit cap, so there is no credit
+   window.  The response states no reset time. *)
+let openrouter_credit_window ~path fields =
+  match List.assoc_opt "limit" fields with
+  | None | Some `Null -> Ok None
+  | Some limit_json ->
+    let limit_path = member_path path "limit" in
+    let* limit = number_at ~path:limit_path limit_json in
+    let* limit = positive_number ~path:limit_path limit in
+    let* remaining = required_as number_at ~path "limit_remaining" fields in
+    let* reset = optional_string ~path "limit_reset" fields in
+    let label =
+      match reset with
+      | Some reset -> Printf.sprintf "credit limit, resets %s" reset
+      | None -> "credit limit"
+    in
+    Ok
+      (Some
+         { limit_id = None
+         ; kind = Provider_label label
+         ; utilization = Fraction ((limit -. remaining) /. limit)
+         ; resets_at = None
+         })
+;;
+
+let openrouter_free_requests_window ~path fields =
+  let* free = optional_object ~path "free_model_daily_requests" fields in
+  match free with
+  | None -> Ok None
+  | Some (path, free_fields) ->
+    let* used = required_as int_at ~path "used" free_fields in
+    let* limit = required_as int_at ~path "limit" free_fields in
+    let* limit = positive_int ~path:(member_path path "limit") limit in
+    Ok
+      (Some
+         { limit_id = None
+         ; kind = Provider_label "free model requests, daily"
+         ; utilization = fraction_of_counts ~used ~limit
+         ; resets_at = None
+         })
+;;
+
+let decode_openrouter_key json =
+  let path = "openrouter-key" in
+  let* fields = fields_at ~path json in
+  let* data = required ~path "data" fields in
+  let path = member_path path "data" in
+  let* data_fields = fields_at ~path data in
+  let* credit = openrouter_credit_window ~path data_fields in
+  let* free = openrouter_free_requests_window ~path data_fields in
+  Ok { source = Openrouter_key_read; windows = List.filter_map Fun.id [ credit; free ] }
+;;
+
+(* Z.AI [unit] codes.  Only [3] is known to be hours: the TOKENS_LIMIT row
+   with [unit 3, number 5] is the plan's 5-hour window.  Any other code keeps
+   the provider's own words instead of a guessed length. *)
+let zai_unit_hours = 3
+let minutes_per_hour = 60
+let ms_per_second = 1000
+
+let zai_window_kind ~limit_type ~unit ~number =
+  if Int.equal unit zai_unit_hours
+  then kind_of_minutes (number * minutes_per_hour)
+  else Provider_label (Printf.sprintf "%s, %d x unit %d" limit_type number unit)
+;;
+
+let zai_limit ~path json =
+  let* fields = fields_at ~path json in
+  let* limit_type = required_as string_at ~path "type" fields in
+  let* unit = required_as int_at ~path "unit" fields in
+  let* number = required_as int_at ~path "number" fields in
+  let* percentage = required_as int_at ~path "percentage" fields in
+  let* next_reset_ms = optional_int ~path "nextResetTime" fields in
+  Ok
+    { limit_id = Some limit_type
+    ; kind = zai_window_kind ~limit_type ~unit ~number
+    ; utilization = Percent percentage
+    ; resets_at = Option.map (fun ms -> ms / ms_per_second) next_reset_ms
+    }
+;;
+
+(* Z.AI, GET /api/monitor/usage/quota/limit (undocumented; the vendor's own
+   coding plugin calls it). *)
+let decode_zai_quota_limit json =
+  let path = "zai-quota-limit" in
+  let* fields = fields_at ~path json in
+  let* success = required ~path "success" fields in
+  let success_path = member_path path "success" in
+  let* () =
+    match success with
+    | `Bool true -> Ok ()
+    | `Bool false ->
+      let* message = optional_string ~path "msg" fields in
+      Error (Not_successful { path = success_path; message })
+    | _ -> Error (Wrong_type { path = success_path; expected = "a boolean" })
+  in
+  let* data = required ~path "data" fields in
+  let path = member_path path "data" in
+  let* data_fields = fields_at ~path data in
+  let* limits = required_as list_at ~path "limits" data_fields in
+  let* windows = map_indexed ~path:(member_path path "limits") zai_limit limits in
+  Ok { source = Zai_quota_limit_read; windows }
+;;
+
+(* Kimi writes counts as decimal strings ("100").  Only plain digits are a
+   count: [int_of_string] alone would also take "0x10", "1_0" and "-5". *)
+let is_decimal_digit c = Char.compare c '0' >= 0 && Char.compare c '9' <= 0
+
+let decimal_string_at ~path json =
+  let* raw = string_at ~path json in
+  let parsed =
+    if String.length raw > 0 && String.for_all is_decimal_digit raw
+    then int_of_string_opt raw
+    else None
+  in
+  match parsed with
+  | Some value -> Ok value
+  | None -> Error (Wrong_type { path; expected = "a decimal integer string" })
+;;
+
+let optional_rfc3339 ~path name fields =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some json ->
+    let path = member_path path name in
+    let* raw = string_at ~path json in
+    (match Time_codec.parse_rfc3339_whole_seconds raw with
+     | Ok seconds -> Ok (Some (Float.to_int seconds))
+     | Error Time_codec.Invalid_rfc3339 ->
+       Error (Wrong_type { path; expected = "an RFC 3339 timestamp" }))
+;;
+
+(* One Kimi [detail] object, or the top-level [usage]: [used] of [limit]. *)
+let kimi_count_window ~path ~kind fields =
+  let* used = required_as decimal_string_at ~path "used" fields in
+  let* limit = required_as decimal_string_at ~path "limit" fields in
+  let* limit = positive_int ~path:(member_path path "limit") limit in
+  let* resets_at = optional_rfc3339 ~path "resetTime" fields in
+  Ok { limit_id = None; kind; utilization = fraction_of_counts ~used ~limit; resets_at }
+;;
+
+let kimi_minute_unit = "TIME_UNIT_MINUTE"
+
+let kimi_window_minutes ~path fields =
+  let* window = required ~path "window" fields in
+  let path = member_path path "window" in
+  let* window_fields = fields_at ~path window in
+  let* time_unit = required_as string_at ~path "timeUnit" window_fields in
+  if String.equal time_unit kimi_minute_unit
+  then required_as int_at ~path "duration" window_fields
+  else
+    Error (Unexpected_value { path = member_path path "timeUnit"; expected = kimi_minute_unit })
+;;
+
+let kimi_limit ~path json =
+  let* fields = fields_at ~path json in
+  let* minutes = kimi_window_minutes ~path fields in
+  let* detail = required ~path "detail" fields in
+  let path = member_path path "detail" in
+  let* detail_fields = fields_at ~path detail in
+  kimi_count_window ~path ~kind:(kind_of_minutes minutes) detail_fields
+;;
+
+(* Kimi, GET /coding/v1/usages (undocumented; the vendor's own CLI calls it).
+   [usages.*.used_ratio] is not read: on the same response it contradicts
+   [limits[].detail] (used 20 of 100 with ratio 0), an open upstream issue,
+   MoonshotAI/kimi-code#3951.  The top-level [usage] states no window
+   length, so it keeps the label "plan period". *)
+let decode_kimi_coding_usages json =
+  let path = "kimi-coding-usages" in
+  let* fields = fields_at ~path json in
+  let* limits = required_as list_at ~path "limits" fields in
+  let* windows = map_indexed ~path:(member_path path "limits") kimi_limit limits in
+  let* plan = optional_object ~path "usage" fields in
+  let* plan_windows =
+    match plan with
+    | None -> Ok []
+    | Some (path, plan_fields) ->
+      let* window = kimi_count_window ~path ~kind:(Provider_label "plan period") plan_fields in
+      Ok [ window ]
+  in
+  Ok { source = Kimi_coding_usages_read; windows = windows @ plan_windows }
+;;
+
+(* Ollama, GET https://ollama.com/api/usage (undocumented; the vendor's own
+   client calls it).  [usage] is a 0-1 fraction: masc live log 2026-09-24 shows 21
+   refusals "you have reached your weekly usage limit" while weekly.usage
+   was 1.  The response states no reset time and no session length. *)
+let ollama_window ~path ~kind name fields =
+  let* entry = optional_object ~path name fields in
+  match entry with
+  | None -> Ok None
+  | Some (path, entry_fields) ->
+    let* usage = required_as number_at ~path "usage" entry_fields in
+    Ok (Some { limit_id = None; kind; utilization = Fraction usage; resets_at = None })
+;;
+
+let decode_ollama_usage json =
+  let path = "ollama-usage" in
+  let* fields = fields_at ~path json in
+  let* limits = required ~path "limits" fields in
+  let path = member_path path "limits" in
+  let* limit_fields = fields_at ~path limits in
+  let* session = ollama_window ~path ~kind:(Provider_label "session") "session" limit_fields in
+  let* weekly = ollama_window ~path ~kind:Seven_day "weekly" limit_fields in
+  Ok { source = Ollama_usage_read; windows = List.filter_map Fun.id [ session; weekly ] }
 ;;
 
 type recorded =

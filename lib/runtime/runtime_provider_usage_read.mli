@@ -7,10 +7,13 @@
     operator projection only: routing and admission do not read it.
 
     Codex answers [account/rateLimits/read] after account admission, with no
-    thread or turn. *)
+    thread or turn. A provider that declares [usage-read] in runtime.toml is
+    asked with one HTTP GET to that URL, authenticated with the provider's own
+    credentials, and the answer is decoded by the declared shape. *)
 
 val read_timeout_s : float
-(** The bound on one read: an account admission and one request. *)
+(** The bound on one read: a Codex account admission and one request, or one
+    whole HTTP GET. *)
 
 val read_codex :
   mgr:_ Eio.Process.mgr ->
@@ -23,8 +26,11 @@ val read_codex :
 
 val read_all :
   mgr:_ Eio.Process.mgr ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
   unit
-(** Read every configured account that can answer, once each. A failed read
-    is logged and leaves that scope as it was. *)
+(** Read every configured account that can answer, once per quota scope. A
+    failed read is logged with its scope (and shape for an HTTP read) and
+    leaves that scope as it was; neither the response body nor the key is
+    logged. *)

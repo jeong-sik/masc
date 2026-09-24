@@ -1377,10 +1377,15 @@ status: reference
   sandbox-relative path를 사용한다.
 
 **Sandbox Target (샌드박스 실행 타깃)**
-: Keeper의 `Execute` 도구가 셸 명령을 격리 실행하는 환경 추상화(`Sandbox_target.t`).
+: Keeper의 `Execute` 도구가 명령을 격리 실행하는 환경 추상화(`Sandbox_target.t`).
   `Host`·`Docker`·`Micro_vm`·`Ssh`·`Delegated`의 닫힌 variant로 표현된다. 각 타깃은
   명령의 표준 입출력과 종료 상태를 `run_outcome`(`Ran`·`Transport_failed`)으로
   전달하여, 원격 런타임 전송 장애와 명령의 자체 실패를 명확히 분리한다.
+  호출 페이로드는 `argv`(셸 없이 그대로 실행하는 프로세스 벡터)와 `command`(셸에
+  넘기는 한 줄) 중 정확히 하나만 받는다. 예전 필드명 `script`는 #38763(하드컷)에서
+  별칭 없이 제거됐으므로 어떤 문맥에서도 쓰지 않는다. 옛 RFC 문서에 남은 `script`
+  표기는 하드컷 전 상태를 기록한 역사 문서의 것으로, 현재 계약이 아니다.
+  → [config/tools/tool_execute.toml](../../config/tools/tool_execute.toml)
 
 **Endpoint Allowed Paths (엔드포인트 허용 경로)**
 : SSH 샌드박스 타깃(`Sandbox_target.Ssh`, `Exec_ssh_endpoint.t`)에서 명령이 접근할 수 있는
@@ -1437,6 +1442,17 @@ status: reference
   TUI와 대시보드의 표시 전용(display only)이며, 커미터가 작성자 이름을 임의
   지정할 수 있으므로 권한(authority)이나 실행 증명으로 삼지 않는다.
   → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli)
+
+**Disposable Build Volume (일회용 빌드 볼륨)**
+: Apple container 샌드박스에서 Keeper의 `_build` 출력이 놓이는, Keeper마다 하나씩
+  할당되는 일회용(disposable) 볼륨(RFC-keeper-build-output-returns-to-a-disposable-volume,
+  #38563 착지). 체크아웃이 놓이는 work volume(`work_volume_guest_root`)과 분리된
+  `/masc-build`(`build_volume_guest_root`)에 마운트된다. 일회용이라는 말 그대로
+  게스트를 재시작할 때마다 `recreate_apple_build_volume`가 지우고 새로 만들어 빈
+  상태로 시작하므로, 매번 콜드 빌드 한 번을 치르는 대신 재시작 사이에 쌓인 빌드
+  산출물이 다음 세션으로 새지 않는다. `container volume create`는 멱등이 아니므로
+  존재 여부를 probe로 가리고, probe 결과가 애매하면 추측으로 지우지 않고 거절한다.
+  → [Keeper_sandbox_microvm](../../lib/keeper/keeper_sandbox_microvm.mli)
 
 ## Continuity
 

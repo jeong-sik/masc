@@ -370,7 +370,6 @@ let test_registry_failure_reason_preserves_typed_configuration_error () =
     Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Capacity_backpressure
          { runtime_id = "runtime.marker-injection"
-         ; source = Keeper_internal_error.Runtime_slot
          ; detail = secret
          ; retry_after = Keeper_internal_error.No_retry_hint
          })

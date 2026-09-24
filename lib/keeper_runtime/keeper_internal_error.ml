@@ -81,22 +81,6 @@ type provider_rejection = {
   reason : string;
 }
 
-type capacity_backpressure_source =
-  | Provider_capacity
-  | Client_capacity
-  | Runtime_slot
-
-let capacity_backpressure_source_to_string = function
-  | Provider_capacity -> "provider_capacity"
-  | Client_capacity -> "client_capacity"
-  | Runtime_slot -> "runtime_slot"
-
-let capacity_backpressure_source_of_string = function
-  | "provider_capacity" -> Some Provider_capacity
-  | "client_capacity" -> Some Client_capacity
-  | "runtime_slot" -> Some Runtime_slot
-  | _ -> None
-
 (** Provider-supplied retry-after hint for capacity backpressure. *)
 type capacity_retry_after =
   | Explicit of float
@@ -109,11 +93,10 @@ type runtime_exhaustion_reason =
   | All_providers_failed
   | Candidates_filtered_after_cycles
   | Session_conflict
-  | Capacity_exhausted
   | Other_detail of string
 
 let runtime_exhaustion_reason_retryable = function
-  | Candidates_filtered_after_cycles | Capacity_exhausted -> true
+  | Candidates_filtered_after_cycles -> true
   | Connection_refused | Dns_failure | No_providers_available | All_providers_failed ->
     true
   | Session_conflict | Other_detail _ -> false
@@ -141,7 +124,6 @@ let runtime_exhaustion_reason_to_label = function
   | All_providers_failed -> "all_providers_failed"
   | Candidates_filtered_after_cycles -> "candidates_filtered_after_cycles"
   | Session_conflict -> "session_conflict"
-  | Capacity_exhausted -> "capacity_exhausted"
   | Other_detail detail ->
     Printf.sprintf "other(%s)" (runtime_exhaustion_label_payload detail)
 
@@ -152,7 +134,6 @@ let runtime_exhaustion_reason_to_json = function
   | All_providers_failed -> `String "all_providers_failed"
   | Candidates_filtered_after_cycles -> `String "candidates_filtered_after_cycles"
   | Session_conflict -> `String "session_conflict"
-  | Capacity_exhausted -> `String "capacity_exhausted"
   | Other_detail msg -> `Assoc [ "tag", `String "other_detail"; "message", `String msg ]
 
 let runtime_exhaustion_reason_of_json = function
@@ -162,7 +143,6 @@ let runtime_exhaustion_reason_of_json = function
   | `String "all_providers_failed" -> Some All_providers_failed
   | `String "candidates_filtered_after_cycles" -> Some Candidates_filtered_after_cycles
   | `String "session_conflict" -> Some Session_conflict
-  | `String "capacity_exhausted" -> Some Capacity_exhausted
   | `Assoc fields ->
     (match List.assoc_opt "tag" fields with
      | Some (`String "other_detail") ->
@@ -313,7 +293,6 @@ and masc_internal_error =
     }
   | Capacity_backpressure of {
       runtime_id : string;
-      source : capacity_backpressure_source;
       detail : string;
       retry_after : capacity_retry_after;
     }
@@ -503,7 +482,7 @@ and masc_internal_error_to_json = function
         ("runtime_id", `String runtime_id);
         ("reason", runtime_exhaustion_reason_to_json reason);
       ]
-  | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
+  | Capacity_backpressure { runtime_id; detail; retry_after } ->
     let runtime_id = runtime_id_to_string runtime_id in
     let retry_after_fields =
       match retry_after with
@@ -514,7 +493,6 @@ and masc_internal_error_to_json = function
       ([
          ("kind", `String capacity_backpressure_kind);
          ("runtime_id", `String runtime_id);
-         ("source", `String (capacity_backpressure_source_to_string source));
          ("detail", `String detail);
        ]
       @ retry_after_fields)
@@ -675,7 +653,7 @@ let accept_rejection_is_thinking_only_no_progress ~reason_kind ~response_shape =
 let summary_of_masc_internal_error = function
   | Official_client_recovery_required recovery ->
     Some (official_client_recovery_summary recovery)
-  | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
+  | Capacity_backpressure { runtime_id; detail; retry_after } ->
       let retry_after_suffix =
         match retry_after with
         | Explicit value -> Printf.sprintf "; retry_after=%.1fs" value
@@ -683,9 +661,8 @@ let summary_of_masc_internal_error = function
       in
       Some
         (Printf.sprintf
-           "Capacity backpressure blocked runtime %s; source=%s; detail=%s%s"
+           "Provider capacity refused runtime %s; detail=%s%s"
            (runtime_id_to_string runtime_id)
-           (capacity_backpressure_source_to_string source)
            detail
            retry_after_suffix)
   | Accept_rejected
@@ -1073,29 +1050,16 @@ and parse_masc_internal_error_json (json : Yojson.Safe.t) :
       | Some (`String kind) when String.equal kind capacity_backpressure_kind -> (
           match
             string_opt_of_assoc "runtime_id" json,
-            string_opt_of_assoc "source" json,
             string_opt_of_assoc "detail" json
           with
-          | Some runtime_id, Some source, Some detail ->
-            (match capacity_backpressure_source_of_string source with
-             | Some source
-               when exact_fields
-                      [ "kind"
-                      ; "runtime_id"
-                      ; "source"
-                      ; "detail"
-                      ; "retry_after_sec"
-                      ]
-                      fields ->
-               let retry_after =
-                 match float_opt_of_assoc "retry_after_sec" json with
-                 | None -> No_retry_hint
-                 | Some s -> Explicit s
-               in
-               Some
-                 (Capacity_backpressure
-                    { runtime_id; source; detail; retry_after })
-             | Some _ | None -> None)
+          | Some runtime_id, Some detail
+            when exact_fields [ "kind"; "runtime_id"; "detail"; "retry_after_sec" ] fields ->
+            let retry_after =
+              match float_opt_of_assoc "retry_after_sec" json with
+              | None -> No_retry_hint
+              | Some s -> Explicit s
+            in
+            Some (Capacity_backpressure { runtime_id; detail; retry_after })
           | _ -> None)
       | Some (`String "resumable_cli_session") -> (
           match string_opt_of_assoc "runtime_id" json, string_opt_of_assoc "detail" json with

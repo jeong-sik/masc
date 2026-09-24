@@ -139,10 +139,7 @@ let build_prompt ?workspace_memory ~meta observation =
   let turn_decision =
     Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation
   in
-  let config = Masc.Workspace.default_config "/tmp" in
   Masc.Keeper_unified_prompt.build_prompt
-    ~meta
-    ~config
     ~turn_decision
     ?workspace_memory
     ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
@@ -1091,7 +1088,7 @@ let test_answered_ask_survives_later_turns_and_checkpoint_reload () = Eio_main.r
   let module Context = Masc.Keeper_context_runtime in
   let original = Agent_core.Types.user_msg prompt.user_message in
   let context = Context.append
-      (Context.create ~eio:false ~system_prompt:prompt.system_prompt) original in
+      (Context.create ~eio:false ~system_prompt:"stable keeper contract") original in
   let later = build_prompt ~meta:minimal_meta base_observation in
   check string "consumed answer is not reinserted in a fresh wake"
     Masc.Keeper_unified_prompt.autonomous_wake_marker later.user_message;
@@ -1370,10 +1367,10 @@ let test_workspace_memory_discovery_is_ephemeral () =
   let prompt = build_prompt ~workspace_memory ~meta:minimal_meta base_observation in
   check bool "exact proposal discoverable in this turn's world frame" true
     (Astring.String.is_infix ~affix:proposal_id prompt.world_state);
-  List.iter (fun text -> check bool "discovery never enters durable instruction or user message" false
-    (Astring.String.is_infix ~affix:proposal_id text)) [prompt.system_prompt; prompt.user_message];
+  check bool "discovery never enters the durable user message" false
+    (Astring.String.is_infix ~affix:proposal_id prompt.user_message);
   let preview = Masc.Keeper_unified_prompt.build_prompt_preview
-    ~workspace_memory ~meta:minimal_meta ~config:(Masc.Workspace.default_config base_path)
+    ~workspace_memory
     ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
     ~observation:base_observation () in
   check bool "preview renders the same published read target" true

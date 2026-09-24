@@ -11373,7 +11373,9 @@ let test_tool_approval_mode_unknown_word_fails () =
    disagree refuse the reply; the warming placeholder is not a fleet. *)
 let keeper_cost_row ?(sum = `Float 1.5) ?(reported = 3) ?(unreported = 0)
     ?(unread = 0)
-    ?(metrics_read = `Assoc [ "state", `String "read"; "malformed_rows", `Int 0 ])
+    ?(metrics_read =
+        `Assoc
+          [ "state", `String "read"; "malformed_rows", `Int 0; "unread_turn_rows", `Int 0 ])
     name =
   `Assoc
     [ "keeper_name", `String name
@@ -11394,9 +11396,19 @@ let keeper_cost_row ?(sum = `Float 1.5) ?(reported = 3) ?(unreported = 0)
     ]
 
 let keeper_costs_reply ?(cache = `Assoc [ "state", `String "fresh"; "generated_at", `Float 1.0 ])
-    keepers =
+    ?(keepers_unread = []) keepers =
   `Assoc
     [ "keepers", `List keepers
+    ; ( "keepers_unread"
+      , `List
+          (List.map
+             (fun (name, detail) ->
+               `Assoc
+                 [ "name", `String name
+                 ; "reason", `String "meta_read_failed"
+                 ; "detail", `String detail
+                 ])
+             keepers_unread) )
     ; "window_minutes", `Int 1440
     ; "generated_at", `Float 1.0
     ; "cache", cache
@@ -11436,8 +11448,20 @@ let test_keeper_costs_refuses_a_sum_that_disagrees_with_its_count () =
      | `Assoc fields ->
          `Assoc (List.remove_assoc "cost_unread_samples" fields)
      | other -> other);
+  refused "a missing unplaced row count"
+    (keeper_cost_row
+       ~metrics_read:(`Assoc [ "state", `String "read"; "malformed_rows", `Int 0 ])
+       "e");
   refused "an unknown metrics_read state"
     (keeper_cost_row ~metrics_read:(`Assoc [ "state", `String "partial" ]) "d");
+  (match
+     Tui_decode.decode_keeper_costs
+       (match keeper_costs_reply [] with
+        | `Assoc fields -> `Assoc (List.remove_assoc "keepers_unread" fields)
+        | other -> other)
+   with
+   | Ok _ -> Alcotest.fail "a reply without keepers_unread was accepted"
+   | Error _ -> ());
   match
     Tui_decode.decode_keeper_costs
       (keeper_costs_reply ~cache:(`Assoc [ "state", `String "cold" ]) [])
@@ -11448,10 +11472,15 @@ let test_keeper_costs_refuses_a_sum_that_disagrees_with_its_count () =
 let test_keeper_costs_fleet_sum_counts_every_shortfall () =
   let costs =
     decode_keeper_costs_ok
-      (keeper_costs_reply
+      (keeper_costs_reply ~keepers_unread:[ ("d", "meta unreadable") ]
          [ keeper_cost_row ~sum:(`Float 1.25) ~reported:2 ~unreported:1 "a"
          ; keeper_cost_row ~sum:(`Float 0.5) ~reported:1 ~unread:2
-             ~metrics_read:(`Assoc [ "state", `String "read"; "malformed_rows", `Int 3 ])
+             ~metrics_read:
+               (`Assoc
+                 [ "state", `String "read"
+                 ; "malformed_rows", `Int 3
+                 ; "unread_turn_rows", `Int 2
+                 ])
              "b"
          ; keeper_cost_row ~sum:`Null ~reported:0
              ~metrics_read:
@@ -11463,8 +11492,8 @@ let test_keeper_costs_fleet_sum_counts_every_shortfall () =
   Alcotest.(check (option (float 0.0001))) "reported sums add" (Some 1.75) fleet.fc_usd;
   Alcotest.(check int) "priced turns" 3 fleet.fc_priced_turns;
   Alcotest.(check int) "unreported and unread turns" 3 fleet.fc_unpriced_turns;
-  Alcotest.(check int) "malformed rows" 3 fleet.fc_malformed_rows;
-  Alcotest.(check int) "unread keepers" 1 fleet.fc_unread_keepers
+  Alcotest.(check int) "malformed and unplaced rows" 5 fleet.fc_unreadable_rows;
+  Alcotest.(check int) "metrics and meta unread keepers" 2 fleet.fc_unread_keepers
 
 let test_keeper_costs_warming_placeholder_is_kept_apart () =
   let costs =

@@ -347,7 +347,8 @@ let test_paused_stopped_and_no_phase_are_counted_apart () =
    a read not made, the warming placeholder and a failed read say what they
    are. *)
 let cost_row ?(unreported = 0) ?(unread = 0)
-    ?(read = Tui_decode.Metrics_read { malformed_rows = 0 }) name cost :
+    ?(read = Tui_decode.Metrics_read { malformed_rows = 0; unread_turn_rows = 0 })
+    name cost :
     Tui_decode.keeper_cost_row =
   { kc_keeper_name = name
   ; kc_cost = cost
@@ -358,7 +359,11 @@ let cost_row ?(unreported = 0) ?(unread = 0)
 
 let costs ?(cache = Tui_decode.Keeper_costs_fresh) keepers =
   Types.Cost_read
-    { Tui_decode.kcs_window_minutes = 24 * 60; kcs_keepers = keepers; kcs_cache = cache }
+    { Tui_decode.kcs_window_minutes = 24 * 60
+    ; kcs_keepers = keepers
+    ; kcs_keepers_unread = []
+    ; kcs_cache = cache
+    }
 
 let check_words label ~lead ~details reading =
   let words = Team.cost_words reading in
@@ -380,11 +385,25 @@ let test_cost_words_say_what_the_sum_is () =
   check_words "a keeper unread, a row unreadable" ~lead:"at least $1.25 24h"
     ~details:[ "1 row unreadable"; "1 keeper unread" ]
     (costs
-       [ cost_row ~read:(Tui_decode.Metrics_read { malformed_rows = 1 }) "a"
+       [ cost_row
+           ~read:(Tui_decode.Metrics_read { malformed_rows = 0; unread_turn_rows = 1 })
+           "a"
            (Tui_decode.Cost_reported { usd = 1.25; samples = 2 })
        ; cost_row ~read:(Tui_decode.Metrics_read_failed { reason = "EACCES" }) "b"
            Tui_decode.Cost_not_reported
        ]);
+  check_words "a keeper whose meta was unread" ~lead:"at least $1.25 24h"
+    ~details:[ "1 keeper unread" ]
+    (Types.Cost_read
+       { Tui_decode.kcs_window_minutes = 24 * 60
+       ; kcs_keepers = [ cost_row "a" (Tui_decode.Cost_reported { usd = 1.25; samples = 2 }) ]
+       ; kcs_keepers_unread =
+           [ { Masc.Keeper_snapshot_unread.name = "b"
+             ; reason = Masc.Keeper_snapshot_unread.Meta_read_failed "meta unreadable"
+             }
+           ]
+       ; kcs_cache = Tui_decode.Keeper_costs_fresh
+       });
   check_words "no priced turn" ~lead:"cost unknown 24h"
     ~details:[ "4 turns unpriced" ]
     (costs [ cost_row ~unreported:4 "a" Tui_decode.Cost_not_reported ]);

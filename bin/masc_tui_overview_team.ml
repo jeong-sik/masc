@@ -263,8 +263,8 @@ let cost_words (cost : Types.overview_cost_reading) =
           (fun (count, text) -> if count > 0 then Some text else None)
           [ ( fleet.fc_unpriced_turns
             , plural fleet.fc_unpriced_turns "turn" ^ " unpriced" )
-          ; ( fleet.fc_malformed_rows
-            , plural fleet.fc_malformed_rows "row" ^ " unreadable" )
+          ; ( fleet.fc_unreadable_rows
+            , plural fleet.fc_unreadable_rows "row" ^ " unreadable" )
           ; ( fleet.fc_unread_keepers
             , plural fleet.fc_unread_keepers "keeper" ^ " unread" )
           ]

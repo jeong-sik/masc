@@ -14369,7 +14369,7 @@ def keeper_costs_fixture(reads: list[str]) -> Callable[[], HttpResponse]:
             "cost_reported_samples": reported,
             "cost_unreported_samples": unreported,
             "cost_unread_samples": 0,
-            "metrics_read": {"state": "read", "malformed_rows": 0},
+            "metrics_read": {"state": "read", "malformed_rows": 0, "unread_turn_rows": 0},
         }
 
     def respond() -> HttpResponse:
@@ -14381,6 +14381,7 @@ def keeper_costs_fixture(reads: list[str]) -> Callable[[], HttpResponse]:
                     row("k-running", 1.75, 2, 1),
                     row("k-flagged", None, 0, 2),
                 ],
+                "keepers_unread": [],
                 "window_minutes": 1440,
                 "generated_at": 1.0,
                 "cache": {"state": "fresh", "generated_at": 1.0},

@@ -3563,9 +3563,11 @@ type keeper_cost_sum =
     zeroes that Keeper's counts on the server, so its row says nothing about
     what it spent. *)
 type keeper_cost_metrics_read =
-  | Metrics_read of { malformed_rows : int }
-      (** Read. [malformed_rows] were not JSON; any of them may have been a
-          turn, so a sum beside a non-zero count is a floor. *)
+  | Metrics_read of { malformed_rows : int; unread_turn_rows : int }
+      (** Read. [malformed_rows] were not JSON, and [unread_turn_rows] were
+          turn rows the window may hold whose time or latency the server
+          could not read. Any of them may have been a turn in it, so a sum
+          beside a non-zero count is a floor. *)
   | Metrics_read_failed of { reason : string }
 
 type keeper_cost_row = {
@@ -3588,6 +3590,10 @@ type keeper_costs_cache =
 type keeper_costs = {
   kcs_window_minutes : int;
   kcs_keepers : keeper_cost_row list;
+  kcs_keepers_unread : Keeper_snapshot_unread.t list;
+      (** [keepers_unread]: Keepers whose meta the server could not read or
+          decode, in the operator snapshot's shape. They have no row, and
+          their turns are in no sum. *)
   kcs_cache : keeper_costs_cache;
 }
 
@@ -3604,8 +3610,12 @@ type fleet_cost = {
       (** [None] when no Keeper reported a price: the cost is unknown. *)
   fc_priced_turns : int;
   fc_unpriced_turns : int;  (** Unreported plus unread samples. *)
-  fc_malformed_rows : int;
-  fc_unread_keepers : int;  (** Keepers whose metrics could not be read. *)
+  fc_unreadable_rows : int;
+      (** Rows that were not JSON plus turn rows the server could not place
+          in or out of the window. *)
+  fc_unread_keepers : int;
+      (** Keepers whose metrics could not be read, plus Keepers whose meta
+          could not be read ([kcs_keepers_unread]). *)
 }
 
 val fleet_cost_of_keeper_costs : keeper_costs -> fleet_cost

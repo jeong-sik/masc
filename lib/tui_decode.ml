@@ -11915,7 +11915,7 @@ type keeper_cost_sum =
   | Cost_not_reported
 
 type keeper_cost_metrics_read =
-  | Metrics_read of { malformed_rows : int }
+  | Metrics_read of { malformed_rows : int; unread_turn_rows : int }
   | Metrics_read_failed of { reason : string }
 
 type keeper_cost_row = {
@@ -11934,6 +11934,7 @@ type keeper_costs_cache =
 type keeper_costs = {
   kcs_window_minutes : int;
   kcs_keepers : keeper_cost_row list;
+  kcs_keepers_unread : Keeper_snapshot_unread.t list;
   kcs_cache : keeper_costs_cache;
 }
 
@@ -11943,7 +11944,10 @@ let decode_keeper_cost_metrics_read json =
   match state with
   | "read" ->
       let* malformed_rows = required_nonnegative_int_field read "malformed_rows" in
-      Ok (Metrics_read { malformed_rows })
+      let* unread_turn_rows =
+        required_nonnegative_int_field read "unread_turn_rows"
+      in
+      Ok (Metrics_read { malformed_rows; unread_turn_rows })
   | "failed" ->
       let* reason = required_string_field read "reason" in
       Ok (Metrics_read_failed { reason })
@@ -11994,14 +11998,20 @@ let decode_keeper_costs json =
   let* kcs_window_minutes = required_int_field json "window_minutes" in
   let* items = required_list_field json "keepers" in
   let* kcs_keepers = decode_list "keepers" decode_keeper_cost_row items in
+  let* unread_items = required_list_field json "keepers_unread" in
+  let* kcs_keepers_unread =
+    Result.map_error
+      (fun err -> "keepers_unread: " ^ err)
+      (Keeper_snapshot_unread.list_of_json (`List unread_items))
+  in
   let* kcs_cache = decode_keeper_costs_cache json in
-  Ok { kcs_window_minutes; kcs_keepers; kcs_cache }
+  Ok { kcs_window_minutes; kcs_keepers; kcs_keepers_unread; kcs_cache }
 
 type fleet_cost = {
   fc_usd : float option;
   fc_priced_turns : int;
   fc_unpriced_turns : int;
-  fc_malformed_rows : int;
+  fc_unreadable_rows : int;
   fc_unread_keepers : int;
 }
 
@@ -12028,14 +12038,17 @@ let fleet_cost_of_keeper_costs (costs : keeper_costs) =
         }
       in
       match row.kc_metrics_read with
-      | Metrics_read { malformed_rows } ->
-          { acc with fc_malformed_rows = acc.fc_malformed_rows + malformed_rows }
+      | Metrics_read { malformed_rows; unread_turn_rows } ->
+          { acc with
+            fc_unreadable_rows =
+              acc.fc_unreadable_rows + malformed_rows + unread_turn_rows
+          }
       | Metrics_read_failed { reason = _ } ->
           { acc with fc_unread_keepers = acc.fc_unread_keepers + 1 })
     { fc_usd = None
     ; fc_priced_turns = 0
     ; fc_unpriced_turns = 0
-    ; fc_malformed_rows = 0
-    ; fc_unread_keepers = 0
+    ; fc_unreadable_rows = 0
+    ; fc_unread_keepers = List.length costs.kcs_keepers_unread
     }
     costs.kcs_keepers

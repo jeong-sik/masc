@@ -101,6 +101,18 @@ let test_tabs () =
   check (option string) "an id never given" None (Executor.Tabs.page_of_id tabs 3)
 ;;
 
+(* A later session's pages are new pages: an id from before reaches none of
+   them, even when the new session reuses a page id. *)
+let test_tabs_across_sessions () =
+  let tabs = Executor.Tabs.create () and fake = fake [ blank; shop () ] ~active:(Some "P2") in
+  ignore (listed tabs fake);
+  Executor.Tabs.forget_pages tabs;
+  check (option string) "an earlier session's id reaches no page" None (Executor.Tabs.page_of_id tabs 0);
+  ignore (listed tabs fake);
+  check (option string) "a page of the new session gets a new id" (Some "P1") (Executor.Tabs.page_of_id tabs 2);
+  check (option string) "the old id stays unused" None (Executor.Tabs.page_of_id tabs 0)
+;;
+
 let test_goto () =
   let tabs = Executor.Tabs.create () and fake = fake [ blank; shop () ] ~active:(Some "P2") in
   ignore (listed tabs fake);
@@ -254,7 +266,10 @@ let test_evaluate_expression () =
 
 let () =
   run "browser_stagehand_executor" [
-    "tabs", [ test_case "pages become tabs with ids that stay" `Quick test_tabs ];
+    "tabs", [
+      test_case "pages become tabs with ids that stay" `Quick test_tabs;
+      test_case "ids are not given again in a later session" `Quick test_tabs_across_sessions;
+    ];
     "goto", [
       test_case "navigates a listed or the active tab" `Quick test_goto;
       test_case "a failure after the navigation is not before effect" `Quick test_goto_effect_boundary;

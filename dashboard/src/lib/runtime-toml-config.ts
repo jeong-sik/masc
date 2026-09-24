@@ -125,8 +125,18 @@ function parseDocument(sourceText: string): TomlDocument {
   return { lines, sections }
 }
 
+function providerSectionName(name: string): string {
+  // Provider ids use [A-Za-z0-9_-]+, but TOML may quote such a key. Match
+  // its logical table while retaining the source spelling for edits.
+  return name.replace(
+    /^providers\.("[A-Za-z0-9_-]+"|'[A-Za-z0-9_-]+')(?=\.|$)/,
+    (_match, quoted: string) => `providers.${quoted.slice(1, -1)}`,
+  )
+}
+
 function sectionOf(document: TomlDocument, name: string): TomlSection | null {
-  return document.sections.find(section => section.name === name) ?? null
+  const logicalName = providerSectionName(name)
+  return document.sections.find(section => providerSectionName(section.name) === logicalName) ?? null
 }
 
 // Bare key (letters/digits/underscore/hyphen) OR a quoted key ("..."/'...').
@@ -261,7 +271,7 @@ function asBoolean(value: TomlScalar | undefined, fallback = false): boolean {
 
 function providerIds(document: TomlDocument): string[] {
   return document.sections
-    .map(section => section.name.match(/^providers\.([^.]+)$/)?.[1])
+    .map(section => providerSectionName(section.name).match(/^providers\.([A-Za-z0-9_-]+)$/)?.[1])
     .filter((id): id is string => Boolean(id))
 }
 

@@ -44,6 +44,19 @@ keep-alive = "10m"
 `
 
 describe('runtime TOML dashboard editing helpers', () => {
+  it('edits a quoted provider table in place', () => {
+    for (const quote of ['"', "'"]) {
+      const header = `providers.${quote}runpod_mtp${quote}`
+      const quoted = sourceText.replaceAll('providers.runpod_mtp', header)
+      expect(parseRuntimeTomlEnvironment(quoted).providers[0]?.id).toBe('runpod_mtp')
+      expect(getRuntimeTomlKey(quoted, 'providers.runpod_mtp', 'display-name')).toBe('"RunPod"')
+      const edited = setRuntimeTomlProviderField(quoted, 'runpod_mtp', 'exact-body-timeout-s', 1200)
+      expect(edited).toContain(`[${header}]`)
+      expect(edited).not.toContain('[providers.runpod_mtp]')
+      expect(getRuntimeTomlKey(edited, 'providers.runpod_mtp', 'exact-body-timeout-s')).toBe('1200')
+    }
+  })
+
   it('projects provider, model, and binding fields from runtime.toml source', () => {
     const environment = parseRuntimeTomlEnvironment(sourceText)
 

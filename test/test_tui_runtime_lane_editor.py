@@ -526,7 +526,7 @@ def run_exact_slot_editor(executable: str) -> None:
         {
             **config,
             "source_text": config["source_text"]
-            + "\n\n[providers.glm-coding]\nexact-body-timeout-s = 1200\n",
+            + '\n\n[providers."glm-coding"]\nexact-body-timeout-s = 1200\n',
         },
     )
 
@@ -557,7 +557,7 @@ def run_exact_slot_editor(executable: str) -> None:
         os.write(fd, b"d")
         h.send_and_wait(process, fd, output, b"e",
                         b"> 1  HTTP glm-coding.glm-5-turbo")
-        h.send_and_wait(process, fd, output, b"d", b"[providers.glm-coding]")
+        h.send_and_wait(process, fd, output, b"d", b'[providers."glm-coding"]')
         h.wait_for_output(process, fd, output, b"exact-body-timeout-s = 1200",
                           start=mark, timeout=5)
         os.write(fd, b"q")

@@ -298,12 +298,21 @@ let set_runtime_config_cursor_near state ~direction ~target =
    view remains the one authority for both what is shown and what $EDITOR
    later receives. *)
 let runtime_config_section_line ~section rows =
-  let header = "[" ^ section ^ "]" in
+  let headers =
+    match String.split_on_char '.' section with
+    | [ "providers"; id ] ->
+      [ "[" ^ section ^ "]"
+      ; "[providers.\"" ^ id ^ "\"]"
+      ; "[providers.'" ^ id ^ "']"
+      ]
+    | _ -> [ "[" ^ section ^ "]" ]
+  in
   let rec scan index = function
     | [] -> None
     | segments :: rest ->
       let text = String.trim (String.concat "" (List.map fst segments)) in
-      if String.equal text header then Some index else scan (index + 1) rest
+      if List.exists (String.equal text) headers then Some index
+      else scan (index + 1) rest
   in
   scan 0 rows
 

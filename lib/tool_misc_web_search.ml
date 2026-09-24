@@ -285,6 +285,19 @@ let take_results limit hits =
   in
   loop limit [] hits
 
+(* A snippet is the preview a caller picks results by. Ollama sends page
+   text in the field read as the snippet. The bound sits above the longest
+   snippet an engine writes itself, so those pass whole and only page text
+   is cut. It counts bytes, marker included, so a CJK snippet is cut at
+   about a third as many characters.
+   Page text is what [includeContent] fetches, capped by [contentMaxChars]. *)
+let snippet_max_bytes = 1024
+let snippet_cut_marker = "…"
+
+let bound_snippet snippet =
+  String_util.utf8_safe ~max_bytes:snippet_max_bytes ~suffix:snippet_cut_marker snippet
+  |> String_util.to_string
+
 let normalize_hits ~source tuples =
   tuples
   |> List.filter (fun (title, url, _snippet) -> not (String.equal title "") && valid_search_result_url url)
@@ -292,7 +305,7 @@ let normalize_hits ~source tuples =
          {
            title;
            url;
-           snippet = clean_search_text snippet;
+           snippet = clean_search_text snippet |> bound_snippet;
            source;
            rank = idx + 1;
            published_at = None;

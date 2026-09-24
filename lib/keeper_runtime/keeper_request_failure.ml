@@ -163,6 +163,7 @@ let provider_network_summary ~provider ~kind ~detail =
   | Llm_provider.Http_client.Timeout -> who ^ " did not respond in time"
   | Llm_provider.Http_client.Local_resource_exhaustion ->
     "Local network resources are exhausted; fewer requests at once are needed"
+  | Llm_provider.Http_client.Connection_reset -> who ^ " reset the connection"
   | Llm_provider.Http_client.End_of_file -> who ^ " closed the connection"
   | Llm_provider.Http_client.Unknown -> detail_speaks "could not be reached"
 ;;
@@ -364,7 +365,7 @@ let cause_to_yojson = function
           | Some provider -> `String provider
           | None -> `Null )
       ; ( "network_kind"
-        , `String (Keeper_internal_error.network_error_kind_to_string kind) )
+        , `String (Llm_provider.Http_client.network_error_kind_to_string kind) )
       ; "detail", `String detail
       ]
   | Context_overflow { limit } ->
@@ -519,7 +520,7 @@ let cause_of_yojson (json : Yojson.Safe.t) =
                 (labelled
                    kind
                    "network_kind"
-                   Keeper_internal_error.network_error_kind_of_string
+                   Llm_provider.Http_client.network_error_kind_of_string
                    fields)
                 (fun network_kind ->
                    Result.map

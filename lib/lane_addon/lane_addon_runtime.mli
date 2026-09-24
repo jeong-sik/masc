@@ -62,6 +62,7 @@ module For_testing : sig
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
     recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->
       (unit, string) result;
+    image_ready : package:Lane_addon_types.package -> (unit, string) result;
   }
   val with_backend : backend -> (unit -> 'a) -> 'a
   val with_action_writer :

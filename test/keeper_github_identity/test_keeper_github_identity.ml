@@ -780,7 +780,16 @@ let test_login_argv_carries_only_chosen_scopes () =
     (after
        (Github.login_argv
           ~hostname:"github.com"
-          ~scopes:[ Github.Write_packages; Github.Workflow ]))
+          ~scopes:[ Github.Write_packages; Github.Workflow ]));
+  Alcotest.(check (option string))
+    "every offered scope is one argument, in the offered order"
+    (Some
+       (String.concat ","
+          (List.map Github.login_scope_to_string Github.all_login_scopes)))
+    (after
+       (Github.login_argv
+          ~hostname:"github.com"
+          ~scopes:Github.all_login_scopes))
 ;;
 
 (* The request names scopes by string. Every offered scope reads back as

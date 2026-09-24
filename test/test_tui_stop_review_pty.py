@@ -133,6 +133,17 @@ def exact_jump(gate):
     return interact
 
 
+def oldest_stop_on_later_page(process, master_fd, _slave_fd, output, _base_path):
+    open_agenda(process, master_fd, output)
+    h.send_and_wait(process, master_fd, output, b"\r", b"stop for specific test-0")
+    screen = h.screen_text(bytes(output))
+    for needle in (b"task-stop-0", b"vr-stop-0", b"stop for specific test-0"):
+        if needle not in screen:
+            raise AssertionError(f"the later page lost {needle!r}: {screen!r}")
+    capture_screen("oldest_stop_on_later_page", output)
+    os.write(master_fd, b"q")
+
+
 def changed_request(gate, requests):
     def interact(process, master_fd, _slave_fd, output, _base_path):
         open_agenda(process, master_fd, output)
@@ -250,6 +261,21 @@ def run(executable):
         interact=exact_jump(gate),
         prepare_workspace=seed_stops,
         http_fixtures={h.VERIFICATION_QUEUE_PATH: gate},
+    )
+    newer = [h.verification_request_row(f"task-other-{n}") for n in range(200)]
+    h.run_terminal_scenario(
+        executable,
+        description="The oldest stop opens even when newer requests fill the first page",
+        interact=oldest_stop_on_later_page,
+        prepare_workspace=seed_stops,
+        http_fixtures={
+            h.VERIFICATION_QUEUE_PATH: (
+                200, h.verification_snapshot(newer, total=207, truncated=True)
+            ),
+            "/api/v1/verification/requests?view=awaiting&limit=200&offset=200": (
+                200, h.verification_snapshot(queue, total=207, offset=200)
+            ),
+        },
     )
     changed = rows()
     changed[1]["request_id"] = "vr-replaced-1"

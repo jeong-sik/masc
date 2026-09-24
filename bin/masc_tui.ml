@@ -16015,10 +16015,35 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         launch_verification_load state ~mailbox
       else (match result with
       | Ok snapshot ->
-          state.verification <- Some snapshot;
-          state.verification_error <- None;
           let requests = snapshot.Masc.Tui_decode.vs_requests in
           let count = List.length requests in
+          let jump_index =
+            Option.bind state.verification_jump (fun (task_id, request_id) ->
+              List.find_index
+                (fun (row : Masc.Tui_decode.verification_request) ->
+                  String.equal row.vr_task_id task_id
+                  && String.equal row.vr_request_id request_id
+                  && (match row.vr_ask with
+                      | Masc.Tui_decode.Asks_cancellation _ -> true
+                      | Asks_completion | Ask_unstated | Unrecognised_ask _ -> false))
+                requests)
+          in
+          (* The agenda shows the oldest stop first while the queue serves its
+             newest requests first. Search later pages before saying an old
+             stop changed or closed; keep the list empty while searching so a
+             keypress cannot act on a page other than the chosen request. *)
+          if Option.is_some state.verification_jump
+             && Option.is_none jump_index
+             && snapshot.vs_truncated
+             && Option.is_none snapshot.vs_backlog_error
+             && snapshot.vs_offset = offset
+             && count > 0
+             && offset + count < snapshot.vs_total then begin
+            state.verification_offset <- offset + count;
+            launch_verification_load state ~mailbox
+          end else begin
+          state.verification <- Some snapshot;
+          state.verification_error <- None;
           if not state.verification_selection_suspended
              && state.verification_cursor >= count then
             state.verification_cursor <- max 0 (count - 1);
@@ -16026,14 +16051,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            | None -> ()
            | Some (task_id, request_id) ->
                state.verification_jump <- None;
-               (match List.find_index
-                        (fun (row : Masc.Tui_decode.verification_request) ->
-                           String.equal row.vr_task_id task_id
-                           && String.equal row.vr_request_id request_id
-                           && (match row.vr_ask with
-                               | Masc.Tui_decode.Asks_cancellation _ -> true
-                               | Asks_completion | Ask_unstated | Unrecognised_ask _ -> false))
-                        requests with
+               (match jump_index with
                 | Some index ->
                     state.verification_selection_suspended <- false;
                     state.verification_cursor <- index;
@@ -16050,8 +16068,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                     state.verification_selection_suspended <- true;
                     state.verification_verdict_error <-
                       Some (Printf.sprintf
-                        "%s: stop request %s changed or closed; review the refreshed queue"
-                        task_id request_id)));
+                        "%s: stop request %s %s; review the refreshed queue"
+                        task_id request_id
+                        (match snapshot.vs_backlog_error with
+                         | Some _ -> "could not be located because the task backlog is unreadable"
+                         | None when snapshot.vs_truncated -> "could not be located because the queue page did not advance"
+                         | None -> "changed or closed"))));
           (match state.verification_detail_request_id with
            | Some request_id
              when not
@@ -16064,6 +16086,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                state.verification_detail_scroll <- 0;
                state.verification_verdict_armed <- None
            | Some _ | None -> ())
+          end
       | Error detail ->
           (* The previous list stays: a failed reload must not make the queue
              look empty, which reads as "nothing is waiting". *)

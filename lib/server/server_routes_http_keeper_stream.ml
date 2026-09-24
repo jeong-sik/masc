@@ -3298,6 +3298,12 @@ let live_event_is_new ~replayed = function
   | Some seq -> not (Hashtbl.mem replayed seq)
 ;;
 
+let operation_heartbeat_decision = function
+  | Some (Keeper_owner.Chat_operation.Queued | Running _) -> `Send_comment
+  | Some (Succeeded _ | Failed _ | Cancelled _) -> `Finish_stream
+  | None -> `Retain_idle_timeout
+;;
+
 (* Everything a reconnect replays, or nothing. Reads the journal, projects it
    with the keeper's current redaction snapshot, and keeps every failure
    inside this function — missing, unreadable, corrupt, or a journaled event
@@ -3537,20 +3543,20 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
                 operation_id
                 (Keeper_owner_registry.command_error_to_string error);
               None
-            | exception Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+            | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
             | exception exn ->
               Log.Keeper.warn
                 "keeper chat heartbeat operation read raised operation=%s: %s"
                 operation_id (Printexc.to_string exn);
               None
           in
-          match state with
-          | Some (Keeper_owner.Chat_operation.Queued | Running _) ->
+          match operation_heartbeat_decision state with
+          | `Send_comment ->
             if keeper_stream_send_raw writer mutex closed ": keepalive\n\n"
             then heartbeat ()
             else finish ()
-          | Some (Succeeded _ | Failed _ | Cancelled _) -> finish ()
-          | None ->
+          | `Finish_stream -> finish ()
+          | `Retain_idle_timeout ->
             (* Preserve the existing idle/reconnect path while operation
                authority is unreadable, without a rapid close/re-POST loop. *)
             heartbeat ())
@@ -3562,6 +3568,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
 (** Build routes for MCP server *)
 
 module For_testing = struct
+  let operation_heartbeat_decision = operation_heartbeat_decision
   let persist_batch_user_rows = persist_batch_user_rows
   let operation_execution_of_outcome = operation_execution_of_outcome
   let parse_request = parse_keeper_chat_stream_request

@@ -19,6 +19,7 @@ import { IdeKeeperWorkPanel } from './ide-keeper-work-panel'
 import { IdeInterject } from './ide-interject'
 import { ExecuteOutputDrawer } from './execute-output-drawer'
 import { IdePresenceStrip } from './ide-presence-strip'
+import { IdePinnedKeepers } from './ide-pinned-keepers'
 import {
   IDE_LAYERS,
   IDE_LAYER_LABELS,
@@ -942,6 +943,16 @@ export function IdeShell() {
     navigate('code', nextParams)
   }
 
+  // The route keeper is the one the chat and the terminal address.
+  const handleOpenKeeper = (keeperName: string) => {
+    navigate('code', {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+      keeper: keeperName,
+    })
+  }
+
   const handleTerminalStop = () => {
     const nextParams: Record<string, string> = {
       ...route.value.params,
@@ -1131,6 +1142,7 @@ export function IdeShell() {
           </div>
         </details>
         <${IdePresenceStrip} compact=${true} pollMs=${IDE_ACTIVITY_POLL_MS} />
+        <${IdePinnedKeepers} onOpenKeeper=${handleOpenKeeper} />
         <button
           type="button"
           class="ide-v2-action ide-v2-rail-toggle"

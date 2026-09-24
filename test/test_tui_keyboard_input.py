@@ -2567,7 +2567,7 @@ def wheel_scrolls_and_clicks_do_not(
         output,
         # The agenda strip takes one of these fourteen rows. The renderer
         # therefore shows a thirteen-row compact frame; the input gate must
-        # measure the same body rather than route this hidden `2`.
+        # measure the same body rather than route this hidden `3`.
         rows=14,
         columns=100,
         needle=b"terminal too small",

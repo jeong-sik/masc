@@ -13801,7 +13801,7 @@ let render_resources (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let split = cols >= keeper_split_threshold_cols in
-  pane_surface_header buf cols state ~name:"Config / Resources" ~split;
+  pane_surface_header buf cols state ~name:"System / Resources" ~split;
   let pane_rows = pane_surface_content_height ~rows in
   let list_rows_budget = pane_rows in
   let rows_list =

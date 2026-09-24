@@ -22,7 +22,7 @@ third stop) and the clients roster with `c`, Workspace reaches Code with
 System reaches Runtime with `9` (Esc returns to System), Resources with `s` and Tools with `t`, and Activity
 reaches the server log with `l`. Task Review, Task Verdicts, Schedules,
 Fusion, Lanes, Clients, Runtime, Changes, Code, Resources, Tools, and Logs
-also keep `go <name>` palette entries, and each Config pane has
+also keep `go <name>` palette entries, and each System pane has
 `go System / <pane>` (`runtime.toml`, `models`, `params`, `prompts`,
 `presets`, `themes`, `voice`). Changes follows the Keeper selected on
 Keepers. Keeper operations are reached from their parent only.

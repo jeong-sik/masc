@@ -1449,8 +1449,25 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
         ; cache_creation_input_tokens = None
         }
     ];
-  check (option string) "the latest report stands for the turn"
+  check (option string) "the latest report stands for the request"
     (Some "tokens: in 1200 \xc2\xb7 out 900 \xc2\xb7 cache read 4096") (usage (Some t));
+  (* The provider accumulates counters inside one request, and a turn that
+     calls tools asks again after every tool result. Round two therefore
+     starts from no counters: leaving round one's numbers up would call one
+     round's tokens what the turn has spent. *)
+  feed t [ Live.Stream_model_started { model = "glm-5-turbo" } ];
+  check (option string) "a second round starts from no counters" None
+    (usage (Some t));
+  feed t
+    [ Live.Stream_usage
+        { input_tokens = Some 30
+        ; output_tokens = Some 12
+        ; cache_read_input_tokens = None
+        ; cache_creation_input_tokens = None
+        }
+    ];
+  check (option string) "and reports only what that round has spent"
+    (Some "tokens: in 30 \xc2\xb7 out 12") (usage (Some t));
   (* A new attempt counts its own tokens: carrying the old ones over would
      bill the new runtime for what the failed one spent. *)
   feed t

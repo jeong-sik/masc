@@ -326,11 +326,13 @@ let runtime_identity_text ~keeper_name ~configured_runtime transcript =
      | None, None -> configured)
   | Some _ | None -> configured
 
-(* What the turn has spent so far, in the clause shape the rest of this screen
-   uses. Only counters the provider reported appear, and each is written out in
-   full: a reader comparing this against a bill needs the digits, not a rounded
-   stand-in. [None] when nothing was reported, so the row stays as it was
-   instead of gaining an empty label. *)
+(* What the request now streaming has spent so far, in the clause shape the
+   rest of this screen uses. It is that request's running total, not the
+   turn's: a turn that calls tools asks several times and each answer counts
+   from zero. Only counters the provider reported appear, and each is written
+   out in full: a reader comparing this against a bill needs the digits, not a
+   rounded stand-in. [None] when nothing was reported, so the row stays as it
+   was instead of gaining an empty label. *)
 let stream_usage_text ~keeper_name transcript =
   match transcript with
   | Some t when String.equal t.keeper_name keeper_name ->
@@ -1880,11 +1882,17 @@ let apply_delta ~now t (delta : Live.delta) =
        | Stream_ended | Stream_failed _ -> ())
   | Live.Stream_model_started { model } ->
       t.observed_model <- Some model;
+      (* A request's counters belong to that request. The provider accumulates
+         them inside one request, so a turn that calls tools asks several
+         times, and each answer starts from zero. Carrying the previous
+         request's numbers into this one would label one round's tokens as
+         what the turn has spent. *)
+      t.observed_usage <- None;
       t.model_signal <- Some (Model_started_at now)
   | Live.Stream_usage usage ->
-      (* Counters only: this says what the turn has spent, not that anything
-         was written, so the model-side signal is left as whatever last moved
-         the answer. *)
+      (* Counters only: this says what the request being streamed has spent so
+         far, not that anything was written, so the model-side signal is left
+         as whatever last moved the answer. *)
       t.observed_usage <- Some usage
   | Live.Text text ->
       t.model_signal <- Some (Answering_at now);

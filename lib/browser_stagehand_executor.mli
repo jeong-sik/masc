@@ -34,8 +34,9 @@ val failure_message : Browser_stagehand_session.call_failure -> string
 type page_runtime = Scene_runtime | No_runtime
 
 (** A [page.evaluate] expression that runs [body] as a function called with
-    [args], after [runtime], and answers its result as a JSON string. The
-    BiDi peer runs the same page scripts this way. *)
+    [args], after [runtime], and answers its result as a JSON string, or a
+    throw as an object [{thrown}] with the thrown message. The BiDi peer runs
+    the same page scripts this way. *)
 val evaluate_expression : runtime:page_runtime -> body:string -> args:Yojson.Safe.t -> string
 
 (** Serves [Tabs_list], [Page_goto], [Page_capture] and the sentence verbs.

@@ -35,7 +35,7 @@ let model_answer =
     ]
 ;;
 
-type act_behaviour = Ask_the_model | Hold
+type act_behaviour = Ask_the_model | Ask_the_model_without_params | Hold
 
 type fake =
   { inbox : string Eio.Stream.t
@@ -45,6 +45,7 @@ type fake =
   ; mutable marker : Yojson.Safe.t
   ; mutable looks_before_ready : int
   ; mutable readiness_throws : bool
+  ; mutable hold_init : bool
   ; mutable act : act_behaviour
   ; mutable held_act : Yojson.Safe.t option
   ; mutable waiting_on_model : (Yojson.Safe.t * Yojson.Safe.t) option
@@ -66,18 +67,23 @@ let to_host fake message =
 let rpc_result id result = obj [ "jsonrpc", str "2.0"; "id", id; "result", result ]
 let rpc_error id message = obj [ "jsonrpc", str "2.0"; "id", id; "error", obj [ "code", `Int (-32603); "message", str message ] ]
 let rpc_request id method_ params = obj [ "jsonrpc", str "2.0"; "id", str id; "method", str method_; "params", params ]
+let rpc_request_without_params id method_ = obj [ "jsonrpc", str "2.0"; "id", str id; "method", str method_ ]
 
 let extension_receives fake message =
   let member = Yojson.Safe.Util.member in
   match member "method" message, member "id" message with
   | `String "stagehand.init", id ->
-    to_host fake (rpc_result id (obj [ "initialized", `Bool true; "pages", `List [ obj [ "page_id", str "P"; "url", str "about:blank" ] ] ]))
+    if not fake.hold_init then
+      to_host fake (rpc_result id (obj [ "initialized", `Bool true; "pages", `List [ obj [ "page_id", str "P"; "url", str "about:blank" ] ] ]))
   | `String "stagehand.act", id ->
     (match fake.act with
      | Hold -> fake.held_act <- Some id
      | Ask_the_model ->
        fake.waiting_on_model <- Some (str "g1", id);
-       to_host fake (rpc_request "g1" "llm.generate" (obj [ "messages", `List [] ])))
+       to_host fake (rpc_request "g1" "llm.generate" (obj [ "messages", `List [] ]))
+     | Ask_the_model_without_params ->
+       fake.waiting_on_model <- Some (str "g1", id);
+       to_host fake (rpc_request_without_params "g1" "llm.generate"))
   | `String "page.goto", id -> to_host fake (rpc_result id (obj [ "page", obj [ "page_id", str "P" ] ]))
   | `Null, id ->
     fake.answers_from_host <- message :: fake.answers_from_host;
@@ -188,6 +194,7 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
     ; marker = marker "2.0.0"
     ; looks_before_ready = 0
     ; readiness_throws = false
+    ; hold_init = false
     ; act = Ask_the_model
     ; held_act = None
     ; waiting_on_model = None
@@ -200,7 +207,8 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
     incr model_calls;
     answer params
   in
-  let session = Session.create ~sw ~clock ~worker_wait_s:deadline_s ~model ~log:(fun event -> events := event :: !events) in
+  let session = Session.create ~sw ~clock ~worker_wait_s:deadline_s ~init_answer_s:deadline_s
+      ~model ~log:(fun event -> events := event :: !events) in
   let cdp =
     Cdp.create ~send:(browser_receives fake) ~close:ignore ~clock ~command_deadline_s:deadline_s
       ~on_event:(Session.on_cdp_event session)
@@ -224,7 +232,7 @@ let attached h =
 
 let error_code message = Yojson.Safe.Util.(message |> member "error" |> member "code" |> to_int)
 let has_result message = Yojson.Safe.Util.member "result" message <> `Null
-let act = Wire.Act { page_id = "P"; instruction = "click the Submit order button" }
+let act = Wire.Act { page_id = "P"; instruction = "click the Submit order button"; timeout = Wire.sentence_timeout }
 let goto = Wire.Page_goto { page_id = "P"; url = "http://127.0.0.1:1/" }
 let logged h wanted = List.exists wanted !(h.events)
 
@@ -285,6 +293,15 @@ let calls_refused_after_failed_attach h =
   | _ -> fail "a session whose attach failed takes no calls"
 ;;
 
+let test_init_without_an_answer () =
+  with_session ~configure:(fun fake -> fake.hold_init <- true)
+  @@ fun h ->
+  (match attach h with
+   | Error (Session.Init_unanswered seconds) -> check (float 0.001) "init answer deadline" deadline_s seconds
+   | _ -> fail "an unanswered init must return a typed timeout");
+  calls_refused_after_failed_attach h
+;;
+
 let test_attach_refusals () =
   (with_session ~configure:(fun fake -> fake.loaded_id <- Some (String.make 32 'a'))
    @@ fun h ->
@@ -341,6 +358,21 @@ let test_model_request_without_a_call () =
   check bool "the refusal is logged" true (logged h (function Session.Model_request_refused _ -> true | _ -> false))
 ;;
 
+let test_model_request_without_params () =
+  with_session ~configure:(fun fake -> fake.act <- Ask_the_model_without_params)
+  @@ fun h ->
+  attached h;
+  (match Session.call h.session act with
+   | Error (Session.Rejected _) -> ()
+   | Ok _ | Error _ -> fail "act should finish after the malformed model request is refused");
+  check string "the request id is preserved" "g1" Yojson.Safe.Util.(only_answer h |> member "id" |> to_string);
+  check int "invalid params code" Wire.invalid_params (error_code (only_answer h));
+  check int "the model was not asked" 0 !(h.model_calls);
+  check bool "the malformed request is logged" true
+    (logged h (function Session.Malformed_message "llm.generate without params" -> true | _ -> false));
+  goto_succeeds h
+;;
+
 let test_abandoned_call () =
   with_session ~configure:(fun fake -> fake.act <- Hold)
   @@ fun h ->
@@ -393,6 +425,23 @@ let test_model_answer_after_the_caller_left () =
   check int "the extension is refused" Wire.host_refused (error_code (only_answer h));
   check bool "the refused act's reply is logged" true
     (logged h (function Session.Abandoned_call_ended { rejected = true; _ } -> true | _ -> false));
+  goto_succeeds h
+;;
+
+(* The model can remain blocked after the extension has asked for an answer.
+   The call's own deadline must refuse that request and release the session. *)
+let test_model_answer_deadline () =
+  let never, _ = Eio.Promise.create () in
+  with_session ~answer:(fun _ -> Eio.Promise.await never)
+  @@ fun h ->
+  attached h;
+  (match Session.call h.session act with
+   | Error (Session.Rejected _) -> ()
+   | Ok _ | Error _ -> fail "the extension should reject act after the model deadline");
+  check int "the model was asked" 1 !(h.model_calls);
+  check int "the extension receives a typed refusal" Wire.host_refused (error_code (only_answer h));
+  check bool "the model deadline is logged" true
+    (logged h (function Session.Model_request_refused { reason } -> String.ends_with ~suffix:"reached its deadline" reason | _ -> false));
   goto_succeeds h
 ;;
 
@@ -464,15 +513,18 @@ let () =
       test_case "a matching extension attaches" `Quick test_attach;
       test_case "a worker listed after loading is found" `Quick test_worker_found_after_loading;
       test_case "a runtime ready a few looks later is waited for" `Quick test_runtime_ready_after_a_few_looks;
+      test_case "an unanswered init ends attach" `Quick test_init_without_an_answer;
       test_case "a failed attach ends the session" `Quick test_attach_refusals;
     ];
     "calls", [
       test_case "act asks the model" `Quick test_act_uses_the_model;
       test_case "a model request with no call is refused" `Quick test_model_request_without_a_call;
+      test_case "a model request without params is refused and releases the call" `Quick test_model_request_without_params;
       test_case "an abandoned call blocks until its reply" `Quick test_abandoned_call;
       test_case "a reply read before the cancelled caller resumes settles the call" `Quick
         test_reply_read_before_the_cancelled_caller_resumes;
       test_case "a model answer after the caller left is not delivered" `Quick test_model_answer_after_the_caller_left;
+      test_case "a model blocked past the call deadline is refused" `Quick test_model_answer_deadline;
       test_case "a model that raises refuses only its request" `Quick test_model_that_raises;
       test_case "a detached worker loses the call" `Quick test_worker_detached;
       test_case "an unsupported request is refused by name" `Quick test_unsupported_request;

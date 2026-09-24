@@ -151,7 +151,7 @@ let test_deadline_terminates_command_once () =
       let done_log = Filename.concat dir "done.log" in
       let command =
         Printf.sprintf
-          "printf 'started' > %s; sleep 5; printf 'done' > %s"
+          "sleep 2; printf 'started' > %s; sleep 5; printf 'done' > %s"
           (Filename.quote started_log)
           (Filename.quote done_log)
       in

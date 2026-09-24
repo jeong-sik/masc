@@ -41,6 +41,7 @@ type start_error =
   | Already_started
   | Already_exited
   | Fork_failed of exn
+  | Server_root_switch_unavailable
 
 type cancel_result =
   | Cancel_requested
@@ -68,6 +69,23 @@ val fork :
     separately attached cancellation context makes cancellation total before
     admission completes without recording a competing switch failure that
     could erase release evidence. *)
+
+(** The [Failed] payload of a lane that [fork_server_owned] refused for want
+    of a live server root switch. *)
+exception Server_root_switch_unavailable_at_start
+
+(** A Keeper lane is server-owned: it must outlive the turn, request or tool
+    call that asked for it. [fork_server_owned] therefore takes no switch from
+    the caller and forks on the server root switch ({!Eio_context.get_root_switch_opt}).
+    When no root switch is installed, or the installed one is cancelling or
+    finished, there is no owner that outlives the
+    lane, so nothing is forked: the lane is settled through [cleanup] and the
+    call returns [Error Server_root_switch_unavailable]. *)
+val fork_server_owned :
+  t ->
+  run:(Eio.Switch.t -> unit) ->
+  cleanup:(outcome -> (unit, string) result) ->
+  (unit, start_error) result
 
 (** Resolve a lane for which the launch gate rejected the fiber before it
     started.  This keeps the join contract total for every registry entry. *)

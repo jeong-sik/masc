@@ -2278,7 +2278,7 @@ let test_missing_operator_token_is_reported () =
   check int "the window comes from the one place that states it" 1
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
        ~module_path:"bin/masc_tui_http.ml"
-       ~binding_name:"install_operator_token"
+       ~binding_name:"mint_operator_token"
        ~callees:[]
        ~identifiers:[ "Masc_tui_credential.self_mint_expiry_hours" ]);
   (* Both refusal surfaces must ask what this process actually holds. Passing a
@@ -2369,6 +2369,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
          it). It reads the stamp rather than drawing it, which is why it is a
          wrapper and not a [Terminal_text] call. *)
     ; "Masc_tui_wire_age.text"
+      (* Also a boundary: every label and value it is handed goes through
+         [Keeper_chat.terminal_safe_text] before a row is built, and its row
+         type is private, so nothing else can make one
+         (masc_tui_approval_detail.mli). Naming it exempts its whole argument,
+         which is what it sanitises. *)
+    ; "Approval_detail.of_fields"
     ]
   in
   let fixture_path = "test/fixtures/tui_terminal_text_ast_fixture.ml" in
@@ -2489,6 +2495,28 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      summary both moved into [approval_detail_line], and the guard follows
      the field rather than the surface's name. *)
   check_fields "approval_detail_line" [ "ap_summary" ];
+  (* The whole-ask screen draws what the list row cuts, and none of it was on
+     this list: a model's command reached the terminal through [kta_question]
+     with its escapes intact. Every field goes through [of_fields] now. *)
+  check_fields "approval_detail_pane"
+    [ "kta_keeper"
+    ; "kta_tool"
+    ; "kta_tool_call_id"
+    ; "kta_question"
+    ; "kta_args"
+    ; "gp_keeper"
+    ; "gp_display_tool"
+    ; "gp_operation"
+    ; "gp_auto_judge_detail"
+    ; "gp_id"
+    ; "gp_execution_sandbox"
+    ; "gp_execution_cwd"
+    ; "gp_input_rows"
+    ; "ap_actor"
+    ; "ap_action_type"
+    ; "ap_target_type"
+    ; "ap_summary"
+    ];
   (* The same move again, for the same reason: the two rows under the queue
      became [approval_metadata_lines] so the row could be measured against the
      frame and could say how tall it is (#36333). The four fields it draws
@@ -2524,15 +2552,32 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* [Link.scan] reads the body without drawing it, but what it returns is
      drawn -- and [Link.parse] percent-decodes, so an id can carry the escape
      bytes the body could not. Sanitize where it lands. *)
+  (* The metrics pane draws four wire words and escaped none of them: the
+     scheduler's probe word beside this pane's own prose, a Keeper id fitted
+     to sixteen cells (fitting is not escaping), and the tool name each
+     pending gate call and held approval is counted under, which the bar
+     chart draws as a label. The pane already escapes the YOLO Keeper names
+     beside them, so the invariant was understood here and these four were
+     missed. *)
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    ~non_rendering_calls:[ "scheduler_probe_text" ] "render_kpi_cards"
+    [ "ssch_probe" ];
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    ~non_rendering_calls:[ "scheduler_probe_text" ] "render_section_fleet"
+    [ "ssch_probe" ];
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    "render_section_tools"
+    [ "mkh_keeper_id"; "gp_display_tool"; "kta_tool" ];
   check_identifiers ~module_path:render_path ~binding:"board_read_pane"
     ~callees:sanitizer_calls [ "id" ];
   (* Every split surface hands its list through one sidebar, so this is the
      single place a row label can reach the terminal unsanitized. Seven
      callers now pass titles that came off the wire. *)
   (* The list sidebar is drawn beside more than one surface, so it sits with
-     the shared primitives. *)
+     the shared primitives. [write_list_sidebar] hands its labels to this
+     one, so this is where a row label reaches the terminal. *)
   check_identifiers ~module_path:"bin/masc_tui_render_prim.ml"
-    ~binding:"write_list_sidebar" ~callees:sanitizer_calls [ "label" ];
+    ~binding:"write_list_sidebar_selection" ~callees:sanitizer_calls [ "label" ];
   check_fields "render_planning_list"
     [ "planning_error"; "pg_due_date"; "pg_title" ];
   (* The drawing moved into [planning_detail_pane] when the goal list came to
@@ -2554,6 +2599,28 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     [ "pg_id"; "pg_title"; "pg_due_date"; "pg_metric"; "pg_target_value" ];
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
     [ "pg_id" ];
+  (* The verifier's reason for skipping a Verifying goal comes off the wire
+     from the goal store's error text. *)
+  check_fields "planning_proof_detail" [ "vu_detail" ];
+  (* The judge's evidence, its refusal reason and a ledger read error are the
+     verdict's own wire text, bound by the pattern rather than read as a
+     field, so they are named as identifiers. *)
+  check_identifiers ~module_path:render_path ~binding:"planning_proof_detail"
+    ~callees:sanitizer_calls [ "evidence"; "reason"; "detail" ];
+  (* The goal detail's verdict block, note and timeline all wrap through this
+     one helper. It splits the text on LF (not drawn) and escapes each line
+     before it wraps. *)
+  check_identifiers ~module_path:"bin/masc_tui_planning_detail.ml" ~binding:"wrapped"
+    ~callees:[ "Tui_decode.sanitize_terminal_text"; "String.split_on_char" ]
+    [ "text"; "line" ];
+  check int "the goal detail heads a stuck goal with the verifier's reason" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"planning_detail_pane"
+       ~callee:"Planning_detail.unreconciled_lines");
+  check int "the Verifying next step comes from the tested sentence" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"planning_next_step"
+       ~callee:"Planning_detail.verifying_next_step");
   check_fields "render_keeper_list" [ "keepers_error" ];
   (* The Memory pane draws from its own file. The guard reaches other files
      by name -- the primitives and the chat pane each have entries -- but no
@@ -2716,6 +2783,32 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
        ~callee:"Terminal_text.short_timestamp");
   check_identifiers ~module_path:"bin/masc_tui_loader.ml" ~binding:"report"
     ~callees:[ "Masc_tui_ansi.Terminal_text.single_line" ] [ "path"; "err" ]
+;;
+
+(* The Keeper GitHub tab draws what the config stores and what this host
+   resolves from it. The second row is there to show a difference, and on a
+   plain login there is none: the live roster drew "signed in as
+   pangyo-preachers · scopes: gist, read:org, repo, workflow" twice, once
+   under each label. The rows are compared now, so agreement is one row
+   carrying both labels and only a difference costs two. *)
+let test_the_github_identity_rows_are_compared_before_they_are_drawn () =
+  check int "the two readings are compared" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_loader.ml"
+       ~binding_name:"github_identity_lines" ~callee:"String.equal")
+;;
+
+(* A server that leaves "authenticated" out, or sends it as something other
+   than a boolean, is not a server saying no. The row read "not signed in"
+   for it, which is the opposite of the truth for a Keeper that is signed in
+   and sends the operator to sign in again. Absence is its own reading. *)
+let test_an_unreported_sign_in_is_not_a_refusal () =
+  let holds needle =
+    Ast_grep.count_exact_string_literals_in_value_binding
+      ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"auth_status" ~needle
+  in
+  check int "the missing key has a reading of its own" 1
+    (holds "sign-in not reported");
+  check int "and the server's own no keeps its words" 1 (holds "not signed in")
 ;;
 
 (* A failed turn used to be drawn twice: the server records it in the
@@ -3073,6 +3166,14 @@ let () =
           "renderers sanitize untrusted terminal fields"
           `Quick
           test_renderers_sanitize_untrusted_terminal_fields;
+        test_case
+          "the GitHub identity rows are compared before they are drawn"
+          `Quick
+          test_the_github_identity_rows_are_compared_before_they_are_drawn;
+        test_case
+          "an unreported sign-in is not a refusal"
+          `Quick
+          test_an_unreported_sign_in_is_not_a_refusal;
         test_case
           "the session row filter reads the transcript"
           `Quick

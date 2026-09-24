@@ -40,8 +40,13 @@ type catalog_fixture =
   ; enable_thinking : bool option
   }
 
+(* Plan admission refuses an exact target without a body deadline, so every
+   fixture target declares one unless a test passes [None]. Long enough that
+   no non-stalling fixture reaches it. *)
+let fixture_body_timeout_s = 30.0
+
 let catalog_entry
-      ?body_timeout_s
+      ?(body_timeout_s = Some fixture_body_timeout_s)
       ?(connect_timeout_s = Some 30.0)
       ?(serving_constraint = false)
       ?(serving_accepted_through_tokens = 524298)
@@ -3487,7 +3492,12 @@ let test_callback_failures_are_terminal () =
   | Ok _ | Error _ -> fail "failed advance did not return typed terminal evidence"
 ;;
 
-let assert_typed_capacity_refusal_advances_once ~label ~first_response ~assert_cause =
+let assert_typed_capacity_refusal_advances_once
+      ~refused_kind
+      ~label
+      ~first_response
+      ~assert_cause
+  =
   let refused_id = label ^ "-refused" in
   let successor_id = label ^ "-successor" in
   let ( (result, replay, advances, evidence, observed_advance, dispatches_before_replay)
@@ -3496,7 +3506,7 @@ let assert_typed_capacity_refusal_advances_once ~label ~first_response ~assert_c
     with_server ~first_response ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
-      [ catalog_entry ~id:refused_id ~base_url ~native:true ~json:true ()
+      [ catalog_entry ~kind:refused_kind ~id:refused_id ~base_url ~native:true ~json:true ()
       ; catalog_entry ~id:successor_id ~base_url ~native:true ~json:true ()
       ]
     @@ fun snapshot ->
@@ -3637,6 +3647,7 @@ let test_context_window_400_prose_remains_terminal () =
 
 let test_serialized_request_413_refusal_advances_once_to_successor () =
   assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"openai_compat"
     ~label:"serialized-request"
     ~first_response:
       (Cohttp.Code.status_of_code 413, {|{"error":"request body too large"}|})
@@ -3652,6 +3663,7 @@ let test_serialized_request_413_refusal_advances_once_to_successor () =
    candidate and the keeper reported "completion failed" with no status. *)
 let test_rate_limited_429_refusal_advances_once_to_successor () =
   assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"openai_compat"
     ~label:"rate-limited"
     ~first_response:
       ( Cohttp.Code.status_of_code 429
@@ -3669,6 +3681,7 @@ let test_rate_limited_429_refusal_advances_once_to_successor () =
    quota reach its CLI tail. *)
 let test_payment_required_402_refusal_advances_once_to_successor () =
   assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"openai_compat"
     ~label:"payment-required"
     ~first_response:
       ( Cohttp.Code.status_of_code 402
@@ -3681,6 +3694,7 @@ let test_payment_required_402_refusal_advances_once_to_successor () =
 
 let test_server_refusal_advances_once_to_successor status =
   assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"openai_compat"
     ~label:(Printf.sprintf "server-refusal-%d" status)
     ~first_response:(Cohttp.Code.status_of_code status, {|{"error":"unavailable"}|})
     ~assert_cause:(function
@@ -3688,6 +3702,137 @@ let test_server_refusal_advances_once_to_successor status =
         when http_status = status
              && refusal = (if status = 529 then EO.Overloaded else EO.Server_error) -> ()
       | _ -> fail "HTTP server refusal lost its typed cause")
+;;
+
+(* A provider that refuses the input as larger than its window refused it
+   before generating, and the successor carries its own window. GLM names the
+   refusal in its body (code 1261); the glm response codec turns it into the
+   typed [Context_overflow] this advance reads. *)
+let test_context_overflow_refusal_advances_once_to_successor () =
+  assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"glm"
+    ~label:"context-overflow"
+    ~first_response:
+      ( Cohttp.Code.status_of_code 400
+      , {|{"error":{"code":"1261","message":"Prompt exceeds max length"}}|} )
+    ~assert_cause:(function
+      | EO.Provider_response_refused
+          { http_status = 400; refusal = EO.Context_overflow } -> ()
+      | _ -> fail "a GLM window refusal lost its typed context-overflow cause")
+;;
+
+(* The same window refusal as an empty answer the provider stopped at its
+   window. [Retry.overflow_of_empty_completion] names which empty answers
+   those are; the flow reads them as the typed refusal above. *)
+let test_window_stopped_empty_answer_advances_once_to_successor () =
+  assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"openai_compat"
+    ~label:"window-stopped-empty-answer"
+    ~first_response:
+      ( Cohttp.Code.status_of_code 200
+      , {|{"id":"resp-window","model":"flow","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"model_context_window_exceeded"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}|}
+      )
+    ~assert_cause:(function
+      | EO.Provider_response_refused
+          { http_status = 200; refusal = EO.Context_overflow } -> ()
+      | _ -> fail "an empty answer stopped at the window lost its overflow cause")
+;;
+
+(* Which of its own deadlines the first candidate misses: the header deadline
+   ([connect_timeout_s]) or the total deadline ([body_timeout_s]), which ends
+   a request with no headers when it is the earlier one. *)
+type sent_deadline =
+  | Header_deadline
+  | Total_deadline
+
+(* A sent request that gets no answer within its binding's deadline advances to
+   the declared successor, which carries its own deadline. The server answers
+   every POST after a delay; only the first candidate's deadline is shorter
+   than that delay, and loopback connects well inside it, so the deadline
+   falls after dispatch. *)
+let test_sent_timeout_advances_once_to_successor deadline () =
+  let timed_out_id = "sent-timeout-first" in
+  let successor_id = "sent-timeout-successor" in
+  let (result, advances, observed_advance), posts =
+    with_server
+      ~response_delay_s:1.5
+      ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ (match deadline with
+         | Header_deadline ->
+           catalog_entry
+             ~connect_timeout_s:(Some 0.5)
+             ~id:timed_out_id
+             ~base_url
+             ~native:true
+             ~json:true
+             ()
+         | Total_deadline ->
+           catalog_entry
+             ~body_timeout_s:0.5
+             ~id:timed_out_id
+             ~base_url
+             ~native:true
+             ~json:true
+             ())
+      ; catalog_entry ~id:successor_id ~base_url ~native:true ~json:true ()
+      ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [ timed_out_id; successor_id ]) in
+    let advances = ref 0 in
+    let observed_advance = ref None in
+    let result =
+      execute_with_accepting_test_validator
+        ~clock
+        ~net
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ -> Ok ())
+        ~before_advance:(fun ~failed ~next ->
+          let failed_candidate, failure = flow_execution_failure failed in
+          observed_advance
+          := Some
+               ( candidate_id failed_candidate
+               , next.identity.candidate_id
+               , failure.EO.cause
+               , EO.receipt_phase failure.receipt
+               , EO.receipt_dispatch_count failure.receipt );
+          incr advances;
+          Ok ())
+        flow
+    in
+    result, !advances, !observed_advance
+  in
+  (match observed_advance with
+   | Some (failed, next, cause, phase, dispatch_count) ->
+     check string "the timed-out candidate" timed_out_id failed;
+     check string "the declared successor" successor_id next;
+     (match deadline, cause with
+      | ( Header_deadline
+        , EO.Completion_failed
+            { error = Http_client.TimeoutError { phase = Http_client.Http_operation; _ }
+            ; _
+            } )
+      | ( Total_deadline
+        , EO.Completion_failed
+            { error = Http_client.TimeoutError { phase = Http_client.Wall_clock; _ }; _ } )
+        -> ()
+      | (Header_deadline | Total_deadline), _ ->
+        fail "the first candidate did not end on its sent-request deadline");
+     check bool "the timed-out request was dispatched" true (phase = EO.Dispatch_started);
+     check int "the timed-out candidate records one dispatch" 1 dispatch_count
+   | None -> fail "a sent-request timeout did not request an advance");
+  check int "one advance to the successor" 1 advances;
+  check int "both candidates reach the server" 2 posts;
+  match result with
+  | Ok success ->
+    check
+      string
+      "the successor answers"
+      successor_id
+      (candidate_id (EO.flow_success_candidate success))
+  | Error _ -> fail "the flow ended on the first candidate's deadline"
 ;;
 
 let check_body_deadline_transcript success =
@@ -3762,7 +3907,7 @@ let test_body_deadline_advances_after_settlement ~http_status ~settle () =
       ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
-      [ catalog_entry ~body_timeout_s:1.0 ~id:first_id ~base_url ~native:true ~json:true ()
+      [ catalog_entry ~body_timeout_s:(Some 1.0) ~id:first_id ~base_url ~native:true ~json:true ()
       ; catalog_entry ~id:next_id ~base_url ~native:true ~json:true () ]
     @@ fun snapshot ->
     let flow = start_flow (frozen_flow snapshot [first_id; next_id]) in
@@ -3828,7 +3973,7 @@ let test_stalled_server_refusal_body_does_not_advance () =
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry
-          ~body_timeout_s:0.05
+          ~body_timeout_s:(Some 0.05)
           ~id:refused_id
           ~base_url
           ~native:true
@@ -4116,23 +4261,25 @@ let test_all_semantic_rejections_return_nonempty_ordered_exhaustion () =
   | Ok _ | Error _ -> fail "semantic exhaustion lost its typed nonempty trace"
 ;;
 
-let test_missing_deadline_rejects_every_candidate_before_dispatch () =
-  (* Neither a connect nor a body budget is declared: the measurement
-     transport would arm no deadline at all, so admission must reject the
-     plan before any request leaves, for every candidate in the flow. *)
+let test_missing_deadline_rejects_every_candidate_before_dispatch ~connect_timeout_s () =
+  (* No body budget is declared. The connect budget, when present, ends at the
+     response headers, so the body would be read with no deadline; admission
+     must reject the plan before any request leaves, for every candidate. *)
   let result, posts =
     with_server ~response:(openai_response {|{"name":"unused"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry
-          ~connect_timeout_s:None
+          ~connect_timeout_s
+          ~body_timeout_s:None
           ~id:"no-deadline-a"
           ~base_url
           ~native:true
           ~json:true
           ()
       ; catalog_entry
-          ~connect_timeout_s:None
+          ~connect_timeout_s
+          ~body_timeout_s:None
           ~id:"no-deadline-b"
           ~base_url
           ~native:true
@@ -4369,7 +4516,7 @@ let test_structural_predispatch_failure_does_not_advance () =
           ~kind:"anthropic"
           ~request_path:"/v1/messages"
           ~serving_constraint:true
-          ~body_timeout_s:1.0
+          ~body_timeout_s:(Some 1.0)
           ~id:"clock-a"
           ~base_url
           ~native:true
@@ -4661,6 +4808,10 @@ let () =
             "HTTP 402 payment required advances with one dispatch per candidate"
             `Quick
             test_payment_required_402_refusal_advances_once_to_successor
+        ; test_case "a window refusal advances once to the declared successor" `Quick
+            test_context_overflow_refusal_advances_once_to_successor
+        ; test_case "an empty answer stopped at the window advances once" `Quick
+            test_window_stopped_empty_answer_advances_once_to_successor
         ; test_case "HTTP 500 advances once to the declared successor" `Quick
             (fun () -> test_server_refusal_advances_once_to_successor 500)
         ; test_case "HTTP 503 advances once to the declared successor" `Quick
@@ -4669,6 +4820,14 @@ let () =
             (fun () -> test_server_refusal_advances_once_to_successor 520)
         ; test_case "HTTP 529 advances once to the declared successor" `Quick
             (fun () -> test_server_refusal_advances_once_to_successor 529)
+        ; test_case
+            "a sent request past its header deadline advances once to the declared successor"
+            `Quick
+            (test_sent_timeout_advances_once_to_successor Header_deadline)
+        ; test_case
+            "a sent request past its total deadline advances once to the declared successor"
+            `Quick
+            (test_sent_timeout_advances_once_to_successor Total_deadline)
         ; test_case "HTTP 200 body deadline advances with truthful evidence" `Quick
             (test_body_deadline_advances_after_settlement ~http_status:200 ~settle:true)
         ; test_case "HTTP 201 body deadline uses the same successor contract" `Quick
@@ -4702,7 +4861,13 @@ let () =
         ; test_case
             "missing deadline rejects every candidate before dispatch"
             `Quick
-            test_missing_deadline_rejects_every_candidate_before_dispatch
+            (test_missing_deadline_rejects_every_candidate_before_dispatch
+               ~connect_timeout_s:None)
+        ; test_case
+            "connect-only deadline rejects every candidate before dispatch"
+            `Quick
+            (test_missing_deadline_rejects_every_candidate_before_dispatch
+               ~connect_timeout_s:(Some 30.0))
         ; test_case
             "admission and semantic rejections share one declared walk"
             `Quick

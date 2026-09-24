@@ -87,7 +87,6 @@ describe('normalizeKeeperConversationDetails', () => {
   it('extracts fields from direct payload', () => {
     const result = normalizeKeeperConversationDetails({
       trace_id: 'trace-123',
-      generation: 5,
       model_used: 'gpt-4',
       latency_ms: 1500,
       cost_usd: 0.05,
@@ -103,7 +102,6 @@ describe('normalizeKeeperConversationDetails', () => {
     })
     expect(result).not.toBeNull()
     expect(result!.traceId).toBe('trace-123')
-    expect(result!.generation).toBe(5)
     expect(result!.modelUsed).toBe('gpt-4')
     expect(result!.latencyMs).toBe(1500)
     expect(result!.costUsd).toBe(0.05)
@@ -162,7 +160,6 @@ describe('normalizeKeeperConversationDetails', () => {
   it('defaults null for missing numeric fields', () => {
     const result = normalizeKeeperConversationDetails({})
     expect(result).not.toBeNull()
-    expect(result!.generation).toBeNull()
     expect(result!.latencyMs).toBeNull()
     expect(result!.costUsd).toBeNull()
   })
@@ -253,13 +250,11 @@ describe('normalizeKeeperToolResponse', () => {
     const raw = JSON.stringify({
       reply: 'Hello World',
       trace_id: 'trace-1',
-      generation: 3,
     })
     const result = normalizeKeeperToolResponse(raw)
     expect(result.text).toBe('Hello World')
     expect(result.details).not.toBeNull()
     expect(result.details!.traceId).toBe('trace-1')
-    expect(result.details!.generation).toBe(3)
   })
 
   it('handles plain text (non-JSON)', () => {

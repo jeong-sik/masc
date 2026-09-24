@@ -599,6 +599,19 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
   | Ok _ -> ()
 ;;
 
+(* The client reaches MASC tools through this handler, so entering it is the
+   observed fact that an effect was attempted. Record it before the call: the
+   handler may commit and then raise or be cancelled, and observing only its
+   return would reopen a duplicate-effect window. *)
+let recording_effect_attempt ~effect_disposition (tool : Host.dynamic_tool) =
+  { tool with
+    Host.call =
+      (fun ~call_id input ->
+        Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted;
+        tool.call ~call_id input)
+  }
+;;
+
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection_for
@@ -845,7 +858,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
-    let dynamic_tools = host_dynamic_tools in
+    let dynamic_tools =
+      List.map (recording_effect_attempt ~effect_disposition) host_dynamic_tools
+    in
     let* () =
       match
         Runtime_claude_code.validate_turn
@@ -939,7 +954,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~on_result_handoff:on_official_client_result_handoff
         ()
     in
-    let dynamic_tools = host_dynamic_tools in
+    let dynamic_tools =
+      List.map (recording_effect_attempt ~effect_disposition) host_dynamic_tools
+    in
     let* claimed_session =
       match
         Session_store.claim_with_context_frontier
@@ -1220,7 +1237,19 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
               Atomic.set
                 effect_disposition
                 Keeper_provider_attempt_effect.No_effect_observed
-            | _ -> ());
+            | Runtime_claude_code.Turn_failed_with_observation _
+            | Runtime_claude_code.Quota_blocked _
+            | Runtime_claude_code.Context_window_exceeded _
+            | Runtime_claude_code.Turn_transport_interrupted _
+            | Runtime_claude_code.Invalid_config _
+            | Runtime_claude_code.Spawn_failed _
+            | Runtime_claude_code.Protocol_error _
+            | Runtime_claude_code.Subscription_required _
+            | Runtime_claude_code.Unsupported_control_request _
+            | Runtime_claude_code.Turn_failed _
+            | Runtime_claude_code.Stopped_by_host _
+            | Runtime_claude_code.Process_exited _
+            | Runtime_claude_code.Timeout _ -> ());
            if not !state_persistence_failed
            then
              recovery_failure :=
@@ -1414,9 +1443,12 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
        spent 29 minutes per attempt discovering it (2026-08-24). A runtime
        that declares nothing starts unbounded.
 
-       The ceiling is the model's max-prompt-bytes. keeper_unified_turn
-       already sizes the pinned briefing from the same number and says the
-       projection cuts the conversation window; this is that cut. *)
+       The ceiling is this runtime's own max-prompt-bytes. The pinned
+       briefing was sized earlier from the smallest max-prompt-bytes among
+       the candidates the turn's walk holds
+       ([Keeper_turn_runtime_budget.world_state_briefing_budget_bytes]). That
+       budget can only withhold [Own_recent_actions] rows, so it does not
+       promise a fit; the shrink below cuts only the conversation window. *)
     Option.value
       (Runtime.max_prompt_bytes_of_runtime_id runtime_id)
       ~default:unbounded_model_input_capacity_bytes

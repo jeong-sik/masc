@@ -235,7 +235,7 @@ let frozen_operator_disposition (receipt : R.t)
   then R.Disp_fail_open_next_runtime, R.Reason_runtime_exhausted
   else if
     String.equal terminal_reason Keeper_internal_error.incomplete_tool_transcript_kind
-  then R.Disp_unknown, R.Reason_transcript_corruption
+  then R.Disp_operator_action_required, R.Reason_transcript_corruption
   else if
     String.equal
       terminal_reason
@@ -246,12 +246,12 @@ let frozen_operator_disposition (receipt : R.t)
     String.equal
       terminal_reason
       Keeper_internal_error.provider_attempt_effect_fenced_kind
-  then R.Disp_unknown, R.Reason_provider_attempt_effect_fenced
+  then R.Disp_effect_review_required, R.Reason_provider_attempt_effect_fenced
   else if
     String.equal terminal_reason Keeper_internal_error.tool_correction_lost_kind
-  then R.Disp_unknown, R.Reason_tool_correction_lost
+  then R.Disp_effect_review_required, R.Reason_tool_correction_lost
   else if String.equal terminal_reason "terminal_effect_failed"
-  then R.Disp_unknown, R.Reason_terminal_effect_failed
+  then R.Disp_effect_review_required, R.Reason_terminal_effect_failed
   else if config_invalid
   then R.Disp_operator_action_required, R.Reason_config_invalid
   else if authorization_refused
@@ -432,9 +432,12 @@ let () =
         terminal_reason_code = Keeper_internal_error.incomplete_tool_transcript_kind
       }
   in
+  (* Nothing was dispatched, so there is no effect to review, and the broken
+     history fails every later turn until an operator purges it. *)
   check
-    "transcript corruption stays a typed alert, not a pause"
-    (transcript_corruption = (R.Disp_unknown, R.Reason_transcript_corruption));
+    "transcript corruption asks the operator to repair the history"
+    (transcript_corruption
+     = (R.Disp_operator_action_required, R.Reason_transcript_corruption));
   check
     "transcript corruption emits operator broadcast"
     (R.needs_operator_broadcast (fst transcript_corruption));
@@ -544,8 +547,12 @@ let () =
       }
   in
   check
-    "tool-correction-lost keeps operator attention with its own typed reason"
-    (lost_disposition = (R.Disp_unknown, R.Reason_tool_correction_lost));
+    "tool-correction-lost asks for an effect review under its own typed reason"
+    (lost_disposition
+     = (R.Disp_effect_review_required, R.Reason_tool_correction_lost));
+  check
+    "tool-correction-lost emits an operator broadcast"
+    (R.needs_operator_broadcast (fst lost_disposition));
   check
     "tool-correction-lost reason has the canonical dashboard wire"
     (String.equal
@@ -553,20 +560,26 @@ let () =
        lost_wire);
   let unmapped_metric = Keeper_metrics.(to_string ReceiptUnmappedDisposition) in
   let unmapped_before = Masc.Otel_metric_store.metric_value_or_zero unmapped_metric () in
-  let fenced_disposition =
-    R.operator_disposition
-      { base_receipt with
-        terminal_reason_code = fenced_wire
-      ; error_kind = Some (R.error_kind_of_string "internal")
-      ; outcome = `Error
-      ; runtime_outcome = R.Runtime_failed
-      }
+  let fenced_receipt =
+    { base_receipt with
+      terminal_reason_code = fenced_wire
+    ; error_kind = Some (R.error_kind_of_string "internal")
+    ; outcome = `Error
+    ; runtime_outcome = R.Runtime_failed
+    }
   in
+  let fenced_disposition = R.operator_disposition fenced_receipt in
   let unmapped_after = Masc.Otel_metric_store.metric_value_or_zero unmapped_metric () in
   check
-    "provider-attempt fence keeps operator attention with a typed reason"
+    "provider-attempt fence asks for an effect review with a typed reason"
     (fenced_disposition
-     = (R.Disp_unknown, R.Reason_provider_attempt_effect_fenced));
+     = (R.Disp_effect_review_required, R.Reason_provider_attempt_effect_fenced));
+  (* What an operator and the dashboard read is the receipt row, so check the
+     wire it carries, not only the pair. *)
+  check
+    "a fenced receipt row carries effect_review_required"
+    (Json_util.get_string (R.to_json fenced_receipt) "operator_disposition"
+     = Some "effect_review_required");
   check
     "provider-attempt fence reason has the canonical dashboard wire"
     (String.equal
@@ -705,6 +718,7 @@ let operator_disposition_kinds =
   ; R.Disp_retry_later
   ; R.Disp_pass_next_model
   ; R.Disp_operator_action_required
+  ; R.Disp_effect_review_required
   ; R.Disp_user_cancelled
   ; R.Disp_skipped
   ; R.Disp_unknown
@@ -804,6 +818,84 @@ let () =
     "test_keeper_terminal_reason_typed: matrix cases=%d mismatches=%d\n"
     !count
     !mismatches
+;;
+
+(* [Disp_unknown] means the classifier had no arm for the receipt, and the arm
+   that returns it is the one that pairs it with [Reason_unmapped_runtime_state]
+   and counts [ReceiptUnmappedDisposition]. So for every receipt the three
+   agree. A known cause that returns [Disp_unknown] from its own arm breaks the
+   agreement: its arm names its own reason and counts nothing (#38414). The
+   walk covers every receipt field the classifier branches on. *)
+let () =
+  let unmapped_metric = Keeper_metrics.(to_string ReceiptUnmappedDisposition) in
+  let shown_disagreements = 10 in
+  let disagreements = ref [] in
+  List.iter
+    (fun code ->
+       List.iter
+         (fun outcome ->
+            List.iter
+              (fun runtime_outcome ->
+                 List.iter
+                   (fun degraded ->
+                      List.iter
+                        (fun runtime_fallback_applied ->
+                           let degraded_retry_applied, degraded_retry_deferred =
+                             degraded_lanes_of_case degraded
+                           in
+                           let receipt =
+                             { base_receipt with
+                               terminal_reason_code = code
+                             ; outcome
+                             ; runtime_outcome
+                             ; degraded_retry_applied
+                             ; degraded_retry_deferred
+                             ; runtime_fallback_applied
+                             }
+                           in
+                           let before =
+                             Masc.Otel_metric_store.metric_value_or_zero
+                               unmapped_metric
+                               ()
+                           in
+                           let disposition, reason = R.operator_disposition receipt in
+                           let after =
+                             Masc.Otel_metric_store.metric_value_or_zero
+                               unmapped_metric
+                               ()
+                           in
+                           let unknown = disposition = R.Disp_unknown in
+                           let unmapped_reason =
+                             reason = R.Reason_unmapped_runtime_state
+                           in
+                           let counted = not (Float.equal before after) in
+                           if not (unknown = unmapped_reason && unknown = counted)
+                           then
+                             disagreements
+                             := Printf.sprintf
+                                  "code=%S out=%s ro=%s deg=%s fb=%b got=%s counted=%b"
+                                  code
+                                  (R.outcome_kind_to_string outcome)
+                                  (R.runtime_outcome_to_string runtime_outcome)
+                                  (degraded_lane_label degraded)
+                                  runtime_fallback_applied
+                                  (disp_pair_to_string (disposition, reason))
+                                  counted
+                                :: !disagreements)
+                        fallback_bools)
+                   degraded_cases)
+              runtime_outcomes)
+         outcomes)
+    codes;
+  let disagreements = List.rev !disagreements in
+  check
+    (Printf.sprintf
+       "Disp_unknown comes only from the unmapped arm (%d disagreement(s)): %s"
+       (List.length disagreements)
+       (String.concat
+          "; "
+          (List.filteri (fun index _ -> index < shown_disagreements) disagreements)))
+    (disagreements = [])
 ;;
 
 let () =
@@ -1372,8 +1464,130 @@ max-concurrent = 1
   check
     "same-conversation counter regression is not guessed to be a reset"
     (regressed.status = Masc.Keeper_usage_resolution.Counter_regressed
-     && Option.is_none regressed.delta
-     && retained_cursor = cumulative.runtime.usage_cursor);
+     && Option.is_none regressed.delta);
+  check
+    "a counter regression re-baselines the cursor on the observed value"
+    (retained_cursor
+     = Some
+         { Masc.Keeper_usage_resolution.runtime_id = "antigravity"
+         ; conversation_id = "conversation-1"
+         ; cumulative = regressed_usage
+         });
+  (* #32463: after a regression the counter climbs again from the lower
+     value. The next round stays below the old peak (9_000), so against a
+     cursor kept on that peak it was Counter_regressed again and the totals
+     stayed stopped until the counter passed 9_000. Only the regressed turn
+     may be lost. *)
+  let dropped_usage =
+    { cumulative_usage with input_tokens = 4_000; output_tokens = 400 }
+  in
+  let dropped =
+    reactive_success
+      ~prior:cumulative
+      ~usage:dropped_usage
+      ~usage_scope:Runtime_usage_scope.Conversation_cumulative
+      ~usage_basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Masc.Keeper_usage_resolution.Resumed
+           })
+      ~last_outcome:KMC.Proactive_unknown
+      ~last_reason:"regressed cumulative usage"
+      ()
+  in
+  check
+    "the regressed turn adds nothing to the totals"
+    (dropped.runtime.usage.total_input_tokens = 9_100
+     && dropped.runtime.usage.total_output_tokens = 920
+     && Float.equal dropped.runtime.usage.total_cost_usd 13.5);
+  check
+    "the regressed turn is recorded as a counter regression"
+    (match dropped.runtime.last_usage_resolution with
+     | Some resolution ->
+       resolution.status = Masc.Keeper_usage_resolution.Counter_regressed
+       && Option.is_none resolution.delta
+     | None -> false);
+  let climbing_usage =
+    { cumulative_usage with
+      input_tokens = 4_500
+    ; output_tokens = 450
+    ; cost_usd = Some 12.3
+    }
+  in
+  let climbing_sample =
+    Masc.Keeper_usage_resolution.sample_of_api_usage climbing_usage
+  in
+  let stalled, _ =
+    Masc.Keeper_usage_resolution.resolve
+      ~cursor:cumulative.runtime.usage_cursor
+      ~basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Masc.Keeper_usage_resolution.Resumed
+           })
+      ~observation:(Some climbing_sample)
+      ~observed_at:44.25
+  in
+  check
+    "against the old peak the next round is the stall #32463 reports"
+    (stalled.status = Masc.Keeper_usage_resolution.Counter_regressed
+     && Option.is_none stalled.delta);
+  let climbing =
+    reactive_success
+      ~prior:dropped
+      ~usage:climbing_usage
+      ~usage_scope:Runtime_usage_scope.Conversation_cumulative
+      ~usage_basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Masc.Keeper_usage_resolution.Resumed
+           })
+      ~last_outcome:KMC.Proactive_unknown
+      ~last_reason:"cumulative usage after a regression"
+      ()
+  in
+  check
+    "the round after a regression adds only its exact delta"
+    (climbing.runtime.usage.total_input_tokens = 9_600
+     && climbing.runtime.usage.total_output_tokens = 970
+     && Float.abs (climbing.runtime.usage.total_cost_usd -. 13.8) < 0.000_001);
+  check
+    "the round after a regression is exact again"
+    (match climbing.runtime.last_usage_resolution with
+     | Some resolution ->
+       resolution.status = Masc.Keeper_usage_resolution.Exact
+       && Option.is_some resolution.delta
+     | None -> false);
+  (* The trade the re-baseline makes, pinned so it reads as a choice and not
+     a bug: if the lower value had been a transient frame, the next turn
+     that climbs past the old peak is charged from the lower cursor. Here
+     4_500 -> 9_500 adds +5_000, once, where keeping the old peak would have
+     counted nothing until 9_000 was passed. *)
+  let past_peak_usage =
+    { climbing_usage with input_tokens = 9_500; output_tokens = 950 }
+  in
+  let past_peak =
+    reactive_success
+      ~prior:climbing
+      ~usage:past_peak_usage
+      ~usage_scope:Runtime_usage_scope.Conversation_cumulative
+      ~usage_basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Masc.Keeper_usage_resolution.Resumed
+           })
+      ~last_outcome:KMC.Proactive_unknown
+      ~last_reason:"cumulative usage past the old peak"
+      ()
+  in
+  check
+    "climbing past the old peak is charged from the re-baselined cursor"
+    (past_peak.runtime.usage.total_input_tokens = 14_600
+     && past_peak.runtime.usage.total_output_tokens = 1_470);
   let cost_regressed_usage =
     { resumed_usage with cost_usd = Some 11.0 }
     |> Masc.Keeper_usage_resolution.sample_of_api_usage
@@ -1942,7 +2156,22 @@ let () =
     "the bare kind still decodes to the same variant"
     (match Tr.of_wire Keeper_internal_error.terminal_effect_failed_kind with
      | Tr.Terminal_effect_failed _ -> true
-     | _ -> false)
+     | _ -> false);
+  let disposition =
+    R.operator_disposition
+      { base_receipt with
+        terminal_reason_code = wire
+      ; error_kind = Some (R.error_kind_of_string "internal")
+      ; outcome = `Error
+      ; runtime_outcome = R.Runtime_failed
+      }
+  in
+  check
+    "a receipt on that wire asks for an effect review"
+    (disposition = (R.Disp_effect_review_required, R.Reason_terminal_effect_failed));
+  check
+    "a receipt on that wire emits an operator broadcast"
+    (R.needs_operator_broadcast (fst disposition))
 ;;
 
 (* RFC-0454 D1: a terminal effect failure says what failed as a typed value,
@@ -2473,6 +2702,176 @@ let () =
               { retry_after = None; message = "slow down" })))
        .Keeper_request_failure_core.message
      = "Rate limited: slow down")
+;;
+
+(* masc#38417: on every decision row [runtime_id] is the keeper's lane and
+   [executed_runtime_id] the candidate that answered. The pair lives in
+   [provider_context] alone, and model metrics credit a row from there. The
+   keeper is assigned [lane]; its successful turn is answered by the lane's
+   second candidate, and its failed turn names the head runtime it dispatched. *)
+let () =
+  with_temp_dir "keeper-decision-row-lane" @@ fun workspace_dir ->
+  let keeper_name = "decision-row-lane" in
+  let lane = "decision-lane" in
+  let head_runtime = "primary.test_model" in
+  let answering_runtime = "fallback.test_model" in
+  let config = Masc.Workspace.default_config workspace_dir in
+  let meta : KMC.keeper_meta =
+    meta_fixture_exn
+      (`Assoc
+        [ "name", `String keeper_name
+        ; "trace_id", `String "trace-decision-row-lane"
+        ])
+  in
+  let meta =
+    { meta with runtime =
+        { meta.runtime with usage =
+            { meta.runtime.usage with total_turns = 1 } } }
+  in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  ignore (Masc.Workspace.init config ~agent_name:(Some "test"));
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot) @@ fun () ->
+  let runtime_path = Filename.concat workspace_dir "runtime.toml" in
+  Fs_compat.save_file runtime_path
+    (Printf.sprintf {|
+[runtime]
+default = "%s"
+[runtime.lanes.%s]
+candidates = ["%s", "%s"]
+[runtime.assignments]
+%s = "%s"
+[providers.primary]
+display-name = "Primary Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[providers.fallback]
+display-name = "Fallback Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+[primary.test_model]
+is-default = true
+max-concurrent = 1
+[fallback.test_model]
+max-concurrent = 1
+|}
+       head_runtime lane head_runtime answering_runtime keeper_name lane);
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> () | Error detail -> failwith detail);
+  let observation =
+    let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates () in
+    Runtime_observation.runtime_observation_with_metrics
+      ~runtime_id:answering_runtime ~selected_model_raw:None ~capture ()
+  in
+  let prompt_metrics =
+    Masc.Keeper_agent_prompt_metrics.build_prompt_metrics
+      ~system_prompt:"" ~dynamic_context:"" ~user_message:""
+  in
+  let ctx_composition : Masc.Keeper_agent_prompt_metrics.ctx_composition_metrics =
+    { actual_input_tokens = None
+    ; attribution =
+        Masc.Keeper_agent_prompt_metrics.Not_measured
+          Masc.Keeper_agent_prompt_metrics.Dispatch_not_reached
+    }
+  in
+  let tool_surface : Masc.Keeper_agent_tool_surface.tool_surface_metrics =
+    { turn_lane = Masc.Keeper_agent_tool_surface.Lane_tool_optional
+    ; config_root = ""
+    ; runtime_config_path = None
+    }
+  in
+  let answered_result : Masc.Keeper_agent_run.run_result =
+    { response_text = "answered on the lane's second candidate"
+    ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
+    ; terminal_effect_receipt = None
+    ; model_used = "test-model"
+    ; runtime_id = answering_runtime
+    ; max_context = 1000
+    ; prompt_metrics
+    ; ctx_composition
+    ; runtime_observation = Some observation
+    ; cooperative_boundary = None
+    ; turn_count = 1
+    ; final_agent_core_turn_ordinal = 0
+    ; usage = Masc.Inference_utils.zero_usage
+    ; usage_reported = true
+    ; usage_scope = Runtime_usage_scope.Per_request
+    ; usage_basis = Masc.Keeper_usage_resolution.Per_request
+    ; tool_calls = []
+    ; completion_contract_result = R.Completion_tool_execution_observed
+    ; operator_disposition = None
+    ; official_client_settlement = None
+    ; checkpoint = None
+    ; trace_ref = None
+    ; run_validation = None
+    ; stop_reason = Runtime_agent.Completed
+    ; inference_telemetry = None
+    ; tool_surface
+    }
+  in
+  let world =
+    Masc.Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
+  in
+  let log_path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
+  let append_and_read ~outcome ~result ?executed_runtime_id () =
+    Masc.Keeper_unified_metrics_decision.append_decision_record
+      ~config ~meta ~observation:world ~latency_ms:3 ~outcome
+      ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+      ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
+      ~degraded_retry_applied:None ~degraded_retry_deferred:None
+      ~result ?executed_runtime_id ();
+    Fs_compat.load_file log_path |> String.split_on_char '\n'
+    |> List.filter (fun row -> row <> "") |> List.rev |> List.hd
+    |> Yojson.Safe.from_string
+  in
+  let member_at row outer inner =
+    Yojson.Safe.Util.(row |> member outer |> member inner)
+  in
+  let answered =
+    append_and_read ~outcome:"success" ~result:(Some answered_result) ()
+  in
+  check "an observed success row keeps the lane in provider_context.runtime_id"
+    (member_at answered "provider_context" "runtime_id" = `String lane);
+  check "an observed success row names the answerer in provider_context.executed_runtime_id"
+    (member_at answered "provider_context" "executed_runtime_id"
+     = `String answering_runtime);
+  check "an observed success row does not repeat the pair in telemetry"
+    (member_at answered "telemetry" "runtime_id" = `Null
+     && member_at answered "telemetry" "executed_runtime_id" = `Null);
+  let aggregate =
+    Model_inference_metrics.compute ~base_path:workspace_dir ~window_minutes:60
+  in
+  check "model metrics credit the observed success to the answerer, not the lane"
+    (List.map
+       (fun (stats : Model_inference_metrics.model_stats) -> stats.model_id)
+       aggregate.models
+     = [ answering_runtime ^ " (runtime)" ]);
+  (* No run result: the turn failed and only the runtime walk's own report
+     names who was dispatched. *)
+  let failed =
+    append_and_read ~outcome:"error" ~result:None ~executed_runtime_id:head_runtime ()
+  in
+  check "a failed row without a run result keeps the lane in provider_context.runtime_id"
+    (member_at failed "provider_context" "runtime_id" = `String lane);
+  check "a failed row names the dispatched candidate in provider_context.executed_runtime_id"
+    (member_at failed "provider_context" "executed_runtime_id" = `String head_runtime);
+  check "a failed row without a run result does not repeat the pair in telemetry"
+    (member_at failed "telemetry" "runtime_id" = `Null
+     && member_at failed "telemetry" "executed_runtime_id" = `Null);
+  let aggregate =
+    Model_inference_metrics.compute ~base_path:workspace_dir ~window_minutes:60
+  in
+  check "model metrics credit the failed row to the dispatched candidate"
+    (List.exists
+       (fun (stats : Model_inference_metrics.model_stats) ->
+          String.equal stats.model_id (head_runtime ^ " (runtime)"))
+       aggregate.models)
 ;;
 
 let () =

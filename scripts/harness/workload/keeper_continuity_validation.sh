@@ -33,13 +33,16 @@ MCP_URL="${MCP_URL:-}"
 MCP_TOKEN="${MASC_TOKEN:-}"
 KEEPER_RUNTIME_NAME="${KEEPER_RUNTIME_NAME:-}"
 KEEPER_NAME="${KEEPER_NAME:-continuity-${RUN_ID}}"
-TARGET_PHASES="${TARGET_PHASES:-bootstrap,liveness,continuity,handoff,recovery}"
-MAX_TURNS="${MAX_TURNS:-4}"
+# The phases this harness runs, in run order.
+KNOWN_PHASES=(bootstrap liveness continuity recovery)
+TARGET_PHASES="${TARGET_PHASES:-bootstrap,liveness,continuity,recovery}"
 TURN_TIMEOUT_SEC="${TURN_TIMEOUT_SEC:-90}"
 HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-20}"
 HEARTBEAT_WAIT_SEC="${HEARTBEAT_WAIT_SEC:-15}"
 PRESSURE_BYTES="${PRESSURE_BYTES:-20000}"
 PRESSURE_PAUSE_SEC="${PRESSURE_PAUSE_SEC:-1}"
+# A turn this recent counts as the one the phase just drove.
+RECENT_TURN_MAX_AGE_SEC=120
 
 SERVER_PID=""
 SERVER_LOG="$RUN_DIR/server.log"
@@ -51,13 +54,10 @@ KEEPER_STOPPED=0
 BOOTSTRAP_PASS=0
 LIVENESS_PASS=0
 CONTINUITY_PASS=0
-HANDOFF_PASS=0
 RECOVERY_PASS=0
 LATEST_INPUT_PREVIEW=""
 LATEST_OUTPUT_PREVIEW=""
 LATEST_TRACE_ID=""
-LATEST_GENERATION=""
-LATEST_HANDOFFS=""
 LATEST_HEALTH=""
 LATEST_HEARTBEAT=""
 LAST_TOOL_RAW=""
@@ -90,6 +90,27 @@ phase_enabled() {
     *,"$1",*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# A phase this harness does not run is refused, not skipped: a skipped name
+# would read as a phase that was checked.
+require_known_phases() {
+  local phase known
+  local -a requested
+  # One or more names joined by single commas. An empty list, a stray comma,
+  # a space or a newline would select no phase and still classify the run.
+  if [[ ! "$TARGET_PHASES" =~ ^[a-z]+(,[a-z]+)*$ ]]; then
+    echo "TARGET_PHASES must be phase names joined by commas: '$TARGET_PHASES' (known: ${KNOWN_PHASES[*]})" >&2
+    return 1
+  fi
+  IFS=',' read -r -a requested <<<"$TARGET_PHASES"
+  for phase in "${requested[@]}"; do
+    for known in "${KNOWN_PHASES[@]}"; do
+      [[ "$phase" == "$known" ]] && continue 2
+    done
+    echo "unknown phase in TARGET_PHASES: $phase (known: ${KNOWN_PHASES[*]})" >&2
+    return 1
+  done
 }
 
 require_cmd() {
@@ -280,25 +301,28 @@ tool_json() {
   printf '%s' "$text" | jq -c '.'
 }
 
+# The Keeper can take a turn: its keepalive loop runs and the registry reports
+# a running, alive fiber. These are the fields masc_keeper_status emits.
+keeper_is_live() {
+  [[ "$(printf '%s' "$1" | jq -r '(.keepalive_running == true) and (.runtime.phase == "running") and (.runtime.fiber_health == "alive")')" == "true" ]]
+}
+
+# The last turn ended within RECENT_TURN_MAX_AGE_SEC. A missing age is not
+# recent.
+last_turn_is_recent() {
+  [[ "$(printf '%s' "$1" | jq -r --argjson max "$RECENT_TURN_MAX_AGE_SEC" '(.last_turn_ago_s | type) == "number" and .last_turn_ago_s < $max')" == "true" ]]
+}
+
 refresh_latest_evidence_from_status() {
   local status_json="$1"
   [[ -z "$status_json" ]] && return 0
   LATEST_TRACE_ID="$(printf '%s' "$status_json" | jq -r '.meta.trace_id // ""')"
-  LATEST_GENERATION="$(printf '%s' "$status_json" | jq -r '.generation // .meta.generation // ""')"
-  LATEST_HANDOFFS="$(printf '%s' "$status_json" | jq -r '.handoff_count_total // ""')"
-  LATEST_HEALTH="$(printf '%s' "$status_json" | jq -r '.diagnostic.health_state // ""')"
-  if [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running // false')" == "true" ]] \
-    && [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists // false')" == "true" ]]; then
-    LATEST_HEARTBEAT="workspace-keepalive-active"
+  LATEST_HEALTH="$(printf '%s' "$status_json" | jq -r '"phase=\(.runtime.phase // "none") fiber=\(.runtime.fiber_health // "none")"')"
+  if keeper_is_live "$status_json"; then
+    LATEST_HEARTBEAT="keeper-live"
   else
-    LATEST_HEARTBEAT="workspace-keepalive-missing"
+    LATEST_HEARTBEAT="keeper-not-live"
   fi
-}
-
-heartbeat_contains_agent() {
-  local heartbeat_text="$1"
-  local agent_name="$2"
-  printf '%s' "$heartbeat_text" | grep -F "agent=$agent_name" >/dev/null 2>&1
 }
 
 keeper_status_json() {
@@ -448,8 +472,7 @@ wait_for_bootstrap() {
   local status_json
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
     status_json="$(keeper_status_json)"
-    if [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running')" == "true" ]] \
-      && [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists')" == "true" ]]; then
+    if keeper_is_live "$status_json"; then
       return 0
     fi
     sleep 1
@@ -458,13 +481,11 @@ wait_for_bootstrap() {
 }
 
 wait_for_restarted_heartbeat() {
-  local _agent_name="$1"
   local deadline=$(( $(date +%s) + HEARTBEAT_WAIT_SEC ))
   local status_json
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
     status_json="$(keeper_status_json)"
-    if [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running')" == "true" ]] \
-      && [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists')" == "true" ]]; then
+    if keeper_is_live "$status_json"; then
       return 0
     fi
     sleep 1
@@ -581,7 +602,7 @@ phase_report_string() {
 run_dry_run() {
   local phase snapshot_file heartbeat_file
   write_text "$SERVER_LOG" "dry-run mode: no live MCP calls executed"
-  for phase in bootstrap liveness continuity handoff recovery; do
+  for phase in "${KNOWN_PHASES[@]}"; do
     [[ -n "$TARGET_PHASES" ]] && ! phase_enabled "$phase" && continue
     snapshot_file="$SNAP_DIR/${phase}-keeper-status.json"
     heartbeat_file="$SNAP_DIR/${phase}-heartbeat.txt"
@@ -592,13 +613,10 @@ run_dry_run() {
   BOOTSTRAP_PASS=2
   LIVENESS_PASS=2
   CONTINUITY_PASS=2
-  HANDOFF_PASS=2
   RECOVERY_PASS=2
   LATEST_INPUT_PREVIEW="[simulated] dry-run validation input"
   LATEST_OUTPUT_PREVIEW="[simulated] dry-run validation output"
   LATEST_TRACE_ID="trace-dry-run-simulated"
-  LATEST_GENERATION="0"
-  LATEST_HANDOFFS="0"
   LATEST_HEALTH="simulated"
   LATEST_HEARTBEAT="simulated"
 }
@@ -631,19 +649,17 @@ finalize_report() {
   local bootstrap_ok="$BOOTSTRAP_PASS"
   local liveness_ok="$LIVENESS_PASS"
   local continuity_ok="$CONTINUITY_PASS"
-  local handoff_ok="$HANDOFF_PASS"
   local recovery_ok="$RECOVERY_PASS"
   if ! phase_enabled bootstrap; then bootstrap_ok=1; fi
   if ! phase_enabled liveness; then liveness_ok=1; fi
   if ! phase_enabled continuity; then continuity_ok=1; fi
-  if ! phase_enabled handoff; then handoff_ok=1; fi
   if ! phase_enabled recovery; then recovery_ok=1; fi
 
   if [[ "$(normalize_bool "$DRY_RUN")" == "1" ]]; then
     classification="DRY_RUN"
     VALIDATION_EXIT_CODE=2
   elif [[ $bootstrap_ok -eq 1 && $liveness_ok -eq 1 && $continuity_ok -eq 1 ]]; then
-    if [[ $handoff_ok -eq 1 && $recovery_ok -eq 1 ]]; then
+    if [[ $recovery_ok -eq 1 ]]; then
       classification="PASS"
       VALIDATION_EXIT_CODE=0
     else
@@ -668,8 +684,6 @@ finalize_report() {
     --arg latest_input_preview "$LATEST_INPUT_PREVIEW" \
     --arg latest_output_preview "$LATEST_OUTPUT_PREVIEW" \
     --arg latest_trace_id "$LATEST_TRACE_ID" \
-    --arg latest_generation "$LATEST_GENERATION" \
-    --arg latest_handoffs "$LATEST_HANDOFFS" \
     --arg latest_health "$LATEST_HEALTH" \
     --arg latest_heartbeat "$LATEST_HEARTBEAT" \
     --arg target_phases "$TARGET_PHASES" \
@@ -677,12 +691,10 @@ finalize_report() {
     --argjson bootstrap_pass "$( [[ $BOOTSTRAP_PASS -eq 1 ]] && echo true || echo false )" \
     --argjson liveness_pass "$( [[ $LIVENESS_PASS -eq 1 ]] && echo true || echo false )" \
     --argjson continuity_pass "$( [[ $CONTINUITY_PASS -eq 1 ]] && echo true || echo false )" \
-    --argjson handoff_pass "$( [[ $HANDOFF_PASS -eq 1 ]] && echo true || echo false )" \
     --argjson recovery_pass "$( [[ $RECOVERY_PASS -eq 1 ]] && echo true || echo false )" \
     --argjson target_bootstrap "$( phase_enabled bootstrap && echo true || echo false )" \
     --argjson target_liveness "$( phase_enabled liveness && echo true || echo false )" \
     --argjson target_continuity "$( phase_enabled continuity && echo true || echo false )" \
-    --argjson target_handoff "$( phase_enabled handoff && echo true || echo false )" \
     --argjson target_recovery "$( phase_enabled recovery && echo true || echo false )" \
     '{
       run_id:$run_id,
@@ -701,8 +713,6 @@ finalize_report() {
         latest_input_preview:$latest_input_preview,
         latest_output_preview:$latest_output_preview,
         latest_trace_id:$latest_trace_id,
-        latest_generation:$latest_generation,
-        latest_handoffs:$latest_handoffs,
         latest_health:$latest_health,
         latest_heartbeat:$latest_heartbeat
       },
@@ -710,7 +720,6 @@ finalize_report() {
         bootstrap:{selected:$target_bootstrap,pass:$bootstrap_pass},
         liveness:{selected:$target_liveness,pass:$liveness_pass},
         continuity:{selected:$target_continuity,pass:$continuity_pass},
-        handoff:{selected:$target_handoff,pass:$handoff_pass},
         recovery:{selected:$target_recovery,pass:$recovery_pass}
       },
       runtime_truth_proven: ($classification == "PASS" and ( $dry_run | not ))
@@ -734,7 +743,6 @@ finalize_report() {
 | bootstrap | $(phase_report_string bootstrap "$BOOTSTRAP_PASS") |
 | liveness | $(phase_report_string liveness "$LIVENESS_PASS") |
 | continuity | $(phase_report_string continuity "$CONTINUITY_PASS") |
-| handoff | $(phase_report_string handoff "$HANDOFF_PASS") |
 | recovery | $(phase_report_string recovery "$RECOVERY_PASS") |
 
 ## Evidence
@@ -742,8 +750,6 @@ finalize_report() {
 - Latest health: \`$LATEST_HEALTH\`
 - Latest liveness signal: \`$LATEST_HEARTBEAT\`
 - Latest trace: \`$LATEST_TRACE_ID\`
-- Generation: \`$LATEST_GENERATION\`
-- Handoffs: \`$LATEST_HANDOFFS\`
 - Recent input preview: $LATEST_INPUT_PREVIEW
 - Recent output preview: $LATEST_OUTPUT_PREVIEW
 
@@ -758,8 +764,8 @@ EOF
 EOF
   else
     cat >>"$RUN_DIR/summary.md" <<'EOF'
-- **PASS**: real live keeper continuity proven. Heartbeat, completed turns, typed checkpoint messages, handoff, and restart recovery all produced runtime evidence.
-- **PARTIAL**: keeper was live and a typed checkpoint was observed, but one or more lifecycle transitions did not happen within the validation window.
+- **PASS**: real live keeper continuity proven. Heartbeat, completed turns, typed checkpoint messages, and restart recovery all produced runtime evidence.
+- **PARTIAL**: keeper was live and a typed checkpoint was observed, but restart recovery did not happen within the validation window.
 - **FAIL**: the typed checkpoint and lifecycle evidence required for live continuity was not observed.
 EOF
   fi
@@ -798,9 +804,7 @@ EOF
 }
 
 real_run() {
-  local status_json heartbeat_output snapshot_info snapshot_file heartbeat_file workspace_file
-  local baseline_generation baseline_handoffs baseline_trace
-  local turn status_after heartbeat_after agent_name handoff_done
+  local status_json snapshot_info snapshot_file heartbeat_file status_after
 
   require_cmd jq || { echo "jq is required" >&2; return 1; }
   require_cmd curl || { echo "curl is required" >&2; return 1; }
@@ -849,14 +853,11 @@ real_run() {
     heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
     status_json="$(cat "$snapshot_file")"
     refresh_latest_evidence_from_status "$status_json"
-    heartbeat_output="$(cat "$heartbeat_file")"
-    agent_name="$(printf '%s' "$status_json" | jq -r '.meta.agent_name')"
-    if [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running')" == "true" ]] \
-      && [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists')" == "true" ]]; then
+    if keeper_is_live "$status_json"; then
       BOOTSTRAP_PASS=1
-      append_phase "bootstrap" "pass" "isolated keeper started with active keepalive and workspace presence" "$snapshot_file" "$heartbeat_file"
+      append_phase "bootstrap" "pass" "isolated keeper started with a running keepalive and an alive fiber" "$snapshot_file" "$heartbeat_file"
     else
-      append_phase "bootstrap" "fail" "keeper started but workspace presence/keepalive were not observed" "$snapshot_file" "$heartbeat_file"
+      append_phase "bootstrap" "fail" "keeper started but its keepalive or fiber was not live" "$snapshot_file" "$heartbeat_file"
       return 1
     fi
   fi
@@ -890,27 +891,16 @@ real_run() {
     heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
     status_json="$(cat "$snapshot_file")"
     refresh_latest_evidence_from_status "$status_json"
-    heartbeat_output="$(cat "$heartbeat_file")"
-    agent_name="$(printf '%s' "$status_json" | jq -r '.meta.agent_name')"
-    if [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists')" == "true" ]] \
+    if keeper_is_live "$status_json" \
       && [[ "$(printf '%s' "$status_json" | jq -r "(((.meta.total_turns | tonumber?) // 0) > ($baseline_turns | tonumber))")" == "true" ]] \
-      && [[ "$(printf '%s' "$status_json" | jq -r '.last_turn_ago_s < 120')" == "true" ]] \
-      && [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running')" == "true" ]]; then
+      && last_turn_is_recent "$status_json"; then
       LIVENESS_PASS=1
-      append_phase "liveness" "pass" "live keeper turn observed with workspace presence and recent output" "$snapshot_file" "$heartbeat_file"
+      append_phase "liveness" "pass" "live keeper turn observed with a live fiber and recent output" "$snapshot_file" "$heartbeat_file"
     else
       append_phase "liveness" "fail" "keeper metadata exists but no fresh live turn was proven" "$snapshot_file" "$heartbeat_file"
       return 1
     fi
   fi
-
-  snapshot_info="$(capture_snapshot baseline)"
-  snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
-  status_json="$(cat "$snapshot_file")"
-  baseline_generation="$(printf '%s' "$status_json" | jq -r '((.generation // .meta.generation) | tonumber?) // 0')"
-  baseline_handoffs="$(printf '%s' "$status_json" | jq -r '(.handoff_count_total | tonumber?) // 0')"
-  baseline_trace="$(printf '%s' "$status_json" | jq -r '.meta.trace_id')"
-  handoff_done=0
 
   if phase_enabled continuity; then
     local continuity_baseline_turns
@@ -950,49 +940,9 @@ real_run() {
     fi
   fi
 
-  for turn in $(seq 2 "$MAX_TURNS"); do
-    if ! phase_enabled handoff; then
-      break
-    fi
-    if ! send_keeper_message "$((1400 + turn))" "$(pressure_prompt "$turn")"; then
-      break
-    fi
-    sleep "$PRESSURE_PAUSE_SEC"
-    snapshot_info="$(capture_snapshot "pressure-${turn}")"
-    snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
-    heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
-    status_after="$(cat "$snapshot_file")"
-    refresh_latest_evidence_from_status "$status_after"
-
-    if [[ $handoff_done -eq 0 ]] \
-      && { [[ "$(printf '%s' "$status_after" | jq -r '((((.generation // .meta.generation) | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_generation")" == "true" ]] \
-        || [[ "$(printf '%s' "$status_after" | jq -r '(((.handoff_count_total | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_handoffs")" == "true" ]] \
-        || [[ "$(printf '%s' "$status_after" | jq -r '.meta.trace_id != $old' --arg old "$baseline_trace")" == "true" ]]; }; then
-      HANDOFF_PASS=1
-      handoff_done=1
-      append_phase "handoff" "pass" "handoff/generation evidence changed under isolated pressure" "$snapshot_file" "$heartbeat_file"
-      baseline_generation="$(printf '%s' "$status_after" | jq -r '((.generation // .meta.generation) | tonumber?) // 0')"
-      baseline_handoffs="$(printf '%s' "$status_after" | jq -r '(.handoff_count_total | tonumber?) // 0')"
-      baseline_trace="$(printf '%s' "$status_after" | jq -r '.meta.trace_id')"
-    fi
-
-    if [[ $handoff_done -eq 1 ]]; then
-      break
-    fi
-  done
-
-  if phase_enabled handoff && [[ $HANDOFF_PASS -eq 0 ]]; then
-    snapshot_info="$(capture_snapshot handoff-miss)"
-    snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
-    heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
-    append_phase "handoff" "fail" "handoff evidence did not appear within the validation window" "$snapshot_file" "$heartbeat_file"
-  fi
-
   if phase_enabled recovery; then
     status_json="$(keeper_status_json)"
-    agent_name="$(printf '%s' "$status_json" | jq -r '.meta.agent_name')"
     LATEST_TRACE_ID="$(printf '%s' "$status_json" | jq -r '.meta.trace_id')"
-    LATEST_GENERATION="$(printf '%s' "$status_json" | jq -r '.generation // .meta.generation // ""')"
     if ! stop_keeper false false; then
       snapshot_info="$(capture_snapshot recovery-down)"
       snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
@@ -1007,7 +957,7 @@ real_run() {
         append_phase "recovery" "fail" "keeper_up restart failed: $LAST_TOOL_ERROR" "$snapshot_file" "$heartbeat_file"
       else
         KEEPER_STOPPED=0
-        if ! wait_for_restarted_heartbeat "$agent_name"; then
+        if ! wait_for_restarted_heartbeat; then
           snapshot_info="$(capture_snapshot recovery-restart)"
           snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
           heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
@@ -1024,9 +974,7 @@ real_run() {
           heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
           status_after="$(cat "$snapshot_file")"
           refresh_latest_evidence_from_status "$status_after"
-          if [[ "$(printf '%s' "$status_after" | jq -r '.keepalive_running')" == "true" ]] \
-            && [[ "$(printf '%s' "$status_after" | jq -r '.last_turn_ago_s < 120')" == "true" ]] \
-            && [[ "$(printf '%s' "$status_after" | jq -r '.agent.exists')" == "true" ]]; then
+          if keeper_is_live "$status_after" && last_turn_is_recent "$status_after"; then
             if load_checkpoint_evidence "$status_after"; then
               append_phase "checkpoint_truth" "pass" "checkpoint contains ${CHECKPOINT_MESSAGE_COUNT} typed messages after restart" "$snapshot_file" "$heartbeat_file"
               RECOVERY_PASS=1
@@ -1048,6 +996,7 @@ real_run() {
 }
 
 main() {
+  require_known_phases || exit 2
   if [[ "$(normalize_bool "$DRY_RUN")" == "1" ]]; then
     run_dry_run
     finalize_report

@@ -18313,6 +18313,12 @@ def dashboard_usage_interaction(
     plain = unwrapped(screen_text(bytes(output)))
     if b"UTC days reported" not in plain or b"Keeper usage" not in plain:
         raise AssertionError(f"Usage evidence and coverage missing: {plain!r}")
+    for scope_prefix in (
+        hashlib.md5(b"provider:fixture").hexdigest()[:8].encode(),
+        hashlib.md5(b"provider:fixture-alt").hexdigest()[:8].encode(),
+    ):
+        if scope_prefix not in plain:
+            raise AssertionError(f"Usage merged or hid quota scope {scope_prefix!r}: {plain!r}")
     print("USAGE_PTY_SCREEN=" + json.dumps(plain.decode("utf-8", errors="replace")), flush=True)
     send_and_wait(process, master_fd, output, b"p", b"MASC Usage / Telemetry")
     send_and_wait(process, master_fd, output, b"3", b"Gate Governance")
@@ -18329,6 +18335,8 @@ def run_dashboard_usage_regression(executable: str) -> None:
     now = time.time()
     scope = "provider:fixture"
     scope_id = hashlib.md5(scope.encode()).hexdigest()
+    second_scope = "provider:fixture-alt"
+    second_scope_id = hashlib.md5(second_scope.encode()).hexdigest()
     status, runtime = runtime_resolved_response()
     assert status == 200 and isinstance(runtime, dict)
     runtime["provider_usage_windows"] = [
@@ -18341,6 +18349,21 @@ def run_dashboard_usage_regression(executable: str) -> None:
                     "limit_id": None,
                     "window": {"kind": "five_hour"},
                     "utilization": {"unit": "fraction", "value": 0.4},
+                    "resets_at": None,
+                    "observed_at": now,
+                    "source": "fixture",
+                }
+            ],
+        },
+        {
+            "scope": second_scope,
+            "providers": ["fixture-alt"],
+            "state": "reported",
+            "windows": [
+                {
+                    "limit_id": None,
+                    "window": {"kind": "five_hour"},
+                    "utilization": {"unit": "fraction", "value": 0.8},
                     "resets_at": None,
                     "observed_at": now,
                     "source": "fixture",
@@ -18408,6 +18431,16 @@ def run_dashboard_usage_regression(executable: str) -> None:
                             "limit_id": None,
                             "unit": "fraction",
                             "value": 0.4,
+                            "observed_at": now,
+                            "source": "fixture",
+                            "resets_at": None,
+                        },
+                        {
+                            "scope_id": second_scope_id,
+                            "kind": "five_hour",
+                            "limit_id": None,
+                            "unit": "fraction",
+                            "value": 0.8,
                             "observed_at": now,
                             "source": "fixture",
                             "resets_at": None,

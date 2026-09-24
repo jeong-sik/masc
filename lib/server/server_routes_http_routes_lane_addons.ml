@@ -122,8 +122,8 @@ let get_action request reqd =
     respond request reqd result) request reqd
 
 (* The source kinds [live] can watch: the ones with a machine screen behind
-   them. Another machine is one more constructor here and one arm in
-   [live_json]. *)
+   them. Another machine is one more constructor here and one arm each in
+   [live_from_published_mark] and [live_json]. *)
 type screen_source = Msx_screen | Dos_screen
 
 let screen_source_kind = function
@@ -176,18 +176,30 @@ let screen_json ~width ~height ~rgb =
   "screen", `Assoc [ "format", `String "rgb8"; "width", `Int width; "height", `Int height
                    ; "rgb_base64", `String (Base64.encode_string rgb) ]
 
+type live_answer = Answered of Yojson.Safe.t | Needs_locked_read
+
 (* The lock-free half of a live read. [current] is the machine's published
    mark, read without its lock. No machine and a [since] that still names it
    are answered here, on the request fiber, with no systhread; only a mark
-   that moved goes to [read], which takes the machine lock and so runs in a
-   systhread. *)
-let answer_live source ~since ~current ~read =
+   that moved needs the locked read, which runs in a systhread. *)
+let answer_from_mark source ~since ~current =
   match current, since with
-  | None, (Some _ | None) -> no_machine_json source
+  | None, (Some _ | None) -> Answered (no_machine_json source)
   | Some (count, incarnation), Some seen
     when seen.count = count && String.equal seen.incarnation incarnation ->
-      `Assoc (marked_json source "unchanged" ~count ~incarnation)
-  | Some _, (Some _ | None) -> Eio_unix.run_in_systhread read
+      Answered (`Assoc (marked_json source "unchanged" ~count ~incarnation))
+  | Some _, (Some _ | None) -> Needs_locked_read
+
+let live_from_published_mark source ~since =
+  let current =
+    match source with
+    | Msx_screen ->
+        Option.map (fun { Msx_lane.count; incarnation } -> (count, incarnation))
+          (Msx_lane.current_mark ())
+    | Dos_screen ->
+        Option.map (fun { Dos_lane.count; incarnation } -> (count, incarnation))
+          (Dos_lane.current_mark ()) in
+  answer_from_mark source ~since ~current
 
 (* The locked half: the lane compares again and copies under one hold, so a
    Changed mark always names its pixels. It writes nothing. *)
@@ -215,17 +227,12 @@ let dos_live source ~since () : Yojson.Safe.t =
             ~rgb:frame.Dos_lane.rgb ])
 
 let live_json source ~since : Yojson.Safe.t =
-  match source with
-  | Msx_screen ->
-      let current =
-        Option.map (fun { Msx_lane.count; incarnation } -> (count, incarnation))
-          (Msx_lane.current_mark ()) in
-      answer_live source ~since ~current ~read:(msx_live source ~since)
-  | Dos_screen ->
-      let current =
-        Option.map (fun { Dos_lane.count; incarnation } -> (count, incarnation))
-          (Dos_lane.current_mark ()) in
-      answer_live source ~since ~current ~read:(dos_live source ~since)
+  match live_from_published_mark source ~since with
+  | Answered json -> json
+  | Needs_locked_read ->
+      (match source with
+       | Msx_screen -> Eio_unix.run_in_systhread (msx_live source ~since)
+       | Dos_screen -> Eio_unix.run_in_systhread (dos_live source ~since))
 
 let get_live request reqd =
   with_read_auth (fun _state _request reqd ->

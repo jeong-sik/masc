@@ -208,9 +208,13 @@ let test_decode_live_query () =
 let hello_com =
   "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$"
 
-(* lea ax, ax: an instruction the core does not implement, so every run faults
-   at its first instruction and [steps] never moves. *)
-let fault_com = "\x8d\xc0"
+(* lea ax, ax: an instruction the core does not implement. Cpu86 raises after
+   fetching the opcode and the modrm byte and leaves IP past them, so the next
+   run starts at the next instruction; past the image memory is zero, and
+   00 00 (add [bx+si], al) runs fine. One copy per run attempt -- the load's
+   boot, then one step -- makes every attempt fault at its first instruction
+   and [steps] never move. *)
+let fault_com = "\x8d\xc0\x8d\xc0"
 
 let who = "live-test"
 let dos_ok what = function
@@ -514,34 +518,37 @@ let test_live_route () =
           let since =
             "&since=" ^ string_of_int (int_member "change_count" json)
             ^ "&incarnation=" ^ string_member "incarnation" json in
-          (* Asked while [pass] holds the machine lock: an unchanged answer
+          let dos_since =
+            Some
+              { Routes.count = int_member "change_count" json
+              ; incarnation = string_member "incarnation" json } in
+          (* Decided while [pass] holds the machine lock: an unchanged answer
              must come from the published mark. Taking the lock on this
-             thread would raise. Waiting for it in a systhread cannot be cut
-             short: [Eio_unix.run_in_systhread] ignores cancellation once the
-             job is handed over, so a timeout would hang with it. Instead the
-             GET runs in its own fiber, which runs until it first suspends.
-             The lock-free answer never suspends, so it is in [held] before
-             [announce] returns. A route that waits for the lock suspends
-             there; [announce] then returns, [pass] lets go of the lock, the
-             systhread takes it and answers, and the switch joins the fiber,
-             so the test fails instead of hanging. *)
+             thread raises (the stdlib mutex checks its owner). The request
+             itself is not forked here: every authenticated GET suspends in
+             the auth lookup's systhread file read before it reaches the
+             route, so whether it finished before [announce] returned says
+             nothing about the machine lock. *)
           let held = ref None in
-          let answered_under_lock = ref false in
-          Eio.Switch.run (fun get_sw ->
-            dos_ok "pass"
-              (Dos_lane.pass ~who ~to_:(Some who)
-                 ~announce:(fun () ->
-                   Eio.Fiber.fork ~sw:get_sw (fun () ->
-                     held := Some (get (dos_live ^ since)));
-                   answered_under_lock := Option.is_some !held)));
-          check bool "unchanged is answered while the lock is held" true !answered_under_lock;
+          dos_ok "pass"
+            (Dos_lane.pass ~who ~to_:(Some who)
+               ~announce:(fun () ->
+                 held := Some (Routes.live_from_published_mark Routes.Dos_screen ~since:dos_since)));
           (match !held with
-           | Some response ->
-               check int "unchanged under a held lock is a 200" 200 (status_of_response response);
-               check string "unchanged under a held lock" "unchanged"
-                 (string_member "state" (body_json response))
+           | Some (Routes.Answered json) ->
+               check string "unchanged is decided under a held lock" "unchanged"
+                 (string_member "state" json)
+           | Some Routes.Needs_locked_read -> fail "a current since asked for the locked read"
            | None -> fail "announce did not run");
+          let same = body_json (get (dos_live ^ since)) in
+          check string "since at the current DOS count is unchanged" "unchanged"
+            (string_member "state" same);
+          check bool "unchanged sends no DOS screen" true (member "screen" same = None);
           dos_ok "press" (Dos_lane.press ~who ~keys:["x"] ~steps:100_000);
+          check bool "a moved DOS mark needs the locked read" true
+            (match Routes.live_from_published_mark Routes.Dos_screen ~since:dos_since with
+             | Routes.Needs_locked_read -> true
+             | Routes.Answered _ -> false);
           check string "a press makes the old DOS since stale" "changed"
             (string_member "state" (body_json (get (dos_live ^ since))))))))
 

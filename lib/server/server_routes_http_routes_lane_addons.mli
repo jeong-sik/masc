@@ -24,3 +24,17 @@ val decode_live_query :
     [since] that is not decimal digits, and [since] or [incarnation] alone are
     errors. *)
 
+(** What a live read can say from the published mark alone. *)
+type live_answer =
+  | Answered of Yojson.Safe.t
+      (** No machine, or a [since] that still names the current mark
+          ([state] ["unchanged"]). *)
+  | Needs_locked_read
+      (** The mark moved or no [since] was given: the frame has to be copied
+          under the machine lock. *)
+
+val live_from_published_mark : screen_source -> since:since option -> live_answer
+(** The first step of [GET /api/v1/lane-addons/live]. It reads the machine's
+    published mark without taking the machine lock and never suspends, so a
+    spectator whose [since] is current is answered while a run holds the
+    lock. *)

@@ -546,7 +546,14 @@ let test_memory_header_rows_come_out_of_the_budget () =
         (Printf.sprintf "%d columns draws inside its budget" cols)
         true
         (rows_drawn ~cols ~budget:20 state <= 20))
-    [ 80; 100; 140 ]
+    [ 80; 100; 140 ];
+  let compact = body_lines ~cols:80 ~budget:20 state in
+  check bool "a short frame names hidden detail rows" true
+    (List.exists (contains "Keeper detail rows hidden") compact);
+  check bool "a short frame keeps the selected Keeper" true
+    (List.exists (contains "alpha") compact);
+  check bool "a short frame keeps the detail's last reading" true
+    (List.exists (contains "vision ingest errors 0") compact)
 ;;
 
 
@@ -1775,7 +1782,7 @@ let test_render_memory_overflow_selection () =
      rows as the list, and this fixture's frame is 22 rows: a terminal tall
      enough to show the roster spends the row against many more. *)
   check int "five keepers fit one list row beside their context" 1
-    (height (Render_memory.memory_overview_scrolled ~cols:100 state));
+    (height (Render_memory.memory_overview_scrolled ~cols:100 ~budget state));
   let assert_selected_visible () =
     let used = ref 0 and selected = ref None in
     let push _ = incr used in
@@ -1787,12 +1794,14 @@ let test_render_memory_overflow_selection () =
       ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
     let expected = Option.get (Types.selected_memory_keeper state) in
     check bool "the selected keeper is inside the visible body" true
-      (Option.fold ~none:false ~some:(contains expected.mkh_keeper_id) !selected)
+      (Option.fold ~none:false ~some:(contains expected.mkh_keeper_id) !selected);
+    check bool "header, roster, overflow and detail fit their shared budget" true
+      (rows_drawn ~cols:100 ~budget state <= budget)
   in
   (* Move through an overflowing list using the same target-row layout as
      keyboard input, including the context of the newly selected keeper. *)
   for cursor = 0 to 4 do
-    let layout = Render_memory.memory_overview_scrolled ~cols:100 ~cursor state in
+    let layout = Render_memory.memory_overview_scrolled ~cols:100 ~budget ~cursor state in
     state.memory_health_cursor <- cursor;
     state.memory_health_scroll <-
       Masc_tui_scroll.ensure_visible ~cursor ~height:(height layout)
@@ -1800,11 +1809,11 @@ let test_render_memory_overflow_selection () =
     assert_selected_visible ()
   done;
   check int "the final row's error and alert leave one list row" 1
-    (height (Render_memory.memory_overview_scrolled ~cols:100 state));
+    (height (Render_memory.memory_overview_scrolled ~cols:100 ~budget state));
   check int "the final row requires scrolling" 4 state.memory_health_scroll;
   state.search_last <- "keeper-4";
   state.memory_health_error <- Some "refresh failed";
-  let layout = Render_memory.memory_overview_scrolled ~cols:100 state in
+  let layout = Render_memory.memory_overview_scrolled ~cols:100 ~budget state in
   check int "filter bounds the cursor to the one visible keeper" 1 layout.sc_count;
   check (option (list string)) "search names the same filtered row"
     (Some ["keeper-4 read-error"]) (Types.surface_row_texts state Types.Memory);

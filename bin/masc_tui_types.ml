@@ -9056,8 +9056,10 @@ let memory_overview_scrolled ~header_rows ~context_rows (state : state) =
   { sc_count = count
   ; sc_chrome =
       Masc_tui_frame.chrome_rows
-      (* The fleet header, then legend, sort, divider, headings, divider. *)
-      + header_rows + 5 + context_rows
+      (* Sort, two dividers and headings always draw; the context divider
+         draws only when there are selected Keeper detail rows. *)
+      + header_rows + 4 + context_rows
+      + (if context_rows > 0 then 1 else 0)
       + (if memory_overview_query state <> "" then 1 else 0)
       + (if Option.is_some state.memory_health_error then 2 else 0)
       + refused_rows

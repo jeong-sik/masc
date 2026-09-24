@@ -775,17 +775,57 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
    above the list, and the selected keeper's block below it. Neither is a
    count of readings -- a reading breaks into as many rows as the frame
    gives it. *)
-let memory_overview_scrolled ~cols ?cursor (state : state) =
+(* The header and selected Keeper's detail share one finite body with the
+   roster. If their wrapped rows do not fit, show both ends when there is room
+   and say how many rows are hidden. A one-row slot shows only that omission,
+   rather than pretending that a clipped alert is complete. *)
+let fold_memory_rows ~subject ~max_rows rows =
+  let count = List.length rows in
+  if count <= max_rows then rows
+  else if max_rows <= 0 then []
+  else
+    let leading = (max_rows - 1) / 2 in
+    let trailing = max_rows - 1 - leading in
+    let hidden = count - leading - trailing in
+    let note =
+      Printf.sprintf "  … %d %s rows hidden; enlarge terminal" hidden subject
+    in
+    List.filteri (fun index _ -> index < leading) rows
+    @ [ note ]
+    @ List.filteri (fun index _ -> index >= count - trailing) rows
+
+let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   let keepers = visible_memory_keepers state in
   let cursor = Option.value cursor ~default:state.memory_health_cursor in
-  let context_rows =
+  let context =
     match List.nth_opt keepers (max 0 (min cursor (List.length keepers - 1))) with
-    | None -> 0
-    | Some keeper -> List.length (memory_context_lines ~cols keeper)
+    | None -> []
+    | Some keeper -> memory_context_lines ~cols keeper
   in
+  let base = memory_overview_scrolled ~header_rows:0 ~context_rows:0 state in
+  (* The context divider needs a row only when the detail itself is shown. *)
+  let fixed_rows = base.sc_chrome - Masc_tui_frame.chrome_rows in
+  (* A nonempty list needs one selected row; a longer list also needs its
+     overflow line. The empty state needs one explanation row. *)
+  let list_rows = if List.length keepers > 1 then 2 else 1 in
+  let header =
+    memory_fleet_header_rows ~cols state
+    |> fold_memory_rows ~subject:"Memory summary"
+         ~max_rows:(max 0 (budget - fixed_rows - list_rows))
+  in
+  let context =
+    let available = budget - fixed_rows - list_rows - List.length header in
+    if context = [] || available <= 1 then []
+    else
+      fold_memory_rows ~subject:"Keeper detail"
+        ~max_rows:(available - 1) context
+  in
+  header, context
+
+let memory_overview_scrolled ~cols ~budget ?cursor (state : state) =
+  let header, context = memory_overview_rows ~cols ~budget ?cursor state in
   memory_overview_scrolled
-    ~header_rows:(List.length (memory_fleet_header_rows ~cols state))
-    ~context_rows state
+    ~header_rows:(List.length header) ~context_rows:(List.length context) state
 
 let render_memory_body ~cols ~budget (state : state)
     ~(push : string -> unit)
@@ -810,7 +850,8 @@ let render_memory_body ~cols ~budget (state : state)
       (Theme.recede ()) Ansi.reset
       (Theme.recede ()) Ansi.reset
   in
-  List.iter push (memory_fleet_header_rows ~cols state);
+  let header_rows, context_lines = memory_overview_rows ~cols ~budget state in
+  List.iter push header_rows;
   push info_bar;
   let search_bar =
     (* The one value the list was filtered by. [visible_memory_keepers] narrows
@@ -859,12 +900,7 @@ let render_memory_body ~cols ~budget (state : state)
   let cursor =
     if shown = 0 then 0 else max 0 (min state.memory_health_cursor (shown - 1))
   in
-  let context_lines =
-    match List.nth_opt keepers cursor with
-    | None -> []
-    | Some k -> memory_context_lines ~cols k
-  in
-  let layout = memory_overview_scrolled ~cols ~cursor state in
+  let layout = memory_overview_scrolled ~cols ~budget ~cursor state in
   let rows = budget + Masc_tui_frame.chrome_rows in
   let available = max 1 (rows - layout.sc_chrome) in
   let overflowing = shown > available in

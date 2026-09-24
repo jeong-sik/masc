@@ -49,14 +49,14 @@ let keeper_trust_json ?(include_receipt = false)
         match latest_receipt with
         | Some receipt -> Option.value ~default:(`String "no_receipt") (Json_util.assoc_member_opt "terminal_reason_code" receipt)
         | None -> `String "no_receipt" );
+      (* The receipt's disposition as the trust snapshot parsed it: [null]
+         when there is no receipt, or when the receipt's kind is not one the
+         receipt module writes. The compact trust projections copy the same
+         two fields from the same snapshot. *)
       ( "operator_disposition",
-        match latest_receipt with
-        | Some receipt -> Option.value ~default:(`String "not_run") (Json_util.assoc_member_opt "operator_disposition" receipt)
-        | None -> `String "not_run" );
+        Option.value ~default:`Null (Json_util.assoc_member_opt "operator_disposition" runtime_trust) );
       ( "operator_disposition_reason",
-        match latest_receipt with
-        | Some receipt -> Option.value ~default:(`String "no_receipt") (Json_util.assoc_member_opt "operator_disposition_reason" receipt)
-        | None -> `String "no_receipt" );
+        Option.value ~default:`Null (Json_util.assoc_member_opt "operator_disposition_reason" runtime_trust) );
       ( "completion_contract_result",
         match latest_receipt with
         (* Missing receipt field stays a UI marker; this is not a runtime
@@ -94,3 +94,18 @@ let keeper_trust_json ?(include_receipt = false)
         else
           `Null );
     ]
+
+(* The trust fields of the row shown for a Keeper whose dashboard row could
+   not be built. No receipt was read for it, so it reports no operator
+   disposition: the snapshot's serializer writes [null] for both fields. *)
+let degraded_keeper_trust_json ~site ~attention_reason =
+  `Assoc
+    (Keeper_runtime_trust_snapshot.trust_model_json_fields
+       { Keeper_runtime_trust_snapshot_core.disposition = "Degraded"
+       ; disposition_reason = site
+       ; receipt_operator_disposition = None
+       ; needs_attention = true
+       ; attention_reason = Some attention_reason
+       ; next_human_action = Some "inspect_keeper_dashboard_worker"
+       })
+;;

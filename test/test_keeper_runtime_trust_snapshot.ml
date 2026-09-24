@@ -855,6 +855,124 @@ let test_a_damaged_receipt_disposition_relays_nothing () =
          (Yojson.Safe.Util.to_string reason))
 ;;
 
+(* The dashboard's per-Keeper trust object writes the receipt's operator
+   disposition as the trust snapshot parsed it. With no receipt, or with a
+   receipt whose kind the receipt module does not write, both fields are
+   null. A whole pair is relayed as the snapshot relays it. *)
+let test_dashboard_trust_relays_the_snapshot_operator_disposition () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "dashboard-trust-operator-disposition" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       let append ~ended_at disposition_fields =
+         Dated_jsonl.append
+           receipt_store
+           (`Assoc
+               ([ "ended_at", `String ended_at
+                ; "terminal_reason_code", `String "success"
+                ; "completion_contract_result", `String "not_dispatched"
+                ]
+                @ disposition_fields))
+       in
+       let operator_fields json =
+         let open Yojson.Safe.Util in
+         member "operator_disposition" json, member "operator_disposition_reason" json
+       in
+       let dashboard_and_snapshot () =
+         ( operator_fields (Dashboard_http_keeper_trust.keeper_trust_json config meta)
+         , operator_fields (K.summary_json ~config ~meta) )
+       in
+       let entry =
+         Masc.Keeper_registry.For_testing.register
+           ~base_path:config.base_path meta.name meta
+       in
+       Fun.protect
+         ~finally:(fun () -> ignore (Masc.Keeper_registry.unregister_exact entry))
+         (fun () ->
+            let dashboard, snapshot = dashboard_and_snapshot () in
+            Alcotest.(check bool)
+              "no receipt: no operator disposition"
+              true
+              (dashboard = (`Null, `Null));
+            Alcotest.(check bool) "no receipt: same as the snapshot" true (dashboard = snapshot);
+            append
+              ~ended_at:"2026-06-01T00:00:00Z"
+              [ "operator_disposition", `String "blocked_runtime"
+              ; "operator_disposition_reason", `String "runtime_blocked"
+              ];
+            let dashboard, snapshot = dashboard_and_snapshot () in
+            Alcotest.(check bool)
+              "an unknown kind is not relayed"
+              true
+              (dashboard = (`Null, `Null));
+            Alcotest.(check bool) "unknown kind: same as the snapshot" true (dashboard = snapshot);
+            append
+              ~ended_at:"2026-06-01T00:01:00Z"
+              [ "operator_disposition", `String "effect_review_required"
+              ; "operator_disposition_reason", `String "provider_attempt_effect_fenced"
+              ];
+            let dashboard, snapshot = dashboard_and_snapshot () in
+            Alcotest.(check bool)
+              "a whole pair is relayed"
+              true
+              (dashboard
+               = (`String "effect_review_required", `String "provider_attempt_effect_fenced"));
+            Alcotest.(check bool) "whole pair: same as the snapshot" true (dashboard = snapshot)))
+;;
+
+(* The row shown when a Keeper's dashboard row could not be built read no
+   receipt, so it reports no operator disposition. It writes the snapshot's
+   decision fields and no others. *)
+let test_degraded_dashboard_trust_reports_no_operator_disposition () =
+  let module Core = Masc.Keeper_runtime_trust_snapshot_core in
+  let trust =
+    Dashboard_http_keeper_trust.degraded_keeper_trust_json
+      ~site:"keeper_dashboard_worker_exception"
+      ~attention_reason:"worker raised"
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool)
+    "no operator disposition"
+    true
+    (member "operator_disposition" trust = `Null);
+  Alcotest.(check bool)
+    "no operator disposition reason"
+    true
+    (member "operator_disposition_reason" trust = `Null);
+  Alcotest.(check string)
+    "the failed site is the reason"
+    "keeper_dashboard_worker_exception"
+    (member "disposition_reason" trust |> to_string);
+  Alcotest.(check string)
+    "the caught error is the attention reason"
+    "worker raised"
+    (member "attention_reason" trust |> to_string);
+  Alcotest.(check bool) "a person looks at it" true (member "needs_attention" trust |> to_bool);
+  let decision_fields =
+    K.trust_model_json_fields
+      { Core.disposition = "any"
+      ; disposition_reason = "any"
+      ; receipt_operator_disposition = None
+      ; needs_attention = false
+      ; attention_reason = None
+      ; next_human_action = None
+      }
+    |> List.map fst
+  in
+  Alcotest.(check (list string)) "the snapshot's decision fields" decision_fields (keys trust)
+;;
+
 let test_model_observability_uses_runtime_trust_selected_model () =
   let runtime_trust =
     `Assoc
@@ -1152,6 +1270,14 @@ let () =
             test_trust_relays_only_a_shown_receipt_operator_disposition
         ; Alcotest.test_case "a damaged receipt disposition relays nothing" `Quick
             test_a_damaged_receipt_disposition_relays_nothing
+        ; Alcotest.test_case
+            "dashboard trust relays the snapshot's operator disposition"
+            `Quick
+            test_dashboard_trust_relays_the_snapshot_operator_disposition
+        ; Alcotest.test_case
+            "degraded dashboard trust reports no operator disposition"
+            `Quick
+            test_degraded_dashboard_trust_reports_no_operator_disposition
         ; Alcotest.test_case
             "missing runtime attempt does not fabricate active_model"
             `Quick

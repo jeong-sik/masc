@@ -268,14 +268,27 @@ previous  = { reference = "…", digest = "sha256:…" }
 
 ### 2.4 런타임: 이름 → 버전 → 실제 VM
 
-1. Keeper TOML 을 읽을 때(`load_profile_doc_content`, 턴마다 다시 읽힌다) `sandbox_image`
-   이름으로 라이브 목록을 찾는다. 그 뒤의 런타임 경로는 지금처럼 태그 문자열을 받는다.
-   - `Promoted` 면 그 `ref` 와 `digest` 가 턴의 샌드박스 설정에 들어간다.
-   - `Not_built_on_host` 면 턴을 거절한다. 사유는 `Image_not_built_on_host { name }` 이고,
-     운영자가 칠 명령(`masc sandbox-image build <이름>` 과 `promote`)을 함께 적는다.
-   - 라이브 목록을 읽지 못하면 `Image_catalog_unreadable` 로 거절한다. 권위 있는
-     저장소를 못 읽으면 진행하지 않는다(constitution `authoritative_read_only`).
-   - 로드한 뒤에 이름이 목록에서 빠지면 다음 턴에 모르는 이름과 같이 거절한다.
+1. 턴이 처음 컨테이너를 요청할 때(`Keeper_sandbox_factory`) `sandbox_image` 이름으로
+   라이브 목록을 한 번 찾고, 그 턴이 끝날 때까지 그 답을 쓴다. 턴의 런타임은 그 답을
+   받아서 띄운다(`Keeper_turn_sandbox_runtime.create ~image`). 턴 밖에서 컨테이너를
+   띄우는 경로(`keeper sandbox start`, docker 한 번 실행, 읽기 fallback)는 띄울 때마다
+   한 번 찾는다(`Keeper_sandbox_image_resolver.for_keeper`).
+   - TOML 을 읽을 때 풀지 않는 까닭: 설정 저장이 `meta.sandbox_image` 를 TOML 에 다시
+     쓴다(`keeper_turn_up_config_persistence.ml`). 읽을 때 태그로 바꾸면 이름 자리에
+     태그가 저장된다. 이미지 저장소도 TOML 이 아니라 `sandbox_profile` 과
+     `microvm_backend` 로 정해진다.
+   - 턴 안에서 한 번만 찾는 까닭: 턴 중간에 promote 가 들어와도 한 턴의 컨테이너가 두
+     빌드로 갈리지 않는다. promote 는 다음 턴부터 닿는다.
+   - promote 된 빌드가 있으면 그 `reference` 로 띄운다.
+   - `Not_built_on_host` 면 띄우지 않는다. 사유에 운영자가 칠 명령(`masc sandbox-image
+     --recipe <이름>` 과 `promote`, 저장소에 따라 `--source`·`--runtime`)을 함께 적는다.
+   - 라이브 목록을 읽지 못하면 띄우지 않는다. 권위 있는 저장소를 못 읽으면 진행하지
+     않는다(constitution `authoritative_read_only`).
+   - 이름이 목록에 없으면 목록에 있는 이름을 함께 적어 거절한다.
+   - 이미지가 필요 없는 경로(호스트 경로 격리 검사, 공유 마운트 읽기)는 이 실패로
+     멈추지 않는다. 실패는 컨테이너를 실제로 띄우는 순간에 드러난다.
+   - docker keeper 는 `keeper up` 에서 이름이 풀리는지 먼저 본다. preflight 를 꺼도
+     이 확인은 한다. 목록 읽기는 daemon 을 건드리지 않는다.
 2. 백엔드가 `ref@digest` 로 실행을 받으면 digest 로 띄운다. nerdctl 은 이미 받는다
    (`keeper_sandbox_microvm.ml:532-546`). Apple `container` 는 확인하지 않았다(§8).
    받지 않으면 `ref` 로 띄운다.
@@ -452,9 +465,10 @@ constitution `<gates>` 는 하드 게이트를 기본으로 두지 말라고 한
 | A | `sandbox-images/` 레시피·`common-packages.txt`·`tools.toml`, 태그 계산, `masc sandbox-image build`, §2.6 확인, 바이너리에 `base` 레시피를 dune rule 로 넣기 | — |
 | B1a | 목록 파서·타입·이름 해석·promote·rollback·저장(#38745) | — |
 | B1b-1 | `masc sandbox-image promote`/`rollback` 명령, 배포 목록과 레시피 이름 일치 검사 | A, B1a |
-| B1b-2 | Keeper TOML 을 읽을 때 이름을 풀고 typed 거절(hard cut), setup 이 `base` 를 목록에 올림 | B1b-1 |
-| B1b-3 | env·내장 기본값·`image_source`·자동 빌드 삭제 | B1b-2 |
-| B2 | `sandbox_image = "` 98곳과 관련 스크립트·문서를 이름으로 바꾸는 스크립트와 그 결과(B1b-2 와 같은 PR) | B1b-1 |
+| B1b-2a | 이름을 목록에서 찾아 promote 된 빌드를 돌려주는 해석기와 typed 거절(#38770) | B1b-1 |
+| B1b-2b | 컨테이너를 띄우는 곳이 모두 해석기를 쓴다. 턴마다 한 번 찾는다. env·내장 기본값·`image_source` 삭제 | B1b-2a |
+| B2 | `sandbox_image = "` 98곳과 관련 스크립트·문서를 이름으로 바꾸는 스크립트와 그 결과, TOML 을 읽을 때 이름 모양이 아니면 거절. B1b-2b 와 함께 배포한다 | B1b-2b |
+| B1b-3 | setup 이 `base` 를 빌드해 목록에 올림, microVM 자동 빌드 삭제, 모든 profile 의 `keeper up` 이름 확인 | B2 |
 | C | 실제 digest 기록·비교, `Image_drift`, 상태·영수증·TUI 표시(#36993 image 축) | B1b-2 |
 | D | `rust`, `web`, `media` 이미지, 크기 실측 | A |
 | E | CI 트리거 확장, 모든 이미지 빌드·확인, CI 의 테스트용 이미지를 목록으로 쓰기 | A, B1b-2 |

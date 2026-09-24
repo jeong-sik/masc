@@ -204,7 +204,6 @@ describe('normalizeOperatorSnapshot', () => {
           phase: 'paused',
           pipeline_stage: 'paused',
           paused: true,
-          generation: 10,
           active_model: 'claude-sonnet',
         },
         { name: 'alice', status: 'Idle' },
@@ -215,7 +214,6 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.keepers[0]!.phase).toBe('paused')
     expect(result.keepers[0]!.pipeline_stage).toBe('paused')
     expect(result.keepers[0]!.paused).toBe(true)
-    expect(result.keepers[0]!.generation).toBe(10)
     expect(result.keepers[0]!.model).toBe('runtime')
   })
 

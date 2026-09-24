@@ -39,7 +39,6 @@ export type ToolCallPathResolution = {
 // goal_ids, keeper_turn_id, sandbox_profile) are not repeated here.
 export type ToolCallRuntimeContract = {
   keeper_name?: string
-  generation?: number
   sandbox_root?: string
   sandbox_roots?: string[]
   path_resolution?: ToolCallPathResolution
@@ -214,7 +213,6 @@ function decodeRuntimeContract(raw: unknown): ToolCallRuntimeContract | undefine
   if (!isRecord(raw)) return undefined
   return {
     keeper_name: asString(raw.keeper_name),
-    generation: asNumber(raw.generation),
     sandbox_root: asString(raw.sandbox_root),
     sandbox_roots: asStringArray(raw.sandbox_roots),
     path_resolution: decodePathResolution(raw.path_resolution),

@@ -160,7 +160,6 @@ const metricSeriesPoint = {
   ts_unix: 1_744_186_600,
   context_ratio: 0.4,
   latency_ms: 1200,
-  generation: 3,
   channel: 'turn',
 }
 

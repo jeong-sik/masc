@@ -769,7 +769,6 @@ export interface KeeperConversationDetails {
   traceId?: string | null
   turnRef?: string | null
   providerMessageId?: string | null
-  generation?: number | null
   modelUsed?: string | null
   stopReason?: string | null
   latencyMs?: number | null
@@ -1638,7 +1637,6 @@ interface KeeperConfigSources {
 }
 
 interface KeeperConfigMetrics {
-  generation: number
   total_turns: number
   total_input_tokens: number
   total_output_tokens: number

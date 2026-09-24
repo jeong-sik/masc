@@ -140,7 +140,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       override_field_sources: [],
     },
     metrics: {
-      generation: 3,
       total_turns: 12,
       total_input_tokens: 1200,
       total_output_tokens: 800,

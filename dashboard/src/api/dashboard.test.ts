@@ -498,7 +498,6 @@ describe('keeper tool telemetry fetchers', () => {
               keeper_name: 'keeper-alpha',
               trace_id: 'trace-1',
               session_id: 'trace-1',
-              generation: 1,
               keeper_turn_id: 29567,
               task_id: null,
               goal_ids: [],
@@ -563,7 +562,6 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.prompt_fingerprint).toBe('464ce7b3280c24fe1cbdcd990a70db87')
     expect(entry?.runtime_contract).toMatchObject({
       keeper_name: 'keeper-alpha',
-      generation: 1,
       sandbox_root: '/sandbox/keeper-alpha/',
       sandbox_roots: ['.masc/playground/keeper-alpha/'],
       network_mode: 'inherit',
@@ -3442,7 +3440,6 @@ describe('fetchKeeperConfig', () => {
         override_fields: 'goal',
       },
       metrics: {
-        generation: '3',
         total_turns: '12',
         total_input_tokens: '1200',
         total_output_tokens: '800',

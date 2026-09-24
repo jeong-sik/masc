@@ -105,7 +105,6 @@ export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversa
     traceId: asString(payload.trace_id) ?? null,
     turnRef: asString(payload.turn_ref) ?? null,
     providerMessageId: asString(payload.provider_message_id) ?? null,
-    generation: asNumber(payload.generation) ?? null,
     modelUsed: asString(payload.model_used) ?? asString(payload.model) ?? null,
     stopReason: asString(payload.stop_reason) ?? null,
     latencyMs: asNumber(payload.latency_ms) ?? null,

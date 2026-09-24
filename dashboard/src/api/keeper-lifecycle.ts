@@ -203,7 +203,6 @@ export interface KeeperCheckpointSummary {
   is_current: boolean
   path: string
   created_at: number
-  generation: number
   message_count: number
   system_prompt_present: boolean
   latest_preview: string | null

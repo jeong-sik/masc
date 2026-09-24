@@ -939,7 +939,6 @@ export function keeperConfigControlInventory(
           source: `${configApiSource} metrics.*`,
           action: 'read-only counters and last turn telemetry',
           contracts: configReadContracts([
-            'metrics.generation',
             'metrics.total_turns',
             'metrics.total_input_tokens',
             'metrics.total_output_tokens',

@@ -123,7 +123,6 @@ export function normalizeKeeperBrief(raw: unknown): DashboardMissionKeeperBrief 
   return {
     name,
     status: asString(raw.status),
-    generation: asNumber(raw.generation),
     context_ratio: asNumber(raw.context_ratio) ?? null,
     last_turn_ago_s: asNumber(raw.last_turn_ago_s) ?? null,
     current_work: asString(raw.current_work) ?? null,

@@ -173,7 +173,6 @@ const STRING_FIELDS = new Set([
 ])
 
 const NUMBER_FIELDS = new Set([
-  'generation',
   'context_ratio',
   'ts_unix',
   'from_generation',

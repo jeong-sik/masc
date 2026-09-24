@@ -25,7 +25,6 @@ import type { KeeperCheckpointSummary } from "../api/keeper"
 function makeRow(overrides: Partial<KeeperCheckpointSummary> = {}): KeeperCheckpointSummary {
   return {
     snapshot_id: "snap-001",
-    generation: 1,
     message_count: 5,
     created_at: 1700000000,
     ...overrides,
@@ -161,7 +160,6 @@ describe("KeeperCheckpointPanel diagnostics", () => {
         status: "available",
         path: "/tmp/trace-test/trace-test.json",
         created_at: 1700000000,
-        generation: 1,
         message_count: 916,
         system_prompt_present: true,
         latest_preview: "latest",

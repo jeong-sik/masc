@@ -89,7 +89,6 @@ export interface DashboardMissionAgentBrief {
 export interface DashboardMissionKeeperBrief {
   name: string
   status?: string
-  generation?: number
   context_ratio?: number | null
   last_turn_ago_s?: number | null
   current_work?: string | null
@@ -235,7 +234,6 @@ export interface OperatorKeeperSnapshot {
   registered?: boolean
   status?: string
   context_ratio?: number | null
-  generation?: number
   last_turn_ago_s?: number
   model?: string
   turn_count?: number

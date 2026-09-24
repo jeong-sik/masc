@@ -416,7 +416,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       override_field_sources: normalizeOverrideFieldSources(sources.override_field_sources),
     },
     metrics: {
-      generation: asInt(metrics.generation) ?? 0,
       total_turns: asInt(metrics.total_turns) ?? 0,
       total_input_tokens: asInt(metrics.total_input_tokens) ?? 0,
       total_output_tokens: asInt(metrics.total_output_tokens) ?? 0,

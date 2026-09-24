@@ -579,7 +579,6 @@ describe('KeeperToolCallInspector render', () => {
           prompt_fingerprint: '464ce7b3280c24fe1cbdcd990a70db87',
           runtime_contract: {
             agent_name: 'keeper-analyst-agent',
-            generation: 1,
             sandbox_root: '/sandbox/analyst/',
             sandbox_roots: ['.masc/playground/analyst/'],
             network_mode: 'inherit',

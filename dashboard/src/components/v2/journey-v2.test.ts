@@ -16,7 +16,6 @@ function trajectory(): TrajectoryResponse {
   return {
     keeper: 'keeper-a',
     trace_id: 'trace-1',
-    generation: 1,
     total_entries: 2,
     showing: 2,
     entries: [
@@ -279,7 +278,7 @@ describe('JourneyV2Panel', () => {
     vi.doMock('../../sse', () => ({ journal: signal<JournalEntry[]>([]) }))
     vi.doMock('../../api/dashboard', () => ({
       fetchKeeperTrajectory: vi.fn().mockResolvedValue({
-        keeper: 'keeper-a', trace_id: 't', generation: 1, total_entries: 0, showing: 0, entries: [],
+        keeper: 'keeper-a', trace_id: 't', total_entries: 0, showing: 0, entries: [],
       }),
       fetchKeeperToolCalls: vi.fn().mockResolvedValue({ keeper: 'keeper-a', count: 0, entries: [] }),
     }))

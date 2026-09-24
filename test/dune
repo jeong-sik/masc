@@ -6704,13 +6704,14 @@
 (test
  (name test_lane_addon_sources)
  (modules test_lane_addon_sources)
- (libraries masc_test_deps masc.browser_lane masc.msx_lane masc.dos_lane masc.tool_schemas eio eio_main yojson unix))
+ (libraries masc_test_deps masc.browser_lane masc.msx_lane masc.dos_lane masc.tool_schemas eio eio_main yojson unix
+   base64 threads.posix))
 
 (test
  (name test_lane_addon_surface)
  (modules test_lane_addon_surface)
  (libraries alcotest yojson masc masc.server masc.masc_tool_dispatch
-   masc.tool_schemas masc.masc_types))
+   masc.tool_schemas masc.masc_types masc_server httpun unix))
 
 (test
  (name test_lane_addon_store_query)

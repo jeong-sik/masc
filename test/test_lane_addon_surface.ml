@@ -49,6 +49,52 @@ let query_boundaries () =
     (Result.is_error (Routes.decode_body {|{"instance_id":"first","instance_id":"second"}|}));
   check bool "non-object body rejected" true (Result.is_error (Routes.decode_body "[]"))
 
+(* The live route takes a screen-bearing source kind and an optional
+   counter, and nothing else. Every other query is a 400. *)
+let live_boundaries () =
+  let reader = function
+    | Ok (Lane_addon_sources.Msx_screen, since) -> Ok ("msx", since)
+    | Ok (Lane_addon_sources.Dos_screen, since) -> Ok ("dos", since)
+    | Error detail -> Error detail in
+  let accepted = result (pair string (option int)) reject in
+  check accepted "MSX without a counter" (Ok ("msx", None))
+    (reader (Routes.decode_live_query ["source_kind", "msx_capture"]));
+  check accepted "DOS with a counter, in any order" (Ok ("dos", Some 12))
+    (reader (Routes.decode_live_query ["since", "12"; "source_kind", "dos_capture"]));
+  check accepted "zero is a counter" (Ok ("dos", Some 0))
+    (reader (Routes.decode_live_query ["source_kind", "dos_capture"; "since", "0"]));
+  List.iter (fun (why, fields) ->
+    check bool why true (Result.is_error (Routes.decode_live_query fields)))
+    [ "no kind", [];
+      "a file has no screen", ["source_kind", "snapshot_file"];
+      "a Lane output has no screen", ["source_kind", "lane_output"];
+      "a browser document has no screen", ["source_kind", "browser_document"];
+      "an unknown kind", ["source_kind", "vic20_capture"];
+      "two kinds", ["source_kind", "msx_capture"; "source_kind", "dos_capture"];
+      "an instance is not part of the route", ["source_kind", "dos_capture"; "instance_id", "i"];
+      "a blank counter", ["source_kind", "dos_capture"; "since", ""];
+      "a negative counter", ["source_kind", "dos_capture"; "since", "-1"];
+      "a hex counter", ["source_kind", "dos_capture"; "since", "0x10"];
+      "an underscored counter", ["source_kind", "dos_capture"; "since", "1_0"];
+      "a fractional counter", ["source_kind", "dos_capture"; "since", "1.5"];
+      "a word", ["source_kind", "dos_capture"; "since", "latest"] ]
+
+(* The route is wrapped in [with_read_auth]; that wrapper answers from
+   [authorize_read_request], and only [is_public_read_path] could bypass it. *)
+let live_requires_authentication () =
+  let path = "/api/v1/lane-addons/live?source_kind=dos_capture" in
+  check bool "live is not on the public-read allowlist" false
+    (Server_auth.is_public_read_path "/api/v1/lane-addons/live");
+  let base_path = Filename.temp_file "lane-live-auth-" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  Fun.protect ~finally:(fun () -> Unix.rmdir base_path) (fun () ->
+    let anonymous = Httpun.Request.create `GET path in
+    match Server_auth.authorize_read_request ~base_path anonymous with
+    | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _)) -> ()
+    | Error other -> failf "refused for another reason: %s" (Masc_domain.masc_error_to_string other)
+    | Ok () -> fail "a request without a credential was admitted")
+
 let subscription_items_keep_strict_schema () =
   let schema = match Tool_schemas_misc.misc_registered_schema Tool_schemas_misc.Misc_lane_updates with
     | Some schema -> schema | None -> fail "missing subscription schema" in
@@ -71,4 +117,6 @@ let () =
     [ "installed contract", [test_case "operator and Keeper discovery agree" `Quick reachable_operations;
         test_case "subscription TOML emits strict nested item schema" `Quick subscription_items_keep_strict_schema];
       "request boundaries", [test_case "source identity remains exact" `Quick readonly_parameters_preserve_identity;
-        test_case "query windows and duplicate identities" `Quick query_boundaries] ]
+        test_case "query windows and duplicate identities" `Quick query_boundaries;
+        test_case "live takes a screen kind and a decimal counter" `Quick live_boundaries;
+        test_case "live requires authentication" `Quick live_requires_authentication] ]

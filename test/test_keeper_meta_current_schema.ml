@@ -108,7 +108,7 @@ let test_required_fields_still_reject_absence () =
     Keeper_meta_json_current_schema.required_field_names
 ;;
 
-let test_older_meta_without_usage_fields_decodes () =
+let test_v2_without_usage_fields_decodes () =
   let optional = Keeper_meta_json_current_schema.optional_field_names in
   check (list string) "only the two usage fields are optional"
     [ "usage_cursor"; "last_usage_resolution" ] optional;
@@ -175,20 +175,21 @@ let test_retired_compaction_failure_authority_requires_reset () =
      |> replace_field "compaction_consecutive_failures" (`Int 3))
 ;;
 
-let test_previous_writer_shape_and_v2_usage_state_roundtrips () =
-  let previous_writer_json =
+let test_v1_shape_and_v2_usage_state_roundtrip () =
+  let v1 =
     current_json ()
     |> replace_field "schema" (`String "masc.keeper_meta.v1")
     |> remove_field "usage_cursor"
     |> remove_field "last_usage_resolution"
   in
-  expect_current "v1 writer shape" previous_writer_json;
+  expect_current "exact pre-#32435 v1" v1;
+  expect_rejected "v1 with usage_cursor" (v1 |> replace_field "usage_cursor" `Null);
   expect_rejected
-    "v1 schema with v2 usage fields"
-    (current_json () |> replace_field "schema" (`String "masc.keeper_meta.v1"));
+    "v1 with last_usage_resolution"
+    (v1 |> replace_field "last_usage_resolution" `Null);
   expect_rejected
-    "v1 schema with one v2 usage field"
-    (previous_writer_json |> replace_field "usage_cursor" `Null);
+    "unsupported schema"
+    (v1 |> replace_field "schema" (`String "masc.keeper_meta.v0"));
   let sample : Keeper_usage_resolution.sample =
     { input_tokens = 160
     ; output_tokens = 20
@@ -300,8 +301,8 @@ let () =
             test_current_writer_roundtrip_and_keyset
         ; test_case "required fields reject absence" `Quick
             test_required_fields_still_reject_absence
-        ; test_case "older meta without usage fields decodes" `Quick
-            test_older_meta_without_usage_fields_decodes
+        ; test_case "v2 without usage fields decodes" `Quick
+            test_v2_without_usage_fields_decodes
         ; test_case "every duplicate is rejected" `Quick
             test_every_duplicate_is_rejected
         ; test_case "every field rejects a wrong type" `Quick
@@ -318,8 +319,8 @@ let () =
             test_retired_compaction_failure_authority_requires_reset
         ; test_case "writer rejects non-finite values" `Quick
             test_current_writer_rejects_non_finite_values
-        ; test_case "previous writer shape and v2 usage state roundtrip" `Quick
-            test_previous_writer_shape_and_v2_usage_state_roundtrips
+        ; test_case "exact v1 shape and v2 usage state roundtrip" `Quick
+            test_v1_shape_and_v2_usage_state_roundtrip
         ; test_case "client-turn totals preserve the conversation cursor" `Quick
             test_client_turn_totals_do_not_use_the_conversation_cursor
         ] )

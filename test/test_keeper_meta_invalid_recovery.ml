@@ -307,7 +307,32 @@ let test_older_meta_keeps_owner_state_without_usage_fields () =
        (Option.map Keeper_id.Task_id.to_string meta.current_task_id);
      check bool "missing cursor becomes None" true (meta.runtime.usage_cursor = None);
      check bool "missing resolution becomes None" true
-       (meta.runtime.last_usage_resolution = None)
+       (meta.runtime.last_usage_resolution = None);
+     let observation : Keeper_usage_resolution.sample =
+       { input_tokens = 1_000
+       ; output_tokens = 100
+       ; cache_creation_input_tokens = 0
+       ; cache_read_input_tokens = 0
+       ; cost_usd = Some 12.5
+       }
+     in
+     let basis =
+       Keeper_usage_resolution.Conversation_counter
+         { runtime_id = "antigravity"
+         ; conversation_id = "existing-conversation"
+         ; position = Keeper_usage_resolution.Resumed
+         }
+     in
+     let resolution, next_cursor =
+       Keeper_usage_resolution.resolve
+         ~cursor:meta.runtime.usage_cursor
+         ~basis
+         ~observation:(Some observation)
+         ~observed_at:1.
+     in
+     (match resolution.status, resolution.delta, next_cursor with
+      | Keeper_usage_resolution.Baseline_missing, None, Some _ -> ()
+      | _ -> fail "resumed v1 conversation charged its whole counter")
    | Ok None -> fail "older meta was discarded as absent"
    | Error detail -> failf "older meta was refused: %s" detail);
   check string "read did not rewrite the older file" before (Masc_test_deps.read_file path);
@@ -421,15 +446,19 @@ let test_gate_verdict_matches_runtime_read () =
        expect_accepted ("older meta without " ^ key))
     optional;
   write_json (List.fold_left (fun json key -> remove_field key json) (current ()) optional);
-  expect_accepted "older meta without both usage fields";
-  let previous_writer =
-    List.fold_left (fun json key -> remove_field key json) (current ()) optional
+  expect_accepted "v2 meta without both usage fields";
+  let historical_v1 =
+    current ()
     |> replace_field "schema" (`String "masc.keeper_meta.v1")
+    |> remove_field "usage_cursor"
+    |> remove_field "last_usage_resolution"
   in
-  write_json previous_writer;
-  expect_accepted "previous v1 writer meta";
-  write_json (previous_writer |> replace_field "last_usage_resolution" `Null);
-  expect_not_current "v1 meta with one v2 usage field";
+  write_json historical_v1;
+  expect_accepted "exact pre-#32435 v1 meta";
+  write_json (historical_v1 |> replace_field "usage_cursor" `Null);
+  expect_not_current "v1 with usage_cursor";
+  write_json (historical_v1 |> replace_field "last_usage_resolution" `Null);
+  expect_not_current "v1 with last_usage_resolution";
   write_json (current () |> replace_field "usage_cursor" (`Bool false));
   expect_not_current "malformed usage_cursor";
   write_json (current () |> replace_field "last_usage_resolution" (`Bool false));

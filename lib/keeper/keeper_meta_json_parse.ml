@@ -1,4 +1,4 @@
-(** Exact current-schema Keeper meta JSON parser. *)
+(** Current v2 and exact earlier v1 Keeper meta JSON parser. *)
 
 open Keeper_types_profile
 open Keeper_meta_contract
@@ -361,20 +361,16 @@ let decode_current_meta fields =
   let* current_task_id = parse_current_task_id fields in
   let* keeper_id = parse_keeper_id fields in
   let* agent_core_env = parse_agent_core_env fields in
-  (* Kept now that the reader fails open: the exact-field check cannot see a
-     format whose field names stayed the same while their meaning changed, and
-     rejecting costs a reset rather than a dead keeper. *)
-  let schema_matches_fields =
-    match schema with
-    | "masc.keeper_meta.v2" -> true
-    | "masc.keeper_meta.v1" ->
-      (* The v1 writer emitted neither field. Accept only that exact
-         pre-usage shape; a hybrid v1 row has no writer contract. *)
-      not (List.mem_assoc "usage_cursor" fields)
-      && not (List.mem_assoc "last_usage_resolution" fields)
-    | _ -> false
-  in
-  if not schema_matches_fields
+  (* Before #32435, the v1 writer used the same durable fields except for
+     the two usage observations. Its missing cursor re-baselines a resumed
+     conversation on the next turn rather than charging the whole counter.
+     A v1 file carrying either v2 field is not that historical shape. *)
+  if String.equal schema "masc.keeper_meta.v1"
+     && (List.mem_assoc "usage_cursor" fields
+         || List.mem_assoc "last_usage_resolution" fields)
+  then invalidf "v1 meta must omit usage_cursor and last_usage_resolution"
+  else if not (String.equal schema "masc.keeper_meta.v1"
+               || String.equal schema "masc.keeper_meta.v2")
   then invalidf "unsupported schema: %S" schema
   else if not (validate_name name)
   then invalidf "name is invalid: %S" name

@@ -11,10 +11,10 @@
     the Keeper. A new failure emits a WARN naming the Keeper, path, and reason;
     unchanged repeats are deduplicated per (site, path), and recovery is logged.
 
-    The preceding v1 writer's snapshots omit both [usage_cursor] and
-    [last_usage_resolution]; that exact shape decodes as [None] without
-    fail-open. A v2 snapshot may also omit either field. Unknown top-level
-    keys and malformed present fields still fail current-schema decoding.
+    An exact pre-#32435 v1 snapshot omits [usage_cursor] and
+    [last_usage_resolution] and decodes both as [None] without fail-open. A v2
+    snapshot may omit them too; the writer always emits v2 with both keys.
+    Unknown top-level keys and malformed present fields still fail decoding.
 
     Issue #28844: a non-canonical value in an enumerated field with a
     canonical default (e.g. [last_proactive_outcome]) is auto-repaired in

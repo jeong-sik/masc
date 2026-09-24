@@ -2,13 +2,13 @@
 
 val meta_of_json :
   Yojson.Safe.t -> (Keeper_meta_contract.keeper_meta, string) result
-(** Decode the current top-level shape emitted by
-    [Keeper_meta_json.meta_to_json]. The writer emits every key. Snapshots from
-    the preceding v1 writer have neither [usage_cursor] nor
-    [last_usage_resolution]; only that exact v1 shape is accepted. A v2
-    snapshot may omit either field, decoded as [None] like [`Null]. Missing
-    required keys and wrong-typed, retired, duplicate, unknown, or malformed
-    fields remain explicit reset-required errors. *)
+(** Decode current v2 metadata and the exact pre-#32435 v1 shape. The v2
+    writer emits every key. A v1 snapshot must omit [usage_cursor] and
+    [last_usage_resolution]; v2 may omit them too. Absence decodes as [None],
+    like [`Null], so the next resumed conversation re-baselines its cursor
+    without charging the whole counter. Present malformed usage fields and
+    missing required, duplicate, unknown, or malformed fields remain explicit
+    reset-required errors. The writer still emits only v2. *)
 
 (** One enumerated-field repair: [field] held [previous_value], which is not a
     canonical spelling of any variant, and is reset to [repaired_value]. *)

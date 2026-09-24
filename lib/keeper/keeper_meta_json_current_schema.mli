@@ -53,8 +53,9 @@ val current_field_names : string list
 (** Writer key set, derived from {!all_fields}. The writer emits every field. *)
 
 val optional_field_names : string list
-(** [usage_cursor] and [last_usage_resolution] may be absent in older
-    snapshots; absence decodes like their canonical [null] value. *)
+(** [usage_cursor] and [last_usage_resolution] are absent in exact v1
+    snapshots and may be absent in v2; absence decodes like [null]. The
+    decoder checks the version and rejects a v1 object carrying either key. *)
 
 val required_field_names : string list
 (** All current fields except {!optional_field_names}. *)

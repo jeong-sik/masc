@@ -162,6 +162,9 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
     | exception (Unix.Unix_error _ as exn) -> io_error "the Stagehand extension directory" exn
   in
   let extension_id = Browser_stagehand_wire.extension_id_of_real_path extension_dir in
+  (* Retire a Chromium left by a previous server before its profile is
+     prepared or its owner record can be replaced by this launch. *)
+  stop_left_behind ~masc_root;
   let* profile = prepare_profile ~masc_root config in
   let started_pid = ref None in
   (* Registered before the spawn, so it runs after the spawn's own release
@@ -174,7 +177,8 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
     match
       Fs_compat.mkdir_p lane;
       let output =
-        Eio.Path.open_out ~sw ~create:(`Or_truncate 0o600) Eio.Path.(Eio.Stdenv.fs env / Filename.concat lane "chromium.log")
+        Eio.Path.open_out ~sw ~append:true ~create:(`If_missing 0o600)
+          Eio.Path.(Eio.Stdenv.fs env / Filename.concat lane "chromium.log")
       in
       Eio.Process.spawn ~sw
         (Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:stop_grace_s)

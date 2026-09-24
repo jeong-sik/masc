@@ -55,6 +55,11 @@ let test_failure_stops_child_before_same_switch_retry () =
   let config : Masc.Browser_configuration.stagehand = { chrome; extension = masc_root; profile = None } in
   let profile = Process.server_profile ~masc_root in
   let record = Process.owner_record_path ~masc_root in
+  let log_path = Filename.concat (Filename.dirname profile) "chromium.log" in
+  Fs_compat.mkdir_p (Filename.dirname profile);
+  let previous_log = open_out log_path in
+  output_string previous_log "previous Chromium failure\n";
+  close_out previous_log;
   let started_pid = Filename.concat (Filename.dirname profile) "started-pid" in
   let attempt () =
     (* The foreground process manager grants the group its full 5 s TERM
@@ -68,6 +73,7 @@ let test_failure_stops_child_before_same_switch_retry () =
    | Error detail -> check bool "first failure reached CDP" true (String.starts_with ~prefix:"CDP connection:" detail)
    | Ok _ -> fail "a refused CDP upgrade opened a session");
   let first_pid = int_of_string (read started_pid) in
+  check string "previous failure log survives first launch" "previous Chromium failure" (read log_path);
   check bool "first Chromium stopped before Error" true (stopped first_pid);
   check bool "first owner record removed" false (Sys.file_exists record);
   let stale = Filename.concat profile "stale-from-first-attempt" in
@@ -77,6 +83,7 @@ let test_failure_stops_child_before_same_switch_retry () =
    | Error detail -> check bool "second failure reached CDP" true (String.starts_with ~prefix:"CDP connection:" detail)
    | Ok _ -> fail "the second refused CDP upgrade opened a session");
   let second_pid = int_of_string (read started_pid) in
+  check string "previous failure log survives retry" "previous Chromium failure" (read log_path);
   check bool "second Chromium stopped before Error" true (stopped second_pid);
   check bool "second owner record removed" false (Sys.file_exists record);
   check bool "server profile was safe to recreate" false (Sys.file_exists stale)

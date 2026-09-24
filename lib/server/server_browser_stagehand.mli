@@ -13,7 +13,9 @@ type t
     launch, this function stops the Chromium process group and removes its
     record before returning, so the same switch may retry. A profile the
     operator configured is kept; otherwise the server's own profile is emptied
-    first. The profile directory is made owner-only. *)
+    first. A recorded Chromium from a previous server is stopped before that
+    profile is prepared and before its owner record can be replaced. The
+    profile directory is made owner-only. *)
 val open_ :
   sw:Eio.Switch.t
   -> env:Eio_unix.Stdenv.base

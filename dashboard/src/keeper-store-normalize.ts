@@ -762,7 +762,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         diagnostic: normalizeKeeperDiagnostic(row.diagnostic),
         conversation_tail_count: asNumber(row.conversation_tail_count),
         k2k_count: asNumber(row.k2k_count),
-        handoff_count_total: asNumber(row.handoff_count_total) ?? asNumber(row.trace_history_count),
+        handoff_count_total: asNumber(row.handoff_count_total),
         metrics_series: metricsSeries.length > 0 ? metricsSeries : undefined,
         metrics_window: metricsWindow,
         provider_health: providerHealth,

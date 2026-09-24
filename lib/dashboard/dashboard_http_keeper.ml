@@ -446,7 +446,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
              | Some row -> [ ("runtime_blocker_summary", `String (pending_approval_summary row)) ]
              | None -> [])
           in
-          let trace_history_count = List.length m.runtime.trace_history in
+          let handoff_count_total = List.length m.runtime.trace_history in
           let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
           (* Cap metrics lines to avoid O(n) slowdown as keepers accumulate turns.
              [series_points] is both the read and output bound. *)
@@ -728,7 +728,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   (Option.map Keeper_id.Task_id.to_string m.current_task_id) );
               ("created_at", `String m.created_at);
               ("updated_at", `String m.updated_at);
-              ("trace_history_count", `Int trace_history_count);
               ( "active_goals_tree",
                 if (not compact) && include_goals then
                   match Goal_store.list_goals_result config () with
@@ -813,7 +812,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s);
               ("last_visible_proactive_ago_s", Json_util.float_opt_to_json last_visible_proactive_ago_s);
               ("last_activity_ago_s", Json_util.float_opt_to_json last_activity_ago_s);
-              ("handoff_count_total", `Int trace_history_count);
+              ("handoff_count_total", `Int handoff_count_total);
               ("total_turns", `Int m.runtime.usage.total_turns);
               ("total_input_tokens", `Int m.runtime.usage.total_input_tokens);
               ("total_output_tokens", `Int m.runtime.usage.total_output_tokens);

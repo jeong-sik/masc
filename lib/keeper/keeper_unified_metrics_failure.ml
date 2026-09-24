@@ -31,10 +31,6 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         | Some (Keeper_turn_driver.Resumable_cli_session { detail; _ }) ->
             let trimmed = String.trim detail in
             if trimmed = "" then reason else trimmed
-        | Some (Keeper_turn_driver.Capacity_backpressure _ as err) ->
-            Option.value
-              ~default:reason
-              (Keeper_turn_driver.summary_of_masc_internal_error err)
         | Some (Keeper_turn_driver.Runtime_exhausted _ as err) -> (
             match Keeper_turn_driver.summary_of_masc_internal_error err with
             | Some summary -> summary

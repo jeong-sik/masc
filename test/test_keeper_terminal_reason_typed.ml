@@ -89,7 +89,6 @@ let with_owner_inventory config f =
 let roundtrip_corpus =
   [ (* exact-match buckets *)
     "runtime_exhausted"
-  ; Keeper_internal_error.capacity_backpressure_kind
   ; Keeper_internal_error.incomplete_tool_transcript_kind
   ; Keeper_internal_error.official_client_recovery_required_kind
   ; Keeper_internal_error.provider_attempt_effect_fenced_kind
@@ -234,9 +233,6 @@ let frozen_operator_disposition (receipt : R.t)
   let authorization_refused = frozen_is_authorization_refused_wire terminal_reason in
   if String.equal terminal_reason "runtime_exhausted"
   then R.Disp_fail_open_next_runtime, R.Reason_runtime_exhausted
-  else if
-    String.equal terminal_reason Keeper_internal_error.capacity_backpressure_kind
-  then R.Disp_fail_open_next_runtime, R.Reason_capacity_backpressure
   else if
     String.equal terminal_reason Keeper_internal_error.incomplete_tool_transcript_kind
   then R.Disp_operator_action_required, R.Reason_transcript_corruption
@@ -399,7 +395,6 @@ let () =
     | Tr.Config_invalid _ -> "config"
     | Tr.Authorization_refused _ -> "authorization"
     | Tr.Runtime_exhausted _
-    | Tr.Capacity_backpressure _
     | Tr.Provider_runtime_failure _
     | Tr.Transcript_corruption _
     | Tr.Official_client_recovery_required _
@@ -901,77 +896,6 @@ let () =
           "; "
           (List.filteri (fun index _ -> index < shown_disagreements) disagreements)))
     (disagreements = [])
-;;
-
-let () =
-  let internal_error =
-    Keeper_internal_error.Capacity_backpressure
-      { runtime_id = "runtime-capacity"
-      ; source = Keeper_internal_error.Provider_capacity
-      ; detail = "provider health cooldown active before dispatch"
-      ; retry_after = Keeper_internal_error.No_retry_hint
-      }
-  in
-  let code =
-    internal_error
-    |> Keeper_internal_error.core_error_of_masc_internal_error
-    |> Masc.Keeper_agent_error.terminal_reason_code_of_core_error
-  in
-  check
-    "capacity producer uses canonical terminal kind"
-    (String.equal code Keeper_internal_error.capacity_backpressure_kind);
-  check
-    "capacity terminal kind decodes to closed variant"
-    (match Tr.of_wire code with
-     | Tr.Capacity_backpressure wire -> String.equal wire code
-     | _ -> false);
-  let receipt =
-    { base_receipt with
-      terminal_reason_code = code
-    ; error_kind = Some (R.error_kind_of_string "internal")
-    ; outcome = `Error
-    ; runtime_outcome = R.Runtime_not_observed
-    }
-  in
-  let got = R.operator_disposition receipt in
-  let want = R.Disp_fail_open_next_runtime, R.Reason_capacity_backpressure in
-  check
-    (Printf.sprintf
-       "capacity disposition want=%s got=%s"
-       (disp_pair_to_string want)
-       (disp_pair_to_string got))
-    (got = want);
-  check
-    "capacity observation does not emit operator broadcast"
-    (not (R.needs_operator_broadcast (fst got)));
-  let opaque_internal =
-    { receipt with terminal_reason_code = code ^ "_unexpected" }
-  in
-  let got = R.operator_disposition opaque_internal in
-  let want = R.Disp_unknown, R.Reason_unmapped_runtime_state in
-  check
-    (Printf.sprintf
-       "capacity lookalike remains opaque internal want=%s got=%s"
-       (disp_pair_to_string want)
-       (disp_pair_to_string got))
-    (got = want);
-  check
-    "opaque capacity lookalike is surfaced as unknown"
-    (R.needs_operator_broadcast (fst got));
-  let noncanonical_case =
-    { receipt with terminal_reason_code = String.uppercase_ascii code }
-  in
-  let got = R.operator_disposition noncanonical_case in
-  let want = R.Disp_unknown, R.Reason_unmapped_runtime_state in
-  check
-    (Printf.sprintf
-       "noncanonical capacity casing stays opaque want=%s got=%s"
-       (disp_pair_to_string want)
-       (disp_pair_to_string got))
-    (got = want);
-  check
-    "noncanonical capacity casing is surfaced as unknown"
-    (R.needs_operator_broadcast (fst got))
 ;;
 
 let () =

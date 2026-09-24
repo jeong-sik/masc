@@ -209,11 +209,6 @@ type operator_disposition_reason =
       turn after neither a degraded retry nor cross-runtime fallback occurred.
       Paired with [Disp_retry_later]: a later keepalive cycle may retry, but the
       receipt does not claim same-turn continuation. *)
-  | Reason_capacity_backpressure
-  (** Typed provider-capacity observation before a retry/rotation has completed.
-      Paired with [Disp_fail_open_next_runtime]: the keeper keeps moving and
-      no operator broadcast is emitted, while the receipt does not falsely
-      claim [Reason_runtime_fallback]. *)
   | Reason_provider_runtime_error
   (** A terminal provider rejection or parse/runtime failure after neither a
       degraded retry nor cross-runtime fallback occurred. Paired with

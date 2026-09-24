@@ -286,7 +286,15 @@ open Alcotest
    keeper_skill_publish tool lets a Keeper publish a Skill package it wrote
    (RFC keeper-self-authored-skills); main's surface had shrunk below the
    entry above, so the total still falls. No headroom. *)
-let ceiling_bytes = 122_228
+(* 2026-09-24: 122,378 across 138 tools, measured by CI at 532fc1f237
+   (the stagehand lane, #38697), less 31 bytes from BrowserSession's
+   description rewritten after that run (JSON-escaped length, not a CI
+   reading). BrowserSession and BrowserGoto take lane (automation or
+   stagehand), BrowserSession says what each lane needs configured, and
+   BrowserTabs says a stagehand tab has no clientId, so a Keeper can open and
+   drive the Stagehand browser (RFC-browser-lane-stagehand §3.8). No
+   headroom. *)
+let ceiling_bytes = 122_347
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

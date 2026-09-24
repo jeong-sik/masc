@@ -53,7 +53,7 @@ type request =
   { messages : message list
   ; system_prompt : string option
   ; temperature : float option
-  ; stop_sequences : string list
+  ; stop_sequences : string list option  (** [None] when the request has none. *)
   ; generation : generation
   }
 (** [temperature] and [stop_sequences] are read and not sent: an exact-output

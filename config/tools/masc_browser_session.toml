@@ -1,6 +1,6 @@
 name = "masc_browser_session"
 description = """
-Manage a browser the server owns. lane=automation: the isolated Gecko browser (configure browser.geckodriver, the server starts and stops it, and optional browser.binary, e.g. Zen). lane=stagehand: a Chromium with the Stagehand runtime (configure [browser.stagehand]). Operator live sessions are not managed. After open, use BrowserGoto with the same lane."""
+Manage a server-owned browser. lane=automation: Gecko (configure browser.geckodriver, optional browser.binary e.g. Zen). lane=stagehand: Chromium with the Stagehand runtime (configure [browser.stagehand]). The server starts and stops it; operator live sessions are not managed. After open, use BrowserGoto with the same lane."""
 additional_properties = false
 
 [[params]]

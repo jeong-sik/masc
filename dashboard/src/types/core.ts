@@ -1509,6 +1509,14 @@ interface KeeperSupervisorDiagnostics {
 
 // --- Keeper Config (structured read-only view) ---
 
+// The system prompt a keeper turn would send (#38354). A turn that cannot
+// build it is refused, so the server sends the typed reason instead of text.
+// A shape this client does not know fails only this field.
+export type KeeperSystemPromptPreview =
+  | { state: 'available'; effective: string; assembled: string }
+  | { state: 'unavailable'; reason: 'constitution_unreadable'; path: string; detail: string }
+  | { state: 'decode_failed'; detail: string }
+
 interface KeeperConfigPrompt {
   instructions: string
   // The server emits exactly one shared block. keeper.constitution,
@@ -1522,8 +1530,7 @@ interface KeeperConfigPrompt {
       text: string
     }
   }
-  effective_system_prompt: string
-  assembled_system_prompt: string
+  system_prompt: KeeperSystemPromptPreview
   unified_user_message_preview: string
 }
 
@@ -1685,10 +1692,14 @@ interface KeeperHookIntrospection {
 
 export type KeeperInputPolicy = 'small' | 'wide'
 
+/** What a successful config POST did to the running lane. Absent on GET. */
+export type KeeperConfigRuntimeSync = 'lane_restarted' | 'deferred_until_turn_end'
+
 export interface KeeperConfig {
   name: string
   config_revision: KeeperConfigRevisionState
   config_write?: KeeperConfigWriteReceipt
+  runtime_sync?: KeeperConfigRuntimeSync
   config_transaction_warnings?: KeeperManifestWarning[]
   activation_mode: KeeperActivationMode
   input_policy: KeeperInputPolicy

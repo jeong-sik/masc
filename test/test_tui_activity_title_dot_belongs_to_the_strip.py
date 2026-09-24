@@ -29,7 +29,7 @@ def run(executable: str) -> None:
     fixtures = h.keeper_runtime_http_fixtures()
 
     def interact(process, fd, _slave, output, _base_path):
-        h.wait_for_output(process, fd, output, b"cluster-a", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go activity", TITLE)
 
         # Wide: the strip draws, and the dot after it separates the tabs from

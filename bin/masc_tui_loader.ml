@@ -11,7 +11,6 @@ module Keeper_selection = Masc_tui_keeper_selection
 module Repository_pulls = Masc_tui_repository_pulls
 module Context_state = Masc_tui_context_state
 module Metrics_tail = Masc_tui_metrics_tail
-module Render_schedule = Masc_tui_render_schedule
 
 open Masc_tui_types
 open Tui_decode
@@ -409,28 +408,27 @@ let clear_local_workspace (state : state) =
   state.local_workspace <- Local_workspace_unread
 ;;
 
-(** Add event to the event log *)
+(** Add an event to the TUI session log, which Metrics draws. *)
 let add_event (state : state) event_type content =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let ev = { timestamp; event_type; content } in
-  let events = ev :: (List.filteri (fun i _ -> i < 10) state.events) in
-  state.overview_event_scroll <-
-    Render_schedule.overview_event_offset_after_prepend
-      ~retained_count:(List.length events)
-      state.overview_event_scroll;
-  state.events <- events
+  state.events <- ev :: List.filteri (fun i _ -> i < 10) state.events
 
 (* An outcome the operator pressed a key for, rather than something that
-   happened on its own. It goes to the event log like any other event, and to
-   the footer, because the log is drawn by Overview alone: the operator who
-   pressed [a] on Workspace stood on the one surface that could not show them
-   whether the registration landed, the declaration was refused, or the
-   editor never started. *)
+   happened on its own. It goes to the session log like any other event, and
+   to the footer, because the log is drawn by Metrics alone: the operator who
+   pressed [a] on Workspace reads on Workspace whether the registration
+   landed, the declaration was refused, or the editor never started. Every
+   call site that answers a key or a command, or finishes the request one
+   started, uses this; [add_event] alone is for what happened on its own --
+   the feed, a failed poll, the server's lifecycle. The footer copy is one
+   line: a server's reason can carry newlines. *)
 let report_action (state : state) event_type content =
   add_event state event_type content;
-  state.last_action <- Some (content, Unix.gettimeofday ())
+  state.last_action <-
+    Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
 
 (** HTTP JSON decoding helpers. These intentionally fail closed for the TUI
     dashboard surfaces: an empty list means the API really returned an empty
@@ -1268,8 +1266,6 @@ let load_overview ~(host : string) ~(port : int) :
         let* workspace_health = required_string_field summary "workspace_health" in
         decode_workspace_health workspace_health
       in
-      let* ov_cluster = required_string_field summary "cluster" in
-      let* ov_project = required_string_field summary "project" in
       (* Counted from the lists the briefing carries. The summary object
          holds workspace_health, cluster, and project and nothing else --
          [lib/dashboard/dashboard_briefing.ml] writes no count into it -- so
@@ -1308,8 +1304,6 @@ let load_overview ~(host : string) ~(port : int) :
       Ok
         {
           ov_workspace_health;
-          ov_cluster;
-          ov_project;
           ov_keepers;
           ov_keeper_liveness;
           ov_keeper_rows;

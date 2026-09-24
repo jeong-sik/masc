@@ -263,6 +263,14 @@ let test_the_turn_start_and_refusal_fronts_say_why () =
        (with_origin (Inspector.Carried_turn_start_unknown { reason = "boundary read failed: fixture" })));
   Alcotest.(check bool) "and the range's own first atom stays on the fact line" true
     (says "from atom 3100" turn_start);
+  Alcotest.(check bool) "a range refused at the Librarian point" true
+    (says "the range from the Librarian's point was refused: front moved to where this turn began"
+       (with_origin Inspector.Carried_turn_start_after_librarian_refusal));
+  Alcotest.(check bool) "a start past the Librarian point names the point and its source" true
+    (says "the Librarian point is atom 2; the range opens later, where the provider last accepted it (front from turn #7's record; nothing counted since the server started)"
+       (with_origin
+          (Inspector.Carried_past_librarian_point
+             { librarian_end_atom = 2; front = Inspector.Carried_from_turn_record { turn = 7 } })));
   Alcotest.(check bool) "a halved front" true
     (says "front halved after a refusal (retry 2)"
        (with_origin (Inspector.Carried_halved_after_refusal { retry = 2 })));
@@ -301,6 +309,45 @@ let test_a_refused_seed_origin_decodes () =
       } -> ()
   | Ok _ -> Alcotest.fail "the refused seed origin decoded as another origin"
   | Error detail -> Alcotest.fail ("the refused seed origin decodes: " ^ detail)
+
+let test_a_start_past_the_librarian_point_decodes () =
+  let decode origin =
+    Inspector.decode_forecast
+      (Yojson.Safe.from_string
+         (Printf.sprintf
+            {|{"schema":"masc.keeper.next-request-forecast.v5","checkpoint_messages":1,"wake_line_bytes":1,
+               "walk":{"lane_id":"r","declared":["r"]},
+               "candidates":[{"runtime_id":"r","lane":{"agent_core":true},"marks":null,
+                 "parts":{"error":"not measured"},"history_atoms":12,
+                 "carried":{"first_atom":8,"kept_atoms":4,"transmitted_bytes":300,"preamble_bytes":null,
+                            "origin":%s,"counted_tokens":null},
+                 "assembly":null,"place":{"walks_at":0,"declared_at":0,"rest":{"kind":"serving"}}}]}|}
+            origin))
+  in
+  (match
+     decode
+       {|{"kind":"past_librarian_point","librarian_end_atom":2,"front":{"kind":"turn_record","turn":7}}|}
+   with
+   | Ok
+       { candidates =
+           [ { carried =
+                 Some
+                   { origin =
+                       Inspector.Carried_past_librarian_point
+                         { librarian_end_atom = 2; front = Inspector.Carried_from_turn_record { turn = 7 } }
+                   ; _
+                   }
+             ; _
+             }
+           ]
+       ; _
+       } -> ()
+   | Ok _ -> Alcotest.fail "the start past the point decoded as another origin"
+   | Error detail -> Alcotest.fail ("the start past the point decodes: " ^ detail));
+  Alcotest.(check bool) "a front that is itself a Librarian point is refused" true
+    (Result.is_error
+       (decode
+          {|{"kind":"past_librarian_point","librarian_end_atom":2,"front":{"kind":"librarian_progress","end_atom":2}}|}))
 
 let test_an_evicted_refusal_origin_decodes () =
   let json =
@@ -758,6 +805,8 @@ let () =
             test_an_evicted_refusal_origin_decodes
         ; Alcotest.test_case "a refused seed origin decodes" `Quick
             test_a_refused_seed_origin_decodes
+        ; Alcotest.test_case "a start past the Librarian point decodes" `Quick
+            test_a_start_past_the_librarian_point_decodes
         ; Alcotest.test_case "a not-applicable lane decodes as such" `Quick
             test_a_not_applicable_lane_decodes_as_such
         ; Alcotest.test_case "a malformed forecast fails the reading" `Quick

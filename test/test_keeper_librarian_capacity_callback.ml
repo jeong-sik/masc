@@ -53,7 +53,9 @@ let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id
    | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
   let input : Keeper_librarian.input =
     {turn_ref = Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1;
-     goal_context = Keeper_librarian.No_task; keeper_instructions = "Preserve evidence.";
+     goal_context = Keeper_librarian.No_task;
+     keeper_id = Masc_test_deps.keeper_id_fixture keeper_id;
+     keeper_instructions = "Preserve evidence.";
      current = None; working_context = Keeper_librarian_context.empty;
      messages = [Agent_core.Types.user_msg "Pending conversation evidence."];
      tool_observations = []; counterpart_observations = []} in
@@ -161,6 +163,7 @@ let test_prefit_real_continuity ~base_path () =
   let input prepared : Keeper_librarian.input =
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
     {turn_ref=P.turn_ref prepared; goal_context=Keeper_librarian.No_task;
+     keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;
      keeper_instructions="Preserve evidence.";
      current=Option.map (fun (s : Current.t) -> {Keeper_librarian.facts=s.facts}) current;
      working_context; messages=P.messages prepared;
@@ -339,7 +342,7 @@ let test_prefit_real_continuity ~base_path () =
     ~input_policy:Keeper_input_policy.Small ~continuity ~provider_config
     ~measure_message_bytes:(fun message -> String.length
       (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
-    ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
+    ~accepted:None ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
     ~current_turn_results:Driver.Current_turn_verbatim ~base_path
     ~demote_before:completed_end ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = completed_end })
     ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical in

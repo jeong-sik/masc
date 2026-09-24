@@ -123,10 +123,12 @@ let test_the_roster_title_says_whether_the_reading_is_live () =
 let test_the_detail_pane_says_where_the_command_would_run () =
   Alcotest.(check bool)
     "the detail pane reads the sandbox it was granted against" true
-    (reads ~binding_name:"render_approvals" ~fields:[ "gp_execution_sandbox" ]
+    (reads ~binding_name:"approval_metadata_lines"
+       ~fields:[ "gp_execution_sandbox" ]
      > 0);
   Alcotest.(check bool) "and the directory it would run in" true
-    (reads ~binding_name:"render_approvals" ~fields:[ "gp_execution_cwd" ] > 0)
+    (reads ~binding_name:"approval_metadata_lines" ~fields:[ "gp_execution_cwd" ]
+     > 0)
 
 (* A blocked Gate row exposes a short reason under the list, where the frame
    has to fit it to one line. Enter promises the whole ask, so that pane must
@@ -302,7 +304,7 @@ let test_the_fleet_row_reads_the_control_planes_own_word () =
 let test_the_detail_pane_compares_before_repeating_the_operation () =
   Alcotest.(check bool) "the operation is weighed against what is already shown"
     true
-    (reads ~binding_name:"render_approvals"
+    (reads ~binding_name:"approval_metadata_lines"
        ~fields:[ "gp_display_tool"; "gp_operation" ]
      > 1)
 

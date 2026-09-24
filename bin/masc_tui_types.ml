@@ -9327,8 +9327,9 @@ let lane_picker_existing_slots (state : state) = function
          |> List.find_opt (fun (row : Tui_decode.standalone_lane) ->
               String.equal row.Tui_decode.sl_lane_id name)
          |> Option.map (fun row ->
-              row.Tui_decode.sl_admitted_slots @ row.Tui_decode.sl_cli_slots
-              @ row.Tui_decode.sl_dropped_slots)
+          row.Tui_decode.sl_admitted_slots @ row.Tui_decode.sl_cli_slots
+              @ row.Tui_decode.sl_dropped_slots
+              @ row.Tui_decode.sl_declared_cli_slots)
          |> Option.value ~default:[])
   | Pick_conversation_lane lane -> conversation_lane_candidates state lane
   | Pick_new_lane _ -> []
@@ -9551,7 +9552,10 @@ let plan_runtime_lane_edit (state : state) = function
 type slot_editor_row =
   { sr_slot : string
   ; sr_admitted : bool
+  ; sr_kind : slot_editor_row_kind
   }
+
+and slot_editor_row_kind = Catalog_slot | Official_client_slot | Media_route_slot
 
 let slot_editor_rows (state : state) =
   match state.slot_editor with
@@ -9569,8 +9573,17 @@ let slot_editor_rows (state : state) =
                  { sr_slot = slot
                  ; sr_admitted =
                      List.exists (String.equal slot) lane.Tui_decode.sl_admitted_slots
+                 ; sr_kind = Catalog_slot
                  })
-              lane.Tui_decode.sl_declared_slots)
+              lane.Tui_decode.sl_declared_slots
+            @ List.map
+                (fun slot ->
+                   { sr_slot = slot
+                   ; sr_admitted =
+                       List.exists (String.equal slot) lane.Tui_decode.sl_cli_slots
+                   ; sr_kind = Official_client_slot
+                   })
+                lane.Tui_decode.sl_declared_cli_slots)
        |> Option.value ~default:[])
   | Some { se_target = Media_failover_slots; _ } ->
     (* Edit the file's declaration, not the shorter active fleet. A rejected
@@ -9584,6 +9597,7 @@ let slot_editor_rows (state : state) =
          (fun runtime_id ->
             { sr_slot = runtime_id
             ; sr_admitted = List.exists (String.equal runtime_id) admitted
+            ; sr_kind = Media_route_slot
             })
          snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_media_failover_declared)
 ;;
@@ -9689,6 +9703,12 @@ let plan_slot_edit (state : state) edit =
            then
              Refuse_slot_edit
                (Lane_write_refused (Printf.sprintf "%s is already %s in %s" slot edge name))
+           else if target <> Media_failover_slots
+                   && row.sr_kind <> (List.nth rows moved_to).sr_kind
+           then
+             Refuse_slot_edit
+               (Lane_write_refused
+                  "HTTP slots run first; CLI slots are the fallback after HTTP exhaustion. Reorder within a group")
            else (
              let request =
                match target with

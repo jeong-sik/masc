@@ -5608,7 +5608,97 @@ let rec take_rows remaining acc = function
   | [] -> List.rev acc
   | row :: rest -> take_rows (remaining - 1) (row :: acc) rest
 
+(* Editing takes the pane while it is open. A long CLI tail otherwise sits
+   below the lane matrix and can put the acting cursor outside the frame. *)
+let render_exact_lane_provider_editor (state : state) editor =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let lane = Masc_tui_types.slot_editor_target_name editor.Masc_tui_types.se_target in
+  let entries = Masc_tui_types.slot_editor_rows state in
+  let count = List.length entries in
+  box_top buf cols;
+  box_line buf cols (screen_title " MASC Lanes / Providers");
+  box_divider buf cols;
+  box_line_styled buf cols ~style:(Theme.info ())
+    (Printf.sprintf "  %s · HTTP first, then CLI after HTTP exhaustion"
+       (Terminal_text.single_line lane));
+  (match state.runtime_lane_notice with
+   | None -> ()
+   | Some notice ->
+     box_line_styled buf cols ~style:(runtime_lane_notice_style notice)
+       ("  " ^ Keeper_chat.terminal_safe_text
+          (Masc_tui_types.runtime_lane_notice_text notice)));
+  List.iter
+    (fun line -> box_line_styled buf cols ~style:(Theme.warn ())
+       ("  " ^ Keeper_chat.terminal_safe_text line))
+    (Masc_tui_types.runtime_lane_stale_lines state);
+  (match Masc_tui_types.runtime_picker_projection state with
+   | Some picker ->
+     box_line_styled buf cols ~style:(Theme.info ())
+       "  add provider · j/k choose · Enter append · e cancel";
+     if picker.Masc_tui_types.rlp_choices = [] then
+       box_line_styled buf cols ~style:(Theme.recede ())
+         "  runtime catalogue unread"
+     else
+       picker.Masc_tui_types.rlp_choices
+       |> List.iteri (fun offset (runtime : Tui_decode.runtime_option) ->
+            box_line buf cols
+              (Printf.sprintf "  %s %s · %s / %s%s"
+                 (if offset = 0 then ">" else " ")
+                 (Terminal_text.single_line runtime.ro_id)
+                 (Terminal_text.single_line runtime.ro_provider)
+                 (Terminal_text.single_line runtime.ro_model)
+                 (if List.mem runtime.ro_id picker.rlp_already
+                  then "  (already declared)" else "")))
+   | None ->
+     (* Reserve a key line and the frame bottom; at least the selected row
+        stays visible on a short terminal. The ordinal places the moving
+        window in the complete declaration. *)
+     let visible = max 1 (min count (rows - count_frame_lines buf - 3)) in
+     let first =
+       min (max 0 (count - visible))
+         (max 0 (editor.Masc_tui_types.se_cursor - (visible / 2)))
+     in
+     if entries = [] then
+       box_line_styled buf cols ~style:(Theme.recede ())
+         "  no provider slots declared; a adds one"
+     else
+       entries
+       |> List.iteri (fun index (row : Masc_tui_types.slot_editor_row) ->
+            if index >= first && index < first + visible then (
+              let kind =
+                match row.Masc_tui_types.sr_kind with
+                | Masc_tui_types.Catalog_slot -> "HTTP"
+                | Masc_tui_types.Official_client_slot -> "CLI"
+                | Masc_tui_types.Media_route_slot -> "ROUTE"
+              in
+              let line =
+                Printf.sprintf "  %s %d/%d  [%s] %s%s"
+                  (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
+                  (index + 1) count kind
+                  (Terminal_text.single_line row.Masc_tui_types.sr_slot)
+                  (if row.Masc_tui_types.sr_admitted then ""
+                   else "  (not admitted)")
+              in
+              if index = editor.Masc_tui_types.se_cursor
+              then box_line_selected buf cols line
+              else box_line buf cols line));
+     box_line_styled buf cols ~style:(Theme.recede ())
+       "  j/k select · a add · x drop · J/K reorder within group · Esc close");
+  for _ = 1 to max 0 (rows - count_frame_lines buf - 2) do
+    box_empty buf cols
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+  finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
+
 let render_lanes_overview (state : state) =
+  match state.slot_editor with
+  | Some ({ Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } as editor) ->
+    render_exact_lane_provider_editor state editor
+  | None | Some { Masc_tui_types.se_target = Masc_tui_types.Media_failover_slots; _ } ->
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let inner = max 1 (framed_inner_width cols) in
@@ -5767,13 +5857,6 @@ let render_lanes_overview (state : state) =
          (match state.lanes_action_error with None -> 0 | Some _ -> 1)
          + (match state.runtime_lane_notice with None -> 0 | Some _ -> 1)
          + List.length (Masc_tui_types.runtime_lane_stale_lines state)
-         (* The slot editor's heading, its rows and its key line, counted here
-            so the lane detail below gives up the space rather than the
-            editor being drawn past the frame. *)
-         + (match state.slot_editor with
-            | None -> 0
-            | Some _ ->
-              2 + max 1 (List.length (Masc_tui_types.slot_editor_rows state)))
        in
        let available =
          max 0
@@ -5817,39 +5900,6 @@ let render_lanes_overview (state : state) =
        box_line_styled buf cols ~style:(Theme.warn ())
          ("  " ^ Keeper_chat.terminal_safe_text line))
     (Masc_tui_types.runtime_lane_stale_lines state);
-  (* The slot editor the "s" key opens. Its rows are the lane's declared
-     order, which is what the lane walks; a slot publication rejected keeps
-     its place there and is marked rather than left out, because dropping it
-     from the drawing would put the numbers beside the other slots out of step
-     with the file. *)
-  (match state.slot_editor with
-   | None -> ()
-   | Some editor ->
-       box_line_styled buf cols ~style:(Theme.info ())
-         (Printf.sprintf "  slots of %s — the order it walks"
-            (Terminal_text.single_line
-               (Masc_tui_types.slot_editor_target_name editor.Masc_tui_types.se_target)));
-       let slot_rows = Masc_tui_types.slot_editor_rows state in
-       if slot_rows = [] then
-         box_line_styled buf cols ~style:(Theme.recede ())
-           "  (this lane declares no slot; a slots array is what it walks)"
-       else
-         List.iteri
-           (fun index (row : Masc_tui_types.slot_editor_row) ->
-              let line =
-                Printf.sprintf "  %s %d  %s%s"
-                  (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
-                  (index + 1)
-                  (Terminal_text.single_line row.Masc_tui_types.sr_slot)
-                  (if row.Masc_tui_types.sr_admitted then ""
-                   else Ansi.dim ^ "  (declared, not admitted)" ^ Ansi.reset)
-              in
-              if index = editor.Masc_tui_types.se_cursor then
-                box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
-              else box_line buf cols line)
-           slot_rows;
-       box_line_styled buf cols ~style:(Theme.recede ())
-         "  j/k move · x drop · J/K reorder · Esc close");
   (* The runtime-candidate picker the "a" key opens. Same projection the
      Runtime surface draws; the row order both render and the key handler
      read is the picker's own, so the cursor and the drawing cannot drift. *)

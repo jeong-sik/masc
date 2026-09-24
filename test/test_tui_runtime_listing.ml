@@ -524,7 +524,8 @@ let test_narrow_target_column_still_tells_the_variants_apart () =
    by whether publication admitted it. A rejected slot keeps its place: the
    admitted list alone cannot say where that is, and the editor moves and
    drops by position. *)
-let standalone_lane ~lane_id ~declared ~admitted : Masc.Tui_decode.standalone_lane =
+let standalone_lane ?(declared_cli = []) ?(admitted_cli = [])
+    ~lane_id ~declared ~admitted : Masc.Tui_decode.standalone_lane =
   { Masc.Tui_decode.sl_lane_id = lane_id
   ; sl_label = lane_id
   ; sl_purpose = None
@@ -533,10 +534,11 @@ let standalone_lane ~lane_id ~declared ~admitted : Masc.Tui_decode.standalone_la
   ; sl_configuration_state = Masc.Tui_decode.Lane_ready
   ; sl_jev = None
   ; sl_admitted_slots = admitted
-  ; sl_cli_slots = []
+  ; sl_cli_slots = admitted_cli
   ; sl_dropped_slots =
       List.filter (fun slot -> not (List.mem slot admitted)) declared
   ; sl_declared_slots = declared
+  ; sl_declared_cli_slots = declared_cli
   ; sl_admission_error = None
   ; sl_retained_run_count = 0
   ; sl_running_count = 0
@@ -553,7 +555,7 @@ let standalone_lane ~lane_id ~declared ~admitted : Masc.Tui_decode.standalone_la
   }
 
 let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])
-      ?(admitted = [ "a"; "b" ]) () =
+      ?(admitted = [ "a"; "b" ]) ?(declared_cli = []) ?(admitted_cli = []) () =
   let state = state () in
   state.standalone_lanes <-
     Some
@@ -561,7 +563,9 @@ let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])
       ; sls_exact_run_projection_count = 0
       ; sls_exact_run_source_total = 0
       ; sls_exact_run_projection_truncated = false
-      ; sls_lanes = [ standalone_lane ~lane_id:"librarian_exact" ~declared ~admitted ]
+      ; sls_lanes =
+          [ standalone_lane ~lane_id:"librarian_exact" ~declared ~admitted
+              ~declared_cli ~admitted_cli ]
       };
   state.slot_editor <-
     Some { se_target = Exact_lane_slots "librarian_exact"; se_cursor = cursor };
@@ -614,6 +618,30 @@ let test_the_slot_editor_keeps_the_last_slot () =
   state.runtime_lane_write <- Lane_write_posting;
   Alcotest.(check string) "a write already out holds the next edit"
     "pending"
+    (slot_plan_text (plan_slot_edit state Drop_slot))
+
+let test_the_slot_editor_edits_cli_slots_after_http () =
+  let state = slot_editor_state ~cursor:1 ~declared:[ "http" ]
+      ~admitted:[ "http" ] ~declared_cli:[ "cli-a"; "cli-rejected"; "cli-b" ]
+      ~admitted_cli:[ "cli-a"; "cli-b" ] () in
+  Alcotest.(check (list string)) "both source arrays are visible in execution order"
+    [ "http HTTP"; "cli-a CLI"; "cli-rejected CLI"; "cli-b CLI" ]
+    (List.map (fun row ->
+       row.sr_slot ^ " " ^
+       (match row.sr_kind with Catalog_slot -> "HTTP"
+        | Official_client_slot -> "CLI" | Media_route_slot -> "route"))
+       (slot_editor_rows state));
+  Alcotest.(check bool) "rejected CLI stays in its declared position" false
+    (List.nth (slot_editor_rows state) 2).sr_admitted;
+  Alcotest.(check string) "CLI row moves within CLI array"
+    "librarian_exact down cli-a, cursor 2"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
+  Alcotest.(check string) "HTTP/CLI boundary explains execution order"
+    "refuse: HTTP slots run first; CLI slots are the fallback after HTTP exhaustion. Reorder within a group"
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_up)));
+  state.slot_editor <- Some { se_target = Exact_lane_slots "librarian_exact"; se_cursor = 2 };
+  Alcotest.(check string) "rejected CLI can be dropped"
+    "librarian_exact drop cli-rejected, cursor stays"
     (slot_plan_text (plan_slot_edit state Drop_slot))
 
 let test_slot_editor_keys_parse () =
@@ -843,6 +871,8 @@ let () = Alcotest.run "runtime list geometry"
         test_the_slot_editor_edits_the_declared_order;
       Alcotest.test_case "the slot editor keeps the last slot" `Quick
         test_the_slot_editor_keeps_the_last_slot;
+      Alcotest.test_case "the slot editor includes CLI fallback slots" `Quick
+        test_the_slot_editor_edits_cli_slots_after_http;
       Alcotest.test_case "slot editor keys parse" `Quick
         test_slot_editor_keys_parse;
       Alcotest.test_case "an undeclared lane is not a single candidate" `Quick

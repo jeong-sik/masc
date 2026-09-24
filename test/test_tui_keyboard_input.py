@@ -10433,10 +10433,10 @@ def standalone_lane_fixture(
         "configured": True,
         "configuration_state": "ready",
         "declared_slots": ["glm-coding.glm-5-turbo"],
+        "declared_cli_slots": [],
         "admitted_slots": ["glm-coding.glm-5-turbo"],
-        # The projection writes four slot lists, not one: what the lane
-        # declares, what admission kept, what it reaches over a CLI, and what
-        # admission dropped. Omitting any list fails the row decode, and the
+        # The projection writes both declared lists and their admission
+        # readings. Omitting any list fails the row decode, and the
         # whole snapshot with it, so the observation matrix simply never
         # draws -- the surface has no per-row gap to show.
         "cli_slots": [],

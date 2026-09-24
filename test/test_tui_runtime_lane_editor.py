@@ -21,6 +21,8 @@ SOURCE_MODULES = (
     "bin/masc_tui_types.ml",
     "bin/masc_tui_keys.ml",
     "bin/masc_tui_http.ml",
+    "lib/server/server_standalone_lane_projection.ml",
+    "lib/tui_decode.ml",
 )
 
 ROUTING_PATH = "/api/v1/runtime/config/routing"
@@ -116,6 +118,7 @@ class LaneStore:
         exact = self.exact_lane(EXACT_LANE)
         exact["dropped_slots"] = [DROPPED_SLOT]
         self.exact_declared = {EXACT_LANE: [DROPPED_SLOT, *exact["admitted_slots"]]}
+        self.exact_declared_cli = {EXACT_LANE: []}
         # The projection now carries the file's own order beside the admission
         # lists; the fixture serves the one it tracks.
         exact["declared_slots"] = list(self.exact_declared[EXACT_LANE])
@@ -194,19 +197,37 @@ class LaneStore:
         action = request.get("action", "set")
         with self.lock:
             if lane_id.startswith("exact/"):
-                if action != "append":
-                    raise AssertionError(f"the TUI posted {action!r} to a standalone lane")
                 name = lane_id[len("exact/"):]
                 slot = request["runtime_id"]
-                declared = self.exact_declared[name]
-                if slot in declared:
-                    return 400, {"error": f"{slot} is already a slot of {name}"}
-                declared.append(slot)
                 lane = self.exact_lane(name)
+                declared = self.exact_declared.setdefault(name, list(lane["declared_slots"]))
+                declared_cli = self.exact_declared_cli.setdefault(
+                    name, list(lane["declared_cli_slots"])
+                )
+                if action == "append":
+                    if slot in declared or slot in declared_cli:
+                        return 400, {"error": f"{slot} is already a slot of {name}"}
+                    declared.append(slot)
+                elif action in ("move", "drop"):
+                    source = declared if slot in declared else declared_cli
+                    if slot not in source:
+                        return 400, {"error": f"{slot} is not a slot of {name}"}
+                    if action == "drop":
+                        source.remove(slot)
+                    else:
+                        index = source.index(slot)
+                        neighbor = index + (1 if request["direction"] == "down" else -1)
+                        if neighbor < 0 or neighbor >= len(source):
+                            return 400, {"error": f"{slot} cannot move across slot groups"}
+                        source[index], source[neighbor] = source[neighbor], source[index]
+                else:
+                    raise AssertionError(f"the TUI posted {action!r} to a standalone lane")
                 lane["admitted_slots"] = [
                     s for s in declared if s not in lane["dropped_slots"]
                 ]
                 lane["declared_slots"] = list(declared)
+                lane["declared_cli_slots"] = list(declared_cli)
+                lane["cli_slots"] = list(declared_cli)
                 return 200, commit_receipt()
             declared = [lane for lane in self.lanes if lane["id"] == lane_id]
             if action == "create":
@@ -505,7 +526,82 @@ def run_exact(executable: str) -> None:
     )
 
 
+def run_cli_editor(executable: str) -> None:
+    """The Librarian editor reaches both arrays and explains their boundary."""
+    store = LaneStore()
+    librarian = store.exact_lane("librarian_exact")
+    cli = ["codex_subscription.gpt-6-luna", "claude_code.claude-sonnet-5"] + [
+        f"codex_subscription.extra-{index}" for index in range(8)
+    ]
+    librarian["declared_cli_slots"] = list(cli)
+    librarian["cli_slots"] = list(cli)
+    store.exact_declared["librarian_exact"] = list(librarian["declared_slots"])
+    store.exact_declared_cli["librarian_exact"] = list(cli)
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
+    fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
+    requests: h.HttpRequests = []
+
+    def exact_posts() -> list[dict]:
+        return [json.loads(body) for path, body in requests if path == ROUTING_PATH]
+
+    def wait_for_posts(count: int) -> list[dict]:
+        deadline = time.monotonic() + 5.0
+        while len(exact_posts()) < count:
+            if time.monotonic() > deadline:
+                raise AssertionError(f"exact posts: {exact_posts()!r}")
+            time.sleep(0.05)
+        return exact_posts()
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        h.resize_and_wait(process, fd, output, rows=30, columns=131,
+                          needle=b"MASC Lanes", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"j", b"HITL")
+        h.send_and_wait(process, fd, output, b"j", b"Librarian")
+        mark = mark_output(fd, output)
+        h.send_and_wait(process, fd, output, b"s", b"MASC Lanes / Providers")
+        h.wait_for_output(process, fd, output,
+                          b"[CLI] codex_subscription.gpt-6-luna", start=mark, timeout=5.0)
+        h.wait_for_output(process, fd, output,
+                          b"[CLI] claude_code.claude-sonnet-5", start=mark, timeout=5.0)
+        h.send_and_wait(process, fd, output, b"j", b"[CLI] codex_subscription.gpt-6-luna")
+        h.send_and_wait(process, fd, output, b"K", b"HTTP slots run first")
+        if exact_posts():
+            raise AssertionError(f"a cross-boundary move posted: {exact_posts()!r}")
+        h.send_and_wait(process, fd, output, b"j", b"[CLI] claude_code.claude-sonnet-5")
+        mark = mark_output(fd, output)
+        os.write(fd, b"K")
+        posted = wait_for_posts(1)
+        expected = [{"lane": "exact/librarian_exact", "action": "move",
+                     "runtime_id": "claude_code.claude-sonnet-5", "direction": "up"}]
+        if posted != expected:
+            raise AssertionError(f"CLI reorder posted {posted!r}, expected {expected!r}")
+        h.wait_for_output(process, fd, output,
+                          b"> 2/11  [CLI] claude_code.claude-sonnet-5", start=mark, timeout=5.0)
+        if store.exact_declared_cli["librarian_exact"] != [cli[1], cli[0], *cli[2:]]:
+            raise AssertionError("the server fixture did not reorder the CLI declaration")
+        h.resize_and_wait(process, fd, output, rows=15, columns=100,
+                          needle=b"MASC Lanes / Providers", controls=(h.FULL_REDRAW,))
+        h.send_and_wait(process, fd, output, b"j" * 9,
+                        b"> 11/11  [CLI] codex_subscription.extra-7")
+        h.send_and_wait(process, fd, output, b"a", b"add provider")
+        h.send_and_wait(process, fd, output, b"e",
+                        b"> 11/11  [CLI] codex_subscription.extra-7")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Librarian provider editor includes CLI fallback slots",
+        interact=interact,
+        http_fixtures=fixtures,
+        http_requests=requests,
+    )
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
     run_exact(os.path.abspath(sys.argv[1]))
+    run_cli_editor(os.path.abspath(sys.argv[1]))
     print("runtime lane editor: PASS")

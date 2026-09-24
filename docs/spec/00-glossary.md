@@ -178,7 +178,18 @@ status: reference
   `keeper.identity` → `keeper.workspace` → `<role>`.
   `keeper.worldview`는 이 세계가 무엇을 잘한 일로 치는가다. 운영자가 덮어쓰며, 배포
   기본값은 "따로 정한 가치관이 없다 — 각 Keeper의 역할이 정한다"이다. 슬롯은 항상 렌더된다.
-  `keeper.constitution`은 세계가 쓴 규범(RFC-0442)이고, 조항이 없으면 통째로 빠진다.
+  `keeper.constitution`은 세계가 쓴 규범(RFC-0442)이다. 원장 파일이 아직 없는 세계(`Missing`)는
+  조항 없이 통째로 빠진다. 반면 원장 파일이 실재하는데 읽을 수 없는 상태(`Unreadable`)는
+  조항 없는 프롬프트로 턴을 돌리지 않고 `prepare_run_context` 단계에서 `prepare_error`
+  (`Constitution_unreadable`)로 즉시 거절(`not-dispatched`)한다. 규범 없이 임의 실행되는
+  것을 막고, 프롬프트 해시 변경으로 인한 벤더 세션 불필요 소모·재시작을 방지하기 위함이다(#38354·#38427).
+  프롬프트 단일 권위(Single Authority): 직접(direct) 턴과 자율(autonomous) 턴 모두
+  `Keeper_run_context.prepare_run_context`가 조립한 단일 `base_system_prompt`만 모델로 보낸다.
+  `Keeper_unified_prompt.build_prompt`는 관찰 프레임과 사용자 메시지만 만들며(`turn_prompt_parts`),
+  별도 시스템 프롬프트를 렌더하지 않는다(`turn_prompt`의 `system_prompt` 필드는 제거됨).
+  대시보드 및 TUI 설정 표면에서는 `prompt.system_prompt`가 닫힌 세 상태
+  (`available`·`unavailable: constitution_unreadable`·`decode_failed`)로 투영되어
+  오류 사유와 파일 경로를 직접 드러낸다.
   `<role>`은 그 Keeper의 `instructions`(Keeper TOML)를 적힌 그대로 감싸며 앞에 제목을
   붙이지 않는다.
   `keeper.identity`·`keeper.workspace`는 각각 Keeper 이름과 샌드박스 루트를 받는다.
@@ -192,7 +203,9 @@ status: reference
   경계: 여기의 "role"은 Message의 role(`System`·`User`·`Assistant`·`Tool`)도, Board
   Interest 판정의 `keeper_role {name, board_interests}`도, Fusion 심판의 `judge_role`
   (Fusion Judge Role)도 아니다.
-  → [Keeper_prompt](../../lib/keeper/keeper_prompt.mli)
+  → [Keeper_run_context.prepare_run_context](../../lib/keeper/keeper_run_context.mli),
+  [Keeper_unified_prompt](../../lib/keeper/keeper_unified_prompt.mli),
+  [Keeper_prompt](../../lib/keeper/keeper_prompt.mli)
 
 **Board Interest**
 : Keeper가 직접 지목되지 않은 Board post와 comment를
@@ -316,10 +329,27 @@ status: reference
   [Keeper_terminal_reason](../../lib/keeper_runtime/keeper_terminal_reason.mli)
 
 **Keeper Chat Operation**
-: Keeper Owner가 접수한 메시지 실행의 durable 기록. `operation_id`로 식별하며
-  `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론도 이 operation을
-  제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상 Keeper다.
-  접수 응답은 실행 완료를 뜻하지 않는다.
+: Keeper 대화에 접수한 메시지 실행의 durable 기록. `operation_id`로 식별하며
+  `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론이나 다른 Keeper(`masc_keeper_msg`·
+  `masc_keeper_delegate`)도 이 operation을 제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상
+  Keeper다. 소스 스키마는 `masc.keeper_chat_operation.source.v2`이며 `sender_keeper` 키를
+  반드시 싣는다. 값은 다른 Keeper가 보낸 경우 그 Keeper 식별자이고, 운영자·커넥터 화자면 `null`이다
+  (RFC-0468 §3.2). 접수 응답은 실행 완료를 뜻하지 않는다.
+  → [Keeper_chat_operation_payload](../../lib/keeper/keeper_chat_operation_payload.mli)
+
+**Speaker Authority (화자 권한)**
+: Keeper 대화 turn을 연 발화자(human 또는 agent)의 권한 분류. 메시지 내용(content)에서
+  추측하지 않고 진입 경로와 Keeper 레지스트리 대조로 구조적으로 결정한다(RFC-0223 §3,
+  RFC-0468 §3.2). 닫힌 세 변형이다 — `Owner` (인증된 대시보드/운영자 경로), `External`
+  (Discord·Slack 등 커넥터 문맥을 나르는 외부 화자), `Keeper` (제출 지점이 Keeper
+  레지스트리와 일치시킨 등록된 다른 Keeper). wire 값은 각각 `"owner"`·`"external"`·
+  `"keeper"`다. `Keeper`인 경우 `speaker_id`와 `speaker_name`에 해당 Keeper 식별자가 실린다
+  (Keeper는 정확히 하나의 이름을 갖는다, RFC-0393).
+  Librarian의 대화 상대방 관측(`Keeper_counterpart_observation`)에서도 같은 닫힌 세
+  변형(`Owner`·`External`·`Keeper`)으로 전달되어, 호스트 참조가 부족해도 운영자,
+  등록된 Keeper, 외부 화자를 안전하게 분리한다.
+  → [Keeper_chat_store](../../lib/keeper/keeper_chat_store.mli),
+  [Keeper_counterpart_observation](../../lib/keeper/keeper_counterpart_observation.mli)
 
 **Turn Row Source (턴 행 출처)**
 : 채팅 transcript가 한 turn의 행을 그리는 출처. 코드의 타입 이름이 아니라 이 문서와
@@ -355,6 +385,15 @@ status: reference
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
   새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고
   새 이력을 시작하며, 첫 저장이 받아들여진 뒤 재시작을 기록한다.
+
+**Prepare Error (준비 오류)**
+: Keeper turn이 모델에 파견(dispatch)되기 전, 실행 컨텍스트를 구성하는 단계(`Keeper_run_context.prepare_run_context`)에서
+  발생하는 닫힌 둘의 실패 사유(`type prepare_error = Checkpoint_unread of checkpoint_load_error | Constitution_unreadable of read_error`).
+  `Checkpoint_unread`는 기존 이력 체크포인트를 불러오지 못한 경우이고, `Constitution_unreadable`은 세계의 헌법 원장
+  파일이 실재하지만 권한·I/O 오류 등으로 읽지 못한 경우다.
+  준비 오류가 발생하면 턴은 모델을 호출하지 않고 `not-dispatched` 실패 경로로 즉시 거절된다. 이 거절은 영수증(receipt)을
+  남기지 않고 트랜스크립트에도 기록되지 않으므로, 다음 턴이 헌법 원장이나 체크포인트를 다시 읽어 정상 회복을 시도한다(#38354·#38427).
+  → [Keeper_run_context.prepare_error](../../lib/keeper/keeper_run_context.mli)
 
 **agent core Turn**
 : 하나의 agent core Agent run 내부에서 provider response와 tool 실행이 진행되는 한
@@ -445,6 +484,24 @@ status: reference
   `conversation_cumulative`는 대화 누적, `unavailable`은 범위 미상이다.
   합계·누적·범위 미상인 값으로 단일 요청의 컨텍스트 점유율이나 비용을 계산하지
   않는다. 클라이언트 턴 합계도 runtime 후보 순서를 포함한 Keeper turn 전체 합계는 아니다.
+
+**Provider Usage Window (제공자 사용량 창)**
+: Claude Code(`rate_limit_event`의 `unifiedWindows`)나 Codex app-server
+  (`account/rateLimits/updated`)가 턴 도중 wire로 통보한 제공자 자체의 사용량 한도 창
+  (`Runtime_provider_usage_window.t`). (quota scope, limit, window)별 최신 관측값과
+  수신 시각을 기록하며, `GET /api/v1/runtime/resolved`에 읽기 전용으로 노출된다(#38380).
+  - **관측 권위**: 이것은 순수한 관측(observation)이다. codex-cli 규약에 따라 클라이언트는
+    소진율(utilization)이나 리셋 시각(`resets_at`)으로 복구 시점을 추론해서는 안 되므로,
+    MASC의 라우팅·후보 순서(candidate ordering)·승인(admission)·재시도(retry) 판단은 이 숫자를
+    일절 읽지 않는다. 제공자가 알려준 사실 그대로를 기록하고 보여줄 뿐이다.
+  - **비영속·프로세스 로컬**: 프로세스 메모리에만 존재하며 저장소에 남지 않는다. 프로세스
+    기동 후 통보가 한 번도 없었던 scope는 0이나 빈 창으로 꾸며내지 않고
+    `Not_reported_since_start`로 명시한다.
+  - **TTL 부재**: `resets_at` 시각이 지나도 자동으로 삭제되거나 만료되지 않으며, 더 새로운
+    보고가 올 때까지 마지막 수신 기록을 유지한다.
+  - **Usage Scope와의 구분**: 위의 Usage Scope(MASC가 집계하는 토큰 수의 범위)와 다른 축이다 —
+    이쪽은 모델 제공자가 wire로 알려준 자기 계정의 5시간·7일 한도 창이다.
+  → [Runtime_provider_usage_window](../../lib/runtime/runtime_provider_usage_window.mli)
 
 **Caller Scope**
 : 이벤트를 발행하는 코드가 bus handle에 실어 봉투에 붙는 불투명한 값
@@ -633,15 +690,60 @@ status: reference
   [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
   [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.ml)
 
+**Quiz Lane (퀴즈 레인)**
+: 저장된 기록(Board·기억 OS·GitHub)에서 인용한 사실 묶음(`deck.json`, `snapshot_file`)을
+  바탕으로 문제를 내고 답을 채점하는 Lane Add-on 패키지 쌍(`quiz-questions`·`quiz-grader`).
+  출제와 채점의 권한을 엄격히 분리하고, 기록 인용과 완전 단어 일치를 강제한다(#38433, task-1688).
+  - **출제·채점 분리**: 출제 패키지(`quiz-questions`, `derive` 기여)는 팩트 덱에서 문제를
+    뽑아 `quiz/questions`로 내보낼 뿐 채점할 수 없다. 채점 패키지(`quiz-grader`, `derive`·
+    `act` 기여)는 출제 결과(`lane_output`)와 같은 팩트 덱을 함께 받아, `lane_act` 도구로
+    들어온 응답을 대조해 `quiz/grades` 판정과 `quiz/score` 누적 점수를 발행한다.
+  - **기록 인용 및 완전 단어 일치**: 문제는 임의의 요약이나 추정이 아니라 실제 저장된
+    기록 파일에 글자 그대로 존재하는 인용문(`quote`)이어야 하며, 정답(`answer`)은 그 인용문
+    안의 완전한 단어(whole-word)여야 한다(예: `"unmerged"` 속의 `"merged"` 매칭은 거절).
+    질문 대상 필드는 닫힌 6종(`author`·`claimant`·`status`·`merged_commit`·`cause`·
+    `decision`)이고, 필드마다 서로 다른 답을 가진 사실이 둘 이상 있어야 출제된다. 단 하나의
+    사실이라도 기록 인용 규칙을 어기면 덱 빌드(`build_deck.py`)는 덱 생성을 통째로 거절한다.
+  - **자칭 응답자 라벨 (Claimed Answerer)**: 채점 점수는 호스트가 인증한 호출자 정체성이
+    아니라 응답자가 액션 payload에 스스로 적어 낸 라벨(`answerer_basis = self_claimed_label`)을
+    기준으로 `by_claimed_label`에 집계한다. 호스트는 인증 요청자를 보존하되 워커에 넘기지
+    않는다. 응답자 자신에 관한 질문은 `excluding_claimed_about_answerer`로 가려진다.
+  - **덱 식별자 무효화**: 덱 빌드가 새 `deck-id`를 발급하면 이전 덱으로 출제된 질문들은
+    의도적으로 채점 불가(`ungradable`)가 되어 낡은 문제와 새 정답의 혼선을 막는다.
+  → [Quiz Deck Skill](../../addons/quiz-questions/skills/quiz-deck/SKILL.md),
+  [quiz-questions](../../addons/quiz-questions/lane.toml),
+  [quiz-grader](../../addons/quiz-grader/lane.toml)
+
 **Runtime execution**
 : 모델·도구·재개 상태를 Agent Core가 소유하는지 공식 클라이언트가 소유하는지의 구분.
   → [Runtime_execution.t](../../lib/runtime/runtime_execution.mli)
 
 **Exact-output route**
-: Librarian 같은 단독 모델 작업의 목적별 실행 경로. 해당 설정은 API slot과
-  후속 CLI 후보 순서를 선언한다. 코드 이름은 `exact_output_lane_decl`이다.
-  → [선언](../../lib/runtime/runtime_schema.mli),
-  [작업 기록](../../lib/exact_lane_run_registry.mli)
+: Librarian, Workspace memory curator, HITL auto judge, Board attention 같은 단독
+  모델 작업의 목적별 실행 경로(`Agent_core.Exact_output`). 설정은 API slot과 후속 CLI
+  후보 순서를 선언한다(`exact_output_lane_decl`). 도구를 쓰지 않고 단일 완결 응답을
+  받아 도메인 검증기가 유효성을 판정하며, 일반 턴 failover인 Runtime Candidate Order와
+  구분된다.
+  - **슬롯 전진 조건 (타임아웃 및 컨텍스트 초과)**: 슬롯 전진은 공통적으로 이 슬롯에서
+    발송이 한 번이었을 때(`receipt_dispatch_count = 1`)만 허용된다. 요청이 wire로 나간
+    뒤 바인딩의 헤더 기한(`connect_timeout_s`, `Http_operation`) 또는 전체 기한
+    (`body_timeout_s`, `Wall_clock`) 안에 응답 헤더를 받지 못한 타임아웃
+    (`Http_client.TimeoutError`)이 발생하거나(#38437), 제공자가 입력을 바인딩 창보다
+    크다고 거절한 경우(`Context_overflow`, #38454) 첫 슬롯에서 패스를 중단하거나 범위를
+    축소하지 않고 선언된 다음 후보 슬롯으로 전진(`execution_failure_may_advance`)한다.
+    바인딩별 응답 기한과 컨텍스트 윈도우 크기는 슬롯 자체의 고유 속성이므로, 더 큰
+    창이나 독립 기한을 가진 후속 후보(예: Claude CLI)가 동일 입력을 처리할 기회를
+    보장한다.
+  - **생성 발송 관측 권위 (`flow_evidence_generation_dispatch`)**: 걸음(walk)에 속한 어느
+    후보라도 외부 완료 생성 요청(`generation dispatch`)을 시작했는지 여부를 불변
+    증거(`Started`·`Not_started`)로 기록한다. 앞선 슬롯이 생성 요청을 보낸 뒤(예: 5xx
+    수신) 후속 슬롯으로 넘어가 최종 슬롯이 발송 전 실패하더라도, 걸음 전체의 영수증에는
+    `outward_effect=started`로 보존된다(마지막 실패 슬롯의 상태만 보고
+    `outward_effect=none`으로 오기록하지 않는다). 단, 사전 토큰 수 측정
+    (`token-count measurement`)은 별개 외부 호출이며 생성 발송 사실로 계수하지
+    않는다(#38525).
+  → [Exact_output](../../packages/agent_core/lib/llm_provider/exact_output.mli),
+  [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
 
 **Memory queue**
 : Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한
@@ -1218,6 +1320,24 @@ status: reference
   `Document`, `Audio`. 정본은 `packages/agent_core/lib/llm_provider/types.mli`의
   `content_block`이다.
 
+**Input Speaker (입력 화자)**
+: Keeper 대화에서 각 `User` message를 누가 발화했는지를 나타내는 메타데이터
+  (`agent_core.input_speaker.v1`, `Agent_core.Types.Input_speaker.key`). 메시지가 생성될
+  때 고정 스탬프되며, 이후 메시지 본문에서 추론하거나 변경하지 않는다(RFC-0468 §3.2).
+  닫힌 타입(`Keeper_input_speaker.t`)은 둘이다 — 외부 주체인 `Person`(`Owner`·`Keeper id`·
+  `External {channel; user_id; user_name}`)과 호스트가 작성한 프롬프트인 `Host_prompt`
+  (`Autonomous_wake {answered_asks}`·`Official_client_resume`). `Keeper`는 생성 지점에서
+  레지스트리와 일치된 등록된 Keeper만 가리키며, 호스트 자율 기상(`Autonomous_wake`)의 답변된
+  Ask들은 요청 형태 보존을 위해 단일 메시지에 인용되므로 `answered_asks`가 각 행에 답변한
+  사람 목록을 순서대로 나열한다.
+  Librarian은 대화 헤더에 `speaker=...`로 렌더링하며, 메타데이터 부재(`Absent`) 시
+  `speaker=unknown`, 잘못된 형태(`Invalid`)면 `speaker=invalid(...)`, 중복(`Duplicate`)이면
+  `speaker=duplicate`로 표기해 패스를 중단하지 않고 대화를 계속 읽는다.
+  이 메타데이터는 LLM provider로 전송되지 않고(`Input_speaker.without`), 공식 클라이언트
+  이력 봉투 및 스냅숏 해시에서 제외되며, 승인 입학 다이제스트(`Keeper_approval_input_admission.admission_digest`)
+  에서도 제외된다.
+  → [Keeper_input_speaker](../../lib/keeper/keeper_input_speaker.mli)
+
 **Atom**
 : History를 자를 때 쓰는 가장 작은 단위. `User` message 하나, 또는 `Assistant`
   message 하나와 그것에 답한 `Tool` message들이다. 따로 저장되지 않고 History를
@@ -1253,15 +1373,29 @@ status: reference
   후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
   그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
   다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
-  이 위치의 출처(`Keeper_carried_front.origin`)는 다섯이다 — `Carried`(seed에서 온
+  이 위치의 출처(`Keeper_carried_front.origin`)는 여섯이다 — `Carried`(seed에서 온
   위치: 원장, turn 기록, 거절 뒤 반 자르기·묶음 비우기, 씨앗 범위 거절 뒤 turn 경계),
   `Librarian_snapshot`(하던 일 저장본이 대신하는 경계),
   `Librarian_progress`(저장본이 이 History에 맞지 않을 때 Librarian의 durable Read
-  Position), `Turn_start`(앞머리도 맞는 저장본도 없음: 이 History에서 마지막으로
+  Position), `Past_librarian_point`(Librarian 지점이 뒤처져 있고 provider가 수용한
+  시작점이 앞서 있을 때 그 수용된 자리에서 시작하는 경계),
+  `Turn_start`(앞머리도 맞는 저장본도 없음: 이 History에서 마지막으로
   끝난 turn이 끝난 자리에서 시작한다), `Turn_start_unknown`(그 경계마저 못 읽음:
   가장 새 Atom 하나에서 시작한다). Agent Core는 맞는 저장본 → Librarian이 읽은
-  위치 → 이 History에 맞는 원장·씨앗 → 마지막으로 끝난 turn의 경계 순으로 고른다.
-  Librarian 지점이 있으면 원장·씨앗은 읽지 않는다. Librarian 지점이 없는 turn에서
+  위치 → Librarian 지점 뒤 수용된 시작점 → 이 History에 맞는 원장·씨앗 → 마지막으로
+  끝난 turn의 경계 순으로 고른다(`choose_range_start`).
+  Librarian 지점이 있으면 원장·씨앗은 읽지 않는다. Librarian 지점이 있거나 그 뒤의
+  수용된 시작점에서 열린 요청이 크기 때문에 거절되면, 도구 마커 재전송 전에 마지막으로
+  완료된 turn 경계부터 동일 후보에 한 번 더 보낸다(`Turn_start_after_librarian_refusal`,
+  RFC librarian-lifecycle §4.10, rule 1). 이 경계 재전송(`turn_boundary_resend_sequence`)은
+  typed size 거절뿐 아니라 실시간 크기 거절 도착 형태인 `Unknown_invalid_request`에도
+  동작한다(`boundary_resend_on`). 만약 재전송이 크기와 무관한 사유(도구 스키마 오류나
+  미지원 파라미터 등)로 다시 거절되면 앞머리를 턴 경계로 계속 쥐고 있지 않고 직전 앞머리를
+  되돌려준다 — 크기가 아닌 거절로 인해 다음 후보나 이후 턴의 앞머리가 영구히 잘려나가는 것을
+  막는다(#38537). provider가 수용한 시작점(`accepted_start`)은 최신
+  응답 관측 턴 기록에서 읽혀 다음 turn의 `choose_range_start`로 전달되며, Librarian
+  지점이 뒤처져 있는 동안 요청은 그 자리에서 열리고(`Past_librarian_point`), 결코 이번
+  turn의 경계를 넘지 않는다(`within_turn_boundary`). Librarian 지점이 없는 turn에서
   provider가 씨앗 범위를 크기 때문에 거절하면 turn 경계가 그 turn의 앞머리가 되고
   (`Turn_start_after_seed_refusal`), 같은 후보에 한 번 더 보낸다. 다음 후보와 공식
   클라이언트 레인도 그 경계부터 싣는다. 받아들여진 요청이 원장에 남으므로 다음
@@ -1271,7 +1405,9 @@ status: reference
   시작한다 (`RFC-keeper-context-window-in-tokens` §13.4·§13.6).
   `Librarian_progress`는 그 위치가 이 trace를 지목하고 그 앞 Atom이 위치가 기록한
   Message로 열릴 때만 채택하며, 그때 요청은 읽지 않은 Atom부터 실리고 그 앞을
-  요약하지 않는다. `Turn_start`에서는 이 turn 자신의 Atom만 실리고 그 앞 Atom은
+  요약하지 않는다. `Past_librarian_point`는 Librarian 지점부터 수용된 시작점
+  직전까지의 Atom을 요청에 싣지 않으며, 이 중 요약도 안 되고 메모리에도 없는 Atom들의
+  틈은 `librarian_gap`이 계산한다. `Turn_start`에서는 이 turn 자신의 Atom만 실리고 그 앞 Atom은
   Librarian의 다음 회차를 기다린다. `Turn_start`의 `end_atom`은 그 경계 자체를 적는다 —
   범위가 열린 Atom이 아니라 turn-boundary 저장소가 말하는 완료 경계다. 그래서 경계가
   가장 새 Atom과 같거나 그보다 뒤여도(옛 번호로 남은 경계) 그 값을 그대로 적고, 범위가
@@ -1346,6 +1482,10 @@ status: reference
   `Turn_boundary_unknown`이고, 요청은 가장 새 Atom 하나만 싣는다 — 모르는 시작을
   0으로 접어 History 전체를 보내지 않는다. 요청이 어디서 시작했는지는 `origin`이
   따로 적는다(`Turn_start`·`Turn_start_unknown`).
+  - **경고 발생 경계**: `turn_start` 조회나 다음 요청 예측(`next-request forecast`) 단계에서
+    무조건 경고를 남기지 않는다. 씨앗이나 앞머리 거절 폴백을 거쳐 실제로 알 수 없는
+    턴 시작으로 범위를 열어 wire로 전송한 요청에서만
+    `warn_range_opens_on_newest_atom` 경고를 낸다(#38365).
   **경고**: `turn_start`의 `Turn_boundary`·`Turn_boundary_unknown`과 `origin`의
   `Turn_start`·`Turn_start_unknown`은 `Turn Boundary Position`의 닫힌 넷
   (`Atom_history`·`Empty_atom_history`·`No_atom_history`·`Stale_noop`)과 **다른
@@ -1474,16 +1614,21 @@ status: reference
   - durable 회차(`Keeper_librarian_durable_consumer`): 끝난 턴을 읽어 Memory OS에 적고
     읽은 위치(Read Position)를 옮긴다. Agent Core 턴은 checkpoint의 atom으로, 공식
     클라이언트 턴은 그 trace의 history 파일에서 `turn_ref`가 가리키는 조각으로 읽는다.
-    두 위치(atom 위치·공식 클라이언트 위치)를 각각 옮기며, `commit`이 Memory OS snapshot
-    커밋을 보고할 때만 옮긴다.
+    두 위치(atom 위치·공식 클라이언트 위치)는 각각 따로 옮기며, `commit`이 Memory OS snapshot
+    커밋을 보고할 때만 옮긴다. 공식 클라이언트 턴 쪽이 읽을 수 없는 거절 경계선에서
+    멈추더라도(`Keeper_librarian_range.Official_stop`), 이 정지는 공식 위치만 세우며 atom 쪽은
+    독립적으로 읽어 atom 위치를 전진시킨다. atom 쪽에 더 읽을 것이 없을 때 비로소 회차가
+    `Official_range_stopped`로 종료된다(#38475).
   - 연속성 회차(`Keeper_librarian_continuity`): 스냅숏이 덮은 앞부분을 다시 쓰는 회차.
     완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 커밋은 durable 회차의
     위치를 바꾸지 않는다.
   두 회차는 따로 밀리고(Continuity Lag), 실패 뒤 범위를 좁히는 방식도 다르다(RFC
-  librarian-lifecycle §4.3). durable 회차는 실패 종류를 보지 않고, 실패 표식을 루프
-  메모리에 두고 가장 오래된 한 턴으로 좁힌다. 연속성 회차는 실패 종류를 보고 크기
+  librarian-lifecycle §4.3). durable 회차는 실패 종류를 보지 않고, 실패 표식(wide-range
+  failure marker)을 루프 메모리에 두고 가장 오래된 한 턴으로 좁힌다. 단, 공식 정지
+  (`Official_range_stopped`)로 끝난 회차는 이 마커를 해제하여 이후 회차가 atom 백로그
+  전체를 정상적으로 읽도록 보장한다(#38475). 연속성 회차는 실패 종류를 보고 크기
   때문인 실패에서만 좁히며, 좁힌 폭(Continuity Width)을 다음 회차로 넘긴다.
-  → [keeper_librarian_durable_consumer](../../lib/keeper/keeper_librarian_durable_consumer.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
+  → [keeper_librarian_durable_consumer](../../lib/keeper/keeper_librarian_durable_consumer.mli) · [keeper_librarian_range](../../lib/keeper/keeper_librarian_range.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
 
 **Continuity Lag (요약이 밀린 정도)**
 : 연속성 회차가 얼마나 뒤처졌나 — Librarian의 읽은 위치(Read Position)의 `end_atom`에서
@@ -1570,9 +1715,12 @@ status: reference
     흡수되지 않은 claim이 기존 기억의 사본이면 역방향 사본 판정(Reverse Copy Judgment)을
     거쳐 저장하지 않고 버린다(#38056·#38243). 흡수 대상(`into`)이 잠근 시점의 스냅숏에도,
     이번 답의 새 claim에도 없으면(회차 도중 Keeper가 그 Fact를 철회하거나 `supersedes`로
-    대체한 경우) 그 흡수는 적용하지 않는다. 원문은 현재 Fact로 남고, 지워진 대상은
-    되살아나지 않으며, Librarian 실행 기록(`run` 출력)에 실제로 적용된 흡수와 미적용
-    흡수를 구분해 남긴다(#38231·#38267).
+    대체한 경우) 그 흡수는 적용하지 않는다. 원문은 현재 Fact로 남고 지워진 대상은
+    되살아나지 않으며, 회차 도중 없어진 기억을 이어붙이는(supersedes 또는 absorbs) 새
+    claim은 저장하지 않고 실행 기록(`run` 출력)에 `claims_not_applied`로 남긴다.
+    원장의 `Revised` 이벤트는 커밋이 실제로 수행한 `supersedes`에만 기록되어 대체된
+    기억은 Keeper가 직접 준 후계자 하나만 보존하며, 후계자 중 어느 것도 스냅숏에 남지
+    않은 대체 대상 기억은 퇴역하지 않고 현재 Fact로 남는다(#38231·#38267·#38317).
   - Keeper 직접 갱신: `keeper_memory_write`는 선택 인자 `supersedes`로 자신이 직접
     적은 이전 Fact 하나를 새 claim으로 대체할 수 있다(#38122). 원자적(locked) 한 번의
     커밋으로 이전 Fact를 지우고 새 Fact를 적으며, 저널에 `superseded_by` 사유를 남기고
@@ -1643,6 +1791,13 @@ status: reference
   한 번 불러, 더할 fact와 버릴 fact와 합칠 fact를 정해 Memory OS에 적는다. 같은
   호출에서 미처리 요청을 묶고 다음 행동을 제안한다. Keeper의 판단을
   대신하지 않는다.
+  Librarian은 자기가 누구를 위해 정리하는지 대상 Keeper의 식별자(`keeper_id`)를
+  입력(`Keeper_librarian.input`)에 필수로 실어 보낸다(RFC-0468 §3.1).
+  세 프롬프트(`librarian`·`librarian.continuity`·`librarian.working_context`)는 이를
+  `keeper_instructions` 옆 호스트 데이터로 전달받아 그 Keeper의 자리에서 대화를
+  읽으며, 안내문의 호칭(\"너\"·\"당신\")이 이 대상 Keeper를 가리킴을 안다.
+  대상 Keeper 이름이 빈 문자열이면 기본값으로 채우지 않고 입력을 거절하거나 유닛을
+  실패 처리한다.
   History를 읽는 경로의 구현 진척은 `RFC-librarian-lifecycle` §8을 본다.
   Agent Core의 읽은 위치가 저장되면 같은 wake에서 남은 이력을 계속 읽는다.
   읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
@@ -1650,6 +1805,18 @@ status: reference
   이 이름은 프롬프트 category `librarian`(`config/prompts/librarian.md`,
   `workspace_memory_curator.md`)과 CLI `masc-librarian-replay`·`masc-librarian-continuity`가
   공유한다. 셋은 서로 다른 것이고, 어느 것도 Skill이 아니다.
+  → [Keeper_librarian](../../lib/keeper/keeper_librarian.mli)
+
+**Librarian Gap (Librarian 틈)**
+: 요청(Request)에도 실리지 않고 Librarian 메모리에도 들어가지 않은 Atom들의 범위
+  (`Keeper_carried_front.librarian_gap`). Librarian이 커버하는 끝은 지속성 스냅숏의
+  자르기(`snapshot_cut`)와 내구성 읽은 위치(`read_position`) 중 나중(뒤쪽) 지점이다 —
+  자르기 이전은 요약되었고, 읽은 위치 이전은 메모리에 있다. provider가 직전 요청에서
+  수용한 시작점(`accepted_start`)이 그 끝보다 뒤쪽에 있을 때, 그 끝부터 `accepted_start`
+  직전까지가 틈이 된다. `accepted_start`가 그 끝 이하이거나 두 위치를 모두 알 수 없으면
+  틈은 없다(`None`). 현재 이력에 맞지 않는 스냅숏이 남아 있는 동안에는 읽은 위치 대신
+  그 자르기부터 계산되어 틈이 짧게 산출될 수 있다 (RFC librarian-lifecycle §4.10, rule 3).
+  → [Keeper_carried_front.librarian_gap](../../lib/keeper/keeper_carried_front.mli)
 
 **Librarian Replay**
 : `masc-librarian-replay` CLI. 라이브 워크스페이스의 turn-boundary 로그와 checkpoint에

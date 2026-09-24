@@ -850,10 +850,6 @@ let acquire_pid_lock
     port
 ;;
 
-module For_testing = struct
-  let acquire_pid_lock_with_start_reader = acquire_pid_lock_with_start_reader
-end
-
 let release_base_path_lease lease =
   Mutex.protect base_path_lease_mu (fun () ->
     let owns_table_entry =
@@ -1570,6 +1566,7 @@ let acquire_base_path_lock =
 ;;
 
 module For_testing = struct
+  let acquire_pid_lock_with_start_reader = acquire_pid_lock_with_start_reader
   let acquire_base_path_lock = acquire_base_path_lock_with
 end
 

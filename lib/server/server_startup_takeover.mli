@@ -152,20 +152,6 @@ val acquire_pid_lock :
   int ->
   acquire_result
 
-module For_testing : sig
-  val acquire_pid_lock_with_start_reader :
-    started_for_pid:(int -> string option) ->
-    ?lock_path:string ->
-    ?probe_timeout_sec:float ->
-    ?term_timeout_sec:float ->
-    ?kill_wait_sec:float ->
-    ?poll_interval_sec:float ->
-    int ->
-    acquire_result
-  (** Injects start-token observations while keeping the real signal and wait
-      path. Used to model PID reuse during the TERM grace deterministically. *)
-end
-
 (** Path of the takeover forensics breadcrumb derived from [lock_path]
     (the pid-lock file the takeover contends on). *)
 val takeover_breadcrumb_path : lock_path:string -> string
@@ -241,6 +227,18 @@ val prepare_base_path_lease_exec_handoff :
   (unit, base_path_lock_rejection) result
 
 module For_testing : sig
+  val acquire_pid_lock_with_start_reader :
+    started_for_pid:(int -> string option) ->
+    ?lock_path:string ->
+    ?probe_timeout_sec:float ->
+    ?term_timeout_sec:float ->
+    ?kill_wait_sec:float ->
+    ?poll_interval_sec:float ->
+    int ->
+    acquire_result
+  (** Injects start-token observations while keeping the real signal and wait
+      path. Used to model PID reuse during the TERM grace deterministically. *)
+
   (** Immutable synchronization boundaries around the external lease open and
       the final identity checks. Production acquisition closes over no-op
       functions; no mutable test hook is reachable from production callers. *)

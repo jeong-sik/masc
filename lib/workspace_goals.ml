@@ -138,6 +138,7 @@ let parse_optional_transition_action args field =
    Conflict instead of inventing a transition. *)
 type phase_write_error =
   | Store_unavailable of Goal_store.unavailable
+  | Goal_missing of string
   | Store_error of string
   | Concurrent_transition of { expected : Goal_phase.t; actual : Goal_phase.t }
 
@@ -162,14 +163,16 @@ let update_goal_phase (ctx : context) (goal : Goal_store.goal) ~phase ?note () :
   | Ok (Goal_store.Goal_phase_mismatch actual) ->
     Error (Concurrent_transition { expected = goal.phase; actual })
   | Error (Goal_store.Store_unavailable unavailable) -> Error (Store_unavailable unavailable)
-  | Error (Goal_store.Goal_not_found _ | Goal_store.Rejected _
-          | Goal_store.Persist_failed _ as error) ->
+  | Error (Goal_store.Goal_not_found _ as error) ->
+    Error (Goal_missing (Goal_store.write_error_to_string error))
+  | Error (Goal_store.Rejected _ | Goal_store.Persist_failed _ as error) ->
     Error (Store_error (Goal_store.write_error_to_string error))
 ;;
 
 let phase_write_error_result ~tool_name ~start_time (error : phase_write_error) =
   match error with
   | Store_unavailable unavailable -> unavailable_result ~tool_name ~start_time unavailable
+  | Goal_missing msg -> error_result_typed ~tool_name ~start_time ~code:Not_found msg
   | Store_error msg ->
     error_result_typed ~tool_name ~start_time ~code:Internal_error msg
   | Concurrent_transition { expected; actual } ->
@@ -321,7 +324,10 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
           error_result_typed ~tool_name ~start_time ~code:Validation_error msg
         | Error (Goal_store.Store_unavailable unavailable) ->
           unavailable_result ~tool_name ~start_time unavailable
-        | Error (Goal_store.Goal_not_found _ | Goal_store.Persist_failed _ as error) ->
+        | Error (Goal_store.Goal_not_found _ as error) ->
+          error_result_typed ~tool_name ~start_time ~code:Not_found
+            (Goal_store.write_error_to_string error)
+        | Error (Goal_store.Persist_failed _ as error) ->
           error_result_typed ~tool_name ~start_time ~code:Internal_error
             (Goal_store.write_error_to_string error)
         | Ok (goal, action) ->
@@ -698,8 +704,10 @@ let transact_or_refuse config ~goal_id decide =
 let proof_request_failure ~tool_name ~start_time = function
   | Store (Goal_store.Store_unavailable unavailable) ->
     unavailable_result ~tool_name ~start_time unavailable
-  | Store (Goal_store.Goal_not_found _ | Goal_store.Rejected _
-          | Goal_store.Persist_failed _ as error) ->
+  | Store (Goal_store.Goal_not_found _ as error) ->
+    error_result_typed ~tool_name ~start_time ~code:Not_found
+      (Goal_store.write_error_to_string error)
+  | Store (Goal_store.Rejected _ | Goal_store.Persist_failed _ as error) ->
     error_result_typed ~tool_name ~start_time ~code:Internal_error
       (Goal_store.write_error_to_string error)
   | Refused { code; message } -> error_result_typed ~tool_name ~start_time ~code message

@@ -49,7 +49,14 @@ val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 val status_to_string : status -> string
 
-val resolve :
+(** [resolve ~cursor ~basis ~observation ~observed_at] turns a raw usage
+    observation into a typed resolution and the cursor to persist for the
+    next turn.
+
+    On a same-conversation counter regression the returned cursor is the
+    observed sample, not the stale high-water baseline: the regressed turn
+    reports [Counter_regressed] with no delta, and the next turn subtracts
+    against the reset counter (#32463). *)val resolve :
   cursor:cursor option ->
   basis:basis ->
   observation:sample option ->

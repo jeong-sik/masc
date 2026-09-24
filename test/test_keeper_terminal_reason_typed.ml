@@ -1372,8 +1372,55 @@ max-concurrent = 1
   check
     "same-conversation counter regression is not guessed to be a reset"
     (regressed.status = Masc.Keeper_usage_resolution.Counter_regressed
-     && Option.is_none regressed.delta
-     && retained_cursor = cumulative.runtime.usage_cursor);
+     && Option.is_none regressed.delta);
+  (* #32463: a regressed counter replaces the baseline with the observed
+     sample, so the loss is exactly this turn. The old behaviour kept the
+     stale high-water mark and lost every following turn until the provider's
+     counter climbed back past it. *)
+  check
+    "a regressed counter becomes the next baseline"
+    (retained_cursor
+     = Some
+         { Masc.Keeper_usage_resolution.runtime_id = "antigravity"
+         ; conversation_id = "conversation-1"
+         ; cumulative = regressed_usage
+         });
+  let after_reset_usage =
+    { regressed_usage with
+      input_tokens = 9_010
+    ; output_tokens = 930
+    ; cost_usd = Some 8.9
+    }
+  in
+  let after_reset, after_reset_cursor =
+    Masc.Keeper_usage_resolution.resolve
+      ~cursor:retained_cursor
+      ~basis:
+        (Masc.Keeper_usage_resolution.Conversation_counter
+           { runtime_id = "antigravity"
+           ; conversation_id = "conversation-1"
+           ; position = Masc.Keeper_usage_resolution.Resumed
+           })
+      ~observation:(Some after_reset_usage)
+      ~observed_at:44.2
+  in
+  check
+    "the turn after a reset resumes an exact delta"
+    (after_reset.status = Masc.Keeper_usage_resolution.Exact
+     && after_reset.delta
+        = Some
+            { Masc.Keeper_usage_resolution.input_tokens = 11
+            ; output_tokens = 1
+            ; cache_creation_input_tokens = 0
+            ; cache_read_input_tokens = 0
+            ; cost_usd = Some 0.0
+            }
+     && after_reset_cursor
+        = Some
+            { Masc.Keeper_usage_resolution.runtime_id = "antigravity"
+            ; conversation_id = "conversation-1"
+            ; cumulative = after_reset_usage
+            });
   let cost_regressed_usage =
     { resumed_usage with cost_usd = Some 11.0 }
     |> Masc.Keeper_usage_resolution.sample_of_api_usage

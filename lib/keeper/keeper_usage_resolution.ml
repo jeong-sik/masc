@@ -416,8 +416,17 @@ let resolve ~cursor ~basis ~observation ~observed_at =
         | Some (delta, status) ->
           { observation; basis; delta = Some delta; status; observed_at }, next_cursor
         | None ->
+          (* #32463: the counter on the provider side went backwards or reset,
+             so the stored high-water baseline is unusable. Keeping it answers
+             [Counter_regressed] with [delta = None] on every turn until the
+             new counter climbs back past the old high-water mark, and usage
+             accounting for that whole stretch is lost. Replacing the baseline
+             with the observed sample loses exactly this one turn: the next
+             turn subtracts against the reset counter and resumes an exact
+             delta. The regressed turn itself still reports
+             [Counter_regressed] and no delta. *)
           ( { observation; basis; delta = None; status = Counter_regressed; observed_at }
-          , cursor ))
+          , next_cursor ))
      | Some _ | None ->
        ( { observation; basis; delta = None; status = Baseline_missing; observed_at }
        , next_cursor ))

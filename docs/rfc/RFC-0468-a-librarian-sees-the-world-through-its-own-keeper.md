@@ -193,9 +193,9 @@ Librarian 이 자기 Keeper 의 관점으로 판단한다. 새 Gate 나 검사�
 
 | 단계 | 내용 | 상태 |
 |---|---|---|
-| 1 | §3.1 자기 Keeper 의 정체를 Librarian 입력에 넣는다 | 구현 중 |
-| 2a | 다른 Keeper 가 보낸 말의 발화자를 등록부로 가린다 | 구현 중 |
-| 2b | 사람 쪽 말마다 typed metadata 로 발화자를 싣는다 | 1·2a 배포 뒤 |
+| 1 | §3.1 자기 Keeper 의 정체를 Librarian 입력에 넣는다 | #38378 배포(2026-09-24 03:16) |
+| 2a | 다른 Keeper 가 보낸 말의 발화자를 등록부로 가린다 | #38383 배포(04:16) |
+| 2b | 사람 쪽 말마다 typed metadata 로 발화자를 싣는다 | #38467 배포(09:55), 네이티브 레인 |
 
 2a 를 따로 뺀 이유: `masc_keeper_msg`·delegate 로 다른 Keeper 가 보낸 말은 지금 `Owner` 로
 저장된다. 요청 출처가 `channel="agent"` 이고 workspace·user id 가 비어서
@@ -220,3 +220,14 @@ Librarian 이 자기 Keeper 의 관점으로 판단한다. 새 Gate 나 검사�
 - 1단계(#38378, 03:16 배포): 새 서버가 만든 Librarian 입력 30건 중 30건에 `keeper_id` 가 들어갔다(배포 전 0/200). 15명의 Keeper 에서 확인했다.
 - 2a(#38383, 04:16 배포) 전 기준: 09-23 00:00 부터 배포 전까지 `agent` surface 의 user 줄 60건 중 57건이 `owner` 로 저장됐다. 같은 기간 운영자가 대시보드로 쓴 줄은 50건이었다.
 - 2a 배포 뒤 첫 표본: `codex-mcp-client` 가 `masc_keeper_msg` 로 보낸 줄이 `owner` 로 저장됐다. 등록된 Keeper 가 아니므로 이 PR 의 규칙대로다. 다만 Keeper 가 아닌 에이전트 세션도 운영자는 아니다. 발화자 종류에 에이전트 세션을 따로 둘지는 열린 항목이다.
+
+- 2a 배포 뒤(04:16~08:12): Keeper 끼리 보낸 말 2건이 모두 `keeper` 로 저장됐고, Librarian counterpart 에 `authority=keeper` 가 나왔다.
+- 2b 배포 뒤(09:55~12:23, 입력 404건): 네이티브 레인 Keeper 7명의 `role=user` 머리 148개 중 146개가 `speaker=host:autonomous_wake` 였다. 나머지 2개는 배포 전에 만들어진 메시지라 `speaker=unknown` 이다.
+- 공식 클라이언트 레인(Antigravity·Claude Code)의 Librarian 대화에는 `role=user` 줄이 없다. turn fragment 가 사람 쪽 말을 저장하지 않기 때문이다. 이 레인에서 누가 말했는지는 `counterpart_observations` 로만 전달된다. 빠지는 것은 주로 호스트 깨우기 문구다.
+
+## 10. 남은 항목
+
+- 공식 클라이언트 레인의 사람 쪽 말: turn fragment 에 저장할지. history.jsonl reader 가 metadata 를 버리는 문제(`keeper_context_core_message_json.ml:173`)도 함께다.
+- Keeper 가 아닌 에이전트 세션(`codex-mcp-client` 등)의 `masc_keeper_msg` 는 `owner` 로 저장된다. 운영자와 구분할 종류가 필요한지.
+- `Agent` surface 에서 온 Ask 답은 `External` 로 매핑된다(`keeper_input_speaker.ml` `of_ask_responder`). 지금은 대시보드만 Ask 답을 만든다.
+- 쓰는 쪽 검증과 lane 판정에 같은 규칙("sender 가 Keeper 면 surface 는 Agent")이 두 곳에 있다.

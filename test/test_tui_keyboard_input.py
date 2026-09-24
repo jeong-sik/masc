@@ -18257,11 +18257,28 @@ def run_fusion_history_regression(executable: str) -> None:
             process, master_fd, output, b"r",
             b"historical Fusion Board identity does not match the selected run and post",
         )
-        stale = resize_and_wait(
+        retained = b"Previous Board reading retained"
+        resize_and_wait(
             process, master_fd, output, rows=111, columns=170,
-            needle=b"Previous Board reading (refresh failed)", controls=(FULL_REDRAW,),
+            needle=retained, controls=(FULL_REDRAW,),
         )
-        if b"different-run-702" in CSI_RE.sub(b"", stale):
+        retained_at = output.rfind(retained)
+        wait_for_output(
+            process, master_fd, output, FRAME_END,
+            start=retained_at + len(retained), timeout=3,
+        )
+        frame_end = output.find(FRAME_END, retained_at) + len(FRAME_END)
+        stale_visible = screen_text(bytes(output[:frame_end]))
+        mismatch = (
+            b"historical Fusion Board identity does not match the selected run and post"
+        )
+        if stale_visible.count(mismatch) != 1 or stale_visible.count(retained) != 1:
+            raise AssertionError(
+                f"Historical Board lost its error or retained reading: {stale_visible!r}"
+            )
+        if b"refresh failed" in stale_visible:
+            raise AssertionError("Historical Board refresh repeated its error verdict")
+        if b"different-run-702" in stale_visible:
             raise AssertionError("mismatched Board origin replaced selected evidence")
         send_and_wait(process, master_fd, output, b"r", b"Observed tokens: 303 input / 202 output")
         all_failed = send_and_wait(

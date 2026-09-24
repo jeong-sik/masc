@@ -2,6 +2,9 @@
     packages decide what those observations mean. Files are explicitly bound by
     the installer, never dereferenced from package output. *)
 type browser_selection = Live of Browser_lane.client_id | Automation
+
+(** The lane name ({!Browser_lane.Lane_name.to_wire}) a selection reads from. *)
+val browser_selection_lane : browser_selection -> string
 type source =
   | Snapshot_file of { id : string; path : string }
   | Msx_capture of { id : string }

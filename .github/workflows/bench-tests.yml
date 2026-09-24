@@ -17,6 +17,9 @@ on:
       - 'lib/exec_shim/exec_shim.ml'
       - 'lib/exec_ssh_protocol/exec_ssh_protocol.ml'
       - '.github/workflows/bench-tests.yml'
+      - 'scripts/harness/perf/compare_tui_artifacts.py'
+      - 'test/test_tui_input_frame_pty.py'
+      - 'test/test_tui_artifact_comparison.py'
   workflow_dispatch:
     inputs:
       compare_tui:
@@ -45,6 +48,10 @@ on:
         type: string
         description: Repetitions per binary, alternating order
         default: '3'
+      input_cycles:
+        type: string
+        description: Repeated sets of ten individually acknowledged input transitions
+        default: '1'
 permissions:
   contents: read
 concurrency:
@@ -65,6 +72,9 @@ jobs:
           python-version: '3.12'
       - name: Install harbor and pytest
         run: python -m pip install -r requirements.txt
+      - name: Check TUI comparison receipt validation
+        working-directory: ${{ github.workspace }}
+        run: python3 test/test_tui_artifact_comparison.py
       - name: Run the bench tests
         run: python -m pytest tests -q -rs --junitxml="${RUNNER_TEMP}/bench-tests.xml"
       - name: Refuse skipped tests
@@ -98,6 +108,8 @@ jobs:
           python-version: '3.14'
       - name: Install binary runtime libraries
         run: brew install gmp libpq openssl@3 zstd
+      - name: Check TUI comparison receipt validation
+        run: python3 test/test_tui_artifact_comparison.py
       - name: Download baseline
         uses: actions/download-artifact@v8
         with:
@@ -129,13 +141,15 @@ jobs:
           CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
           REPETITIONS: ${{ inputs.repetitions }}
+          INPUT_CYCLES: ${{ inputs.input_cycles }}
         run: |
           exec python3 scripts/harness/perf/compare_tui_artifacts.py \
             --baseline runtime-baseline --baseline-run "$BASELINE_RUN" \
             --baseline-artifact "$BASELINE_ARTIFACT" --baseline-commit "$BASELINE_COMMIT" \
             --candidate runtime-candidate --candidate-run "$CANDIDATE_RUN" \
             --candidate-artifact "$CANDIDATE_ARTIFACT" --candidate-commit "$CANDIDATE_COMMIT" \
-            --repetitions "$REPETITIONS" --output-dir comparison-results
+            --repetitions "$REPETITIONS" --input-cycles "$INPUT_CYCLES" \
+            --output-dir comparison-results
       - name: Retain raw observations and identity receipts
         if: always()
         uses: actions/upload-artifact@v7

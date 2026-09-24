@@ -17,6 +17,7 @@
     Errors:
     - 400 — malformed sha256 (not 64 lowercase hex chars)
     - 404 — sha256 not in store
+    - 413 — artifact exceeds the 32 MiB whole-response limit
     - 503 — stored artifact unreadable *)
 
 val is_valid_sha256 : string -> bool
@@ -33,18 +34,27 @@ val blob_response :
     - [`Not_found] when the sha is well-formed but absent
       from the store.
 
-    Store inspection, read, and integrity failures return
-    [`Service_unavailable]. Cancellation propagates. *)
+    Oversized artifacts return [`Payload_too_large]. Store inspection, read,
+    and integrity failures return [`Service_unavailable]. Cancellation
+    propagates. *)
 
 val artifact_read_permission : Masc_domain.permission
 (** Operator-only authority required to dereference exact tool-output bytes. *)
+
+val maximum_artifact_response_bytes : int
+(** Upper bound for either whole-body HTTP artifact response. *)
+
+val too_large_response : int -> int -> Yojson.Safe.t
+(** Typed JSON body for an artifact exceeding the HTTP response bound. *)
 
 val artifact_bytes :
   base_path:string ->
   sha256:string ->
   (string option, Tool_blob_store.fetch_error) result
 (** Exact validated bytes shared by the HTTP/1 and HTTP/2 authenticated raw
-    download routes. The blocking file read runs in an Eio system thread. *)
+    download routes. The blocking file read runs in an Eio system thread and
+    rejects files above {!maximum_artifact_response_bytes} before allocating
+    their full content. *)
 
 val add_routes :
   Http_server_eio.Router.t ->

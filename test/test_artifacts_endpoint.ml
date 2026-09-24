@@ -220,7 +220,23 @@ let test_artifact_route_enforces_admin_token () =
          Alcotest.(check bool) "raw response keeps binary bytes" true
            (Astring.String.is_infix ~affix:binary admin_raw);
          Alcotest.(check bool) "raw response is a download" true
-           (Astring.String.is_infix ~affix:"application/octet-stream" admin_raw)))
+           (Astring.String.is_infix ~affix:"application/octet-stream" admin_raw);
+         let source = Filename.concat base_path "oversized.bin" in
+         let fd = Unix.openfile source [ Unix.O_CREAT; Unix.O_WRONLY ] 0o600 in
+         Fun.protect
+           ~finally:(fun () -> Unix.close fd)
+           (fun () -> Unix.ftruncate fd (A.maximum_artifact_response_bytes + 1));
+         let oversized : O.artifact_ref =
+           B.put_file_durable store ~path:source ~mime:"application/octet-stream"
+         in
+         let oversized_path = "/api/v1/artifact-bytes/" ^ oversized.sha256 in
+         let oversized_response =
+           dispatch router (http_request ~path:oversized_path ~token:admin ())
+         in
+         Alcotest.(check int) "oversized raw artifact refused" 413
+           (status_of_response oversized_response);
+         Alcotest.(check bool) "response states the byte limit" true
+           (Astring.String.is_infix ~affix:"maximum_bytes" oversized_response)))
 ;;
 
 (* --- blob_response shape --- *)

@@ -250,6 +250,32 @@ let test_put_then_fetch () =
               Alcotest.failf "fetch failed: %s" (B.fetch_error_to_string error))
       | O.Inline _ -> Alcotest.fail "put returned Inline")
 
+let test_fetch_bounded_rejects_large_real_blob () =
+  with_temp_dir (fun dir ->
+    let store = B.create ~base_path:dir in
+    let payload = "bounded blob" in
+    let sha256 =
+      match B.put store ~bytes:payload ~mime:"application/octet-stream" with
+      | O.Stored { sha256; _ } -> sha256
+      | O.Inline _ -> Alcotest.fail "put returned Inline"
+    in
+    let maximum = String.length payload - 1 in
+    (match B.fetch_bounded store ~sha256 ~max_bytes:maximum with
+     | Error (B.Too_large { actual; maximum = reported; _ }) ->
+       Alcotest.(check int) "actual size" (String.length payload) actual;
+       Alcotest.(check int) "reported limit" maximum reported
+     | Error error ->
+       Alcotest.failf "wrong bounded error: %s" (B.fetch_error_to_string error)
+     | Ok _ -> Alcotest.fail "oversized blob was returned");
+    (match B.fetch_bounded store ~sha256 ~max_bytes:(String.length payload) with
+     | Ok (Some bytes) -> Alcotest.(check string) "at limit" payload bytes
+     | Ok None -> Alcotest.fail "blob disappeared"
+     | Error error -> Alcotest.fail (B.fetch_error_to_string error));
+    match B.fetch_bounded store ~sha256 ~max_bytes:(-1) with
+    | Error (B.Invalid_max_bytes (-1)) -> ()
+    | _ -> Alcotest.fail "negative bound was accepted")
+;;
+
 let test_binary_previews_are_utf8_without_changing_stored_bytes () =
   with_temp_dir (fun dir ->
     let store = B.create ~base_path:dir in
@@ -1512,6 +1538,8 @@ let () =
           Alcotest.test_case "put returns Stored" `Quick
             test_put_returns_stored;
           Alcotest.test_case "put then fetch" `Quick test_put_then_fetch;
+          Alcotest.test_case "bounded fetch rejects oversized real blob" `Quick
+            test_fetch_bounded_rejects_large_real_blob;
           Alcotest.test_case "binary previews preserve UTF-8 and stored bytes" `Quick
             test_binary_previews_are_utf8_without_changing_stored_bytes;
           Alcotest.test_case "put then fetch bounded ranges" `Quick

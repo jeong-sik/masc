@@ -11,6 +11,7 @@ vi.mock('../../api/dev-token', () => ({ ensureDevToken: vi.fn(async () => {}) })
 vi.mock('../../lib/runtime-catalog-resource', () => ({
   runtimeCatalogState: { value: { status: 'idle' } },
   loadRuntimeCatalog: vi.fn(),
+  reloadRuntimeCatalog: vi.fn(async () => {}),
 }))
 afterEach(() => { cleanup(); runtimeCatalogState.value = { status: 'idle' }; vi.useRealTimers(); vi.restoreAllMocks(); vi.resetAllMocks() })
 const response = { window_minutes: 60,
@@ -69,6 +70,14 @@ it('shows each official client account once with its provider-reported usage', a
   await waitFor(() => expect(view.getByTestId('overview-client-claude_one').textContent).toContain('CLI 자체 보고: ready'))
   expect(view.getByTestId('overview-client-codex_two').textContent).toContain('로그인 미측정')
   expect(post).toHaveBeenCalledWith('/api/v1/runtime/official-client/probe', { runtime_id: 'claude_one.shared' })
+})
+it('shows a catalog failure instead of silently omitting account monitoring', async () => {
+  runtimeCatalogState.value = { status: 'error', message: 'HTTP 503' }
+  vi.mocked(get).mockResolvedValue(response)
+  const view = render(html`<${OverviewRuntimeStats} />`)
+  await waitFor(() => expect(view.getByText('runtime_lane_example')).toBeTruthy())
+  expect(view.getByRole('alert').textContent).toContain('공식 Client 계정 목록을 읽지 못했습니다: HTTP 503')
+  expect(view.queryByTestId('overview-official-client-accounts')).toBeNull()
 })
 it('keeps stale values explicit until a refresh returns fresh cache metadata', async () => {
   vi.mocked(get).mockResolvedValueOnce({ ...response,

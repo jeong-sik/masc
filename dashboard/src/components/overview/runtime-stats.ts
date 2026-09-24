@@ -9,7 +9,7 @@ import {
   type DashboardRuntimeProviderSnapshot,
 } from '../../api/dashboard-runtime'
 import type { ProviderUsageScope, ProviderUsageWindow, RuntimeResolvedResponse } from '../../api/schemas/runtime-resolved'
-import { loadRuntimeCatalog, runtimeCatalogState } from '../../lib/runtime-catalog-resource'
+import { loadRuntimeCatalog, reloadRuntimeCatalog, runtimeCatalogState } from '../../lib/runtime-catalog-resource'
 import { setupVisibleAutoRefresh, DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 import { RouteLink } from '../common/route-link'
 
@@ -163,6 +163,12 @@ export function OverviewRuntimeStats() {
   const data = state.kind === 'ready' || state.kind === 'pending' ? state.value : null
   const ledger = data?.cost_ledger_read
   const cache = data?.cache
+  const refresh = () => {
+    setGeneration(value => value + 1)
+    // The catalog is shared across the dashboard and may have changed since
+    // this screen first loaded. Its resource publishes a typed error on failure.
+    void reloadRuntimeCatalog().catch(() => {})
+  }
   return html`<section class="ov-card min-w-0" aria-label="런타임 사용 통계" data-overview-runtime-stats>
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h2>런타임 사용 통계</h2>
@@ -170,11 +176,13 @@ export function OverviewRuntimeStats() {
         <label>집계 요청 기간 <select value=${windowMinutes} onChange=${(event: Event) => setWindowMinutes(Number((event.target as HTMLSelectElement).value))}>
           <option value="30">30분</option><option value="60">1시간</option><option value="360">6시간</option><option value="1440">24시간</option>
         </select></label>
-        <button type="button" onClick=${() => setGeneration(value => value + 1)}>통계 새로 읽기</button>
+        <button type="button" onClick=${refresh}>통계 새로 읽기</button>
         <${RouteLink} tab="monitoring" params=${{ section: 'runtime', view: 'cost' }} class="underline">토큰·지연 상세</${RouteLink}>
       </div>
     </div>
     <p class="text-sm text-text-muted">Keeper 결정 기록과 날짜별 비용 원장을 결합한 런타임별 집계입니다. 토큰·지연은 오류 없는 기록 중 보고된 값만 포함하며, 작업 완료율을 뜻하지 않습니다.</p>
+    ${catalog.status === 'error' ? html`<p role="alert">공식 Client 계정 목록을 읽지 못했습니다: ${catalog.message}</p>` : null}
+    ${catalog.status === 'loaded' && clients.length === 0 ? html`<p>설정된 공식 Client 런타임이 없습니다.</p>` : null}
     ${clients.length > 0 ? html`
       <div class="flex flex-wrap gap-2" aria-label="공식 Client 계정별 런타임" data-testid="overview-official-client-accounts">
         ${clients.map(client => html`<${OfficialClientAccount}

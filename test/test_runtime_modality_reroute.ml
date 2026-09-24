@@ -740,7 +740,7 @@ supports-multimodal-inputs = true
     check bool "native image declaration remains effective" true native_caps.supports_image_input;
     check bool "native audio declaration remains effective" true native_caps.supports_audio_input)
 
-(* The vision read runtimes are [runtime.media_failover] resolved in declared
+(* The vision runtimes are [runtime.media_failover] resolved in declared
    order: ids that resolve to nothing are skipped and a repeated id counts
    once. [fixture.b] is declared and image-capable but not listed, so it is not
    among them. *)

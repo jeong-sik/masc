@@ -349,7 +349,7 @@ val load_list :
     [\[runtime\].media_failover] entry does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
     validation — no silent fallback for a typo'd id). [keeper_assignments] is the
-    keeper→lane-name-or-runtime-id list; [media_failover] names the vision read runtimes;
+    keeper→lane-name-or-runtime-id list; [media_failover] names the vision runtimes;
     [lanes] is the ordered failover candidate lists. *)
 
 
@@ -563,7 +563,7 @@ val verifier_exact_slot_admission : runtime_id:string -> (unit, string) result
     execution-kind constraint; a replacing registry cannot grant admission. *)
 
 val media_failover : unit -> string list
-(** [\[runtime\].media_failover] — the vision read runtimes: ordered runtime ids the
+(** [\[runtime\].media_failover] — the vision runtimes: ordered runtime ids the
     vision tool calls, including the image readings made for a runtime that
     cannot take the image. A keeper turn never dispatches to them; its image
     reroute stays inside its lane. [[]] = no vision runtimes. Every entry is

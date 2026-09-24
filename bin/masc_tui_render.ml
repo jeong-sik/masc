@@ -12171,7 +12171,7 @@ let render_runtime (state : state) =
               | Some id -> Terminal_text.single_line id
               | None -> Ansi.dim ^ "none — every keeper needs an assignment" ^ Ansi.reset)
        in
-       let fleet_text =
+       let media_text =
          match resolved with
          | None -> field_missing_reading ~error:state.runtime_surface_error
          | Some resolved ->
@@ -12205,7 +12205,7 @@ let render_runtime (state : state) =
        c.push_styled ~style:(Theme.recede ())
          (Printf.sprintf "  %s %s   %s"
             (runtime_column runtime_lane_width "media_failover")
-            (runtime_column runtime_candidate_width fleet_text)
+            (runtime_column runtime_candidate_width media_text)
             (Ansi.dim ^ "m edits it · the vision runtimes, in call order" ^ Ansi.reset));
        c.push_divider ());
   c.push_styled ~style:(Theme.recede ())

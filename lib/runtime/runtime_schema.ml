@@ -483,7 +483,7 @@ type config =
         id is an opaque binding key here — only the AGENT_CORE adapter parses it into
         provider/model/spec. *)
   ; media_failover : string list
-    (** [\[runtime\].media_failover] — the vision read runtimes: ordered runtime ids
+    (** [\[runtime\].media_failover] — the vision runtimes: ordered runtime ids
         the vision tool calls, including the image readings made for a runtime
         that cannot take the image. A keeper turn never dispatches to them; its
         image reroute stays inside its lane. [[]] = no vision runtimes. Each id must

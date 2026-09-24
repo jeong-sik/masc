@@ -654,7 +654,7 @@ status: reference
 
 **media_failover**
 : vision 도구가 이미지를 읽을 때 호출하는 runtime의 순서(`[runtime].media_failover`,
-  "vision read runtimes"). 이미지를 받지 못하는 runtime을 대신해 읽는 경우까지 포함한다.
+  "vision runtimes"). 이미지를 받지 못하는 runtime을 대신해 읽는 경우까지 포함한다.
   Keeper turn은 여기로 파견하지 않고, turn의 이미지 재라우팅은 자기 lane 안에 머문다.
   Keeper turn이 실패했을 때 다음 runtime을 고르는 **Runtime Candidate Order**와는 다른
   장치다.

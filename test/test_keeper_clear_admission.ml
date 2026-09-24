@@ -54,7 +54,7 @@ max-context = 4096
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.save_file (Filename.concat keepers_dir (meta.name ^ ".toml"))
-    "[keeper]\ninstructions = \"Clear admission fixture\"\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\n";
+    "[keeper]\ninstructions = \"Clear admission fixture\"\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n";
   Keeper_meta_store.replace_snapshot config meta |> require_ok;
   ignore (Keeper_registry.register_offline ~base_path meta.name meta);
   if install_owner then (
@@ -197,47 +197,276 @@ let checkpoint_path config (meta : Keeper_meta_contract.keeper_meta) =
     ~session_id:trace_id
 ;;
 
-let test_checkpoint_read_failure fault () =
+let session_dir_of config (meta : Keeper_meta_contract.keeper_meta) =
+  Keeper_types_support.keeper_session_dir config
+    (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+;;
+
+let is_absent path =
+  match Unix.lstat path with
+  | _ -> false
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true
+;;
+
+let is_symlink path = (Unix.lstat path).Unix.st_kind = Unix.S_LNK
+
+let session_entries session_dir =
+  Sys.readdir session_dir |> Array.to_list |> List.sort String.compare
+;;
+
+(* The saved checkpoint rewritten as a later [checkpoint_version] wrote it. *)
+let as_newer_version path =
+  match Yojson.Safe.from_string (Fs_compat.load_file path) with
+  | `Assoc fields ->
+    Yojson.Safe.to_string
+      (`Assoc
+        (List.map
+           (fun (key, value) ->
+              if String.equal key "version"
+              then key, `Int (Agent_core.Checkpoint.checkpoint_version + 1)
+              else key, value)
+           fields))
+  | _ -> fail "checkpoint is not a JSON object"
+;;
+
+(* A checkpoint no turn can decode fails every turn, so the operator's clear
+   deletes it: the canonical is gone, nothing else in the session directory
+   changes (the history window included), and the next turn starts from no
+   checkpoint. *)
+let test_undecodable_checkpoint_is_removed () =
   with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved ~save:_ ~load ~clear ~official_session ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
+  let path = checkpoint_path config meta in
+  let session_dir = session_dir_of config meta in
+  Unix.unlink path;
+  Fs_compat.save_file path "{broken-checkpoint";
+  let others_before =
+    List.filter (fun entry -> not (String.equal entry (Filename.basename path)))
+      (session_entries session_dir)
+  in
+  ignore (Keeper_turn_failure_streak.increment
+    ~base_path:config.base_path ~keeper_name:meta.name);
+  let result = clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  let removed =
+    Tool_result.data result |> Yojson.Safe.Util.member "undecodable_checkpoint_removed"
+  in
+  check string "result names the checkpoint it removed" path
+    Yojson.Safe.Util.(member "checkpoint_path" removed |> to_string);
+  check bool "result carries the decode error" true
+    (String.length Yojson.Safe.Util.(member "decode_error" removed |> to_string) > 0);
+  check bool "the canonical checkpoint is gone" true (is_absent path);
+  check (list string) "nothing else in the session directory changed" others_before
+    (session_entries session_dir);
+  check bool "a removed checkpoint counts as found" true
+    Yojson.Safe.Util.(Tool_result.data result |> member "checkpoint_found" |> to_bool);
+  (* No message was counted and no system prompt was kept, so neither is
+     claimed. *)
+  check bool "no message count is claimed" true
+    (Yojson.Safe.Util.(Tool_result.data result |> member "cleared_message_count") = `Null);
+  check bool "no kept system prompt is claimed" true
+    (Yojson.Safe.Util.(Tool_result.data result |> member "preserve_system_prompt") = `Null);
+  check_official_session_cleared official_session;
+  check int "clear resets the failure streak" 0
+    (Keeper_registry.get_turn_failures ~base_path:config.base_path meta.name);
+  let base_dir = Keeper_types_profile.session_base_dir config in
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  match Keeper_owner_registry.run_autonomous_if_idle
+    ~base_path:config.base_path ~keeper_name:meta.name (fun () ->
+      match Context.load_context_from_checkpoint_classified ~trace_id ~base_dir with
+      | _, Context.Checkpoint_absent -> ()
+      | _, Context.Checkpoint_loaded _ -> fail "next turn loaded a checkpoint"
+      | _, Context.Checkpoint_unread error ->
+        fail ("next turn still cannot read its checkpoint: "
+              ^ Keeper_checkpoint_store.checkpoint_load_error_to_string error)) with
+  | Ok (`Ran ()) -> ()
+  | Ok (`Busy _ | `Interrupted) -> fail "next turn did not run"
+  | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
+;;
+
+let with_mode path mode f =
+  let before = (Unix.stat path).Unix.st_perm in
+  Unix.chmod path mode;
+  Fun.protect ~finally:(fun () -> Unix.chmod path before) f
+;;
+
+let malformed = "{broken-checkpoint"
+
+let remove config meta =
+  Keeper_checkpoint_store.remove_undecodable_canonical ~session_dir:(session_dir_of config meta)
+    ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+;;
+
+let removal_message = function
+  | Ok _ -> "Ok"
+  | Error error -> Keeper_checkpoint_store.undecodable_removal_error_to_string error
+;;
+
+let test_removal_leaves_a_loadable_checkpoint () =
+  with_keeper ~paused:false ~install_owner:false
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
   let path = checkpoint_path config meta in
   let original = Fs_compat.load_file path in
-  let backup = path ^ ".test-original" in
-  let missing_target = path ^ ".missing" in
-  let invalid_json = "{broken-checkpoint" in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
-  let boundaries () = Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:meta.name |> require_ok in
-  let before_boundaries = boundaries () in
-  let before_failures = Keeper_turn_failure_streak.increment
-    ~base_path:config.base_path ~keeper_name:meta.name in
-  Unix.rename path backup;
-  (match fault with
-   | `Malformed -> Fs_compat.save_file path invalid_json
-   | `Unreadable_path -> Unix.symlink missing_target path);
-  Fun.protect
-    ~finally:(fun () -> Unix.unlink path; Unix.rename backup path)
-    (fun () ->
-      let result = clear () in
-      check_refused result;
-      check string "failure identifies the checkpoint" path
-        (Tool_result.data result |> Yojson.Safe.Util.member "checkpoint_path"
-         |> Yojson.Safe.Util.to_string);
-      (match fault with
-       | `Malformed ->
-         check string "malformed original is not overwritten" invalid_json (Fs_compat.load_file path)
-       | `Unreadable_path ->
-         check string "unreadable path is not replaced" missing_target (Unix.readlink path));
-      check bool "failed clear appends no restart marker" true (before_boundaries = boundaries ());
-      check int "process failure streak is preserved" before_failures
-        (Keeper_registry.get_turn_failures ~base_path:config.base_path meta.name);
-      check bool "checkpoint refusal keeps the official session" true
-        (Option.is_some (official_session ()));
-      match Keeper_turn_failure_streak_store.load ~base_path:config.base_path ~keeper_name:meta.name with
-      | Ok count -> check (option int) "durable failure streak is preserved" (Some before_failures) count
-      | Error error -> fail (Keeper_turn_failure_streak_store.error_to_string error));
-  check string "original bytes remain available after read recovery" original (Fs_compat.load_file path);
-  check bool "next load continues the original conversation" true
-    (Context.messages_of_context saved = Context.messages_of_context (load ()))
+  (match remove config meta with
+   | Ok Keeper_checkpoint_store.Canonical_loadable -> ()
+   | other -> failf "a readable checkpoint was not left alone: %s" (removal_message other));
+  check string "the readable checkpoint is untouched" original (Fs_compat.load_file path)
+;;
+
+let test_removal_reports_absence () =
+  with_keeper ~paused:false ~install_owner:false
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  Unix.unlink (checkpoint_path config meta);
+  match remove config meta with
+  | Ok Keeper_checkpoint_store.Canonical_absent -> ()
+  | other -> failf "absence was not reported: %s" (removal_message other)
+;;
+
+let test_removal_deletes_undecodable_bytes () =
+  with_keeper ~paused:false ~install_owner:false
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  let path = checkpoint_path config meta in
+  let session_dir = session_dir_of config meta in
+  Fs_compat.save_file path malformed;
+  let others_before =
+    List.filter (fun entry -> not (String.equal entry (Filename.basename path)))
+      (session_entries session_dir)
+  in
+  match remove config meta with
+  | Ok (Keeper_checkpoint_store.Removed { undecodable = Parse_error _ }) ->
+    check bool "canonical is gone" true (is_absent path);
+    check (list string) "no other file was created or removed" others_before
+      (session_entries session_dir)
+  | other -> failf "malformed checkpoint was not removed: %s" (removal_message other)
+;;
+
+let test_removal_refuses_an_os_read_failure () =
+  with_keeper ~paused:false ~install_owner:false
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  let path = checkpoint_path config meta in
+  let original = Fs_compat.load_file path in
+  with_mode path 0o000 (fun () ->
+    match remove config meta with
+    | Error
+        (Keeper_checkpoint_store.Removal_refused
+           (Read_failed { cause = Os_error Unix.EACCES; _ })) -> ()
+    | other -> failf "an OS read failure was not refused: %s" (removal_message other));
+  check string "the checkpoint stays" original (Fs_compat.load_file path)
+;;
+
+(* A path that is not a regular file was never read, so it says nothing
+   about any bytes and is left in place. *)
+let test_removal_refuses_a_path_that_is_not_a_regular_file () =
+  with_keeper ~paused:false ~install_owner:false
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  let path = checkpoint_path config meta in
+  Unix.unlink path;
+  Unix.symlink (path ^ ".missing") path;
+  (match remove config meta with
+   | Error (Keeper_checkpoint_store.Removal_refused (Io_error _)) -> ()
+   | other -> failf "a non-regular path was not refused: %s" (removal_message other));
+  check bool "the link stays" true (is_symlink path)
+;;
+
+(* A directory that can be written and entered but not opened: the unlink
+   lands, the directory fsync cannot open it. *)
+let test_removal_reports_an_unconfirmed_delete () =
+  with_keeper ~paused:false ~install_owner:false
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  let path = checkpoint_path config meta in
+  Fs_compat.save_file path malformed;
+  let result = with_mode (session_dir_of config meta) 0o333 (fun () -> remove config meta) in
+  (match result with
+   | Error (Keeper_checkpoint_store.Removal_durability_unknown _) -> ()
+   | other -> failf "an unsynced delete was not reported: %s" (removal_message other));
+  check bool "the delete itself happened" true (is_absent path)
+;;
+
+(* A later version wrote it and can still read it: the clear refuses before
+   anything changes, the official-client session included. *)
+let test_clear_refuses_a_newer_version_checkpoint () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
+  let path = checkpoint_path config meta in
+  let newer = as_newer_version path in
+  Fs_compat.save_file path newer;
+  let result = clear () in
+  check_refused result;
+  check int "the refusal names the file's version"
+    (Agent_core.Checkpoint.checkpoint_version + 1)
+    Yojson.Safe.Util.(Tool_result.data result |> member "checkpoint_version" |> to_int);
+  check bool "the official session is kept" true (Option.is_some (official_session ()));
+  check string "the newer checkpoint stays" newer (Fs_compat.load_file path)
+;;
+
+let test_removal_refuses_a_newer_version () =
+  with_keeper ~paused:false ~install_owner:false
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  let path = checkpoint_path config meta in
+  let newer = as_newer_version path in
+  Fs_compat.save_file path newer;
+  (match remove config meta with
+   | Error (Keeper_checkpoint_store.Removal_refused (Newer_version { got; _ })) ->
+     check int "the refusal carries the file's version"
+       (Agent_core.Checkpoint.checkpoint_version + 1) got
+   | other -> failf "a newer-version checkpoint was not refused: %s" (removal_message other));
+  check string "the newer checkpoint stays" newer (Fs_compat.load_file path)
+;;
+
+(* A session id that is not a path segment never reaches a read, so nothing
+   is known against any bytes. *)
+let test_judgement_of_a_bad_session_id_is_inconclusive () =
+  with_keeper ~paused:false ~install_owner:false
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear:_ ~official_session:_ ->
+  match
+    Keeper_checkpoint_store.judge_canonical ~session_dir:(session_dir_of config meta)
+      ~session_id:"../escape"
+  with
+  | Keeper_checkpoint_store.Judged_inconclusive (Store_error _) -> ()
+  | Keeper_checkpoint_store.Judged_absent
+  | Keeper_checkpoint_store.Judged_decoded _
+  | Keeper_checkpoint_store.Judged_superseded _
+  | Keeper_checkpoint_store.Judged_newer _
+  | Keeper_checkpoint_store.Judged_undecodable _
+  | Keeper_checkpoint_store.Judged_inconclusive _ ->
+    fail "a bad session id was judged as if it had been read"
+;;
+
+let test_clear_refuses_an_os_read_failure () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
+  let path = checkpoint_path config meta in
+  let original = Fs_compat.load_file path in
+  let result = with_mode path 0o000 clear in
+  check_refused result;
+  check bool "the refusal names an OS read failure" true
+    (String.starts_with ~prefix:"os_error"
+       Yojson.Safe.Util.(Tool_result.data result |> member "read_failure" |> to_string));
+  check bool "the official session is kept" true (Option.is_some (official_session ()));
+  check string "the checkpoint stays" original (Fs_compat.load_file path)
+;;
+
+let test_clear_refuses_a_path_that_is_not_a_regular_file () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
+  let path = checkpoint_path config meta in
+  Unix.unlink path;
+  Unix.symlink (path ^ ".missing") path;
+  check_refused (clear ());
+  check bool "the official session is kept" true (Option.is_some (official_session ()));
+  check bool "the link stays" true (is_symlink path)
+;;
+
+let test_clear_reports_a_delete_that_did_not_happen () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session:_ ->
+  let path = checkpoint_path config meta in
+  Fs_compat.save_file path malformed;
+  let result = with_mode (session_dir_of config meta) 0o555 clear in
+  check bool (Tool_result.message result) true (Tool_result.is_failed result);
+  check bool "the result says the session was cleared" true
+    Yojson.Safe.Util.(Tool_result.data result |> member "official_client_session_cleared" |> to_bool);
+  check string "the checkpoint stays" malformed (Fs_compat.load_file path)
 ;;
 
 let test_absent_checkpoint_is_a_noop () =
@@ -300,14 +529,36 @@ let () =
     [ "owner", [ test_case "active turn, clear, next turn" `Quick test_clear_does_not_race_the_active_turn
                ; test_case "paused keeper remains paused" `Quick test_paused_keeper_can_clear_without_resuming
                ; test_case "missing owner leaves history" `Quick test_missing_owner_does_not_clear
-               ; test_case "parse failure preserves history and failure state" `Quick
-                   (test_checkpoint_read_failure `Malformed)
-               ; test_case "unreadable path is not absence" `Quick
-                   (test_checkpoint_read_failure `Unreadable_path)
+               ; test_case "malformed checkpoint is deleted" `Quick
+                   test_undecodable_checkpoint_is_removed
+               ; test_case "newer-version checkpoint refuses the clear" `Quick
+                   test_clear_refuses_a_newer_version_checkpoint
+               ; test_case "OS read failure refuses the clear" `Quick
+                   test_clear_refuses_an_os_read_failure
+               ; test_case "non-regular path refuses the clear" `Quick
+                   test_clear_refuses_a_path_that_is_not_a_regular_file
+               ; test_case "a failed delete is a failed clear" `Quick
+                   test_clear_reports_a_delete_that_did_not_happen
                ; test_case "absent checkpoint clears only the official session" `Quick
                    test_absent_checkpoint_is_a_noop
                ; test_case "superseded checkpoint clears like an absent one" `Quick
                    test_superseded_checkpoint_clears_like_an_absent_one
                ; test_case "paused stale epoch clears without resume" `Quick
                    test_paused_keeper_clears_stale_epoch_without_resuming
-               ] ]
+               ]
+    ; "removal", [ test_case "loadable checkpoint is left alone" `Quick
+                     test_removal_leaves_a_loadable_checkpoint
+                 ; test_case "absence is reported" `Quick test_removal_reports_absence
+                 ; test_case "undecodable bytes are deleted" `Quick
+                     test_removal_deletes_undecodable_bytes
+                 ; test_case "newer version is refused" `Quick
+                     test_removal_refuses_a_newer_version
+                 ; test_case "bad session id is inconclusive" `Quick
+                     test_judgement_of_a_bad_session_id_is_inconclusive
+                 ; test_case "OS read failure is refused" `Quick
+                     test_removal_refuses_an_os_read_failure
+                 ; test_case "non-regular path is refused" `Quick
+                     test_removal_refuses_a_path_that_is_not_a_regular_file
+                 ; test_case "unsynced delete is reported" `Quick
+                     test_removal_reports_an_unconfirmed_delete
+                 ] ]

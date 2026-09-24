@@ -338,6 +338,7 @@ let test_create_publishes_without_host_path_input () =
    with
    | Ok (Editor.Created_and_published { preview; _ }) ->
      check string "generated profile" "instruction" preview.profile.kind
+   | Ok (Created_but_shadowed _) -> fail "the only source's Skill was shadowed"
    | Ok (Created_but_unpublished _) -> fail "generated Skill was not published"
    | Error error -> fail (Editor.error_to_string error));
   let persisted = Filename.concat base_path "skills/generated/SKILL.md" in
@@ -353,6 +354,119 @@ let test_create_publishes_without_host_path_input () =
    | Error Editor.Package_already_exists -> ()
    | Error error -> fail ("wrong duplicate error: " ^ Editor.error_to_string error)
    | Ok _ -> fail "create-only path overwrote an existing package")
+;;
+
+(* When two sources declare one name, the earlier source wins and the later
+   package is its shadow (RFC keeper-self-authored-skills). Keeper turns list
+   Skills by name, so a create that lands behind an earlier source is written
+   and published but never seen, and the answer has to say whose package is
+   seen instead. *)
+let test_create_behind_an_earlier_source_names_the_winner () =
+  with_workspace @@ fun base_path ->
+  let operator_root = Filename.concat base_path "operator-skills" in
+  let late_root = Filename.concat base_path "late-skills" in
+  Unix.mkdir operator_root 0o700;
+  Unix.mkdir late_root 0o700;
+  Unix.mkdir (Filename.concat base_path "skills") 0o700;
+  Unix.mkdir (Filename.concat operator_root "shared") 0o700;
+  write_file
+    (Filename.concat operator_root "shared/SKILL.md")
+    (named_skill_text "shared" "The operator's procedure." "# Operator");
+  Unix.mkdir (Filename.concat late_root "trailing") 0o700;
+  write_file
+    (Filename.concat late_root "trailing/SKILL.md")
+    (named_skill_text "trailing" "A later source's procedure." "# Late");
+  let config_text =
+    "[skills]\nresource-read-max-bytes = 65536\n\n\
+     [[skills.sources]]\nid = \"operator\"\nanchor = \"base-path\"\n\
+     path = \"operator-skills\"\naccess = \"read-only\"\n\n\
+     [[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\n\
+     path = \"skills\"\naccess = \"read-write\"\n\n\
+     [[skills.sources]]\nid = \"late\"\nanchor = \"base-path\"\n\
+     path = \"late-skills\"\naccess = \"read-only\"\n"
+  in
+  let workspace =
+    match Service.workspace_of_base_path ~base_path with
+    | Ok workspace -> workspace
+    | Error _ -> fail "workspace fixture was rejected"
+  in
+  let refresh () =
+    Ok
+      (Service.refresh
+         ~workspace
+         ~user_home:None
+         ~read_config:(fun () -> Service.Config_text config_text))
+  in
+  (match refresh () with
+   | Ok (Service.Published _ | Unchanged _) -> ()
+   | Ok Workspace_retired | Error _ -> fail "snapshot fixture was not published");
+  let source_id =
+    match Skill_source_config.source_id_of_string "workspace" with
+    | Ok value -> value
+    | Error detail -> fail detail
+  in
+  let create package_id =
+    Editor.create
+      ~base_path
+      ~source_id
+      ~package_id
+      ~source_text:(named_skill_text package_id "A later procedure." "# Later")
+      ~refresh
+  in
+  (match create "shared" with
+   | Ok (Editor.Created_but_shadowed { preview; winner; _ } as outcome) ->
+     check string "winner source" "operator"
+       (Skill_reference.identity_source_id_to_string winner);
+     check string "winner package" "shared"
+       (Skill_reference.identity_package_id_to_string winner);
+     check string "the shadow is the created package" "workspace"
+       (Skill_reference.identity_source_id_to_string preview.profile.reference.identity);
+     let json = Editor.create_outcome_to_yojson outcome in
+     check string "receipt status" "created_but_shadowed"
+       Yojson.Safe.Util.(member "status" json |> to_string);
+     check bool "receipt names the winner" true
+       (Yojson.Safe.Util.member "winner" json
+        = Skill_catalog_snapshot.identity_to_yojson winner)
+   | Ok (Created_and_published _) ->
+     fail "a package behind an earlier source was reported as the one Keepers see"
+   | Ok (Created_but_unpublished { reason; _ }) -> fail ("not published: " ^ reason)
+   | Error error -> fail (Editor.error_to_string error));
+  check bool "the shadowed package is still written" true
+    (Sys.file_exists (Filename.concat base_path "skills/shared/SKILL.md"));
+  (* The other side of a shadow: a later source already declares the name,
+     so the created package is the winner and must not be reported as
+     shadowed by itself. *)
+  (match create "trailing" with
+   | Ok (Editor.Created_and_published { preview; snapshot_revision = _ }) ->
+     let created = preview.profile.reference.identity in
+     let published =
+       match Service.current ~workspace with
+       | Some snapshot -> snapshot
+       | None -> fail "no snapshot after the create"
+     in
+     check bool "the created package shadows the later source's" true
+       (List.exists
+          (fun (shadow : Snapshot.shadow) ->
+             Skill_reference.equal_identity shadow.winner created
+             && String.equal
+                  "late"
+                  (Skill_reference.identity_source_id_to_string shadow.shadowed))
+          (Snapshot.shadows published))
+   | Ok (Created_but_shadowed { winner; _ }) ->
+     fail
+       ("the winner of a shadow was reported shadowed by "
+        ^ Skill_reference.identity_source_id_to_string winner)
+   | Ok (Created_but_unpublished { reason; _ }) -> fail ("not published: " ^ reason)
+   | Error error -> fail (Editor.error_to_string error));
+  (* Control: the same sources, a name no earlier source declares. *)
+  match create "fresh" with
+  | Ok (Editor.Created_and_published _) -> ()
+  | Ok (Created_but_shadowed { winner; _ }) ->
+    fail
+      ("a name no earlier source declares was shadowed by "
+       ^ Skill_reference.identity_package_id_to_string winner)
+  | Ok (Created_but_unpublished { reason; _ }) -> fail ("not published: " ^ reason)
+  | Error error -> fail (Editor.error_to_string error)
 ;;
 
 let read_file path =
@@ -388,6 +502,82 @@ let test_delete_exact_reference_and_publish () =
    | Error Editor.Reference_not_current -> ()
    | Error error -> fail ("wrong post-delete error: " ^ Editor.error_to_string error)
    | Ok _ -> fail "published snapshot retained the deleted reference")
+;;
+
+let delete_package_directory ~base_path ~reference ~refresh =
+  match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
+  | Ok (Editor.Deleted_and_published { package_directory; _ }) -> package_directory
+  | Ok (Deleted_but_unpublished _) -> fail "deleted Skill was not published"
+  | Error error -> fail (Editor.error_to_string error)
+;;
+
+(* #38594: delete moved SKILL.md out and left the package folder, so the same
+   package id could never be created again. *)
+let test_delete_removes_empty_package_and_id_is_reusable () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
+  let package_dir = Filename.dirname skill_path in
+  (match delete_package_directory ~base_path ~reference ~refresh with
+   | Editor.Package_directory_removed -> ()
+   | Package_directory_kept_non_empty -> fail "an empty package folder was kept"
+   | Package_directory_removed_unsynced detail -> fail detail
+   | Package_directory_remove_failed detail -> fail detail);
+  check bool "package folder removed" false (Sys.file_exists package_dir);
+  let source_id =
+    match Skill_source_config.source_id_of_string "workspace" with
+    | Ok value -> value
+    | Error detail -> fail detail
+  in
+  let recreated = skill_text "Recreated." "# Recreated" in
+  (match
+     Editor.create
+       ~base_path
+       ~source_id
+       ~package_id:"sample"
+       ~source_text:recreated
+       ~refresh
+   with
+   | Ok (Editor.Created_and_published _) -> ()
+   | Ok (Created_but_shadowed { winner; _ }) ->
+     fail
+       ("the recreated Skill was shadowed by "
+        ^ Skill_reference.identity_package_id_to_string winner)
+   | Ok (Created_but_unpublished _) -> fail "recreated Skill was not published"
+   | Error error -> fail ("same package id was refused: " ^ Editor.error_to_string error));
+  check string "recreated SKILL.md" recreated (read_file skill_path)
+;;
+
+let test_delete_keeps_package_with_other_files () =
+  with_workspace @@ fun base_path ->
+  let skill_path, _, reference, refresh = setup base_path ~access:"read-write" in
+  let package_dir = Filename.dirname skill_path in
+  let references_dir = Filename.concat package_dir "references" in
+  Unix.mkdir references_dir 0o700;
+  let note = Filename.concat references_dir "note.md" in
+  write_file note "kept";
+  let outcome =
+    match Editor.delete ~base_path ~reference ~confirmed:true ~refresh with
+    | Ok outcome -> outcome
+    | Error error -> fail (Editor.error_to_string error)
+  in
+  (match outcome with
+   | Editor.Deleted_and_published { package_directory = Package_directory_kept_non_empty; _ }
+     -> ()
+   | Deleted_and_published _ -> fail "a folder with other files was not reported as kept"
+   | Deleted_but_unpublished _ -> fail "deleted Skill was not published");
+  (* The row the delete route writes: a kept folder is what a later
+     package_already_exists for this id traces back to. *)
+  let audit_outcome, details =
+    Server_routes_http_routes_dashboard.For_testing.skill_delete_audit_of_outcome outcome
+  in
+  check bool "audit outcome" true (audit_outcome = Masc.Audit_log.Success);
+  check
+    string
+    "audit row package_directory"
+    "kept_non_empty"
+    Yojson.Safe.Util.(details |> member "package_directory" |> member "kind" |> to_string);
+  check bool "SKILL.md moved out" false (Sys.file_exists skill_path);
+  check string "other file untouched" "kept" (read_file note)
 ;;
 
 let test_delete_stale_revision_does_not_mutate () =
@@ -771,6 +961,19 @@ let test_delete_refresh_cancellation_is_unpublished () =
         "serialized refresh cancellation"
         "snapshot refresh cancelled"
         Yojson.Safe.Util.(json |> member "reason" |> to_string);
+      (* An unpublished delete still moved the Skill out, so its audit row is
+         a failure that still says what happened to the folder. *)
+      let audit_outcome, details =
+        Server_routes_http_routes_dashboard.For_testing.skill_delete_audit_of_outcome
+          (Editor.Deleted_but_unpublished outcome)
+      in
+      check bool "audit outcome is a failure" true
+        (audit_outcome = Masc.Audit_log.Failure "snapshot refresh cancelled");
+      check
+        string
+        "audit row package_directory"
+        "removed"
+        Yojson.Safe.Util.(details |> member "package_directory" |> member "kind" |> to_string);
       recovery_id
     | Ok _ -> fail "refresh cancellation was reported as published"
     | Error error -> fail (Editor.error_to_string error)
@@ -971,8 +1174,14 @@ let () =
             test_saved_but_unpublished_is_explicit
         ; test_case "create publishes without host path input" `Quick
             test_create_publishes_without_host_path_input
+        ; test_case "create behind an earlier source names the winner" `Quick
+            test_create_behind_an_earlier_source_names_the_winner
         ; test_case "delete exact reference and publish" `Quick
             test_delete_exact_reference_and_publish
+        ; test_case "delete removes the empty package and the id is reusable" `Quick
+            test_delete_removes_empty_package_and_id_is_reusable
+        ; test_case "delete keeps a package that holds other files" `Quick
+            test_delete_keeps_package_with_other_files
         ; test_case "delete stale revision does not mutate" `Quick
             test_delete_stale_revision_does_not_mutate
         ; test_case "delete stale published revision does not mutate" `Quick

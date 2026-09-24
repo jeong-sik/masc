@@ -39,7 +39,7 @@ def run(executable: str) -> None:
     fixtures[h.RUNTIME_CONFIG_RAW_PATH] = h.standalone_lane_runtime_config_response()
 
     def interact(process, fd, _slave, output, _base_path):
-        h.wait_for_output(process, fd, output, b"cluster-a", start=0, timeout=10)
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
         h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
         for columns in (110, 66):
             drawn = h.resize_and_wait(process, fd, output, rows=24,

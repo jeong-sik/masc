@@ -454,30 +454,13 @@ function handleEvent(event: SSEEvent): void {
     case 'keeper_heartbeat':
       addTypedJournalEntry(
         event.name ?? agent,
-        `Heartbeat gen=${event.generation ?? '?'}`,
+        'Heartbeat',
         'keepers',
         'keeper_heartbeat',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText:
-            `${actorLabel(event.name ?? agent)}가 하트비트를 보냈습니다`
-            + ` (gen ${event.generation ?? '?'})`,
-        },
-      )
-      break
-    case 'keeper_handoff':
-      addTypedJournalEntry(
-        event.name ?? agent,
-        `Handoff gen ${event.from_generation ?? '?'} -> ${event.to_generation ?? '?'} (runtime)`,
-        'keepers',
-        'keeper_handoff',
-        {
-          severity: event.severity,
-          source: event.source,
-          narrativeText:
-            `${actorLabel(event.name ?? agent)}가 keeper handoff를 수행했습니다`
-            + ` (gen ${event.from_generation ?? '?'} → ${event.to_generation ?? '?'}, runtime)`,
+          narrativeText: `${actorLabel(event.name ?? agent)}가 하트비트를 보냈습니다`,
         },
       )
       break

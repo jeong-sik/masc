@@ -2670,21 +2670,20 @@ let test_model_visible_masc_ask_records_the_question () =
               [ ( "questions"
                 , `List
                     [ `Assoc
-                        [ "question_id", `String "q1"
-                        ; "header", `String "deploy"
+                        [ "header", `String "deploy"
                         ; "prompt", `String "Roll forward or roll back?"
                         ; "mode", `String "single"
                         ; ( "choices"
                           , `List
-                              [ `Assoc
-                                  [ "choice_id", `String "c1"
-                                  ; "label", `String "roll forward"
-                                  ]
-                              ; `Assoc
-                                  [ "choice_id", `String "c2"
-                                  ; "label", `String "roll back"
-                                  ]
+                              [ `Assoc [ "label", `String "roll forward" ]
+                              ; `Assoc [ "label", `String "roll back" ]
                               ] )
+                        ]
+                    ; `Assoc
+                        [ "header", `String "announce"
+                        ; "prompt", `String "Who should hear about it first?"
+                        ; "mode", `String "single"
+                        ; "free_text", `Bool true
                         ]
                     ] )
               ; "context", `String "the release window closes tonight"
@@ -2695,7 +2694,7 @@ let test_model_visible_masc_ask_records_the_question () =
       let json = parse_json result.raw_output in
       check string "recorded under the asking keeper" meta.name
         Yojson.Safe.Util.(member "keeper_name" json |> to_string);
-      check int "the reply says one question is open" 1
+      check int "the reply says one ask is open" 1
         Yojson.Safe.Util.(member "open_count" json |> to_int);
       match
         Masc.Keeper_ask_store.rows ~base_path:config.base_path ~keeper_name:meta.name
@@ -2704,7 +2703,21 @@ let test_model_visible_masc_ask_records_the_question () =
         check string "the store row names the keeper" meta.name
           ask.Masc.Keeper_ask.keeper_name;
         check bool "the row is still open" true
-          (resolution = Masc.Keeper_ask.Open)
+          (resolution = Masc.Keeper_ask.Open);
+        (* The call named no ids. The handler numbers questions and choices
+           by position, so an answer still has an id to name. *)
+        check (list string) "questions are numbered by position" [ "q1"; "q2" ]
+          (List.map
+             (fun (q : Masc.Keeper_ask.question) -> q.Masc.Keeper_ask.question_id)
+             ask.Masc.Keeper_ask.questions);
+        check (list (list string)) "choices are numbered by position within their question"
+          [ [ "c1"; "c2" ]; [] ]
+          (List.map
+             (fun (q : Masc.Keeper_ask.question) ->
+               List.map
+                 (fun (c : Masc.Keeper_ask.choice) -> c.Masc.Keeper_ask.choice_id)
+                 q.Masc.Keeper_ask.choices)
+             ask.Masc.Keeper_ask.questions)
       | _ -> fail "expected exactly one recorded ask")
 
 let test_public_masc_web_fetch_rejects_localhost_after_gate () =

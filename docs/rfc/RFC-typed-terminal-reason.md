@@ -185,7 +185,7 @@ broadcast 도 없다. 이 판정은 라벨이다.
 | `fsm-hub-types.ts:310-324` `TURN_TERMINAL_FAILURE_CODES` → `keeper-detail-alert-strip.ts:150, 217, 342` | 손으로 베낀 wire 8개와 같음 비교. `turn_timeout` 은 `lib/` 어디에도 없는 글자다. `heartbeat_consecutive_failures`·`turn_consecutive_failures` 를 괄호 없이 그대로 쓰는 곳도 `lib/` 에 없다. registry 는 `heartbeat_consecutive_failures(3)` 처럼 쓴다(`keeper_registry_types_failure.ml:83-85`) |
 | `cost-dashboard.ts`, `stop-cause.ts`, `telemetry-unified.ts`, `turn-fsm-detail-panel.ts`, `fleet-telemetry-utils.ts`, 정규화·스키마 파일 | 표시·전달 |
 | `scripts/analysis/prefix-cache-first-round.py:364` | 모델별 집계 |
-| `scripts/harness/workload/keeper_continuity_validation.sh:389` | manifest decision 의 값 |
+| `scripts/harness/workload/keeper_continuity_validation.sh` 의 `runtime_terminal_summary` | manifest decision 의 값 |
 | `scripts/keeper-runtime-truth-gate.sh:139` | fixture |
 | `scripts/check-boundary-guard.sh:282-287` (V7r) | 지울 파일 목록 |
 

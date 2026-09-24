@@ -37,20 +37,17 @@ let pull_node
       ?(author = {|{"name":"edgar"}|})
       ?(mergeable = {|"mergeable":"MERGEABLE",|})
       ~number
-      ~branch
       ~draft
       ~review
       ~rollup
       ()
   =
   Printf.sprintf
-    {|{"number":%d,"title":"PR %d","headRefName":"%s","isDraft":%b,
-       "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":%s,%s
+    {|{"number":%d,"isDraft":%b,
+       "reviewDecision":%s,%s
        "authored":{"nodes":[{"commit":{"parents":{"totalCount":1},"author":%s}}]},
        "head":{"nodes":[{"commit":{"statusCheckRollup":%s}}]}}|}
     number
-    number
-    branch
     draft
     review
     mergeable
@@ -100,10 +97,9 @@ let test_decodes_two_pages () =
     page
       ~has_next:true
       ~cursor:(Some "Y3Vyc29yOjE=")
-      [ pull_node ~number:38091 ~branch:"docs/rfc-0465" ~draft:true ~review:"null" ~rollup:"null" ()
+      [ pull_node ~number:38091 ~draft:true ~review:"null" ~rollup:"null" ()
       ; pull_node
           ~number:38054
-          ~branch:"fix/schedule-actor"
           ~draft:false
           ~review:{|"APPROVED"|}
           ~rollup:{|{"state":"SUCCESS"}|} ()
@@ -115,7 +111,6 @@ let test_decodes_two_pages () =
       ~cursor:None
       [ pull_node
           ~number:38030
-          ~branch:"fix/tui-task-body"
           ~draft:false
           ~review:{|"REVIEW_REQUIRED"|}
           ~rollup:{|{"state":"PENDING"}|} ()
@@ -137,7 +132,6 @@ let test_decodes_two_pages () =
      Alcotest.(check bool) "APPROVED" true (approved.review = Pulls.Review_approved);
      Alcotest.(check bool) "PENDING" true (waiting.checks = Pulls.Checks_running);
      Alcotest.(check bool) "REVIEW_REQUIRED" true (waiting.review = Pulls.Review_waiting);
-     Alcotest.(check string) "head branch" "fix/tui-task-body" waiting.head_branch;
      Alcotest.(check string) "slug" "jeong-sik/masc" waiting.repo_slug
    | _ -> failf "expected three pull requests");
   match requests () with
@@ -149,16 +143,15 @@ let test_unknown_enum_is_counted () =
     page
       ~has_next:false
       ~cursor:None
-      [ pull_node ~number:1 ~branch:"a" ~draft:false ~review:"null" ~rollup:{|{"state":"SUCCESS"}|} ()
+      [ pull_node ~number:1 ~draft:false ~review:"null" ~rollup:{|{"state":"SUCCESS"}|} ()
       ; pull_node
           ~number:2
-          ~branch:"b"
           ~draft:false
           ~review:"null"
           ~rollup:{|{"state":"QUEUED_FOR_SOMETHING_NEW"}|} ()
-      ; pull_node ~number:3 ~branch:"c" ~draft:false ~review:{|"DISMISSED_NEW"|} ~rollup:"null" ()
-      ; {|{"number":4,"title":"PR 4","headRefName":"d","isDraft":false,
-          "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"MERGEABLE",
+      ; pull_node ~number:3 ~draft:false ~review:{|"DISMISSED_NEW"|} ~rollup:"null" ()
+      ; {|{"number":4,"isDraft":false,
+          "reviewDecision":null,"mergeable":"MERGEABLE",
           "authored":{"nodes":[{"commit":{"parents":{"totalCount":1},"author":null}}]},
           "head":{"nodes":[{"commit":{}}]}}|}
       ]
@@ -387,6 +380,7 @@ let test_remote_ssh_reader_is_refused () =
          ; env_allowlist = []
          ; capabilities = []
          ; private_home = false
+         ; allowed_paths = []
          }
      ^ Printf.sprintf "\n[repositories]\npr_reader = %S\n" reader_keeper);
   write_file
@@ -515,10 +509,9 @@ let test_rate_limit_waits_for_reset () =
 
 let no_commit_node ~number =
   Printf.sprintf
-    {|{"number":%d,"title":"PR %d","headRefName":"n","isDraft":false,
-       "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"UNKNOWN",
+    {|{"number":%d,"isDraft":false,
+       "reviewDecision":null,"mergeable":"UNKNOWN",
        "authored":{"nodes":[]},"head":{"nodes":[]}}|}
-    number
     number
 
 let test_author_and_mergeable_decode () =
@@ -526,12 +519,11 @@ let test_author_and_mergeable_decode () =
     page
       ~has_next:false
       ~cursor:None
-      [ pull_node ~number:1 ~branch:"a" ~draft:false ~review:"null" ~rollup:"null" ()
+      [ pull_node ~number:1 ~draft:false ~review:"null" ~rollup:"null" ()
       ; pull_node
           ~author:"null"
           ~mergeable:{|"mergeable":"CONFLICTING",|}
           ~number:2
-          ~branch:"b"
           ~draft:false
           ~review:"null"
           ~rollup:"null"
@@ -539,7 +531,6 @@ let test_author_and_mergeable_decode () =
       ; pull_node
           ~author:{|{"name":null}|}
           ~number:3
-          ~branch:"c"
           ~draft:false
           ~review:"null"
           ~rollup:"null"
@@ -578,18 +569,17 @@ let test_unknown_mergeable_or_missing_author_is_counted () =
       [ pull_node
           ~mergeable:{|"mergeable":"SOMETHING_NEW",|}
           ~number:1
-          ~branch:"a"
           ~draft:false
           ~review:"null"
           ~rollup:"null"
           ()
-      ; pull_node ~mergeable:"" ~number:2 ~branch:"b" ~draft:false ~review:"null" ~rollup:"null" ()
-      ; {|{"number":3,"title":"PR 3","headRefName":"c","isDraft":false,
-          "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"MERGEABLE",
+      ; pull_node ~mergeable:"" ~number:2 ~draft:false ~review:"null" ~rollup:"null" ()
+      ; {|{"number":3,"isDraft":false,
+          "reviewDecision":null,"mergeable":"MERGEABLE",
           "authored":{"nodes":[{"commit":{"parents":{"totalCount":1}}}]},
           "head":{"nodes":[{"commit":{"statusCheckRollup":null}}]}}|}
-      ; pull_node ~author:"{}" ~number:4 ~branch:"d" ~draft:false ~review:"null" ~rollup:"null" ()
-      ; pull_node ~number:5 ~branch:"e" ~draft:false ~review:"null" ~rollup:"null" ()
+      ; pull_node ~author:"{}" ~number:4 ~draft:false ~review:"null" ~rollup:"null" ()
+      ; pull_node ~number:5 ~draft:false ~review:"null" ~rollup:"null" ()
       ]
   in
   let http_post, _ = recording_stub [ ok_response body ] in
@@ -609,11 +599,10 @@ let authored_node ~parents ~author =
 
 let merge_head_node ~number ~authored ~head_rollup =
   Printf.sprintf
-    {|{"number":%d,"title":"PR %d","headRefName":"m","isDraft":false,
-       "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"MERGEABLE",
+    {|{"number":%d,"isDraft":false,
+       "reviewDecision":null,"mergeable":"MERGEABLE",
        "authored":{"nodes":[%s]},
        "head":{"nodes":[{"commit":{"statusCheckRollup":%s}}]}}|}
-    number
     number
     (String.concat "," authored)
     head_rollup
@@ -707,14 +696,11 @@ let test_the_query_reads_head_checks_and_an_author_window () =
 let pull ~number ~author =
   { Pulls.repo_slug = "jeong-sik/masc"
   ; number
-  ; title = "PR"
-  ; head_branch = "feat/x"
   ; draft = false
   ; checks = Pulls.Checks_none
   ; review = Pulls.Review_none
   ; mergeable = Pulls.Mergeable
   ; author
-  ; updated_at = now ()
   }
 
 let test_join_is_exact () =
@@ -773,8 +759,8 @@ let test_json_shape () =
     expected;
   Alcotest.(check (list string))
     "row keys"
-    [ "repo_slug"; "number"; "title"; "head_branch"; "draft"; "checks"; "review"; "mergeable"
-    ; "author"; "keeper"; "updated_at" ]
+    [ "repo_slug"; "number"; "draft"; "checks"; "review"; "mergeable"
+    ; "author"; "keeper" ]
     (keys (List.hd rows))
 
 (* A Keeper directory that cannot be listed: the snapshot says so instead of
@@ -899,7 +885,7 @@ let test_persisted_keeper_is_joined () =
    | Error detail -> failf "keeper meta persistence failed: %s" detail);
   let author name = Printf.sprintf {|{"name":%S}|} name in
   let node ~number name =
-    pull_node ~author:(author name) ~number ~branch:"b" ~draft:false ~review:"null" ~rollup:"null" ()
+    pull_node ~author:(author name) ~number ~draft:false ~review:"null" ~rollup:"null" ()
   in
   let body =
     page

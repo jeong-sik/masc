@@ -439,8 +439,14 @@ let rec find_source_root dir hops =
     let parent = Filename.dirname dir in
     if String.equal parent dir then None else find_source_root parent (hops - 1)
 
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root ->
+    if Sys.file_exists (Filename.concat root "config/sandbox-images.toml") then Some root else None
+  | None -> find_source_root (Sys.getcwd ()) 8
+
 let test_the_shipped_catalog_promotes_nothing () =
-  match find_source_root (Sys.getcwd ()) 8 with
+  match source_root () with
   | None -> fail ("config/sandbox-images.toml not found above " ^ Sys.getcwd ())
   | Some root ->
     let text =
@@ -453,7 +459,7 @@ let test_the_shipped_catalog_promotes_nothing () =
 (* A recipe cannot be added without a name a Keeper can use, nor a name
    without a recipe that builds it. *)
 let test_the_shipped_catalog_names_every_recipe () =
-  match find_source_root (Sys.getcwd ()) 8 with
+  match source_root () with
   | None -> fail ("config/sandbox-images.toml not found above " ^ Sys.getcwd ())
   | Some root ->
     let text =

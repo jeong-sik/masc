@@ -95,12 +95,13 @@ let with_source files f =
        mkdirs (Filename.dirname full);
        Out_channel.with_open_bin full (fun oc -> output_string oc contents))
     files;
+  (* A target may be removed before its in-checkout symlink in readdir order. *)
   let rec remove path =
-    if Sys.is_directory path
-    then (
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR ->
       Array.iter (fun e -> remove (Filename.concat path e)) (Sys.readdir path);
-      Sys.rmdir path)
-    else Sys.remove path
+      Sys.rmdir path
+    | _ -> Sys.remove path
   in
   Fun.protect ~finally:(fun () -> remove root) (fun () -> f root)
 

@@ -3306,7 +3306,8 @@ let sandbox_image_change_catalog ~base_path change =
   let* shipped =
     match Embedded_config.read Keeper_sandbox_image_catalog.file_name with
     | Some shipped -> Ok shipped
-    | None -> Error "sandbox-image: embedded image name catalog is unavailable"
+    | None ->
+      Error "sandbox-image: missing embedded config/sandbox-images.toml"
   in
   let* catalog, expected =
     Result.map_error
@@ -3443,7 +3444,31 @@ let sandbox_image_rollback_exit base_path runtime name =
      let store = sandbox_image_store runtime in
      let* path =
        sandbox_image_change_catalog ~base_path (fun catalog ->
-         Keeper_sandbox_image_catalog.rollback catalog ~name ~store)
+         let* next =
+           Keeper_sandbox_image_catalog.rollback catalog ~name ~store
+           |> Result.map_error (fun error ->
+                "sandbox-image: " ^ Keeper_sandbox_image_catalog.change_error_to_string error)
+         in
+         let* previous =
+           match Keeper_sandbox_image_catalog.resolve next ~name ~store with
+           | Keeper_sandbox_image_catalog.Resolved previous -> Ok previous
+           | Keeper_sandbox_image_catalog.Unknown_image _
+           | Keeper_sandbox_image_catalog.Not_built_on_host _ ->
+             Error "sandbox-image: rollback target disappeared from the catalog"
+         in
+         let* builder = sandbox_image_builder runtime in
+         let* observed =
+           sandbox_image_store_digest ~builder ~store ~reference:previous.reference
+           |> Result.map_error (fun detail ->
+                Printf.sprintf "sandbox-image: cannot inspect previous build %s: %s"
+                  previous.reference detail)
+         in
+         if String.equal observed previous.digest then Ok next
+         else
+           Error
+             (Printf.sprintf
+                "sandbox-image: previous build %s changed digest (expected %s, found %s)"
+                previous.reference previous.digest observed))
      in
      Ok
        (Printf.sprintf "%s on %s is back on its previous build, recorded in %s." name

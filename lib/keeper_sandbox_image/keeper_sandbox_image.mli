@@ -21,9 +21,9 @@
     cannot install what it finds missing. *)
 
 val default_tag : string
-(** ["masc-sandbox:general"] — the tag {!build_argv} uses when the caller names
-    none. Not yet the runtime default; a Keeper reaches it through
-    [sandbox_image] or [MASC_KEEPER_SANDBOX_DOCKER_IMAGE]. *)
+(** ["masc-sandbox:general"] — the image the shipped Keepers name. [masc
+    setup] builds it when the store lacks it, and the Apple Container runtime
+    does on a Keeper's first boot; nothing rebuilds it once it is there. *)
 
 val dockerfile : string
 (** The recipe, read at build time from [sandbox-images/base/Dockerfile]. It

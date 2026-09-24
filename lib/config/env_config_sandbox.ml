@@ -58,7 +58,7 @@ module Runtime = struct
      carries [sandbox_image = "masc-keeper-sandbox:local"] -- but a Keeper that
      declared no image is far more likely to be working on something else, and
      handing it an OCaml image it cannot install out of is the worse default.
-     `masc sandbox-image` builds what this names. *)
+     `masc setup` builds what this names when the store lacks it. *)
   let docker_image_env = "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
 
   let docker_image () =

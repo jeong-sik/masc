@@ -10,7 +10,7 @@
     whatever its package mirrors serve that day, so two builds of one recipe
     are two images. A tag names one build: the build command refuses a tag
     that is already in the image store rather than moving it to new content.
-    RFC keeper-sandbox-images-have-versions §2.2. *)
+    RFC keeper-sandbox-images-have-versions (#38699) §2.2. *)
 
 type input =
   { path : string  (** Relative to the source checkout, as listed in [inputs]. *)
@@ -33,10 +33,16 @@ type load_error =
           than [a-z], [0-9] and [-], or a leading [-]. *)
   | Recipe_missing of { path : string }
   | Input_path_rejected of { listed_in : string; path : string }
-      (** Absolute, empty, or with a [..] segment: it would reach outside the
-          checkout the recipe belongs to. *)
+      (** Absolute, empty, with a [..] segment, or [Dockerfile] itself: it
+          would reach outside the checkout, or land on the recipe in the
+          build context. *)
+  | Input_outside_source of { listed_in : string; path : string }
+      (** The path resolves, through a symbolic link somewhere on it, to a
+          file outside the checkout. Docker does not follow such a link out of
+          its context, so neither does this. *)
   | Input_missing of { listed_in : string; path : string }
   | Unreadable of { path : string; detail : string }
+  | Context_unwritable of { path : string; detail : string }
 
 val load_error_to_string : load_error -> string
 
@@ -60,11 +66,16 @@ val repository : recipe -> string
 val tag : built_at:float -> recipe -> string
 (** [built_at] is Unix time; only its UTC minute appears in the tag. *)
 
-val labels : built_at:float -> recipe -> (string * string) list
-(** The OCI [version] and [created] annotations, plus
-    [masc.sandbox.recipe] and [masc.sandbox.inputs_sha256]. *)
+val version : built_at:float -> recipe -> string
+(** The part of {!tag} after the colon. *)
 
-val write_context : dir:string -> recipe -> string
+val labels : version:string -> built_at:float -> recipe -> (string * string) list
+(** The OCI [version] and [created] annotations, plus
+    [masc.sandbox.recipe] and [masc.sandbox.inputs_sha256]. [version] is the
+    tag's own version part: {!version} for a computed tag, the tag as given
+    when the caller named one. *)
+
+val write_context : dir:string -> recipe -> (string, load_error) result
 (** Write the recipe's Dockerfile and inputs under [dir], each input at its
     listed path, and answer the Dockerfile's path. [dir] must exist and is the
     caller's to remove. *)

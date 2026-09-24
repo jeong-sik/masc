@@ -12,4 +12,4 @@
   %{workspace_root}/masc.opam.locked
   %{workspace_root}/scripts/opam-pin-from-lock.sh)
  (action (run %{test}))
- (libraries alcotest masc.keeper_sandbox_image))
+ (libraries alcotest unix masc.keeper_sandbox_image))

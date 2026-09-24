@@ -366,9 +366,10 @@ What a Keeper needs before its first turn runs:
   A `remote_ssh` Keeper names a `remote_endpoint` declared under
   `[exec.ssh.endpoints]` in `runtime.toml`.
 - **An image.** `docker` and `microvm` turns run inside an image, and until
-  it exists image preflight refuses the turn. `masc sandbox-image`
-  builds `masc-sandbox:general` (bash, ripgrep, git on Debian) from a recipe
-  embedded in the binary. Every `docker` or `microvm` Keeper names its image
+  it exists image preflight refuses the turn. `masc setup` builds
+  `masc-sandbox:general` from the recipe embedded in the binary
+  (`sandbox-images/base/Dockerfile`) when the store lacks it; `masc
+  sandbox-image` builds a new, never-reused tag by hand. Every `docker` or `microvm` Keeper names its image
   in `sandbox_image`, and one that names none is refused rather than given a
   default: a Keeper that only needs the general image writes
   `sandbox_image = "masc-sandbox:general"`, and one that has to build a

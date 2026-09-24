@@ -436,9 +436,12 @@ masc sandbox-image --runtime nerdctl_kata
 Each build gets its own tag, `masc-sandbox-base:<UTC minute>-<input hash>`,
 and the command prints it; name that tag in the Keeper TOML's
 `sandbox_image`. A tag already in the store is refused rather than rebuilt,
-so an image a Keeper runs on never changes under the same name. A Keeper
-that names `masc-sandbox:general` still gets that image built by the
-runtime on its first boot. Recipes other than `base` live under
+so an image a Keeper runs on never changes under the same name. The
+shipped Keepers name `masc-sandbox:general`: `masc setup` builds it when the
+store lacks it and leaves it alone when it is there, and
+`masc sandbox-image --tag masc-sandbox:general` builds it by hand. On Apple
+Container the runtime also builds that one tag on a Keeper's first boot;
+Docker and nerdctl do not. Recipes other than `base` live under
 `sandbox-images/` in a checkout: `masc sandbox-image --recipe ocaml --source .`.
 
 On Linux, create the Keeper with the same base path as the running server.

@@ -143,8 +143,8 @@ let docker_sandbox_image_available =
        Printf.eprintf
          "SKIPPING every case in this suite: it runs each turn inside the %s \
           sandbox image, which is not on this host. Build it with `masc \
-          sandbox-image` to run them.\n%!"
-         Keeper_sandbox_image.default_tag;
+          sandbox-image --tag %s` to run them.\n%!"
+         Keeper_sandbox_image.default_tag Keeper_sandbox_image.default_tag;
      available)
 
 (* The image being present is half the premise. Every case here writes the

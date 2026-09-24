@@ -60,11 +60,15 @@ let test_framing_keeps_boundaries () =
 
 let test_labels_carry_version_and_full_hash () =
   let r = recipe "base" in
-  let labels = V.labels ~built_at r in
   let tag = V.tag ~built_at r in
-  let version = String.sub tag (String.index tag ':' + 1) (String.length tag - String.index tag ':' - 1) in
+  let version = V.version ~built_at r in
+  check string "version is the tag's own part" tag (V.repository r ^ ":" ^ version);
+  let labels = V.labels ~version ~built_at r in
   check (option string) "version" (Some version)
     (List.assoc_opt "org.opencontainers.image.version" labels);
+  check (option string) "a named tag labels itself" (Some "fixture:requested")
+    (List.assoc_opt "org.opencontainers.image.version"
+       (V.labels ~version:"fixture:requested" ~built_at r));
   check (option string) "created" (Some "2026-09-24T11:30:45Z")
     (List.assoc_opt "org.opencontainers.image.created" labels);
   check (option string) "recipe" (Some "base") (List.assoc_opt "masc.sandbox.recipe" labels);
@@ -134,6 +138,8 @@ let test_load_refusals () =
     ; "sandbox-images/up/inputs", "../outside\n"
     ; "sandbox-images/gone/Dockerfile", "FROM scratch\n"
     ; "sandbox-images/gone/inputs", "missing.txt\n"
+    ; "sandbox-images/self/Dockerfile", "FROM scratch\n"
+    ; "sandbox-images/self/inputs", "Dockerfile\n"
     ]
     (fun source ->
        let inputs_of name = Filename.concat (Filename.concat (Filename.concat source "sandbox-images") name) "inputs" in
@@ -148,12 +154,35 @@ let test_load_refusals () =
          (V.load ~source ~name:"up");
        expect_error "missing input"
          (V.Input_missing { listed_in = inputs_of "gone"; path = "missing.txt" })
-         (V.load ~source ~name:"gone"))
+         (V.load ~source ~name:"gone");
+       expect_error "the recipe's own name"
+         (V.Input_path_rejected { listed_in = inputs_of "self"; path = "Dockerfile" })
+         (V.load ~source ~name:"self"))
+
+(* A link inside the checkout that points outside it would carry that file
+   into the image; docker itself does not follow links out of its context. *)
+let test_load_refuses_a_link_out_of_the_checkout () =
+  with_source [ "outside/secret", "s" ] (fun outer ->
+    let secret = Filename.concat (Filename.concat outer "outside") "secret" in
+    with_source
+      [ "sandbox-images/leak/Dockerfile", "FROM scratch\n"
+      ; "sandbox-images/leak/inputs", "link\n"
+      ]
+      (fun source ->
+         Unix.symlink secret (Filename.concat source "link");
+         let inputs = Filename.concat (Filename.concat (Filename.concat source "sandbox-images") "leak") "inputs" in
+         expect_error "link out"
+           (V.Input_outside_source { listed_in = inputs; path = "link" })
+           (V.load ~source ~name:"leak")))
 
 let test_write_context_places_inputs () =
   let r = recipe ~dockerfile:"FROM scratch\n" ~inputs:[ input "scripts/x.sh" "echo" ] "t" in
   with_source [] (fun dir ->
-    let dockerfile = V.write_context ~dir r in
+    let dockerfile =
+      match V.write_context ~dir r with
+      | Ok path -> path
+      | Error e -> fail (V.load_error_to_string e)
+    in
     check string "dockerfile" "FROM scratch\n" (In_channel.with_open_bin dockerfile In_channel.input_all);
     check string "nested input" "echo"
       (In_channel.with_open_bin (Filename.concat dir "scripts/x.sh") In_channel.input_all))
@@ -211,6 +240,8 @@ let () =
       , [ test_case "reads inputs in listed order" `Quick test_load_reads_inputs_in_listed_order
         ; test_case "no inputs file means no inputs" `Quick test_load_without_inputs_file
         ; test_case "refusals are typed" `Quick test_load_refusals
+        ; test_case "a link out of the checkout is refused" `Quick
+            test_load_refuses_a_link_out_of_the_checkout
         ; test_case "write_context places nested inputs" `Quick test_write_context_places_inputs
         ; test_case "repository recipes list their COPY sources" `Quick
             test_repository_recipes_list_their_copy_sources

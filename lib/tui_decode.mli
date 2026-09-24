@@ -2775,6 +2775,54 @@ val decode_runtime_resolved_snapshot :
     Assignment and max-context fields belong to other consumers and are not
     duplicated into this light projection. *)
 
+(** What each provider account said about its own usage windows, as
+    [GET /api/v1/runtime/resolved] carries it. The server keeps these values
+    as reported and derives no availability from them. *)
+type provider_usage_window_kind =
+  | Window_five_hour
+  | Window_seven_day
+  | Window_duration_minutes of int
+      (** A window length the server has no name for. *)
+  | Window_provider_label of string
+      (** A label the provider gave the window, kept as written. *)
+
+(** The usage in the unit the provider reported it in. Not clamped. *)
+type provider_usage_utilization =
+  | Utilization_fraction of float  (** [0.67] is 67 %. *)
+  | Utilization_percent of int
+
+type provider_usage_window = {
+  puw_limit_id : string option;
+  puw_kind : provider_usage_window_kind;
+  puw_utilization : provider_usage_utilization;
+  puw_resets_at : float option;  (** Epoch seconds, as reported. *)
+  puw_observed_at : float;  (** When the server heard this report. *)
+}
+
+(** A reported account holds at least one window; an account that has not
+    reported since the server started holds none. *)
+type provider_usage_state =
+  | Account_not_reported_since_start
+  | Account_reported of provider_usage_window * provider_usage_window list
+
+type provider_usage_account = {
+  pua_scope : string;  (** The quota scope, as [quota_scope] on runtime rows. *)
+  pua_providers : string list;
+  pua_state : provider_usage_state;
+}
+
+type provider_usage_windows = {
+  puws_since : float;  (** Server process start: the table's first moment. *)
+  puws_accounts : provider_usage_account list;
+}
+
+val decode_provider_usage_windows :
+  Yojson.Safe.t -> (provider_usage_windows, string) result
+(** Strict decoder for the [provider_usage_windows_since] and
+    [provider_usage_windows] members of [GET /api/v1/runtime/resolved]. An
+    unknown [state], window [kind] or utilization [unit] is an error, as is a
+    reported account without windows or an unreported one with windows. *)
+
 val decode_runtime_surface_snapshot :
   probe_json:Yojson.Safe.t ->
   resolved_json:Yojson.Safe.t ->

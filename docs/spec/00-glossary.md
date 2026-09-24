@@ -99,12 +99,14 @@ status: reference
   → [Masc_tui_overview_goals](../../bin/masc_tui_overview_goals.mli)
 
 **Fleet (Keeper fleet)**
-: 한 워크스페이스에서 돌아가는 Keeper 전부. 화면과 코드에서 "fleet" 은 이 뜻 하나로만
-  쓴다 — `fleet ok` 상태 줄, fleet scan 과 Keeper Fleet Blocker,
-  "held outside the fleet" 가 모두 이 Keeper 묶음을 말한다. 같은 묶음을 Overview 는
-  Team 블록으로, Activity 패널의 `Fleet` 탭은 도구 호출 단위로 보여 준다. 이미지를 대신
-  읽는 런타임 목록(`[runtime].media_failover`)은 Keeper 가 아니므로 fleet 이라 부르지 않고
-  vision runtimes 라고 부른다.
+: 한 워크스페이스에 등록된 Keeper 묶음. 화면과 코드에서 "fleet" 은 이 뜻 하나로만 쓴다 —
+  `fleet ok` 상태 줄과 fleet scan, Keeper Fleet Blocker, "held outside the fleet" 가 모두
+  이 묶음을 말한다. 상태 줄의 `running N/M` 에서 M 은 부팅할 Keeper 수라서 일시정지된
+  Keeper 는 들어가지 않는다. Overview 의 Team 블록은 이 묶음을 Keeper 한 명당 한 줄로
+  보여 준다. Activity 패널의 `Recent` 탭(`Tab_fleet`, 명령 `/activity fleet`)은 이 중
+  오프라인이 아닌 Keeper 를 최근에 움직인 순서로 한 줄씩 싣고, 커서가 놓인 Keeper 의 최근
+  도구 호출을 그 아래에 붙인다. 이미지를 대신 읽는 런타임 목록(`[runtime].media_failover`)은
+  Keeper 가 아니므로 fleet 이라 부르지 않고 vision runtimes 라고 부른다.
 
 **Team 블록 (Overview Team)**
 : TUI Overview 에서 fleet 을 Keeper 한 명당 한 줄로 보여 주며 "누가 무엇을 하고 누가 막혔나" 에 답하는

@@ -19,9 +19,12 @@ type line =
   ; text : string
   }
 
+(* Every row this module wraps is wire text: a judge's reason, a keeper's
+   note, a timeline event, a store error. It is escaped before it is wrapped,
+   so a control byte in any of them reaches the pane as its escape. *)
 let wrapped ~width tone text =
-  Message_layout.wrap_words ~max_cells:width text
-  |> List.map (fun text -> { tone; text })
+  Message_layout.wrap_words ~max_cells:width (Tui_decode.sanitize_terminal_text text)
+  |> List.map (fun row -> { tone; text = row })
 
 type confirmation = {
   goal_id : string;
@@ -121,7 +124,7 @@ let unreconciled_heading = function
 
 let unreconciled_lines ~width (blocked : Tui_decode.verifier_unreconciled) =
   verdict ~width:(max 1 width) Refused (unreconciled_heading blocked.vu_step)
-    (Some (Tui_decode.sanitize_terminal_text blocked.vu_detail))
+    (Some blocked.vu_detail)
 
 let note ~width = function
   | None -> []

@@ -3157,16 +3157,18 @@ let planning_proof_detail (goal : planning_goal) =
   | None ->
   match goal.pg_proof with
   | Tui_decode.Proof_proven None -> Some ((Theme.ok ()), "proven")
-  | Tui_decode.Proof_proven (Some evidence) -> Some ((Theme.ok ()), "proven: " ^ evidence)
+  | Tui_decode.Proof_proven (Some evidence) ->
+      Some ((Theme.ok ()), "proven: " ^ Terminal_text.single_line evidence)
   | Tui_decode.Proof_refuted None -> Some ((Theme.bad ()), "refused")
-  | Tui_decode.Proof_refuted (Some reason) -> Some ((Theme.bad ()), "refused: " ^ reason)
+  | Tui_decode.Proof_refuted (Some reason) ->
+      Some ((Theme.bad ()), "refused: " ^ Terminal_text.single_line reason)
   | Tui_decode.Proof_pending -> Some ((Theme.warn ()), "waiting for the completion judge")
   | Tui_decode.Proof_stale _ ->
       Some ((Theme.warn ()), "criterion changed; previous proof is historical")
   | Tui_decode.Proof_unreadable None ->
       Some ((Theme.warn ()), "verification ledger unreadable")
   | Tui_decode.Proof_unreadable (Some detail) ->
-      Some ((Theme.warn ()), "verification ledger unreadable: " ^ detail)
+      Some ((Theme.warn ()), "verification ledger unreadable: " ^ Terminal_text.single_line detail)
   | Tui_decode.Proof_idle ->
       (* Nothing from the judge. A keeper's own note is the next best thing the
          row has to say, and it is what the operator wrote there to be read. *)

@@ -105,6 +105,27 @@ let test_a_stuck_goal_says_which_step_and_why () =
     "judge stuck replaying its committed proof"
     (Detail.unreconciled_heading Masc.Goal_verification_agent.Reconcile_proof)
 
+(* The judge's reason and the keeper's note are wire text. An ESC in either
+   used to reach the terminal as an ESC and could clear or repaint the pane
+   (same class as the approval detail, #38478). *)
+let test_verdict_and_note_reach_the_pane_escaped () =
+  let rows =
+    Detail.body ~width:60
+      (Proof.Proof_refuted (Some "refused\x1b[2J by the judge"))
+      (Some "note\x1b]52;c;cGFzdGU=\x07 here")
+  in
+  check_bool "no raw ESC or BEL byte reaches the pane" true
+    (List.for_all
+       (fun text -> not (String.contains text '\x1b' || String.contains text '\x07'))
+       (texts rows));
+  check_bool "the escaped reason is still readable" true
+    (List.exists
+       (fun text ->
+          let needle = "refused\\x1B[2J" in
+          let n = String.length needle in
+          String.length text >= n && String.sub text 0 n = needle)
+       (texts rows))
+
 let test_a_narrow_pane_still_produces_rows () =
   let rows = Detail.body ~width:0 (Proof.Proof_refuted (Some "why")) None in
   check_bool "width 0 does not loop or vanish" true (rows <> [])
@@ -287,6 +308,8 @@ let () =
             test_tone_separates_a_refusal_from_a_proof
         ; Alcotest.test_case "a stuck goal says which step and why" `Quick
             test_a_stuck_goal_says_which_step_and_why
+        ; Alcotest.test_case "verdict and note reach the pane escaped" `Quick
+            test_verdict_and_note_reach_the_pane_escaped
         ; Alcotest.test_case "a narrow pane still produces rows" `Quick
             test_a_narrow_pane_still_produces_rows
         ; Alcotest.test_case "a timestamp value never starts at the colon" `Quick

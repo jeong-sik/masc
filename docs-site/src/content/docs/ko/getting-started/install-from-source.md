@@ -14,7 +14,7 @@ description: OCaml 소스에서 MASC 서버와 터미널 UI 를 직접 빌드합
 - **OCaml** 5.5.1, `opam` 포함
 - **Node.js** 22+ (웹 대시보드에만 필요)
 - **Native 라이브러리** (gmp, OpenSSL, zstd, SQLite, libpq, libev, libffi, zlib,
-  ncurses, `protoc` 25.1을 포함한 protobuf): OS별 패키지 목록은
+  ncurses, proto3 `optional`을 지원하는 `protoc`): OS별 패키지 목록은
   [README](https://github.com/jeong-sik/masc/blob/main/README.ko.md#소스에서)에 있습니다
 
 ## 1. 클론하고 의존성 설치

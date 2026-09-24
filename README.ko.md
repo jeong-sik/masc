@@ -115,10 +115,10 @@ Git, opam, C 개발 도구, Node.js 22, Corepack과 native 라이브러리를 �
 
 - Debian/Ubuntu: `pkg-config m4 libgmp-dev libssl-dev libzstd-dev
   libsqlite3-dev libpq-dev libev-dev libffi-dev zlib1g-dev libncurses-dev
-  libprotobuf-dev protobuf-compiler`. 빌드에는 `protoc` 25.1이 필요합니다. Ubuntu
-  22.04 패키지의 3.12는 실패하므로
-  [upstream 릴리스](https://github.com/protocolbuffers/protobuf/releases/tag/v25.1)를
-  `PATH` 앞쪽에 둡니다([`scripts/build-linux-release.sh`](scripts/build-linux-release.sh) 참고).
+  libprotobuf-dev protobuf-compiler`. `protoc`는 proto3 `optional`을 이해해야 합니다.
+  Ubuntu 22.04 패키지의 3.12는 이를 지원하지 않으므로 더 새로운
+  [upstream protoc](https://github.com/protocolbuffers/protobuf/releases)를 `PATH` 앞쪽에
+  둡니다(릴리스 빌드는 25.1 사용, [`scripts/build-linux-release.sh`](scripts/build-linux-release.sh) 참고).
 - macOS(Homebrew): `flock gmp libpq openssl@3 zstd protobuf`를 설치하고,
   [Release workflow](.github/workflows/release.yml)의 macOS 단계처럼 `openssl@3`와
   `libpq`에 맞춰 `PKG_CONFIG_PATH`, `CPATH`, `LIBRARY_PATH`를 export합니다.

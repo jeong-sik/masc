@@ -123,11 +123,11 @@ libraries first:
 
 - Debian/Ubuntu: `pkg-config m4 libgmp-dev libssl-dev libzstd-dev
   libsqlite3-dev libpq-dev libev-dev libffi-dev zlib1g-dev libncurses-dev
-  libprotobuf-dev protobuf-compiler`. The build needs `protoc` 25.1; Ubuntu
-  22.04's packaged 3.12 fails, so put the
-  [upstream release](https://github.com/protocolbuffers/protobuf/releases/tag/v25.1)
-  first on `PATH` ([`scripts/build-linux-release.sh`](scripts/build-linux-release.sh)
-  is the reference).
+  libprotobuf-dev protobuf-compiler`. `protoc` must understand proto3
+  `optional`; Ubuntu 22.04's packaged 3.12 does not, so put a newer
+  [upstream protoc](https://github.com/protocolbuffers/protobuf/releases) first
+  on `PATH` (the release build uses 25.1; see
+  [`scripts/build-linux-release.sh`](scripts/build-linux-release.sh)).
 - macOS (Homebrew): `flock gmp libpq openssl@3 zstd protobuf`, then export
   `PKG_CONFIG_PATH`, `CPATH` and `LIBRARY_PATH` for `openssl@3` and `libpq` as the
   macOS step of the [Release workflow](.github/workflows/release.yml) does.

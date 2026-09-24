@@ -14,7 +14,7 @@ compiles the OCaml server and dashboard and can take several minutes.
 - **OCaml** 5.5.1, with `opam`
 - **Node.js** 22+ (only for the web dashboard)
 - **Native libraries** (gmp, OpenSSL, zstd, SQLite, libpq, libev, libffi, zlib,
-  ncurses, protobuf with `protoc` 25.1): the package lists per OS are in the
+  ncurses, and a `protoc` that supports proto3 `optional`): the package lists per OS are in the
   [README](https://github.com/jeong-sik/masc#from-source)
 
 ## 1. Clone and install dependencies

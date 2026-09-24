@@ -11674,8 +11674,8 @@ let render_connectors (state : state) =
   let title =
     match state.connectors with
     | None ->
-        Printf.sprintf "%s  %s  %s  %s"
-          (screen_title " MASC Connectors") (title_missing_reading ~error:state.connectors_error) timestamp
+        Printf.sprintf "%s  %s  %s"
+          (screen_title " MASC Connectors") timestamp
           (connection_badge state)
     | Some snapshot ->
         Printf.sprintf "%s (%d of %d available)  %s  %s"

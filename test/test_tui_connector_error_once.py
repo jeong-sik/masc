@@ -75,6 +75,33 @@ def run(executable: str) -> None:
             http_fixtures=fixtures,
         )
 
+    fixtures = h.keeper_runtime_http_fixtures()
+    fixtures[CONNECTORS] = (503, {"error": "synthetic connector offline"})
+
+    def list_interaction(process, fd, _slave, output, _base_path):
+        h.resize_and_wait(
+            process, fd, output, rows=30, columns=160, needle=b"MASC Overview"
+        )
+        h.palette_go(process, fd, output, b"go Connectors", b"MASC Connectors")
+        h.wait_for_output(
+            process, fd, output, b"connector load failed:", start=0, timeout=5
+        )
+        h.drain_until_quiet(process, fd, output)
+        frame = h.unwrapped(h.screen_text(bytes(output)))
+        if b"synthetic connector offline" not in frame:
+            raise AssertionError(f"Connector list lost the failure cause: {frame!r}")
+        if frame.count(b"load failed") != 1:
+            raise AssertionError(f"Connector title repeated the body verdict: {frame!r}")
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Keepers")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Connector list shows one failure verdict",
+        interact=list_interaction,
+        http_fixtures=fixtures,
+    )
+
 
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))

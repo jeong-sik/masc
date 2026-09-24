@@ -566,12 +566,23 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
   | Memory_row_fact fact ->
       let claim_lines = detail_claim_lines ~inner_width fact.mf_claim in
       let history =
-        Printf.sprintf "Retrieved %d · %s · last %s · Retracted %d · Revised from %d"
-          fact.mf_events.mfe_retrieved_count
-          (Message_layout.count_noun fact.mf_events.mfe_retrieved_distinct_days "day")
-          (match fact.mf_events.mfe_last_retrieved_at with
-           | None -> "never"
-           | Some at -> memory_fact_age_label at)
+        (* The retrieval count, its day count and its last clock are one
+           reading: the server derives all three from the same list of
+           retrieval times, and the decoder keeps them as one value. A fact
+           nobody has read draws the single phrase "Never retrieved".
+
+           [Retracted] and [Revised from] keep their zeros. Both are measured
+           counts the server always sends, and hiding a measured zero makes it
+           read as "not measured" -- the shape RFC-0462 closed. *)
+        let read =
+          match fact.mf_events.mfe_retrieval with
+          | Never_retrieved -> "Never retrieved"
+          | Retrieved { count; distinct_days; last_at } ->
+              Printf.sprintf "Retrieved %d on %s · last %s" count
+                (Message_layout.count_noun distinct_days "day")
+                (memory_fact_age_label last_at)
+        in
+        Printf.sprintf "%s · Retracted %d · Revised from %d" read
           fact.mf_events.mfe_retracted_count
           (List.length fact.mf_events.mfe_revised_from)
       in

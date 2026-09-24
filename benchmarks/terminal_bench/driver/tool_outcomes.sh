@@ -10,12 +10,18 @@
 # are counted.
 #
 # A call failed when its disposition is "failed", or, on a row with no
-# disposition, when its wire_outcome is "error". A wire_outcome of "unknown"
-# is not a failure. This is the repository's rule
-# (Tool_result.recorded_call_outcome), including what it calls malformed: a
-# disposition other than "completed", "deferred" or "failed", or a
-# wire_outcome other than "ok", "error" or "unknown", is not read as a
-# success but fails the function like any other broken row. The dashboard
+# disposition, when its wire_outcome is "error". This is the repository's rule
+# (Tool_result.recorded_call_outcome):
+#   disposition "failed"                          -> failed
+#   disposition "completed" or "deferred"         -> not failed
+#   no disposition, wire_outcome "error"          -> failed
+#   no disposition, wire_outcome "ok"             -> not failed
+#   no disposition, wire_outcome "unknown"        -> not failed (unsettled)
+#   neither key                                   -> not failed (unsettled)
+#   either key present with null, a non-string or
+#   a value outside those lists                   -> malformed
+# A malformed row is not read as a success; it fails the function like any
+# other broken row. The dashboard
 # (dashboard_http_tool_quality.ml) applies the same rule but also counts
 # composition_run rows, so a trial that ran compositions shows one call per
 # run fewer here than there.
@@ -34,7 +40,7 @@
 # directory holds no ledger, because an episode that recorded nothing was not
 # measured and must not read as zero calls. A line that is not a JSON object,
 # a row whose record_kind is missing or none of the three, or a call row with
-# no tool or with neither disposition nor wire_outcome, fails the function
+# no tool or with a malformed outcome, fails the function
 # with a non-zero exit, so the caller can record null instead of a count that
 # silently left rows out.
 bench_tool_outcomes_json() {
@@ -68,7 +74,7 @@ bench_tool_outcomes_json() {
             | if $w == "error" then true
               elif $w == "ok" or $w == "unknown" then false
               else error("a call row has wire_outcome \($w | tojson)") end)
-         else error("a call row names neither disposition nor wire_outcome") end) as $failed
+         else false end) as $failed
       | {tool: .tool,
          failed: $failed,
          bytes: (if (.result_bytes | type) == "number" then .result_bytes else null end),

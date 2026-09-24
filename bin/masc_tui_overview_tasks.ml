@@ -153,6 +153,60 @@ let step tasks ~selected direction =
       in
       id_at tasks target
 
+type focus = No_task_focus | Task_focus of { selected : string option }
+
+let selection = function
+  | No_task_focus -> None
+  | Task_focus { selected } -> selected
+
+let is_focused = function No_task_focus -> false | Task_focus _ -> true
+
+let focus_list tasks = Task_focus { selected = id_at tasks 0 }
+
+let toggle tasks = function
+  | No_task_focus -> focus_list tasks
+  | Task_focus _ -> No_task_focus
+
+let land_on tasks ~task_id =
+  match row_of tasks ~task_id with
+  | Some _ -> Task_focus { selected = Some task_id }
+  | None -> No_task_focus
+
+let move tasks focus direction =
+  match focus with
+  | No_task_focus -> No_task_focus
+  | Task_focus { selected } ->
+      Task_focus { selected = step tasks ~selected direction }
+
+let reconcile tasks focus =
+  match focus with
+  | No_task_focus | Task_focus { selected = None } -> (focus, None)
+  | Task_focus { selected = Some task_id } -> (
+      match row_of tasks ~task_id with
+      | Some _ -> (focus, None)
+      | None -> (Task_focus { selected = None }, Some task_id))
+
+type rows_reading =
+  | Rows_unread
+  | Rows_read of Tui_decode.task list
+  | Rows_unavailable of string
+
+let after_read reading focus =
+  match reading with
+  | Rows_unread | Rows_unavailable _ -> (focus, None)
+  | Rows_read rows -> reconcile rows focus
+
+type opening = Open of Tui_decode.task | No_held_task | No_selection
+
+let opening tasks focus =
+  match focus with
+  | No_task_focus -> None
+  | Task_focus { selected } -> (
+      match selected_task tasks ~selected, rows tasks with
+      | Some task, _ -> Some (Open task)
+      | None, [] -> Some No_held_task
+      | None, _ :: _ -> Some No_selection)
+
 let age_text ~age_text ~now since =
   match since with
   | None -> "?"

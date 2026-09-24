@@ -697,9 +697,12 @@ let render_overview (state : state) =
   let attention_items, tasks_error, row_budget =
     overview_layout state ~terminal_rows:rows
   in
+  (* The rows reading, not [state.tasks]: before the first read that list is
+     [] with no error, and counting it would draw "0 of 0" over a section that
+     says it has not loaded. A note on rows that were read (backup recovery,
+     goal links) stays in the Tasks section below; GOALS counts the rows. *)
   Overview_goals.draw buf ~cols ~rows:row_budget.goal_rows
-    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime
-    ~tasks:(Option.fold ~none:(Ok state.tasks) ~some:Result.error tasks_error)
+    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime ~tasks:state.task_reading
     state.overview_goals;
   (* The panel spans the band the rest of the screen's rows cover: one cell of
      margin on each side of the frame. *)
@@ -919,7 +922,7 @@ let render_overview (state : state) =
     let now = Unix.gettimeofday () in
     let selected =
       Overview_tasks.selected_index state.tasks
-        ~selected:state.task_selected_id
+        ~selected:(Overview_tasks.selection state.task_focus)
     in
     (* An unread or failed backlog has said so above; "no task in progress"
        would be a reading it never made. *)
@@ -963,7 +966,7 @@ let render_overview (state : state) =
                 Ansi.reset (task_line task)
             in
             if
-              state.task_focus = Right_pane
+              Overview_tasks.is_focused state.task_focus
               && Option.equal Int.equal selected (Some index)
             then
               box_line_selected buf cols (Masc_tui_theme.strip_sgr ("> " ^ row))
@@ -991,7 +994,7 @@ let render_overview (state : state) =
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
        ~hints:
          (Masc_tui_keys.footer_hints_overview
-            ~task_focus:(state.task_focus = Right_pane)));
+            ~task_focus:(Overview_tasks.is_focused state.task_focus)));
 
   finish_surface state ~surface_key:"overview" ~rows:terminal_rows ~cols buf
 
@@ -1228,7 +1231,10 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
            row, not more of these, so there is no second number to draw. *)
         ~holding:None
         ~labels:
-          (List.map (fun (row : Tui_decode.task) -> row.title)
+          (List.map
+             (fun (row : Tui_decode.task) ->
+               Render_schedule.task_list_sidebar_label ~title:row.title
+                 ~task_id:row.id)
              (Overview_tasks.rows state.tasks))
         ~selection:(Overview_tasks.row_of state.tasks ~task_id:task.id);
       let answer =
@@ -5235,8 +5241,15 @@ let render_keeper_list (state : state) =
      scroll the frame. *)
   let chrome_rows = count_frame_lines buf in
   let footer_rows = 3 in
-  let keeper_rows = max 0 (rows - chrome_rows - footer_rows) in
+  let list_rows = max 0 (rows - chrome_rows - footer_rows) in
   let keeper_count = List.length state.keepers in
+  (* A roster with more keepers than rows says which of them these are, the
+     way every other scrolled list on this screen does. The line costs one of
+     the rows it describes, so it is drawn only where there is something to
+     say, and only where there is a row to spend on it: with no rows left the
+     roster draws nothing and the line would push the frame past its budget. *)
+  let overflowing = list_rows > 0 && keeper_count > list_rows in
+  let keeper_rows = if overflowing then max 0 (list_rows - 1) else list_rows in
   let scroll_offset =
     if keeper_rows > 0 && state.keeper_cursor >= keeper_rows then
       state.keeper_cursor - keeper_rows + 1
@@ -5298,6 +5311,12 @@ let render_keeper_list (state : state) =
           else box_line buf cols row
       | Some _, None | None, Some _ | None, None -> box_empty buf cols
     done;
+
+  if overflowing then
+    box_line_styled buf cols ~style:(Theme.recede ())
+      (Printf.sprintf "[keepers %s]"
+         (Masc_tui_scroll.window_text ~scroll:scroll_offset ~height:keeper_rows
+            keeper_count));
 
   box_line buf cols (keeper_operations_preview state);
   (* A section rule, drawn by the helper the rest of this surface uses, so it
@@ -16066,17 +16085,41 @@ let render_context_inspector state =
             |> List.iter c.push
           end)
 
-(* What the help overlay can show right now: the rows its sheet folds to at
-   this width, and the height it draws them in. The key handler bounds its
-   step against this, so a press that the frame cannot spend is not taken. *)
+(* The height an overlay shows [count] rows in, for the overlays that say
+   which of their lines are showing: one row comes off when they overflow,
+   because the "[lines a-b/n]" row is drawn inside the same body.
+   [Masc_tui_scroll.content_height] owns that rule; the frame supplies the
+   chrome. *)
+let overlay_window_height ~rows ~count =
+  Masc_tui_scroll.content_height ~rows ~chrome:framed_chrome_rows ~count
+    ~preview_keep:None ~overflow_takes_row:true
+
+(* The "[lines a-b/n]" row an overflowing overlay draws under its rows, or
+   nothing when every row fits. The row's height is the one
+   [overlay_window_height] took off. *)
+let overlay_window_row ~scroll ~height count =
+  if count > height then
+    Some
+      (Theme.recede ()
+      ^ Printf.sprintf "  [lines %s]"
+          (Masc_tui_scroll.window_text ~scroll ~height count)
+      ^ Ansi.reset)
+  else None
+
+(* The sheet's rows and the viewport that shows them, at this width. One
+   answer for the two readers -- the keypress that bounds the scroll and the
+   frame that draws it -- so [G] cannot land the scroll a row past what the
+   frame is showing, and a press the frame cannot spend is not taken. *)
 let help_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let header = help_masthead state in
-  ( List.length
+  let count =
+    List.length
       (Masc_tui_help.sheet ~header ~cols
          (help_lines ~width:(Masc_tui_help.line_cells ~cols) state))
-  , framed_content_height ~rows )
+  in
+  (count, overlay_window_height ~rows ~count)
 
 (* The [:] palette: a typed filter over every jump the strip and roster
    offer. The list is the same [palette_matches] the Enter key resolves, so
@@ -16298,10 +16341,15 @@ let render_link_preview_modal (state : state) =
                 c.push line)
             content_lines)
 
+(* The record's rows and the viewport that shows them, the way
+   [help_viewport] answers for the sheet: one pair for the keypress that
+   bounds the scroll and the frame that draws it, and one row off the height
+   when the record has more rows than it can show. *)
 let keeper_deletions_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  List.length (keeper_deletions_lines state ~cols), framed_content_height ~rows
+  let count = List.length (keeper_deletions_lines state ~cols) in
+  (count, overlay_window_height ~rows ~count)
 
 (* The deletion record overlay drew its rows and closed the box under them,
    with nothing filling the rows between: on a short record the footer stood in
@@ -16310,24 +16358,28 @@ let keeper_deletions_viewport (state : state) =
 let render_keeper_deletions (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let lines = keeper_deletions_lines state ~cols in
-  let height =
-    framed_content_height ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
-  in
+  let count, height = keeper_deletions_viewport state in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"keeper-deletions"
     ~frame:Chrome_overlay
     ~title:
       (screen_title " 키퍼 삭제 기록"
        ^ (if state.keeper_deletions_loading then " · 조회/재시도 중" else ""))
-    ~hints:(keeper_deletions_hints state ~scrollable:(List.length lines > height))
-    ~body:(fun ~budget c ->
+    ~hints:(keeper_deletions_hints state ~scrollable:(count > height))
+    (* [keeper_deletions_viewport] rather than the budget it is derived from:
+       the keypress bounds the scroll against that pair. *)
+    ~body:(fun ~budget:_ c ->
       let scroll =
-        Masc_tui_scroll.normalize ~count:(List.length lines) ~height:budget
-          state.keeper_deletions_scroll
+        Masc_tui_scroll.normalize ~count ~height state.keeper_deletions_scroll
       in
       List.iteri
         (fun index text ->
-          if index >= scroll && index < scroll + budget then c.push text)
-        lines)
+          if index >= scroll && index < scroll + height then c.push text)
+        lines;
+      (* The record is one JSON document. Measured on the live server, it ran
+         past every height: at 44 rows it ended mid-object on "kind":
+         "delivered", and the footer named the scroll keys without saying how
+         far they had to go. *)
+      Option.iter c.push (overlay_window_row ~scroll ~height count))
 
 (* The cheat sheet, through the overlay contract. It drew its box and its rows
    by hand and closed the box under the last row, so a sheet shorter than the
@@ -16355,15 +16407,22 @@ let render_help (state : state) =
        pressing [j] forty times, and nothing said [G] exists. The keys are
        handled at masc_tui.ml: "pageup" | "pagedown", "g", "G". *)
     ~hints:"j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close"
-    ~body:(fun ~budget c ->
+    (* [help_viewport] rather than the budget it is derived from: the
+       keypress bounds the scroll against that pair, and a sheet whose
+       drawing used a different height would leave [G] one row short. *)
+    ~body:(fun ~budget:_ c ->
+      let count, height = help_viewport state in
       let scroll =
-        Masc_tui_scroll.normalize
-          ~count:(List.length rendered_rows) ~height:budget state.help_scroll
+        Masc_tui_scroll.normalize ~count ~height state.help_scroll
       in
       List.iteri
         (fun index line ->
-          if index >= scroll && index < scroll + budget then c.push line)
-        rendered_rows)
+          if index >= scroll && index < scroll + height then c.push line)
+        rendered_rows;
+      (* Which of them these are. The sheet is longer than any terminal --
+         at 150x78 the later sections are still off screen -- so a reader
+         pressing [j] had no way of telling a page from a hundred. *)
+      Option.iter c.push (overlay_window_row ~scroll ~height count))
 
 (* Rows the agenda panel can show, and how many it has. The keypress bounds
    the scroll from the same pair the frame draws with -- the shape
@@ -16380,10 +16439,15 @@ let agenda_lines (state : state) =
     ~cols:(framed_inner_width cols)
     (Masc_tui_types.agenda state)
 
+(* The panel's rows and the viewport that shows them, the way
+   [help_viewport] answers for the sheet: one pair for the keypress that
+   bounds the cursor and the frame that draws it, and one row off the height
+   when the panel has more rows than it can show. *)
 let agenda_viewport (state : state) =
   let terminal_rows, _cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  (List.length (agenda_lines state), framed_content_height ~rows)
+  let count = List.length (agenda_lines state) in
+  (count, overlay_window_height ~rows ~count)
 
 let answering_viewport (state : state) =
   let terminal_rows, _cols = get_terminal_size () in
@@ -16517,16 +16581,23 @@ let render_agenda (state : state) =
     ~frame:Chrome_overlay
     ~title:(screen_title " MASC Agenda")
     ~hints
-    ~body:(fun ~budget c ->
+    (* [agenda_viewport] rather than the budget it is derived from: the
+       keypress bounds the cursor against that pair. *)
+    ~body:(fun ~budget:_ c ->
+      let count, height = agenda_viewport state in
       let scroll =
-        Masc_tui_scroll.normalize
-          ~count:(List.length lines) ~height:budget state.agenda_scroll
+        Masc_tui_scroll.normalize ~count ~height state.agenda_scroll
       in
       List.iteri
         (fun index line ->
-          if index >= scroll && index < scroll + budget then
+          if index >= scroll && index < scroll + height then
             c.push (paint ~selected:(index = state.agenda_cursor) line))
-        lines)
+        lines;
+      (* What falls off this panel is not more of the same: measured at 24
+         rows and 100 columns, the panel drew sixteen of its twenty coming
+         rows and neither of the two sections under them, and nothing said
+         "Waiting on you" and "Stuck on you" were there. *)
+      Option.iter c.push (overlay_window_row ~scroll ~height count))
 ;;
 
 let render_terminal_too_small state ~rows ~cols =

@@ -1399,6 +1399,16 @@ let listing_rows_below_the_body = 3
    [None] draws no row as selected.
    [focused] says whether the arrow keys are pointed here, which is a
    different question from which row is open. *)
+(* What a row draws before its label when the cursor is on it. The fold below
+   measures this instead of counting its cells here, so the two cannot drift
+   apart, and the mark is the one the rest of the file draws rather than a
+   second spelling of its bytes. *)
+let sidebar_caret_lead = " " ^ Masc_tui_theme.Glyph.current_entry ^ " "
+
+(* Every row folds to the room the widest lead leaves, so the fold does not
+   move when the cursor does. *)
+let sidebar_row_lead_cells = Message_layout.display_width sidebar_caret_lead
+
 (* How many rows an index is holding, and how many the surface holds. Three
    surfaces draw a server page beside a detail -- the Board's fifty posts,
    the Schedules page, the Task Review page -- and each one's index said the
@@ -1427,7 +1437,9 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
      sentence; which pane hears them is this one glyph. *)
   framed_line buf cols
     ((if focused then Ansi.bold else Ansi.dim)
-     ^ Printf.sprintf " %s%s %s" (if focused then "\xe2\x96\xb8 " else "") title
+     ^ Printf.sprintf " %s%s %s"
+         (if focused then Masc_tui_theme.Glyph.current_entry ^ " " else "")
+         title
          (list_count_text ~loaded:(List.length labels) ~holding)
      ^ Ansi.reset);
   framed_divider buf cols;
@@ -1444,8 +1456,23 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
     | Some label ->
       (* A separate name for the sanitized text. Shadowing [label] left four
          uses that read as raw ones to anything checking by name, the reader
-         included. *)
-      let drawn = Terminal_text.single_line label in
+         included.
+
+         Folded from the middle, the way a table folds a name: the frame
+         cuts a tail, and a reader's index is a column of names whose ends
+         are what part them. Measured on the live Board, 50 posts: a tail cut
+         left nine rows in three groups a reader could not tell apart -- four
+         read "#verification Approved task...", three "#verification Verify:
+         wkbl ..." -- and folding from the middle leaves all fifty distinct.
+
+         Every row folds to the same room whether or not the cursor is on it.
+         The caret takes two cells more than the plain lead, so a label
+         fitted to the wider room re-folded as the cursor passed over it. *)
+      let drawn =
+        Message_layout.fit_middle
+          (max 1 (framed_inner_width cols - sidebar_row_lead_cells))
+          (Terminal_text.single_line label)
+      in
       framed_line buf cols
         (if Option.equal Int.equal selection (Some (first + i)) then
            if focused then
@@ -1454,7 +1481,7 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
                  (max 0 (cols - 5 - Message_layout.display_width drawn))
                  ' '
              ^ Ansi.reset
-           else Ansi.bold ^ " \xe2\x96\xb8 " ^ drawn ^ Ansi.reset
+           else Ansi.bold ^ sidebar_caret_lead ^ drawn ^ Ansi.reset
          else " " ^ drawn)
     | None -> framed_empty buf cols
   done;

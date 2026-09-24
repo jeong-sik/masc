@@ -505,7 +505,44 @@ def run_exact(executable: str) -> None:
     )
 
 
+def run_exact_slot_editor(executable: str) -> None:
+    """bin/masc_tui_types.ml and bin/masc_tui_render.ml: Librarian's CLI
+    candidates share the visible slot editor with its HTTP candidates."""
+    store = LaneStore()
+    store.exact_lane(EXACT_LANE)["cli_slots"] = [
+        "codex_subscription.gpt-6-luna-xhigh", "claude_code.claude-sonnet-5",
+    ]
+    store.exact_lane(EXACT_LANE)["declared_cli_slots"] = [
+        "codex_subscription.gpt-6-luna-xhigh", "claude_code.claude-sonnet-5",
+    ]
+    fixtures = h.overview_event_http_fixtures()
+    fixtures[h.RUNTIME_PROBE_PATH] = h.runtime_probe_response(fresh=True)
+    fixtures[h.RUNTIME_PROBE_FORCE_PATH] = h.runtime_probe_response(fresh=True)
+    fixtures[h.RUNTIME_RESOLVED_PATH] = store.resolved
+    fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
+
+    def interact(process, fd, _slave, output, _base):
+        h.palette_go(process, fd, output, b"go lanes", b"MASC Lanes")
+        h.wait_for_output(process, fd, output, b"Board Attention", start=0, timeout=10)
+        os.write(fd, b"jj")
+        h.send_and_wait(process, fd, output, b"s", b"slots of librarian_exact")
+        h.wait_for_output(process, fd, output, b"CLI  codex_subscription.gpt-6-luna-xhigh", start=0, timeout=5)
+        # Two HTTP rows precede the CLI row. Crossing that boundary is a
+        # refusal with the execution reason, and must send no routing write.
+        os.write(fd, b"jj")
+        h.send_and_wait(process, fd, output, b"K", b"HTTP slots run before CLI slots")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Librarian slot editor shows HTTP and CLI candidates",
+        interact=interact,
+        http_fixtures=fixtures,
+    )
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
     run_exact(os.path.abspath(sys.argv[1]))
+    run_exact_slot_editor(os.path.abspath(sys.argv[1]))
     print("runtime lane editor: PASS")

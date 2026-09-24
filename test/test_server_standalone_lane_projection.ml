@@ -84,6 +84,7 @@ let test_runs_without_a_slot_are_split_by_why () =
           ; cli_slots = []
           ; dropped_slots = []
           ; declared_slots = [ lane_id ^ "-primary" ]
+          ; declared_cli_slots = []
           ; admission_error = None
           })
       ~jev_readiness:Typesafeai.Off
@@ -171,6 +172,7 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
       ; cli_slots = []
       ; dropped_slots = []
       ; declared_slots = [ lane_id ^ "-primary" ]
+      ; declared_cli_slots = []
       ; admission_error = None
       }
   in
@@ -233,7 +235,7 @@ let test_board_lane_projects_credential_free_jev_readiness () =
   let http_lane =
     Projection.Configured
       { admitted_slots = [ "primary" ]; cli_slots = []; dropped_slots = []
-      ; declared_slots = [ "primary" ]; admission_error = None }
+      ; declared_slots = [ "primary" ]; declared_cli_slots = []; admission_error = None }
   in
   let snapshot ?(configuration = http_lane) jev_readiness =
     Projection.For_testing.snapshot_json_with
@@ -284,10 +286,10 @@ let test_board_lane_projects_credential_free_jev_readiness () =
        check string "readiness follows the resolved transport" expected actual)
     [ (Projection.Configured
          { admitted_slots = []; cli_slots = [ "cli" ]; dropped_slots = []
-         ; declared_slots = []; admission_error = None }, "cli_only")
+         ; declared_slots = []; declared_cli_slots = [ "cli" ]; admission_error = None }, "cli_only")
     ; (Projection.Configured
          { admitted_slots = []; cli_slots = []; dropped_slots = []
-         ; declared_slots = []; admission_error = None }, "lane_unavailable")
+         ; declared_slots = []; declared_cli_slots = []; admission_error = None }, "lane_unavailable")
     ; Projection.Unconfigured "no lane", "lane_unavailable"
     ; Projection.Registry_unavailable "no registry", "lane_unavailable"
     ];
@@ -359,6 +361,8 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
       ; cli_slots =
           (if String.equal lane_id "hitl_auto_judge"
            then [ "antigravity_subscription.gemini-3-7-flash-high" ]
+           else if String.equal lane_id "verifier_exact"
+           then [ "verifier-cli-good" ]
            else [])
       ; dropped_slots =
           (if String.equal lane_id "librarian_exact"
@@ -370,6 +374,12 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
            else if String.equal lane_id "hitl_auto_judge"
            then []
            else [ "slot" ])
+      ; declared_cli_slots =
+          (if String.equal lane_id "hitl_auto_judge"
+           then [ "antigravity_subscription.gemini-3-7-flash-high" ]
+           else if String.equal lane_id "verifier_exact"
+           then [ "verifier-cli-rejected"; "verifier-cli-good" ]
+           else [])
       ; admission_error = None
       }
   in
@@ -425,6 +435,12 @@ let test_no_verdict_is_failed_and_synthetic_elapsed_skips_p50 () =
     (match field "hitl_auto_judge" "cli_slots" with
      | `List [ `String "antigravity_subscription.gemini-3-7-flash-high" ] -> true
      | _ -> false);
+  check bool
+    "verifier retains a rejected CLI declaration for the editor"
+    true
+    (match field "verifier_exact" "declared_cli_slots" with
+     | `List [ `String "verifier-cli-rejected"; `String "verifier-cli-good" ] -> true
+     | _ -> false);
   check string
     "a cli-only lane is ready"
     "ready"
@@ -466,6 +482,7 @@ let test_an_operator_routed_claim_is_not_a_lane_run () =
       ; cli_slots = []
       ; dropped_slots = []
       ; declared_slots = [ lane_id ^ "-primary" ]
+      ; declared_cli_slots = []
       ; admission_error = None
       }
   in
@@ -528,6 +545,7 @@ let test_latest_terminal_uses_completion_time () =
       ; cli_slots = []
       ; dropped_slots = []
       ; declared_slots = [ lane_id ^ "-primary" ]
+      ; declared_cli_slots = []
       ; admission_error = None
       })
       ~jev_readiness:Typesafeai.Off
@@ -972,6 +990,7 @@ let test_a_lane_that_could_not_admit_reads_degraded () =
       ; cli_slots = [ lane_id ^ "-cli" ]
       ; dropped_slots = []
       ; declared_slots = [ lane_id ^ "-primary" ]
+      ; declared_cli_slots = [ lane_id ^ "-cli" ]
       ; admission_error = Some "requires admitted exact-output slots"
       }
   in
@@ -999,6 +1018,7 @@ let test_a_lane_that_could_not_admit_reads_degraded () =
       ; cli_slots = [ lane_id ^ "-cli" ]
       ; dropped_slots = []
       ; declared_slots = [ lane_id ^ "-primary" ]
+      ; declared_cli_slots = [ lane_id ^ "-cli" ]
       ; admission_error = None
       }
   in

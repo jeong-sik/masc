@@ -24,6 +24,9 @@ type lane_configuration =
                 The two lists above are an admission reading: once a sibling
                 was rejected they cannot be put back in file order, and the
                 slot editor moves and drops by position. *)
+      ; declared_cli_slots : string list
+            (** [cli_slots] in file order, including verifier candidates
+                rejected by judgement admission. *)
       ; admission_error : string option
       }
   | Unconfigured of string

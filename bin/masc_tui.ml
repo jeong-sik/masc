@@ -25030,6 +25030,35 @@ and is loaded on demand through keeper_skill.
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_channels ->
            handle_connector_edit ()
+       | Some "d"
+         when state.view = Lanes && state.lanes_mode = Lanes_overview
+              && Option.is_some state.slot_editor ->
+           (match Masc_tui_types.slot_editor_cursor_row state with
+            | Some { sr_kind = `Http; sr_slot; _ } ->
+              (match String.index_opt sr_slot '.' with
+               | Some boundary when boundary > 0 ->
+                 let provider = String.sub sr_slot 0 boundary in
+                 let section = "providers." ^ provider in
+                 state.view <- Config;
+                 state.config_pane <- Config_runtime;
+                 state.runtime_config_jump_section <- Some section;
+                 (match state.runtime_config_view with
+                  | None -> launch_runtime_config_load state ~mailbox:async_messages
+                  | Some _ ->
+                    (match apply_runtime_config_jump state with
+                     | Some (_, true) -> ()
+                     | Some (_, false) ->
+                       report_action state "error"
+                         (Printf.sprintf "runtime.toml has no [%s] section" section)
+                     | None -> ()))
+               | Some _ | None ->
+                 show_lanes_action_error state
+                   "Selected HTTP slot has no provider.model binding id")
+            | Some { sr_kind = (`Cli | `Media); _ } ->
+              show_lanes_action_error state
+                "Select an HTTP slot to edit its provider deadline"
+            | None ->
+              show_lanes_action_error state "No slot is selected")
        | Some "e" | Some "E" ->
            (* Settings edit hands the terminal to $EDITOR, so it cannot live
               inside the keeper-action pipeline: the loop is inside the

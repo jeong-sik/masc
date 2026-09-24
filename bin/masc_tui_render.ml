@@ -5810,7 +5810,7 @@ let render_lanes_overview (state : state) =
    | None -> ()
    | Some editor ->
        box_line_styled buf cols ~style:(Theme.info ())
-         (Printf.sprintf "  slots of %s — the order it walks"
+         (Printf.sprintf "  slots of %s — HTTP first, then CLI"
             (Terminal_text.single_line
                (Masc_tui_types.slot_editor_target_name editor.Masc_tui_types.se_target)));
        let slot_rows = Masc_tui_types.slot_editor_rows state in
@@ -5821,9 +5821,13 @@ let render_lanes_overview (state : state) =
          List.iteri
            (fun index (row : Masc_tui_types.slot_editor_row) ->
               let line =
-                Printf.sprintf "  %s %d  %s%s"
+                Printf.sprintf "  %s %d  %s %s%s"
                   (if index = editor.Masc_tui_types.se_cursor then ">" else " ")
                   (index + 1)
+                  (match row.Masc_tui_types.sr_kind with
+                   | `Http -> "HTTP"
+                   | `Cli -> "CLI "
+                   | `Media -> "    ")
                   (Terminal_text.single_line row.Masc_tui_types.sr_slot)
                   (if row.Masc_tui_types.sr_admitted then ""
                    else Ansi.dim ^ "  (declared, not admitted)" ^ Ansi.reset)
@@ -5833,7 +5837,7 @@ let render_lanes_overview (state : state) =
               else box_line buf cols line)
            slot_rows;
        box_line_styled buf cols ~style:(Theme.recede ())
-         "  j/k move · x drop · J/K reorder · Esc close");
+         "  j/k select · a add · x drop · J/K reorder · d HTTP provider · Esc close");
   (* The runtime-candidate picker the "a" key opens. Same projection the
      Runtime surface draws; the row order both render and the key handler
      read is the picker's own, so the cursor and the drawing cannot drift. *)

@@ -63,6 +63,14 @@ export interface RuntimeTomlEnvironment {
   warnings: string[]
 }
 
+export interface RuntimeTomlExactLane {
+  id: string
+  slots: string[]
+  cliSlots: string[]
+  maxOutputTokens: number | null
+  error: string | null
+}
+
 export interface RuntimeTomlImpactSummary {
   defaultRuntimeBefore: string
   defaultRuntimeAfter: string
@@ -506,6 +514,101 @@ function tomlArrayValueEndLine(
   return sawOpen ? null : startIndex
 }
 
+function parseTomlStringArray(raw: string): string[] {
+  let position = 0
+  const values: string[] = []
+  const skipSpace = () => {
+    while (position < raw.length) {
+      const char = raw[position]
+      if (char === '#') {
+        while (position < raw.length && raw[position] !== '\n') position += 1
+      } else if (char === ' ' || char === '\t' || char === '\r' || char === '\n') {
+        position += 1
+      } else break
+    }
+  }
+  skipSpace()
+  if (raw[position] !== '[') throw new Error('expected an array')
+  position += 1
+  while (true) {
+    skipSpace()
+    if (raw[position] === ']') {
+      position += 1
+      skipSpace()
+      if (position !== raw.length) throw new Error('unexpected content after array')
+      return values
+    }
+    const quote = raw[position]
+    if (quote !== '"' && quote !== "'") throw new Error('expected a quoted runtime id')
+    const start = position
+    position += 1
+    while (position < raw.length) {
+      if (raw[position] === '\\' && quote === '"') { position += 2; continue }
+      if (raw[position] === quote) break
+      position += 1
+    }
+    if (raw[position] !== quote) throw new Error('unterminated runtime id')
+    const token = raw.slice(start, position + 1)
+    const value = quote === '"' ? JSON.parse(token) as unknown : token.slice(1, -1)
+    if (typeof value !== 'string') throw new Error('runtime id must be a string')
+    values.push(value)
+    position += 1
+    skipSpace()
+    if (raw[position] === ',') { position += 1; continue }
+    if (raw[position] !== ']') throw new Error('expected comma or closing bracket')
+  }
+}
+
+function sectionStringArray(document: TomlDocument, sectionName: string, key: string): string[] {
+  const section = sectionOf(document, sectionName)
+  if (!section) return []
+  for (let index = section.start + 1; index < section.end; index += 1) {
+    const match = keyLineMatch(document.lines[index] ?? '')
+    if (!match || dequoteTomlKey(match[2]) !== key) continue
+    const end = tomlArrayValueEndLine(document.lines, index, section.end, match[4] ?? '')
+    if (end === null) throw new Error(`unterminated ${key} array`)
+    const segments = [match[4] ?? '', ...document.lines.slice(index + 1, end + 1)]
+    // The source editor may attach operational reasons to individual slots.
+    // The array writer replaces the span, so refuse a structured edit that
+    // would discard any of those comments. The raw TOML editor retains them.
+    if (segments.some(segment => stripInlineComment(segment) !== segment.trim())) {
+      throw new Error(`${key} contains comments; edit this array in raw TOML to preserve them`)
+    }
+    const raw = segments.join('\n')
+    return parseTomlStringArray(raw)
+  }
+  return []
+}
+
+export function parseRuntimeTomlExactLanes(sourceText: string): RuntimeTomlExactLane[] {
+  const document = parseDocument(sourceText)
+  return document.sections.flatMap<RuntimeTomlExactLane>(section => {
+    const match = section.name.match(/^runtime\.exact_output_lanes\.([^.]+)$/)
+    if (!match?.[1]) return []
+    const values = sectionValues(document, section.name)
+    try {
+      return [{ id: match[1], slots: sectionStringArray(document, section.name, 'slots'),
+        cliSlots: sectionStringArray(document, section.name, 'cli_slots'),
+        maxOutputTokens: asNumber(values.max_output_tokens), error: null }]
+    } catch (error) {
+      return [{ id: match[1], slots: [], cliSlots: [], maxOutputTokens: asNumber(values.max_output_tokens),
+        error: error instanceof Error ? error.message : String(error) }]
+    }
+  })
+}
+
+export function setRuntimeTomlExactLaneSlots(sourceText: string, laneId: string,
+  kind: 'slots' | 'cli_slots', values: readonly string[]): string {
+  const lane = parseRuntimeTomlExactLanes(sourceText).find(candidate => candidate.id === laneId)
+  if (!lane || lane.error) throw new Error(`Cannot edit exact lane ${laneId}: ${lane?.error ?? 'missing lane'}`)
+  const remaining = kind === 'slots' ? lane.cliSlots : lane.slots
+  if (values.length + remaining.length === 0) throw new Error('An exact lane needs at least one slot')
+  if (new Set([...values, ...remaining]).size !== values.length + remaining.length) {
+    throw new Error('An exact lane cannot declare the same runtime twice')
+  }
+  return setRuntimeTomlStringArrayKey(sourceText, `runtime.exact_output_lanes.${laneId}`, kind, values)
+}
+
 function joinLines(lines: string[]): string {
   return lines.join('\n')
 }
@@ -667,7 +770,7 @@ export function setRuntimeTomlDefault(sourceText: string, runtimeId: string): st
 export function setRuntimeTomlProviderField(
   sourceText: string,
   providerId: string,
-  field: 'enabled' | 'display-name' | 'protocol' | 'endpoint' | 'command' | 'is-non-interactive' | 'agent' | 'effort' | 'timeout-s',
+  field: 'enabled' | 'display-name' | 'protocol' | 'endpoint' | 'command' | 'is-non-interactive' | 'agent' | 'effort' | 'timeout-s' | 'exact-body-timeout-s',
   value: string | number | boolean | null,
 ): string {
   const section = `providers.${providerId}`

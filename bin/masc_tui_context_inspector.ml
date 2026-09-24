@@ -587,17 +587,10 @@ let input_map_rows (record : Turn_record.t) provider_input =
            })
         components
 
-(* At most six characters, which is the cell every "≈%6s tok" column
-   reserves. A figure changes rung as soon as the previous format would
-   round it to a seventh character: 999,950 reads "1.00M" rather than
-   "1000.0k", 99,995,000 reads "100.0M" rather than "100.00M", and
-   999,950,000 reads "1.00B" rather than "1000.0M". *)
-let format_tokens tokens =
-  if tokens >= 999_950_000 then Printf.sprintf "%.2fB" (float tokens /. 1_000_000_000.)
-  else if tokens >= 99_995_000 then Printf.sprintf "%.1fM" (float tokens /. 1_000_000.)
-  else if tokens >= 999_950 then Printf.sprintf "%.2fM" (float tokens /. 1_000_000.)
-  else if tokens >= 1_000 then Printf.sprintf "%.1fk" (float tokens /. 1_000.)
-  else string_of_int tokens
+(* The rungs this column was measured for now live beside every other figure
+   the screen reads at a glance: four ladders spelled the same count four
+   ways and two of them shared a screen. *)
+let format_tokens = Masc_tui_message_layout.compact_count
 
 let forecast_schema = "masc.keeper.next-request-forecast.v5"
 

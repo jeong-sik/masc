@@ -619,19 +619,28 @@ let count_noun ?plural count singular =
 let thousand = 1_000
 let million = 1_000_000
 
-(* The smallest step ["%.1fk"] can draw is a tenth of a thousand, so it rounds
-   to the nearest hundred and every count within half of that below a million
-   prints as "1000.0k" -- four digits where the rung holds three, and a figure
-   that reads larger than the million it has not reached. The rung changes
-   where the rounding does.
-   [Masc_tui_context_inspector.format_tokens] draws its own columns by the
-   same rule. There is no rung above M here, so M has no such boundary: past
-   a thousand million it draws more digits rather than a wrong rung. *)
-let thousand_rounding_half = thousand / 10 / 2
+(* At most six characters, which is the cell every "\xe2\x89\x88%6s tok" column
+   reserves. A figure changes rung as soon as the previous format would round
+   it to a seventh character: 999,950 reads "1.00M" rather than "1000.0k",
+   99,995,000 reads "100.0M" rather than "100.00M", and 999,950,000 reads
+   "1.00B" rather than "1000.0M".
+
+   One ladder, because four spelled the same figure four ways: this one drew
+   "1.0M" for 1,048,576 where the context inspector drew "1.05M" beside it,
+   and the same screen carried both. The inspector's rungs are the ones kept
+   -- they are the only set whose boundaries were worked out against the
+   column width they have to fit. *)
+let rung_billion = 999_950_000
+let rung_hundred_million = 99_995_000
+let rung_million = 999_950
 
 let compact_count n =
-  if n >= million - thousand_rounding_half then
+  if n >= rung_billion then
+    Printf.sprintf "%.2fB" (float_of_int n /. 1_000_000_000.)
+  else if n >= rung_hundred_million then
     Printf.sprintf "%.1fM" (float_of_int n /. float_of_int million)
+  else if n >= rung_million then
+    Printf.sprintf "%.2fM" (float_of_int n /. float_of_int million)
   else if n >= thousand then
     Printf.sprintf "%.1fk" (float_of_int n /. float_of_int thousand)
   else string_of_int n

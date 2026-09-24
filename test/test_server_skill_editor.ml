@@ -450,9 +450,7 @@ let test_delete_keeps_package_with_other_files () =
   (* The row the delete route writes: a kept folder is what a later
      package_already_exists for this id traces back to. *)
   let audit_outcome, details =
-    Server_routes_http_routes_dashboard.For_testing.skill_delete_audit_of_outcome
-      ~reference
-      outcome
+    Server_routes_http_routes_dashboard.For_testing.skill_delete_audit_of_outcome outcome
   in
   check bool "audit outcome" true (audit_outcome = Masc.Audit_log.Success);
   check
@@ -845,6 +843,19 @@ let test_delete_refresh_cancellation_is_unpublished () =
         "serialized refresh cancellation"
         "snapshot refresh cancelled"
         Yojson.Safe.Util.(json |> member "reason" |> to_string);
+      (* An unpublished delete still moved the Skill out, so its audit row is
+         a failure that still says what happened to the folder. *)
+      let audit_outcome, details =
+        Server_routes_http_routes_dashboard.For_testing.skill_delete_audit_of_outcome
+          (Editor.Deleted_but_unpublished outcome)
+      in
+      check bool "audit outcome is a failure" true
+        (audit_outcome = Masc.Audit_log.Failure "snapshot refresh cancelled");
+      check
+        string
+        "audit row package_directory"
+        "removed"
+        Yojson.Safe.Util.(details |> member "package_directory" |> member "kind" |> to_string);
       recovery_id
     | Ok _ -> fail "refresh cancellation was reported as published"
     | Error error -> fail (Editor.error_to_string error)

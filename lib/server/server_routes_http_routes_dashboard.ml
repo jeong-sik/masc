@@ -1039,22 +1039,24 @@ let skill_delete_audit_details ~reference ~status ~recovery ~package_directory =
          ])
 ;;
 
-(* The success row is read off the delete outcome here, not in the handler,
-   so a field the outcome carries cannot be dropped on the way to the audit. *)
-let skill_delete_audit_of_outcome ~reference outcome =
+(* The row for a delete that went through is read off the outcome here, not in
+   the handler, so a field the outcome carries cannot be dropped on the way to
+   the audit. *)
+let skill_delete_audit_of_outcome outcome =
   let recovery recovery_id disposition =
     Some (recovery_id, Server_skill_editor.recovery_disposition_to_string disposition)
   in
   match outcome with
   | Server_skill_editor.Deleted_and_published
-      { recovery_id; disposition; package_directory; _ } ->
+      { reference; recovery_id; disposition; package_directory; _ } ->
     ( Audit_log.Success
     , skill_delete_audit_details
         ~reference
         ~status:"deleted_and_published"
         ~recovery:(recovery recovery_id disposition)
         ~package_directory:(Some package_directory) )
-  | Deleted_but_unpublished { reason; recovery_id; disposition; package_directory; _ } ->
+  | Deleted_but_unpublished
+      { reference; reason; recovery_id; disposition; package_directory } ->
     ( Audit_log.Failure (Server_skill_editor.delete_unpublished_reason_to_string reason)
     , skill_delete_audit_details
         ~reference
@@ -2363,9 +2365,7 @@ let add_routes ~sw ~clock router =
                         (Audit_log.Failure (Server_skill_editor.error_to_string error));
                     respond_skill_editor_error ~request:req reqd error
                   | Ok outcome ->
-                    let audit_outcome, details =
-                      skill_delete_audit_of_outcome ~reference outcome
-                    in
+                    let audit_outcome, details = skill_delete_audit_of_outcome outcome in
                     audit_skill_delete state agent_name ~details ~outcome:audit_outcome;
                     Http.Response.json_value
                       ~compress:true

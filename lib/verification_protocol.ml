@@ -484,12 +484,48 @@ let retry_delay_sentence = function
   | Full_interval { seconds } -> Printf.sprintf "retry scheduled in %.0f s" seconds
   | Shared_timer -> "retry scheduled when the shared retry timer fires"
 
+type stalled_subject =
+  | Task_review of
+      { task_id : string
+      ; verification_id : string
+      ; disposition : stall_disposition
+      }
+  | Goal_review of { goal_id : string; request_id : string }
+
+(* The disposition the post reports. Only a Task review can have a retry
+   armed; the Goal verifier arms none, so a Goal review carries no
+   disposition and is always [No_retry_armed]. *)
+let subject_disposition = function
+  | Task_review { disposition; _ } -> disposition
+  | Goal_review _ -> No_retry_armed
+
+(* The subject's identity as metadata fields. The same list is what a post
+   writes and what the repeat check compares, so a post and its lookup
+   cannot name the subject two ways. *)
+let subject_identity_fields = function
+  | Task_review { task_id; verification_id; disposition = _ } ->
+    [ ("task_id", task_id); ("verification_id", verification_id) ]
+  | Goal_review { goal_id; request_id } ->
+    [ ("goal_id", goal_id); ("request_id", request_id) ]
+
+let subject_kind = function
+  | Task_review _ -> "task_review"
+  | Goal_review _ -> "goal_review"
+
+(* The id the error log is filed under. *)
+let subject_owner_id = function
+  | Task_review { task_id; _ } -> task_id
+  | Goal_review { goal_id; _ } -> goal_id
+
 (* The sentence is rendered from the disposition the scheduling owner
    reported after it acted, so the post cannot say one thing while the lane
-   armed another. *)
-let stalled_board_content ~task_id ~verification_id ~gate ~detail ~disposition =
-  match disposition with
-  | Retry_scheduled { delay } ->
+   armed another. A Goal review has no retry to report and names the
+   forward path a Goal has: a Keeper asking again with request_complete.
+   Without new evidence that call keeps the same request, so a review that
+   stops again for the same reason is not posted twice. *)
+let stalled_board_content ~subject ~gate ~detail =
+  match subject with
+  | Task_review { task_id; verification_id; disposition = Retry_scheduled { delay } } ->
     Printf.sprintf
       "Stalled task %s (vrf:%s) — %s. gate=%s: %s. The authority reviews \
        this verification again on its own; resubmitting now would supersede \
@@ -499,7 +535,7 @@ let stalled_board_content ~task_id ~verification_id ~gate ~detail ~disposition =
       (retry_delay_sentence delay)
       gate
       detail
-  | No_retry_armed ->
+  | Task_review { task_id; verification_id; disposition = No_retry_armed } ->
     Printf.sprintf
       "Stalled task %s (vrf:%s) — no retry armed. gate=%s: %s. Forward path: \
        the assignee resubmits with submit_for_verification (supersedes this \
@@ -510,24 +546,33 @@ let stalled_board_content ~task_id ~verification_id ~gate ~detail ~disposition =
       verification_id
       gate
       detail
+  | Goal_review { goal_id; request_id } ->
+    Printf.sprintf
+      "Stalled goal %s (request:%s) — no retry armed. gate=%s: %s. The Goal \
+       stays verifying. Forward path: a Keeper calls request_complete on \
+       this Goal, which starts the next review; while the cause above holds, \
+       that review stops the same way."
+      goal_id
+      request_id
+      gate
+      detail
 
 let stalled_metadata
       ~(authority : Masc_domain.completion_authority)
-      ~task_id
-      ~verification_id
+      ~subject
       ~gate
       ~detail
-      ~disposition
   =
   `Assoc
     ([ ("type", `String "verification_stalled")
-     ; ("task_id", `String task_id)
-     ; ("verification_id", `String verification_id)
+     ; ("subject", `String (subject_kind subject))
      ]
+     @ List.map (fun (name, value) -> (name, `String value))
+         (subject_identity_fields subject)
      @ completion_authority_fields authority
      @ [ ("gate", `String gate)
        ; ("detail", `String detail)
-       ; ("disposition", stall_disposition_to_json disposition)
+       ; ("disposition", stall_disposition_to_json (subject_disposition subject))
        ; ("timestamp", `Float (Time_compat.now ()))
        ])
 
@@ -546,8 +591,8 @@ let stall_lookback_posts = 200
    when it has told them nothing.
 
    The Board is what the repeat is about, so the Board is what decides. The
-   post carries its identity in typed metadata — [type], [task_id],
-   [verification_id], [gate] — and its news in [disposition]; this reads
+   post carries its identity in typed metadata — [type], the subject's
+   identity fields, [gate] — and its news in [disposition]; this reads
    those fields rather than matching the rendered sentence. [detail] is
    evidence the post carries, not identity: a diagnostic that changes
    wording while the disposition stands is not news.
@@ -558,7 +603,7 @@ let stall_lookback_posts = 200
    so it can neither silence a notice nor force one. A post that failed to
    land leaves nothing to find, so a stall whose notice never reached anyone
    is reported again on the next sweep. *)
-let latest_stall_disposition_on_the_board ~task_id ~verification_id ~gate =
+let latest_stall_disposition_on_the_board ~subject ~gate =
   let published (post : Board.post) =
     match post.meta_json with
     | None -> None
@@ -570,8 +615,9 @@ let latest_stall_disposition_on_the_board ~task_id ~verification_id ~gate =
       in
       let is name expected = Option.equal String.equal (text name) (Some expected) in
       if is "type" "verification_stalled"
-         && is "task_id" task_id
-         && is "verification_id" verification_id
+         && List.for_all
+              (fun (name, value) -> is name value)
+              (subject_identity_fields subject)
          && is "gate" gate
       then (
         match List.assoc_opt "disposition" fields with
@@ -597,16 +643,14 @@ let latest_stall_disposition_on_the_board ~task_id ~verification_id ~gate =
 
 let notify_stalled_verification
       ~(authority : Masc_domain.completion_authority)
-      ~task_id
-      ~verification_id
+      ~subject
       ~gate
       ~detail
-      ~disposition
   =
   let already_told =
-    match latest_stall_disposition_on_the_board ~task_id ~verification_id ~gate with
+    match latest_stall_disposition_on_the_board ~subject ~gate with
     | None -> false
-    | Some latest -> same_disposition latest disposition
+    | Some latest -> same_disposition latest (subject_disposition subject)
   in
   if already_told
   then ()
@@ -614,33 +658,30 @@ let notify_stalled_verification
   match
     Board_dispatch.create_post
       ~author:(Masc_domain.completion_authority_actor authority)
-      ~content:
-        (stalled_board_content
-           ~task_id ~verification_id ~gate ~detail ~disposition)
+      ~content:(stalled_board_content ~subject ~gate ~detail)
       ~post_kind:Board.System_post
-      ~meta_json:
-        (stalled_metadata
-           ~authority ~task_id ~verification_id ~gate ~detail ~disposition)
+      ~meta_json:(stalled_metadata ~authority ~subject ~gate ~detail)
       ~visibility:Board.Internal
       ~hearth:"verification"
       ()
   with
   | Ok _ -> ()
   | Error e ->
+    let owner_id = subject_owner_id subject in
     Log.Task.error
-      ~keeper_name:task_id
-      "stalled-review board post failed (task=%s vrf=%s): %s"
-      task_id verification_id (Board_types.show_board_error e)
+      ~keeper_name:owner_id
+      "stalled-review board post failed (%s %s gate=%s): %s"
+      (subject_kind subject)
+      (String.concat " "
+         (List.map
+            (fun (name, value) -> name ^ "=" ^ value)
+            (subject_identity_fields subject)))
+      gate
+      (Board_types.show_board_error e)
 
 module For_testing = struct
   let verdict_event_json = verdict_event_json
   let stalled_board_content = stalled_board_content
   let stall_disposition_of_json = stall_disposition_of_json
-
-  let stalled_metadata
-        ~authority ~task_id ~verification_id ~gate ~detail ~disposition
-    =
-    stalled_metadata
-      ~authority ~task_id ~verification_id ~gate ~detail ~disposition
-  ;;
+  let stalled_metadata = stalled_metadata
 end

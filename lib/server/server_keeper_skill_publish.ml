@@ -8,7 +8,7 @@ let cause_of_editor_error : Server_skill_editor.error -> Publish.refusal_cause =
   | Server_skill_editor.Invalid_workspace
   | Snapshot_not_registered
   | Snapshot_uninitialized
-  | Source_not_ready
+  | Source_not_ready _
   | Source_file_missing
   | Source_read_failed
   | Source_path_rejected _
@@ -94,6 +94,19 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
                { reference = preview.profile.reference
                ; snapshot_revision =
                    Skill_catalog_snapshot.snapshot_revision_to_string snapshot_revision
+               } )
+         | Created_but_shadowed { preview; snapshot_revision; winner } ->
+           (* The write and the republish succeeded; which package the name
+              resolves to is catalog state that changes when either package
+              goes, so the row records the status, not a failure. *)
+           ( preview
+           , "created_but_shadowed"
+           , Audit_log.Success
+           , Publish.Created_but_shadowed
+               { reference = preview.profile.reference
+               ; snapshot_revision =
+                   Skill_catalog_snapshot.snapshot_revision_to_string snapshot_revision
+               ; winner
                } )
          | Created_but_unpublished { preview; reason } ->
            ( preview

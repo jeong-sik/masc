@@ -204,14 +204,17 @@ let approval_lifecycle_phase_of_label = function
 type speaker_authority =
   | Owner
   | External
+  | Keeper
 
 let authority_label = function
   | Owner -> "owner"
   | External -> "external"
+  | Keeper -> "keeper"
 
 let authority_of_label = function
   | "owner" -> Some Owner
   | "external" -> Some External
+  | "keeper" -> Some Keeper
   | _ -> None
 
 type chat_block = Keeper_chat_blocks.chat_block
@@ -231,6 +234,10 @@ type speaker = {
   speaker_name : string option;
   speaker_authority : speaker_authority;
 }
+
+let keeper_speaker keeper_id =
+  let id = Keeper_identity.Keeper_id.to_string keeper_id in
+  { speaker_id = Some id; speaker_name = Some id; speaker_authority = Keeper }
 
 type chat_message = {
   id : string;

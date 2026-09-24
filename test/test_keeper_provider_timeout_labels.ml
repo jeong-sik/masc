@@ -58,8 +58,6 @@ let aliases =
   ; "wall_clock_timeout", "wall_clock"
   ; "wall_exceeded", "wall_clock"
   ; "max_execution_time", "wall_clock"
-  ; "client_capacity", "capacity_backpressure"
-  ; "client_capacity_full", "capacity_backpressure"
   ]
 
 let test_every_idle_label_keeps_its_own_state () =

@@ -17,6 +17,8 @@ val read_jsonl : t -> Lane_addon_types.evidence -> (string, string) result
 (** Reads a complete retained sequence, oldest first, validating every node.
     Explicit full-history reads allocate the requested result; capture does not. *)
 val save_binding : t -> instance_id:string -> Yojson.Safe.t -> (unit, string) result
+val remove_binding : t -> instance_id:string -> (unit, string) result
+(** Removes one binding record. A missing record is already removed. *)
 val save_action : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
 val load_action : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
 val bindings : t -> (Yojson.Safe.t list, string) result

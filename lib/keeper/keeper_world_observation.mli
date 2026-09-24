@@ -29,8 +29,10 @@ type pending_board_event_kind =
           (the parent post for a comment vote). *)
   | Fusion_completed
   | Delegate_completed
-  | Ask_answered_row
-      (** A human answered a question this Keeper asked. Like
+  | Ask_answered_row of { answered_by : Keeper_input_speaker.person }
+      (** A human answered a question this Keeper asked. [answered_by] is
+          fixed from the answer's responder when the row is made, so the
+          conversation can say who answered without reading the row text. Like
           {!Composition_completed} the row carries the answer itself: the
           asker has nowhere else to read it mid-cycle, and a wake with no
           content is a wake it cannot act on. *)

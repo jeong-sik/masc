@@ -117,7 +117,11 @@ let parse_stating_a_profile ctx json =
   let json =
     match json with
     | `Assoc fields when not (List.mem_assoc "sandbox_profile" fields) ->
-      `Assoc (fields @ [ "sandbox_profile", `String "docker" ])
+      let image =
+        if List.mem_assoc "sandbox_image" fields then []
+        else [ "sandbox_image", `String "masc-sandbox:general" ]
+      in
+      `Assoc (fields @ ("sandbox_profile", `String "docker") :: image)
     | other -> other
   in
   Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx json
@@ -182,7 +186,7 @@ remote_root = "/srv/masc/playground"
        parsed.remote_endpoint_opt);
   (match
      parse
-       [ "sandbox_profile", `String "docker"
+       [ "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
        ; "remote_endpoint", `String "fixture"
        ]
    with
@@ -341,7 +345,7 @@ remote_root = "/srv/masc/playground"
     parse_or_fail
       (`Assoc
          [ "name", `String name
-         ; "sandbox_profile", `String "docker"
+         ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
          ; "remote_endpoint", `Null
          ])
   in
@@ -401,7 +405,7 @@ let test_microvm_backend_persistence_round_trip () =
       (`Assoc
          [ "name", `String name
          ; "instructions", `String "fixture instructions"
-         ; "sandbox_profile", `String "microvm"
+         ; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "masc-sandbox:general"
          ; "microvm_backend", `String "nerdctl_kata"
          ])
   in
@@ -409,14 +413,14 @@ let test_microvm_backend_persistence_round_trip () =
     { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm; microvm_backend = create.profile_defaults.microvm_backend };
   check (option string) "backend persisted" (Some "nerdctl_kata") (read_back ());
   let omitted = parse_or_fail (`Assoc
-      [ "name", `String name; "sandbox_profile", `String "microvm"
+      [ "name", `String name; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "masc-sandbox:general"
       ; "instructions", `String "updated instructions" ]) in
   persist omitted
     { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm;
                      microvm_backend = omitted.profile_defaults.microvm_backend };
   check (option string) "omitted backend survives update" (Some "nerdctl_kata") (read_back ());
   let changed = parse_or_fail (`Assoc
-      [ "name", `String name; "sandbox_profile", `String "microvm"
+      [ "name", `String name; "sandbox_profile", `String "microvm" ; "sandbox_image", `String "masc-sandbox:general"
       ; "microvm_backend", `String "apple_container" ]) in
   persist changed
     { base_meta with sandbox_profile = Keeper_types_profile_sandbox.Micro_vm;
@@ -426,7 +430,7 @@ let test_microvm_backend_persistence_round_trip () =
     parse_or_fail
       (`Assoc
          [ "name", `String name
-         ; "sandbox_profile", `String "docker"
+         ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
          ; "microvm_backend", `Null
          ])
   in
@@ -1821,6 +1825,7 @@ let test_actor_publication_starts_after_config_commit () =
       (`Assoc ["name", `String name; "instructions", `String "committed"]) with
     | Ok parsed -> parsed
     | Error error -> fail (Keeper_types_profile.tool_result_body error) in
+  let meta = { meta with sandbox_image = parsed.profile_defaults.sandbox_image } in
   let journal_path = Keeper_config_journal.journal_path_for_base_path
       ~base_path:ctx.config.base_path in
   let published = ref false in
@@ -2323,7 +2328,38 @@ let preflight_fixture ~ok : Keeper_sandbox_runtime.docker_preflight =
 ;;
 
 let docker_args ~profile =
-  `Assoc [ "name", `String "preflight-fixture"; "sandbox_profile", `String profile ]
+  `Assoc
+    [ "name", `String "preflight-fixture"
+    ; "sandbox_profile", `String profile
+    ; "sandbox_image", `String "masc-sandbox:general"
+    ]
+;;
+
+(* #37523. A docker keeper whose call and TOML both name no image is refused
+   at admission, before any preflight, rather than admitted onto the general
+   image. The same call with an image is the control: it reaches the
+   preflight. *)
+let test_a_docker_keeper_naming_no_image_is_refused () =
+  with_test_context
+  @@ fun ctx ->
+  let probes = ref 0 in
+  let docker_preflight ?image:_ ~timeout_sec:_ () =
+    incr probes;
+    None
+  in
+  (match
+     Keeper_turn_up_args.parse ~docker_preflight ctx
+       (`Assoc [ "name", `String "imageless"; "sandbox_profile", `String "docker" ])
+   with
+   | Ok _ -> fail "a docker keeper naming no image was admitted"
+   | Error result ->
+     check bool "the refusal names the missing key" true
+       (contains "sandbox_image is required"
+          (Keeper_types_profile.tool_result_body result));
+     check int "refused before the preflight" 0 !probes);
+  match Keeper_turn_up_args.parse ~docker_preflight ctx (docker_args ~profile:"docker") with
+  | Ok _ -> check int "the declared image reaches the preflight" 1 !probes
+  | Error result -> fail (Keeper_types_profile.tool_result_body result)
 ;;
 
 (* new-keeper, 2026-09-02: admitted from the TUI in 33 ms on a host with no
@@ -2588,7 +2624,7 @@ let test_parse_rejects_unknown_keys () =
           [ "name", `String "unknown-args-fixture"
           (* The tool schema defaults this to "docker"; [parse] is called
              directly here, so the fixture states what the schema would. *)
-          ; "sandbox_profile", `String "docker"
+          ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
           ; "instructions", `String "still fine"
           ])
    with
@@ -2605,7 +2641,8 @@ let test_sandbox_image_persistence () =
     | Ok meta -> { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker }
     | Error error -> fail error in
   let apply fields =
-    let parsed = match parse_stating_a_profile ctx (`Assoc (("name", `String name) :: fields)) with
+    let parsed = match parse_stating_a_profile ctx
+        (`Assoc (("name", `String name) :: ("sandbox_profile", `String "docker") :: fields)) with
       | Ok parsed -> parsed
       | Error result -> fail (Keeper_types_profile.tool_result_body result) in
     let instructions = match parsed.instructions_opt with
@@ -2628,7 +2665,22 @@ let test_sandbox_image_persistence () =
     (apply ["instructions", `String "new instructions"]);
   check (option string) "image replacement materializes" (Some "registry.example/documents:v2")
     (apply ["sandbox_image", `String "registry.example/documents:v2"]);
-  check (option string) "explicit clear removes override" None (apply ["sandbox_image", `Null]);
+  (* A docker Keeper cannot drop its image (#37523): the explicit clear is
+     refused before anything is written, and the stored image stays. *)
+  (match parse_stating_a_profile ctx
+      (`Assoc [ "name", `String name; "sandbox_profile", `String "docker"
+              ; "sandbox_image", `Null ]) with
+   | Error result ->
+     check bool "the refusal names the missing image" true
+       (contains "sandbox_image is required"
+          (Keeper_types_profile.tool_result_body result))
+   | Ok _ -> fail "clearing a docker Keeper's image was accepted");
+  (match Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+     ~base_path:ctx.config.base_path name with
+   | Ok defaults ->
+     check (option string) "refused clear keeps the stored image"
+       (Some "registry.example/documents:v2") defaults.sandbox_image
+   | Error e -> fail (Keeper_types_profile.keeper_toml_load_error_to_string e));
   List.iter (fun image ->
     match parse_stating_a_profile ctx (`Assoc ["name", `String name; "sandbox_image", image]) with
     | Error _ -> () | Ok _ -> fail "invalid image accepted") [`String " "; `Int 1; `Bool true]
@@ -2704,6 +2756,10 @@ let () =
             "remote endpoint required and registry-resolved"
             `Quick
             test_remote_endpoint_validation
+        ; test_case
+            "a docker keeper naming no image is refused"
+            `Quick
+            test_a_docker_keeper_naming_no_image_is_refused
         ; test_case
             "docker profile is refused when its preflight fails"
             `Quick

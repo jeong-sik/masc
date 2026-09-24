@@ -734,7 +734,15 @@ let test_a_return_with_no_start_held_has_no_duration () =
        completed);
   check string "the row then shows the tool alone"
     "\xe2\x9c\x93 analyst returned | read_file"
-    (text (Acting.row_of_event ~at:100. ~duration_ms:None (Observer.Agent_core completed)))
+    (text (Acting.row_of_event ~at:100. ~duration_ms:None (Observer.Agent_core completed)));
+  (* A negative duration is a clock that disagreed with itself. The row it
+     leaves is the row a missing one leaves, not "read_file \xc2\xb7 0ms" and
+     not a dash the missing row does not draw. *)
+  check string "a negative duration reads as no duration"
+    "\xe2\x9c\x93 analyst returned | read_file"
+    (text
+       (Acting.row_of_event ~at:100. ~duration_ms:(Some (-4.))
+          (Observer.Agent_core completed)))
 
 let test_keeper_rows_say_what_the_keeper_did () =
   check string "a settlement carries tokens, cost, and calls"
@@ -814,9 +822,12 @@ let test_a_lane_named_event_is_attributed_by_its_trace () =
     (Acting.keeper_of_event ~traces (heartbeat "bandleader"))
 
 let test_elapsed_text_picks_a_unit () =
-  check (list string) "ms, seconds, minutes"
-    [ "32ms"; "1.2s"; "2m05s" ]
-    (List.map Acting.elapsed_text [ 32.; 1200.; 125_000. ])
+  check (list (option string)) "ms, seconds, minutes"
+    [ Some "32ms"; Some "1.2s"; Some "2m05s" ]
+    (List.map Acting.elapsed_text [ 32.; 1200.; 125_000. ]);
+  (* A feed clock that disagreed with itself is not an instant call. *)
+  check (option string) "a negative duration has no spelling, not 0ms" None
+    (Acting.elapsed_text (-4.))
 
 (* The feed used to render keeper_skill and keeper_compose_* as anonymous
    "call"/"returned" rows, so skill use was invisible in the chat-side surfaces
@@ -1312,10 +1323,15 @@ let test_call_key_prefers_the_provider_id () =
 let table_row ?(keeper = "keeper") ?(label = "turn") ?(detail = "") () =
   { Acting.at = 100.; keeper; glyph = Acting.Turn_boundary; label; detail }
 
+(* Measuring reads a row's two named columns; the table is sized from these,
+   never from a row's detail. *)
+let measured_row ?keeper ?label () =
+  Acting.measured_of_row (table_row ?keeper ?label ())
+
 let test_a_long_keeper_widens_its_column () =
   let name = "agent_core-glm-coding.glm-5-turbo" in
   let columns =
-    Acting.columns ~inner_width:160 [ table_row ~keeper:name () ]
+    Acting.columns ~inner_width:160 [ measured_row ~keeper:name () ]
   in
   check int "the column holds the name whole" (String.length name)
     columns.Acting.keeper_cells
@@ -1325,7 +1341,7 @@ let test_a_long_keeper_widens_its_column () =
 let test_short_rows_leave_the_columns_where_they_were () =
   let columns =
     Acting.columns ~inner_width:160
-      [ table_row ~keeper:"rondo" ~label:"turn" () ]
+      [ measured_row ~keeper:"short-name" ~label:"turn" () ]
   in
   check int "the keeper column is what it drew before" 16
     columns.Acting.keeper_cells;
@@ -1336,7 +1352,8 @@ let test_short_rows_leave_the_columns_where_they_were () =
 let test_no_column_goes_under_what_it_drew_before () =
   for inner_width = 0 to 200 do
     let columns =
-      Acting.columns ~inner_width [ table_row ~keeper:"a-very-long-agent-name-indeed" () ]
+      Acting.columns ~inner_width
+        [ measured_row ~keeper:"a-very-long-agent-name-indeed" () ]
     in
     check bool
       (Printf.sprintf "inner %d keeps the keeper column" inner_width)
@@ -1348,13 +1365,81 @@ let test_no_column_goes_under_what_it_drew_before () =
       (columns.Acting.label_cells >= 16)
   done
 
+(* Measuring asks the event for its keeper and its label. The row the screen
+   draws has to say the same two words: if the two readings drifted, the
+   columns would be sized for a table that is not on the screen. The row
+   compared here is the one the flat scopes draw, [keeper_row_of_entry], not a
+   copy of its rule. The label lines hold by construction -- both readings
+   take [label_of_event] -- so the keeper is what this test divides on: a
+   correlated agent_core row is drawn under the keeper whose trace it carries,
+   not under its lane. *)
+let test_measuring_reads_what_the_row_draws () =
+  let traces = [ ("keeper-one", "trace-1") ] in
+  let correlated =
+    match agent_core ~tool:"masc_board_stats" "agent_core-glm-coding.glm-5-turbo" with
+    | Observer.Agent_core e ->
+        Observer.Agent_core { e with Observer.correlation = Some "trace-1" }
+    | other -> other
+  in
+  let drawn event =
+    Acting.measured_of_row
+      (Acting.keeper_row_of_entry ~traces ~duration_ms:None
+         { Acting.ae_at = 100.; ae_event = event })
+  in
+  List.iter
+    (fun (what, event) ->
+      let on_screen = drawn event in
+      let measured = Acting.measured_of_event ~traces event in
+      check string (what ^ ": the same event word")
+        on_screen.Acting.measured_label measured.Acting.measured_label;
+      check string (what ^ ": the keeper the row is drawn under")
+        on_screen.Acting.measured_keeper measured.Acting.measured_keeper)
+    [ ("a plain tool call", agent_core ~tool:"masc_board_stats" "alpha")
+    ; ("a skill call", agent_core ~tool:"keeper_skill" "alpha")
+    ; ("a correlated call", correlated)
+    ; ( "a failed container"
+      , lane_resource ~detail:"No such image" Lane_events.Acquire_failed )
+    ; ("a removed container", lane_resource Lane_events.Release_confirmed)
+    ; ("a heartbeat", heartbeat "keeper-one")
+    ; ("a registry push", Observer.Internal_agent_runs_changed)
+    ];
+  (* The dividing case: the drawn row names the keeper, and that is not the
+     name [row_of_entry] gives it. Drawing without the rename would leave the
+     lane here while measuring names the keeper, and the check above fails. *)
+  check string "the drawn row names the keeper" "keeper-one"
+    (drawn correlated).Acting.measured_keeper;
+  let unrenamed =
+    Acting.row_of_entry ~duration_ms:None
+      { Acting.ae_at = 100.; ae_event = correlated }
+  in
+  check string "which is not the lane the feed named"
+    "agent_core-glm-coding.glm-5-turbo" unrenamed.Acting.keeper
+
+(* The renderer draws a name through [Terminal_text.single_line], which spells
+   a control byte as a four-cell escape. Measured raw, a tab and a whole ESC
+   colour sequence took no cells, so the column came out narrower than the
+   name drawn in it: [keeper-\x1B[31mred\x1B[0m] is 25 cells on screen and
+   was measured as 10, the tab name 23 and 19. *)
+let test_a_control_byte_is_measured_as_it_is_drawn () =
+  List.iter
+    (fun name ->
+      let on_screen = Masc.Tui_decode.sanitize_terminal_text name in
+      let columns =
+        Acting.columns ~inner_width:160
+          [ Acting.measured_of_event ~traces:[] (heartbeat name) ]
+      in
+      check int
+        (String.escaped name ^ ": the column holds the drawn name whole")
+        (String.length on_screen) columns.Acting.keeper_cells)
+    [ "keeper\tone-two-three"; "keeper-\x1b[31mred\x1b[0m" ]
+
 (* And the detail column keeps half the row: it is the one that carries
    sentences. *)
 let test_the_named_columns_leave_detail_its_half () =
   let long = String.make 80 'x' in
   for inner_width = 80 to 200 do
     let columns =
-      Acting.columns ~inner_width [ table_row ~keeper:long ~label:long () ]
+      Acting.columns ~inner_width [ measured_row ~keeper:long ~label:long () ]
     in
     let taken = columns.Acting.keeper_cells + columns.Acting.label_cells in
     let half = max 32 ((inner_width - 15) / 2) in
@@ -1468,5 +1553,9 @@ let () =
             test_no_column_goes_under_what_it_drew_before
         ; test_case "the named columns leave detail its half" `Quick
             test_the_named_columns_leave_detail_its_half
+        ; test_case "measuring reads what the row draws" `Quick
+            test_measuring_reads_what_the_row_draws
+        ; test_case "a control byte is measured as it is drawn" `Quick
+            test_a_control_byte_is_measured_as_it_is_drawn
         ] )
     ]

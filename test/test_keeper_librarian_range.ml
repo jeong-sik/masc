@@ -40,7 +40,14 @@ let digest_of messages atom =
 ;;
 
 (* The line a turn leaves when it ends with [messages] saved. *)
-let turn_ended ?(trace_id = trace) ?(turn = 1) ~fresh messages : Boundaries.record =
+let turn_ended
+      ?(trace_id = trace)
+      ?(turn = 1)
+      ?history_at_start
+      ~fresh
+      messages
+  : Boundaries.record
+  =
   let position =
     match Boundaries.position_of_messages messages with
     | Ok position -> position
@@ -51,7 +58,10 @@ let turn_ended ?(trace_id = trace) ?(turn = 1) ~fresh messages : Boundaries.reco
       Boundaries.Turn_ended
         { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
         ; history_at_start =
-            (if fresh then Boundaries.Fresh_history else Boundaries.Continued_history)
+            (match history_at_start with
+             | Some history_at_start -> history_at_start
+             | None ->
+               if fresh then Boundaries.Fresh_history else Boundaries.Continued_history)
         ; position
         }
   }
@@ -365,6 +375,41 @@ let test_a_restart_after_an_unreadable_line_lets_the_rounds_go_on () =
        saved)
 ;;
 
+(* masc#37061: a continued turn that carries its start position settles the
+   refused line before it, so the round goes back to atom zero instead of
+   standing for good. The bare [Continued_history] token is not a start state,
+   which the case above pins. *)
+let test_a_continued_start_after_an_unreadable_line_lets_the_rounds_go_on () =
+  let saved = history 2 in
+  let continued_from =
+    turn_ended
+      ~turn:2
+      ~history_at_start:
+        (Boundaries.Continued_history_from { start_atom = 1; start_atom_digest = "d" })
+      ~fresh:false
+      saved
+  in
+  check string "the start state settles the refused line and the round reads from zero"
+    "read [0,2) seen=3"
+    (select
+       ~lines:
+         [ 1, Ok (restarted ())
+         ; 2, Error (Boundaries.Not_json "{")
+         ; 3, Ok continued_from
+         ]
+       saved);
+  check string "and the round after it resumes from the position, not from zero"
+    "nothing"
+    (select
+       ~progress:(progress_at ~seen:3 saved 2)
+       ~lines:
+         [ 1, Ok (restarted ())
+         ; 2, Error (Boundaries.Not_json "{")
+         ; 3, Ok continued_from
+         ]
+       saved)
+;;
+
 (* {1 How much is read} *)
 
 (* Row 3a. *)
@@ -644,6 +689,8 @@ let () =
             test_an_unreadable_line_stops_and_a_torn_tail_does_not
         ; test_case "a restart after an unreadable line lets the rounds go on" `Quick
             test_a_restart_after_an_unreadable_line_lets_the_rounds_go_on
+        ; test_case "a continued start after an unreadable line lets the rounds go on"
+            `Quick test_a_continued_start_after_an_unreadable_line_lets_the_rounds_go_on
         ] )
     ; ( "extent"
       , [ test_case "after a failed round only the oldest turn is read" `Quick

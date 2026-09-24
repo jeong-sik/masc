@@ -1,6 +1,7 @@
 [keeper]
 activation_mode = "autonomous"
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 network_mode = "inherit"
 mention_targets = ["arbiter", "심판"]
 

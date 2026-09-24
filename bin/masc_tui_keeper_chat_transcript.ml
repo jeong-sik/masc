@@ -233,6 +233,24 @@ type t =
            binds a provider and a model under an operator-chosen id), so a
            model observed without a runtime is shown as a model, never as the
            runtime. Reset per attempt with the runtime. *)
+  ; mutable observed_usage : Live.stream_usage option
+        (* The token counters the provider last reported for the request now
+           streaming. They are cumulative inside one request, so the latest
+           report replaces the one before it rather than adding to it. Reset
+           when the next request starts ([Stream_model_started]) and per
+           attempt with the runtime. *)
+  ; mutable observed_stop_reason : string option
+        (* Why the provider said the request it last answered stopped, in the
+           provider's own word ([end_turn], [max_tokens], [refusal], …). It
+           belongs to that request, so it is cleared when the next one starts
+           ([Stream_model_started]) and again per attempt with the runtime.
+           It is what the stream reported while writing -- an OpenAI-compatible
+           stream maps [finish_reason] through
+           [Stop_reason_wire.provisional_of_string]
+           (packages/agent_core/lib/llm_provider/streaming.ml:1420) -- not a
+           verdict masc settled afterwards. And it is a different fact from
+           [Keeper_turn_outcome.t], which says what masc did with the turn: a
+           reply cut off at [max_tokens] is still a visible reply. *)
   ; mutable model_signal : model_signal option
         (* The last thing the model side sent in this attempt, and when.
            Tool calls carry their own pending state; this covers the stretches
@@ -294,6 +312,8 @@ let create ~keeper_name ~request_id ~started_at =
   ; attempt = 0
   ; current_runtime_id = None
   ; observed_model = None
+  ; observed_usage = None
+  ; observed_stop_reason = None
   ; model_signal = None
   ; runtime_named_at = None
   ; reply = None
@@ -319,6 +339,81 @@ let runtime_identity_text ~keeper_name ~configured_runtime transcript =
      | None, Some model -> "model: " ^ safe_line model ^ " · " ^ configured
      | None, None -> configured)
   | Some _ | None -> configured
+
+(* What the request now streaming has spent so far, in the clause shape the
+   rest of this screen uses. It is that request's running total, not the
+   turn's: a turn that calls tools asks several times and each answer counts
+   from zero. Only counters the provider reported appear, and each is written
+   out in full: a reader comparing this against a bill needs the digits, not a
+   rounded stand-in. [None] when nothing was reported, so the row stays as it
+   was instead of gaining an empty label. *)
+let stream_tokens_text ~keeper_name transcript =
+  let tokens_clause usage =
+    match usage with
+    | None -> None
+    | Some usage ->
+       let clause label value =
+         Option.map (fun value -> Printf.sprintf "%s %d" label value) value
+       in
+       let parts =
+         List.filter_map
+           (fun clause -> clause)
+           [ clause "in" usage.Live.input_tokens
+           ; clause "out" usage.Live.output_tokens
+           ; clause "cache read" usage.Live.cache_read_input_tokens
+           ; clause "cache write" usage.Live.cache_creation_input_tokens
+           ]
+       in
+       (match parts with
+        | [] -> None
+        | parts -> Some ("tokens: " ^ String.concat " · " parts))
+  in
+  match transcript with
+  | Some t when String.equal t.keeper_name keeper_name ->
+    tokens_clause t.observed_usage
+  | Some _ | None -> None
+
+(* The counters and why the provider stopped writing, joined the way the row
+   joins clauses. The reason is drawn whenever one was reported, [end_turn]
+   included — the screen keeps no list of "ordinary" reasons to hide, because
+   such a list goes stale the day a provider adds one. The caller draws a
+   clause whole or not at all and the two together do not fit every frame, so
+   the tokens keep their own reading above: a row too narrow for both keeps
+   the counters it was already drawing rather than losing them to the newer
+   fact. *)
+let stream_details_text ~keeper_name transcript =
+  match transcript with
+  | Some t when String.equal t.keeper_name keeper_name ->
+    let parts =
+      List.filter_map
+        (fun clause -> clause)
+        [ stream_tokens_text ~keeper_name transcript
+        ; Option.map
+            (fun reason -> "stopped: " ^ safe_line reason)
+            t.observed_stop_reason
+        ]
+    in
+    (match parts with
+     | [] -> None
+     | parts -> Some (String.concat " · " parts))
+  | Some _ | None -> None
+
+(* The clause a row draws beside the runtime id when it has [room] cells left,
+   separator included. A clause is drawn whole or not at all -- a half-written
+   number reads as a smaller bill than the real one, and a cut stop reason
+   reads as another word -- so a row that cannot hold both facts falls back to
+   the counters alone rather than to nothing: the newer fact must not take
+   away the one the screen was already showing. [None] when not even the
+   counters fit, and the row is what it was before any of this was measured. *)
+let stream_details_within ~keeper_name ~room transcript =
+  let clause text = " \xc2\xb7 " ^ text in
+  List.find_opt
+    (fun text -> Masc_tui_message_layout.display_width text <= room)
+    (List.filter_map
+       (fun text -> Option.map clause text)
+       [ stream_details_text ~keeper_name transcript
+       ; stream_tokens_text ~keeper_name transcript
+       ])
 
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
    between closes it. Coalescing here rather than at draw time keeps the trail
@@ -1837,6 +1932,8 @@ let apply_delta ~now t (delta : Live.delta) =
       (* The model the stream named belongs to the attempt it was named in;
          a repeated event for the same attempt keeps it. *)
       if new_attempt then t.observed_model <- None;
+      if new_attempt then t.observed_usage <- None;
+      if new_attempt then t.observed_stop_reason <- None;
       t.model_signal <- None;
       t.runtime_named_at <- Some now;
       t.awaiting <- None;
@@ -1845,7 +1942,28 @@ let apply_delta ~now t (delta : Live.delta) =
        | Stream_ended | Stream_failed _ -> ())
   | Live.Stream_model_started { model } ->
       t.observed_model <- Some model;
+      (* A request's counters and its stop reason belong to that request. The
+         provider accumulates the counters inside one request and reports the
+         reason at its end, so a turn that calls tools asks several times and
+         each answer starts from neither. Carrying the previous request's
+         numbers into this one would label one round's tokens as what the turn
+         has spent, and carrying its reason would leave [stopped: tool_use] on
+         the header while the next round is still writing. *)
+      t.observed_usage <- None;
+      t.observed_stop_reason <- None;
       t.model_signal <- Some (Model_started_at now)
+  | Live.Stream_details { usage; stop_reason } ->
+      (* What the provider reported, not that anything was written, so the
+         model-side signal is left as whatever last moved the answer. A field
+         the delta did not carry leaves the last report standing: the wire
+         sends the counters and the stop reason in the same event, but not
+         always in the same one. *)
+      (match usage with
+       | Some usage -> t.observed_usage <- Some usage
+       | None -> ());
+      (match stop_reason with
+       | Some stop_reason -> t.observed_stop_reason <- Some stop_reason
+       | None -> ())
   | Live.Text text ->
       t.model_signal <- Some (Answering_at now);
       Buffer.add_string t.text_buffer text;

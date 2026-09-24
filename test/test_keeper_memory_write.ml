@@ -880,6 +880,199 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     (match_texts replacement_search)
 ;;
 
+(* An endpoint-owned tree (microVM, remote) is read by running this argv on
+   the endpoint. Running it here checks the shell text: the bytes, the byte
+   bound, and that absence and a non-file come back as exit statuses rather
+   than as stderr text to parse. *)
+let run_endpoint_source path ~max_bytes =
+  let argv = Masc.Keeper_memory_source_current.endpoint_source_argv ~path ~max_bytes in
+  let ic = Unix.open_process_args_in (List.hd argv) (Array.of_list argv) in
+  let out = In_channel.input_all ic in
+  (Unix.close_process_in ic, out)
+;;
+
+let test_endpoint_source_read_reports_by_exit_status () =
+  with_temp_dir
+  @@ fun dir ->
+  let file = Filename.concat dir "source.txt" in
+  Out_channel.with_open_bin file (fun oc -> output_string oc "authoritative value\n");
+  let exit_of code = Unix.WEXITED code in
+  let module S = Masc.Keeper_memory_source_current in
+  (match run_endpoint_source file ~max_bytes:64 with
+   | Unix.WEXITED 0, out -> Alcotest.(check string) "file bytes" "authoritative value\n" out
+   | _, out -> Alcotest.fail ("file read failed: " ^ out));
+  (match run_endpoint_source file ~max_bytes:5 with
+   | Unix.WEXITED 0, out -> Alcotest.(check string) "byte bound" "autho" out
+   | _, out -> Alcotest.fail ("bounded read failed: " ^ out));
+  Alcotest.(check bool) "missing path exits with the missing status" true
+    (fst (run_endpoint_source (Filename.concat dir "absent.txt") ~max_bytes:64)
+     = exit_of S.endpoint_source_missing_exit);
+  Alcotest.(check bool) "a directory exits with the not-regular status" true
+    (fst (run_endpoint_source dir ~max_bytes:64) = exit_of S.endpoint_source_not_regular_exit);
+  if Unix.geteuid () <> 0
+  then (
+    let unreadable = Filename.concat dir "unreadable.txt" in
+    Out_channel.with_open_bin unreadable (fun oc -> output_string oc "hidden\n");
+    Unix.chmod unreadable 0o000;
+    let status =
+      Fun.protect
+        ~finally:(fun () -> Unix.chmod unreadable 0o600)
+        (fun () -> fst (run_endpoint_source unreadable ~max_bytes:64))
+    in
+    Alcotest.(check bool) "an unreadable file exits with the unreadable status" true
+      (status = exit_of S.endpoint_source_unreadable_exit))
+;;
+
+(* A source the store cannot read this time is not an answer about the
+   source. The fact stays, nothing is invalidated, and the recall is told it
+   was not re-read. A permission-denied host file is Source_io_failed. *)
+let test_unreadable_source_keeps_its_fact_marked_unverified () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_temp_dir
+  @@ fun base_path ->
+  let module Source = Masc.Keeper_memory_source_current in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "source-unreadable" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let source_path = "source.txt" in
+  let host_path = Filename.concat sandbox_root source_path in
+  Fs_compat.mkdir_p sandbox_root;
+  (match Fs_compat.save_file_atomic host_path "value\n" with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  (match
+     Source.upsert_file_fact
+       ~config ~meta ~keepers_dir ~now:100.0 ~claim:"the value is set" ~source_path ()
+   with
+   | Ok _ -> ()
+   | Error (Source.Source_read_failed failure) ->
+     Alcotest.fail (Source.source_read_failure_to_string failure)
+   | Error (Source.Store_write_failed detail) -> Alcotest.fail detail);
+  Unix.chmod host_path 0o000;
+  let revalidated =
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod host_path 0o600)
+      (fun () -> Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
+  in
+  match revalidated with
+  | Error detail -> Alcotest.fail detail
+  | Ok projection ->
+    Alcotest.(check int) "the fact is kept" 1 (List.length projection.Source.facts);
+    Alcotest.(check int)
+      "nothing is invalidated" 0 (List.length projection.Source.invalidations);
+    Alcotest.(check (list string))
+      "the recall is told it was not re-read"
+      [ source_path ]
+      projection.Source.unverified_paths
+;;
+
+(* One file that cannot be read says nothing about the other sources. The
+   pass goes on: the unreadable fact is kept unverified, the source that
+   changed on disk after it is read and invalidated, and the unchanged one is
+   re-verified. *)
+let test_one_unreadable_source_does_not_stop_the_pass () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_temp_dir
+  @@ fun base_path ->
+  let module Source = Masc.Keeper_memory_source_current in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "source-unreadable-pass" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Fs_compat.mkdir_p sandbox_root;
+  let write_source path content =
+    match Fs_compat.save_file_atomic (Filename.concat sandbox_root path) content with
+    | Ok () -> ()
+    | Error detail -> Alcotest.fail detail
+  in
+  let record_fact path =
+    match
+      Source.upsert_file_fact
+        ~config ~meta ~keepers_dir ~now:100.0 ~claim:("claim about " ^ path)
+        ~source_path:path ()
+    with
+    | Ok _ -> ()
+    | Error (Source.Source_read_failed failure) ->
+      Alcotest.fail (Source.source_read_failure_to_string failure)
+    | Error (Source.Store_write_failed detail) -> Alcotest.fail detail
+  in
+  let unreadable = "unreadable.txt" in
+  let changed = "changed.txt" in
+  let unchanged = "unchanged.txt" in
+  List.iter
+    (fun path ->
+       write_source path "value\n";
+       record_fact path)
+    [ unreadable; changed; unchanged ];
+  write_source changed "another value\n";
+  let unreadable_host = Filename.concat sandbox_root unreadable in
+  Unix.chmod unreadable_host 0o000;
+  let revalidated =
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod unreadable_host 0o600)
+      (fun () -> Source.revalidate ~config ~meta ~keepers_dir ~now:200.0 ())
+  in
+  match revalidated with
+  | Error detail -> Alcotest.fail detail
+  | Ok projection ->
+    Alcotest.(check (list string))
+      "the unreadable and the unchanged facts are kept"
+      [ unreadable; unchanged ]
+      (List.map (fun (fact : Source.fact) -> fact.source.path) projection.Source.facts);
+    Alcotest.(check (list string))
+      "the changed source after the unreadable one is still read and invalidated"
+      [ changed ]
+      (List.map
+         (fun (invalidation : Source.invalidation) -> invalidation.source_path)
+         projection.Source.invalidations);
+    Alcotest.(check (list string))
+      "only the unreadable fact is unverified"
+      [ unreadable ]
+      projection.Source.unverified_paths
+;;
+
+(* What an endpoint run says about the source. A run that reached none of
+   the command's declared exits is the endpoint not answering, which stops
+   the revalidation pass; an unreadable file is a declared exit and is about
+   that file only. The stop itself has no seam here: an endpoint that does
+   not answer cannot be produced in this test without a new test hook. *)
+let test_endpoint_source_outcome_separates_endpoint_from_file () =
+  let module S = Masc.Keeper_memory_source_current in
+  let describe = function
+    | Ok content -> "ok:" ^ content
+    | Error (S.Source_endpoint_unanswered _) -> "endpoint_unanswered"
+    | Error (S.Source_io_failed _) -> "file_unreadable"
+    | Error S.Source_missing -> "missing"
+    | Error S.Source_not_a_regular_file -> "not_regular"
+    | Error (S.Source_over_limit _) -> "over_limit"
+    | Error (S.Source_too_large _) -> "too_large"
+    | Error (S.Source_path_rejected _) -> "path_rejected"
+  in
+  let check label expected outcome =
+    Alcotest.(check string) label expected (describe (S.endpoint_source_read_of_outcome outcome))
+  in
+  (* Error texts in the shape Keeper_sandbox_read_backend's
+     classify_read_outcome_with_limit gives them; the mapping reads only the
+     Error case, never the text. *)
+  check "a transport failure is the endpoint" "endpoint_unanswered"
+    (Error "microvm_remote_read_transport_failed: endpoint=guest reason=exec failed stderr=");
+  check "a signalled run is the endpoint" "endpoint_unanswered"
+    (Error "microvm_remote_read_signaled: endpoint=guest signal=9 stderr=");
+  check "an undeclared exit (no head on the endpoint) is the endpoint" "endpoint_unanswered"
+    (Error "microvm_remote_read_failed: endpoint=guest exit=127 stderr=head: not found");
+  check "the unreadable exit is the file" "file_unreadable"
+    (Ok (Unix.WEXITED S.endpoint_source_unreadable_exit, ""));
+  check "the missing exit" "missing" (Ok (Unix.WEXITED S.endpoint_source_missing_exit, ""));
+  check "the not-regular exit" "not_regular"
+    (Ok (Unix.WEXITED S.endpoint_source_not_regular_exit, ""));
+  check "exit 0 carries the bytes" "ok:value\n" (Ok (Unix.WEXITED 0, "value\n"))
+;;
+
 let test_source_bound_write_is_not_gated_by_recall_size () =
   with_temp_dir
   @@ fun base_path ->
@@ -1571,6 +1764,7 @@ let test_absorbed_search_preserves_board_basis source =
   let input : Librarian.input =
     { turn_ref = Ids.Turn_ref.make ~trace_id:"absorb-board-sources" ~absolute_turn:8
     ; goal_context = Librarian.No_task
+    ; keeper_id = Masc_test_deps.keeper_id_fixture meta.name
     ; keeper_instructions = "Preserve useful observations."
     ; current = Some { Librarian.facts = original }
     ; working_context = Masc.Keeper_librarian_context.empty
@@ -1949,6 +2143,133 @@ let test_absorbed_chain_prefers_current_and_stops_before_a_loop () =
           ( string_field "text" matched
           , string_field "into" matched
           , json_field "into_current" matched = `Bool true ))
+       found)
+;;
+
+(* A claim the librarian absorbed into can later be replaced: the keeper
+   writes a new claim with [supersedes], and the old one is dropped with a
+   [Revised] event naming the new one. The absorbed row still names the
+   dropped claim, so the search follows the [Revised] event from there and
+   lands on the claim that is current now (#38543). *)
+let test_absorbed_chain_follows_a_revised_claim () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "absorbed-chain-revised" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let replacement = fact "foxtrot holds the release notes now" in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ replacement ];
+  let absorbed = fact "golf deploys on monday" in
+  let replaced = fact "foxtrot holds the release notes" in
+  (match
+     Masc.Keeper_memory_absorbed.append_all
+       ~keepers_dir
+       ~keeper_id:meta.name
+       [ { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
+         ; trace_id = "absorbing-pass"
+         ; memory_id = id absorbed
+         ; into = id replaced
+         ; fact = absorbed
+         }
+       ]
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
+  (match
+     Masc.Keeper_memory_os_events.append
+       ~keepers_dir
+       ~keeper_id:meta.name
+       { Masc.Keeper_memory_os_events.recorded_at = Time_compat.now ()
+       ; memory_id = id replaced
+       ; trace_id = "revising-turn"
+       ; kind = Revised { superseded_by = id replacement }
+       }
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_memory_os_events.append_error_to_string error));
+  let found =
+    match
+      Runtime.keeper_memory_search_json
+        ~config
+        ~meta
+        ~ctx_work:(empty_ctx ())
+        ~args:
+          (`Assoc
+              [ "query", `String "deploys"; "source", `String "absorbed"; "limit", `Int 10 ])
+      |> Yojson.Safe.from_string
+      |> json_field "matches"
+    with
+    | `List items -> items
+    | _ -> Alcotest.fail "matches is a list"
+  in
+  Alcotest.(check (list (triple string string bool)))
+    "the absorbed claim leads past the replaced claim to its replacement"
+    [ "golf deploys on monday", id replacement, true ]
+    (List.map
+       (fun matched ->
+          ( string_field "text" matched
+          , string_field "into" matched
+          , json_field "into_current" matched = `Bool true ))
+       found)
+;;
+
+(* The events sidecar grows with every search, so a search whose absorbed rows
+   all reach a current claim does not read it. A sidecar that cannot be read
+   then costs that search nothing. *)
+let test_absorbed_search_reads_events_only_for_a_stopped_chain () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "absorbed-events-unread" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let current = fact "hotel holds the release notes" in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ current ];
+  let absorbed = fact "india deploys on monday" in
+  (match
+     Masc.Keeper_memory_absorbed.append_all
+       ~keepers_dir
+       ~keeper_id:meta.name
+       [ { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
+         ; trace_id = "absorbing-pass"
+         ; memory_id = id absorbed
+         ; into = id current
+         ; fact = absorbed
+         }
+       ]
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
+  (* A directory where the sidecar file should be: reading it fails. *)
+  Unix.mkdir
+    (Masc.Keeper_memory_os_events.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
+    0o755;
+  let search () =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:
+        (`Assoc
+            [ "query", `String "deploys"; "source", `String "absorbed"; "limit", `Int 10 ])
+    |> Yojson.Safe.from_string
+  in
+  let found =
+    match search () |> json_field "matches" with
+    | `List items -> items
+    | _ -> Alcotest.fail "matches is a list"
+  in
+  Alcotest.(check (list (pair string bool)))
+    "a chain that reaches a current claim does not need the events sidecar"
+    [ "india deploys on monday", true ]
+    (List.map
+       (fun matched ->
+          string_field "text" matched, json_field "into_current" matched = `Bool true)
        found)
 ;;
 
@@ -2762,6 +3083,14 @@ let () =
             `Quick
             test_absorbed_chain_prefers_current_and_stops_before_a_loop
         ; Alcotest.test_case
+            "absorbed chain follows a revised claim"
+            `Quick
+            test_absorbed_chain_follows_a_revised_claim
+        ; Alcotest.test_case
+            "absorbed search reads events only for a stopped chain"
+            `Quick
+            test_absorbed_search_reads_events_only_for_a_stopped_chain
+        ; Alcotest.test_case
             "a query of several words is answered"
             `Quick
             test_a_query_of_several_words_is_answered
@@ -2793,6 +3122,22 @@ let () =
             "unreadable source path is the caller's to fix"
             `Quick
             test_unreadable_source_path_is_the_callers_to_fix
+        ; Alcotest.test_case
+            "endpoint source read reports absence by exit status"
+            `Quick
+            test_endpoint_source_read_reports_by_exit_status
+        ; Alcotest.test_case
+            "an unreadable source keeps its fact, marked unverified"
+            `Quick
+            test_unreadable_source_keeps_its_fact_marked_unverified
+        ; Alcotest.test_case
+            "one unreadable source does not stop the pass"
+            `Quick
+            test_one_unreadable_source_does_not_stop_the_pass
+        ; Alcotest.test_case
+            "endpoint source outcome separates the endpoint from the file"
+            `Quick
+            test_endpoint_source_outcome_separates_endpoint_from_file
         ] )
     ]
 ;;

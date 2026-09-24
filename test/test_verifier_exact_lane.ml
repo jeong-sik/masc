@@ -644,7 +644,7 @@ let verifier_lane_projection () =
   |> List.find (fun lane ->
     String.equal
       (Yojson.Safe.Util.(lane |> member "lane_id" |> to_string))
-      Runtime.verifier_exact_lane_id)
+      (Standalone_lane.to_id Standalone_lane.Verifier))
 ;;
 
 let projected_strings lane key =
@@ -778,7 +778,7 @@ let test_setup_never_writes_a_verifier_slot_that_cannot_judge () =
     (match
        List.find_opt
          (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-            String.equal lane.id Runtime.verifier_exact_lane_id)
+            String.equal lane.id (Standalone_lane.to_id Standalone_lane.Verifier))
          config.exact_output_lane_decls
      with
      | None -> Alcotest.fail "setup dropped the verifier_exact lane declaration"
@@ -818,7 +818,7 @@ let test_setup_keeps_a_declared_cli_slot_that_can_judge () =
     (match
        List.find_opt
          (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-            String.equal lane.id Runtime.verifier_exact_lane_id)
+            String.equal lane.id (Standalone_lane.to_id Standalone_lane.Verifier))
          config.exact_output_lane_decls
      with
      | None -> Alcotest.fail "setup erased a verifier lane that still had a judge"

@@ -44,7 +44,6 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     health: asString(raw.health) ?? null,
     status: asString(raw.status),
     context_ratio: asNumber(raw.context_ratio),
-    generation: asNumber(raw.generation),
     last_turn_ago_s: asNumber(raw.last_turn_ago_s),
     model: asString(raw.model),
     needs_attention: typeof raw.needs_attention === 'boolean' ? raw.needs_attention : null,

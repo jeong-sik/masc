@@ -232,6 +232,24 @@ let gate_and_answer_co_admission () = with_directory (fun root ->
   Alcotest.(check bool) "failed co-admission changes neither input" true
     (unchanged.messages = after.messages))
 
+(* RFC-0468 §3.2: an input admitted before its speaker was stamped matches the
+   stamped copy of the same input. A gate pending across the upgrade resumes
+   instead of admitting the answer a second time. *)
+let speaker_stamp_resumes_pre_speaker_admission () =
+  let before = admitted () in
+  let stamped =
+    { input with
+      metadata =
+        Masc.Keeper_input_speaker.metadata
+          (Masc.Keeper_input_speaker.Person Masc.Keeper_input_speaker.Owner) }
+  in
+  match Admission.prepare ~identity:(identity "receipt-a") ~message:stamped before with
+  | Ok (Admission.Admission_resume after) ->
+    Alcotest.(check bool) "history unchanged, no second copy" true
+      (after.messages = before.messages)
+  | Ok (Admission.Admission_new _) -> Alcotest.fail "the stamped input was admitted again"
+  | Error error -> Alcotest.fail (Admission.error_to_string error)
+
 let () = Alcotest.run "approval input admission"
   [ "durable conversation", List.map (fun (name, test) -> Alcotest.test_case name `Quick test)
       [ "Gate and answered Ask atomic admission", gate_and_answer_co_admission
@@ -241,4 +259,5 @@ let () = Alcotest.run "approval input admission"
       ; "durable restart with newer history", durable_restart
       ; "cold creation race", cold_creation_race
       ; "interrupted tool before approval", interrupted_tool_then_approval
-      ; "stable replay identity and wire projection", stable_replay_identity ] ]
+      ; "stable replay identity and wire projection", stable_replay_identity
+      ; "speaker stamp resumes a pre-speaker admission", speaker_stamp_resumes_pre_speaker_admission ] ]

@@ -66,6 +66,7 @@ let write_keeper_toml ~keepers_dir ~name =
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 instructions = "Dashboard keeper fixture"
 |}
 
@@ -152,6 +153,7 @@ let create_keeper env sw state name =
         Lib.Mcp_server.publication_recovery_availability_provider state;
     }
   in
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   match
     Lib.Keeper_tool_surface.dispatch ctx ~name:"masc_keeper_up"
       ~args:

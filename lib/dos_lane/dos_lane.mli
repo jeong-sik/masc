@@ -102,13 +102,25 @@ type ran = {
           it means the call reached its step ceiling: the rest were not
           recorded and never reached the ring, so the caller sends them
           again. *)
+  unsaved : string list;
+      (** files the program wrote during this call that did not reach the
+          saves directory, one line each with the reason. Empty when every
+          save is on disk. The call itself happened: the guest moved either
+          way, so this is not a reason to send the same keys again. *)
 }
 
 val settle_chunk : int
 (** Instructions between two screen readings while waiting for {!ran.settled}. *)
 
+val escapes : string -> bool
+(** A name that is a path or a drive rather than one plain file name: a
+    separator, a colon, [..] or a leading dot. The program inventory refuses
+    such names, and a file the guest creates under one is never written to
+    the saves directory. *)
+
 val load :
   ledger_dir:string ->
+  saves_dir:string ->
   program_name:string ->
   program_bytes:string ->
   files:(string * string) list ->
@@ -127,6 +139,14 @@ val load :
     Two names that differ only in case are refused: DOS folds filenames, so
     the guest would see one of them and the observation would list both.
 
+    [saves_dir] holds what this program wrote on earlier machines. Its files
+    are mounted over [files] of the same DOS name, and every call that runs
+    the guest writes a file whose contents changed back to it, so a game's
+    own save survives an eject and a server restart. A save that cannot be
+    written is listed in {!ran.unsaved}. A file the program deletes is not
+    carried: the next load mounts the inventory copy again. A save directory
+    that will not read is [Unreadable].
+
     [announce] runs while the machine's lock is still held, right after this
     machine becomes the workspace's. Announcements therefore reach whoever
     reads them in the order the machines actually changed. It must not call
@@ -136,6 +156,16 @@ val eject : announce:(unit -> unit) -> unit -> (unit, error) result
 (** Drops the workspace machine. [announce] runs under the same lock as
     {!load}'s, with the same restriction. *)
 val screen : unit -> (observation, error) result
+
+type frame = { width : int; height : int; rgb : string }
+(** The frame as the display would show it: [width * height] pixels, three
+    bytes each, rows top to bottom. *)
+
+val capture : unit -> (observation * frame, error) result
+(** {!screen} and the frame it describes, read under one lock, so the two
+    cannot come from different moments. The frame is what a Keeper with
+    vision reads: a VGA game's Korean menus are glyphs in pixels, which
+    [frame_ascii]'s luminance cells cannot spell. *)
 
 val step : steps:int -> until_ready:bool -> (observation * ran, error) result
 (** Advances up to [steps] (1..{!max_steps_per_call}) with no key pressed.

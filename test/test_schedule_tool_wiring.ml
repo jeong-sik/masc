@@ -27,7 +27,7 @@ let register_wake_target config keeper_name =
   Out_channel.with_open_text profile_path (fun channel ->
     Printf.fprintf
       channel
-      "[keeper]\ninstructions = \"schedule wiring test target\"\nsandbox_profile = \"docker\"\n");
+      "[keeper]\ninstructions = \"schedule wiring test target\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n");
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc

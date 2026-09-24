@@ -88,7 +88,7 @@ let timeout_phase_of_label label =
     | "cli_stdout_idle" -> Some Cli_stdout_idle
     | "wall_clock" | "wall_clock_timeout" | "wall_exceeded" | "max_execution_time" ->
       Some Wall_clock
-    | "capacity_backpressure" | "client_capacity" | "client_capacity_full" ->
+    | "capacity_backpressure" ->
       Some Capacity_backpressure
     | "queue" -> Some Queue
     | "unknown_timeout" -> Some Unknown_timeout
@@ -228,7 +228,6 @@ let provider_timeout ~source ~phase =
 let classify_masc_internal_error = function
   | Some
       ( Keeper_internal_error.Runtime_exhausted _
-      | Keeper_internal_error.Capacity_backpressure _
       | Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Accept_rejected _
       | Keeper_internal_error.Internal_unhandled_exception _
@@ -240,8 +239,7 @@ let classify_masc_internal_error = function
       | Keeper_internal_error.Provider_attempt_effect_fenced _
       | Keeper_internal_error.Tool_correction_lost _
       (* Neither is a provider-runtime timeout: the host stopped the turn, or
-         the client's transport closed. [ProviderUnavailable] answered the
-         same before RFC-0454 P2 typed the second one. *)
+         the client's transport closed. *)
       | Keeper_internal_error.Host_stopped_turn _
       | Keeper_internal_error.Preempted_before_first_token _
       | Keeper_internal_error.Runtime_connection_closed _

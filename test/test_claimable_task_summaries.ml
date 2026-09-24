@@ -206,8 +206,6 @@ let frame config meta =
   in
   let parts =
     Keeper_unified_prompt.build_prompt_preview
-      ~meta
-      ~config
       ~current_task:Keeper_world_observation_inputs.No_current_task
       ~observation
       ()

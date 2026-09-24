@@ -234,6 +234,33 @@ type invariant_error =
 
 let schema_version = 8
 
+(* A [Blocked] shutdown holds the admission fence only while the failure left
+   durable truth half-torn-down. A failure that happened before the shutdown
+   mutated anything durable is retryable: the Keeper may boot again, and the
+   operation is replayed or superseded. [Task_discovery] and [Record_persist]
+   are read/persist steps with no Keeper state behind them; [Meta_update] and
+   [Pending_confirm_cleanup] are idempotent -- a failed metadata read wrote
+   nothing, and a failed pending-confirm sweep is re-run on the next attempt.
+   Every stage from [Task_settlement] onward mutates durable state (task
+   ownership, lanes, metadata, session, registry) and keeps the fence. *)
+let failure_stage_requires_admission_fence = function
+  | Task_discovery
+  | Record_persist
+  | Meta_update
+  | Pending_confirm_cleanup -> false
+  | Turn_cancel
+  | Lane_cancel
+  | Turn_join
+  | Lane_join
+  | Record_update
+  | Unhandled_worker
+  | Task_settlement
+  | Approval_summary_retirement
+  | Meta_remove
+  | Session_remove
+  | Registry_unregister -> true
+;;
+
 let requires_admission_fence operation =
   match operation.phase with
   | Finalized { completion = (Completion_pending _ | Completion_delivery_failed _); _ } -> true
@@ -242,13 +269,13 @@ let requires_admission_fence operation =
   | Superseded _
   | Owner_absent _
   | Operator_absence_acknowledged _ -> false
+  | Blocked { stage; _ } -> failure_stage_requires_admission_fence stage
   | Prepared
   | Joining_lanes
   | Joined_idle
   | Finalizing_tasks _
   | Cleanup_ready _
-  | Reconciliation_required _
-  | Blocked _ -> true
+  | Reconciliation_required _ -> true
 ;;
 
 let cleanup_reason_label = function

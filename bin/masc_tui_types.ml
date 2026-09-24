@@ -1547,6 +1547,12 @@ type schedule_snapshot = {
       [scs_request_count = None] carries. *)
   scs_counts: (Schedule_domain.schedule_status * int) list option;
   scs_rows: schedule_row list;
+  scs_runner_status: Tui_decode.schedule_runner_status;
+  (** The schedule runner's status word, sent once beside the rows. A row's
+      [sch_runner_hold] is what the runner's newest successful tick decided,
+      at its [srh_observed_at]; only [Runner_ok] says that tick is recent and
+      the runner is healthy, so only then is the hold drawn as the present
+      (#38411). *)
 }
 
 (** One recorded wake attempt of a schedule instance. The list surface carries
@@ -1983,6 +1989,14 @@ type overview_goals_reading =
   | Goals_read of Tui_decode.overview_goal list
   | Goals_failed of string
 
+(** The Overview's reading of the provider usage windows on the same
+    [/api/v1/runtime/resolved] document. Decoded apart from the runtime rows,
+    so a row this build cannot read does not hide what the providers said. *)
+type overview_providers_reading =
+  | Providers_unread
+  | Providers_read of Tui_decode.provider_usage_windows
+  | Providers_failed of string
+
 (** One open pull request as [GET /api/v1/repositories/pulls] reports it
     (RFC-0465). The check and review words are parsed at decode; a word this
     build cannot name makes the row undecodable rather than a default. *)
@@ -1992,8 +2006,6 @@ type pull_mergeable = Pull_mergeable | Pull_conflicting | Pull_mergeable_unknown
 
 type open_pull = {
   op_number: int;
-  op_title: string;
-  op_head_branch: string;
   op_draft: bool;
   op_checks: pull_checks;
   op_review: pull_review;
@@ -2087,6 +2099,7 @@ type planning_goal = Tui_decode.planning_goal
   pg_metric: string option;
   pg_target_value: string option;
   pg_proof: Tui_decode.goal_proof;
+  pg_verifier_unreconciled: Tui_decode.verifier_unreconciled option;
   pg_last_review_note: string option;
   pg_last_review_at: string option;
   pg_created_at: string option;
@@ -2927,10 +2940,9 @@ let rec surface_needs ~keeper_pane_drawn surface =
   else needs
 
 and surface_needs_of_surface : surface -> surface_needs = function
-  (* The Team block names the quota windows that are shut. The catalogue is
-     43 KB and answers in under two milliseconds on the live runtime, and
-     only this surface draws the windows beside the Keepers they stop.
-     The goal tree is read only here too: the GOALS section is its reader. *)
+  (* The Providers section draws each account's usage windows from the
+     runtime catalogue. Only this surface draws them. The goal tree is read
+     only here too: the GOALS section is its reader. *)
   | Overview ->
       { nothing with
         needs_transport = true
@@ -3065,6 +3077,23 @@ let listing_chrome ~error = if Option.is_some error then 9 else 7
 let lanes_listing_chrome ~load_error ~action_error =
   listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
 
+(* A listing draws a reading of the selected row under its list, and both are
+   paid for out of the same frame. The reading was given exactly one row and
+   cut there, while a list shorter than the frame drew blank rows under its
+   last entry -- nineteen of them, above a ruling cut mid-sentence (#38434).
+
+   The reading takes those blank rows and no others. [body_rows] is what the
+   frame leaves for the list and the reading together, [entries] is how many
+   rows the list has something to draw on, and [wanted] is how many rows the
+   reading packs into at this width. The answer never drops below one row, so
+   a list that fills the frame draws what it drew before, and it never rises
+   past the spare, so [body_rows - answer >= entries]: no entry loses its row
+   to a longer reading. *)
+let listing_note_rows ~body_rows ~entries ~wanted =
+  let body_rows = max 2 body_rows in
+  let spare = max 0 (body_rows - 1 - max 0 entries) in
+  min (max 1 wanted) (1 + spare)
+
 (* [authority_rows] is how many rows the line naming the SSOT and the last
    probe took at this width. It wraps at clause marks
    ([runtime_authority_rows]), so a narrow frame spends more than one row on it
@@ -3138,7 +3167,7 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.Run_finished
   | Masc_tui_keeper_chat_live.Runtime_attempt_started _
   | Masc_tui_keeper_chat_live.Stream_model_started _
-  | Masc_tui_keeper_chat_live.Stream_usage _
+  | Masc_tui_keeper_chat_live.Stream_details _
   | Masc_tui_keeper_chat_live.Undecodable _ ->
       if Masc_tui_keeper_chat_log.add turn_log.tl_log ~seq delta
       then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
@@ -3960,7 +3989,7 @@ type palette_mode =
    belongs to this view instance, so late browser replies cannot replace a
    different source or tab after the operator moves. *)
 module Browser_lane_view = struct
-  type source = Live | Automation
+  type source = Browser_lane.Lane_name.t = Live | Automation
   type browser = Firefox | Zen
   type client = { client_id : string; browser : browser }
   type discovery = Read_after_discovery | Choose_client
@@ -4050,7 +4079,7 @@ module Browser_lane_view = struct
     read_continuation : read_continuation;
   }
 
-  let source_name = function Live -> "live" | Automation -> "automation"
+  let source_name = Browser_lane.Lane_name.to_wire
   let browser_name = function Firefox -> "Firefox" | Zen -> "Zen"
   let client_id t = match t.source, t.selected_client with
     | Live, Some client -> Some client.client_id
@@ -4190,9 +4219,9 @@ module Browser_lane_view = struct
   let string = function `String s -> Ok s | _ -> Error "expected string"
   let integer = function `Int n when n >= 0 -> Ok n | _ -> Error "expected nonnegative integer"
   let boolean = function `Bool b -> Ok b | _ -> Error "expected boolean"
-  let parse_source = function
-    | `String "live" -> Ok Live | `String "automation" -> Ok Automation
-    | _ -> Error "unknown browser source"
+  let parse_source json =
+    let lane = match json with `String raw -> Browser_lane.Lane_name.of_wire raw | _ -> None in
+    Option.to_result ~none:"unknown browser source" lane
   let get parse name json = let* value = field name json in parse value
   let parse_client json =
     let* client_id = get string "clientId" json in
@@ -4223,7 +4252,7 @@ module Browser_lane_view = struct
     match source, value with
     | Live, `String id when String.trim id <> "" -> Ok (Some id)
     | Automation, `Null -> Ok None
-    | _ -> Error "browser client ID does not match source"
+    | Live, _ | Automation, _ -> Error "browser client ID does not match source"
   let parse_tab json =
     let* id = get integer "id" json in
     let* title = get string "title" json in
@@ -4824,9 +4853,7 @@ module Browser_history = struct
     match observation t with
     | None -> view
     | Some observation ->
-      let source = match observation.source with
-        | Masc.Browser_surface.Live -> Browser_lane_view.Live
-        | Automation -> Browser_lane_view.Automation in
+      let source = observation.source in
       let client_id = Option.map Browser_lane.client_id_to_string observation.client_id in
       {view with source;selected_tab=Some observation.tab_id;scroll=t.scroll;
        scene=Some {source;client_id;tab_id=observation.tab_id;content=observation.scene;elapsed_ms=0.}}
@@ -5622,8 +5649,9 @@ type state = {
   mutable last_action: (string * float) option;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
-     fleet's own reading of what is missing. *)
-  mutable fleet_safety: fleet_safety option;
+     fleet's own reading of what is missing, or the server's word that its
+     health snapshot is being rebuilt. *)
+  mutable fleet_safety: Tui_decode.fleet_safety_reading option;
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
   mutable local_workspace: local_workspace_reading;
@@ -5649,6 +5677,7 @@ type state = {
      picker's [runtime_catalog] so a refresh behind the Overview never moves
      the rows under an open picker's cursor. *)
   mutable overview_quota: overview_quota_reading;
+  mutable overview_providers: overview_providers_reading;
   mutable overview_pulls: overview_pulls_reading;
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
@@ -7784,6 +7813,7 @@ let create_state
   runtime_pick_cursor = 0;
   runtime_catalog = [];
   overview_quota = Quota_unread;
+  overview_providers = Providers_unread;
   overview_pulls = Overview_pulls_unread;
   overview_goals = Goals_unread;
   runtime_lanes = [];
@@ -8263,6 +8293,25 @@ let title_missing_reading ~error =
    said. *)
 let field_missing_reading ~error =
   if Option.is_some error then field_failed else field_unread
+
+(* The Activity feed's title reading. A count is a reading only once the feed
+   has answered. With no server on the port the feed never opens, and a title
+   reading "(0 rows \xc2\xb7 0 events held)" there states a measurement of
+   nothing while the row under it reads "the feed is not open"; every other
+   surface's title in that frame, and the Logs tab of this very surface, reads
+   "(load failed)" or "(not loaded)".
+
+   Held frames outlive the stream that delivered them, so a closed feed, or one
+   switched back off, with frames in hand still has a reading to report. Only
+   the state before any answer, with nothing held, has none. *)
+let activity_title_reading ~observer ~shown ~held =
+  match observer, held with
+  | (Observer_off | Observer_opening), 0 -> title_missing_reading ~error:None
+  | (Observer_off | Observer_opening | Observer_live _ | Observer_closed _), _
+    ->
+    Printf.sprintf "(%s \xc2\xb7 %s held)"
+      (Masc_tui_message_layout.count_noun shown "row")
+      (Masc_tui_message_layout.count_noun held "event")
 
 (* The same answer for a pane whose reading is a [Masc_tui_fetched] view: the
    count once it has answered, and otherwise which of the two it is. Asked and
@@ -10233,6 +10282,21 @@ let approvals_open_question_count (state : state) =
           total + List.length row.Tui_decode.ar_questions)
         0 rows
   | None -> 0
+
+(* Whether the rows behind [approvals_open_question_count] are the server's
+   current answer. Before the first poll answers there are no rows, so the
+   count holds no question because none was read; a failed poll keeps the
+   previous rows, as [apply_asks_load] replaces them only on [Ok]. *)
+type questions_reading =
+  | Questions_current
+  | Questions_unread
+  | Questions_stale
+
+let approvals_questions_reading (state : state) =
+  match (state.asks_snapshot, state.asks_error) with
+  | None, _ -> Questions_unread
+  | Some _, Some _ -> Questions_stale
+  | Some _, None -> Questions_current
 
 let approvals_surface_pending (state : state) =
   List.length (approval_items state) + approvals_open_question_count state

@@ -279,10 +279,9 @@ let path_rest ~now runtime_id =
           ; failed_attempt = _
           } ->
         let promotes =
-          match retry_after with
-          | Some seconds when (not (Float.is_nan seconds)) && seconds > 0.0 ->
-            Float.compare seconds cap_sec <= 0
-          | Some _ | None -> false
+          match Keeper_runtime_failure_route.usable_retry_after retry_after with
+          | Some seconds -> Float.compare seconds cap_sec <= 0
+          | None -> false
         in
         Some
           ( noted_at +. rest_sec Keeper_runtime_failure_route.Rate_limited retry_after
@@ -1444,6 +1443,32 @@ let official_client_dispatch ~provider_config_transform =
   | Some _ -> Keeper_attempt_dispatch.Rejected_before_dispatch
   | None -> Keeper_attempt_dispatch.Dispatched
 
+(* Whether any request of this attempt reached a provider. The pre-dispatch
+   serialization observer fires just before a request leaves, after the
+   pipeline's own checks, so when it never fired no provider saw the attempt.
+   The shape then only says who refused it: the pipeline's route stage refuses
+   a request it will not send with [Attempt_rejected] (no output ceiling, an
+   invalid prepared request), [InputCapacity] (a serving constraint it can
+   judge locally), [ContextOverflow] (a window it counted locally) or
+   [InvalidConfig] (no or an invalid declared context limit). A provider gives
+   the same capacity shapes only after a request went out, so they pair with a
+   fired observer. Any other error with no request out, such as a failed
+   token-count round trip, may have reached the provider and stays dispatched.
+   One attempt can send several requests, so a refusal after an earlier one
+   went out is dispatched too. *)
+let provider_attempt_dispatch ~request_serialized result =
+  match request_serialized, result with
+  | ( false
+    , Error
+        ( Agent_core.Error.Api
+            ( Llm_provider.Retry.InvalidRequest
+                { reason = Llm_provider.Retry.Attempt_rejected; _ }
+            | Llm_provider.Retry.InputCapacity _
+            | Llm_provider.Retry.ContextOverflow _ )
+        | Agent_core.Error.Config (Agent_core.Error.InvalidConfig _) ) ) ->
+    Keeper_attempt_dispatch.Rejected_before_dispatch
+  | (true | false), (Ok _ | Error _) -> Keeper_attempt_dispatch.Dispatched
+
 let run_named
     ?(input_policy = Keeper_input_policy.default)
     ~runtime_id
@@ -2578,6 +2603,15 @@ let run_named
                reaches the real provider boundary; only the resulting typed error
                may drive fallback. *)
             let name = Printf.sprintf "agent_core-%s" attempt_runtime_id in
+          let request_serialized = ref false in
+          let on_request_wire_observation =
+            Some
+              (fun ~runtime_id ~body_bytes ~serialized ->
+                 request_serialized := true;
+                 Option.iter
+                   (fun observe -> observe ~runtime_id ~body_bytes ~serialized)
+                   on_request_wire_observation)
+          in
           let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
@@ -2730,7 +2764,8 @@ let run_named
           ( selected_runtime_result runtime ~lane_attempt_index:idx outcomes.turn_result
           , outcomes.checkpoint_after
           , Keeper_provider_attempt_effect.No_effect_observed
-          , Keeper_attempt_dispatch.Dispatched ))))
+          , provider_attempt_dispatch ~request_serialized:!request_serialized
+              outcomes.turn_result ))))
        )))
     attempt_candidates
 
@@ -2765,6 +2800,7 @@ module For_testing = struct
     resolve_runtime_candidate_for_attempt
 
   let selected_runtime_result = selected_runtime_result
+  let provider_attempt_dispatch = provider_attempt_dispatch
   let apply_official_client_accept = apply_official_client_accept
 
 	  let media_degrade_manifest_decision = media_degrade_manifest_decision

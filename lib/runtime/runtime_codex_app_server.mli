@@ -315,6 +315,13 @@ val list_models :
     turn/start. The CLI owns cache policy; callers needing refresh use an isolated
     connection home without a model cache. This response has no context window. *)
 
+val read_rate_limits :
+  mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock -> cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  config -> (Runtime_provider_usage_window.report, error) result
+(** Account admission followed by [account/rateLimits/read], without
+    thread/start or turn/start. The windows are for the operator projection;
+    the app-server's schema says clients must not infer recovery from them. *)
+
 val run_turn :
   ?dynamic_tools:dynamic_tool list ->
   ?reasoning_effort:Llm_provider.Reasoning_effort.t ->

@@ -11,8 +11,9 @@ val is_transient_network_error : Agent_core.Error.t -> bool
 
 (** [true] when a typed internal runner exception preserves a transient
     transport failure raised inside {!Keeper_turn_driver.runtime_runner_execute_site}.
-    Legacy internal exception envelopes without [transport_error_kind] are
-    diagnostic-only and are not parsed heuristically. *)
+    An envelope without [transport_error_kind] (the exception is not known
+    to be a transport failure) is [false]; its [exn_repr] is diagnostic
+    only and is not parsed. *)
 val is_transient_internal_runner_error : Agent_core.Error.t -> bool
 
 (** Detect request body parse errors from either the provider or the API

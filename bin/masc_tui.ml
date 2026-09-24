@@ -1831,14 +1831,18 @@ type http_scoped_surface_results = {
   http_board_hearths: ((string * int) list, string) result option;
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;
-  http_fleet_safety: (Tui_decode.fleet_safety, string) result option;
+  http_fleet_safety: (Tui_decode.fleet_safety_reading, string) result option;
   (* [None] on surfaces that do not show it: the roster costs a request and
      only the Keepers surface reads it, so leaving it out keeps whatever the
      last Keepers refresh observed rather than dropping it. *)
   http_keeper_roster:
     (Keeper_control.roster, Keeper_control.roster_failure) result option;
-  (* [None] off the Overview, the one surface that draws the quota windows. *)
-  http_runtime_quota: (Tui_decode.runtime_option list, string) result option;
+  (* [None] off the Overview, the one surface that draws the provider usage
+     windows. One fetch, two readings: the runtime rows and the windows. *)
+  http_runtime_quota:
+    ((Tui_decode.runtime_option list, string) result
+    * (Tui_decode.provider_usage_windows, string) result)
+    option;
   http_repository_pulls:
     (overview_pulls_reading, string) result
     option;
@@ -10552,8 +10556,8 @@ let launch_system_logs_load state ~mailbox =
   | None -> run_load ()
 
 let apply_fleet_safety_load state = function
-  | Ok fleet ->
-      state.fleet_safety <- Some fleet;
+  | Ok reading ->
+      state.fleet_safety <- Some reading;
       state.fleet_safety_error <- None
   | Error err ->
       (* The last good reading is dropped: a stale fleet line is worse than an
@@ -10565,11 +10569,15 @@ let apply_fleet_safety_load state = function
         ~set_error:(fun value -> state.fleet_safety_error <- value)
         err
 
-(* A failed read replaces the last good one: a window drawn as shut after the
-   reading that said so stopped arriving would name a stop nobody observed. *)
-let apply_runtime_quota_load state = function
-  | Ok options -> state.overview_quota <- Quota_read options
-  | Error err -> state.overview_quota <- Quota_failed err
+(* A failed read replaces the last good one: a window drawn after the reading
+   that said so stopped arriving would name a report nobody heard again. *)
+let apply_runtime_quota_load state (runtimes, providers) =
+  (match runtimes with
+   | Ok options -> state.overview_quota <- Quota_read options
+   | Error err -> state.overview_quota <- Quota_failed err);
+  match providers with
+  | Ok windows -> state.overview_providers <- Providers_read windows
+  | Error err -> state.overview_providers <- Providers_failed err
 
 let apply_repository_pulls_load state = function
   | Ok reading -> state.overview_pulls <- reading
@@ -10815,11 +10823,12 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
         (* A raise here would fail the whole scoped refresh and drop the
            transport and ask readings it carries; the picker's loader maps
            the same raise to [Error] for the same reason. *)
-        match Masc_tui_loader.load_runtime_resolved ~host ~port with
-        | result ->
-            Result.map (fun (options, _lanes, _assignments) -> options) result
+        match Masc_tui_loader.load_overview_runtime_resolved ~host ~port with
+        | readings -> readings
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-        | exception exn -> Error (Printexc.to_string exn))
+        | exception exn ->
+            let reason = Printexc.to_string exn in
+            (Error reason, Error reason))
   in
   let http_repository_pulls =
     when_needed needs.needs_repository_pulls (fun () ->
@@ -11677,7 +11686,7 @@ let toggle_ask_choice state index =
 let begin_ask_text_entry state =
   match (selected_ask_row state, selected_ask_question state) with
   | Some row, Some question ->
-      let slot = Ask.free_text_slot question in
+      let slot = Ask.free_text_slot ~ask_id:row.Tui_decode.ar_id question in
       let existing =
         match Ask.response_for (Ask.draft_for state.ask_draft ~row) ~question with
         | Some (Ask.Draft_wrote text) -> text
@@ -11698,13 +11707,27 @@ let commit_ask_text_entry state =
   match state.ask_text_entry with
   | None -> ()
   | Some entry ->
-      (* Through the slot, which names its own question: the cursor may have
-         been moved by a snapshot arriving while the operator typed, and the
-         answer belongs to the question the editor was opened on. Blank text
-         clears the response rather than recording one -- an editor emptied by
-         backspaces means unanswered, and the domain refuses a blank write. *)
-      with_ask_draft state (fun draft _question ->
-          Ask.set_text draft ~slot:entry.ate_slot ~text:entry.ate_text);
+      (* Through the slot, which names its own ask and question: a snapshot
+         arriving while the operator typed may have moved the cursor, even to
+         another ask whose question carries the same id (masc_ask numbers
+         every ask from q1), and the answer belongs to the question the editor
+         was opened on. So the ask is looked up by the slot's id, not taken
+         from the cursor. Blank text clears the response rather than recording
+         one -- an editor emptied by backspaces means unanswered, and the
+         domain refuses a blank write. *)
+      let ask_id = Ask.free_text_ask_id entry.ate_slot in
+      (match
+         List.find_opt
+           (fun (row : Tui_decode.ask_row) -> String.equal row.Tui_decode.ar_id ask_id)
+           (open_ask_rows state)
+       with
+       | Some row ->
+           let draft = Ask.draft_for state.ask_draft ~row in
+           state.ask_draft <- Some (Ask.set_text draft ~slot:entry.ate_slot ~text:entry.ate_text);
+           state.pending_ask_submit <- None
+       | None ->
+           report_action state "system"
+             "The question you were writing to is no longer open; the text was not recorded");
       state.ask_text_entry <- None
 
 let cancel_ask_text_entry state = state.ask_text_entry <- None
@@ -17518,29 +17541,67 @@ and is loaded on demand through keeper_skill.
                 with
                 | Error detail -> report_action state "error" ("Skill create failed: " ^ detail)
                 | Ok json ->
-                  (* The server answers exactly created_and_published or
+                  (* The server answers exactly created_and_published,
+                     created_but_shadowed(+winner) or
                      created_but_unpublished(+reason). The old "created"
                      default reported a status the server never sends and
                      swallowed the not-published reason — the save path
                      below already reports it; the create path now does
-                     the same. *)
+                     the same, in the footer of the surface [c] was pressed
+                     on, as #32069 meant for every editor-backed outcome.
+                     The event log escapes an entry where it draws it, the
+                     footer draws what it is given, and [source_id] and the
+                     receipt come from the server, so every receipt outcome
+                     crosses [Terminal_text.single_line] here. *)
+                  let report event_type text =
+                    report_action state event_type (Terminal_text.single_line text)
+                  in
                   (match json_assoc_member_opt "status" json with
                    | Some (`String "created_and_published") ->
-                     report_action
-                       state
+                     report
                        "system"
                        (Printf.sprintf
                           "created and published · %s/%s"
                           source_id
                           package_id)
+                   | Some (`String "created_but_shadowed") ->
+                     (* A package earlier in the catalog declares the same
+                        name, so Keepers listing by name see that one; the
+                        winner leads because the footer cuts the tail
+                        first. *)
+                     let winner_field field =
+                       match json_assoc_member_opt "winner" json with
+                       | Some winner ->
+                         (match json_assoc_member_opt field winner with
+                          | Some (`String value) -> Some value
+                          | Some _ | None -> None)
+                       | None -> None
+                     in
+                     (match winner_field "source_id", winner_field "package_id" with
+                      | Some winner_source, Some winner_package ->
+                        report
+                          "error"
+                          (Printf.sprintf
+                             "shadowed by %s/%s: %s/%s was created and \
+                              published, but Keepers see that one by name"
+                             winner_source
+                             winner_package
+                             source_id
+                             package_id)
+                      | None, _ | _, None ->
+                        report
+                          "error"
+                          (Printf.sprintf
+                             "%s/%s: shadowed create receipt named no winner"
+                             source_id
+                             package_id))
                    | Some (`String "created_but_unpublished") ->
                      let reason =
                        match json_assoc_member_opt "reason" json with
                        | Some (`String reason) -> reason
                        | _ -> "(no reason reported)"
                      in
-                     report_action
-                       state
+                     report
                        "error"
                        (Printf.sprintf
                           "%s/%s was created but NOT published: %s"
@@ -17548,8 +17609,7 @@ and is loaded on demand through keeper_skill.
                           package_id
                           reason)
                    | Some (`String other) ->
-                     report_action
-                       state
+                     report
                        "error"
                        (Printf.sprintf
                           "%s/%s: unrecognized create status %S"
@@ -17557,8 +17617,7 @@ and is loaded on demand through keeper_skill.
                           package_id
                           other)
                    | Some _ | None ->
-                     report_action
-                       state
+                     report
                        "error"
                        (Printf.sprintf
                           "%s/%s: create receipt carried no status"

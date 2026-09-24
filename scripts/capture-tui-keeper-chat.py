@@ -543,10 +543,34 @@ def fixture_static_response(state: Fixture, path: str) -> object | None:
         "/health": {"paths": paths},
         "/health?full=1": {
             "paths": paths,
+            # The TUI takes how current the fleet reading is from here: a
+            # stale snapshot serves the last reading it measured.
+            "full_health_snapshot": {"status": "ready"},
+            # A fleet reading: the TUI requires the schema and every count
+            # and name list it draws, the way the fleet scan writes them.
             "keeper_fleet_safety": {
+                "schema": "masc.keeper_fleet_operator.v1",
                 "status": "ok",
+                "blocker": None,
+                "operator_action_required": False,
+                "bootable_keeper_count": 1,
+                "bootable_keeper_names": ["alpha"],
+                "running_keeper_fiber_count": 1,
+                "running_keeper_names": ["alpha"],
+                "executable_keeper_fiber_count": 1,
+                "executable_keeper_names": ["alpha"],
+                "failing_keeper_fiber_count": 0,
+                "recovering_keeper_fiber_count": 0,
+                "turn_configuration_error_keeper_count": 0,
+                "turn_configuration_error_keeper_names": [],
                 "official_client_recovery_required_keeper_count": 0,
                 "official_client_recovery_required_keeper_names": [],
+                "paused_keeper_count": 0,
+                "target_reaction_capacity_count": 1,
+                "reaction_capacity_shortfall_count": 0,
+                "active_task_owner_without_executable_fiber_count": 0,
+                "completion_authority_pending_task_count": 0,
+                "active_task_owner_scan_error_count": 0,
             },
         },
         "/api/v1/dashboard/transport-health": {
@@ -584,6 +608,11 @@ def fixture_static_response(state: Fixture, path: str) -> object | None:
         "/api/v1/keepers/asks": {"keeper": None, "open_count": 0, "asks": []},
         "/api/v1/dashboard/scheduled-automation": {
             "status": "ok",
+            # The TUI refuses a list without the runner's status word.
+            "schedule_runner": {
+                "schema": "masc.dashboard.scheduled_automation.schedule_runner.v1",
+                "status": "ok",
+            },
             "schedule_store_read_error": None,
             "request_count": 0,
             "truncated": False,

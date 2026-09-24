@@ -1769,6 +1769,81 @@ let test_schedule_exact_lookup_rejects_blank_id () =
     (Some (Masc_domain.iso8601_of_unix_seconds now))
     (field "generated_at")
 
+let schedule_lookup_dashboard_fixture =
+  "../dashboard/src/api/fixtures/scheduled-automation-lookup-found.json"
+
+(* The Dashboard reads this envelope with an exact key list. #32273 added the
+   wake history to it without touching the Dashboard, and from then on every
+   found answer was refused there as carrying unknown keys (#38510). The
+   Dashboard decoder test reads the shared fixture; this pins the fixture to
+   what the server writes, every key at every depth and the kind of every
+   value, so the next key the server adds fails here before it reaches an
+   operator. *)
+let test_schedule_exact_lookup_found_matches_the_dashboard_fixture () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let schedule_id = "sched-dashboard-fixture" in
+  let actor id =
+    { Schedule_domain.id; kind = Schedule_domain.Human_operator; display_name = None }
+  in
+  let request =
+    match
+      Schedule_domain.create_request
+        ~schedule_id
+        ~requested_by:(actor "requester")
+        ~scheduled_by:(actor "scheduler")
+        ~requested_at:100.0
+        ~due_at:200.0
+        ~payload:
+          (`Assoc
+            [ "kind", `String "consumer.note"
+            ; "body", `Assoc [ "text", `String "dashboard fixture" ]
+            ])
+        ~source:Schedule_domain.Operator_request
+        ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+        ()
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  (match Schedule_store.insert_request config request with
+   | Ok _ -> ()
+   | Error _ -> fail "the fixture schedule could not be inserted");
+  (match Schedule_store.refresh_due config ~now:201.0
+    ~retention_days:Schedule_store.terminal_schedule_retention_days with
+   | Ok _ -> ()
+   | Error _ -> fail "refresh_due refused the fixture");
+  (match Schedule_store.start_due_candidate config ~now:202.0 ~schedule_id with
+   | Ok _ -> ()
+   | Error _ -> fail "start_due_candidate refused the fixture");
+  (match Schedule_store.accept_running config ~now:203.0 ~schedule_id () with
+   | Ok _ -> ()
+   | Error _ -> fail "accept_running refused the fixture");
+  let body =
+    Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json
+      config
+      ~now:400.0
+      ~schedule_id
+  in
+  let fixture = Yojson.Safe.from_file schedule_lookup_dashboard_fixture in
+  (* Every key at every depth with the kind of its value. Values differ run to
+     run (the instance id), so they are not compared; a list is walked by
+     index, and both sides hold the one wake this setup produces. *)
+  let rec shape path json =
+    let here = [ path, Json_util.kind_name json ] in
+    match json with
+    | `Assoc fields ->
+      here
+      @ List.concat_map (fun (key, value) -> shape (path ^ "." ^ key) value) fields
+    | `List items ->
+      here @ List.concat (List.mapi (fun index item -> shape (Printf.sprintf "%s[%d]" path index) item) items)
+    | _ -> here
+  in
+  check
+    (list (pair string string))
+    "the found answer's keys and kinds at every depth"
+    (List.sort compare (shape "$" body))
+    (List.sort compare (shape "$" fixture))
+
 (* The exact lookup is where a schedule's past is read, because the aggregate
    sends one wake per row and 20 rows of 323. Until this projection carried the
    list, one attempt of the up-to-32 the store keeps was all an operator could
@@ -1907,6 +1982,12 @@ let test_schedule_page_can_be_scoped_to_one_target () =
   check int "the scoped limit is its own number"
     Server_dashboard_schedule_projection.schedule_projection_target_request_limit
     (scoped |> member "request_limit" |> to_int);
+  (* #38411: the runner's status rides the scoped page too, but only the word.
+     The rest of /health's runner object is every target's holds and every
+     tick's totals, which this page would carry as this Keeper's. *)
+  check (list string) "the scoped page carries the runner's status and nothing of the fleet's"
+    [ "schema"; "status" ]
+    (scoped |> member "schedule_runner" |> keys |> List.sort String.compare);
   let fleet =
     Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in
@@ -5200,7 +5281,7 @@ let write_config_sync_toml config name =
   let path = Filename.concat dir (name ^ ".toml") in
   write_file path
     (Printf.sprintf
-       "[keeper]\nsandbox_profile = \"docker\"\ninstructions = \"%s config-sync fixture instructions\"\nactivation_mode = \"manual\"\n"
+       "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\ninstructions = \"%s config-sync fixture instructions\"\nactivation_mode = \"manual\"\n"
        name);
   path
 
@@ -5322,12 +5403,12 @@ let expect_http_status label status raw =
   if not (String.starts_with ~prefix raw)
   then failf "%s: expected %s, got %s" label prefix raw
 
-let config_reconciliation_response ~name error =
+let config_refusal_response ~name refusal =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
-      Keeper_config_post.For_testing.respond_config_reconciliation
-        ~request:(Httpun.Reqd.request reqd) reqd ~name ~error)
+      Keeper_config_post.For_testing.respond_config_refusal
+        ~request:(Httpun.Reqd.request reqd) reqd ~name ~refusal ~receipt:None)
   in
   let request = "POST /api/v1/keepers/test/config HTTP/1.1\r\nHost: x\r\n\r\n" in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
@@ -5373,20 +5454,11 @@ let test_composite_reconciliation_response_preserves_both_authorities () =
     ; detail = "runtime restore durability unconfirmed"
     }
   in
-  let error =
-    Masc.Keeper_turn_up_update.For_testing.composite_reconciliation_required_data
-      { manifest = Some manifest; runtime_assignment = Some runtime_assignment }
+  let raw, json =
+    config_refusal_response ~name:"alpha"
+      (Masc.Keeper_turn_up_update.Composite_reconciliation_required
+         { manifest = Some manifest; runtime_assignment = Some runtime_assignment })
   in
-  let result =
-    Masc.Keeper_types_profile.tool_result_error_data
-      ~class_:Tool_result.Runtime_failure error
-  in
-  let projected =
-    match Masc.Keeper_turn_up_update.config_reconciliation_required_of_result result with
-    | Some projected -> projected
-    | None -> fail "composite reconciliation was not classified"
-  in
-  let raw, json = config_reconciliation_response ~name:"alpha" projected in
   expect_http_status "composite reconciliation" 503 raw;
   let open Yojson.Safe.Util in
   check string "typed composite reconciliation code"
@@ -5866,11 +5938,21 @@ let test_config_post_mid_turn_without_lane_still_fails () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-mid-turn-no-lane" in
   prepare_config_sync_keeper ~sw config name;
-  let (_ : string) = write_config_sync_toml config name in
+  let toml_path = write_config_sync_toml config name in
   post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name
     {|{"activation_mode":"autonomous"}|}
   |> expect_mid_turn_sync_failure ~label:"no running lane"
-       ~message_needle:"no keepalive lane is running"
+       ~message_needle:"no keepalive lane is running";
+  (* [config_applied: true] above is only right if the write stayed. *)
+  match
+    Keeper_toml_loader.parse_toml
+      (In_channel.with_open_bin toml_path In_channel.input_all)
+  with
+  | Error error -> fail error
+  | Ok doc ->
+    check (option string) "the refused sync left the write committed"
+      (Some "autonomous")
+      (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
 
 let test_config_post_mid_turn_policy_needs_the_lanes_proxy () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -5906,7 +5988,8 @@ let test_config_post_materializes_missing_toml () =
       let raw, json =
         post_config ~sw ~clock:(Eio.Stdenv.clock env)
           ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-          ~name {|{"activation_mode":"autonomous","sandbox_profile":"docker"}|}
+          ~name
+          {|{"activation_mode":"autonomous","sandbox_profile":"docker","sandbox_image":"masc-sandbox:general"}|}
       in
       expect_http_status "HTTP 200" 200 raw;
       let open Yojson.Safe.Util in
@@ -5928,6 +6011,9 @@ let test_config_post_materializes_missing_toml () =
       | Ok doc ->
         check (option string) "materialized sandbox profile" (Some "docker")
           (Keeper_toml_loader.toml_string_opt doc "keeper.sandbox_profile");
+        check (option string) "materialized sandbox image"
+          (Some "masc-sandbox:general")
+          (Keeper_toml_loader.toml_string_opt doc "keeper.sandbox_image");
         check (option string) "materialized activation mode" (Some "autonomous")
           (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"))
 
@@ -5965,6 +6051,42 @@ let test_config_post_rolls_back_missing_runtime_assignment () =
   in
   check (option string) "TOML is rolled back" (Some "manual")
     (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
+
+(* The route's own validation lets an unknown network_mode through, and the
+   update refuses it before writing anything. Nothing changed and no lane was
+   touched, so the refusal must say so. *)
+let test_config_post_refused_before_write_says_not_applied () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-refused-before-write" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:config.base_path
+  in
+  let read path = In_channel.with_open_bin path In_channel.input_all in
+  let toml_before = read toml_path in
+  let runtime_before = read runtime_path in
+  let raw, json =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"activation_mode":"autonomous","network_mode":"not-a-mode"}|}
+  in
+  expect_http_status "a profile the update cannot resolve is HTTP 400" 400 raw;
+  let open Yojson.Safe.Util in
+  check bool "nothing was written" false
+    (json |> member "config_applied" |> to_bool);
+  check string "runtime sync was not attempted" "not_attempted"
+    (json |> member "runtime_sync" |> to_string);
+  check string "refusal names the profile, not a runtime sync failure"
+    "keeper_config_profile_refused"
+    (json |> member "error" |> member "code" |> to_string);
+  check bool "refusal names the rejected value" true
+    (String_util.contains_substring
+       (json |> member "error" |> member "detail" |> to_string)
+       "not-a-mode");
+  check string "keeper TOML is untouched" toml_before (read toml_path);
+  check string "runtime.toml is untouched" runtime_before (read runtime_path)
 
 let test_config_post_rejects_invalid_activation_mode () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -6678,6 +6800,8 @@ let () =
             test_scheduled_automation_reads_its_cache_key;
           test_case "schedule exact lookup carries the wake history" `Quick
             test_schedule_exact_lookup_carries_the_wake_history;
+          test_case "schedule exact lookup found matches the Dashboard fixture" `Quick
+            test_schedule_exact_lookup_found_matches_the_dashboard_fixture;
           test_case "schedule page can be scoped to one target" `Quick
             test_schedule_page_can_be_scoped_to_one_target;
           test_case "schedule page counts retained wakes" `Quick
@@ -6766,6 +6890,8 @@ let () =
             test_config_post_rolls_back_missing_runtime_assignment;
           test_case "mixed invalid request commits nothing" `Quick
             test_config_post_prevalidates_mixed_request;
+          test_case "config refused before the write says not applied" `Quick
+            test_config_post_refused_before_write_says_not_applied;
           test_case "config rejects invalid activation mode" `Quick
             test_config_post_rejects_invalid_activation_mode;
           test_case "typed tools patch round-trips and previews admission" `Quick

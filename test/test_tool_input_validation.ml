@@ -301,11 +301,12 @@ let test_plan_accepts_an_output_reference () =
       (Yojson.Safe.to_string (Tool_result.data result))
 ;;
 
-(* Where the schema stops. [validate_args] reads [oneOf] and [properties] off
-   the top-level schema only, so a template stated inside [nodes.items] is
-   what the model is told, not what it is held to: an [output] with no [node]
+(* Where the schema stops. [validate_args] descends nested [properties] and
+   [items] but reads [oneOf] off the top-level schema only, so a template
+   stated as a [oneOf] inside [nodes.items] is what the model is told, not
+   what it is held to: an [output] with no [node]
    passes here and is refused later by [Keeper_tool_plan]. Pinned so the day
-   the validator descends, this test says so rather than the schema quietly
+   the validator descends into [oneOf], this test says so rather than the schema quietly
    becoming load-bearing. *)
 let test_plan_template_is_advertised_not_enforced () =
   match
@@ -938,7 +939,7 @@ let test_keeper_up_accepts_live_traffic_fields () =
     `Assoc
       [ "name", `String "alpha"
       ; "instructions", `String "do the thing"
-      ; "sandbox_profile", `String "docker"
+      ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
       ; "mention_targets", `List [ `String "alpha" ]
       ; "activation_mode", `String "autonomous"
       ; "runtime_id", `String "rt"

@@ -56,10 +56,11 @@ let note_end ended event =
     match event with
     | Session.Worker_detached -> Some "the service worker went away"
     | Session.Connection_ended reason -> Some ("the connection ended: " ^ reason)
-    | Session.Model_request_refused _ | Session.Model_failed _ | Session.Unsupported_request _
+    (* The session ends with an answer it could not deliver. *)
+    | Session.Reply_not_delivered detail -> Some ("an answer to the extension was not delivered: " ^ detail)
+    | Session.Runtime_ready _ | Session.Model_request_refused _ | Session.Model_failed _ | Session.Unsupported_request _
     | Session.Unsupported_notification _ | Session.Extension_log _ | Session.Malformed_message _
-    | Session.Unexpected_response _ | Session.Abandoned_call_ended _ | Session.Reply_not_delivered _
-    | Session.Malformed_cdp_event _ -> None
+    | Session.Unexpected_response _ | Session.Abandoned_call_ended _ | Session.Malformed_cdp_event _ -> None
   in
   match !ended, reason with
   | None, Some _ -> ended := reason

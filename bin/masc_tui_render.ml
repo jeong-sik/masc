@@ -1247,6 +1247,10 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
          the row the cursor last rested on would be a different task. *)
       write_list_sidebar_selection left_buf ~rows ~cols:left_cols
         ~title:"Tasks" ~focused:false
+        (* [Overview_tasks.rows] drops what is done, cancelled or still todo.
+           A filter is not a page: what it left out is a different kind of
+           row, not more of these, so there is no second number to draw. *)
+        ~holding:None
         ~labels:
           (List.map (fun (row : Tui_decode.task) -> row.title)
              (Overview_tasks.rows state.tasks))
@@ -1422,10 +1426,13 @@ let render_approval_detail (state : state) (row : approval_row) =
       let right_buf = Buffer.create 4096 in
       (* Not "Asks": this surface already calls a Keeper's question to a human
          an ask, and these rows are the confirmations waiting on an operator. *)
+      (* The actor filter hides entries rather than paging past them, and
+         the surface's own title already carries "hidden N". *)
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Approvals"
+        ~holding:None
         ~focused:false
         ~labels:(List.map approval_sidebar_label (approval_items state))
-        ~selected:state.approval_cursor ();
+        ~selected:state.approval_cursor;
       let hint =
         approval_detail_pane state ~clamped:scroll ~rows
           ~cols:(cols - left_cols) row right_buf
@@ -2480,7 +2487,7 @@ let render_board_list (state : state) =
     (screen_title " MASC Board")
     (match state.board_posts, board_list_page state ~error:board_list_error with
      | _ :: _, _ | [], Page_empty ->
-         board_list_count_text ~loaded:count ~holding
+         list_count_text ~loaded:count ~holding
      | [], (Page_unread | Page_failed) ->
          title_missing_reading ~error:board_list_error)
     hearth timestamp
@@ -3060,9 +3067,9 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
   in
   write_list_sidebar buf ~rows ~cols ~title:"Board"
     ~focused:(state.board_focus = Left_pane)
-    ?holding:(board_holding state)
+    ~holding:(board_holding state)
     ~labels:(List.map format_sidebar_post state.board_posts)
-    ~selected ()
+    ~selected
 
 let render_board_read (state : state) (list_post : board_post) =
   let terminal_rows, cols = get_terminal_size () in
@@ -3849,10 +3856,13 @@ let render_planning_detail (state : state)
         Printf.sprintf "%s P%d %s" phase_badge row.pg_priority
           (Terminal_text.single_line row.pg_title)
       in
+      (* The goal filter narrows to a phase; the goals it leaves out are on
+         the other side of a filter, not behind a page boundary. *)
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Planning"
+        ~holding:None
         ~focused:false
         ~labels:(List.map format_sidebar_goal goals)
-        ~selected ();
+        ~selected;
       let scroll =
         planning_detail_pane state ~armed ~confirmation ~rows ~cols:(cols - left_cols) goal
           right_buf
@@ -4545,10 +4555,10 @@ let render_schedule_detail (state : state) (row : schedule_row) =
       let right_buf = Buffer.create 4096 in
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Schedules"
         ~focused:false
-        ?holding:
+        ~holding:
           (Option.bind state.schedules (fun snapshot ->
                snapshot.scs_request_count))
-        ~labels ~selected:state.schedule_cursor ();
+        ~labels ~selected:state.schedule_cursor;
       let answer =
         schedule_detail_pane state ~rows ~cols:(cols - left_cols) row
           right_buf
@@ -8937,8 +8947,16 @@ let render_verification_detail (state : state) request =
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
+      (* One server page: the list screen next door draws "history 1-50 of
+         664" off the same snapshot, and this index drew "(50)". *)
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Task Review"
-        ~focused:false ~labels ~selected:state.verification_cursor ();
+        ~focused:false
+        ~holding:
+          (Option.map
+             (fun (snapshot : Tui_decode.verification_snapshot) ->
+               snapshot.Tui_decode.vs_total)
+             state.verification)
+        ~labels ~selected:state.verification_cursor;
       let answer =
         verification_detail_pane state ~rows ~cols:(cols - left_cols) request
           right_buf
@@ -9401,8 +9419,10 @@ let render_harness_detail (state : state) verdict =
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
+      (* The harness snapshot carries its verdicts whole; there is no page
+         behind them. *)
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Verdicts"
-        ~focused:false ~labels ~selected:state.harness_cursor ();
+        ~focused:false ~holding:None ~labels ~selected:state.harness_cursor;
       let answer =
         harness_detail_pane state ~rows ~cols:(cols - left_cols) verdict
           right_buf
@@ -10274,8 +10294,9 @@ let render_fusion_detail (state : state) run_id =
          refreshed inventory omits it. The sidebar's index API uses -1 for
          no matching row; the domain selection stays optional. *)
       let selected = Option.value (fusion_detail_entry_index state) ~default:(-1) in
+      (* The retained inventory is the whole list; nothing is held back. *)
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Fusion"
-        ~focused:false ~labels ~selected ();
+        ~focused:false ~holding:None ~labels ~selected;
       let answer =
         fusion_detail_pane state ~rows ~cols:(cols - left_cols) run_id
           right_buf

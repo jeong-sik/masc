@@ -231,15 +231,16 @@ val write_list_sidebar :
   cols:int ->
   title:string ->
   focused:bool ->
-  ?holding:int ->
+  holding:int option ->
   labels:string list ->
   selected:int ->
-  unit ->
   unit
 (** An index beside a detail pane. [holding] is what the surface holds when
     that is more than [labels] was given -- the Board's page of fifty out of a
     board of a hundred and ninety-eight -- and the row spells the pair the way
-    the surface's own header does. *)
+    the surface's own header does. A list that is filtered rather than paged
+    passes [None]; it is asked of every caller so that a list with nothing
+    more to hold says so. *)
 
 val write_list_sidebar_selection :
   Buffer.t ->
@@ -247,6 +248,7 @@ val write_list_sidebar_selection :
   cols:int ->
   title:string ->
   focused:bool ->
+  holding:int option ->
   labels:string list ->
   selection:int option ->
   unit
@@ -303,10 +305,11 @@ val bracketed : max_cells:int -> string -> string
 (** [\[text\]], with [text] folded in the middle only when it runs past
     [max_cells]. Never padded inside the brackets. *)
 
-val board_list_count_text : loaded:int -> holding:int option -> string
-(** [(loaded of holding)] when the board holds more than the listing page
-    carries, and [(loaded)] otherwise. [holding] is the census count for the
-    whole board, or for the hearth being read when one is narrowed. *)
+val list_count_text : loaded:int -> holding:int option -> string
+(** [(loaded of holding)] when the surface holds more than the page an index
+    carries, and [(loaded)] otherwise. [holding] is the Board census, the
+    Schedules request count, the Task Review page total -- whatever the
+    surface's own header counts. *)
 
 val board_read_title :
   screen:string -> id:string -> hearth:string option -> votes:int -> replies:int ->

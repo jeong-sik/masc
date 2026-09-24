@@ -109,7 +109,9 @@ def exact_jump(gate):
             needle=b"MASC Agenda", final_cursor=b"\x1b[?25l",
         )
         narrow = h.screen_text(bytes(output))
-        for count in (b"tool approvals 0", b"stop requests 7",
+        # This scenario provides no approvals endpoint, so the agenda must
+        # name its unavailable source instead of claiming a zero count.
+        for count in (b"tool approvals unknown", b"stop requests 7",
                       b"held without actor 0", b"unreadable producer 0"):
             if count not in narrow:
                 raise AssertionError(f"narrow agenda clipped {count!r}: {narrow!r}")

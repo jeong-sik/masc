@@ -791,9 +791,12 @@ let handle_owned_read_file_with_outcome
             ~scan_complete:(not prefix.truncated)
             prefix.content
         with
+        (* Only a truncated prefix gets here: a complete scan turns a line past
+           EOF into an empty window. The line may exist past the prefix, and no
+           offset the caller picks reaches it (#38609). *)
         | Error `Offset_beyond_scan ->
           Keeper_tool_execution.failure
-            ~class_:Tool_result.Policy_rejection
+            ~class_:Tool_result.Runtime_failure
             (error_json
                ~fields:
                  [ "path", `String target

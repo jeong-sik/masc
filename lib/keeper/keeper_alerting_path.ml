@@ -62,6 +62,14 @@ let caller_refusal reason =
   in
   { failure_class = Tool_result.Policy_rejection; message }
 
+type owned_read_target_failure =
+  | Caller_cwd of string
+  | Default_cwd of string
+
+let owned_read_target_refusal = function
+  | Caller_cwd message -> { failure_class = Tool_result.Policy_rejection; message }
+  | Default_cwd message -> { failure_class = Tool_result.Runtime_failure; message }
+
 let endpoint_unresolved ~tree_refusal ~endpoint_error =
   { failure_class = Tool_result.Runtime_failure
   ; message =

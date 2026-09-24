@@ -175,6 +175,48 @@ let test_precedence_and_exact_identity () =
   | _ -> fail "expected two configured sources"
 ;;
 
+(* The TUI reads this snapshot through Tui_decode.decode_skills_catalog. The
+   server's own serializer goes through it here, so a renamed or reshaped
+   shadow fails this test instead of turning the TUI's Skill pane into a read
+   failure. *)
+let test_the_tui_reads_the_shadows_this_snapshot_writes () =
+  let config = parse_config (config_text two_sources) in
+  let first = candidate ~directory:"review" (document ~name:"review" ~description:"First" ~body:"first body") in
+  let second = candidate ~directory:"review" (document ~name:"review" ~description:"Second" ~body:"second body") in
+  let snapshot =
+    configured_snapshot
+      ~config
+      (scans ~base_path:"/workspace" config [ [ first ]; [ second ] ])
+  in
+  let response =
+    `Assoc
+      [ "schema", `String "masc.skill-snapshot/v1"
+      ; "state", `String "ready"
+      ; "snapshot", Snapshot.to_public_yojson snapshot
+      ; "surfaces", `List []
+      ; "usage_coverage", `Assoc [ "ledgers_loaded", `Int 0; "unavailable", `List [] ]
+      ]
+  in
+  let sides winner shadowed =
+    ( Reference.identity_source_id_to_string winner
+      ^ "/" ^ Reference.identity_package_id_to_string winner
+    , Reference.identity_source_id_to_string shadowed
+      ^ "/" ^ Reference.identity_package_id_to_string shadowed )
+  in
+  match Masc.Tui_decode.decode_skills_catalog response with
+  | Error error -> fail ("the TUI refused the snapshot's own JSON: " ^ error)
+  | Ok catalog ->
+    check (list (pair string string))
+      "the TUI keeps every shadow the snapshot records, winner first"
+      (List.map
+         (fun (shadow : Snapshot.shadow) -> sides shadow.winner shadow.shadowed)
+         (Snapshot.shadows snapshot))
+      (List.map
+         (fun (shadow : Masc.Tui_decode.skill_catalog_shadow) ->
+            sides shadow.scsh_winner shadow.scsh_shadowed)
+         catalog.sc_shadows);
+    check int "the fixture carries one shadow" 1 (List.length catalog.sc_shadows)
+
 let test_reversing_sources_reverses_winner () =
   let reversed_sources =
     source_row ~id:"second" ~path:"second-skills"
@@ -564,6 +606,8 @@ let () =
     [ ( "snapshot"
       , [ test_case "precedence and exact identity" `Quick
             test_precedence_and_exact_identity
+        ; test_case "the TUI reads the shadows this snapshot writes" `Quick
+            test_the_tui_reads_the_shadows_this_snapshot_writes
         ; test_case "reversed source order" `Quick
             test_reversing_sources_reverses_winner
         ; test_case "scan order cannot override config" `Quick

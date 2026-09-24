@@ -14,14 +14,11 @@ let pull ?(checks = Server.Checks_passing) ?(review = Server.Review_waiting)
     number : Server.pull_request =
   { repo_slug = "jeong-sik/masc"
   ; number
-  ; title = Printf.sprintf "pull %d" number
-  ; head_branch = Printf.sprintf "fix/%d" number
   ; draft
   ; checks
   ; review
   ; mergeable
   ; author
-  ; updated_at = 1_790_000_000.
   }
 
 let entry repository_id pulls : Server.repository_entry =

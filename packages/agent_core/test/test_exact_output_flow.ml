@@ -976,6 +976,49 @@ let test_missing_output_advances_to_frozen_successor () =
   | Error _ -> fail "missing output did not advance to its frozen successor"
 ;;
 
+(* The first candidate sends, returns no output and advances; the successor's
+   bind fails before it sends. The error answers for the invocation that ended
+   the flow, which sent nothing. The evidence answers for the walk, which did:
+   a caller that reports what the walk sent reads the second (#38450). *)
+let test_walk_dispatch_counts_a_candidate_that_advanced () =
+  let first_response = `OK, missing_output_response in
+  let result, posts =
+    with_server ~first_response ~response:(openai_response {|{"name":"unused"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"sent-first" ~base_url ~native:false ~json:false ()
+      ; catalog_entry ~id:"bind-refused" ~base_url ~native:false ~json:false ()
+      ]
+    @@ fun snapshot ->
+    execute_with_accepting_test_validator
+      ~clock
+      ~net
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~before_dispatch:(fun candidate ->
+        if String.equal (candidate_id candidate) "bind-refused"
+        then Error "bind-not-durable"
+        else Ok ())
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      (start_flow (frozen_flow snapshot [ "sent-first"; "bind-refused" ]))
+  in
+  check int "only the first candidate sent" 1 posts;
+  match result with
+  | Error (EO.Flow_before_dispatch_callback_failed { candidate; evidence; _ }) ->
+    check string "the flow ended on the successor" "bind-refused" (candidate_id candidate);
+    check
+      int
+      "the candidate that ended the flow sent nothing"
+      0
+      (EO.receipt_dispatch_count candidate.receipt);
+    check
+      bool
+      "the walk sent from its first candidate"
+      true
+      (EO.flow_evidence_generation_dispatch evidence = EO.Generation_dispatch_started)
+  | Ok _ | Error _ -> fail "a refused successor bind did not end the flow"
+;;
+
 let test_provider_schema_still_requires_native_capability () =
   let requirement =
     EO.make_output_requirement ~schema ~minimum_guarantee:EO.Provider_schema
@@ -1022,12 +1065,12 @@ let test_provider_schema_still_requires_native_capability () =
     0
     (List.length evidence.attempts);
   match result with
-  | Error (EO.Flow_candidates_exhausted { rejection; _ } as error) ->
+  | Error (EO.Flow_candidates_exhausted { rejection; evidence = terminal_evidence }) ->
     check
       bool
       "provider-schema rejection starts no outward dispatch"
       true
-      (EO.flow_execution_error_generation_dispatch error = EO.No_generation_dispatch);
+      (EO.flow_evidence_generation_dispatch terminal_evidence = EO.No_generation_dispatch);
     (match EO.candidate_rejection_disposition rejection with
      | EO.Output_requirement_rejected -> ()
      | _ -> fail "provider-schema rejection lost its typed disposition");
@@ -1332,13 +1375,13 @@ let test_credential_rejections_are_ordered_zero_dispatch_terminal () =
    | _ -> fail "credential evidence did not retain three typed rejections");
   match result with
   | Error
-      (EO.Flow_candidates_exhausted { rejection; evidence = terminal_evidence } as error)
+      (EO.Flow_candidates_exhausted { rejection; evidence = terminal_evidence })
     ->
     check
       bool
       "candidate exhaustion starts no outward dispatch"
       true
-      (EO.flow_execution_error_generation_dispatch error = EO.No_generation_dispatch);
+      (EO.flow_evidence_generation_dispatch terminal_evidence = EO.No_generation_dispatch);
     check
       string
       "last rejected candidate is terminal"
@@ -2061,7 +2104,10 @@ let test_measurement_fence_rejection_is_terminal_without_wire () =
   match result with
   | Error
       (EO.Flow_before_measurement_dispatch_callback_failed
-         { measurement = failed; cause = "measurement-fence-not-durable"; _ } as error) ->
+         { measurement = failed
+         ; cause = "measurement-fence-not-durable"
+         ; evidence = terminal_evidence
+         }) ->
     check
       string
       "terminal error retains the same operation"
@@ -2072,7 +2118,7 @@ let test_measurement_fence_rejection_is_terminal_without_wire () =
       bool
       "fence rejection starts no generation dispatch"
       true
-      (EO.flow_execution_error_generation_dispatch error = EO.No_generation_dispatch)
+      (EO.flow_evidence_generation_dispatch terminal_evidence = EO.No_generation_dispatch)
   | Ok _ | Error _ -> fail "fence rejection lost its typed terminal error"
 ;;
 
@@ -2239,13 +2285,16 @@ let test_measurement_terminal_callback_failure_blocks_generation () =
   match result with
   | Error
       (EO.Flow_measurement_terminal_callback_failed
-         { measurement; cause = "measurement-terminal-not-durable"; _ } as error) ->
+         { measurement
+         ; cause = "measurement-terminal-not-durable"
+         ; evidence = terminal_evidence
+         }) ->
     let snapshot = EO.flow_measurement_receipt_snapshot measurement in
     check
       bool
       "terminal callback error is generation-zero"
       true
-      (EO.flow_execution_error_generation_dispatch error = EO.No_generation_dispatch);
+      (EO.flow_evidence_generation_dispatch terminal_evidence = EO.No_generation_dispatch);
     check
       bool
       "terminal callback error retains terminal receipt"
@@ -3385,32 +3434,19 @@ let test_callback_failures_are_terminal () =
   (match before_dispatch_result with
    | Error
        (EO.Flow_before_dispatch_callback_failed
-          { candidate; cause = "bind-not-durable"; evidence } as error) ->
+          { candidate; cause = "bind-not-durable"; evidence }) ->
      check
        bool
-       "before-dispatch callback failure starts no outward dispatch"
+       "a walk whose only bind failed sent nothing"
        true
-       (EO.flow_execution_error_generation_dispatch error = EO.No_generation_dispatch);
+       (EO.flow_evidence_generation_dispatch evidence = EO.No_generation_dispatch);
      check string "failed bind candidate" "bind-a" (candidate_id candidate);
      check
        bool
        "failed bind leaves receipt not started"
        true
        (EO.receipt_phase candidate.receipt = EO.Not_started);
-     check int "successor remains unprepared" 1 (List.length evidence.attempts);
-     let start_failed =
-       EO.Flow_attempt_start_failed
-         { candidate = candidate.visit
-         ; cause = EO.Call_id_generation_failed "injected"
-         ; evidence
-         }
-     in
-     check
-       bool
-       "attempt-start failure starts no outward dispatch"
-       true
-       (EO.flow_execution_error_generation_dispatch start_failed
-        = EO.No_generation_dispatch)
+     check int "successor remains unprepared" 1 (List.length evidence.attempts)
    | Ok _ | Error _ -> fail "failed bind did not return typed terminal evidence");
   let before_advance_result, before_advance_posts =
     with_server ~response:(openai_response {|{"name":"unused"}|})
@@ -3434,12 +3470,12 @@ let test_callback_failures_are_terminal () =
   match before_advance_result with
   | Error
       (EO.Flow_before_advance_callback_failed
-         { failed; next; cause = "release-not-durable"; evidence; _ } as error) ->
+         { failed; next; cause = "release-not-durable"; evidence; _ }) ->
     check
       bool
-      "before-advance callback failure starts no outward dispatch"
+      "a walk whose only candidate never connected sent nothing"
       true
-      (EO.flow_execution_error_generation_dispatch error = EO.No_generation_dispatch);
+      (EO.flow_evidence_generation_dispatch evidence = EO.No_generation_dispatch);
     check string "failed attempt identity" "advance-a" (flow_failure_id failed);
     check string "withheld successor identity" "advance-b" next.identity.candidate_id;
     check int "withheld successor remains unprepared" 1 (List.length evidence.attempts);
@@ -3925,13 +3961,12 @@ let test_postdispatch_and_structural_outcomes_never_advance () =
     check int (label ^ " dispatches exactly once") 1 posts;
     check int (label ^ " does not request advance") 0 advances;
     match result with
-    | Error (EO.Flow_exact_execution_failed { candidate; cause; evidence } as error) ->
+    | Error (EO.Flow_exact_execution_failed { candidate; cause; evidence }) ->
       check
         bool
-        (label ^ " records outward dispatch started")
+        (label ^ " walk evidence counts the attempt that ended it")
         true
-        (EO.flow_execution_error_generation_dispatch error
-         = EO.Generation_dispatch_started);
+        (EO.flow_evidence_generation_dispatch evidence = EO.Generation_dispatch_started);
       check string (label ^ " terminal candidate") (label ^ "-a") (candidate_id candidate);
       check
         int
@@ -4116,12 +4151,14 @@ let test_missing_deadline_rejects_every_candidate_before_dispatch () =
   match result with
   | Error
       (EO.Flow_execution_terminal
-         { cause = (EO.Flow_candidates_exhausted { rejection; _ } as error); _ }) ->
+         { cause = EO.Flow_candidates_exhausted { rejection; evidence = terminal_evidence }
+         ; _
+         }) ->
     check
       bool
       "missing-deadline rejection starts no outward dispatch"
       true
-      (EO.flow_execution_error_generation_dispatch error = EO.No_generation_dispatch);
+      (EO.flow_evidence_generation_dispatch terminal_evidence = EO.No_generation_dispatch);
     (match EO.candidate_rejection_disposition rejection with
      | EO.Runtime_contract_rejected -> ()
      | _ -> fail "missing-deadline rejection lost its typed disposition");
@@ -4291,13 +4328,13 @@ let test_gemini_structural_sibling_rejects_before_outer_dispatch () =
   check int "invalid Gemini schema allocates no attempt" 0 (List.length evidence.attempts);
   match result with
   | Error
-      (EO.Flow_candidates_exhausted { rejection; evidence = terminal_evidence } as error)
+      (EO.Flow_candidates_exhausted { rejection; evidence = terminal_evidence })
     ->
     check
       bool
       "invalid Gemini schema starts no generation dispatch"
       true
-      (EO.flow_execution_error_generation_dispatch error = EO.No_generation_dispatch);
+      (EO.flow_evidence_generation_dispatch terminal_evidence = EO.No_generation_dispatch);
     (match EO.candidate_rejection_disposition rejection with
      | EO.Output_requirement_rejected -> ()
      | _ -> fail "invalid Gemini schema lost its output-requirement disposition");
@@ -4404,12 +4441,12 @@ let test_structural_predispatch_failure_does_not_advance () =
   match result with
   | Error
       (EO.Flow_measurement_start_failed
-         { cause = EO.Measurement_clock_required_for_timeout; evidence; _ } as error) ->
+         { cause = EO.Measurement_clock_required_for_timeout; evidence; _ }) ->
     check
       bool
       "predispatch structural failure starts no outward dispatch"
       true
-      (EO.flow_execution_error_generation_dispatch error = EO.No_generation_dispatch);
+      (EO.flow_evidence_generation_dispatch evidence = EO.No_generation_dispatch);
     check int "structural successor remains unprepared" 0 (List.length evidence.attempts)
   | Ok _ | Error _ -> fail "missing clock was not terminal"
 ;;
@@ -4520,6 +4557,10 @@ let () =
             "missing output advances to frozen successor"
             `Quick
             test_missing_output_advances_to_frozen_successor
+        ; test_case
+            "walk dispatch counts a candidate that advanced"
+            `Quick
+            test_walk_dispatch_counts_a_candidate_that_advanced
         ; test_case
             "provider schema still requires native capability"
             `Quick

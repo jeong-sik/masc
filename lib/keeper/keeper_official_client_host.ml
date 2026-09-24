@@ -324,7 +324,14 @@ let effective_reasoning_effort
   effective
 ;;
 
-let host_stop_result ~runtime_id ~model ~session_id ~turn_id ~turns_used ~latency_ms ~usage
+let host_stop_result
+      ~runtime_id
+      ~model
+      ~session_id
+      ~turn_id
+      ~turns_used
+      ~latency_ms
+      ~request_context
     stop =
   match stop with
   | Terminal_tool_boundary
@@ -346,7 +353,7 @@ let host_stop_result ~runtime_id ~model ~session_id ~turn_id ~turns_used ~latenc
       ; model
       ; stop_reason = Agent_core.Types.EndTurn
       ; content = []
-      ; usage
+      ; usage = None
       ; telemetry =
           Some
             { Agent_core.Types.default_inference_telemetry with
@@ -386,10 +393,8 @@ let host_stop_result ~runtime_id ~model ~session_id ~turn_id ~turns_used ~latenc
         ~capture
         ~attempt_details_source:"official_client_host_stop"
         ~agent_core_internal_runtime_allowed:false
-        ~usage_scope:
-          (match usage with
-           | Some _ -> Runtime_usage_scope.Per_request
-           | None -> Runtime_usage_scope.Usage_scope_unavailable)
+        ~usage_scope:Runtime_usage_scope.Usage_scope_unavailable
+        ?request_context
         ()
     in
     Ok
@@ -1462,7 +1467,6 @@ let masc_observation_sentence masc =
          (if turn_accepted then "after" else "before")
          detail
      | Keeper_internal_error.Runtime_exhausted _
-     | Keeper_internal_error.Capacity_backpressure _
      | Keeper_internal_error.Resumable_cli_session _
      | Keeper_internal_error.Accept_rejected _
      | Keeper_internal_error.Internal_unhandled_exception _

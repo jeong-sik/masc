@@ -759,7 +759,7 @@ let test_untitled_wake_keeps_pointer_out_of_prose () =
   | WO.Task_outcome _
   | WO.Task_cancelled _
   | WO.Delegate_completed
-  | WO.Ask_answered_row
+  | WO.Ask_answered_row _
   | WO.Composition_completed ->
     fail "scheduled wake must project to Schedule_due"
 ;;
@@ -1067,7 +1067,7 @@ let test_answered_ask_survives_later_turns_and_checkpoint_reload () = Eio_main.r
   let answer = "2026-10-17 토요일 14:00–17:00 / 은빛정류장 전시실\n무료" in
   let answered : WO.pending_board_event =
     { sample_board_event with
-      event_kind = WO.Ask_answered_row
+      event_kind = WO.Ask_answered_row { answered_by = Masc.Keeper_input_speaker.Owner }
     ; post_id = "keeper-ask:schedule"
     ; author = "operator"
     ; title = "확정 정보"
@@ -1107,6 +1107,54 @@ let test_answered_ask_survives_later_turns_and_checkpoint_reload () = Eio_main.r
       |> Context.messages_of_context in
     check int "one complete attributed answer remains after ten later wakes" 1
       (List.length (List.filter (fun message -> message = original) messages)))
+
+(* RFC-0468 §3.2: the autonomous turn's User message is host text that quotes
+   each answered Ask as a row. Its speaker names the host cue and, row for
+   row in the order the rows are joined, who answered. *)
+let test_autonomous_wake_speaker_names_each_answer () =
+  let module S = Masc.Keeper_input_speaker in
+  let answered ~post_id ~preview answered_by : WO.pending_board_event =
+    { sample_board_event with
+      event_kind = WO.Ask_answered_row { answered_by }
+    ; post_id
+    ; preview
+    ; post_kind = Masc.Board.System_post
+    }
+  in
+  let beta =
+    match Masc.Keeper_identity.Keeper_id.of_string "beta" with
+    | Some id -> id
+    | None -> fail "keeper id fixture"
+  in
+  let observation =
+    { base_observation with
+      pending_board_events =
+        [ answered ~post_id:"keeper-ask:first" ~preview:"first answer" S.Owner
+        ; sample_board_event
+        ; answered ~post_id:"keeper-ask:second" ~preview:"second answer" (S.Keeper beta)
+        ]
+    }
+  in
+  check bool "wake names both answerers in row order" true
+    (S.equal
+       (S.Host_prompt (S.Autonomous_wake { answered_asks = [ S.Owner; S.Keeper beta ] }))
+       (Masc.Keeper_unified_prompt.autonomous_input_speaker observation));
+  let prompt = build_prompt ~meta:minimal_meta observation in
+  let position needle =
+    let n = String.length needle and h = String.length prompt.user_message in
+    let rec go i =
+      if i + n > h then fail ("missing from user message: " ^ needle)
+      else if String.sub prompt.user_message i n = needle then i
+      else go (i + 1)
+    in
+    go 0
+  in
+  check bool "the rows appear in the order the speaker names them" true
+    (position "first answer" < position "second answer");
+  check bool "a wake with no answers quotes nobody" true
+    (S.equal
+       (S.Host_prompt (S.Autonomous_wake { answered_asks = [] }))
+       (Masc.Keeper_unified_prompt.autonomous_input_speaker base_observation))
 
 let post_id_exn s =
   match Masc.Board.Post_id.of_string s with
@@ -1389,6 +1437,8 @@ let () =
         [
           test_case "answered Ask survives later wakes and checkpoint reload" `Quick
             test_answered_ask_survives_later_turns_and_checkpoint_reload;
+          test_case "autonomous wake speaker names each answer in row order" `Quick
+            test_autonomous_wake_speaker_names_each_answer;
           test_case "affordance: no keeper is offered task_verify" `Quick
             test_no_task_verify_affordance_for_any_keeper;
           test_case "affordance: Board activity exposes curation without threshold"

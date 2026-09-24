@@ -17,10 +17,16 @@ type group =
       (** Alive ([Running], [Draining], [Restarting]) and holds a Claimed or
           InProgress task. *)
   | Idle  (** Alive with no such task. *)
-  | Parked
+  | No_phase
+      (** Not paused, no phase in the briefing, and no item above info
+          severity names the Keeper: where it is is unknown. Drawn as one
+          line of names. *)
+  | Paused
       (** The brief says [paused: true] (whatever the phase and the attention
-          list say), or [Paused], [Stopped], [Offline], or no phase and
-          nothing asking for the operator. Drawn as one line of names. *)
+          list say), or the phase is [Paused]. Drawn as one line of names. *)
+  | Stopped
+      (** Not paused, and the phase is [Stopped] or [Offline]. Drawn as one
+          line of names. *)
 
 type detail =
   | Blocker of {
@@ -48,14 +54,20 @@ type row = {
 type t = {
   rows : row list;
       (** Needs_you, then Working, then Idle; by name inside a band. *)
-  parked : (string * int) list;
-      (** Parked Keeper names, by name, with the open tasks each still holds:
-          work behind a stopped Keeper is work nobody is doing. *)
+  no_phase : (string * int) list;
+      (** [No_phase] Keeper names, by name, with the open tasks each still
+          holds. *)
+  paused : (string * int) list;
+      (** [Paused] Keeper names, by name, with the open tasks each still
+          holds: work behind a paused Keeper is work nobody is doing. *)
+  stopped : (string * int) list;
+      (** [Stopped] Keeper names, by name, with the open tasks each still
+          holds. *)
   other_holders : (string * int) list;
       (** Assignees that are not Keepers in the briefing (MCP clients, retired
           names) with how many open tasks each holds, most first. Work held
           outside the fleet is still work the team is waiting on; work a
-          Keeper holds is counted on that Keeper's row or parked entry. *)
+          Keeper holds is counted on that Keeper's row or name entry. *)
 }
 
 val project :
@@ -66,8 +78,8 @@ val project :
 
 val drawn_rows : t -> int
 (** Rows the block draws below its title: one per [rows] entry, one for the
-    parked names when there are any, one for [other_holders] when there are
-    any. The row budget asks for this many. *)
+    no-phase, the paused and the stopped names when there are any, one for
+    [other_holders] when there are any. The row budget asks for this many. *)
 
 val count : t -> group -> int
 
@@ -75,7 +87,7 @@ val drawn_items : t -> rows:int -> Masc_tui_types.attention_item list
 (** The attention items the block's first [rows] rows draw. The block draws
     its [Needs_you] rows first, and only a [Blocker] row draws an item --
     one item, even when several name the Keeper. A working or idle row, the
-    parked line and the holders line draw none. *)
+    name lines and the holders line draw none. *)
 
 val settle :
   t ->

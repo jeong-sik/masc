@@ -79,6 +79,7 @@ let record
       ; cache_read_input_tokens = None
       ; scope = Runtime_usage_scope.Per_request
       }
+  ; turn_output_tokens = None
   ; ts = 0.
   }
 ;;

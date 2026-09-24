@@ -234,6 +234,7 @@ let run (ctx : ctx)
                  ~max_context:execution.max_context
                  ~build_turn_prompt
                  ~user_message
+                 ~input_speaker:(Keeper_unified_prompt.autonomous_input_speaker observation)
                  ~turn_kind:Turn_record.Autonomous
                  ~skill_snapshot
                  ~task_skill_selection

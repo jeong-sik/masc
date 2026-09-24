@@ -103,6 +103,7 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
       ; delta.needs_operator_approvals
       ; delta.needs_asks
       ; delta.needs_runtime_quota
+      ; delta.needs_keeper_usage
       ; delta.needs_repository_pulls
       ; delta.needs_overview_goals
       ]
@@ -113,7 +114,7 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
   let _, dataset_count =
     List.fold_left add_delta (needs Types.Overview, 0) destinations
   in
-  check int "only newly visible scoped requests are planned" 6 dataset_count
+  check int "only newly visible scoped requests are planned" 7 dataset_count
 ;;
 
 let test_equal_needs_have_no_delta () =
@@ -184,6 +185,13 @@ let test_only_the_overview_asks_for_the_goal_tree () =
     ]
 ;;
 
+let test_usage_asks_for_keeper_usage () =
+  check bool "Usage fetches Keeper metrics" true
+    (needs Types.Metrics).Types.needs_keeper_usage;
+  check bool "Dashboard does not fetch Keeper detail" false
+    (needs Types.Overview).Types.needs_keeper_usage
+;;
+
 let () =
   run "tui_surface_needs"
     [ ( "refresh scope"
@@ -191,6 +199,8 @@ let () =
             test_only_the_chat_pane_asks_for_chat_history
         ; test_case "only the overview asks for the goal tree" `Quick
             test_only_the_overview_asks_for_the_goal_tree
+        ; test_case "Usage owns Keeper usage" `Quick
+            test_usage_asks_for_keeper_usage
         ; test_case "every keeper sub-mode asks for the roster" `Quick
             test_every_keeper_sub_mode_still_asks_for_the_roster
         ; test_case "the keeper pane asks for the roster wherever it is drawn"

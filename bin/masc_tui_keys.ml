@@ -218,8 +218,8 @@ let context_inspector_label = "Ctrl-X"
 
 
 let keepers_jump =
-  b Meta "2" "keepers"
-    ~help:"jump to Keepers when the active field or panel does not use 2"
+  b Meta "3" "keepers"
+    ~help:"jump to Keepers when the active field or panel does not use 3"
 
 let global =
   [ b Meta "Tab / Shift-Tab" "next / previous surface"
@@ -315,19 +315,12 @@ let fusion_board_key = b Navigate "B" "Board evidence"
 
 let for_surface = function
   | Overview ->
-      [ b Navigate "j/k" "move" ~help:"move through the selected task list"
-      ; b Navigate "m" "telemetry"
-          ~help:"system metrics, engine telemetry and this TUI's session log"
-      ; b Act "t" "tasks" ~help:"select the task list for j/k"
-      ; b Act "Right / Enter" "open" ~help:"open the selected task"
-      ; b Act "Left / Esc" "back" ~help:"close detail / leave the task list"
-      ; b Navigate "Home/End" "top/bottom"
-          ~help:"the ends of the task list, or of an open task's detail"
+      [ b Navigate "m" "Usage" ~help:"account windows and Keeper usage"
       ]
       @ listing_meta
   | Acting ->
-      [ b Navigate "1 / 2" "Events / Logs"
-          ~help:"Events, or the server's own log lines; l opens Logs as well"
+      [ b Navigate "e / l" "Events / Logs"
+          ~help:"Events, or the server's own log lines"
       ; b Navigate "j/k" "move" ~help:"select an event / scroll its evidence"
       (* [Navigate], not [Act]: the group is documented as "doing something to
          the thing under the cursor", and this key does nothing to the event
@@ -359,10 +352,7 @@ let for_surface = function
       ]
   | Metrics ->
       [ b Navigate "j/k" "scroll"
-      ; b Navigate "1-3" "section"
-          ~help:"1: Engine & Scheduler · 2: Work & Outcomes · 3: Memory & Gate Safety"
-      ; b Navigate "s" "cycle" ~help:"cycle telemetry section"
-      ; b Act "Esc" "overview"
+      ; b Act "Esc" "Dashboard"
       ; b Meta "r" "refresh"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
@@ -564,6 +554,8 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Planning ->
       [ b Navigate "j/k" "move"
+      ; b Navigate "t" "Goals / Tasks"
+          ~help:"switch between Goals and the active task list"
       ; b Navigate "v" "next Planning tab"
           ~help:"Goals, then the two task surfaces: Task Review and \
                  Task Verdicts. Not stages of one flow"
@@ -846,7 +838,7 @@ let for_surface = function
       ]
       @ listing_meta
   | System_logs ->
-      [ b Navigate "1 / 2" "Events / Logs"
+      [ b Navigate "e" "Events"
       ; b Navigate "j/k" "move / scroll"
       ; b Navigate "PgUp/PgDn" "detail page"
       ; b Navigate "[ / ]" "previous / next"
@@ -1235,19 +1227,21 @@ let memory_fact_detail_hints = hints_of_bindings bindings_memory_fact_detail
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)
 let help_surfaces : (string * surface) list =
-  [ "Overview", Overview
-  ; "Activity", Acting
-  ; "Metrics", Metrics
+  [ "Dashboard", Overview
+  ; "Work", Planning
   ; "Keepers", Keepers Keeper_list
+  ; "Usage", Metrics
+  ; "Board", Board
+  ; "Workspace", Repositories
+  ; "System", Config
+  ; "Activity", Acting
   ; "Keeper detail", Keepers Keeper_detail
   ; "Chat", Keepers Keeper_message
   ; "Lanes", Lanes
-  ; "Config / Runtime / Clients", Clients
-  ; "Board", Board
+  ; "System / Runtime / Clients", Clients
   ; "Approvals", Approvals
-  ; "Planning / Goals", Planning
-  ; "Planning / Task Review", Verification
-  ; "Planning / Task Verdicts", Harness
+  ; "Work / Task Review", Verification
+  ; "Work / Task Verdicts", Harness
   ; "Fusion", Fusion
   (* "Schedules", the name the title bar and the palette both use. It read
      "Keeper detail / Automation" -- a Keeper detail tab that has no keys of
@@ -1257,14 +1251,12 @@ let help_surfaces : (string * surface) list =
      puts the highlight while this surface is open. *)
   ; "Keepers / Schedules", Schedules
   ; "Memory", Memory
-  ; "Workspace", Repositories
   ; "Workspace / Code", Code
   ; "Changes", Changes
-  ; "Config / Runtime", Runtime
-  ; "Config", Config
-  ; "Config / Resources", Resources
-  ; "Config / Tools", Tools
-  ; "Activity / Logs", System_logs
+  ; "System / Runtime", Runtime
+  ; "System / Resources", Resources
+  ; "System / Tools", Tools
+  ; "System / Logs", System_logs
   ]
 
 let entries bindings =

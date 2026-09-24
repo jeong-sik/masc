@@ -178,9 +178,13 @@ let heard_text ~now observed_at =
 (* ---- accounts ----------------------------------------------------------- *)
 
 let account_name (account : Tui_decode.provider_usage_account) =
+  let id =
+    Digest.to_hex (Digest.string account.pua_scope)
+    |> fun hex -> String.sub hex 0 8
+  in
   match account.pua_providers with
-  | [] -> Terminal_text.single_line account.pua_scope
-  | providers -> Terminal_text.single_line (String.concat "," providers)
+  | [] -> "account " ^ id
+  | providers -> Terminal_text.single_line (String.concat "," providers) ^ " · " ^ id
 
 (* The runtime catalogue's own [quota_exhausted], joined by quota scope,
    with the reopen time the catalogue states for it. That time is the

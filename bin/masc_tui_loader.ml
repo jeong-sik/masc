@@ -1131,6 +1131,11 @@ let load_overview_runtime_resolved ~(host : string) ~(port : int) :
           (Tui_decode.decode_runtime_resolved_full json)
       , Tui_decode.decode_provider_usage_windows json )
 
+let load_keeper_usage ~(host : string) ~(port : int) =
+  match fetch_keeper_usage ~host ~port with
+  | Error reason -> Error ("keeper usage load failed: " ^ reason)
+  | Ok json -> Tui_decode.decode_keeper_usage_window json
+
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
   rsl_probe : (Tui_decode.runtime_probe_snapshot, string) result;

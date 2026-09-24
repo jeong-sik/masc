@@ -1843,6 +1843,7 @@ type http_scoped_surface_results = {
     ((Tui_decode.runtime_option list, string) result
     * (Tui_decode.provider_usage_windows, string) result)
     option;
+  http_keeper_usage: (Tui_decode.keeper_usage_window, string) result option;
   http_repository_pulls:
     (overview_pulls_reading, string) result
     option;
@@ -10579,6 +10580,10 @@ let apply_runtime_quota_load state (runtimes, providers) =
   | Ok windows -> state.overview_providers <- Providers_read windows
   | Error err -> state.overview_providers <- Providers_failed err
 
+let apply_keeper_usage_load state = function
+  | Ok usage -> state.keeper_usage <- Keeper_usage_read usage
+  | Error reason -> state.keeper_usage <- Keeper_usage_error reason
+
 let apply_repository_pulls_load state = function
   | Ok reading -> state.overview_pulls <- reading
   | Error err -> state.overview_pulls <- Overview_pulls_failed err
@@ -10830,6 +10835,13 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
             let reason = Printexc.to_string exn in
             (Error reason, Error reason))
   in
+  let http_keeper_usage =
+    when_needed needs.needs_keeper_usage (fun () ->
+      match Masc_tui_loader.load_keeper_usage ~host ~port with
+      | result -> result
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+      | exception exn -> Error (Printexc.to_string exn))
+  in
   let http_repository_pulls =
     when_needed needs.needs_repository_pulls (fun () ->
         match Masc_tui_loader.load_repository_pulls ~host ~port with
@@ -10854,6 +10866,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   ; http_fleet_safety
   ; http_keeper_roster
   ; http_runtime_quota
+  ; http_keeper_usage
   ; http_repository_pulls
   ; http_overview_goals
   }
@@ -10901,6 +10914,7 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   Option.iter (apply_runtime_quota_load state) results.http_runtime_quota;
+  Option.iter (apply_keeper_usage_load state) results.http_keeper_usage;
   Option.iter (apply_repository_pulls_load state) results.http_repository_pulls;
   Option.iter (apply_overview_goals_load state) results.http_overview_goals
 
@@ -19830,7 +19844,9 @@ and is loaded on demand through keeper_skill.
                      | Masc_tui_agenda.The_task ->
                          (* Work nobody holds is read on the task itself, the
                             same landing the palette gives a task id. *)
-                         goto_surface state ~mailbox:async_messages Overview;
+                         goto_surface state ~mailbox:async_messages Planning;
+                         state.planning_mode <- Planning_list;
+                         state.task_focus <- Right_pane;
                          state.task_detail_id <- Some task_id;
                          state.task_detail_scroll <- 0;
                          state.task_history <- None;
@@ -20165,7 +20181,9 @@ and is loaded on demand through keeper_skill.
                      (* The palette lands where Enter on the task list would:
                         Overview with the task's detail open and the cursor
                         on its row. *)
-                     goto_surface state ~mailbox:async_messages Overview;
+                     goto_surface state ~mailbox:async_messages Planning;
+                     state.planning_mode <- Planning_list;
+                     state.task_focus <- Right_pane;
                      state.task_detail_id <- Some task_id;
                      state.task_detail_scroll <- 0;
                      state.task_history <- None;
@@ -21502,28 +21520,12 @@ and is loaded on demand through keeper_skill.
             | None, (Actions | Everything) ->
                 state.acting_detail <- selected_acting_entry state;
                 state.acting_detail_scroll <- 0)
-       | Some "1" when state.view = Acting || state.view = System_logs ->
+       | Some "e" when state.view = Acting || state.view = System_logs ->
            goto_surface state ~mailbox:async_messages Acting
-       | Some "2" when state.view = Acting || state.view = System_logs ->
-           goto_surface state ~mailbox:async_messages System_logs
        | Some ("l" | "L") when state.view = Acting ->
            goto_surface state ~mailbox:async_messages System_logs
-        (* Metrics shortcuts: 'm' from Overview navigates to visual telemetry,
-           1-3 switch sections, s/S cycles through sections. *)
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
-        | Some "1" when state.view = Metrics ->
-            state.metrics_section <- Section_fleet;
-            state.metrics_scroll <- 0
-        | Some "2" when state.view = Metrics ->
-            state.metrics_section <- Section_resources;
-            state.metrics_scroll <- 0
-        | Some "3" when state.view = Metrics ->
-            state.metrics_section <- Section_tools;
-            state.metrics_scroll <- 0
-        | Some ("s" | "S") when state.view = Metrics ->
-            state.metrics_section <- Masc_tui_types.next_metrics_section state.metrics_section;
-            state.metrics_scroll <- 0
        (* In chat, printable keys normally belong to the draft. Keep [?] as
           the documented global Help key when the draft is empty; once a
           sentence has started it remains an ordinary question mark. This
@@ -22753,6 +22755,11 @@ and is loaded on demand through keeper_skill.
                  | Planning_detail _ ->
                      state.planning_mode <- Planning_list;
                      state.planning_scroll <- 0
+                 | Planning_list when Option.is_some state.task_detail_id ->
+                     state.task_detail_id <- None;
+                     state.task_detail_scroll <- 0
+                 | Planning_list when state.task_focus = Right_pane ->
+                     state.task_focus <- Left_pane
                  | Planning_list -> state.view <- Overview)
             | Fusion ->
                 (match state.fusion_mode with
@@ -23180,6 +23187,15 @@ and is loaded on demand through keeper_skill.
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
+                 | Planning_list when state.task_focus = Right_pane ->
+                     if Option.is_some state.task_detail_id then
+                       state.task_detail_scroll <-
+                         Masc_tui_types.scroll_down_from state.task_detail_scroll ~by:1
+                     else
+                       state.task_selected_id <-
+                         Masc_tui_overview_tasks.step state.tasks
+                           ~selected:state.task_selected_id
+                           Masc_tui_overview_tasks.Next
                  | Planning_list ->
                      let goals =
                        match state.planning with
@@ -23545,6 +23561,14 @@ and is loaded on demand through keeper_skill.
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
+                 | Planning_list when state.task_focus = Right_pane ->
+                     if Option.is_some state.task_detail_id then
+                       state.task_detail_scroll <- max 0 (state.task_detail_scroll - 1)
+                     else
+                       state.task_selected_id <-
+                         Masc_tui_overview_tasks.step state.tasks
+                           ~selected:state.task_selected_id
+                           Masc_tui_overview_tasks.Previous
                  | Planning_list ->
                      if state.planning_cursor > 0 then
                        state.planning_cursor <- state.planning_cursor - 1
@@ -23978,6 +24002,16 @@ and is loaded on demand through keeper_skill.
                  | Some _ -> ())
             | Planning ->
                 (match state.planning_mode with
+                 | Planning_list when state.task_focus = Right_pane ->
+                     (match Masc_tui_overview_tasks.selected_task state.tasks
+                              ~selected:state.task_selected_id with
+                      | None -> ()
+                      | Some task ->
+                          state.task_detail_id <- Some task.id;
+                          state.task_detail_scroll <- 0;
+                          state.task_history <- None;
+                          launch_task_history_load state
+                            ~mailbox:async_messages task.id)
                  | Planning_list ->
                      open_planning_detail state ~mailbox:async_messages
                  | Planning_detail _ -> ())
@@ -24323,7 +24357,9 @@ and is loaded on demand through keeper_skill.
             let change_ctx =
               Masc_tui_render_prim.resolve_change_context state ~path_opt
             in
-            goto_surface state ~mailbox:async_messages Overview;
+            goto_surface state ~mailbox:async_messages Planning;
+            state.planning_mode <- Planning_list;
+            state.task_focus <- Right_pane;
             (match change_ctx.Masc_tui_render_prim.ctx_task_id with
              | Some tid ->
                  state.task_detail_id <- Some tid;
@@ -24342,7 +24378,8 @@ and is loaded on demand through keeper_skill.
            (match state.view with
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
-            | Overview when Option.is_none state.task_detail_id ->
+            | Planning when state.planning_mode = Planning_list
+                            && Option.is_none state.task_detail_id ->
                 state.task_focus <-
                   (match state.task_focus with
                    | Left_pane -> Right_pane

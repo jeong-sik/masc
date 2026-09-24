@@ -222,9 +222,8 @@ let add_routes ~sw router =
            cached_dashboard_json ~sw ~sync_first:false
              ~cache:dashboard_keeper_costs_cache ~key
              ~placeholder:
-               (* NDT-OK: request-time clock for a cost window; a dashboard read endpoint, not durable output. *)
-               (Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                  ~keepers:[] ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
+               (`Assoc [ "state", `String "loading"
+                       ; "window_minutes", `Int window ])
              ~compute:(fun () ->
                let keeper_names = Keeper_meta_store.keeper_names config in
                let keepers =

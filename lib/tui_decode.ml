@@ -5195,6 +5195,75 @@ let decode_provider_usage_windows json =
   in
   Ok { puws_since; puws_accounts }
 
+type keeper_usage_coverage =
+  | Keeper_usage_complete
+  | Keeper_usage_partial of int
+  | Keeper_usage_failed of string
+
+type keeper_usage_row = {
+  kur_name : string;
+  kur_turn_samples : int;
+  kur_tokens : int option;
+  kur_cost_usd : float option;
+  kur_tokens_reported : int;
+  kur_tokens_missing : int;
+  kur_cost_reported : int;
+  kur_cost_missing : int;
+  kur_coverage : keeper_usage_coverage;
+}
+
+type keeper_usage_window =
+  | Keeper_usage_loading
+  | Keeper_usage_window of {
+      kuw_generated_at : float;
+      kuw_window_minutes : int;
+      kuw_rows : keeper_usage_row list;
+    }
+
+let decode_keeper_usage_row json =
+  let* kur_name = required_string_field json "keeper_name" in
+  let* kur_turn_samples = required_int_field json "sample_count" in
+  let* kur_tokens = required_nullable_int_field json "total_tokens" in
+  let* kur_cost_usd = required_nullable_float_field json "total_cost_usd" in
+  let* kur_tokens_reported = required_int_field json "tokens_reported_samples" in
+  let* tokens_unreported = required_int_field json "tokens_unreported_samples" in
+  let* tokens_unread = required_int_field json "tokens_unread_samples" in
+  let* kur_cost_reported = required_int_field json "cost_reported_samples" in
+  let* cost_unreported = required_int_field json "cost_unreported_samples" in
+  let* cost_unread = required_int_field json "cost_unread_samples" in
+  let* metrics_read = required_object_field json "metrics_read" in
+  let* read_state = required_string_field metrics_read "state" in
+  let* kur_coverage =
+    match read_state with
+    | "read" ->
+        let* malformed = required_int_field metrics_read "malformed_rows" in
+        Ok (if malformed = 0 then Keeper_usage_complete
+            else Keeper_usage_partial malformed)
+    | "failed" ->
+        let* reason = required_string_field metrics_read "reason" in
+        Ok (Keeper_usage_failed reason)
+    | state -> Error ("unknown keeper usage read state: " ^ state)
+  in
+  Ok
+    { kur_name; kur_turn_samples; kur_tokens; kur_cost_usd;
+      kur_tokens_reported;
+      kur_tokens_missing = tokens_unreported + tokens_unread;
+      kur_cost_reported;
+      kur_cost_missing = cost_unreported + cost_unread;
+      kur_coverage }
+
+let decode_keeper_usage_window json =
+  match Json_util.assoc_member_opt "state" json with
+  | Some (`String "loading") -> Ok Keeper_usage_loading
+  | Some (`String state) -> Error ("unknown keeper usage state: " ^ state)
+  | Some _ -> Error "keeper usage state must be a string"
+  | None ->
+      let* kuw_generated_at = required_number_field json "generated_at" in
+      let* kuw_window_minutes = required_int_field json "window_minutes" in
+      let* rows = required_list_field json "keepers" in
+      let* kuw_rows = decode_list "keepers" decode_keeper_usage_row rows in
+      Ok (Keeper_usage_window { kuw_generated_at; kuw_window_minutes; kuw_rows })
+
 let join_runtime_surface ~probe ~probe_error ~resolved =
   let probe_rows =
     match probe with
@@ -6712,11 +6781,26 @@ let decode_planning_snapshot json =
   let* pl_generated_at = required_string_field json "generated_at" in
   Ok { pl_goals; pl_rollup; pl_backlog; pl_goal_history; pl_generated_at }
 
+type overview_goal_measurement =
+  | Goal_measurement_unread
+  | Goal_measurement_not_recorded
+  | Goal_measurement_reported of {
+      value : string;
+      evidence : string;
+      actor : string;
+      recorded_at : string;
+    }
+  | Goal_measurement_unavailable of string
+
 type overview_goal = {
   og_id : string;
   og_title : string;
   og_phase : Goal_phase.t;
   og_priority : int;
+  og_criterion_revision : string option;
+  og_metric : string option;
+  og_target_value : string option;
+  og_measurement : overview_goal_measurement;
   og_due_date : string option;
   og_task_count : int;
   og_task_done_count : int;
@@ -6746,6 +6830,34 @@ let decode_overview_goal_items decode items =
   in
   loop [] items
 
+let decode_overview_goal_measurement ~goal_id ~criterion_revision json =
+  match Json_util.assoc_member_opt "measurement" json with
+  | None -> Ok Goal_measurement_unread
+  | Some measurement ->
+      let* state = required_string_field measurement "state" in
+      match state with
+      | "not_recorded" -> Ok Goal_measurement_not_recorded
+      | "unavailable" ->
+          let* reason = required_string_field measurement "reason" in
+          Ok (Goal_measurement_unavailable reason)
+      | "reported" ->
+          let* record = required_object_field measurement "record" in
+          let* recorded_goal_id = required_string_field record "goal_id" in
+          let* recorded_revision = required_string_field record "criterion_revision" in
+          let* () =
+            match criterion_revision with
+            | Some current
+              when String.equal current recorded_revision
+                   && String.equal goal_id recorded_goal_id -> Ok ()
+            | Some _ | None -> Error "goal measurement does not match current criterion"
+          in
+          let* value = required_string_field record "observed_value" in
+          let* evidence = required_string_field record "evidence" in
+          let* actor = required_string_field record "actor" in
+          let* recorded_at = required_string_field record "recorded_at" in
+          Ok (Goal_measurement_reported { value; evidence; actor; recorded_at })
+      | _ -> Error ("unknown goal measurement state: " ^ state)
+
 (* One tree node and every goal under it, parent first. A child goal is a goal
    in its own right, so the Overview reads the forest flat. *)
 let rec decode_overview_goal_node json =
@@ -6762,6 +6874,13 @@ let rec decode_overview_goal_node json =
         Error (Overview_goal_phase_unknown { goal_id = og_id; phase = raw_phase })
   in
   let* og_priority = malformed (required_int_field json "priority") in
+  let* og_criterion_revision = malformed (optional_string_field json "criterion_revision") in
+  let* og_metric = malformed (optional_string_field json "metric") in
+  let* og_target_value = malformed (optional_string_field json "target_value") in
+  let* og_measurement =
+    malformed (decode_overview_goal_measurement ~goal_id:og_id
+                 ~criterion_revision:og_criterion_revision json)
+  in
   let* og_due_date = malformed (optional_string_field json "due_date") in
   let* og_task_count = malformed (required_int_field json "task_count") in
   let* og_task_done_count =
@@ -6785,6 +6904,10 @@ let rec decode_overview_goal_node json =
      ; og_title
      ; og_phase
      ; og_priority
+     ; og_criterion_revision
+     ; og_metric
+     ; og_target_value
+     ; og_measurement
      ; og_due_date
      ; og_task_count
      ; og_task_done_count

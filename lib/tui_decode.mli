@@ -2905,6 +2905,36 @@ val decode_provider_usage_windows :
     unknown [state], window [kind] or utilization [unit] is an error, as is a
     reported account without windows or an unreported one with windows. *)
 
+type keeper_usage_coverage =
+  | Keeper_usage_complete
+  | Keeper_usage_partial of int
+  | Keeper_usage_failed of string
+
+type keeper_usage_row = {
+  kur_name : string;
+  kur_turn_samples : int;
+  kur_tokens : int option;
+  kur_cost_usd : float option;
+  kur_tokens_reported : int;
+  kur_tokens_missing : int;
+  kur_cost_reported : int;
+  kur_cost_missing : int;
+  kur_coverage : keeper_usage_coverage;
+}
+
+type keeper_usage_window =
+  | Keeper_usage_loading
+  | Keeper_usage_window of {
+      kuw_generated_at : float;
+      kuw_window_minutes : int;
+      kuw_rows : keeper_usage_row list;
+    }
+
+val decode_keeper_usage_window :
+  Yojson.Safe.t -> (keeper_usage_window, string) result
+(** Decode the coverage-bearing [/api/v1/dashboard/keeper-costs] projection.
+    A null sum stays absent, and a loading placeholder never reads as zero. *)
+
 val decode_runtime_surface_snapshot :
   probe_json:Yojson.Safe.t ->
   resolved_json:Yojson.Safe.t ->
@@ -3000,16 +3030,28 @@ val decode_planning_snapshot :
     {!goal_store_unavailable_view_to_string} line as the [Error]; RFC-0444 PR-4
     lifts it into a [Planning_unavailable] constructor. *)
 
-(** One goal of [GET /api/v1/dashboard/goals] as the Overview's GOALS
-    section reads it. [og_task_count] and [og_task_done_count] count the
-    goal's linked tasks; a goal has no measured metric value, so nothing here
-    stands in for one. [og_stagnation_seconds] is the server's time since the
-    goal's last activity, [None] when it has none to measure from. *)
+type overview_goal_measurement =
+  | Goal_measurement_unread
+  | Goal_measurement_not_recorded
+  | Goal_measurement_reported of {
+      value : string;
+      evidence : string;
+      actor : string;
+      recorded_at : string;
+    }
+  | Goal_measurement_unavailable of string
+
+(** One goal of [GET /api/v1/dashboard/goals]. Linked Task completion and
+    explicitly reported metric values remain separate observations. *)
 type overview_goal = {
   og_id : string;
   og_title : string;
   og_phase : Goal_phase.t;
   og_priority : int;
+  og_criterion_revision : string option;
+  og_metric : string option;
+  og_target_value : string option;
+  og_measurement : overview_goal_measurement;
   og_due_date : string option;
   og_task_count : int;
   og_task_done_count : int;

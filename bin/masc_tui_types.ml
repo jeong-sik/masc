@@ -1997,6 +1997,11 @@ type overview_providers_reading =
   | Providers_read of Tui_decode.provider_usage_windows
   | Providers_failed of string
 
+type keeper_usage_reading =
+  | Keeper_usage_unread
+  | Keeper_usage_read of Tui_decode.keeper_usage_window
+  | Keeper_usage_error of string
+
 (** One open pull request as [GET /api/v1/repositories/pulls] reports it
     (RFC-0465). The check and review words are parsed at decode; a word this
     build cannot name makes the row undecodable rather than a default. *)
@@ -2872,17 +2877,13 @@ type browser_lane_visibility =
    results are read, and before this stop it was reachable only through the
    palette or a deep link, so the surface existed but could not be found. *)
 let surface_ring : (surface * string) list =
-  [ (Overview, "Overview");
-    (Acting, "Activity");
+  [ (Overview, "Dashboard");
+    (Planning, "Work");
     (Keepers Keeper_list, "Keepers");
-    (Lanes, "Lanes");
-    (Memory, "Memory");
-    (Approvals, "Approvals");
+    (Metrics, "Usage");
     (Board, "Board");
-    (Planning, "Planning");
-    (Fusion, "Fusion");
     (Repositories, "Workspace");
-    (Config, "Config");
+    (Config, "System");
   ]
 
 (** What a surface needs loaded to draw itself.
@@ -2903,6 +2904,7 @@ type surface_needs = {
   needs_operator_approvals : bool;
   needs_asks : bool;
   needs_runtime_quota : bool;
+  needs_keeper_usage : bool;
   needs_repository_pulls : bool;
   needs_overview_goals : bool;
 }
@@ -2918,6 +2920,7 @@ let nothing =
     needs_operator_approvals = false;
     needs_asks = false;
     needs_runtime_quota = false;
+    needs_keeper_usage = false;
     needs_repository_pulls = false;
     needs_overview_goals = false;
   }
@@ -2947,7 +2950,6 @@ and surface_needs_of_surface : surface -> surface_needs = function
       { nothing with
         needs_transport = true
       ; needs_runtime_quota = true
-      ; needs_repository_pulls = true
       ; needs_overview_goals = true
       }
   (* Its rows come from the acting store and the keeper list, neither of which
@@ -2983,8 +2985,10 @@ and surface_needs_of_surface : surface -> surface_needs = function
   | Metrics ->
       { nothing with
         needs_keeper_roster = true
-      ; needs_fleet_safety = true
-      ; needs_transport = true
+        ; needs_fleet_safety = true
+        ; needs_transport = true
+        ; needs_runtime_quota = true
+        ; needs_keeper_usage = true
       }
   | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
   | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
@@ -3009,6 +3013,8 @@ let surface_needs_delta ~previous ~next =
   ; needs_asks = next.needs_asks && not previous.needs_asks
   ; needs_runtime_quota =
       next.needs_runtime_quota && not previous.needs_runtime_quota
+  ; needs_keeper_usage =
+      next.needs_keeper_usage && not previous.needs_keeper_usage
   ; needs_repository_pulls =
       next.needs_repository_pulls && not previous.needs_repository_pulls
   ; needs_overview_goals =
@@ -5678,6 +5684,7 @@ type state = {
      the rows under an open picker's cursor. *)
   mutable overview_quota: overview_quota_reading;
   mutable overview_providers: overview_providers_reading;
+  mutable keeper_usage: keeper_usage_reading;
   mutable overview_pulls: overview_pulls_reading;
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
@@ -7814,6 +7821,7 @@ let create_state
   runtime_catalog = [];
   overview_quota = Quota_unread;
   overview_providers = Providers_unread;
+  keeper_usage = Keeper_usage_unread;
   overview_pulls = Overview_pulls_unread;
   overview_goals = Goals_unread;
   runtime_lanes = [];
@@ -10303,7 +10311,6 @@ let approvals_surface_pending (state : state) =
 
 let is_surface_active (state : state) (s : surface) =
   match s with
-  | Metrics -> false
   | Approvals ->
       state.view = Approvals || approvals_surface_pending state > 0
   | _ -> true
@@ -10336,22 +10343,16 @@ let visible_surface_ring (state : state) : (surface * string) list =
 let surface_ring_family (state : state) (view : surface) =
   match view with
   | Keepers _ -> Keepers Keeper_list
-  | Verification | Harness -> Planning
+  | Verification | Harness | Approvals -> Planning
   | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
-  | Changes | Connectors | Schedules -> Keepers Keeper_list
-  | Runtime | Clients -> Config
-  | Lanes -> Lanes
+  | Changes | Connectors | Schedules | Fusion | Memory -> Keepers Keeper_list
+  | Runtime | Clients | Lanes | Acting | System_logs -> Config
   | Code -> Repositories
   | Resources | Tools -> Config
-  | System_logs -> Acting
-  | Metrics -> Overview
+  | Metrics -> Metrics
   | Overview -> Overview
-  | Acting -> Acting
-  | Memory -> Memory
-  | Approvals -> Approvals
   | Board -> Board
   | Planning -> Planning
-  | Fusion -> Fusion
   | Repositories -> Repositories
   | Config -> Config
 

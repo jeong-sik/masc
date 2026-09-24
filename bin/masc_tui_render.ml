@@ -29,8 +29,6 @@ module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Overview_team = Masc_tui_overview_team
 module Overview_goals = Masc_tui_overview_goals
-module Overview_providers = Masc_tui_overview_providers
-module Repository_pulls = Masc_tui_repository_pulls
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
 module Markdown = Masc_tui_markdown
@@ -40,6 +38,7 @@ module Composer_projection = Masc_tui_composer_projection
 module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
 module Overview_tasks = Masc_tui_overview_tasks
+module Overview_providers = Masc_tui_overview_providers
 module Tool_tree = Masc_tui_tool_tree
 module Theme_choice = Masc_tui_theme_choice
 module File_icon = Masc_tui_file_icon
@@ -271,725 +270,193 @@ let blame_author_cells = 9
 let blame_age_cells = 3
 let blame_margin_cells = blame_author_cells + blame_age_cells + 2
 
-let task_line (task : task) =
-  let status = Masc_domain.task_status_to_string task.status in
-  (* The icon and the status word share one color so the row's state reads at
-     a glance: in-flight rows in cyan, waiting rows dimmed. Terminal states
-     never reach this list ([active_tasks_of_domain] filters them); they keep
-     the default so a future caller showing one is visible rather than wrong. *)
-  let status_color =
-    match task.status with
-    | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> (Theme.info ())
-    | Masc_domain.AwaitingVerification _ -> Theme.warn ()
-    | Masc_domain.Todo -> Ansi.dim
-    | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ""
-  in
-  let assignee =
-    match Masc_domain.task_assignee_of_status task.status with
-    | Some name -> Printf.sprintf " @%s" (Terminal_text.single_line name)
-    | None -> ""
-  in
-  let goal_tag =
-    match task.goal_ids with
-    | [] -> ""
-    | goal :: _ ->
-        Printf.sprintf " %s%s%s" (Theme.recede ())
-          (Terminal_text.single_line goal)
-          Ansi.reset
-  in
-  Printf.sprintf "%s%s%s %s[%s]%s %s %s(%s%s)%s %s%s"
-    status_color
-    (task_status_icon task.status)
-    Ansi.reset
-    Ansi.dim
-    (Terminal_text.single_line task.id)
-    Ansi.reset
-    (Terminal_text.single_line task.title)
-    status_color
-    status
-    assignee
-    Ansi.reset
-    (priority_indicator task.priority)
-    goal_tag
-
-(* The Team block's rows, projected from the briefing's Keeper rows and the
-   backlog the same refresh loaded. [None] until a briefing has been read: a
-   Team block over no Keeper rows would claim an empty fleet. *)
-let overview_team (state : state) =
-  match state.overview with
-  | None -> None
-  | Some overview ->
-      Some
-        (Overview_team.project ~keepers:overview.ov_keeper_rows
-           ~tasks:state.tasks ~attention:overview.ov_attention_items)
-
-let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
-
-(* Lines under the Team block that explain no Keeper row: the pull request
-   summary. *)
-let overview_team_detail_lines (state : state) = overview_pulls_lines state
-
-(* The Team block's title and its rows, [team_rows] of them. Every row the
-   projection makes is drawn in its band's order and cut from the bottom, so
-   what a short viewport loses first is the name lines and the holders
-   outside the fleet, then idle Keepers -- never a stuck one. *)
-let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~detail_lines ~pr_tag_of_keeper =
-  let name_cells =
-    List.fold_left
-      (fun widest (row : Overview_team.row) ->
-        max widest
-          (Message_layout.display_width
-             (Terminal_text.single_line row.keeper.okp_name)))
-      0 team.rows
-  in
-  let held_tail held =
-    if held > 0 then Printf.sprintf " %s· holds %d%s" Ansi.dim held Ansi.reset
-    else ""
-  in
-  let awaiting_tail awaiting =
-    if awaiting > 0 then
-      Printf.sprintf " %s· %d awaiting%s" (Theme.warn ()) awaiting Ansi.reset
-    else ""
-  in
-  let keeper_line (row : Overview_team.row) =
-    let mark, tone =
-      match row.group with
-      | Overview_team.Needs_you -> ("!", Theme.bad ())
-      | Overview_team.Working -> ("\xe2\x97\x8f", Theme.info ())
-      | Overview_team.Idle | Overview_team.No_phase | Overview_team.Paused
-      | Overview_team.Stopped ->
-          ("\xc2\xb7", Ansi.dim)
-    in
-    let age =
-      match row.keeper.okp_last_turn_ago_s with
-      | Some seconds -> keeper_lane_idle_text (int_of_float seconds)
-      | None -> "\xe2\x80\x94"
-    in
-    let detail =
-      match row.detail with
-      | Overview_team.Blocker { summary; held; item = _ } ->
-          Terminal_text.single_line summary ^ held_tail held
-      | Overview_team.Phase_word { word = _; held } ->
-          Printf.sprintf "%sno attention item names a cause%s%s" Ansi.dim
-            Ansi.reset (held_tail held)
-      | Overview_team.Working_on { task; more; awaiting } ->
-          Printf.sprintf "%s[%s]%s %s%s%s" Ansi.dim
-            (Terminal_text.single_line task.id)
-            Ansi.reset
-            (Terminal_text.single_line task.title)
-            (if more > 0 then Printf.sprintf " %s+%d%s" Ansi.dim more Ansi.reset
-             else "")
-            (awaiting_tail awaiting)
-      | Overview_team.No_open_task { awaiting } ->
-          Printf.sprintf "%sno open task%s%s" Ansi.dim Ansi.reset
-            (awaiting_tail awaiting)
-    in
-    (* The Keeper's PR, ahead of the detail so a narrow row keeps it: its
-       number and one glyph for its checks, "+N" for more. *)
-    let pr_tag = pr_tag_of_keeper row.keeper.okp_name in
-    Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s" tone mark Ansi.reset
-      (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
-      tone
-      (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
-      Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset pr_tag detail
-  in
-  let off_glyph = "\xe2\x97\x8b" in
-  let names_line glyph label = function
-    | [] -> []
-    | names ->
-        let still_held = List.fold_left (fun sum (_, held) -> sum + held) 0 names in
-        [ Printf.sprintf "%s%s %s: %s%s%s" Ansi.dim glyph label
-            (String.concat ", "
-               (List.map (fun (name, _) -> Terminal_text.single_line name) names))
-            Ansi.reset
-            (if still_held > 0 then
-               Printf.sprintf " %s\xc2\xb7 %d open task%s still held%s" (Theme.warn ())
-                 still_held
-                 (if still_held = 1 then "" else "s")
-                 Ansi.reset
-             else "")
-        ]
-  in
-  let holders_line =
-    match team.other_holders with
-    | [] -> []
-    | holders ->
-        [ Printf.sprintf "%s\xe2\x97\x87 held outside the fleet: %s%s" Ansi.dim
-            (String.concat " \xc2\xb7 "
-               (List.map
-                  (fun (name, count) ->
-                    Printf.sprintf "%s %d" (Terminal_text.single_line name) count)
-                  holders))
-            Ansi.reset
-        ]
-  in
-  (* The shut-window line explains the stuck rows, so it sits right under
-     them: a viewport with room for one row keeps a stuck Keeper, and the
-     window that stopped it comes next. *)
-  let stuck, others =
-    List.partition
-      (fun (row : Overview_team.row) -> row.group = Overview_team.Needs_you)
-      team.rows
-  in
-  (* Detail lines come last: the layout gives them only rows nothing else
-     wanted, so a short viewport cuts them before any Keeper. *)
-  let rows =
-    List.map keeper_line stuck
-    @ List.map keeper_line others
-    @ names_line "?" "no phase" team.no_phase
-    @ names_line off_glyph "paused" team.paused
-    @ names_line off_glyph "stopped" team.stopped
-    @ holders_line @ detail_lines
-  in
-  let total = List.length rows in
-  let counts =
-    List.filter_map
-      (fun (group, label) ->
-        match Overview_team.count team group with
-        | 0 -> None
-        | n -> Some (Printf.sprintf "%d %s" n label))
-      [ (Overview_team.Needs_you, "need you")
-      ; (Overview_team.Working, "working")
-      ; (Overview_team.Idle, "idle")
-      ; (Overview_team.No_phase, "no phase")
-      ; (Overview_team.Paused, "paused")
-      ; (Overview_team.Stopped, "stopped")
-      ]
-  in
-  (* The group counts are Keepers; the rows also hold name and detail lines,
-     so a cut says how many rows fell off the bottom, never a row total that
-     sits beside the Keeper counts. *)
-  let window =
-    if team_rows < total then Printf.sprintf " +%d more" (total - team_rows)
-    else ""
-  in
-  let head =
-    Printf.sprintf " %sTeam%s%s  %s" Ansi.bold Ansi.reset window
-      (String.concat " \xc2\xb7 " counts)
-  in
-  (* Completions per UTC day over the flow's span, oldest first, so the last
-     glyph is today. Scaled from zero: a quiet day is the lowest bar, not the
-     baseline of whatever the busiest fortnight happened to be.
-
-     Measured at 132x40 beside the roster pane, the full tail ran off the
-     row and the cut took "today" and the peak. The tail now sheds its parts
-     from the right -- peak, then today -- and goes whole before the band
-     counts lose a cell: they are what the block is for. *)
-  let tails =
-    match flow with
-    | None -> []
-    | Some (flow : Masc_tui_task_flow.t) -> (
-        let per_day =
-          List.map (fun (day : Masc_tui_task_flow.day) -> day.d_completed)
-            flow.daily
-        in
-        match List.rev per_day with
-        | [] -> []
-        | today :: _ ->
-            let spark =
-              Printf.sprintf "   %s%dd%s %s%s%s" Ansi.dim (List.length per_day)
-                Ansi.reset (Theme.ok ())
-                (Chart.sparkline ~min:0 per_day)
-                Ansi.reset
-            in
-            [ Printf.sprintf "%s today %d \xc2\xb7 peak %d" spark today
-                (List.fold_left max 0 per_day)
-            ; Printf.sprintf "%s today %d" spark today
-            ; spark
-            ])
-  in
-  let title =
-    match
-      List.find_opt
-        (fun tail -> Message_layout.display_width (head ^ tail) <= cols)
-        tails
-    with
-    | Some tail -> head ^ tail
-    | None -> head
-  in
-  (title, List.filteri (fun index _ -> index < team_rows) rows)
-
-(* Every item the Overview has to place: the transport's, then the
-   briefing's. *)
-let overview_attention (state : state) =
+(* Dashboard rows summarize sources without changing their meaning. The full
+   task list lives in Work, Keeper rows in Keepers, and account windows in
+   Usage. A missing reading is never projected as a zero. *)
+let dashboard_attention (state : state) =
   Option.to_list (transport_attention_item state.transport)
   @
   match state.overview with
   | None -> []
   | Some overview -> overview.ov_attention_items
 
-(* The Providers section, drawn between the Attention panel and the Team
-   block. *)
-let overview_providers_section (state : state) ~cols =
-  Overview_providers.section ~providers:state.overview_providers
-    ~runtimes:state.overview_quota ~now:(Unix.gettimeofday ())
-    ~width:(framed_inner_width cols)
+let dashboard_keeper_line (state : state) =
+  match state.overview with
+  | None -> "Keepers: not observed"
+  | Some overview ->
+      let team =
+        Overview_team.project ~keepers:overview.ov_keeper_rows
+          ~tasks:state.tasks ~attention:overview.ov_attention_items
+      in
+      Printf.sprintf "Keepers: %d working · %d need you · %d idle · %d paused/stopped"
+        (Overview_team.count team Overview_team.Working)
+        (Overview_team.count team Overview_team.Needs_you)
+        (Overview_team.count team Overview_team.Idle)
+        (Overview_team.count team Overview_team.Paused
+         + Overview_team.count team Overview_team.Stopped)
 
-(** Project the shared Overview row budget and its sanitized variable inputs. *)
-let overview_layout (state : state) ~terminal_rows =
-  let all_attention = overview_attention state in
-  let tasks_error = Terminal_text.optional_single_line state.tasks_error in
-  let team_count =
-    match overview_team state with
-    | None -> 0
-    | Some team -> Overview_team.drawn_rows team
-  in
-  let providers_count =
-    match overview_providers_section state ~cols:(snd (get_terminal_size ())) with
-    | None -> 0
-    | Some section -> List.length section.Overview_providers.lines
-  in
-  let allocate attention_items =
-    Render_schedule.allocate_overview ~terminal_rows
-      ~attention_count:(List.length attention_items)
-      ~goal_count:(Overview_goals.wanted_rows state.overview_goals)
-      ~team_count
-      ~providers_count
-      ~task_count:
-        (Overview_tasks.line_count state.tasks
-           (Overview_tasks.backlog state.tasks_domain))
-      ~has_task_error:(Option.is_some tasks_error)
-  in
-  (* An item a drawn Team row carries -- a stuck Keeper's row prints its
-     sentence -- is that Keeper's row there; drawn in both places the same
-     stop took two rows and read as two problems. Only items the viewport
-     actually draws on a Team row leave the panel: an item about a running
-     Keeper, a second item about the same Keeper, and the items of rows the
-     budget cuts all stay, because nothing else on screen says them. *)
-  let attention_items, row_budget =
-    match overview_team state with
-    | None -> (all_attention, allocate all_attention)
-    | Some team ->
-        Overview_team.settle team ~attention:all_attention ~allocate
-          ~team_rows:(fun (budget : Render_schedule.overview_allocation) ->
-            budget.team_rows)
-  in
-  (* Detail lines are settled after the Keeper rows: they only take rows
-     nothing else wanted, so they never change which items a row carries. *)
-  let row_budget =
-    match overview_team state with
-    | None -> row_budget
-    | Some _ ->
-        Render_schedule.spend_spare_rows_on_team row_budget
-          ~extra:(List.length (overview_team_detail_lines state))
-  in
-  attention_items, tasks_error, row_budget
+let dashboard_work_lines (state : state) =
+  match state.task_flow with
+  | None ->
+      [ " Work  · task flow not observed"
+      ; (match state.tasks_error with
+         | Some error -> "   " ^ Terminal_text.single_line error
+         | None -> "   Waiting for a durable task snapshot") ]
+  | Some flow ->
+      let recent = flow.Masc_tui_task_flow.recent in
+      let current = flow.current in
+      let completed =
+        List.map
+          (fun (day : Masc_tui_task_flow.day) -> float_of_int day.d_completed)
+          flow.daily
+      in
+      [ Printf.sprintf " Work  · 24h: %d created · %d done · %d cancelled"
+          recent.created recent.completed recent.cancelled
+      ; Printf.sprintf "   Open: %d working · %d awaiting verification · %d claimed · %d todo"
+          current.in_progress current.awaiting_verification current.claimed
+          current.todo
+      ; Printf.sprintf "   Done by UTC day (%d days): %s"
+          (List.length flow.daily) (braille_sparkline completed) ]
 
-(** Render the Overview surface (Dashboard V2 shell/briefing summary). *)
+let dashboard_goal_lines (state : state) =
+  match state.overview_goals with
+  | Goals_unread -> [ " Goals · not observed" ]
+  | Goals_failed reason ->
+      [ " Goals · unavailable: " ^ Terminal_text.single_line reason ]
+  | Goals_read goals ->
+      let active = Overview_goals.drawn_goals goals in
+      let shown = List.filteri (fun index _ -> index < 2) active in
+      let heading =
+        Printf.sprintf " Goals · %d active · metric and linked tasks are separate"
+          (List.length active)
+      in
+      heading
+      :: (if shown = [] then [ "   No active Goal" ]
+          else
+            List.map
+              (fun (goal : Tui_decode.overview_goal) ->
+                let actual =
+                  match goal.og_measurement with
+                  | Goal_measurement_unread -> "not observed"
+                  | Goal_measurement_not_recorded -> "not recorded"
+                  | Goal_measurement_unavailable _ -> "unavailable"
+                  | Goal_measurement_reported { value; _ } ->
+                      Terminal_text.single_line value ^ " (reported)"
+                in
+                let target =
+                  match goal.og_metric, goal.og_target_value with
+                  | Some metric, Some target ->
+                      Printf.sprintf "%s → %s"
+                        (Terminal_text.single_line metric)
+                        (Terminal_text.single_line target)
+                  | Some metric, None -> Terminal_text.single_line metric
+                  | None, Some target -> Terminal_text.single_line target
+                  | None, None -> "target unavailable"
+                in
+                Printf.sprintf "   %s · actual %s · target %s · linked tasks %d/%d done"
+                  (Terminal_text.single_line goal.og_title) actual target
+                  goal.og_task_done_count goal.og_task_count)
+              shown)
+      @ (if List.length active > List.length shown then
+           [ Printf.sprintf "   +%d more Goals in Work"
+               (List.length active - List.length shown) ]
+         else [])
+
+let dashboard_usage_lines (state : state) =
+  let accounts =
+    match state.overview_providers with
+    | Providers_unread -> "account reports not observed"
+    | Providers_failed reason ->
+        "account reports unavailable: " ^ Terminal_text.single_line reason
+    | Providers_read reading ->
+        let total = List.length reading.puws_accounts in
+        let reported =
+          List.fold_left
+            (fun count (account : Tui_decode.provider_usage_account) ->
+              match account.pua_state with
+              | Account_reported _ -> count + 1
+              | Account_not_reported_since_start -> count)
+            0 reading.puws_accounts
+        in
+        Printf.sprintf "%d/%d accounts reported since server start"
+          reported total
+  in
+  let quota =
+    match state.overview_quota with
+    | Quota_unread -> "runtime quota not observed"
+    | Quota_failed reason ->
+        "runtime quota unavailable: " ^ Terminal_text.single_line reason
+    | Quota_read runtimes ->
+        let blocked =
+          List.fold_left
+            (fun count (runtime : Tui_decode.runtime_option) ->
+              if runtime.ro_quota_exhausted then count + 1 else count)
+            0 runtimes
+        in
+        Printf.sprintf "%d runtime quota blocks observed" blocked
+  in
+  [ " Usage · " ^ accounts; "   " ^ quota ^ " · account windows in Usage" ]
+
 let render_overview (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  (* The composer owns the terminal's last row; everything this surface
-     lays out fits above it. *)
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
-
+  let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 2048 in
   let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  %s[%s]%s  %s  %s"
-    (screen_title " MASC Overview")
-    (Masc_tui_theme.tone Masc_tui_theme.Accent) (Terminal_text.single_line state.workspace) Ansi.reset timestamp
-    (connection_badge state) in
-
+  let header =
+    Printf.sprintf "%s  %s[%s]%s  %02d:%02d:%02d  %s"
+      (screen_title " MASC Dashboard")
+      (Masc_tui_theme.tone Masc_tui_theme.Accent)
+      (Terminal_text.single_line state.workspace) Ansi.reset
+      now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
+      (connection_badge state)
+  in
+  let health =
+    match state.overview_error, state.overview with
+    | Some error, _ ->
+        " Health: unavailable · " ^ Terminal_text.single_line error
+    | None, None -> " Health: not observed"
+    | None, Some overview ->
+        Printf.sprintf " Health: %s · %s"
+          (workspace_health_label overview.ov_workspace_health)
+          (dashboard_keeper_line state)
+  in
+  let attention = dashboard_attention state in
+  let attention_lines =
+    let title = Printf.sprintf " Needs you · %d items" (List.length attention) in
+    let shown = List.filteri (fun index _ -> index < 2) attention in
+    title
+    :: (if shown = [] then [ "   Nothing awaiting attention" ]
+        else
+          List.map
+            (fun item ->
+              "   " ^ attention_severity_badge item.ai_severity
+              ^ Terminal_text.single_line item.ai_summary)
+            shown)
+  in
+  let lines =
+    [ health; "" ]
+    @ dashboard_goal_lines state
+    @ [ "" ]
+    @ dashboard_work_lines state
+    @ [ "" ]
+    @ dashboard_usage_lines state
+    @ [ "" ]
+    @ attention_lines
+  in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-
-  let ov = state.overview in
-  let overview_error =
-    Terminal_text.optional_single_line state.overview_error
-  in
-
-  (* Summary line *)
-  let summary_line =
-    match (ov, overview_error) with
-    | _, Some err ->
-        data_unreliable_row ~cols err
-    | None, None ->
-        Printf.sprintf "  %s(no overview data — press 'r' to refresh)%s"
-          Ansi.dim Ansi.reset
-    | Some o, None ->
-        let health_color = workspace_health_color o.ov_workspace_health in
-        let health_label = workspace_health_label o.ov_workspace_health in
-        (* The tab strip's badge counts held keeper tool calls, pending gate
-           rows, and confirm-queue entries together, and so does the Approvals
-           screen's own header. This row counted only the third of those, off
-           the confirm queue's own visible count, so a runtime holding one
-           keeper tool call drew "Approvals: 0" beside a tab reading
-           "Approvals·1" -- one name over two populations. All three now walk
-           [approval_items].
-
-           The "?" tail marks a count no source will stand behind, and it does
-           not say which way the number is wrong, because the failures do not
-           agree on that. A dropped confirm queue empties its list, leaving the
-           count short. A failed held-calls or gate poll replaces nothing --
-           the previous rows stay on screen, which the Approvals header calls
-           "held calls stale" -- so that count can just as easily be long,
-           describing rows the server no longer holds. Which list failed is a
-           question that header answers; at this width the row says only that
-           one did. *)
-        let approval_count =
-          let on_screen = Masc_tui_types.approvals_surface_pending state in
-          let source_unread =
-            Option.is_none state.approval_snapshot
-            || Option.is_some state.approvals_error
-            || Option.is_some state.keeper_tool_approvals_error
-            || Option.is_none state.asks_snapshot
-            || Option.is_some state.asks_error
-            || Option.is_some state.gate_error
-            || Option.is_some state.gate_queue_unavailable
-          in
-          if source_unread then Printf.sprintf "%d?" on_screen
-          else string_of_int on_screen
-        in
-        (* Keepers and MCP clients are counted apart: a row reading
-           "Agents: 2" over a runtime with ten keepers named the wrong
-           population.
-
-           The incident count used to ride here too, over an Attention panel
-           three lines below drawing those same incidents one per row. A
-           number above the list it counts is not a summary of anything the
-           reader cannot already see; where the panel cannot fit them all,
-           the panel's own title says so. *)
-        (* Nine Keepers with two that had stopped doing anything and one an
-           operator had paused read exactly like nine running ones. The
-           briefing has carried the control plane's word for each of them all
-           along; only the number reached this row.
-
-           The states that are not "active" are the ones an operator acts on,
-           so those are the ones named. A fleet where every Keeper is active
-           says only its number -- an always-on breakdown would be texture,
-           the way an always-on tab badge would be. *)
-        let keeper_note =
-          let l = o.ov_keeper_liveness in
-          let parts =
-            List.filter_map
-              (fun (count, label) ->
-                if count = 0 then None
-                else Some (Printf.sprintf "%d %s" count label))
-              [ (l.klc_paused, "paused")
-              ; (l.klc_offline, "offline")
-              ; (l.klc_idle, "idle")
-              ; (l.klc_unreadable, "unreadable")
-              ]
-          in
-          match parts with
-          | [] -> ""
-          | _ :: _ -> Printf.sprintf " (%s)" (String.concat ", " parts)
-        in
-        let pulse_suffix =
-          if cols >= 92 then
-            Printf.sprintf "  %sPulse:%s %s" Ansi.bold Ansi.reset
-              (overview_pulse_text state ~now:(Unix.gettimeofday ()))
-          else ""
-        in
-        Printf.sprintf
-          "  Health: %s%s%s  Keepers: %d%s  MCP agents: %d  Approvals: %s%s"
-          health_color health_label Ansi.reset o.ov_keepers keeper_note
-          o.ov_mcp_agents approval_count pulse_suffix
-  in
-  box_line buf cols summary_line;
-
-  box_divider buf cols;
-
-  (* Attention panel *)
-  let attention_items, tasks_error, row_budget =
-    overview_layout state ~terminal_rows:rows
-  in
-  Overview_goals.draw buf ~cols ~rows:row_budget.goal_rows
-    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime
-    ~tasks:(Option.fold ~none:(Ok state.tasks) ~some:Result.error tasks_error)
-    state.overview_goals;
-  (* The panel spans the band the rest of the screen's rows cover: one cell of
-     margin on each side of the frame. *)
-  let panel_width = cols - 2 in
-  (* The count used to ride the summary row three lines above, over the very
-     rows it counted. It belongs to the panel, and it earns its place only
-     where it says something the rows cannot: that some did not fit. *)
-  let attention_count = List.length attention_items in
-  (* The age cell answers "why is this still here", and a producer that puts
-     no time on its evidence leaves it an em dash. Live, that is every item:
-     of the nine the briefing queued, eight carry no timestamp at all and the
-     ninth writes one under a name this surface does not read, so the column
-     drew nine dashes and spent four cells of the panel. It is drawn when some
-     item has an age; summaries still start on one edge, because the column is
-     there or not there for the whole panel. *)
-  let attention_shows_age =
-    List.exists
-      (fun (item : attention_item) ->
-        Option.is_some item.ai_evidence_ts)
-      attention_items
-  in
-  (* Items a drawn Team row carries are drawn there, not here
-     ([overview_layout]). The panel says how many went there, so its count
-     and the briefing's total do not disagree without a reason on screen,
-     and an empty panel is not read as "nothing needs attention". *)
-  let on_team_rows =
-    List.length (overview_attention state) - attention_count
-  in
-  let attention_title =
-    let counted =
-      if attention_count = 0 then " Attention "
-      else if attention_count <= row_budget.attention_rows then
-        Printf.sprintf " Attention %d " attention_count
-      else
-        Printf.sprintf " Attention %d/%d " row_budget.attention_rows
-          attention_count
-    in
-    let with_team =
-      Printf.sprintf "%s+%d on Team " counted on_team_rows
-    in
-    if attention_count > 0 && on_team_rows > 0
-       && String.length with_team <= panel_width
-    then with_team
-    else counted
-  in
-  Buffer.add_string buf
-    (Printf.sprintf " %s%s%s\n" Ansi.bold attention_title Ansi.reset);
-
-  let attention_items_window = Rows.of_list ~first:0 ~height:row_budget.attention_rows attention_items in
-  (* What the panel says when it has no item to draw, the way the Tasks panel
-     below it does. It said nothing: an overview that answered with no items,
-     one not read yet and one that failed all left the panel blank under its
-     title. A failure is already the summary row's to say. *)
-  (* These notes stand in for rows, so they start where rows start. This
-     panel writes its own two cells of indent ahead of every row, and the
-     notes are written for a body that adds its own -- pasted in whole, the
-     note sat two cells right of the rows it replaces and of the title above
-     them. *)
-  let attention_empty_note =
-    match empty_page_of ~snapshot:state.overview ~error:overview_error with
-    | Page_empty when on_team_rows > 0 ->
-        Some (Printf.sprintf "(%d on Team rows below)" on_team_rows)
-    | Page_empty -> Some "(nothing needs attention)"
-    | Page_unread -> Some (String.trim page_unread_note)
-    | Page_failed -> None
-  in
-  for i = 0 to row_budget.attention_rows - 1 do
-    let attention_str =
-      (* No length guard: the window already answers [None] past the end,
-         which is the blank this drew. The guard that stood here counted the
-         whole list once per row. *)
-      match Rows.at attention_items_window i with
-      | None when i = 0 && attention_count = 0 ->
-          (match attention_empty_note with
-           | Some note -> Ansi.dim ^ note ^ Ansi.reset
-           | None -> "")
-      | None -> ""
-      | Some a ->
-        let severity_badge = attention_severity_badge a.ai_severity in
-        (* The age answers "why is this still here": a stamped item shows how
-           long ago its evidence happened, an unstamped one (a paused keeper,
-           a waiting confirmation) shows an em dash because its producer put
-           no time on it -- it stands until its condition clears. A fixed
-           three-cell column, like the severity label, so summaries start on
-           one edge. *)
-        let age_cell =
-          if not attention_shows_age then ""
-          else
-            let age_label =
-              match a.ai_evidence_ts with
-              | Some ts ->
-                  keeper_lane_idle_text
-                    (int_of_float (Unix.gettimeofday () -. ts))
-              | None -> "\xe2\x80\x94"
-            in
-            Printf.sprintf "%s%s%s " Ansi.dim (fit_width age_label 3) Ansi.reset
-        in
-          (* Fitted once, by the fit that draws the row. Fitting the summary
-             here as well meant guessing how many cells the label ahead of it
-             spends. The severity badge pads itself to its own column, which
-             is measured from the level names rather than guessed at -- so it
-             is the one part of the row that is finished before it gets
-             here. *)
-          Printf.sprintf "%s %s%s" severity_badge age_cell
-            (Terminal_text.single_line a.ai_summary)
-    in
-    Buffer.add_string buf
-      (Printf.sprintf "  %s\n" (fit_width attention_str (panel_width - 2)))
-  done;
-
-  box_divider buf cols;
-
-  (* Providers section: each provider account's usage windows, as reported.
-     Drawn above Team, whose stuck Keepers a shut account explains. *)
-  (match overview_providers_section state ~cols with
-   | Some section when row_budget.providers_rows > 0 ->
-       Buffer.add_string buf (fit_width section.Overview_providers.title cols ^ "\n");
-       List.iter (box_line buf cols)
-         (List.filteri
-            (fun index _ -> index < row_budget.providers_rows)
-            section.Overview_providers.lines);
-       box_divider buf cols
-   | Some _ | None -> ());
-
-  (* Team block: who is doing what, who is stuck. The allocation gave it
-     [team_rows] rows plus its title and closing divider, or nothing. *)
-  (match overview_team state with
-   | Some team when row_budget.team_rows > 0 ->
-       let title, lines =
-         overview_team_lines team ~team_rows:row_budget.team_rows
-           ~flow:state.task_flow ~cols
-           ~detail_lines:(overview_team_detail_lines state)
-           ~pr_tag_of_keeper:(Repository_pulls.keeper_tag state.overview_pulls)
-       in
-       Buffer.add_string buf (fit_width title cols ^ "\n");
-       List.iter (box_line buf cols) lines;
-       box_divider buf cols
-   | Some _ | None -> ());
-
-  (* Tasks section *)
-  (* [state.tasks] holds only open tasks, so a done count folded over it was
-     zero on every frame. Completions come from the flow snapshot the same
-     refresh built from the whole backlog; without one the segment says
-     nothing rather than a zero it never measured. *)
-  let done_segment =
-    match state.task_flow with
-    | None -> ""
-    | Some flow ->
-        Printf.sprintf " · %s%d done 24h%s" (Theme.ok ())
-          flow.Masc_tui_task_flow.recent.completed Ansi.reset
-  in
-  let task_header =
-    (* A backlog with nothing open is when the completions are the whole
-       story, so the empty header keeps them. *)
-    if List.is_empty state.tasks then
-      match state.task_flow with
-      | None -> Printf.sprintf " %sTasks%s" Ansi.bold Ansi.reset
-      | Some _ ->
-          Printf.sprintf " %sTasks%s (0 open%s)" Ansi.bold Ansi.reset
-            done_segment
-    else
-      (* The todo count is the backlog line's, under the rows. *)
-      let count_of matches = List.length (List.filter matches state.tasks) in
-      let in_progress_c =
-        count_of (fun (t : task) ->
-            match t.status with
-            | InProgress _ -> true
-            | Todo | Claimed _ | AwaitingVerification _ | Done _ | Cancelled _ -> false)
-      in
-      let awaiting_c =
-        count_of (fun (t : task) ->
-            match t.status with
-            | AwaitingVerification _ -> true
-            | Todo | Claimed _ | InProgress _ | Done _ | Cancelled _ -> false)
-      in
-      let claimed_c =
-        count_of (fun (t : task) ->
-            match t.status with
-            | Claimed _ -> true
-            | Todo | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ -> false)
-      in
-      Printf.sprintf " %sTasks%s (%s%d in progress%s · %s%d awaiting%s · %s%d claimed%s%s)"
-        Ansi.bold Ansi.reset
-        (Theme.info ()) in_progress_c Ansi.reset
-        (Theme.warn ()) awaiting_c Ansi.reset
-        (Theme.info ()) claimed_c Ansi.reset
-        done_segment
-  in
-  (* Fitted to the frame, the way the Team title above it is. This title is
-     the longest thing the surface writes and it went in raw: at sixty columns
-     it read seven cells past the box edge while every other row stopped at
-     it. The held counts run in the order of the rows under it, which repeat
-     them, so a narrow fit gives up the done count first. *)
-  Buffer.add_string buf (fit_width task_header cols ^ "\n");
-
-  (match tasks_error with
-   | Some err when row_budget.task_error_rows > 0 ->
-        box_line buf cols
-          ((Theme.bad ()) ^ "  "
-          ^ fit_width err (cols - 8)
-          ^ Ansi.reset)
-   | None | Some _ -> ());
-  let no_tasks_note =
-    match local_rows_page state ~error:tasks_error with
-    | Page_empty -> Some "  (no tasks)"
-    | Page_unread -> Some page_unread_note
-    | Page_failed -> None
-  in
-  (match no_tasks_note with
-   | Some note when row_budget.task_rows > 0 && List.is_empty state.tasks ->
-     box_line buf cols (Ansi.dim ^ note ^ Ansi.reset)
-   | Some _ | None -> begin
-    (* Held work first, one row each, then the todo backlog as one line.
-       The selection is a task id; its row is looked up in this frame's
-       [Overview_tasks.rows], so a poll that drops a task above it cannot
-       move the highlight onto another task. *)
-    let now = Unix.gettimeofday () in
-    let selected =
-      Overview_tasks.selected_index state.tasks
-        ~selected:state.task_selected_id
-    in
-    (* An unread or failed backlog has said so above; "no task in progress"
-       would be a reading it never made. *)
-    let lines =
-      if List.is_empty state.tasks then []
-      else
-        Overview_tasks.lines ~height:row_budget.task_rows
-          ~selected state.tasks
-          (Overview_tasks.backlog state.tasks_domain)
-    in
-    let ages =
-      List.filter_map
-        (function
-          | Overview_tasks.Task_row { task; _ } ->
-              Some
-                (Overview_tasks.age_text ~age_text:keeper_lane_idle_text ~now
-                   (Overview_tasks.held_since task))
-          | Overview_tasks.More_active _ | Overview_tasks.Nothing_active
-          | Overview_tasks.Todo_backlog _ ->
-              None)
-        lines
-    in
-    (* Ages right-aligned to the widest one drawn, so the ids start in one
-       column. *)
-    let age_cells =
-      List.fold_left (fun widest age -> max widest (String.length age)) 0 ages
-    in
-    List.iter
-      (fun line ->
-        match line with
-        | Overview_tasks.Task_row { index; task } ->
-            let age =
-              Overview_tasks.age_text ~age_text:keeper_lane_idle_text ~now
-                (Overview_tasks.held_since task)
-            in
-            let row =
-              Printf.sprintf "%s%*s%s %s" Ansi.dim age_cells age Ansi.reset
-                (task_line task)
-            in
-            if
-              state.task_focus = Right_pane
-              && Option.equal Int.equal selected (Some index)
-            then
-              box_line_selected buf cols (Masc_tui_theme.strip_sgr ("> " ^ row))
-            else box_line buf cols ("  " ^ row)
-        | Overview_tasks.More_active _ | Overview_tasks.Nothing_active
-        | Overview_tasks.Todo_backlog _ ->
-            Option.iter
-              (fun text -> box_line buf cols (Ansi.dim ^ "  " ^ text ^ Ansi.reset))
-              (Overview_tasks.summary_text ~age_text:keeper_lane_idle_text ~now
-                 line))
-      lines
-  end);
-
-  (* Carry the frame to the bottom of the terminal. Without this the surface
-     stops where its content does and the footer under it lands wherever that
-     happens to be -- halfway up a tall window. *)
-  for _ = 1 to row_budget.filler_rows do
+  let capacity = max 0 (body_rows - 5) in
+  let visible = List.filteri (fun index _ -> index < capacity) lines in
+  List.iter (box_line buf cols) visible;
+  for _ = List.length visible to capacity - 1 do
     box_empty buf cols
   done;
-
   box_bottom buf cols;
-
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
-       ~hints:
-         (Masc_tui_keys.footer_hints_overview
-            ~task_focus:(state.task_focus = Right_pane)));
-
+       ~hints:(Masc_tui_keys.footer_hints Overview));
   finish_surface state ~surface_key:"overview" ~rows:terminal_rows ~cols buf
 
 (* One task's event history, appended after the detail body so it rides the
@@ -1241,6 +708,51 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
        ~hints:"j/k:scroll  x:cancel  Left / Esc:back  r:refresh");
 
   finish_surface state ~clamped:(Task_detail offset) ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
+
+let render_work_tasks (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Overview_tasks.rows state.tasks in
+  let selected = Overview_tasks.selected_index state.tasks
+      ~selected:state.task_selected_id in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"work-tasks"
+    ~title:(screen_title " MASC Work / Tasks")
+    ~hints:"t:Goals  j/k:select  Enter:detail  Esc:Goals"
+    ~body:(fun ~budget c ->
+      c.push (Printf.sprintf " Active tasks · %d in progress, awaiting verification, or claimed"
+                (List.length rows));
+      (match state.task_flow with
+       | None -> c.push " Task history · not observed"
+       | Some flow ->
+           let completed =
+             List.map (fun (day : Masc_tui_task_flow.day) ->
+               float_of_int day.d_completed) flow.daily in
+           c.push (Printf.sprintf " Done by UTC day (%d days): %s"
+                     (List.length flow.daily) (braille_sparkline completed)));
+      c.push "";
+      let room = max 0 (budget - 3) in
+      if rows = [] then c.push " No active tasks";
+      let first =
+        match selected with
+        | None -> 0
+        | Some index -> max 0 (index - room + 1)
+      in
+      List.iteri
+        (fun index (task : Tui_decode.task) ->
+           if index >= first && index < first + room then
+             let status =
+               match task.status with
+               | Masc_domain.InProgress _ -> "working"
+               | Masc_domain.AwaitingVerification _ -> "awaiting verification"
+               | Masc_domain.Claimed _ -> "claimed"
+               | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> "other"
+             in
+             let line =
+               Printf.sprintf " %s %-24s %s"
+                 (Terminal_text.single_line task.id) status
+                 (Terminal_text.single_line task.title)
+             in
+             if Some index = selected then c.push_selected line else c.push line)
+        rows)
 
 (** Render the Approvals surface (pending confirmations). *)
 (* The ask, whole. The list row is one line through [single_line], which
@@ -13138,6 +12650,54 @@ let render_acting (state : state) =
     | Actions | Everything -> Acting_selection (scroll, cursor) in
   finish_surface state ~clamped ~surface_key:"acting" ~rows:terminal_rows ~cols buf
 
+let usage_lines ~cols (state : state) =
+  let accounts =
+    match Overview_providers.section
+            ~providers:state.overview_providers ~runtimes:state.overview_quota
+            ~now:(Unix.gettimeofday ()) ~width:(max 20 (cols - 4)) with
+    | Some section -> section.title :: section.lines
+    | None ->
+        [ (match state.overview_providers with
+           | Providers_unread -> " Accounts · not observed"
+           | Providers_failed reason ->
+               " Accounts · unavailable: " ^ Terminal_text.single_line reason
+           | Providers_read _ -> " Accounts · no provider accounts reported") ]
+  in
+  let keepers =
+    match state.keeper_usage with
+    | Keeper_usage_unread -> [ " Keeper usage (24h) · not observed" ]
+    | Keeper_usage_error reason ->
+        [ " Keeper usage (24h) · unavailable: " ^ Terminal_text.single_line reason ]
+    | Keeper_usage_read Keeper_usage_loading ->
+        [ " Keeper usage (24h) · collecting" ]
+    | Keeper_usage_read (Keeper_usage_window { kuw_rows; _ }) ->
+        " Keeper usage · last 24h · recorded turn metrics"
+        :: (if kuw_rows = [] then [ "   No Keepers in the returned roster" ]
+            else List.map
+              (fun (row : Tui_decode.keeper_usage_row) ->
+                let tokens =
+                  Option.fold ~none:"unreported" ~some:string_of_int row.kur_tokens in
+                let cost =
+                  Option.fold ~none:"unreported"
+                    ~some:(Printf.sprintf "$%.4f") row.kur_cost_usd in
+                let coverage =
+                  match row.kur_coverage with
+                  | Keeper_usage_complete -> "read"
+                  | Keeper_usage_partial count ->
+                      Printf.sprintf "partial (%d malformed rows)" count
+                  | Keeper_usage_failed reason ->
+                      "unavailable: " ^ Terminal_text.single_line reason
+                in
+                Printf.sprintf
+                  "   %s · %d turns · tokens %s (%d reported, %d missing) · cost %s (%d reported, %d missing) · %s"
+                  (Terminal_text.single_line row.kur_name)
+                  row.kur_turn_samples tokens row.kur_tokens_reported
+                  row.kur_tokens_missing cost row.kur_cost_reported
+                  row.kur_cost_missing coverage)
+              kuw_rows)
+  in
+  accounts @ [ "" ] @ keepers
+
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -13148,7 +12708,7 @@ let render_metrics (state : state) =
      title does not name it a second time. *)
   let title =
     Printf.sprintf "%s  %s  %s"
-      (screen_title " MASC Metrics")
+      (screen_title " MASC Usage")
       timestamp (connection_badge state)
   in
   (* The section's lines are formatted by the drawing, so the row it could
@@ -13160,10 +12720,19 @@ let render_metrics (state : state) =
     state ~terminal_rows ~cols ~surface_key:"metrics"
     ~title ~hints:(Masc_tui_keys.footer_hints state.view)
     ~body:(fun ~budget c ->
-      Render_metrics.render_metrics_body ~cols ~budget state
-        ~report_scroll:(fun scroll -> drawn_metrics_scroll := scroll)
-        ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
-        ~push_divider:c.push_divider ~push_empty:c.push_empty)
+      let lines = usage_lines ~cols state in
+      let height = max 0 (budget - 1) in
+      let max_scroll = max 0 (List.length lines - height) in
+      let scroll = min max_scroll (max 0 state.metrics_scroll) in
+      drawn_metrics_scroll := scroll;
+      List.iteri
+        (fun index line ->
+          if index >= scroll && index < scroll + height then c.push line)
+        lines;
+      if List.length lines > height then
+        c.push (Printf.sprintf " [rows %s · j/k to scroll]"
+                  (Masc_tui_scroll.window_text ~scroll ~height
+                     (List.length lines))))
 
 (** Render the runtime picker: the dispatchable catalogue, with the keeper it
     is choosing for and where that keeper points today in the header. *)
@@ -15815,9 +15384,15 @@ let render_surface (state : state) =
                         | Board_detail.Loading -> c.push "  Loading Board post..."
                         | Board_detail.Ready _ -> ())))
   | Planning ->
-      (match state.planning_mode with
-       | Planning_list -> render_planning_list state
-       | Planning_detail goal_id ->
+      (match state.task_detail_id, state.task_focus, state.planning_mode with
+       | Some _, Right_pane, Planning_list ->
+           (match Task_selection.detail_row
+                    ~detail_id:state.task_detail_id ~tasks:state.tasks_domain with
+            | Some task -> render_task_detail state task
+            | None -> render_work_tasks state)
+       | None, Right_pane, Planning_list -> render_work_tasks state
+       | _, _, Planning_list -> render_planning_list state
+       | _, _, Planning_detail goal_id ->
            let goals = match state.planning with None -> [] | Some p -> p.pl_goals in
            match List.find_opt (fun g -> g.pg_id = goal_id) goals with
            | Some goal ->

@@ -36,13 +36,13 @@ let every_surface =
    arrives with a cursor and nothing to open has to be a decision. *)
 let enter_atom_count_exceptions =
   [ (* Charts, not a list: [j/k] scrolls. *)
-    "Metrics", 0
+    "Usage", 0
   ; (* A detail screen. Its tabs carry their own keys. *)
     "Keeper detail", 0
   ; (* A roster with a cursor and nothing the cursor opens. *)
-    "Config / Runtime / Clients", 0
+    "System / Runtime / Clients", 0
   ; (* A scrolling reading, not a row list. *)
-    "Config / Tools", 0
+    "System / Tools", 0
   ; (* The second is the history overlay's, which [footer_hints_code] drops
        from the panes that have no commits. *)
     "Workspace / Code", 2
@@ -51,7 +51,7 @@ let enter_atom_count_exceptions =
        union the help sheet shows, not of any footer. The per-pane form of
        this check is [test_every_config_pane_answers_once] below, which is
        stricter than the one here -- it asks seven screens, not one union. *)
-    "Config", 2
+    "System", 2
   ]
 
 let test_every_surface_names_one_key_that_acts_on_the_cursor () =
@@ -815,7 +815,7 @@ let test_every_detail_surface_steps_through_its_list () =
 
 let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
-    "j/k:move  v:next Planning tab  f:filter  s:sort  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  a:confirm proof  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  t:Goals / Tasks  v:next Planning tab  f:filter  s:sort  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  a:confirm proof  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints ~detail_open:false Planning)
 
 let test_board_footer_names_reversible_hearth_navigation () =
@@ -881,7 +881,7 @@ let test_verdicts_is_a_planning_child () =
     (ring_stop Harness);
   Alcotest.(check bool) "and the help sheet files it under Planning" true
     (List.exists
-       (fun (label, _) -> String.equal label "Planning / Task Verdicts")
+       (fun (label, _) -> String.equal label "Work / Task Verdicts")
        (Masc_tui_keys.help_sections ()))
 
 (* Changes reads one keeper's file writes and binds to the roster cursor on
@@ -1226,10 +1226,10 @@ let test_every_config_pane_answers_once () =
     config_panes
 
 let test_lanes_is_a_main_destination () =
-  Alcotest.(check bool) "Lanes is a top-level ring entry" true
+  Alcotest.(check bool) "Lanes is reached through System" false
     (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
-  Alcotest.(check bool) "Lanes has its own ring stop" true
-    (ring_stop Lanes <> ring_stop Config);
+  Alcotest.(check int) "Lanes highlights System"
+    (ring_stop Config) (ring_stop Lanes);
   Alcotest.(check bool) "help sheet names Lanes directly" true
     (List.exists
        (fun (label, _) -> String.equal label "Lanes")
@@ -1273,7 +1273,7 @@ let test_resources_is_a_config_child () =
     (ring_stop Resources);
   Alcotest.(check bool) "and the help sheet files it under Config" true
     (List.exists
-       (fun (label, _) -> String.equal label "Config / Resources")
+       (fun (label, _) -> String.equal label "System / Resources")
        (Masc_tui_keys.help_sections ()));
   let config_keys =
     List.map
@@ -1291,7 +1291,7 @@ let test_tools_is_a_config_child () =
     (ring_stop Tools);
   Alcotest.(check bool) "and the help sheet files it under Config" true
     (List.exists
-       (fun (label, _) -> String.equal label "Config / Tools")
+       (fun (label, _) -> String.equal label "System / Tools")
        (Masc_tui_keys.help_sections ()));
   let config_keys =
     List.map
@@ -1313,17 +1313,17 @@ let test_logs_is_an_activity_child () =
     [Runtime; Clients];
   Alcotest.(check bool) "Logs is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = System_logs) surface_ring);
-  Alcotest.(check int) "Logs highlights Activity"
-    (ring_stop Acting)
+  Alcotest.(check int) "Logs highlights System"
+    (ring_stop Config)
     (ring_stop System_logs);
-  Alcotest.(check bool) "and the help sheet files it under Activity" true
+  Alcotest.(check bool) "the help sheet still exposes logs" true
     (List.exists
-       (fun (label, _) -> String.equal label "Activity / Logs")
+       (fun (label, _) -> String.equal label "System / Logs")
        (Masc_tui_keys.help_sections ()));
-  Alcotest.(check bool) "and the ring stop is spelled Activity" true
+  Alcotest.(check bool) "the ring stop is spelled System" true
     (List.exists
        (fun ((surface : surface), label) ->
-         surface = Acting && String.equal label "Activity")
+         surface = Config && String.equal label "System")
        surface_ring);
   let acting_keys =
     List.map
@@ -1331,22 +1331,22 @@ let test_logs_is_an_activity_child () =
       (Masc_tui_keys.for_surface Acting)
   in
   Alcotest.(check bool) "Activity documents the way to Logs" true
-    (List.mem "1 / 2" acting_keys)
+    (List.mem "e / l" acting_keys)
 
 (* Telemetry and multicore engine metrics hang off Overview under [m]
    instead of holding a top-level Tab stop of their own. *)
 let test_metrics_is_an_overview_child () =
-  Alcotest.(check bool) "Metrics is not a top-level ring entry" false
+  Alcotest.(check bool) "Usage is a top-level ring entry" true
     (List.exists (fun (surface, _) -> surface = Metrics) surface_ring);
-  Alcotest.(check int) "Metrics highlights Overview"
-    (ring_stop Overview)
+  Alcotest.(check int) "Usage highlights itself"
+    (ring_stop Metrics)
     (ring_stop Metrics);
   let overview_keys =
     List.map
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
       (Masc_tui_keys.for_surface Overview)
   in
-  Alcotest.(check bool) "Overview documents the [m] hop" true
+  Alcotest.(check bool) "Dashboard documents the [m] hop" true
     (List.mem "m" overview_keys)
 
 let test_browser_lanes_highlight_config () =
@@ -1378,7 +1378,7 @@ let test_visible_surface_ring_declutter () =
     (List.exists (fun (s, _) -> s = Approvals) ring_empty);
   state.view <- Approvals;
   let ring_active = visible_surface_ring state in
-  Alcotest.(check bool) "Approvals shown when active surface" true
+  Alcotest.(check bool) "Approvals stay inside Work when active" false
     (List.exists (fun (s, _) -> s = Approvals) ring_active);
   state.view <- Overview;
   state.keeper_tool_approvals <-
@@ -1393,7 +1393,7 @@ let test_visible_surface_ring_declutter () =
       }
     ];
   let ring_with_pending = visible_surface_ring state in
-  Alcotest.(check bool) "Approvals shown when pending items exist" true
+  Alcotest.(check bool) "Approvals stay inside Work when pending" false
     (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
 
 (* One ask can carry several questions, and the surface counts them under the
@@ -1507,8 +1507,8 @@ let test_visible_surface_ring_open_ask () =
           ]
       };
   let ring = visible_surface_ring state in
-  Alcotest.(check bool) "Approvals stays visible with zero approvals and one open ask"
-    true (List.exists (fun (s, _) -> s = Approvals) ring)
+  Alcotest.(check bool) "Ask keeps the top-level ring compact"
+    false (List.exists (fun (s, _) -> s = Approvals) ring)
 
 (* The sheet is the only place the keeper marks are named where a reader
    can read all of them at once: the Keepers rows pair each glyph with its word
@@ -1580,7 +1580,7 @@ let test_the_sheet_says_the_listing_tail_once () =
             (List.exists (fun (k, _) -> String.equal k key) rows))
         [ "Tab / Shift-Tab"; "r"; "q" ];
       Alcotest.(check bool) "a surface's own r stays" true
-        (match List.assoc_opt "Config" sections with
+        (match List.assoc_opt "System" sections with
          | None -> false
          | Some config -> List.mem ("r", "reload") config)
 
@@ -1930,7 +1930,7 @@ let test_help_documents_what_was_missing () =
   Alcotest.(check bool) "the palette has a row" true (List.mem ":" global);
   Alcotest.(check bool) "the cross-surface Keepers jump has a row" true
     (List.mem "2" global);
-  let logs = List.map fst (section "Activity / Logs") in
+  let logs = List.map fst (section "System / Logs") in
   Alcotest.(check bool) "Logs documents only what is bound" false
     (List.mem "g / G" logs)
 
@@ -2020,10 +2020,10 @@ let test_the_sheet_opens_on_the_current_surface () =
                 (Masc_tui_keys.sheet_bindings surface))
              keys
        | [] -> Alcotest.fail (name ^ ": no sections at all"))
-    [ ("Overview", Overview, "Overview")
+    [ ("Dashboard", Overview, "Dashboard")
     ; ("Keepers", Keepers Keeper_list, "Keepers")
     ; ("Chat", Keepers Keeper_message, "Chat")
-    ; ("Config", Config, "Config")
+    ; ("System", Config, "System")
     ]
 
 (* The Keepers sub-modes are one entry on the strip and three sections here.
@@ -2045,7 +2045,7 @@ let test_without_a_surface_the_order_is_the_strips () =
   match Masc_tui_keys.help_sections () with
   | (title, _) :: (second, _) :: _ ->
       Alcotest.(check string) "Global first" "Global" title;
-      Alcotest.(check string) "then the strip's first surface" "Overview" second
+      Alcotest.(check string) "then the strip's first surface" "Dashboard" second
   | _ -> Alcotest.fail "expected at least two sections"
 
 (* --- Lanes drill-down: the lane notice, the combined "/" search list, and

@@ -1395,10 +1395,12 @@ let listing_rows_below_the_body = 3
    is there. Only the label -- the columns a full list carries do not fit
    thirty cells, and a truncated author reads as a different author.
 
-   [selected] indexes [labels]; the pane scrolls to keep that row drawn.
+   [selection] indexes [labels]; the pane scrolls to keep that row drawn.
+   [None] draws no row as selected.
    [focused] says whether the arrow keys are pointed here, which is a
    different question from which row is open. *)
-let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
+let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~labels
+    ~selection =
   framed_top buf cols;
   (* Focus wears a caret, not a key list: which keys work is the footer's
      sentence; which pane hears them is this one glyph. *)
@@ -1410,7 +1412,10 @@ let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
   framed_divider buf cols;
   let content_height = max 0 (rows - framed_chrome_rows) in
   let first =
-    if selected < content_height then 0 else selected - content_height + 1
+    match selection with
+    | Some selected when selected >= content_height ->
+        selected - content_height + 1
+    | Some _ | None -> 0
   in
   let labels_window = Rows.of_list ~first:first ~height:content_height labels in
   for i = 0 to content_height - 1 do
@@ -1421,7 +1426,7 @@ let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
          included. *)
       let drawn = Terminal_text.single_line label in
       framed_line buf cols
-        (if first + i = selected then
+        (if Option.equal Int.equal selection (Some (first + i)) then
            if focused then
              Theme.selection ^ " " ^ drawn
              ^ String.make
@@ -1433,6 +1438,10 @@ let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
     | None -> framed_empty buf cols
   done;
   framed_bottom buf cols
+
+let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
+  write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~labels
+    ~selection:(Some selected)
 
 
 (* The row a surface draws when its load failed. Six copies wrote the sentence

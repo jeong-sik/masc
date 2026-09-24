@@ -496,6 +496,13 @@ let carried_start_front_to_string = function
   | Librarian_progress _ -> "librarian_progress"
 ;;
 
+let warn_if_sent_on_unknown_start ~keeper_name = function
+  | Turn_start_unknown { reason } ->
+    Keeper_carried_front.warn_range_opens_on_newest_atom ~keeper_name ~reason
+  | Carried_seed _ | Lane_cut | Turn_start | Librarian_snapshot _ | Librarian_progress _ ->
+    ()
+;;
+
 let continuity_observation_input ~trace_id ~continuity front =
   match front, continuity with
   | Librarian_snapshot { absorbed_through; boundary_line }, _ ->

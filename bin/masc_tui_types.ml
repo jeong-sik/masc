@@ -1975,6 +1975,14 @@ type overview_quota_reading =
   | Quota_read of Tui_decode.runtime_option list
   | Quota_failed of string
 
+(** The Overview's reading of [GET /api/v1/dashboard/goals]. A failed read and
+    one not made yet are each drawn as what they are, never as an empty
+    section. *)
+type overview_goals_reading =
+  | Goals_unread
+  | Goals_read of Tui_decode.overview_goal list
+  | Goals_failed of string
+
 (** One open pull request as [GET /api/v1/repositories/pulls] reports it
     (RFC-0465). The check and review words are parsed at decode; a word this
     build cannot name makes the row undecodable rather than a default. *)
@@ -2883,6 +2891,7 @@ type surface_needs = {
   needs_asks : bool;
   needs_runtime_quota : bool;
   needs_repository_pulls : bool;
+  needs_overview_goals : bool;
 }
 
 let nothing =
@@ -2897,6 +2906,7 @@ let nothing =
     needs_asks = false;
     needs_runtime_quota = false;
     needs_repository_pulls = false;
+    needs_overview_goals = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -2919,12 +2929,14 @@ let rec surface_needs ~keeper_pane_drawn surface =
 and surface_needs_of_surface : surface -> surface_needs = function
   (* The Team block names the quota windows that are shut. The catalogue is
      43 KB and answers in under two milliseconds on the live runtime, and
-     only this surface draws the windows beside the Keepers they stop. *)
+     only this surface draws the windows beside the Keepers they stop.
+     The goal tree is read only here too: the GOALS section is its reader. *)
   | Overview ->
       { nothing with
         needs_transport = true
       ; needs_runtime_quota = true
       ; needs_repository_pulls = true
+      ; needs_overview_goals = true
       }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -2987,6 +2999,8 @@ let surface_needs_delta ~previous ~next =
       next.needs_runtime_quota && not previous.needs_runtime_quota
   ; needs_repository_pulls =
       next.needs_repository_pulls && not previous.needs_repository_pulls
+  ; needs_overview_goals =
+      next.needs_overview_goals && not previous.needs_overview_goals
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -3124,6 +3138,7 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.Run_finished
   | Masc_tui_keeper_chat_live.Runtime_attempt_started _
   | Masc_tui_keeper_chat_live.Stream_model_started _
+  | Masc_tui_keeper_chat_live.Stream_details _
   | Masc_tui_keeper_chat_live.Undecodable _ ->
       if Masc_tui_keeper_chat_log.add turn_log.tl_log ~seq delta
       then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
@@ -5542,7 +5557,9 @@ type state = {
      until it is sent, and cleared with the form -- a field left filled is a
      credential sitting in the process for as long as the pane is up. *)
   mutable identity_app_form: identity_app_form option;
-  mutable task_cursor: int;
+  mutable task_selected_id: string option;
+      (* The Overview task row the operator chose, by id. An index into the
+         rows would name another task after a poll drops a finished one. *)
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
   mutable tasks_error: string option;
@@ -5605,8 +5622,9 @@ type state = {
   mutable last_action: (string * float) option;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
-     fleet's own reading of what is missing. *)
-  mutable fleet_safety: fleet_safety option;
+     fleet's own reading of what is missing, or the server's word that its
+     health snapshot is being rebuilt. *)
+  mutable fleet_safety: Tui_decode.fleet_safety_reading option;
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
   mutable local_workspace: local_workspace_reading;
@@ -5633,6 +5651,7 @@ type state = {
      the rows under an open picker's cursor. *)
   mutable overview_quota: overview_quota_reading;
   mutable overview_pulls: overview_pulls_reading;
+  mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
@@ -7735,7 +7754,7 @@ let create_state
   identity_filter = None;
   identity_app_form = None;
   github_identity_view_error = None;
-  task_cursor = 0;
+  task_selected_id = None;
   task_detail_id = None;
   task_detail_scroll = 0;
   tasks_error = None;
@@ -7767,6 +7786,7 @@ let create_state
   runtime_catalog = [];
   overview_quota = Quota_unread;
   overview_pulls = Overview_pulls_unread;
+  overview_goals = Goals_unread;
   runtime_lanes = [];
   runtime_assignments = [];
   runtime_catalog_error = None;

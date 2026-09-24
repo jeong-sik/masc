@@ -1238,6 +1238,17 @@ let load_repository_pulls ~(host : string) ~(port : int) :
   | Error err -> Error ("pull requests load failed: " ^ err)
   | Ok json -> Repository_pulls.decode_reading json
 
+(* The Overview's GOALS section. A phase this build does not know refuses the
+   whole reading: a goal dropped from the list, or drawn under a phase it is
+   not in, would answer "is work moving a goal" about a different fleet. *)
+let load_overview_goals ~(host : string) ~(port : int) :
+    (Tui_decode.overview_goal list, string) result =
+  match Masc_tui_http.fetch_dashboard_goals ~host ~port with
+  | Error err -> Error ("goals load failed: " ^ err)
+  | Ok json ->
+      Result.map_error Tui_decode.overview_goals_error_to_string
+        (Tui_decode.decode_overview_goals json)
+
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
     (overview_snapshot, string) result =
@@ -1633,7 +1644,7 @@ let restore_preset ~(host : string) ~(port : int) ~(name : string)
    started has no row, so the roster shows nine keepers whether the tenth is
    absent by design or blocked. *)
 let load_fleet_safety ~(host : string) ~(port : int) :
-    (Tui_decode.fleet_safety, string) result =
+    (Tui_decode.fleet_safety_reading, string) result =
   match fetch_fleet_safety ~host ~port with
   | Error err -> Error ("fleet safety load failed: " ^ err)
   | Ok json -> Tui_decode.decode_fleet_safety json

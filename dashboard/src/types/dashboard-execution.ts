@@ -436,7 +436,6 @@ export interface DashboardExecutionContinuityBrief {
   note: string
   focus: string
   last_signal_at?: string | null
-  generation?: number
   turn_count?: number
   context_ratio?: number | null
   continuity?: string | null

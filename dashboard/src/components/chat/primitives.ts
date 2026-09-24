@@ -625,7 +625,6 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
     typeof details.usage?.totalTokens === 'number' ? { label: '토큰', value: `${details.usage.totalTokens}` } : null,
     formatCurrency(details.costUsd) ? { label: '비용', value: formatCurrency(details.costUsd)! } : null,
     details.traceId ? { label: '트레이스', value: details.traceId } : null,
-    typeof details.generation === 'number' ? { label: '세대', value: `${details.generation}` } : null,
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
 

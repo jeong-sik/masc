@@ -121,13 +121,12 @@ let completed_history_end ~trace_id ~lines ~messages =
    the newest atom alone and the origin says so, rather than on the whole
    history under a boundary that was never read (§13.4 does not fold an
    unknown start into 0). Under the small input policy no completed-turn
-   boundary demotes tool bodies either. *)
+   boundary demotes tool bodies either. Reading it logs nothing: a request
+   whose range it opens says so ([Keeper_carried_front.warn_range_opens_on_newest_atom]),
+   and the dispatches that read it but start from a seed or a Librarian
+   point, or the forecast that only looks, have nothing to report. *)
 let turn_start ~config ~keeper_name ~trace_id ~messages =
-  let unknown reason =
-    Log.Keeper.warn ~keeper_name
-      "turn start unknown, the range opens on the newest atom alone: %s" reason;
-    Keeper_carried_front.Turn_boundary_unknown { reason }
-  in
+  let unknown reason = Keeper_carried_front.Turn_boundary_unknown { reason } in
   match
     Keeper_turn_boundaries.read
       ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
@@ -382,6 +381,7 @@ type try_provider_ctx =
        candidate that was refused, so the lane's next candidate composes
        from it instead of starting over from the turn start. *)
     hold_carried_front : Keeper_carried_front.seed -> unit
+  ; restore_carried_front : Keeper_carried_front.seed option -> unit
   ; base_path : string
   ; keeper_name : string
   ; name : string
@@ -1627,6 +1627,8 @@ let bounded_model_input_projection
         messages
     in
     let composed = view.composed in
+    Keeper_carried_front.warn_if_origin_is_unknown_start
+      ~keeper_name:ctx.keeper_name composed.origin;
     let history_atom_count = composed.history_atom_count in
     (* Asked only after a refusal ([current_turn_demotion_sequence]). *)
     state.current_turn_demotion :=
@@ -2535,11 +2537,12 @@ let eviction_retry_to_json = function
    arrives that way -- a 400 whose only size signal is its sentence, with
    no typed code (RFC librarian-lifecycle §4.10 lists the measured wires) --
    and reading the sentence
-   would be a string classifier. Today this is the same set as
-   [refusal_evicts]. It is kept separate so that this check keeps all three
-   when [refusal_evicts] narrows to the two typed size refusals (#38286).
+   would be a string classifier. [refusal_evicts] names only the two typed
+   size refusals (#38286); this check keeps the third.
    - A refusal that was not about size draws the same refusal from the
-     boundary. No accepted start is recorded, and the turn ends on it.
+     boundary. The held front is then given back ([turn_boundary_resend_sequence]),
+     so a later candidate that the declared-lane walk asks opens on the
+     original range and no accepted start at the boundary is recorded.
    - A refusal that was about size leaves a gap the Librarian still reads.
      Once it reaches the accepted start the request starts at its point
      again (rule 5), so no context is lost for good.
@@ -2589,11 +2592,21 @@ let boundary_resend_on = function
    a Librarian point, the Librarian reads past it. A refused boundary
    request, a refusal of a range that opened at or after the boundary, and
    every other error end the sequence with the error in hand. The range is
-   never halved on this path. *)
+   never halved on this path.
+
+   The front stays held only when the boundary request is accepted or is
+   refused for a typed size ([refusal_evicts]). A boundary request refused
+   for any other reason says the boundary did not answer the refusal, so
+   the front held before it comes back: without that, the later candidate
+   the walk asks opens at the boundary, its success records that boundary as
+   the accepted start, and every later turn starts there -- context cut for
+   a refusal that was never about size. *)
 let turn_boundary_resend_sequence
       ~same_run_retry_authorized
       ~(refused_range : unit -> (Keeper_carried_front.origin * int) option)
       ~(turn_start_front : unit -> Keeper_carried_front.seed option)
+      ~(held_front : unit -> Keeper_carried_front.seed option)
+      ~(restore_front : Keeper_carried_front.seed option -> unit)
       ~(hold_front : Keeper_carried_front.seed -> unit)
       ~(on_turn_start : Agent_core.Error.t -> Keeper_carried_front.seed -> unit)
       ~(attempt : unit -> ('ok, Agent_core.Error.t) result)
@@ -2614,9 +2627,14 @@ let turn_boundary_resend_sequence
        (match turn_start_front () with
         | Some (front : Keeper_carried_front.seed)
           when front.first_atom > refused_first_atom ->
+          let before = held_front () in
           hold_front front;
           on_turn_start error front;
-          attempt ()
+          (match attempt () with
+           | Ok _ as ok -> ok
+           | Error resent as refused ->
+             if not (refusal_evicts resent) then restore_front before;
+             refused)
         | Some (_ : Keeper_carried_front.seed) | None -> failed)
      | Some
          ( ( Keeper_carried_front.Carried _
@@ -2809,7 +2827,7 @@ let run_try_provider_with_carried_range_eviction
   let same_run_retry_authorized () = same_run_retry_allowed ctx.checkpoint_progress in
   (* The lane's own answer to a size refusal, which depends on where the
      range started; what is left after it is the current turn's demotion. *)
-  let boundary_resend ~source =
+  let boundary_resend ?(on_turn_start_extra = fun (_ : Keeper_carried_front.seed) -> ()) ~source () =
     turn_boundary_resend_sequence
       ~same_run_retry_authorized
       ~refused_range:(fun () ->
@@ -2831,8 +2849,11 @@ let run_try_provider_with_carried_range_eviction
             (fun front_digest ->
                { Keeper_carried_front.first_atom; front_digest; source })
             (sent.digest_at first_atom)))
+      ~held_front:ctx.carried_front_after_refusal
+      ~restore_front:ctx.restore_carried_front
       ~hold_front:ctx.hold_carried_front
       ~on_turn_start:(fun error front ->
+        on_turn_start_extra front;
         Log.Keeper.info
           ~keeper_name:ctx.keeper_name
           "model input carried range refused runtime=%s: the turn's front moves to \
@@ -2846,9 +2867,19 @@ let run_try_provider_with_carried_range_eviction
   let range_answer () =
     match ctx.continuity with
     | Some (Summarized _ | Absorbed _) ->
-      boundary_resend ~source:Keeper_carried_front.Turn_start_after_librarian_refusal
+      boundary_resend ~source:Keeper_carried_front.Turn_start_after_librarian_refusal ()
     | Some Without_snapshot ->
-      boundary_resend ~source:Keeper_carried_front.Turn_start_after_seed_refusal
+      boundary_resend
+        ~on_turn_start_extra:(fun (_ : Keeper_carried_front.seed) ->
+          (* The refused seed gives way to the turn start; an unknown one puts
+             the front on the newest atom alone for the rest of the turn. *)
+          match ctx.turn_boundary with
+          | Keeper_carried_front.Turn_boundary_unknown { reason } ->
+            Keeper_carried_front.warn_range_opens_on_newest_atom
+              ~keeper_name:ctx.keeper_name ~reason
+          | Keeper_carried_front.Turn_boundary _ -> ())
+        ~source:Keeper_carried_front.Turn_start_after_seed_refusal
+        ()
     | None ->
       (* An uncapped runtime retries like any other. #36817 kept such a
          runtime out of the token halving because that walk invented a seed

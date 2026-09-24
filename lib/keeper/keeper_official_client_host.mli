@@ -303,6 +303,12 @@ val read_librarian_front
 
 val carried_start_front_to_string : carried_start_front -> string
 
+val warn_if_sent_on_unknown_start : keeper_name:string -> carried_start_front -> unit
+(** {!Keeper_carried_front.warn_range_opens_on_newest_atom} when the range a
+    lane sent opened on an unknown turn start. Called where the lane reports
+    the front it sent, so a Claude Code resume, which sends no range, says
+    nothing; composing a range logs nothing. *)
+
 val continuity_observation_input
   :  trace_id:string
   -> continuity:Keeper_turn_driver_try_provider.continuity option

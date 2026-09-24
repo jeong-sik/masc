@@ -44,6 +44,9 @@ let failing_text (fleet : Tui_decode.fleet_safety) =
                    (fun (label, count) -> Printf.sprintf "%s %d" label count)
                    classes)))
 
+let not_measured_text ~status =
+  Printf.sprintf "not measured yet (%s)" (Terminal_text.single_line status)
+
 (* The task owners the fleet has no fiber for, and how much of that reading is
    missing. A Keeper whose profile does not load is a scan error: its tasks are
    left out of the count, and only a backlog failure moves the fleet status off

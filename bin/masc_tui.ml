@@ -1904,7 +1904,8 @@ type async_msg =
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
-  | Msx_frame_loaded of msx_poll_request * (Masc_tui_types.msx_frame option, string) result
+  | Msx_frame_loaded of msx_poll_request
+      * (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result
   | Dos_live_loaded of machine_live_request * (Masc_tui_machine_live.answer, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
      on every one of these rather than read from the state at delivery: the
@@ -8852,13 +8853,21 @@ let render_spectator (state : Masc_tui_types.state) =
         Masc_tui_machine_live.Dos state.dos_live
 ;;
 
-(* The MSX frame a live read stands for. It names no mode, media or players;
-   the next tick answer does. *)
-let msx_frame_of_live (view : Masc_tui_machine_live.view) =
+(* A live read names no mode, media or players. Keep the last tick metadata
+   only within the same incarnation, so a keypress does not briefly erase the
+   title while a replacement machine never inherits its predecessor's name. *)
+let msx_frame_of_live ~previous_live ~previous_frame
+    (view : Masc_tui_machine_live.view) =
   match view with
   | Masc_tui_machine_live.Showing ({ time = Masc_tui_machine_live.Frame number; _ } as p) ->
+      let meta =
+        match previous_live, previous_frame with
+        | Masc_tui_machine_live.Showing old, Some frame
+          when String.equal old.mark.incarnation p.mark.incarnation -> frame.msx_meta
+        | _ -> None
+      in
       (view, Some { Masc_tui_types.msx_number = number; msx_width = p.width;
-                    msx_height = p.height; msx_rgb = p.rgb; msx_meta = None })
+                    msx_height = p.height; msx_rgb = p.rgb; msx_meta = meta })
   | Masc_tui_machine_live.Showing { time = Masc_tui_machine_live.Untimed; _ } ->
       (Masc_tui_machine_live.Failed "an MSX answer carried no frame number", None)
   | Masc_tui_machine_live.Unread | Masc_tui_machine_live.Not_loaded
@@ -8876,7 +8885,10 @@ let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
   (match Masc_tui_machine_live.advance state.msx_live result with
    | None -> ()
    | Some view ->
-       let view, frame = msx_frame_of_live view in
+       let view, frame =
+         msx_frame_of_live ~previous_live:state.msx_live
+           ~previous_frame:state.msx_frame view
+       in
        state.msx_live <- view;
        state.msx_frame <- frame;
        msx_surface_frame := frame);
@@ -8898,7 +8910,7 @@ let observe_msx_frame ?(clear_notice = false) (state : Masc_tui_types.state) =
    The menu, not the spectator, is what this opens. The [&] key and the
    palette's "go MSX" both land here, so the two doors stay one door -- which
    is why the menu goes in the function rather than at the key. *)
-let open_msx_screen (state : Masc_tui_types.state) =
+let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
   invalidate_msx_poll ();
   (* The spectator takes ownership from any image preview. A pending async
      preview must not keep its old surface alive underneath the game. *)
@@ -8910,18 +8922,13 @@ let open_msx_screen (state : Masc_tui_types.state) =
     state.image_open <- false
   end;
   observe_msx_frame ~clear_notice:true state;
-  (* The DOS screen is offered in the same menu, so it is read as well. *)
-  (match
-     Masc_tui_machine_live.advance state.dos_live
-       (Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:state.port
-          Masc_tui_machine_live.Dos ~since:(Masc_tui_machine_live.since state.dos_live))
-   with
-   | None -> ()
-   | Some view -> state.dos_live <- view);
   state.msx_carts <-
     Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port;
   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-  Masc_tui_msx.open_menu ~write:write_to_terminal state
+  Masc_tui_msx.open_menu ~write:write_to_terminal state;
+  (* A first DOS read may carry a full screen. Let the menu accept keys while
+     the read is in flight, and redraw its watch row when it arrives. *)
+  launch_dos_live_poll state ~mailbox
 
 (* Where a reference lands, and what it opens when it gets there.
 
@@ -14846,14 +14853,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                     Masc_tui_msx.render_menu ~write:write_to_terminal ~status:notice state
                   else
                     render_spectator state
-            | Ok frame ->
+            | Ok (frame, mark) ->
                 msx_pending_poll := Poll_idle;
                 if request.poll_view == !msx_poll_view && request.poll_port = state.port
                    && state.msx_open && not state.msx_menu_open then begin
                   state.msx_frame <- frame;
-                  (* A tick answer carries no change counter, so the next live
-                     read must ask for a picture rather than compare. *)
-                  state.msx_live <- Masc_tui_machine_live.Unread;
+                  state.msx_live <-
+                    (match frame, mark with
+                     | Some frame, Some mark ->
+                       Masc_tui_machine_live.Showing
+                         { width = frame.msx_width; height = frame.msx_height
+                         ; rgb = frame.msx_rgb; mark
+                         ; time = Masc_tui_machine_live.Frame frame.msx_number }
+                     | None, None -> Masc_tui_machine_live.Not_loaded
+                     | Some _, None | None, Some _ ->
+                       Masc_tui_machine_live.Failed "MSX tick mark and picture disagree");
                   msx_surface_frame := frame;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
                   render_spectator state
@@ -14867,13 +14881,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Masc_tui_machine_live.Msx -> false
       in
       if request.live_view == !msx_poll_view && request.live_port = state.port
-         && state.msx_open && not state.msx_menu_open && watching_dos then
-        (* An unchanged answer draws nothing and decodes no pixels. *)
+         && state.msx_open && (state.msx_menu_open || watching_dos) then
+        (* An unchanged answer draws nothing and decodes no pixels. The same
+           read also discovers the DOS watch row while the menu is open. *)
         (match Masc_tui_machine_live.advance state.dos_live result with
          | None -> ()
          | Some view ->
              state.dos_live <- view;
-             render_spectator state)
+             if state.msx_menu_open then
+               Masc_tui_msx.render_menu ~write:write_to_terminal state
+             else render_spectator state)
+      else if state.msx_open && state.msx_menu_open then
+        launch_dos_live_poll state ~mailbox
   | Keeper_chat_control_received (keeper_name, generation, token) ->
       if generation = keeper_chat_control_generation state keeper_name then begin
         (* [false] means no control was pending for this generation and
@@ -20221,7 +20240,7 @@ and is loaded on demand through keeper_skill.
                  | Some (_, Masc_tui_types.Palette_hide_browser_lane) ->
                      hide_browser_lane state
                  | Some (_, Masc_tui_types.Palette_msx) ->
-                     open_msx_screen state
+                     open_msx_screen state ~mailbox:async_messages
                  | Some (_, Masc_tui_types.Palette_lane_addons) ->
                      launch_lane_addons state ~mailbox:async_messages
                        Masc_tui_lane_addons.Inspect
@@ -21838,7 +21857,7 @@ and is loaded on demand through keeper_skill.
        | Some "?" ->
            state.help_open <- true;
            state.help_scroll <- 0
-      | Some "&" -> open_msx_screen state
+      | Some "&" -> open_msx_screen state ~mailbox:async_messages
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0;

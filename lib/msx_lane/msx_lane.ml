@@ -654,7 +654,8 @@ let step_frame ~frames =
     | Error _ as error -> error
     | Ok () ->
         advance st frames;
-        Ok (frame_of st, List.rev st.entries))
+        let mark = { count = !change_count; incarnation = st.incarnation } in
+        Ok (frame_of st, List.rev st.entries, mark))
 ;;
 
 let capture () = with_machine (fun st -> Ok (observe st, frame_of st))

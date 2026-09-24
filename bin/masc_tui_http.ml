@@ -621,7 +621,8 @@ let post_msx_checkpoint ~host ~port ~restore ~slot =
    Only validated pixels are retained; every tick supplies fresh metadata. *)
 let msx_tick_cache = Masc_tui_msx_tick.create ()
 
-let tick_msx ~(host : string) ~(port : int) : (Masc_tui_types.msx_frame option, string) result =
+let tick_msx ~(host : string) ~(port : int) :
+    (Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option, string) result =
   let headers = auth_headers () in
   let request ~body =
     match http_post_with_timeout ~timeout_sec:(request_timeout_sec ()) ~headers

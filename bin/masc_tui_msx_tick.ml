@@ -59,6 +59,12 @@ let decode_reference fields =
       Ok { revision; width; height }
   | _ -> Error "MSX tick: invalid pixel reference"
 
+let decode_mark fields =
+  match List.assoc_opt "change_count" fields, List.assoc_opt "incarnation" fields with
+  | Some (`Int count), Some (`String incarnation) when count >= 0 && incarnation <> "" ->
+      Ok { Masc_tui_machine_live.count = count; incarnation }
+  | _ -> Error "MSX tick: invalid change mark"
+
 let decode previous json =
   let ( let* ) = Result.bind in
   match json with
@@ -67,8 +73,9 @@ let decode previous json =
       if List.length names <> List.length (List.sort_uniq String.compare names)
       then Error "MSX tick: duplicate frame fields"
       else (match List.assoc_opt "loaded" fields, List.assoc_opt "pixels" fields with
-       | Some (`Bool false), _ -> Ok (None, None)
+       | Some (`Bool false), _ -> Ok (None, None, None)
        | Some (`Bool true), Some (`Assoc pixel_fields) ->
+           let* mark = decode_mark fields in
            let names = List.map fst pixel_fields in
            let* () = if List.length names <> List.length (List.sort_uniq String.compare names)
              then Error "MSX tick: duplicate pixel fields" else Ok () in
@@ -87,12 +94,13 @@ let decode previous json =
              | _ -> Error "MSX tick: invalid pixel representation" in
            (match frame_with_rgb ~rgb:pixels.rgb json with
             | Some frame when frame.msx_width = reference.width && frame.msx_height = reference.height ->
-                Ok (Some frame, Some pixels)
+                Ok (Some frame, Some pixels, Some mark)
             | Some _ | None -> Error "MSX tick: invalid frame metadata")
        | Some (`Bool true), None ->
+           let* mark = decode_mark fields in
            (* A complete frame is also a valid answer to a retention hint. *)
            (match frame_of_json json with
-            | Some frame -> Ok (Some frame, None)
+            | Some frame -> Ok (Some frame, None, Some mark)
             | None -> Error "MSX tick: invalid full frame")
        | _ -> Error "MSX tick: invalid frame response")
   | _ -> Error "MSX tick: expected an object"
@@ -111,5 +119,5 @@ let fetch t ~host ~port ~headers ~request =
   let result = Result.bind (request ~body) (decode previous) in
   Mutex.protect t.mutex (fun () ->
     if t.request_token == token then
-      t.pixels <- (match result with Ok (_, pixels) -> pixels | Error _ -> None));
-  Result.map fst result
+      t.pixels <- (match result with Ok (_, pixels, _) -> pixels | Error _ -> None));
+  Result.map (fun (frame, _, mark) -> frame, mark) result

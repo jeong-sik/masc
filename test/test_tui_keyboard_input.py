@@ -17813,10 +17813,20 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
     changed = threading.Event()
     original = msx_loaded_frame_fixture()[1]
     pixel_responses: list[dict[str, object]] = []
+    live_reads: list[LiveMark | None] = []
+
+    live_fixture = msx_live_fixture(lambda: (200, original))
+
+    def live(path: str) -> HttpResponse:
+        kind, since = machine_live_query(path)
+        if kind == "msx_capture":
+            live_reads.append(since)
+        return live_fixture.resolve(path)
 
     def tick(request_body: bytes = b""):
         number[0] += 1
-        body = dict(original, number=number[0])
+        body = dict(original, number=number[0], change_count=number[0],
+                    incarnation=LIVE_INCARNATION)
         if changed.is_set():
             body["rgb_base64"] = base64.b64encode(
                 bytes([0, 255, 0]) * MSX_FRAME_WIDTH * MSX_FRAME_HEIGHT
@@ -17892,6 +17902,12 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
         key(b":go msx\r", b"watch MSX machine")
         reopened = key(b"\r", b"F6: save quick")
         assert b"f=24" in reopened, "reopening reused a deleted image"
+        # The next explicit read starts at the mark of the tick picture, and
+        # keeps its title metadata while the live route returns pixels only.
+        before_key = len(live_reads)
+        after_key = key(b"z", b"F6: save quick")
+        assert any(mark is not None for mark in live_reads[before_key:]), live_reads
+        assert b"SCREEN2" in after_key and b"split.rom" in after_key, after_key[:250]
         print(f"MSX PTY wire: first={len(first)} steady_three_polls={len(steady)} "
               f"replacement={len(replacement)} bytes", flush=True)
         key(b"\x1b", b"MASC Overview")
@@ -17902,7 +17918,7 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
         description=("MSX tick sends a reference for pixels the TUI already holds" if retained_tick
                      else "MSX retains Kitty pixels between live polls"),
         interact=interact, preload_input=GRAPHICS_SUPPORTED_REPLY,
-        http_fixtures={MACHINE_LIVE_PATH: msx_live_fixture(lambda: (200, original)),
+        http_fixtures={MACHINE_LIVE_PATH: PathHttpResponse(live),
                        "/api/v1/msx/tick": RequestHttpResponse(tick) if retained_tick else tick},
     )
     if retained_tick:
@@ -17912,7 +17928,8 @@ def run_msx_retained_regression(executable: str, *, retained_tick: bool = False)
 def run_msx_background_poll_regression(executable: str) -> None:
     """A pending mutation must not own the terminal's input loop."""
     original = msx_loaded_frame_fixture()[1]
-    late = dict(original, number=999, rgb_base64=base64.b64encode(
+    late = dict(original, number=999, change_count=999,
+                incarnation=LIVE_INCARNATION, rgb_base64=base64.b64encode(
         bytes([0, 255, 0]) * MSX_FRAME_WIDTH * MSX_FRAME_HEIGHT).decode("ascii"))
     pending = GatedHttpResponse((200, late), hold_seconds=20.0)
     failed = GatedHttpResponse((503, {"error": "tick unavailable"}), hold_seconds=20.0)
@@ -18088,6 +18105,9 @@ def run_dos_live_regression(executable: str) -> None:
     picture: dict[str, Any] = {"frame": dos_flat_frame(bytes([255, 0, 0])), "steps": 100}
     dos_reads: list[LiveMark | None] = []
     posts: HttpRequests = []
+    first_read = GatedHttpResponse(
+        machine_live_answer("dos_capture", picture["frame"], None,
+                            count=100, frame_number=None), hold_seconds=20.0)
 
     def resolve(path: str) -> HttpResponse:
         kind, since = machine_live_query(path)
@@ -18096,6 +18116,8 @@ def run_dos_live_regression(executable: str) -> None:
         if kind != "dos_capture":
             raise AssertionError(f"unexpected source kind: {kind}")
         dos_reads.append(since)
+        if len(dos_reads) == 1:
+            return first_read()
         return machine_live_answer(kind, picture["frame"], since,
                                    count=int(picture["steps"]), frame_number=None)
 
@@ -18114,7 +18136,17 @@ def run_dos_live_regression(executable: str) -> None:
                 select.select([master], [], [], min(0.05, max(0, deadline - time.monotonic())))
             read_available(master, output)
 
-        key(b":go msx\r", b"watch DOS machine")
+        try:
+            key(b":go msx\r", MSX_MENU_TITLE)
+            assert wait_for_fixture_event(process, master, output,
+                                          first_read.requested, timeout=5.0)
+            assert not first_read.completed.is_set(), "DOS menu read did not remain pending"
+            key(b"j", b"Esc:back")
+            assert not first_read.completed.is_set(), "menu key waited for DOS pixels"
+        finally:
+            first_read.release.set()
+        wait_for_output(process, master, output, b"watch DOS machine",
+                        start=0, timeout=5.0)
         start = key(b"\r", b"Esc: back  +/-: 100%")
         watching = bytes(output[start:])
         if b"DOS \xe2\x80\x94 change 100" not in watching:

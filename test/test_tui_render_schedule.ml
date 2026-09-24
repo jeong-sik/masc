@@ -52,14 +52,30 @@ let test_input_after_idle_renders_immediately () =
 let test_input_does_not_wait_for_recent_frame () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
   check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
-  List.iter
-    (fun now_ns ->
-      Schedule.request schedule Schedule.Input;
-      check (float 0.0) "processed input never sleeps before presentation" 0.0
-        (Schedule.input_timeout_seconds schedule ~now_ns ~maximum:0.1);
-      check_render "keypress immediately after a frame"
-        (Schedule.take schedule ~now_ns))
-    [ 1L; 100L; 1_000L ]
+  Schedule.request schedule Schedule.Input;
+  check (float 0.0) "first input does not sleep" 0.0
+    (Schedule.input_timeout_seconds schedule ~now_ns:1L ~maximum:0.1);
+  check_render "keypress immediately after a background frame"
+    (Schedule.take schedule ~now_ns:1L)
+
+let test_separate_repeated_inputs_keep_the_frame_interval () =
+  let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
+  check_render "initial frame" (Schedule.take schedule ~now_ns:0L);
+  Schedule.request schedule Schedule.Input;
+  check_render "first input is immediate" (Schedule.take schedule ~now_ns:(ms 1));
+  Schedule.request schedule Schedule.Input;
+  check (float 0.000_001) "next input waits without a busy poll" 0.011
+    (Schedule.input_timeout_seconds schedule ~now_ns:(ms 6) ~maximum:0.1);
+  (match Schedule.take schedule ~now_ns:(ms 6) with
+   | Schedule.Wait_until due -> check int64 "input frame deadline" (ms 17) due
+   | Schedule.Idle | Schedule.Render -> fail "a separate input rendered before its frame deadline");
+  check_render "second input renders at the frame deadline"
+    (Schedule.take schedule ~now_ns:(ms 17));
+  Schedule.request schedule Schedule.Force;
+  check_render "force still renders immediately" (Schedule.take schedule ~now_ns:(ms 18));
+  Schedule.request schedule Schedule.Input;
+  check_render "a later input preempts the forced frame"
+    (Schedule.take schedule ~now_ns:(ms 19))
 
 let test_buffered_input_renders_when_drained () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
@@ -2228,6 +2244,8 @@ let () =
             test_input_after_idle_renders_immediately
         ; test_case "a recent frame does not delay a keypress" `Quick
             test_input_does_not_wait_for_recent_frame
+        ; test_case "separate repeated inputs keep the frame interval" `Quick
+            test_separate_repeated_inputs_keep_the_frame_interval
         ; test_case "buffered input paints when drained" `Quick
             test_buffered_input_renders_when_drained
         ; test_case "dirty input wait uses the frame deadline" `Quick

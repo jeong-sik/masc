@@ -273,9 +273,50 @@ let test_non_enumerated_corruption_reads_as_absent () =
     (List.exists
        (fun (entry : Log.Ring.entry) ->
           Astring.String.is_infix ~affix:"treating as absent" entry.message
+          && Astring.String.is_infix ~affix:("keeper=" ^ name) entry.message
+          && Astring.String.is_infix ~affix:("path=" ^ path) entry.message
+          && Astring.String.is_infix ~affix:"reason=" entry.message
           && Astring.String.is_infix ~affix:"generation" entry.message)
        episode);
   check string "corrupt file is not rewritten" before (Masc_test_deps.read_file path)
+;;
+
+let test_older_meta_keeps_owner_state_without_usage_fields () =
+  with_temp_workspace @@ fun config ->
+  let name = "meta-before-usage-fields" in
+  let path = keeper_meta_path config name in
+  let old_json =
+    Masc_test_deps.current_meta_json_fixture ~name ()
+    |> replace_field "total_turns" (`Int 41)
+    |> replace_field "total_cost_usd" (`Float 12.5)
+    |> replace_field "paused" (`Bool true)
+    |> replace_field "current_task_id" (`String "task-1722")
+    |> remove_field "usage_cursor"
+    |> remove_field "last_usage_resolution"
+  in
+  write_file path (Yojson.Safe.pretty_to_string old_json);
+  let before = Masc_test_deps.read_file path in
+  let base_seq = latest_seq () in
+  (match Keeper_meta_store.read_meta config name with
+   | Ok (Some meta) ->
+     check int "total turns survive" 41 meta.runtime.usage.total_turns;
+     check (float 0.000001) "cost survives" 12.5 meta.runtime.usage.total_cost_usd;
+     check bool "operator pause survives" true meta.paused;
+     check (option string) "task binding survives" (Some "task-1722")
+       (Option.map Keeper_id.Task_id.to_string meta.current_task_id);
+     check bool "missing cursor becomes None" true (meta.runtime.usage_cursor = None);
+     check bool "missing resolution becomes None" true
+       (meta.runtime.last_usage_resolution = None)
+   | Ok None -> fail "older meta was discarded as absent"
+   | Error detail -> failf "older meta was refused: %s" detail);
+  check string "read did not rewrite the older file" before (Masc_test_deps.read_file path);
+  check int "valid older meta emits no loss WARN" 0
+    (List.length (warns (entries_about name (keeper_entries_since base_seq))));
+  (match Keeper_meta_store.validate_current_meta_file_result path with
+   | Ok () -> ()
+   | Error (Keeper_meta_store.Unreadable detail)
+   | Error (Keeper_meta_store.Not_current detail) ->
+     failf "deploy gate rejected a readable older meta: %s" detail)
 ;;
 
 let test_recognized_misspelling_repairs_to_canonical_spelling () =
@@ -372,13 +413,25 @@ let test_gate_verdict_matches_runtime_read () =
   in
   write_json (current ());
   expect_accepted "current meta";
+  let optional = Keeper_meta_json_current_schema.optional_field_names in
+  List.iter
+    (fun key ->
+       write_json (current () |> remove_field key);
+       expect_accepted ("older meta without " ^ key))
+    optional;
+  write_json (List.fold_left (fun json key -> remove_field key json) (current ()) optional);
+  expect_accepted "older meta without both usage fields";
+  write_json (current () |> replace_field "usage_cursor" (`Bool false));
+  expect_not_current "malformed usage_cursor";
+  write_json (current () |> replace_field "last_usage_resolution" (`Bool false));
+  expect_not_current "malformed last_usage_resolution";
   write_json (current () |> replace_field "generation" (`Int 0));
   expect_not_current "retired field";
   List.iter
     (fun key ->
        write_json (current () |> remove_field key);
        expect_not_current ("missing " ^ key))
-    Keeper_meta_json.current_field_names;
+    Keeper_meta_json_current_schema.required_field_names;
   (* The issue #28844 shape: the runtime repairs it in place and serves it,
      so the gate passes it without writing — the repair stays the runtime's. *)
   write_json
@@ -419,6 +472,10 @@ let () =
             "non-enumerated corruption reads as absent"
             `Quick
             test_non_enumerated_corruption_reads_as_absent
+        ; test_case
+            "older meta keeps owner state without usage fields"
+            `Quick
+            test_older_meta_keeps_owner_state_without_usage_fields
         ] )
     ; ( "deploy-gate-twin"
       , [ test_case

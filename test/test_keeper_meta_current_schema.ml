@@ -99,13 +99,30 @@ let test_current_writer_rejects_non_finite_values () =
   | Ok _ -> Alcotest.fail "current writer accepted a non-finite value"
 ;;
 
-let test_every_current_field_is_required () =
+let test_required_fields_still_reject_absence () =
   List.iter
     (fun key ->
        expect_rejected
          ("missing " ^ key)
          (current_json () |> remove_field key))
-    Keeper_meta_json.current_field_names
+    Keeper_meta_json_current_schema.required_field_names
+;;
+
+let test_older_meta_without_usage_fields_decodes () =
+  let optional = Keeper_meta_json_current_schema.optional_field_names in
+  check (list string) "only the two usage fields are optional"
+    [ "usage_cursor"; "last_usage_resolution" ] optional;
+  let decode_missing keys =
+    let json = List.fold_left (fun json key -> remove_field key json) (current_json ()) keys in
+    match Keeper_meta_json_parse.meta_of_json json with
+    | Error detail -> failf "missing %s rejected: %s" (String.concat ", " keys) detail
+    | Ok meta ->
+      check bool "missing cursor means None" true (meta.runtime.usage_cursor = None);
+      check bool "missing resolution means None" true
+        (meta.runtime.last_usage_resolution = None)
+  in
+  List.iter (fun key -> decode_missing [ key ]) optional;
+  decode_missing optional
 ;;
 
 let test_every_duplicate_is_rejected () =
@@ -271,8 +288,10 @@ let () =
     [ ( "current-schema"
       , [ test_case "writer roundtrip and keyset" `Quick
             test_current_writer_roundtrip_and_keyset
-        ; test_case "every field is required" `Quick
-            test_every_current_field_is_required
+        ; test_case "required fields reject absence" `Quick
+            test_required_fields_still_reject_absence
+        ; test_case "older meta without usage fields decodes" `Quick
+            test_older_meta_without_usage_fields_decodes
         ; test_case "every duplicate is rejected" `Quick
             test_every_duplicate_is_rejected
         ; test_case "every field rejects a wrong type" `Quick

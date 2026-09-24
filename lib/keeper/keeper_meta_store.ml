@@ -230,9 +230,10 @@ let read_meta_file_path_presence ?ownership_root path : (meta_presence, string) 
     if Problem_report_state.should_report ~site:Meta_read ~path ~detail
     then
       Log.Keeper.warn
-        "keeper meta unreadable at %s, treating as absent (accumulated \
-         counters in it are lost; the declaration re-materialises the \
-         keeper): %s"
+        "keeper meta unreadable keeper=%s path=%s reason=%s; treating as \
+         absent (accumulated counters in it are lost; the declaration \
+         re-materialises the keeper)"
+        (Filename.remove_extension (Filename.basename path))
         path
         detail;
     (* main took the recovery decision (#29610: unreadable is absent, not fatal);

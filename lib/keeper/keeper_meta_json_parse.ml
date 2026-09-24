@@ -331,19 +331,17 @@ let decode_current_meta fields =
   let* last_output_tokens = int_field fields "last_output_tokens" in
   let* last_total_tokens = int_field fields "last_total_tokens" in
   let* usage_cursor =
-    let* json = required_field fields "usage_cursor" in
-    match json with
-    | `Null -> Ok None
-    | json ->
+    match List.assoc_opt "usage_cursor" fields with
+    | None | Some `Null -> Ok None
+    | Some json ->
       (match Keeper_usage_resolution.cursor_of_json json with
        | Ok value -> Ok (Some value)
        | Error detail -> invalidf "usage_cursor: %s" detail)
   in
   let* last_usage_resolution =
-    let* json = required_field fields "last_usage_resolution" in
-    match json with
-    | `Null -> Ok None
-    | json ->
+    match List.assoc_opt "last_usage_resolution" fields with
+    | None | Some `Null -> Ok None
+    | Some json ->
       (match Keeper_usage_resolution.of_json json with
        | Ok value -> Ok (Some value)
        | Error detail -> invalidf "last_usage_resolution: %s" detail)

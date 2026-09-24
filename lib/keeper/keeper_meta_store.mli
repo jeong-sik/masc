@@ -4,20 +4,23 @@
     keep their read API while writes are restricted to complete Owner
     snapshots. *)
 
-(** Read a keeper meta JSON file at [path]. Returns [Ok None] when
-    the file does not exist. Unknown top-level keys are rejected with a
-    reset-required error.
+(** Read a keeper meta JSON file at [path]. Returns [Ok None] when the file
+    does not exist, or when its current-schema decode fails and boot treats it
+    as absent. The latter is [Meta_not_current] in [read_meta_file_path_presence]
+    and can lose persisted counters and task binding when boot re-materialises
+    the Keeper. A new failure emits a WARN naming the Keeper, path, and reason;
+    unchanged repeats are deduplicated per (site, path), and recovery is logged.
+
+    Older snapshots may omit [usage_cursor] and [last_usage_resolution]; they
+    decode as [None] without fail-open. Unknown top-level keys and malformed
+    present fields still fail current-schema decoding.
 
     Issue #28844: a non-canonical value in an enumerated field with a
     canonical default (e.g. [last_proactive_outcome]) is auto-repaired in
-    place through the normal serializer and the read proceeds; all other
-    corruption keeps failing loud and the file is left untouched.
-    [ownership_root] scopes the durable directory-chain fsync of the repair
-    write when the caller knows the workspace root.
-
-    The parse-failure WARN is emitted on state transitions (new failure,
-    changed failure reason, recovery) per (site, path), not on every
-    repeated read of the same broken file. *)
+    place through the normal serializer and the read proceeds; other decode
+    failures leave the file untouched. [ownership_root] scopes the durable
+    directory-chain fsync of the repair write when the caller knows the
+    workspace root. *)
 val read_meta_file_path :
   ?ownership_root:string ->
   string ->

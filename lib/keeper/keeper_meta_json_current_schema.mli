@@ -50,7 +50,14 @@ val object_of_field_values :
     reorder a persisted field independently of the reader's key authority. *)
 
 val current_field_names : string list
-(** Derived from {!all_fields}; never maintained as a separate string list. *)
+(** Writer key set, derived from {!all_fields}. The writer emits every field. *)
+
+val optional_field_names : string list
+(** [usage_cursor] and [last_usage_resolution] may be absent in older
+    snapshots; absence decodes like their canonical [null] value. *)
+
+val required_field_names : string list
+(** All current fields except {!optional_field_names}. *)
 
 val find_duplicate : ('a * 'b) list -> 'a option
 (** Return [Some key] for the first key that already occurred earlier in the
@@ -59,5 +66,6 @@ val find_duplicate : ('a * 'b) list -> 'a option
 
 val validate_current_object :
   Yojson.Safe.t -> ((string * Yojson.Safe.t) list, validation_error) result
-(** Require exactly the current top-level key set. Every field outside that set
-    has the same [Invalid_current] classification. *)
+(** Require every {!required_field_names} key and reject keys outside
+    {!current_field_names}. Missing {!optional_field_names} keys are allowed;
+    duplicates and unknown keys keep [Invalid_current] classification. *)

@@ -126,6 +126,15 @@ let field_name = function
 
 let current_field_names = List.map field_name all_fields
 
+(* The writer still emits both fields. Older snapshots predate them, and
+   absence has the same meaning as their canonical null value. *)
+let optional_fields = [ Usage_cursor; Last_usage_resolution ]
+let optional_field_names = List.map field_name optional_fields
+let required_field_names =
+  all_fields
+  |> List.filter (fun field -> not (List.mem field optional_fields))
+  |> List.map field_name
+
 let object_of_field_values field_values =
   let supplied = List.map fst field_values in
   if supplied <> all_fields
@@ -162,7 +171,7 @@ let validate_current_object (json : Yojson.Safe.t) =
          List.filter (fun key -> not (List.mem key current_field_names)) present
        in
        let missing =
-         List.filter (fun key -> not (List.mem key present)) current_field_names
+         List.filter (fun key -> not (List.mem key present)) required_field_names
        in
        if outside_current <> []
        then

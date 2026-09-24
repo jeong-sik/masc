@@ -2308,6 +2308,8 @@ let add_routes ~sw ~clock router =
                     | Server_skill_editor.Created_and_published
                         { preview; snapshot_revision = _ } ->
                       preview, "created_and_published", Audit_log.Success
+                    | Created_but_shadowed { preview; snapshot_revision = _; winner = _ } ->
+                      preview, "created_but_shadowed", Audit_log.Success
                     | Created_but_unpublished { preview; reason } ->
                       preview, "created_but_unpublished", Audit_log.Failure reason
                   in

@@ -131,6 +131,19 @@ let dashboard_query_cache_key config prefix fields =
   dashboard_cache_key config prefix suffix
 ;;
 
+let scheduled_automation_cache_key config =
+  dashboard_query_cache_key config "scheduled_automation" []
+;;
+
+(* The fleet schedule list carries the schedule runner's status and its holds,
+   and the runner changes both on every tick. Cached for [live_cache_ttl_s]
+   alone, the page would keep saying [ok] for that long after a tick failed,
+   so the runner loop drops it each time a tick's outcome is on record
+   (#38411). *)
+let invalidate_scheduled_automation config =
+  Dashboard_cache.invalidate (scheduled_automation_cache_key config)
+;;
+
 let dashboard_briefing_timeout_s = Env_config_runtime.Dashboard.briefing_timeout_sec
 
 let attach_projection_diagnostics json diagnostics =

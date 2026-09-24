@@ -11686,7 +11686,7 @@ let toggle_ask_choice state index =
 let begin_ask_text_entry state =
   match (selected_ask_row state, selected_ask_question state) with
   | Some row, Some question ->
-      let slot = Ask.free_text_slot question in
+      let slot = Ask.free_text_slot ~ask_id:row.Tui_decode.ar_id question in
       let existing =
         match Ask.response_for (Ask.draft_for state.ask_draft ~row) ~question with
         | Some (Ask.Draft_wrote text) -> text
@@ -11707,13 +11707,27 @@ let commit_ask_text_entry state =
   match state.ask_text_entry with
   | None -> ()
   | Some entry ->
-      (* Through the slot, which names its own question: the cursor may have
-         been moved by a snapshot arriving while the operator typed, and the
-         answer belongs to the question the editor was opened on. Blank text
-         clears the response rather than recording one -- an editor emptied by
-         backspaces means unanswered, and the domain refuses a blank write. *)
-      with_ask_draft state (fun draft _question ->
-          Ask.set_text draft ~slot:entry.ate_slot ~text:entry.ate_text);
+      (* Through the slot, which names its own ask and question: a snapshot
+         arriving while the operator typed may have moved the cursor, even to
+         another ask whose question carries the same id (masc_ask numbers
+         every ask from q1), and the answer belongs to the question the editor
+         was opened on. So the ask is looked up by the slot's id, not taken
+         from the cursor. Blank text clears the response rather than recording
+         one -- an editor emptied by backspaces means unanswered, and the
+         domain refuses a blank write. *)
+      let ask_id = Ask.free_text_ask_id entry.ate_slot in
+      (match
+         List.find_opt
+           (fun (row : Tui_decode.ask_row) -> String.equal row.Tui_decode.ar_id ask_id)
+           (open_ask_rows state)
+       with
+       | Some row ->
+           let draft = Ask.draft_for state.ask_draft ~row in
+           state.ask_draft <- Some (Ask.set_text draft ~slot:entry.ate_slot ~text:entry.ate_text);
+           state.pending_ask_submit <- None
+       | None ->
+           report_action state "system"
+             "The question you were writing to is no longer open; the text was not recorded");
       state.ask_text_entry <- None
 
 let cancel_ask_text_entry state = state.ask_text_entry <- None
@@ -17527,29 +17541,67 @@ and is loaded on demand through keeper_skill.
                 with
                 | Error detail -> report_action state "error" ("Skill create failed: " ^ detail)
                 | Ok json ->
-                  (* The server answers exactly created_and_published or
+                  (* The server answers exactly created_and_published,
+                     created_but_shadowed(+winner) or
                      created_but_unpublished(+reason). The old "created"
                      default reported a status the server never sends and
                      swallowed the not-published reason — the save path
                      below already reports it; the create path now does
-                     the same. *)
+                     the same, in the footer of the surface [c] was pressed
+                     on, as #32069 meant for every editor-backed outcome.
+                     The event log escapes an entry where it draws it, the
+                     footer draws what it is given, and [source_id] and the
+                     receipt come from the server, so every receipt outcome
+                     crosses [Terminal_text.single_line] here. *)
+                  let report event_type text =
+                    report_action state event_type (Terminal_text.single_line text)
+                  in
                   (match json_assoc_member_opt "status" json with
                    | Some (`String "created_and_published") ->
-                     report_action
-                       state
+                     report
                        "system"
                        (Printf.sprintf
                           "created and published · %s/%s"
                           source_id
                           package_id)
+                   | Some (`String "created_but_shadowed") ->
+                     (* A package earlier in the catalog declares the same
+                        name, so Keepers listing by name see that one; the
+                        winner leads because the footer cuts the tail
+                        first. *)
+                     let winner_field field =
+                       match json_assoc_member_opt "winner" json with
+                       | Some winner ->
+                         (match json_assoc_member_opt field winner with
+                          | Some (`String value) -> Some value
+                          | Some _ | None -> None)
+                       | None -> None
+                     in
+                     (match winner_field "source_id", winner_field "package_id" with
+                      | Some winner_source, Some winner_package ->
+                        report
+                          "error"
+                          (Printf.sprintf
+                             "shadowed by %s/%s: %s/%s was created and \
+                              published, but Keepers see that one by name"
+                             winner_source
+                             winner_package
+                             source_id
+                             package_id)
+                      | None, _ | _, None ->
+                        report
+                          "error"
+                          (Printf.sprintf
+                             "%s/%s: shadowed create receipt named no winner"
+                             source_id
+                             package_id))
                    | Some (`String "created_but_unpublished") ->
                      let reason =
                        match json_assoc_member_opt "reason" json with
                        | Some (`String reason) -> reason
                        | _ -> "(no reason reported)"
                      in
-                     report_action
-                       state
+                     report
                        "error"
                        (Printf.sprintf
                           "%s/%s was created but NOT published: %s"
@@ -17557,8 +17609,7 @@ and is loaded on demand through keeper_skill.
                           package_id
                           reason)
                    | Some (`String other) ->
-                     report_action
-                       state
+                     report
                        "error"
                        (Printf.sprintf
                           "%s/%s: unrecognized create status %S"
@@ -17566,8 +17617,7 @@ and is loaded on demand through keeper_skill.
                           package_id
                           other)
                    | Some _ | None ->
-                     report_action
-                       state
+                     report
                        "error"
                        (Printf.sprintf
                           "%s/%s: create receipt carried no status"

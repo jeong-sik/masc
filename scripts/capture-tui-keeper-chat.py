@@ -543,6 +543,9 @@ def fixture_static_response(state: Fixture, path: str) -> object | None:
         "/health": {"paths": paths},
         "/health?full=1": {
             "paths": paths,
+            # The TUI takes how current the fleet reading is from here: a
+            # stale snapshot serves the last reading it measured.
+            "full_health_snapshot": {"status": "ready"},
             # A fleet reading: the TUI requires the schema and every count
             # and name list it draws, the way the fleet scan writes them.
             "keeper_fleet_safety": {
@@ -605,6 +608,11 @@ def fixture_static_response(state: Fixture, path: str) -> object | None:
         "/api/v1/keepers/asks": {"keeper": None, "open_count": 0, "asks": []},
         "/api/v1/dashboard/scheduled-automation": {
             "status": "ok",
+            # The TUI refuses a list without the runner's status word.
+            "schedule_runner": {
+                "schema": "masc.dashboard.scheduled_automation.schedule_runner.v1",
+                "status": "ok",
+            },
             "schedule_store_read_error": None,
             "request_count": 0,
             "truncated": False,

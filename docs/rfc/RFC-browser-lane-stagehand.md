@@ -101,11 +101,18 @@ variant 에 생성자를 더하면 컴파일러가 match 하는 곳을 짚는다
 | `bin/masc_tui_types.ml:4200-4202` | TUI source |
 | `config/tools/masc_browser_{tabs,interact,read,act}.toml` | `lane` enum |
 
-그래서 target 을 더하기 전에 lane 이름 파서를 하나로 모은다 (§7 2번).
-`Browser_lane.route_of_wire : string -> route option` 과 `route_to_wire` 하나씩만 둔다.
-위 자리는 전부 이것을 부른다. `BrowserAct` 의 빈 `lane` 기본값은 없애고 `lane` 을 필수로 한다.
+그래서 target 을 더하기 전에 lane 이름을 읽는 곳을 하나로 모은다 (§7 2번).
+자리마다 client id 규칙이 다르다. live 에 client id 가 꼭 있어야 하는 곳도 있고, 없어도 되는 곳도 있다.
+그래서 공유하는 것은 lane 이름뿐이다.
+`Browser_lane.Lane_name` 에 `type t = Live | Automation`, `of_wire`, `to_wire` 를 두고,
+위 자리는 이 타입 위에서 `_ ->` 없이 match 한다. 이름이 하나 늘면 컴파일러가 자리마다 짚는다.
+도구 TOML 의 `lane` enum 은 테스트가 `Lane_name.of_wire` 로 읽어 본다.
+이 단계는 동작을 바꾸지 않는다.
+
+lane 값이 둘 이상이 되는 7번에서 도구 입력을 바꾼다.
+`BrowserAct` 의 `lane` 은 지금 값이 하나라 TOML 에 `default = "automation"` 이 있다. 7번에서 기본값을 없애고 필수로 한다.
 `handle_session`·`handle_goto` 는 `issue_automation` 을 직접 부른다 (`tool_misc_browser_lane.ml:141-173`).
-두 도구에도 `lane` 을 넣고 `resolve_target` 을 거친다.
+7번에서 두 도구에 `lane` 을 넣고 `resolve_target` 을 거친다.
 
 ### 3.2 동사
 
@@ -386,13 +393,13 @@ Firefox 와 Chromium 은 로그인 세션을 나눠 쓸 수 없다.
 2·3번은 혼자서도 쓸모가 있어서 먼저 들어가도 된다.
 
 1. 이 RFC 와 실측 증거.
-2. lane 이름 파서를 `Browser_lane.route_of_wire`·`route_to_wire` 하나로 모은다.
-   `BrowserAct` 의 빈 `lane` 기본값을 없애고, `BrowserSession`·`BrowserGoto` 에 `lane` 을 넣는다.
+2. lane 이름을 읽는 곳을 `Browser_lane.Lane_name` 하나로 모은다. 동작은 바꾸지 않는다.
 3. AGENT_CORE: `Exact_output.success` 에 typed usage 를 담는다.
 4. `Browser_cdp`, `Stagehand_rpc` (`ws-direct`, 닫힌 봉투·메시지 타입, `call_state`, 가짜 transport 테스트).
 5. `Browser_configuration` 변경, `[browser.stagehand]`, 확장 설치 스크립트, `server_browser_stagehand` 실행과 정리.
 6. `Runtime.exact_lane.Browser_stagehand`, lane 선언, system prompt admission, `llm.generate` 연결.
-7. `Browser_lane.Stagehand` target, 기존 동사 연결, surface·TUI source, `BrowserInstruct` 도구, 문서
+7. `Browser_lane.Stagehand` target, 기존 동사 연결, surface·TUI source,
+   `BrowserSession`·`BrowserGoto` 의 `lane`, `BrowserAct` 기본값 제거, `BrowserInstruct` 도구, 문서
    (`docs-site` browser-lanes 가이드, `skills/browser-lanes`).
 8. CI 실제 브라우저 증명, §6.3 비교 실험 증거.
 

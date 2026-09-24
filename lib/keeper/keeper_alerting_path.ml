@@ -62,6 +62,13 @@ let caller_refusal reason =
   in
   { failure_class = Tool_result.Policy_rejection; message }
 
+let endpoint_unresolved ~tree_refusal ~endpoint_error =
+  { failure_class = Tool_result.Runtime_failure
+  ; message =
+      Printf.sprintf "%s; the endpoint that may declare this path is unresolved: %s"
+        tree_refusal.message endpoint_error
+  }
+
 let project_root_of_config (config : Workspace.config) : string =
   let base = config.base_path in
   if Filename.basename base = Common.masc_dirname then Filename.dirname base else base

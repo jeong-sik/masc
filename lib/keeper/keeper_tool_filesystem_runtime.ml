@@ -337,10 +337,10 @@ let resolve_read_file_target
        with
        | Ok (Some endpoint_path) -> Ok (Declared_endpoint_file endpoint_path)
        | Ok None -> Error (Read_path_error refusal)
-       | Error message ->
+       | Error endpoint_error ->
          Error
            (Read_path_error
-              { Keeper_alerting_path.failure_class = Tool_result.Runtime_failure; message })))
+              (Keeper_alerting_path.endpoint_unresolved ~tree_refusal:refusal ~endpoint_error))))
 ;;
 
 (* A Read that did not return content says whose it is to fix: a path, limit

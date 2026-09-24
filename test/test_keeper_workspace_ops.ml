@@ -192,6 +192,21 @@ let test_p10_docker_envelope_shape () =
     false
     (yojson_has_field "status" envelope)
 
+(* ---- Endpoint that cannot be resolved ------------------------------ *)
+
+let test_unresolved_endpoint_is_the_operators_and_keeps_the_tree_refusal () =
+  let tree_refusal = Keeper_alerting_path.caller_refusal (Keeper_alerting_path.Cwd_is_file { cwd = "/etc/passwd" }) in
+  let endpoint_error = "sandbox endpoint \"builder\" is not configured" in
+  let refusal = Keeper_alerting_path.endpoint_unresolved ~tree_refusal ~endpoint_error in
+  Alcotest.(check bool) "tree refusal was the caller's" true
+    (tree_refusal.Keeper_alerting_path.failure_class = Tool_result.Policy_rejection);
+  Alcotest.(check bool) "unresolved endpoint is the operator's" true
+    (refusal.Keeper_alerting_path.failure_class = Tool_result.Runtime_failure);
+  Alcotest.(check bool) "message starts with the tree refusal" true
+    (String.starts_with ~prefix:tree_refusal.Keeper_alerting_path.message refusal.Keeper_alerting_path.message);
+  Alcotest.(check bool) "message ends with the endpoint error" true
+    (String.ends_with ~suffix:endpoint_error refusal.Keeper_alerting_path.message)
+
 (* ---- Suite registration ------------------------------------------- *)
 
 let () =
@@ -218,5 +233,9 @@ let () =
             test_p10_host_envelope_shape
         ; Alcotest.test_case "docker envelope fields" `Quick
             test_p10_docker_envelope_shape
+        ] )
+    ; ( "endpoint_unresolved"
+      , [ Alcotest.test_case "operator's class, tree refusal kept" `Quick
+            test_unresolved_endpoint_is_the_operators_and_keeps_the_tree_refusal
         ] )
     ]

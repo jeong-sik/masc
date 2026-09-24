@@ -1400,9 +1400,7 @@ status: reference
   명령의 표준 입출력과 종료 상태를 `run_outcome`(`Ran`·`Transport_failed`)으로
   전달하여, 원격 런타임 전송 장애와 명령의 자체 실패를 명확히 분리한다.
   호출 페이로드는 `argv`(셸 없이 그대로 실행하는 프로세스 벡터)와 `command`(셸에
-  넘기는 한 줄) 중 정확히 하나만 받는다. 예전 필드명 `script`는 #38763(하드컷)에서
-  별칭 없이 제거됐으므로 어떤 문맥에서도 쓰지 않는다. 옛 RFC 문서에 남은 `script`
-  표기는 하드컷 전 상태를 기록한 역사 문서의 것으로, 현재 계약이 아니다.
+  넘기는 한 줄) 중 정확히 하나만 받는다.
   → [config/tools/tool_execute.toml](../../config/tools/tool_execute.toml)
 
 **Endpoint Allowed Paths (엔드포인트 허용 경로)**

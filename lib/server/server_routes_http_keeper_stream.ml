@@ -3529,7 +3529,8 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
          The comment proves only transport liveness, not model progress. *)
       let rec heartbeat () =
         Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s;
-        if Option.is_none (Eio.Promise.peek finished) then (
+        if !closed || Httpun.Body.Writer.is_closed writer then finish ()
+        else if Option.is_none (Eio.Promise.peek finished) then (
           let state =
             match
               Keeper_owner_registry.exact_operation

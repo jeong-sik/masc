@@ -222,6 +222,9 @@ binary = false|};
 chrome = "/test/chrome"|};
       "a Stagehand table needs its browser", {|[browser.stagehand]
 extension = "/test/extension"|};
+      "an empty Stagehand table needs its browser", {|[browser.stagehand]|};
+      "a misspelled Stagehand field does not disable the backend", {|[browser.stagehand]
+extention = "/test/extension"|};
       "a relative Stagehand profile is refused", {|[browser.stagehand]
 chrome = "/test/chrome"
 extension = "/test/extension"

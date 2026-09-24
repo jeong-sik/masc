@@ -188,7 +188,21 @@ let parse_sync_response
                { kind = Http_client.Context_overflow { limit = None }
                ; message = error.message
                })
-        | Backend_glm.Glm_quota_exceeded
+        | Backend_glm.Glm_quota_exceeded ->
+          (* Arrears, an exhausted package or an expired plan (1113, 1304,
+             1308-1311, 1313) do not clear on their own the way a rate
+             limit does. As a synthetic 429 they read as RateLimited and the
+             path was rested for the rate-limit floor and retried every
+             minute; typed, they reach the hard-quota route. The envelope
+             carries no reset time. *)
+          Error
+            (Http_client.ProviderFailure
+               { kind = Http_client.Hard_quota { retry_after = None }
+               ; message =
+                   (match error.code with
+                    | Some code -> Printf.sprintf "Glm error %s: %s" code error.message
+                    | None -> error.message)
+               })
         | Backend_glm.Glm_rate_limited
         | Backend_glm.Glm_auth_error
         | Backend_glm.Glm_server_error
@@ -293,6 +307,40 @@ let%test "sync: an unreadable response is a provider parse failure" =
       parser
       (Provider_config.string_of_provider_kind Provider_config.OpenAI_compat)
   | Ok _ | Error _ -> false
+;;
+
+(* Arrears, an exhausted package or an expired plan arrive as the typed
+   hard-quota failure, not as a synthetic 429 the retry classifier reads as a
+   rate limit. A real GLM rate limit (1305) keeps the 429. *)
+let%test "glm quota exhaustion is a typed hard quota" =
+  let glm_sync_error body =
+    parse_sync_response
+      ~http_codec:Provider_http_codec.Glm_chat
+      ~provider_kind:Provider_config.Glm
+      body
+  in
+  List.for_all
+    (fun code ->
+      match
+        glm_sync_error
+          (Printf.sprintf {|{"error":{"code":"%s","message":"quota exhausted"}}|} code)
+      with
+      | Error
+          (Http_client.ProviderFailure
+             { kind = Http_client.Hard_quota { retry_after = None }; _ }) -> true
+      | Error _ | Ok _ -> false)
+    [ "1113"; "1304"; "1308"; "1309"; "1310"; "1311"; "1313" ]
+;;
+
+let%test "glm rate limit stays an http 429" =
+  match
+    parse_sync_response
+      ~http_codec:Provider_http_codec.Glm_chat
+      ~provider_kind:Provider_config.Glm
+      {|{"error":{"code":"1305","message":"too many requests"}}|}
+  with
+  | Error (Http_client.HttpError { code = 429; _ }) -> true
+  | Error _ | Ok _ -> false
 ;;
 
 type resolved_sync_transport =

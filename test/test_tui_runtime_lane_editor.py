@@ -523,7 +523,7 @@ def run_exact_slot_editor(executable: str) -> None:
     """bin/masc_tui_types.ml and bin/masc_tui_render.ml: Librarian's CLI
     candidates share the visible slot editor with its HTTP candidates."""
     store = LaneStore()
-    new_cli = "a-cli"
+    new_cli = "aaa_cli.fixture"
     store.body["runtimes"].append({
         **h.runtime_resolved_runtime(new_cli, "Official client", "model"),
         "exact_slot_group": "cli_slots",
@@ -571,7 +571,7 @@ def run_exact_slot_editor(executable: str) -> None:
         mark = mark_output(fd, output)
         h.send_and_wait(process, fd, output, b"a",
                         b"adding a candidate to librarian_exact")
-        h.wait_for_output(process, fd, output, b"[CLI tail] a-cli",
+        h.wait_for_output(process, fd, output, b"[CLI tail] aaa_cli.fixture",
                           start=mark, timeout=5)
         h.wait_for_output(process, fd, output, b"[HTTP tail] runtime-a",
                           start=mark, timeout=5)

@@ -3517,16 +3517,43 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
       (* A queued operation has no journal events until its Keeper gets the
          slot. Keep the HTTP stream alive during that silence, so a healthy
          queue does not become a 180-second transport timeout in the TUI.
-         This SSE comment proves only that this connection is alive; it does
-         not claim the operation or provider made progress. Use the shared
-         server SSE cadence and stop the heartbeat as soon as a terminal
-         event or failed write resolves [finished]. *)
+         Check the exact durable operation before every comment: if it has
+         settled without a wire terminal, closing this stream lets the TUI
+         reconcile the terminal from the authoritative operation record.
+         The comment proves only transport liveness, not model progress. *)
       let rec heartbeat () =
         Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s;
-        if Option.is_none (Eio.Promise.peek finished) then
-          if keeper_stream_send_raw writer mutex closed ": keepalive\n\n"
-          then heartbeat ()
-          else finish ()
+        if Option.is_none (Eio.Promise.peek finished) then (
+          let state =
+            match
+              Keeper_owner_registry.exact_operation
+                ~base_path ~keeper_name:payload.name payload.request_id
+            with
+            | Ok (Some operation) -> Some operation.state
+            | Ok None -> None
+            | Error error ->
+              Log.Keeper.warn
+                "keeper chat heartbeat could not read operation=%s: %s"
+                operation_id
+                (Keeper_owner_registry.command_error_to_string error);
+              None
+            | exception Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+            | exception exn ->
+              Log.Keeper.warn
+                "keeper chat heartbeat operation read raised operation=%s: %s"
+                operation_id (Printexc.to_string exn);
+              None
+          in
+          match state with
+          | Some (Keeper_owner.Chat_operation.Queued | Running _) ->
+            if keeper_stream_send_raw writer mutex closed ": keepalive\n\n"
+            then heartbeat ()
+            else finish ()
+          | Some (Succeeded _ | Failed _ | Cancelled _) -> finish ()
+          | None ->
+            (* Preserve the existing idle/reconnect path while operation
+               authority is unreadable, without a rapid close/re-POST loop. *)
+            heartbeat ())
       in
       Eio.Fiber.first
         (fun () -> Eio.Promise.await finished)

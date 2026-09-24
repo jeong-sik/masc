@@ -180,6 +180,82 @@ let test_source_failure_clears_only_after_successful_reload () =
       Alcotest.(check bool) "missing file is legitimate" true (load store = Ok 0)) loaders)
 ;;
 
+(* #38595: a load that stopped at a damaged row leaves memory with only the
+   rows before it. A snapshot from that memory used to replace the file and
+   delete the damaged row and every row after it. Every snapshot write -- the
+   flush, the direct save, and a delete -- now leaves both files as they are. *)
+let test_partial_load_never_rewrites_the_file () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let _dir = fresh_test_base_path () in
+  let source_store = Board_core.create_store () in
+  let make_post content =
+    match
+      Board_core.create_post source_store ~author:"partial-writer" ~content
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error error -> Alcotest.failf "create_post failed: %s" (Board.show_board_error error)
+  in
+  let make_comment ~post_id content =
+    match
+      Board_core.add_comment source_store ~post_id ~author:"partial-writer" ~content
+        ~ttl_hours:0 ()
+    with
+    | Ok comment -> comment
+    | Error error -> Alcotest.failf "add_comment failed: %s" (Board.show_board_error error)
+  in
+  let before = make_post "row before the damage" in
+  let after = make_post "row after the damage" in
+  let before_id = Board.Post_id.to_string before.id in
+  let c_before = make_comment ~post_id:before_id "comment before the damage" in
+  let c_after = make_comment ~post_id:before_id "comment after the damage" in
+  let read path = In_channel.with_open_bin path In_channel.input_all in
+  let damage path first second =
+    Out_channel.with_open_bin path (fun out ->
+      output_string out (first ^ "\n{damaged\n" ^ second ^ "\n"));
+    read path
+  in
+  let json to_yojson value = Yojson.Safe.to_string (to_yojson value) in
+  let posts_path = Board.persist_path () in
+  let comments_path = Board.comments_path () in
+  let posts_on_disk =
+    damage posts_path (json Board_core.post_to_yojson before)
+      (json Board_core.post_to_yojson after)
+  in
+  let comments_on_disk =
+    damage comments_path (json Board_core.comment_to_yojson c_before)
+      (json Board_core.comment_to_yojson c_after)
+  in
+  let store = Board_core.create_store () in
+  Alcotest.(check bool) "posts load reports the damage" true
+    (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_posts store));
+  Alcotest.(check bool) "comments load reports the damage" true
+    (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_comments store));
+  let unchanged label =
+    Alcotest.(check string) (label ^ ": posts file untouched") posts_on_disk (read posts_path);
+    Alcotest.(check string) (label ^ ": comments file untouched") comments_on_disk
+      (read comments_path)
+  in
+  store.Board.dirty_posts <- true;
+  store.Board.dirty_comments <- true;
+  Board.flush_dirty store;
+  unchanged "flush";
+  Alcotest.(check bool) "refused posts write stays scheduled" true store.Board.dirty_posts;
+  Alcotest.(check bool) "refused comments write stays scheduled" true
+    store.Board.dirty_comments;
+  Alcotest.(check bool) "direct posts snapshot is refused" true
+    (Result.is_error (Board_core.save_posts_snapshot store ""));
+  Alcotest.(check bool) "direct comments snapshot is refused" true
+    (Result.is_error (Board_core.save_comments_snapshot store ""));
+  unchanged "direct save";
+  Alcotest.(check bool) "delete is refused before it touches memory" true
+    (Result.is_error (Board.delete_post store ~post_id:before_id));
+  Alcotest.(check bool) "the post is still in memory" true
+    (Result.is_ok (Board_core.get_post store ~post_id:before_id));
+  unchanged "delete"
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -199,6 +275,10 @@ let () =
             "loader keeps only exact current rows"
             `Quick
             test_loader_keeps_only_current_rows
+        ; Alcotest.test_case
+            "a partial load never rewrites the posts or comments file"
+            `Quick
+            test_partial_load_never_rewrites_the_file
         ] )
     ]
 ;;

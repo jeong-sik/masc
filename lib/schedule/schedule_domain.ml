@@ -282,12 +282,15 @@ type interval_below_runner_tick =
   ; runner_tick_sec : float
   }
 
-(* The schedule runner looks for due schedules once per tick and fires a due
-   schedule at most once per look ([next_due_after] skips the ticks it
-   missed). An interval shorter than the tick therefore fires once per tick,
-   not once per interval, and the stored interval would say something the
-   runner never does. Create and modify refuse it; the refusal names the tick,
-   so the caller can send an interval the runner keeps. *)
+(* The schedule runner looks for due schedules once per loop pass and fires a
+   due schedule at most once per look ([next_due_after] skips the passes it
+   missed). A pass is the tick's work followed by a sleep of the tick, so it
+   lasts at least one tick. An interval shorter than the tick therefore fires
+   once per pass, not once per interval, and the stored interval would say
+   something the runner never does. An interval at or above the tick is also
+   seen only at pass boundaries, so each firing can land up to one pass late.
+   Create and modify refuse an interval below the tick; the refusal names the
+   tick, so the caller can send an interval the runner can reach. *)
 let interval_fires_as_declared ~runner_tick_sec recurrence =
   match recurrence with
   | One_shot | Daily _ | Cron _ -> Ok ()

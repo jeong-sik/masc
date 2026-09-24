@@ -16,9 +16,13 @@ val make_request_handler :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   server_start_time:float ->
+  request_sw:Eio.Switch.t ->
   Eio.Net.Sockaddr.stream ->
   H2.Reqd.t ->
   unit
-(** The client address was ['a] while this handler discarded it, which is also
+(** [sw] retains the server lifetime for durable MCP work and shared
+    producers. [request_sw] belongs to this connection and is cancelled when
+    connection I/O ends; body completions and SSE producers use that scope.
+    The client address was ['a] while this handler discarded it, which is also
     how the per-client-IP limit the H1 ingress applies went missing on this
     transport. It is named now because the handler charges that bucket. *)

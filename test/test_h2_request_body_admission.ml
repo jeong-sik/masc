@@ -90,6 +90,7 @@ let exchange ~handler ?(meth = `POST) ?(headers = []) ~send target =
   let to_server = { pending = "" } in
   let to_client = { pending = "" } in
   let rec pump () =
+    Eio.Fiber.yield ();
     let sent =
       transfer to_server
         (fun () -> H2.Client_connection.next_write_operation client)
@@ -122,17 +123,17 @@ let send_whole payload writer =
 
 (* Records what the body reader handed over and answers 200, so a case tells a
    delivered body from a refused one and checks how much arrived. *)
-let ceiling_handler delivered reqd =
-  Helpers.h2_read_body reqd (fun body ->
+let ceiling_handler ~sw delivered reqd =
+  Helpers.h2_read_body ~sw reqd (fun body ->
     delivered := Some (String.length body);
     Helpers.h2_respond_text reqd "delivered")
 
 (* Nothing is sent after the headers. A reader that waited for the declared
    bytes would stall the exchange. *)
-let test_declared_length_over_the_ceiling_is_refused_before_any_byte () =
+let test_declared_length_over_the_ceiling_is_refused_before_any_byte sw =
   let delivered = ref None in
   let reply =
-    exchange ~handler:(ceiling_handler delivered)
+    exchange ~handler:(ceiling_handler ~sw delivered)
       ~headers:[ "content-length", string_of_int (max_bytes + 1) ]
       ~send:(fun _writer -> ())
       "/upload"
@@ -140,20 +141,20 @@ let test_declared_length_over_the_ceiling_is_refused_before_any_byte () =
   check int "refused as too large" 413 reply.status;
   check (option int) "the callback never ran" None !delivered
 
-let test_streamed_body_over_the_ceiling_is_refused () =
+let test_streamed_body_over_the_ceiling_is_refused sw =
   let delivered = ref None in
   let reply =
-    exchange ~handler:(ceiling_handler delivered)
+    exchange ~handler:(ceiling_handler ~sw delivered)
       ~send:(send_whole (String.make (max_bytes + 1) 'x'))
       "/upload"
   in
   check int "refused as too large" 413 reply.status;
   check (option int) "the callback never ran" None !delivered
 
-let test_body_at_the_ceiling_is_delivered_whole () =
+let test_body_at_the_ceiling_is_delivered_whole sw =
   let delivered = ref None in
   let reply =
-    exchange ~handler:(ceiling_handler delivered)
+    exchange ~handler:(ceiling_handler ~sw delivered)
       ~send:(send_whole (String.make max_bytes 'x'))
       "/upload"
   in
@@ -163,10 +164,10 @@ let test_body_at_the_ceiling_is_delivered_whole () =
 
 (* The declared-length check and the streamed check are separate branches;
    this one pins the first at the boundary. *)
-let test_declared_length_at_the_ceiling_is_delivered_whole () =
+let test_declared_length_at_the_ceiling_is_delivered_whole sw =
   let delivered = ref None in
   let reply =
-    exchange ~handler:(ceiling_handler delivered)
+    exchange ~handler:(ceiling_handler ~sw delivered)
       ~headers:[ "content-length", string_of_int max_bytes ]
       ~send:(send_whole (String.make max_bytes 'x'))
       "/upload"
@@ -227,7 +228,7 @@ let with_gateway f =
             };
           let handler =
             Server_h2_gateway.make_request_handler
-              ~trust_policy:(trust_policy ()) ~sw
+              ~trust_policy:(trust_policy ()) ~sw ~request_sw:sw
               ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.
               (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
           in
@@ -327,19 +328,24 @@ let test_board_reads_require_a_token_under_strict_auth () =
       Yojson.Safe.from_string reply.body |> member "slug" |> to_string);
   check int "board list with a token" 200 (get ~token "/api/v1/board").status
 
+let with_request_scope test () =
+  Eio_main.run (fun env ->
+    Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 (fun () ->
+      Eio.Switch.run test))
+
 let () =
   run "H2 request body admission"
     [ ( "body ceiling"
       , [ test_case "a declared length over the ceiling is refused before any byte"
             `Quick
-            test_declared_length_over_the_ceiling_is_refused_before_any_byte
+            (with_request_scope test_declared_length_over_the_ceiling_is_refused_before_any_byte)
         ; test_case "a streamed body over the ceiling is refused" `Quick
-            test_streamed_body_over_the_ceiling_is_refused
+            (with_request_scope test_streamed_body_over_the_ceiling_is_refused)
         ; test_case "a body at the ceiling is delivered whole" `Quick
-            test_body_at_the_ceiling_is_delivered_whole
+            (with_request_scope test_body_at_the_ceiling_is_delivered_whole)
         ; test_case "a declared length at the ceiling is delivered whole"
             `Quick
-            test_declared_length_at_the_ceiling_is_delivered_whole
+            (with_request_scope test_declared_length_at_the_ceiling_is_delivered_whole)
         ] )
     ; ( "graphql read gate"
       , [ test_case "an unauthenticated POST is refused before its body" `Quick

@@ -152,7 +152,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       invalid_arg ("mcp profile requested for unrouted path: " ^ unrouted)
   in
 
-  let h2_request_handler client_addr h2_reqd =
+  let h2_request_handler ~request_sw client_addr h2_reqd =
     let h2_req = H2.Reqd.request h2_reqd in
     let h2_headers = h2_req.headers in
     (* Convert H2.Request to Httpun.Request for compatibility with existing code *)
@@ -164,6 +164,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
     in
     let httpun_request = Httpun.Request.create ~headers:httpun_headers httpun_meth h2_req.target in
     let handle_admitted_request request_authority =
+    (* Body callbacks are delivered later by the connection reader, outside
+       this fiber binding. Carry the parsed authority into the deferred work. *)
+    let h2_read_body reqd callback =
+      Server_h2_gateway_helpers.h2_read_body ~sw:request_sw reqd (fun body ->
+        Server_request_authority.with_current request_authority (fun () ->
+          callback body))
+    in
     let path = Http.Request.path httpun_request in
     let origin = get_origin httpun_request in
     let reflected_cors_origin =
@@ -246,6 +253,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           [ "location", location; "cache-control", "no-store" ]
     in
     let h2_read_oauth_body callback =
+      let dispatch work =
+        Server_h2_gateway_helpers.dispatch_request ~sw:request_sw h2_reqd
+          (fun () -> Server_request_authority.with_current request_authority work)
+      in
       let body = H2.Reqd.request_body h2_reqd in
       let buffer = Http_body_buffer.create 4096 in
       let bytes_read = ref 0 in
@@ -254,15 +265,18 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         H2.Body.Reader.schedule_read
           body
           ~on_eof:(fun () ->
-            if not !stopped then callback (Http_body_buffer.contents buffer))
+            if not !stopped then (
+              stopped := true;
+              dispatch (fun () -> callback (Http_body_buffer.contents buffer))))
           ~on_read:(fun bigstring ~off ~len ->
             bytes_read := !bytes_read + len;
             if !bytes_read > Server_oauth_service.max_request_body_bytes
             then (
               stopped := true;
               H2.Body.Reader.close body;
-              h2_respond_oauth_error
-                (Auth_oauth.Invalid_request "request body is too large"))
+              dispatch (fun () ->
+                h2_respond_oauth_error
+                  (Auth_oauth.Invalid_request "request body is too large")))
             else (
               Http_body_buffer.add_bigstring buffer bigstring ~off ~len;
               read_loop ()))
@@ -741,7 +755,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                      .body_is_subscriptions_listen
                                        post_context.body_str
                                    then
-                                     serve_subscriptions_listen_h2 ~sw ~clock
+                                     serve_subscriptions_listen_h2 ~sw:request_sw ~clock
                                        ~cors ~body_str:post_context.body_str
                                        h2_reqd
                                    else

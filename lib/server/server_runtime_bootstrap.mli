@@ -253,6 +253,7 @@ val run :
                            sw:Eio.Switch.t ->
                            clock:float Eio.Time.clock_ty Eio.Resource.t ->
                            server_start_time:float ->
+                           request_sw:Eio.Switch.t ->
                            Eio.Net.Sockaddr.stream ->
                            H2.Reqd.t -> unit) ->
   make_h2_error_handler:(unit ->

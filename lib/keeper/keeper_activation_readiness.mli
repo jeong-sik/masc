@@ -1,7 +1,3 @@
-(** Whether owner activation is unsolicited or backed by existing durable
-    requested work. This is a call intent, not a second configuration knob. *)
-type activation_intent = Spontaneous | Requested_work
-
 (** Shared readiness predicates for autonomous keeper work.
 
     Used by both keeper preflight tools and dashboard fleet projections so
@@ -91,7 +87,9 @@ val classify_durable_demand_execution :
 (** Classify activation for an already-persisted explicit demand such as a due
     schedule or HITL continuation. Lifecycle and shutdown policy still apply.
     Activation mode and global initiative settings do not gate explicit work.
-    A requested wake can recover an absent owner in Manual mode. Pause,
+    A Manual owner that is not running classifies as [Recoverable]; nothing
+    starts it, so the demand waits in the durable queue until an operator
+    starts the Keeper. Pause,
     shutdown ownership, terminal runtime state, and unreadable state retain
     their typed precedence. *)
 

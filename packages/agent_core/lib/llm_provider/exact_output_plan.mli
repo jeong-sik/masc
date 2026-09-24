@@ -20,8 +20,9 @@ type output_admission_error =
   | Invalid_connect_timeout of float
   | Invalid_body_timeout of float
   | Missing_deadline
-      (** Neither a connect nor a body timeout is declared, so the wire runs
-          with no deadline at all. At least one budget must be declared. *)
+      (** No body timeout is declared. The connect timeout ends at the
+          response headers, so without a body timeout the response body is
+          read with no deadline. Every exact wire must declare one. *)
   | Caller_supplied_header_not_allowed of string
   | Unsupported_image_input
   | Unsupported_document_input
@@ -54,9 +55,9 @@ type output_normalization_error =
 
 (** Run every pure exact-output contract check and freeze the final generation
     request before any provider-native token measurement can dispatch. The
-    accepted combination of connect and body deadlines is enforced here: each
-    budget alone passes, but when neither is declared preflight fails with
-    {!Missing_deadline} so the wire can never run without any deadline. The
+    body deadline is required here: when it is absent preflight fails with
+    {!Missing_deadline}, whether or not a connect deadline is declared, so the
+    response body is never read without a deadline. The
     header budget may be caller-supplied; see {!Caller_supplied_header_not_allowed}. *)
 (** Resolve credentials once and freeze them with the request. A delayed plan
     does not renew expiring credentials during execution, because that would
@@ -84,11 +85,11 @@ val measurement_request
 
 (** The serving constraint observed when the body was frozen, if any. *)
 val serving_constraint : preflight -> Serving_constraint.t option
-(** The connect budget declared for the wire, if any. Preflight requires at
-    least one of the two budgets; see {!preflight}. *)
+(** The connect budget declared for the wire, if any. It is optional; see
+    {!preflight}. *)
 val preflight_connect_timeout_s : preflight -> float option
-(** The body budget declared for the wire, if any. Preflight requires at
-    least one of the two budgets; see {!preflight}. *)
+(** The body budget declared for the wire. Preflight refuses a wire without
+    one, so an admitted preflight always carries [Some]; see {!preflight}. *)
 val preflight_body_timeout_s : preflight -> float option
 val preflight_request_body_sha256 : preflight -> string
 val preflight_request_body_bytes : preflight -> int

@@ -1934,7 +1934,7 @@ function asFusionPanel(meta: unknown): FusionPanelEntry[] {
     if (!raw || typeof raw !== 'object') return []
     const r = raw as Record<string, unknown>
     const model = stringOrUndef(r.model) ?? '?'
-    const reason = stringOrUndef(r.reason_detail) ?? stringOrUndef(r.reason)
+    const reason = stringOrUndef(r.reason_detail)
     return [{
       model,
       status: stringOrUndef(r.status) ?? 'unknown',

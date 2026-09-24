@@ -3958,7 +3958,7 @@ describe('fusion chat card', () => {
         source: 'fusion',
         panel: [
           { model: 'ollama_cloud.kimi-k2-6', status: 'answered', answer: 'PANEL ONE ANSWER' },
-          { model: 'ollama_cloud.minimax-m3', status: 'failed', reason: 'timeout' },
+          { model: 'ollama_cloud.minimax-m3', status: 'failed', reason_detail: 'timeout' },
         ],
         judge: { status: 'synthesized', decision: 'answer — ok', resolved_answer: 'JUDGE RESOLVED ANSWER' },
       },
@@ -4001,12 +4001,12 @@ describe('fusion chat card', () => {
           {
             model: 'ollama_cloud.minimax-m3',
             status: 'failed',
-            reason: "Provider 'unknown' bad gateway",
+            reason_detail: "Provider 'unknown' bad gateway",
           },
           {
             model: 'ollama_cloud.deepseek-v4-flash',
             status: 'failed',
-            reason: 'timeout',
+            reason_detail: 'timeout',
           },
         ],
         judge: { status: 'failed', decision: 'blocked', error: 'judge failed hard' },
@@ -4160,7 +4160,7 @@ describe('fusion chat card', () => {
         source: 'fusion',
         panel: [
           { model: 'm1', status: 'answered', answer: 'a', output_tokens: 1200 },
-          { model: 'm2', status: 'failed', reason: 'timeout' },
+          { model: 'm2', status: 'failed', reason_detail: 'timeout' },
         ],
         judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'r' },
         observed_usage: { input_tokens: 712, output_tokens: 3432 },

@@ -3520,8 +3520,14 @@ let render_planning_list (state : state) =
             holds for the roster and the reading panes. The chrome is zero
             here because [content_height] above has already taken it. *)
          let list_rows =
-           Masc_tui_scroll.content_height ~rows:content_height ~chrome:0 ~count
-             ~preview_keep:None ~overflow_takes_row:true
+           (* [content_height] has a floor of one row, and a frame too short
+              for the selected goal's line and the footer leaves this at zero
+              or less. The list draws nothing there rather than taking the
+              row those two were counted for. *)
+           if content_height <= 0 then 0
+           else
+             Masc_tui_scroll.content_height ~rows:content_height ~chrome:0
+               ~count ~preview_keep:None ~overflow_takes_row:true
          in
          let overflowing = list_rows < content_height in
          let scroll_offset =

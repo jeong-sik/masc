@@ -51,7 +51,9 @@ def run(executable: str) -> None:
         os.write(fd, b"r")
         h.wait_for_output(process, fd, output, needle, start=start, timeout=10)
 
-    # The readiness rows close the Work section, below a thirty-row frame.
+    # The readiness rows close the Work section, below a thirty-row frame. A
+    # [j] at the end of the section draws nothing, so no new frame means the
+    # whole section has been on screen without the needle.
     def scroll_until(process, fd, output, needle: bytes) -> None:
         for _ in range(MAX_SCROLL_STEPS):
             h.read_available(fd, output)
@@ -59,8 +61,11 @@ def run(executable: str) -> None:
                 return
             start = len(output)
             os.write(fd, b"j")
-            h.wait_for_output(process, fd, output, h.FRAME_END, start=start, timeout=3)
-        raise AssertionError(f"scrolled {MAX_SCROLL_STEPS} rows without reaching {needle!r}")
+            if not h.poll_for_output(
+                process, fd, output, h.FRAME_END, start=start, timeout=3
+            ):
+                break
+        raise AssertionError(f"the Work section never showed {needle!r}")
 
     def interact(process, fd, _slave, output, _base):
         h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")

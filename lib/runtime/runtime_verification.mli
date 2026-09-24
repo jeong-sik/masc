@@ -20,6 +20,19 @@ type unavailable =
 
 type failure =
   | Unavailable of unavailable
+  | Rate_limited of string
+      (** The provider throttled the request (HTTP 429, or an official
+          client's usage window). Temporary: the same choice works after a
+          wait. Read from the typed error, never from its wording. *)
+  | Quota_exhausted of string
+      (** The account's quota or balance is used up (HTTP 402 family). *)
+  | Provider_overloaded of string
+      (** The provider refused for its own capacity or failed with a server
+          error. *)
+  | Provider_auth_refused of string
+      (** The provider refused the credential (HTTP 401/403). *)
+  | Provider_unreachable of string
+      (** The transport could not reach the provider. *)
   | Provider_rejected of string
       (** The provider or client refused the verification request, carrying
           its own account of the refusal. Both a wire refusal and a request
@@ -55,6 +68,13 @@ val to_json : result -> Yojson.Safe.t
 val failure_code : failure -> string
 val failure_message : failure -> string
 val failure_detail : failure -> string option
+
+val failure_of_agent_core_error : Agent_core.Error.t -> failure
+(** The verification failure for a refused Agent Core run, read from the
+    error's typed route ([Keeper_runtime_failure_route.route_of_error]), so a
+    rate limit, an exhausted quota, an overloaded provider, a refused
+    credential and an unreachable endpoint each keep their own code. A route
+    with none of those causes stays [Provider_rejected]. *)
 
 type unmeasured =
   { runtime_id : string

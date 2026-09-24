@@ -3392,6 +3392,15 @@ let setup_validate_runtime base_path =
            | Some (Runtime_verification.Unavailable (Missing_credential _)), Some (Runtime_schema.Env key) ->
              Printf.eprintf "Missing model credential: %s. Set this variable in the shell that starts MASC.\n" key
            | _ -> ());
+          (* Name the cause: a rate limit only needs a wait, a refused key
+             needs a new one, and the operator cannot tell them apart from
+             the sentence below alone. *)
+          Option.iter
+            (fun failure ->
+               Printf.eprintf "%s: %s\n%!"
+                 (Runtime_verification.failure_code failure)
+                 (Runtime_verification.failure_message failure))
+            result.failure;
           prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.");
         code
 

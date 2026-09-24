@@ -20,6 +20,7 @@ import sys
 import subprocess
 import tempfile
 import termios
+import time
 import tty
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
@@ -48,6 +49,58 @@ class VerificationError(SetupError):
         super().__init__('The selected model did not pass response and tool verification. Configuration was preserved.')
 
 
+def color_enabled():
+    # https://no-color.org: any non-empty NO_COLOR turns color off. Color is
+    # only for a person at a terminal; logs and pipes get the same plain text.
+    return sys.stderr.isatty() and os.environ.get('TERM') != 'dumb' and not os.environ.get('NO_COLOR')
+
+
+# A small, fixed palette: state is told apart by more than one hue (bold,
+# dim, a leading mark) so it still reads on a monochrome or low-contrast theme.
+STYLES = {'title': '1', 'hint': '2', 'current': '1;36', 'ok': '32', 'fail': '1;31',
+          'warn': '1;33', 'info': '36'}
+
+
+def paint(value, style):
+    if not style or not color_enabled():
+        return value
+    return '\x1b[{}m{}\x1b[0m'.format(STYLES[style], value)
+
+
+# The binary's verification codes are a closed set (runtime_verification.ml);
+# this table only chooses how each is shown. Temporary causes are yellow and
+# say so, so a rate limit is never mistaken for a broken configuration.
+FAILURE_CAUSES = {
+    'rate_limited': ('Rate limit (temporary)', 'warn',
+                     'Nothing to fix: wait a little, then choose "Retry the selected connections", '
+                     'or exclude this connection and continue with the others.'),
+    'provider_overloaded': ('Provider busy (temporary)', 'warn',
+                            'The provider side failed. Retry shortly, or exclude this connection for now.'),
+    'timed_out': ('No answer in time (often temporary)', 'warn',
+                  'Retry once; if it keeps timing out, check the endpoint or pick a smaller model.'),
+    'provider_unreachable': ('Network: provider unreachable', 'warn',
+                             'Check the endpoint URL, proxy and network, then retry.'),
+    'quota_exhausted': ('Quota or balance used up (not a rate limit)', 'fail',
+                        'Retrying will not help until the plan or billing changes. '
+                        'Exclude this connection or configure later.'),
+    'provider_auth_refused': ('Credential refused (not a rate limit)', 'fail',
+                              'Check the API key variable or sign in again, then retry.'),
+    'missing_credential': ('Credential missing (not a rate limit)', 'fail',
+                           'Export the named variable in the shell that runs MASC, then retry.'),
+    'invalid_credential': ('Credential unusable (not a rate limit)', 'fail',
+                           'Fix or replace the declared credential, then retry.'),
+    'client_not_authenticated': ('Not signed in (not a rate limit)', 'fail',
+                                 'Sign in with the official CLI (offered below), then retry.'),
+    'client_not_started': ('Client not installed or not starting', 'fail',
+                           'Install the official CLI or fix its path, then retry.'),
+}
+
+
+def failure_cause(failure):
+    return FAILURE_CAUSES.get(failure.get('code'),
+                              ('Model check failed (not a rate limit)', 'fail', None))
+
+
 def print_verification_reason(failure):
     # Native verification owns safe fixed diagnostics; never display provider
     # stderr or HTTP bodies here. The detail line is the official client's own
@@ -56,13 +109,50 @@ def print_verification_reason(failure):
     code = failure.get('code')
     message = failure.get('message')
     if model_text(code) and model_text(message):
-        print(terminal_text(code) + ': ' + terminal_text(message), file=sys.stderr)
+        label, style, _ = failure_cause(failure)
+        print(paint('[' + label + '] ', style) + terminal_text(code) + ': ' + terminal_text(message),
+              file=sys.stderr)
     detail = failure.get('detail')
     if model_text(detail):
-        print('  ' + terminal_text(detail), file=sys.stderr)
+        print(paint('  ' + terminal_text(detail), 'hint'), file=sys.stderr)
 
 
-def native_setup_command(binary, command, payload=None, arguments=()):
+def print_verification_next_step(failure):
+    _, style, step = failure_cause(failure)
+    if step:
+        print(paint('Next: ', style) + step, file=sys.stderr)
+
+
+def run_with_elapsed(argv, label):
+    """Run a child whose work can take a while, showing that it is alive.
+
+    Provider checks wait on remote models; without a visible clock a slow or
+    throttled provider looks exactly like a hung installer. Off a terminal the
+    child runs exactly as before."""
+    if not label or not color_enabled():
+        return subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    started = time.monotonic()
+    with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
+        try:
+            while True:
+                try:
+                    stdout, stderr = process.communicate(timeout=1)
+                    break
+                except subprocess.TimeoutExpired:
+                    elapsed = int(time.monotonic() - started)
+                    print('\r\x1b[2K' + paint('… ' + label, 'info') +
+                          paint(' {}s · Ctrl-C stops and keeps the previous configuration'.format(elapsed), 'hint'),
+                          end='', file=sys.stderr, flush=True)
+        except BaseException:
+            process.kill()
+            process.wait()
+            raise
+        finally:
+            print('\r\x1b[2K', end='', file=sys.stderr, flush=True)
+    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+
+
+def native_setup_command(binary, command, payload=None, arguments=(), progress=None):
     # The compiled renderer is the only identity authority. This helper handles
     # terminal interaction and private IPC; it never renders or edits TOML.
     if not binary:
@@ -73,7 +163,7 @@ def native_setup_command(binary, command, payload=None, arguments=()):
             path = Path(directory) / 'request.json'
             atomic_write(path, json.dumps(payload, ensure_ascii=False, allow_nan=False).encode(), 0o600)
             argv += ['--spec' if command == 'runtime-setup-render' else '--request', str(path)]
-        result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        result = run_with_elapsed(argv, progress)
     try:
         receipt = json.loads(result.stdout)
     except (TypeError, ValueError):
@@ -231,7 +321,8 @@ def configure_many(binary, base_path, specs, selected_ids=None, verify=False, de
     selected = [default_id] + [value for value in selected if value != default_id]
     result = native_setup_command(binary, 'runtime-setup-batch', dict(
         connections=specs, runtime_ids=selected, default_runtime_id=default_id,
-        expected_revision=expected_revision, verify=verify), arguments=['--base-path', str(base_path)])
+        expected_revision=expected_revision, verify=verify), arguments=['--base-path', str(base_path)],
+        progress='Checking each model with a real reply and a harmless tool call' if verify else None)
     if (result.get('runtime_id') != default_id or result.get('runtime_ids') != selected
             or result.get('configured') is not True or result.get('validation') != 'passed'
             or result.get('readiness') != ('verified' if verify else 'not_probed')):
@@ -379,7 +470,7 @@ def pick(title, labels, multiple=False, defaults=()):
     current = min(selected) if selected else 0
     interactive = sys.stdin.isatty() and sys.stderr.isatty() and os.environ.get('TERM') != 'dumb'
     if not interactive:
-        print('\n' + terminal_text(title), file=sys.stderr)
+        print('\n' + paint(terminal_text(title), 'title'), file=sys.stderr)
         for index, label in enumerate(labels, 1):
             print('  {}) {}'.format(index, terminal_text(label)), file=sys.stderr)
         while True:
@@ -421,25 +512,30 @@ def pick(title, labels, multiple=False, defaults=()):
                 print('\x1b[{}A'.format(drawn), end='', file=sys.stderr)
             hint = ('↑/↓ move · Space mark several · Enter choose · type to filter · Esc clears · Ctrl-C cancels' if multiple
                     else '↑/↓ move · Enter select · type to filter · Esc clears · Ctrl-C cancels')
-            lines = [terminal_text(title), hint, 'Filter: ' + text_query]
+            # Styles wrap whole rows, after truncation, so an escape sequence
+            # is never cut and the row text stays one searchable run.
+            lines = [(terminal_text(title), 'title'), (hint, 'hint'),
+                     ('Filter: ' + text_query, None if text_query else 'hint')]
             for slot in range(start, min(len(visible), start + count)):
                 index = visible[slot]
                 marker = '[x]' if index in selected else '[ ]'
-                lines.append(('› ' if index == current else '  ') + (marker + ' ' if multiple else '') + terminal_text(labels[index]))
+                style = 'current' if index == current else 'ok' if index in selected else None
+                lines.append((('› ' if index == current else '  ') + (marker + ' ' if multiple else '') +
+                              terminal_text(labels[index]), style))
             if not visible:
-                footer = 'no matches'
+                footer = ('no matches', 'warn')
             elif multiple:
-                footer = '{} selected · {}/{} shown'.format(len(selected), len(visible), len(labels))
+                footer = ('{} selected · {}/{} shown'.format(len(selected), len(visible), len(labels)), 'hint')
             else:
-                footer = '{}/{} shown'.format(len(visible), len(labels))
+                footer = ('{}/{} shown'.format(len(visible), len(labels)), 'hint')
             lines.append(footer)
             # A narrower frame has fewer lines than the one before it. Pad
             # with cleared empties so exactly the previous frame's line count
             # is rewritten, or the rows that vanished stay on screen as ghost
             # rows (old markers, old footer and all).
-            emitted = lines + [''] * max(0, drawn - len(lines))
-            for line in emitted:
-                print('\r\x1b[2K' + line[:max(1, width - 1)], file=sys.stderr)
+            emitted = lines + [('', None)] * max(0, drawn - len(lines))
+            for line, style in emitted:
+                print('\r\x1b[2K' + paint(line[:max(1, width - 1)], style), file=sys.stderr)
             sys.stderr.flush()
             drawn = len(emitted)
             key = os.read(fd, 1)
@@ -1493,7 +1589,8 @@ def wizard_with_credentials(binary, base_path, timeout, credentials, quick_model
                             index = pick('Choose the next fallback connection', [names[value] for value in selected])[0]
                             ordered.append(selected.pop(index))
                 ordered += selected
-            print('Checking a real response and a harmless tool call for each selected connection…', file=sys.stderr)
+            print(paint('Checking a real response and a harmless tool call for each selected connection…', 'info'),
+                  file=sys.stderr)
             while ordered:
                 try:
                     # Excluding a failed connection must also exclude its new
@@ -1508,8 +1605,10 @@ def wizard_with_credentials(binary, base_path, timeout, credentials, quick_model
                     result['base_path'] = str(base_path)
                     return result
                 except VerificationError as error:
-                    print('Verification failed: ' + terminal_text(names[error.runtime_id]), file=sys.stderr)
+                    print(paint('✗ Verification failed: ' + terminal_text(names[error.runtime_id]), 'fail'),
+                          file=sys.stderr)
                     print_verification_reason(error.failure)
+                    print_verification_next_step(error.failure)
                     login = login_command(binary, error.runtime_id, specs, inventory)
                     actions = ['Retry the selected connections', 'Exclude this connection', 'Choose connections again', 'Configure later']
                     if login:
@@ -1528,7 +1627,7 @@ def wizard_with_credentials(binary, base_path, timeout, credentials, quick_model
         except (SetupError, OSError, ValueError, URLError) as error:
             if not isinstance(error, SetupError):
                 error = SetupError('the selected server did not return usable model details; check its connection and try again')
-            print(terminal_text(error), file=sys.stderr)
+            print(paint('✗ ' + terminal_text(error), 'fail'), file=sys.stderr)
             action = pick('Connection setup', ['Choose connections again', 'Configure later'])[0]
             if action == 1:
                 # Leaving after a failed save is not the operator deferring the

@@ -56,6 +56,24 @@ MASC(Multi-Agent Shared Context)는 저장소 하나에 코딩 에이전트 여�
 
 ## 설치
 
+### 빠른 설치
+
+1. 사용할 모델 CLI(Claude Code, Codex 등)에 로그인하거나 API 키 환경변수를 설정하고 Docker를 시작합니다.
+2. 설치 스크립트를 실행합니다. 작업 공간 디렉터리를 묻고, 모델을 고르게 한 뒤
+   저장 전에 각 모델의 실제 응답을 확인합니다.
+
+```bash
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+  -o /tmp/masc-install.sh && bash /tmp/masc-install.sh
+```
+
+3. 모델 확인이 실패하면 마법사가 원인을 표시합니다. 노란색
+   **Rate limit (temporary)**, **Provider busy**, **No answer in time**은 잠시 기다린 뒤
+   *Retry*만 하면 됩니다. 빨간색 원인(credential refused, quota used up, not signed in)은
+   표시된 조치가 필요합니다. 해당 연결만 제외하고 계속하거나 *Configure later*를 고른 뒤
+   나중에 `masc setup`을 실행할 수 있습니다. 확인 중에는 경과 시간(초)이 표시되므로
+   느린 프로바이더를 멈춘 설치로 오해하지 않아도 됩니다. `NO_COLOR=1`이면 색 없이 출력합니다.
+
 ### 첫 대화
 
 먼저 보유한 모델 CLI에 로그인하거나 API 인증 환경변수를 설정하고 Docker를

@@ -151,6 +151,48 @@ let test_client_failures_stay_apart () =
   check int "an unavailable client still exits 2" 2 (Verify.exit_code result)
 ;;
 
+(* A 429 used to arrive as the same provider_rejected as a refused key, so an
+   operator stopped the install to find out whether waiting would do. Each
+   typed cause keeps its own code, and the code survives the report the
+   setup screen reads back. *)
+let test_provider_refusals_name_their_cause () =
+  let code_of error =
+    let failure = Verify.failure_of_agent_core_error error in
+    let result = measure (fun _ ~prompt:_ -> Error failure) in
+    (match Verify.of_json (Verify.to_json result) with
+     | Ok (Verify.Measured { Verify.failure = Some read; _ }) ->
+       check string "the code reads back" (Verify.failure_code failure) (Verify.failure_code read)
+     | Ok _ | Error _ -> fail "the report did not read back with its failure");
+    Verify.failure_code failure
+  in
+  let api error = Agent_core.Error.Api error in
+  check
+    (list string)
+    "each typed refusal keeps its cause"
+    [ "rate_limited"
+    ; "quota_exhausted"
+    ; "provider_overloaded"
+    ; "provider_auth_refused"
+    ; "provider_auth_refused"
+    ]
+    (List.map
+       code_of
+       [ api (Llm_provider.Retry.RateLimited { retry_after = Some 30.; message = "slow down" })
+       ; api (Llm_provider.Retry.PaymentRequired { message = "balance" })
+       ; api (Llm_provider.Retry.Overloaded { message = "busy" })
+       ; api (Llm_provider.Retry.AuthError { message = "bad key" })
+       ; api (Llm_provider.Retry.AuthorizationError { message = "no access" })
+       ]);
+  let throttled =
+    api (Llm_provider.Retry.RateLimited { retry_after = Some 30.; message = "slow down" })
+  in
+  check
+    (option string)
+    "the provider's retry hint is kept"
+    (Some (Agent_core.Error.to_string throttled ^ " (provider asks to retry after 30s)"))
+    (Verify.failure_detail (Verify.failure_of_agent_core_error throttled))
+;;
+
 (* Proves the credential arm keeps the dispatch check's own account. A runtime
    whose declared file credential resolved to nothing usable reports
    [Invalid_credential] with a reason naming the file carrier, and one whose
@@ -942,6 +984,10 @@ let () =
             "client failures stay apart"
             `Quick
             test_client_failures_stay_apart
+        ; test_case
+            "provider refusals name their cause"
+            `Quick
+            test_provider_refusals_name_their_cause
         ; test_case
             "all configured model inventory"
             `Quick

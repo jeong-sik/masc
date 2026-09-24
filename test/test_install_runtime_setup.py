@@ -476,6 +476,31 @@ class RuntimeSetupAdapter(unittest.TestCase):
         self.assertIn('  claude auth status reported loggedIn=false', text)
         self.assertEqual(text.count('\n'), 2)
 
+    def test_verification_failure_says_whether_it_is_a_rate_limit(self):
+        # A 429 read the same as a refused key, and operators stopped the
+        # install to find out whether waiting would do.
+        def shown(code):
+            with patch.object(SETUP.sys, 'stderr', io.StringIO()) as stderr:
+                failure = dict(code=code, message='fixture message', detail='fixture detail')
+                SETUP.print_verification_reason(failure)
+                SETUP.print_verification_next_step(failure)
+            return stderr.getvalue()
+        throttled = shown('rate_limited')
+        self.assertIn('[Rate limit (temporary)] rate_limited: fixture message', throttled)
+        self.assertIn('Retry the selected connections', throttled)
+        self.assertIn('not a rate limit', shown('provider_auth_refused'))
+        self.assertIn('[Model check failed (not a rate limit)] provider_rejected:', shown('provider_rejected'))
+        # Captured output is not a terminal, so it carries no escape codes.
+        self.assertNotIn('\x1b[', throttled)
+
+    def test_color_follows_no_color(self):
+        with patch.object(SETUP.sys.stderr, 'isatty', return_value=True), \
+                patch.dict(SETUP.os.environ, {'TERM': 'xterm', 'NO_COLOR': ''}):
+            self.assertEqual(SETUP.paint('x', 'fail'), '\x1b[1;31mx\x1b[0m')
+        with patch.object(SETUP.sys.stderr, 'isatty', return_value=True), \
+                patch.dict(SETUP.os.environ, {'TERM': 'xterm', 'NO_COLOR': '1'}):
+            self.assertEqual(SETUP.paint('x', 'fail'), 'x')
+
     def test_ctrl_c_in_the_picker_cancels_without_a_traceback(self):
         master, slave = pty.openpty()
         program = ('import importlib.util,json; s=importlib.util.spec_from_file_location("setup",' +

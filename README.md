@@ -58,6 +58,25 @@ product grows (see [Dashboard](#dashboard)).
 
 ## Start here
 
+### Quick install
+
+1. Sign in to a model CLI (Claude Code, Codex, …) or export its API key, and start Docker.
+2. Run the installer. It asks for a workspace directory, lets you pick models, and
+   checks each one with a real reply before saving:
+
+```bash
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+  -o /tmp/masc-install.sh && bash /tmp/masc-install.sh
+```
+
+3. If a model check fails, the wizard names the cause. A yellow
+   **Rate limit (temporary)**, **Provider busy** or **No answer in time** needs only a
+   wait and *Retry*; a red cause (credential refused, quota used up, not signed in)
+   needs the fix it names. You can exclude that connection and continue, or choose
+   *Configure later* and run `masc setup` afterwards. A running check shows its
+   elapsed seconds, so a slow provider is not a frozen installer. `NO_COLOR=1`
+   gives plain output.
+
 ### First conversation
 
 First sign in to your model CLI or export its API credential, and start Docker.

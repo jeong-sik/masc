@@ -23,6 +23,7 @@ function queueItem(overrides: Partial<KeeperApprovalQueueItem> & { id: string })
     waiting_s: 92,
     input_preview: '{"path":"config.json","content":"hello"}',
     task_id: 'T-1',
+    phase: 'queued',
     summary_status: { status: 'not_requested' },
     exact_attempt: { state: 'unbound' },
     summary_attempt_disposition: { code: 'ready' },
@@ -346,6 +347,7 @@ describe('ApprovalsSurface', () => {
     const { ApprovalsSurface } = await loadSurface([
       queueItem({
         id: 'appr-summary',
+        phase: 'human_required',
         keeper_name: 'masc-improver',
         summary_status: {
           status: 'available',
@@ -384,6 +386,7 @@ describe('ApprovalsSurface', () => {
     const { ApprovalsSurface } = await loadSurface([
       queueItem({
         id: 'appr-pending',
+        phase: 'judging',
         summary_status: { status: 'pending' },
         exact_attempt: {
           ...releasedRecoveryAttempt('appr-pending'),
@@ -393,6 +396,7 @@ describe('ApprovalsSurface', () => {
       }),
       queueItem({
         id: 'appr-failed',
+        phase: 'blocked',
         summary_status: { status: 'failed', reason: 'exact attempt quarantined' },
         exact_attempt: {
           ...completedExactAttempt('appr-failed', 'call-failed'),

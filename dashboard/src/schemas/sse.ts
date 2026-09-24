@@ -62,8 +62,6 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'reaction_changed',
   'heartbeat',
   'keeper_heartbeat',
-  'keeper_handoff',
-  'masc/keeper_handoff',
   'keeper_phase_changed',
   'keeper_composite_changed',
   'keeper_chat_appended',
@@ -175,8 +173,6 @@ const STRING_FIELDS = new Set([
 const NUMBER_FIELDS = new Set([
   'context_ratio',
   'ts_unix',
-  'from_generation',
-  'to_generation',
   'before_tokens',
   'after_tokens',
   'saved_tokens',

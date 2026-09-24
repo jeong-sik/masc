@@ -184,6 +184,7 @@ let write_keeper_toml config_dir ~name =
 name = "%s"
 instructions = "test keeper"
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 |}
        name)
 
@@ -197,6 +198,7 @@ let write_keeper_toml_with_instructions config_dir ~name ~instructions =
 [keeper]
 name = "%s"
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 activation_mode = "on_demand"
 instructions = "%s"
 |}
@@ -212,6 +214,7 @@ let write_empty_keeper_toml config_dir ~name =
 name = "%s"
 instructions = "test keeper"
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 activation_mode = "on_demand"
 |}
        name);

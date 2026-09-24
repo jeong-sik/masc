@@ -348,15 +348,27 @@ type inventory_freshness =
       (** The server answered from a built inventory. An empty list here does
           mean no tools. *)
 
-(** One tool the keeper's effective surface carries. [et_skill_source_id]
-    names the configured skill source a composition skill came from, read
-    from [origin.skill_provenance.identity.source_id]; it is [None] for any
-    tool with no skill behind it, and for a composition skill whose
-    provenance the producer could not resolve. *)
+(** Where one tool on the keeper's effective surface came from, as
+    [origin.kind] names it. Only a composition skill carries
+    [origin.skill_provenance], and it always carries the key: [skill_source_id]
+    is read from [skill_provenance.identity.source_id], and is [None] when the
+    producer sent [null] because it could not resolve the provenance. *)
+type effective_tool_origin =
+  | Descriptor_origin
+  | Instruction_skill_origin
+  | Composition_skill_origin of { skill_source_id : string option }
+  | Composition_control_origin
+  | Unrecognised_origin of string
+      (** A kind this build does not know, kept as the server spelled it so
+          the Tools column still draws it and the rest of the surface still
+          loads. Its provenance is not read. *)
+
+val effective_tool_origin_kind : effective_tool_origin -> string
+(** The [origin.kind] word the server sent. *)
+
 type effective_tool = {
   et_name : string;
-  et_origin : string;
-  et_skill_source_id : string option;
+  et_origin : effective_tool_origin;
 }
 
 type effective_tool_delivery =
@@ -476,6 +488,18 @@ type skill_usage_coverage = {
   suc_unavailable : string list;
 }
 
+(** One Skill name two catalog entries declare. The first entry for the name
+    in catalog order wins (Skill_catalog_snapshot.effective_projection):
+    [scsh_winner]. The two can sit in different sources, or in one source
+    whose directory names normalize to the same Skill name. A Keeper turn that
+    lists Skills by name gets the winner, when the winner loads;
+    [scsh_shadowed] is published but reaches a turn only when a Task names its
+    exact reference. Both carry the same name and differ in identity. *)
+type skill_catalog_shadow = {
+  scsh_winner : Skill_reference.identity;
+  scsh_shadowed : Skill_reference.identity;
+}
+
 type skills_catalog = {
   sc_state : skills_catalog_state;
   sc_config : skill_catalog_config option;
@@ -484,6 +508,7 @@ type skills_catalog = {
   sc_sources : skill_catalog_source list;
   sc_surfaces : skills_catalog_surface list;
   sc_rejections : skill_catalog_rejection list;
+  sc_shadows : skill_catalog_shadow list;
   sc_usage_coverage : skill_usage_coverage option;
 }
 
@@ -512,13 +537,11 @@ type effective_skill_profile = {
 
 type configured_skill_name_unavailable = {
   csn_name : string;
-  csn_reason : string option;
+  csn_reason : string;
 }
 (** A Skill name the Keeper profile selected that the turn's catalog does not
     hold. Not a read failure, so it is a different fact from
-    [ets_skills_left_out]. [csn_reason] is the producer's word for why, and it
-    is [None] when the producer sent none rather than a word this reader made
-    up. *)
+    [ets_skills_left_out]. [csn_reason] is the producer's word for why. *)
 
 type effective_tool_surface =
   | Effective_surface_available of {
@@ -1310,6 +1333,9 @@ type verification_snapshot = {
           live backlog: the rows are real and as old as that snapshot, so
           anything submitted after it is absent. *)
 }
+(** The four backlog fields are required in {!Awaiting_queue}, where the
+    server joins the backlog and always sends them. {!Full_history} does not
+    join the backlog and sends none of them, so they read as empty there. *)
 
 type keeper_phase
 (** A validated Keeper lifecycle phase from the live roster. The underlying
@@ -2246,6 +2272,15 @@ type fleet_safety = {
     alive, its durable demand is not admissible. Collapsing the two reads a
     live fleet as a stopped one. *)
 
+type fleet_safety_reading =
+  | Fleet_measured of fleet_safety
+  | Fleet_not_measured of { status : string }
+      (** The health snapshot has no fleet reading and nothing failed: it is
+          being rebuilt, at boot and again after a change invalidates it.
+          [status] is the placeholder's word (["warming"]). Kept apart from a
+          reading: zero counts would draw an idle fleet the server never
+          measured. *)
+
 type server_gc_health = {
   sgc_heap_words : int;
   sgc_live_words : int;
@@ -2746,6 +2781,54 @@ val decode_runtime_resolved_snapshot :
     Assignment and max-context fields belong to other consumers and are not
     duplicated into this light projection. *)
 
+(** What each provider account said about its own usage windows, as
+    [GET /api/v1/runtime/resolved] carries it. The server keeps these values
+    as reported and derives no availability from them. *)
+type provider_usage_window_kind =
+  | Window_five_hour
+  | Window_seven_day
+  | Window_duration_minutes of int
+      (** A window length the server has no name for. *)
+  | Window_provider_label of string
+      (** A label the provider gave the window, kept as written. *)
+
+(** The usage in the unit the provider reported it in. Not clamped. *)
+type provider_usage_utilization =
+  | Utilization_fraction of float  (** [0.67] is 67 %. *)
+  | Utilization_percent of int
+
+type provider_usage_window = {
+  puw_limit_id : string option;
+  puw_kind : provider_usage_window_kind;
+  puw_utilization : provider_usage_utilization;
+  puw_resets_at : float option;  (** Epoch seconds, as reported. *)
+  puw_observed_at : float;  (** When the server heard this report. *)
+}
+
+(** A reported account holds at least one window; an account that has not
+    reported since the server started holds none. *)
+type provider_usage_state =
+  | Account_not_reported_since_start
+  | Account_reported of provider_usage_window * provider_usage_window list
+
+type provider_usage_account = {
+  pua_scope : string;  (** The quota scope, as [quota_scope] on runtime rows. *)
+  pua_providers : string list;
+  pua_state : provider_usage_state;
+}
+
+type provider_usage_windows = {
+  puws_since : float;  (** Server process start: the table's first moment. *)
+  puws_accounts : provider_usage_account list;
+}
+
+val decode_provider_usage_windows :
+  Yojson.Safe.t -> (provider_usage_windows, string) result
+(** Strict decoder for the [provider_usage_windows_since] and
+    [provider_usage_windows] members of [GET /api/v1/runtime/resolved]. An
+    unknown [state], window [kind] or utilization [unit] is an error, as is a
+    reported account without windows or an unreported one with windows. *)
+
 val decode_runtime_surface_snapshot :
   probe_json:Yojson.Safe.t ->
   resolved_json:Yojson.Safe.t ->
@@ -2874,11 +2957,19 @@ val decode_overview_goals :
     server order. Goals of every phase are returned; which ones a surface
     draws is the surface's decision. *)
 
-val decode_fleet_safety : Yojson.Safe.t -> (fleet_safety, string) result
+val decode_fleet_safety :
+  Yojson.Safe.t -> (fleet_safety_reading, string) result
 (** Reads the [keeper_fleet_safety] section out of a [/health?full=1] body.
     A body without the section is an error rather than an empty reading: an
     absent section and a healthy fleet are different facts, and rendering the
-    second for the first is how a blocked keeper stays invisible. *)
+    second for the first is how a blocked keeper stays invisible.
+
+    A section carrying [schema = Keeper_fleet_blocker.reading_schema] is a
+    reading, and every field of {!fleet_safety} is required: a missing count
+    is an error, not zero. A section without [schema] is the health
+    snapshot's placeholder: {!Fleet_not_measured} when it carries no
+    [error], and an error with the server's reason when it does (the refresh
+    timed out or the scan raised). *)
 val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :

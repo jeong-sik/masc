@@ -5,6 +5,7 @@ type flags =
   { name : string
   ; instructions : string
   ; sandbox_profile : string
+  ; sandbox_image : string option
   ; network_mode : string option
   ; microvm_backend : string option
   ; remote_endpoint : string option
@@ -107,6 +108,14 @@ let declaration_of_flags (flags : flags) : (Yojson.Safe.t, string) result =
             | None -> []
             | Some text -> [ "instructions", `String text ]
           in
+          (* Passed through untrimmed-to-default: the server owns the rule
+             that a docker or microvm keeper names its image (#37523), so a
+             missing one is refused there with the TOML line to add. *)
+          let sandbox_image =
+            match Option.bind flags.sandbox_image trimmed_nonempty with
+            | None -> []
+            | Some image -> [ "sandbox_image", `String image ]
+          in
           let microvm_backend =
             match flags.microvm_backend with
             | None -> []
@@ -149,6 +158,7 @@ let declaration_of_flags (flags : flags) : (Yojson.Safe.t, string) result =
                  ; "network_mode", `String network_mode
                  ]
                  @ instructions
+                 @ sandbox_image
                  @ microvm_backend
                  @ remote_endpoint
                  @ mention_targets

@@ -76,8 +76,16 @@ type delta =
       (** New resolved-runtime attempt: discard unfinished text/thinking from
           the prior attempt while retaining tool evidence. *)
   | Stream_model_started of { model : string }
-  | Stream_usage of stream_usage
-      (** Token counters the provider reported for the request in flight. *)
+  | Stream_details of
+      { usage : stream_usage option
+      ; stop_reason : string option
+      }
+      (** What the provider said about the message in flight: the counters so
+          far, and why it stopped writing ([end_turn], [max_tokens],
+          [refusal], …). One wire event carries both and the dashboard keeps
+          them as one record ([dashboard/src/keeper-stream.ts]
+          KEEPER_STREAM_MESSAGE_DELTA), so they arrive together here too. At
+          least one of the two is present. *)
   | Text of string  (** Assistant text to append. *)
   | Thinking of string  (** Reasoning text to append. *)
   | Tool_started of

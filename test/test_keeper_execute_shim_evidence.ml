@@ -117,7 +117,8 @@ let with_workspace ~response_kind f =
       ; known_hosts_file = default_known_hosts_file ~name:"fixture"
       ; remote_root = "/srv/masc/playground"; connect_timeout_sec = 1
       ; max_concurrent_sessions = 1; env_allowlist = []; capabilities = []
-      ; private_home = false });
+      ; private_home = false
+      ; allowed_paths = [] });
   (match Keeper_approval_queue.install_persistence ~base_path with
    | Ok _ -> () | Error error -> fail (Keeper_approval_queue.install_error_to_string error));
   (match Keeper_gate_mode.set config ~actor:"fixture" Keeper_gate_mode.Auto_judge with

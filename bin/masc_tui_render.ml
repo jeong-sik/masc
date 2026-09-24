@@ -29,6 +29,7 @@ module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Overview_team = Masc_tui_overview_team
 module Overview_goals = Masc_tui_overview_goals
+module Overview_providers = Masc_tui_overview_providers
 module Repository_pulls = Masc_tui_repository_pulls
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
@@ -322,67 +323,18 @@ let overview_team (state : state) =
         (Overview_team.project ~keepers:overview.ov_keeper_rows
            ~tasks:state.tasks ~attention:overview.ov_attention_items)
 
-(* The quota windows the runtime catalogue reports shut, as one line under
-   the Team block's stuck rows: a shut window is usually why the Keepers under it
-   are stuck, and when it reopens is what the operator waits on. Nothing is
-   drawn while every window is open or before the first read -- a line saying
-   "all open" on every frame would be texture. A failed read says so. *)
-(* A failed quota read is said, but as a detail line: it explains no stuck
-   row, so it takes only rows the Overview had spare. *)
-let overview_quota_unread_line (state : state) =
-  match state.overview_quota with
-  | Quota_failed err ->
-      Some
-        (Printf.sprintf "%squota windows unread: %s%s" Ansi.dim
-           (Terminal_text.single_line err) Ansi.reset)
-  | Quota_unread | Quota_read _ -> None
-
-let overview_quota_line (state : state) ~now =
-  match state.overview_quota with
-  | Quota_unread | Quota_failed _ -> None
-  | Quota_read options -> (
-      match Overview_team.shut_windows options with
-      | [] -> None
-      | windows ->
-          let window_text (window : Overview_team.shut_window) =
-            let scope =
-              match window.sw_scope with
-              | Some scope -> Terminal_text.single_line scope
-              | None -> "unscoped"
-            in
-            let reopen =
-              match window.sw_resets_at with
-              | None -> "reopening time not reported"
-              | Some at when at <= now -> "reopen due, not yet re-read"
-              | Some at ->
-                  let tm = Unix.gmtime at in
-                  Printf.sprintf "reopens %02d:%02dZ, in %s" tm.Unix.tm_hour
-                    tm.Unix.tm_min
-                    (keeper_lane_idle_text (int_of_float (at -. now)))
-            in
-            Printf.sprintf "%s%s%s (%d runtime%s) %s" (Theme.warn ()) scope
-              Ansi.reset window.sw_runtimes
-              (if window.sw_runtimes = 1 then "" else "s")
-              reopen
-          in
-          Some
-            (Printf.sprintf "%s\xe2\x8f\xb8%s quota shut: %s" (Theme.warn ())
-               Ansi.reset
-               (String.concat " \xc2\xb7 " (List.map window_text windows))))
-
 let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
 
-(* Lines under the Team block that explain no Keeper row: an unread quota
-   and the pull request summary. *)
-let overview_team_detail_lines (state : state) =
-  Option.to_list (overview_quota_unread_line state) @ overview_pulls_lines state
+(* Lines under the Team block that explain no Keeper row: the pull request
+   summary. *)
+let overview_team_detail_lines (state : state) = overview_pulls_lines state
 
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the name lines and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~quota_line ~detail_lines ~pr_tag_of_keeper =
+    ~detail_lines ~pr_tag_of_keeper =
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -483,7 +435,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
   (* Detail lines come last: the layout gives them only rows nothing else
      wanted, so a short viewport cuts them before any Keeper. *)
   let rows =
-    List.map keeper_line stuck @ Option.to_list quota_line
+    List.map keeper_line stuck
     @ List.map keeper_line others
     @ names_line "?" "no phase" team.no_phase
     @ names_line off_glyph "paused" team.paused
@@ -567,6 +519,13 @@ let overview_attention (state : state) =
   | None -> []
   | Some overview -> overview.ov_attention_items
 
+(* The Providers section, drawn between the Attention panel and the Team
+   block. *)
+let overview_providers_section (state : state) ~cols =
+  Overview_providers.section ~providers:state.overview_providers
+    ~runtimes:state.overview_quota ~now:(Unix.gettimeofday ())
+    ~width:(framed_inner_width cols)
+
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
 let overview_layout (state : state) ~terminal_rows =
   let all_attention = overview_attention state in
@@ -574,16 +533,19 @@ let overview_layout (state : state) ~terminal_rows =
   let team_count =
     match overview_team state with
     | None -> 0
-    | Some team ->
-        Overview_team.drawn_rows team
-        + Option.fold ~none:0 ~some:(fun _ -> 1)
-            (overview_quota_line state ~now:(Unix.gettimeofday ()))
+    | Some team -> Overview_team.drawn_rows team
+  in
+  let providers_count =
+    match overview_providers_section state ~cols:(snd (get_terminal_size ())) with
+    | None -> 0
+    | Some section -> List.length section.Overview_providers.lines
   in
   let allocate attention_items =
     Render_schedule.allocate_overview ~terminal_rows
       ~attention_count:(List.length attention_items)
       ~goal_count:(Overview_goals.wanted_rows state.overview_goals)
       ~team_count
+      ~providers_count
       ~task_count:
         (Overview_tasks.line_count state.tasks
            (Overview_tasks.backlog state.tasks_domain))
@@ -850,6 +812,18 @@ let render_overview (state : state) =
 
   box_divider buf cols;
 
+  (* Providers section: each provider account's usage windows, as reported.
+     Drawn above Team, whose stuck Keepers a shut account explains. *)
+  (match overview_providers_section state ~cols with
+   | Some section when row_budget.providers_rows > 0 ->
+       Buffer.add_string buf (fit_width section.Overview_providers.title cols ^ "\n");
+       List.iter (box_line buf cols)
+         (List.filteri
+            (fun index _ -> index < row_budget.providers_rows)
+            section.Overview_providers.lines);
+       box_divider buf cols
+   | Some _ | None -> ());
+
   (* Team block: who is doing what, who is stuck. The allocation gave it
      [team_rows] rows plus its title and closing divider, or nothing. *)
   (match overview_team state with
@@ -857,7 +831,6 @@ let render_overview (state : state) =
        let title, lines =
          overview_team_lines team ~team_rows:row_budget.team_rows
            ~flow:state.task_flow ~cols
-           ~quota_line:(overview_quota_line state ~now:(Unix.gettimeofday ()))
            ~detail_lines:(overview_team_detail_lines state)
            ~pr_tag_of_keeper:(Repository_pulls.keeper_tag state.overview_pulls)
        in
@@ -2374,9 +2347,22 @@ let board_hearth_census_line ~cols (state : state) =
          to fit beside it, which is a different question from the one the row
          asks. *)
       let banded = Magnitude.of_counts census in
-      let entry (name, count, band) =
+      (* Each hearth's text is made printable once, here, and the budget below
+         and [entry] both read that one string. Measured as it arrived, a name
+         with a control byte in it counts that byte as no cells, and the row
+         draws it as a four-cell escape. The name as it arrived stays beside
+         the text for the selection check, since [board_hearth] holds it in
+         that form. *)
+      let hearths =
+        List.map
+          (fun (name, count, band) ->
+             ( name
+             , Printf.sprintf "%s %d" (Terminal_text.single_line name) count
+             , band ))
+          banded
+      in
+      let entry (name, text, band) =
         let selected = Option.equal String.equal state.board_hearth (Some name) in
-        let text = Printf.sprintf "%s %d" (Terminal_text.single_line name) count in
         (* Selection wins over size: which hearth is being read is a different
            axis from how big it is, and the reverse block says the first
            without leaving the second unsaid -- the count is in the text. *)
@@ -2399,31 +2385,49 @@ let board_hearth_census_line ~cols (state : state) =
         Printf.sprintf "   %s" (Masc_tui_message_layout.count_noun total "post")
       in
       let dropped_note count = Printf.sprintf "%s+%d" census_separator count in
-      (* Room for the widest note the row could end on: any hearth but the
-         first may be the one that does not fit. *)
-      let room =
-        max 8
-          (framed_inner_width cols - cells lead - cells tail
-          - cells (dropped_note (List.length census)))
+      let room = framed_inner_width cols - cells lead - cells tail in
+      (* The hearths that fit in [budget] cells, in census order, and how many
+         are left over. *)
+      let take budget =
+        let rec go kept used = function
+          | [] -> (List.rev kept, 0)
+          | ((_, text, _) as hearth) :: rest ->
+              let width =
+                cells text + if kept = [] then 0 else cells census_separator
+              in
+              if used + width > budget then (List.rev kept, 1 + List.length rest)
+              else go (hearth :: kept) (used + width) rest
+        in
+        go [] 0 hearths
       in
-      let rec take kept used = function
-        | [] -> (List.rev kept, 0)
-        | ((name, count, _) as banded_entry) :: rest ->
-            let width =
-              cells (Printf.sprintf "%s %d" name count)
-              + if kept = [] then 0 else cells census_separator
-            in
-            if used + width > room then (List.rev kept, 1 + List.length rest)
-            else take (banded_entry :: kept) (used + width) rest
+      (* The note is drawn only when a hearth is dropped, so it takes room only
+         then. Setting it aside before filling would, at a width that holds
+         every hearth but not the note as well, drop the last hearth and draw
+         "+1" for a hearth that had room.
+
+         So the first pass sets nothing aside. A pass that drops hearths runs
+         again with room for the note that drop needs. Dropping more can add a
+         digit to the count, and a pass whose note is wider than what it set
+         aside runs once more with that width. Each pass sets aside more than
+         the one before, and no note is wider than the one for the whole
+         census, so this ends. *)
+      let rec fit ~note_cells =
+        match take (room - note_cells) with
+        | kept, 0 -> (kept, None)
+        | kept, dropped ->
+            let note = dropped_note dropped in
+            if cells note <= note_cells then (kept, Some note)
+            else fit ~note_cells:(cells note)
       in
-      let kept, dropped = take [] 0 banded in
+      let kept, note = fit ~note_cells:0 in
       let shown =
         List.map entry kept
         |> String.concat (Ansi.dim ^ census_separator ^ Ansi.reset)
       in
       Printf.sprintf "  %s%s%s %s%s%s" Ansi.dim label Ansi.reset shown
-        (if dropped = 0 then ""
-         else Printf.sprintf "%s%s%s" Ansi.dim (dropped_note dropped) Ansi.reset)
+        (match note with
+         | None -> ""
+         | Some note -> Printf.sprintf "%s%s%s" Ansi.dim note Ansi.reset)
         (Printf.sprintf "%s%s%s" Ansi.dim tail Ansi.reset)
 
 let render_board_list (state : state) =
@@ -4076,15 +4080,29 @@ let render_schedule_list (state : state) =
              |> min 40
            in
            let wake_width = schedule_wake_word_cells in
+           (* Measured, like the target beside it. The column was a literal
+              12, and the words the projection sends run past it: live,
+              [turn_finished] drew as [tur...finished], and
+              [terminal_cancelled] and [conflicting_terminal_evidence] are
+              longer still. The wake column next to it takes its width from
+              the contract's own list; this one has no such list to read
+              (#38350), so it is measured from the rows on the page. *)
+           let delivery_width =
+             Render_schedule.schedule_delivery_width
+               (List.map
+                  (fun row ->
+                    Terminal_text.single_line (schedule_delivery_word row))
+                  snapshot.scs_rows)
+           in
            let recurrence_width =
              Render_schedule.schedule_recurrence_width
                ~inner_width:(max 1 (framed_inner_width cols - 2))
-               ~target_width:subject_width ~wake_width
+               ~target_width:subject_width ~wake_width ~delivery_width
            in
            c.push_styled ~style:(Theme.recede ())
              ("  "
              ^ Render_schedule.schedule_header_row ~target_width:subject_width
-                 ~wake_width ~recurrence_width);
+                 ~wake_width ~delivery_width ~recurrence_width);
            c.push_divider ();
            (* The column names and the rule under them, the two rows every
               other list on this screen already spends to say what it draws. *)
@@ -4143,7 +4161,7 @@ let render_schedule_list (state : state) =
                  Render_schedule.schedule_row ~status_style:status_color
                    ~wake_style:(schedule_status_color last_wake)
                    ~recurrence_style:Ansi.dim ~target_width:subject_width
-                   ~wake_width ~recurrence_width
+                   ~wake_width ~delivery_width ~recurrence_width
                    { Render_schedule.srow_status =
                        bracketed ~max_cells:10 row.sch_status
                    ; srow_due = due
@@ -5005,7 +5023,12 @@ let render_keeper_list (state : state) =
        box_line buf cols
          ((Theme.bad ()) ^ "  fleet: " ^ Terminal_text.single_line err ^ Ansi.reset)
    | None, None -> ()
-   | Some fleet, None ->
+   | Some (Fleet_not_measured { status }), None ->
+       box_line buf cols
+         ((Theme.warn ()) ^ "  fleet "
+          ^ Masc_tui_fleet_line.not_measured_text ~status
+          ^ Ansi.reset)
+   | Some (Fleet_measured fleet), None ->
        let tone =
          if fleet.fs_operator_action_required then (Theme.bad ())
          else if String.equal fleet.fs_status "ok" then (Theme.ok ())
@@ -7459,18 +7482,29 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                            String.equal binding.cb_keeper_name k.k_name)
                         connector.cn_bindings)
                  in
+                 let tail =
+                   Printf.sprintf "  %d here / %d total" here_count
+                     (List.length connector.cn_bindings)
+                 in
+                 (* Two cells of indent, two for the cursor mark, two between
+                    the name and the badge: the padding the row spends before
+                    its columns. *)
+                 let name_cells =
+                   Masc_tui_connector_state.list_row_name_cells
+                     ~inner:(framed_inner_width cols) ~fixed_cells:6
+                     ~tail_cells:(String.length tail)
+                 in
                  let line =
                    "  " ^ (if index = selected_index then "▸ " else "  ")
                    ^ fit_width
                        (Terminal_text.single_line connector.cn_display_name)
-                       14
+                       name_cells
                    ^ "  "
                    ^ fit_width
                        (Masc_tui_connector_state.badge_word
                           connector.cn_connection)
-                       12
-                   ^ Printf.sprintf "  %d here / %d total" here_count
-                       (List.length connector.cn_bindings)
+                       Masc_tui_connector_state.badge_column_cells
+                   ^ tail
                  in
                  if index = selected_index then Ansi.reverse ^ line ^ Ansi.reset
                  else line)
@@ -9564,9 +9598,41 @@ let render_fusion_list (state : state) =
       box_divider buf cols) replay_warning;
   let chrome_rows = listing_chrome ~error:state.fusion_error
       + (if Option.is_some replay_warning then 2 else 0) in
-  (* The selected run's lifecycle is a reading, not footer help. Reserve one
-     row for it so every run says where it is in the four-stage flow. *)
-  let content_height = max 1 (rows - chrome_rows - 1) in
+  (* The selected run's lifecycle is a reading, not footer help, and it is
+     asked for its own height the way the Memory block under the roster is
+     (#38432): the clauses are packed into rows here, before the list is given
+     its height. [listing_note_rows] hands it only the rows the list leaves
+     blank, so every run still says where it is in the four-stage flow and no
+     entry loses its row. *)
+  let summary_indent = "  " in
+  let summary_clauses =
+    match List.nth_opt entries state.fusion_cursor with
+    | None -> None
+    | Some (Tui_decode.Fusion_historical_evidence _) ->
+        Some
+          ( Theme.warn ()
+          , [ "Historical Board evidence; run lifecycle unavailable"
+            ; "Enter:read original result" ] )
+    | Some (Tui_decode.Fusion_retained_run selected) ->
+        let style, summary = fusion_run_summary selected in
+        Some (style, [ fusion_run_duration ~now:now_epoch selected; summary ])
+  in
+  let packed_summary =
+    match summary_clauses with
+    | None -> []
+    | Some (_, clauses) ->
+        Message_layout.pack_clauses
+          ~max_cells:
+            (max 1
+               (framed_inner_width cols
+                - Message_layout.display_width summary_indent))
+          clauses
+  in
+  let summary_rows =
+    listing_note_rows ~body_rows:(rows - chrome_rows) ~entries:shown
+      ~wanted:(List.length packed_summary)
+  in
+  let content_height = max 1 (rows - chrome_rows - summary_rows) in
   let scroll =
     if state.fusion_cursor >= content_height then
       state.fusion_cursor - content_height + 1
@@ -9619,14 +9685,22 @@ let render_fusion_list (state : state) =
             box_line buf cols (Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line)
           else box_line buf cols ("  " ^ line)
     done;
-  (match List.nth_opt entries state.fusion_cursor with
-   | None -> box_empty buf cols
-   | Some (Tui_decode.Fusion_historical_evidence _) ->
-       box_line_styled buf cols ~style:(Theme.warn ())
-         "  Historical Board evidence; run lifecycle unavailable · Enter:read original result"
-   | Some (Tui_decode.Fusion_retained_run selected) ->
-       let style, summary = fusion_run_summary selected in
-       box_line_styled buf cols ~style ("  " ^ fusion_run_duration ~now:now_epoch selected ^ " · " ^ summary));
+  (match summary_clauses with
+   | None -> for _ = 1 to summary_rows do box_empty buf cols done
+   | Some (style, clauses) ->
+       (* The packed rows are drawn only when the frame had room for all of
+          them. A reading that does not fit is drawn as the one joined row it
+          was, where the frame's own cut mark still says it was cut; stopping
+          after the rows that fit would end on a row that reads as whole
+          (#38432 falls back to the same line). *)
+       let drawn =
+         if List.length packed_summary <= summary_rows then packed_summary
+         else [ String.concat Message_layout.clause_separator clauses ]
+       in
+       List.iter
+         (fun row -> box_line_styled buf cols ~style (summary_indent ^ row))
+         drawn;
+       for _ = List.length drawn + 1 to summary_rows do box_empty buf cols done);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols

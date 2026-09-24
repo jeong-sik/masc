@@ -468,6 +468,20 @@ module Glyph = struct
      tree -- are not this and do not read it. *)
   let current_entry = "\xe2\x96\xb8"
 
+  (* What a field with no value draws, wherever the surface measures in
+     display cells. The Keepers roster row and the keeper detail pane read
+     the same k_current_task_id, and an absent task drew an em dash in the
+     row and a hyphen in the pane one keypress later, so the same nothing
+     carried two marks.
+
+     Two kinds of cell keep their own one-byte mark instead. A column padded
+     with %-Ns counts bytes, and three bytes in a seven-byte cell end the row
+     two columns short -- Masc_tui_model_runtime_table says so where it
+     spells its own. And a column whose marks are a one-cell alphabet -- the
+     Memory roster's ST column, the fleet row's call figure -- reads its mark
+     against + ! s x and ?, not against this. *)
+  let no_value = "\xe2\x80\x94"
+
   (* Only the top priority speaks. The !!!/!!/! ladder made every task list
      shout — on the live Overview five of eight rows carried a red tail —
      and a mark on most rows distinguishes nothing. *)

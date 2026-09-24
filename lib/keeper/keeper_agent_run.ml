@@ -1573,7 +1573,7 @@ let run_turn
          (* The autonomous lane can abandon a call before its first event: its
             stimulus stays pending for a later cycle. A direct operation has
             already claimed its user's input, so it hands over only after a
-            tool boundary has persisted a resumable checkpoint. Applying the
+            settled tool result whose continuation can be retained. Applying the
             pre-first-token abort to it would fail that operation instead. *)
          let person_queued_probe =
            person_queued_probe ~turn_kind ~autonomous_yield_requested

@@ -39,6 +39,10 @@ COLUMNS = [
     # turns_unanswered 는 어느 후보에도 보내지 못하고 실패한 turn 수다.
     # turns_unanswered 가 빈 칸이면 측정되지 않은 것이다(0 이 아니다).
     "arm", "candidates", "answered_by", "failed_on", "turns_unanswered",
+    # 도구 호출 중 실패한 수와, 실패가 있었던 도구별 "도구=실패 수" 를 ; 로 이은 것.
+    # 벤치 점수가 낮을 때 모델 탓인지 도구 결함(경로 거절 등) 탓인지 가르는 칸이다.
+    # 빈 칸이면 측정되지 않은 것이다(0 이 아니다).
+    "failed_tool_calls", "failed_by_tool",
 ]
 
 # 후보 순서를 한 칸에 적을 때의 구분자. 순서가 곧 의미라 정렬하지 않는다.
@@ -82,6 +86,15 @@ def turns_by_runtime_cell(turns_by_runtime) -> str:
         f"{runtime}={turns}" for runtime, turns in sorted(turns_by_runtime.items()))
 
 
+def failed_by_tool_cell(outcomes) -> str:
+    """"도구=실패 수" 를 실패가 많은 순서로. 실패가 없는 도구는 뺀다."""
+    if not isinstance(outcomes, list):
+        return ""
+    return ANSWER_SEPARATOR.join(
+        f"{row['tool']}={row['failed']}" for row in outcomes
+        if isinstance(row, dict) and row.get("failed"))
+
+
 def main() -> None:
     jobs = Path(sys.argv[1])
     # csv.writer 로 쓴다. task_name 이나 masc_state 에 쉼표가 들어가면 수동
@@ -98,6 +111,7 @@ def main() -> None:
                 trial_dir.name, "", "", "", "", "", "", "", "",
                 read_error or "unreadable", "", "", "",
                 "", "", "", "", "",
+                "", "",
             ])
             continue
         verifier = data.get("verifier_result") or {}
@@ -124,6 +138,8 @@ def main() -> None:
             turns_by_runtime_cell(meta.get("answered_by")),
             turns_by_runtime_cell(meta.get("failed_on")),
             cell(meta.get("turns_unanswered")),
+            cell(meta.get("failed_tool_calls")),
+            failed_by_tool_cell(meta.get("tool_outcomes")),
         ])
 
 

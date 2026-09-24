@@ -86,7 +86,7 @@ let test_descriptor_is_typed_only () =
      from creeping back in. *)
   Alcotest.(check int) "2 oneOf branches" 2 (List.length branches);
   Alcotest.(check bool) "argv branch present" true (List.mem "argv" branches);
-  Alcotest.(check bool) "script branch present" true (List.mem "command" branches);
+  Alcotest.(check bool) "command branch present" true (List.mem "command" branches);
   Alcotest.(check bool) "cmd branch absent" false (List.mem "cmd" branches);
   Alcotest.(check bool)
     "pipeline branch absent" false (List.mem "pipeline" branches);

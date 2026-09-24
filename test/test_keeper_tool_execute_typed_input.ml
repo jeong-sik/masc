@@ -1279,6 +1279,10 @@ let suite =
           `Quick
           test_of_json_rejects_cmd_string_only
       ; Alcotest.test_case
+          "of_json_refuses_the_script_field"
+          `Quick
+          test_of_json_refuses_the_script_field
+      ; Alcotest.test_case
           "of_json_rejects_cmd_string_with_argv"
           `Quick
           test_of_json_rejects_cmd_string_with_argv

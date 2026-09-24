@@ -1226,7 +1226,8 @@ let test_validate_args_tool_execute_rejects_cmd_string () =
       true
       (string_contains msg "accepted: argv")
 
-let test_validate_args_tool_execute_rejects_command_string () =
+(* [command] is the shell form: one line for the shell, admitted alone. *)
+let test_validate_args_tool_execute_accepts_command_string () =
   let args = `Assoc [ "command", `String "pwd" ] in
   match
     Tool_input_validation.validate_args
@@ -1235,17 +1236,11 @@ let test_validate_args_tool_execute_rejects_command_string () =
       ~args
       ()
   with
-  | Ok _ -> Alcotest.fail "expected tool_execute command string to be rejected"
+  | Ok _ -> ()
   | Error result ->
-    let msg = Yojson.Safe.to_string (Tool_result.data result) in
-    Alcotest.(check bool)
-      "validation error mentions unsupported command field"
-      true
-      (string_contains msg "unsupported field(s): command");
-    Alcotest.(check bool)
-      "validation error names the accepted fields"
-      true
-      (string_contains msg "accepted: argv")
+    Alcotest.failf
+      "expected tool_execute command string to pass validation, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
 
 let test_validate_args_tool_execute_rejects_background_flag () =
   let args =
@@ -2574,8 +2569,8 @@ let () =
         test_validate_args_partial_object_keeps_invalid_args_reason;
       Alcotest.test_case "tool_execute rejects cmd string" `Quick
         test_validate_args_tool_execute_rejects_cmd_string;
-      Alcotest.test_case "tool_execute rejects command string" `Quick
-        test_validate_args_tool_execute_rejects_command_string;
+      Alcotest.test_case "tool_execute accepts command string" `Quick
+        test_validate_args_tool_execute_accepts_command_string;
       Alcotest.test_case "tool_execute rejects background flag" `Quick
         test_validate_args_tool_execute_rejects_background_flag;
       Alcotest.test_case "tool_execute rejects async lifecycle fields" `Quick

@@ -5,8 +5,8 @@
     does not decode refuses the boot rather than advertising a partial execute
     surface, so a reader never has to ask whether the schema loaded.
 
-    Five flat parameters: [argv] or [command], with [shell], [cwd] and
-    [timeout_sec]. [test_execute_tool_toml_parity] pins the shape and the
+    Six flat parameters: [argv] or [command], with [shell], [cwd],
+    [timeout_sec] and [intent]. [test_execute_tool_toml_parity] pins the shape and the
     description bounds, not bytes. *)
 
 let schema_of_name name : Masc_domain.tool_schema =

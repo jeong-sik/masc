@@ -95,8 +95,8 @@ val of_json : Yojson.Safe.t -> (execute_input, string) result
 (** Parse the typed Execute JSON boundary.
 
     [{argv}] is one process; [{command, shell?}] is one command line for a
-    shell. Both together, raw command-string fields and other unsupported
-    fields are rejected here. No compatibility normalization is applied at
+    shell. Both together and any other field are rejected here; the refusal
+    lists the accepted fields. No compatibility normalization is applied at
     parse time. *)
 
 val validate : execute_input -> (unit, validation_error) result

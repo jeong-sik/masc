@@ -109,7 +109,7 @@ scripts/dune-local.sh build lib/exec/test/test_exec_dispatch_docker_streaming.ex
 
 `Execute` remains synchronous at the callable-surface level. The public schema
 rejects legacy background flags and accepts only typed command fields:
-`argv`, `command`, `shell`, `cwd`, and `timeout_sec`. It does not expose
+`argv`, `command`, `shell`, `cwd`, `timeout_sec`, and `intent`. It does not expose
 `job_id`, `request_id`, `poll`, or `cancel` fields.
 
 Keeper-turn async messaging is a separate surface (`keeper_msg`,

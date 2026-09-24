@@ -75,16 +75,15 @@ let keeper_phase_is_running : keeper_phase -> bool = function
   | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting ->
       false
 
-type keeper_phase_band = Phase_stuck | Phase_alive | Phase_parked
+type keeper_phase_band = Phase_stuck | Phase_alive | Phase_paused | Phase_stopped
 
 let keeper_phase_band : keeper_phase -> keeper_phase_band = function
   | Keeper_state_machine.Failing | Keeper_state_machine.Crashed -> Phase_stuck
   | Keeper_state_machine.Running | Keeper_state_machine.Draining
   | Keeper_state_machine.Restarting ->
       Phase_alive
-  | Keeper_state_machine.Paused | Keeper_state_machine.Stopped
-  | Keeper_state_machine.Offline ->
-      Phase_parked
+  | Keeper_state_machine.Paused -> Phase_paused
+  | Keeper_state_machine.Stopped | Keeper_state_machine.Offline -> Phase_stopped
 
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
 
@@ -883,6 +882,91 @@ let decode_task json =
   let* task = Masc_domain.task_of_yojson json in
   Ok (task_of_domain task)
 
+(* #38445: a terminal draws bidi controls and zero-width characters as
+   nothing, so the glyphs an operator reads can differ from the bytes the
+   approval hash covers (Trojan Source, CVE-2021-42574). Both terminal
+   sanitizers route those codepoints through here, so the rule lives in one
+   place: the codepoint is drawn as its own escape text, never dropped. *)
+let is_invisible_codepoint code =
+  code = 0x061C
+  || (code >= 0x200B && code <= 0x200F)
+  || (code >= 0x202A && code <= 0x202E)
+  || (code >= 0x2066 && code <= 0x2069)
+  || code = 0xFEFF
+;;
+
+let zero_width_joiner = 0x200D
+let variation_selector_15 = 0xFE0E
+let variation_selector_16 = 0xFE0F
+
+(* The one ZWJ that is not hiding anything: the one holding an emoji
+   together. [Masc_tui_message_layout] already reads it that way when it
+   measures a cluster ("a family joined by ZWJ"), and escaping it everywhere
+   drew 🤷‍♂️ as six ASCII characters on the screen and put them back in the
+   input line on recall. UAX #29 GB11 is the line: a ZWJ between two
+   pictographs joins them and stays; every other ZWJ joins nothing a reader
+   can see, so it is drawn as its escape with the rest of the invisibles.
+   The scalars below sit inside a cluster without ending it -- the two
+   presentation selectors and the skin tones -- so a joined ZWJ is still
+   recognised after them (🧑🏽‍💻). *)
+let continues_pictograph scalar =
+  let code = Uchar.to_int scalar in
+  code = variation_selector_15
+  || code = variation_selector_16
+  || Uucp.Emoji.is_emoji_modifier scalar
+
+let scalar_at text index =
+  if index >= String.length text
+  then None
+  else (
+    let decoded = String.get_utf_8_uchar text index in
+    if Uchar.utf_decode_is_valid decoded
+    then Some (Uchar.utf_decode_uchar decoded)
+    else None)
+
+let opens_pictograph text index =
+  match scalar_at text index with
+  | Some scalar -> Uucp.Emoji.is_extended_pictographic scalar
+  | None -> false
+
+let escape_invisible text =
+  let output = Buffer.create (String.length text) in
+  let length = String.length text in
+  let rec walk index ~after_pictograph =
+    if index < length
+    then (
+      let decoded = String.get_utf_8_uchar text index in
+      let step = Uchar.utf_decode_length decoded in
+      let scalar = Uchar.utf_decode_uchar decoded in
+      let valid = Uchar.utf_decode_is_valid decoded in
+      let code = Uchar.to_int scalar in
+      let joins_two_pictographs =
+        valid
+        && code = zero_width_joiner
+        && after_pictograph
+        && opens_pictograph text (index + step)
+      in
+      if valid && is_invisible_codepoint code && not joins_two_pictographs
+      then Buffer.add_string output (Printf.sprintf "\\u%04X" code)
+      else Buffer.add_substring output text index step;
+      let after_pictograph =
+        if not valid
+        then false
+        else if Uucp.Emoji.is_extended_pictographic scalar
+        then true
+        (* Only a joiner that actually joined carries the state: an escaped
+           one has been written out as text, so what follows it no longer sits
+           inside an emoji and a second joiner cannot ride through on it. *)
+        else if continues_pictograph scalar || joins_two_pictographs
+        then after_pictograph
+        else false
+      in
+      walk (index + step) ~after_pictograph)
+  in
+  walk 0 ~after_pictograph:false;
+  Buffer.contents output
+;;
+
 let sanitize_terminal_text text =
   let escaped_byte byte = Printf.sprintf "\\x%02X" byte in
   let escaped_codepoint byte = Printf.sprintf "\\u00%02X" byte in
@@ -963,7 +1047,7 @@ let sanitize_terminal_text text =
           append (index + 1))
   in
   append 0;
-  Buffer.contents output
+  escape_invisible (Buffer.contents output)
 ;;
 
 (* One row of a text that has rows. The terminal boundary escapes control

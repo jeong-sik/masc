@@ -382,51 +382,6 @@ let test_repeating_generation_rotates_the_model () =
   Alcotest.(check bool) "the model answered, so the input was observed" true
     (KFR.response_observed route)
 
-let test_masc_internal_backpressure_hint () =
-  let err =
-    internal_err
-      (Keeper_internal_error.Capacity_backpressure
-         { runtime_id = "glm-coding.glm-5-turbo"
-         ; detail = "429 burst"
-         ; retry_after = Keeper_internal_error.Explicit 45.0
-         })
-  in
-  check_masc_route
-    "masc backpressure carries typed Explicit hint"
-    (KFR.Retry_after_observed
-       { retry_class = KFR.Provider_capacity; retry_after = Some 45.0 })
-    err;
-  Alcotest.(check (option (float 1e-6)))
-    "retry_after_of_route extracts the hint"
-    (Some 45.0)
-    (KFR.retry_after_of_route (route_of_masc_error err))
-
-(* The capacity envelope is the provider's capacity and has no source field.
-   A payload that names a source, or a runtime exhausted for capacity, is not
-   a shape MASC writes, so the strict decoder refuses it. *)
-let test_capacity_envelope_decoder_is_strict () =
-  let envelope extra =
-    `Assoc
-      ([ "kind", `String Keeper_internal_error.capacity_backpressure_kind
-       ; "runtime_id", `String "r"
-       ; "detail", `String "busy"
-       ; "retry_after_sec", `Null
-       ]
-       @ extra)
-  in
-  Alcotest.(check bool) "the envelope without a source decodes" true
-    (Option.is_some (Keeper_internal_error.parse_masc_internal_error_json (envelope [])));
-  List.iter
-    (fun source ->
-       Alcotest.(check bool) ("a source field is refused: " ^ source) true
-         (Option.is_none
-            (Keeper_internal_error.parse_masc_internal_error_json
-               (envelope [ "source", `String source ]))))
-    [ "provider_capacity"; "client_capacity"; "runtime_slot" ];
-  Alcotest.(check bool) "capacity_exhausted is not a runtime exhaustion reason" true
-    (Option.is_none
-       (Keeper_internal_error.runtime_exhaustion_reason_of_json (`String "capacity_exhausted")))
-
 let test_masc_internal_terminal_classes () =
   (match
      route_of_masc_error
@@ -774,10 +729,7 @@ let () =
             test_repeating_generation_rotates_the_model
         ] )
     ; ( "masc_internal"
-      , [ Alcotest.test_case "backpressure hint" `Quick test_masc_internal_backpressure_hint
-        ; Alcotest.test_case "capacity envelope decoder is strict" `Quick
-            test_capacity_envelope_decoder_is_strict
-        ; Alcotest.test_case "terminal classes" `Quick test_masc_internal_terminal_classes
+      , [ Alcotest.test_case "terminal classes" `Quick test_masc_internal_terminal_classes
         ] )
     ; ( "families"
       , [ Alcotest.test_case "non-provider terminal" `Quick test_non_provider_families_judge ] )

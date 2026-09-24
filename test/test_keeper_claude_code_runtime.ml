@@ -410,18 +410,81 @@ let test_result_only_usage_keeps_client_turn_scope () =
     ~input_tokens:123498 ~output_tokens:789 ~cache_read_input_tokens:42 ()
 ;;
 
-let test_latest_request_usage_outranks_client_turn_total () =
+(* Claude Code 2.1.280, 2026-09-23: one client turn of two provider requests.
+   The assistant frames' output counts (3, 2) are streaming snapshots; the
+   result frame's 270 is what the turn spent. The spend goes to the response
+   usage, the one the cost ledger reads; the second request's input goes to
+   the observation's request context, the one the turn record's context
+   readers read. Before this the turn was recorded as one request with
+   output 2. *)
+let test_real_two_request_turn_routes_spend_and_occupancy_apart () =
+  let frames =
+    In_channel.with_open_bin "fixtures/claude_code/cc-2.1.280-two-request-turn.jsonl"
+      In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.map (fun line -> Emit line)
+  in
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture frames (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"USAGE_SCOPE" () with
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok turn ->
+           (match turn.response.usage with
+            | None -> fail "the result frame's spend was dropped"
+            | Some usage ->
+              check int "spend output is the result frame's" 270 usage.output_tokens;
+              check int "spend input is inclusive" (18 + 7734 + 40681) usage.input_tokens;
+              check int "spend cache read" 40681 usage.cache_read_input_tokens;
+              check int "spend cache creation" 7734 usage.cache_creation_input_tokens);
+           (match turn.runtime_observation with
+            | None -> fail "runtime observation was dropped"
+            | Some observation ->
+              check string "spend is a client-turn total" "turn_total"
+                (Runtime_usage_scope.to_string observation.usage_scope);
+              (match observation.request_context with
+               | None -> fail "the newest request's occupancy was dropped"
+               | Some context ->
+                 check int "occupancy is the second request's inclusive input"
+                   (8 + 2747 + 22834) context.input_tokens;
+                 check int "occupancy cache read" 22834 context.cache_read_input_tokens;
+                 check int "occupancy cache creation" 2747
+                   context.cache_creation_input_tokens))))
+;;
+
+(* An assistant frame reported usage but the result frame carried none: the
+   turn's spend is not observed, so the response carries no usage and the
+   scope is unavailable. The assistant frame's output (20 here) is a streaming
+   snapshot and must not stand in for it. The request's occupancy still
+   travels. *)
+let test_assistant_usage_without_result_usage_keeps_spend_unavailable () =
   let counted_assistant =
     {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-counted","message":{"id":"msg-counted","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"USAGE_OK"}],"usage":{"input_tokens":200,"output_tokens":20,"cache_read_input_tokens":5}}}|}
   in
-  check_usage_scope
-    ~frames:
-      [ Emit counted_assistant
-      ; Emit (assistant ~turn_id:"uncounted" "USAGE_OK")
-      ; Emit result_with_aggregate_usage
-      ]
-    ~expected_scope:"per_request"
-    ~input_tokens:205 ~output_tokens:20 ~cache_read_input_tokens:5 ()
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit counted_assistant; Emit (result ~turn_id:"turn-no-usage" "USAGE_OK") ]
+         (fun cli_path ->
+            match run_keeper_turn ~base_path ~cli_path ~goal:"USAGE_SCOPE" () with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok turn ->
+              check bool "spend is not observed" true (Option.is_none turn.response.usage);
+              (match turn.runtime_observation with
+               | None -> fail "runtime observation was dropped"
+               | Some observation ->
+                 check string "spend scope is unavailable" "unavailable"
+                   (Runtime_usage_scope.to_string observation.usage_scope);
+                 (match observation.request_context with
+                  | None -> fail "the request's occupancy was dropped"
+                  | Some context ->
+                    check int "occupancy is the request's inclusive input" 205
+                      context.input_tokens))))
 ;;
 
 let checkpoint_with_messages
@@ -2206,6 +2269,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
       ; cache_read_input_tokens = None
       ; scope = Runtime_usage_scope.Per_request
       }
+  ; turn_output_tokens = None
   ; ts = 0.
   }
 ;;
@@ -2759,8 +2823,10 @@ let () =
     ; ( "usage scope"
       , [ test_case "result-only usage keeps client-turn scope" `Quick
             test_result_only_usage_keeps_client_turn_scope
-        ; test_case "latest request outranks client-turn total" `Quick
-            test_latest_request_usage_outranks_client_turn_total
+        ; test_case "real two-request turn routes spend and occupancy apart" `Quick
+            test_real_two_request_turn_routes_spend_and_occupancy_apart
+        ; test_case "assistant usage without result usage keeps spend unavailable" `Quick
+            test_assistant_usage_without_result_usage_keeps_spend_unavailable
         ] )
     ; ( "lifecycle"
       , [ test_case "settles and resumes" `Quick test_keeper_settles_and_resumes

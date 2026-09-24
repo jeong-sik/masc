@@ -377,7 +377,7 @@ let overview_team_detail_lines (state : state) =
 
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
-   what a short viewport loses first is the parked roll call and the holders
+   what a short viewport loses first is the name lines and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
     ~quota_line ~detail_lines ~pr_tag_of_keeper =
@@ -403,7 +403,9 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
       match row.group with
       | Overview_team.Needs_you -> ("!", Theme.bad ())
       | Overview_team.Working -> ("\xe2\x97\x8f", Theme.info ())
-      | Overview_team.Idle | Overview_team.Parked -> ("\xc2\xb7", Ansi.dim)
+      | Overview_team.Idle | Overview_team.No_phase | Overview_team.Paused
+      | Overview_team.Stopped ->
+          ("\xc2\xb7", Ansi.dim)
     in
     let age =
       match row.keeper.okp_last_turn_ago_s with
@@ -438,14 +440,14 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
       (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
       Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset pr_tag detail
   in
-  let parked_line =
-    match team.parked with
+  let off_glyph = "\xe2\x97\x8b" in
+  let names_line glyph label = function
     | [] -> []
-    | parked ->
-        let still_held = List.fold_left (fun sum (_, held) -> sum + held) 0 parked in
-        [ Printf.sprintf "%s\xe2\x97\x8b parked: %s%s%s" Ansi.dim
+    | names ->
+        let still_held = List.fold_left (fun sum (_, held) -> sum + held) 0 names in
+        [ Printf.sprintf "%s%s %s: %s%s%s" Ansi.dim glyph label
             (String.concat ", "
-               (List.map (fun (name, _) -> Terminal_text.single_line name) parked))
+               (List.map (fun (name, _) -> Terminal_text.single_line name) names))
             Ansi.reset
             (if still_held > 0 then
                Printf.sprintf " %s\xc2\xb7 %d open task%s still held%s" (Theme.warn ())
@@ -480,7 +482,11 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
      wanted, so a short viewport cuts them before any Keeper. *)
   let rows =
     List.map keeper_line stuck @ Option.to_list quota_line
-    @ List.map keeper_line others @ parked_line @ holders_line @ detail_lines
+    @ List.map keeper_line others
+    @ names_line "?" "no phase" team.no_phase
+    @ names_line off_glyph "paused" team.paused
+    @ names_line off_glyph "stopped" team.stopped
+    @ holders_line @ detail_lines
   in
   let total = List.length rows in
   let counts =
@@ -492,11 +498,17 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
       [ (Overview_team.Needs_you, "need you")
       ; (Overview_team.Working, "working")
       ; (Overview_team.Idle, "idle")
-      ; (Overview_team.Parked, "parked")
+      ; (Overview_team.No_phase, "no phase")
+      ; (Overview_team.Paused, "paused")
+      ; (Overview_team.Stopped, "stopped")
       ]
   in
+  (* The group counts are Keepers; the rows also hold name and detail lines,
+     so a cut says how many rows fell off the bottom, never a row total that
+     sits beside the Keeper counts. *)
   let window =
-    if team_rows < total then Printf.sprintf " %d/%d" team_rows total else ""
+    if team_rows < total then Printf.sprintf " +%d more" (total - team_rows)
+    else ""
   in
   let head =
     Printf.sprintf " %sTeam%s%s  %s" Ansi.bold Ansi.reset window
@@ -544,13 +556,18 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
   in
   (title, List.filteri (fun index _ -> index < team_rows) rows)
 
+(* Every item the Overview has to place: the transport's, then the
+   briefing's. *)
+let overview_attention (state : state) =
+  Option.to_list (transport_attention_item state.transport)
+  @
+  match state.overview with
+  | None -> []
+  | Some overview -> overview.ov_attention_items
+
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
 let overview_layout (state : state) ~terminal_rows =
-  let all_attention =
-    match state.overview with
-    | None -> []
-    | Some overview -> overview.ov_attention_items
-  in
+  let all_attention = overview_attention state in
   let tasks_error = Terminal_text.optional_single_line state.tasks_error in
   let team_count =
     match overview_team state with
@@ -562,9 +579,7 @@ let overview_layout (state : state) ~terminal_rows =
   in
   let allocate attention_items =
     Render_schedule.allocate_overview ~terminal_rows
-      ~has_cluster:(Option.is_some state.overview)
       ~attention_count:(List.length attention_items)
-      ~event_count:(List.length state.events)
       ~team_count
       ~task_count:(List.length state.tasks)
       ~has_task_error:(Option.is_some tasks_error)
@@ -709,84 +724,26 @@ let render_overview (state : state) =
   in
   box_line buf cols summary_line;
 
-  (* Cluster/project line *)
-  (match ov with
-   | None -> ()
-   | Some o ->
-         (* The transport summary rides this row rather than taking one of its
-            own: a narrow viewport must not trade an event line for it. A path
-            that is not listening reads "off" instead of zero sessions, and
-            dropped events are called out because a steady queue that drops is
-            not a healthy transport. *)
-         let transport_tail =
-           match state.transport with
-           | None -> ""
-           | Some t -> transport_summary t
-         in
-         (* The runtime event feed rides the same tail. "live N" counts the
-            frames this stream has delivered; a closed feed keeps its count
-            and says why it closed, so a stream that dropped after a thousand
-            events and one that never opened do not read alike.
-
-            Both states put the count straight after the state word, because
-            the count is the same quantity in both and the pair is what tells
-            a reader what the number counts. The closed arm read "closed after
-            N", and a bare number behind "after" reads as a duration -- how
-            long it lasted, not how much it carried -- while its own sibling
-            one frame earlier had used that number as a count. Dropping the
-            word also returns six cells to a row this comment already guards
-            from the reason string. *)
-         let observer_summary =
-           match state.observer with
-           | Observer_off -> ""
-           | Observer_opening -> "  feed: opening"
-           | Observer_live { events; _ } -> Printf.sprintf "  feed: live %d" events
-           | Observer_closed { events; _ } ->
-               (* The reason is in TUI Session Events and on the Activity status
-                  row; here it would push the count off a narrow row. *)
-               Printf.sprintf "  feed: closed %d" events
-         in
-         (* Neither name is padded to a column. Both are fixed for the
-            session, so nothing to their right moves between frames, and
-            the 24 and 20 cells they used to be padded to were blank on
-            the live workspace ("default", "me") while the transport
-            tail behind them was cut to "ws …" beside the roster pane. *)
-         let cluster_line =
-           Printf.sprintf "  Cluster: %s%s%s  Project: %s%s%s"
-             Ansi.dim
-             (Terminal_text.single_line o.ov_cluster)
-             Ansi.reset
-             (Terminal_text.single_line o.ov_project)
-             transport_tail observer_summary
-       in
-       box_line buf cols cluster_line);
-
   box_divider buf cols;
 
   (* Attention panel *)
   let attention_items, tasks_error, row_budget =
     overview_layout state ~terminal_rows:rows
   in
-  (* Three verticals plus two panels have to add up to the box the rest of the
-     screen draws. An odd remainder used to be dropped by the division, so on
-     any odd width the Attention/Events band ended one column short of every
-     other row and the right edge stepped in and back out. The odd column goes
-     to the right panel. *)
-  let panel_width = (cols - 3) / 2 in
-  let right_panel_width = cols - 3 - panel_width in
+  (* The panel spans the band the rest of the screen's rows cover: one cell of
+     margin on each side of the frame. *)
+  let panel_width = cols - 2 in
   (* The count used to ride the summary row three lines above, over the very
      rows it counted. It belongs to the panel, and it earns its place only
-     where it says something the rows cannot: that some did not fit. The
-     Events panel beside it states its window the same way. *)
+     where it says something the rows cannot: that some did not fit. *)
   let attention_count = List.length attention_items in
   (* The age cell answers "why is this still here", and a producer that puts
      no time on its evidence leaves it an em dash. Live, that is every item:
      of the nine the briefing queued, eight carry no timestamp at all and the
      ninth writes one under a name this surface does not read, so the column
-     drew nine dashes and spent four cells of a panel that shares its row with
-     the events beside it. It is drawn when some item has an age; summaries
-     still start on one edge, because the column is there or not there for the
-     whole panel. *)
+     drew nine dashes and spent four cells of the panel. It is drawn when some
+     item has an age; summaries still start on one edge, because the column is
+     there or not there for the whole panel. *)
   let attention_shows_age =
     List.exists
       (fun (item : attention_item) ->
@@ -798,9 +755,7 @@ let render_overview (state : state) =
      and the briefing's total do not disagree without a reason on screen,
      and an empty panel is not read as "nothing needs attention". *)
   let on_team_rows =
-    match ov with
-    | None -> 0
-    | Some o -> List.length o.ov_attention_items - attention_count
+    List.length (overview_attention state) - attention_count
   in
   let attention_title =
     let counted =
@@ -819,38 +774,10 @@ let render_overview (state : state) =
     then with_team
     else counted
   in
-  (* A burst of identical lines (manual refreshes, a broadcast fan-out) folds
-     into one row with a ×N tail; the window scrolls over folded rows. *)
-  let collapsed_events =
-    Render_schedule.collapse_consecutive
-      ~key:Masc_tui_types.overview_event_collapse_key state.events
-  in
-  let event_count = List.length collapsed_events in
-  let event_window =
-    Render_schedule.project_overview_event_window ~event_count
-      ~visible_rows:row_budget.attention_rows state.overview_event_scroll
-  in
-  let events_title =
-    let title =
-      if event_window.oew_first_position = 0 then " TUI Session Events "
-      else
-        Printf.sprintf " TUI Session Events %d-%d/%d "
-          event_window.oew_first_position event_window.oew_last_position
-          event_count
-    in
-    fit_width title (max 0 panel_width)
-  in
-  Buffer.add_string buf (Printf.sprintf " %s%s%s%s%s%s\n"
-    Ansi.bold attention_title Ansi.reset
-    (String.make (max 0 (panel_width - String.length attention_title)) ' ')
-    ((Theme.recede ()) ^ Ansi.box_v ^ Ansi.reset)
-    events_title);
+  Buffer.add_string buf
+    (Printf.sprintf " %s%s%s\n" Ansi.bold attention_title Ansi.reset);
 
   let attention_items_window = Rows.of_list ~first:0 ~height:row_budget.attention_rows attention_items in
-  let collapsed_events_window =
-    Rows.of_list ~first:event_window.oew_offset
-      ~height:row_budget.attention_rows collapsed_events
-  in
   (* What the panel says when it has no item to draw, the way the Tasks panel
      below it does. It said nothing: an overview that answered with no items,
      one not read yet and one that failed all left the panel blank under its
@@ -859,8 +786,7 @@ let render_overview (state : state) =
      panel writes its own two cells of indent ahead of every row, and the
      notes are written for a body that adds its own -- pasted in whole, the
      note sat two cells right of the rows it replaces and of the title above
-     them, while the Events panel beside it put its title and its rows on one
-     column. *)
+     them. *)
   let attention_empty_note =
     match empty_page_of ~snapshot:state.overview ~error:overview_error with
     | Page_empty when on_team_rows > 0 ->
@@ -902,43 +828,15 @@ let render_overview (state : state) =
         in
           (* Fitted once, by the fit that draws the row. Fitting the summary
              here as well meant guessing how many cells the label ahead of it
-             spends, and the events column beside this one guessed one too
-             many: every event row came out a cell over its budget and was
-             marked truncated whether or not anything was cut. The severity
-             badge pads itself to its own column, which is measured from the
-             level names rather than guessed at -- so it is the one part of
-             the row that is finished before it gets here. *)
+             spends. The severity badge pads itself to its own column, which
+             is measured from the level names rather than guessed at -- so it
+             is the one part of the row that is finished before it gets
+             here. *)
           Printf.sprintf "%s %s%s" severity_badge age_cell
             (Terminal_text.single_line a.ai_summary)
     in
-    let event_str =
-      let event_index = i + event_window.oew_offset in
-      match Rows.at collapsed_events_window event_index with
-      | None -> ""
-      | Some (e, run) ->
-        let tail =
-          if run > 1 then Printf.sprintf " %s\xc3\x97%d%s" Ansi.dim run Ansi.reset
-          else ""
-        in
-        (* After the clock, so the clock column stays one column down the
-           panel and only the rows that carry a mark give up its two cells. *)
-        let mark =
-          match Masc_tui_types.overview_event_mark e with
-          | None -> ""
-          | Some glyph ->
-              Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph
-                Ansi.reset
-        in
-        Printf.sprintf "%s[%s]%s %s%s%s"
-          Ansi.dim e.timestamp Ansi.reset
-          mark
-          (Terminal_text.single_line e.content)
-          tail
-    in
-    Buffer.add_string buf (Printf.sprintf "  %s %s%s%s %s\n"
-      (fit_width attention_str (panel_width - 2))
-      (Theme.recede ()) Ansi.box_v Ansi.reset
-      (fit_width event_str (right_panel_width - 2)))
+    Buffer.add_string buf
+      (Printf.sprintf "  %s\n" (fit_width attention_str (panel_width - 2)))
   done;
 
   box_divider buf cols;
@@ -1065,8 +963,7 @@ let render_overview (state : state) =
          (Masc_tui_keys.footer_hints_overview
             ~task_focus:(state.task_focus = Right_pane)));
 
-  finish_surface state ~clamped:(Overview_events event_window.oew_offset) ~surface_key:"overview" ~rows:terminal_rows
-      ~cols buf
+  finish_surface state ~surface_key:"overview" ~rows:terminal_rows ~cols buf
 
 (* One task's event history, appended after the detail body so it rides the
    same scroll. Loaded lazily on detail entry; the id check drops an answer
@@ -12824,8 +12721,8 @@ let render_acting (state : state) =
     | Observer_off -> "feed: off"
     | Observer_opening -> "feed: opening"
     | Observer_live { events; _ } -> Printf.sprintf "feed: live %d" events
-    (* Same shape as the Overview row: the count sits straight after the state
-       word, so it reads as the count its "live N" sibling above uses. *)
+    (* The count sits straight after the state word, so it reads as the count
+       its "live N" sibling above uses. *)
     | Observer_closed { events; reason; _ } ->
         Printf.sprintf "feed: closed %d (%s)" events
           (Terminal_text.single_line reason)

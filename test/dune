@@ -252,6 +252,7 @@
   test_keeper_librarian_context
   test_keeper_librarian_context_recall
   test_surface_ref
+  test_keeper_input_speaker
   test_inference_inflight_observation
   test_audit_projection
   test_keeper_turn_outcome
@@ -610,6 +611,7 @@
   test_keeper_librarian_context_recall
   test_keeper_skill_catalog
   test_surface_ref
+  test_keeper_input_speaker
   test_inference_inflight_observation
   test_audit_projection
   test_keeper_turn_outcome
@@ -2798,6 +2800,7 @@
 
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)
+(include stanzas/test_provider_usage_windows.inc)
 
 (include stanzas/test_keeper_surface_status.inc)
 
@@ -5557,7 +5560,7 @@
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_code_lexer.inc)
 (include stanzas/test_tui_overview_pulse.inc)
-(include stanzas/test_tui_overview_transport_row.inc)
+(include stanzas/test_tui_overview_transport_item.inc)
 (include stanzas/test_tui_schedules_empty_row_names_its_key.inc)
 (include stanzas/test_tui_activity_title_dot_belongs_to_the_strip.inc)
 (include stanzas/test_tui_feed_row_counts_events.inc)
@@ -5886,8 +5889,8 @@
  (libraries alcotest masc_tui_board_kind_mark masc_tui_types))
 
 (test
- (name test_tui_overview_event_mark)
- (modules test_tui_overview_event_mark)
+ (name test_tui_session_event_mark)
+ (modules test_tui_session_event_mark)
  (libraries alcotest masc_tui_types))
 
 (test

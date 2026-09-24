@@ -119,6 +119,9 @@ export type TurnRecordEntry = {
   usage_scope: (typeof TURN_USAGE_SCOPES)[number]
   input_tokens?: number
   output_tokens?: number
+  // The whole client turn's output, written apart from output_tokens when the
+  // usage fields describe the newest request (Claude Code). Absent otherwise.
+  turn_output_tokens?: number
   // #25779 made the provider cache counts durable on the turn record
   // (lib/types/turn_record.ml:79-82 writes them as optional fields). Same
   // absent-means-absent contract as the neighbours: a provider that reports no
@@ -535,6 +538,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'cache_creation_input_tokens',
     'cache_read_input_tokens',
     'output_tokens',
+    'turn_output_tokens',
     'ts',
   ])) return null
   const keeper = decodeExactNonEmptyString(raw.keeper)
@@ -596,6 +600,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   const enable_thinking = decodeOptionalField(raw, 'enable_thinking', decodeBoolean)
   const input_tokens = decodeOptionalField(raw, 'input_tokens', decodeNonNegativeSafeInteger)
   const output_tokens = decodeOptionalField(raw, 'output_tokens', decodeNonNegativeSafeInteger)
+  const turn_output_tokens =
+    decodeOptionalField(raw, 'turn_output_tokens', decodeNonNegativeSafeInteger)
   const cache_creation_input_tokens =
     decodeOptionalField(raw, 'cache_creation_input_tokens', decodeNonNegativeSafeInteger)
   const cache_read_input_tokens =
@@ -641,6 +647,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     || enable_thinking === null
     || input_tokens === null
     || output_tokens === null
+    || turn_output_tokens === null
     || cache_creation_input_tokens === null
     || cache_read_input_tokens === null
   ) {
@@ -671,6 +678,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     response_observed_model_input,
     input_tokens,
     output_tokens,
+    turn_output_tokens,
     cache_creation_input_tokens,
     cache_read_input_tokens,
     context_window,

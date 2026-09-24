@@ -25,6 +25,7 @@
 type item =
   | Cancel_claim of
       { task_id : string
+      ; verification_id : string
       ; assignee : string
       ; submitted_at : string
       ; reason : Workspace_verification_store.cancellation_reason_read

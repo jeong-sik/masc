@@ -38,8 +38,9 @@ type awaiting =
    on the task itself. Carried rather than re-derived here from [what], which
    is a sentence written for a reader. *)
 type ends_at =
-  | Verify_queue
-  | The_task
+  | Verify_queue of string
+  | Actorless_task
+  | Unreadable_producer
 
 type stalled =
   { task_id : string
@@ -203,6 +204,7 @@ type tone =
    than an answer. *)
 type destination =
   | Nowhere
+  | Full_cancel_queue
   | Keeper_holding of string
       (** the keeper sitting on a tool call only an operator releases *)
   | Stuck_task of
@@ -287,7 +289,8 @@ let waited ~now since_iso =
 (* Sixty-two rows is not a panel, it is a wall, and the operator reads the
    oldest few and then goes to the tool. The count is the part that has to be
    exact; the rows are the part that has to fit. *)
-let stalled_rows_shown = 5
+let cancellation_preview_rows = 3
+let other_stalled_preview_rows = 5
 
 let overlay ~now ~localtime ~cols t =
   let quiet text = { tone = Quiet; text = "  " ^ text; goes_to = Nowhere } in
@@ -343,34 +346,79 @@ let overlay ~now ~localtime ~cols t =
            })
         rows
   in
-  let stuck =
+  let tool_count =
+    match t.blocked with
+    | Read rows -> string_of_int (List.length rows)
+    | Not_read | Read_failed _ -> "unknown"
+  in
+  let cancellations, other_stalled, counts =
     match t.stuck with
-    | Not_read -> [ quiet "not loaded yet" ]
-    | Read_failed reason -> [ failure ~cols reason ]
-    | Read [] -> [ quiet "no task is stuck on you" ]
+    | Not_read -> [], [], [ quiet "tasks not loaded yet" ]
+    | Read_failed reason -> [], [], [ failure ~cols reason ]
     | Read rows ->
-      let shown = List.filteri (fun index _ -> index < stalled_rows_shown) rows in
-      let hidden = List.length rows - List.length shown in
-      List.map
+      let cancellations, other =
+        List.partition
+          (fun row -> match row.ends_at with Verify_queue _ -> true
+            | Actorless_task | Unreadable_producer -> false)
+          rows
+      in
+      let actorless, unreadable =
+        List.fold_left
+          (fun (actorless, unreadable) row ->
+             match row.ends_at with
+             | Verify_queue _ -> actorless, unreadable
+             | Actorless_task -> actorless + 1, unreadable
+             | Unreadable_producer -> actorless, unreadable + 1)
+          (0, 0) other
+      in
+      cancellations, other,
+      [ quiet ("tool approvals " ^ tool_count)
+      ; quiet (Printf.sprintf "stop requests %d" (List.length cancellations))
+      ; quiet (Printf.sprintf "held without actor %d" actorless)
+      ; quiet (Printf.sprintf "unreadable producer %d" unreadable) ]
+  in
+  let task_lines rows =
+    List.map
         (fun (row : stalled) ->
            { tone = Question
            ; goes_to =
                Stuck_task { task_id = row.task_id; ends_at = row.ends_at }
            ; text = two_column ~cols row.what (waited ~now row.since_iso)
            })
-        shown
-      @
-      if hidden <= 0
-      then []
-      else [ quiet (Printf.sprintf "and %d more \xe2\x80\x94 masc_operator_digest" hidden) ]
+        rows
+  in
+  let cancel_count = List.length cancellations in
+  let shown_cancellations =
+    List.filteri (fun index _ -> index < cancellation_preview_rows)
+      cancellations
+  in
+  let cancel_lines =
+    task_lines shown_cancellations
+    @ if cancel_count > cancellation_preview_rows then
+        [ { tone = Question
+          ; text = two_column ~cols
+              (Printf.sprintf "전체 %d건 열기 · Task Review" cancel_count) "Enter"
+          ; goes_to = Full_cancel_queue } ]
+      else []
+  in
+  let other_lines =
+    let shown =
+      List.filteri (fun index _ -> index < other_stalled_preview_rows)
+        other_stalled
+    in
+    task_lines shown
+    @ if List.length other_stalled > List.length shown then
+        [ quiet (Printf.sprintf "%d more task alerts"
+            (List.length other_stalled - List.length shown)) ]
+      else []
   in
   let heading text = { tone = Heading; text; goes_to = Nowhere } in
   let blank = { tone = Quiet; text = ""; goes_to = Nowhere } in
-  (heading "Coming up" :: wakes)
-  @ [ blank; heading "Waiting on you" ]
-  @ questions
-  @ [ blank; heading "Stuck on you" ]
-  @ stuck
+  [ heading "Waiting on you" ] @ counts @ questions
+  @ [ blank; heading "Stop requests" ]
+  @ (if cancel_count = 0 then [ quiet "no stop requests" ] else cancel_lines)
+  @ (if other_lines = [] then [] else [ blank; heading "Other task alerts" ] @ other_lines)
+  @ [ blank; heading "Coming up" ] @ wakes
 ;;
 
 (** Indexes of the rows Enter can act on, in display order. The cursor moves
@@ -385,7 +433,7 @@ let target_indexes lines =
         (index + 1)
         (match line.goes_to with
          | Nowhere -> acc
-         | Keeper_holding _ | Stuck_task _ -> index :: acc)
+         | Full_cancel_queue | Keeper_holding _ | Stuck_task _ -> index :: acc)
         rest
   in
   loop 0 [] lines

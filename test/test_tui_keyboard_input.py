@@ -10308,7 +10308,7 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
             master_fd,
             output,
             b"a",
-            b"armed: approve task-901 -- same key again to send",
+            b"armed: approve task-901 [vr-task-901] -- a again to send",
         )
         if verdict_bodies():
             raise AssertionError("the first press already sent the verdict")

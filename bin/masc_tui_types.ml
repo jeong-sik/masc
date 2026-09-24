@@ -6272,6 +6272,7 @@ type state = {
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_inflight: bool;
+  mutable verification_generation: int;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
   (* Which list this surface is reading. The store keeps every submission ever
@@ -6288,12 +6289,15 @@ type state = {
      may reorder the queue; retaining the request id prevents the detail pane
      and verdict keys from silently moving to a different task. *)
   mutable verification_detail_request_id: string option;
+  (* An agenda jump waits for a fresh queue read. Keep both identities so a
+     reordered or replaced request cannot turn into the first visible row. *)
+  mutable verification_jump: (string * string) option;
   mutable verification_detail_scroll: int;
   (* An approve armed for a second keypress: which task. The cursor can move
      between the two presses, so the task id is captured at arm time and a
      press on a different row re-arms for that row. Reject carries no arm --
      its $EDITOR reason form is the confirmation step. *)
-  mutable verification_verdict_armed: string option;
+  mutable verification_verdict_armed: (string * string) option;
   mutable verification_verdict_error: string option;
   mutable system_logs: system_log_snapshot option;
   mutable system_logs_error: string option;
@@ -8133,11 +8137,13 @@ let create_state
   verification = None;
   verification_error = None;
   verification_inflight = false;
+  verification_generation = 0;
   verification_scroll = 0;
   verification_cursor = 0;
   verification_view = Tui_decode.Awaiting_queue;
   verification_offset = 0;
   verification_detail_request_id = None;
+  verification_jump = None;
   verification_detail_scroll = 0;
   verification_verdict_armed = None;
   verification_verdict_error = None;

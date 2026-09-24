@@ -1998,7 +1998,9 @@ type async_msg =
       string * int * (Masc.Tui_decode.lane_run_detail, string) result
   | Measurement_artifact_loaded of
       string * int * (Measurement.t, string) result
-  | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
+  | Verification_loaded of
+      int * Masc.Tui_decode.verification_view * int *
+      (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Fusion_runs_loaded of
       int * (Masc.Tui_decode.fusion_snapshot, string) result
@@ -6365,9 +6367,11 @@ let open_measurement_artifact state ~mailbox ~sha256 =
    that arrived from a different page would approve a task the operator never
    looked at. *)
 let reset_verification_rows state =
+  state.verification_generation <- state.verification_generation + 1;
   state.verification_cursor <- 0;
   state.verification_scroll <- 0;
   state.verification_detail_request_id <- None;
+  state.verification_jump <- None;
   state.verification_detail_scroll <- 0;
   state.verification_verdict_armed <- None;
   state.verification_verdict_error <- None
@@ -6383,26 +6387,30 @@ let launch_verification_load state ~mailbox =
        arrives must be the one that was asked for. *)
     let view = state.verification_view in
     let offset = state.verification_offset in
+    let generation = state.verification_generation in
     let run () =
       let result =
         try Masc_tui_loader.load_verification ~host ~port ~limit:200 ~view ~offset with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
-      enqueue_async mailbox (Verification_loaded result)
+      enqueue_async mailbox (Verification_loaded (generation, view, offset, result))
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
         Masc_tui_fork_guard.launch ~sw
           ~on_sync_failure:(fun detail ->
               state.verification_inflight <- false;
-              enqueue_async mailbox (Verification_loaded (Error detail)))
+              enqueue_async mailbox
+                (Verification_loaded (generation, view, offset, Error detail)))
           (fun () ->
             run ();
             `Stop_daemon)
     | None ->
         state.verification_inflight <- false;
-        enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
+        enqueue_async mailbox
+          (Verification_loaded
+             (generation, view, offset, Error "Eio switch is unavailable"))
   end
 
 (* One surface's row list: how many rows it has, which one the cursor is on,
@@ -12390,16 +12398,19 @@ let handle_verification_approve_key state ~mailbox =
   | None -> ()
   | Some row -> (
       let task_id = row.Masc.Tui_decode.vr_task_id in
+      let request_id = row.Masc.Tui_decode.vr_request_id in
       match state.verification_verdict_armed with
-      | Some armed when String.equal armed task_id ->
+      | Some (armed_task, armed_request)
+        when String.equal armed_task task_id
+             && String.equal armed_request request_id ->
           state.verification_verdict_armed <- None;
           start_verification_verdict state ~mailbox ~task_id
-            ~verification_id:row.Masc.Tui_decode.vr_request_id ~verdict:`Approve
+            ~verification_id:request_id ~verdict:`Approve
       | Some _ | None ->
-          state.verification_verdict_armed <- Some task_id;
+          state.verification_verdict_armed <- Some (task_id, request_id);
           state.verification_verdict_error <- None;
           report_action state "system"
-            (Printf.sprintf "press a again to approve %s" task_id))
+            (Printf.sprintf "press a again to approve %s [%s]" task_id request_id))
 
 let open_board_composer_editor state ~restore ~reenter =
   match Masc_tui_editor.editor_command () with
@@ -14541,7 +14552,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              else "Verification: " ^ message);
           (* The row shown still says awaiting until this lands; a judged row
              that stays listed invites a second verdict. *)
-          launch_verification_load state ~mailbox
+          (* A queue GET may have started before this POST. Its answer must
+             not restore the judged request, even if it arrives after the
+             verdict. The stale generation starts a fresh read on arrival. *)
+          state.verification_generation <- state.verification_generation + 1;
+          state.verification <- None;
+          state.verification_detail_request_id <- None;
+          launch_verification_load state ~mailbox;
+          start_http_refresh state ~host:server_peer_host ~port:state.port
+            ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+            ~scoped_refresh_inflight:http_scoped_refresh_inflight
+            ~scoped_refresh_followup ~mailbox
       | Error err ->
           state.verification_verdict_armed <- None;
           state.verification_verdict_error <- Some err)
@@ -15977,9 +15998,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 launch_fusion_runs_load state ~mailbox)
        | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _ | Fusion_launch_started _)
        | None -> ())
-  | Verification_loaded result ->
+  | Verification_loaded (generation, view, offset, result) ->
       state.verification_inflight <- false;
-      (match result with
+      if generation <> state.verification_generation
+         || view <> state.verification_view || offset <> state.verification_offset then
+        launch_verification_load state ~mailbox
+      else (match result with
       | Ok snapshot ->
           state.verification <- Some snapshot;
           state.verification_error <- None;
@@ -15987,6 +16011,34 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           let count = List.length requests in
           if state.verification_cursor >= count then
             state.verification_cursor <- max 0 (count - 1);
+          (match state.verification_jump with
+           | None -> ()
+           | Some (task_id, request_id) ->
+               state.verification_jump <- None;
+               (match List.find_index
+                        (fun (row : Masc.Tui_decode.verification_request) ->
+                           String.equal row.vr_task_id task_id
+                           && String.equal row.vr_request_id request_id
+                           && (match row.vr_ask with
+                               | Masc.Tui_decode.Asks_cancellation _ -> true
+                               | Asks_completion | Ask_unstated | Unrecognised_ask _ -> false))
+                        requests with
+                | Some index ->
+                    state.verification_cursor <- index;
+                    state.verification_detail_request_id <- Some request_id;
+                    state.verification_detail_scroll <- 0;
+                    state.verification_evidence <- None;
+                    launch_verification_evidence_load state ~mailbox task_id
+                | None ->
+                    state.verification_detail_request_id <- None;
+                    (* No row is selected until the operator moves explicitly.
+                       Keeping cursor zero here would let the next a or x
+                       judge the first, unrelated request. *)
+                    state.verification_cursor <- count;
+                    state.verification_verdict_error <-
+                      Some (Printf.sprintf
+                        "%s: stop request %s changed or closed; review the refreshed queue"
+                        task_id request_id)));
           (match state.verification_detail_request_id with
            | Some request_id
              when not
@@ -15996,12 +16048,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                             request_id)
                        requests) ->
                state.verification_detail_request_id <- None;
-               state.verification_detail_scroll <- 0
+               state.verification_detail_scroll <- 0;
+               state.verification_verdict_armed <- None
            | Some _ | None -> ())
       | Error detail ->
           (* The previous list stays: a failed reload must not make the queue
              look empty, which reads as "nothing is waiting". *)
-          state.verification_error <- Some detail)
+          state.verification_error <- Some detail;
+          (match state.verification_jump with
+           | None -> ()
+           | Some (task_id, request_id) ->
+               state.verification_jump <- None;
+               state.verification_verdict_error <-
+                 Some (Printf.sprintf "%s: could not open stop request %s: %s"
+                   task_id request_id detail)))
   | Keeper_chat_older_loaded (generation, keeper_name, before, result) ->
       (* A page that arrived for a keeper the pane has since left, or after a
          reload moved the cursor, is dropped: prepending it would put rows
@@ -19792,13 +19852,22 @@ and is loaded on demand through keeper_skill.
                      close ();
                      goto_surface state ~mailbox:async_messages Approvals
                  | Some
+                     { Masc_tui_agenda.goes_to = Masc_tui_agenda.Full_cancel_queue
+                     ; _ } ->
+                     close ();
+                     state.verification_view <- Masc.Tui_decode.Awaiting_queue;
+                     state.verification_offset <- 0;
+                     reset_verification_rows state;
+                     state.verification <- None;
+                     goto_surface state ~mailbox:async_messages Verification
+                 | Some
                      { Masc_tui_agenda.goes_to =
                          Masc_tui_agenda.Stuck_task { task_id; ends_at }
                      ; _
                      } -> (
                      close ();
                      match ends_at with
-                     | Masc_tui_agenda.Verify_queue ->
+                     | Masc_tui_agenda.Verify_queue request_id ->
                          (* A stop is granted as a verdict, and verdicts are
                             signed in the verify queue. Forced onto the queue
                             view: the reader may have left this surface on the
@@ -19806,28 +19875,13 @@ and is loaded on demand through keeper_skill.
                          state.verification_view <-
                            Masc.Tui_decode.Awaiting_queue;
                          state.verification_offset <- 0;
+                         reset_verification_rows state;
+                         state.verification <- None;
+                         state.verification_jump <- Some (task_id, request_id);
                          goto_surface state ~mailbox:async_messages
-                           Verification;
-                         (* Land on the row when the queue has already
-                            answered. A queue still loading lands at the top,
-                            and the reader finds the row with [/]. *)
-                         (match state.verification with
-                          | None -> ()
-                          | Some snapshot ->
-                              let rec place index = function
-                                | [] -> ()
-                                | (request :
-                                    Masc.Tui_decode.verification_request)
-                                  :: rest ->
-                                    if
-                                      String.equal
-                                        request.Masc.Tui_decode.vr_task_id
-                                        task_id
-                                    then state.verification_cursor <- index
-                                    else place (index + 1) rest
-                              in
-                              place 0 snapshot.Masc.Tui_decode.vs_requests)
-                     | Masc_tui_agenda.The_task ->
+                           Verification
+                     | Masc_tui_agenda.Actorless_task
+                     | Masc_tui_agenda.Unreadable_producer ->
                          (* Work nobody holds is read on the task itself, the
                             same landing the palette gives a task id. *)
                          goto_surface state ~mailbox:async_messages Overview;

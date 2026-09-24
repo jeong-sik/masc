@@ -407,7 +407,7 @@ let test_empty_sections_answer_in_words () =
   let text = joined lines in
   check bool "the wake section answers" true (contains ~needle:"nothing is scheduled" text);
   check bool "so does the waiting section" true (contains ~needle:"nobody is waiting" text);
-  check bool "and the stuck section" true (contains ~needle:"no task is stuck on you" text);
+  check bool "and the stop section" true (contains ~needle:"no stop requests" text);
   check int "all three headings are still drawn" 3 (List.length (tones_of lines Agenda.Heading))
 ;;
 
@@ -546,7 +546,7 @@ let test_the_kind_prefix_comes_off_a_target () =
 (* A task that only the operator can move is a reason to draw the strip. The
    whole point of the row is that nothing else was saying so. *)
 let stuck ?(since_iso = "2026-08-20T00:00:00Z") ?(task_id = "task-348")
-    ?(ends_at = Agenda.Verify_queue) what : Agenda.stalled =
+    ?(ends_at = Agenda.Verify_queue "vr-task-348") what : Agenda.stalled =
   { task_id; what; since_iso; ends_at }
 ;;
 
@@ -595,19 +595,26 @@ let test_the_stuck_section_shows_a_few_and_counts_the_rest () =
   in
   let lines = overlay_of (with_stuck rows) in
   let text = joined lines in
-  check int "only the oldest few are drawn" 5
+  check int "only the oldest three are drawn" 3
     (List.length
        (List.filter
           (fun (line : Agenda.line) ->
              contains ~needle:"held by a session that is gone" line.Agenda.text)
           lines));
-  check bool "and the rest are counted" true (contains ~needle:"and 4 more" text)
+  check bool "the full queue is a selectable row" true
+    (contains ~needle:"전체 9건 열기" text);
+  check bool "the full queue has a destination" true
+    (List.exists
+       (fun index -> match List.nth_opt lines index with
+          | Some { Agenda.goes_to = Agenda.Full_cancel_queue; _ } -> true
+          | Some _ | None -> false)
+       (Agenda.target_indexes lines))
 ;;
 
 let test_the_stuck_section_answers_in_words () =
   let read = joined (overlay_of (with_stuck [])) in
   check bool "an empty list read is an answer" true
-    (contains ~needle:"no task is stuck on you" read);
+    (contains ~needle:"no stop requests" read);
   let unread =
     joined
       (overlay_of
@@ -617,7 +624,7 @@ let test_the_stuck_section_answers_in_words () =
             ~stalled:Agenda.Not_read))
   in
   check bool "a list nobody read does not say it is empty" false
-    (contains ~needle:"no task is stuck on you" unread)
+    (contains ~needle:"no stop requests" unread)
 ;;
 
 (* The wait is why the row exists, so it is what the right column says. *)
@@ -657,8 +664,8 @@ let test_prose_rows_take_no_cursor () =
 let test_a_stop_and_held_work_lead_to_different_places () =
   let t =
     with_stuck
-      [ stuck ~task_id:"task-1" ~ends_at:Agenda.Verify_queue "a stop to grant"
-      ; stuck ~task_id:"task-2" ~ends_at:Agenda.The_task "work nobody holds"
+      [ stuck ~task_id:"task-1" ~ends_at:(Agenda.Verify_queue "vr-task-1") "a stop to grant"
+      ; stuck ~task_id:"task-2" ~ends_at:Agenda.Actorless_task "work nobody holds"
       ]
   in
   let lines = overlay_of t in
@@ -672,9 +679,9 @@ let test_a_stop_and_held_work_lead_to_different_places () =
       (Agenda.target_indexes lines)
   in
   check bool "the stop is answered in the verify queue" true
-    (List.mem ("task-1", Agenda.Verify_queue) doors);
+    (List.mem ("task-1", Agenda.Verify_queue "vr-task-1") doors);
   check bool "held work is answered on the task" true
-    (List.mem ("task-2", Agenda.The_task) doors)
+    (List.mem ("task-2", Agenda.Actorless_task) doors)
 
 let () =
   run

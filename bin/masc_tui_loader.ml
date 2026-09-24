@@ -228,11 +228,12 @@ let load_active_tasks (base_path : string) :
                        a fourth has to be given a door here rather than
                        inheriting one. *)
                     (match item with
-                     | Masc.Operator_task_attention.Cancel_claim _ ->
-                       Masc_tui_agenda.Verify_queue
-                     | Masc.Operator_task_attention.Held_without_actor _
-                     | Masc.Operator_task_attention.Producer_record_unreadable _
-                       -> Masc_tui_agenda.The_task)
+                     | Masc.Operator_task_attention.Cancel_claim { verification_id; _ } ->
+                       Masc_tui_agenda.Verify_queue verification_id
+                     | Masc.Operator_task_attention.Held_without_actor _ ->
+                       Masc_tui_agenda.Actorless_task
+                     | Masc.Operator_task_attention.Producer_record_unreadable _ ->
+                       Masc_tui_agenda.Unreadable_producer)
                 })) )
 
 (** Apply one strict bounded metrics snapshot to the mutable screen state. *)

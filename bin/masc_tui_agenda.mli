@@ -61,8 +61,9 @@ type awaiting =
     read on the task itself. Carried rather than re-derived from [what], which
     is a sentence written for a reader. *)
 type ends_at =
-  | Verify_queue
-  | The_task
+  | Verify_queue of string  (** the exact verification request ID *)
+  | Actorless_task
+  | Unreadable_producer
 
 type stalled =
   { task_id : string  (** the task the row is about, so a key can open it *)
@@ -142,6 +143,7 @@ type tone =
     waiting on the operator and had no way to reach any of it. *)
 type destination =
   | Nowhere
+  | Full_cancel_queue
   | Keeper_holding of string
       (** the keeper sitting on a tool call only an operator releases *)
   | Stuck_task of
@@ -161,9 +163,8 @@ val overlay :
     operator, then the tasks stuck on them. Not just the one the strip names.
     A section whose list was not read says that instead of saying it is empty.
 
-    The stuck section is the exception to "every": it draws the oldest few and
-    then says how many it did not. Sixty-two rows is a wall, and the list
-    itself belongs to a tool. *)
+    Cancellation requests preview the oldest three and expose a selectable
+    row for the full Task Review queue. *)
 
 val target_indexes : line list -> int list
 (** Indexes of the rows Enter can act on, in display order. The cursor moves

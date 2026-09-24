@@ -337,6 +337,7 @@ let test_attention_grades_the_operators_tasks () =
     Dashboard_attention.detect_operator_tasks
       [ Masc.Operator_task_attention.Cancel_claim
           { task_id = "task-348"
+          ; verification_id = "vr-task-348"
           ; assignee = "goo-yang-bong"
           ; submitted_at = "2026-09-08T23:28:19Z"
           ; reason =

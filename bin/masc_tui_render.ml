@@ -8747,7 +8747,12 @@ let render_verification_list (state : state) =
              [vr_task_title] already, and shown in the detail pane below --
              just not in the list. What a verification request asks for is
              that this task be verified, so the title is what it asks for. *)
-          let asks = r.vr_task_title in
+          let asks =
+            match r.vr_ask with
+            | Asks_cancellation _ -> "STOP REQUEST · " ^ r.vr_task_title
+            | Asks_completion | Ask_unstated | Unrecognised_ask _ ->
+                r.vr_task_title
+          in
           let line =
             "  "
             ^ Render_schedule.verification_row ~submitter_width ~title_width
@@ -8766,8 +8771,7 @@ let render_verification_list (state : state) =
                          Masc_domain.verification_intent_to_string
                            Masc_domain.Complete_task
                      | Asks_cancellation _ ->
-                         Masc_domain.verification_intent_to_string
-                           Masc_domain.Cancel_task
+                         "STOP"
                      (* The row does not say which verdict it waits on, and
                         neither does this cell. A word here would be one the
                         record never wrote. *)
@@ -8858,14 +8862,15 @@ let render_verification_list (state : state) =
   (* The arm and the server's last refusal sit under the list, the same rows
      the schedule cancel carries them on. *)
   (match state.verification_verdict_armed with
-   | Some task_id ->
+   | Some (task_id, request_id) ->
        (* No width padding on the id: padding to a reserved column pushes the
           "same key again" tail past the box on a narrow terminal, and the
           tail is the half that instructs. *)
        box_line buf cols
          ((Theme.warn ())
-         ^ Printf.sprintf "  armed: approve %s -- same key again to send"
+         ^ Printf.sprintf "  armed: approve %s [%s] -- a again to send"
              (Terminal_text.single_line task_id)
+             (Terminal_text.single_line request_id)
          ^ Ansi.reset)
    | None -> ());
   (match state.verification_verdict_error with
@@ -8906,6 +8911,21 @@ let verification_detail_lines ~width
                     Ansi.reset, (if index = 0 then "    - " else "      ") ^ line))
           items
   in
+  let cancellation_lines =
+    match request.vr_ask with
+    | Masc.Tui_decode.Asks_completion | Ask_unstated | Unrecognised_ask _ -> []
+    | Asks_cancellation reason ->
+        let reason = match reason with
+          | Some text -> text
+          | None -> "This request kept no copy of the case for stopping."
+        in
+        wrapped_block "STOP REQUEST · FULL REASON" reason
+        @ [ Ansi.dim, "" ]
+        @ wrapped_block "VERDICT"
+            "a twice: approve and cancel this task. x: write a reason and return the task to its existing assignee."
+        @ [ Ansi.dim, "" ]
+  in
+  cancellation_lines @
   [ Ansi.bold, "  VERIFICATION REQUEST"
   ; field "Request" request.vr_request_id
   ; field "Task" request.vr_task_id
@@ -8926,21 +8946,6 @@ let verification_detail_lines ~width
   ; field "Created" (Terminal_text.short_timestamp request.vr_created_at)
   ; Ansi.dim, ""
   ]
-  (* The case for stopping the Task, which is the whole of what an operator
-     decides on a cancellation: the artifacts and evidence below answer a
-     completion, and a stop is not asking about them. Wrapped, because the
-     reason is prose and a cut one argues nothing. *)
-  @ (match request.vr_ask with
-     | Masc.Tui_decode.Asks_completion | Ask_unstated | Unrecognised_ask _ -> []
-     | Asks_cancellation (Some reason) ->
-         wrapped_block "WHY IT SHOULD STOP" reason @ [ (Ansi.dim, "") ]
-     (* A stop submitted before the record kept the case has none. The block
-        says the copy is missing rather than drawing an empty heading, which
-        would read as a stop nobody argued for. *)
-     | Asks_cancellation None ->
-         wrapped_block "WHY IT SHOULD STOP"
-           "This request kept no copy of the case for stopping."
-         @ [ (Ansi.dim, "") ])
   (* [Kind], [What is being judged] and [What moves it forward] stood here.
      Their three fields were literals in the producer -- "normal", "" and "" --
      so the three rows read the same on every request this pane has ever
@@ -9035,11 +9040,25 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
        (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id));
   box_divider buf cols;
   let width = max 1 (framed_inner_width cols) in
+  let verdict_notice =
+    (match state.verification_verdict_armed with
+     | Some (task_id, request_id)
+       when String.equal task_id request.Masc.Tui_decode.vr_task_id
+            && String.equal request_id request.vr_request_id ->
+         [ Theme.warn (),
+           (match request.vr_ask with
+            | Masc.Tui_decode.Asks_cancellation _ ->
+                "  ARMED: press a again to cancel this task"
+            | Asks_completion | Ask_unstated | Unrecognised_ask _ ->
+                "  ARMED: press a again to approve this request") ]
+     | Some _ | None -> [])
+  in
   let lines =
-    verification_detail_lines ~width request
+    verdict_notice @ verification_detail_lines ~width request
     @ verification_evidence_lines state ~width request.Masc.Tui_decode.vr_task_id
   in
-  let content_height = max 1 (rows - 6) in
+  let error_rows = if Option.is_some state.verification_verdict_error then 1 else 0 in
+  let content_height = max 1 (rows - 7 - error_rows) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
@@ -9048,6 +9067,17 @@ let verification_detail_pane (state : state) ~rows ~cols request buf =
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
+  (match state.verification_verdict_error with
+   | Some error ->
+       box_line_styled buf cols ~style:(Theme.bad ())
+         ("  " ^ Terminal_text.single_line error)
+   | None -> ());
+  box_line_styled buf cols ~style:(Theme.warn ())
+    (match request.Masc.Tui_decode.vr_ask with
+     | Masc.Tui_decode.Asks_cancellation _ ->
+         "  a twice: cancel task · x: reason to existing assignee"
+     | Asks_completion | Ask_unstated | Unrecognised_ask _ ->
+         "  a twice: approve · x: reject with reason");
   box_bottom buf cols;
   scroll, Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)
 ;;

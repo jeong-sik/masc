@@ -5744,7 +5744,7 @@ def seed_playground_workspace(base_path: str) -> None:
     all."""
     Path(base_path, ".masc", "config", "keepers").mkdir(parents=True, exist_ok=True)
     Path(base_path, ".masc", "config", "keepers", "alpha.toml").write_text(
-        '[keeper]\nsandbox_profile = "docker"\nsandbox_image = "masc-sandbox:general"\n',
+        '[keeper]\nsandbox_profile = "docker"\nsandbox_image = "base"\n',
         encoding="utf-8"
     )
     Path(base_path, ".masc", "playground", "docker", "alpha").mkdir(

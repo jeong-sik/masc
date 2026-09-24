@@ -351,7 +351,7 @@ reviewer = "<provider>.<model>"
   바이너리에 든 레시피(`sandbox-images/base/Dockerfile`)로 `masc-sandbox:general`을
   만듭니다. `masc sandbox-image`는 다시 쓰지 않는 새 태그로 손수 빌드합니다. `docker`와 `microvm` Keeper는 모두 `sandbox_image`에 이미지를
   적어야 하고, 적지 않으면 기본값을 받는 대신 거부됩니다. 범용 이미지로
-  충분한 Keeper는 `sandbox_image = "masc-sandbox:general"`을, 프로젝트를
+  충분한 Keeper는 `sandbox_image = "base"`을, 프로젝트를
   빌드해야 하는 Keeper는 그 프로젝트 툴체인 이미지를 적습니다. 컨테이너는 읽기 전용 rootfs, `--cap-drop=ALL`,
   내 uid로 돌기 때문에 `bash`와 툴체인이 이미지에 미리 있어야 합니다. 턴 도중에
   뭘 설치할 수는 없습니다.

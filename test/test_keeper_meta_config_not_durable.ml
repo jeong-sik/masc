@@ -47,7 +47,7 @@ let test_config_writes_are_dropped () =
   Alcotest.(check bool) "input policy is TOML-owned" true (decoded.input_policy = Keeper_input_policy.Small);
   let defaults = {Keeper_types_profile.empty_keeper_profile_defaults with
     sandbox_profile=Some Keeper_types_profile.Docker;
-    sandbox_image=Some "masc-sandbox:general";
+    sandbox_image=Some "base";
     input_policy=Some Keeper_input_policy.Wide} in
   let effective defaults meta = match Keeper_meta_contract.effective_meta_of_profile_defaults defaults meta with
     | Ok effective -> effective | Error detail -> Alcotest.fail detail in
@@ -118,7 +118,7 @@ let test_board_interests_survive_an_empty_profile_default () =
   let defaults_with_profile board_interests =
     { Keeper_types_profile.empty_keeper_profile_defaults with
       sandbox_profile = Some Keeper_types_profile.Docker
-    ; sandbox_image = Some "masc-sandbox:general"
+    ; sandbox_image = Some "base"
     ; board_interests
     }
   in

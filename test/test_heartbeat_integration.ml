@@ -252,7 +252,7 @@ let seed_keeper_sandbox_profile ~base_dir name =
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.save_file
     (Filename.concat keepers_dir (name ^ ".toml"))
-    ("[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\ninstructions = \"# " ^ name ^ "\"\n")
+    ("[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\ninstructions = \"# " ^ name ^ "\"\n")
 
 let dashboard_purge_cleanup requested_name
     (meta : Keeper_meta_contract.keeper_meta)
@@ -2377,7 +2377,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some live_meta.sandbox_profile
-        ; sandbox_image = Some "masc-sandbox:general"
+        ; sandbox_image = Some "base"
         }
       in
       let parsed : Turn_up_args.parsed_args =
@@ -2459,7 +2459,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       let stale_name = "stale-up-does-not-resume-operator-pause" in
       let stale_meta =
         Shutdown_finalize.For_testing.paused_meta
-          { (make_meta stale_name) with sandbox_image = Some "masc-sandbox:general" }
+          { (make_meta stale_name) with sandbox_image = Some "base" }
       in
       create_owner_meta_exn config stale_meta;
       let stale_parsed =
@@ -2694,7 +2694,7 @@ let test_update_keeper_defers_lane_swap_while_turn_in_flight () =
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some meta.sandbox_profile
-        ; sandbox_image = Some "masc-sandbox:general"
+        ; sandbox_image = Some "base"
         }
       in
       let parsed : Turn_up_args.parsed_args =
@@ -2885,7 +2885,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some meta.sandbox_profile
-        ; sandbox_image = Some "masc-sandbox:general"
+        ; sandbox_image = Some "base"
         }
       in
       let parsed : Turn_up_args.parsed_args =
@@ -5669,7 +5669,7 @@ let test_field_only_update_honors_toml_declared_profile () =
       let profile_defaults =
         { Keeper_profile_defaults.empty_keeper_profile_defaults with
           sandbox_profile = Some Keeper_types_profile.Docker
-        ; sandbox_image = Some "masc-sandbox:general"
+        ; sandbox_image = Some "base"
         }
       in
       let parsed : Turn_up_args.parsed_args =

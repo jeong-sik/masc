@@ -5281,7 +5281,7 @@ let write_config_sync_toml config name =
   let path = Filename.concat dir (name ^ ".toml") in
   write_file path
     (Printf.sprintf
-       "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\ninstructions = \"%s config-sync fixture instructions\"\nactivation_mode = \"manual\"\n"
+       "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\ninstructions = \"%s config-sync fixture instructions\"\nactivation_mode = \"manual\"\n"
        name);
   path
 
@@ -5989,7 +5989,7 @@ let test_config_post_materializes_missing_toml () =
         post_config ~sw ~clock:(Eio.Stdenv.clock env)
           ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
           ~name
-          {|{"activation_mode":"autonomous","sandbox_profile":"docker","sandbox_image":"masc-sandbox:general"}|}
+          {|{"activation_mode":"autonomous","sandbox_profile":"docker","sandbox_image":"base"}|}
       in
       expect_http_status "HTTP 200" 200 raw;
       let open Yojson.Safe.Util in

@@ -169,7 +169,7 @@ sandbox_profile = "%s"
 %s%sinstructions = %S
 |}
        sandbox_profile
-       (if String.equal sandbox_profile "remote_ssh" then "" else "sandbox_image = \"masc-sandbox:general\"\n")
+       (if String.equal sandbox_profile "remote_ssh" then "" else "sandbox_image = \"base\"\n")
        (match microvm_backend with
         | None -> ""
         | Some backend -> Printf.sprintf "microvm_backend = %S\n" backend)
@@ -304,7 +304,7 @@ let test_toml_overlay_reaches_effective_meta () =
     {|[keeper]
 instructions = "Analyze carefully."
 sandbox_profile = "docker"
-sandbox_image = "masc-sandbox:general"
+sandbox_image = "base"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -459,7 +459,7 @@ let test_profile_defaults_overlay_applies_without_reloading () =
     {|[keeper]
 instructions = "Analyze carefully."
 sandbox_profile = "docker"
-sandbox_image = "masc-sandbox:general"
+sandbox_image = "base"
 |};
   let config = Workspace.default_config base in
   let persisted = seed_runtime_meta config name in
@@ -499,7 +499,7 @@ let test_keeper_instructions_reach_meta_json () =
     {|[keeper]
 instructions = "keeper instructions"
 sandbox_profile = "docker"
-sandbox_image = "masc-sandbox:general"
+sandbox_image = "base"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -545,7 +545,7 @@ let test_ensure_keeper_meta_persists_toml_identity_snapshot () =
     {|[keeper]
 instructions = "Improve MASC autonomously"
 sandbox_profile = "docker"
-sandbox_image = "masc-sandbox:general"
+sandbox_image = "base"
 activation_mode = "autonomous"
 |};
   let config = Workspace.default_config base in
@@ -679,7 +679,7 @@ let test_turn_setup_uses_effective_meta () =
     {|[keeper]
 instructions = "Prepare the turn."
 sandbox_profile = "docker"
-sandbox_image = "masc-sandbox:general"
+sandbox_image = "base"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -713,7 +713,7 @@ let test_keepalive_meta_selection_overlays_disk_meta () =
     {|[keeper]
 instructions = "Coordinate the work."
 sandbox_profile = "docker"
-sandbox_image = "masc-sandbox:general"
+sandbox_image = "base"
 network_mode = "inherit"
 |};
   let config = Workspace.default_config base in
@@ -842,7 +842,7 @@ let test_keeper_up_materializes_missing_profile_source () =
     `Assoc
       [ "name", `String name
       ; "instructions", `String "durable direct instructions"
-      ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "masc-sandbox:general"
+      ; "sandbox_profile", `String "docker" ; "sandbox_image", `String "base"
       ; "mention_targets", `List [ `String "operator" ]
       ; "board_interests", `List [ `String "MASC runtime" ]
       ; "activation_mode", `String "manual"
@@ -1420,7 +1420,7 @@ let test_config_snapshot_prompt_is_nested_only () =
     {|[keeper]
 instructions = "nested instructions"
 sandbox_profile = "docker"
-sandbox_image = "masc-sandbox:general"
+sandbox_image = "base"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -1463,7 +1463,7 @@ let test_config_snapshot_reports_an_unbuildable_system_prompt () =
     {|[keeper]
 instructions = "nested instructions"
 sandbox_profile = "docker"
-sandbox_image = "masc-sandbox:general"
+sandbox_image = "base"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);

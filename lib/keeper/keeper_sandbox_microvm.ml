@@ -1376,6 +1376,357 @@ let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
   | Backend.Nerdctl_kata -> ensure_nerdctl_work_volume ~volume_name ~size ~timeout_sec
 ;;
 
+(* ── The build volume (RFC-0468) ─────────────────────────────────────
+   Apple_container only: msb's named volume is a host directory ([--kind
+   dir]), and nerdctl's managed volume is also a host directory with
+   `capacity_enforced=false` (see ensure_msb_work_volume,
+   ensure_nerdctl_work_volume above) -- deleting a file inside either
+   already returns host disk immediately, no VM disk image between the
+   guest and the host filesystem. Only Apple's volume is a sparse
+   virtio-blk image (`volume.img`), and only Apple's image was measured
+   (2026-09-24) to keep its allocated size after the guest deletes
+   everything inside it -- `fstrim` inside the guest, run as root, answers
+   "Operation not permitted": container 1.3.1's virtio-blk backend
+   advertises no discard/unmap. A keeper's `_build` living on its own
+   disposable volume, instead of folded into the unified work volume
+   RFC-0400 gave every checkout, is what makes "delete the volume, make a
+   new one" a real host-disk reclaim path again for Apple, the same way
+   RFC-0399 built it before RFC-0400's tree unification removed it as an
+   unrelated side effect (RFC-0468's "What the codebase already says"). *)
+
+(** Guest mount point of the per-keeper build volume, RFC-0399's original
+    choice, distinct from {!work_volume_guest_root}. *)
+let build_volume_guest_root = "/masc-build"
+
+let build_volume_name ~keeper_name =
+  if valid_volume_segment keeper_name
+  then Ok ("masc-keeper-build-" ^ keeper_name)
+  else Error ("unsupported keeper name for a build volume: " ^ keeper_name)
+;;
+
+(** Apple's sized-volume spelling, the build-volume sibling of
+    {!apple_volume_create_argv}. *)
+let apple_build_volume_create_argv ~volume_name ~size =
+  command_argv_for Backend.Apple_container @ [ "volume"; "create"; "-s"; size; volume_name ]
+;;
+
+let build_volume_mount_args ~volume_name =
+  [ "--volume"; volume_name ^ ":" ^ build_volume_guest_root ]
+;;
+
+(** A checkout's build directory on the volume.
+
+    The playground-relative path is flattened with [:] so the target needs no
+    parent directories -- the guest cannot [mkdir -p] through a symlink whose
+    parent is missing, and the host cannot write into the disk image at all.
+    A path segment already containing [:] would make two checkouts share one
+    build directory, so it is refused instead. Unchanged from RFC-0399. *)
+let build_link_separator = ':'
+
+let build_link_target ~playground_relative =
+  let segments = String.split_on_char '/' playground_relative in
+  let empty = List.exists (fun s -> String.equal s "") segments in
+  let collides = String.contains playground_relative build_link_separator in
+  if List.is_empty segments || empty
+  then Error ("empty path segment in playground path: " ^ playground_relative)
+  else if collides
+  then
+    Error
+      (Printf.sprintf
+         "playground path contains %c, which the build link uses as a separator: %s"
+         build_link_separator
+         playground_relative)
+  else
+    Ok
+      (Filename.concat
+         build_volume_guest_root
+         (String.concat (String.make 1 build_link_separator) segments))
+;;
+
+(** What [_build] is right now, as far as the plan cares. *)
+type build_link_state =
+  | Build_absent
+  | Build_symlink of string
+  | Build_real_directory
+
+type build_link_plan =
+  | Link_create of string
+  | Link_retarget of string
+  | Link_already_correct
+  | Link_refused_real_directory
+
+(** Deciding is separate from acting so the refusal is testable.
+
+    A real [_build] is not deleted. It holds build output this module did not
+    create, and silently discarding it to install a link would trade a disk
+    problem for lost work; the caller reports it and leaves the checkout
+    building on the unified work volume. Retargeting a stale link is
+    different -- removing a symlink removes no data. *)
+let plan_build_link ~target = function
+  | Build_absent -> Link_create target
+  | Build_symlink existing when String.equal existing target -> Link_already_correct
+  | Build_symlink _ -> Link_retarget target
+  | Build_real_directory -> Link_refused_real_directory
+;;
+
+(** Apple's build-volume probe and provisioning, the build-volume sibling of
+    {!apple_volume_probe} / {!ensure_apple_work_volume}. Reuses
+    {!classify_volume_probe} and {!volume_names_of_json} above unchanged --
+    those are pure [container volume] JSON/exit-code parsing, independent of
+    which named volume is being asked about. *)
+let apple_build_volume_probe ~volume_name ~timeout_sec =
+  let cli = command_argv_for Backend.Apple_container in
+  let inspect_argv = cli @ [ "volume"; "inspect"; volume_name ] in
+  let inspect = Process_eio.run_argv_with_status_split ~timeout_sec inspect_argv in
+  let listing =
+    match inspect with
+    | Unix.WEXITED 1, _, _ ->
+      let list_argv = cli @ [ "volume"; "list"; "--format"; "json" ] in
+      Some (Process_eio.run_argv_with_status_split ~timeout_sec list_argv)
+    | _ -> None
+  in
+  classify_volume_probe ~volume_name ~inspect ~listing
+;;
+
+let ensure_apple_build_volume ~volume_name ~size ~timeout_sec =
+  match apple_build_volume_probe ~volume_name ~timeout_sec with
+  | Volume_present -> Ok `Already_present
+  | Volume_probe_failed message ->
+    Error (Printf.sprintf "microvm_build_volume_probe_failed: %s" message)
+  | Volume_absent ->
+    let argv = apple_build_volume_create_argv ~volume_name ~size in
+    (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
+     | Unix.WEXITED 0, _, _ -> Ok `Created
+     | status, stdout, stderr ->
+       Error
+         (Printf.sprintf
+            "microvm_build_volume_create_failed: %s (%s; %s)"
+            volume_name
+            (match status with
+             | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+             | Unix.WSIGNALED n -> Printf.sprintf "signalled %d" n
+             | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
+            (output_for_log ~stdout ~stderr)))
+;;
+
+(* ── Binding a checkout's _build to the volume (RFC-0399, unchanged) ── *)
+
+(** What [_build] is on the host right now.
+
+    Anything that is neither absent nor a symlink -- a directory, but also a
+    plain file -- reads as [Build_real_directory] so the plan refuses it. The
+    conservative reading is the safe one: the only action taken on that answer
+    is to leave the path alone. *)
+let build_link_state_of_path path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Build_absent
+  | exception Unix.Unix_error _ -> Build_real_directory
+  | { Unix.st_kind = Unix.S_LNK; _ } ->
+    (match Unix.readlink path with
+     | target -> Build_symlink target
+     | exception Unix.Unix_error _ -> Build_real_directory)
+  | _ -> Build_real_directory
+;;
+
+(** Carry out one plan.
+
+    The link points at a guest path, so on the host it dangles by
+    construction. [Unix.symlink] does not care, and the host never follows it:
+    the readers under [Playground_paths] read sources, not build output. *)
+let apply_build_link ~path plan =
+  match plan with
+  | Link_already_correct -> Ok `Unchanged
+  | Link_create target ->
+    (match Unix.symlink target path with
+     | () -> Ok `Linked
+     | exception Unix.Unix_error (err, _, _) ->
+       Error (Printf.sprintf "could not link %s: %s" path (Unix.error_message err)))
+  | Link_retarget target ->
+    (match
+       Unix.unlink path;
+       Unix.symlink target path
+     with
+     | () -> Ok `Relinked
+     | exception Unix.Unix_error (err, _, _) ->
+       Error (Printf.sprintf "could not relink %s: %s" path (Unix.error_message err)))
+  | Link_refused_real_directory ->
+    Error
+      (Printf.sprintf
+         "%s is a real directory holding build output this code did not create; \
+          it is left on the unified work volume rather than deleted. Next: \
+          remove or move it by hand if the build cache is not wanted, and the \
+          link is installed on the following turn."
+         path)
+;;
+
+(* ── Finding the checkouts that build (RFC-0399, unchanged) ─────────── *)
+
+(** How far below a keeper's playground a checkout is looked for.
+
+    Observed layouts put them at depth 1 ([polisher/masc-t362]) and depth 2
+    ([lane-smith/repos/wt-370]). Three leaves room for one more level without
+    turning this into a whole-tree walk. *)
+let build_root_scan_depth = 3
+
+(** A checkout is a directory holding [dune-project].
+
+    That is the marker for the build output this addresses: [_build] is
+    dune's name and dune's alone. Other ecosystems pin host descriptors the
+    same way through their own output directories -- [node_modules],
+    [target], [dist] -- and are {i not} handled here (RFC-0399's own measured
+    finding: npm deletes and replaces a [node_modules] symlink on every
+    install, defeating this mechanism outright). Naming that gap is
+    deliberate, so a reader does not read this as covering every keeper. *)
+let build_root_marker = "dune-project"
+
+let build_output_dir_name = "_build"
+
+(** Directories skipped rather than descended.
+
+    [_build] because it is the thing being moved and holds the file counts
+    that make a walk expensive -- one measured at 61,602 entries. [.git]
+    because nothing under it builds. *)
+let build_scan_skipped = [ build_output_dir_name; ".git" ]
+
+let build_roots_under ~playground_root =
+  let rec walk dir depth acc =
+    if depth > build_root_scan_depth
+    then acc
+    else (
+      let acc =
+        if Sys.file_exists (Filename.concat dir build_root_marker)
+        then dir :: acc
+        else acc
+      in
+      match Sys.readdir dir with
+      | exception Sys_error _ -> acc
+      | entries ->
+        Array.sort String.compare entries;
+        Array.fold_left
+          (fun acc entry ->
+            if List.exists (String.equal entry) build_scan_skipped
+            then acc
+            else (
+              let child = Filename.concat dir entry in
+              (* [lstat], not [stat]: a symlink is never followed, which keeps
+                 the walk from looping and from descending through the very
+                 links this module installs. *)
+              match Unix.lstat child with
+              | { Unix.st_kind = Unix.S_DIR; _ } -> walk child (depth + 1) acc
+              | _ | (exception Unix.Unix_error _) -> acc))
+          acc
+          entries)
+  in
+  match Unix.lstat playground_root with
+  | { Unix.st_kind = Unix.S_DIR; _ } -> List.rev (walk playground_root 0 [])
+  | _ | (exception Unix.Unix_error _) -> []
+;;
+
+(** The path of [dir] relative to [playground_root], or [None] when it is not
+    below it. *)
+let playground_relative ~playground_root dir =
+  let root =
+    let n = String.length playground_root in
+    if n > 1 && Char.equal playground_root.[n - 1] '/'
+    then String.sub playground_root 0 (n - 1)
+    else playground_root
+  in
+  let root_slash = root ^ "/" in
+  let n = String.length root_slash in
+  if String.length dir > n && String.equal (String.sub dir 0 n) root_slash
+  then Some (String.sub dir n (String.length dir - n))
+  else None
+;;
+
+type build_link_row =
+  { path : string
+  ; target : string option
+  ; outcome : ([ `Linked | `Relinked | `Unchanged ], string) result
+  }
+
+(** Point every checkout's [_build] at the volume, and report each one.
+
+    A row per checkout rather than a single verdict: one refusal must not hide
+    the checkouts that were linked, and the caller has to be able to say which
+    one stayed on the share. [target] carries the guest path so the caller can
+    create it -- see {!build_target_mkdir_argv} for why that is a separate
+    step. *)
+let ensure_build_links ~playground_root =
+  build_roots_under ~playground_root
+  |> List.map (fun root ->
+    let path = Filename.concat root build_output_dir_name in
+    match playground_relative ~playground_root root with
+    | None ->
+      { path
+      ; target = None
+      ; outcome = Error (Printf.sprintf "%s is not below %s" root playground_root)
+      }
+    | Some relative ->
+      (match build_link_target ~playground_relative:relative with
+       | Error message -> { path; target = None; outcome = Error message }
+       | Ok target ->
+         { path
+         ; target = Some target
+         ; outcome =
+             apply_build_link ~path (plan_build_link ~target (build_link_state_of_path path))
+         }))
+;;
+
+(** What each checkout's [_build] is, without changing any of it.
+
+    The status surface needs the same walk [ensure_build_links] does but must
+    not act: an operator opening a tab should not install links as a side
+    effect of looking. A checkout still holding a real [_build] is the row
+    that matters -- it is the one still writing to the unified work volume,
+    and the one a person has to clear by hand. *)
+let observe_build_links ~playground_root =
+  build_roots_under ~playground_root
+  |> List.map (fun root ->
+    let path = Filename.concat root build_output_dir_name in
+    path, build_link_state_of_path path)
+;;
+
+(** Create the link targets inside the guest.
+
+    Measured, and the reason this step exists: dune does not create the
+    directory a [_build] symlink points at. It lstats [_build], sees something
+    there, and opens [_build/.lock] straight away --
+
+    {v Error: open(_build/.lock): No such file or directory v}
+
+    The host cannot create it either, because it lives inside the volume's
+    ext4 image. The volume root is initially owned by root, so creation runs
+    as root with an explicit writable mode. [-m] applies only to newly created
+    directories: existing keeper-owned targets remain untouched, which matters
+    because Apple Container's user namespace refuses even guest root changing
+    their mode. One command covers every target and is idempotent. *)
+let build_target_dir_mode = "0777"
+
+let build_target_mkdir_argv ~container_name ~targets =
+  exec_argv_for
+    Backend.Apple_container
+    ~container_name
+    ~uid:0
+    ~gid:0
+    ~container_cwd:build_volume_guest_root
+    ~stdin:false
+    ~command_argv:("mkdir" :: "-p" :: "-m" :: build_target_dir_mode :: targets)
+;;
+
+(** Targets that a build will write through, from the rows above.
+
+    A refused checkout contributes nothing: it keeps its real [_build] on the
+    unified work volume, so there is no build-volume directory for it to
+    need. *)
+let build_link_targets_to_create rows =
+  List.filter_map
+    (fun row ->
+      match row.outcome, row.target with
+      | Ok (`Linked | `Relinked | `Unchanged), Some target -> Some target
+      | _ -> None)
+    rows
+;;
+
 (** The keeper's root on the work volume, created inside the guest.
 
     The host does not access it directly; all backends provision through guest exec. The

@@ -35,6 +35,7 @@ import type {
   GoalDetailKeeper,
   GoalDetailTimelineEvent,
   GoalFsmProjection,
+  GoalMeasurementProjection,
   GoalTreeNode,
   GoalTreeTask,
   GoalTreeSummary,
@@ -573,6 +574,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
                 <span aria-hidden="true">↗ </span>${node.metric}${node.target_value ? html`<span class="ml-1 text-text-strong"> · ${node.target_value}</span>` : null}
               </span>
             ` : null}
+            <${GoalMeasurementBadge} node=${node} />
             ${(() => {
               const awaiting = countAwaitingVerificationTasks(node.tasks)
               return awaiting > 0 ? html`
@@ -620,6 +622,79 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
         </div>
       ` : null}
     </div>
+  `
+}
+
+function goalMeasurementLabel(measurement: GoalMeasurementProjection): string {
+  switch (measurement.state) {
+    case 'reported': return `관측 ${measurement.record.observed_value}`
+    case 'not_recorded': return '관측 미기록'
+    case 'unavailable': return '측정 저장소 읽기 실패'
+    case 'not_loaded': return '측정 미로드'
+    default: {
+      const unhandled: never = measurement
+      return unhandled
+    }
+  }
+}
+
+function GoalMeasurementBadge({ node }: { node: GoalTreeNode }) {
+  const measurement = node.measurement
+  return html`
+    <span
+      data-testid=${`goal-measurement-badge-${node.id}`}
+      data-state=${measurement.state}
+      class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-3xs text-text-secondary"
+      title=${`현재 기준 개정 ${node.criterion_revision}`}
+    >${goalMeasurementLabel(measurement)}</span>
+  `
+}
+
+function GoalMeasurementDetail({ node }: { node: GoalTreeNode }) {
+  const measurement = node.measurement
+  let content
+  switch (measurement.state) {
+    case 'reported':
+      content = html`
+        <div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
+          <div>
+            <div class="text-3xs text-text-muted">기록된 관측값</div>
+            <div class="mt-1 break-words text-sm font-semibold text-text-strong" data-testid="goal-observed-value">${measurement.record.observed_value}</div>
+          </div>
+          <div>
+            <div class="text-3xs text-text-muted">선언된 목표값</div>
+            <div class="mt-1 break-words text-sm text-text-body">${node.target_value ?? '설정되지 않음'}</div>
+          </div>
+        </div>
+        <div class="mt-3 break-words text-xs text-text-body" data-testid="goal-measurement-evidence">
+          <span class="text-text-muted">증거 참조 · </span>${measurement.record.evidence}
+        </div>
+        <div class="mt-1 text-3xs text-text-muted">${measurement.record.actor} · ${measurement.record.recorded_at}</div>
+        <div class="mt-2 text-3xs text-text-muted">관측 기록이며 목표 달성 판정은 별도 검증 결과를 따릅니다.</div>
+      `
+      break
+    case 'not_recorded':
+      content = html`<div class="mt-2 text-xs text-text-muted">현재 기준에 기록된 관측값이 없습니다.</div>`
+      break
+    case 'unavailable':
+      content = html`<div class="mt-2 break-words text-xs text-warn" role="alert">측정 저장소를 읽지 못했습니다: ${measurement.reason}</div>`
+      break
+    case 'not_loaded':
+      content = html`<div class="mt-2 text-xs text-text-muted">측정 투영이 아직 로드되지 않았습니다.</div>`
+      break
+    default: {
+      const unhandled: never = measurement
+      return unhandled
+    }
+  }
+  return html`
+    <section class=${CARD_BOX} aria-label="목표 측정" data-testid="goal-measurement-detail" data-state=${measurement.state}>
+      <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">현재 기준의 측정</div>
+      <div class="mt-1 break-all font-mono text-3xs text-text-muted" data-testid="goal-criterion-revision">
+        기준 개정 ${node.criterion_revision}
+      </div>
+      ${content}
+    </section>
   `
 }
 
@@ -908,6 +983,7 @@ function GoalDetailPanel({
       </div>
 
       <${GoalTaskRelationStrip} node=${selectedNode} />
+      <${GoalMeasurementDetail} node=${detail?.goal ?? selectedNode} />
       <${GoalProofDetail} proof=${selectedNode.verification} />
       <${GoalLifecycleActionPanel} node=${selectedNode} />
       ${selectedNode.phase === 'awaiting_confirmation' || selectedNode.phase === 'completed' ? html`

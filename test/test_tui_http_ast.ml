@@ -2558,9 +2558,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      single place a row label can reach the terminal unsanitized. Seven
      callers now pass titles that came off the wire. *)
   (* The list sidebar is drawn beside more than one surface, so it sits with
-     the shared primitives. *)
+     the shared primitives. Both spellings a surface can call -- the one that
+     takes a row and the one that takes a row or none -- hand their labels to
+     [write_list_sidebar_body], which is where a label reaches the terminal;
+     guarding either wrapper would guard a function that draws nothing. *)
   check_identifiers ~module_path:"bin/masc_tui_render_prim.ml"
-    ~binding:"write_list_sidebar_selection" ~callees:sanitizer_calls [ "label" ];
+    ~binding:"write_list_sidebar_body" ~callees:sanitizer_calls [ "label" ];
   check_fields "render_planning_list"
     [ "planning_error"; "pg_due_date"; "pg_title" ];
   (* The drawing moved into [planning_detail_pane] when the goal list came to

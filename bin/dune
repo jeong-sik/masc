@@ -1586,7 +1586,7 @@
  (name masc_tui_keeper_spend)
  (wrapped false)
  (modules masc_tui_keeper_spend)
- (libraries masc masc.server masc_tui_types masc_tui_ansi masc_tui_message_layout yojson))
+ (libraries masc masc_tui_types masc_tui_ansi masc_tui_message_layout yojson))
 
 
 (executable

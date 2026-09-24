@@ -8,6 +8,7 @@
 
 open Alcotest
 module Route = Server_routes_http_routes_provider_runs
+module Cache_wire = Masc.Dashboard_cache_wire
 module Spend = Masc_tui_keeper_spend
 module Keeper_metrics_record = Masc.Keeper_metrics_record
 module Keeper_types_support = Masc.Keeper_types_support
@@ -105,7 +106,7 @@ let server_default_window =
 
 (* The server's own answer for [keepers], wrapped with the cache object the
    route appends. *)
-let server_answer ?(state = Route.Cache_fresh) ?age_s ?error config names =
+let server_answer ?(state = Cache_wire.Cache_fresh) ?age_s ?error config names =
   let body =
     Dashboard_http_keeper.keeper_cost_aggregates_json ~config
       ~keepers:(List.map make_meta names) ~window_minutes:server_default_window
@@ -250,15 +251,15 @@ let test_team_total_of_an_empty_answer_is_unknown () =
 let test_every_cache_state_decodes () =
   List.iter
     (fun state ->
-      let label = Route.cache_state_to_string state in
+      let label = Cache_wire.to_string state in
       check bool "route parses its serialized cache state" true
-        (Route.cache_state_of_string label = Some state);
+        (Cache_wire.of_string label = Some state);
       match state with
-      | Route.Cache_fresh -> (
+      | Cache_wire.Cache_fresh -> (
           match decode (server_json ~state ()) with
           | Overview_spend_read { freshness = Spend_fresh; _ } -> ()
           | _ -> failf "%s decodes as a fresh read" label)
-      | Route.Cache_stale_refreshing -> (
+      | Cache_wire.Cache_stale_refreshing -> (
           match decode (server_json ~state ~age_s:95.0 ~error:"EIO" ()) with
           | Overview_spend_read
               { freshness = Spend_stale { age_s; last_error = Some "EIO" }; _ } as reading
@@ -271,7 +272,7 @@ let test_every_cache_state_decodes () =
                 [ "$ spend is 1m old, refresh failed: EIO" ]
                 (List.map strip (Spend.lines reading))
           | _ -> failf "%s with an error decodes as stale with it" label)
-      | Route.Cache_warming -> (
+      | Cache_wire.Cache_warming -> (
           (* A warming answer carries the placeholder: its empty rows say
              nothing, so it must not read as "no Keeper spent anything". *)
           let placeholder ?error () =
@@ -285,9 +286,9 @@ let test_every_cache_state_decodes () =
               check bool "the error is carried" true
                 (String.ends_with ~suffix:"EACCES" err)
           | _ -> failf "%s with an error decodes as a failure" label))
-    [ Route.Cache_fresh; Route.Cache_stale_refreshing; Route.Cache_warming ];
+    [ Cache_wire.Cache_fresh; Cache_wire.Cache_stale_refreshing; Cache_wire.Cache_warming ];
   check bool "route rejects an unknown cache state" true
-    (Route.cache_state_of_string "future" = None)
+    (Cache_wire.of_string "future" = None)
 
 let test_not_read_draws_no_tag_and_one_line () =
   List.iter

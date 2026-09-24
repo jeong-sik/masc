@@ -8,20 +8,9 @@ val add_routes :
   sw:Eio.Switch.t ->
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 
-(** How old a cached dashboard body is; the [cache.state] word of every
-    cached dashboard route. [Cache_warming] is the placeholder answered
-    before anything was computed for that key. *)
-type cache_state =
-  | Cache_fresh
-  | Cache_stale_refreshing
-  | Cache_warming
-
-val cache_state_to_string : cache_state -> string
-val cache_state_of_string : string -> cache_state option
-
 (** The [cache] object a cached dashboard route appends. *)
 val cache_metadata :
-  state:cache_state ->
+  state:Dashboard_cache_wire.state ->
   generated_at:float ->
   ?age_s:float ->
   ?error:string ->

@@ -2278,7 +2278,7 @@ let test_interval_wake_to_unstarted_owner_holds_the_next_occurrence () =
             (request.due_at +. Float.of_int interval_sec) stored.due_at
         | None -> fail "schedule disappeared after acceptance");
        let before_next_due =
-         tick_ok config ~now:(first_tick_at +. Env_config_runtime_services.ScheduleRunner.interval_sec)
+         tick_ok config ~now:(first_tick_at +. (Float.of_int interval_sec /. 2.0))
        in
        check int "a tick before the next due dispatches nothing" 0
          (List.length before_next_due.dispatches);

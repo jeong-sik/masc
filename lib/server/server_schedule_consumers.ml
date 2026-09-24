@@ -1290,14 +1290,17 @@ let dispatch_keeper_wake
              stimulus_id)
     in
     (* Every outcome commits acceptance once the stimulus is durable, whatever
-       happened to the owner's activation. An owner that is paused, offline,
-       crashed, restarting or draining takes the stimulus from its durable
-       queue when its next turn starts, the same way a paused owner does after
-       resume; nothing on the schedule side can start that turn. Retrying the
-       dispatch instead leaves the schedule to cycle due -> running -> due on
-       every runner tick for as long as the owner stays down. The queue holds
-       at most one pending occurrence per schedule because each new firing
-       supersedes the earlier one ([accept_keeper_wake_occurrence]). *)
+       happened to the owner's activation. For a paused, offline, crashed,
+       restarting or draining owner the stimulus waits in its durable queue
+       and the first turn of its next fiber reads it, the same way a paused
+       owner reads it after resume. Nothing on the schedule side starts that
+       fiber; the wake receipt names the deferral reason for the operator.
+       Retrying the dispatch instead leaves the schedule to cycle
+       due -> running -> due on every runner tick for as long as the owner
+       stays down. Pending occurrences stay bounded per schedule: an interval
+       heartbeat holds its next firing in the runner ([defer_wake]), and any
+       other firing supersedes the earlier pending one
+       ([accept_keeper_wake_occurrence]). *)
     log_activation_outcome
       ~schedule_id:request.schedule_id
       ~keeper_name:activation_keeper_name

@@ -122,11 +122,11 @@ let test_titles_that_share_both_ends_are_parted_by_the_id () =
   let first =
     fold
       (Masc_tui_render_schedule.sidebar_row_label
-         ~about:(triage_title 30858) ~apart:"task-1174")
+         ~about:(triage_title 30858) ~apart:(Some "task-1174"))
   and second =
     fold
       (Masc_tui_render_schedule.sidebar_row_label
-         ~about:(triage_title 30904) ~apart:"task-1175")
+         ~about:(triage_title 30904) ~apart:(Some "task-1175"))
   in
   Alcotest.(check bool) "with the id they part" true (first <> second);
   Alcotest.(check bool) "and each row ends in its own id" true
@@ -142,7 +142,7 @@ let test_approval_requesters_stay_distinct_in_rendered_rows () =
   Alcotest.(check int) "Approvals sidebar width" 34 cols;
   let label keeper =
     Masc_tui_render_schedule.sidebar_row_label ~about:"tool_execute"
-      ~apart:keeper
+      ~apart:(Some keeper)
   in
   match
     content_rows ~title:"Approvals" ~cols ~focused:false

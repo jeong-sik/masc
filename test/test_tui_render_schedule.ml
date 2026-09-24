@@ -2196,14 +2196,14 @@ let test_rows_alike_but_for_the_asker_are_parted_by_it () =
   in
   let fold label = Masc_tui_message_layout.fit_middle room label in
   let first =
-    Schedule.sidebar_row_label ~about:"tool_execute" ~apart:"tui-developer"
+    Schedule.sidebar_row_label ~about:"tool_execute" ~apart:(Some "tui-developer")
   and second =
-    Schedule.sidebar_row_label ~about:"tool_execute" ~apart:"ocaml-agent-ic"
+    Schedule.sidebar_row_label ~about:"tool_execute" ~apart:(Some "ocaml-agent-ic")
   in
   check bool "the two rows part" true (fold first <> fold second);
   check string "and the tool still leads" "tool_execute  tui-developer" first;
   check string "an unnamed asker leaves the label as it was" "tool_execute"
-    (Schedule.sidebar_row_label ~about:"tool_execute" ~apart:"")
+    (Schedule.sidebar_row_label ~about:"tool_execute" ~apart:None)
 
 (* A post with no time has no age. Read as the epoch, it drew twenty thousand
    days folded into the column as "2…d09h". *)

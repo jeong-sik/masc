@@ -1354,9 +1354,16 @@ let board_age_text ~now = function
 
    The full-width list rows put the same reading first, where nothing folds.
    These two orders are not a disagreement: one draws in the room it has, the
-   other in the room a fold leaves. *)
+   other in the room a fold leaves.
+
+   [apart] is an option because a row may have nothing to be parted by -- a
+   verdict whose clock the codec could not read, an asker the wire did not
+   name -- and that row keeps its subject alone rather than trailing a
+   separator with nothing after it. An empty string would say the same thing
+   in a second vocabulary, and would leave every caller deciding which of the
+   two absences it holds. *)
 let sidebar_row_label ~about ~apart =
-  if apart = "" then about else about ^ "  " ^ apart
+  match apart with None -> about | Some apart -> about ^ "  " ^ apart
 
 let board_title_width ~inner_width =
   (* The header word does not move the column: [board_age_width] is fixed and

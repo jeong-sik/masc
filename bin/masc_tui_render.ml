@@ -1236,7 +1236,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
           (List.map
              (fun (row : Tui_decode.task) ->
                Render_schedule.sidebar_row_label ~about:row.title
-                 ~apart:row.id)
+                 ~apart:(Some row.id))
              (Overview_tasks.rows state.tasks))
         ~selection:(Overview_tasks.row_of state.tasks ~task_id:task.id);
       let answer =
@@ -1406,7 +1406,7 @@ let approval_sidebar_label (row : approval_row) =
       pending.Tui_decode.gp_display_tool, pending.Tui_decode.gp_keeper
     | Operator_row item -> item.ap_action_type, item.ap_actor
   in
-  Render_schedule.sidebar_row_label ~about ~apart
+  Render_schedule.sidebar_row_label ~about ~apart:(Some apart)
 
 let render_approval_detail (state : state) (row : approval_row) =
   let terminal_rows, cols = get_terminal_size () in

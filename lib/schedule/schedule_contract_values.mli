@@ -70,6 +70,22 @@ val wake_status_to_string : wake_status -> string
 val wake_status_of_string : string -> (wake_status, decode_error) result
 val wake_status_strings : string list
 
+(** The schedule runner's own [status], as [/health] reports it under
+    [schedule_runner] and the schedule list reports it beside its rows. The
+    runner re-reads what it holds only on a tick that succeeds, so a reader of
+    a hold needs this word to know whether that hold is still being checked. *)
+type runner_status =
+  | Runner_not_started  (** No tick has run in this process yet. *)
+  | Runner_running  (** A tick is in flight. *)
+  | Runner_stale
+      (** The newest tick finished longer ago than the server's threshold. *)
+  | Runner_degraded
+      (** The newest tick failed, or it dispatched or woke with failures. *)
+  | Runner_ok  (** The newest tick succeeded, recently and without failures. *)
+
+val runner_status_to_string : runner_status -> string
+val runner_status_of_string : string -> (runner_status, decode_error) result
+
 (** Selector for whose schedules a listing reads: the caller on either side of
     a schedule, the Keeper a schedule wakes, the actor that scheduled it, or
     every row. *)

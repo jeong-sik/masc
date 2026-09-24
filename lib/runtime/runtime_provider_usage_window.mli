@@ -2,9 +2,11 @@
 
     Claude Code's [rate_limit_event] and the Codex app-server's
     [account/rateLimits/updated] report, during a turn, how much of each
-    usage window the account has used and when the window resets.  This
-    module decodes those reports at the wire and keeps the latest one per
-    quota scope and window, with the time MASC heard it.
+    usage window the account has used and when the window resets.  The
+    Codex app-server also answers [account/rateLimits/read] without a turn
+    ({!Runtime_provider_usage_read}).  This module decodes those reports at
+    the wire and keeps the latest one per quota scope and window, with the
+    time MASC heard it.
 
     It is an observation.  Routing, candidate ordering, admission and retry
     do not read it: codex-cli 0.156.0's protocol schema says clients must not
@@ -34,6 +36,7 @@ type utilization =
 type source =
   | Claude_code_rate_limit_event
   | Codex_account_rate_limits_updated
+  | Codex_account_rate_limits_read
 
 type window =
   { limit_id : string option
@@ -73,6 +76,13 @@ val decode_codex_rate_limits_updated : Yojson.Safe.t -> (report, decode_error) r
     exactly 300 is {!Five_hour} and exactly 10080 is {!Seven_day}; another
     length is {!Duration_minutes}; no length keeps the slot name as
     {!Provider_label}. *)
+
+val decode_codex_rate_limits_read : Yojson.Safe.t -> (report, decode_error) result
+(** The result of an [account/rateLimits/read] request, which the app-server
+    answers without a thread or a turn. Every bucket of [rateLimitsByLimitId]
+    is read, a bucket without its own [limitId] taking its key; when that map
+    is absent or null, the single [rateLimits] is read. Windows are decoded as
+    in {!decode_codex_rate_limits_updated}. *)
 
 type recorded =
   { window : window

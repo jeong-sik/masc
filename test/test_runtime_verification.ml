@@ -765,7 +765,6 @@ assert "read_file(*)" in settings["permissions"]["deny"]
 config = json.loads((home / ".gemini/config/mcp_config.json").read_text())
 assert list(config["mcpServers"]) == ["masc"]
 server = config["mcpServers"]["masc"]
-assert server["tools"] and all(v == {"eager": True} for v in server["tools"].values()), server.get("tools")
 headers = dict(server["headers"], **{"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
 
 def rpc(method, params, request_id=None):
@@ -782,6 +781,8 @@ headers["MCP-Protocol-Version"] = "2025-11-25"
 rpc("notifications/initialized", {})
 listed = rpc("tools/list", {}, 2)
 assert [tool["name"] for tool in listed["result"]["tools"]] == ["runtime_readiness_challenge"]
+assert sorted(server["tools"]) == sorted(tool["name"] for tool in listed["result"]["tools"]), server.get("tools")
+assert all(v == {"eager": True} for v in server["tools"].values()), server["tools"]
 result = rpc("tools/call", {"name": "runtime_readiness_challenge", "arguments": {}}, 3)
 text = result["result"]["content"][0]["text"]
 model = sys.argv[sys.argv.index("--model") + 1]

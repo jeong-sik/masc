@@ -28,9 +28,10 @@ val start :
   unit ->
   t
 
-(** Exact remote-MCP configuration measured against Antigravity CLI 1.1.11.
-    The returned JSON contains the ephemeral capability and must not be logged
-    or persisted after the turn.
+(** Remote-MCP configuration for Antigravity CLI: [url] and [headers] as
+    measured against 1.1.11, [tools] as measured against 1.2.9. The returned
+    JSON contains the ephemeral capability and must not be logged or persisted
+    after the turn.
 
     [eager_tools] are declared [tools.<name>.eager = true]. Antigravity lists
     a tool without that declaration by name only and tells the model to read

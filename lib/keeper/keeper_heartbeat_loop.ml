@@ -255,18 +255,63 @@ module Deferred_lane_slot = struct
     | Error error -> log_store_error slot ~action:"clear" error
   ;;
 
-  let restore ~base_path ~keepers_dir ~keeper_name =
+  (* What the assignment walks now. A restart is also how an operator applies
+     an edited [runtime.toml], so a suffix frozen before the restart may name
+     candidates the lane no longer has. *)
+  type lane_now =
+    | Lane_candidates of string list
+    | Lane_missing
+    | Lane_unavailable
+
+  let current_lane assignment_id =
+    match Runtime.resolve_assignment assignment_id with
+    | `Lane lane -> Lane_candidates (Runtime_lane.ordered_candidates lane)
+    | `Missing -> Lane_missing
+    | `Unavailable _ -> Lane_unavailable
+  ;;
+
+  (* The frozen suffix survives only while every id in it is still a candidate
+     of the assignment. Membership, not a positional suffix: the walk that
+     froze it had already demoted quota-exhausted candidates. An unavailable
+     catalog entry says nothing about lane membership, so it keeps the hint and
+     the walk reports that entry as it would without one. *)
+  let stale_reason ~lane_now (hint : Keeper_turn_driver.deferred_runtime_lane) =
+    match lane_now with
+    | Lane_unavailable -> None
+    | Lane_missing ->
+      Some (Printf.sprintf "assignment %s is no longer configured" hint.assignment_id)
+    | Lane_candidates candidates ->
+      List.find_opt
+        (fun id -> not (List.mem id candidates))
+        (Keeper_turn_driver.deferred_runtime_ids hint)
+      |> Option.map (fun id ->
+        Printf.sprintf
+          "%s is no longer a candidate of %s"
+          id
+          hint.assignment_id)
+  ;;
+
+  let restore ~lane_now ~base_path ~keepers_dir ~keeper_name =
     let slot = { base_path; keepers_dir; keeper_name; hint = ref None } in
     (match Store.load ~keepers_dir ~keeper_name with
      | Ok None -> ()
      | Ok (Some (restored : Keeper_turn_driver.deferred_runtime_lane)) ->
-       Log.Keeper.info
-         ~keeper_name
-         "restored deferred runtime lane assignment=%s failed=%s next=%s"
-         restored.assignment_id
-         restored.failed_runtime_id
-         restored.next_runtime_id;
-       slot.hint := Some restored
+       (match stale_reason ~lane_now:(lane_now restored.assignment_id) restored with
+        | Some reason ->
+          Log.Keeper.info
+            ~keeper_name
+            "dropped restored deferred runtime lane next=%s: %s"
+            restored.next_runtime_id
+            reason;
+          clear_durable slot
+        | None ->
+          Log.Keeper.info
+            ~keeper_name
+            "restored deferred runtime lane assignment=%s failed=%s next=%s"
+            restored.assignment_id
+            restored.failed_runtime_id
+            restored.next_runtime_id;
+          slot.hint := Some restored)
      | Error error ->
        (* The file is kept as evidence, so this warning repeats on every
           start until an operator acts on it or the next deferral replaces
@@ -1367,6 +1412,7 @@ let run_heartbeat_loop
   let shared_context = Agent_core.Context.create () in
   let deferred_runtime_lane_slot =
     Deferred_lane_slot.restore
+      ~lane_now:Deferred_lane_slot.current_lane
       ~base_path:ctx.config.base_path
       ~keepers_dir:(Workspace.keepers_runtime_dir ctx.config)
       ~keeper_name:m.name
@@ -1746,6 +1792,11 @@ module For_testing = struct
   let consume_deferred_runtime_lane_hint = consume_deferred_runtime_lane_hint
   let deferred_runtime_lane_for_assignment = deferred_runtime_lane_for_assignment
   type deferred_lane_slot = Deferred_lane_slot.t
+
+  type deferred_lane_now = Deferred_lane_slot.lane_now =
+    | Lane_candidates of string list
+    | Lane_missing
+    | Lane_unavailable
 
   let restore_deferred_lane_slot = Deferred_lane_slot.restore
   let record_deferred_lane = Deferred_lane_slot.record

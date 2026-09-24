@@ -5031,6 +5031,12 @@ let cluster_keepers_dir base_path cluster =
   Filename.concat (Filename.concat base_path cluster) "keepers"
 ;;
 
+(* The configured lane each restore sees, unchanged across the restart. *)
+let unchanged_lane _assignment_id =
+  Masc.Keeper_heartbeat_loop.For_testing.Lane_candidates
+    [ "runtime.a"; "runtime.b"; "runtime.c" ]
+;;
+
 let test_deferred_hint_survives_store_restart_and_clears_after_settlement () =
   with_deferred_store (fun base_path ->
     let original =
@@ -5088,9 +5094,9 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
         ~later_runtime_ids:[ "runtime.c" ]
         ~failure:(accept_empty_no_progress_error "runtime.a")
     in
-    let before = Loop.restore_deferred_lane_slot ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
+    let before = Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
     Loop.record_deferred_lane before hint;
-    let after = Loop.restore_deferred_lane_slot ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
+    let after = Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
     (match Loop.deferred_lane_for_assignment after ~assignment_id:"lane.restart" with
      | Some restored ->
        Alcotest.(check (list string))
@@ -5104,9 +5110,9 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
       true
       (Option.is_none
          (Loop.deferred_lane_hint
-            (Loop.restore_deferred_lane_slot ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend")));
+            (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend")));
     Loop.record_deferred_lane after hint;
-    let reassigned = Loop.restore_deferred_lane_slot ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
+    let reassigned = Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
     Alcotest.(check bool)
       "changed assignment gets no suffix"
       true
@@ -5117,7 +5123,7 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
       true
       (Option.is_none
          (Loop.deferred_lane_hint
-            (Loop.restore_deferred_lane_slot ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend"))))
+            (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend"))))
 ;;
 
 (* Two named clusters with the same keeper name and assignment: recording or
@@ -5135,6 +5141,7 @@ let test_deferred_suffix_is_isolated_between_clusters () =
     in
     let slot cluster =
       Loop.restore_deferred_lane_slot
+        ~lane_now:unchanged_lane
         ~base_path
         ~keepers_dir:(cluster_keepers_dir base_path cluster)
         ~keeper_name:"backend"
@@ -5164,6 +5171,49 @@ let test_deferred_suffix_is_isolated_between_clusters () =
       "clearing beta leaves alpha's suffix"
       (Some "runtime.b")
       (next_of "alpha"))
+;;
+
+(* An operator edits the lane to [A; D] and restarts. The frozen suffix names
+   B and C, which the lane no longer has, so the restart walks the edited lane
+   and the file is gone; a removed assignment is dropped the same way. *)
+let test_restored_suffix_yields_to_edited_lane () =
+  with_deferred_store (fun base_path ->
+    let module Loop = Masc.Keeper_heartbeat_loop.For_testing in
+    let keepers_dir = cluster_keepers_dir base_path "alpha" in
+    let restore lane_now =
+      Loop.restore_deferred_lane_slot ~lane_now ~base_path ~keepers_dir ~keeper_name:"backend"
+    in
+    let hint =
+      Driver.For_testing.make_deferred_runtime_lane
+        ~assignment_id:"lane.edited"
+        ~failed_runtime_id:"runtime.a"
+        ~next_runtime_id:"runtime.b"
+        ~later_runtime_ids:[ "runtime.c" ]
+        ~failure:(accept_empty_no_progress_error "runtime.a")
+    in
+    Loop.record_deferred_lane (restore unchanged_lane) hint;
+    let edited _ = Loop.Lane_candidates [ "runtime.a"; "runtime.d" ] in
+    Alcotest.(check bool)
+      "edited lane drops the frozen suffix"
+      true
+      (Option.is_none (Loop.deferred_lane_hint (restore edited)));
+    Alcotest.(check bool)
+      "dropped suffix does not come back under the old lane"
+      true
+      (Option.is_none (Loop.deferred_lane_hint (restore unchanged_lane)));
+    Loop.record_deferred_lane (restore unchanged_lane) hint;
+    Alcotest.(check bool)
+      "unavailable catalog entry keeps the suffix"
+      true
+      (Option.is_some (Loop.deferred_lane_hint (restore (fun _ -> Loop.Lane_unavailable))));
+    Alcotest.(check bool)
+      "removed assignment drops the suffix"
+      true
+      (Option.is_none (Loop.deferred_lane_hint (restore (fun _ -> Loop.Lane_missing))));
+    Alcotest.(check bool)
+      "removed assignment's suffix is not restored again"
+      true
+      (Option.is_none (Loop.deferred_lane_hint (restore unchanged_lane))))
 ;;
 
 let test_deferred_store_rejects_unknown_schema_without_fallback () =
@@ -5778,6 +5828,10 @@ let () =
             "deferred suffix is isolated between clusters"
             `Quick
             test_deferred_suffix_is_isolated_between_clusters;
+          Alcotest.test_case
+            "restored suffix yields to an edited lane"
+            `Quick
+            test_restored_suffix_yields_to_edited_lane;
           Alcotest.test_case
             "deferred store rejects unknown schema"
             `Quick

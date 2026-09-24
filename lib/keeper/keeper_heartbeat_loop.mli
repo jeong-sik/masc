@@ -379,9 +379,22 @@ module For_testing : sig
   (** Load the durable hint for [keeper_name] under the cluster-aware
       [keepers_dir]. A missing file is no hint; a
       store error is logged with its path and also yields no hint, leaving the
-      file in place as evidence. *)
+      file in place as evidence. A suffix naming an id the assignment no
+      longer has as a candidate, or an assignment no longer configured, is
+      dropped and its file removed, so an edited [runtime.toml] wins. *)
+  (** What an assignment walks now, as the restore check sees it. Production
+      reads {!Runtime.resolve_assignment}. *)
+  type deferred_lane_now =
+    | Lane_candidates of string list
+    | Lane_missing
+    | Lane_unavailable
+
   val restore_deferred_lane_slot :
-    base_path:string -> keepers_dir:string -> keeper_name:string -> deferred_lane_slot
+    lane_now:(string -> deferred_lane_now) ->
+    base_path:string ->
+    keepers_dir:string ->
+    keeper_name:string ->
+    deferred_lane_slot
 
   (** Persist, then hold, the suffix a failed cycle left behind. *)
   val record_deferred_lane :

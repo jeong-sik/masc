@@ -87,6 +87,29 @@ let test_a_missing_name_inside_is_still_inside () =
       (inside ~base "not-written-yet.toml"))
 ;;
 
+(* #38593: an ssh endpoint's [allowed_paths] name another machine's paths.
+   One function says whether a path lies under them, for Execute and for the
+   remote keeper's reads alike, and it never asks this host's filesystem. *)
+let test_declared_endpoint_roots_are_judged_by_their_spelling () =
+  let under ?workdir path =
+    Exec_policy_paths.extra_root_path ?workdir ~extra_roots:[ "/app"; "/srv/data/" ] path
+  in
+  let some = Alcotest.(check (option string)) in
+  some "a file under a root" (Some "/app/x.py") (under "/app/x.py");
+  some "the root itself" (Some "/app") (under "/app");
+  some "dot segments are cleaned" (Some "/app/b") (under "/app/./a/../b");
+  some "a root spelled with a trailing slash" (Some "/srv/data/f") (under "/srv/data/f");
+  some "a relative path under a declared workdir" (Some "/app/out/y")
+    (under ~workdir:"/app" "out/y");
+  some "climbing out is refused" None (under "/app/../etc/passwd");
+  some "a sibling that shares the prefix is refused" None (under "/application/x");
+  some "no roots declared" None
+    (Exec_policy_paths.extra_root_path ~extra_roots:[] "/app/x.py");
+  check "Execute's check agrees" true
+    (Exec_policy_paths.validate_path ~workdir:"/nonexistent-workdir" ~extra_roots:[ "/app" ]
+       "/app/x.py")
+;;
+
 let () =
   Alcotest.run "exec policy containment"
     [ ( "request paths"
@@ -99,6 +122,10 @@ let () =
             test_symlink_inside_pointing_out
         ; Alcotest.test_case "a missing name inside" `Quick
             test_a_missing_name_inside_is_still_inside
+        ] )
+    ; ( "declared endpoint roots"
+      , [ Alcotest.test_case "judged by their spelling" `Quick
+            test_declared_endpoint_roots_are_judged_by_their_spelling
         ] )
     ]
 ;;

@@ -928,7 +928,7 @@ let test_one_of_writes_the_negation_two_ways () =
          ^ "[[params]]\nname = \"argv\"\ntype = \"string\"\n\
             [[one_of]]\nrequired = [\"argv\"]\nforbidden = [\"pipeline\"]\n\
             description = \"single\"\n\
-            [[one_of]]\nrequired = [\"script\"]\n\
+            [[one_of]]\nrequired = [\"command\"]\n\
             forbidden = [\"argv\", \"pipeline\"]\ndescription = \"shell\"\n")
   in
   let alternatives =

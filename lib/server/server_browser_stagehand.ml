@@ -101,7 +101,7 @@ let confirm_group_stopped_after_kill pgid =
     | Ok () -> Ok ()
     | Error _ as error when Monotonic_deadline.passed deadline -> error
     | Error _ ->
-      (try ignore (Unix.select [] [] [] stop_confirm_poll_s) with
+      (try Unix.sleepf stop_confirm_poll_s with
        | Unix.Unix_error (Unix.EINTR, _, _) -> ());
       check ()
   in

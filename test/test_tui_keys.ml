@@ -1449,6 +1449,29 @@ let test_the_question_count_counts_questions () =
   Alcotest.(check int) "only the open ask's questions" 2
     (approvals_open_question_count state)
 
+(* The question count reads 0 both when no question is open and when the
+   questions were never read, so the title needs to know which. *)
+let test_the_questions_reading_tells_unread_from_none_open () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let reading () =
+    match approvals_questions_reading state with
+    | Questions_current -> "current"
+    | Questions_unread -> "unread"
+    | Questions_stale -> "stale"
+  in
+  Alcotest.(check string) "before the first poll answers" "unread" (reading ());
+  state.asks_error <- Some "connection refused";
+  Alcotest.(check string) "a first poll that failed" "unread" (reading ());
+  state.asks_snapshot <-
+    Some { Tui_decode.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
+  Alcotest.(check string) "rows kept from before a failed poll" "stale"
+    (reading ());
+  state.asks_error <- None;
+  Alcotest.(check string) "an answered poll with no question" "current"
+    (reading ());
+  Alcotest.(check int) "which counts the same 0 as unread" 0
+    (approvals_open_question_count state)
+
 let test_visible_surface_ring_open_ask () =
   (* A keeper's question is an approval of a different kind: it waits on the
      same human, on the same surface. With zero approvals and one open ask
@@ -3021,6 +3044,8 @@ let () =
             test_visible_surface_ring_open_ask
         ; Alcotest.test_case "the question count counts questions" `Quick
             test_the_question_count_counts_questions
+        ; Alcotest.test_case "the questions reading tells unread from none open"
+            `Quick test_the_questions_reading_tells_unread_from_none_open
         ; Alcotest.test_case "braille sparkline renders levels" `Quick
             test_braille_sparkline
         ; Alcotest.test_case "fleet total cost sums correctly" `Quick

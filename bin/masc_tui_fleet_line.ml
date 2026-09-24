@@ -47,6 +47,24 @@ let failing_text (fleet : Tui_decode.fleet_safety) =
 let not_measured_text ~status =
   Printf.sprintf "not measured yet (%s)" (Terminal_text.single_line status)
 
+(* A stale health snapshot serves the last fleet it measured, so the counts
+   beside this are a past reading (#38499). The age is taken from [now] at
+   draw time, so it keeps growing between polls instead of freezing at the
+   age the poll saw. A server clock ahead of this one has no age to give, and
+   the tag still says the reading is stale. *)
+let freshness_text ~now = function
+  | Tui_decode.Fleet_current -> None
+  | Fleet_last_good { measured_at_unix; stale_reason } ->
+      let reason = Terminal_text.single_line stale_reason in
+      Some
+        (match
+           Masc_tui_message_layout.age_text ~now ~since:measured_at_unix
+         with
+         | Some age -> Printf.sprintf "stale \xc2\xb7 measured %s ago (%s)" age reason
+         | None -> Printf.sprintf "stale (%s)" reason)
+  | Unrecognised_snapshot_status word ->
+      Some ("health snapshot " ^ Terminal_text.single_line word)
+
 (* The task owners the fleet has no fiber for, and how much of that reading is
    missing. A Keeper whose profile does not load is a scan error: its tasks are
    left out of the count, and only a backlog failure moves the fleet status off

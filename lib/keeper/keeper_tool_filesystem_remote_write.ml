@@ -41,46 +41,67 @@ let append_script = "set -e; d=$(dirname \"$1\"); mkdir -p \"$d\"; cat >> \"$1\"
 (* A path under an endpoint's declared roots (#38593) was judged lexically,
    on this host, before the Gate was asked; the endpoint's filesystem can
    disagree, because a symbolic link under a root may lead outside it. So the
-   script that writes resolves on the endpoint the directory it writes in and
-   refuses, with this exit code, unless that directory is physically under
-   one of the roots given after the target ([$2]...), each root resolved the
-   same way. The deepest existing ancestor is checked before [mkdir -p], so
-   no directory is created through a link, and a target that is itself a
-   link is refused, so [cat >>] and [mv] act on the file the check saw. *)
+   script that writes checks, on the endpoint and against the directory it
+   writes in, that it is physically under one of the roots given after the
+   target ([$2]...), each root resolved the same way:
+   - the deepest existing ancestor is checked before [mkdir -p], so no
+     directory is created through a link;
+   - the script then [cd]s into the directory, checks where it is, and names
+     the file only as [./name] from there, so every later step acts on the
+     directory the check saw;
+   - a captured path carries a marker through [$(...)], which would otherwise
+     drop a trailing newline from a name, and the target's directory and
+     name are split by parameter expansion, which keeps it;
+   - a target that is a link or a directory is refused, and [mv -T] never
+     moves into a directory that a racing link could put there.
+   A refusal exits {!declared_root_escape_exit} with its reason on stderr; no
+   declared root, or a directory on the way, that cannot be resolved exits
+   {!declared_root_unresolved_exit}. The roots are resolved when the write
+   runs, so a root that is itself a link is followed: the operator declared
+   it. *)
 let declared_root_escape_exit = 6
+let declared_root_unresolved_exit = 7
 
 let declared_root_prelude =
+  let escape = string_of_int declared_root_escape_exit in
+  let unresolved = string_of_int declared_root_unresolved_exit in
   String.concat "\n"
     [ "set -e"
     ; "t=$1; shift"
+    ; "phys() { phys_out=$(cd \"$1\" 2>/dev/null && pwd -P && echo .) || return 1; phys_out=${phys_out%??}; }"
     ; "under_root() {"
     ; "  q=$1; shift"
     ; "  for r in \"$@\"; do"
-    ; "    rp=$(cd \"$r\" 2>/dev/null && pwd -P) || continue"
-    ; "    case \"$q/\" in \"${rp%/}\"/*) return 0;; esac"
+    ; "    phys \"$r\" || continue"
+    ; "    case \"$q/\" in \"${phys_out%/}\"/*) return 0;; esac"
     ; "  done"
     ; "  return 1"
     ; "}"
-    ; "d=$(dirname \"$t\"); a=$d"
-    ; "while [ ! -d \"$a\" ]; do a=$(dirname \"$a\"); done"
-    ; Printf.sprintf "under_root \"$(cd \"$a\" && pwd -P)\" \"$@\" || exit %d"
-        declared_root_escape_exit
+    ; "refuse() { printf '%s\\n' \"$1\" >&2; exit " ^ escape ^ "; }"
+    ; "unresolved() { printf '%s\\n' \"$1\" >&2; exit " ^ unresolved ^ "; }"
+    ; "any=0; for r in \"$@\"; do if phys \"$r\"; then any=1; fi; done"
+    ; "[ \"$any\" = 1 ] || unresolved declared_root_unavailable"
+    ; "d=${t%/*}; [ -n \"$d\" ] || d=/; b=${t##*/}"
+    ; "a=$d; while [ ! -d \"$a\" ]; do a=${a%/*}; [ -n \"$a\" ] || a=/; done"
+    ; "phys \"$a\" || unresolved directory_unavailable"
+    ; "under_root \"$phys_out\" \"$@\" || refuse resolves_outside_declared_roots"
     ; "mkdir -p \"$d\""
-    ; "p=$(cd \"$d\" && pwd -P)"
-    ; Printf.sprintf "under_root \"$p\" \"$@\" || exit %d" declared_root_escape_exit
-    ; "f=$p/$(basename \"$t\")"
-    ; Printf.sprintf "if [ -L \"$f\" ]; then exit %d; fi" declared_root_escape_exit
+    ; "cd \"$d\""
+    ; "p=$(pwd -P && echo .); p=${p%??}"
+    ; "under_root \"$p\" \"$@\" || refuse resolves_outside_declared_roots"
+    ; "if [ -L \"./$b\" ]; then refuse target_is_symbolic_link; fi"
+    ; "if [ -d \"./$b\" ]; then refuse target_is_directory; fi"
     ]
 ;;
 
 let declared_root_overwrite_script =
   declared_root_prelude
-  ^ "\nw=$(mktemp \"$p/.masc-write.XXXXXX\"); cat > \"$w\"; \
-     if [ -e \"$f\" ]; then chmod \"$(stat -c %a \"$f\")\" \"$w\"; else chmod 0644 \"$w\"; fi; \
-     mv -f \"$w\" \"$f\""
+  ^ "\nw=$(mktemp ./.masc-write.XXXXXX); cat > \"$w\"; \
+     if [ -e \"./$b\" ]; then chmod \"$(stat -c %a \"./$b\")\" \"$w\"; else chmod 0644 \"$w\"; fi; \
+     mv -f -T \"$w\" \"./$b\""
 ;;
 
-let declared_root_append_script = declared_root_prelude ^ "\ncat >> \"$f\""
+let declared_root_append_script = declared_root_prelude ^ "\ncat >> \"./$b\""
 
 (* A patch source that is not a regular file exits with this code, chosen
    here, so the handler tells "nothing to patch" from a failed [cat]. *)
@@ -295,10 +316,11 @@ let handle_content_with_endpoint
              | Unix.WEXITED code, Some roots when code = declared_root_escape_exit ->
                failure ~class_:Tool_result.Policy_rejection ~target
                  (Printf.sprintf
-                    "path_outside_declared_root: on endpoint %s, %s leads outside the \
-                     declared roots (%s) through a symbolic link; nothing was written"
+                    "path_outside_declared_root: on endpoint %s, %s was refused (%s); the \
+                     declared roots are %s. Nothing was written"
                     (Keeper_sandbox_remote.name endpoint)
                     target
+                    (String.trim (Exec_policy.truncate_for_log stderr))
                     (String.concat ", " roots))
              | Unix.WEXITED 0, (None | Some _) ->
                Log.Keeper.info

@@ -69,12 +69,15 @@ val declared_root_write_argv :
   mode:content_mode -> endpoint_path:string -> roots:string list -> string list
 (** The payload for a path under the endpoint's declared [roots]. On the
     endpoint it resolves the directory it writes in and exits
-    {!declared_root_escape_exit}, writing nothing, unless that directory is
-    physically under one of [roots] and the target is not a symbolic link.
-    The Gate approved a lexical path; this makes the bytes land at that path
-    or nowhere. *)
+    {!declared_root_escape_exit}, writing nothing and naming the reason on
+    stderr, unless that directory is physically under one of [roots] and the
+    target is neither a symbolic link nor a directory. It exits
+    {!declared_root_unresolved_exit} when no root, or a directory on the way,
+    can be resolved. The roots are resolved when it runs: a root that is itself
+    a link is followed, and a file with other hard links is the same file. *)
 
 val declared_root_escape_exit : int
+val declared_root_unresolved_exit : int
 
 val read_source_argv : remote_path:string -> string list
 (** The payload that prints a regular file, or exits

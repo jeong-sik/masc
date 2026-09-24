@@ -527,9 +527,6 @@ let test_a_guest_endpoint_declares_no_roots () =
   check bool "nothing written" true (nothing_written f)
 ;;
 
-(* An approval is spent only on the Gate input it was given. Replay rebuilds
-   the input from the endpoint configuration current then, so the same name
-   pointing at another host is another input and needs its own approval. *)
 let test_declared_root_escape_is_refused_as_the_callers () =
   with_eio @@ fun () ->
   let f = declared_fixture ~mode:"escape" in
@@ -595,9 +592,31 @@ let test_declared_payload_does_not_follow_a_link_out_of_the_root () =
     (payload overwrite "sub/ok.txt" "hello" = Unix.WEXITED 0);
   check string "with the bytes" "hello" (read_file (Filename.concat app "sub/ok.txt"));
   check bool "and appended to" true (payload append "sub/ok.txt" "+more" = Unix.WEXITED 0);
-  check string "in place" "hello+more" (read_file (Filename.concat app "sub/ok.txt"))
+  check string "in place" "hello+more" (read_file (Filename.concat app "sub/ok.txt"));
+  (* A name ending in a newline: a [$(...)] capture would drop it and resolve
+     [x\n] as [x], which here is a link out of the root. *)
+  let newline_dir = Filename.concat app "x\n" in
+  Unix.mkdir newline_dir 0o700;
+  Unix.symlink newline_dir (Filename.concat app "l");
+  Unix.symlink outside (Filename.concat app "x");
+  check bool "a directory whose name ends in a newline is written in" true
+    (payload overwrite "l/nl.txt" "kept" = Unix.WEXITED 0);
+  check string "inside the root" "kept" (read_file (Filename.concat newline_dir "nl.txt"));
+  check bool "not behind the look-alike link" false
+    (Sys.file_exists (Filename.concat outside "nl.txt"));
+  Unix.mkdir (Filename.concat app "d.txt") 0o700;
+  check bool "a target that is a directory" true (payload overwrite "d.txt" "x" = escaped);
+  check bool "a root that does not exist is not an escape" true
+    (run_payload ~stdin:"x"
+       (Keeper_tool_filesystem_remote_write.declared_root_write_argv ~mode:overwrite
+          ~endpoint_path:(Filename.concat root "absent/f.txt")
+          ~roots:[ Filename.concat root "absent" ])
+     = Unix.WEXITED Keeper_tool_filesystem_remote_write.declared_root_unresolved_exit)
 ;;
 
+(* An approval is spent only on the Gate input it was given. Replay rebuilds
+   the input from the endpoint configuration current then, so the same name
+   pointing at another host is another input and needs its own approval. *)
 let test_another_host_behind_the_name_is_another_gate_input () =
   let input host =
     Keeper_tool_filesystem_runtime.declared_root_write_gate_input

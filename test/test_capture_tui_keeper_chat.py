@@ -74,6 +74,9 @@ class CaptureTuiKeeperChatTest(unittest.TestCase):
             health["keeper_fleet_safety"]["schema"],
             "masc.keeper_fleet_operator.v1",
         )
+        # A reading without the snapshot beside it is refused: the TUI
+        # cannot tell the present from a stale snapshot's last reading.
+        self.assertEqual(health["full_health_snapshot"]["status"], "ready")
         self.assertEqual(roster["total"], 1)
         self.assertEqual(roster["keepers"][0]["name"], "alpha")
         self.assertEqual(roster["keepers"][0]["meta"]["sandbox_profile"], "docker")

@@ -71,8 +71,8 @@ related: ["librarian-lifecycle", "0440", "0454", "typed-terminal-reason"]
 `Unknown_invalid_request` 는 응답이 이유를 기계가 읽는 모양으로 주지 않은 거절이다. 2026-09-21~22 system log 에서
 exact 걸음이 이것으로 멈춘 53번은 모두 Librarian lane 이었고, 응답 문장은 모두 창 초과를 말했다.
 
-- ollama `deepseek-v4-1-flash` 41번: `"code": null`, "The prompt is too long: …, model maximum context length: 1048576"
-- glm `glm-5.3-flash` 12번: `"code": "1261"`, "Prompt exceeds max length"
+- ollama `deepseek-v4-1-flash` 41번: `"code": null`, "The prompt is too long: …, model maximum context length: 1048576" (#37836)
+- glm `glm-5.3-flash` 12번: `"code": "1261"`. 09-21 09:13Z 까지만 있었다. 09:16Z 부터 같은 응답 103번은 `ContextOverflow` 로 읽혔다.
 
 ### 1.3 왜 이렇게 됐나
 
@@ -163,7 +163,7 @@ val of_transport_error : Http_client.http_error -> dispatch:dispatch -> t
    #38472 (폐기된 키 하나가 lane 전체를 멈춤)가 이것으로 풀린다.
 4. **`Unknown_invalid_request` 는 `Unattributed` 이고, 두 걸음 모두 넘긴다.**
    Keeper 걸음은 지금도 넘긴다. exact 걸음이 멈춤에서 넘김으로 바뀐다.
-   §1.2 의 53번은 다음 슬롯의 창이 더 컸다면 받을 수 있었다. 입력 탓인 400 이라면 후보마다 한 번씩 더 보낸다.
+   §1.2 의 ollama 41번은 다음 슬롯의 창이 더 컸다면 받을 수 있었다. 입력 탓인 400 이라면 후보마다 한 번씩 더 보낸다.
    판정은 `Binding` 이 아니다. 응답이 이유를 말하지 않았으니, 기록에도 모른다고 남긴다.
 
 ## 4. 단계
@@ -188,5 +188,4 @@ val of_transport_error : Http_client.http_error -> dispatch:dispatch -> t
 
 - 재시도 지연, 쿼터 창, 후보 순서 선호는 다루지 않는다 (RFC-0440, RFC-0458).
 - 새 Gate 를 만들지 않는다. 판정은 관찰이고, 넘길지는 지금처럼 각 걸음이 정한다.
-- 응답 문장에서 이유를 읽지 않는다. glm 의 `"code": "1261"` 처럼 응답이 기계가 읽는 코드를 주면,
-  그 코드를 `classify_refusal` 에서 타입으로 옮기는 일은 따로 한다.
+- 응답 문장에서 이유를 읽지 않는다. 이유는 응답의 상태 코드와 문서화된 코드 칸에서만 읽는다.

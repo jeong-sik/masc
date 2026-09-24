@@ -50,8 +50,9 @@ val memory_fleet_header_rows : cols:int -> state -> string list
     the frame [cols] gives. *)
 
 val memory_overview_scrolled : cols:int -> budget:int -> ?cursor:int -> state -> scrolled
-(** The overview's scroll layout at [cols], with header and selected Keeper
-    detail rows limited to the same body [budget] used by the renderer. *)
+(** The overview's scroll layout at [cols], with summary, rejected Keeper
+    rows and selected Keeper detail limited to the same body [budget] used by
+    the renderer. *)
 
 val render_memory_body :
   cols:int ->

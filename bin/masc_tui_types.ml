@@ -9044,15 +9044,9 @@ let selected_memory_keeper (state : state) =
    row, and the block breaks its rows at clause marks now, so a count taken
    from the readings would size the list for a block two or three rows
    shorter than the one drawn. *)
-let memory_overview_scrolled ~header_rows ~context_rows (state : state) =
+let memory_overview_scrolled ~header_rows ~refused_rows ~context_rows (state : state) =
   let keepers = visible_memory_keepers state in
   let count = List.length keepers in
-  (* One row per keeper row the decoder refused, then a divider. *)
-  let refused_rows =
-    match state.memory_health with
-    | Some { Tui_decode.mhs_refused_keepers = []; _ } | None -> 0
-    | Some { Tui_decode.mhs_refused_keepers = refused; _ } -> List.length refused + 1
-  in
   { sc_count = count
   ; sc_chrome =
       Masc_tui_frame.chrome_rows

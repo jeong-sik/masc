@@ -556,6 +556,49 @@ let test_memory_header_rows_come_out_of_the_budget () =
     (List.exists (contains "vision ingest errors 0") compact)
 ;;
 
+let test_refused_keeper_rows_stay_inside_the_memory_budget () =
+  let state = make_state () in
+  let keepers =
+    List.map
+      (fun id -> make_keeper_health ~keeper_id:id ~facts:10 ~snapshot_bytes:1024)
+      [ "alpha"; "beta"; "gamma" ]
+  in
+  let refused =
+    List.init 40 (fun index ->
+      { Decode.mkr_keeper_id = Some (Printf.sprintf "broken-%02d" index)
+      ; mkr_reason = "unsupported snapshot state"
+      })
+  in
+  state.memory_health <- Some
+    { (make_fleet_health (List.hd keepers)) with
+      Decode.mhs_keepers = keepers
+    ; mhs_refused_keepers = refused
+    };
+  state.memory_health_cursor <- 2;
+  let budget = 20 in
+  check bool "rejected rows leave the selected roster and footer inside the body" true
+    (rows_drawn ~cols:100 ~budget state <= budget);
+  let lines = body_lines ~cols:100 ~budget state in
+  let hidden =
+    match List.find_opt (contains "rejected Keeper rows hidden") lines with
+    | None -> fail "the truncated rejected rows have no count"
+    | Some note ->
+      Scanf.sscanf note "  … %d rejected Keeper rows hidden; enlarge terminal"
+        (fun count -> count)
+  in
+  let displayed = List.length (List.filter (contains "row not read") lines) in
+  check int "the hidden count reconciles with the shown rejected rows" 40
+    (hidden + displayed);
+  let selected = ref [] in
+  let ignore_row _ = () in
+  Render_memory.render_memory_body ~cols:100 ~budget state
+    ~push:ignore_row ~push_styled:(fun ~style:_ _ -> ())
+    ~push_selected:(fun row -> selected := row :: !selected)
+    ~push_divider:(fun () -> ()) ~push_empty:(fun () -> ());
+  check bool "the last selected Keeper remains visible" true
+    (List.exists (contains "gamma") !selected)
+;;
+
 
 (* The filter bar names the filter its number is over.
 
@@ -1933,6 +1976,8 @@ let () =
       , [ test_case "memory_body_budget" `Quick test_render_memory_body
         ; test_case "header rows come out of the budget" `Quick
             test_memory_header_rows_come_out_of_the_budget
+        ; test_case "rejected Keeper rows remain inside the budget" `Quick
+            test_refused_keeper_rows_stay_inside_the_memory_budget
         ; test_case "the keeper block breaks the Librarian row at a clause mark"
             `Quick test_the_keeper_block_breaks_the_librarian_row_at_a_clause_mark
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers

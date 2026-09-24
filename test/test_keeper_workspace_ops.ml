@@ -202,10 +202,11 @@ let test_unresolved_endpoint_is_the_operators_and_keeps_the_tree_refusal () =
     (tree_refusal.Keeper_alerting_path.failure_class = Tool_result.Policy_rejection);
   Alcotest.(check bool) "unresolved endpoint is the operator's" true
     (refusal.Keeper_alerting_path.failure_class = Tool_result.Runtime_failure);
-  Alcotest.(check bool) "message starts with the tree refusal" true
-    (String.starts_with ~prefix:tree_refusal.Keeper_alerting_path.message refusal.Keeper_alerting_path.message);
-  Alcotest.(check bool) "message ends with the endpoint error" true
-    (String.ends_with ~suffix:endpoint_error refusal.Keeper_alerting_path.message)
+  Alcotest.(check bool) "the operator's endpoint error leads" true
+    (String.starts_with ~prefix:endpoint_error refusal.Keeper_alerting_path.message);
+  Alcotest.(check bool) "the tree refusal follows" true
+    (String.ends_with ~suffix:(tree_refusal.Keeper_alerting_path.message ^ ")")
+       refusal.Keeper_alerting_path.message)
 
 (* ---- Suite registration ------------------------------------------- *)
 

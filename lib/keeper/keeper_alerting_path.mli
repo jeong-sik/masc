@@ -34,8 +34,9 @@ val caller_refusal : caller_cwd_refusal -> path_refusal
 
 (** The keeper's tree refused a path, and the endpoint whose declared roots
     might hold it could not be resolved. The endpoint is the operator's
-    configuration, so this is a [Runtime_failure]; the message keeps the
-    tree's refusal, since the path may be refused either way. *)
+    configuration, so this is a [Runtime_failure] and its error leads the
+    message; the tree's refusal follows, since the path may be refused either
+    way. *)
 val endpoint_unresolved : tree_refusal:path_refusal -> endpoint_error:string -> path_refusal
 
 (** Project a [Workspace.config] to its project root by stripping the

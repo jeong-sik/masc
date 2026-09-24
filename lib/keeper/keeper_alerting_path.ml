@@ -65,8 +65,8 @@ let caller_refusal reason =
 let endpoint_unresolved ~tree_refusal ~endpoint_error =
   { failure_class = Tool_result.Runtime_failure
   ; message =
-      Printf.sprintf "%s; the endpoint that may declare this path is unresolved: %s"
-        tree_refusal.message endpoint_error
+      Printf.sprintf "%s (the keeper's tree also refused the path: %s)"
+        endpoint_error tree_refusal.message
   }
 
 let project_root_of_config (config : Workspace.config) : string =

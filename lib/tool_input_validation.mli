@@ -1,6 +1,7 @@
 (** Tool_input_validation — Pre-dispatch validation of one tool argument object.
 
-    Root-property [type], [enum], [const] and [required] are checked by
+    Property [type], [enum], [const] and [required], including nested objects
+    and array items, are checked by
     [Agent_core.Tool_input_validation.validate] against the tool's full input
     schema, the same check Agent-Core runs before any tool handler. MASC adds the
     checks Agent-Core does not make: undeclared fields under
@@ -51,7 +52,7 @@ type violation =
   | No_one_of_branch_matches
   | Several_one_of_branches_match
   | Field_errors of Agent_core.Tool_input_validation.field_error list
-      (** Root-property [type], [enum], [const] or [required]. *)
+      (** Property [type], [enum], [const] or [required], at any depth. *)
   | Argument_out_of_range of
       { path : string
       ; keyword : bound_keyword

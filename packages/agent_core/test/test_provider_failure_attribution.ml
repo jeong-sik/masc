@@ -247,7 +247,12 @@ let test_closed_ownership_matrix () =
          Attribution.Endpoint
          with_credential
          (Http.NetworkError { message = "network detail"; kind }))
-    [ Http.Connection_refused; Http.Dns_failure; Http.Tls_error; Http.End_of_file ];
+    [ Http.Connection_refused
+    ; Http.Dns_failure
+    ; Http.Tls_error
+    ; Http.Connection_reset
+    ; Http.End_of_file
+    ];
   check_ownership
     "local resource exhaustion is attempt local"
     Attribution.Attempt_local

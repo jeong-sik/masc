@@ -31,19 +31,29 @@ type observation =
 type login_scope =
   | Workflow
   | Write_packages
+  | Read_packages
+  | Project
+  | Write_repo_hook
 
 let login_scope_to_string = function
   | Workflow -> "workflow"
   | Write_packages -> "write:packages"
+  | Read_packages -> "read:packages"
+  | Project -> "project"
+  | Write_repo_hook -> "write:repo_hook"
 ;;
 
 let login_scope_of_string = function
   | "workflow" -> Some Workflow
   | "write:packages" -> Some Write_packages
+  | "read:packages" -> Some Read_packages
+  | "project" -> Some Project
+  | "write:repo_hook" -> Some Write_repo_hook
   | _ -> None
 ;;
 
-let all_login_scopes = [ Workflow; Write_packages ]
+let all_login_scopes =
+  [ Workflow; Write_packages; Read_packages; Project; Write_repo_hook ]
 
 (* The login request carries its scopes as [?scopes=workflow,...], beside the
    [hostname] it already takes as a query parameter. An empty or absent value

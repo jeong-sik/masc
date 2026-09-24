@@ -19,14 +19,20 @@ val send_to_host_binding : string
     extension. *)
 val deliver_expression : string -> string
 
-(** A [Runtime.evaluate] expression (with [awaitPromise]) that resolves to the
-    runtime marker once the extension's receiver is installed. The CDP
-    command deadline bounds the wait. *)
+(** A [Runtime.evaluate] expression that says at once whether the
+    extension's receiver is installed and what its runtime marker is. The
+    host polls it: the service worker's evaluation context has no
+    [setTimeout] to wait with. *)
 val readiness_expression : string
 
 type marker = { protocol_version : string; runtime_version : string }
 
 val marker_of_json : Yojson.Safe.t -> (marker, string) result
+
+type readiness = Not_ready | Ready of marker
+
+(** The value {!readiness_expression} evaluates to. *)
+val readiness_of_json : Yojson.Safe.t -> (readiness, string) result
 
 (** The leading number of the marker's [protocol_version], digits only. *)
 val protocol_major : marker -> (int, string) result

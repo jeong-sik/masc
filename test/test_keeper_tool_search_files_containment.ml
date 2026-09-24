@@ -263,7 +263,6 @@ let test_docker_keeper_rg_invalid_type_surfaces_stderr () =
 let test_docker_keeper_invalid_type_rejects_before_docker_spawn () =
   setup ~keeper_name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground:_ ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   let raw =
     Keeper_workspace_ops.handle_tool_search_files
       ~turn_sandbox_factory:None
@@ -287,9 +286,9 @@ let test_docker_keeper_invalid_type_rejects_before_docker_spawn () =
       true
       (String_util.contains_substring err "invalid");
     Alcotest.(check bool)
-      "docker image was not pulled"
+      "sandbox image was never resolved (this keeper has none set)"
       false
-      (String_util.contains_substring err "docker image is not configured")
+      (String_util.contains_substring err "sandbox_image")
 let test_docker_keeper_blocks_second_rg_outside () =
   setup ~keeper_name:"acme-sandbox" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->

@@ -463,20 +463,18 @@ let assert_docker_route_fires ~config ~meta ~playground =
       let raw =
         Keeper_workspace_ops.handle_tool_search_files ~turn_sandbox_factory:None ~config ~meta ~args
       in
-      if not (response_mentions raw "error" "docker image") then
+      if not (response_mentions raw "error" "sandbox_image") then
         Alcotest.failf "unexpected %s docker-route response: %s" op raw)
     cases
 
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
 let test_readonly_ops_route_through_docker () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   assert_docker_route_fires ~config ~meta ~playground
 
 let test_cat_legacy_keeper_skips_docker () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
   @@ fun ~config ~meta ~playground ->
   let host_path = Filename.concat playground "scratch/x" in
@@ -489,7 +487,7 @@ let test_cat_legacy_keeper_skips_docker () =
   Alcotest.(check bool)
     "legacy keeper does not surface docker image error"
     false
-    (response_mentions raw "error" "docker image")
+    (response_mentions raw "error" "sandbox_image")
 
 let fake_docker_rg_no_match_script =
   "#!/bin/sh\n\
@@ -589,10 +587,13 @@ printf 'unexpected docker invocation\\n' >&2\n\
 exit 2\n"
 
 let test_rg_no_match_remains_successful_in_docker_route () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_rg_no_match_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let host_path = Filename.concat playground "scratch/demo.txt" in
   ensure_dir (Filename.dirname host_path);
   ignore (Fs_compat.save_file_atomic host_path "alpha\nbeta\ngamma\n");
@@ -715,7 +716,6 @@ let test_execute_rejects_factory_profile_drift_in_every_direction () =
 
 
 let test_execute_routes_through_docker () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
@@ -727,12 +727,11 @@ let test_execute_routes_through_docker () =
   Alcotest.(check (option bool)) "Docker request did not run on Host" None
     (parse_bool_field raw "ok");
   Alcotest.(check bool) "missing Docker image is explicit" true
-    (response_mentions raw "error" "docker image");
+    (response_mentions raw "error" "sandbox_image_unresolved");
   Alcotest.(check (option string)) "no local fallback" None
     (parse_string_field raw "sandbox_fallback")
 
 let test_execute_legacy_skips_docker () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
   @@ fun ~config ~meta ~playground ->
   let outside_cwd = temp_dir () in
@@ -745,7 +744,7 @@ let test_execute_legacy_skips_docker () =
   Alcotest.(check bool)
     "legacy Execute does not surface docker image error"
     false
-    (response_mentions raw "error" "docker image")
+    (response_mentions raw "error" "sandbox_image")
 
 let fake_docker_echo_script =
   "#!/bin/sh\n\
@@ -818,10 +817,13 @@ printf 'stdout:%s\\n' \"$*\"\n\
 exit 0\n"
 
 let test_execute_typed_env_wrapper_target_allowed () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
     Keeper_tool_execute_runtime.handle_tool_execute
@@ -840,10 +842,13 @@ let test_execute_typed_env_wrapper_target_allowed () =
 
 
 let test_execute_typed_repeated_executable_arg_is_preserved () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
     Keeper_tool_execute_runtime.handle_tool_execute
@@ -870,10 +875,13 @@ let test_execute_typed_repeated_executable_arg_is_preserved () =
 
 
 let test_execute_git_status_readonly () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
@@ -978,10 +986,13 @@ printf 'retry-ok\n'\n\
 exit 0\n"
 
 let test_docker_run_does_not_retry_generic_timeout () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_timeout_then_ok_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   match
     Keeper_sandbox_docker.run_docker_shell_command_with_status
       ~config
@@ -1001,10 +1012,13 @@ let test_docker_run_does_not_retry_generic_timeout () =
       (String_util.contains_substring result.output "retry-ok")
 
 let test_docker_run_does_not_retry_daemon_unavailable () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_daemon_unavailable_then_ok_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   match
     Keeper_sandbox_docker.run_docker_shell_command_with_status
       ~config
@@ -1026,7 +1040,6 @@ let test_docker_run_does_not_retry_daemon_unavailable () =
       (String_util.contains_substring result.output "retry-ok")
 
 let test_execute_git_routes_through_docker () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
@@ -1043,9 +1056,12 @@ let test_execute_git_routes_through_docker () =
     (parse_string_field raw "sandbox_fallback")
 
 let test_execute_git_uses_turn_runtime () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
@@ -1077,9 +1093,12 @@ let test_execute_git_uses_turn_runtime () =
     (String_util.contains_substring log "\nexec ")
 
 let test_execute_git_without_github_bundle_succeeds () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
@@ -1107,9 +1126,12 @@ let test_execute_git_without_github_bundle_succeeds () =
     Yojson.Safe.Util.(member "failure_class" (Yojson.Safe.from_string raw) = `Null)
 
 let test_execute_git_c_option_is_owned_by_cli () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
@@ -1128,10 +1150,13 @@ let test_execute_git_c_option_is_owned_by_cli () =
     (Sys.file_exists log_path)
 
 let test_execute_missing_playground_blocks_before_docker () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   let mount_source =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
@@ -1168,9 +1193,12 @@ let test_execute_missing_playground_blocks_before_docker () =
   Alcotest.(check bool) "docker was not invoked" false (Sys.file_exists log_path)
 
 let test_execute_git_c_bare_worktrees_is_owned_by_cli () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   let worktree = Filename.concat repo ".worktrees/task-229" in
   ensure_dir worktree;
@@ -1198,10 +1226,13 @@ let test_execute_git_c_bare_worktrees_is_owned_by_cli () =
     (Sys.file_exists log_path)
 
 let test_execute_git_push_routes_docker () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   ensure_dir repo;
   git_ok ~cwd:playground [ "init"; "-q" ];
@@ -1237,9 +1268,12 @@ let test_execute_git_push_routes_docker () =
     (docker_log_has_container_execution log)
 
 let test_execute_git_push_routes_through_docker () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
@@ -1300,9 +1334,12 @@ let test_docker_shell_missing_image_fails_before_run () =
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "missing:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
@@ -1331,9 +1368,12 @@ let test_docker_shell_ir_parse_failure_blocks_before_run () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   match
     Keeper_sandbox_docker.run_docker_shell_command_with_status
       ~config
@@ -1362,9 +1402,12 @@ let test_execute_missing_image_without_factory_fails_closed () =
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "missing:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
@@ -1394,11 +1437,14 @@ let test_execute_outside_playground_rejects_before_image_preflight () =
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground:_ ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "missing:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   let cwd = Filename.concat config.Workspace.base_path "outside-playground" in
   ensure_dir cwd;
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
@@ -1464,8 +1510,7 @@ esac
   let sentinel = Filename.concat playground "existing-work.txt" in
   write_file sentinel "preserved workspace";
   let runtime image =
-    Keeper_turn_sandbox_runtime.create ~config
-      ~meta:{ meta with sandbox_image = Some image } () in
+    Keeper_turn_sandbox_runtime.create ~config ~meta ~image:(Ok image) () in
   let select runtime =
     match Keeper_turn_sandbox_runtime.exec_argv ~validate_cached_container:true
       runtime ~cwd:playground ~command_argv:["printf"; "probe"] with
@@ -1514,9 +1559,12 @@ let test_exec_argv_is_the_container_argv () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
@@ -1571,8 +1619,11 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
   write_file (Filename.concat tasks_host "backlog.json") "{}";
   write_file (Filename.concat masc_root "board_posts.jsonl") "";
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
@@ -1638,8 +1689,11 @@ let run_docker_shell_command ~config ~(meta : Keeper_meta_contract.keeper_meta) 
   ensure_dir repo;
   if not (Sys.file_exists (Filename.concat repo ".git")) then
     git_ok ~cwd:repo [ "init"; "-q" ];
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
@@ -1808,10 +1862,13 @@ let test_docker_shell_names_the_keeper_as_git_author_only () =
     (String_util.contains_substring line "GIT_COMMITTER_EMAIL=")
 
 let test_execute_fake_docker_executes () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
     Keeper_tool_execute_runtime.handle_tool_execute ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command ~turn_sandbox_factory:(Some factory) ~config ~meta
@@ -1903,10 +1960,13 @@ let verify_execute_artifact_pages store (artifact : Tool_output.artifact_ref) ~s
 ;;
 
 let test_execute_preserves_large_docker_output ~exit_code ~private_output ~storage_failure () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_file_output_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let stdout_path = Filename.concat config.Workspace.base_path "source.stdout" in
   let stderr_path = Filename.concat config.Workspace.base_path "source.stderr" in
   let counter_path = Filename.concat config.Workspace.base_path "exec-count" in
@@ -1994,10 +2054,13 @@ let test_execute_preserves_large_docker_output ~exit_code ~private_output ~stora
 ;;
 
 let test_turn_runtime_projects_keeper_secret_dir () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let secret_root =
     Filename.concat
       (Filename.concat (Filename.concat config.Workspace.base_path Common.masc_dirname) "secrets")
@@ -2082,10 +2145,13 @@ let test_turn_runtime_projects_keeper_secret_dir () =
       (Sys.file_exists github_config_dir)
 
 let test_turn_runtime_redacts_the_stable_identity_mount () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let snapshot_token = "snapshot-token-before-central-rotation" in
   let rotated_token = "central-token-after-container-start" in
   let relogin_token = "central-token-after-relogin" in
@@ -2171,9 +2237,12 @@ let test_turn_runtime_redacts_the_stable_identity_mount () =
 
 let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_tool_policy_config @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
@@ -2193,9 +2262,12 @@ let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
     (response_mentions raw "output" "stdout:")
 
 let test_execute_exit_one_remains_failure_in_docker_route () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_bash_rg_no_match_script @@ fun () ->
   setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let lib =
     Filename.concat
       (Filename.concat (Filename.concat playground "repos") "masc")
@@ -2221,7 +2293,6 @@ let test_execute_exit_one_remains_failure_in_docker_route () =
     (parse_status_exit_code raw)
 
 let test_execute_blocks_file_redirect_before_docker () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
@@ -2247,9 +2318,12 @@ let test_execute_blocks_file_redirect_before_docker () =
     (Sys.file_exists log_path)
 
 let test_execute_repo_checks_routes_through_docker () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
@@ -2276,10 +2350,13 @@ let test_execute_repo_checks_routes_through_docker () =
 
 
 let test_execute_rewrites_host_path_command_for_docker () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path
+    [ "test", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "test" } in
   let container_root = Keeper_sandbox.container_root meta.name in
   ensure_git_repo (Filename.concat (Filename.concat playground "repos") "masc");
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->

@@ -49,10 +49,13 @@ let keeper_trust_json ?(include_receipt = false)
         match latest_receipt with
         | Some receipt -> Option.value ~default:(`String "no_receipt") (Json_util.assoc_member_opt "terminal_reason_code" receipt)
         | None -> `String "no_receipt" );
-      (* The receipt's disposition as the trust snapshot parsed it: [null]
-         when there is no receipt, or when the receipt's kind is not one the
-         receipt module writes. The compact trust projections copy the same
-         two fields from the same snapshot. *)
+      (* The receipt's disposition as the trust snapshot relays it. It is
+         [null] when there is no receipt, when the receipt's pair is damaged
+         (a kind the receipt module does not write, or a kind without its
+         reason), and when the snapshot shows its own verdict instead (a
+         pending approval, an unreadable approval queue, an active runtime
+         blocker). The compact trust projections copy the same two fields
+         from the same snapshot. *)
       ( "operator_disposition",
         Option.value ~default:`Null (Json_util.assoc_member_opt "operator_disposition" runtime_trust) );
       ( "operator_disposition_reason",
@@ -95,17 +98,10 @@ let keeper_trust_json ?(include_receipt = false)
           `Null );
     ]
 
-(* The trust fields of the row shown for a Keeper whose dashboard row could
-   not be built. No receipt was read for it, so it reports no operator
-   disposition: the snapshot's serializer writes [null] for both fields. *)
 let degraded_keeper_trust_json ~site ~attention_reason =
-  `Assoc
-    (Keeper_runtime_trust_snapshot.trust_model_json_fields
-       { Keeper_runtime_trust_snapshot_core.disposition = "Degraded"
-       ; disposition_reason = site
-       ; receipt_operator_disposition = None
-       ; needs_attention = true
-       ; attention_reason = Some attention_reason
-       ; next_human_action = Some "inspect_keeper_dashboard_worker"
-       })
+  Keeper_runtime_trust_snapshot.unread_keeper_json
+    ~disposition:"Degraded"
+    ~disposition_reason:site
+    ~attention_reason
+    ~next_human_action:"inspect_keeper_dashboard_worker"
 ;;

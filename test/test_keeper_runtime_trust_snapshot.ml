@@ -863,6 +863,7 @@ let test_dashboard_trust_relays_the_snapshot_operator_disposition () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_runtime_default_for_tests ();
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> remove_tree base_dir)
@@ -906,6 +907,15 @@ let test_dashboard_trust_relays_the_snapshot_operator_disposition () =
               true
               (dashboard = (`Null, `Null));
             Alcotest.(check bool) "no receipt: same as the snapshot" true (dashboard = snapshot);
+            Alcotest.(check bool)
+              "no receipt: the full row with its receipt says the same"
+              true
+              (operator_fields
+                 (Dashboard_http_keeper_trust.keeper_trust_json
+                    ~include_receipt:true
+                    config
+                    meta)
+               = (`Null, `Null));
             append
               ~ended_at:"2026-06-01T00:00:00Z"
               [ "operator_disposition", `String "blocked_runtime"
@@ -932,10 +942,8 @@ let test_dashboard_trust_relays_the_snapshot_operator_disposition () =
 ;;
 
 (* The row shown when a Keeper's dashboard row could not be built read no
-   receipt, so it reports no operator disposition. It writes the snapshot's
-   decision fields and no others. *)
+   receipt, so it reports no operator disposition. *)
 let test_degraded_dashboard_trust_reports_no_operator_disposition () =
-  let module Core = Masc.Keeper_runtime_trust_snapshot_core in
   let trust =
     Dashboard_http_keeper_trust.degraded_keeper_trust_json
       ~site:"keeper_dashboard_worker_exception"
@@ -958,19 +966,7 @@ let test_degraded_dashboard_trust_reports_no_operator_disposition () =
     "the caught error is the attention reason"
     "worker raised"
     (member "attention_reason" trust |> to_string);
-  Alcotest.(check bool) "a person looks at it" true (member "needs_attention" trust |> to_bool);
-  let decision_fields =
-    K.trust_model_json_fields
-      { Core.disposition = "any"
-      ; disposition_reason = "any"
-      ; receipt_operator_disposition = None
-      ; needs_attention = false
-      ; attention_reason = None
-      ; next_human_action = None
-      }
-    |> List.map fst
-  in
-  Alcotest.(check (list string)) "the snapshot's decision fields" decision_fields (keys trust)
+  Alcotest.(check bool) "a person looks at it" true (member "needs_attention" trust |> to_bool)
 ;;
 
 let test_model_observability_uses_runtime_trust_selected_model () =

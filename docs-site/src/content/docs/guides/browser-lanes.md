@@ -94,7 +94,7 @@ extension = "/absolute/path/printed/by/the/installer"
 
 All three are absolute paths. MASC loads the extension over the debugging
 connection (`Extensions.loadUnpacked`), which was verified with Chrome Canary
-156; branded Chrome refuses `--load-extension` from version 137, and whether a
+156 and Chrome for Testing 154; branded Chrome refuses `--load-extension` from version 137, and whether a
 given build accepts the CDP load depends on the build. The debugging port
 listens on loopback and admits only the extension's own origin. Without
 `profile`, each session starts from a server-owned profile that is emptied

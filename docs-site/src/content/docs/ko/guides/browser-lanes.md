@@ -56,7 +56,7 @@ extension = "/absolute/path/printed/by/the/installer"
 # profile = "/absolute/path/to/profile"
 ```
 
-세 값 모두 절대 경로입니다. MASC는 디버깅 연결로 확장을 올립니다(`Extensions.loadUnpacked`). Chrome Canary 156에서 확인했습니다. 일반 Chrome은 137부터 `--load-extension`을 막았고, CDP로 올리는 방식을 받는지는 빌드마다 다를 수 있습니다. 디버깅 포트는 loopback에서만 열리고 확장 자신의 origin만 받습니다. `profile`이 없으면 세션마다 서버 소유 profile을 비우고 시작하며, 설정한 profile은 지우지 않습니다. 어느 쪽이든 폴더는 소유자만 접근할 수 있습니다.
+세 값 모두 절대 경로입니다. MASC는 디버깅 연결로 확장을 올립니다(`Extensions.loadUnpacked`). Chrome Canary 156과 Chrome for Testing 154에서 확인했습니다. 일반 Chrome은 137부터 `--load-extension`을 막았고, CDP로 올리는 방식을 받는지는 빌드마다 다를 수 있습니다. 디버깅 포트는 loopback에서만 열리고 확장 자신의 origin만 받습니다. `profile`이 없으면 세션마다 서버 소유 profile을 비우고 시작하며, 설정한 profile은 지우지 않습니다. 어느 쪽이든 폴더는 소유자만 접근할 수 있습니다.
 
 Stagehand 런타임은 `llm.generate`로 모델을 요청합니다. MASC는 `runtime.toml`의 `browser_stagehand_exact` exact-output lane으로 답합니다. slot을 순서대로 시도하며, system prompt를 받지 않는 모델의 slot은 건너뜁니다. CLI slot을 선언한 lane은 거절합니다. 답은 JSON 값 하나인지만 확인하고, 모양은 확장이 자기 스키마로 확인합니다.
 

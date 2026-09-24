@@ -626,8 +626,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
       | Ok (Some home) ->
         (match api_format with
          | Codex_app_server_runtime | Claude_code_runtime
-           when home <> "" && home = String.trim home && not (Filename.is_relative home) ->
-           Ok (Some home)
+           when Runtime_account_home.is_valid home -> Ok (Some home)
          | Codex_app_server_runtime | Claude_code_runtime ->
            Error (error (path ^ ".account-home") "account-home must be a non-empty absolute path without surrounding whitespace")
          | _ ->

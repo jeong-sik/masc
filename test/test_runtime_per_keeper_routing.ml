@@ -1645,7 +1645,46 @@ tools-support = true
      | Error errors ->
        Alcotest.(check bool) "the account path is refused" true
          (List.exists (fun e -> e.Runtime_toml.path = "providers.bad.account-home") errors)
-     | Ok _ -> Alcotest.fail "relative account home was accepted")
+     | Ok _ -> Alcotest.fail "relative account home was accepted");
+  Masc_test_deps.with_process_env "HOME" (Some "") (fun () ->
+    Masc_test_deps.with_process_env "CODEX_HOME" (Some "") (fun () ->
+      match Runtime_toml.parse_string
+        {|[providers.codex]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+[providers.http]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.shared]
+api-name = "shared-model"
+max-context = 100000
+tools-support = true
+[codex.shared]
+[http.shared]
+|} with
+      | Error errors ->
+        Alcotest.failf "an unselected provider should still parse: %s"
+          (String.concat "; " (List.map (fun e -> e.Runtime_toml.message) errors))
+      | Ok config ->
+        let binding id =
+          match List.find_opt
+                  (fun b -> String.equal b.Runtime_schema.provider_id id)
+                  config.Runtime_schema.bindings with
+          | Some b -> b
+          | None -> Alcotest.fail ("missing binding " ^ id)
+        in
+        (match Runtime.of_binding config (binding "codex") with
+            | Error (Runtime.Execution_unbuildable reason) ->
+              Alcotest.(check bool) "selected account needs a real home" true
+                (String_util.contains_substring reason "account-home")
+            | Error _ | Ok _ ->
+              Alcotest.fail "selected official client without HOME gained a shared scope");
+        (match Runtime.of_binding config (binding "http") with
+         | Ok _ -> ()
+         | Error reason ->
+           Alcotest.failf "unrelated HTTP binding was rejected: %s"
+             (Runtime.string_of_drop_reason reason)))
 ;;
 
 (* The base file, loaded, with the official clients and [lane] written after

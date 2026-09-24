@@ -1695,7 +1695,10 @@ let child_environment_key_allowed = function
 let resolved_codex_home () =
   let home = match Sys.getenv_opt "CODEX_HOME" with
     | Some path when path <> "" -> Some path
-    | _ -> Option.map (fun home -> Filename.concat home ".codex") (Sys.getenv_opt "HOME") in
+    | _ ->
+      (match Sys.getenv_opt "HOME" with
+       | Some home when home <> "" -> Some (Filename.concat home ".codex")
+       | Some _ | None -> None) in
   Option.map (fun path ->
     if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path) home
 ;;
@@ -1994,8 +1997,15 @@ let validate_process_config config =
   then Error (Invalid_config "account_home and isolated_home cannot both be selected")
   else if (match config.account_home with
       | None -> false
-      | Some home -> home = "" || home <> String.trim home || Filename.is_relative home)
+      | Some home -> not (Runtime_account_home.is_valid home))
   then Error (Invalid_config "account_home must be a non-empty absolute path")
+  else if (match config.isolated_home with
+      | Some home -> not (Runtime_account_home.is_valid home)
+      | None ->
+        (match effective_account_home config.account_home with
+      | Some home -> not (Runtime_account_home.is_valid home)
+      | None -> true))
+  then Error (Invalid_config "Codex needs an absolute isolated_home, account_home, CODEX_HOME, or HOME")
   else if
     not (Float.is_finite config.admission_timeout_s)
     || config.admission_timeout_s <= 0.0

@@ -95,7 +95,8 @@ val scope_of_codex_home : string option -> scope
     row id. Two rows selecting the same home share observations; selecting a
     different home under the same row id does not reuse prior observations.
     Without an explicit home, the process's CLI home environment is sampled
-    at materialization, or the client's default home is used as one scope. *)
+    at materialization, or the client's default directory under HOME is used.
+    A missing or non-absolute home is rejected before execution. *)
 
 val reset_for_testing : unit -> unit
 (** Drop every remembered window.  Test-only. *)

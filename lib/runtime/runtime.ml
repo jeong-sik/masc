@@ -273,15 +273,25 @@ let quota_scope_of_materialized
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Claude_code _ -> None
   in
+  let official_home client selected scope =
+    match selected with
+    | None -> Error (client ^ " needs account-home or an absolute CLI home")
+    | Some home ->
+      (match Runtime_account_home.of_string home with
+       | Ok home -> Ok (scope (Some home))
+       | Error reason -> Error (client ^ ": " ^ reason))
+  in
   match execution with
   | Runtime_execution.Claude_code client ->
-    Runtime_quota_window.scope_of_claude_code_home
+    official_home "Claude Code"
       (Runtime_claude_code.effective_account_home client.account_home)
+      Runtime_quota_window.scope_of_claude_code_home
   | Runtime_execution.Codex_app_server client ->
-    Runtime_quota_window.scope_of_codex_home
+    official_home "Codex"
       (Runtime_codex_app_server.effective_account_home client.account_home)
+      Runtime_quota_window.scope_of_codex_home
   | Runtime_execution.Agent_core _ | Runtime_execution.Antigravity_cli _ ->
-    Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential
+    Ok (Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential)
 ;;
 
 (* Why a binding did not become a runtime, as a closed vocabulary rather than a
@@ -321,7 +331,7 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
     else
       (match Runtime_adapter.binding_to_execution cfg b with
        | Ok execution ->
-         Ok
+         Result.map (fun quota_scope ->
            { id = id_of_binding b
            ; provider
            ; model
@@ -339,8 +349,10 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
                  | Runtime_execution.Antigravity_cli _ -> Runtime_candidate_backpressure.Official_client_binding
                in
                Runtime_candidate_backpressure.create_candidate ~binding)
-           ; quota_scope = quota_scope_of_materialized ~provider ~execution
-           }
+           ; quota_scope
+           })
+           (quota_scope_of_materialized ~provider ~execution)
+         |> Result.map_error (fun reason -> Execution_unbuildable reason)
        | Error reason -> Error (Execution_unbuildable reason))
   | None, _ -> Error (Provider_not_declared b.provider_id)
   | Some _, None -> Error (Model_not_declared b.model_id)

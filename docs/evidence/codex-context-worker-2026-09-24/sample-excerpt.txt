@@ -8,13 +8,13 @@
 8: Platform:        macOS
 9: Parent Process:  launchd [1]
 10: Target Type:     live task
-11: 
+11:
 12: Date/Time:       2026-09-24 23:26:52.500 +0900
 13: Launch Time:     2026-09-24 23:00:23.595 +0900
 14: OS Version:      macOS 26.6.1 (25G76)
 15: Report Version:  7
 16: Analysis Tool:   /usr/bin/sample
-17: 
+17:
 18: Physical footprint:         6.4G
 19: Physical footprint (peak):  9.5G
 20: Idle exit:                  untracked

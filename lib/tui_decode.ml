@@ -11686,13 +11686,9 @@ let decode_schedule_runner_hold row =
 
 let decode_oauth_client_saved json =
   match json with
-  | `Assoc _ -> (
-      match member "error" json with
-      | `String detail -> Error detail
-      | `Null ->
-          let* scopes = required_list_field json "scopes" in
-          Ok (List.length scopes)
-      | bad -> field_type_error "error" "a string" bad)
+  | `Assoc _ ->
+      let* scopes = required_list_field json "scopes" in
+      Ok (List.length scopes)
   | other ->
       Error
         (Printf.sprintf "the reply must be an object (received %s)"

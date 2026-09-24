@@ -3482,5 +3482,6 @@ val decode_oauth_client_saved : Yojson.Safe.t -> (int, string) result
 (** Reads the reply of [POST /api/v1/keepers/oauth/client]: the number of
     scopes the saved app will ask for, [0] being an app saved with none, so
     the service's own list is asked for. The server always echoes [scopes];
-    a reply without it is refused rather than read as zero scopes. An
-    [error] string in the reply is its detail. *)
+    a reply without it is refused rather than read as zero scopes. The
+    server's refusals arrive as a non-2xx status, which the HTTP client has
+    already turned into an error before this runs. *)

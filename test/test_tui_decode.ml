@@ -12,13 +12,10 @@ let test_decode_oauth_client_saved_reads_scopes_and_refuses_their_absence () =
     (decode {|{"provider":"github","scopes":["repo","read:org"]}|});
   Alcotest.check result "saved with none" (Ok 0)
     (decode {|{"provider":"github","scopes":[]}|});
-  Alcotest.check result "no scopes field"
-    (Error "missing required field 'scopes'")
-    (decode {|{"provider":"github"}|});
-  Alcotest.check result "the server's own error" (Error "unknown provider")
-    (decode {|{"error":"unknown provider"}|});
-  Alcotest.(check bool) "an error that is not a string is refused" true
-    (Result.is_error (decode {|{"error":{"code":1},"scopes":[]}|}));
+  Alcotest.(check bool) "no scopes field is refused" true
+    (Result.is_error (decode {|{"provider":"github"}|}));
+  Alcotest.(check bool) "scopes that are not a list are refused" true
+    (Result.is_error (decode {|{"provider":"github","scopes":"repo"}|}));
   Alcotest.(check bool) "a reply that is not an object is refused" true
     (Result.is_error (decode {|[]|}))
 

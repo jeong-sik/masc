@@ -660,6 +660,66 @@ let test_board_write_routes_use_authenticated_actor () =
     (Masc.Board.Agent_id.to_string local_post.author)
 ;;
 
+let test_board_http_typed_attachments () =
+  with_authenticated_activity_router
+    ~prefix:"board-http-attachments-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path
+  @@ fun () ->
+  let post title extra =
+    dispatch_json
+      ~router
+      ~token
+      ~path:"/api/v1/tools/masc_board_post"
+      ~body:
+        (Yojson.Safe.to_string
+           (`Assoc
+              ([ "title", `String title
+               ; "body", `String "Typed attachment route"
+               ]
+               @ extra)))
+      ()
+  in
+  let image =
+    `Assoc
+      [ "kind", `String "image"
+      ; "url", `String "https://cdn.example.test/image.png"
+      ]
+  in
+  let status, _ = post "HTTP typed image" [ "attachments", `List [ image ] ] in
+  check int "typed HTTPS image accepted" 201 status;
+  let created =
+    match board_post_by_title "HTTP typed image" with
+    | Some post -> post
+    | None -> fail "HTTP typed image was not stored"
+  in
+  let stored =
+    Yojson.Safe.Util.
+      (Option.value ~default:`Null created.meta_json |> member "attachments")
+  in
+  check bool "typed HTTPS image read back" true
+    (Yojson.Safe.equal stored (`List [ image ]));
+  let status, _ =
+    post
+      "HTTP unsafe URL"
+      [ "attachments",
+        `List
+          [ `Assoc
+              [ "kind", `String "image"
+              ; "url", `String "javascript:alert(1)"
+              ]
+          ]
+      ]
+  in
+  check int "HTTP unsafe URL rejected" 400 status;
+  let status, _ =
+    post
+      "HTTP raw meta"
+      [ "meta", `Assoc [ "attachments", `List [ image ] ] ]
+  in
+  check int "HTTP raw meta attachments rejected" 400 status
+
 let test_sub_board_routes_use_authenticated_owner () =
   with_authenticated_activity_router
     ~prefix:"sub-board-http-owner-"
@@ -1220,6 +1280,8 @@ let () =
             test_goal_transition_uses_authenticated_actor
         ; test_case "board write actors come from auth" `Quick
             test_board_write_routes_use_authenticated_actor
+        ; test_case "HTTP Board attachments use typed input" `Quick
+            test_board_http_typed_attachments
         ; test_case "sub-board owner comes from auth" `Quick
             test_sub_board_routes_use_authenticated_owner
         ; test_case "sub-board unknown access is a 400" `Quick

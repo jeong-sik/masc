@@ -452,6 +452,110 @@ let test_post_create_metadata_payload () =
   Alcotest.(check string) "source meta kept" "keeper_autonomy"
     Yojson.Safe.Util.(json |> member "meta" |> member "source" |> to_string)
 
+let test_post_create_typed_attachments () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let base =
+    [ "content", `String "Typed attachments"
+    ; "author", `String "tester"
+    ]
+  in
+  let post attachments =
+    dispatch_result "masc_board_post"
+      (make_args (base @ [ "attachments", `List attachments ]))
+  in
+  let image =
+    `Assoc
+      [ "kind", `String "image"
+      ; "url", `String "https://cdn.example.test/image.png"
+      ]
+  in
+  let result = post [ image ] in
+  Alcotest.(check bool) "HTTPS image accepted" true (Tool_result.is_success result);
+  let stored =
+    Yojson.Safe.Util.
+      (Tool_result.data result |> member "meta" |> member "attachments")
+  in
+  Alcotest.(check bool)
+    "typed image stored and read"
+    true
+    (Yojson.Safe.equal stored (`List [ image ]));
+  let blob =
+    match
+      Tool_blob_store.put
+        (Tool_blob_store.create ~base_path:_test_base_path)
+        ~bytes:"attachment bytes"
+        ~mime:"application/octet-stream"
+    with
+    | Tool_output.Stored reference -> reference
+    | Tool_output.Inline _ -> Alcotest.fail "artifact was not stored"
+  in
+  let artifact =
+    `Assoc
+      [ "kind", `String "external_link"
+      ; "sha256", `String blob.sha256
+      ]
+  in
+  let artifact_result = post [ artifact ] in
+  Alcotest.(check bool)
+    "existing artifact accepted"
+    true
+    (Tool_result.is_success artifact_result);
+  let stored_artifact =
+    Yojson.Safe.Util.
+      (Tool_result.data artifact_result |> member "meta" |> member "attachments")
+  in
+  (match stored_artifact with
+   | `List [ `Assoc fields ] ->
+     (match List.assoc_opt "artifact" fields with
+      | Some json ->
+        (match Tool_output.normalized_artifact_ref_of_json json with
+         | Tool_output.Decoded_normalized_artifact_ref reference ->
+           Alcotest.(check string) "stored artifact hash" blob.sha256 reference.sha256
+         | _ -> Alcotest.fail "stored artifact lacks canonical reference")
+      | None -> Alcotest.fail "stored artifact missing")
+   | _ -> Alcotest.fail "stored attachment list malformed");
+  List.iter
+    (fun url ->
+      let unsafe =
+        post
+          [ `Assoc
+              [ "kind", `String "image"
+              ; "url", `String url
+              ]
+          ]
+      in
+      Alcotest.(check bool) ("unsafe URL rejected: " ^ url) false
+        (Tool_result.is_success unsafe);
+      check_failure_class
+        "unsafe URL is workflow rejection"
+        (Some "workflow_rejection")
+        unsafe)
+    [ "javascript:alert(1)"; "data:image/png;base64,AAA"; "http://example.test/a.png" ];
+  let missing =
+    post
+      [ `Assoc
+          [ "kind", `String "image"
+          ; "sha256", `String (String.make 64 'f')
+          ]
+      ]
+  in
+  Alcotest.(check bool) "missing artifact rejected" false
+    (Tool_result.is_success missing);
+  Alcotest.(check bool) "missing artifact named" true
+    (String_util.contains_substring
+       (Tool_result.message missing)
+       "artifact not found");
+  let raw =
+    dispatch_result "masc_board_post"
+      (make_args
+         (base @
+          [ "meta", `Assoc [ "attachments", `List [ image ] ] ]))
+  in
+  Alcotest.(check bool) "raw meta attachments rejected" false
+    (Tool_result.is_success raw)
+
 (* Regression guard: board_post must return STRUCTURED [data] (`Assoc), not a
    `String that embeds stringified JSON. The `String form double-encodes the
    payload — a consumer that re-serializes the result (e.g. the dashboard's
@@ -2551,6 +2655,8 @@ let () =
           Alcotest.test_case "create success" `Quick test_post_create_success;
           Alcotest.test_case "create structured payload" `Quick
             test_post_create_metadata_payload;
+          Alcotest.test_case "create typed attachments" `Quick
+            test_post_create_typed_attachments;
           Alcotest.test_case "create data is structured not double-encoded" `Quick
             test_post_create_data_is_structured;
           Alcotest.test_case "projection failure preserves primary effect" `Quick

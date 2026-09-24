@@ -593,6 +593,52 @@ let test_maintenance_keeps_live_and_deletes_stable_dead_after_restart () =
         (Some "live gate replay output")
         (fetch_ok store ~sha256:replay_live.sha256))
 
+let test_maintenance_keeps_board_attachment_reference () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let live =
+        B.put store ~bytes:"board attachment" ~mime:"image/png"
+        |> stored_ref_exn
+      in
+      let dead =
+        B.put store ~bytes:"unreferenced attachment" ~mime:"image/png"
+        |> stored_ref_exn
+      in
+      let board_posts =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "board_posts.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname board_posts);
+      Fs_compat.save_file
+        board_posts
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "meta",
+                `Assoc
+                  [ "attachments",
+                    `List
+                      [ `Assoc
+                          [ "kind", `String "image"
+                          ; "artifact", O.normalized_artifact_ref_to_json live
+                          ]
+                      ]
+                  ]
+              ])
+         ^ "\n");
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int) "Board reference is live" 1 observed.live_references;
+      let swept = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+      Alcotest.(check int) "only dead blob deleted" 1 swept.deleted;
+      Alcotest.(check (option string))
+        "Board artifact survives"
+        (Some "board attachment")
+        (fetch_ok store ~sha256:live.sha256);
+      Alcotest.(check (option string))
+        "unreferenced artifact is deleted"
+        None
+        (fetch_ok store ~sha256:dead.sha256))
+
 let test_maintenance_keeps_wire_capture_reference_within_retention () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -1470,6 +1516,10 @@ let () =
             "maintenance keeps live and deletes stable dead after restart"
             `Quick
             test_maintenance_keeps_live_and_deletes_stable_dead_after_restart;
+          Alcotest.test_case
+            "maintenance keeps Board attachment artifact"
+            `Quick
+            test_maintenance_keeps_board_attachment_reference;
           Alcotest.test_case
             "maintenance malformed reference fails closed"
             `Quick

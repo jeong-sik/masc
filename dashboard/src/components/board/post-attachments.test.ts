@@ -9,26 +9,32 @@ vi.mock('./composer-v2', () => ({
 }))
 
 import { PostAttachments } from './post-attachments'
-import type { BoardAttachment, BoardAttachmentDecode } from '../../types'
+import type { BoardAttachmentKind, BoardAttachmentDecode } from '../../types'
 
 afterEach(() => {
   cleanup()
 })
 
-function attachment(overrides: Partial<BoardAttachment>): BoardAttachmentDecode {
+function attachment(overrides: {
+  kind?: BoardAttachmentKind
+  url?: string
+  name?: string
+  sizeBytes?: number
+  width?: number | null
+  height?: number | null
+}): BoardAttachmentDecode {
   return {
     ok: true,
     attachment: {
-      id: 'a-1',
-      kind: 'image',
-      origin_url: 'https://cdn.example.com/a.png',
-      origin_name: 'a.png',
-      origin_size_bytes: 128,
-      mime_type: 'image/png',
-      width: 640,
-      height: 480,
-      created_at: 1_714_989_600,
-      ...overrides,
+      kind: overrides.kind ?? 'image',
+      source: {
+        kind: 'url',
+        url: overrides.url ?? 'https://cdn.example.com/a.png',
+        name: overrides.name ?? 'a.png',
+        sizeBytes: overrides.sizeBytes ?? 128,
+        width: overrides.width ?? 640,
+        height: overrides.height ?? 480,
+      },
     },
   }
 }
@@ -50,9 +56,8 @@ describe('PostAttachments', () => {
         attachments: [
           attachment({
             kind: 'video',
-            origin_url: 'https://cdn.example.com/b.mp4',
-            origin_name: 'b.mp4',
-            mime_type: 'video/mp4',
+            url: 'https://cdn.example.com/b.mp4',
+            name: 'b.mp4',
           }),
         ],
       }),
@@ -69,9 +74,8 @@ describe('PostAttachments', () => {
         attachments: [
           attachment({
             kind: 'youtube',
-            origin_url: 'https://www.youtube.com/watch?v=abc123def45',
-            origin_name: 'demo',
-            mime_type: 'text/uri-list',
+            url: 'https://www.youtube.com/watch?v=abc123def45',
+            name: 'demo',
           }),
         ],
       }),
@@ -90,9 +94,8 @@ describe('PostAttachments', () => {
         attachments: [
           attachment({
             kind: 'external_link',
-            origin_url: 'https://example.com/spec',
-            origin_name: 'spec',
-            mime_type: 'text/uri-list',
+            url: 'https://example.com/spec',
+            name: 'spec',
           }),
         ],
       }),
@@ -121,7 +124,7 @@ describe('PostAttachments', () => {
   it('refuses to render unsafe attachment URLs and says so explicitly', () => {
     render(
       h(PostAttachments, {
-        attachments: [attachment({ origin_url: 'javascript:alert(1)' })],
+        attachments: [attachment({ url: 'javascript:alert(1)' })],
       }),
     )
     const error = screen.getByTestId('board-attachment-error')
@@ -137,6 +140,19 @@ describe('PostAttachments', () => {
     expect(error.textContent).toContain('이미지를 불러오지 못했습니다')
     const link = error.querySelector('a')
     expect(link).toHaveAttribute('href', 'https://cdn.example.com/a.png')
+  })
+
+  it('links an artifact reference to the existing artifact reader', () => {
+    const sha256 = 'a'.repeat(64)
+    render(h(PostAttachments, { attachments: [{
+      ok: true,
+      attachment: { kind: 'image', source: {
+        kind: 'artifact', sha256, bytes: 12, mime: 'application/octet-stream',
+      } },
+    }] }))
+    const link = screen.getByTestId('board-attachment-artifact')
+    expect(link).toHaveAttribute('href', `/api/v1/artifacts/${sha256}`)
+    expect(document.querySelector('img')).toBeNull()
   })
 
   it('renders nothing when the attachments list is empty', () => {

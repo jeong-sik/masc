@@ -12,6 +12,7 @@ import {
   fetchBoardReactionState,
   normalizeBoardContextInferenceSubmission,
   normalizeBoardKarmaLedger,
+  normalizeBoardAttachments,
   requestBoardContextInference,
   sanitizeBoardTitle,
   toggleReaction,
@@ -955,6 +956,42 @@ describe('fetchBoardPost', () => {
   })
 })
 
+describe('normalizeBoardAttachments', () => {
+  it('decodes a typed HTTPS image and an artifact reference', () => {
+    const sha256 = 'a'.repeat(64)
+    expect(normalizeBoardAttachments([
+      { kind: 'image', url: 'https://cdn.example.com/a.png' },
+      { kind: 'external_link', artifact: { _blob: {
+        sha256, bytes: 12, mime: 'application/octet-stream', preview: '',
+      } } },
+    ])).toEqual([
+      { ok: true, attachment: { kind: 'image', source: {
+        kind: 'url', url: 'https://cdn.example.com/a.png',
+      } } },
+      { ok: true, attachment: { kind: 'external_link', source: {
+        kind: 'artifact', sha256, bytes: 12, mime: 'application/octet-stream',
+      } } },
+    ])
+  })
+
+  it('keeps a safe old entry and exposes unsafe or malformed old entries', () => {
+    const old = {
+      id: 'a-old', kind: 'image', origin_url: 'https://cdn.example.com/old.png',
+      origin_name: 'old.png', origin_size_bytes: 12, created_at: 1,
+    }
+    const decoded = normalizeBoardAttachments([
+      old,
+      { ...old, origin_url: 'http://example.com/old.png' },
+      { ...old, id: '' },
+    ])
+    expect(decoded?.[0]).toMatchObject({ ok: true, attachment: {
+      source: { kind: 'url', url: old.origin_url, name: 'old.png' },
+    } })
+    expect(decoded?.[1]).toMatchObject({ ok: false })
+    expect(decoded?.[2]).toMatchObject({ ok: false })
+  })
+})
+
 describe('createPost', () => {
   it('passes hearth assignment through to the board post tool', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
@@ -978,7 +1015,7 @@ describe('createPost', () => {
     })
   })
 
-  it('passes typed metadata through to the board post tool', async () => {
+  it('sends attachments through the typed argument, outside meta', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{}', {
         status: 200,
@@ -988,43 +1025,19 @@ describe('createPost', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await createPost('Plan', 'Body', 'dashboard-user', {
-      meta: {
-        attachments: [{
-          id: 'att-1',
-          kind: 'external_link',
-          origin_url: 'https://example.test/trace.log',
-          origin_name: 'trace.log',
-          origin_size_bytes: 4,
-          mime_type: 'text/plain',
-          width: null,
-          height: null,
-          created_at: 1_799_000_000,
-        }],
-      },
+      meta: { source: 'dashboard' },
+      attachments: [{ kind: 'external_link', url: 'https://example.test/trace.log' }],
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(String(init.body))).toMatchObject({
       title: 'Plan',
       content: 'Body',
       author: 'dashboard-user',
-      meta: {
-        attachments: [{
-          id: 'att-1',
-          kind: 'external_link',
-          origin_url: 'https://example.test/trace.log',
-          origin_name: 'trace.log',
-          origin_size_bytes: 4,
-          mime_type: 'text/plain',
-          width: null,
-          height: null,
-          created_at: 1_799_000_000,
-        }],
-      },
+      meta: { source: 'dashboard' },
+      attachments: [{ kind: 'external_link', url: 'https://example.test/trace.log' }],
     })
-  })
-})
+  })})
 
 describe('SubBoard API helpers', () => {
   it('normalizes sub-board members', () => {

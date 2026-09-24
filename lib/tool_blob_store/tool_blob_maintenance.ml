@@ -292,6 +292,12 @@ let durable_consumer_roots ~base_path =
   List.map (Filename.concat runtime_root) durable_consumer_basenames
 ;;
 
+let board_post_consumer_path ~base_path =
+  Filename.concat
+    (Common.masc_dir_from_base_path ~base_path)
+    "board_posts.jsonl"
+;;
+
 let same_directory_snapshot (left : Unix.stats) (right : Unix.stats) =
   left.st_dev = right.st_dev
   && left.st_ino = right.st_ino
@@ -450,11 +456,25 @@ let live_references ~base_path =
                 scan_entry (Filename.concat path name) current))
            (Ok references)
   in
+  let scan_board_post_file references =
+    let path = board_post_consumer_path ~base_path in
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok references
+    | exception Unix.Unix_error (code, fn, arg) ->
+      Error
+        (Durable_source_stat_failed
+           { path
+           ; reason =
+               Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+           })
+    | _ -> scan_entry path references
+  in
   durable_consumer_roots ~base_path
   |> List.fold_left
        (fun result root ->
           Result.bind result (fun progress -> scan_directory root progress))
        (Ok Artifact_reference_set.empty)
+  |> Result.bind scan_board_post_file
 ;;
 
 let expand_artifact_manifests ~store references =

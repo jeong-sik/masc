@@ -1335,6 +1335,11 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
+             let* () =
+               Board_tool_attachment.parse_args args
+               |> Result.map (fun _ -> ())
+               |> Result.map_error Board_tool_attachment.error_to_string
+             in
              let author = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "author" author args in
              let* args =

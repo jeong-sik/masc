@@ -14,6 +14,19 @@ open Tool_args
    [Tool_result.result] variant directly. *)
 
 let handle_post_create ~tool_name ~start_time args : Tool_result.result =
+  let attachment_result =
+    Result.bind
+      (Board_tool_attachment.parse_args args)
+      (Board_tool_attachment.resolve ~base_path:(Env_config_core.base_path ()))
+  in
+  match attachment_result with
+  | Error error ->
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      (Board_tool_attachment.error_to_string error)
+  | Ok attachments ->
   let title = get_string_opt args "title" in
   (* Reject empty or whitespace-only titles. *)
   match title with
@@ -79,9 +92,9 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
         match sources with
         | Some entries ->
           Board_tool_format.merge_sources_into_meta
-            (Board_tool_format.normalize_board_post_meta args)
+            (Board_tool_format.normalize_board_post_meta ~attachments args)
             entries
-        | None -> Board_tool_format.normalize_board_post_meta args
+        | None -> Board_tool_format.normalize_board_post_meta ~attachments args
       in
       let visibility =
         match Board_tool_format.visibility_of_string visibility_str with

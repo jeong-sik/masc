@@ -97,7 +97,9 @@ let make_meta
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
-    let meta = { meta with sandbox_profile = sandbox } in
+    (* [base] is the image the premise checks for; each run's workspace
+       catalog promotes it. *)
+    let meta = { meta with sandbox_profile = sandbox; sandbox_image = Some "base" } in
     if always_allow then { meta with always_allow = Some true } else meta
   | Error e -> Alcotest.fail e
 ;;
@@ -204,6 +206,8 @@ let setup ?sandbox ?always_allow f =
   @@ fun ~fs ~sw () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base
+    [ "base", Keeper_sandbox_image.default_tag ];
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->

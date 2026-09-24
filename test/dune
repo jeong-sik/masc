@@ -4269,6 +4269,7 @@
   masc_types
   masc_tui_types
   masc_tui_overview_goals
+  masc_tui_overview_tasks
   unix
   yojson))
 

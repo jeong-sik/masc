@@ -151,7 +151,7 @@ let read_archived_tasks config : (Masc_domain.task list * int, string) result =
     tasks remain available in Planning rollups and the detail view but do not
     occupy the Overview list. *)
 let load_active_tasks (base_path : string) :
-    task list
+    Masc_tui_overview_tasks.rows_reading
     * Masc_domain.task list
     * string option
     * Masc_tui_task_flow.t option
@@ -161,7 +161,12 @@ let load_active_tasks (base_path : string) :
   match Workspace_backlog.read_backlog_observation_with_source_r config with
   | Error err ->
       report path err;
-      [], [], Some ("task backlog unavailable: " ^ err), None, None
+      let reason = "task backlog unavailable: " ^ err in
+      ( Masc_tui_overview_tasks.Rows_unavailable reason
+      , []
+      , Some reason
+      , None
+      , None )
   | Ok observation ->
       let recovery_error =
         match observation.recovered_from with
@@ -200,8 +205,9 @@ let load_active_tasks (base_path : string) :
           report (Workspace_utils_paths_backend.archive_path config) error;
           [], Some ("task archive unavailable, the day bars miss archived tasks: " ^ error)
       in
-      ( Tui_decode.active_tasks_of_domain ~goals_for_task
-          observation.observed_backlog.tasks
+      ( Masc_tui_overview_tasks.Rows_read
+          (Tui_decode.active_tasks_of_domain ~goals_for_task
+             observation.observed_backlog.tasks)
       , observation.observed_backlog.tasks
       , (match recovery_error, goal_link_error, archive_error with
          | Some recovery, _, _ -> Some recovery
@@ -270,6 +276,28 @@ let load_selected_live_context (state : state) (base_path : string)
 let load_live_context state base_path keeper =
   load_selected_live_context state base_path (Some keeper)
 
+(** Add an event to the TUI session log, which Metrics draws. *)
+let add_event (state : state) event_type content =
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp = Printf.sprintf "%02d:%02d:%02d"
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
+  let ev = { timestamp; event_type; content } in
+  state.events <- ev :: List.filteri (fun i _ -> i < 10) state.events
+
+(* An outcome the operator pressed a key for, rather than something that
+   happened on its own. It goes to the session log like any other event, and
+   to the footer, because the log is drawn by Metrics alone: the operator who
+   pressed [a] on Workspace reads on Workspace whether the registration
+   landed, the declaration was refused, or the editor never started. Every
+   call site that answers a key or a command, or finishes the request one
+   started, uses this; [add_event] alone is for what happened on its own --
+   the feed, a failed poll, the server's lifecycle. The footer copy is one
+   line: a server's reason can carry newlines. *)
+let report_action (state : state) event_type content =
+  add_event state event_type content;
+  state.last_action <-
+    Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
+
 (** Load state from .masc directory *)
 let load_from_masc_dir (state : state) (base_path : string) =
   let masc_dir = Filename.concat base_path Common.masc_dirname in
@@ -303,12 +331,34 @@ let load_from_masc_dir (state : state) (base_path : string) =
   (* Load tasks from their single durable source. The domain rows land first:
      a detail view open across this refresh keeps its row even when the task
      just turned terminal, because the projection below drops exactly those. *)
-  let tasks, tasks_domain, tasks_error, task_flow, operator_stalled =
+  let rows, tasks_domain, tasks_error, task_flow, operator_stalled =
     load_active_tasks base_path
   in
   state.tasks_domain <- tasks_domain;
-  state.tasks <- tasks;
+  state.task_reading <- rows;
+  state.tasks <-
+    (match rows with
+     | Masc_tui_overview_tasks.Rows_read tasks -> tasks
+     | Masc_tui_overview_tasks.Rows_unread
+     | Masc_tui_overview_tasks.Rows_unavailable _ -> []);
   state.tasks_error <- tasks_error;
+  (* A chosen task that left rows that were read (finished, or back to Todo)
+     is dropped here, where the rows change, and said once. A failed read
+     keeps the choice: it did not look, so nothing left. With that task's
+     detail open the detail still shows it, so the footer says nothing that
+     the screen contradicts. *)
+  (let focus, left =
+     Masc_tui_overview_tasks.after_read rows state.task_focus
+   in
+   state.task_focus <- focus;
+   Option.iter
+     (fun task_id ->
+       if not (Option.equal String.equal state.task_detail_id (Some task_id))
+       then
+         report_action state "system"
+           (Printf.sprintf "%s left the held tasks; nothing is chosen"
+              task_id))
+     left);
   state.task_flow <- task_flow;
   state.operator_stalled <- operator_stalled;
 
@@ -438,6 +488,8 @@ let clear_local_workspace (state : state) =
   state.agents <- [];
   state.tasks <- [];
   state.tasks_domain <- [];
+  state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
+  state.task_reading <- Masc_tui_overview_tasks.Rows_unread;
   state.task_flow <- None;
   state.operator_stalled <- None;
   state.tasks_error <- None;
@@ -450,28 +502,6 @@ let clear_local_workspace (state : state) =
   state.live_context <- Context_state.empty;
   state.local_workspace <- Local_workspace_unread
 ;;
-
-(** Add an event to the TUI session log, which Metrics draws. *)
-let add_event (state : state) event_type content =
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let ev = { timestamp; event_type; content } in
-  state.events <- ev :: List.filteri (fun i _ -> i < 10) state.events
-
-(* An outcome the operator pressed a key for, rather than something that
-   happened on its own. It goes to the session log like any other event, and
-   to the footer, because the log is drawn by Metrics alone: the operator who
-   pressed [a] on Workspace reads on Workspace whether the registration
-   landed, the declaration was refused, or the editor never started. Every
-   call site that answers a key or a command, or finishes the request one
-   started, uses this; [add_event] alone is for what happened on its own --
-   the feed, a failed poll, the server's lifecycle. The footer copy is one
-   line: a server's reason can carry newlines. *)
-let report_action (state : state) event_type content =
-  add_event state event_type content;
-  state.last_action <-
-    Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
 
 (** HTTP JSON decoding helpers. These intentionally fail closed for the TUI
     dashboard surfaces: an empty list means the API really returned an empty

@@ -697,9 +697,12 @@ let render_overview (state : state) =
   let attention_items, tasks_error, row_budget =
     overview_layout state ~terminal_rows:rows
   in
+  (* The rows reading, not [state.tasks]: before the first read that list is
+     [] with no error, and counting it would draw "0 of 0" over a section that
+     says it has not loaded. A note on rows that were read (backup recovery,
+     goal links) stays in the Tasks section below; GOALS counts the rows. *)
   Overview_goals.draw buf ~cols ~rows:row_budget.goal_rows
-    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime
-    ~tasks:(Option.fold ~none:(Ok state.tasks) ~some:Result.error tasks_error)
+    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime ~tasks:state.task_reading
     state.overview_goals;
   (* The panel spans the band the rest of the screen's rows cover: one cell of
      margin on each side of the frame. *)
@@ -919,7 +922,7 @@ let render_overview (state : state) =
     let now = Unix.gettimeofday () in
     let selected =
       Overview_tasks.selected_index state.tasks
-        ~selected:state.task_selected_id
+        ~selected:(Overview_tasks.selection state.task_focus)
     in
     (* An unread or failed backlog has said so above; "no task in progress"
        would be a reading it never made. *)
@@ -963,7 +966,7 @@ let render_overview (state : state) =
                 Ansi.reset (task_line task)
             in
             if
-              state.task_focus = Right_pane
+              Overview_tasks.is_focused state.task_focus
               && Option.equal Int.equal selected (Some index)
             then
               box_line_selected buf cols (Masc_tui_theme.strip_sgr ("> " ^ row))
@@ -991,7 +994,7 @@ let render_overview (state : state) =
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
        ~hints:
          (Masc_tui_keys.footer_hints_overview
-            ~task_focus:(state.task_focus = Right_pane)));
+            ~task_focus:(Overview_tasks.is_focused state.task_focus)));
 
   finish_surface state ~surface_key:"overview" ~rows:terminal_rows ~cols buf
 

@@ -1232,6 +1232,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries digestif mtime.clock.os masc_tui_esc_interrupt masc_tui_planning_detail
+  masc_tui_overview_tasks
   masc_tui_connector_unbind
   ;; [sch_last_wake_status] is the schedule contract's wake_status.
   masc.masc_schedule
@@ -1555,6 +1556,7 @@
  (modules masc_tui_overview_goals)
  (libraries
   masc
+  masc_tui_overview_tasks
   masc.masc_goal
   masc_types
   masc_tui_types

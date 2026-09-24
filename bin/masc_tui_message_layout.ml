@@ -2119,20 +2119,22 @@ let milliseconds_in_a_second = 1000.
 let tenths_in_a_second = 10.
 let tenths_in_a_minute = 600.
 
-let elapsed_text seconds =
-  if seconds < 0. then None
+(* The ladder alone, for a caller that has already said what a negative
+   means to it by clamping one to zero. [Float.max] also turns [-0.] into
+   [+0.], which would otherwise print "-0ms". *)
+let clamped_elapsed_text seconds =
+  let seconds = Float.max 0. seconds in
+  let milliseconds = Float.round (seconds *. milliseconds_in_a_second) in
+  if milliseconds < milliseconds_in_a_second then
+    Printf.sprintf "%.0fms" milliseconds
   else
-    (* [-0.] is not below zero and would print "-0ms"; [Float.max] gives
-       [+0.] for it. *)
-    let seconds = Float.max 0. seconds in
-    let milliseconds = Float.round (seconds *. milliseconds_in_a_second) in
-    if milliseconds < milliseconds_in_a_second then
-      Some (Printf.sprintf "%.0fms" milliseconds)
-    else
-      let tenths = Float.round (seconds *. tenths_in_a_second) in
-      if tenths < tenths_in_a_minute then
-        Some (Printf.sprintf "%.1fs" (tenths /. tenths_in_a_second))
-      else Some (span_text (tenths /. tenths_in_a_second))
+    let tenths = Float.round (seconds *. tenths_in_a_second) in
+    if tenths < tenths_in_a_minute then
+      Printf.sprintf "%.1fs" (tenths /. tenths_in_a_second)
+    else span_text (tenths /. tenths_in_a_second)
+
+let elapsed_text seconds =
+  if seconds < 0. then None else Some (clamped_elapsed_text seconds)
 
 let age_text ~now ~since =
   let seconds = now -. since in

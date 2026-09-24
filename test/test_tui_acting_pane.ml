@@ -1522,16 +1522,29 @@ let backwards_run_input () =
   in
   { (runner_input ()) with Pane.chunks = chunks [ "runner" ] (entries (other :: calls)) }
 
+(* Where the four spellable durations (19 cells) do not fit but their sum
+   does. Outside the wide pane a candidate fits when it is at most
+   cols - 18 cells: the border, glyph, dispatch marks and two gaps take
+   seven, "Execute \xc3\x975" ten, and the one before the duration one more.
+   At 30 the list is too wide and "11.7s" fits; at 40 the list itself fits. *)
+let backwards_run_sum_cols = 30
+
 let test_a_backwards_duration_is_left_out_of_the_run () =
   let wide =
     run_row (Pane.lines ~rows ~cols:Pane.wide_pane_cols ~scroll:0 (backwards_run_input ()))
   in
-  check bool ("the list skips it: " ^ wide) true (contains "2.7s 1.4s 2.9s 4.7s" wide);
+  (* The wide pane pads the name and ends with the age, so the durations are
+     read between the gaps around them. *)
+  check bool ("the list skips it: " ^ wide) true
+    (contains " 2.7s 1.4s 2.9s 4.7s " wide);
+  check bool "and draws no dash for it" false (contains "\xe2\x80\x94" wide);
   let narrow =
-    run_row (Pane.lines ~rows ~cols:narrow_run_cols ~scroll:0 (backwards_run_input ()))
+    run_row
+      (Pane.lines ~rows ~cols:backwards_run_sum_cols ~scroll:0 (backwards_run_input ()))
   in
-  check bool ("the sum leaves it out: " ^ narrow) true (contains "11.7s" narrow);
-  check bool "and is not taken from" false (contains "7.7s" narrow)
+  check bool ("the sum leaves it out: " ^ narrow) true
+    (String.ends_with ~suffix:"Execute \xc3\x975         11.7s" narrow);
+  check bool "rather than taking it from the sum" false (contains "7.7s" narrow)
 
 let test_the_call_row_marks_a_batch_and_a_deferral () =
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 (runner_input ())).Pane.rows in

@@ -253,14 +253,10 @@ let failed_call_glyph = Acting.glyph_text Acting.Failure
 let detail_indent_cells = mark_cells + dispatch_cells + gap_cells
 let detail_label_cells = 4
 
-(* The clamp leaves nothing negative, so the ladder spells every age this
-   passes it and the [None] arm does not come back. The clamp itself draws a
-   backwards clock as "0ms", where [Masc_tui_message_layout.age_text] draws
-   nothing; that is #38663. *)
-let age_text ~now at =
-  match Acting.elapsed_text (Float.max 0. (now -. at) *. 1000.) with
-  | Some text -> text
-  | None -> ""
+(* An age clamps a backwards clock to "0ms", where
+   [Masc_tui_message_layout.age_text] draws nothing; that and a NaN clock
+   are #38663. *)
+let age_text ~now at = Layout.clamped_elapsed_text (now -. at)
 
 let last_event_text ~now at = "last event " ^ age_text ~now at
 

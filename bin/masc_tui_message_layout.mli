@@ -744,6 +744,11 @@ val elapsed_text : float -> string option
     takes over. A negative duration is [None], as a backwards {!age_text} is:
     a clock that disagreed with itself, not a call that took no time. *)
 
+val clamped_elapsed_text : float -> string
+(** {!elapsed_text}'s ladder with a negative duration read as zero, [0ms].
+    Only for a caller that clamps on purpose; anything drawing a duration it
+    was handed uses {!elapsed_text}, which says nothing for a negative. *)
+
 val age_text : now:float -> since:float -> string option
 (** How long something has been outstanding, as {!span_text}.
 

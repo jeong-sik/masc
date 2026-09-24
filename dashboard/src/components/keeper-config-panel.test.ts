@@ -44,7 +44,7 @@ describe('keeper config save failure authority', () => {
       status: 503,
       errorCode: 'keeper_runtime_sync_failed',
       configApplied: true,
-      runtimeSync: false,
+      runtimeSync: 'failed',
     }))).toBe(true)
     expect(keeperConfigFailureRequiresAuthoritativeReload(new ApiRequestError({
       method: 'POST',

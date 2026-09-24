@@ -7,6 +7,8 @@ module Live = Masc_tui_keeper_chat_live
    delta sequence therefore asserts it for a whole-body feed and for a
    byte-at-a-time feed, and the invariance test below pins the general case. *)
 
+let token_count = function Some value -> string_of_int value | None -> "none"
+
 let delta_to_string : Live.delta -> string = function
   | Live.Batch_bound {operation_id; execution_id} -> Printf.sprintf "batch(%s,%s)" operation_id execution_id
   | Live.Run_started -> "run_started"
@@ -15,6 +17,12 @@ let delta_to_string : Live.delta -> string = function
         (Option.value ~default:"none" runtime_id)
         (match attempt_index with Some i -> string_of_int i | None -> "none")
   | Live.Stream_model_started { model } -> Printf.sprintf "stream_model_started(%s)" model
+  | Live.Stream_usage usage ->
+      Printf.sprintf "stream_usage(in=%s,out=%s,cache_read=%s,cache_write=%s)"
+        (token_count usage.Live.input_tokens)
+        (token_count usage.Live.output_tokens)
+        (token_count usage.Live.cache_read_input_tokens)
+        (token_count usage.Live.cache_creation_input_tokens)
   | Live.Text text -> Printf.sprintf "text(%s)" text
   | Live.Thinking text -> Printf.sprintf "thinking(%s)" text
   | Live.Tool_started { occurrence; tool_name } ->
@@ -661,6 +669,45 @@ let test_stream_model_started_is_typed () =
     [ Live.Stream_model_started { model = "claude-3-7-sonnet" } ]
     (feed_whole body)
 
+let test_stream_usage_is_typed () =
+  let body =
+    sse
+      (custom "KEEPER_STREAM_MESSAGE_DELTA"
+         (`Assoc
+            [ "stop_reason", `String "end_turn"
+            ; ( "usage"
+              , `Assoc
+                  [ "input_tokens", `Int 1200
+                  ; "output_tokens", `Int 340
+                  ; "cache_read_input_tokens", `Int 900
+                  ] )
+            ]))
+  in
+  (* The counters the provider did report are carried; the one it did not
+     stays None rather than becoming a zero the screen would state as a
+     measured fact. *)
+  check (list delta) "stream message delta yields the reported token counters"
+    [ Live.Stream_usage
+        { input_tokens = Some 1200
+        ; output_tokens = Some 340
+        ; cache_read_input_tokens = Some 900
+        ; cache_creation_input_tokens = None
+        }
+    ]
+    (feed_whole body)
+
+let test_stream_delta_without_usage_is_no_row () =
+  (* The dividing input: a delta that reported no counter at all. Without
+     this, an implementation that answers every message delta with a row of
+     blanks passes the test above. *)
+  let body =
+    sse
+      (custom "KEEPER_STREAM_MESSAGE_DELTA"
+         (`Assoc [ "stop_reason", `String "end_turn" ]))
+  in
+  check (list delta) "a delta that reported no counters draws nothing" []
+    (feed_whole body)
+
 let test_unknown_custom_event_is_reported () =
   let body = sse (custom "KEEPER_FUTURE_EVENT" `Null) in
   check (list delta) "new server vocabulary cannot disappear silently"
@@ -686,6 +733,10 @@ let () =
             test_runtime_attempt_rejects_invalid_payload
         ; test_case "stream message start model is typed" `Quick
             test_stream_model_started_is_typed
+        ; test_case "a turn in flight reports the tokens it has spent" `Quick
+            test_stream_usage_is_typed
+        ; test_case "a delta that reported no counters draws nothing" `Quick
+            test_stream_delta_without_usage_is_no_row
         ] )
     ; ( "acceptance"
       , [ test_case "the three states are read" `Quick

@@ -502,7 +502,7 @@ let board_event_kind_label = function
   | Keeper_world_observation.Delegate_completed -> "keeper_delegate_completed"
   | Keeper_world_observation.Composition_completed ->
     "keeper_composition_completed"
-  | Keeper_world_observation.Ask_answered_row -> "ask_answered"
+  | Keeper_world_observation.Ask_answered_row _ -> "ask_answered"
 ;;
 
 let quote_prompt_field value =
@@ -707,7 +707,7 @@ let board_event_note_fields = function
   | Keeper_world_observation.Task_cancelled _
   | Keeper_world_observation.Delegate_completed
   (* The answer is the row's title and preview; there is no side fact to add. *)
-  | Keeper_world_observation.Ask_answered_row
+  | Keeper_world_observation.Ask_answered_row _
   | Keeper_world_observation.Composition_completed -> []
 ;;
 
@@ -786,9 +786,20 @@ let answered_ask_inputs (observation : Keeper_world_observation.world_observatio
   observation.pending_board_events
   |> List.filter_map (fun (event : Keeper_world_observation.pending_board_event) ->
     match event.event_kind with
-    | Keeper_world_observation.Ask_answered_row ->
-      Some (event.post_id, format_board_event_text event)
+    | Keeper_world_observation.Ask_answered_row { answered_by } ->
+      Some (event.post_id, format_board_event_text event, answered_by)
     | _ -> None)
+;;
+
+(* Who said the autonomous turn's User message. The host wrote the wake cue and
+   quotes each answered Ask after it, in [answered_ask_inputs] order, which is
+   the order [build_prompt_internal] joins them in. *)
+let autonomous_input_speaker observation =
+  Keeper_input_speaker.Host_prompt
+    (Keeper_input_speaker.Autonomous_wake
+       { answered_asks =
+           List.map (fun (_, _, answered_by) -> answered_by) (answered_ask_inputs observation)
+       })
 ;;
 
 let format_scheduled_automation_item
@@ -893,7 +904,7 @@ let group_scheduled_wake_events events =
     | Keeper_world_observation.Task_outcome _
     | Keeper_world_observation.Task_cancelled _
     | Keeper_world_observation.Delegate_completed
-    | Keeper_world_observation.Ask_answered_row
+    | Keeper_world_observation.Ask_answered_row _
     | Keeper_world_observation.Composition_completed -> groups
   in
   List.fold_left add_event [] events
@@ -1044,7 +1055,7 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Task_cancelled _
          | Keeper_world_observation.Delegate_completed
-         | Keeper_world_observation.Ask_answered_row
+         | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed -> None)
       events
   in
@@ -1094,7 +1105,7 @@ let format_task_outcome_observations
          | Keeper_world_observation.Completion_authority_rejected _
          | Keeper_world_observation.Task_cancelled _
          | Keeper_world_observation.Delegate_completed
-         | Keeper_world_observation.Ask_answered_row
+         | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed -> None)
       events
   in
@@ -1148,7 +1159,7 @@ let format_task_cancellation_observations
          | Keeper_world_observation.Completion_authority_rejected _
          | Keeper_world_observation.Task_outcome _
          | Keeper_world_observation.Delegate_completed
-         | Keeper_world_observation.Ask_answered_row
+         | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed -> None)
       events
   in
@@ -2115,7 +2126,7 @@ let build_prompt_internal
      Dynamic context is transient across tool rounds and is not checkpointed.
      Keep the attributed, quoted answer in the ordinary durable user turn;
      subsequent wakes carry no copy once the answer stimulus is consumed. *)
-  let answered_asks = List.map snd (answered_ask_inputs observation) in
+  let answered_asks = List.map (fun (_, text, _) -> text) (answered_ask_inputs observation) in
   let user_message =
     String.concat "\n\n"
       (Env_config_keeper.KeeperAutonomous.wake_prompt () :: answered_asks)

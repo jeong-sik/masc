@@ -7404,18 +7404,29 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                            String.equal binding.cb_keeper_name k.k_name)
                         connector.cn_bindings)
                  in
+                 let tail =
+                   Printf.sprintf "  %d here / %d total" here_count
+                     (List.length connector.cn_bindings)
+                 in
+                 (* Two cells of indent, two for the cursor mark, two between
+                    the name and the badge: the padding the row spends before
+                    its columns. *)
+                 let name_cells =
+                   Masc_tui_connector_state.list_row_name_cells
+                     ~inner:(framed_inner_width cols) ~fixed_cells:6
+                     ~tail_cells:(String.length tail)
+                 in
                  let line =
                    "  " ^ (if index = selected_index then "▸ " else "  ")
                    ^ fit_width
                        (Terminal_text.single_line connector.cn_display_name)
-                       14
+                       name_cells
                    ^ "  "
                    ^ fit_width
                        (Masc_tui_connector_state.badge_word
                           connector.cn_connection)
-                       12
-                   ^ Printf.sprintf "  %d here / %d total" here_count
-                       (List.length connector.cn_bindings)
+                       Masc_tui_connector_state.badge_column_cells
+                   ^ tail
                  in
                  if index = selected_index then Ansi.reverse ^ line ^ Ansi.reset
                  else line)

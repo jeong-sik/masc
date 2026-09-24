@@ -604,6 +604,18 @@ let test_maintenance_keeps_board_attachment_reference () =
         B.put store ~bytes:"unreferenced attachment" ~mime:"image/png"
         |> stored_ref_exn
       in
+      let child = B.put_durable store ~bytes:"board manifest child" ~mime:"text/plain" in
+      let structured_content =
+        `Assoc [ "output_artifact", O.normalized_artifact_ref_to_json child ]
+      in
+      let manifest =
+        B.put_durable store
+          ~bytes:
+            (O.artifact_manifest_to_json
+               ~content:"board manifest child" ~structured_content
+             |> Yojson.Safe.to_string)
+          ~mime:O.artifact_manifest_mime
+      in
       let board_posts =
         Filename.concat
           (Common.masc_dir_from_base_path ~base_path)
@@ -622,18 +634,26 @@ let test_maintenance_keeps_board_attachment_reference () =
                           [ "kind", `String "image"
                           ; "artifact", O.normalized_artifact_ref_to_json live
                           ]
+                      ; `Assoc
+                          [ "kind", `String "external_link"
+                          ; "artifact", O.normalized_artifact_ref_to_json manifest
+                          ]
                       ]
                   ]
               ])
          ^ "\n");
       let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
-      Alcotest.(check int) "Board reference is live" 1 observed.live_references;
+      Alcotest.(check int) "Board and manifest child references are live" 3 observed.live_references;
       let swept = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
       Alcotest.(check int) "only dead blob deleted" 1 swept.deleted;
       Alcotest.(check (option string))
         "Board artifact survives"
         (Some "board attachment")
         (fetch_ok store ~sha256:live.sha256);
+      Alcotest.(check (option string))
+        "Board manifest child survives"
+        (Some "board manifest child")
+        (fetch_ok store ~sha256:child.sha256);
       Alcotest.(check (option string))
         "unreferenced artifact is deleted"
         None

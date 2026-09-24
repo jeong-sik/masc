@@ -35,7 +35,8 @@ val parse_args : Yojson.Safe.t -> (unresolved list, error) result
 
 val resolve : base_path:string -> unresolved list -> (t list, error) result
 (** Verifies artifact bytes in the existing Tool_blob_store before a post is
-    written. Blocking blob reads run in an Eio system thread. *)
+    written. A canonical result manifest keeps its MIME so blob maintenance
+    follows its child references. Blocking blob reads run in an Eio system thread. *)
 
 val to_json : t -> Yojson.Safe.t
 (** An artifact uses the canonical [_blob] wrapper so durable maintenance

@@ -1,8 +1,9 @@
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { mediaEmbedForUrl } from '../common/rich-content-utils'
 import { formatFileSize } from './composer-v2'
 import { isRecord } from '../common/normalize'
+import { fetchToolBlobBytes } from '../../api/tool-blob'
 import type { BoardAttachmentDecode, BoardAttachmentSource } from '../../types'
 
 type UrlSource = Extract<BoardAttachmentSource, { kind: 'url' }>
@@ -180,22 +181,44 @@ function ExternalLinkAttachment({ source }: { source: UrlSource }) {
 }
 
 function ArtifactAttachment({ source }: { source: ArtifactSource }) {
-  const url = `/api/v1/artifacts/${encodeURIComponent(source.sha256)}`
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => () => {
+    if (downloadUrl) URL.revokeObjectURL(downloadUrl)
+  }, [downloadUrl])
+  const load = async () => {
+    if (loading || downloadUrl !== null) return
+    setLoading(true)
+    setError(null)
+    try {
+      const bytes = await fetchToolBlobBytes(source.sha256)
+      setDownloadUrl(URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' })))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setLoading(false)
+    }
+  }
   return html`
-    <a
-      class="flex flex-col gap-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2 no-underline hover:border-[var(--accent-30)]"
-      href=${url}
-      target="_blank"
-      rel="noopener noreferrer"
+    <div
+      class="flex flex-col gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2"
       data-testid="board-attachment-artifact"
     >
-      <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">
-        📎 아티팩트 열기 (${source.sha256.slice(0, 12)})
-      </span>
+      <button type="button" class="text-left text-xs font-semibold text-[var(--color-fg-secondary)] underline"
+        disabled=${loading} onClick=${() => void load()}>
+        📎 아티팩트 다운로드 준비 (${source.sha256.slice(0, 12)})
+      </button>
       <span class="text-2xs text-[var(--color-fg-muted)]">
         ${formatFileSize(source.bytes)} · ${source.mime}
       </span>
-    </a>
+      ${loading ? html`<span role="status">읽는 중…</span>` : null}
+      ${error ? html`<${FailureCard} label=${`아티팩트를 읽지 못했습니다 (${error})`} />` : null}
+      ${downloadUrl !== null
+        ? html`<a href=${downloadUrl} download=${`artifact-${source.sha256}.bin`}
+            data-testid="board-attachment-artifact-download">다운로드</a>`
+        : null}
+    </div>
   `
 }
 

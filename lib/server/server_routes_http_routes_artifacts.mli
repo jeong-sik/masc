@@ -39,10 +39,17 @@ val blob_response :
 val artifact_read_permission : Masc_domain.permission
 (** Operator-only authority required to dereference exact tool-output bytes. *)
 
+val artifact_bytes :
+  base_path:string ->
+  sha256:string ->
+  (string option, Tool_blob_store.fetch_error) result
+(** Exact validated bytes shared by the HTTP/1 and HTTP/2 authenticated raw
+    download routes. *)
+
 val add_routes :
   Http_server_eio.Router.t ->
   Http_server_eio.Router.t
 (** Register the [GET /api/v1/artifacts/<sha256>] route on
-    [router]. Exact bytes require a token-bound operator credential even when
+    [router], plus binary-safe [GET /api/v1/artifact-bytes/<sha256>]. Exact bytes require a token-bound operator credential even when
     general HTTP auth is non-strict; a content digest is not an authorization
     capability. Returns the augmented router. *)

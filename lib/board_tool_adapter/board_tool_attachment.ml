@@ -137,6 +137,16 @@ let parse_args args =
     | _ -> Error Duplicate_attachments
 ;;
 
+let artifact_mime bytes =
+  match Yojson.Safe.from_string bytes with
+  | json ->
+    (match Tool_output.artifact_manifest_of_json json with
+     | Tool_output.Decoded_artifact_manifest _ -> Tool_output.artifact_manifest_mime
+     | Tool_output.Not_artifact_manifest
+     | Tool_output.Invalid_artifact_manifest _ -> "application/octet-stream")
+  | exception Yojson.Json_error _ -> "application/octet-stream"
+;;
+
 let resolve ~base_path entries =
   let store = Tool_blob_store.create ~base_path in
   let rec loop index acc = function
@@ -159,7 +169,7 @@ let resolve ~base_path entries =
               ~sha256
               ~bytes:(String.length bytes)
               ~preview:""
-              ~mime:"application/octet-stream"
+              ~mime:(artifact_mime bytes)
           with
           | Error error -> Error (Invalid_artifact_reference (index, error))
           | Ok reference ->

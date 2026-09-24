@@ -1432,17 +1432,20 @@ describe('board attachments decode', () => {
     expect(first).toMatchObject({
       ok: true,
       attachment: {
-        id: 'a-image',
         kind: 'image',
-        origin_url: 'https://cdn.example.com/a.png',
-        origin_size_bytes: 128,
-        width: 640,
-        height: null,
+        source: {
+          kind: 'url',
+          url: 'https://cdn.example.com/a.png',
+          name: 'a.png',
+          sizeBytes: 128,
+          width: 640,
+          height: null,
+        },
       },
     })
     expect(attachments?.[3]).toMatchObject({
       ok: true,
-      attachment: { kind: 'external_link', origin_url: 'https://example.com/spec' },
+      attachment: { kind: 'external_link', source: { kind: 'url', url: 'https://example.com/spec' } },
     })
   })
 

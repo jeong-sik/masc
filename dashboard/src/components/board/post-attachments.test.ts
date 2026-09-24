@@ -7,12 +7,16 @@ import '@testing-library/jest-dom'
 vi.mock('./composer-v2', () => ({
   formatFileSize: (bytes: number) => `${bytes} B`,
 }))
+vi.mock('../../api/tool-blob', () => ({ fetchToolBlobBytes: vi.fn() }))
 
 import { PostAttachments } from './post-attachments'
+import { fetchToolBlobBytes } from '../../api/tool-blob'
 import type { BoardAttachmentKind, BoardAttachmentDecode } from '../../types'
 
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
+  vi.clearAllMocks()
 })
 
 function attachment(overrides: {
@@ -142,17 +146,46 @@ describe('PostAttachments', () => {
     expect(link).toHaveAttribute('href', 'https://cdn.example.com/a.png')
   })
 
-  it('links an artifact reference to the existing artifact reader', () => {
+  it('fetches artifact bytes with auth before offering a download', async () => {
     const sha256 = 'a'.repeat(64)
+    const NativeURL = URL
+    const objectUrl = 'blob:board-attachment'
+    const createObjectURL = vi.fn(() => objectUrl)
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', class extends NativeURL {
+      static createObjectURL = createObjectURL
+      static revokeObjectURL = revokeObjectURL
+    })
+    vi.mocked(fetchToolBlobBytes).mockResolvedValue(new Uint8Array([0, 255, 42]).buffer)
     render(h(PostAttachments, { attachments: [{
       ok: true,
       attachment: { kind: 'image', source: {
         kind: 'artifact', sha256, bytes: 12, mime: 'application/octet-stream',
       } },
     }] }))
-    const link = screen.getByTestId('board-attachment-artifact')
-    expect(link).toHaveAttribute('href', `/api/v1/artifacts/${sha256}`)
+    const card = screen.getByTestId('board-attachment-artifact')
+    expect(card.querySelector('a')).toBeNull()
+    fireEvent.click(card.querySelector('button')!)
+    const link = await screen.findByTestId('board-attachment-artifact-download')
+    expect(fetchToolBlobBytes).toHaveBeenCalledWith(sha256)
+    expect(link).toHaveAttribute('href', objectUrl)
+    expect(link).toHaveAttribute('download', `artifact-${sha256}.bin`)
+    expect(createObjectURL).toHaveBeenCalledOnce()
     expect(document.querySelector('img')).toBeNull()
+  })
+
+  it('shows an artifact read failure instead of a broken link', async () => {
+    vi.mocked(fetchToolBlobBytes).mockRejectedValue(new Error('403 Forbidden'))
+    render(h(PostAttachments, { attachments: [{
+      ok: true,
+      attachment: { kind: 'image', source: {
+        kind: 'artifact', sha256: 'a'.repeat(64), bytes: 12, mime: 'application/octet-stream',
+      } },
+    }] }))
+    fireEvent.click(screen.getByTestId('board-attachment-artifact').querySelector('button')!)
+    const error = await screen.findByTestId('board-attachment-error')
+    expect(error.textContent).toContain('403 Forbidden')
+    expect(screen.queryByTestId('board-attachment-artifact-download')).toBeNull()
   })
 
   it('renders nothing when the attachments list is empty', () => {

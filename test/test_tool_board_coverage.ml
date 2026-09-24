@@ -516,6 +516,46 @@ let test_post_create_typed_attachments () =
          | _ -> Alcotest.fail "stored artifact lacks canonical reference")
       | None -> Alcotest.fail "stored artifact missing")
    | _ -> Alcotest.fail "stored attachment list malformed");
+  let store = Tool_blob_store.create ~base_path:_test_base_path in
+  let child =
+    Tool_blob_store.put_durable store ~bytes:"manifest child" ~mime:"text/plain"
+  in
+  let structured_content =
+    `Assoc [ "output_artifact", Tool_output.normalized_artifact_ref_to_json child ]
+  in
+  let manifest =
+    Tool_blob_store.put_durable store
+      ~bytes:
+        (Tool_output.artifact_manifest_to_json
+           ~content:"manifest child" ~structured_content
+         |> Yojson.Safe.to_string)
+      ~mime:Tool_output.artifact_manifest_mime
+  in
+  let manifest_result =
+    post
+      [ `Assoc
+          [ "kind", `String "external_link"
+          ; "sha256", `String manifest.sha256
+          ]
+      ]
+  in
+  Alcotest.(check bool) "canonical manifest accepted" true
+    (Tool_result.is_success manifest_result);
+  let stored_manifest =
+    Yojson.Safe.Util.
+      (Tool_result.data manifest_result |> member "meta" |> member "attachments")
+  in
+  (match stored_manifest with
+   | `List [ `Assoc fields ] ->
+     (match List.assoc_opt "artifact" fields with
+      | Some json ->
+        (match Tool_output.normalized_artifact_ref_of_json json with
+         | Tool_output.Decoded_normalized_artifact_ref reference ->
+           Alcotest.(check string) "manifest MIME survives Board post"
+             Tool_output.artifact_manifest_mime reference.mime
+         | _ -> Alcotest.fail "manifest reference is malformed")
+      | None -> Alcotest.fail "manifest attachment missing")
+   | _ -> Alcotest.fail "manifest attachment list malformed");
   List.iter
     (fun url ->
       let unsafe =

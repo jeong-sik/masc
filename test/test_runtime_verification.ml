@@ -825,6 +825,8 @@ headers["MCP-Protocol-Version"] = "2025-11-25"
 rpc("notifications/initialized", {})
 listed = rpc("tools/list", {}, 2)
 assert [tool["name"] for tool in listed["result"]["tools"]] == ["runtime_readiness_challenge"]
+assert sorted(server["tools"]) == sorted(tool["name"] for tool in listed["result"]["tools"]), server.get("tools")
+assert all(v == {"eager": True} for v in server["tools"].values()), server["tools"]
 result = rpc("tools/call", {"name": "runtime_readiness_challenge", "arguments": {}}, 3)
 text = result["result"]["content"][0]["text"]
 model = sys.argv[sys.argv.index("--model") + 1]

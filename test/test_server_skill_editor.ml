@@ -538,7 +538,10 @@ let test_delete_removes_empty_package_and_id_is_reusable () =
        ~refresh
    with
    | Ok (Editor.Created_and_published _) -> ()
-   | Ok (Created_but_shadowed _) -> fail "the recreated Skill was shadowed"
+   | Ok (Created_but_shadowed { winner; _ }) ->
+     fail
+       ("the recreated Skill was shadowed by "
+        ^ Skill_reference.identity_package_id_to_string winner)
    | Ok (Created_but_unpublished _) -> fail "recreated Skill was not published"
    | Error error -> fail ("same package id was refused: " ^ Editor.error_to_string error));
   check string "recreated SKILL.md" recreated (read_file skill_path)

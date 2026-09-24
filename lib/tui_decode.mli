@@ -43,12 +43,19 @@ type keeper = {
 }
 
 val escape_invisible : string -> string
-(** Draw bidi controls and zero-width characters (U+061C, U+200B-U+200F,
-    U+202A-U+202E, U+2066-U+2069, U+FEFF) as their own [\uXXXX] escape text.
-    A terminal draws them as nothing, so without this the glyphs an operator
-    reads can differ from the bytes an approval hash covers (Trojan Source,
-    CVE-2021-42574). {!sanitize_terminal_text} and the Keeper chat boundary
-    both route through here, so the rule lives in one place. *)
+(** Draw bidi controls, zero-width characters and tag characters (U+061C,
+    U+200B-U+200F, U+202A-U+202E, U+2066-U+2069, U+FEFF, U+E0000-U+E007F) as
+    their own escape text: [\uXXXX] inside the basic plane and [\UXXXXXXXX]
+    above it, since the tag block needs five digits. A terminal draws them as
+    nothing, so without this the glyphs an operator reads can differ from the
+    bytes an approval hash covers (Trojan Source, CVE-2021-42574; spelling
+    ASCII in tag characters is the same trick without the bidi). Two
+    exceptions are characters a reader can see the effect of, and each is
+    admitted by its neighbours rather than by a list: a zero-width joiner
+    between two pictographs (UAX #29 GB11), and a complete emoji tag sequence
+    -- U+1F3F4, one or more tag bases, then the terminator U+E007F -- which is
+    kept whole or escaped whole. {!sanitize_terminal_text} and the Keeper chat
+    boundary both route through here, so the rule lives in one place. *)
 
 val sanitize_terminal_text : string -> string
 (** Escape C0, DEL, raw C1 bytes, UTF-8 encoded C1 code points, malformed

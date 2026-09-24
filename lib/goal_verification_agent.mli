@@ -26,18 +26,39 @@ val scan_skipped_log_prefix : string
     line count = skipped scan count). The same scan appends one
     {!Goal_verification_run_registry.Scan_skipped} row. *)
 
+val unreconciled_to_yojson : Goal_store.goal -> Yojson.Safe.t
+(** [null], or [{step; detail}] when the latest completed scan could not
+    settle this still-Verifying goal. Recomputed by every scan and never
+    stored, so it names the goals stuck in Verifying now. *)
+
 module For_testing : sig
   val scan_active_once : unit -> bool
   (** Consume one pending scan on the real active runtime for deterministic
       wake/ownership race tests. False means no runtime is active. *)
   type pending_work = { goal_id : string }
 
-  (** How one review ended. [Deferred] carries the reason no verdict was
-      committed; the pending row it names is still durable. *)
+  (** Why a review ended without a verdict. *)
+  type deferral =
+    | Review_not_bound of { detail : string }
+    | Proof_lookup_unavailable of { detail : string }
+    | Not_reviewed of { gate : string; detail : string }
+    | Verdict_without_reason
+    | Commit_refused of { detail : string }
+
+  (** How one review ended. [Deferred] carries why no verdict was committed;
+      the pending row it names is still durable. A deferral of a request
+      that still stands is posted once per (Goal, request, gate) through
+      {!Verification_protocol.notify_stalled_verification}. *)
   type process_outcome =
     | Committed
     | Superseded
-    | Deferred of string
+    | Deferred of deferral
+
+  val deferral_gate : deferral -> string
+  (** The [gate] the Board notice keys its repeat check on: the evaluator's
+      gate name for [Not_reviewed], the constructor name otherwise. *)
+
+  val deferral_detail : deferral -> string
 
   (** Why a scan produced no work: the goal store this build cannot read.
       It is recorded as a durable row and a WARN line. *)
@@ -49,7 +70,8 @@ module For_testing : sig
       row stays durable. *)
   type reconcile_failure =
     { failed_goal_id : string
-    ; failure : string
+    ; step : Goal_reconcile_step.t
+    ; failure : Goal_store.write_error
     }
 
   type scan =

@@ -133,6 +133,10 @@ let read_jsonl t reference =
   Ok (String.concat "" records)
 let binding_path instance_id = Filename.concat "bindings" (digest instance_id ^ ".json")
 let save_binding t ~instance_id json = write t (binding_path instance_id) (Yojson.Safe.to_string json)
+let remove_binding t ~instance_id = protect (fun () ->
+  (try Unix.unlink (Filename.concat t.root (binding_path instance_id))
+   with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+  Ok ())
 let action_path ~instance_id ~request_id =
   Filename.concat "actions" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
 let save_action t ~instance_id ~request_id json =
@@ -154,8 +158,11 @@ let read_directory t relative = protect (fun () ->
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
         | name :: rest when Filename.check_suffix name ".json" ->
-            let json = Fs_compat.load_file (Filename.concat path name) |> Yojson.Safe.from_string in
-            loop (json :: acc) rest
+            (* A binding removed between the listing and this read is absent,
+               the same as one never listed. *)
+            (match Fs_compat.load_file_opt (Filename.concat path name) with
+             | None -> loop acc rest
+             | Some bytes -> loop (Yojson.Safe.from_string bytes :: acc) rest)
         | _ :: rest -> loop acc rest
       in loop [] names)
 let bindings t = read_directory t "bindings"

@@ -467,6 +467,11 @@ let validate_verification_run_id verification_run_id =
 (* The authority is constructed inside the application boundary. It is not a
    field accepted from an MCP caller and cannot be replaced by a Keeper/session
    name. [Standalone_lane.to_id Verifier] is the runtime configuration SSOT. *)
+let verifier_authority =
+  Masc_domain.System_llm_agent
+    { agent_run_id = Standalone_lane.to_id Standalone_lane.Verifier }
+;;
+
 let gate_verdict
       (outcome : Goal_verification.verdict_outcome)
       ~verification_run_id
@@ -479,9 +484,7 @@ let gate_verdict
   ; verification_run_id
   ; request_id
   ; criterion
-  ; authority =
-      Masc_domain.System_llm_agent
-        { agent_run_id = Standalone_lane.to_id Standalone_lane.Verifier }
+  ; authority = verifier_authority
   ; evidence
   ; recorded_at = Masc_domain.now_iso ()
   }
@@ -655,15 +658,14 @@ let reconcile_committed_proof config ~goal_id =
           | Ok (Goal_phase.Already _) -> Error "proof reconciliation did not name a phase transition"
           | Ok (Goal_phase.Move_to phase) ->
             Ok (goal_after_proof goal phase note, (Reconciled phase, Some verdict)))) in
-  (* This locked re-read folds its write_error — including a store that
-     became unavailable after the verifier scan listed it — to a string. The
-     scan records only its own list read as [Scan_skipped] (RFC-0444 PR-5);
-     a failure here reaches it as an unreconciled goal it skips and logs. *)
+  (* This locked re-read keeps its write_error typed — including a store that
+     became unavailable after the verifier scan listed it. The scan records
+     only its own list read as [Scan_skipped] (RFC-0444 PR-5); a failure here
+     reaches it as an unreconciled goal the Goal rows show. *)
   Result.map (fun ((goal : Goal_store.goal), (outcome, verdict)) ->
     Option.iter (fun verdict -> emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
       ~payload:(gate_event_payload ctx ~phase:goal.phase verdict)) verdict;
     outcome) result
-  |> Result.map_error Goal_store.write_error_to_string
 ;;
 
 let parse_goal_evidence_refs args =
@@ -709,7 +711,6 @@ let recover_current_proof config ~goal_id =
     | Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped ->
         Ok (goal, false))
   |> Result.map snd
-  |> Result.map_error Goal_store.write_error_to_string
 ;;
 
 (* A repeated [request_complete] on [Verifying] is the explicit retry that

@@ -2095,6 +2095,7 @@ type planning_goal = Tui_decode.planning_goal
   pg_metric: string option;
   pg_target_value: string option;
   pg_proof: Tui_decode.goal_proof;
+  pg_verifier_unreconciled: Tui_decode.verifier_unreconciled option;
   pg_last_review_note: string option;
   pg_last_review_at: string option;
   pg_created_at: string option;
@@ -3071,6 +3072,23 @@ type scrolled = {
 let listing_chrome ~error = if Option.is_some error then 9 else 7
 let lanes_listing_chrome ~load_error ~action_error =
   listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
+
+(* A listing draws a reading of the selected row under its list, and both are
+   paid for out of the same frame. The reading was given exactly one row and
+   cut there, while a list shorter than the frame drew blank rows under its
+   last entry -- nineteen of them, above a ruling cut mid-sentence (#38434).
+
+   The reading takes those blank rows and no others. [body_rows] is what the
+   frame leaves for the list and the reading together, [entries] is how many
+   rows the list has something to draw on, and [wanted] is how many rows the
+   reading packs into at this width. The answer never drops below one row, so
+   a list that fills the frame draws what it drew before, and it never rises
+   past the spare, so [body_rows - answer >= entries]: no entry loses its row
+   to a longer reading. *)
+let listing_note_rows ~body_rows ~entries ~wanted =
+  let body_rows = max 2 body_rows in
+  let spare = max 0 (body_rows - 1 - max 0 entries) in
+  min (max 1 wanted) (1 + spare)
 
 (* [authority_rows] is how many rows the line naming the SSOT and the last
    probe took at this width. It wraps at clause marks

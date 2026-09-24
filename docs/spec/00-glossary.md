@@ -429,7 +429,12 @@ status: reference
 **Checkpoint Load**
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
   새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고
-  새 이력을 시작하며, 첫 저장이 받아들여진 뒤 재시작을 기록한다.
+  새 이력을 시작하며, 첫 저장이 받아들여진 뒤 재시작을 기록한다. 이전 버전 체크포인트는
+  턴 실행 시 저장된 이력 없음(`Saved_history_superseded`)으로 읽히며, 초기화 도구
+  (`masc_keeper_clear`)에서도 읽기 오류로 거절하지 않고 부재한 것으로 취급해 공식
+  클라이언트 세션과 함께 정상 비운다(#38223).
+  → [Keeper_checkpoint_store](../../lib/keeper/keeper_checkpoint_store.mli),
+  [Keeper_tool_surface](../../lib/keeper/keeper_tool_surface.ml)
 
 **Prepare Error (준비 오류)**
 : Keeper turn이 모델에 파견(dispatch)되기 전, 실행 컨텍스트를 구성하는 단계(`Keeper_run_context.prepare_run_context`)에서
@@ -1095,6 +1100,27 @@ status: reference
   → [keeper_approval_queue_rules_types](../../lib/keeper_contract/keeper_approval_queue_rules_types.mli),
   [Keeper_approval_queue](../../lib/keeper/keeper_approval_queue.mli)
 
+**Late Tool Approval (늦은 도구 승인)**
+: Human-in-the-Loop (HITL) 실시간 대기(`await`)가 만료(타임아웃, `keeper_tool_approval_timeout_sec`: 180초)된
+  뒤 뒤늦게 도착한 운영자의 답변을 보존하는 인메모리 저장소(`Keeper_late_approval`). 키퍼가 다음 턴에 동일한
+  호출을 재시도할 때 같은 질문을 두 번 묻지 않고 늦은 답변으로 1회 해결한다.
+  - **동일 호출 엄격 매칭**: `(keeper_name, tool_name, canonical_args_fingerprint)`가 정확히 일치하는
+    호출에만 매칭된다. 인자가 조금이라도 다르면 매칭되지 않고 다시 묻는다.
+  - **1회성 소비(Single-use)**: 한 번 매칭(`take`)되면 메모리에서 즉시 제거된다. 운영자는 해당 단일 호출을
+    승인한 것이지, 동일한 형태를 지닌 모든 후속 호출을 영구 승인한 것이 아니다.
+  - **유효 시간 제한(TTL, 900초)**: 실시간 대기 창(180초)을 지나 도착한 결정은 최대 900초(15분) 동안만
+    유효하며, 초과된 항목은 다음 조회 시 회수(`reap`)되어 부재(`None`) 처리된다. 인간의 결정이 영구적인
+    호출 자격 증명으로 오남용되지 않도록 안전 상한을 둔다.
+  - **인증된 행위자 기록**: HTTP 경계에서 인증된 호출자(`actor`)를 필수 인자로 받아 기록하며, 클라이언트가
+    요청 본문으로 자체 보고하는 `actor_id`는 신뢰하지 않는다(#38038·#38230).
+  - **거부 결정 대칭 보존**: 승인(`Approve`)뿐 아니라 거부(`Deny`) 결정도 동일하게 기억하여 불필요한 재질문을
+    방지한다. 키퍼가 실제로 재시도하지 않은 호출은 자동 실행되지 않으며, 유효 시간 경과 시 안전하게 폐기된다.
+  - **판정 결과 상태**: `remember_outcome`은 `Remembered of { tool_name : string }` 또는 `No_matching_ask`로
+    나뉜다.
+  - **Yolo 모드 안전 불변식**: 키퍼가 `Yolo` 스탠스로 전환된 동안에는 승인 게이트를 묻지도 소비하지도 않아
+    항목이 쌓일 수 있으나, TTL 검사 덕분에 이전 결정이 스탠스 복귀 후 임의로 발화하지 않고 만료 폐기된다.
+  → [Keeper_late_approval](../../lib/keeper/keeper_late_approval.mli)
+
 ## Task Lifecycle
 
 **Created By**
@@ -1229,6 +1255,25 @@ status: reference
   → [Skill_source_config](../../lib/skill_config/skill_source_config.mli),
   [Server_skill_editor](../../lib/server/server_skill_editor.mli)
 
+**Skill Deletion (Skill 삭제)**
+: 선언된 소스에서 Skill 패키지를 제거하고 복구 격리소로 이동하는 절차(`Server_skill_editor.delete`).
+  단순 파일 삭제가 아니라 격리 검증·패키지 폴더 처분·스냅샷 갱신(`delete_outcome`)의 세 단계를
+  거치며, 발행 여부에 따라 `Deleted_and_published`와 `Deleted_but_unpublished`로 나뉜다.
+  - **SKILL.md 격리 (`recovery_id`)**: 원본 `SKILL.md`는 삭제되지 않고 고유 복구 식별자(`recovery_id`)가
+    부여된 격리 디렉터리로 이동(`recovery_disposition`)되어 비상 복구 가능성을 보존한다.
+  - **패키지 폴더 처분 (`package_directory`)**: `SKILL.md` 이동 후 남겨진 패키지 폴더를 닫힌 네 가지
+    상태로 판정하여 처리한다(#38594·#38616). 과거에는 빈 폴더를 방치하여 동일한 패키지 ID로
+    재생성할 때 영구히 `Package_already_exists` 거절을 받는 결함이 있었다.
+    1. `Package_directory_removed` (wire: `{"kind": "removed"}`): 빈 패키지 폴더가 `rmdir`로 완전히
+       제거되어 동일한 ID로 새 Skill 생성이 즉시 가능함.
+    2. `Package_directory_kept_non_empty` (wire: `{"kind": "kept_non_empty"}`): 폴더 내에 부속
+       파일(예: `references/`, `scripts/` 등)이 남아 있어 패키지 폴더를 그대로 보존함.
+    3. `Package_directory_removed_unsynced of string` (wire: `{"kind": "removed_unsynced", "detail": "..."}`):
+       폴더는 지웠으나 상위 디렉터리 동기화(`fsync`)에 실패하여 비정상 종료 시 폴더가 복원될 수 있음.
+    4. `Package_directory_remove_failed of string` (wire: `{"kind": "remove_failed", "detail": "..."}`):
+       폴더 삭제(`rmdir`) 작업 자체가 시스템 오류로 실패함.
+  → [Server_skill_editor](../../lib/server/server_skill_editor.mli)
+
 **Instruction Skill**
 : Keeper가 `keeper_skill`로 본문과 참조 파일을 읽고 적용할 방법을 판단하는 Skill.
   본문을 읽었다는 사실은 그 절차를 실행했거나 성공했다는 증거가 아니다.
@@ -1283,6 +1328,30 @@ status: reference
 : Keeper tool이 접근할 수 있는 writable filesystem 경계. 도구에는 반환된
   sandbox-relative path를 사용한다.
 
+**Sandbox Target (샌드박스 실행 타깃)**
+: Keeper의 `Execute` 도구가 셸 명령을 격리 실행하는 환경 추상화(`Sandbox_target.t`).
+  `Host`·`Docker`·`Micro_vm`·`Ssh`·`Delegated`의 닫힌 variant로 표현된다. 각 타깃은
+  명령의 표준 입출력과 종료 상태를 `run_outcome`(`Ran`·`Transport_failed`)으로
+  전달하여, 원격 런타임 전송 장애와 명령의 자체 실패를 명확히 분리한다.
+
+**Endpoint Allowed Paths (엔드포인트 허용 경로)**
+: SSH 샌드박스 타깃(`Sandbox_target.Ssh`, `Exec_ssh_endpoint.t`)에서 명령이 접근할 수 있는
+  추가 루트 경로 목록(`allowed_paths`).
+  - **격리 기본값**: 기본 실행 정책(`Exec_policy_paths.validate_path`)은 Keeper 작업
+    디렉터리(`workdir`)와 `/tmp` 외의 경로 접근을 정적 스크립트 검사에서 엄격히 거절한다.
+  - **추가 루트 선언**: Terminal-Bench 등 외부 벤치마크/엔드포인트 환경(예: `/app`)을
+    지원하기 위해 `runtime.toml`의 `[exec.ssh.endpoints.<name>] allowed_paths = ["/app", ...]`로
+    추가 허용 루트를 선언할 수 있다(#38603).
+  - **설정 불변식**: 선언 경로는 반드시 절대 경로이자 정규화된(normalized) 경로여야 하며,
+    루트(`/`)는 거절된다(`Exec_ssh_endpoint.parse_toml`).
+  - **어휘 비교 경계**: 엔드포인트가 원격 머신일 수 있으므로 호스트 파일시스템의 심볼릭
+    링크를 해석하지 않고 순수 어휘(lexical prefix)로만 비교한다. 그래서 추가 루트 아래에서
+    밖을 가리키는 심볼릭 링크는 이 검사가 막지 못한다. 엔드포인트가 이 머신이면 추가 루트는 링크를
+    풀어 보는 작업 디렉터리(`workdir`)보다 느슨하고, 실제 경계는 엔드포인트 계정의 권한이다. 기본값은 빈 목록(`[]`)이다.
+  → [Sandbox_target](../../lib/exec/sandbox_target.mli),
+  [Exec_policy_paths](../../lib/exec_policy/exec_policy_paths.mli),
+  [Exec_ssh_endpoint](../../lib/runtime/exec_ssh_endpoint.mli)
+
 **Worktree**
 : 한 repository 안에서 branch 작업을 격리하는 Git worktree.
 
@@ -1332,6 +1401,32 @@ status: reference
   가능한 operation을 같은 bootstrap에서 정산하면 supervisor의 주기 pass가 그
   Keeper를 등록한다. 배제된 Keeper는 이 이유와 함께 excluded list에 찍는다.
   → [keeper_runtime.mli](../../lib/keeper/keeper_runtime.mli)
+
+**Shutdown Admission Fence (종료 진입 차단막)**
+: 종료 작업 진행 중인 Keeper의 재부팅을 막아 원장 정합성을 지키는 진입 차단 술어(`Keeper_shutdown_types.requires_admission_fence`).
+  - **단계별 차단막 해제 규칙 (#31738·#38569)**: 과거에는 `Blocked` 상태의 종료 작업에 대해 실패 단계와
+    무관하게 차단막을 영구 유지하여, 영속 상태가 전혀 파괴되지 않은 Keeper도 수동 교체(`Superseded`) 없이는
+    영구히 재부팅할 수 없는 결함이 있었다. 현재는 실패 단계(`failure_stage`)를 검사하여 영속 상태 변경 전에
+    실패한 단계는 차단막을 해제하고 즉시 재시도(`retryable`)를 허용한다:
+    1. **해제 대상 (`retryable`, 차단막 없음)**: 영속 상태를 변경하기 전의 읽기·초기화·멱등 정리 단계
+       (`Task_discovery`·`Record_persist`·`Meta_update`·`Pending_confirm_cleanup`).
+    2. **유지 대상 (`fenced`, 차단막 유지)**: 키퍼의 영속 상태(태스크 소유권, 레인, 메타데이터, 세션, 레지스트리)가
+       반쯤 철거된 단계(`Turn_cancel`·`Lane_cancel`·`Turn_join`·`Lane_join`·`Record_update`·`Unhandled_worker`·
+       `Task_settlement`·`Approval_summary_retirement`·`Meta_remove`·`Session_remove`·`Registry_unregister`).
+  - **영속 복구**: 재시작 시 디스크에 이미 기록된 `Blocked` 레코드라도 해제 대상 단계에 머물러 있다면 차단막을
+    세우지 않고 다음 부팅에서 종료 작업을 안전하게 재실행한다.
+  → [Keeper_shutdown_types](../../lib/keeper/keeper_shutdown_types.mli)
+
+**Boot Meta Failure Cause (부팅 메타 실패 사유)**
+: Keeper 기동 및 구체화(materialization) 시점에 메타데이터 검증 실패를 표현하는 닫힌 구조화 사유(`Keeper_runtime.boot_meta_failure_cause`).
+  - 닫힌 다섯 가지 variant:
+    1. `Meta_read_error`: 메타데이터 파일 읽기 또는 디코딩 실패.
+    2. `Config_invalid`: TOML 파싱 또는 유효성 검사 실패.
+    3. `Sandbox_profile_required`: 선언형 키퍼 프로필에 필수 `sandbox_profile` 누락.
+    4. `Sandbox_image_required`: 컨테이너 실행 프로필(`docker`·`microvm`)에 `sandbox_image` 누락 또는 공백(#37523·#38572). `remote_ssh`는 이미지를 쓰지 않으므로 요구되지 않음. 부팅 조정(`reconcile`)과 `keeper_up` 생성 파싱 양쪽에서 `Keeper_meta_contract.missing_required_sandbox_image_error` 공통 규칙으로 즉시 거절.
+    5. `Materialization_failed`: 파일시스템 또는 디렉터리 구조 구체화 실패.
+  → [keeper_runtime](../../lib/keeper/keeper_runtime.mli),
+  [Keeper_meta_contract](../../lib/keeper/keeper_meta_contract.mli)
 
 **Checkpoint**
 : History와 설정을 담은 Agent Core의 durable 저장점. trace당 파일 하나
@@ -1905,6 +2000,13 @@ status: reference
     매 검색마다 이벤트 사이드카를 읽는 부하를 막기 위해 평소에는 흡수 원장(`memory-absorbed.jsonl`)만으로
     해결하고, 체인의 끝이 non-current일 때만 사이드카(`.memory-events.jsonl`)를 읽는다. 손상된
     이벤트 줄은 `event_unreadable_lines`로 분리 보고된다(#38543·#38552).
+  - **Keeper 삭제 시 사이드카 정리 및 캐시 무효화**: Keeper를 삭제(`purge_keeper_artifacts`)할 때 이
+    사이드카 파일(`<keeper>.memory-events.jsonl`)도 함께 삭제(`Keeper_memory_events_artifact`)되고
+    캐시된 파일 쓰기 핸들러(`Fs_compat.invalidate_cached_writer`)도 무효화된다. 따라서 동일 프로세스에서
+    같은 이름으로 다시 생성된 후속 키퍼가 이전의 조회·철회·대체 이벤트를 상속하거나 삭제된 inode에 쓰기
+    내용이 유실되는 결함을 원천 방지한다(#38235).
+  → [Keeper_shutdown_types](../../lib/keeper/keeper_shutdown_types.mli),
+  [Server_dashboard_http_delete_actions](../../lib/server/server_dashboard_http_delete_actions.ml)
 
 **Library**
 : `masc_library_add`로 수동 추가한 Markdown 문서를 읽는 지식 라이브러리.

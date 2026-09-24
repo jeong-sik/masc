@@ -122,6 +122,14 @@ type goal_proof =
           as an unreviewed goal, and showing it as "not reviewed" would
           disguise corruption as quiet. *)
 
+type verifier_unreconciled = {
+  vu_step : Goal_reconcile_step.t;
+  vu_detail : string;
+}
+(** The latest verifier scan could not settle this Verifying goal. It stays
+    Verifying until [request_complete] retries it or a later scan settles it,
+    or the operator takes it back or drops it. *)
+
 type planning_goal = {
   pg_id : string;
   pg_title : string;
@@ -131,6 +139,7 @@ type planning_goal = {
   pg_metric : string option;
   pg_target_value : string option;
   pg_proof : goal_proof;
+  pg_verifier_unreconciled : verifier_unreconciled option;
   pg_last_review_note : string option;
       (** What a keeper or operator wrote at the last transition. Free text,
           unlike {!pg_proof}, which is the judge's. *)
@@ -348,15 +357,27 @@ type inventory_freshness =
       (** The server answered from a built inventory. An empty list here does
           mean no tools. *)
 
-(** One tool the keeper's effective surface carries. [et_skill_source_id]
-    names the configured skill source a composition skill came from, read
-    from [origin.skill_provenance.identity.source_id]; it is [None] for any
-    tool with no skill behind it, and for a composition skill whose
-    provenance the producer could not resolve. *)
+(** Where one tool on the keeper's effective surface came from, as
+    [origin.kind] names it. Only a composition skill carries
+    [origin.skill_provenance], and it always carries the key: [skill_source_id]
+    is read from [skill_provenance.identity.source_id], and is [None] when the
+    producer sent [null] because it could not resolve the provenance. *)
+type effective_tool_origin =
+  | Descriptor_origin
+  | Instruction_skill_origin
+  | Composition_skill_origin of { skill_source_id : string option }
+  | Composition_control_origin
+  | Unrecognised_origin of string
+      (** A kind this build does not know, kept as the server spelled it so
+          the Tools column still draws it and the rest of the surface still
+          loads. Its provenance is not read. *)
+
+val effective_tool_origin_kind : effective_tool_origin -> string
+(** The [origin.kind] word the server sent. *)
+
 type effective_tool = {
   et_name : string;
-  et_origin : string;
-  et_skill_source_id : string option;
+  et_origin : effective_tool_origin;
 }
 
 type effective_tool_delivery =
@@ -476,6 +497,18 @@ type skill_usage_coverage = {
   suc_unavailable : string list;
 }
 
+(** One Skill name two catalog entries declare. The first entry for the name
+    in catalog order wins (Skill_catalog_snapshot.effective_projection):
+    [scsh_winner]. The two can sit in different sources, or in one source
+    whose directory names normalize to the same Skill name. A Keeper turn that
+    lists Skills by name gets the winner, when the winner loads;
+    [scsh_shadowed] is published but reaches a turn only when a Task names its
+    exact reference. Both carry the same name and differ in identity. *)
+type skill_catalog_shadow = {
+  scsh_winner : Skill_reference.identity;
+  scsh_shadowed : Skill_reference.identity;
+}
+
 type skills_catalog = {
   sc_state : skills_catalog_state;
   sc_config : skill_catalog_config option;
@@ -484,6 +517,7 @@ type skills_catalog = {
   sc_sources : skill_catalog_source list;
   sc_surfaces : skills_catalog_surface list;
   sc_rejections : skill_catalog_rejection list;
+  sc_shadows : skill_catalog_shadow list;
   sc_usage_coverage : skill_usage_coverage option;
 }
 
@@ -512,13 +546,11 @@ type effective_skill_profile = {
 
 type configured_skill_name_unavailable = {
   csn_name : string;
-  csn_reason : string option;
+  csn_reason : string;
 }
 (** A Skill name the Keeper profile selected that the turn's catalog does not
     hold. Not a read failure, so it is a different fact from
-    [ets_skills_left_out]. [csn_reason] is the producer's word for why, and it
-    is [None] when the producer sent none rather than a word this reader made
-    up. *)
+    [ets_skills_left_out]. [csn_reason] is the producer's word for why. *)
 
 type effective_tool_surface =
   | Effective_surface_available of {
@@ -1310,6 +1342,9 @@ type verification_snapshot = {
           live backlog: the rows are real and as old as that snapshot, so
           anything submitted after it is absent. *)
 }
+(** The four backlog fields are required in {!Awaiting_queue}, where the
+    server joins the backlog and always sends them. {!Full_history} does not
+    join the backlog and sends none of them, so they read as empty there. *)
 
 type keeper_phase
 (** A validated Keeper lifecycle phase from the live roster. The underlying

@@ -3129,6 +3129,13 @@ let planning_stage_rail (phase : Goal_phase.t) =
       ]
 ;;
 
+let planning_detail_tone (tone : Planning_detail.tone) =
+  match tone with
+  | Planning_detail.Proven -> (Theme.ok ())
+  | Planning_detail.Refused -> (Theme.bad ())
+  | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
+  | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
+
 (* What moves this goal next, in one sentence, from the pair the operator can
    see separately but had to combine themselves: the phase and the judge's
    last word. [executing] with a refusal on the ledger is a different
@@ -3144,8 +3151,8 @@ let planning_next_step (goal : planning_goal) =
     ( Ansi.dim
     , "work the linked tasks, then [c] to submit it for verification" )
   | Goal_phase.Verifying, _ ->
-    ( (Theme.warn ())
-    , "with the completion judge - [c] re-arms the request; [o] takes it back, [x] drops it" )
+    let tone, text = Planning_detail.verifying_next_step goal.pg_verifier_unreconciled in
+    (planning_detail_tone tone, text)
   | Goal_phase.Awaiting_confirmation, _ ->
     (Theme.warn (), "proof passed - [a] reads the proof for your final confirmation")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
@@ -3156,18 +3163,30 @@ let planning_next_step (goal : planning_goal) =
    reason is a colour and nothing else; the reason is what the judge produced
    and the only thing that says what to do next. *)
 let planning_proof_detail (goal : planning_goal) =
+  match goal.pg_verifier_unreconciled with
+  | Some blocked ->
+    (* The judge's last word is not what holds this goal: the latest verifier
+       scan could not settle it, and only this line says why. *)
+    Some
+      ( Theme.bad ()
+      , Printf.sprintf "%s: %s"
+          (Planning_detail.unreconciled_heading blocked.vu_step)
+          (Terminal_text.single_line blocked.vu_detail) )
+  | None ->
   match goal.pg_proof with
   | Tui_decode.Proof_proven None -> Some ((Theme.ok ()), "proven")
-  | Tui_decode.Proof_proven (Some evidence) -> Some ((Theme.ok ()), "proven: " ^ evidence)
+  | Tui_decode.Proof_proven (Some evidence) ->
+      Some ((Theme.ok ()), "proven: " ^ Terminal_text.single_line evidence)
   | Tui_decode.Proof_refuted None -> Some ((Theme.bad ()), "refused")
-  | Tui_decode.Proof_refuted (Some reason) -> Some ((Theme.bad ()), "refused: " ^ reason)
+  | Tui_decode.Proof_refuted (Some reason) ->
+      Some ((Theme.bad ()), "refused: " ^ Terminal_text.single_line reason)
   | Tui_decode.Proof_pending -> Some ((Theme.warn ()), "waiting for the completion judge")
   | Tui_decode.Proof_stale _ ->
       Some ((Theme.warn ()), "criterion changed; previous proof is historical")
   | Tui_decode.Proof_unreadable None ->
       Some ((Theme.warn ()), "verification ledger unreadable")
   | Tui_decode.Proof_unreadable (Some detail) ->
-      Some ((Theme.warn ()), "verification ledger unreadable: " ^ detail)
+      Some ((Theme.warn ()), "verification ledger unreadable: " ^ Terminal_text.single_line detail)
   | Tui_decode.Proof_idle ->
       (* Nothing from the judge. A keeper's own note is the next best thing the
          row has to say, and it is what the operator wrote there to be read. *)
@@ -3572,13 +3591,6 @@ let render_planning_list (state : state) =
    next-step sentence is a row of its own. Counted here, drawn below. *)
 let planning_detail_fixed_rows = 12
 
-let planning_detail_tone (tone : Planning_detail.tone) =
-  match tone with
-  | Planning_detail.Proven -> (Theme.ok ())
-  | Planning_detail.Refused -> (Theme.bad ())
-  | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
-  | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
-
 let planning_detail_pane (state : state)
     ~(armed : Goal_phase.Public_action.t option) ~confirmation ~rows ~cols
     (goal : planning_goal) buf =
@@ -3718,7 +3730,11 @@ let planning_detail_pane (state : state)
          Masc_tui_message_layout.wrap_words ~max_cells:(cols - 6)
            (Terminal_text.single_line detail)
          |> List.map (fun text -> { Planning_detail.tone = Unreadable; text })
-     | `Inspect Absent -> Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note)
+     | `Inspect Absent ->
+         (match goal.pg_verifier_unreconciled with
+          | Some blocked -> Planning_detail.unreconciled_lines ~width:(cols - 6) blocked
+          | None -> [])
+         @ Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note)
     @ Planning_detail.timeline ~width:(cols - 6) ~goal_id:goal.pg_id
         state.goal_timeline
   in
@@ -4077,15 +4093,29 @@ let render_schedule_list (state : state) =
              |> min 40
            in
            let wake_width = schedule_wake_word_cells in
+           (* Measured, like the target beside it. The column was a literal
+              12, and the words the projection sends run past it: live,
+              [turn_finished] drew as [tur...finished], and
+              [terminal_cancelled] and [conflicting_terminal_evidence] are
+              longer still. The wake column next to it takes its width from
+              the contract's own list; this one has no such list to read
+              (#38350), so it is measured from the rows on the page. *)
+           let delivery_width =
+             Render_schedule.schedule_delivery_width
+               (List.map
+                  (fun row ->
+                    Terminal_text.single_line (schedule_delivery_word row))
+                  snapshot.scs_rows)
+           in
            let recurrence_width =
              Render_schedule.schedule_recurrence_width
                ~inner_width:(max 1 (framed_inner_width cols - 2))
-               ~target_width:subject_width ~wake_width
+               ~target_width:subject_width ~wake_width ~delivery_width
            in
            c.push_styled ~style:(Theme.recede ())
              ("  "
              ^ Render_schedule.schedule_header_row ~target_width:subject_width
-                 ~wake_width ~recurrence_width);
+                 ~wake_width ~delivery_width ~recurrence_width);
            c.push_divider ();
            (* The column names and the rule under them, the two rows every
               other list on this screen already spends to say what it draws. *)
@@ -4144,7 +4174,7 @@ let render_schedule_list (state : state) =
                  Render_schedule.schedule_row ~status_style:status_color
                    ~wake_style:(schedule_status_color last_wake)
                    ~recurrence_style:Ansi.dim ~target_width:subject_width
-                   ~wake_width ~recurrence_width
+                   ~wake_width ~delivery_width ~recurrence_width
                    { Render_schedule.srow_status =
                        bracketed ~max_cells:10 row.sch_status
                    ; srow_due = due
@@ -5262,7 +5292,10 @@ let standalone_lane_row ~now ~frame ~(columns : Lane_table.columns) width
   let p50 =
     match lane.sl_p50_elapsed_s with
     | None -> "—"
-    | Some seconds -> Printf.sprintf "%.1fs" seconds
+    | Some seconds -> (
+        match Message_layout.elapsed_text seconds with
+        | Some text -> text
+        | None -> "—")
   in
   let prefix = standalone_lane_status_style lane.sl_status in
   let line =
@@ -5383,13 +5416,16 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
         float_of_int lane.sl_succeeded_count /. float_of_int total *. 100.0
       in
       let p50_str =
-        (* One decimal, the way the P50 column above draws the same
-           [sl_p50_elapsed_s]: the row read "8.0s" and this line "8.00s" of
-           one number on one screen, which leaves the reader deciding whether
-           they are the same figure. The column is the constrained one -- six
-           cells -- so the detail follows it rather than the other way. *)
+        (* The P50 column above draws the same [sl_p50_elapsed_s] through
+           the same ladder. The two used to differ -- "8.0s" in the row,
+           "8.00s" here -- which left the reader deciding whether they were
+           one figure. A reading the ladder has no spelling for leaves the
+           clause out, as a missing one does. *)
         match lane.sl_p50_elapsed_s with
-        | Some s -> Printf.sprintf " · p50 latency %.1fs" s
+        | Some s -> (
+            match Message_layout.elapsed_text s with
+            | Some text -> Printf.sprintf " · p50 latency %s" text
+            | None -> "")
         | None -> ""
       in
       Printf.sprintf "Runs: %d retained (%d ok / %d fail / %d cancel) · %.1f%% success%s"
@@ -5891,7 +5927,10 @@ let render_lane_run_list (state : state) ~lane_id =
           let elapsed =
             match run.lrs_elapsed_s with
             | None -> "—"
-            | Some seconds -> Printf.sprintf "%.1fs" seconds
+            | Some seconds -> (
+                match Message_layout.elapsed_text seconds with
+                | Some text -> text
+                | None -> "—")
           in
           let line =
             "  "
@@ -6194,7 +6233,10 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
   let elapsed =
     match detail.lrd_elapsed_s with
     | None -> ""
-    | Some seconds -> Printf.sprintf "  ·  %.1fs" seconds
+    | Some seconds -> (
+        match Message_layout.elapsed_text seconds with
+        | Some text -> Printf.sprintf "  ·  %s" text
+        | None -> "")
   in
   let slot =
     match detail.lrd_answer_source, detail.lrd_selected_slot with
@@ -7451,18 +7493,29 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                            String.equal binding.cb_keeper_name k.k_name)
                         connector.cn_bindings)
                  in
+                 let tail =
+                   Printf.sprintf "  %d here / %d total" here_count
+                     (List.length connector.cn_bindings)
+                 in
+                 (* Two cells of indent, two for the cursor mark, two between
+                    the name and the badge: the padding the row spends before
+                    its columns. *)
+                 let name_cells =
+                   Masc_tui_connector_state.list_row_name_cells
+                     ~inner:(framed_inner_width cols) ~fixed_cells:6
+                     ~tail_cells:(String.length tail)
+                 in
                  let line =
                    "  " ^ (if index = selected_index then "▸ " else "  ")
                    ^ fit_width
                        (Terminal_text.single_line connector.cn_display_name)
-                       14
+                       name_cells
                    ^ "  "
                    ^ fit_width
                        (Masc_tui_connector_state.badge_word
                           connector.cn_connection)
-                       12
-                   ^ Printf.sprintf "  %d here / %d total" here_count
-                       (List.length connector.cn_bindings)
+                       Masc_tui_connector_state.badge_column_cells
+                   ^ tail
                  in
                  if index = selected_index then Ansi.reverse ^ line ^ Ansi.reset
                  else line)
@@ -9556,9 +9609,41 @@ let render_fusion_list (state : state) =
       box_divider buf cols) replay_warning;
   let chrome_rows = listing_chrome ~error:state.fusion_error
       + (if Option.is_some replay_warning then 2 else 0) in
-  (* The selected run's lifecycle is a reading, not footer help. Reserve one
-     row for it so every run says where it is in the four-stage flow. *)
-  let content_height = max 1 (rows - chrome_rows - 1) in
+  (* The selected run's lifecycle is a reading, not footer help, and it is
+     asked for its own height the way the Memory block under the roster is
+     (#38432): the clauses are packed into rows here, before the list is given
+     its height. [listing_note_rows] hands it only the rows the list leaves
+     blank, so every run still says where it is in the four-stage flow and no
+     entry loses its row. *)
+  let summary_indent = "  " in
+  let summary_clauses =
+    match List.nth_opt entries state.fusion_cursor with
+    | None -> None
+    | Some (Tui_decode.Fusion_historical_evidence _) ->
+        Some
+          ( Theme.warn ()
+          , [ "Historical Board evidence; run lifecycle unavailable"
+            ; "Enter:read original result" ] )
+    | Some (Tui_decode.Fusion_retained_run selected) ->
+        let style, summary = fusion_run_summary selected in
+        Some (style, [ fusion_run_duration ~now:now_epoch selected; summary ])
+  in
+  let packed_summary =
+    match summary_clauses with
+    | None -> []
+    | Some (_, clauses) ->
+        Message_layout.pack_clauses
+          ~max_cells:
+            (max 1
+               (framed_inner_width cols
+                - Message_layout.display_width summary_indent))
+          clauses
+  in
+  let summary_rows =
+    listing_note_rows ~body_rows:(rows - chrome_rows) ~entries:shown
+      ~wanted:(List.length packed_summary)
+  in
+  let content_height = max 1 (rows - chrome_rows - summary_rows) in
   let scroll =
     if state.fusion_cursor >= content_height then
       state.fusion_cursor - content_height + 1
@@ -9611,14 +9696,22 @@ let render_fusion_list (state : state) =
             box_line buf cols (Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line)
           else box_line buf cols ("  " ^ line)
     done;
-  (match List.nth_opt entries state.fusion_cursor with
-   | None -> box_empty buf cols
-   | Some (Tui_decode.Fusion_historical_evidence _) ->
-       box_line_styled buf cols ~style:(Theme.warn ())
-         "  Historical Board evidence; run lifecycle unavailable · Enter:read original result"
-   | Some (Tui_decode.Fusion_retained_run selected) ->
-       let style, summary = fusion_run_summary selected in
-       box_line_styled buf cols ~style ("  " ^ fusion_run_duration ~now:now_epoch selected ^ " · " ^ summary));
+  (match summary_clauses with
+   | None -> for _ = 1 to summary_rows do box_empty buf cols done
+   | Some (style, clauses) ->
+       (* The packed rows are drawn only when the frame had room for all of
+          them. A reading that does not fit is drawn as the one joined row it
+          was, where the frame's own cut mark still says it was cut; stopping
+          after the rows that fit would end on a row that reads as whole
+          (#38432 falls back to the same line). *)
+       let drawn =
+         if List.length packed_summary <= summary_rows then packed_summary
+         else [ String.concat Message_layout.clause_separator clauses ]
+       in
+       List.iter
+         (fun row -> box_line_styled buf cols ~style (summary_indent ^ row))
+         drawn;
+       for _ = List.length drawn + 1 to summary_rows do box_empty buf cols done);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -12522,8 +12615,8 @@ let render_keeper_calls (state : state) =
              ("?", Ansi.reset)
          in
          let duration =
-           match call.kc_duration_ms with
-           | Some ms -> Masc_tui_acting.elapsed_text ms
+           match Option.bind call.kc_duration_ms Masc_tui_acting.elapsed_text with
+           | Some text -> text
            | None -> "-"
          in
          let turn =
@@ -12746,8 +12839,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Other _ ->
           None
     in
-    let row = Acting.row_of_entry ~duration_ms entry in
-    { row with Acting.keeper = Acting.keeper_of_event ~traces event }
+    Acting.keeper_row_of_entry ~traces ~duration_ms entry
   in
   (* [Turns] folds the whole ring into per-turn rows; the flat filters keep
      the page-lazy pairing above. *)
@@ -12818,23 +12910,19 @@ let render_acting (state : state) =
     ("  " ^ Acting.filter_explanation state.acting_filter);
   box_divider buf cols;
   (* Measured over every row the filter keeps, not the page on screen, so the
-     columns do not move while a reader scrolls. This walks the list once and
-     builds a row per entry; what the note above avoids for the page is the
-     pairing, which is quadratic, and measuring needs neither the pairing nor
-     the duration it finds -- those reach the detail column, and the two
-     columns measured here are the keeper and the label. *)
+     columns do not move while a reader scrolls. Only the two named columns
+     are measured, so this asks the event for its keeper and its label rather
+     than building a row: a row carries the detail sentence too, and spelling
+     one per kept entry on every frame is work the screen never shows. The
+     chunked list is already built, so its rows are read as they are. *)
   let table_columns =
     let measured =
       match chunked with
-      | Some rows -> rows
+      | Some rows -> List.map Acting.measured_of_row rows
       | None ->
           List.map
             (fun (entry, _older) ->
-              let row = Acting.row_of_entry ~duration_ms:None entry in
-              { row with
-                Acting.keeper =
-                  Acting.keeper_of_event ~traces entry.Acting.ae_event
-              })
+              Acting.measured_of_event ~traces entry.Acting.ae_event)
             visible
     in
     Acting.columns ~inner_width:(framed_inner_width cols) measured

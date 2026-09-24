@@ -1502,6 +1502,50 @@ let test_a_narrow_run_says_its_total () =
   check bool "the sum stands for the durations" true (contains "12.0s" run);
   check bool "the list of them is gone" false (contains "274ms" run)
 
+(* A negative duration is a clock that disagreed with itself. The run leaves
+   it out of the list and out of the sum, as it does a call with no duration:
+   summed, these five read "7.7s" -- the negative taken from the real 11.7s. *)
+let backwards_run_input () =
+  let other =
+    runner_call ~at:900. ~duration_ms:5. ~id:"read"
+      ~disposition:(Ok Masc.Tui_decode.Keeper_call_completed)
+      ~input:"{\"path\":\"lib/a.ml\"}" ~output:"12 lines" "Read"
+  in
+  let calls =
+    List.map
+      (fun (index, duration) ->
+        runner_call ~at:(950. +. float_of_int index) ~duration_ms:duration
+          ~id:(Printf.sprintf "exec-%d" index)
+          ~disposition:(Ok Masc.Tui_decode.Keeper_call_completed)
+          ~input:"{\"cmd\":\"ls\"}" "Execute")
+      [ 0, 2700.; 1, -4000.; 2, 1400.; 3, 2900.; 4, 4700. ]
+  in
+  { (runner_input ()) with Pane.chunks = chunks [ "runner" ] (entries (other :: calls)) }
+
+(* Where the four spellable durations (19 cells) do not fit but their sum
+   does. Outside the wide pane a candidate fits when it is at most
+   cols - 18 cells: the border, glyph, dispatch marks and two gaps take
+   seven, "Execute \xc3\x975" ten, and the one before the duration one more.
+   At 30 the list is too wide and "11.7s" fits; at 40 the list itself fits. *)
+let backwards_run_sum_cols = 30
+
+let test_a_backwards_duration_is_left_out_of_the_run () =
+  let wide =
+    run_row (Pane.lines ~rows ~cols:Pane.wide_pane_cols ~scroll:0 (backwards_run_input ()))
+  in
+  (* The wide pane pads the name and ends with the age, so the durations are
+     read between the gaps around them. *)
+  check bool ("the list skips it: " ^ wide) true
+    (contains " 2.7s 1.4s 2.9s 4.7s " wide);
+  check bool "and draws no dash for it" false (contains "\xe2\x80\x94" wide);
+  let narrow =
+    run_row
+      (Pane.lines ~rows ~cols:backwards_run_sum_cols ~scroll:0 (backwards_run_input ()))
+  in
+  check bool ("the sum leaves it out: " ^ narrow) true
+    (String.ends_with ~suffix:"Execute \xc3\x975         11.7s" narrow);
+  check bool "rather than taking it from the sum" false (contains "7.7s" narrow)
+
 let test_the_call_row_marks_a_batch_and_a_deferral () =
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 (runner_input ())).Pane.rows in
   check bool "a serial completed call wears no mark" true
@@ -1905,16 +1949,18 @@ let test_a_wide_call_row_ends_with_its_age () =
   check bool "the narrow pane draws no age" false
     (List.exists (contains "50.0s") (List.map text narrow_view.Pane.rows))
 
-(* An age past ninety-nine minutes is wider than the six cells the column
-   is padded to: the row widens the age and keeps every digit. *)
-let test_an_old_call_keeps_every_digit_of_its_age () =
+(* An age past ninety-nine minutes used to spell "120m05s", seven cells in a
+   column padded to six, and the row widened to keep the digits. The ladder
+   carries hours now, so the old age and a fresh one end in the same column. *)
+let test_an_old_call_keeps_the_age_column () =
   let old = [ runner_call ~at:(now -. 7_205.) ~duration_ms:5. ~id:"old" "Read" ] in
   let view =
     Pane.lines ~rows ~cols:wide_cols ~scroll:0
       { (runner_input ()) with Pane.chunks = chunks [ "runner" ] (entries old) }
   in
   let row = List.nth view.Pane.rows first_call_row in
-  check bool "120m05s whole at the edge" true (String.ends_with ~suffix:"5ms 120m05s" (text row));
+  check bool "2h00m in the six cells the column pads to" true
+    (String.ends_with ~suffix:"5ms  2h00m" (text row));
   check int "the row still fits" wide_cols (width row)
 
 let test_a_call_row_names_the_call_a_press_opens () =
@@ -2032,6 +2078,8 @@ let () =
             test_a_run_of_one_tool_is_one_counted_row
         ; test_case "a narrow run says its total" `Quick
             test_a_narrow_run_says_its_total
+        ; test_case "a backwards duration is left out of the run" `Quick
+            test_a_backwards_duration_is_left_out_of_the_run
         ; test_case "an opened call draws its facts and previews" `Quick
             test_an_opened_call_draws_its_facts_and_previews
         ; test_case "an opened wire call says what it does not carry" `Quick
@@ -2052,8 +2100,8 @@ let () =
             test_the_wide_fleet_row_keeps_a_long_name_whole
         ; test_case "a wide call row ends with its age" `Quick
             test_a_wide_call_row_ends_with_its_age
-        ; test_case "an old call keeps every digit of its age" `Quick
-            test_an_old_call_keeps_every_digit_of_its_age
+        ; test_case "an old call keeps the age column" `Quick
+            test_an_old_call_keeps_the_age_column
         ] )
     ; ( "responses"
       , [ test_case "each model response gets a bracket beside its calls" `Quick

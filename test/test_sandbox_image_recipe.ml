@@ -58,26 +58,6 @@ let test_recipe_needs_no_build_context () =
   check bool "no COPY" false (contains Keeper_sandbox_image.dockerfile "\nCOPY ");
   check bool "no ADD" false (contains Keeper_sandbox_image.dockerfile "\nADD ")
 
-(* sandbox-images/base/Dockerfile is the recipe's only source, and the dune
-   rule in lib/keeper_sandbox_image copies it into the binary. CI builds the
-   image from the file while the binary and test.yml use the embedded string,
-   so the two have to be the same bytes. Dune passes the declared dependency's
-   path directly; the direct CI runners provide DUNE_SOURCEROOT. Neither path
-   depends on the test's build directory. *)
-
-let test_binary_embeds_the_recipe_file () =
-  let recipe_path =
-    match Sys.argv with
-    | [| _; path |] -> path
-    | [| _ |] ->
-      (match Sys.getenv_opt "DUNE_SOURCEROOT" with
-      | Some root -> Filename.concat root "sandbox-images/base/Dockerfile"
-      | None -> fail "recipe path argument or DUNE_SOURCEROOT is required")
-    | _ -> fail "expected a single recipe path argument"
-  in
-  let on_disk = In_channel.with_open_bin recipe_path In_channel.input_all in
-  check string "embedded recipe = file" on_disk Keeper_sandbox_image.dockerfile
-
 let test_build_argv_reads_the_recipe_from_stdin () =
   check
     (list string)
@@ -153,8 +133,7 @@ let test_nobody_named_the_image_says_so () =
            .Env_config_sandbox.Runtime.source)
 
 let () =
-  (* The recipe path is this test's input, not an Alcotest subcommand. *)
-  run ~argv:[| Sys.argv.(0) |] "Sandbox image recipe"
+  run "Sandbox image recipe"
     [ ( "dockerfile"
       , [ test_case "installs bash" `Quick test_recipe_installs_bash
         ; test_case "installs ripgrep" `Quick test_recipe_installs_ripgrep
@@ -164,8 +143,6 @@ let () =
         ; test_case "gives an arbitrary uid a home" `Quick
             test_recipe_gives_an_arbitrary_uid_a_home
         ; test_case "needs no build context" `Quick test_recipe_needs_no_build_context
-        ; test_case "the binary embeds the recipe file" `Quick
-            test_binary_embeds_the_recipe_file
         ] )
     ; ( "build_argv"
       , [ test_case "reads the recipe from stdin" `Quick

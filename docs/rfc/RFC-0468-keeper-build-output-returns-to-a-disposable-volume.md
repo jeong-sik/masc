@@ -104,11 +104,14 @@ state and docs that live next to `_build` — which is exactly why today's
 manual cleanup stopped at `rm -rf` inside the guest and never reclaimed host
 space.
 
-This is a regression the RFC-0400 author could not have measured at the
-time: RFC-0400 was written to stop kernel panics, on a fleet where volumes
-were presumably still small. Five months (worth of turns) later, host disk
-is the failure mode RFC-0399 already had a working answer for, and RFC-0400
-removed it as a side effect of solving something else.
+RFC-0400 was merged 2026-09-02 (#32574, both its work-volume and cut phases)
+— 22 days before this RFC, not the "five months" an earlier draft of this
+section claimed without checking. It was written to stop kernel panics, on
+a fleet whose volumes this RFC has no measurement of at that date. What is
+measured is where the fleet is now: host disk is the failure mode RFC-0399
+already had a working answer for, and RFC-0400 removed that answer as a
+side effect of solving something else, regardless of how long the gap took
+to matter.
 
 ## Design
 
@@ -151,42 +154,39 @@ only for the checkouts whose plan needs one. Only `plan_build_link` and the
 pure state/plan types are unchanged from RFC-0399; the walk and the act are
 new.
 
-**Recreation trigger — reactive, not predictive.** An earlier draft of this
-section proposed probing each build volume's host size on a timer and
-recreating past some percentage of the ceiling. That number would have been
-a guess with no measurement behind it — exactly `forbidden#magic_number`
-("암묵적 판단 기준이 아니라 선명한 기준으로") — and checking it would have
-required inventing the fleet's first real disk-pressure gate on top of a
-module that is explicitly not one.
+**Recreation trigger — tied to a boundary that already exists, not a new
+one.** Two earlier drafts of this section each invented something: first a
+proactive size percentage with no fleet measurement behind it
+(`forbidden#magic_number`), then a reactive ENOSPC classification. The
+second was closer, but adversarial review (against the commit that
+introduced it) found it still didn't work: `keeper_disk_pressure.mli` is
+observation-only by its own doc comment — *"This module never admits,
+delays, pauses, or rejects Keeper work"* — so there was no typed ENOSPC
+signal to extend; a build-volume write failing would have reached the host
+as an exec's stderr text, and classifying it without matching that string
+is exactly `forbidden#string_matching`. Worse, `container volume` has no
+attach or detach (checked: `create, delete/rm, list/ls, inspect, prune`
+only), so recreating mid-session was never actually possible — any
+recreation was always going to mean stopping the guest, which is a boot,
+not a hot-swap.
 
-Corrected against what the codebase actually has: `keeper_disk_pressure.mli`
-(now `lib/keeper_runtime/`) says of itself, in its own doc comment,
-*"This module never admits, delays, pauses, or rejects Keeper work. It
-records actual typed ENOSPC failures and exposes raw df observations."*
-RFC-0122's `Resource_pressure.S` circuit breaker that would have made a size
-threshold meaningful was never built — its own progress audit marks that
-phase absent. There is no existing gate this RFC's trigger can ride on.
+Once that's true, the trigger falls out for free: recreate the build volume
+on every fresh `container run`, never on adopting an already-running guest.
+`microvm_build_volume` already runs exactly there — the same call site
+`microvm_work_volume` uses to keep its own volume *across* restarts, this
+RFC's version does the opposite, deliberately. Fresh boot and empty build
+volume now coincide by construction. No classification, no lockfile check,
+no size threshold, no new module, no gate on keeper turns —
+`recreate_apple_build_volume` deletes the volume if present and creates it
+again, using the probe already written for `ensure_apple_build_volume`. A
+probe failure refuses the boot the same way an absent work volume already
+does.
 
-So it does not predict. RFC-0399 already measured and declared a ceiling for
-`_build` volumes — 128 GiB, `MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE` — sized
-against one keeper's real 87 GB. That number is not invented here; it is
-reused as-is. The trigger is the guest's own write failing inside that
-ceiling: a build-volume operation returns typed ENOSPC (the same condition
-`keeper_disk_pressure.ml`'s `note_exception` already records, extended to
-also route through the build-volume path), and *that*, not a percentage
-guess, is what starts recreation — stop the guest's use of that one volume,
-delete it, recreate it empty, refresh the symlink, let the failed operation
-retry. Nothing is predicted; something that already, deterministically,
-happened is repaired.
-
-This is host-side fleet maintenance, not a budget gate on keeper turns — the
-keeper never sees this volume, there is no cumulative counter, and
-`forbidden#budget_gate`'s own carve-out for resource/safety boundaries
-covers a real ENOSPC the same way it covers a provider's hard limit. It is
-also, honestly, new: this is the first thing in the codebase that *acts* on
-a disk-pressure observation rather than only recording it. RFC-0122's own
-"purge 정책은 별도 RFC" note said this was coming; this is that RFC, scoped
-to exactly the one volume kind this RFC has measurements for.
+The cost is a cold `dune build` on every guest restart, on however many
+GB of the checkout's build graph. Guests are meant to be keeper-lifetime
+(RFC-0400: "the guest outlives turns"), so this trades disk for rebuild
+time only on the restarts that already happen — crashes, operator resets,
+image upgrades — not on anything this RFC introduces.
 
 **What does not move.** `.git`, task files, docs, anything the keeper wrote
 by hand — RFC-0400's unified tree ownership stands. Only the directory dune
@@ -230,38 +230,63 @@ own uid:gid over `container exec`, and are covered by tests that check
 argv/script shape rather than a real filesystem.
 
 No new refusal semantics: a real `_build` directory already found on the
-unified volume (pre-existing keepers, mid-flight at cutover) is left alone
-and reported, exactly as RFC-0399's `Link_refused_real_directory` already
-does. It converts to a link on a later turn once emptied, same as before.
+unified volume is left alone and reported, exactly as RFC-0399's
+`Link_refused_real_directory` already does. It converts to a link once the
+directory is cleared by hand — this RFC never clears one itself, so an
+already-bloated pre-existing checkout stays on the unified volume
+indefinitely unless an operator moves it, the same posture RFC-0399 took
+toward real output from day one. A one-time migration of the fleet's
+existing checkouts (`container exec cp -a` style, the same mechanism
+RFC-0400's own cutover runbook already used once) would clear this, but
+it's a separate, explicit, operator-run action, not something this RFC
+does automatically to a keeper's tree.
 
-### B. Recreation policy
+`MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE` (default `128g`, RFC-0399's own
+default) is reintroduced with the same name RFC-0400 deleted, mirroring
+`MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE`'s shape in `Env_config_sandbox`.
+Not `forbidden#env_var_sprawl`: that rule is about a new variable
+duplicating one that already covers the same value, and this one covers
+nothing that exists today — it names the ceiling of a volume kind this RFC
+reintroduces, not a second name for the work volume's existing
+`..._WORK_VOLUME_SIZE`.
 
-No new periodic probe, no new ceiling. `keeper_disk_pressure.ml`'s
-`note_exception` call sites extend to cover build-volume operations (today
-they cover the paths RFC-0122 already wired); a build-volume write that
-surfaces ENOSPC is where recreation starts, typed as `Build_volume_full of
-{ name; op }`, not a size measured against a guess. `_build/.lock` presence
-still gates the destructive step — a build in flight when ENOSPC hit is not
-possible by construction (the failing write *is* the in-flight build), but
-a second, unrelated build on the same volume must not be torn down under it,
-so the lock check stays as the concurrency guard it already is for dune.
+The link refresh (`ensure_microvm_build_links`, implemented in PR #38563's
+boot-wiring commit) runs once per guest adoption, not literally every
+turn as RFC-0399's original refresh was: `microvm_remote_endpoint` already
+memoizes the work-root check the same way
+(`mark_microvm_work_root_ready`), and scanning on every tool call inside a
+turn would be an exec per call for checkouts that rarely change
+mid-session. Stated gap: a checkout the keeper creates after a guest's
+first adoption keeps writing to the unified volume until the guest
+restarts — bounded by the same restart that already recreates the build
+volume (§B), not indefinite.
+
+### B. Recreate on every fresh boot (implemented)
+
+`recreate_apple_build_volume` deletes the build volume if present, then
+creates it empty, called from `microvm_build_volume` — which runs only on
+a fresh `container run`, never on adopting a guest that is already up, the
+same call site `microvm_work_volume` uses to keep *its* volume across
+restarts. This RFC's volume does the opposite on purpose: fresh boot and
+empty build volume coincide by construction, so every guest restart
+(crash, operator reset, image upgrade — not anything new this RFC causes)
+is the host-disk reclaim this RFC exists for. No new gate, classification,
+lockfile check, or size threshold; `keeper_disk_pressure.ml` is untouched.
 
 ### C. Verification
 
-- Unit: extend `test_keeper_sandbox_microvm` with RFC-0399's original suites
-  ported to the RFC-0400 guest layout (44 tests existed; the ones proving
-  "never deletes real output" and "does not follow symlinks" are the ones
-  that matter most here, since this RFC pairs mechanism reuse with a new
-  destructive step that must inherit those guarantees).
-- New: `Build_volume_full` classification against a stubbed ENOSPC `errno`;
-  the lockfile skip; recreation leaves the symlink and mountpoint intact
-  from the keeper's perspective (a `dune build` retried immediately after
-  recreation succeeds without the keeper doing anything).
-- Live: one keeper's build volume filled to its 128 GiB ceiling (a small
-  volume in a test fixture, not the live fleet), a build issued against it
-  observed to hit ENOSPC, get classified, and trigger recreation; guest
-  confirms the checkout is untouched (`git status` clean, task files
-  present) and the retried `dune build` succeeds cold.
+- Unit (landed): `test_keeper_sandbox_microvm` — 8 tests for the guest-exec
+  scan/plan/apply (argv and script shape, not a real filesystem — the walk
+  and link now run inside a guest this test suite doesn't boot), 1 for the
+  delete argv, plus the RFC-0399-derived pure `plan_build_link`/
+  `build_link_target` cases. 75 tests total, all passing, no regression.
+- Missing (open, tracked as this RFC's remaining acceptance gap): a
+  `MASC_MICROVM_LIVE=1` test that boots a real Apple guest, confirms the
+  build volume is mounted at `/masc-build`, writes past its declared size
+  to confirm the guest sees ENOSPC rather than something stranger, restarts
+  the guest, and confirms both that the volume's host size dropped back
+  down and that the checkout (`git status`, task files) survived untouched.
+  Nothing in this RFC's acceptance has run against a live guest yet.
 
 ## Alternatives, and why they are not this
 
@@ -292,22 +317,33 @@ throws away everything, including state this RFC is explicitly trying to
 keep (git checkouts, task files, docs), to reclaim space that is 90%+ one
 directory dune already knows it doesn't need.
 
+**ENOSPC-reactive recreation** (an earlier draft of this RFC). Checked
+against what exists rather than assumed: `keeper_disk_pressure.ml` is
+observation-only (no admission gate ever landed — RFC-0122's own progress
+audit marks that phase absent), so there was no typed ENOSPC signal to
+attach to; building one would have meant classifying a build-volume
+failure from an exec's stderr text, which is `forbidden#string_matching`.
+Moot regardless: `container volume` has no attach or detach, so recreating
+a volume under a *running* guest was never possible — any recreation was
+always a guest restart. §B ties recreation to the restart boundary that
+already exists instead of inventing a detection mechanism to justify one
+that doesn't.
+
 ## Open questions
 
-1. ~~Ceiling and probe interval defaults~~ — resolved by not needing one.
-   The trigger is ENOSPC against RFC-0399's already-measured 128 GiB
-   ceiling, not a proactive percentage against an unmeasured fleet
-   distribution. No new number, no new probe interval.
-2. **Idle-detection precision.** `_build/.lock` covers dune. A build tool
-   this RFC hasn't measured (if a keeper ever runs one inside `_build`) could
-   have no lockfile at all, and the recreation step would need a second
-   signal or would need to stay dune-only in scope, matching RFC-0399's own
-   "Known gaps" posture on npm/cargo.
-3. **Does the janitor need per-keeper opt-out?** A keeper mid-debugging a
-   build artifact (inspecting `_build` output by hand, not through a fresh
-   `dune build`) would lose that state on recreation. RFC-0399 never had this
-   question because its volume was smaller and the guest chose when to link;
-   this RFC adds an external actor deleting guest-visible state on a timer.
+1. ~~Ceiling and probe interval defaults~~ — moot. There is no probe, no
+   ceiling check, and no percentage: recreation is tied to the fresh-boot
+   boundary, not to a measured or guessed size.
+2. ~~ENOSPC/idle-detection precision~~ — moot for the same reason: nothing
+   classifies a live failure, so a build tool's lockfile shape (dune's
+   `_build/.lock`, or the lack of one for another tool) never enters the
+   decision.
+3. **Is a cold build on every restart an acceptable cost long-term?**
+   Restarts are meant to be rare (RFC-0400: guests are keeper-lifetime), so
+   this RFC accepts the cost rather than design against it. If restart
+   frequency turns out higher than assumed — unmeasured here — the cost
+   compounds, and that would be grounds for a follow-up, not for this RFC
+   guessing a mitigation now.
 
 ## Non-goals
 
@@ -322,6 +358,16 @@ directory dune already knows it doesn't need.
   this RFC has measurements for. A generic disk-pressure sweep across
   arbitrary guest paths is a different, larger RFC — RFC-0122 already flags
   "purge 정책" for later work explicitly, and this is that work, narrowly.
+- **Deleting the build volume on keeper purge/decommission.** Checked, not
+  assumed: `git grep` for a `container volume` delete call across `lib/`
+  returns zero hits today — the work volume is not explicitly deleted on
+  purge either. It relies on `container volume prune`, which removes any
+  volume with no container reference, run either manually or on whatever
+  cadence an operator chooses (measured this session: 6 orphaned volumes,
+  147 GB, reclaimed by one `container volume prune` call). The build volume
+  is the same kind of object as the work volume to that command, so it is
+  swept the same way once its container is gone; no new cleanup path is
+  added by this RFC, and none is needed.
 
 ## Number allocation note
 

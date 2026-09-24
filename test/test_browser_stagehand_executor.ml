@@ -137,7 +137,8 @@ let test_capture_passes_the_surface () =
   let tabs = Executor.Tabs.create () and fake = fake [ blank; shop () ] ~active:(Some "P2") in
   ignore (listed tabs fake);
   Eio_main.run
-  @@ fun _ ->
+  @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Lane.install_stagehand_executor (Some (Executor.execute ~tabs ~call:(call fake)));
   let captured = Masc.Browser_surface.capture { Masc.Browser_surface.route = Lane.Stagehand_route; tab_id = Some 1 } in
   Lane.install_stagehand_executor None;

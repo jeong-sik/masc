@@ -1097,7 +1097,7 @@ let load_schedule_wake_history ~(host : string) ~(port : int)
 let load_schedules_for_target ~(host : string) ~(port : int)
     ~(payload_target : string) : (schedule_snapshot, string) result =
   match fetch_schedules_for_target ~host ~port ~payload_target with
-  | Error err -> Error ("keeper schedule load failed: " ^ err)
+  | Error err -> Error err
   | Ok json -> decode_schedule_snapshot json
 
 (** Load board post list from /api/v1/board *)

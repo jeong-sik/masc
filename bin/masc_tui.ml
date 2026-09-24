@@ -3629,23 +3629,35 @@ let launch_keeper_schedules_load state ~mailbox ~keeper_name =
       let host = server_peer_host in
       let port = state.port in
       let payload_target = "keeper:" ^ keeper_name in
+      let enqueue_result result =
+        enqueue_async mailbox
+          (Keeper_schedules_loaded
+             ( keeper_name
+             , Result.map_error
+                 (fun detail -> "keeper schedule load failed: " ^ detail)
+                 result ))
+      in
       let run () =
         let result =
           try Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
         in
-        enqueue_async mailbox (Keeper_schedules_loaded (keeper_name, result))
+        enqueue_result result
       in
       (match Eio_context.get_switch_opt () with
        | Some sw ->
-           Eio.Fiber.fork_daemon ~sw (fun () ->
-               run ();
-               `Stop_daemon)
+           Masc_tui_fork_guard.launch ~sw
+             ~on_sync_failure:(fun detail ->
+                 if Option.equal String.equal state.keeper_schedules_inflight
+                      (Some keeper_name)
+                 then state.keeper_schedules_inflight <- None;
+                 enqueue_result (Error detail))
+             (fun () ->
+                run ();
+                `Stop_daemon)
        | None ->
-           enqueue_async mailbox
-             (Keeper_schedules_loaded
-                (keeper_name, Error "Eio switch is unavailable")))
+           enqueue_result (Error "Eio switch is unavailable"))
 
 let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   let read, request = Snapshot_read.start ~intent state.schedules_read in

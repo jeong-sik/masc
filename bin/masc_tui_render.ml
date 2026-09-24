@@ -4878,7 +4878,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
          A keeper that never turned, or one whose last turn reads from the
          future, draws the dash every unknown draws. The count itself still
          lives on the detail pane. *)
-      (let dash = "\xe2\x80\x94" in
+      (let dash = Masc_tui_theme.Glyph.no_value in
        let turn_color, turn_age =
          match
            Masc_tui_keeper_mark.turn_clock ~turn

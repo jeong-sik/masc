@@ -1412,8 +1412,7 @@ let exec_ssh_allowed_path_covers_remote_root ~remote_root value =
   || String.starts_with ~prefix:(value ^ "/") remote_root
 ;;
 
-let exec_ssh_allowed_paths_field ~(path : string) ~(remote_root : string option)
-      (tbl : Otoml.t)
+let exec_ssh_allowed_paths_field ~(path : string) (tbl : Otoml.t)
   : (string list, parse_error list) result
   =
   match
@@ -1431,15 +1430,7 @@ let exec_ssh_allowed_paths_field ~(path : string) ~(remote_root : string option)
       List.concat
         (List.mapi
            (fun index value ->
-              let reason =
-                match exec_ssh_allowed_path_error value, remote_root with
-                | (Some _ as reason), (Some _ | None) -> reason
-                | None, Some remote_root
-                  when exec_ssh_allowed_path_covers_remote_root ~remote_root value ->
-                  Some "must not be remote_root or an ancestor of it"
-                | None, (Some _ | None) -> None
-              in
-              match reason with
+              match exec_ssh_allowed_path_error value with
               | None -> []
               | Some reason ->
                 error
@@ -1527,8 +1518,29 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
   let private_home_result =
     typed_find_or "a boolean" path tbl "private_home" Otoml.get_boolean ~default:false
   in
-  let allowed_paths_result =
-    exec_ssh_allowed_paths_field ~path ~remote_root:(Result.to_option remote_root_result) tbl
+  let allowed_paths_result = exec_ssh_allowed_paths_field ~path tbl in
+  (* Checked once both fields parsed, like [destination_result]: a field that
+     failed already reports its own error. *)
+  let allowed_paths_cover_result =
+    match remote_root_result, allowed_paths_result with
+    | Ok remote_root, Ok allowed_paths ->
+      (match
+         List.concat
+           (List.mapi
+              (fun index value ->
+                 if exec_ssh_allowed_path_covers_remote_root ~remote_root value
+                 then
+                   error
+                     (Printf.sprintf "%s.allowed_paths[%d]" path index)
+                     (Printf.sprintf
+                        "allowed_paths entry must not be remote_root or an ancestor of it, got %S"
+                        value)
+                 else [])
+              allowed_paths)
+       with
+       | [] -> Ok ()
+       | _ :: _ as cover_errors -> Error cover_errors)
+    | Error _, _ | _, Error _ -> Ok ()
   in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let field_errors =
@@ -1545,6 +1557,7 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
     @ errs capabilities_result
     @ errs private_home_result
     @ errs allowed_paths_result
+    @ errs allowed_paths_cover_result
   in
   match unknown_key_errors with
   | _ :: _ -> Error (unknown_key_errors @ field_errors)
@@ -1562,7 +1575,8 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
        , env_allowlist_result
        , capabilities_result
        , private_home_result
-       , allowed_paths_result )
+       , allowed_paths_result
+       , allowed_paths_cover_result )
      with
      | ( Ok host
        , Ok user
@@ -1576,7 +1590,8 @@ let parse_exec_ssh_endpoint ~(name : string) (tbl : Otoml.t)
        , Ok env_allowlist
        , Ok declared_capabilities
        , Ok private_home
-       , Ok allowed_paths ) ->
+       , Ok allowed_paths
+       , Ok () ) ->
        let capabilities =
          List.filter
            (fun capability ->

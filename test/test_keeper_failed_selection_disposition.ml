@@ -69,60 +69,38 @@ let decide ?deferred_runtime_lane route =
     }
 ;;
 
-let policy_name = function
-  | Masc.Keeper_keepalive_signal.Interrupt_on_wakeup -> "interrupt_on_wakeup"
-  | Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration -> "serve_wakeup_after_duration"
-;;
-
 let show_after_failure = function
   | None -> "cadence"
   | Some (Loop.Continue_on_deferred_lane { next_runtime_id }) ->
     Printf.sprintf "continue on %s" next_runtime_id
-  | Some (Loop.Wait_for_path_release { release_at; wake_policy; waiting_on }) ->
-    Printf.sprintf
-      "wait for %s until %.1f (%s)"
-      waiting_on
-      release_at
-      (policy_name wake_policy)
+  | Some (Loop.Wait_for_path_release { release_at; waiting_on }) ->
+    Printf.sprintf "wait for %s until %.1f" waiting_on release_at
 ;;
 
 let check_decision label expected actual =
   check string label (show_after_failure expected) (show_after_failure actual)
 ;;
 
-let wait ~after ~policy =
-  Some
-    (Loop.Wait_for_path_release
-       { release_at = now +. after; wake_policy = policy; waiting_on = "lane-a" })
+let wait ~after =
+  Some (Loop.Wait_for_path_release { release_at = now +. after; waiting_on = "lane-a" })
 ;;
 
 (* #34653: with no other path for the input, a rate limit or quota waits for
    the failed path's own rest and a wakeup does not cut that wait short
-   ([Serve_wakeup_after_duration], pinned in test_keeper_keepalive_helpers).
+   (pinned in test_keeper_keepalive_helpers).
    The rest is the provider's answer: a stated 5 s waits 5 s, not a cadence. *)
 let test_a_refusal_without_a_suffix_waits_for_the_failed_path () =
-  let serve = Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration in
   let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
   let floor_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec in
   check_decision "a rate limit stating 5 s"
-    (wait ~after:5.0 ~policy:serve)
+    (wait ~after:5.0)
     (decide (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = Some 5.0 }));
   check_decision "a rate limit stating nothing"
-    (wait ~after:floor_sec ~policy:serve)
+    (wait ~after:floor_sec)
     (decide (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = None }));
   check_decision "a hard quota stating nothing"
-    (wait ~after:cap_sec ~policy:serve)
+    (wait ~after:cap_sec)
     (decide (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None }))
-;;
-
-let test_capacity_waits_interruptibly_with_or_without_a_suffix () =
-  let route =
-    KFR.Retry_after_observed { retry_class = KFR.Capacity_backpressure; retry_after = Some 5.0 }
-  in
-  let expected = wait ~after:5.0 ~policy:Masc.Keeper_keepalive_signal.Interrupt_on_wakeup in
-  check_decision "capacity without a suffix" expected (decide route);
-  check_decision "capacity with a suffix" expected
-    (decide ~deferred_runtime_lane:deferred_lane route)
 ;;
 
 (* #36583: the driver deferred the input to a path that is not resting, so the
@@ -138,6 +116,8 @@ let test_a_suffix_on_a_serving_path_continues_without_waiting () =
     ; ( "hard quota"
       , KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = Some 600.0 } )
     ; "repeated generation", KFR.Rotate_now { rotate = KFR.Generation_repeated }
+    ; ( "provider capacity (#38061)"
+      , KFR.Retry_after_observed { retry_class = KFR.Provider_capacity; retry_after = Some 5.0 } )
     ]
 ;;
 
@@ -155,6 +135,8 @@ let test_other_failures_without_a_suffix_keep_the_cadence () =
           } )
     ; ( "server error"
       , KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None } )
+    ; ( "provider capacity (#38061)"
+      , KFR.Retry_after_observed { retry_class = KFR.Provider_capacity; retry_after = None } )
     ; ( "provider timeout"
       , KFR.Retry_after_observed
           { retry_class = KFR.Provider_timeout; retry_after = None } )
@@ -174,7 +156,6 @@ let test_a_serving_deferred_suffix_starts_the_next_cycle_without_a_stimulus () =
     Some
       (Loop.Wait_for_path_release
          { release_at = now +. 60.0
-         ; wake_policy = Masc.Keeper_keepalive_signal.Serve_wakeup_after_duration
          ; waiting_on = "lane-a"
          })
   in
@@ -578,10 +559,6 @@ let () =
             "a refusal without a suffix waits for the failed path"
             `Quick
             test_a_refusal_without_a_suffix_waits_for_the_failed_path
-        ; test_case
-            "capacity waits interruptibly with or without a suffix"
-            `Quick
-            test_capacity_waits_interruptibly_with_or_without_a_suffix
         ; test_case
             "a suffix on a serving path continues without waiting"
             `Quick

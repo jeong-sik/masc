@@ -176,7 +176,6 @@ let rec interruption_cause_of_internal_error
      | Keeper_internal_error.Fenced_core _ -> None)
   | Keeper_internal_error.Official_client_recovery_required _
   | Keeper_internal_error.Runtime_exhausted _
-  | Keeper_internal_error.Capacity_backpressure _
   | Keeper_internal_error.Resumable_cli_session _
   | Keeper_internal_error.Accept_rejected _
   | Keeper_internal_error.Internal_unhandled_exception _
@@ -210,7 +209,6 @@ let effect_attempted_of_internal_error
   | Keeper_internal_error.Runtime_connection_closed _
   | Keeper_internal_error.Official_client_recovery_required _
   | Keeper_internal_error.Runtime_exhausted _
-  | Keeper_internal_error.Capacity_backpressure _
   | Keeper_internal_error.Resumable_cli_session _
   | Keeper_internal_error.Accept_rejected _
   | Keeper_internal_error.Internal_unhandled_exception _

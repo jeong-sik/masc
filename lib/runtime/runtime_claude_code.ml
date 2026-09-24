@@ -188,6 +188,7 @@ type stream_event =
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
+  | Usage_windows_reported of Runtime_provider_usage_window.report
   | Turn_finished of { text : string }
 
 let emit_stream_event on_stream_event event =
@@ -1190,6 +1191,16 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~stream_started ~response_emitted
   | "rate_limit_event" ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
+    (* The usage windows ride the same event. They are an observation for
+       operators: a shape this client cannot read is logged and the turn goes
+       on, with [rate_limit] above still governing the turn as before. *)
+    (match Runtime_provider_usage_window.decode_claude_rate_limit_event json with
+     | Ok { Runtime_provider_usage_window.windows = []; _ } -> ()
+     | Ok report -> emit_stream_event on_stream_event (Usage_windows_reported report)
+     | Error error ->
+       Log.Runtime_agent.warn
+         "Claude Code rate_limit_event usage windows not read: %s"
+         (Runtime_provider_usage_window.decode_error_to_string error));
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed

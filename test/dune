@@ -2800,6 +2800,7 @@
 
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)
+(include stanzas/test_provider_usage_windows.inc)
 
 (include stanzas/test_keeper_surface_status.inc)
 

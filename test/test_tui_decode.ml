@@ -1,8 +1,9 @@
 open Masc
 
-(* #38205: a schedule row carries the occurrence the runner is holding back.
-   The hold is read, not guessed: absent or null is "not held", an object must
-   name both the occurrence and its due, and any other shape is refused. *)
+(* #38205, #38411: a schedule row carries the occurrence the runner is holding
+   back and when the runner read it. The hold is read, not guessed: the key is
+   always sent and null is "not held"; an object must name the occurrence, its
+   due and the time it was seen, and any other shape is refused. *)
 let test_decode_schedule_runner_hold_reads_a_held_row () =
   let row =
     `Assoc
@@ -12,30 +13,137 @@ let test_decode_schedule_runner_hold_reads_a_held_row () =
             [ "occurrence_id", `String "occ-2"
             ; "due_at", `Float 260.0
             ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+            ; "observed_at", `Float 275.5
+            ; "observed_at_iso", `String "1970-01-01T00:04:35Z"
             ] )
       ]
   in
   match Tui_decode.decode_schedule_runner_hold row with
   | Ok (Some hold) ->
       Alcotest.(check string) "occurrence" "occ-2" hold.Tui_decode.srh_occurrence_id;
-      Alcotest.(check string) "due" "1970-01-01T00:04:20Z" hold.Tui_decode.srh_due_at_iso
+      Alcotest.(check string) "due" "1970-01-01T00:04:20Z" hold.Tui_decode.srh_due_at_iso;
+      Alcotest.(check (float 0.0)) "seen" 275.5 hold.Tui_decode.srh_observed_at
   | Ok None -> Alcotest.fail "a held row decoded as not held"
   | Error err -> Alcotest.fail err
 
 let test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes () =
   let decode hold = Tui_decode.decode_schedule_runner_hold (`Assoc hold) in
-  let not_held label = function
-    | Ok None -> ()
-    | Ok (Some _) -> Alcotest.failf "%s: decoded as held" label
-    | Error err -> Alcotest.failf "%s: %s" label err
-  in
-  not_held "null" (decode [ "runner_hold", `Null ]);
-  not_held "absent" (decode []);
+  (match decode [ "runner_hold", `Null ] with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "null: decoded as held"
+   | Error err -> Alcotest.failf "null: %s" err);
+  (* #38413: a row without the key is a server that does not say. Read as
+     null, it drew a held schedule as a free one. *)
+  Alcotest.(check bool) "a row without the key is refused" true
+    (Result.is_error (decode []));
   Alcotest.(check bool) "an object without its due is refused" true
     (Result.is_error
        (decode [ "runner_hold", `Assoc [ "occurrence_id", `String "occ-2" ] ]));
+  Alcotest.(check bool) "an object without the time it was seen is refused" true
+    (Result.is_error
+       (decode
+          [ ( "runner_hold"
+            , `Assoc
+                [ "occurrence_id", `String "occ-2"
+                ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+                ] )
+          ]));
+  Alcotest.(check bool) "and so is a null time" true
+    (Result.is_error
+       (decode
+          [ ( "runner_hold"
+            , `Assoc
+                [ "occurrence_id", `String "occ-2"
+                ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+                ; "observed_at", `Null
+                ] )
+          ]));
   Alcotest.(check bool) "a bare string is refused" true
     (Result.is_error (decode [ "runner_hold", `String "occ-2" ]))
+
+(* #38411: the hold's time is drawn through the terminal's clock, which fails on
+   a time far enough out, and nothing on the render side would catch that. A
+   time past the end of year 9999 is refused where it is read; the last second
+   of that year is still a time. *)
+let test_decode_schedule_runner_hold_refuses_a_time_no_clock_can_draw () =
+  let decode observed_at =
+    Tui_decode.decode_schedule_runner_hold
+      (`Assoc
+         [ ( "runner_hold"
+           , `Assoc
+               [ "occurrence_id", `String "occ-2"
+               ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+               ; "observed_at", `Float observed_at
+               ] )
+         ])
+  in
+  Alcotest.(check bool) "a time the terminal's clock fails on is refused" true
+    (Result.is_error (decode 1e18));
+  Alcotest.(check bool) "and so is the first second past year 9999" true
+    (Result.is_error (decode (Tui_decode.latest_drawable_unix_seconds +. 1.0)));
+  Alcotest.(check bool) "the last second of year 9999 is still read" true
+    (Result.is_ok (decode Tui_decode.latest_drawable_unix_seconds))
+
+(* #38411: the list carries the runner's own status once, beside the rows. It
+   is required. A word the shared vocabulary does not have is kept as itself
+   rather than read as the nearest state -- and rather than failing the whole
+   list, which is three screens, over one word. *)
+let test_decode_schedule_runner_status_reads_the_lists_runner () =
+  let page runner = `Assoc [ "status", `String "ok"; "schedule_runner", runner ] in
+  (match
+     Tui_decode.decode_schedule_runner_status
+       (page
+          (`Assoc
+             [ "schema", `String "masc.schedule.runner_status.v1"
+             ; "status", `String "stale"
+             ]))
+   with
+   | Ok status ->
+       Alcotest.(check bool) "the runner is stale" true
+         (status = Tui_decode.Runner_status Schedule_contract_values.Runner_stale)
+   | Error err -> Alcotest.fail err);
+  Alcotest.(check bool) "a list without the runner is refused" true
+    (Result.is_error
+       (Tui_decode.decode_schedule_runner_status (`Assoc [ "status", `String "ok" ])));
+  Alcotest.(check bool) "a runner without a status is refused" true
+    (Result.is_error (Tui_decode.decode_schedule_runner_status (page (`Assoc []))));
+  Alcotest.(check bool) "a word outside the vocabulary is kept as itself" true
+    (Tui_decode.decode_schedule_runner_status
+       (page (`Assoc [ "status", `String "warming" ]))
+     = Ok (Tui_decode.Runner_unrecognised "warming"))
+
+(* #38411: only the latest list, from a runner whose status is ok, vouches for
+   its hold now. Every other runner word -- one this build does not know
+   included -- and any list kept on screen after a failed reload draw the hold
+   at the time it was read. *)
+let test_schedule_hold_reads_as_of_its_time_unless_the_runner_is_ok () =
+  let hold =
+    { Tui_decode.srh_occurrence_id = "occ-2"
+    ; srh_due_at_iso = "1970-01-01T00:04:20Z"
+    ; srh_observed_at = 275.5
+    }
+  in
+  let reading freshness runner =
+    Tui_decode.schedule_hold_reading ~freshness ~runner hold
+  in
+  let ok = Tui_decode.Runner_status Schedule_contract_values.Runner_ok in
+  Alcotest.(check bool) "the latest list from an ok runner: the hold is the present" true
+    (reading Tui_decode.List_latest ok = Tui_decode.Hold_current);
+  List.iter
+    (fun (label, runner) ->
+      Alcotest.(check bool)
+        (label ^ ": the hold is as of the time it was seen")
+        true
+        (reading Tui_decode.List_latest runner = Tui_decode.Hold_as_of 275.5))
+    [ ( "not_started"
+      , Tui_decode.Runner_status Schedule_contract_values.Runner_not_started )
+    ; "running", Tui_decode.Runner_status Schedule_contract_values.Runner_running
+    ; "stale", Tui_decode.Runner_status Schedule_contract_values.Runner_stale
+    ; "degraded", Tui_decode.Runner_status Schedule_contract_values.Runner_degraded
+    ; "a word this build does not know", Tui_decode.Runner_unrecognised "warming"
+    ];
+  Alcotest.(check bool) "a list kept after a failed reload: as of, even from an ok runner" true
+    (reading Tui_decode.List_kept ok = Tui_decode.Hold_as_of 275.5)
 
 let test_decode_agent_success () =
   let json =
@@ -12139,6 +12247,12 @@ let () =
           test_decode_schedule_runner_hold_reads_a_held_row
       ; Alcotest.test_case "reads not held and refuses bad shapes" `Quick
           test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes
+      ; Alcotest.test_case "refuses a time no clock can draw" `Quick
+          test_decode_schedule_runner_hold_refuses_a_time_no_clock_can_draw
+      ; Alcotest.test_case "reads the list's runner status" `Quick
+          test_decode_schedule_runner_status_reads_the_lists_runner
+      ; Alcotest.test_case "reads as of its time unless the runner is ok" `Quick
+          test_schedule_hold_reads_as_of_its_time_unless_the_runner_is_ok
       ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert

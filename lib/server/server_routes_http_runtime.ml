@@ -251,10 +251,9 @@ let otel_health_json () =
 ;;
 
 let schedule_runner_status_json () =
-  Schedule_runner_status.snapshot ()
-  |> Schedule_runner_status.snapshot_to_yojson
-       ~now:(Time_compat.now ())
-       ~stale_after_sec:Server_schedule_runner_policy.stale_after_sec
+  Server_schedule_runner_policy.status_json
+    ~now:(Time_compat.now ())
+    (Schedule_runner_status.snapshot ())
 ;;
 
 let measure_health_phase timing phase f =

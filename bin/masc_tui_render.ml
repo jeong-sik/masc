@@ -3988,7 +3988,7 @@ let schedule_delivery_word (row : schedule_row) =
   | None -> "\xe2\x80\x94"
   | Some status -> cut status
 
-let schedule_delivery_summary (row : schedule_row) =
+let schedule_delivery_summary ~freshness ~runner (row : schedule_row) =
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
     | None, None -> "queue:\xe2\x80\x94"
@@ -4006,14 +4006,23 @@ let schedule_delivery_summary (row : schedule_row) =
      readings on the next line still describe the previous one. The hold says
      so on the identity line, next to the status it would otherwise leave
      reading as a late [due]. The short tag, because the line is already
-     most of a narrow screen; the detail pane carries the full sentence. *)
+     most of a narrow screen; the detail pane carries the full sentence.
+     Unless the list is the latest answer and the runner is [ok], the hold
+     is drawn at the time the runner read it: the tag names that time instead
+     of the due -- the same width, and the due column above still has the
+     due (#38411). *)
   let hold =
     match row.sch_runner_hold with
     | None -> ""
     | Some hold ->
         " \xc2\xb7 "
-        ^ Render_schedule.schedule_hold_tag
-            ~due:(Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso)
+        ^ (match Tui_decode.schedule_hold_reading ~freshness ~runner hold with
+           | Tui_decode.Hold_current ->
+               Render_schedule.schedule_hold_tag
+                 ~due:(Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso)
+           | Tui_decode.Hold_as_of checked ->
+               Render_schedule.schedule_hold_as_of_tag
+                 ~checked:(Terminal_text.short_timestamp_of_unix checked))
   in
   ( Printf.sprintf "%s \xc2\xb7 status:%s%s" row.sch_schedule_id
       row.sch_status hold
@@ -4029,6 +4038,14 @@ let schedule_source_warning (state : state) =
          match state.schedules with
          | None -> err
          | Some _ -> "이전 조회 유지 · " ^ err)
+
+(* The list on screen is the newest answer only while its last load
+   succeeded. A failed reload keeps the previous list on screen, and a hold on
+   it is then an earlier reading whatever the runner said at the time. *)
+let schedule_list_freshness (state : state) =
+  match state.schedules_error with
+  | None -> Tui_decode.List_latest
+  | Some _ -> Tui_decode.List_kept
 
 (** Render the Schedules surface: the scheduled-automation list, with an
     armed cancel. The server sorts active rows first by due time and caps the
@@ -4237,7 +4254,11 @@ let render_schedule_list (state : state) =
                 c.push_empty ();
                 c.push_empty ()
             | Some selected ->
-                let identity, delivery = schedule_delivery_summary selected in
+                let identity, delivery =
+                  schedule_delivery_summary
+                    ~freshness:(schedule_list_freshness state)
+                    ~runner:snapshot.scs_runner_status selected
+                in
                 c.push_styled ~style:(Theme.recede ())
                   ("  " ^ identity);
                 c.push_styled ~style:(Theme.recede ())
@@ -4432,7 +4453,7 @@ let schedule_wake_lines
                 | Some err -> [ head; field ~style:(Theme.bad ()) "" err ])
              wakes
 
-let schedule_detail_lines ~width (row : schedule_row)
+let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
       ~(wake_history : schedule_wake_history option)
       ~(wake_history_error : (string * string) option) =
   let field ?(style = Ansi.reset) label value =
@@ -4538,8 +4559,15 @@ let schedule_detail_lines ~width (row : schedule_row)
      | None -> []
      | Some hold ->
          [ field ~style:(Theme.warn ()) "Held"
-             (Render_schedule.schedule_hold_reading
-                ~due:(Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso))
+             (match Tui_decode.schedule_hold_reading ~freshness ~runner hold with
+              | Tui_decode.Hold_current ->
+                  Render_schedule.schedule_hold_reading
+                    ~due:
+                      (Terminal_text.short_timestamp
+                         hold.Tui_decode.srh_due_at_iso)
+              | Tui_decode.Hold_as_of checked ->
+                  Render_schedule.schedule_hold_as_of_reading
+                    ~checked:(Terminal_text.short_timestamp_of_unix checked))
          ; field "Held id" hold.Tui_decode.srh_occurrence_id
          ])
   @ schedule_turn_rows ~field row
@@ -4553,7 +4581,7 @@ let schedule_detail_lines ~width (row : schedule_row)
        ]
      else [])
 
-let schedule_detail_pane (state : state) ~rows ~cols (row : schedule_row) buf =
+let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row) buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s[%s]%s"
@@ -4571,7 +4599,7 @@ let schedule_detail_pane (state : state) ~rows ~cols (row : schedule_row) buf =
   let lines =
     schedule_detail_lines
       ~width:(max 1 (framed_inner_width cols))
-      row
+      ~freshness:(schedule_list_freshness state) ~runner row
       ~wake_history:state.schedule_wake_history
       ~wake_history_error:state.schedule_wake_history_error
   in
@@ -4591,13 +4619,13 @@ let schedule_detail_pane (state : state) ~rows ~cols (row : schedule_row) buf =
 (* The schedule list stays beside the schedule. Opening one used to hide the others, and the others
    are what say whether this is the one to act on. Below the split
    width there is no room for both and the detail keeps the screen. *)
-let render_schedule_detail (state : state) (row : schedule_row) =
+let render_schedule_detail (state : state) ~runner (row : schedule_row) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let scroll, _max_scroll =
     if cols < keeper_split_threshold_cols then
-      schedule_detail_pane state ~rows ~cols row buf
+      schedule_detail_pane state ~rows ~cols ~runner row buf
     else begin
       let left_cols = keeper_roster_pane_cols in
       let labels =
@@ -4617,7 +4645,7 @@ let render_schedule_detail (state : state) (row : schedule_row) =
         ~labels ~selected:state.schedule_cursor;
       let answer =
         schedule_detail_pane state ~rows ~cols:(cols - left_cols) row
-          right_buf
+          ~runner right_buf
       in
       write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
       answer
@@ -4637,7 +4665,8 @@ let render_schedules (state : state) =
            (fun row -> String.equal row.sch_schedule_id schedule_id)
            snapshot.scs_rows
        with
-       | Some row -> render_schedule_detail state row
+       | Some row ->
+           render_schedule_detail state ~runner:snapshot.scs_runner_status row
        | None -> render_schedule_list state)
   | Some _, None | None, _ -> render_schedule_list state
 

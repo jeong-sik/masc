@@ -45,6 +45,10 @@ implementation_prs: ["#38733", "#38730"]
   `steps` 에서 파생하지 않는다. `steps` 는 0 걸음 fault 에서 오르지 않는다. Lane 관측 seq 도 쓰지 않는다. seq 는 worker 가 관측에
   성공할 때만 오르므로(`commit_output`), worker 가 실패하거나 죽으면 멈춘다.
 - 보는 데 패키지 설치나 worker 는 필요 없다.
+- **왜 Lane 경로 아래인가.** `live` 는 Lane 인스턴스·바인딩·관측을 읽지 않는다. 읽는 것은 Lane 의
+  **source 어댑터**(`msx_capture`, `dos_capture`)가 가리키는 기계이고, 요청도 그 source 이름으로
+  받는다. 관측은 source 를 캡처해 남기는 길이고, `live` 는 같은 source 를 남기지 않고 지금 보는
+  길이다. 새 기계가 source 어댑터를 얻으면 같은 라우트로 보인다. 기계마다 라우트를 만들지 않는다.
 - TUI 는 렌더 tick(`Render_schedule`) 한 번에 `live?since=N&incarnation=I` 를 한 번 부른다.
   새 주기 상수를 만들지 않는다. "그대로"는 몇 바이트다.
 

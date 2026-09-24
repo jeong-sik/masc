@@ -75,6 +75,10 @@ reports/e0-campaign-*/
 reports/deploy-*/
 artifacts/
 
+# Release-evidence pipeline default output; bundles are regenerated per
+# release (docs/RELEASE-EVIDENCE.md) and must not be committed.
+.release-evidence/
+
 # Trunk linter lock files
 .trunk-lock/
 

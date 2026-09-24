@@ -22,11 +22,12 @@ val to_yojson : t -> Yojson.Safe.t
 
 val load : Workspace_utils.config -> (t list, string) result
 (** An unreadable primary is an error. A missing primary with an existing
-    recovery mirror is an error, rather than an empty measurement history. *)
+    recovery mirror is an error, rather than an empty snapshot. There is at
+    most one observation per Goal; a new one replaces its previous revision. *)
 
-val latest_for_goal :
-  Workspace_utils.config -> goal:Goal_store.goal -> (t option, string) result
-(** Only the current success-criterion revision is eligible. *)
+val cache_generation : unit -> int
+(** Changes after a successful measurement write from either API or Keeper
+    tool. The dashboard includes it in the goal response cache key. *)
 
 val projection :
   (t list, string) result -> Goal_store.goal -> Yojson.Safe.t

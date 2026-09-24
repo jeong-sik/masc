@@ -1,5 +1,11 @@
 let ( let* ) = Result.bind
 
+(* A successful Keeper or operator write changes the public goal projection.
+   The dashboard uses this generation in its cache key, so either writer path
+   reaches the next read without this domain depending on the dashboard. *)
+let cache_generation_counter = Atomic.make 0
+let cache_generation () = Atomic.get cache_generation_counter
+
 type t = {
   id : string;
   goal_id : string;
@@ -101,24 +107,19 @@ let load config =
           items (Ok [])
     | _ -> Error "goal_measurement: measurements must be a list"
 
-let latest_for_goal config ~(goal : Goal_store.goal) =
-  let* rows = load config in
-  Ok
-    (List.find_opt
-       (fun row ->
-          String.equal row.goal_id goal.id
-          && String.equal row.criterion_revision goal.criterion_revision)
-       rows)
+let latest rows (goal : Goal_store.goal) =
+  List.find_opt
+    (fun row ->
+       String.equal row.goal_id goal.id
+       && String.equal row.criterion_revision goal.criterion_revision)
+    rows
 
 let projection records (goal : Goal_store.goal) =
   match records with
   | Error reason ->
       `Assoc [ "state", `String "unavailable"; "reason", `String reason ]
   | Ok rows ->
-      (match List.find_opt
-               (fun row -> String.equal row.goal_id goal.id
-                           && String.equal row.criterion_revision goal.criterion_revision)
-               rows with
+      (match latest rows goal with
        | None -> `Assoc [ "state", `String "not_recorded" ]
        | Some row ->
            `Assoc [ "state", `String "reported"
@@ -170,12 +171,21 @@ let record config ~goal_id ~criterion_revision ~observed_value ~evidence ~actor 
                     ; recorded_at = Masc_domain.now_iso ()
                     }
                   in
-                  let* () = write config (item :: previous) in
+                  (* The product reads one current observation per Goal. A
+                     replacement also removes records for retired criterion
+                     revisions, keeping this snapshot bounded by Goal count. *)
+                  let remaining =
+                    List.filter (fun row -> not (String.equal row.goal_id goal_id)) previous
+                  in
+                  let* () = write config (item :: remaining) in
                   Ok item
                 in
                 Ok (goal, Result.map_error (fun detail -> Store_error detail) recorded)))
     with
-    | Ok (_, item) -> item
+    | Ok (_, Ok item) ->
+        ignore (Atomic.fetch_and_add cache_generation_counter 1);
+        Ok item
+    | Ok (_, Error error) -> Error error
     | Error (Goal_store.Goal_not_found _) ->
         Error (Invalid_request "goal_measurement: Goal not found")
     | Error error -> Error (Store_error (Goal_store.write_error_to_string error))

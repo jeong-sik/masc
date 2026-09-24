@@ -3220,11 +3220,15 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/goals" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         (* Keeper tool writes can update the measurement ledger outside this
-            HTTP router. Read the current ledger on each request. *)
+         let config = Mcp_server.workspace_config state in
+         let cache_key =
+           Printf.sprintf "goals_tree:%s:%d" config.base_path
+             (Goal_measurement.cache_generation ())
+         in
          let json =
-           Domain_pool_ref.submit_io_or_inline (fun () ->
-             dashboard_goals_tree_http_json ~config:(Mcp_server.workspace_config state))
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s
+             (fun () -> Domain_pool_ref.submit_io_or_inline (fun () ->
+                dashboard_goals_tree_http_json ~config))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -3253,9 +3257,6 @@ let add_routes ~sw ~clock router =
                    (dashboard_error_json ~ok:false
                       (Goal_measurement.error_to_string error))
              | Ok measurement ->
-                 let base_path = (Mcp_server.workspace_config state).base_path in
-                 Dashboard_cache.invalidate ("goals_tree:" ^ base_path);
-                 Dashboard_cache.invalidate_prefix ("goal_detail:" ^ base_path ^ ":");
                  respond_json_value_with_cors req reqd
                    (`Assoc [ "ok", `Bool true
                            ; "measurement", Goal_measurement.to_yojson measurement ])))
@@ -3271,10 +3272,15 @@ let add_routes ~sw ~clock router =
            respond_public_read_json_value ~status:`Bad_request req reqd
              (dashboard_error_json ~ok:false "goal_id query param is required")
          else
+           let config = Mcp_server.workspace_config state in
+           let cache_key =
+             Printf.sprintf "goal_detail:%s:%s:%d" config.base_path goal_id
+               (Goal_measurement.cache_generation ())
+           in
            let json =
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_goal_detail_http_json
-                 ~config:(Mcp_server.workspace_config state) ~goal_id)
+             Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s
+               (fun () -> Domain_pool_ref.submit_io_or_inline (fun () ->
+                  dashboard_goal_detail_http_json ~config ~goal_id))
            in
            Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

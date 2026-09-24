@@ -485,11 +485,11 @@ let test_measurement_requires_current_criterion_and_evidence () =
   in
   check string "the tool calls it reported" "reported_only"
     (json_state measured [ "verification" ]);
-  (match Goal_measurement.latest_for_goal config ~goal with
-   | Ok (Some row) ->
-       check string "actual is stored exactly" "0" row.observed_value;
-       check string "evidence survives" "artifact:measured-count" row.evidence
-   | Ok None | Error _ -> fail "explicit measurement was not retained");
+  let first_measurement = Goal_measurement.projection (Goal_measurement.load config) goal in
+  check string "actual is stored exactly" "0"
+    (json_state first_measurement [ "record"; "observed_value" ]);
+  check string "evidence survives" "artifact:measured-count"
+    (json_state first_measurement [ "record"; "evidence" ]);
   let listed = must_succeed "goal list after measurement"
       (dispatch ctx ~name:"masc_goal_list" []) in
   (match Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list with
@@ -499,14 +499,27 @@ let test_measurement_requires_current_criterion_and_evidence () =
        check string "list preserves reported zero" "0"
          (json_state goal_json [ "measurement"; "record"; "observed_value" ])
    | _ -> fail "expected one listed Goal");
+  let cache_before = Goal_measurement.cache_generation () in
+  (match Goal_measurement.record config ~goal_id
+           ~criterion_revision:goal.criterion_revision ~observed_value:"1"
+           ~evidence:"artifact:updated-count" ~actor:"test" with
+   | Ok _ -> ()
+   | Error error -> fail (Goal_measurement.error_to_string error));
+  check int "successful write changes dashboard cache key" (cache_before + 1)
+    (Goal_measurement.cache_generation ());
+  (match Goal_measurement.load config with
+   | Ok [ row ] ->
+       check string "latest replaces prior value" "1" row.observed_value;
+       check string "latest replaces prior evidence" "artifact:updated-count" row.evidence
+   | Ok _ | Error _ -> fail "measurement snapshot kept more than one row for a Goal");
   let changed =
     match Goal_store.upsert_goal config ~id:goal_id ~target_value:"2" () with
     | Ok (goal, _) -> goal
     | Error error -> fail (Goal_store.write_error_to_string error)
   in
-  (match Goal_measurement.latest_for_goal config ~goal:changed with
-   | Ok None -> ()
-   | Ok (Some _) | Error _ -> fail "old criterion was presented as current");
+  check string "old criterion is not current" "not_recorded"
+    (json_state (Goal_measurement.projection (Goal_measurement.load config) changed)
+       [ "state" ]);
   let listed = must_succeed "goal list after criterion revision"
       (dispatch ctx ~name:"masc_goal_list" []) in
   (match Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list with

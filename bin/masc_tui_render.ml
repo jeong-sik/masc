@@ -5107,9 +5107,9 @@ let render_keeper_list (state : state) =
   (* A roster with more keepers than rows says which of them these are, the
      way every other scrolled list on this screen does. The line costs one of
      the rows it describes, so it is drawn only where there is something to
-     say: at twenty-four terminal rows the roster drew eleven of nineteen
-     keepers and nothing on the screen said the other eight were there. *)
-  let overflowing = keeper_count > list_rows in
+     say, and only where there is a row to spend on it: with no rows left the
+     roster draws nothing and the line would push the frame past its budget. *)
+  let overflowing = list_rows > 0 && keeper_count > list_rows in
   let keeper_rows = if overflowing then max 0 (list_rows - 1) else list_rows in
   let scroll_offset =
     if keeper_rows > 0 && state.keeper_cursor >= keeper_rows then

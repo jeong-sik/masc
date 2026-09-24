@@ -1468,11 +1468,21 @@ FAKE
   # custom-bound list; without it the walk never enters the phase and any
   # ordering passes. When #36343 removes the custom bound, the phase, the
   # hook and this fixture go together.
+  #
+  # The numbers: the walk builds for four seconds and runs for eight, so it
+  # needs twelve of the budget's fifteen and the suite after it cannot start
+  # its own four-second build. They were one, two and four, which left the
+  # walk one second of slack -- and on a loaded runner the setup spent that
+  # second before dune began, so the walk named itself "stopped at the step
+  # budget" and the case failed on pull requests that had not touched it
+  # (#38615). The shape still reads the clock; what changed is that the
+  # margin is now three seconds rather than one. The case below stopped
+  # reading the clock altogether for the same reason.
   MASC_SELFTEST_CUSTOM_BOUND_SUITE="test/test_slow_py.py" \
-  FAKE_DUNE_SUITE_SECONDS=2 \
+  FAKE_DUNE_SUITE_SECONDS=8 \
     runner_check "a custom-bound walk runs first and whole, and the budget names what follows" \
       "test/test_slow_one (not built: the step budget ran out);" \
-      1 4 test_slow_one test/test_slow_py.py
+      4 15 test_slow_one test/test_slow_py.py
 
   # Production is untouched by the hook: with the variable unset a plain
   # Python suite keeps the default bound and only the walk has its own.

@@ -1228,7 +1228,10 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
            row, not more of these, so there is no second number to draw. *)
         ~holding:None
         ~labels:
-          (List.map (fun (row : Tui_decode.task) -> row.title)
+          (List.map
+             (fun (row : Tui_decode.task) ->
+               Render_schedule.task_list_sidebar_label ~title:row.title
+                 ~task_id:row.id)
              (Overview_tasks.rows state.tasks))
         ~selection:(Overview_tasks.row_of state.tasks ~task_id:task.id);
       let answer =

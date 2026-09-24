@@ -1714,6 +1714,119 @@ let approval_detail_rows line =
   String.iter (fun c -> if c = '\n' then incr n) line;
   !n
 
+(* The two rows drawn under the approval queue: what the selected ask is, and
+   its payload. Both sit below the box with the frame's own margins, so both
+   belong inside [framed_inner_width]. The payload row always asked for that
+   width; the metadata row never did, and with [expires] now spelled as a full
+   timestamp it wanted eighty-four columns on every terminal (#36333).
+
+   The metadata row is a list of clauses rather than one joined string, so it
+   breaks where a clause ends and keeps every value whole -- the rule this
+   surface already states for the ask body, where a value too wide for the
+   pane wraps rather than being cut. Nothing is dropped either: [trace] is how
+   an operator matches this decision in the log afterwards, and a trace id cut
+   to its first few bytes is worse than one that took its own row. *)
+let approval_metadata_lines (state : state) ~approvals ~cols =
+  let clauses, payload_line =
+    match List.nth_opt approvals state.approval_cursor with
+    | None -> [], ""
+    | Some (Operator_row approval) ->
+        (* The same clock as [created] beside it. This one kept the server's
+           RFC 3339 string as it arrived -- UTC, and in Seoul nine hours off
+           the local reading next to it -- so a row could show a decision
+           created at 09:03 expiring at 00:03 and read as already gone. It is
+           also the longer of the two spellings, which is what pushed this row
+           past every terminal width once it was spelled in full (#36333); the
+           row now breaks instead of losing it. A decision with no deadline
+           still draws "-": that is not a time. *)
+        let expires =
+          match Terminal_text.optional_single_line approval.ap_expires_at with
+          | None -> "-"
+          | Some at -> Terminal_text.short_timestamp at
+        in
+        let payload =
+          Masc_tui_operator_projection.approval_payload_for_terminal
+            approval.ap_payload
+        in
+        ( [ Printf.sprintf "trace=%s"
+              (Terminal_text.single_line approval.ap_trace_id)
+          ; Printf.sprintf "created=%s"
+              (Terminal_text.short_timestamp approval.ap_created_at)
+          ; Printf.sprintf "expires=%s" expires ]
+        , Printf.sprintf "  %spayload=%s%s" Ansi.dim
+            (fit_width payload (max 8 (cols - 12)))
+            Ansi.reset )
+    | Some (Keeper_tool_row held) ->
+        ( [ Printf.sprintf "keeper=%s"
+              (Terminal_text.single_line held.kta_keeper)
+          ; Printf.sprintf "call=%s"
+              (Terminal_text.single_line held.kta_tool_call_id) ]
+        , Printf.sprintf "  %sargs=%s%s" Ansi.dim
+            (fit_width
+               (Terminal_text.preview_line held.kta_args)
+               (max 8 (cols - 9)))
+            Ansi.reset )
+    | Some (Gate_row pending) ->
+        (* The keeper name is not repeated here: the line directly above is
+           "<keeper> -> <what it wants>", so this line spends its width on
+           what that line cannot say. Where the command would run comes first
+           among those -- the same command means different things on the host
+           and in a container -- and the approval id, a uuid nobody reads off
+           a screen, takes what is left. *)
+        (* Ordered by what the eye needs first. The sandbox is short and
+           decides the most -- host or container -- so it leads; the working
+           directory refines it and is long, so it is the clause most likely
+           to start a second row. At eighty columns the old order lost the
+           sandbox entirely, and the directory it kept was measured by
+           nothing: [approval=] was bound to the width left over, while
+           [at=] inside this pair was not bound at all. *)
+        let site =
+          match
+            pending.Tui_decode.gp_execution_sandbox,
+            pending.Tui_decode.gp_execution_cwd
+          with
+          | None, None -> []
+          | sandbox, cwd ->
+            [ Printf.sprintf "sandbox=%s"
+                (Terminal_text.single_line_or ~default:"?" sandbox)
+            ; Printf.sprintf "at=%s"
+                (Terminal_text.single_line_or ~default:"?" cwd) ]
+        in
+        (* The operation is already the right-hand side of the line above
+           whenever the two agree, which is every operation but an identity
+           call. Repeating it there costs the width this line needs. *)
+        let operation =
+          let name = Terminal_text.single_line pending.Tui_decode.gp_operation in
+          if String.equal name
+               (Terminal_text.single_line pending.Tui_decode.gp_display_tool)
+          then []
+          else [ Printf.sprintf "operation=%s" name ]
+        in
+        ( operation @ site
+          @ [ Printf.sprintf "approval=%s"
+                (Terminal_text.single_line pending.Tui_decode.gp_id) ]
+        , Printf.sprintf "  %sinput=%s%s" Ansi.dim
+            (fit_width
+               (Terminal_text.single_line_or ~default:"(no input preview)"
+                  pending.Tui_decode.gp_input_preview)
+               (max 8 (cols - 10)))
+            Ansi.reset )
+  in
+  (* The rows are counted here rather than read back off the joined string.
+     [approval_detail_rows] answers that question for the detail line and the
+     surface pins it to one call; this row already holds its own rows as a
+     list, so its height is the length of what it is about to draw. *)
+  let metadata_rows =
+    match clauses with
+    | [] -> [ "" ]
+    | clauses ->
+        Message_layout.pack_clauses ~max_cells:(framed_inner_width cols) clauses
+        |> List.map (fun row -> Printf.sprintf "  %s%s%s" Ansi.dim row Ansi.reset)
+  in
+  String.concat "\n" metadata_rows, payload_line, List.length metadata_rows
+;;
+
+
 let render_approvals (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -1737,6 +1850,13 @@ let render_approvals (state : state) =
     approval_detail_line state ~approvals ~cols ~action_inflight
   in
   let detail_extra_rows = approval_detail_rows detail_line - 1 in
+  (* The same reading for the two rows under the queue. A metadata row that
+     breaks into two takes a row from the block below unless the budget knows
+     about it -- the drift [detail_extra_rows] is here to stop. *)
+  let metadata_line, payload_line, metadata_rows =
+    approval_metadata_lines state ~approvals ~cols
+  in
+  let metadata_extra_rows = metadata_rows - 1 in
   (* What the questions may spend. The block is drawn last, and a surface that
      overruns loses its final rows, so an unbudgeted question list does not
      push the approval queue off the screen -- it pushes itself off, cursor and
@@ -1744,7 +1864,8 @@ let render_approvals (state : state) =
      was already trying to promise and could not keep. *)
   let ask_budget =
     max 4
-      (rows - boxed_surface_chrome_rows - gate_lane_rows - detail_extra_rows - 1)
+      (rows - boxed_surface_chrome_rows - gate_lane_rows - detail_extra_rows
+       - metadata_extra_rows - 1)
   in
   (* Drawn before the queue's own budget is settled so its height is a measured
      fact rather than a second estimate that can disagree with the drawing. *)
@@ -1754,7 +1875,7 @@ let render_approvals (state : state) =
   let approval_body_rows =
     max 1
       (rows - boxed_surface_chrome_rows - gate_lane_rows - ask_rows
-       - detail_extra_rows)
+       - detail_extra_rows - metadata_extra_rows)
   in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -2053,91 +2174,6 @@ let render_approvals (state : state) =
 
   Buffer.add_string buf (Printf.sprintf "%s\n" detail_line);
 
-  let metadata_line, payload_line =
-    match List.nth_opt approvals state.approval_cursor with
-    | None -> "", ""
-    | Some (Operator_row approval) ->
-        (* The same clock as [created] beside it. This one kept the server's
-           RFC 3339 string as it arrived -- UTC, and in Seoul nine hours off
-           the local reading next to it -- so a row could show a decision
-           created at 09:03 expiring at 00:03 and read as already gone. It is
-           also the longer of the two spellings, on the row this surface cuts
-           first (#36333). A decision with no deadline still draws "-": that
-           is not a time. *)
-        let expires =
-          match Terminal_text.optional_single_line approval.ap_expires_at with
-          | None -> "-"
-          | Some at -> Terminal_text.short_timestamp at
-        in
-        let payload =
-          Masc_tui_operator_projection.approval_payload_for_terminal
-            approval.ap_payload
-        in
-        ( Printf.sprintf "  %strace=%s  created=%s  expires=%s%s" Ansi.dim
-            (fit_width (Terminal_text.single_line approval.ap_trace_id) 18)
-            (Terminal_text.short_timestamp approval.ap_created_at)
-            expires Ansi.reset
-        , Printf.sprintf "  %spayload=%s%s" Ansi.dim
-            (fit_width payload (max 8 (cols - 12)))
-            Ansi.reset )
-    | Some (Keeper_tool_row held) ->
-        ( Printf.sprintf "  %skeeper=%s  call=%s%s" Ansi.dim
-            (fit_width (Terminal_text.single_line held.kta_keeper) 20)
-            (fit_width (Terminal_text.single_line held.kta_tool_call_id) 28)
-            Ansi.reset
-        , Printf.sprintf "  %sargs=%s%s" Ansi.dim
-            (fit_width
-               (Terminal_text.preview_line held.kta_args)
-               (max 8 (cols - 9)))
-            Ansi.reset )
-    | Some (Gate_row pending) ->
-        (* The keeper name is not repeated here: the line directly above is
-           "<keeper> -> <what it wants>", so this line spends its width on
-           what that line cannot say. Where the command would run comes first
-           among those -- the same command means different things on the host
-           and in a container -- and the approval id, a uuid nobody reads off
-           a screen, takes what is left. *)
-        (* Ordered by what survives a narrow window. The sandbox is short and
-           decides the most -- host or container -- so it goes first; the
-           working directory refines it and is long, so it truncates first.
-           At eighty columns the old order lost the sandbox entirely. *)
-        let site =
-          match
-            pending.Tui_decode.gp_execution_sandbox,
-            pending.Tui_decode.gp_execution_cwd
-          with
-          | None, None -> ""
-          | sandbox, cwd ->
-            Printf.sprintf "sandbox=%s  at=%s"
-              (Terminal_text.single_line_or ~default:"?" sandbox)
-              (Terminal_text.single_line_or ~default:"?" cwd)
-        in
-        (* The operation is already the right-hand side of the line above
-           whenever the two agree, which is every operation but an identity
-           call. Repeating it there costs the width this line needs. *)
-        let operation =
-          let name = Terminal_text.single_line pending.Tui_decode.gp_operation in
-          if String.equal name
-               (Terminal_text.single_line pending.Tui_decode.gp_display_tool)
-          then ""
-          else Printf.sprintf "operation=%s" (fit_width name 20)
-        in
-        let described =
-          List.filter (fun part -> part <> "") [ operation; site ]
-          |> String.concat "  "
-        in
-        ( Printf.sprintf "  %s%s  approval=%s%s" Ansi.dim
-            described
-            (fit_width (Terminal_text.single_line pending.Tui_decode.gp_id)
-               (max 8 (cols - 22 - Message_layout.display_width described)))
-            Ansi.reset
-        , Printf.sprintf "  %sinput=%s%s" Ansi.dim
-            (fit_width
-               (Terminal_text.single_line_or ~default:"(no input preview)"
-                  pending.Tui_decode.gp_input_preview)
-               (max 8 (cols - 10)))
-            Ansi.reset )
-  in
   Buffer.add_string buf (Printf.sprintf "%s\n%s\n" metadata_line payload_line);
 
   Buffer.add_buffer buf ask_buf;

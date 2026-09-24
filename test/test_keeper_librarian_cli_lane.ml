@@ -140,7 +140,7 @@ let test_execution_failure_names_cli_slot_once () =
   in
   check_once
     (Masc.Fusion_official_client.Codex_failure
-       (Masc.Runtime_codex_app_server.Invalid_config "synthetic failure"));
+       (Runtime_codex_app_server.Invalid_config "synthetic failure"));
   check_once
     (Masc.Fusion_official_client.Setup_failure
        (Provider_error "synthetic failure"));

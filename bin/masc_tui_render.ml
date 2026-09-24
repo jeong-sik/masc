@@ -3515,12 +3515,15 @@ let render_planning_list (state : state) =
             and the frame drew seven, and nothing on the screen said an
             eighth existed -- the rollup above counts every goal in the
             store, not the ones this filter and this frame leave off. The
-            reading costs one of the rows it describes, the way it does on
-            the roster and the reading panes. *)
-         let overflowing = count > content_height in
+            reading costs one of the rows it describes, which is the rule
+            [Masc_tui_scroll.content_height ~overflow_takes_row:true] already
+            holds for the roster and the reading panes. The chrome is zero
+            here because [content_height] above has already taken it. *)
          let list_rows =
-           if overflowing then max 1 (content_height - 1) else content_height
+           Masc_tui_scroll.content_height ~rows:content_height ~chrome:0 ~count
+             ~preview_keep:None ~overflow_takes_row:true
          in
+         let overflowing = list_rows < content_height in
          let scroll_offset =
            if state.planning_cursor >= list_rows then
              state.planning_cursor - list_rows + 1

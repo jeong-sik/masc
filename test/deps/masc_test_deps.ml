@@ -551,6 +551,39 @@ let declare_fixture_keeper ~base_path ~sandbox_profile name =
          (Otoml.TomlTable [ "keeper", Otoml.TomlTable fields ])))
 ;;
 
+(* A Keeper's container starts from the build its [sandbox_image] name has in
+   the host's image catalog, so a fixture that reaches a container start
+   writes one for its workspace, at the config root the runtime resolves for
+   that base path. Each [(name, reference)] is promoted in Docker's store
+   with {!sandbox_image_test_digest}; nothing checks the digest against a
+   store. An existing catalog is replaced. *)
+let sandbox_image_test_digest = "sha256:" ^ String.make 64 '0'
+
+let write_sandbox_image_catalog ~base_path images =
+  let module Catalog = Masc.Keeper_sandbox_image_catalog in
+  let or_fail to_string = function
+    | Ok value -> value
+    | Error error -> failwith ("write_sandbox_image_catalog: " ^ to_string error)
+  in
+  let names =
+    String.concat "" (List.map (fun (name, _) -> Printf.sprintf "[images.%s]\n" name) images)
+  in
+  let catalog =
+    List.fold_left
+      (fun catalog (name, reference) ->
+        Catalog.promote catalog ~name ~store:Catalog.Docker_daemon ~reference
+          ~digest:sandbox_image_test_digest
+        |> or_fail Catalog.change_error_to_string)
+      (Catalog.parse names |> or_fail Catalog.parse_error_to_string)
+      images
+  in
+  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+  let config_root = resolution.Config_dir_resolver.config_root.Config_dir_resolver.path in
+  Fs_compat.mkdir_p config_root;
+  Out_channel.with_open_bin (Filename.concat config_root Catalog.file_name) (fun output ->
+    output_string output (Catalog.to_toml catalog))
+;;
+
 (* The factory a fixture's guest command is dispatched through.
 
    Typed Shell IR guest dispatch refuses to run without one:

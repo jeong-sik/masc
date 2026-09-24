@@ -1121,7 +1121,15 @@ let start_dispatch_workers cs =
         match Eio.Stream.take cs.dispatch_queue with
         | Stop_dispatch_worker -> `Stop_daemon
         | Dispatch_text msg ->
-          if not (Atomic.get cs.disconnected) then dispatch_message cs msg;
+          (* One frame that raises (a parser failure other than a JSON error,
+             or an answer that cannot be sent) is dropped with a log line;
+             the worker stays up for the frames behind it. *)
+          (if not (Atomic.get cs.disconnected)
+           then (
+             try dispatch_message cs msg with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn ->
+               Log.Server.warn "LSP dispatch frame dropped: %s" (Printexc.to_string exn)));
           loop ()
       in
       try loop () with

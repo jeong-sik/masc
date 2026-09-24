@@ -437,10 +437,17 @@ let tools_display_lines (state : state) =
                   work-intake), while the id answers the question this
                   column asks -- which configured source this came from. It
                   is also short, so the column does not have to cut it. *)
+               let kind = Masc.Tui_decode.effective_tool_origin_kind tool.et_origin in
                let source =
-                 match tool.et_skill_source_id with
-                 | Some source_id -> tool.et_origin ^ ":" ^ source_id
-                 | None -> tool.et_origin
+                 match tool.et_origin with
+                 | Masc.Tui_decode.Composition_skill_origin
+                     { skill_source_id = Some source_id } ->
+                   kind ^ ":" ^ source_id
+                 | Masc.Tui_decode.Composition_skill_origin { skill_source_id = None }
+                 | Masc.Tui_decode.Descriptor_origin
+                 | Masc.Tui_decode.Instruction_skill_origin
+                 | Masc.Tui_decode.Composition_control_origin
+                 | Masc.Tui_decode.Unrecognised_origin _ -> kind
                in
                Ansi.dim,
                Tool_table.effective_tool_line
@@ -809,10 +816,8 @@ let tools_display_lines (state : state) =
                     (Theme.warn ()),
                     "     "
                     ^ Terminal_text.single_line csn_name
-                    ^ (match csn_reason with
-                       | None -> ""
-                       | Some reason ->
-                         " \xc2\xb7 " ^ Terminal_text.single_line reason))
+                    ^ " \xc2\xb7 "
+                    ^ Terminal_text.single_line csn_reason)
                   unavailable)
         @ [ Ansi.bold, Tool_table.effective_tool_header ]
         @ tool_lines
@@ -1219,7 +1224,14 @@ let tools_display_lines (state : state) =
             (Terminal_text.single_line
                (Masc.Tui_decode.skills_catalog_state_to_string sc_state)) ]
     | Some
-        { Masc.Tui_decode.sc_surfaces; sc_rejections; sc_sources; sc_config; sc_usage_coverage; _ }
+        { Masc.Tui_decode.sc_surfaces
+        ; sc_rejections
+        ; sc_shadows
+        ; sc_sources
+        ; sc_config
+        ; sc_usage_coverage
+        ; _
+        }
       ->
         let used =
           List.filter
@@ -1351,7 +1363,38 @@ let tools_display_lines (state : state) =
                     :: diagnostics)
                  rejections
         in
-        heading @ rows @ rejection_rows
+        (* A Skill name two catalog entries declare. The first in catalog order
+           wins (Skill_catalog_snapshot.effective_projection); the other is
+           published but listed to no Keeper turn by that name, and this list
+           is where an operator sees it. The name leads, the shadowed package
+           follows it, and the winner stands on its own line so a narrow pane
+           cuts neither package. *)
+        let shadow_rows =
+          let identity_text identity =
+            Skill_reference.identity_source_id_to_string identity
+            ^ "/"
+            ^ Skill_reference.identity_package_id_to_string identity
+          in
+          match sc_shadows with
+          | [] -> []
+          | shadows ->
+            ( Ansi.bold,
+              Printf.sprintf " Shadowed Skills — %d" (List.length shadows) )
+            :: List.concat_map
+                 (fun (shadow : Masc.Tui_decode.skill_catalog_shadow) ->
+                    [ ( Theme.warn (),
+                        Printf.sprintf
+                          "   %s \xc2\xb7 %s"
+                          (Terminal_text.single_line
+                             shadow.scsh_shadowed.Skill_reference.name)
+                          (Terminal_text.single_line (identity_text shadow.scsh_shadowed)) )
+                    ; ( Ansi.dim,
+                        "     shadowed by "
+                        ^ Terminal_text.single_line (identity_text shadow.scsh_winner) )
+                    ])
+                 shadows
+        in
+        heading @ rows @ rejection_rows @ shadow_rows
     in
     error_lines @ reading_lines
     end

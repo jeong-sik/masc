@@ -35,9 +35,20 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   (* [usage_trust] is anomaly provenance only. The raw provider observation is
      preserved as last usage; only the single typed resolution below is
      additive. *)
-  let observed_input_tokens = result.usage.input_tokens in
+  (* [last_input_tokens] is read as context occupancy (keeper meta JSON,
+     the context projection's fallback). A runtime that reports the newest
+     request's input apart from the turn's spend supplies that figure; the
+     spend's input is a sum over the turn's requests, not a size any request
+     had. The output stays the turn's. *)
   let observed_output_tokens = result.usage.output_tokens in
-  let observed_total_tokens = Inference_utils.total_tokens result.usage in
+  let observed_input_tokens, observed_total_tokens =
+    match result.runtime_observation with
+    | Some { request_context = Some context; _ } ->
+      ( context.Runtime_observation.input_tokens
+      , context.Runtime_observation.input_tokens + observed_output_tokens )
+    | Some { request_context = None; _ } | None ->
+      result.usage.input_tokens, Inference_utils.total_tokens result.usage
+  in
   (* Runtime usage is not necessarily a turn delta. The resolver combines the
      producer's fresh/resumed conversation authority with the durable cursor;
      every downstream aggregate consumes that same delta. *)

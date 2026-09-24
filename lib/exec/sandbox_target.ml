@@ -96,6 +96,10 @@ type ssh_endpoint = {
   remote_root : string;
   connect_timeout_sec : int;
   env_allowlist : string list;
+  allowed_paths : string list;
+  (* Extra endpoint-side roots an Execute command may name beyond the
+     keeper workdir and /tmp; absolute and normalized by the config parser,
+     compared lexically by the path check. *)
 }
 
 type t =

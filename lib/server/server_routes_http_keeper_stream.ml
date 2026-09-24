@@ -253,6 +253,25 @@ let chat_speaker_of_request payload =
         speaker_name = None;
         speaker_authority = Keeper_chat_store.Owner }
 
+(* The same three cases as [chat_speaker_of_request], as the typed speaker the
+   turn stamps on the User message it creates (RFC-0468 §3.2). The Librarian
+   reads the conversation, not the chat store, so the speaker has to travel
+   with the message. *)
+let input_speaker_of_request payload =
+  match payload.sender_keeper with
+  | Some keeper_id -> Keeper_input_speaker.Person (Keeper_input_speaker.Keeper keeper_id)
+  | None ->
+    if has_external_speaker payload then
+      Keeper_input_speaker.Person
+        (Keeper_input_speaker.External
+           { Keeper_input_speaker.channel = payload.channel
+           ; user_id = Some payload.channel_user_id
+           ; user_name =
+               (let name = String.trim payload.channel_user_name in
+                if name = "" then None else Some name)
+           })
+    else Keeper_input_speaker.Person Keeper_input_speaker.Owner
+
 let combined_turn_instructions ~turn_instructions ~surface_context =
   let ctx_text =
     match surface_context with
@@ -1175,6 +1194,7 @@ let execute_keeper_stream_tool_streaming
       state
       ~agent_name
       ~message
+      ~input_speaker
       ~continuation_channel
       ~on_text_delta
   =
@@ -1213,6 +1233,7 @@ let execute_keeper_stream_tool_streaming
           keeper_ctx
           ~continuation_channel
           ~message
+          ~input_speaker
       in
       match dispatched with
       | Some (Keeper_turn.Turn_settled result) ->
@@ -2132,7 +2153,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                 ~sw:request_sw
                 ~clock
                 ?auth_token
-                state ~agent_name ~message:direct_message ~on_event
+                state ~agent_name ~message:direct_message
+                ~input_speaker:(input_speaker_of_request payload) ~on_event
                 ~on_tool_stream_observation
                 ~on_tool_result_ready
                 ~approval_gate
@@ -3507,6 +3529,7 @@ module For_testing = struct
   let message_for_request = message_for_request
   let chat_surface_of_request = chat_surface_of_request
   let chat_speaker_of_request = chat_speaker_of_request
+  let input_speaker_of_request = input_speaker_of_request
   let turn_instructions_for_request = turn_instructions_for_request
   let direct_message_of_request = direct_message_of_request
   let canonical_reply_payload_of_body = canonical_reply_payload_of_body

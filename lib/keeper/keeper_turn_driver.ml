@@ -17,7 +17,6 @@ include Keeper_internal_error
 include Keeper_turn_driver_helpers
 
 include Keeper_turn_driver_provider_attempt
-include Keeper_turn_driver_backpressure
 
 let positive_modality_counts counts =
   counts
@@ -1226,6 +1225,7 @@ let project_input_for_attempt
        Keeper_runtime_manifest.event_kind ->
        unit)
     ~goal_blocks
+    ~goal_metadata
     ~initial_messages
     ~agent_core_checkpoint
     ~runtime_id
@@ -1392,7 +1392,9 @@ let project_input_for_attempt
               message after the seed history. Record the boundary now, before
               the provider can append answers, tools or injected context. *)
            let input_message blocks =
-             Agent_core.Types.user_msg_blocks
+             Agent_core.Types.make_message
+               ~metadata:goal_metadata
+               ~role:Agent_core.Types.User
                (List.map
                   (function
                     | Agent_core.Types.Text text ->
@@ -1442,6 +1444,32 @@ let official_client_dispatch ~provider_config_transform =
   | Some _ -> Keeper_attempt_dispatch.Rejected_before_dispatch
   | None -> Keeper_attempt_dispatch.Dispatched
 
+(* Whether any request of this attempt reached a provider. The pre-dispatch
+   serialization observer fires just before a request leaves, after the
+   pipeline's own checks, so when it never fired no provider saw the attempt.
+   The shape then only says who refused it: the pipeline's route stage refuses
+   a request it will not send with [Attempt_rejected] (no output ceiling, an
+   invalid prepared request), [InputCapacity] (a serving constraint it can
+   judge locally), [ContextOverflow] (a window it counted locally) or
+   [InvalidConfig] (no or an invalid declared context limit). A provider gives
+   the same capacity shapes only after a request went out, so they pair with a
+   fired observer. Any other error with no request out, such as a failed
+   token-count round trip, may have reached the provider and stays dispatched.
+   One attempt can send several requests, so a refusal after an earlier one
+   went out is dispatched too. *)
+let provider_attempt_dispatch ~request_serialized result =
+  match request_serialized, result with
+  | ( false
+    , Error
+        ( Agent_core.Error.Api
+            ( Llm_provider.Retry.InvalidRequest
+                { reason = Llm_provider.Retry.Attempt_rejected; _ }
+            | Llm_provider.Retry.InputCapacity _
+            | Llm_provider.Retry.ContextOverflow _ )
+        | Agent_core.Error.Config (Agent_core.Error.InvalidConfig _) ) ) ->
+    Keeper_attempt_dispatch.Rejected_before_dispatch
+  | (true | false), (Ok _ | Error _) -> Keeper_attempt_dispatch.Dispatched
+
 let run_named
     ?(input_policy = Keeper_input_policy.default)
     ~runtime_id
@@ -1450,6 +1478,7 @@ let run_named
     ~base_path
     ~goal
     ?goal_blocks
+    ?(goal_metadata = [])
     ?session_id
     (* Required, not defaulted to "". Three of the runtimes this dispatches to
        -- Codex, Claude Code, Antigravity -- refuse a blank composition in
@@ -1643,6 +1672,9 @@ let run_named
 	     range in the canonical encoding, which is what these lanes measure;
 	     the Agent Core record holds its serialized body. *)
 	  let record_official_client_continuity ~runtime_id front ~transmitted_bytes =
+	    (* Reached only for a range the lane sent: a Claude Code resume reports
+	       no front, and composing a range logs nothing. *)
+	    Keeper_official_client_host.warn_if_sent_on_unknown_start ~keeper_name front;
 	    match session_id with
 	    | None -> ()
 	    | Some trace_id ->
@@ -2007,6 +2039,7 @@ let run_named
           ~keeper_name
           ~emit_runtime_manifest
           ~goal_blocks
+          ~goal_metadata
           ~initial_messages
           ~agent_core_checkpoint
           ~runtime_id:attempt_runtime_id
@@ -2571,6 +2604,15 @@ let run_named
                reaches the real provider boundary; only the resulting typed error
                may drive fallback. *)
             let name = Printf.sprintf "agent_core-%s" attempt_runtime_id in
+          let request_serialized = ref false in
+          let on_request_wire_observation =
+            Some
+              (fun ~runtime_id ~body_bytes ~serialized ->
+                 request_serialized := true;
+                 Option.iter
+                   (fun observe -> observe ~runtime_id ~body_bytes ~serialized)
+                   on_request_wire_observation)
+          in
           let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
@@ -2595,11 +2637,13 @@ let run_named
                    | None -> Keeper_carried_front.no_seed_read)
             ; carried_front_after_refusal = (fun () -> !refused_carried_front)
             ; hold_carried_front = (fun seed -> refused_carried_front := Some seed)
+            ; restore_carried_front = (fun prior -> refused_carried_front := prior)
             ; base_path
             ; keeper_name
             ; name
             ; goal
             ; goal_blocks
+            ; goal_metadata
             ; session_id
             ; system_prompt
             ; (* Only this lane can widen a running turn, so only this lane
@@ -2721,7 +2765,8 @@ let run_named
           ( selected_runtime_result runtime ~lane_attempt_index:idx outcomes.turn_result
           , outcomes.checkpoint_after
           , Keeper_provider_attempt_effect.No_effect_observed
-          , Keeper_attempt_dispatch.Dispatched ))))
+          , provider_attempt_dispatch ~request_serialized:!request_serialized
+              outcomes.turn_result ))))
        )))
     attempt_candidates
 
@@ -2756,6 +2801,7 @@ module For_testing = struct
     resolve_runtime_candidate_for_attempt
 
   let selected_runtime_result = selected_runtime_result
+  let provider_attempt_dispatch = provider_attempt_dispatch
   let apply_official_client_accept = apply_official_client_accept
 
 	  let media_degrade_manifest_decision = media_degrade_manifest_decision

@@ -351,6 +351,7 @@ module Advanced : sig
     -> ?on_yield:(unit -> unit)
     -> ?on_resume:(unit -> unit)
     -> ?execution_store:execution_store
+    -> ?input_metadata:Types.metadata
     -> api_strategy:api_strategy
     -> on_tool_boundary:(tool_boundary -> boundary_decision)
     -> t
@@ -364,6 +365,7 @@ module Advanced : sig
     -> ?on_yield:(unit -> unit)
     -> ?on_resume:(unit -> unit)
     -> ?execution_store:execution_store
+    -> ?input_metadata:Types.metadata
     -> api_strategy:api_strategy
     -> on_tool_boundary:(tool_boundary -> boundary_decision)
     -> t
@@ -449,13 +451,19 @@ val run
 (** Run agent to completion with a user-authored content block list.
     This is the multimodal entrypoint for callers that need to pass text
     together with images, documents, or audio. Text blocks are UTF-8 sanitized;
-    non-text media payloads are preserved. *)
+    non-text media payloads are preserved.
+
+    [input_metadata] (default empty) becomes the metadata of the User message
+    this call appends, stamped when the message is created. A key may appear
+    once. It is not applied when an [execution_store] resumes the run: the
+    restored message already carries what was stamped at its creation. *)
 val run_blocks
   :  sw:Eio.Switch.t
   -> ?clock:_ Eio.Time.clock
   -> ?on_yield:(unit -> unit)
   -> ?on_resume:(unit -> unit)
   -> ?execution_store:execution_store
+  -> ?input_metadata:Types.metadata
   -> t
   -> Types.content_block list
   -> (Types.api_response, Error.t) result
@@ -467,6 +475,7 @@ val run_blocks_detailed
   -> ?on_yield:(unit -> unit)
   -> ?on_resume:(unit -> unit)
   -> ?execution_store:execution_store
+  -> ?input_metadata:Types.metadata
   -> t
   -> Types.content_block list
   -> (Types.api_response, detailed_error) result
@@ -505,6 +514,7 @@ val run_stream_blocks
   -> ?on_yield:(unit -> unit)
   -> ?on_resume:(unit -> unit)
   -> ?execution_store:execution_store
+  -> ?input_metadata:Types.metadata
   -> t
   -> Types.content_block list
   -> (Types.api_response, Error.t) result

@@ -339,6 +339,25 @@ val reasoning_details_text
 (** Message metadata: extensible typed key-value pairs attached to a message. *)
 type metadata = (string * Yojson.Safe.t) list [@@deriving show]
 
+(** Host-owned attribution of a User input. AGENT_CORE owns only the key: the
+    payload is the host's typed speaker encoded as JSON, which AGENT_CORE
+    stores and checkpoints but never reads, never serializes to a provider, and
+    never lets change request shape. A host stamps it when it creates the
+    message and does not add or remove it afterwards. *)
+module Input_speaker : sig
+  type classification =
+    | Absent
+    | Present of Yojson.Safe.t
+    | Duplicate
+
+  val key : string
+  val entry : Yojson.Safe.t -> string * Yojson.Safe.t
+  val classify : metadata -> classification
+
+  (** [metadata] with every input-speaker entry removed. *)
+  val without : metadata -> metadata
+end
+
 (** Checkpoint-only conversation metadata owned by AGENT_CORE. The run boundary is
     deliberately absent from provider payloads; it lets crash recovery avoid
     correlating tool failures across distinct external user runs. *)
@@ -354,7 +373,8 @@ module Conversation_metadata : sig
   val classify_run_boundary : metadata -> run_boundary
 
   (** Whether a follow-up User message may be folded into the preceding Tool
-      message for providers that require a single user-role span. *)
+      message for providers that require a single user-role span. A single
+      {!Input_speaker} entry does not affect the answer. *)
   val is_mergeable_followup : metadata -> bool
 end
 

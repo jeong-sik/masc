@@ -541,7 +541,6 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_voice_session_end", keeper_shard_write);
     ("keeper_tasks_audit", keeper_shard_read);
     ("keeper_broadcast", keeper_shard_write);
-    ("keeper_handoff", keeper_shard_write);
     ("keeper_task_create", keeper_shard_add_task);
     ("tool_edit_file", keeper_shard_write);
     ("tool_write_file", keeper_shard_write);

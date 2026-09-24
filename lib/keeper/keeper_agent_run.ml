@@ -1926,6 +1926,8 @@ let run_turn
                    =
                    let actual_input_tokens =
                      match result.runtime_observation with
+                     | Some { request_context = Some context; _ } ->
+                       Some context.Runtime_observation.input_tokens
                      | Some { usage_scope = Runtime_usage_scope.Per_request; _ }
                        when usage.input_tokens > 0 -> Some usage.input_tokens
                      | Some _ | None -> None
@@ -2147,6 +2149,22 @@ let run_turn
         in
         let usage : Turn_record.usage =
           match turn_result with
+          | Ok
+              { runtime_observation =
+                  Some { request_context = Some (context : Runtime_observation.request_context); _ }
+              ; _
+              } ->
+            (* A runtime that reports the newest request's occupancy apart from
+               the turn's spend (Claude Code) records that request here: this
+               record's readers ask what one request carried. The request's
+               own output count is not known; the turn's output goes to
+               [turn_output_tokens] below, under its own scope. *)
+            { input_tokens = Some context.input_tokens
+            ; output_tokens = None
+            ; cache_creation_input_tokens = Some context.cache_creation_input_tokens
+            ; cache_read_input_tokens = Some context.cache_read_input_tokens
+            ; scope = Runtime_usage_scope.Per_request
+            }
           | Ok result when result.usage_reported ->
             (* Cache counts travel with the turn rather than being dropped: a large
                input_tokens on a cache-heavy turn and one on a genuinely large prompt
@@ -2166,6 +2184,20 @@ let run_turn
             ; cache_read_input_tokens = None
             ; scope = Runtime_usage_scope.Usage_scope_unavailable
             }
+        in
+        (* The turn's output rides apart from [usage] only when [usage] is
+           the newest request's: then the spend is a client-turn total and
+           its output is the turn's, not that request's. *)
+        let turn_output_tokens =
+          match turn_result with
+          | Ok
+              ({ runtime_observation = Some { request_context = Some _; _ }
+               ; usage_reported = true
+               ; usage_scope = Runtime_usage_scope.Turn_total
+               ; _
+               } as result) ->
+            Some result.usage.output_tokens
+          | Ok _ | Error _ -> None
         in
         let request_latency_ms : int option =
           (* RFC-0233 §9 — wall-clock duration of the provider call in
@@ -2393,6 +2425,7 @@ let run_turn
             ; enable_thinking = tctx.thinking_enabled
             }
           ~usage
+          ~turn_output_tokens
           ~execution_ids
           ~blocks
           ~input_components

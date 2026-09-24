@@ -174,6 +174,7 @@ type stream_event =
       ; mode : elicitation_mode
       ; reason : elicitation_cancel_reason
       }
+  | Usage_windows_reported of Runtime_provider_usage_window.report
   | Turn_finished of { text : string }
 
 let emit_stream_event on_stream_event event =
@@ -1350,6 +1351,27 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       | Some _ -> usage
       | None -> seen_usage
     in
+    await_turn_terminal
+      io
+      ~tools
+      ~tool_call_count
+      ~thread_id
+      ~turn_id
+      ~seen_final
+      ~seen_fallback
+      ~seen_usage
+      ~open_tool_call_ids
+      ~on_stream_event
+  (* Account-wide usage windows, for the operator projection only. An update
+     this client cannot read is logged and does not fail the turn. *)
+  | Notification { method_ = "account/rateLimits/updated"; params } ->
+    (match Runtime_provider_usage_window.decode_codex_rate_limits_updated params with
+     | Ok { Runtime_provider_usage_window.windows = []; _ } -> ()
+     | Ok report -> emit_stream_event on_stream_event (Usage_windows_reported report)
+     | Error error ->
+       Log.Runtime_agent.warn
+         "Codex app-server rate-limit update not read: %s"
+         (Runtime_provider_usage_window.decode_error_to_string error));
     await_turn_terminal
       io
       ~tools

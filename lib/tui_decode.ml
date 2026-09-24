@@ -75,16 +75,15 @@ let keeper_phase_is_running : keeper_phase -> bool = function
   | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting ->
       false
 
-type keeper_phase_band = Phase_stuck | Phase_alive | Phase_parked
+type keeper_phase_band = Phase_stuck | Phase_alive | Phase_paused | Phase_stopped
 
 let keeper_phase_band : keeper_phase -> keeper_phase_band = function
   | Keeper_state_machine.Failing | Keeper_state_machine.Crashed -> Phase_stuck
   | Keeper_state_machine.Running | Keeper_state_machine.Draining
   | Keeper_state_machine.Restarting ->
       Phase_alive
-  | Keeper_state_machine.Paused | Keeper_state_machine.Stopped
-  | Keeper_state_machine.Offline ->
-      Phase_parked
+  | Keeper_state_machine.Paused -> Phase_paused
+  | Keeper_state_machine.Stopped | Keeper_state_machine.Offline -> Phase_stopped
 
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
 
@@ -883,6 +882,91 @@ let decode_task json =
   let* task = Masc_domain.task_of_yojson json in
   Ok (task_of_domain task)
 
+(* #38445: a terminal draws bidi controls and zero-width characters as
+   nothing, so the glyphs an operator reads can differ from the bytes the
+   approval hash covers (Trojan Source, CVE-2021-42574). Both terminal
+   sanitizers route those codepoints through here, so the rule lives in one
+   place: the codepoint is drawn as its own escape text, never dropped. *)
+let is_invisible_codepoint code =
+  code = 0x061C
+  || (code >= 0x200B && code <= 0x200F)
+  || (code >= 0x202A && code <= 0x202E)
+  || (code >= 0x2066 && code <= 0x2069)
+  || code = 0xFEFF
+;;
+
+let zero_width_joiner = 0x200D
+let variation_selector_15 = 0xFE0E
+let variation_selector_16 = 0xFE0F
+
+(* The one ZWJ that is not hiding anything: the one holding an emoji
+   together. [Masc_tui_message_layout] already reads it that way when it
+   measures a cluster ("a family joined by ZWJ"), and escaping it everywhere
+   drew 🤷‍♂️ as six ASCII characters on the screen and put them back in the
+   input line on recall. UAX #29 GB11 is the line: a ZWJ between two
+   pictographs joins them and stays; every other ZWJ joins nothing a reader
+   can see, so it is drawn as its escape with the rest of the invisibles.
+   The scalars below sit inside a cluster without ending it -- the two
+   presentation selectors and the skin tones -- so a joined ZWJ is still
+   recognised after them (🧑🏽‍💻). *)
+let continues_pictograph scalar =
+  let code = Uchar.to_int scalar in
+  code = variation_selector_15
+  || code = variation_selector_16
+  || Uucp.Emoji.is_emoji_modifier scalar
+
+let scalar_at text index =
+  if index >= String.length text
+  then None
+  else (
+    let decoded = String.get_utf_8_uchar text index in
+    if Uchar.utf_decode_is_valid decoded
+    then Some (Uchar.utf_decode_uchar decoded)
+    else None)
+
+let opens_pictograph text index =
+  match scalar_at text index with
+  | Some scalar -> Uucp.Emoji.is_extended_pictographic scalar
+  | None -> false
+
+let escape_invisible text =
+  let output = Buffer.create (String.length text) in
+  let length = String.length text in
+  let rec walk index ~after_pictograph =
+    if index < length
+    then (
+      let decoded = String.get_utf_8_uchar text index in
+      let step = Uchar.utf_decode_length decoded in
+      let scalar = Uchar.utf_decode_uchar decoded in
+      let valid = Uchar.utf_decode_is_valid decoded in
+      let code = Uchar.to_int scalar in
+      let joins_two_pictographs =
+        valid
+        && code = zero_width_joiner
+        && after_pictograph
+        && opens_pictograph text (index + step)
+      in
+      if valid && is_invisible_codepoint code && not joins_two_pictographs
+      then Buffer.add_string output (Printf.sprintf "\\u%04X" code)
+      else Buffer.add_substring output text index step;
+      let after_pictograph =
+        if not valid
+        then false
+        else if Uucp.Emoji.is_extended_pictographic scalar
+        then true
+        (* Only a joiner that actually joined carries the state: an escaped
+           one has been written out as text, so what follows it no longer sits
+           inside an emoji and a second joiner cannot ride through on it. *)
+        else if continues_pictograph scalar || joins_two_pictographs
+        then after_pictograph
+        else false
+      in
+      walk (index + step) ~after_pictograph)
+  in
+  walk 0 ~after_pictograph:false;
+  Buffer.contents output
+;;
+
 let sanitize_terminal_text text =
   let escaped_byte byte = Printf.sprintf "\\x%02X" byte in
   let escaped_codepoint byte = Printf.sprintf "\\u00%02X" byte in
@@ -963,7 +1047,17 @@ let sanitize_terminal_text text =
           append (index + 1))
   in
   append 0;
-  Buffer.contents output
+  escape_invisible (Buffer.contents output)
+;;
+
+(* A text whose line breaks are its own shape, read whole rather than as one
+   row: each LF stays a break and every line goes through the same escape
+   table as a single row, so a tab, a carriage return or an ESC is drawn as
+   its visible [\xNN] and never reaches the terminal as a control byte. *)
+let sanitize_terminal_lines text =
+  String.split_on_char '\n' text
+  |> List.map sanitize_terminal_text
+  |> String.concat "\n"
 ;;
 
 (* One row of a text that has rows. The terminal boundary escapes control
@@ -6231,6 +6325,116 @@ let decode_planning_snapshot json =
   in
   let* pl_generated_at = required_string_field json "generated_at" in
   Ok { pl_goals; pl_rollup; pl_backlog; pl_goal_history; pl_generated_at }
+
+type overview_goal = {
+  og_id : string;
+  og_title : string;
+  og_phase : Goal_phase.t;
+  og_priority : int;
+  og_due_date : string option;
+  og_task_count : int;
+  og_task_done_count : int;
+  og_stagnation_seconds : int option;
+  og_task_ids : string list;
+}
+
+type overview_goals_error =
+  | Overview_goal_phase_unknown of { goal_id : string; phase : string }
+  | Overview_goals_source_unavailable of string
+  | Overview_goals_malformed of string
+
+let overview_goals_error_to_string = function
+  | Overview_goal_phase_unknown { goal_id; phase } ->
+      Printf.sprintf "goal %s has a phase this build does not know: %S" goal_id
+        phase
+  | Overview_goals_source_unavailable reason -> reason
+  | Overview_goals_malformed detail -> detail
+
+let decode_overview_goal_items decode items =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest -> (
+        match decode item with
+        | Ok decoded -> loop (decoded :: acc) rest
+        | Error _ as error -> error)
+  in
+  loop [] items
+
+(* One tree node and every goal under it, parent first. A child goal is a goal
+   in its own right, so the Overview reads the forest flat. *)
+let rec decode_overview_goal_node json =
+  let malformed result =
+    Result.map_error (fun detail -> Overview_goals_malformed detail) result
+  in
+  let* og_id = malformed (required_string_field json "id") in
+  let* og_title = malformed (required_string_field json "title") in
+  let* raw_phase = malformed (required_string_field json "phase") in
+  let* og_phase =
+    match Goal_phase.parse raw_phase with
+    | Some phase -> Ok phase
+    | None ->
+        Error (Overview_goal_phase_unknown { goal_id = og_id; phase = raw_phase })
+  in
+  let* og_priority = malformed (required_int_field json "priority") in
+  let* og_due_date = malformed (optional_string_field json "due_date") in
+  let* og_task_count = malformed (required_int_field json "task_count") in
+  let* og_task_done_count =
+    malformed (required_int_field json "task_done_count")
+  in
+  let* og_stagnation_seconds =
+    malformed (required_nullable_int_field json "stagnation_seconds")
+  in
+  let* tasks_json = malformed (required_list_field json "tasks") in
+  let* og_task_ids =
+    decode_overview_goal_items
+      (fun task -> malformed (required_string_field task "id"))
+      tasks_json
+  in
+  let* children_json = malformed (required_list_field json "children") in
+  let* children =
+    decode_overview_goal_items decode_overview_goal_node children_json
+  in
+  Ok
+    ({ og_id
+     ; og_title
+     ; og_phase
+     ; og_priority
+     ; og_due_date
+     ; og_task_count
+     ; og_task_done_count
+     ; og_stagnation_seconds
+     ; og_task_ids
+     }
+    :: List.concat children)
+
+let decode_overview_goals json =
+  let* () =
+    match decode_goal_source_failure json with
+    | Ok (Some failure) ->
+        Error
+          (Overview_goals_source_unavailable
+             (goal_source_failure_to_string failure))
+    | Ok None -> Ok ()
+    | Error detail -> Error (Overview_goals_malformed detail)
+  in
+  let* tree_json =
+    match Json_util.assoc_member_opt "tree" json with
+    | None -> Error (Overview_goals_malformed "missing required field 'tree'")
+    (* The server nulls the tree when it cannot read the approval queue it
+       joins onto each goal, and says why in [approval_queue_state]. *)
+    | Some `Null ->
+        Error
+          (Overview_goals_source_unavailable
+             ("the server sent no goal tree: approval_queue_state="
+             ^ Yojson.Safe.to_string (member "approval_queue_state" json)))
+    | Some (`List items) -> Ok items
+    | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _) ->
+        Result.map_error
+          (fun detail -> Overview_goals_malformed detail)
+          (required_list_field json "tree")
+  in
+  let* nodes = decode_overview_goal_items decode_overview_goal_node tree_json in
+  Ok (List.concat nodes)
 
 let decode_keeper_runtime json =
   let* kr_name = required_string_field json "name" in

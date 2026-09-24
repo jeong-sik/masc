@@ -465,6 +465,9 @@ type exact_lane =
   | Board_attention
   | Workspace_curator
   | Verifier
+  | Browser_stagehand
+      (** Answers the Stagehand extension's [llm.generate] for the browser
+          lane (RFC-browser-lane-stagehand §3.7). *)
 
 val all_exact_lanes : exact_lane list
 (** Every exact-output lane. *)
@@ -478,7 +481,9 @@ val exact_lane_of_id : string -> exact_lane option
 val exact_lane_supports_cli_tail : exact_lane -> bool
 (** Whether this exact lane can walk official-client [cli_slots] when HTTP
     provider slots are absent or exhausted. Verifier uses the managed tool-call
-    runner and its typed verdict callback. *)
+    runner and its typed verdict callback. [Browser_stagehand] answers through
+    AGENT_CORE only: its answer carries the provider's usage, which a CLI slot
+    does not report. *)
 
 val verifier_exact_lane_id : string
 (** ["verifier_exact"] — the [\[runtime.exact_output_lanes.verifier_exact\]]

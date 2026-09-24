@@ -127,6 +127,14 @@ max_output_tokens = 8192
 slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-flash"]
 max_output_tokens = 8192
 
+# Answers the Stagehand browser extension's llm.generate
+# (RFC-browser-lane-stagehand §3.7). Stagehand's system_prompt goes to the
+# system slot, so a slot whose model takes no system prompt is refused when
+# the lane is resolved. The lane walks no cli_slots.
+[runtime.exact_output_lanes.browser_stagehand_exact]
+slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
+max_output_tokens = 8192
+
 # SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in
 # docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md).
 # A keeper opts in with sandbox_profile = "remote_ssh" + remote_endpoint =

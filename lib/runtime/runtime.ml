@@ -940,8 +940,11 @@ type exact_lane =
   | Board_attention
   | Workspace_curator
   | Verifier
+  | Browser_stagehand
 
-let all_exact_lanes = [ Librarian; Hitl_auto_judge; Board_attention; Workspace_curator; Verifier ]
+let all_exact_lanes =
+  [ Librarian; Hitl_auto_judge; Board_attention; Workspace_curator; Verifier; Browser_stagehand ]
+;;
 
 let exact_lane_id = function
   | Librarian -> "librarian_exact"
@@ -949,6 +952,7 @@ let exact_lane_id = function
   | Board_attention -> "board_attention_exact"
   | Workspace_curator -> "workspace_curator_exact"
   | Verifier -> verifier_exact_lane_id
+  | Browser_stagehand -> "browser_stagehand_exact"
 ;;
 
 let exact_lane_of_id = function
@@ -957,16 +961,18 @@ let exact_lane_of_id = function
   | "board_attention_exact" -> Some Board_attention
   | "workspace_curator_exact" -> Some Workspace_curator
   | "verifier_exact" -> Some Verifier
+  | "browser_stagehand_exact" -> Some Browser_stagehand
   | _ -> None
 ;;
 
-(* [Server_workspace_memory_curator.execute] refuses a run whose lane declares
-   any CLI slot, so [false] here is that refusal read in advance. The two are
-   tied by these comments alone; making a CLI slot on such a lane unloadable
-   would leave one rule and let that refusal go. *)
+(* [Server_workspace_memory_curator.execute] and [Browser_stagehand_model]
+   refuse a run whose lane declares any CLI slot, so [false] here is that
+   refusal read in advance. The two are tied by these comments alone; making a
+   CLI slot on such a lane unloadable would leave one rule and let that
+   refusal go. *)
 let exact_lane_supports_cli_tail = function
   | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true
-  | Workspace_curator -> false
+  | Workspace_curator | Browser_stagehand -> false
 ;;
 
 (* [verifier_exact] is the one exact-output lane whose slot ids are read
@@ -3329,7 +3335,7 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
           | Verifier, Ok () -> slots, cli_slots
           | Verifier, Error _ ->
             judgeable_declared_verifier_slots, judgeable_declared_verifier_cli_slots
-          | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator), _ ->
+          | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator | Browser_stagehand), _ ->
             slots, (if exact_lane_supports_cli_tail lane then cli_slots else [])
         in
         let next =

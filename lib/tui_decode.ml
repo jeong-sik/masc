@@ -1054,6 +1054,16 @@ let sanitize_terminal_text text =
   escape_invisible (Buffer.contents output)
 ;;
 
+(* A text whose line breaks are its own shape, read whole rather than as one
+   row: each LF stays a break and every line goes through the same escape
+   table as a single row, so a tab, a carriage return or an ESC is drawn as
+   its visible [\xNN] and never reaches the terminal as a control byte. *)
+let sanitize_terminal_lines text =
+  String.split_on_char '\n' text
+  |> List.map sanitize_terminal_text
+  |> String.concat "\n"
+;;
+
 (* One row of a text that has rows. The terminal boundary escapes control
    bytes because an external value may carry them by mistake or on purpose;
    a file's newline is neither, it is the text's own shape, and a list cell

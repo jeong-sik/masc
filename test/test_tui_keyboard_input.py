@@ -4041,6 +4041,90 @@ def concealed_input_detail_interaction() -> Interaction:
     return interact
 
 
+# A held Keeper tool call asks "Run <tool> on <subject>?", and the subject is
+# the command the model wrote. ESC [ 1 A ESC [ 2 K in it moves the cursor up
+# a row and clears it, so the detail the operator reads before pressing y
+# could be rewritten by the ask itself. The question is the field under test;
+# the args carry a marker past the list row's cut, so only the detail pane can
+# draw it and the frame that holds it is the detail's.
+ESCAPED_QUESTION_INJECTED = b"ok\x1b[1A\x1b[2Krm"
+ESCAPED_QUESTION_TAIL = b"rm -rf /tmp/forged?"
+ESCAPED_QUESTION_VISIBLE = b"ok\\x1B[1A\\x1B[2Krm"
+ESCAPED_QUESTION_DETAIL_MARKER = b"detail-only-marker"
+
+
+def escaped_question_http_fixtures() -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    command = "echo " + "x" * 120 + " " + ESCAPED_QUESTION_DETAIL_MARKER.decode()
+    fixtures["/api/v1/keepers/tool-approvals"] = (
+        200,
+        {
+            "pending": [
+                {
+                    "keeper": "alpha",
+                    "tool_call_id": "tool-escaped-question",
+                    "tool": "Bash",
+                    "args": json.dumps({"command": command}),
+                    "question": "Run Bash on echo "
+                    + ESCAPED_QUESTION_INJECTED.decode()
+                    + " -rf /tmp/forged?",
+                    "because": None,
+                    "asked_at": 1787766400.0,
+                    "timeout_sec": 300.0,
+                }
+            ]
+        },
+    )
+    return fixtures
+
+
+def escaped_question_detail_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=40,
+            columns=100,
+            needle=b"MASC Overview",
+        )
+        tab_until(process, master_fd, output, b"MASC Approvals")
+        wait_for_output(
+            process, master_fd, output, b"tool-escaped-question", start=0, timeout=5.0
+        )
+        detail = send_and_wait(
+            process, master_fd, output, b"\r", ESCAPED_QUESTION_DETAIL_MARKER
+        )
+        frame = frame_containing(detail, ESCAPED_QUESTION_DETAIL_MARKER)
+        plain = CSI_RE.sub(b"", frame)
+        # Asked of the raw frame: CSI_RE strips exactly the bytes under test.
+        if ESCAPED_QUESTION_INJECTED in frame:
+            raise AssertionError(
+                "the approval detail drew the question's escapes raw, so the"
+                f" ask could rewrite the rows above it: {frame!r}"
+            )
+        # The escape is drawn as text where it sat, so the operator sees one
+        # was tried instead of a blank that reads as spacing.
+        if ESCAPED_QUESTION_VISIBLE not in plain:
+            raise AssertionError(
+                f"the question's escapes are not drawn visibly: {frame!r}"
+            )
+        # The words the escape surrounded are still on the pane.
+        if ESCAPED_QUESTION_TAIL not in plain:
+            raise AssertionError(
+                f"the question's tail is missing from the detail: {frame!r}"
+            )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def approval_selection_identity_interaction(
     fixtures: HttpFixtures,
     initial_items: list[dict[str, object]],
@@ -14943,6 +15027,12 @@ def run_keyboard_regression(executable: str) -> None:
         description="A concealing escape in the input draws as text in approval detail",
         interact=concealed_input_detail_interaction(),
         http_fixtures=concealed_input_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="A cursor escape in a held call's question draws as text in approval detail",
+        interact=escaped_question_detail_interaction(),
+        http_fixtures=escaped_question_http_fixtures(),
     )
     run_terminal_scenario(
         executable,

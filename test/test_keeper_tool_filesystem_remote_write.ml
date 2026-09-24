@@ -103,6 +103,10 @@ let stub_main () =
       | "fail" ->
         write_all Unix.stderr ("mv: cannot move: No space left on device\n" ^ trailer ~exit:1 ());
         exit 0
+      | "escape" ->
+        write_all Unix.stderr
+          (trailer ~exit:Keeper_tool_filesystem_remote_write.declared_root_escape_exit ());
+        exit 0
       | other -> failwith ("unknown remote write stub mode: " ^ other))
 ;;
 
@@ -434,7 +438,8 @@ let test_declared_root_write_lands_when_the_gate_allows () =
     (asked_as_pairs asked);
   let request, stdin = write_frame f in
   check (list string) "written at the endpoint path as itself"
-    (Keeper_tool_filesystem_remote_write.write_argv ~mode:Replace_whole ~remote_path:"/app/out.txt")
+    (Keeper_tool_filesystem_remote_write.declared_root_write_argv ~mode:Replace_whole
+       ~endpoint_path:"/app/out.txt" ~roots:[ "/app" ])
     request.argv;
   check string "content" "done\n" stdin
 ;;
@@ -499,7 +504,8 @@ let test_declared_root_patch_asks_with_the_patched_body () =
     (asked_as_pairs asked);
   let request, stdin = write_frame f in
   check (list string) "replaced at the endpoint path"
-    (Keeper_tool_filesystem_remote_write.write_argv ~mode:Replace_whole ~remote_path:"/app/conf.py")
+    (Keeper_tool_filesystem_remote_write.declared_root_write_argv ~mode:Replace_whole
+       ~endpoint_path:"/app/conf.py" ~roots:[ "/app" ])
     request.argv;
   check string "patched body" "a = 2\nb = 1\n" stdin
 ;;
@@ -524,6 +530,74 @@ let test_a_guest_endpoint_declares_no_roots () =
 (* An approval is spent only on the Gate input it was given. Replay rebuilds
    the input from the endpoint configuration current then, so the same name
    pointing at another host is another input and needs its own approval. *)
+let test_declared_root_escape_is_refused_as_the_callers () =
+  with_eio @@ fun () ->
+  let f = declared_fixture ~mode:"escape" in
+  let result, asked =
+    handle_declared f ~decision:allow
+      [ "path", `String "/app/linkdir/out.txt"; "mode", `String "overwrite"; "content", `String "x" ]
+  in
+  check int "the Gate was asked for the lexical path" 1 (List.length asked);
+  check bool "a path that leads out through a link is the caller's" true
+    (failed_as Tool_result.Policy_rejection result);
+  check bool "the refusal says what happened" true
+    (let raw = result.raw_output and needle = "path_outside_declared_root" in
+     let n = String.length needle in
+     let rec from i = i + n <= String.length raw && (String.sub raw i n = needle || from (i + 1)) in
+     from 0)
+;;
+
+(* The declared-root payloads, run here as the endpoint would run them,
+   against real symbolic links. *)
+let run_payload ~stdin argv =
+  match argv with
+  | "sh" :: rest ->
+    let stdin_path = Filename.temp_file "masc-declared-" ".stdin" in
+    save stdin_path stdin;
+    let fd = Unix.openfile stdin_path [ Unix.O_RDONLY ] 0 in
+    let pid = Unix.create_process "sh" (Array.of_list ("sh" :: rest)) fd Unix.stdout Unix.stderr in
+    Unix.close fd;
+    let _, status = Unix.waitpid [] pid in
+    Sys.remove stdin_path;
+    status
+  | _ -> fail "the payload is not an sh command"
+;;
+
+let test_declared_payload_does_not_follow_a_link_out_of_the_root () =
+  let root = temp_dir () in
+  let app = Filename.concat root "app" in
+  let outside = Filename.concat root "outside" in
+  Unix.mkdir app 0o700;
+  Unix.mkdir outside 0o700;
+  let victim = Filename.concat outside "out.txt" in
+  save victim "original";
+  Unix.symlink outside (Filename.concat app "linkdir");
+  Unix.symlink victim (Filename.concat app "link.txt");
+  let payload mode path content =
+    run_payload ~stdin:content
+      (Keeper_tool_filesystem_remote_write.declared_root_write_argv ~mode
+         ~endpoint_path:(Filename.concat app path) ~roots:[ app ])
+  in
+  let escaped = Unix.WEXITED Keeper_tool_filesystem_remote_write.declared_root_escape_exit in
+  let overwrite = Keeper_tool_filesystem_remote_write.Replace_whole in
+  let append = Keeper_tool_filesystem_remote_write.Append_tail in
+  check bool "overwrite through a linked directory" true
+    (payload overwrite "linkdir/out.txt" "x" = escaped);
+  check bool "append through a linked directory" true
+    (payload append "linkdir/out.txt" "x" = escaped);
+  check bool "append to a linked file" true (payload append "link.txt" "x" = escaped);
+  check bool "a new directory behind a link" true
+    (payload overwrite "linkdir/new/deep.txt" "x" = escaped);
+  check string "the file outside the root is untouched" "original" (read_file victim);
+  check bool "no directory was made behind the link" false
+    (Sys.file_exists (Filename.concat outside "new"));
+  check bool "a path inside the root is written" true
+    (payload overwrite "sub/ok.txt" "hello" = Unix.WEXITED 0);
+  check string "with the bytes" "hello" (read_file (Filename.concat app "sub/ok.txt"));
+  check bool "and appended to" true (payload append "sub/ok.txt" "+more" = Unix.WEXITED 0);
+  check string "in place" "hello+more" (read_file (Filename.concat app "sub/ok.txt"))
+;;
+
 let test_another_host_behind_the_name_is_another_gate_input () =
   let input host =
     Keeper_tool_filesystem_runtime.declared_root_write_gate_input
@@ -588,6 +662,10 @@ let () =
               test_a_guest_endpoint_declares_no_roots
           ; test_case "another host behind the name is another Gate input" `Quick
               test_another_host_behind_the_name_is_another_gate_input
+          ; test_case "a declared root escape is refused as the caller's" `Quick
+              test_declared_root_escape_is_refused_as_the_callers
+          ; test_case "the declared payload does not follow a link out of the root" `Quick
+              test_declared_payload_does_not_follow_a_link_out_of_the_root
           ; test_case "patch without a source is a workflow rejection" `Quick
               test_patch_without_a_source_is_a_workflow_rejection
           ; test_case "endpoint failure is a runtime failure" `Quick

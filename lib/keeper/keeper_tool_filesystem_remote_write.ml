@@ -38,6 +38,50 @@ let overwrite_script =
 
 let append_script = "set -e; d=$(dirname \"$1\"); mkdir -p \"$d\"; cat >> \"$1\""
 
+(* A path under an endpoint's declared roots (#38593) was judged lexically,
+   on this host, before the Gate was asked; the endpoint's filesystem can
+   disagree, because a symbolic link under a root may lead outside it. So the
+   script that writes resolves on the endpoint the directory it writes in and
+   refuses, with this exit code, unless that directory is physically under
+   one of the roots given after the target ([$2]...), each root resolved the
+   same way. The deepest existing ancestor is checked before [mkdir -p], so
+   no directory is created through a link, and a target that is itself a
+   link is refused, so [cat >>] and [mv] act on the file the check saw. *)
+let declared_root_escape_exit = 6
+
+let declared_root_prelude =
+  String.concat "\n"
+    [ "set -e"
+    ; "t=$1; shift"
+    ; "under_root() {"
+    ; "  q=$1; shift"
+    ; "  for r in \"$@\"; do"
+    ; "    rp=$(cd \"$r\" 2>/dev/null && pwd -P) || continue"
+    ; "    case \"$q/\" in \"${rp%/}\"/*) return 0;; esac"
+    ; "  done"
+    ; "  return 1"
+    ; "}"
+    ; "d=$(dirname \"$t\"); a=$d"
+    ; "while [ ! -d \"$a\" ]; do a=$(dirname \"$a\"); done"
+    ; Printf.sprintf "under_root \"$(cd \"$a\" && pwd -P)\" \"$@\" || exit %d"
+        declared_root_escape_exit
+    ; "mkdir -p \"$d\""
+    ; "p=$(cd \"$d\" && pwd -P)"
+    ; Printf.sprintf "under_root \"$p\" \"$@\" || exit %d" declared_root_escape_exit
+    ; "f=$p/$(basename \"$t\")"
+    ; Printf.sprintf "if [ -L \"$f\" ]; then exit %d; fi" declared_root_escape_exit
+    ]
+;;
+
+let declared_root_overwrite_script =
+  declared_root_prelude
+  ^ "\nw=$(mktemp \"$p/.masc-write.XXXXXX\"); cat > \"$w\"; \
+     if [ -e \"$f\" ]; then chmod \"$(stat -c %a \"$f\")\" \"$w\"; else chmod 0644 \"$w\"; fi; \
+     mv -f \"$w\" \"$f\""
+;;
+
+let declared_root_append_script = declared_root_prelude ^ "\ncat >> \"$f\""
+
 (* A patch source that is not a regular file exits with this code, chosen
    here, so the handler tells "nothing to patch" from a failed [cat]. *)
 let patch_source_missing_exit = 3
@@ -59,6 +103,15 @@ let write_argv ~mode ~remote_path =
     | Append_tail -> append_script
   in
   [ "sh"; "-c"; script; script_name; remote_path ]
+;;
+
+let declared_root_write_argv ~mode ~endpoint_path ~roots =
+  let script =
+    match mode with
+    | Replace_whole -> declared_root_overwrite_script
+    | Append_tail -> declared_root_append_script
+  in
+  [ "sh"; "-c"; script; script_name; endpoint_path ] @ roots
 ;;
 
 let read_source_argv ~remote_path = [ "sh"; "-c"; read_source_script; script_name; remote_path ]
@@ -226,14 +279,28 @@ let handle_content_with_endpoint
             host one. *)
          let write ~content_mode ~mode_label ~body ~extra_fields ~evidence ~patch =
            let run_write () =
+             let argv, declared_roots =
+               match remote_target with
+               | Keeper_tree_target _ -> write_argv ~mode:content_mode ~remote_path, None
+               | Declared_root_target { endpoint_config; _ } ->
+                 let roots = endpoint_config.Exec_ssh_endpoint.allowed_paths in
+                 ( declared_root_write_argv ~mode:content_mode ~endpoint_path:remote_path ~roots
+                 , Some roots )
+             in
              let status, _stdout, stderr =
                Masc_exec.Sandbox_target.status_tuple
-                 (run ~endpoint ~cwd:keeper_root
-                    ~argv:(write_argv ~mode:content_mode ~remote_path)
-                    ~stdin:body)
+                 (run ~endpoint ~cwd:keeper_root ~argv ~stdin:body)
              in
-             match status with
-             | Unix.WEXITED 0 ->
+             match status, declared_roots with
+             | Unix.WEXITED code, Some roots when code = declared_root_escape_exit ->
+               failure ~class_:Tool_result.Policy_rejection ~target
+                 (Printf.sprintf
+                    "path_outside_declared_root: on endpoint %s, %s leads outside the \
+                     declared roots (%s) through a symbolic link; nothing was written"
+                    (Keeper_sandbox_remote.name endpoint)
+                    target
+                    (String.concat ", " roots))
+             | Unix.WEXITED 0, (None | Some _) ->
                Log.Keeper.info
                  "WRITE_AUDIT: keeper=%s fs_edit path=%s mode=%s bytes=%d via=remote"
                  meta.name target mode_label (String.length body);
@@ -248,7 +315,7 @@ let handle_content_with_endpoint
                (match evidence with
                 | Some evidence -> Keeper_tool_execution.with_file_change_evidence evidence execution
                 | None -> execution)
-             | status ->
+             | status, (None | Some _) ->
                failure ~class_:Tool_result.Runtime_failure ~target
                  (Printf.sprintf
                     "remote write failed (%s) on endpoint %s: %s"

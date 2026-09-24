@@ -65,6 +65,17 @@ val write_argv : mode:content_mode -> remote_path:string -> string list
 (** The [sh -c] payload that writes stdin to [remote_path]: an atomic
     replace beside the target, or an append. *)
 
+val declared_root_write_argv :
+  mode:content_mode -> endpoint_path:string -> roots:string list -> string list
+(** The payload for a path under the endpoint's declared [roots]. On the
+    endpoint it resolves the directory it writes in and exits
+    {!declared_root_escape_exit}, writing nothing, unless that directory is
+    physically under one of [roots] and the target is not a symbolic link.
+    The Gate approved a lexical path; this makes the bytes land at that path
+    or nowhere. *)
+
+val declared_root_escape_exit : int
+
 val read_source_argv : remote_path:string -> string list
 (** The payload that prints a regular file, or exits
     {!patch_source_missing_exit} when there is none to patch. *)

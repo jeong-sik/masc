@@ -3,7 +3,11 @@
    The fake browser answers the CDP commands a session sends; the fake
    extension answers the JSON-RPC it receives through [Runtime.evaluate] and
    talks back through [Runtime.bindingCalled]. Frames go back to the
-   connection from a separate fiber, as a socket reader would deliver them. *)
+   connection from a separate fiber, as a socket reader would deliver them.
+
+   The mock clock advances only when every fiber is blocked, so [settle]
+   returns once the session, the reader and the fake have all run as far as
+   they can. *)
 open Alcotest
 module Cdp = Masc.Browser_cdp
 module Wire = Masc.Browser_stagehand_wire
@@ -14,13 +18,30 @@ let str value = `String value
 let to_s = Yojson.Safe.to_string
 let worker = "W"
 let deadline_s = 5.0
+
+(* Shorter than every timer the session and the connection start (the 0.1 s
+   worker poll, the deadlines above), so the clock reaches it only after all
+   other fibers have blocked. *)
+let settle_s = 0.001
 let marker version = obj [ "protocolVersion", str version; "serverInfo", obj [ "name", str "stagehand"; "version", str "1.0.2" ] ]
+
+(* An llm.generate answer in the protocol's LLMStructuredGenerateResult shape. *)
+let model_answer =
+  obj
+    [ "role", str "assistant"
+    ; "content", obj [ "type", str "text"; "text", str {|{"pick":"0-18"}|} ]
+    ; "output_format", str "json_schema"
+    ; "structured_content", obj [ "pick", str "0-18" ]
+    ]
+;;
 
 type act_behaviour = Ask_the_model | Hold
 
 type fake =
   { inbox : string Eio.Stream.t
+  ; mutable loaded : string option
   ; mutable loaded_id : string option
+  ; mutable listings_without_worker : int
   ; mutable marker : Yojson.Safe.t
   ; mutable act : act_behaviour
   ; mutable held_act : Yojson.Safe.t option
@@ -28,8 +49,10 @@ type fake =
   ; mutable answers_from_host : Yojson.Safe.t list
   }
 
+let to_masc fake frame = Eio.Stream.add fake.inbox frame
+
 let to_host fake message =
-  Eio.Stream.add fake.inbox
+  to_masc fake
     (to_s
        (obj
           [ "method", str "Runtime.bindingCalled"
@@ -39,6 +62,7 @@ let to_host fake message =
 ;;
 
 let rpc_result id result = obj [ "jsonrpc", str "2.0"; "id", id; "result", result ]
+let rpc_error id message = obj [ "jsonrpc", str "2.0"; "id", id; "error", obj [ "code", `Int (-32603); "message", str message ] ]
 let rpc_request id method_ params = obj [ "jsonrpc", str "2.0"; "id", str id; "method", str method_; "params", params ]
 
 let extension_receives fake message =
@@ -58,7 +82,9 @@ let extension_receives fake message =
     (match fake.waiting_on_model with
      | Some (model_id, act_id) when id = model_id ->
        fake.waiting_on_model <- None;
-       to_host fake (rpc_result act_id (obj [ "success", `Bool true; "model", member "result" message ]))
+       (match member "result" message with
+        | `Null -> to_host fake (rpc_error act_id "the model request was refused")
+        | result -> to_host fake (rpc_result act_id (obj [ "success", `Bool true; "model", result ])))
      | Some _ | None -> ())
   | _ -> failf "the fake extension got %s" (to_s message)
 ;;
@@ -88,22 +114,28 @@ let delivered expression =
     else None
 ;;
 
+let targets fake =
+  let page = obj [ "targetId", str "P"; "type", str "page"; "url", str "about:blank" ] in
+  match fake.loaded with
+  | Some loaded when fake.listings_without_worker = 0 ->
+    [ page; obj [ "targetId", str "SW"; "type", str "service_worker"; "url", str ("chrome-extension://" ^ loaded ^ "/service-worker.js") ] ]
+  | Some _ | None ->
+    fake.listings_without_worker <- max 0 (fake.listings_without_worker - 1);
+    [ page ]
+;;
+
 let browser_receives fake frame =
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string frame in
   let id = member "id" json |> to_int and params = member "params" json in
-  let answer result = Eio.Stream.add fake.inbox (to_s (obj [ "id", `Int id; "result", result ])) in
+  let answer result = to_masc fake (to_s (obj [ "id", `Int id; "result", result ])) in
   match member "method" json |> to_string with
-  | "Target.setDiscoverTargets" | "Runtime.enable" | "Runtime.addBinding" -> answer (obj [])
+  | "Runtime.enable" | "Runtime.addBinding" -> answer (obj [])
   | "Extensions.loadUnpacked" ->
     let loaded = Option.value fake.loaded_id ~default:(Wire.extension_id_of_real_path (member "path" params |> to_string)) in
-    answer (obj [ "id", str loaded ]);
-    Eio.Stream.add fake.inbox
-      (to_s
-         (obj
-            [ "method", str "Target.targetCreated"
-            ; "params", obj [ "targetInfo", obj [ "targetId", str "SW"; "type", str "service_worker"; "url", str ("chrome-extension://" ^ loaded ^ "/service-worker.js") ] ]
-            ]))
+    fake.loaded <- Some loaded;
+    answer (obj [ "id", str loaded ])
+  | "Target.getTargets" -> answer (obj [ "targetInfos", `List (targets fake) ])
   | "Target.attachToTarget" -> answer (obj [ "sessionId", str worker ])
   | "Runtime.evaluate" ->
     let expression = member "expression" params |> to_string in
@@ -117,16 +149,26 @@ let browser_receives fake frame =
   | other -> failf "the fake browser got %s" other
 ;;
 
-let with_session ?(configure = ignore) ?(answer = fun _ -> Ok (obj [ "structured_content", obj [ "pick", str "0-18" ] ])) f =
-  Eio_mock.Backend.run
-  @@ fun () ->
-  let clock = Eio_mock.Clock.make () in
-  Eio_mock.Clock.set_time clock 0.0;
+type harness =
+  { fake : fake
+  ; session : Session.t
+  ; cdp : Cdp.t
+  ; events : Session.event list ref
+  ; model_calls : int ref
+  ; settle : unit -> unit
+  }
+
+let with_session ?(configure = ignore) ?(answer = fun _ -> Ok model_answer) f =
+  Eio_mock.Backend.run_full
+  @@ fun env ->
+  let clock = env#clock in
   Eio.Switch.run
   @@ fun sw ->
   let fake =
     { inbox = Eio.Stream.create max_int
+    ; loaded = None
     ; loaded_id = None
+    ; listings_without_worker = 0
     ; marker = marker "2.0.0"
     ; act = Ask_the_model
     ; held_act = None
@@ -151,159 +193,233 @@ let with_session ?(configure = ignore) ?(answer = fun _ -> Ok (obj [ "structured
       read ()
     in
     read ());
-  f ~fake ~session ~cdp ~events ~model_calls
+  f { fake; session; cdp; events; model_calls; settle = (fun () -> Eio.Time.sleep clock settle_s) }
 ;;
 
-let attach session cdp = Session.attach session cdp ~extension_dir:(Sys.getcwd ()) ~browser_cdp_url:"ws://127.0.0.1:9/devtools/browser/b"
+let attach h = Session.attach h.session h.cdp ~extension_dir:(Sys.getcwd ()) ~browser_cdp_url:"ws://127.0.0.1:9/devtools/browser/b"
 
-let attached session cdp =
-  match attach session cdp with
+let attached h =
+  match attach h with
   | Ok _ -> ()
   | Error _ -> fail "attach failed"
 ;;
 
-(* Let the reader and reply fibers run until [ready] holds. *)
-let yields_allowed = 1000
-
-let run_until ready =
-  let rec go remaining =
-    if ready () then ()
-    else if remaining = 0 then fail "the fake never reached the expected state"
-    else (
-      Eio.Fiber.yield ();
-      go (remaining - 1))
-  in
-  go yields_allowed
-;;
-
-(* The extension holds an act only after masc's [Runtime.evaluate] carrying
-   it was answered; until the reader has taken that answer, a cancelled
-   caller would still have a CDP command out, which ends the connection. *)
-let act_held fake () = Option.is_some fake.held_act && Eio.Stream.is_empty fake.inbox
-
-(* After the answer is read, the caller's fiber still has to reach its wait
-   for the JSON-RPC reply. *)
-let passes_to_reach_the_wait = 10
-
-let let_callers_reach_their_waits () =
-  for _ = 1 to passes_to_reach_the_wait do
-    Eio.Fiber.yield ()
-  done
-;;
-
 let error_code message = Yojson.Safe.Util.(message |> member "error" |> member "code" |> to_int)
+let has_result message = Yojson.Safe.Util.member "result" message <> `Null
 let act = Wire.Act { page_id = "P"; instruction = "click the Submit order button" }
 let goto = Wire.Page_goto { page_id = "P"; url = "http://127.0.0.1:1/" }
+let logged h wanted = List.exists wanted !(h.events)
+
+let only_answer h =
+  match h.fake.answers_from_host with
+  | [ answer ] -> answer
+  | answers -> failf "expected one answer to the extension, got %d" (List.length answers)
+;;
+
+let goto_succeeds h =
+  match Session.call h.session goto with
+  | Ok _ -> ()
+  | Error Session.Abandoned_call_pending -> fail "goto was refused behind an abandoned call"
+  | Error _ -> fail "goto"
+;;
+
+(* Starts [call] on a fiber of its own, lets it reach its wait, and cancels
+   it there, as the lane deadline does. *)
+let cancel_waiting_caller h call =
+  try
+    Eio.Switch.run (fun caller ->
+      Eio.Fiber.fork ~sw:caller (fun () -> ignore (Session.call h.session call));
+      h.settle ();
+      Eio.Switch.fail caller Exit)
+  with
+  | Exit -> ()
+;;
+
+exception Model_bug
 
 let test_attach () =
   with_session
-  @@ fun ~fake:_ ~session ~cdp ~events:_ ~model_calls:_ ->
-  match attach session cdp with
+  @@ fun h ->
+  match attach h with
   | Ok init -> check bool "init reports its pages" true (Yojson.Safe.Util.member "pages" init <> `Null)
   | Error _ -> fail "attach against a matching extension"
 ;;
 
+let test_worker_found_after_loading () =
+  with_session ~configure:(fun fake -> fake.listings_without_worker <- 3)
+  @@ fun h ->
+  match attach h with
+  | Ok _ -> check int "every empty listing was read" 0 h.fake.listings_without_worker
+  | Error _ -> fail "a worker listed a few polls after loading is found"
+;;
+
+let calls_refused_after_failed_attach h =
+  match Session.call h.session goto with
+  | Error (Session.Connection_gone _) -> ()
+  | _ -> fail "a session whose attach failed takes no calls"
+;;
+
 let test_attach_refusals () =
   (with_session ~configure:(fun fake -> fake.loaded_id <- Some (String.make 32 'a'))
-   @@ fun ~fake:_ ~session ~cdp ~events:_ ~model_calls:_ ->
-   match attach session cdp with
-   | Error (Session.Extension_id_mismatch { loaded; _ }) -> check string "loaded id" (String.make 32 'a') loaded
-   | _ -> fail "an extension loaded under another id is refused");
+   @@ fun h ->
+   (match attach h with
+    | Error (Session.Extension_id_mismatch { loaded; _ }) -> check string "loaded id" (String.make 32 'a') loaded
+    | _ -> fail "an extension loaded under another id is refused");
+   calls_refused_after_failed_attach h);
+  (with_session ~configure:(fun fake -> fake.listings_without_worker <- max_int)
+   @@ fun h ->
+   (match attach h with
+    | Error Session.Service_worker_absent -> ()
+    | _ -> fail "no worker within the wait is refused");
+   calls_refused_after_failed_attach h);
   with_session ~configure:(fun fake -> fake.marker <- marker "3.1.0")
-  @@ fun ~fake:_ ~session ~cdp ~events:_ ~model_calls:_ ->
-  match attach session cdp with
-  | Error (Session.Runtime_incompatible { found = "3.1.0"; supported = 2 }) -> ()
-  | _ -> fail "another protocol major is refused"
+  @@ fun h ->
+  (match attach h with
+   | Error (Session.Runtime_incompatible { found = "3.1.0"; supported = 2 }) -> ()
+   | _ -> fail "another protocol major is refused");
+  calls_refused_after_failed_attach h
 ;;
 
 let test_act_uses_the_model () =
   with_session
-  @@ fun ~fake ~session ~cdp ~events:_ ~model_calls ->
-  attached session cdp;
-  (match Session.call session act with
-   | Ok result ->
-     check string "the extension received the model's answer" {|{"structured_content":{"pick":"0-18"}}|}
-       (to_s (Yojson.Safe.Util.member "model" result))
+  @@ fun h ->
+  attached h;
+  (match Session.call h.session act with
+   | Ok result -> check string "the extension received the model's answer" (to_s model_answer) (to_s (Yojson.Safe.Util.member "model" result))
    | Error _ -> fail "act");
-  check int "one model call" 1 !model_calls;
-  check int "one answer went back" 1 (List.length fake.answers_from_host)
+  check int "one model call" 1 !(h.model_calls);
+  check bool "one answer went back" true (has_result (only_answer h))
 ;;
 
 let test_model_request_without_a_call () =
   with_session
-  @@ fun ~fake ~session ~cdp ~events ~model_calls ->
-  attached session cdp;
-  to_host fake (rpc_request "g9" "llm.generate" (obj []));
-  run_until (fun () -> fake.answers_from_host <> []);
-  check int "refused with the host code" Wire.host_refused (error_code (List.hd fake.answers_from_host));
-  check int "the model was not asked" 0 !model_calls;
-  check bool "the refusal is logged" true
-    (List.exists (function Session.Model_request_refused _ -> true | _ -> false) !events)
+  @@ fun h ->
+  attached h;
+  to_host h.fake (rpc_request "g9" "llm.generate" (obj []));
+  h.settle ();
+  check int "refused with the host code" Wire.host_refused (error_code (only_answer h));
+  check int "the model was not asked" 0 !(h.model_calls);
+  check bool "the refusal is logged" true (logged h (function Session.Model_request_refused _ -> true | _ -> false))
 ;;
 
 let test_abandoned_call () =
   with_session ~configure:(fun fake -> fake.act <- Hold)
-  @@ fun ~fake ~session ~cdp ~events:_ ~model_calls ->
-  attached session cdp;
+  @@ fun h ->
+  attached h;
+  cancel_waiting_caller h act;
+  (match Session.call h.session goto with
+   | Error Session.Abandoned_call_pending -> ()
+   | _ -> fail "a new call waits for the abandoned one");
+  to_host h.fake (rpc_request "g2" "llm.generate" (obj []));
+  h.settle ();
+  check int "the abandoned call gets no model answer" Wire.host_refused (error_code (only_answer h));
+  check int "the model was not asked" 0 !(h.model_calls);
+  to_host h.fake (rpc_result (Option.get h.fake.held_act) (obj [ "success", `Bool true ]));
+  h.settle ();
+  check bool "the abandoned call's reply is logged" true
+    (logged h (function Session.Abandoned_call_ended { method_ = "stagehand.act"; rejected = false } -> true | _ -> false));
+  goto_succeeds h
+;;
+
+(* The reply is read before the cancelled caller resumes: the call is settled,
+   not left abandoned waiting for a reply that already came. *)
+let test_reply_read_before_the_cancelled_caller_resumes () =
+  with_session ~configure:(fun fake -> fake.act <- Hold)
+  @@ fun h ->
+  attached h;
   (try
      Eio.Switch.run (fun caller ->
-       Eio.Fiber.fork ~sw:caller (fun () -> ignore (Session.call session act));
-       run_until (act_held fake);
-       let_callers_reach_their_waits ();
+       Eio.Fiber.fork ~sw:caller (fun () -> ignore (Session.call h.session act));
+       h.settle ();
+       (* Wakes the reader first; the cancellation queues the caller after it. *)
+       to_host h.fake (rpc_result (Option.get h.fake.held_act) (obj [ "success", `Bool true ]));
        Eio.Switch.fail caller Exit)
    with
    | Exit -> ());
-  (match Session.call session goto with
-   | Error Session.Abandoned_call_pending -> ()
-   | _ -> fail "a new call waits for the abandoned one");
-  to_host fake (rpc_request "g2" "llm.generate" (obj []));
-  run_until (fun () -> fake.answers_from_host <> []);
-  check int "the abandoned call gets no model answer" Wire.host_refused (error_code (List.hd fake.answers_from_host));
-  check int "the model was not asked" 0 !model_calls;
-  to_host fake (rpc_result (Option.get fake.held_act) (obj [ "success", `Bool true ]));
-  run_until (fun () -> Result.is_ok (Session.call session goto))
+  h.settle ();
+  check bool "nothing was abandoned" false (logged h (function Session.Abandoned_call_ended _ -> true | _ -> false));
+  goto_succeeds h
+;;
+
+(* The caller leaves while the model is still answering: the answer is not
+   delivered and the extension is refused instead. *)
+let test_model_answer_after_the_caller_left () =
+  let never, _ = Eio.Promise.create () in
+  with_session ~answer:(fun _ -> Eio.Promise.await never)
+  @@ fun h ->
+  attached h;
+  cancel_waiting_caller h act;
+  h.settle ();
+  check int "the model was asked" 1 !(h.model_calls);
+  check int "the extension is refused" Wire.host_refused (error_code (only_answer h));
+  check bool "the refused act's reply is logged" true
+    (logged h (function Session.Abandoned_call_ended { rejected = true; _ } -> true | _ -> false));
+  goto_succeeds h
+;;
+
+let test_model_that_raises () =
+  with_session ~answer:(fun _ -> raise Model_bug)
+  @@ fun h ->
+  attached h;
+  (match Session.call h.session act with
+   | Error (Session.Rejected _) -> ()
+   | _ -> fail "the act fails when its model request is refused");
+  check int "the extension is refused" Wire.host_refused (error_code (only_answer h));
+  check bool "the failure is logged" true (logged h (function Session.Model_failed _ -> true | _ -> false));
+  goto_succeeds h
 ;;
 
 let test_worker_detached () =
   with_session ~configure:(fun fake -> fake.act <- Hold)
-  @@ fun ~fake ~session ~cdp ~events:_ ~model_calls:_ ->
-  attached session cdp;
+  @@ fun h ->
+  attached h;
   Eio.Switch.run
   @@ fun sw ->
-  let waiting = Eio.Fiber.fork_promise ~sw (fun () -> Session.call session act) in
-  run_until (act_held fake);
-  Eio.Stream.add fake.inbox (to_s (obj [ "method", str "Target.detachedFromTarget"; "params", obj [ "sessionId", str worker ] ]));
+  let waiting = Eio.Fiber.fork_promise ~sw (fun () -> Session.call h.session act) in
+  h.settle ();
+  to_masc h.fake (to_s (obj [ "method", str "Target.detachedFromTarget"; "params", obj [ "sessionId", str worker ] ]));
   (match Eio.Promise.await_exn waiting with
    | Error (Session.Lost _) -> ()
    | _ -> fail "the call out when the worker left is lost");
-  match Session.call session goto with
+  match Session.call h.session goto with
   | Error Session.Detached -> ()
   | _ -> fail "later calls are refused"
 ;;
 
 let test_unsupported_request () =
   with_session
-  @@ fun ~fake ~session ~cdp ~events ~model_calls:_ ->
-  attached session cdp;
-  to_host fake (rpc_request "u1" "context.clipboard_read_text" (obj []));
-  run_until (fun () -> fake.answers_from_host <> []);
-  check int "method not found" Wire.method_not_found (error_code (List.hd fake.answers_from_host));
+  @@ fun h ->
+  attached h;
+  to_host h.fake (rpc_request "u1" "context.clipboard_read_text" (obj []));
+  h.settle ();
+  check int "method not found" Wire.method_not_found (error_code (only_answer h));
   check bool "logged by name" true
-    (List.exists
-       (function Session.Unsupported_request { method_ = "context.clipboard_read_text" } -> true | _ -> false)
-       !events)
+    (logged h (function Session.Unsupported_request { method_ = "context.clipboard_read_text" } -> true | _ -> false))
+;;
+
+let test_protocol_major () =
+  let major version = Wire.protocol_major { Wire.protocol_version = version; runtime_version = "1" } in
+  check (result int string) "2.0.0" (Ok 2) (major "2.0.0");
+  List.iter (fun version -> check bool version true (Result.is_error (major version))) [ "0x2.0.0"; "+2.0.0"; "2_0.0"; ""; "v2" ];
+  check string "the version masc sends" "2.0.0" Wire.protocol_version
 ;;
 
 let () =
   run "browser_stagehand_session" [
+    "wire", [ test_case "protocol major is digits only" `Quick test_protocol_major ];
     "attach", [
       test_case "a matching extension attaches" `Quick test_attach;
-      test_case "a wrong id or major is refused" `Quick test_attach_refusals;
+      test_case "a worker listed after loading is found" `Quick test_worker_found_after_loading;
+      test_case "a failed attach ends the session" `Quick test_attach_refusals;
     ];
     "calls", [
       test_case "act asks the model" `Quick test_act_uses_the_model;
       test_case "a model request with no call is refused" `Quick test_model_request_without_a_call;
       test_case "an abandoned call blocks until its reply" `Quick test_abandoned_call;
+      test_case "a reply read before the cancelled caller resumes settles the call" `Quick
+        test_reply_read_before_the_cancelled_caller_resumes;
+      test_case "a model answer after the caller left is not delivered" `Quick test_model_answer_after_the_caller_left;
+      test_case "a model that raises refuses only its request" `Quick test_model_that_raises;
       test_case "a detached worker loses the call" `Quick test_worker_detached;
       test_case "an unsupported request is refused by name" `Quick test_unsupported_request;
     ];

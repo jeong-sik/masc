@@ -1,9 +1,11 @@
 type session_id = string
 type target_kind = Page | Service_worker | Other_kind of string
 
+type target_info = { target_id : string; kind : target_kind; url : string }
+
 type event =
   | Binding_called of { session : session_id option; name : string; payload : string }
-  | Target_created of { target_id : string; kind : target_kind; url : string }
+  | Target_created of target_info
   | Target_detached of { session : session_id }
   | Target_destroyed of { target_id : string }
   | Malformed_event of { method_ : string; detail : string }
@@ -16,7 +18,7 @@ type failure =
 
 type envelope =
   | Reply of { id : int; result : (Yojson.Safe.t, int * string) result }
-  | Event of { method_ : string; session : session_id option; params : Yojson.Safe.t }
+  | Event of { method_ : string; session : session_id option; params : Yojson.Safe.t option }
 
 let ( let* ) = Result.bind
 let field key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
@@ -42,9 +44,7 @@ let decode frame =
         | Some _, Some _ | None, None -> Error "CDP reply without exactly one of result and error")
      | None, Some (`String method_) ->
        let session = match field "sessionId" json with Some (`String id) -> Some id | _ -> None in
-       (* CDP omits [params] for an event that has none. *)
-       let params = Option.value ~default:(`Assoc []) (field "params" json) in
-       Ok (Event { method_; session; params })
+       Ok (Event { method_; session; params = field "params" json })
      | _ -> Error "CDP frame is neither a reply nor an event")
 ;;
 
@@ -59,25 +59,39 @@ let target_kind_of = function
   | other -> Other_kind other
 ;;
 
+let target_info_of_json info =
+  let* target_id = string_field "targetId" info in
+  let* kind = string_field "type" info in
+  let* url = string_field "url" info in
+  Ok { target_id; kind = target_kind_of kind; url }
+;;
+
 let event_of ~method_ ~session params =
+  let with_params read =
+    match params with
+    | Some params -> read params
+    | None -> Error "params are missing"
+  in
   let decoded =
     match method_ with
     | "Runtime.bindingCalled" ->
-      let* name = string_field "name" params in
-      let* payload = string_field "payload" params in
-      Ok (Binding_called { session; name; payload })
+      with_params (fun params ->
+        let* name = string_field "name" params in
+        let* payload = string_field "payload" params in
+        Ok (Binding_called { session; name; payload }))
     | "Target.targetCreated" ->
-      let* info = Option.to_result ~none:"targetInfo is missing" (field "targetInfo" params) in
-      let* target_id = string_field "targetId" info in
-      let* kind = string_field "type" info in
-      let* url = string_field "url" info in
-      Ok (Target_created { target_id; kind = target_kind_of kind; url })
+      with_params (fun params ->
+        let* info = Option.to_result ~none:"targetInfo is missing" (field "targetInfo" params) in
+        let* target = target_info_of_json info in
+        Ok (Target_created target))
     | "Target.detachedFromTarget" ->
-      let* detached = string_field "sessionId" params in
-      Ok (Target_detached { session = detached })
+      with_params (fun params ->
+        let* detached = string_field "sessionId" params in
+        Ok (Target_detached { session = detached }))
     | "Target.targetDestroyed" ->
-      let* target_id = string_field "targetId" params in
-      Ok (Target_destroyed { target_id })
+      with_params (fun params ->
+        let* target_id = string_field "targetId" params in
+        Ok (Target_destroyed { target_id }))
     | _ -> Ok (Unobserved { method_ })
   in
   match decoded with

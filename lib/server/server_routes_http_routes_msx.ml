@@ -95,7 +95,8 @@ let press_result_json ~ok ?message (obs : Msx_lane.observation option) : Yojson.
    move the machine. Tick advances it every poll and stays silent until the RFC's §4
    realtime question has an answer. *)
 let machine_changed ~config =
-  Lane_addon_runtime.notify_activity ~config ~activity:Lane_addon_sources.Msx_changed
+  Eio.Cancel.protect (fun () ->
+    Lane_addon_runtime.notify_activity ~config ~activity:Lane_addon_sources.Msx_changed)
 
 (* The keys the caller named, parsed to the lane's vocabulary; the first bad one
    fails the whole press so nothing is half-applied. *)
@@ -184,27 +185,29 @@ let load_result_json ~ok ~message : Yojson.Safe.t =
    keeper's masc_msx_load runs, so there is one loader and one inventory. The
    route only turns its tool result into an HTTP answer; the TUI re-fetches the
    frame to start spectating. Body: {cart:"name"}. *)
+let load_response ~(config : Workspace.config) ~agent_name ~body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error message ->
+    `Bad_request, load_result_json ~ok:false ~message:("invalid JSON: " ^ message)
+  | args ->
+    let result =
+      (* Time_compat.now is the codebase's clock accessor the determinism
+         gate accepts, the same one Tool_misc.dispatch stamps tool calls
+         with; reading the wall clock any other way here would add
+         non-deterministic-boundary debt. *)
+      Tool_misc_msx_lane.handle_load ~tool_name:"masc_msx_load"
+        ~start_time:(Time_compat.now ()) ~base_path:config.base_path
+        ~agent_name ~after_load:(fun () -> machine_changed ~config) args
+    in
+    let ok = Tool_result.is_success result in
+    let status = if ok then `OK else `Bad_request in
+    status, load_result_json ~ok ~message:(Tool_result.message result)
+;;
+
 let handle_load ~(config : Workspace.config) ~agent_name request reqd =
   Http.Request.read_body_async reqd (fun body ->
-      let respond ~status json = respond_json_value_with_cors ~status request reqd json in
-      match Yojson.Safe.from_string body with
-      | exception Yojson.Json_error message ->
-        respond ~status:`Bad_request
-          (load_result_json ~ok:false ~message:("invalid JSON: " ^ message))
-      | args ->
-        let result =
-          (* Time_compat.now is the codebase's clock accessor the determinism
-             gate accepts, the same one Tool_misc.dispatch stamps tool calls
-             with; reading the wall clock any other way here would add
-             non-deterministic-boundary debt. *)
-          Tool_misc_msx_lane.handle_load ~tool_name:"masc_msx_load"
-            ~start_time:(Time_compat.now ()) ~base_path:config.base_path
-            ~agent_name args
-        in
-        let ok = Tool_result.is_success result in
-        if ok then machine_changed ~config;
-        let status = if ok then `OK else `Bad_request in
-        respond ~status (load_result_json ~ok ~message:(Tool_result.message result)))
+      let status, json = load_response ~config ~agent_name ~body in
+      respond_json_value_with_cors ~status request reqd json)
 ;;
 
 (* "who is at the machine": each keeper's most-recent key within a window of the

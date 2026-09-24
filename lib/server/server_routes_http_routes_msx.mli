@@ -38,6 +38,12 @@ val carts_json : base_path:string -> Yojson.Safe.t
 val load_result_json : ok:bool -> message:string -> Yojson.Safe.t
 (** The load response body: [{ok, message}]. Exposed for the route test. *)
 
+val load_response :
+  config:Workspace.config -> agent_name:string -> body:string ->
+  [ `OK | `Bad_request ] * Yojson.Safe.t
+(** An accepted load wakes the workspace's machine watchers after the machine
+    changes and before the optional Board announcement. A refusal wakes none. *)
+
 val msx_tick_default_frames : int
 (** Frames a [POST /api/v1/msx/tick] advances when the body names none. *)
 

@@ -270,8 +270,9 @@ let add_routes ~sw router =
                let config = Mcp_server.workspace_config state in
                (* NDT-OK: the request clock bounds a read-only UTC day window;
                   no missing provider report is synthesized. *)
+               let request_now = Unix.gettimeofday () in
                if Server_provider_usage_history.failure_in_window
-                    ~now:(Unix.gettimeofday ()) ~days then
+                    ~now:request_now ~days then
                  `OK, `Assoc [ "state", `String "unavailable"
                              ; "reason", `String "provider usage history incomplete: a report could not be stored" ]
                else
@@ -284,8 +285,9 @@ let add_routes ~sw router =
                        let result =
                          (* NDT-OK: compute time bounds this read-only history
                             after an asynchronous cache refresh starts. *)
+                         let compute_now = Unix.gettimeofday () in
                          try Server_provider_usage_history.read config
-                               ~now:(Unix.gettimeofday ()) ~days
+                               ~now:compute_now ~days
                          with Eio.Cancel.Cancelled _ as exn -> raise exn
                             | exn ->
                                 Log.Server.warn "provider usage history crashed: %s"

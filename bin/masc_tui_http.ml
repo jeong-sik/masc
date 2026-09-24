@@ -2500,7 +2500,9 @@ let fetch_server_identity ~(host : string) ~(port : int) : (Yojson.Safe.t, strin
     The operator snapshot does not carry it: [keeper_fleet_safety] is assembled
     in lib/server from a scan the operator projection has no path to, and the
     dependency runs server -> operator, not back. So this reads the health
-    surface the dashboard already reads for the same facts.
+    surface, which serves the section from its cached snapshot: while the
+    refreshes fail, a stale snapshot serves the last reading it measured, and
+    the [full_health_snapshot] beside it says when that was (#38499).
 
     [full=1] is the only shape that carries the section. It is a wider payload
     than the fleet reading alone, which is why the caller polls it on the fleet

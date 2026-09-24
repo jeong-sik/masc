@@ -284,14 +284,8 @@ let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
 let dashboard_scheduled_automation_http_json ~(config : Workspace.config) :
   Yojson.Safe.t
   =
-  let cache_key =
-    Server_dashboard_http_core_cache.dashboard_query_cache_key
-      config
-      "scheduled_automation"
-      []
-  in
   Dashboard_cache.get_or_compute
-    cache_key
+    (Server_dashboard_http_core_cache.scheduled_automation_cache_key config)
     ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
     (fun () ->
       Domain_pool_ref.submit_io_or_inline (fun () ->

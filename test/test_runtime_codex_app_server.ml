@@ -985,6 +985,95 @@ let test_metadata_listing_pages_without_turn () =
         check string "opaque cursor forwarded" "page-two" (last |> member "params" |> member "cursor" |> to_string)))
 ;;
 
+(* An exhausted account runs no turn, so no [account/rateLimits/updated] ever
+   arrives for it. [account/rateLimits/read] asks without a thread or a turn,
+   and every metered limit of the per-limit map is kept; a bucket that does
+   not name itself takes its key. *)
+let test_rate_limits_read_without_turn () =
+  let capture = Filename.temp_file "masc-rate-limits-capture-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
+    with_fixture ~capture_path:capture [init_result; account_chatgpt;
+      {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":null},"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000},"secondary":{"usedPercent":64,"windowDurationMins":10080,"resetsAt":1790800000}},"codex_other":{"primary":{"usedPercent":3,"windowDurationMins":300}}}}}|}]
+      (fun path ->
+        let outcome = Eio_main.run (fun env ->
+          let config = { (Runtime_codex_app_server.default_config ()) with cli_path=path; admission_timeout_s=2. } in
+          Runtime_codex_app_server.read_rate_limits ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env) ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp") config) in
+        let report = match outcome with Ok report -> report | Error error -> fail (Runtime_codex_app_server.error_to_string error) in
+        check string "source" "codex.account_rate_limits_read"
+          (Runtime_provider_usage_window.source_to_string report.source);
+        let seen =
+          List.map
+            (fun (w : Runtime_provider_usage_window.window) ->
+              ( Option.value ~default:"-" w.limit_id
+              , (match w.kind with
+                 | Five_hour -> "5h" | Seven_day -> "7d"
+                 | Duration_minutes m -> string_of_int m | Provider_label l -> l)
+              , (match w.utilization with Percent p -> p | Fraction _ -> -1) ))
+            report.windows
+        in
+        check (list (triple string string int)) "every bucket, keyed"
+          [ ("codex", "5h", 100); ("codex", "7d", 64); ("codex_other", "5h", 3) ]
+          seen;
+        let channel = open_in capture in
+        let requests = Fun.protect ~finally:(fun () -> close_in channel) (fun () ->
+          let rec read acc = match input_line channel with
+            | line -> read (Yojson.Safe.from_string line :: acc)
+            | exception End_of_file -> List.rev acc in read []) in
+        let open Yojson.Safe.Util in
+        check (list string) "no thread or turn request"
+          ["initialize";"initialized";"account/read";"account/rateLimits/read"]
+          (List.map (fun json -> json |> member "method" |> to_string) requests)))
+;;
+
+(* The read after a quota refusal is asked for by a turn that ends at once.
+   It must outlive that turn: a fiber on the turn's switch would be
+   cancelled when the turn returns, before the app-server answered. A
+   second ask while the first is still reading starts nothing. *)
+let test_background_read_outlives_the_turn () =
+  with_fixture [init_result; account_chatgpt;
+    {|{"id":3,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1790300000}},"rateLimitsByLimitId":null}}|}]
+    (fun path ->
+      let scope = Runtime_quota_window.scope_of_credential ~provider_id:"background-read-test" None in
+      let saved = Eio_context.snapshot_state () in
+      Fun.protect ~finally:(fun () -> Eio_context.restore_state saved) (fun () ->
+        Eio_main.run (fun env ->
+          let clock = Eio.Stdenv.clock env in
+          let cwd = Eio.Path.(Eio.Stdenv.fs env / "/tmp") in
+          let codex =
+            ({ cli_path = path; model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
+          in
+          let recorded =
+            Eio.Switch.run (fun root_sw ->
+              Eio_context.set_switch root_sw;
+              let first, second =
+                Eio.Switch.run (fun turn_sw ->
+                  Eio_context.with_turn_switch turn_sw (fun () ->
+                    let first =
+                      Runtime_provider_usage_read.read_codex_in_background ~clock ~cwd ~scope codex
+                    in
+                    let second =
+                      Runtime_provider_usage_read.read_codex_in_background ~clock ~cwd ~scope codex
+                    in
+                    first, second))
+              in
+              check bool "the first ask starts a read" true
+                (first = Runtime_provider_usage_read.Started);
+              check bool "a second ask while it runs starts nothing" true
+                (second = Runtime_provider_usage_read.Already_reading);
+              let rec wait tries =
+                match Runtime_provider_usage_window.state ~scope with
+                | Runtime_provider_usage_window.Reported _ -> true
+                | Runtime_provider_usage_window.Not_reported_since_start when tries > 0 ->
+                  Eio.Time.sleep clock 0.05;
+                  wait (tries - 1)
+                | Runtime_provider_usage_window.Not_reported_since_start -> false
+              in
+              wait 100)
+          in
+          check bool "the window is recorded after the turn ended" true recorded)))
+;;
+
 let test_thread_resume_skips_history_injection () =
   let history =
     [ { Runtime_codex_app_server.role = User; text = "already in official thread" } ]
@@ -5215,6 +5304,8 @@ let () =
             `Quick
             test_subscription_probe_stops_before_thread
         ; test_case "metadata listing pages without turn" `Quick test_metadata_listing_pages_without_turn
+        ; test_case "rate limits read without turn" `Quick test_rate_limits_read_without_turn
+        ; test_case "background read outlives the turn" `Quick test_background_read_outlives_the_turn
         ; test_case "declared cwd reaches spawn" `Quick test_declared_cwd_reaches_spawn
         ; test_case
             "protocol and spawn share cwd authority"

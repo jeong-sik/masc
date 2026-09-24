@@ -630,8 +630,16 @@ type fleet_safety = {
   fs_active_task_owner_scan_error_count : int;
 }
 
+type fleet_reading_freshness =
+  | Fleet_current
+  | Fleet_last_good of { measured_at_unix : float; stale_reason : string }
+  | Unrecognised_snapshot_status of string
+
 type fleet_safety_reading =
-  | Fleet_measured of fleet_safety
+  | Fleet_measured of
+      { fleet : fleet_safety
+      ; freshness : fleet_reading_freshness
+      }
   | Fleet_not_measured of { status : string }
 
 type log_kind =
@@ -1182,6 +1190,13 @@ let preview_line text =
   sanitize_terminal_text (Buffer.contents output)
 ;;
 
+let short_timestamp_of_unix_for_terminal ~localtime unix_seconds =
+  let tm = localtime unix_seconds in
+  Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
+    tm.Unix.tm_sec
+;;
+
 (* The date and time beside a record, in the zone the operator's terminal is
    in. It sliced the first nineteen bytes of the server's RFC 3339 string, which
    kept a UTC reading and dropped the [Z] that said so -- "2026-08-22T00:03:00"
@@ -1191,11 +1206,7 @@ let preview_line text =
 let short_timestamp_for_terminal ~localtime text =
   sanitize_terminal_text
     (match Time_codec.parse_rfc3339_opt text with
-     | Some unix_seconds ->
-         let tm = localtime unix_seconds in
-         Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900)
-           (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
-           tm.Unix.tm_sec
+     | Some unix_seconds -> short_timestamp_of_unix_for_terminal ~localtime unix_seconds
      | None ->
          if String.length text > 19 then String.sub text 0 19
          else if String.length text = 0 then "(never)"
@@ -10214,11 +10225,44 @@ let decode_fleet_placeholder section =
          (if timed_out then ", refresh timed out" else "")
          error)
 
+(* Server_routes_http_runtime.full_health_snapshot_metadata: every full body
+   carries it beside the sections, and its [status] says whether they are the
+   latest refresh. A [stale] snapshot keeps serving the last reading it
+   measured -- after a refresh timed out or raised, or when none has run
+   within the time to live -- so the fleet it carries is a past one (#38499).
+   The server always writes [computed_at_unix] and [stale_reason], and a
+   stale snapshot fills both. A time before 1970 is refused with the rest that
+   are not times: the age drawn from it would overflow the integer it is
+   counted in. *)
+let decode_fleet_reading_freshness json =
+  let* snapshot = required_object_field json "full_health_snapshot" in
+  let* status = required_string_field snapshot "status" in
+  match status with
+  | "ready" -> Ok Fleet_current
+  | "stale" -> (
+    let* computed_at = required_nullable_float_field snapshot "computed_at_unix" in
+    let* stale_reason = required_nullable_string_field snapshot "stale_reason" in
+    match computed_at, stale_reason with
+    | Some measured_at_unix, Some stale_reason
+      when Float.is_finite measured_at_unix && measured_at_unix >= 0.0 ->
+      Ok (Fleet_last_good { measured_at_unix; stale_reason })
+    | Some measured_at_unix, Some _ ->
+      Error
+        (Printf.sprintf "full_health_snapshot computed_at_unix %g is not a time"
+           measured_at_unix)
+    | None, _ | _, None ->
+      Error
+        "a stale full_health_snapshot must say when its reading was measured \
+         (computed_at_unix) and why it is stale (stale_reason)")
+  | other -> Ok (Unrecognised_snapshot_status other)
+
 let decode_fleet_safety json =
   let* section = required_object_field json "keeper_fleet_safety" in
   match Json_util.assoc_member_opt "schema" section with
   | Some (`String schema) when String.equal schema Keeper_fleet_blocker.reading_schema ->
-    Result.map (fun fleet -> Fleet_measured fleet) (decode_fleet_safety_reading section)
+    let* fleet = decode_fleet_safety_reading section in
+    let* freshness = decode_fleet_reading_freshness json in
+    Ok (Fleet_measured { fleet; freshness })
   | Some (`String schema) ->
     Error
       (Printf.sprintf "keeper_fleet_safety schema %S is not %S" schema
@@ -11894,14 +11938,90 @@ let decode_async_request_observation json =
 type schedule_runner_hold =
   { srh_occurrence_id : string
   ; srh_due_at_iso : string
+  ; srh_observed_at : float
   }
 
+(* 9999-12-31T23:59:59Z. The hold's time is drawn through [Unix.localtime],
+   which fails with EOVERFLOW far above this (from 1e17 on macOS, measured),
+   and the Schedules render has no handler for that. A time the wire can carry
+   but no clock on the screen can mean is refused here, where it is read. *)
+let latest_drawable_unix_seconds = 253_402_300_799.0
+
+(* The server writes [runner_hold] on every row, [null] when nothing is held.
+   A row without the key is a server that does not say, and reading it as
+   [null] would draw a held schedule as a free one (#38413). *)
 let decode_schedule_runner_hold row =
-  match member "runner_hold" row with
+  let* hold = required_member row "runner_hold" in
+  match hold with
   | `Null -> Ok None
-  | `Assoc _ as hold ->
+  | `Assoc _ ->
     let* srh_occurrence_id = required_string_field hold "occurrence_id" in
     let* srh_due_at_iso = required_string_field hold "due_at_iso" in
-    Ok (Some { srh_occurrence_id; srh_due_at_iso })
+    let* observed_at = required_nullable_float_field hold "observed_at" in
+    let* srh_observed_at =
+      match observed_at with
+      | Some time
+        when Float.is_finite time && time >= 0.0 && time <= latest_drawable_unix_seconds
+        -> Ok time
+      | Some _ | None ->
+        Error "runner_hold observed_at must be a time from 1970 to the end of year 9999"
+    in
+    Ok (Some { srh_occurrence_id; srh_due_at_iso; srh_observed_at })
   | bad -> field_type_error "runner_hold" "an object or null" bad
+;;
+
+type schedule_runner_status =
+  | Runner_status of Schedule_contract_values.runner_status
+  | Runner_unrecognised of string
+
+(* The object and its word are required. A word this build does not know is
+   kept as itself rather than refused: refusing it failed the whole list --
+   Schedules, a Keeper's Automation tab and the agenda -- over one word. *)
+let decode_schedule_runner_status snapshot =
+  let* runner = required_object_field snapshot "schedule_runner" in
+  let* word = required_string_field runner "status" in
+  match Schedule_contract_values.runner_status_of_string word with
+  | Ok status -> Ok (Runner_status status)
+  | Error _ -> Ok (Runner_unrecognised word)
+;;
+
+type schedule_list_freshness =
+  | List_latest
+  | List_kept
+
+type schedule_hold_reading =
+  | Hold_current
+  | Hold_as_of of float
+
+(* Only the latest answer from a runner whose status is [ok] -- its newest
+   tick succeeded, recently and without failures -- vouches for a hold now.
+   [stale] and a failed tick mean the list is from an earlier tick. [degraded]
+   can also mean the newest tick read the list and then dispatched with
+   failures, so the list is the newest one while the runner says it is not
+   healthy. [running] has not finished a new read; [not_started] has made none;
+   a word this build does not know says nothing. A list kept after a failed
+   reload is an earlier answer whatever its runner said then. In all of these
+   the hold is drawn at the time it was read (#38411). *)
+let schedule_hold_reading
+      ~(freshness : schedule_list_freshness)
+      ~(runner : schedule_runner_status)
+      hold
+  =
+  match freshness, runner with
+  | List_latest, Runner_status Schedule_contract_values.Runner_ok -> Hold_current
+  | ( List_latest
+    , Runner_status
+        ( Schedule_contract_values.Runner_not_started
+        | Schedule_contract_values.Runner_running
+        | Schedule_contract_values.Runner_stale
+        | Schedule_contract_values.Runner_degraded ) )
+  | List_latest, Runner_unrecognised _
+  | ( List_kept
+    , Runner_status
+        ( Schedule_contract_values.Runner_ok
+        | Schedule_contract_values.Runner_not_started
+        | Schedule_contract_values.Runner_running
+        | Schedule_contract_values.Runner_stale
+        | Schedule_contract_values.Runner_degraded ) )
+  | List_kept, Runner_unrecognised _ -> Hold_as_of hold.srh_observed_at
 ;;

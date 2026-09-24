@@ -1951,6 +1951,8 @@
   masc.embedded_config
   masc.skill_config
   masc.skill_reference
+  ; test_tui_decode names the schedule runner status the TUI decodes into
+  masc.masc_schedule
   bigstringaf
   ; test_terminal_size reads the tty size through the ioctl stub
   terminal_size
@@ -5439,6 +5441,8 @@
  (modules test_tui_fleet_line)
  (libraries alcotest masc masc_tui_fleet_line))
 
+(include stanzas/test_tui_fleet_reading_says_when_it_was_measured.inc)
+
 (test
  (name test_tui_client_rows)
  (modules test_tui_client_rows)
@@ -5594,11 +5598,14 @@
 (include stanzas/test_prompt_templates_render.inc)
 (include stanzas/test_tui_send_disposition.inc)
 (include stanzas/test_tui_scroll.inc)
+(include stanzas/test_tui_schedules_hold_says_when_it_was_checked.inc)
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
 (include stanzas/test_tui_title_counts.inc)
 (include stanzas/test_tui_data_unreliable_row.inc)
 (include stanzas/test_tui_tab_strip.inc)
+
+(include stanzas/test_tui_row_with_field.inc)
 (include stanzas/test_tui_burn_hud.inc)
 (include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_next_request_band.inc)
@@ -6139,6 +6146,8 @@
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)
+
+(include stanzas/test_browser_lane_name.inc)
 
 (include stanzas/test_execute_file_artifact.inc)
 
@@ -6703,7 +6712,7 @@
 (test
  (name test_lane_addon_sources)
  (modules test_lane_addon_sources)
- (libraries masc_test_deps masc.browser_lane masc.msx_lane masc.tool_schemas eio eio_main yojson unix))
+ (libraries masc_test_deps masc.browser_lane masc.msx_lane masc.dos_lane masc.tool_schemas eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_surface)

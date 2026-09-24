@@ -102,6 +102,35 @@ let handle ~config ~keeper_name ~args =
                ; "reference", Skill_reference.to_yojson reference
                ; "snapshot_revision", `String snapshot_revision
                ]))
+     | Ok (Created_but_shadowed { reference; snapshot_revision; winner }) ->
+       (* The write and the republish both committed; the catalog lists
+          [winner] first under the same name, so turns that list Skills by
+          name see it instead. The call did what it does, so it completes and
+          the status says the rest. A failure class would be read back to the
+          model with a fixed next move (config/prompts/tool_failure.md), and
+          each of them is false here: nothing was refused, the runtime did
+          not fail, and the same call now always answers
+          package_already_exists. *)
+       Keeper_tool_execution.success_data
+         (`Assoc
+            (identity
+             @ [ "ok", `Bool true
+               ; "status", `String "created_but_shadowed"
+               ; "reference", Skill_reference.to_yojson reference
+               ; "snapshot_revision", `String snapshot_revision
+               ; "winner", Skill_reference.identity_to_yojson winner
+               ; ( "message"
+                 , `String
+                     (Printf.sprintf
+                        "SKILL.md was written and the catalog republished, but \
+                         %s/%s declares the name %s earlier in the catalog and \
+                         wins. Turns that list Skills by name see that package, \
+                         not this one; a Task that pins this exact reference \
+                         still gets this one."
+                        (Skill_reference.identity_source_id_to_string winner)
+                        (Skill_reference.identity_package_id_to_string winner)
+                        winner.name) )
+               ]))
      | Ok (Created_but_unpublished { reference; reason }) ->
        (* SKILL.md is on disk, so a retry answers package_already_exists; the
           Keeper learns the write committed and why later turns cannot see it

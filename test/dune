@@ -6690,7 +6690,7 @@
 (test
  (name test_lane_addon)
  (modules test_lane_addon)
- (libraries masc_test_deps eio eio_main yojson unix))
+ (libraries masc_test_deps masc.server masc.msx_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_sources)

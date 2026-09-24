@@ -81,6 +81,18 @@ let press_result_json ~ok ?message (obs : Msx_lane.observation option) : Yojson.
         ])
 ;;
 
+(* A human change to the machine wakes the Lane instances bound to it with the
+   typed activity a Keeper's finished MSX tool produces through the event
+   bridge (RFC machine-spectating-goes-through-lanes §2.2). These routes call
+   [Msx_lane] or the tool handlers directly and publish no ToolCompleted, so the
+   bridge never notifies for the same operation. Only an accepted operation
+   notifies: [Msx_lane] commits a new machine only when it answers [Ok], so a
+   refusal or failure leaves nothing new to observe. Save does not move the
+   machine. Tick advances it every poll and stays silent until the RFC's §4
+   realtime question has an answer. *)
+let machine_changed ~config =
+  Lane_addon_runtime.notify_activity ~config ~activity:Lane_addon_sources.Msx_changed
+
 (* The keys the caller named, parsed to the lane's vocabulary; the first bad one
    fails the whole press so nothing is half-applied. *)
 let parse_keys names =
@@ -95,8 +107,8 @@ let parse_keys names =
     (Ok []) names
 
 (* The press body decoded and applied under [who], the identity the route's
-   actor auth resolved. Pure over the body so the route test can drive it. *)
-let press_response ~who ~body =
+   actor auth resolved. The route test drives it with its own workspace. *)
+let press_response ~config ~who ~body =
   let error status message = status, press_result_json ~ok:false ~message None in
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error message -> error `Bad_request ("invalid JSON: " ^ message)
@@ -115,16 +127,18 @@ let press_response ~who ~body =
     | Ok ([], _, _, _) -> error `Bad_request "keys must name at least one key"
     | Ok (keys, hold_frames, step_frames, sequence) -> (
       match Msx_lane.press ~who ~keys ~hold_frames ~step_frames ~sequence with
-      | Ok obs -> `OK, press_result_json ~ok:true (Some obs)
+      | Ok obs ->
+        machine_changed ~config;
+        `OK, press_result_json ~ok:true (Some obs)
       | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
         error `Bad_request (Msx_lane.error_to_string e)
       | Error (Msx_lane.Unreadable _ as e) ->
         error `Internal_server_error (Msx_lane.error_to_string e)))
 ;;
 
-let handle_press ~who request reqd =
+let handle_press ~config ~who request reqd =
   Http.Request.read_body_async reqd (fun body ->
-      let status, json = press_response ~who ~body in
+      let status, json = press_response ~config ~who ~body in
       respond_json_value_with_cors ~status request reqd json)
 ;;
 
@@ -161,7 +175,7 @@ let load_result_json ~ok ~message : Yojson.Safe.t =
    keeper's masc_msx_load runs, so there is one loader and one inventory. The
    route only turns its tool result into an HTTP answer; the TUI re-fetches the
    frame to start spectating. Body: {cart:"name"}. *)
-let handle_load ~base_path ~agent_name request reqd =
+let handle_load ~(config : Workspace.config) ~agent_name request reqd =
   Http.Request.read_body_async reqd (fun body ->
       let respond ~status json = respond_json_value_with_cors ~status request reqd json in
       match Yojson.Safe.from_string body with
@@ -175,10 +189,11 @@ let handle_load ~base_path ~agent_name request reqd =
              with; reading the wall clock any other way here would add
              non-deterministic-boundary debt. *)
           Tool_misc_msx_lane.handle_load ~tool_name:"masc_msx_load"
-            ~start_time:(Time_compat.now ()) ~base_path
+            ~start_time:(Time_compat.now ()) ~base_path:config.base_path
             ~agent_name args
         in
         let ok = Tool_result.is_success result in
+        if ok then machine_changed ~config;
         let status = if ok then `OK else `Bad_request in
         respond ~status (load_result_json ~ok ~message:(Tool_result.message result)))
 ;;
@@ -378,7 +393,8 @@ let handle_tick request reqd =
         ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request)) json reqd)
 ;;
 
-let checkpoint_response ~base_path ~restore ~body =
+let checkpoint_response ~(config : Workspace.config) ~restore ~body =
+  let base_path = config.base_path in
   let error status message = status, load_result_json ~ok:false ~message in
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error message -> error `Bad_request message
@@ -395,9 +411,10 @@ let checkpoint_response ~base_path ~restore ~body =
            | None -> `OK
            | Some Tool_result.Workflow_rejection -> `Bad_request
            | Some _ -> `Internal_server_error in
-         status,
-         load_result_json ~ok ~message:(Tool_result.message result)) with
-       | Ok response -> response
+         ok, (status, load_result_json ~ok ~message:(Tool_result.message result))) with
+       | Ok (ok, response) ->
+         if ok && restore then machine_changed ~config;
+         response
        | Error (Executor_pool_ref.Pool_unavailable | Executor_pool_ref.Caller_not_in_eio) ->
          error `Service_unavailable "MSX checkpoint worker is unavailable"
        | Error failure ->
@@ -405,7 +422,7 @@ let checkpoint_response ~base_path ~restore ~body =
          error `Internal_server_error "MSX checkpoint failed; inspect the current state before retrying")
 ;;
 
-let handle_change_disk ~base_path request reqd =
+let handle_change_disk ~(config : Workspace.config) request reqd =
   Http.Request.read_body_async reqd (fun body ->
     let error status message = status, load_result_json ~ok:false ~message in
     let status, json = match Yojson.Safe.from_string body with
@@ -413,13 +430,15 @@ let handle_change_disk ~base_path request reqd =
       | args -> (
         match Executor_pool_ref.submit_strict (fun () ->
           let result = Tool_misc_msx_lane.handle_change_disk ~tool_name:"masc_msx_change_disk"
-              ~start_time:(Time_compat.now ()) ~base_path args in
+              ~start_time:(Time_compat.now ()) ~base_path:config.base_path args in
           let ok = Tool_result.is_success result in
           let status = match Tool_result.failure_class result with
             | None -> `OK | Some Tool_result.Workflow_rejection -> `Bad_request
             | Some _ -> `Internal_server_error in
-          status, load_result_json ~ok ~message:(Tool_result.message result)) with
-        | Ok response -> response
+          ok, (status, load_result_json ~ok ~message:(Tool_result.message result))) with
+        | Ok (ok, response) ->
+          if ok then machine_changed ~config;
+          response
         | Error (Executor_pool_ref.Pool_unavailable | Executor_pool_ref.Caller_not_in_eio) ->
           error `Service_unavailable "MSX disk worker is unavailable"
         | Error failure ->
@@ -428,9 +447,9 @@ let handle_change_disk ~base_path request reqd =
     respond_json_value_with_cors ~status request reqd json)
 ;;
 
-let handle_checkpoint ~base_path ~restore request reqd =
+let handle_checkpoint ~config ~restore request reqd =
   Http.Request.read_body_async reqd (fun body ->
-    let status, json = checkpoint_response ~base_path ~restore ~body in
+    let status, json = checkpoint_response ~config ~restore ~body in
     respond_json_value_with_cors ~status request reqd json)
 ;;
 
@@ -450,31 +469,30 @@ let add_routes router =
          request reqd)
   |> Http.Router.post "/api/v1/msx/press" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_msx_press"
-         (fun _state who _req reqd -> handle_press ~who request reqd)
+         (fun state who _req reqd ->
+           handle_press ~config:(Mcp_server.workspace_config state) ~who request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/load" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_msx_load"
          (fun state agent_name _req reqd ->
-           let base_path = (Mcp_server.workspace_config state).base_path in
-           handle_load ~base_path ~agent_name request reqd)
+           handle_load ~config:(Mcp_server.workspace_config state) ~agent_name request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/save" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_save"
          (fun state _req reqd ->
-           let base_path = (Mcp_server.workspace_config state).base_path in
-           handle_checkpoint ~base_path ~restore:false request reqd)
+           handle_checkpoint ~config:(Mcp_server.workspace_config state) ~restore:false
+             request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/restore" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_restore"
          (fun state _req reqd ->
-           let base_path = (Mcp_server.workspace_config state).base_path in
-           handle_checkpoint ~base_path ~restore:true request reqd)
+           handle_checkpoint ~config:(Mcp_server.workspace_config state) ~restore:true
+             request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/disk" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_change_disk"
          (fun state _req reqd ->
-           let base_path = (Mcp_server.workspace_config state).base_path in
-           handle_change_disk ~base_path request reqd)
+           handle_change_disk ~config:(Mcp_server.workspace_config state) request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/tick" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_msx_step"

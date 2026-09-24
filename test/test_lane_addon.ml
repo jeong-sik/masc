@@ -387,7 +387,64 @@ let test_capture_cannot_rewrite_detach_failure () =
     detach config id;
     await_phase clock config id "detached")
 
+(* An observer bound to the workspace machine. The fake backend's capture
+   answers without reading the machine; only the wake path is under test. *)
+let attach_machine_watcher config dir =
+  unwrap (dispatch config Runtime.Attach
+    ["manifest_path",`String (manifest dir "machine-observer");"run_id",`String "machine";
+     "binding",`Assoc ["sources",`List [`Assoc
+       ["kind",`String "msx_capture";"source_id",`String "machine"]]]])
+  |> text "instance_id"
+
+(* Long enough for the worker to run a wake it was handed; a second
+   notification for one press would show here as an extra observation or a
+   coalesced wake. *)
+let quiet_period_s = 0.05
+
+let test_human_press_wakes_machine_watchers_once () =
+  with_fixture (fun env _sw config dir _state ->
+    let clock = Eio.Stdenv.clock env in
+    let msx = function Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
+    ignore (msx (Msx_lane.load ~ledger_dir:(Filename.concat dir "machine") ~roms_dir:None
+      ~cart_path:None ~disk_path:None));
+    Fun.protect ~finally:(fun () -> ignore (Msx_lane.eject ())) (fun () ->
+      let id = attach_machine_watcher config dir in
+      let sequence () = int "observation_seq" (instance config id) in
+      await clock (fun () -> sequence () = 1);
+      let press body =
+        fst (Server_routes_http_routes_msx.press_response ~config ~who:"operator" ~body) in
+      check bool "a key the machine lacks is refused" true
+        (press {|{"keys":["not-a-key"]}|} = `Bad_request);
+      check bool "a human press is accepted" true (press {|{"keys":["space"]}|} = `OK);
+      await clock (fun () -> sequence () = 2);
+      Eio.Time.sleep clock quiet_period_s;
+      check Alcotest.int "one accepted press is one observation, the refusal none" 2 (sequence ());
+      check Alcotest.int "no second wake is queued behind it" 0
+        (int "coalesced_wakes" (instance config id));
+      detach config id;
+      await_phase clock config id "detached"))
+
+let test_activity_from_another_domain_reaches_the_owner () =
+  with_fixture (fun env _sw config dir _state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach_machine_watcher config dir in
+    let sequence () = int "observation_seq" (instance config id) in
+    await clock (fun () -> sequence () = 1);
+    let caller_owned_root =
+      Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
+        let owned = Eio_context.root_switch_on_current_domain () in
+        Runtime.notify_activity ~config ~activity:Lane_addon_sources.Msx_changed;
+        owned) in
+    check bool "the notification came from off the owner domain" false caller_owned_root;
+    await clock (fun () -> sequence () = 2);
+    detach config id;
+    await_phase clock config id "detached")
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "a human MSX press wakes machine watchers exactly once" `Quick
+    test_human_press_wakes_machine_watchers_once;
+  test_case "activity from another domain is delivered on the owner domain" `Quick
+    test_activity_from_another_domain_reaches_the_owner;
   test_case "a capture yielding to detach preserves cleanup ownership" `Quick
     test_capture_cannot_rewrite_detach_failure;
   test_case "activity probes exact file captures while explicit observes remain stateful" `Quick

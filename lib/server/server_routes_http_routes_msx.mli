@@ -20,13 +20,15 @@ val press_default_step_frames : int
 (** Frames a [POST /api/v1/msx/press] advances in all when the body names none. *)
 
 val press_response :
-  who:string -> body:string ->
+  config:Workspace.config -> who:string -> body:string ->
   [ `OK | `Bad_request | `Internal_server_error ] * Yojson.Safe.t
 (** Authenticated press body handling under [who], the actor the route's
     [with_tool_actor_auth] resolved. [keys] must be an array of strings naming
     at least one key; [hold_frames] and [frames] must be positive integers and
     [sequence] a boolean when present, each defaulting when absent. A field of
-    the wrong type is a [`Bad_request] naming the field, and nothing is pressed. *)
+    the wrong type is a [`Bad_request] naming the field, and nothing is pressed.
+    An accepted press wakes the [config] workspace's Lane instances bound to the
+    machine once, with [Msx_changed]; a refused one wakes nothing. *)
 
 val carts_json : base_path:string -> Yojson.Safe.t
 (** The load menu's inventory: [{carts:[names], loaded, cartridge}], the file
@@ -52,6 +54,9 @@ val tick_response :
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
 
+(** Save ([restore=false]) or restore the machine in the [config] workspace's
+    checkpoint slot. An accepted restore wakes the Lane instances bound to the
+    machine once, with [Msx_changed]; a save or a refusal wakes nothing. *)
 val checkpoint_response :
-  base_path:string -> restore:bool -> body:string ->
+  config:Workspace.config -> restore:bool -> body:string ->
   [ `OK | `Bad_request | `Service_unavailable | `Internal_server_error ] * Yojson.Safe.t

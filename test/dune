@@ -3604,7 +3604,7 @@
 (test
  (name test_tui_no_value_mark)
  (modules test_tui_no_value_mark)
- (libraries alcotest ast_grep masc_tui_theme)
+ (libraries alcotest ast_grep masc_tui_theme tui_source)
  (deps
   (source_tree ../bin)))
 

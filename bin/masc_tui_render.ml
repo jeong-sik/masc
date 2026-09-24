@@ -972,7 +972,9 @@ let render_overview (state : state) =
     (* Ages right-aligned to the widest one drawn, so the ids start in one
        column. *)
     let age_cells =
-      List.fold_left (fun widest age -> max widest (String.length age)) 0 ages
+      List.fold_left
+        (fun widest age -> max widest (Message_layout.display_width age))
+        0 ages
     in
     List.iter
       (fun line ->
@@ -983,8 +985,9 @@ let render_overview (state : state) =
                 (Overview_tasks.held_since task)
             in
             let row =
-              Printf.sprintf "%s%*s%s %s" Ansi.dim age_cells age Ansi.reset
-                (task_line task)
+              Printf.sprintf "%s%s%s %s" Ansi.dim
+                (Message_layout.pad_left age age_cells)
+                Ansi.reset (task_line task)
             in
             if
               state.task_focus = Right_pane

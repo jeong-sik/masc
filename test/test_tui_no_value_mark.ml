@@ -11,31 +11,14 @@
 
 let mark = Masc_tui_theme.Glyph.no_value
 let hyphen = "-"
-let theme = "bin/masc_tui_theme.ml"
+let theme = Tui_source.theme
+let drawing_modules = Tui_source.drawing_modules ()
 
-let source_root =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root when Sys.file_exists root -> root
-  | _ -> Sys.getcwd ()
-;;
-
-(* Read the directory rather than list the files: a module added to the
-   drawing is in scope the day it lands, and a count that names its files by
-   hand answers by growing a list instead of by changing. *)
-let drawing_modules =
-  let prefix = "masc_tui_" in
-  Sys.readdir (Filename.concat source_root "bin")
-  |> Array.to_list
-  |> List.filter (fun name ->
-         String.starts_with ~prefix name && Filename.check_suffix name ".ml")
-  |> List.sort String.compare
-  |> List.map (fun name -> Filename.concat "bin" name)
-;;
-
+(* A scan that read the wrong directory comes back empty and every rule below
+   passes over nothing. The module that holds the mark is what says it read
+   the right one. *)
 let test_the_drawing_is_read () =
-  Alcotest.(check bool) "the scan found the surfaces" true
-    (List.length drawing_modules > 20);
-  Alcotest.(check bool) "including the one that holds the mark" true
+  Alcotest.(check bool) "the scan reached the module that holds the mark" true
     (List.mem theme drawing_modules)
 ;;
 

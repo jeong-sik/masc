@@ -535,7 +535,7 @@ def run_exact(executable: str) -> None:
 def run_cli_editor(executable: str) -> None:
     """The Librarian editor reaches both arrays and explains their boundary."""
     store = LaneStore()
-    new_cli = "a-cli"
+    new_cli = "aaa_cli.fixture"
     store.body["runtimes"].append({
         **h.runtime_resolved_runtime(new_cli, "Official client", "model"),
         "exact_slot_group": "cli_slots",
@@ -603,7 +603,7 @@ def run_cli_editor(executable: str) -> None:
         h.send_and_wait(process, fd, output, b"k" * 10,
                         b"> 1/11  [HTTP]")
         mark = mark_output(fd, output)
-        h.send_and_wait(process, fd, output, b"a", b"[CLI tail] a-cli")
+        h.send_and_wait(process, fd, output, b"a", b"[CLI tail] aaa_cli.fixture")
         h.wait_for_output(process, fd, output,
                           b"[HTTP tail] runtime-a", start=mark, timeout=5.0)
         mark = mark_output(fd, output)
@@ -615,7 +615,7 @@ def run_cli_editor(executable: str) -> None:
         h.wait_for_output(process, fd, output,
                           b"> 1/12  [HTTP]", start=mark, timeout=5.0)
         h.send_and_wait(process, fd, output, b"j" * 11,
-                        b"> 12/12  [CLI] a-cli")
+                        b"> 12/12  [CLI] aaa_cli.fixture")
         if store.exact_declared_cli["librarian_exact"][-1] != new_cli:
             raise AssertionError("new official client did not append to CLI tail")
         os.write(fd, b"q")

@@ -1890,6 +1890,7 @@ let test_health_json_surfaces_keeper_toml_unknown_keys () =
 [keeper]
 name = "alpha"
 sandbox_profile = "docker"
+sandbox_image = "masc-sandbox:general"
 typo_field = "unexpected"
 |};
   let request = health_request () in

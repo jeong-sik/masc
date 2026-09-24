@@ -2327,7 +2327,38 @@ let preflight_fixture ~ok : Keeper_sandbox_runtime.docker_preflight =
 ;;
 
 let docker_args ~profile =
-  `Assoc [ "name", `String "preflight-fixture"; "sandbox_profile", `String profile ]
+  `Assoc
+    [ "name", `String "preflight-fixture"
+    ; "sandbox_profile", `String profile
+    ; "sandbox_image", `String "masc-sandbox:general"
+    ]
+;;
+
+(* #37523. A docker keeper whose call and TOML both name no image is refused
+   at admission, before any preflight, rather than admitted onto the general
+   image. The same call with an image is the control: it reaches the
+   preflight. *)
+let test_a_docker_keeper_naming_no_image_is_refused () =
+  with_test_context
+  @@ fun ctx ->
+  let probes = ref 0 in
+  let docker_preflight ?image:_ ~timeout_sec:_ () =
+    incr probes;
+    None
+  in
+  (match
+     Keeper_turn_up_args.parse ~docker_preflight ctx
+       (`Assoc [ "name", `String "imageless"; "sandbox_profile", `String "docker" ])
+   with
+   | Ok _ -> fail "a docker keeper naming no image was admitted"
+   | Error result ->
+     check bool "the refusal names the missing key" true
+       (contains "sandbox_image is required"
+          (Keeper_types_profile.tool_result_body result));
+     check int "refused before the preflight" 0 !probes);
+  match Keeper_turn_up_args.parse ~docker_preflight ctx (docker_args ~profile:"docker") with
+  | Ok _ -> check int "the declared image reaches the preflight" 1 !probes
+  | Error result -> fail (Keeper_types_profile.tool_result_body result)
 ;;
 
 (* new-keeper, 2026-09-02: admitted from the TUI in 33 ms on a host with no
@@ -2708,6 +2739,10 @@ let () =
             "remote endpoint required and registry-resolved"
             `Quick
             test_remote_endpoint_validation
+        ; test_case
+            "a docker keeper naming no image is refused"
+            `Quick
+            test_a_docker_keeper_naming_no_image_is_refused
         ; test_case
             "docker profile is refused when its preflight fails"
             `Quick

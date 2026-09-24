@@ -15342,22 +15342,24 @@ let finish_voice_surface (state : state) ~terminal_rows ~cols ~head ~body ~hints
   in
   let buf = Buffer.create (Buffer.length head + Buffer.length body + 256) in
   Buffer.add_buffer buf head;
-  let drawn = ref 0 in
   List.iteri
     (fun index line ->
       if index >= scroll && index < scroll + height then begin
         Buffer.add_string buf line;
-        Buffer.add_char buf '\n';
-        incr drawn
+        Buffer.add_char buf '\n'
       end)
     lines;
   (* The rows the reading does not fill. Without them the box bottom and the
-     footer sit under the last line drawn, wherever that lands: the Voice
-     pane's twenty lines put the footer on row 24 of a forty-four row
-     terminal with eighteen blank rows under it, and on row 24 of a thirty
-     row one. It is the same hand-drawn frame the cheat sheet and the
-     answering overlay were moved off for the same reason. *)
-  for _ = !drawn + 1 to height do
+     footer sit under the last line drawn, wherever that lands, and the pane
+     ends in the middle of the frame with blank rows under it. It is the same
+     hand-drawn frame the cheat sheet and the answering overlay were moved off
+     for the same reason.
+
+     How many were drawn is the window, not a tally of it: [normalize] holds
+     [scroll] at or under [count - height], so the loop above draws exactly
+     this many. *)
+  let drawn = min height (max 0 (List.length lines - scroll)) in
+  for _ = drawn + 1 to height do
     box_empty buf cols
   done;
   box_bottom buf cols;

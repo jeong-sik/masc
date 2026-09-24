@@ -80,9 +80,9 @@ FAILURE_CAUSES = {
                   'Retry once; if it keeps timing out, check the endpoint or pick a smaller model.'),
     'provider_unreachable': ('Network: provider unreachable', 'warn',
                              'Check the endpoint URL, proxy and network, then retry.'),
-    'quota_exhausted': ('Quota or balance used up (not a rate limit)', 'fail',
-                        'Retrying will not help until the plan or billing changes. '
-                        'Exclude this connection or configure later.'),
+    'quota_exhausted': ('Usage limit or quota used up (not a short rate limit)', 'fail',
+                        'A plan usage window can take hours or days to reopen, and a balance needs '
+                        'billing. Exclude this connection or configure later.'),
     'provider_auth_refused': ('Credential refused (not a rate limit)', 'fail',
                               'Check the API key variable or sign in again, then retry.'),
     'missing_credential': ('Credential missing (not a rate limit)', 'fail',

@@ -75,8 +75,9 @@ let failure_message = function
     "The provider is rate limiting this account (a request limit or usage window). \
      The configuration is fine; wait and retry, or continue with another connection."
   | Quota_exhausted _ ->
-    "The provider reports the account's quota or balance is used up. Retrying will not \
-     help until the plan or billing changes; choose another connection or configure later."
+    "The account's quota, balance or plan usage window is used up. A usage window can \
+     take hours or days to reopen and a balance needs a billing change; choose another \
+     connection or configure later."
   | Provider_overloaded _ ->
     "The provider is overloaded or returned a server error. The problem is on the \
      provider's side; retry shortly or choose another connection."
@@ -518,7 +519,9 @@ let failure_of_agent_core_error error =
 
 let failure_of_codex_turn detail (info : Runtime_codex_app_server.Codex_error_info.t option) =
   match info with
-  | Some (Rate_limit_exceeded | Usage_limit_exceeded) -> Rate_limited detail
+  | Some Rate_limit_exceeded -> Rate_limited detail
+  (* The plan's usage window: five hours or a week, not a short wait. *)
+  | Some Usage_limit_exceeded -> Quota_exhausted detail
   | Some (Server_overloaded | Internal_server_error) -> Provider_overloaded detail
   | Some Unauthorized -> Provider_auth_refused detail
   | Some
@@ -676,9 +679,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                 (Invalid_configuration (Runtime_claude_code.error_to_string error)))
          | Error (Runtime_claude_code.Timeout _) -> Error Timed_out
          | Error (Runtime_claude_code.Quota_blocked _ as error) ->
-           (* The subscription's usage window refused the turn; it reopens on
-              its own, so this is a rate limit, not a broken sign-in. *)
-           Error (Rate_limited (Runtime_claude_code.error_to_string error))
+           (* The subscription's usage window refused the turn. It reopens on
+              its own, but the window can be hours or days, so it reads as a
+              used-up quota rather than a short rate limit. *)
+           Error (Quota_exhausted (Runtime_claude_code.error_to_string error))
          | Error error ->
            Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
       | Runtime_execution.Codex_app_server execution ->

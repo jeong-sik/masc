@@ -21,11 +21,13 @@ type unavailable =
 type failure =
   | Unavailable of unavailable
   | Rate_limited of string
-      (** The provider throttled the request (HTTP 429, or an official
-          client's usage window). Temporary: the same choice works after a
-          wait. Read from the typed error, never from its wording. *)
+      (** The provider throttled the request (HTTP 429). Temporary: the same
+          choice works after a short wait. Read from the typed error, never
+          from its wording. *)
   | Quota_exhausted of string
-      (** The account's quota or balance is used up (HTTP 402 family). *)
+      (** The account's quota or balance is used up (HTTP 402 family), or an
+          official client's plan usage window is spent, which can take hours
+          or days to reopen. *)
   | Provider_overloaded of string
       (** The provider refused for its own capacity or failed with a server
           error. *)

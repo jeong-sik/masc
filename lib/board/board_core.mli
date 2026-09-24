@@ -13,7 +13,7 @@
       derivation, and the canonical [normalize_post_payload].
     - {b Local store + persistence} (this .mli's locally
       pinned surface) — sweeper / lock / cache /
-      JSONL-rotate / append helpers.
+      JSONL append helpers.
     - {b Public board operations} — create / get / list /
       search post + comment APIs.
 
@@ -45,7 +45,7 @@ end
 (** Returns the cumulative count of persist failures since
     process start.  The counter is bumped by the internal
     [record_persist_error] path whenever a [Sys_error] is
-    swallowed during JSONL append / rotate; consumed by the
+    swallowed during a JSONL append; consumed by the
     operator dashboard for at-a-glance health. *)
 val persist_error_count : unit -> int
 
@@ -105,7 +105,7 @@ val invalidate_comment_caches : store -> unit
     [(removed_posts, removed_comments)]. *)
 val sweep : store -> int * int
 
-(** {1 Persistence paths + rotation} *)
+(** {1 Persistence paths} *)
 
 (** Resolves the board base path from {!Env_config}.  Used by
     {!persist_path}, {!comments_path}, and the
@@ -113,11 +113,11 @@ val sweep : store -> int * int
 val board_base_path : unit -> string
 
 (** Path to the board posts JSONL log under
-    [<base>/.masc/board-posts.jsonl]. *)
+    [<base>/.masc/board_posts.jsonl]. *)
 val persist_path : unit -> string
 
 (** Path to the board comments JSONL log under
-    [<base>/.masc/board-comments.jsonl]. *)
+    [<base>/.masc/board_comments.jsonl]. *)
 val comments_path : unit -> string
 
 (** Path to the board reactions JSONL snapshot under
@@ -143,6 +143,17 @@ val index_post_origin : store -> post -> unit
 val append_comment : comment -> (unit, board_error) result
 
 (** {1 Whole-state JSONL rewrite} *)
+
+(** Atomically replaces {!persist_path} with [content], a snapshot of
+    [store.posts]. Every posts snapshot write goes through here. Refused with
+    [Io_error] while [store.posts_load_result] is [Error]: memory then holds
+    every row the loader could decode but not the line it could not, and the
+    rewrite would delete that line (#38595). *)
+val save_posts_snapshot : store -> string -> (unit, board_error) result
+
+(** {!save_posts_snapshot} for {!comments_path}, guarded by
+    [store.comments_load_result]. *)
+val save_comments_snapshot : store -> string -> (unit, board_error) result
 
 (** Atomically rewrites {!persist_path} from
     [store.posts].  The implementation snapshots under [store.mutex]

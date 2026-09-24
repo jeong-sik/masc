@@ -39,13 +39,17 @@ let of_json json =
     let* tab_id = match List.assoc_opt "tabId" fields with
       | Some (`Int id) when id >= 0 -> Ok id
       | _ -> Error "observation requires its observed tabId" in
+    let source = match List.assoc_opt "source" fields with
+      | Some (`String raw) -> Browser_lane.Lane_name.of_wire raw
+      | Some _ | None -> None in
     let* source, client_id =
-      match List.assoc_opt "source" fields, List.assoc_opt "clientId" fields with
-      | Some (`String "automation"), Some `Null -> Ok (Browser_surface.Automation, None)
-      | Some (`String "live"), Some (`String raw) ->
+      match source, List.assoc_opt "clientId" fields with
+      | Some Browser_surface.Automation, Some `Null -> Ok (Browser_surface.Automation, None)
+      | Some Browser_surface.Live, Some (`String raw) ->
         let* client_id = Browser_lane.client_id_of_string raw in
         Ok (Browser_surface.Live, Some client_id)
-      | _ -> Error "observation requires explicit source and resolved client identity" in
+      | (Some (Browser_surface.Automation | Browser_surface.Live) | None), _ ->
+        Error "observation requires explicit source and resolved client identity" in
     Ok {scene;source;client_id;tab_id}
   | _ -> Error "observation must be an object"
 

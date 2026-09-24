@@ -1137,7 +1137,7 @@ let () =
   let endpoint : Sandbox_target.ssh_endpoint =
     { name = "fixture"; host = "unused.invalid"; user = "fixture"; port = 22
     ; identity_file = "unused"; known_hosts_file = "unused"; remote_root = "/fixture"
-    ; connect_timeout_sec = 1; env_allowlist = [] }
+    ; connect_timeout_sec = 1; env_allowlist = []; allowed_paths = [] }
   in
   let targets =
     [ Sandbox_target.host ()

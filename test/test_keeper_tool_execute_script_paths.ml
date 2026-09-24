@@ -173,7 +173,7 @@ let with_tmp_scratch f =
 
 let coupling_test name ?workdir ~expect_ok ir =
   Alcotest.test_case name `Quick (fun () ->
-      match Exec_policy.validate_shell_ir_paths ?workdir ir with
+      match Exec_policy.validate_shell_ir_paths ~extra_roots:[] ?workdir ir with
       | Ok () -> if not expect_ok then Alcotest.fail (name ^ ": expected a rejection, got Ok")
       | Error msg ->
         if expect_ok then Alcotest.failf "%s: expected Ok, got Error %s" name msg)
@@ -202,7 +202,7 @@ let coupling_suite =
       `Quick
       (fun () ->
         match
-          Exec_policy.validate_shell_ir_paths (argv_ir "sh" [ "-c"; "cd /etc && ls" ])
+          Exec_policy.validate_shell_ir_paths ~extra_roots:[] (argv_ir "sh" [ "-c"; "cd /etc && ls" ])
         with
         | Ok () -> Alcotest.fail "re-opened cd /etc must be rejected"
         | Error _ -> ())
@@ -221,7 +221,7 @@ let scratch_suite =
       `Quick
       (fun () ->
         with_tmp_scratch (fun root ->
-            match Exec_policy.validate_shell_ir_paths (argv_ir "cd" [ root ]) with
+            match Exec_policy.validate_shell_ir_paths ~extra_roots:[] (argv_ir "cd" [ root ]) with
             | Ok () -> ()
             | Error msg -> Alcotest.failf "cd %s must pass, got: %s" root msg))
   ; Alcotest.test_case
@@ -231,7 +231,7 @@ let scratch_suite =
         with_tmp_scratch (fun root ->
             let target = Filename.concat root "wt" in
             match
-              Exec_policy.validate_shell_ir_paths (argv_ir "mkdir" [ target ])
+              Exec_policy.validate_shell_ir_paths ~extra_roots:[] (argv_ir "mkdir" [ target ])
             with
             | Ok () -> ()
             | Error msg -> Alcotest.failf "mkdir %s must pass, got: %s" target msg))

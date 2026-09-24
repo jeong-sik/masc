@@ -11,7 +11,7 @@ let with_workspace f =
   List.iter (fun path -> Unix.mkdir path 0o700) [masc; config; declarations];
   let path = Filename.concat declarations "imp.toml" in
   Out_channel.with_open_bin path (fun out -> output_string out
-    "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\ninstructions = \"Help the operator.\"\n");
+    "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\ninstructions = \"Help the operator.\"\n");
   Fun.protect ~finally:(fun () ->
     Unix.unlink path;
     List.iter Unix.rmdir [declarations; config; masc; base])

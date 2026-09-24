@@ -90,7 +90,7 @@ let persist_meta config name =
   then
     write_file
       path
-      "[keeper]\ninstructions = \"You are a focused test Keeper.\"\nsandbox_profile = \"docker\"\n";
+      "[keeper]\ninstructions = \"You are a focused test Keeper.\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\n";
   match Keeper_meta_store.replace_snapshot config (make_meta name) with
   | Ok () -> ()
   | Error detail -> failf "keeper meta persistence failed: %s" detail
@@ -106,7 +106,7 @@ let configure_mention_targets config name mention_targets =
   write_file
     path
     (Printf.sprintf
-       "[keeper]\ninstructions = \"You are a focused test Keeper.\"\nsandbox_profile = \"docker\"\nmention_targets = [%s]\n"
+       "[keeper]\ninstructions = \"You are a focused test Keeper.\"\nsandbox_profile = \"docker\"\nsandbox_image = \"masc-sandbox:general\"\nmention_targets = [%s]\n"
        rendered_targets)
 ;;
 

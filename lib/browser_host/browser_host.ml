@@ -287,7 +287,7 @@ let post ~clock ~client ~server ~config ~info ~token path json =
           let response, body =
             Cohttp_eio.Client.post client ~sw
               ~headers:(Cohttp.Header.of_list
-                [ "Content-Type", "application/json"; "x-lane", "live"; "x-lane-token", token;
+                [ "Content-Type", "application/json"; "x-lane", Browser_lane.Lane_name.(to_wire Live); "x-lane-token", token;
                   "x-browser-client-id", config.client_id; "x-browser-name", info.browser;
                   "x-browser-version", info.version; "x-browser-engine-version", info.engine_version ])
               ~body:(Cohttp_eio.Body.of_string (Yojson.Safe.to_string json))

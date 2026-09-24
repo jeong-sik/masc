@@ -3090,12 +3090,18 @@ supports_native_streaming = false
    composition would run the turn under Codex's built-in instructions with
    masc's tool surface attached (#33165). The sibling suites for the other two
    official clients name a fixture prompt the same way. *)
-let run_keeper_turn ?(tools = []) ?accept ?hooks ?context_injector ?model_input_projection
-    ?(initial_messages = []) ?base_path ?raw_trace_path
+(* A session trace whose boundary store holds no completed turn: the
+   official-client lanes read the turn boundary as atom 0, so the whole
+   offered history is the carried range. A turn with no trace carries the
+   newest atom alone ([Keeper_turn_driver.For_testing.official_client_turn_start]). *)
+let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
+
+let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projection
+    ?(initial_messages = []) ?base_path ?raw_trace_path ?session_id
     ?on_event ?on_request_attribution ?(keeper_name = "codex-fixture")
     ?(system_prompt = "pre-dispatch fixture system prompt")
     ?(goal = "Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.") ~cli_path
-    ~model () =
+    ~model ?accept () =
   let owns_base_path = Option.is_none base_path in
   let base_path =
     Option.value base_path ~default:(temp_workspace "masc-codex-session-")
@@ -3153,6 +3159,7 @@ let run_keeper_turn ?(tools = []) ?accept ?hooks ?context_injector ?model_input_
                       ?context_injector
                       ?context
                       ?raw_trace
+                      ?session_id
                       ?on_event
                       ?on_request_attribution
                       ~sw
@@ -3286,6 +3293,7 @@ let check_keeper_shrinks_history_after_typed_context_error ~read_only_tool () =
          (fun cli_path ->
             match
               run_keeper_turn
+                ~session_id:fixture_trace_with_no_completed_turn
                 ~tools
                 ~initial_messages
                 ~keeper_name:"codex-fixture-same-size-shrink"
@@ -3364,6 +3372,7 @@ let test_tool_completion_evidence_belongs_to_retry () =
       (handshake @ [tool_call_request; empty_completed])
       (fun cli_path ->
         let result = run_keeper_turn ~tools:[tool]
+          ~session_id:fixture_trace_with_no_completed_turn
           ~accept:(fun _ -> incr acceptance_calls; false)
           ~initial_messages:(List.init 64 (fun _ -> Agent_core.Types.user_msg (String.make 4096 'x')))
           ~cli_path ~model:"gpt-fixture" () in

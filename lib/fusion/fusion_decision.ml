@@ -61,22 +61,31 @@ let evidence_sha256 (post : Board.post) =
 
 let validate_event json =
   let names = ["type"; "decision_id"; "fusion_run_id"; "fusion_post_id"; "fusion_evidence_sha256"; "task";
-    "goal_ids"; "agent"; "actor_kind"; "turn_ref"; "decision"; "choice"; "reason"; "notes"; "ts"] in
+    "goal_ids"; "agent"; "actor_kind"; "turn_ref"; "decision"; "choice"; "reason"; "ts"] in
   let* fields = match json with
-    | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare names -> Ok fields
+    | `Assoc fields when List.sort String.compare (List.map fst (List.remove_assoc "notes" fields)) = List.sort String.compare names -> Ok fields
     | _ -> Error "invalid Fusion decision event fields" in
   let value key = List.assoc key fields in
   let string key = match value key with `String text when String.trim text <> "" -> Ok text
     | _ -> Error ("invalid decision event " ^ key) in
   let* _ = List.fold_left (fun result key -> let* () = result in let* _ = string key in Ok ()) (Ok ())
-    ["decision_id"; "fusion_run_id"; "fusion_post_id"; "fusion_evidence_sha256"; "task"; "agent"; "choice"; "reason"; "notes"; "ts"] in
+    ["decision_id"; "fusion_run_id"; "fusion_post_id"; "fusion_evidence_sha256"; "task"; "agent"; "ts"] in
   let* decision = string "decision" in
   let* _ = disposition_of_string decision in
+  let* _ = string "choice" in
+  let* _ = string "reason" in
+  (* Existing immutable rows may carry their own nonblank note. New rows
+     write the original decision fields without a second rendered sentence. *)
+  let* () = match List.assoc_opt "notes" fields with
+    | None -> Ok ()
+    | Some (`String stored) when String.trim stored <> "" -> Ok ()
+    | Some _ -> Error "invalid Fusion decision event notes" in
   let* _ = Ids.Turn_ref.of_yojson (value "turn_ref") in
   let* () = match value "goal_ids" with
     | `List goals when List.for_all (function `String id -> String.trim id <> "" | _ -> false) goals -> Ok ()
     | _ -> Error "invalid decision Goal context" in
-  if value "actor_kind" <> `String "keeper" then Error "invalid decision actor kind" else Ok json
+  if value "actor_kind" <> `String "keeper" then Error "invalid decision actor kind"
+  else Ok json
 
 let events_root config = Filename.concat (Workspace.masc_dir config) "events"
 let protect f = try f () with
@@ -155,7 +164,7 @@ let record ~config ~keeper ~turn_ref proposal = protect (fun () ->
     "task", `String proposal.task_id; "goal_ids", `List (List.map (fun id -> `String id) goal_ids);
     "agent", `String keeper; "actor_kind", `String "keeper"; "turn_ref", Ids.Turn_ref.to_yojson turn_ref;
     "decision", `String (disposition_to_string proposal.disposition); "choice", `String proposal.choice;
-    "reason", `String proposal.reason; "notes", `String ("Fusion " ^ disposition_to_string proposal.disposition ^ ": " ^ proposal.choice ^ " — " ^ proposal.reason)] in
+    "reason", `String proposal.reason] in
   Workspace_utils.with_file_lock config (Filename.concat (events_root config) "fusion-decision.lock") (fun () ->
     let* existing = read ~config ~run_id:proposal.run_id in
     match List.find_opt (fun row -> Json_util.get_string row "decision_id" = Some decision_id) existing with

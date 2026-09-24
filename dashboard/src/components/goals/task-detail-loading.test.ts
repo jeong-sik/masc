@@ -14,9 +14,9 @@ vi.mock('../../api/dashboard', async importOriginal => ({
   fetchAgentTimeline: vi.fn(),
 }))
 import { fetchAgentTimeline } from '../../api/dashboard'
-import { fetchTaskDetail } from '../../api/actions'
+import { fetchTaskDetail, fetchTaskEvents } from '../../api/actions'
 import { selectedTask } from './task-detail-selection'
-import { closeTaskDetail, openTaskDetail, retryTaskDetails, taskDetailsState, switchToActivityTab, activeTab, activityError, activityLoading, activityEvents } from './task-detail-state'
+import { closeTaskDetail, openTaskDetail, retryTaskDetails, taskDetailsState, switchToActivityTab, activeTab, activityError, activityLoading, activityEvents, taskEvents } from './task-detail-state'
 import { TaskDetailOverlay } from './task-detail-overlay'
 
 function pending<T>() {
@@ -31,6 +31,7 @@ const settle = async () => { await Promise.resolve(); await Promise.resolve() }
 let host: HTMLDivElement
 beforeEach(() => {
   vi.mocked(fetchTaskDetail).mockReset()
+  vi.mocked(fetchTaskEvents).mockReset().mockResolvedValue([])
   vi.mocked(fetchAgentTimeline).mockReset()
   closeTaskDetail()
   host = document.createElement('div')
@@ -39,6 +40,29 @@ beforeEach(() => {
 afterEach(() => { render(null, host); host.remove(); closeTaskDetail() })
 
 describe('task details loaded on demand', () => {
+  it.each([
+    ['new event', undefined],
+    ['existing event', 'Fusion modified: Choose B — measured constraint'],
+  ])('renders %s Fusion decisions from their original fields', async (_label, notes) => {
+    vi.mocked(fetchTaskEvents).mockResolvedValueOnce([
+      { type: 'fusion_decision', task: 'a', decision: 'modified',
+        choice: 'Choose B', reason: 'measured constraint', ...(notes ? { notes } : {}) },
+    ])
+    await act(async () => { openTaskDetail(complete('a')); render(html`<${TaskDetailOverlay} />`, host); await settle() })
+    await vi.waitFor(() => expect(taskEvents.value[0]?.notes).toBe('modified: Choose B — measured constraint'))
+    await vi.waitFor(() => expect(host.textContent).toContain('modified: Choose B — measured constraint'))
+    expect(host.textContent).not.toContain('Fusion modified: Choose B')
+  })
+  it('keeps a distinct recorded Fusion note visible', async () => {
+    vi.mocked(fetchTaskEvents).mockResolvedValueOnce([
+      { type: 'fusion_decision', task: 'a', decision: 'modified',
+        choice: 'Choose B', reason: 'measured constraint', notes: 'operator annotation' },
+    ])
+    await act(async () => { openTaskDetail(complete('a')); render(html`<${TaskDetailOverlay} />`, host); await settle() })
+    await vi.waitFor(() => expect(taskEvents.value[0]?.notes).toBe('modified: Choose B — measured constraint · Note: operator annotation'))
+    await vi.waitFor(() => expect(host.textContent).toContain('modified: Choose B — measured constraint'))
+    await vi.waitFor(() => expect(host.textContent).toContain('operator annotation'))
+  })
   it('keeps complete rows immediate and avoids another request', () => {
     openTaskDetail(complete('a'))
     expect(fetchTaskDetail).not.toHaveBeenCalled()

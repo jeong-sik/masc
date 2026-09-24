@@ -38,10 +38,30 @@ interface TaskHistoryRow {
   ts?: string
   ts_iso?: string
   notes?: string
+  decision?: string
+  choice?: string
   reason?: string
   handoff_context?: {
     summary?: string
   } | null
+}
+
+function fusionDecisionNote(row: TaskHistoryRow): string | null {
+  if (row.type !== 'fusion_decision') return null
+  switch (row.decision) {
+    case 'adopted':
+    case 'rejected':
+    case 'modified': break
+    default: return null
+  }
+  if (typeof row.choice !== 'string' || !row.choice.trim()
+    || typeof row.reason !== 'string' || !row.reason.trim()) return null
+  const decision = `${row.decision}: ${row.choice} — ${row.reason}`
+  const recordedNote = `Fusion ${row.decision}: ${row.choice} — ${row.reason}`
+  if (typeof row.notes === 'string' && row.notes.trim() && row.notes !== recordedNote) {
+    return `${decision} · Note: ${row.notes}`
+  }
+  return decision
 }
 
 function normalizeTaskHistory(raw: TaskHistoryRow[]): NormalizedTaskEvent[] {
@@ -51,7 +71,7 @@ function normalizeTaskHistory(raw: TaskHistoryRow[]): NormalizedTaskEvent[] {
     actorKind: r.actor_kind ?? null,
     taskId: r.task ?? r.task_id ?? null,
     ts: r.ts ?? r.ts_iso ?? null,
-    notes: r.notes ?? r.handoff_context?.summary ?? r.reason ?? null,
+    notes: fusionDecisionNote(r) ?? r.notes ?? r.handoff_context?.summary ?? r.reason ?? null,
   }))
 }
 

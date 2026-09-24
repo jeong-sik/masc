@@ -67,9 +67,11 @@ type t
     transport can let go. A command still without a reply after
     [command_deadline_s], or whose caller is cancelled while it is out, ends
     the connection, because a later command would be written behind one whose
-    outcome is unknown. [on_event] runs on whichever fiber delivered the frame
-    or ended the connection (the reader, a deadline, a cancelled caller, the
-    owner's release) and must not block. *)
+    outcome is unknown. A failed [send] also ends the connection and settles
+    every pending command as [Connection_lost]. Cancellation during [send]
+    ends the connection and is re-raised. [on_event] runs on whichever fiber
+    delivered the frame or ended the connection (the reader, a deadline, a
+    cancelled caller, the owner's release) and must not block. *)
 val create :
   send:(string -> unit)
   -> close:(unit -> unit)

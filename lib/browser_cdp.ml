@@ -162,24 +162,35 @@ let command t ?session method_ params =
     let id = t.next_id in
     let reply, resolver = Eio.Promise.create () in
     Hashtbl.replace t.pending id resolver;
-    t.send (encode_command ~id ?session method_ params);
+    let sent =
+      match t.send (encode_command ~id ?session method_ params) with
+      | () -> true
+      | exception (Eio.Cancel.Cancelled _ as exn) ->
+        lost t "a command's caller was cancelled while sending";
+        raise exn
+      | exception exn ->
+        lost t ("CDP command send failed: " ^ Printexc.to_string exn);
+        false
+    in
     (* The deadline ends the connection only for a command still waiting: a
        reply that arrived as the deadline passed is the reply, and the
        connection stays. Without one, the connection ends rather than write
        the next command behind a command whose outcome is unknown. *)
-    (match
-       Watched_work.run
-         ~watcher:(fun () ->
-           t.sleep t.command_deadline_s;
-           if Hashtbl.mem t.pending id then lost t deadline_exceeded;
-           Eio.Promise.await reply)
-         (fun () -> Eio.Promise.await reply)
-     with
-     | result -> result
-     | exception (Eio.Cancel.Cancelled _ as exn) ->
-       (* A caller that leaves with its command out leaves its outcome unknown. *)
-       if Hashtbl.mem t.pending id then lost t "a command's caller was cancelled";
-       raise exn)
+    if not sent then Eio.Promise.await reply
+    else
+      match
+        Watched_work.run
+          ~watcher:(fun () ->
+            t.sleep t.command_deadline_s;
+            if Hashtbl.mem t.pending id then lost t deadline_exceeded;
+            Eio.Promise.await reply)
+          (fun () -> Eio.Promise.await reply)
+      with
+      | result -> result
+      | exception (Eio.Cancel.Cancelled _ as exn) ->
+        (* A caller that leaves with its command out leaves its outcome unknown. *)
+        if Hashtbl.mem t.pending id then lost t "a command's caller was cancelled";
+        raise exn
 ;;
 
 module Endpoint = Ws_direct_core.Endpoint

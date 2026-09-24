@@ -20,13 +20,6 @@ let ( let* ) = Result.bind
 
 (* ── Model attribution helpers ──────────────────────────── *)
 
-let provider_opt_of_fields ~(model : string) (fields : (string * Yojson.Safe.t) list)
-  : string option
-  =
-  let _ = model, fields in
-  None
-;;
-
 (* [executed_runtime_id] is the candidate that answered; [runtime_id] is the
    lane it answered on. In-turn failover can make those different
    runtimes, and this function's callers ask the first question, so prefer
@@ -145,7 +138,6 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
                "telemetry_reported"
                Missing_telemetry_reported
            in
-           let provider = provider_opt_of_fields ~model tfields in
            Ok
              { model
              ; inference_identity = None
@@ -154,7 +146,6 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; stop_reason = json_string_field_opt "stop_reason" tfields
              ; turn_lane = json_string_field_opt "turn_lane" tfields
              ; tok_per_sec = None
-             ; provider
              ; prompt_tok_per_sec = None
              ; hw_decode_tok_per_sec = None
              ; peak_memory_gb = None
@@ -218,7 +209,6 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
                "telemetry_reported"
                Missing_telemetry_reported
            in
-           let provider = provider_opt_of_fields ~model tfields in
            let tok_per_sec_raw = json_float_field_opt "tokens_per_second" tfields in
            let prompt_tok_per_sec =
              match List.assoc_opt "prompt_per_second" tfields with
@@ -287,7 +277,6 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; stop_reason = json_string_field_opt "stop_reason" tfields
              ; turn_lane = json_string_field_opt "turn_lane" tfields
              ; tok_per_sec = tok_per_sec_raw
-             ; provider
              ; prompt_tok_per_sec
              ; hw_decode_tok_per_sec
              ; peak_memory_gb
@@ -383,7 +372,6 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
     in
     Ok
       { model = row.model
-      ; provider = provider_opt_of_fields ~model:row.model fields
       ; inference_identity = Cost_ledger.inference_identity row
       ; ts_unix = row.ts_unix
       ; outcome = "success"

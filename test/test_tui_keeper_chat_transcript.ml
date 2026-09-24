@@ -1416,8 +1416,9 @@ let test_runtime_identity_separates_configured_and_observed () =
    nothing. *)
 let test_the_turn_reports_the_tokens_it_has_spent () =
   let usage ?(keeper_name = "keeper.one") transcript =
-    Transcript.stream_usage_text ~keeper_name transcript
+    Transcript.stream_details_text ~keeper_name transcript
   in
+  let counters ?stop_reason usage = Live.Stream_details { usage = Some usage; stop_reason } in
   check (option string) "nothing is claimed without a transcript" None (usage None);
   let t = fresh () in
   check (option string) "a turn that reported no counters says nothing" None
@@ -1426,7 +1427,7 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
     [ Live.Run_started
     ; Live.Runtime_attempt_started
         { runtime_id = Some "observed-glm"; attempt_index = Some 0 }
-    ; Live.Stream_usage
+    ; counters
         { input_tokens = Some 1200
         ; output_tokens = Some 340
         ; cache_read_input_tokens = None
@@ -1442,7 +1443,7 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
     (usage ~keeper_name:"keeper.other" (Some t));
   (* Cumulative: a later report replaces the earlier one instead of adding. *)
   feed t
-    [ Live.Stream_usage
+    [ counters
         { input_tokens = Some 1200
         ; output_tokens = Some 900
         ; cache_read_input_tokens = Some 4096
@@ -1451,22 +1452,59 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
     ];
   check (option string) "the latest report stands for the request"
     (Some "tokens: in 1200 \xc2\xb7 out 900 \xc2\xb7 cache read 4096") (usage (Some t));
-  (* The provider accumulates counters inside one request, and a turn that
-     calls tools asks again after every tool result. Round two therefore
-     starts from no counters: leaving round one's numbers up would call one
-     round's tokens what the turn has spent. *)
-  feed t [ Live.Stream_model_started { model = "glm-5-turbo" } ];
-  check (option string) "a second round starts from no counters" None
+  (* The provider's word for why it stopped writing. [Keeper_turn_outcome.t]
+     cannot say this: a reply cut off at max_tokens is still a visible reply,
+     so without this clause the screen shows a finished answer and no sign
+     that the provider ran out of room. *)
+  feed t [ Live.Stream_details { usage = None; stop_reason = Some "max_tokens" } ];
+  check (option string) "why the provider stopped joins the same clause"
+    (Some
+       "tokens: in 1200 \xc2\xb7 out 900 \xc2\xb7 cache read 4096 \xc2\xb7 stopped: max_tokens")
     (usage (Some t));
+  (* A delta that carried only counters leaves the reason standing, and the
+     ordinary reason is drawn too: keeping a list of reasons worth hiding
+     would go stale the day a provider adds one. *)
   feed t
-    [ Live.Stream_usage
+    [ counters ~stop_reason:"end_turn"
+        { input_tokens = Some 1200
+        ; output_tokens = Some 950
+        ; cache_read_input_tokens = Some 4096
+        ; cache_creation_input_tokens = None
+        }
+    ];
+  check (option string) "an ordinary stop reason is drawn like any other"
+    (Some
+       "tokens: in 1200 \xc2\xb7 out 950 \xc2\xb7 cache read 4096 \xc2\xb7 stopped: end_turn")
+    (usage (Some t));
+  (* Both facts belong to the request that reported them. A turn that calls
+     tools asks again after every tool result, and the counters accumulate
+     inside one request while the reason arrives at its end. Round two starts
+     from neither: leaving round one's numbers up would call one round's
+     tokens what the turn has spent, and leaving [stopped: tool_use] up would
+     say the provider has stopped while round two is still writing. *)
+  feed t
+    [ counters ~stop_reason:"tool_use"
+        { input_tokens = Some 1200
+        ; output_tokens = Some 980
+        ; cache_read_input_tokens = Some 4096
+        ; cache_creation_input_tokens = None
+        }
+    ; Live.Stream_model_started { model = "glm-5-turbo" }
+    ];
+  check (option string) "a second round starts from neither" None
+    (usage (Some t));
+  feed t [ Live.Text "still writing" ];
+  check (option string) "and text arriving does not bring the old ones back"
+    None (usage (Some t));
+  feed t
+    [ counters
         { input_tokens = Some 30
         ; output_tokens = Some 12
         ; cache_read_input_tokens = None
         ; cache_creation_input_tokens = None
         }
     ];
-  check (option string) "and reports only what that round has spent"
+  check (option string) "it reports only what that round has spent"
     (Some "tokens: in 30 \xc2\xb7 out 12") (usage (Some t));
   (* A new attempt counts its own tokens: carrying the old ones over would
      bill the new runtime for what the failed one spent. *)
@@ -1474,7 +1512,72 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
     [ Live.Runtime_attempt_started
         { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
     ];
-  check (option string) "a new attempt starts from no counters" None (usage (Some t))
+  check (option string) "a new attempt starts from no counters" None (usage (Some t));
+  (* The reason belongs to the attempt as much as the counters do: carrying it
+     over would blame the new runtime for how the old runtime's answer ended.
+     The reason has to be on the header when the attempt changes or this
+     asserts nothing -- the request reset above has already cleared it. *)
+  feed t
+    [ counters ~stop_reason:"max_tokens"
+        { input_tokens = Some 40
+        ; output_tokens = Some 20
+        ; cache_read_input_tokens = None
+        ; cache_creation_input_tokens = None
+        }
+    ];
+  check (option string) "the reason is on the header before the failover"
+    (Some "tokens: in 40 \xc2\xb7 out 20 \xc2\xb7 stopped: max_tokens")
+    (usage (Some t));
+  feed t
+    [ Live.Runtime_attempt_started
+        { runtime_id = Some "gpt-4o-mini"; attempt_index = Some 2 }
+    ];
+  check (option string) "a new attempt starts from no reason either" None
+    (usage (Some t))
+
+(* The stop reason arrived after the counters were already on the header, so a
+   frame that had room for the counters and not for both must keep drawing the
+   counters. Losing them would be a regression against the row as it shipped,
+   and the narrow frames are exactly where a reader has least to go on. *)
+let test_a_narrow_row_keeps_the_counters_it_was_drawing () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Runtime_attempt_started
+        { runtime_id = Some "observed-glm"; attempt_index = Some 0 }
+    ; (let counters ?stop_reason usage =
+         Live.Stream_details { usage = Some usage; stop_reason }
+       in
+       counters ~stop_reason:"max_tokens"
+         { input_tokens = Some 1200
+         ; output_tokens = Some 900
+         ; cache_read_input_tokens = Some 4096
+         ; cache_creation_input_tokens = None
+         })
+    ];
+  let cells text = Masc_tui_message_layout.display_width (" \xc2\xb7 " ^ text) in
+  let tokens = "tokens: in 1200 \xc2\xb7 out 900 \xc2\xb7 cache read 4096" in
+  let both = tokens ^ " \xc2\xb7 stopped: max_tokens" in
+  let within room =
+    Transcript.stream_details_within ~keeper_name:"keeper.one" ~room (Some t)
+  in
+  check (option string) "a frame with room for both draws both"
+    (Some (" \xc2\xb7 " ^ both))
+    (within (cells both));
+  (* The dividing width: one cell short of both, and only there does the
+     fallback decide anything. Without it the row draws nothing here. *)
+  check (option string) "one cell short of both keeps the counters"
+    (Some (" \xc2\xb7 " ^ tokens))
+    (within (cells both - 1));
+  check (option string) "and so does a frame with room for the counters alone"
+    (Some (" \xc2\xb7 " ^ tokens))
+    (within (cells tokens));
+  check (option string) "below that the row is what it was before" None
+    (within (cells tokens - 1));
+  check (option string) "a room of nothing claims nothing" None (within 0);
+  check (option string) "another keeper's transcript claims nothing" None
+    (Transcript.stream_details_within ~keeper_name:"keeper.other"
+       ~room:(cells both) (Some t))
 
 let test_new_attempt_does_not_inherit_previous_runtime () =
   List.iter (fun attempt_index ->
@@ -2809,6 +2912,8 @@ let () =
             test_the_row_names_the_model_phase_between_tool_calls
         ; test_case "header separates configured and observed runtimes" `Quick
             test_runtime_identity_separates_configured_and_observed
+        ; test_case "a narrow row keeps the counters it was drawing" `Quick
+            test_a_narrow_row_keeps_the_counters_it_was_drawing
         ; test_case "the turn reports the tokens it has spent" `Quick
             test_the_turn_reports_the_tokens_it_has_spent
         ; test_case "new attempt does not inherit previous runtime" `Quick

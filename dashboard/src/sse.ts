@@ -464,21 +464,6 @@ function handleEvent(event: SSEEvent): void {
         },
       )
       break
-    case 'keeper_handoff':
-      addTypedJournalEntry(
-        event.name ?? agent,
-        `Handoff gen ${event.from_generation ?? '?'} -> ${event.to_generation ?? '?'} (runtime)`,
-        'keepers',
-        'keeper_handoff',
-        {
-          severity: event.severity,
-          source: event.source,
-          narrativeText:
-            `${actorLabel(event.name ?? agent)}가 keeper handoff를 수행했습니다`
-            + ` (gen ${event.from_generation ?? '?'} → ${event.to_generation ?? '?'}, runtime)`,
-        },
-      )
-      break
     case 'keeper_phase_changed':
       addTypedJournalEntry(
         event.name ?? agent,

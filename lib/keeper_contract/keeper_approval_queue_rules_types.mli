@@ -93,6 +93,26 @@ type summary_attempt_disposition =
       summary_attempt_pre_worker_unavailable
   | Summary_attempt_settled
 
+(** Closed HITL queue progression phase projected from disposition and summary.
+    Emitted as a typed single string on wire/SSE so clients do not guess it. *)
+type approval_queue_phase =
+  | Phase_queued
+  | Phase_judging
+  | Phase_human_required
+  | Phase_blocked
+
+val approval_queue_phases : approval_queue_phase list
+val approval_queue_phase_to_string : approval_queue_phase -> string
+val approval_queue_phase_of_string : string -> approval_queue_phase option
+val approval_queue_phase_to_yojson : approval_queue_phase -> Yojson.Safe.t
+val approval_queue_phase_of_yojson_with_error :
+  Yojson.Safe.t -> (approval_queue_phase, string) result
+
+val phase_of_disposition_and_summary :
+  disposition:summary_attempt_disposition ->
+  summary_status:summary_status ->
+  approval_queue_phase
+
 (** How the attempt to run a request boxed ended (RFC-0422): the exit status
     the shim reported for a box it could not build. It is never the
     requested program's own status, because that program never started. *)

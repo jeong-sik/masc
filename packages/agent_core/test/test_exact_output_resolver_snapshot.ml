@@ -121,14 +121,13 @@ let target_catalog
     model
     (option_line "enable_thinking" string_of_bool enable_thinking)
     (* Every admission-expecting case here reaches [ready] -> [EO.admit], and
-       #36984 made admission reject a plan whose connect and body budgets are
-       both absent (validate_deadline_coverage). This fixture declared no
-       budget, so the suite went red as soon as a PR edit made CI select it.
-       Default the connect budget the way the flow suite does
+       admission rejects a plan without a body budget (Missing_deadline).
+       Default both budgets the way the flow suite does
        (test_exact_output_flow.ml), while callers still pass a bare float. *)
     (option_line "connect_timeout_s" toml_float
        (Some (Option.value connect_timeout_s ~default:30.0)))
-    (option_line "body_timeout_s" toml_float body_timeout_s)
+    (option_line "body_timeout_s" toml_float
+       (Some (Option.value body_timeout_s ~default:30.0)))
 ;;
 
 let snapshot ?(getenv = fun _ -> Ok None) contents =

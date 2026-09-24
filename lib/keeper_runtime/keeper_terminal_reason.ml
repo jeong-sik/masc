@@ -44,7 +44,6 @@ let wire_provider_error_network_timeout_prefix = "provider_error_network:timeout
 
 type t =
   | Runtime_exhausted of string
-  | Capacity_backpressure of string
   | Config_invalid of string
   | Authorization_refused of string
   | Provider_runtime_failure of string
@@ -78,32 +77,25 @@ let is_authorization_refused_wire wire =
 ;;
 
 (* The keeper's own internal-error family, classified from the producer's
-   typed enumeration instead of from its printed form. Previously five of
-   these thirteen were recognised by [String.equal] against four exported
-   constants and the rest fell to [Unknown], which is how a keeper's named
-   failure reached the operator as "unmapped runtime state" (#29929).
+   typed enumeration instead of from its printed form (#29929).
 
    Three kinds get no policy here on purpose. [Resumable_cli_session],
    [Receipt_persistence_failed] and [Gate_replay_repair_required] have never
    been observed — zero rows across 189 receipt files and every August log —
    so there is no trace to classify them from, and naming a disposition from
    the constructor name alone would be a guess dressed as a decision. They
-   stay [Unknown], which is what they do today; the difference is that the
-   match now names them, so the next author sees the open question instead of
-   an absent arm. *)
+   stay [Unknown]. The match names them, so the next author sees the open
+   question instead of an absent arm. *)
 let of_masc_internal_kind wire = function
   | Keeper_internal_error.Wire_runtime_exhausted -> Runtime_exhausted wire
-  | Keeper_internal_error.Wire_capacity_backpressure -> Capacity_backpressure wire
   | Keeper_internal_error.Wire_incomplete_tool_transcript -> Transcript_corruption wire
   | Keeper_internal_error.Wire_provider_attempt_effect_fenced ->
     Provider_attempt_effect_fenced wire
   | Keeper_internal_error.Wire_tool_correction_lost -> Tool_correction_lost wire
   | Keeper_internal_error.Wire_official_client_recovery_required ->
     Official_client_recovery_required wire
-  (* RFC-0454 P2. Both wires are new spellings of failures that already
-     reached this classifier, and each keeps the bucket it had: a host stop
-     used to arrive as the bare ["internal_error"] wire, and a closed runtime
-     connection as a [provider_error_*] one. *)
+  (* A host stop is an internal error, and a closed runtime connection is a
+     provider runtime failure. *)
   | Keeper_internal_error.Wire_host_stopped_turn -> Internal_error wire
   | Keeper_internal_error.Wire_runtime_connection_closed ->
     Provider_runtime_failure wire
@@ -168,7 +160,6 @@ let of_wire wire =
    round-trip fidelity; [operator_disposition] ignores it. *)
 let to_wire = function
   | Runtime_exhausted wire -> wire
-  | Capacity_backpressure wire -> wire
   | Config_invalid wire -> wire
   | Authorization_refused wire -> wire
   | Provider_runtime_failure wire -> wire
@@ -202,7 +193,6 @@ let is_transient_provider_runtime_failure = function
     || String.equal wire wire_provider_error_network_timeout
     || String.starts_with ~prefix:wire_provider_error_network_timeout_prefix wire
   | Runtime_exhausted _
-  | Capacity_backpressure _
   | Config_invalid _
   | Authorization_refused _
   | Transcript_corruption _

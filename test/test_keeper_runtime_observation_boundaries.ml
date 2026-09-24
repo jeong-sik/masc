@@ -241,6 +241,56 @@ let test_provider_network_timeout_without_phase_reaches_registry () =
     ~expected:(KPB.Provider_timeout { source = KPB.Agent_core_provider; phase = None })
     ~expected_timeout_prefix:(Some "Provider timeout")
 
+(* #38513: a reset reaches the runner the same way a refusal or a closed
+   connection does, and none of those takes the short transient-runner retry
+   that a TLS handshake failure takes. *)
+let test_reset_internal_error_is_not_transient_runner () =
+  let err =
+    KTD.core_error_of_masc_internal_error
+      (KTD.Internal_unhandled_exception
+         { site = KTD.runtime_runner_execute_site
+         ; exn_repr = "Unix.Unix_error(Unix.ECONNRESET, \"read\", \"\")"
+         ; transport_error_kind = Some Llm_provider.Http_client.Connection_reset
+         })
+  in
+  Alcotest.(check bool)
+    "runtime_runner reset is not a transient runner error"
+    false
+    (EC.is_transient_internal_runner_error err)
+
+(* The runner reads a transport kind off the exception it caught, through
+   the same classifier the HTTP client uses. A reset used to come back as a
+   refusal here, from a hand copy of that classifier (#38513). *)
+let test_runner_exception_reads_reset_as_reset () =
+  let kind = Runtime_agent.For_testing.transport_error_kind_of_exception in
+  let kind_label = function
+    | None -> "none"
+    | Some kind -> Llm_provider.Http_client.network_error_kind_to_string kind
+  in
+  let check_kind name expected exn =
+    Alcotest.(check string) name expected (kind_label (kind exn))
+  in
+  check_kind
+    "Unix ECONNRESET"
+    "connection_reset"
+    (Unix.Unix_error (Unix.ECONNRESET, "read", ""));
+  check_kind
+    "Eio reset carrying ECONNRESET"
+    "connection_reset"
+    (Eio.Exn.create
+       (Eio.Net.E
+          (Eio.Net.Connection_reset (Eio_unix.Unix_error (Unix.ECONNRESET, "read", "")))));
+  check_kind
+    "Eio reset carrying EPIPE stays a closed connection"
+    "end_of_file"
+    (Eio.Exn.create
+       (Eio.Net.E
+          (Eio.Net.Connection_reset (Eio_unix.Unix_error (Unix.EPIPE, "write", "")))));
+  check_kind
+    "Unix ECONNREFUSED stays a refusal"
+    "connection_refused"
+    (Unix.Unix_error (Unix.ECONNREFUSED, "connect", ""))
+
 let test_tls_handshake_internal_error_is_transient () =
   let err = tls_handshake_internal_error () in
   Alcotest.(check bool)
@@ -540,6 +590,10 @@ let () =
           test_raw_agent_core_api_timeout_preserves_typed_observation;
         Alcotest.test_case "TLS handshake internal error is transient" `Quick
           test_tls_handshake_internal_error_is_transient;
+        Alcotest.test_case "reset internal error is not a transient runner error" `Quick
+          test_reset_internal_error_is_not_transient_runner;
+        Alcotest.test_case "runner exception reads a reset as a reset" `Quick
+          test_runner_exception_reads_reset_as_reset;
         Alcotest.test_case "provider parse rejection counts toward crash" `Quick
           test_provider_parse_rejection_counts_toward_crash;
         Alcotest.test_case

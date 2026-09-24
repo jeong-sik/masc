@@ -1,10 +1,6 @@
 (** Structured keeper-internal error envelopes carried through
     [Agent_core.Error.Internal]. *)
 
-(** Canonical wire kind emitted for {!Capacity_backpressure}, a provider's
-    capacity refusal carried on a MASC envelope.  Receipt terminal projection
-    and decoding consume this same value. *)
-val capacity_backpressure_kind : string
 (** Canonical wire kind for structural transcript corruption rejected before
     provider dispatch. *)
 val incomplete_tool_transcript_kind : string
@@ -61,10 +57,6 @@ type provider_rejection = {
   reason : string;
 }
 
-type capacity_retry_after =
-  | Explicit of float
-  | No_retry_hint
-
 type runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
@@ -88,10 +80,8 @@ type accept_rejection_kind =
   | Accept_no_usable_progress
   | Accept_predicate_rejected
 
-(** The wire label for a {!Llm_provider.Http_client.network_error_kind}.
-    Exported because [Keeper_agent_error] renders the same seven kinds for
-    its own [network_kind] field and kept a byte-identical copy; two
-    mappings for one type can be renamed apart. *)
+(** {!Llm_provider.Http_client.network_error_kind_to_string}, re-exported
+    next to its decoder. *)
 val network_error_kind_to_string :
   Llm_provider.Http_client.network_error_kind -> string
 
@@ -160,11 +150,6 @@ and masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
       reason : runtime_exhaustion_reason;
-    }
-  | Capacity_backpressure of {
-      runtime_id : string;
-      detail : string;
-      retry_after : capacity_retry_after;
     }
   | Resumable_cli_session of {
       runtime_id : string;
@@ -289,7 +274,6 @@ val summary_of_masc_internal_error : masc_internal_error -> string option
 type wire_kind =
   | Wire_official_client_recovery_required
   | Wire_runtime_exhausted
-  | Wire_capacity_backpressure
   | Wire_resumable_cli_session
   | Wire_accept_rejected
   | Wire_internal_unhandled_exception

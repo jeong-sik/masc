@@ -1,7 +1,5 @@
 name: Lane Add-on native candidate
 on:
-  push:
-    branches: ['codex/lane-addon-v0']
   workflow_dispatch: {}
 permissions:
   contents: read

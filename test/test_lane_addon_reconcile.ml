@@ -521,6 +521,8 @@ let test_startup_dependency_recovers_without_editing_toml () =
       end
     in
     advance_until_started ();
+    check bool "a startup that never created a container leaves no retained record" false
+      (instances config |> List.exists (fun value -> text "instance_id" value = failed_id));
     let id = declared_instance config "observer" |> text "instance_id" in
     await_ready real_clock config id;
     check string "recovered worker receives the original binding" "initial"
@@ -565,6 +567,49 @@ let test_historical_missing_container_identity_is_recovered () =
     check bool "ownership recovery preserves retained observation history" true
       (dispatch config Runtime.Slice [] |> values "rows"
        |> List.exists (fun value -> text "id" value = row));
+    detach clock config new_id)
+
+(* A binding a previous process left for a worker that never started -- no
+   observation, no container -- is recovered like any other, and once it is
+   detached it leaves no file: the rule [persist] applies to a live worker
+   holds on the restart path too. *)
+let test_historical_never_started_leaves_no_binding () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    let bytes = declaration ~id:"observer" ~manifest () in
+    write path bytes;
+    ignore (reconcile config directory);
+    let old_id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config old_id;
+    let captured = instance config old_id in
+    detach clock config old_id;
+    Runtime.For_testing.reset ();
+    let fields = Yojson.Safe.Util.to_assoc captured in
+    let never_started =
+      `Assoc
+        (("container_id", `Null) :: ("observation_seq", `Int 0)
+         :: List.remove_assoc "observation_seq" (List.remove_assoc "container_id" fields))
+    in
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    unwrap (Store.save_binding store ~instance_id:old_id never_started);
+    let has_binding () =
+      unwrap (Store.bindings store)
+      |> List.exists (function
+        | `Assoc binding -> List.assoc_opt "instance_id" binding = Some (`String old_id)
+        | _ -> false)
+    in
+    write path bytes;
+    ignore (reconcile config directory);
+    await_yield (fun () -> List.mem (Recovery_completed (old_id, None)) !(state.events));
+    await_yield (fun () -> not (has_binding ()));
+    check bool "a never-started binding is gone after restart recovery" false (has_binding ());
+    (* Recovery nudges configuration, but this test runs no configuration
+       service, so the declaration attaches again only on the next reconcile. *)
+    ignore (reconcile config directory);
+    let new_id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config new_id;
     detach clock config new_id)
 
 let test_cleanup_failure_retries_on_maintenance_without_hotloop () =
@@ -681,6 +726,8 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_startup_dependency_recovers_without_editing_toml;
   test_case "historical missing container identity is recovered" `Quick
     test_historical_missing_container_identity_is_recovered;
+  test_case "historical never-started binding leaves no file" `Quick
+    test_historical_never_started_leaves_no_binding;
   test_case "cleanup failures wait for maintenance rather than hotloop" `Quick
     test_cleanup_failure_retries_on_maintenance_without_hotloop;
   test_case "install, idempotence, rename, and explicit removal" `Quick

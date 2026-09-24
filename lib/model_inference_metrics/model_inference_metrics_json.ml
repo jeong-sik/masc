@@ -59,7 +59,6 @@ let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
   =
   `Assoc
     [ "model_id", `String model_label
-    ; "provider", `Null
     ; "entry_count", `Int s.entry_count
     ; "avg_tok_per_sec", Json_util.float_opt_to_json s.avg_tok_per_sec
     ; "p50_tok_per_sec", Json_util.float_opt_to_json s.p50_tok_per_sec
@@ -109,7 +108,6 @@ let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
              (fun (r : recent_entry) ->
                 `Assoc
                   [ "ts_unix", `Float r.re_ts_unix
-                  ; "provider", `Null
                   ; "outcome", `String r.re_outcome
                   ; "stop_reason", Json_util.string_opt_to_json r.re_stop_reason
                   ; "turn_lane", Json_util.string_opt_to_json r.re_turn_lane

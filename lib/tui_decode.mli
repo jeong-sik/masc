@@ -42,11 +42,37 @@ type keeper = {
   k_updated_at : string;
 }
 
+val escape_invisible : string -> string
+(** Draw bidi controls, zero-width characters and tag characters (U+061C,
+    U+200B-U+200F, U+202A-U+202E, U+2066-U+2069, U+FEFF, U+E0000-U+E007F) as
+    their own escape text: [\uXXXX] inside the basic plane and [\UXXXXXXXX]
+    above it, since the tag block needs five digits. A terminal draws them as
+    nothing, so without this the glyphs an operator reads can differ from the
+    bytes an approval hash covers (Trojan Source, CVE-2021-42574; spelling
+    ASCII in tag characters is the same trick without the bidi). Two
+    exceptions are characters a reader can see the effect of, and each is
+    admitted by its neighbours rather than by a list: a zero-width joiner
+    between two pictographs (UAX #29 GB11), and a subdivision flag -- U+1F3F4,
+    three to seven tag characters in the lowercase-and-digit shape UTS #51
+    gives a subdivision code, then the terminator U+E007F -- which is kept
+    whole or escaped whole. Tag characters outside that shape are drawn even
+    behind a flag: the wider grammar spells sentences, and a flag is all a
+    reader would see of them. {!sanitize_terminal_text} and the Keeper chat
+    boundary both route through here, so the rule lives in one place. *)
+
 val sanitize_terminal_text : string -> string
-(** Escape C0, DEL, raw C1 bytes, UTF-8 encoded C1 code points, and malformed
-    UTF-8 bytes so external values form one printable terminal row. Call at the
-    terminal rendering boundary; decoded records intentionally retain their raw
-    typed value for non-terminal consumers. *)
+(** Escape C0, DEL, raw C1 bytes, UTF-8 encoded C1 code points, malformed
+    UTF-8 bytes, and the invisible code points {!escape_invisible} names, so
+    external values form one printable terminal row. Call at the terminal
+    rendering boundary; decoded records intentionally retain their raw typed
+    value for non-terminal consumers. *)
+
+val sanitize_terminal_lines : string -> string
+(** [sanitize_terminal_lines text] keeps each LF of [text] as a line break and
+    puts every line between them through {!sanitize_terminal_text}, so each
+    other control byte -- a tab, a carriage return, an ESC -- is drawn as its
+    visible escape rather than sent to the terminal or folded into a space.
+    For a text read whole, where a reader must see what the bytes are. *)
 
 val preview_line : string -> string
 (** One row of a multi-line text for a list cell: each line break (LF, CR LF,
@@ -322,15 +348,27 @@ type inventory_freshness =
       (** The server answered from a built inventory. An empty list here does
           mean no tools. *)
 
-(** One tool the keeper's effective surface carries. [et_skill_source_id]
-    names the configured skill source a composition skill came from, read
-    from [origin.skill_provenance.identity.source_id]; it is [None] for any
-    tool with no skill behind it, and for a composition skill whose
-    provenance the producer could not resolve. *)
+(** Where one tool on the keeper's effective surface came from, as
+    [origin.kind] names it. Only a composition skill carries
+    [origin.skill_provenance], and it always carries the key: [skill_source_id]
+    is read from [skill_provenance.identity.source_id], and is [None] when the
+    producer sent [null] because it could not resolve the provenance. *)
+type effective_tool_origin =
+  | Descriptor_origin
+  | Instruction_skill_origin
+  | Composition_skill_origin of { skill_source_id : string option }
+  | Composition_control_origin
+  | Unrecognised_origin of string
+      (** A kind this build does not know, kept as the server spelled it so
+          the Tools column still draws it and the rest of the surface still
+          loads. Its provenance is not read. *)
+
+val effective_tool_origin_kind : effective_tool_origin -> string
+(** The [origin.kind] word the server sent. *)
+
 type effective_tool = {
   et_name : string;
-  et_origin : string;
-  et_skill_source_id : string option;
+  et_origin : effective_tool_origin;
 }
 
 type effective_tool_delivery =
@@ -450,6 +488,18 @@ type skill_usage_coverage = {
   suc_unavailable : string list;
 }
 
+(** One Skill name two catalog entries declare. The first entry for the name
+    in catalog order wins (Skill_catalog_snapshot.effective_projection):
+    [scsh_winner]. The two can sit in different sources, or in one source
+    whose directory names normalize to the same Skill name. A Keeper turn that
+    lists Skills by name gets the winner, when the winner loads;
+    [scsh_shadowed] is published but reaches a turn only when a Task names its
+    exact reference. Both carry the same name and differ in identity. *)
+type skill_catalog_shadow = {
+  scsh_winner : Skill_reference.identity;
+  scsh_shadowed : Skill_reference.identity;
+}
+
 type skills_catalog = {
   sc_state : skills_catalog_state;
   sc_config : skill_catalog_config option;
@@ -458,6 +508,7 @@ type skills_catalog = {
   sc_sources : skill_catalog_source list;
   sc_surfaces : skills_catalog_surface list;
   sc_rejections : skill_catalog_rejection list;
+  sc_shadows : skill_catalog_shadow list;
   sc_usage_coverage : skill_usage_coverage option;
 }
 
@@ -486,13 +537,11 @@ type effective_skill_profile = {
 
 type configured_skill_name_unavailable = {
   csn_name : string;
-  csn_reason : string option;
+  csn_reason : string;
 }
 (** A Skill name the Keeper profile selected that the turn's catalog does not
     hold. Not a read failure, so it is a different fact from
-    [ets_skills_left_out]. [csn_reason] is the producer's word for why, and it
-    is [None] when the producer sent none rather than a word this reader made
-    up. *)
+    [ets_skills_left_out]. [csn_reason] is the producer's word for why. *)
 
 type effective_tool_surface =
   | Effective_surface_available of {
@@ -1284,6 +1333,9 @@ type verification_snapshot = {
           live backlog: the rows are real and as old as that snapshot, so
           anything submitted after it is absent. *)
 }
+(** The four backlog fields are required in {!Awaiting_queue}, where the
+    server joins the backlog and always sends them. {!Full_history} does not
+    join the backlog and sends none of them, so they read as empty there. *)
 
 type keeper_phase
 (** A validated Keeper lifecycle phase from the live roster. The underlying
@@ -1300,9 +1352,10 @@ val keeper_phase_is_running : keeper_phase -> bool
 
 (** Which Overview Team band a phase puts a Keeper in (RFC-0464). A stuck
     Keeper's turns are failing or its fiber crashed; an alive one can take a
-    turn now or is between runs; a parked one was stopped or never started.
+    turn now or is between runs; a paused one was paused by an operator; a
+    stopped one was stopped or never started.
     Exhaustive in the implementation, so a new phase has to choose a band. *)
-type keeper_phase_band = Phase_stuck | Phase_alive | Phase_parked
+type keeper_phase_band = Phase_stuck | Phase_alive | Phase_paused | Phase_stopped
 
 val keeper_phase_band : keeper_phase -> keeper_phase_band
 
@@ -2219,6 +2272,15 @@ type fleet_safety = {
     alive, its durable demand is not admissible. Collapsing the two reads a
     live fleet as a stopped one. *)
 
+type fleet_safety_reading =
+  | Fleet_measured of fleet_safety
+  | Fleet_not_measured of { status : string }
+      (** The health snapshot has no fleet reading and nothing failed: it is
+          being rebuilt, at boot and again after a change invalidates it.
+          [status] is the placeholder's word (["warming"]). Kept apart from a
+          reading: zero counts would draw an idle fleet the server never
+          measured. *)
+
 type server_gc_health = {
   sgc_heap_words : int;
   sgc_live_words : int;
@@ -2719,6 +2781,54 @@ val decode_runtime_resolved_snapshot :
     Assignment and max-context fields belong to other consumers and are not
     duplicated into this light projection. *)
 
+(** What each provider account said about its own usage windows, as
+    [GET /api/v1/runtime/resolved] carries it. The server keeps these values
+    as reported and derives no availability from them. *)
+type provider_usage_window_kind =
+  | Window_five_hour
+  | Window_seven_day
+  | Window_duration_minutes of int
+      (** A window length the server has no name for. *)
+  | Window_provider_label of string
+      (** A label the provider gave the window, kept as written. *)
+
+(** The usage in the unit the provider reported it in. Not clamped. *)
+type provider_usage_utilization =
+  | Utilization_fraction of float  (** [0.67] is 67 %. *)
+  | Utilization_percent of int
+
+type provider_usage_window = {
+  puw_limit_id : string option;
+  puw_kind : provider_usage_window_kind;
+  puw_utilization : provider_usage_utilization;
+  puw_resets_at : float option;  (** Epoch seconds, as reported. *)
+  puw_observed_at : float;  (** When the server heard this report. *)
+}
+
+(** A reported account holds at least one window; an account that has not
+    reported since the server started holds none. *)
+type provider_usage_state =
+  | Account_not_reported_since_start
+  | Account_reported of provider_usage_window * provider_usage_window list
+
+type provider_usage_account = {
+  pua_scope : string;  (** The quota scope, as [quota_scope] on runtime rows. *)
+  pua_providers : string list;
+  pua_state : provider_usage_state;
+}
+
+type provider_usage_windows = {
+  puws_since : float;  (** Server process start: the table's first moment. *)
+  puws_accounts : provider_usage_account list;
+}
+
+val decode_provider_usage_windows :
+  Yojson.Safe.t -> (provider_usage_windows, string) result
+(** Strict decoder for the [provider_usage_windows_since] and
+    [provider_usage_windows] members of [GET /api/v1/runtime/resolved]. An
+    unknown [state], window [kind] or utilization [unit] is an error, as is a
+    reported account without windows or an unreported one with windows. *)
+
 val decode_runtime_surface_snapshot :
   probe_json:Yojson.Safe.t ->
   resolved_json:Yojson.Safe.t ->
@@ -2814,11 +2924,52 @@ val decode_planning_snapshot :
     {!goal_store_unavailable_view_to_string} line as the [Error]; RFC-0444 PR-4
     lifts it into a [Planning_unavailable] constructor. *)
 
-val decode_fleet_safety : Yojson.Safe.t -> (fleet_safety, string) result
+(** One goal of [GET /api/v1/dashboard/goals] as the Overview's GOALS
+    section reads it. [og_task_count] and [og_task_done_count] count the
+    goal's linked tasks; a goal has no measured metric value, so nothing here
+    stands in for one. [og_stagnation_seconds] is the server's time since the
+    goal's last activity, [None] when it has none to measure from. *)
+type overview_goal = {
+  og_id : string;
+  og_title : string;
+  og_phase : Goal_phase.t;
+  og_priority : int;
+  og_due_date : string option;
+  og_task_count : int;
+  og_task_done_count : int;
+  og_stagnation_seconds : int option;
+  og_task_ids : string list;  (** Ids of [tasks[]], in server order. *)
+}
+
+type overview_goals_error =
+  | Overview_goal_phase_unknown of { goal_id : string; phase : string }
+      (** A goal named a phase {!Goal_phase.parse} does not know. The whole
+          reading is refused rather than the goal dropped or given a phase. *)
+  | Overview_goals_source_unavailable of string
+      (** The server answered, and said it could not read its goals. *)
+  | Overview_goals_malformed of string
+
+val overview_goals_error_to_string : overview_goals_error -> string
+
+val decode_overview_goals :
+  Yojson.Safe.t -> (overview_goal list, overview_goals_error) result
+(** Every goal in the body's [tree], each node before its [children], in
+    server order. Goals of every phase are returned; which ones a surface
+    draws is the surface's decision. *)
+
+val decode_fleet_safety :
+  Yojson.Safe.t -> (fleet_safety_reading, string) result
 (** Reads the [keeper_fleet_safety] section out of a [/health?full=1] body.
     A body without the section is an error rather than an empty reading: an
     absent section and a healthy fleet are different facts, and rendering the
-    second for the first is how a blocked keeper stays invisible. *)
+    second for the first is how a blocked keeper stays invisible.
+
+    A section carrying [schema = Keeper_fleet_blocker.reading_schema] is a
+    reading, and every field of {!fleet_safety} is required: a missing count
+    is an error, not zero. A section without [schema] is the health
+    snapshot's placeholder: {!Fleet_not_measured} when it carries no
+    [error], and an error with the server's reason when it does (the refresh
+    timed out or the scan raised). *)
 val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :

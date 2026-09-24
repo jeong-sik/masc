@@ -94,9 +94,11 @@ val turn_start :
     keeper-context-window-in-tokens §13.4): {!completed_history_end} read from
     the keeper's turn-boundary store, [Turn_boundary 0] when the history has
     no completed turn. A store this process cannot read, or a boundary the
-    history in hand does not match, is logged and answered
-    [Turn_boundary_unknown]: the request then opens on the newest atom alone
-    and its origin says so, rather than on the whole history. *)
+    history in hand does not match, is answered [Turn_boundary_unknown]: a
+    request it decides then opens on the newest atom alone and its origin says
+    so, rather than on the whole history. Reading it logs nothing; the request
+    whose range it opens warns
+    ({!Keeper_carried_front.warn_range_opens_on_newest_atom}). *)
 
 val prepare_continuity :
   trace_id:string ->
@@ -321,11 +323,15 @@ type try_provider_ctx =
   ; hold_carried_front : Keeper_carried_front.seed -> unit
         (** Keeps a front moved by either halving or block eviction after a
             refusal. It names an atom of the shared checkpoint history. *)
+  ; restore_carried_front : Keeper_carried_front.seed option -> unit
+        (** Puts back the front held before a boundary resend that the
+            provider refused for a reason other than size. *)
   ; base_path : string
   ; keeper_name : string
   ; name : string
   ; goal : string
   ; goal_blocks : Agent_core.Types.content_block list option
+  ; goal_metadata : Agent_core.Types.metadata
   ; session_id : string option
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
@@ -602,15 +608,17 @@ val boundary_resend_on : Agent_core.Error.t -> bool
     refusal ([ContextOverflow], [Request_body_refused_by_provider]) and a
     refusal whose reason agent core does not model
     ([Unknown_invalid_request]), which is how live size refusals arrive.
-    Today the same set as [refusal_evicts], kept separate so it keeps all
-    three when that one narrows to the typed two (#38286). A refusal that
-    was not about size is refused again from the boundary and records no
-    accepted start; one that was leaves atoms the Librarian still reads. *)
+    [refusal_evicts] names only the typed two (#38286). A refusal that was
+    not about size is refused again from the boundary, the front held before
+    it is given back, and no accepted start at the boundary is recorded; one
+    that was leaves atoms the Librarian still reads. *)
 
 val turn_boundary_resend_sequence :
   same_run_retry_authorized:(unit -> bool) ->
   refused_range:(unit -> (Keeper_carried_front.origin * int) option) ->
   turn_start_front:(unit -> Keeper_carried_front.seed option) ->
+  held_front:(unit -> Keeper_carried_front.seed option) ->
+  restore_front:(Keeper_carried_front.seed option -> unit) ->
   hold_front:(Keeper_carried_front.seed -> unit) ->
   on_turn_start:(Agent_core.Error.t -> Keeper_carried_front.seed -> unit) ->
   attempt:(unit -> ('ok, Agent_core.Error.t) result) ->
@@ -627,7 +635,10 @@ val turn_boundary_resend_sequence :
     {!Keeper_carried_front.Turn_start_after_librarian_refusal}), and
     [same_run_retry_authorized] holds, the boundary is given to [hold_front]
     as the turn's front, [on_turn_start] is told, and [attempt] runs once
-    more; its result is returned as it is. Every other failure is returned
+    more; its result is returned as it is. When that second attempt is
+    refused for a reason {!refusal_evicts} does not name, [restore_front]
+    gets back what [held_front] reported before the hold, so a refusal that
+    was not about size leaves the turn's front where it was. Every other failure is returned
     at once, so a candidate that already opens at the held boundary is not
     asked twice. The range is never halved: an accepted boundary request is
     what the ledger records, so the next turn's seed is that boundary. *)

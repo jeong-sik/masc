@@ -47,15 +47,24 @@ type read_error =
 
 val read_error_to_string : read_error -> string
 
+(** The program and arguments [read_file] runs inside the backend for a window
+    starting at [start_line] of [path], producing at most [max_bytes]. Line 1
+    is [head -c]; a later line streams from that line through [sh]. *)
+val read_window_argv : start_line:int -> max_bytes:int -> path:string -> string list
+
 (** [read_file ~config ~meta ~host_path ~max_bytes ~timeout_sec ()] reads
     [host_path] through the selected sandbox backend and returns the captured
     bytes (clamped to [max_bytes]). Docker mounts the playground read-only;
     SSH invokes the fixed remote shim and never probes the host path first.
 
+    [start_line] (default 1) is the file's line the returned bytes begin at;
+    [max_bytes] bounds the bytes from that line, not the file's prefix.
+
     Errors include backend image misconfiguration, backend command failure, or
     the input not being inside the playground. *)
 val read_file :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  ?start_line:int ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   host_path:string ->

@@ -22,8 +22,26 @@ type network_error_kind =
   | Timeout (** Connection or read timed out (ETIMEDOUT). *)
   | Local_resource_exhaustion
   (** Local OS resource limits reached (EMFILE, ENFILE, ENOBUFS, EADDRNOTAVAIL). *)
+  | Connection_reset
+  (** Peer reset an established connection (ECONNRESET). Unlike
+      [Connection_refused], the request may already have been sent. *)
   | End_of_file (** Peer closed the connection unexpectedly. *)
   | Unknown (** Unclassified network error. *)
+
+(** The one snake_case label for a kind, used by logs, metrics and the
+    keeper wire field alike. *)
+val network_error_kind_to_string : network_error_kind -> string
+
+(** Kind of a [Unix.error]; [Unknown] for a code no arm names. *)
+val classify_unix_error : Unix.error -> network_error_kind
+
+(** Kind of an Eio I/O error. A [Connection_reset] reads the Unix code it
+    carries; [Multiple_io] prefers a non-retryable kind; anything
+    unclassified is [Unknown]. *)
+val classify_eio_error : Eio.Exn.err -> network_error_kind
+
+(** [None] for [Unknown], [Some kind] otherwise. *)
+val known_network_error_kind : network_error_kind -> network_error_kind option
 
 (** What a stream was producing when it went idle: the state its last
     named production left it in. Transport-generic: provider parsers

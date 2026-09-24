@@ -370,6 +370,14 @@
  (modules masc_tui_task_selection)
  (libraries masc.masc_types))
 
+;; The Overview Tasks section's rows and summary lines: pure, so a test can
+;; read the order without the renderer.
+(library
+ (name masc_tui_overview_tasks)
+ (wrapped false)
+ (modules masc_tui_overview_tasks)
+ (libraries masc masc.masc_types))
+
 (library
  (name masc_tui_keeper_chat_projection)
  (wrapped false)
@@ -1006,7 +1014,7 @@
  (name masc_tui_approval_detail)
  (wrapped false)
  (modules masc_tui_approval_detail)
- (libraries masc_tui_message_layout))
+ (libraries masc masc_tui_message_layout))
 
 (library
  (name masc_tui_footer)
@@ -1359,12 +1367,14 @@
   masc_tui_ansi
   masc_tui_chart
   masc_tui_context_inspector
+  masc_tui_render_schedule
   masc_tui_rows
   masc_tui_scroll
   masc_tui_theme
   masc_tui_token_scale
   masc_tui_types
   masc_tui_message_layout
+  masc_tui_fleet_line
   unix))
 
 (library
@@ -1537,6 +1547,31 @@
  (modules masc_tui_overview_team)
  (libraries masc masc_types masc_tui_types))
 
+;; The Overview's GOALS section: whether the fleet's work moves any goal. A
+;; library so a test can draw it from a fixture of the server's goal tree.
+(library
+ (name masc_tui_overview_goals)
+ (wrapped false)
+ (modules masc_tui_overview_goals)
+ (libraries
+  masc
+  masc.masc_goal
+  masc_types
+  masc_tui_types
+  masc_tui_ansi
+  masc_tui_message_layout
+  masc_tui_render_prim
+  ptime
+  unix))
+
+;; The Overview Providers section: each provider account's usage windows as
+;; the provider reported them. A library so a test can draw it.
+(library
+ (name masc_tui_overview_providers)
+ (wrapped false)
+ (modules masc_tui_overview_providers)
+ (libraries masc masc_tui_types masc_tui_ansi masc_tui_message_layout unix))
+
 ;; RFC-0465: the Overview's pull request reading, decoder and lines. A
 ;; library so a test can decode the server's own encoder output.
 (library
@@ -1581,6 +1616,8 @@
   masc.sse_wire
   masc_tui_task_flow
   masc_tui_overview_team
+  masc_tui_overview_goals
+  masc_tui_overview_providers
   masc.masc_tool_blob_store
   masc_tui_agenda
   masc_tui_ansi
@@ -1718,6 +1755,7 @@
   masc_tui_planning_selection
   masc_tui_planning_detail
   masc_tui_task_selection
+  masc_tui_overview_tasks
   masc_tui_layout
   masc_tui_render_schedule
   masc_tui_json

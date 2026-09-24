@@ -498,7 +498,6 @@ describe('keeper tool telemetry fetchers', () => {
               keeper_name: 'keeper-alpha',
               trace_id: 'trace-1',
               session_id: 'trace-1',
-              generation: 1,
               keeper_turn_id: 29567,
               task_id: null,
               goal_ids: [],
@@ -563,7 +562,6 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.prompt_fingerprint).toBe('464ce7b3280c24fe1cbdcd990a70db87')
     expect(entry?.runtime_contract).toMatchObject({
       keeper_name: 'keeper-alpha',
-      generation: 1,
       sandbox_root: '/sandbox/keeper-alpha/',
       sandbox_roots: ['.masc/playground/keeper-alpha/'],
       network_mode: 'inherit',
@@ -3441,7 +3439,6 @@ describe('fetchKeeperConfig', () => {
         override_fields: 'goal',
       },
       metrics: {
-        generation: '3',
         total_turns: '12',
         total_input_tokens: '1200',
         total_output_tokens: '800',
@@ -3774,6 +3771,7 @@ describe('keeper config mutation API', () => {
           selected_runtime_canonical: 'b.two',
           runtime_options: ['a.one', 'b.two'],
         },
+        runtime_sync: 'lane_restarted',
         sources: {
           default_source_kind: 'toml',
           default_manifest_path: '/tmp/.masc/config/keepers/sangsu.toml',
@@ -3815,6 +3813,7 @@ describe('keeper config mutation API', () => {
         config_revision: configRevision,
         max_context_override: null,
         skills: { names: ['ocaml-coding'] },
+        runtime_sync: 'lane_restarted',
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -3832,6 +3831,40 @@ describe('keeper config mutation API', () => {
       expected_config_revision: configRevision,
     })
     expect(result.skills.names).toEqual(['ocaml-coding'])
+  })
+
+  it('reads a save deferred until the running turn ends as a success', async () => {
+    const body = (runtimeSync: unknown) => JSON.stringify({
+      name: 'keeper-sangsu',
+      activation_mode: 'autonomous',
+      input_policy: 'small',
+      config_revision: configRevision,
+      max_context_override: null,
+      skills: { names: [] },
+      ...(runtimeSync === undefined ? {} : { runtime_sync: runtimeSync }),
+    })
+    const respond = (runtimeSync: unknown) => vi.fn().mockResolvedValue(
+      new Response(body(runtimeSync), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    vi.stubGlobal('fetch', respond('deferred_until_turn_end'))
+    const deferred = await patchKeeperConfig('keeper-sangsu', {
+      activation_mode: 'autonomous',
+    }, configRevision)
+    expect(deferred.runtime_sync).toBe('deferred_until_turn_end')
+
+    vi.stubGlobal('fetch', respond('failed'))
+    await expect(patchKeeperConfig('keeper-sangsu', {
+      activation_mode: 'autonomous',
+    }, configRevision)).rejects.toThrow('runtime_sync is not a success state')
+
+    vi.stubGlobal('fetch', respond(undefined))
+    await expect(patchKeeperConfig('keeper-sangsu', {
+      activation_mode: 'autonomous',
+    }, configRevision)).rejects.toThrow('runtime_sync is required after a save')
   })
 })
 
@@ -4836,7 +4869,6 @@ describe('fetchRuntimeModelMetrics', () => {
     const metric = result.models[0]!
 
     expect(metric.model_id).toBe('runtime_lane_a1b2c3d4e5f6')
-    expect(metric.provider).toBeNull()
     expect(metric.usage_sample_count).toBe(0)
     expect(metric.telemetry_sample_count).toBe(0)
     expect(metric.usage_missing_count).toBe(1)

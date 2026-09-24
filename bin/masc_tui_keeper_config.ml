@@ -256,18 +256,37 @@ let config_write_warning_codes json =
   | Some _ -> Error "config_write receipt is malformed"
   | None -> Error "config_write receipt is missing"
 
+type runtime_sync =
+  | Lane_restarted
+  | Deferred_until_turn_end
+
+let runtime_sync_of_response json =
+  match member "runtime_sync" json with
+  | Some (`String "lane_restarted") -> Ok Lane_restarted
+  | Some (`String "deferred_until_turn_end") -> Ok Deferred_until_turn_end
+  | Some _ -> Error "runtime_sync is not a known success state"
+  | None -> Error "runtime_sync is missing"
+
 let config_write_status_message ~keeper_name json =
-  Result.map
-    (function
-      | [] -> "system", keeper_name ^ ": changed settings applied"
-      | warning_codes ->
-        ( "error"
-        , Printf.sprintf
-            "%s: settings applied with %d config durability warning(s): %s"
-            keeper_name
-            (List.length warning_codes)
-            (String.concat ", " warning_codes) ))
-    (config_write_warning_codes json)
+  Result.bind (runtime_sync_of_response json) (fun runtime_sync ->
+    let timing =
+      match runtime_sync with
+      | Lane_restarted -> ""
+      | Deferred_until_turn_end ->
+        " (a turn is running; the next turn uses the new settings)"
+    in
+    Result.map
+      (function
+        | [] -> "system", keeper_name ^ ": changed settings applied" ^ timing
+        | warning_codes ->
+          ( "error"
+          , Printf.sprintf
+              "%s: settings applied with %d config durability warning(s): %s%s"
+              keeper_name
+              (List.length warning_codes)
+              (String.concat ", " warning_codes)
+              timing ))
+      (config_write_warning_codes json))
 
 let patch_of_edit ~before ~after =
   match after with

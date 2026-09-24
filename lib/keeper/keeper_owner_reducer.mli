@@ -83,11 +83,6 @@ type meta_command =
       ; updated_at : string
       }
   | Update_profile of profile_update
-  | Repair_trace_identity of
-      { trace_id : Keeper_id.Trace_id.t
-      ; trace_history : string list
-      ; updated_at : string
-      }
   | Delete_if_snapshot of Keeper_meta_json.Snapshot_digest.t
   | Turn_started_projection of { updated_at : string }
   | Turn_succeeded of

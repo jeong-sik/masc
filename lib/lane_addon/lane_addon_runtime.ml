@@ -91,11 +91,28 @@ let entry_json e =
     "binding", e.binding; "package", package_to_json e.package;
     "configuration", Option.fold ~none:`Null ~some:configuration_json e.configuration;
     "container_id", (match e.connection with None -> `Null | Some c -> `String c.container_id)]
+(* A detached worker that never created a container and never committed an
+   observation leaves nothing for Inspect, Slice or Evidence to read. When
+   its start returned [Error], the masc:lane:resource:acquire_failed event in
+   the agent-core event journal records why it did not start; a start that
+   raised keeps its reason only in the [Failed] phase until it is retired.
+   Its binding would only add a record that every reconciliation reads
+   again, and a startup that keeps failing adds one per maintenance beat, so
+   its durable form is no file. [persist] and the restart recovery in
+   [historical_detach] both decide with this one rule. *)
+let never_started ~seq ~has_container = seq = 0 && not has_container
+let retains_history e =
+  not (never_started ~seq:e.seq ~has_container:(Option.is_some e.connection))
 let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
   (* Capture mutable state on the owning domain after serializing writes.
-     The I/O thread sees only the immutable snapshot. *)
-  let json = entry_json e in
-  offload (fun () -> Lane_addon_store.save_binding m.store ~instance_id:e.instance_id json))
+     The I/O thread sees only the immutable snapshot. Every write, including
+     a late one after detach, derives the file from the same state under this
+     mutex, so the last write leaves the record that state calls for. *)
+  if e.phase = Detached && not (retains_history e)
+  then offload (fun () -> Lane_addon_store.remove_binding m.store ~instance_id:e.instance_id)
+  else
+    let json = entry_json e in
+    offload (fun () -> Lane_addon_store.save_binding m.store ~instance_id:e.instance_id json))
 let wake ?(request=Observe_now) e =
   let previous = e.pending in
   e.pending <- (match previous,request with
@@ -469,6 +486,9 @@ let historical_detach ~sw m fields =
       | Some `Null -> Ok None
       | Some _ -> Result.map Option.some (text fields "container_id")
       | None -> Error "missing persisted container identity" in
+    let* seq = match List.assoc_opt "observation_seq" fields with
+      | Some (`Int n) when n >= 0 -> Ok n
+      | _ -> Error "missing persisted observation sequence" in
     let* package = match List.assoc_opt "package" fields with
       | Some json -> object_ json | None -> Error "missing persisted package" in
     let* run_id = text fields "run_id" in
@@ -498,8 +518,12 @@ let historical_detach ~sw m fields =
         { instance_id = id; run_id; package_id; package_revision;
           container_id;
           detail = (match result with Ok () -> None | Error message -> Some message) };
-      let json = replace_phase fields phase in
-      let persisted = offload (fun () -> Lane_addon_store.save_binding m.store ~instance_id:id json) in
+      let persisted =
+        if phase = Detached && never_started ~seq ~has_container:(Option.is_some container_id)
+        then offload (fun () -> Lane_addon_store.remove_binding m.store ~instance_id:id)
+        else
+          let json = replace_phase fields phase in
+          offload (fun () -> Lane_addon_store.save_binding m.store ~instance_id:id json) in
       Hashtbl.remove m.recovering id;
       match persisted with
       | Ok () -> if phase = Detached then m.configuration_nudge ()

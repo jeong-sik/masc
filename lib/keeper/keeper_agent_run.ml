@@ -2155,7 +2155,7 @@ let run_turn
               ; _
               } ->
             (* A runtime that reports the newest request's occupancy apart from
-               the turn's spend (Claude Code) records that request here: this
+               the turn's spend (Claude Code and Codex) records that request here: this
                record's readers ask what one request carried. The request's
                own output count is not known; the turn's output goes to
                [turn_output_tokens] below, under its own scope. *)

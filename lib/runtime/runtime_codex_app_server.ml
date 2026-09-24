@@ -1700,6 +1700,11 @@ let resolved_codex_home () =
     if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path) home
 ;;
 
+let effective_account_home = function
+  | Some path -> Some path
+  | None -> resolved_codex_home ()
+;;
+
 let configured_auth_environment_keys home =
   match home with
   | None -> Ok []
@@ -1735,9 +1740,7 @@ let configured_auth_environment_keys home =
 let client_environment account_home =
   (* Resolve before the child changes cwd; admission and execution must read
      the same credential declarations and CLI store. *)
-  let home = match account_home with
-    | Some path -> Some path
-    | None -> resolved_codex_home () in
+  let home = effective_account_home account_home in
   let* configured = configured_auth_environment_keys home in
   Unix.environment ()
   |> Array.to_list

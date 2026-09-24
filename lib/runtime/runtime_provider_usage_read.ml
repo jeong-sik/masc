@@ -28,11 +28,10 @@ let readable_scopes () =
     (fun acc (rt : Runtime.t) ->
       match rt.execution with
       | Runtime_execution.Codex_app_server codex ->
-        (match Runtime.quota_scope_of_runtime_id rt.id with
-         | Some scope
-           when not (List.exists (fun r -> Runtime_quota_window.scope_equal r.scope scope) acc) ->
-           { scope; codex } :: acc
-         | Some _ | None -> acc)
+        let scope = Runtime.quota_scope_of_runtime rt in
+        if List.exists (fun r -> Runtime_quota_window.scope_equal r.scope scope) acc
+        then acc
+        else { scope; codex } :: acc
       | Runtime_execution.Agent_core _
       | Runtime_execution.Antigravity_cli _
       | Runtime_execution.Claude_code _ -> acc)

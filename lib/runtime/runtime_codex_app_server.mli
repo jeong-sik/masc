@@ -71,6 +71,10 @@ type config =
 
 val default_timeout_s : float
 val default_config : unit -> config
+val effective_account_home : string option -> string option
+(** The CODEX_HOME that a child receives: an explicit account home, the
+    process CODEX_HOME, or the default derived from HOME. Quota ownership
+    uses this same resolution. *)
 
 (** One image attached to a turn. [base64_data] is the raw base64 payload with
     no data-URL prefix and no newlines; the app-server [image] input variant

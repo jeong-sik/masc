@@ -266,19 +266,11 @@ let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_comple
   }
 ;;
 
-(* A provider's report about its own usage windows, kept for the operator
-   projection ([Runtime_provider_usage_window]). Nothing that routes, orders,
-   admits or retries reads it. A runtime id with no configured quota scope
-   has no account to key the report by, so it is logged and dropped. *)
-let record_usage_windows ~keeper_name ~runtime_id report =
-  match Runtime.quota_scope_of_runtime_id runtime_id with
-  | Some scope ->
-    Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report
-  | None ->
-    Log.Keeper.warn
-      ~keeper_name
-      "Codex usage windows not recorded: runtime %s has no quota scope"
-      runtime_id
+(* A late report stays with the CLI home selected for this turn, even if the
+   provider row is rebound while the app-server is running. *)
+let record_usage_windows ~quota_scope report =
+  Runtime_provider_usage_window.record
+    ~scope:quota_scope ~observed_at:(Time_compat.now ()) report
 ;;
 
 (* A turn refused for spent usage carries no reset time
@@ -287,32 +279,26 @@ let record_usage_windows ~keeper_name ~runtime_id report =
    can still say when it resets without a turn, so ask it once. The read
    outlives this turn ({!Runtime_provider_usage_read.read_codex_in_background}),
    and the refused turn returns without waiting on it. *)
-let read_usage_after_quota_refusal ~keeper_name ~runtime_id ~clock ~cwd config =
-  match Runtime.quota_scope_of_runtime_id runtime_id with
-  | None ->
+let read_usage_after_quota_refusal ~keeper_name ~quota_scope ~clock ~cwd config =
+  match Runtime_provider_usage_read.read_codex_in_background
+          ~clock ~cwd ~scope:quota_scope config with
+  | Runtime_provider_usage_read.Started | Runtime_provider_usage_read.Already_reading -> ()
+  | Runtime_provider_usage_read.No_root_switch ->
     Log.Keeper.warn
       ~keeper_name
-      "Codex usage not read after a quota refusal: runtime %s has no quota scope"
-      runtime_id
-  | Some scope ->
-    (match Runtime_provider_usage_read.read_codex_in_background ~clock ~cwd ~scope config with
-     | Runtime_provider_usage_read.Started | Runtime_provider_usage_read.Already_reading -> ()
-     | Runtime_provider_usage_read.No_root_switch ->
-       Log.Keeper.warn
-         ~keeper_name
-         "Codex usage not read after a quota refusal: no server root switch")
+      "Codex usage not read after a quota refusal: no server root switch"
 ;;
 
 (* Always installed so usage-window reports are recorded. A turn nobody
    streams, traces or observes gets only that; its other events are ignored as
    before. *)
-let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event =
+let codex_stream_callback ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action on_event =
   match on_event, raw_trace_run, on_native_action with
   | None, None, None ->
     Some
       (function
         | Runtime_codex_app_server.Usage_windows_reported report ->
-          record_usage_windows ~keeper_name ~runtime_id report
+          record_usage_windows ~quota_scope report
         | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
         | Turn_finished _ -> ())
@@ -403,7 +389,7 @@ let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~o
             "Codex MCP request cancelled: host input unavailable (server=%s); the user did not decline it"
             server_name
         | Runtime_codex_app_server.Usage_windows_reported report ->
-          record_usage_windows ~keeper_name ~runtime_id report
+          record_usage_windows ~quota_scope report
         | Runtime_codex_app_server.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text
@@ -727,7 +713,7 @@ let resume_external_context ~snapshot_sha256 ~source_snapshot_sha256
        "original_vendor_turn", encode_turn official_client_original_turn]) ]
 ;;
 
-let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~official_client_original_turn ~runtime_id ~keeper_name
+let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~official_client_original_turn ~runtime_id ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~declared_max_prompt_bytes ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
@@ -1308,7 +1294,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       try
         let on_stream_event =
           codex_stream_callback
-          ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event
+          ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action on_event
         in
         (match
        Runtime_codex_app_server.run_turn
@@ -1370,7 +1356,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             ; _
             } ->
           read_usage_after_quota_refusal
-            ~keeper_name ~runtime_id ~clock
+            ~keeper_name ~quota_scope ~clock
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
             config
         | _ -> ());
@@ -1635,7 +1621,11 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
-    ~event_bus ~raw_trace ~on_event ~config () =
+    ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.codex_app_server) () =
+  let quota_scope =
+    Runtime_quota_window.scope_of_codex_home
+      (Runtime_codex_app_server.effective_account_home config.account_home)
+  in
   let settled_session = Atomic.make None in
   let on_session_settled value = Atomic.set settled_session (Some value) in
   let effect_disposition =
@@ -1698,6 +1688,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
         run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~official_client_continuation ~official_client_original_turn
           ~required_native_posture
           ~runtime_id
+          ~quota_scope
           ~keeper_name
     ~pre_tool_rejects
           ~base_path
@@ -1759,7 +1750,7 @@ module For_testing = struct
     match
       codex_stream_callback
         ~keeper_name:"test"
-        ~runtime_id:"test"
+        ~quota_scope:(Runtime_quota_window.scope_of_codex_home None)
         ~raw_trace_run:None
         ~turn_count
         ~on_native_action:(Some observe)

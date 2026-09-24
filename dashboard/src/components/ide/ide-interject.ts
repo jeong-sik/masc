@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { useStoreSubscription } from './use-signal-value'
 import type { FunctionComponent } from 'preact'
 import { dispatchKeeperInterjectAction } from '../../keeper-actions'
@@ -65,12 +65,6 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
     return () => unsub()
   }, [interjectStore, keeperName])
   useEffect(() => {
-    const unsub = activeKeeperName.subscribe(name => {
-      interjectStore.setActiveKeeper(keeperName?.trim() || name)
-    })
-    return () => unsub()
-  }, [interjectStore, keeperName])
-  useEffect(() => {
     interjectStore.setActiveKeeper(resolveActiveKeeper(keeperName))
   }, [interjectStore, keeperName])
 
@@ -91,6 +85,25 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
     ? presenceEntries(presence).find(e => e.keeper_id.trim().toLowerCase() === keeperIdNorm) ?? null
     : null
   const contextLinks = interjectContextRouteLinks(keeperId)
+
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (compact && expanded) inputRef.current?.focus()
+  }, [compact, expanded])
+
+  const sendAction = actions.find(action => action.kind === 'send')
+  // Enter sends, as in every chat box. A Korean or Japanese IME confirms its
+  // composition with Enter too; that keystroke belongs to the IME.
+  const handleInputKeyDown = (event: KeyboardEvent): void => {
+    if (event.isComposing) return
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      if (sendAction?.enabled) void interjectStore.submit('send')
+    } else if (event.key === 'Escape' && compact) {
+      event.preventDefault()
+      setExpanded(false)
+    }
+  }
 
   if (compact && !expanded) {
     return html`
@@ -128,7 +141,19 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
           padding: '0 var(--sp-2)',
         }}
       >
-        <span>INTERJECT</span>
+        <span style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          INTERJECT
+          ${compact ? html`
+            <button
+              type="button"
+              class="v2-ide-action"
+              data-testid="ide-interject-collapse"
+              aria-label="Close keeper chat"
+              title="Close keeper chat (Esc)"
+              onClick=${() => setExpanded(false)}
+            >✕</button>
+          ` : null}
+        </span>
         <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)' }}>
           <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-secondary)' }}>
             ${keeperId || 'No active keeper'}
@@ -142,7 +167,10 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({
         type="text"
         placeholder="Send message to active keeper..."
         aria-label="Interject input"
+        aria-keyshortcuts=${compact ? 'Enter Escape' : 'Enter'}
+        ref=${inputRef}
         value=${snapshot.message}
+        onKeyDown=${handleInputKeyDown}
         disabled=${snapshot.busy_action !== null}
         onInput=${(event: Event) =>
           interjectStore.setMessage((event.currentTarget as HTMLInputElement).value)}

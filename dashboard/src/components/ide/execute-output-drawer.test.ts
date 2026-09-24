@@ -20,6 +20,15 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** An event-stream body that delivers [text] and then stays open. */
+function openStream(text: string): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      if (text !== '') controller.enqueue(new TextEncoder().encode(text))
+    },
+  })
+}
+
 describe('ExecuteOutputDrawer event mapping', () => {
   it('maps stdout and stderr chunks to terminal lines', () => {
     const lines = linesFromExecuteOutputEvent({
@@ -168,8 +177,9 @@ describe('ExecuteOutputDrawer event mapping', () => {
     mounted = document.createElement('div')
     render(h(ExecuteOutputDrawer, { keeperName: 'sangsu' }), mounted)
 
+    // The stream stays open: a live task keeps its connection.
     resolveFetch(new Response(
-      'event: output\ndata: {"type":"snapshot","keeper":"sangsu","task_id":"task-123","stdout_since":"one\\ntwo\\n","stderr_since":"warn\\n","bytes_dropped_stdout":12,"bytes_dropped_stderr":3,"closed":false}\n\n',
+      openStream('event: output\ndata: {"type":"snapshot","keeper":"sangsu","task_id":"task-123","stdout_since":"one\\ntwo\\n","stderr_since":"warn\\n","bytes_dropped_stdout":12,"bytes_dropped_stderr":3,"closed":false}\n\n'),
       {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
@@ -186,6 +196,54 @@ describe('ExecuteOutputDrawer event mapping', () => {
     expect(summary?.textContent).toContain('dropped 15B')
     expect(mounted.querySelector('[data-status-chip-tone="info"]')?.textContent).toContain('streaming')
     expect(mounted.querySelector('[data-status-chip-tone="bad"]')?.textContent).toContain('stderr 1')
+  })
+
+  // A body that ends while the task is still running used to leave the chip
+  // on "streaming" for good. It now says the output ended early.
+  it('marks a stream that ends without the task closing as ended', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      'event: output\ndata: {"type":"snapshot","keeper":"sangsu","task_id":"task-9","stdout_since":"one\\n","closed":false}\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    )))
+
+    mounted = document.createElement('div')
+    render(h(ExecuteOutputDrawer, { keeperName: 'sangsu' }), mounted)
+
+    await waitFor(() => {
+      expect(mounted?.querySelector('[data-status-chip-tone="warn"]')?.textContent).toContain('ended')
+    })
+    expect(mounted.textContent).toContain('output stream ended before the task closed')
+  })
+
+  it('keeps closed for a stream whose task said it closed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      'event: output\ndata: {"type":"snapshot","keeper":"sangsu","task_id":"task-9","stdout_since":"one\\n","closed":true}\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    )))
+
+    mounted = document.createElement('div')
+    render(h(ExecuteOutputDrawer, { keeperName: 'sangsu' }), mounted)
+
+    await waitFor(() => {
+      expect(mounted?.querySelector('[data-status-chip-tone="neutral"]')?.textContent).toContain('closed')
+    })
+    expect(mounted.textContent).not.toContain('output stream ended before the task closed')
+  })
+
+  it('offers Stop only while live output is on', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(openStream(''), {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    })))
+    const onStop = vi.fn()
+
+    mounted = document.createElement('div')
+    render(h(ExecuteOutputDrawer, { keeperName: 'sangsu', onStop }), mounted)
+    fireEvent.click(mounted.querySelector<HTMLButtonElement>('[data-testid="execute-output-stop"]')!)
+    expect(onStop).toHaveBeenCalledTimes(1)
+
+    render(h(ExecuteOutputDrawer, { keeperName: 'sangsu', onStop, streamEnabled: false }), mounted)
+    expect(mounted.querySelector('[data-testid="execute-output-stop"]')).toBeNull()
   })
 
   it('renders Execute output context links and routes back into task context', async () => {

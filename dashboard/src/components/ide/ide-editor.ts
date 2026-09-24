@@ -32,7 +32,7 @@ import { globalPresenceSnapshot } from './keeper-presence-store'
 import { ideContextFocus, type IdeContextFocus } from './ide-state'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { ideReplayUntilMs } from './ide-replay-state'
-import { IdeFindPanel } from './ide-editor-find'
+import { IdeFindPanel, ideFindReveal } from './ide-editor-find'
 import {
   BlameTimeline,
   LayerOverlaySummary,
@@ -425,6 +425,23 @@ function CodeMirrorEditor({
     documentStore,
     ready,
   ])
+
+  // Find in file: select the current match and bring it into view. Focus
+  // stays in the find box so Enter keeps walking the matches.
+  const findReveal = useSignalValue(ideFindReveal)
+  useEffect(() => {
+    const view = editorRef.current
+    if (!view || !ready || findReveal === null) return
+    if (findReveal.filePath !== documentStore.document().file_path) return
+    if (findReveal.line < 1 || findReveal.line > view.state.doc.lines) return
+    const line = view.state.doc.line(findReveal.line)
+    const from = Math.min(line.from + findReveal.column, line.to)
+    const to = Math.min(from + findReveal.length, line.to)
+    view.dispatch({
+      selection: { anchor: from, head: to },
+      effects: [EditorView.scrollIntoView(from, { y: 'center' })],
+    })
+  }, [documentStore, findReveal, ready])
 
   useStoreSubscription(documentStore.subscribe)
   useStoreSubscription(ownershipStore.subscribe)

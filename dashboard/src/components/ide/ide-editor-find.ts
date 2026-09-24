@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { signal } from '@preact/signals'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type { CodeDocumentLine } from './code-document-store'
 import { escapeRegExp } from '../../lib/format-string'
 
@@ -10,10 +11,40 @@ export interface FindOptions {
 
 export interface FindMatch {
   readonly line: number
+  /** 0-based offset of the match in the line. */
+  readonly column: number
   readonly text: string
   readonly before: string
   readonly match: string
   readonly after: string
+}
+
+/**
+ * The match the find panel has made current, for the editor to select and
+ * scroll to. `seq` changes on every reveal so choosing the same match again
+ * (a click on the active row) still moves the editor back to it.
+ */
+export interface FindReveal {
+  readonly filePath: string
+  readonly line: number
+  readonly column: number
+  readonly length: number
+  readonly seq: number
+}
+
+export const ideFindReveal = signal<FindReveal | null>(null)
+
+let revealSeq = 0
+
+function revealMatch(filePath: string, match: FindMatch): void {
+  revealSeq += 1
+  ideFindReveal.value = {
+    filePath,
+    line: match.line,
+    column: match.column,
+    length: match.match.length,
+    seq: revealSeq,
+  }
 }
 
 export function IdeFindPanel({
@@ -44,11 +75,39 @@ export function IdeFindPanel({
     setActiveIndex(matches.length - 1)
   }, [activeIndex, matches.length])
 
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  // The editor follows the current match; closing the panel leaves the
+  // selection where it is.
+  const activeMatch = matches[activeIndex] ?? null
+  useEffect(() => {
+    if (activeMatch !== null) revealMatch(filePath, activeMatch)
+  }, [activeMatch, filePath])
+  useEffect(() => () => { ideFindReveal.value = null }, [])
+
   const activeOrdinal = matches.length > 0 ? activeIndex + 1 : 0
   const canMove = matches.length > 1
   const move = (delta: number): void => {
     if (matches.length === 0) return
     setActiveIndex(index => (index + delta + matches.length) % matches.length)
+  }
+  const choose = (index: number): void => {
+    const match = matches[index]
+    if (match === undefined) return
+    if (index === activeIndex) revealMatch(filePath, match)
+    else setActiveIndex(index)
+  }
+  const handleKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      move(event.shiftKey ? -1 : 1)
+    } else if (event.key === 'Escape' && onClose) {
+      event.preventDefault()
+      onClose()
+    }
   }
 
   return html`
@@ -86,9 +145,12 @@ export function IdeFindPanel({
         <input
           type="search"
           aria-label="Find query"
+          aria-keyshortcuts="Enter Shift+Enter Escape"
           placeholder="Find in current file"
+          ref=${inputRef}
           value=${query}
           onInput=${(event: Event) => setQuery((event.target as HTMLInputElement).value)}
+          onKeyDown=${handleKeyDown}
           style=${{
             flex: '1 1 100px',
             minWidth: 0,
@@ -183,10 +245,13 @@ export function IdeFindPanel({
             >
               ${matches.map((item, index) => html`
                 <li
+                  key=${`${item.line}:${item.column}`}
                   class="v2-ide-row"
                   role="listitem"
                   aria-current=${index === activeIndex ? 'true' : undefined}
+                  onClick=${() => choose(index)}
                   style=${{
+                    cursor: 'pointer',
                     display: 'grid',
                     gridTemplateColumns: '48px minmax(0, 1fr)',
                     gap: 'var(--sp-2)',
@@ -261,24 +326,26 @@ export function currentFileFindMatches(
   const needle = query.trim()
   if (needle === '') return []
 
-  const flags = options.caseSensitive ? '' : 'i'
+  const flags = options.caseSensitive ? 'g' : 'gi'
   const pattern = options.wholeWord
     ? `\\b${escapeRegExp(needle)}\\b`
     : escapeRegExp(needle)
   const regex = new RegExp(pattern, flags)
   const matches: FindMatch[] = []
 
+  // Every occurrence is a stop, so Next walks a line with two hits twice.
   for (const line of lines) {
-    const match = regex.exec(line.text)
-    if (!match) continue
-    matches.push({
-      line: line.num,
-      text: line.text,
-      before: line.text.slice(0, match.index),
-      match: match[0],
-      after: line.text.slice(match.index + match[0].length),
-    })
-    if (matches.length >= 50) break
+    for (const match of line.text.matchAll(regex)) {
+      matches.push({
+        line: line.num,
+        column: match.index,
+        text: line.text,
+        before: line.text.slice(0, match.index),
+        match: match[0],
+        after: line.text.slice(match.index + match[0].length),
+      })
+      if (matches.length >= 50) return matches
+    }
   }
 
   return matches

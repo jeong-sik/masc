@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
+import { EditorView } from '@codemirror/view'
 import { currentFileFindMatches, IdeEditor } from './ide-editor'
 import { createCodeDocumentStore } from './code-document-store'
 import { createKeeperLineOwnershipStore } from './keeper-line-ownership-store'
@@ -119,7 +120,7 @@ describe('IdeEditor', () => {
         'runtime',
         { caseSensitive: false, wholeWord: false },
       ).map(match => match.line),
-    ).toEqual([1, 2])
+    ).toEqual([1, 2, 2])
 
     expect(
       currentFileFindMatches(
@@ -183,6 +184,80 @@ describe('IdeEditor', () => {
       expect(container.querySelector('[data-testid="ide-find-status"]')?.textContent)
         .toContain('2 of 2 matches')
     })
+  })
+
+  it('stops at every occurrence on a line, not only the first', () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'runtime(runtime)\nother\n',
+    })
+
+    expect(
+      currentFileFindMatches(
+        documentStore.lines(),
+        'runtime',
+        { caseSensitive: false, wholeWord: false },
+      ).map(match => [match.line, match.column]),
+    ).toEqual([[1, 0], [1, 8]])
+  })
+
+  // Find used to cycle a highlight inside its own list while the editor
+  // stayed where it was. The current match is now the editor's selection,
+  // Enter and Shift+Enter walk the matches, and Escape closes the panel.
+  it('moves the editor selection to the current match from the keyboard', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst other = 2\nreturn runtime\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+    let closed = 0
+    document.body.appendChild(container)
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        findOpen: true,
+        onFindClose: () => { closed += 1 },
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.cm-content')).not.toBeNull()
+    })
+    const input = container.querySelector<HTMLInputElement>('[aria-label="Find query"]')!
+    expect(document.activeElement).toBe(input)
+    fireEvent.input(input, { target: { value: 'runtime' } })
+
+    const selectedText = (): string => {
+      const view = EditorView.findFromDOM(container.querySelector<HTMLElement>('.cm-editor')!)!
+      const { from, to } = view.state.selection.main
+      return `${view.state.doc.lineAt(from).number}:${view.state.sliceDoc(from, to)}`
+    }
+
+    await waitFor(() => expect(selectedText()).toBe('1:runtime'))
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="ide-find-status"]')?.textContent)
+        .toContain('2 of 2 matches')
+      expect(selectedText()).toBe('3:runtime')
+    })
+
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+    await waitFor(() => expect(selectedText()).toBe('1:runtime'))
+
+    const rows = container.querySelectorAll<HTMLElement>('[data-testid="ide-find-results"] li')
+    fireEvent.click(rows[1]!)
+    await waitFor(() => expect(selectedText()).toBe('3:runtime'))
+
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(closed).toBe(1)
+    container.remove()
   })
 
   it('includes keeper trace in active layer summary and count', () => {

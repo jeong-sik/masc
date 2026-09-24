@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { useSignalValue, useSubscribedSnapshot, useSubscribedValue } from './use-signal-value'
+import { globalShortcutManager } from '../../lib/global-shortcut-manager'
 import {
   activeIdeFile,
   focusIdeContextAnchor,
@@ -939,6 +940,16 @@ export function IdeShell() {
     navigate('code', nextParams)
   }
 
+  const handleTerminalStop = () => {
+    const nextParams: Record<string, string> = {
+      ...route.value.params,
+      section: 'ide-shell',
+      view: activeView,
+    }
+    delete nextParams.terminal
+    navigate('code', nextParams)
+  }
+
   const handleFindOpen = () => {
     navigate('code', {
       ...route.value.params,
@@ -947,6 +958,32 @@ export function IdeShell() {
       find: 'open',
     })
   }
+
+  // Mod+F inside the IDE opens the current-file find, as every editor does;
+  // outside it the browser keeps its own find. The editor surface is
+  // contenteditable, so the binding has to fire from inside inputs too.
+  const shellRef = useRef<HTMLElement>(null)
+  const findOpenRef = useRef(findOpen)
+  findOpenRef.current = findOpen
+  const handleFindOpenRef = useRef(handleFindOpen)
+  handleFindOpenRef.current = handleFindOpen
+  useEffect(() => globalShortcutManager.register({
+    id: 'ide.find.open',
+    chord: { key: 'f', modifiers: ['Mod'] },
+    description: 'Find in the current file',
+    scope: { within: () => shellRef.current },
+    preserveInInputs: true,
+    action: (event) => {
+      event.preventDefault()
+      if (!findOpenRef.current) {
+        handleFindOpenRef.current()
+        return
+      }
+      const input = shellRef.current?.querySelector<HTMLInputElement>('[data-testid="ide-find-panel"] input[type="search"]')
+      input?.focus()
+      input?.select()
+    },
+  }), [])
 
   const handleFindClose = () => {
     const nextParams: Record<string, string> = {
@@ -1002,6 +1039,7 @@ export function IdeShell() {
 
   return html`
     <section
+      ref=${shellRef}
       class="ide-plane-shell ide-v2-surface v2-ide-surface ss-surface bg-surface-page"
       role="region"
       aria-label="Code IDE shell"
@@ -1149,6 +1187,7 @@ export function IdeShell() {
                 keeperName=${terminalKeeper}
                 streamEnabled=${terminalOpen}
                 compact=${true}
+                onStop=${handleTerminalStop}
               />`
             : null}
         </div>

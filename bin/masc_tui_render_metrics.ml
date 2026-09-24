@@ -271,7 +271,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     ]
     |> List.map (fun line -> if Layout.display_width line > inner_width then Layout.take_cells line inner_width ^ Ansi.reset else line)
 
-let render_section_fleet ~cols (state : state) =
+let render_section_fleet ?session_rows ~cols (state : state) =
   let inner_width = max 20 (framed_inner_width cols) in
   let clip text = Layout.take_cells text inner_width ^ Ansi.reset in
   let title text = "  " ^ Ansi.bold ^ Theme.info () ^ text ^ Ansi.reset in
@@ -311,16 +311,78 @@ let render_section_fleet ~cols (state : state) =
   let transport_lines = match state.transport with
     | None -> [ "    " ^ not_observed ]
     | Some transport ->
-      [ Printf.sprintf "    SSE sessions %d · WebSocket sessions %s · dropped events %d"
+      [ Printf.sprintf "    Primary path %s · gRPC %s"
+          (Masc.Transport_metrics.primary_path_kind_to_string transport.th_primary_path)
+          (Option.fold ~none:"off" ~some:(Printf.sprintf ":%d") transport.th_grpc_port)
+      ; Printf.sprintf "    SSE sessions %d · WebSocket sessions %s · dropped events %d"
           transport.th_sse_sessions
           (Option.fold ~none:"unreported" ~some:string_of_int transport.th_websocket_sessions)
           transport.th_events_dropped
       ; "    Queue pressure: " ^ Masc.Transport_metrics.queue_pressure_kind_to_string transport.th_queue_pressure ]
   in
+  (* This TUI's own subscription to the runtime event feed. The count sits
+     straight after the state word in both states, the way the Activity
+     status row puts it, so a closed feed's number reads as the frames it
+     carried. *)
+  let feed_line =
+    "    Runtime event feed: "
+    ^
+    match state.observer with
+    | Observer_off -> "off"
+    | Observer_opening -> "opening"
+    | Observer_live { events; _ } -> Printf.sprintf "live %d" events
+    | Observer_closed { events; reason; _ } ->
+        Printf.sprintf "closed %d (%s)" events (Terminal_text.single_line reason)
+  in
+  (* This TUI's own log: what it did and what it was told, oldest first so the
+     newest line is last. The log holds eleven lines ([add_event]); a run of
+     the same line folds into one row with a ×N tail. First in the section,
+     so the block starts on screen. [session_rows] is how many rows the frame
+     can give it: past that the block keeps its newest rows and says how many
+     earlier ones it left out, so the newest line is never below the fold. *)
+  let session_lines =
+    match state.events with
+    | [] -> [ "    (no events yet)" ]
+    | events ->
+      let rows =
+        Masc_tui_render_schedule.collapse_consecutive
+          ~key:session_event_collapse_key events
+        |> List.rev
+        |> List.map (fun ((event : event), run) ->
+               let mark =
+                 match session_event_mark event with
+                 | None -> ""
+                 | Some glyph ->
+                   Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph
+                     Ansi.reset
+               in
+               let tail =
+                 if run > 1 then
+                   Printf.sprintf " %s\xc3\x97%d%s" Ansi.dim run Ansi.reset
+                 else ""
+               in
+               Printf.sprintf "    %s[%s]%s %s%s%s" Ansi.dim event.timestamp
+                 Ansi.reset mark
+                 (Terminal_text.single_line event.content)
+                 tail)
+      in
+      let count = List.length rows in
+      (match session_rows with
+       | Some room when count > room && room >= 2 ->
+         (* One row goes to the count of what was left out. *)
+         let earlier = count - (room - 1) in
+         (Printf.sprintf "    %s+%d earlier%s" Ansi.dim earlier Ansi.reset)
+         :: List.filteri (fun index _ -> index >= earlier) rows
+       | Some room when count > room ->
+         (* No room for the count as well: the newest row alone. *)
+         List.filteri (fun index _ -> index = count - 1) rows
+       | Some _ | None -> rows)
+  in
   List.map clip
-    ([ title "Engine memory" ] @ gc_lines
+    ([ title "TUI session" ] @ session_lines
+     @ [ ""; title "Engine memory" ] @ gc_lines
      @ [ ""; title "Scheduler lag (producer sample window)" ] @ scheduler_lines
-     @ [ ""; title "Transport delivery" ] @ transport_lines)
+     @ [ ""; title "Transport delivery" ] @ transport_lines @ [ feed_line ])
 
 let timestamp_utc at =
   let tm = Unix.gmtime at in
@@ -623,14 +685,17 @@ let render_metrics_body ~cols ~budget (state : state)
   let card_lines = render_kpi_cards ~cols state kpis in
   List.iter push card_lines;
   push_divider ();
+  let fixed_rows = 1 + 1 + 1 + List.length card_lines + 1 in
+  let room = max 0 (budget - fixed_rows) in
   let section_lines =
     match state.metrics_section with
-    | Section_fleet -> render_section_fleet ~cols state
+    | Section_fleet ->
+      (* The block's title takes one row and the scroll hint under the
+         section may take another; the rest is the log's. *)
+      render_section_fleet ~session_rows:(max 1 (room - 2)) ~cols state
     | Section_resources -> render_section_resources ~cols state
     | Section_tools -> render_section_tools ~cols state
   in
-  let fixed_rows = 1 + 1 + 1 + List.length card_lines + 1 in
-  let room = max 0 (budget - fixed_rows) in
   let total_lines = List.length section_lines in
   let overflowing = total_lines > room in
   let hint_rows = if overflowing && room >= 2 then 1 else 0 in

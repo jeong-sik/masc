@@ -55,24 +55,102 @@ let resume_operator_pause
   | false, _ -> Ok old
 ;;
 
-let turn_in_flight_rejection ~keeper_name
-    (info : Keeper_owner.turn_in_flight) : tool_result =
-  tool_result_error_data
-    ~class_:Tool_result.Workflow_rejection
+type lane_swap_refusal =
+  | Swap_turn_in_flight of Keeper_owner.turn_in_flight
+  | Swap_failed of tool_result
+
+type runtime_sync =
+  | Lane_restarted
+  | Deferred_until_turn_end of Keeper_owner.turn_in_flight
+
+let runtime_sync_to_wire = function
+  | Lane_restarted -> "lane_restarted"
+  | Deferred_until_turn_end _ -> "deferred_until_turn_end"
+;;
+
+type update_outcome =
+  | Runtime_synced of
+      { result : tool_result
+      ; runtime_sync : runtime_sync
+      }
+  | Update_refused of tool_result
+
+let result_of_outcome = function
+  | Runtime_synced { result; _ } | Update_refused result -> result
+;;
+
+let map_outcome_result f = function
+  | Runtime_synced { result; runtime_sync } ->
+    Runtime_synced { result = f result; runtime_sync }
+  | Update_refused result -> Update_refused (f result)
+;;
+
+let runtime_synced_result ~keeper_name (updated : keeper_meta) runtime_sync =
+  let sync_fields =
+    match runtime_sync with
+    | Lane_restarted -> []
+    | Deferred_until_turn_end info ->
+      [ ( "block"
+        , Keeper_owner.autonomous_block_to_yojson
+            (Keeper_owner.Turn_busy (Some info)) )
+      ; ( "message"
+        , `String
+            (Printf.sprintf
+               "keeper %s configuration was saved and published. A turn \
+                holds the keeper's slot, so the keepalive lane was not \
+                restarted; the turn in flight keeps the configuration it \
+                started with and the next turn reads the new one. Do not \
+                resend this update."
+               keeper_name) )
+      ]
+  in
+  tool_result_ok_data
     (`Assoc
-       [ "error", `String "keeper_turn_in_flight"
-       ; "keeper", `String keeper_name
-       ; ( "block"
-         , Keeper_owner.autonomous_block_to_yojson
-             (Keeper_owner.Turn_busy (Some info)) )
-       ; ( "message"
-         , `String
-             "keeper metadata was updated but the keepalive lane was not \
-              restarted: a turn holds this keeper's slot. A keeper's own \
-              turn always holds the slot, so masc_keeper_up cannot restart \
-              its caller from inside that turn. Retry masc_keeper_up when \
-              the keeper is idle to restart the lane." )
-       ])
+       (( "runtime_sync", `String (runtime_sync_to_wire runtime_sync) )
+        :: sync_fields
+        @ [ "meta", Keeper_meta_json.meta_to_json updated ]))
+;;
+
+(* Why a turn-in-flight swap refusal cannot be reported as deferred. Every
+   editable field is read per turn or per cycle, so a running lane picks the
+   update up without a restart -- but only a running lane, and not the egress
+   proxy: it is forked only when a lane starts in the policy network mode
+   ([Keeper_keepalive.fork_egress_proxy]). Nothing restarts the lane after the
+   turn ends. The registry's bound port is the lane's own answer; comparing
+   old and new meta would miss an earlier update that also skipped the
+   restart. *)
+type deferral_blocker =
+  | No_running_lane
+  | Policy_lane_without_egress_proxy
+
+let deferral_blocker ~base_path (updated : keeper_meta) =
+  match Keeper_registry.get ~base_path updated.name with
+  | None -> Some No_running_lane
+  | Some entry ->
+    (match updated.network_mode with
+     | Keeper_types_profile_sandbox.Network_none
+     | Keeper_types_profile_sandbox.Network_inherit -> None
+     | Keeper_types_profile_sandbox.Network_policy ->
+       (match Atomic.get entry.egress_proxy_port with
+        | Some _ -> None
+        | None -> Some Policy_lane_without_egress_proxy))
+;;
+
+let deferral_blocker_message ~keeper_name = function
+  | No_running_lane ->
+    Printf.sprintf
+      "keeper %s configuration was saved and published, but a turn holds the \
+       keeper's slot and no keepalive lane is running, so none was started. \
+       Call masc_keeper_up again when the keeper is idle."
+      keeper_name
+  | Policy_lane_without_egress_proxy ->
+    Printf.sprintf
+      "keeper %s configuration was saved and published, but a turn holds the \
+       keeper's slot, so the keepalive lane was not restarted. The running \
+       lane has no egress proxy, and network_mode=policy needs one: it takes \
+       effect only when the lane restarts. Call masc_keeper_up again when the \
+       keeper is idle."
+      keeper_name
 ;;
 
 (* The lane swap tears down the registry entry a live turn's finalize path
@@ -99,7 +177,7 @@ let turn_in_flight_rejection ~keeper_name
      concurrent-update race it also matches is absorbed by the existing
      launch-conflict arm. *)
 let rec swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
-  : (joined_stop_result * start_keepalive_outcome, tool_result) result =
+  : (joined_stop_result * start_keepalive_outcome, lane_swap_refusal) result =
   if not (Eio_context.root_switch_on_current_domain ())
      && Option.is_some (Eio_context.get_root_switch_opt ())
   then
@@ -127,14 +205,24 @@ let rec swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
   with
   | Error error ->
     Error
-      (tool_result_error ~class_:Tool_result.Runtime_failure
-         (Keeper_owner_registry.command_error_to_string error))
+      (Swap_failed
+         (tool_result_error ~class_:Tool_result.Runtime_failure
+            (Keeper_owner_registry.command_error_to_string error)))
   | Ok (Keeper_owner.Shutdown_reserved { in_flight = Some info; _ }) ->
     rollback ~operation_id;
-    Error (turn_in_flight_rejection ~keeper_name info)
+    Error (Swap_turn_in_flight info)
   | Ok (Keeper_owner.Shutdown_already_reserved
-      { in_flight = Some info; _ }) ->
-    Error (turn_in_flight_rejection ~keeper_name info)
+      { in_flight = Some _; _ }) ->
+    (* Another operation's fence stays in place and blocks admissions, so
+       the next turn is not this update's to promise. *)
+    Error
+      (Swap_failed
+         (tool_result_error ~class_:Tool_result.Workflow_rejection
+            (Printf.sprintf
+               "keeper %s configuration was saved, but another shutdown \
+                operation holds the keeper and a turn is in flight; the \
+                keepalive lane was not restarted."
+               keeper_name)))
   | Ok (Keeper_owner.Shutdown_reserved { in_flight = None; _ }) ->
     let stop_outcome =
       match swap () with
@@ -342,17 +430,40 @@ let finish_published_update ~supersession ctx updated =
         supersession
     with
     | Error error ->
-      tool_result_error ~class_:Tool_result.Runtime_failure
-        (Keeper_shutdown_supersession.error_to_string error)
+      Update_refused
+        (tool_result_error ~class_:Tool_result.Runtime_failure
+           (Keeper_shutdown_supersession.error_to_string error))
     | Ok
         ( Keeper_shutdown_supersession.No_shutdown_admission
         | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
       (match swap_keepalive_lane_fenced ctx updated with
-       | Error rejection -> rejection
+       | Error (Swap_failed result) -> Update_refused result
+       | Error (Swap_turn_in_flight info) ->
+         (match deferral_blocker ~base_path:ctx.config.base_path updated with
+          | Some blocker ->
+            Update_refused
+              (tool_result_error ~class_:Tool_result.Workflow_rejection
+                 (deferral_blocker_message ~keeper_name:updated.name blocker))
+          | None ->
+           (* The owner publication above already carries the new profile;
+              the turn holding the slot finishes on the meta it was admitted
+              with and the next admitted turn reads the published one. *)
+           let runtime_sync = Deferred_until_turn_end info in
+           Runtime_synced
+             { result =
+                 runtime_synced_result ~keeper_name:updated.name updated
+                   runtime_sync
+             ; runtime_sync
+             })
        | Ok (stop_outcome, launch_outcome) ->
          (match launch_outcome with
           | Keepalive_started _ ->
-            tool_result_ok_data (Keeper_meta_json.meta_to_json updated)
+            Runtime_synced
+              { result =
+                  runtime_synced_result ~keeper_name:updated.name updated
+                    Lane_restarted
+              ; runtime_sync = Lane_restarted
+              }
           | Keepalive_already_registered entry ->
             let stop_detail =
               match stop_outcome with
@@ -360,22 +471,24 @@ let finish_published_update ~supersession ctx updated =
                 "keeper was not registered before restart"
               | Keeper_joined _ -> "previous keeper lane joined"
             in
-            tool_result_error ~class_:Tool_result.Workflow_rejection
-              (Printf.sprintf
-                 "keeper update launch conflicted after %s: %s"
-                 stop_detail
-                 (start_keepalive_outcome_to_string
-                    (Keepalive_already_registered entry)))
+            Update_refused
+              (tool_result_error ~class_:Tool_result.Workflow_rejection
+                 (Printf.sprintf
+                    "keeper update launch conflicted after %s: %s"
+                    stop_detail
+                    (start_keepalive_outcome_to_string
+                       (Keepalive_already_registered entry))))
           | ( Keepalive_lifecycle_denied _
             | Keepalive_registration_rejected _
             | Keepalive_fiber_start_rejected _
             | Keepalive_launch_callback_failed _
             | Keepalive_lane_ownership_lost
             | Keepalive_fork_rejected _ ) as rejected ->
-            tool_result_error ~class_:Tool_result.Runtime_failure
-              (Printf.sprintf
-                 "keeper metadata was updated but lane restart failed: %s"
-                 (start_keepalive_outcome_to_string rejected)))))
+            Update_refused
+              (tool_result_error ~class_:Tool_result.Runtime_failure
+                 (Printf.sprintf
+                    "keeper metadata was updated but lane restart failed: %s"
+                    (start_keepalive_outcome_to_string rejected))))))
 ;;
 
 let finish_publication_after_runtime_failure ~supersession ctx detail =
@@ -397,7 +510,7 @@ let finish_publication_after_runtime_failure ~supersession ctx detail =
 let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
     ~(expected_config_revision : Keeper_turn_up_config_persistence.config_revision)
     (ctx : _ context) (p : parsed_args)
-    (old : keeper_meta) : tool_result
+    (old : keeper_meta) : update_outcome
     =
   match
     match p.sandbox_profile_opt with
@@ -421,7 +534,8 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
              raw
              (String.concat ", " Keeper_types_profile.valid_sandbox_profile_strings))
   with
-  | Error msg -> tool_result_error ~class_:Tool_result.Policy_rejection msg
+  | Error msg ->
+    Update_refused (tool_result_error ~class_:Tool_result.Policy_rejection msg)
   | Ok sandbox_profile ->
   (* Same non-durable pin as [sandbox_profile] above: [fallback] is the TOML
      declaration, never [old.network_mode]. The meta decoder fixes that field
@@ -438,7 +552,8 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
       ~sandbox_profile
       ~fallback:p.profile_defaults.network_mode
   with
-  | Error msg -> tool_result_error ~class_:Tool_result.Policy_rejection msg
+  | Error msg ->
+    Update_refused (tool_result_error ~class_:Tool_result.Policy_rejection msg)
   | Ok network_mode ->
   let input_policy = match p.input_policy_opt, p.profile_defaults.input_policy with
     | Some policy, _ | None, Some policy -> policy
@@ -518,8 +633,9 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
               ~actor:ctx.agent_name
           with
           | Error error ->
-            tool_result_error ~class_:Tool_result.Runtime_failure
-              (Keeper_shutdown_supersession.error_to_string error)
+            Update_refused
+              (tool_result_error ~class_:Tool_result.Runtime_failure
+                 (Keeper_shutdown_supersession.error_to_string error))
           | Ok supersession ->
             let publish outcome config_revision =
               let failed detail =
@@ -558,9 +674,10 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
              with
              | Error
                  (Keeper_turn_up_config_persistence.Revision_conflict conflict) ->
-               tool_result_error_data
-                 ~class_:Tool_result.Workflow_rejection
-                 (config_revision_conflict_data conflict)
+               Update_refused
+                 (tool_result_error_data
+                    ~class_:Tool_result.Workflow_rejection
+                    (config_revision_conflict_data conflict))
              | Error (Keeper_turn_up_config_persistence.Io_error detail) ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string TurnUpUpdateFailures)
@@ -571,48 +688,57 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                      )
                    ]
                  ();
-               config_publication_rollback_result detail
-               |> with_config_receipt ~revision:expected_config_revision
-                    ~warnings:[] ~applied:false
+               Update_refused
+                 (config_publication_rollback_result detail
+                  |> with_config_receipt ~revision:expected_config_revision
+                       ~warnings:[] ~applied:false)
              | Error
                  (Keeper_turn_up_config_persistence.Reconciliation_required state) ->
-               tool_result_error_data
-                 ~class_:Tool_result.Runtime_failure
-                 (reconciliation_required_data state)
+               Update_refused
+                 (tool_result_error_data
+                    ~class_:Tool_result.Runtime_failure
+                    (reconciliation_required_data state))
              | Error
                  (Keeper_turn_up_config_persistence.Composite_reconciliation_required
                     state) ->
-               tool_result_error_data
-                 ~class_:Tool_result.Runtime_failure
-                 (composite_reconciliation_required_data state)
+               Update_refused
+                 (tool_result_error_data
+                    ~class_:Tool_result.Runtime_failure
+                    (composite_reconciliation_required_data state))
              | Error
                  (Keeper_turn_up_config_persistence.Publication_exception
                     { detail; _ }) ->
-               tool_result_error ~class_:Tool_result.Runtime_failure
-                 ("keeper config publication raised and was rolled back: " ^ detail)
+               Update_refused
+                 (tool_result_error ~class_:Tool_result.Runtime_failure
+                    ("keeper config publication raised and was rolled back: "
+                     ^ detail))
              | Ok { value = publication; warnings } ->
                match publication with
              | Publication_failed (_outcome, revision, result) ->
-               with_config_receipt
-                 ~revision
-                 ~warnings
-                 ~applied:true
-                 result
-             | Publication_applied (_outcome, updated, revision) ->
-               finish_published_update ~supersession ctx updated
-               |> with_config_receipt
+               Update_refused
+                 (with_config_receipt
                     ~revision
                     ~warnings
                     ~applied:true
+                    result)
+             | Publication_applied (_outcome, updated, revision) ->
+               finish_published_update ~supersession ctx updated
+               |> map_outcome_result
+                    (with_config_receipt
+                       ~revision
+                       ~warnings
+                       ~applied:true)
              | Publication_applied_with_runtime_failure (_outcome, revision, detail) ->
-               finish_publication_after_runtime_failure
-                 ~supersession ctx detail
-               |> with_config_receipt
-                    ~revision
-                    ~warnings
-                    ~applied:true))
+               Update_refused
+                 (finish_publication_after_runtime_failure
+                    ~supersession ctx detail
+                  |> with_config_receipt
+                       ~revision
+                       ~warnings
+                       ~applied:true)))
 
-let update_keeper ?preserve_prompt_defaults ~expected_config_revision ctx p old =
+let update_keeper_outcome ?preserve_prompt_defaults ~expected_config_revision
+    ctx p old =
   update_keeper_with
     ~apply_profile:(fun ~base_path ~keeper_name command ->
       Keeper_owner_registry.apply_meta ~base_path ~keeper_name command)
@@ -623,9 +749,35 @@ let update_keeper ?preserve_prompt_defaults ~expected_config_revision ctx p old 
     old
 ;;
 
+let update_keeper ?preserve_prompt_defaults ~expected_config_revision ctx p old =
+  update_keeper_outcome
+    ?preserve_prompt_defaults
+    ~expected_config_revision
+    ctx
+    p
+    old
+  |> result_of_outcome
+;;
+
 module For_testing = struct
   let composite_reconciliation_required_data =
     composite_reconciliation_required_data
 
-  let update_keeper_with_apply_profile = update_keeper_with
+  let update_keeper_with_apply_profile
+        ~apply_profile
+        ?preserve_prompt_defaults
+        ~expected_config_revision
+        ctx
+        p
+        old
+    =
+    update_keeper_with
+      ~apply_profile
+      ?preserve_prompt_defaults
+      ~expected_config_revision
+      ctx
+      p
+      old
+    |> result_of_outcome
+  ;;
 end

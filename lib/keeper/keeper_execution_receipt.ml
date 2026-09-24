@@ -75,7 +75,6 @@ type operator_disposition_reason =
   | Reason_degraded_retry
   | Reason_runtime_fallback
   | Reason_transient_runtime_retry
-  | Reason_capacity_backpressure
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_input_required
@@ -97,7 +96,6 @@ let operator_disposition_reason_to_string = function
   | Reason_degraded_retry -> "degraded_retry"
   | Reason_runtime_fallback -> "runtime_fallback"
   | Reason_transient_runtime_retry -> "transient_runtime_retry"
-  | Reason_capacity_backpressure -> Keeper_internal_error.capacity_backpressure_kind
   | Reason_provider_runtime_error -> "provider_runtime_error"
   | Reason_internal_error -> "internal_error"
   | Reason_input_required -> "input_required"
@@ -118,12 +116,10 @@ let operator_disposition (receipt : t)
   : operator_disposition_kind * operator_disposition_reason
   =
   (* Parse the wire string ONCE into the typed classification
-     ([Keeper_terminal_reason], RFC-0042 PR-4). The earlier
-     [String.starts_with] / [string_contains] chain is now a single
-     [of_wire] call; each former string predicate is a variant test,
-     preserving the original [if/else] priority order. The error_kind
-     sub-predicates stay here (they read the receipt record, not the wire
-     string) and remain OR'd with the variant test at the same branch. *)
+     ([Keeper_terminal_reason]). Each branch below is a variant test in
+     priority order. The error_kind sub-predicates read the receipt record,
+     not the wire string, and are OR'd with the variant test at the same
+     branch. *)
   let terminal_reason = Keeper_terminal_reason.of_wire receipt.terminal_reason_code in
   let input_required =
     let open Keeper_turn_disposition in
@@ -148,20 +144,16 @@ let operator_disposition (receipt : t)
     Option.is_some receipt.degraded_retry_applied
     || Option.is_some receipt.degraded_retry_deferred
   in
-  (* Pre-typing, this branch also matched runtime_outcome="runtime_exhausted"
-     and "exhausted" — neither is in the producer's closed [runtime_outcome]
-     set ([Runtime_passed_to_next_model] / [_completed] / [_failed] /
-     [_not_observed] / [_not_dispatched]).  Those branches were unreachable workarounds; the
-     typed migration drops them.  Runtime exhaustion still reaches this
-     branch via [terminal_reason="runtime_exhausted"]. *)
+  (* Runtime exhaustion reaches this branch via
+     [terminal_reason="runtime_exhausted"]; the closed [runtime_outcome] set
+     has no exhaustion value. *)
   match terminal_reason with
   | _ when input_required -> Disp_pass, Reason_input_required
   | Keeper_terminal_reason.Transcript_corruption _ ->
-    (* An incomplete tool transcript no longer parks the Keeper: boot-time
+    (* An incomplete tool transcript does not park the Keeper: boot-time
        tail recovery closes the open cycles a process death leaves, and the
-       turn otherwise follows the ordinary typed route. Keep the operator
-       alert with the typed reason rather than claiming a pause that no
-       longer happens. *)
+       turn otherwise follows the ordinary typed route. The operator alert
+       keeps the typed reason and claims no pause. *)
     Disp_unknown, Reason_transcript_corruption
   | Keeper_terminal_reason.Official_client_recovery_required _ ->
     (* The refusal happened while claiming the local durable session, before
@@ -186,21 +178,10 @@ let operator_disposition (receipt : t)
        and the stimulus behind it is retired rather than requeued. A human
        decides what happened, which is why this sits with its siblings above
        the retry-label guards — a degraded retry elsewhere in the turn must
-       not relabel an alert this one earns on its own. Until now it reached
-       the operator as an unmapped state (#29929). *)
+       not relabel an alert this one earns on its own (#29929). *)
     Disp_unknown, Reason_terminal_effect_failed
   | Keeper_terminal_reason.Runtime_exhausted _ ->
     Disp_fail_open_next_runtime, Reason_runtime_exhausted
-  | Keeper_terminal_reason.Capacity_backpressure _ ->
-    (* The typed runtime route treats provider-capacity failure as retryable and
-       continues with another eligible runtime.  [runtime_fallback_applied] is
-       derived from the lane walk's winning candidate index, which only
-       advances on a candidate that actually wins the turn — this receipt is
-       for the failed pre-dispatch attempt itself, so [runtime_fallback_applied]
-       stays false here even though the lane goes on to try a later
-       candidate. It must neither claim a completed fallback nor page a
-       human. *)
-    Disp_fail_open_next_runtime, Reason_capacity_backpressure
   (* Two refusals that both stop the turn before dispatch and both need a
      human, but need different things from that human. They are constructor
      arms rather than a boolean guard, so a third pre-dispatch refusal added
@@ -266,7 +247,6 @@ let operator_disposition (receipt : t)
       (match terminal_reason with
        | Keeper_terminal_reason.Pre_dispatch_success _ -> true
        | Runtime_exhausted _
-       | Capacity_backpressure _
        | Config_invalid _
        | Authorization_refused _
        | Provider_runtime_failure _
@@ -302,18 +282,16 @@ let operator_disposition (receipt : t)
            dispatching to the LLM (cached response, immediate tool result,
            or pre-dispatch check resolved the turn).  Treated as healthy
            because the outcome is success — the runtime was simply not
-           needed.  Previously unmapped (1062 WARN/day on 2026-05-24). *)
+           needed. *)
         Disp_pass, Reason_healthy
-      (* masc#31312 closed the producer gap this arm papered over: the
-         official-client host-stop path now writes a one-attempt runtime
-         observation, so a successful turn no longer arrives as
-         [Runtime_not_observed]. A receipt that still does is a new
-         producer hole and belongs in unmapped, per the contract above. *)
+      (* The official-client host-stop path writes a one-attempt runtime
+         observation (masc#31312), so a successful turn does not arrive as
+         [Runtime_not_observed]. A receipt that does is a producer hole and
+         belongs in unmapped, per the contract above. *)
       | _
         when (match terminal_reason with
               | Keeper_terminal_reason.Accept_rejected _ -> true
               | Runtime_exhausted _
-              | Capacity_backpressure _
               | Config_invalid _
               | Authorization_refused _
               | Provider_runtime_failure _

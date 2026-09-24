@@ -214,9 +214,34 @@ let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_comple
   }
 ;;
 
-let codex_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_action on_event =
+(* A provider's report about its own usage windows, kept for the operator
+   projection ([Runtime_provider_usage_window]). Nothing that routes, orders,
+   admits or retries reads it. A runtime id with no configured quota scope
+   has no account to key the report by, so it is logged and dropped. *)
+let record_usage_windows ~keeper_name ~runtime_id report =
+  match Runtime.quota_scope_of_runtime_id runtime_id with
+  | Some scope ->
+    Runtime_provider_usage_window.record ~scope ~observed_at:(Time_compat.now ()) report
+  | None ->
+    Log.Keeper.warn
+      ~keeper_name
+      "Codex usage windows not recorded: runtime %s has no quota scope"
+      runtime_id
+;;
+
+(* Always installed so usage-window reports are recorded. A turn nobody
+   streams, traces or observes gets only that; its other events are ignored as
+   before. *)
+let codex_stream_callback ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event =
   match on_event, raw_trace_run, on_native_action with
-  | None, None, None -> None
+  | None, None, None ->
+    Some
+      (function
+        | Runtime_codex_app_server.Usage_windows_reported report ->
+          record_usage_windows ~keeper_name ~runtime_id report
+        | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+        | Native_tool_started _ | Native_tool_finished _ | Elicitation_cancelled _
+        | Turn_finished _ -> ())
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
@@ -303,6 +328,8 @@ let codex_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_act
           Log.Keeper.info ~keeper_name
             "Codex MCP request cancelled: host input unavailable (server=%s); the user did not decline it"
             server_name
+        | Runtime_codex_app_server.Usage_windows_reported report ->
+          record_usage_windows ~keeper_name ~runtime_id report
         | Runtime_codex_app_server.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text
@@ -1056,7 +1083,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
               (* A host stop ends the turn from inside a tool call, before
                  the app-server's thread/tokenUsage/updated for this turn has
                  arrived, so there is no count to report here. *)
-            ~usage:None
+            ~request_context:None
             stop
         in
         let* () =
@@ -1095,7 +1122,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let turn_result =
       try
         let on_stream_event =
-          codex_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_action on_event
+          codex_stream_callback
+          ~keeper_name ~runtime_id ~raw_trace_run ~turn_count ~on_native_action on_event
         in
         (match
        Runtime_codex_app_server.run_turn
@@ -1511,6 +1539,7 @@ module For_testing = struct
     match
       codex_stream_callback
         ~keeper_name:"test"
+        ~runtime_id:"test"
         ~raw_trace_run:None
         ~turn_count
         ~on_native_action:(Some observe)

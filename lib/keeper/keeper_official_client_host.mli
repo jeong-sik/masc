@@ -569,17 +569,17 @@ val host_stop_result :
   turn_id:string ->
   turns_used:int ->
   latency_ms:int option ->
-  usage:Agent_core.Types.api_usage option ->
+  request_context:Runtime_observation.request_context option ->
   host_stop ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
 (** Build the provider-neutral checkpoint terminal after an official-client
     adapter stops its vendor-owned loop. The external client session is the
     durable continuation owner, so no Agent Core checkpoint is synthesized.
 
-    [usage] is what the adapter could measure before the stop: Claude Code
-    uses the newest assistant request's usage, since the result frame that
-    carries a turn total never arrives after a host stop. [Some] marks the
-    observation [Per_request]; [None] leaves the scope unavailable.
+    The turn's spend is not observed: no adapter has a terminal usage frame
+    after a host stop, so the response carries no usage and the scope is
+    unavailable. [request_context] is the context the newest request
+    occupied when the adapter saw one (Claude Code's assistant frames).
 
     Non-failed stops carry a one-attempt runtime observation (masc#31312):
     the vendor loop did run to reach this boundary, and a [None] observation

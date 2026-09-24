@@ -619,6 +619,10 @@ type fleet_safety = {
   fs_active_task_owner_scan_error_count : int;
 }
 
+type fleet_safety_reading =
+  | Fleet_measured of fleet_safety
+  | Fleet_not_measured of { status : string }
+
 type log_kind =
   | Log_turn
   | Log_heartbeat
@@ -9783,8 +9787,9 @@ let decode_lane_run_detail json =
     }
 ;;
 
-let decode_fleet_safety json =
-  let* section = required_object_field json "keeper_fleet_safety" in
+(* Every field is read as required: the full reading writes all of them, so a
+   missing count is a broken payload, not an idle fleet. *)
+let decode_fleet_safety_reading section =
   let* fs_status = required_string_field section "status" in
   let* fs_blocker =
     Result.map
@@ -9792,29 +9797,26 @@ let decode_fleet_safety json =
            match Keeper_fleet_blocker.of_wire_name name with
            | Some blocker -> Blocker blocker
            | None -> Unrecognised_blocker name))
-      (optional_string_field section "blocker")
+      (required_nullable_string_field section "blocker")
   in
   let* fs_operator_action_required =
-    match member "operator_action_required" section with
-    | `Bool value -> Ok value
-    | `Null -> Ok false
-    | bad -> field_type_error "operator_action_required" "a bool or null" bad
+    required_bool_field section "operator_action_required"
   in
-  let* fs_bootable_count = int_field_or section "bootable_keeper_count" ~default:0 in
-  let* fs_running_count = int_field_or section "running_keeper_fiber_count" ~default:0 in
+  let* fs_bootable_count = required_int_field section "bootable_keeper_count" in
+  let* fs_running_count = required_int_field section "running_keeper_fiber_count" in
   let* fs_executable_count =
-    int_field_or section "executable_keeper_fiber_count" ~default:0
+    required_int_field section "executable_keeper_fiber_count"
   in
-  let* fs_failing_count = int_field_or section "failing_keeper_fiber_count" ~default:0 in
+  let* fs_failing_count = required_int_field section "failing_keeper_fiber_count" in
   let* fs_recovering_count =
-    int_field_or section "recovering_keeper_fiber_count" ~default:0
+    required_int_field section "recovering_keeper_fiber_count"
   in
   (* The unscoped count: every Failing keeper whose reason is a turn
      configuration error, autoboot target or not. The configuration_blocked_*
      fields answer an autoboot question instead and skip keepers outside the
      autoboot set, so they cannot partition the failing count. *)
   let* fs_turn_configuration_error_count =
-    int_field_or section "turn_configuration_error_keeper_count" ~default:0
+    required_int_field section "turn_configuration_error_keeper_count"
   in
   let* fs_official_client_recovery_required_count =
     required_int_field section "official_client_recovery_required_keeper_count"
@@ -9822,34 +9824,34 @@ let decode_fleet_safety json =
   let* fs_official_client_recovery_required_names =
     require_string_list section "official_client_recovery_required_keeper_names"
   in
-  let* fs_paused_count = int_field_or section "paused_keeper_count" ~default:0 in
+  let* fs_paused_count = required_int_field section "paused_keeper_count" in
   let* fs_target_reaction_capacity =
-    int_field_or section "target_reaction_capacity_count" ~default:0
+    required_int_field section "target_reaction_capacity_count"
   in
   let* fs_reaction_capacity_shortfall =
-    int_field_or section "reaction_capacity_shortfall_count" ~default:0
+    required_int_field section "reaction_capacity_shortfall_count"
   in
-  let* fs_bootable_names = decode_string_name_list section "bootable_keeper_names" in
-  let* fs_running_names = decode_string_name_list section "running_keeper_names" in
+  let* fs_bootable_names = require_string_list section "bootable_keeper_names" in
+  let* fs_running_names = require_string_list section "running_keeper_names" in
   let* fs_executable_names =
-    decode_string_name_list section "executable_keeper_names"
+    require_string_list section "executable_keeper_names"
   in
   let* fs_turn_configuration_error_names =
-    decode_string_name_list section "turn_configuration_error_keeper_names"
+    require_string_list section "turn_configuration_error_keeper_names"
   in
   let* fs_active_task_owner_without_fiber_count =
-    int_field_or section "active_task_owner_without_executable_fiber_count" ~default:0
+    required_int_field section "active_task_owner_without_executable_fiber_count"
   in
   let* fs_completion_authority_pending_count =
-    int_field_or section "completion_authority_pending_task_count" ~default:0
+    required_int_field section "completion_authority_pending_task_count"
   in
   (* Sources the task-owner scan could not read -- the backlog, or a Keeper
      whose profile did not load. Their tasks are left out of the count above,
      and only a backlog failure moves [status] off "ok", so a Keeper that
      could not be read leaves the count short with nothing on the row saying
-     so. Absent reads as none, the way every count in this section does. *)
+     so. *)
   let* fs_active_task_owner_scan_error_count =
-    int_field_or section "active_task_owner_scan_error_count" ~default:0
+    required_int_field section "active_task_owner_scan_error_count"
   in
   Ok
     { fs_status
@@ -9874,6 +9876,42 @@ let decode_fleet_safety json =
     ; fs_completion_authority_pending_count
     ; fs_active_task_owner_scan_error_count
     }
+
+(* Server_routes_http_runtime.full_health_component_placeholder: what the
+   section holds when the health snapshot has no fleet reading. It carries no
+   counts, and [error] only when something failed. Without [error] the
+   snapshot is being rebuilt -- "warming" at boot and again after a change
+   invalidates it -- and nothing failed. With [error] the refresh timed out or
+   the scan raised, which is a failure the operator should see as one, with
+   the server's reason. *)
+let decode_fleet_placeholder section =
+  let* status = required_string_field section "status" in
+  let* timed_out = required_bool_field section "component_timed_out" in
+  let* error = optional_string_field section "error" in
+  match error with
+  | None -> Ok (Fleet_not_measured { status })
+  | Some error ->
+    Error
+      (Printf.sprintf "the server could not measure the fleet (%s%s): %s" status
+         (if timed_out then ", refresh timed out" else "")
+         error)
+
+let decode_fleet_safety json =
+  let* section = required_object_field json "keeper_fleet_safety" in
+  match Json_util.assoc_member_opt "schema" section with
+  | Some (`String schema) when String.equal schema Keeper_fleet_blocker.reading_schema ->
+    Result.map (fun fleet -> Fleet_measured fleet) (decode_fleet_safety_reading section)
+  | Some (`String schema) ->
+    Error
+      (Printf.sprintf "keeper_fleet_safety schema %S is not %S" schema
+         Keeper_fleet_blocker.reading_schema)
+  | Some other -> field_type_error "keeper_fleet_safety.schema" "a string" other
+  | None ->
+    Result.map_error
+      (fun detail ->
+         "keeper_fleet_safety has no schema and is not the health placeholder: "
+         ^ detail)
+      (decode_fleet_placeholder section)
 
 let bounded_parent_depth ?(max_depth = 64) ~(id_of : 'a -> string)
     ~(parent_id_of : 'a -> string option) (items : 'a list) (item : 'a) : int =

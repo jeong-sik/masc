@@ -5622,8 +5622,9 @@ type state = {
   mutable last_action: (string * float) option;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
-     fleet's own reading of what is missing. *)
-  mutable fleet_safety: fleet_safety option;
+     fleet's own reading of what is missing, or the server's word that its
+     health snapshot is being rebuilt. *)
+  mutable fleet_safety: Tui_decode.fleet_safety_reading option;
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
   mutable local_workspace: local_workspace_reading;

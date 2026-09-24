@@ -2246,6 +2246,15 @@ type fleet_safety = {
     alive, its durable demand is not admissible. Collapsing the two reads a
     live fleet as a stopped one. *)
 
+type fleet_safety_reading =
+  | Fleet_measured of fleet_safety
+  | Fleet_not_measured of { status : string }
+      (** The health snapshot has no fleet reading and nothing failed: it is
+          being rebuilt, at boot and again after a change invalidates it.
+          [status] is the placeholder's word (["warming"]). Kept apart from a
+          reading: zero counts would draw an idle fleet the server never
+          measured. *)
+
 type server_gc_health = {
   sgc_heap_words : int;
   sgc_live_words : int;
@@ -2874,11 +2883,19 @@ val decode_overview_goals :
     server order. Goals of every phase are returned; which ones a surface
     draws is the surface's decision. *)
 
-val decode_fleet_safety : Yojson.Safe.t -> (fleet_safety, string) result
+val decode_fleet_safety :
+  Yojson.Safe.t -> (fleet_safety_reading, string) result
 (** Reads the [keeper_fleet_safety] section out of a [/health?full=1] body.
     A body without the section is an error rather than an empty reading: an
     absent section and a healthy fleet are different facts, and rendering the
-    second for the first is how a blocked keeper stays invisible. *)
+    second for the first is how a blocked keeper stays invisible.
+
+    A section carrying [schema = Keeper_fleet_blocker.reading_schema] is a
+    reading, and every field of {!fleet_safety} is required: a missing count
+    is an error, not zero. A section without [schema] is the health
+    snapshot's placeholder: {!Fleet_not_measured} when it carries no
+    [error], and an error with the server's reason when it does (the refresh
+    timed out or the scan raised). *)
 val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :

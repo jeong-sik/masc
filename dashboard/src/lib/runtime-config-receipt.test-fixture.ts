@@ -27,6 +27,7 @@ interface CommittedRuntimeTomlConfigFixtureOptions {
   readonly skills?: CommittedRuntimeSkillApplication
   readonly routing?: CommittedRuntimeTomlConfig['application']['routing']
   readonly keeperOverlay?: CommittedRuntimeTomlConfig['application']['keeper_overlay']
+  readonly exactOutputRegistry?: CommittedRuntimeTomlConfig['application']['exact_output_registry']
 }
 
 const defaultRouting: CommittedRuntimeTomlConfig['application']['routing'] = {
@@ -80,6 +81,8 @@ export function committedRuntimeTomlConfigFixture(
       routing: options.routing ?? defaultRouting,
       keeper_overlay: options.keeperOverlay ?? defaultKeeperOverlay,
       skills,
+      exact_output_registry: options.exactOutputRegistry
+        ?? { status: 'applied', requires_restart: false },
     },
   }
 }

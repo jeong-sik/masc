@@ -5727,6 +5727,19 @@ let test_direct_assignment_route_surfaces_runtime_lock_release_warning () =
     "runtime_config_lock_release_unconfirmed"
     (json |> member "commit" |> member "warnings" |> index 0
      |> member "code" |> to_string);
+  (* Every commit response says what happened to the exact-output registry,
+     apart from routing: routing always applies, the registry only when one is
+     published (#38779). *)
+  let exact = json |> member "application" |> member "exact_output_registry" in
+  let expected_status, expected_restart =
+    match Runtime_exact_output_registry.current () with
+    | Ok _ -> "applied", false
+    | Error _ -> "unpublished", true
+  in
+  check string "commit reports the exact-output registry outcome" expected_status
+    (exact |> member "status" |> to_string);
+  check bool "an unpublished registry is reported as needing a restart" expected_restart
+    (exact |> member "requires_restart" |> to_bool);
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)

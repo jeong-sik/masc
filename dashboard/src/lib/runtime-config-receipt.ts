@@ -31,6 +31,9 @@ export function runtimeConfigCommitReceiptNotice(receipt: CommittedRuntimeTomlCo
   const runtimeNotice = keeperOverlay.requires_restart
     ? `${routingApplicationNotice(receipt.application.routing)} · Keeper 설정 ${keeperOverlay.pending_keys.length}개 재시작 대기`
     : routingApplicationNotice(receipt.application.routing)
+  const exactOutputRegistryNotice = receipt.application.exact_output_registry.status === 'applied'
+    ? 'Exact registry 적용됨'
+    : 'Exact registry 미게시 · 재시작 필요'
   const durabilityNotice = receipt.commit.durability === 'durable'
     ? '파일 내구성 확인됨'
     : '파일 교체됨 · 디렉터리 동기화 미확인'
@@ -39,6 +42,7 @@ export function runtimeConfigCommitReceiptNotice(receipt: CommittedRuntimeTomlCo
     `커밋 #${receipt.commit.order}`,
     runtimeNotice,
     skillApplicationNotice(receipt.application.skills),
+    exactOutputRegistryNotice,
     durabilityNotice,
   ].join(' · ')
 }

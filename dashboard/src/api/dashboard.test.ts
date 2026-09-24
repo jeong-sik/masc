@@ -4033,6 +4033,7 @@ describe('runtime.toml raw config API', () => {
           applied_keys: [],
           preempted_keys: [],
         },
+        exact_output_registry: { status: 'applied', requires_restart: false },
         ...application,
         skills: {
           state: 'published',
@@ -4225,7 +4226,37 @@ describe('runtime.toml raw config API', () => {
     await expect(saveRuntimeTomlConfig('[runtime]\n')).rejects.toThrow(/적용 영수증/)
   })
 
-  it.each(['routing', 'keeper_overlay'] as const)(
+  it.each([
+    [{ status: 'unpublished', requires_restart: true }, 'unpublished'],
+    [{ status: 'applied', requires_restart: true }, undefined],
+    [{ status: 'unpublished', requires_restart: false }, undefined],
+    [{ status: 'future', requires_restart: false }, undefined],
+  ] as const)(
+    'decodes the exact-output registry row %o only when status and restart agree',
+    async (exactOutputRegistry, expected) => {
+      const payload = committedPayload({
+        ok: true,
+        path: '/tmp/.masc/config/runtime.toml',
+        file_name: 'runtime.toml',
+        source_text: '[runtime]\n',
+        provider_protocols: providerProtocols,
+        application: { exact_output_registry: exactOutputRegistry },
+      })
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })))
+
+      if (expected === undefined) {
+        await expect(saveRuntimeTomlConfig('[runtime]\n')).rejects.toThrow(/적용 영수증/)
+      } else {
+        const result = await saveRuntimeTomlConfig('[runtime]\n')
+        expect(result.application.exact_output_registry.status).toBe(expected)
+      }
+    },
+  )
+
+  it.each(['routing', 'keeper_overlay', 'exact_output_registry'] as const)(
     'rejects a committed write response without %s application evidence',
     async (missingField) => {
       const payload = committedPayload({

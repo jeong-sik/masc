@@ -353,8 +353,24 @@ let runtime_config_commit_json (receipt : Runtime.config_commit_receipt) =
     ]
 ;;
 
+(* The exact-output registry is its own row, not part of [routing]: the
+   runtime cache and the registry are published by different code, and a
+   commit made while no registry is published leaves exact lanes unavailable
+   although routing applied (#38779). *)
+let exact_output_registry_application_json
+      (outcome : Runtime_exact_output_registry.replacement_outcome)
+  =
+  let status, requires_restart =
+    match outcome with
+    | Runtime_exact_output_registry.Registry_replaced -> "applied", false
+    | Runtime_exact_output_registry.Registry_unpublished -> "unpublished", true
+  in
+  `Assoc [ "status", `String status; "requires_restart", `Bool requires_restart ]
+;;
+
 let runtime_config_application_json
       ?skill_application
+      ?exact_output_registry
       ~operation
       ~routing_applied_at
       overlay
@@ -372,9 +388,13 @@ let runtime_config_application_json
           ] )
     ; "keeper_overlay", overlay
     ]
-     @ match skill_application with
+     @ (match skill_application with
+        | None -> []
+        | Some application -> [ "skills", skill_application_json application ])
+     @ match exact_output_registry with
        | None -> []
-       | Some application -> [ "skills", skill_application_json application ])
+       | Some outcome ->
+         [ "exact_output_registry", exact_output_registry_application_json outcome ])
 ;;
 
 let runtime_config_raw_json
@@ -398,6 +418,11 @@ let runtime_config_raw_json
     ; ( "application"
       , runtime_config_application_json
           ?skill_application
+          ?exact_output_registry:
+            (Option.map
+               (fun (receipt : Runtime.config_commit_receipt) ->
+                  receipt.exact_output_registry)
+               commit)
           ~operation
           ~routing_applied_at
           overlay )

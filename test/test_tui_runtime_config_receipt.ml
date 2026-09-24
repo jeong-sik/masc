@@ -40,7 +40,18 @@ let superseded ?(commit_order = "7") () =
     ]
 ;;
 
-let receipt ?(skills = published ()) ?(routing = routing) ?(keeper = keeper_overlay) () =
+let exact_output_registry ?(status = "applied") ?(requires_restart = false) () =
+  `Assoc [ "status", `String status; "requires_restart", `Bool requires_restart ]
+;;
+
+let receipt
+      ?(skills = published ())
+      ?(routing = routing)
+      ?(keeper = keeper_overlay)
+      ?(exact = exact_output_registry ())
+      ?(warnings = `List [])
+      ()
+  =
   `Assoc
     [ "ok", `Bool true
     ; "state", `String "committed"
@@ -49,6 +60,7 @@ let receipt ?(skills = published ()) ?(routing = routing) ?(keeper = keeper_over
           [ "source_revision", `String "source-7"
           ; "order", `String "7"
           ; "durability", `String "durable"
+          ; "warnings", warnings
           ] )
     ; ( "application"
       , `Assoc
@@ -56,6 +68,7 @@ let receipt ?(skills = published ()) ?(routing = routing) ?(keeper = keeper_over
           ; "routing", routing
           ; "keeper_overlay", keeper
           ; "skills", skills
+          ; "exact_output_registry", exact
           ] )
     ]
 ;;
@@ -112,6 +125,52 @@ let test_rejects_incomplete_application_receipts () =
   rejected (receipt ~keeper:(`Assoc []) ())
 ;;
 
+(* The server always writes [commit.warnings] and, on a commit, the
+   exact-output registry row; a decoder that refuses either refuses every
+   real receipt. *)
+let test_exact_output_registry_and_lock_warnings () =
+  let lock_warning =
+    `Assoc
+      [ "code", `String "runtime_config_lock_release_unconfirmed"
+      ; "detail", `String "lock file stayed"
+      ]
+  in
+  let applied = decoded (receipt ~warnings:(`List [ lock_warning ]) ()) in
+  (match applied.application.exact_output_registry with
+   | Receipt.Exact_output_registry_applied -> ()
+   | Receipt.Exact_output_registry_unpublished -> fail "applied registry changed variant");
+  check (list string) "lock warning codes"
+    [ "runtime_config_lock_release_unconfirmed" ]
+    (List.map (fun (warning : Receipt.lock_warning) -> warning.code) applied.lock_warnings);
+  check bool "summary names the applied registry" true
+    (String.ends_with ~suffix:"exact-registry-applied" (Receipt.summary applied));
+  let unpublished =
+    decoded
+      (receipt
+         ~exact:(exact_output_registry ~status:"unpublished" ~requires_restart:true ())
+         ())
+  in
+  (match unpublished.application.exact_output_registry with
+   | Receipt.Exact_output_registry_unpublished -> ()
+   | Receipt.Exact_output_registry_applied -> fail "unpublished registry read as applied");
+  rejected
+    (receipt ~exact:(exact_output_registry ~status:"unpublished" ~requires_restart:false ()) ());
+  rejected
+    (receipt ~exact:(exact_output_registry ~status:"applied" ~requires_restart:true ()) ());
+  rejected (receipt ~exact:(exact_output_registry ~status:"future" ()) ());
+  rejected (receipt ~warnings:(`List [ `Assoc [ "code", `String "x" ] ]) ());
+  match receipt () with
+  | `Assoc fields ->
+    (match List.assoc "application" fields with
+     | `Assoc application ->
+       rejected
+         (`Assoc
+            (("application", `Assoc (List.remove_assoc "exact_output_registry" application))
+             :: List.remove_assoc "application" fields))
+     | _ -> fail "application fixture must be an object")
+  | _ -> fail "receipt fixture must be an object"
+;;
+
 let test_rejects_false_success_receipt () =
   match receipt () with
   | `Assoc fields -> rejected (`Assoc (("ok", `Bool false) :: List.remove_assoc "ok" fields))
@@ -130,6 +189,8 @@ let () =
             test_rejects_open_or_incomplete_skill_variants
         ; test_case "application evidence is required" `Quick
             test_rejects_incomplete_application_receipts
+        ; test_case "exact-output registry row and lock warnings are decoded" `Quick
+            test_exact_output_registry_and_lock_warnings
         ; test_case "ok=false is rejected" `Quick test_rejects_false_success_receipt
         ] )
     ]

@@ -36,7 +36,12 @@ def commit_receipt() -> dict[str, object]:
     return {
         "ok": True,
         "state": "committed",
-        "commit": {"source_revision": "source-7", "order": "7", "durability": "durable"},
+        "commit": {
+            "source_revision": "source-7",
+            "order": "7",
+            "durability": "durable",
+            "warnings": [],
+        },
         "application": {
             "operation": "routing",
             "routing": {
@@ -60,6 +65,7 @@ def commit_receipt() -> dict[str, object]:
                 "catalog_revision": "catalog-7",
                 "config_state": "configured",
             },
+            "exact_output_registry": {"status": "applied", "requires_restart": False},
         },
     }
 

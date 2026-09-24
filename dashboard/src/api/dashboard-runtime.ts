@@ -1065,11 +1065,19 @@ export interface CommittedRuntimeConfigKeeperOverlayApplication
   status: RuntimeConfigKeeperOverlayStatus
 }
 
+// Whether the commit published an exact-output registry rebuilt from the
+// committed text. `unpublished` means no registry was published when the text
+// was committed, so exact lanes stay unavailable until a restart.
+export type CommittedRuntimeExactOutputRegistryApplication =
+  | { status: 'applied'; requires_restart: false }
+  | { status: 'unpublished'; requires_restart: true }
+
 export interface CommittedRuntimeConfigApplication extends RuntimeConfigApplication {
   operation: string
   routing: CommittedRuntimeConfigApplicationLane
   keeper_overlay: CommittedRuntimeConfigKeeperOverlayApplication
   skills: CommittedRuntimeSkillApplication
+  exact_output_registry: CommittedRuntimeExactOutputRegistryApplication
 }
 
 export interface RuntimeConfigKeeperOverlayApplication extends RuntimeConfigApplicationLane {
@@ -1942,17 +1950,43 @@ function decodeCommittedRuntimeKeeperOverlay(
   }
 }
 
+function decodeCommittedRuntimeExactOutputRegistry(
+  raw: unknown,
+): CommittedRuntimeExactOutputRegistryApplication | undefined {
+  if (!hasExactKeys(raw, ['status', 'requires_restart'])) return undefined
+  if (raw.status === 'applied' && raw.requires_restart === false) {
+    return { status: 'applied', requires_restart: false }
+  }
+  if (raw.status === 'unpublished' && raw.requires_restart === true) {
+    return { status: 'unpublished', requires_restart: true }
+  }
+  return undefined
+}
+
 function decodeCommittedRuntimeConfigApplication(
   raw: unknown,
   commit: RuntimeConfigCommit,
 ): CommittedRuntimeConfigApplication | undefined {
-  if (!hasExactKeys(raw, ['operation', 'routing', 'keeper_overlay', 'skills'])) return undefined
+  if (!hasExactKeys(raw, [
+    'operation',
+    'routing',
+    'keeper_overlay',
+    'skills',
+    'exact_output_registry',
+  ])) return undefined
   const operation = asString(raw.operation)
   const routing = decodeCommittedRuntimeApplicationLane(raw.routing)
   const keeperOverlay = decodeCommittedRuntimeKeeperOverlay(raw.keeper_overlay)
   const skills = decodeCommittedRuntimeSkillApplication(raw.skills, commit)
-  if (!operation || !routing || !keeperOverlay || !skills) return undefined
-  return { operation, routing, keeper_overlay: keeperOverlay, skills }
+  const exactOutputRegistry = decodeCommittedRuntimeExactOutputRegistry(raw.exact_output_registry)
+  if (!operation || !routing || !keeperOverlay || !skills || !exactOutputRegistry) return undefined
+  return {
+    operation,
+    routing,
+    keeper_overlay: keeperOverlay,
+    skills,
+    exact_output_registry: exactOutputRegistry,
+  }
 }
 
 export function decodeCommittedRuntimeTomlConfig(raw: unknown): CommittedRuntimeTomlConfig {

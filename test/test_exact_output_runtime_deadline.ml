@@ -12,13 +12,13 @@ let requirement =
     ~schema:(`Assoc [ "type", `String "object" ])
     ~minimum_guarantee:EO.Json_syntax
 
-let runtime_toml ~connect ~body =
+let runtime_toml ?(bindings = [ "probe" ]) ?(default = "probe") ~connect ~body () =
   let deadline key = function
     | None -> ""
     | Some value -> Printf.sprintf "%s = %.1f\n" key value
   in
   Printf.sprintf {|[runtime]
-default = "openai-responses.probe"
+default = "openai-responses.%s"
 %s
 [providers.openai-responses]
 protocol = "openai-compatible-http"
@@ -27,10 +27,8 @@ endpoint = "https://api.openai.com"
 [providers.openai-responses.credentials]
 type = "env"
 key = "OPENAI_API_KEY"
-[models.probe]
-api-name = "gpt-5.6-luna"
-[openai-responses.probe]
-|}
+%s|}
+    default
     (String.concat "\n"
        (List.map
           (fun lane -> Printf.sprintf "[runtime.exact_output_lanes.%s]\nslots = [\"openai-responses.probe\"]\nmax_output_tokens = 4096" lane)
@@ -38,6 +36,14 @@ api-name = "gpt-5.6-luna"
              (lane_id :: Server_runtime_bootstrap.mandatory_exact_output_lane_ids))))
     (deadline Runtime_schema.connect_timeout_s_key connect)
     (deadline Runtime_schema.exact_body_timeout_s_key body)
+    (String.concat ""
+       (List.map
+          (fun binding ->
+             Printf.sprintf
+               "[models.%s]\napi-name = \"gpt-5.6-luna\"\n[openai-responses.%s]\n"
+               binding
+               binding)
+          bindings))
 
 let ready target =
   (match EO.project_request_body ~target ~messages requirement with
@@ -82,7 +88,13 @@ let expected_plan ~connect ~body =
   |> fun admitted -> EO.admitted_target_with_max_tokens admitted 4096
   |> ready
 
-let with_runtime_root f =
+let published_target () =
+  let registry = Registry.current () |> require_ok "published registry" in
+  match Registry.resolve_lane registry ~lane_id with
+  | Ok { selected_slots = [ slot ]; _ } -> slot.admitted_target
+  | _ -> fail "expected one admitted Librarian slot"
+
+let with_runtime_fixture f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
   Masc_test_deps.with_process_env "OPENAI_API_KEY" (Some "synthetic-no-network") @@ fun () ->
@@ -102,12 +114,24 @@ let with_runtime_root f =
     Config_dir_resolver.reset ();
     Fs_compat.remove_tree root) @@ fun () ->
   Llm_provider.Model_catalog.clear_global ();
-  let load ~connect ~body =
-    let path = Filename.concat root "runtime.toml" in
-    Fs_compat.save_file path (runtime_toml ~connect ~body);
+  let path = Filename.concat root "runtime.toml" in
+  (* What a server does at boot: load the runtimes, then publish the
+     exact-output registry from them. *)
+  let boot text =
+    Fs_compat.save_file path text;
     (match Runtime.init_default ~config_path:path with
      | Ok () -> ()
      | Error detail -> failf "runtime initialization: %s" detail);
+    Server_runtime_bootstrap.For_testing.configure_exact_output_registry ~config_root:root ()
+  in
+  (* What POST /api/v1/runtime/config/raw does once the text validates. *)
+  let save text = Runtime.save_config_text ~runtime_config_path:path text in
+  f ~path ~boot ~save
+
+let with_runtime f =
+  with_runtime_fixture @@ fun ~path:_ ~boot ~save:_ ->
+  let load ~connect ~body =
+    boot (runtime_toml ~connect ~body ());
     let runtime = match Runtime.get_runtimes () with
       | [ runtime ] -> runtime | _ -> fail "expected one runtime" in
     check (option (float 0.0)) "declared Exact body deadline" body
@@ -124,15 +148,9 @@ let with_runtime_root f =
     let declared = entry |> member "declared_spec" |> member "provider" in
     check bool "dashboard exposes the declared Exact deadline" true
       ((declared |> member "exact_body_timeout_s") = Json_util.float_opt_to_json body);
-    Server_runtime_bootstrap.For_testing.configure_exact_output_registry ~config_root:root ();
-    let registry = Registry.current () |> require_ok "published registry" in
-    match Registry.resolve_lane registry ~lane_id with
-    | Ok { selected_slots = [ slot ]; _ } -> slot.admitted_target
-    | _ -> fail "expected one admitted Librarian slot"
+    published_target ()
   in
-  f ~root load
-
-let with_runtime f = with_runtime_root (fun ~root:_ load -> f load)
+  f load
 
 let test_body_only_declaration_reaches_exact () =
   with_runtime @@ fun load ->
@@ -191,9 +209,8 @@ let lane_unavailable registry lane =
    unavailable on its own, and the registry still publishes because an
    emptied mandatory lane is not required at publication. *)
 let test_connect_only_declaration_is_left_out_at_boot () =
-  with_runtime_root @@ fun ~root _load ->
-  let path = Filename.concat root "runtime.toml" in
-  Fs_compat.save_file path (runtime_toml ~connect:(Some 17.5) ~body:None);
+  with_runtime_fixture @@ fun ~path ~boot:_ ~save:_ ->
+  Fs_compat.save_file path (runtime_toml ~connect:(Some 17.5) ~body:None ());
   (match Runtime.init_default ~config_path:path with
    | Ok () -> ()
    | Error detail -> failf "boot must not refuse a connect-only provider: %s" detail);
@@ -329,6 +346,51 @@ let test_missing_body_deadline_refusal_names_provider_and_key () =
       ; "response headers"
       ]
 
+(* A saved [exact-body-timeout-s] reaches the published Exact target with the
+   save, not at the next restart. On 2026-09-24 a key saved at 22:53:59 KST
+   answered [applied] while requests kept the boot-time target (#38779). *)
+let test_saved_body_deadline_reaches_published_target () =
+  with_runtime_fixture @@ fun ~path:_ ~boot ~save ->
+  boot (runtime_toml ~connect:None ~body:(Some 91.5) ());
+  check (option (float 0.0)) "boot publishes the declared body deadline" (Some 91.5)
+    (EO.body_timeout_s (ready (published_target ())));
+  (match save (runtime_toml ~connect:None ~body:(Some 55.5) ()) with
+   | Ok receipt ->
+     (match receipt.Runtime.exact_output_registry with
+      | Registry.Registry_replaced -> ()
+      | Registry.Registry_unpublished ->
+        fail "a save over a published registry reported it unpublished")
+   | Error detail -> failf "save refused: %s" detail);
+  check (option (float 0.0)) "the saved body deadline reaches the published target"
+    (Some 55.5) (EO.body_timeout_s (ready (published_target ())))
+
+(* A save whose text the registry cannot be rebuilt from is refused before the
+   write. Keeping the published registry after the write would run requests on
+   a binding the file no longer has; withdrawing it would turn the save into
+   an outage of every exact lane. Here the text removes the binding every
+   mandatory lane names while the lane still names it. *)
+let test_save_that_breaks_the_registry_is_refused () =
+  with_runtime_fixture @@ fun ~path ~boot ~save ->
+  let booted =
+    runtime_toml ~bindings:[ "probe"; "other" ] ~connect:None ~body:(Some 91.5) ()
+  in
+  boot booted;
+  let before = Registry.current () |> require_ok "published registry" in
+  (match
+     save
+       (runtime_toml
+          ~bindings:[ "other" ]
+          ~default:"other"
+          ~connect:None
+          ~body:(Some 91.5)
+          ())
+   with
+   | Ok _ -> fail "a save that leaves mandatory exact lanes without a target was applied"
+   | Error _ -> ());
+  check string "the refused save leaves the file as it was" booted (Fs_compat.load_file path);
+  let after = Registry.current () |> require_ok "registry after the refused save" in
+  check bool "the refused save leaves the published registry in place" true (before == after)
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -344,4 +406,9 @@ let () =
         test_case "a lane emptied by gaps is unavailable alone" `Quick
           test_a_lane_emptied_by_gaps_is_unavailable_alone;
         test_case "missing body deadline refusal names provider and key" `Quick
-          test_missing_body_deadline_refusal_names_provider_and_key ] ]
+          test_missing_body_deadline_refusal_names_provider_and_key ];
+      "config commit", [
+        test_case "a saved body deadline reaches the published target" `Quick
+          test_saved_body_deadline_reaches_published_target;
+        test_case "a save that breaks the registry is refused before the write" `Quick
+          test_save_that_breaks_the_registry_is_refused ] ]

@@ -27,6 +27,9 @@ type publication_error =
       ; cause : Agent_core.Exact_output.target_ref_error
       }
   | Required_lane_unavailable of { lane_id : string }
+  | Resolver_snapshot_rejected of Agent_core.Exact_output.resolver_snapshot_error
+      (** The resolver snapshot for a replacement could not be built from the
+          text being committed. *)
 
 type rejected_slot =
   { lane_id : string
@@ -54,6 +57,16 @@ type rejected_slot_diagnosis =
           mistyped. *)
 
 type prepared_replacement
+
+(** What committing a prepared replacement does to the published registry. *)
+type replacement_outcome =
+  | Registry_replaced
+      (** A new registry, admitted against a resolver snapshot built from the
+          committed text, is published with the write. *)
+  | Registry_unpublished
+      (** No registry was published when the replacement was prepared, and the
+          replacement publishes none: only boot and setup resume publish the
+          first one. *)
 
 type ('not_committed, 'committed) replacement_effect =
   | Not_committed of 'not_committed
@@ -103,11 +116,21 @@ val unpublish : unit -> (unit, publication_error) result
 
 val prepare_replacement
   :  lanes:Runtime_schema.exact_output_lane_decl list
+  -> load_resolver_snapshot:
+       (unit
+        -> ( Agent_core.Exact_output.resolver_snapshot
+           , Agent_core.Exact_output.resolver_snapshot_error )
+           result)
   -> (prepared_replacement, publication_error) result
-(** Purely admit [lanes] against the currently published frozen resolver and
-    return an immutable candidate tied to that exact base registry identity.
-    This performs no credential resolution, global mutation, or publication
+(** Admit [lanes] against the resolver snapshot [load_resolver_snapshot]
+    builds, and return an immutable candidate tied to the currently published
+    registry's identity. The snapshot is built only when a registry is
+    published; the candidate never reuses a handle admitted against the
+    previous snapshot, so a changed binding (its body deadline, its endpoint)
+    reaches the candidate. This performs no global mutation or publication
     fence. When no registry exists, only an empty lane set can be prepared. *)
+
+val replacement_outcome : prepared_replacement -> replacement_outcome
 
 val transact_replacement
   :  prepared_replacement
@@ -171,6 +194,12 @@ val catalog_generation_fingerprint : t -> string
     credentials nor serialized provider configuration. *)
 
 val publication_error_to_string : publication_error -> string
+val resolver_snapshot_error_to_string
+  :  Agent_core.Exact_output.resolver_snapshot_error
+  -> string
+val binding_component_to_string
+  :  Agent_core.Exact_output.resolver_binding_component
+  -> string
 val lane_resolution_error_to_string : lane_resolution_error -> string
 
 module For_testing : sig

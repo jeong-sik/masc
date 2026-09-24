@@ -38,6 +38,10 @@ type keeper_overlay_status =
   | Keeper_preempted_by_env
   | Keeper_mixed
 
+type exact_output_registry_status =
+  | Exact_output_registry_applied
+  | Exact_output_registry_unpublished
+
 type applied_at =
   | Not_applied
   | Applied_at_string of string
@@ -57,12 +61,19 @@ type application =
   ; keeper_applied_keys : string list
   ; keeper_preempted_keys : string list
   ; skills : skill_application
+  ; exact_output_registry : exact_output_registry_status
+  }
+
+type lock_warning =
+  { code : string
+  ; detail : string
   }
 
 type t =
   { source_revision : string
   ; order : string
   ; durability : durability
+  ; lock_warnings : lock_warning list
   ; application : application
   }
 

@@ -93,7 +93,8 @@ type publication_error =
       ; cause : Exact_output.target_ref_error
       }
   | Required_lane_unavailable of { lane_id : string }
- 
+  | Resolver_snapshot_rejected of Exact_output.resolver_snapshot_error
+
 type selected_slot =
   { slot_id : string
   ; admitted_target : Exact_output.admitted_target
@@ -112,6 +113,10 @@ type prepared_replacement =
   { base : t option
   ; candidate : t option
   }
+
+type replacement_outcome =
+  | Registry_replaced
+  | Registry_unpublished
 
 type ('not_committed, 'committed) replacement_effect =
   | Not_committed of 'not_committed
@@ -218,25 +223,6 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
   loop 1 String_set.empty admitted_by_id [] [] lanes
 ;;
 
-let rec same_slot_ids left_slot_ids right_slot_ids =
-  match left_slot_ids, right_slot_ids with
-  | [], [] -> true
-  | left :: left_rest, right :: right_rest ->
-    String.equal left right && same_slot_ids left_rest right_rest
-  | [], _ :: _ | _ :: _, [] -> false
-;;
-
-let rec same_lane_declarations left_lanes right_lanes =
-  match left_lanes, right_lanes with
-  | [], [] -> true
-  | left :: left_rest, right :: right_rest ->
-    String.equal left.Runtime_schema.id right.Runtime_schema.id
-    && same_slot_ids left.slot_ids right.slot_ids
-    && same_slot_ids left.cli_slot_ids right.cli_slot_ids
-    && same_lane_declarations left_rest right_rest
-  | [], _ :: _ | _ :: _, [] -> false
-;;
-
 let validate_required_lanes required_lane_ids admitted_lanes =
   let rec loop = function
     | [] -> Ok ()
@@ -252,18 +238,6 @@ let validate_required_lanes required_lane_ids admitted_lanes =
          Error (Required_lane_unavailable { lane_id }))
   in
   loop required_lane_ids
-;;
-
-let admitted_by_id admitted_lanes =
-  List.fold_left
-    (fun by_id lane ->
-       List.fold_left
-         (fun by_id (slot : admitted_slot) ->
-            String_map.add slot.slot_id slot.admitted_target by_id)
-         by_id
-         lane.slots)
-    String_map.empty
-    admitted_lanes
 ;;
 
 let with_publication_lock f =
@@ -317,35 +291,45 @@ let reserve candidate =
   Ok reservation
 ;;
 
-let prepare_replacement ~lanes =
+(* Every replacement admits its lanes against a resolver snapshot built from
+   the text being committed. A snapshot frozen at boot answered a saved
+   provider change -- a new [exact-body-timeout-s], a new binding -- with the
+   targets the process started on, while the save reported the change applied
+   (#38779). Handles admitted against the previous snapshot are never reused,
+   because they carry that snapshot's binding. *)
+let prepare_replacement ~lanes ~load_resolver_snapshot =
   let base = Atomic.get published in
   match base, lanes with
   | None, [] -> Ok { base; candidate = None }
   | None, _ :: _ -> Error Registry_not_published
   | Some previous, _ ->
-    if same_lane_declarations previous.declared_lanes lanes
-    then Ok { base; candidate = Some previous }
-    else (
-      let* exact_output_lanes, rejected_slots =
-        admit_lanes
-          ~admitted_by_id:(admitted_by_id previous.exact_output_lanes)
-          previous.resolver_snapshot
-          lanes
-      in
-      let* () =
-        validate_required_lanes previous.required_lane_ids exact_output_lanes
-      in
-      Ok
-        { base
-        ; candidate =
-            Some
-              { resolver_snapshot = previous.resolver_snapshot
-              ; declared_lanes = lanes
-              ; exact_output_lanes
-              ; rejected_slots
-              ; required_lane_ids = previous.required_lane_ids
-              }
-        })
+    let* resolver_snapshot =
+      load_resolver_snapshot ()
+      |> Result.map_error (fun error -> Resolver_snapshot_rejected error)
+    in
+    let* exact_output_lanes, rejected_slots =
+      admit_lanes ~admitted_by_id:String_map.empty resolver_snapshot lanes
+    in
+    let* () =
+      validate_required_lanes previous.required_lane_ids exact_output_lanes
+    in
+    Ok
+      { base
+      ; candidate =
+          Some
+            { resolver_snapshot
+            ; declared_lanes = lanes
+            ; exact_output_lanes
+            ; rejected_slots
+            ; required_lane_ids = previous.required_lane_ids
+            }
+      }
+;;
+
+let replacement_outcome (prepared : prepared_replacement) =
+  match prepared.candidate with
+  | Some _ -> Registry_replaced
+  | None -> Registry_unpublished
 ;;
 
 let same_registry_identity left right =
@@ -488,6 +472,59 @@ let resolve_lane registry ~lane_id =
       Ok { selected_slots; cli_slots = lane.cli_slots }
 ;;
 
+let catalog_source_to_string = function
+  | Exact_output.Embedded_catalog -> "embedded"
+  | Exact_output.Full_replacement_catalog -> "full replacement"
+;;
+
+let collision_to_string = function
+  | Exact_output.Duplicate_provider_identity -> "duplicate provider identity"
+  | Exact_output.Duplicate_model_identity -> "duplicate model identity"
+  | Exact_output.Duplicate_target_identity -> "duplicate target identity"
+  | Exact_output.Provider_alias_shadow -> "provider alias shadow"
+;;
+
+let binding_component_to_string = function
+  | Exact_output.Target_provider -> "provider"
+  | Exact_output.Target_model -> "model"
+;;
+
+let endpoint_error_to_string = function
+  | Exact_output.Malformed_base_url -> "malformed base URL"
+  | Exact_output.Base_url_userinfo_not_allowed -> "base URL userinfo is not allowed"
+  | Exact_output.Base_url_query_not_allowed -> "base URL query is not allowed"
+  | Exact_output.Base_url_fragment_not_allowed -> "base URL fragment is not allowed"
+  | Exact_output.Invalid_request_path -> "invalid request path"
+  | Exact_output.Unsupported_gemini_request_path ->
+    "Gemini exact targets require the generated endpoint surface"
+  | Exact_output.Invalid_gemini_model_path -> "invalid Gemini model path"
+;;
+
+let resolver_snapshot_error_to_string = function
+  | Exact_output.Catalog_read_failed { path; detail } ->
+    Printf.sprintf "catalog read failed (%s): %s" path detail
+  | Exact_output.Catalog_parse_failed { source; detail } ->
+    Printf.sprintf "%s catalog parse failed: %s" (catalog_source_to_string source) detail
+  | Exact_output.Target_catalog_invalid { source; detail } ->
+    Printf.sprintf
+      "%s target catalog is invalid: %s"
+      (catalog_source_to_string source)
+      detail
+  | Exact_output.Catalog_collision collision -> collision_to_string collision
+  | Exact_output.Target_binding_missing { target_ref; component } ->
+    Printf.sprintf
+      "target %S is missing its %s binding"
+      target_ref
+      (binding_component_to_string component)
+  | Exact_output.Target_endpoint_invalid { target_ref; cause } ->
+    Printf.sprintf
+      "target %S endpoint is invalid: %s"
+      target_ref
+      (endpoint_error_to_string cause)
+  | Exact_output.Environment_read_failed { environment_variable } ->
+    Printf.sprintf "failed to read environment variable %s" environment_variable
+;;
+
 let publication_error_to_string = function
   | Registry_not_published -> "exact-output registry has not been published"
   | Publication_busy -> "exact-output registry publication is reserved"
@@ -523,6 +560,8 @@ let publication_error_to_string = function
     Printf.sprintf
       "required exact-output lane %S has no admitted target in the frozen catalog"
       lane_id
+  | Resolver_snapshot_rejected error ->
+    "exact-output resolver snapshot: " ^ resolver_snapshot_error_to_string error
 ;;
 
 let lane_resolution_error_to_string = function

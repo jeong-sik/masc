@@ -125,6 +125,7 @@ type config_commit_receipt =
   ; durability : config_durability
   ; order : config_commit_order
   ; lock_warnings : config_lock_warning list
+  ; exact_output_registry : Runtime_exact_output_registry.replacement_outcome
   }
 
 and config_lock_warning =
@@ -1748,6 +1749,111 @@ let init_default ~config_path =
   set_loaded ~config_path ~exact_output_lane_decls loaded;
   Ok ()
 
+(* An exact-output slot names a runtime binding: the lane configuration and the
+   binding table use the same "<provider>.<model>" id. Restating that binding in
+   a second file is how a slot came to point at a declaration nobody had
+   written, and how a binding's declared connect timeout stopped reaching the
+   slot that runs on it (#37004). The slots are the bindings.
+
+   The binding itself travels, not a list of fields read off it. Handing over a
+   subset left the exact request without the connect deadline (#37004), then
+   without the declared effort (#37326), then on a different wire than the
+   Keeper's own requests (#37674) -- three turns of the same field going
+   missing at this boundary. *)
+let exact_output_targets runtimes =
+  (* An exact-output slot resolves against the AGENT_CORE catalog, which speaks
+     only of endpoints. A subscription CLI has none — it is a local binary named
+     by [command] — so declaring one as a target only to have the binding
+     resolver reject it reports a missing catalog provider where the truth is
+     that this kind of runtime does no exact output. *)
+  List.filter_map
+    (fun (rt : t) ->
+       match rt.execution with
+       | Runtime_execution.Agent_core config ->
+         Some
+           ({ target_ref = rt.id
+            ; (* [enable_thinking] is a per-turn control the Keeper path sets as
+                 it builds each request, so the binding config carries none yet.
+                 An exact request has one shape and asks once, here, from the
+                 same row the Keeper reads. *)
+              binding =
+                { config with
+                  Llm_provider.Provider_config.enable_thinking =
+                    rt.model.Runtime_schema.thinking_support
+                }
+            ; (* A slot's credential is the key its binding already resolved --
+                 the one the Keeper's requests carry, whatever source the
+                 binding named. Handing over the environment name instead sent
+                 the resolver back to read it a second time, and a binding fed
+                 from a file or an inline value had no name to hand over, so it
+                 reached the wire with no key at all. An environment name that
+                 resolved to nothing stays named, so the refusal can say which. *)
+              credential =
+                (let key = config.Llm_provider.Provider_config.api_key in
+                 match rt.provider.Runtime_schema.credentials with
+                 | Some (Runtime_schema.Env name) when Llm_provider.Secret.is_empty key ->
+                   Agent_core.Exact_output.Credential_unresolved
+                     { environment_variable = name }
+                 | Some (Runtime_schema.Env _ | Runtime_schema.File _ | Runtime_schema.Inline _)
+                   -> Agent_core.Exact_output.Credential_resolved key
+                 | None when Llm_provider.Secret.is_empty key ->
+                   Agent_core.Exact_output.Credential_not_declared
+                 | None -> Agent_core.Exact_output.Credential_resolved key)
+            ; body_timeout_s = rt.provider.Runtime_schema.exact_body_timeout_s
+            } : Agent_core.Exact_output.declared_target)
+       | Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Antigravity_cli _ -> None)
+    runtimes
+;;
+
+(* Where the exact-output targets come from, read once per build: boot and
+   every config commit call this with the runtimes and lanes they are about
+   to publish. Under the runtime bindings, a slot left out by rule 3 (its
+   provider declares no [exact-body-timeout-s]) is not handed to the
+   resolver, so the registry leaves it out; the lane keeps its other slots
+   and its cli_slots. *)
+let exact_output_resolver_catalog ~exact_output_lane_decls runtimes =
+  match exact_output_target_source () with
+  | Replacement_catalog_targets { path } ->
+    Agent_core.Exact_output.Full_replacement_file path, " from full replacement " ^ path
+  | Runtime_binding_targets ->
+    let gaps =
+      exact_slot_body_deadline_gaps_of
+        ~target_source:Runtime_binding_targets
+        runtimes
+        exact_output_lane_decls
+    in
+    let targets =
+      exact_output_targets runtimes
+      |> List.filter (fun (target : Agent_core.Exact_output.declared_target) ->
+        not
+          (List.exists
+             (fun (gap : exact_slot_body_deadline_gap) ->
+                String.equal gap.slot_id target.target_ref)
+             gaps))
+    in
+    ( Agent_core.Exact_output.Embedded_with_targets targets
+    , Printf.sprintf
+        " from AGENT_CORE embedded catalog with %d runtime binding(s) as targets"
+        (List.length targets) )
+;;
+
+let load_exact_output_resolver_snapshot catalog =
+  let io : Agent_core.Exact_output.resolver_io =
+    { getenv =
+        (fun name ->
+          try Ok (Sys.getenv_opt name) with
+          | Sys_error _ | Invalid_argument _ -> Error ())
+    }
+  in
+  Agent_core.Exact_output.load_resolver_snapshot
+    ~io
+    ~target_binding_policy:Agent_core.Exact_output.Exclude_unbound_targets
+    ~catalog
+    ()
+;;
+
 let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
   match
     Runtime_exact_output_registry.publish
@@ -2831,7 +2937,7 @@ let materialize_runtime_config_text ~config_path content =
 let runtime_config_commit_order = ref Int64.zero
 let runtime_config_commit_order_mu = Stdlib.Mutex.create ()
 
-let committed_receipt ~observation ~durability =
+let committed_receipt ~observation ~durability ~exact_output_registry =
   let order =
     (* Process-global publication order spans every runtime.toml authority.
        The file lock is path-scoped, so distinct config paths can commit on
@@ -2844,6 +2950,7 @@ let committed_receipt ~observation ~durability =
   ; durability
   ; order = Config_commit_order order
   ; lock_warnings = []
+  ; exact_output_registry
   }
 ;;
 
@@ -2909,6 +3016,7 @@ let with_manifest_config_lock ~runtime_config_path ~manifest_path action =
 let runtime_config_atomic_failure
     ~replacement_visible
     ~observation
+    ~exact_output_registry
     (failure : Fs_compat.atomic_replace_failure)
   =
   if replacement_visible
@@ -2917,7 +3025,8 @@ let runtime_config_atomic_failure
     Ok
       (committed_receipt
          ~observation
-         ~durability:(Durability_unconfirmed { detail }))
+         ~durability:(Durability_unconfirmed { detail })
+         ~exact_output_registry)
   else
     match failure.Fs_compat.exception_ with
     | Eio.Cancel.Cancelled _ ->
@@ -3203,55 +3312,66 @@ let commit_runtime_config_text
   let* loaded, exact_output_lanes, startup_degradation, declared_media_failover =
     validate_save_text ~config_path:path content
   in
+  let publish_runtimes () =
+    set_loaded
+      ?startup_degradation
+      ~declared_media_failover
+      ~config_path:path
+      ~exact_output_lane_decls:exact_output_lanes
+      loaded
+  in
+  (* The registry is rebuilt from the runtimes this text loads, the same
+     derivation boot publishes from, so a saved binding reaches exact requests
+     with the write rather than at the next restart (#38779). *)
+  let load_resolver_snapshot () =
+    let runtimes, _, _, _, _, _, _, _ = loaded in
+    exact_output_resolver_catalog ~exact_output_lane_decls:exact_output_lanes runtimes
+    |> fst
+    |> load_exact_output_resolver_snapshot
+  in
   match
-    Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
+    Runtime_exact_output_registry.prepare_replacement
+      ~lanes:exact_output_lanes
+      ~load_resolver_snapshot
   with
   | Error Runtime_exact_output_registry.Registry_not_published ->
+    let exact_output_registry = Runtime_exact_output_registry.Registry_unpublished in
     (match replace_file path content with
      | Ok () ->
-       set_loaded
-         ?startup_degradation
-         ~declared_media_failover
-         ~config_path:path
-         ~exact_output_lane_decls:exact_output_lanes
-         loaded;
-       Ok (committed_receipt ~observation ~durability:Durable)
+       publish_runtimes ();
+       Ok (committed_receipt ~observation ~durability:Durable ~exact_output_registry)
      | Error (failure : Fs_compat.atomic_replace_failure) ->
        (match failure.stage with
         | Fs_compat.Before_rename ->
           runtime_config_atomic_failure
             ~replacement_visible:false
             ~observation
+            ~exact_output_registry
             failure
         | Fs_compat.After_rename ->
-          set_loaded
-            ?startup_degradation
-            ~declared_media_failover
-            ~config_path:path
-            ~exact_output_lane_decls:exact_output_lanes
-            loaded;
+          publish_runtimes ();
           runtime_config_atomic_failure
             ~replacement_visible:true
             ~observation
+            ~exact_output_registry
             failure))
   | Error error ->
+    (* Refused before the write: the file and the published registry both
+       stay as they were, so neither describes a config the other does not. *)
     Error
       ("exact-output registry replacement rejected: "
        ^ Runtime_exact_output_registry.publication_error_to_string error)
   | Ok prepared_replacement ->
+    let exact_output_registry =
+      Runtime_exact_output_registry.replacement_outcome prepared_replacement
+    in
     (match
        Runtime_exact_output_registry.transact_replacement
          prepared_replacement
          ~apply_write:
            (runtime_config_write_outcome
               ~replace_file
-              ~on_replacement_visible:(fun () ->
-                set_loaded
-                  ?startup_degradation
-                  ~declared_media_failover
-                  ~config_path:path
-                  ~exact_output_lane_decls:exact_output_lanes
-                  loaded)
+              ~on_replacement_visible:publish_runtimes
               ~path
               content)
      with
@@ -3263,15 +3383,17 @@ let commit_runtime_config_text
        runtime_config_atomic_failure
          ~replacement_visible:false
          ~observation
+         ~exact_output_registry
          failure
      | Ok (Runtime_exact_output_registry.Committed `Durable) ->
-       Ok (committed_receipt ~observation ~durability:Durable)
+       Ok (committed_receipt ~observation ~durability:Durable ~exact_output_registry)
      | Ok
          (Runtime_exact_output_registry.Committed
            (`Durability_unconfirmed failure)) ->
        runtime_config_atomic_failure
          ~replacement_visible:true
          ~observation
+         ~exact_output_registry
          failure)
 ;;
 

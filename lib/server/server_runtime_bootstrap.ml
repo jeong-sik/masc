@@ -94,63 +94,6 @@ let config_load_failure_diagnostic ~detail =
      Fix the configuration above or move the file aside. Run masc runtime-verify <RUNTIME_ID> to re-check a model connection afterwards."
     detail
 
-let exact_output_catalog_source_to_string = function
-  | Exact_output.Embedded_catalog -> "embedded"
-  | Exact_output.Full_replacement_catalog -> "full replacement"
-;;
-
-let exact_output_collision_to_string = function
-  | Exact_output.Duplicate_provider_identity -> "duplicate provider identity"
-  | Exact_output.Duplicate_model_identity -> "duplicate model identity"
-  | Exact_output.Duplicate_target_identity -> "duplicate target identity"
-  | Exact_output.Provider_alias_shadow -> "provider alias shadow"
-;;
-
-let exact_output_binding_component_to_string = function
-  | Exact_output.Target_provider -> "provider"
-  | Exact_output.Target_model -> "model"
-;;
-
-let exact_output_endpoint_error_to_string = function
-  | Exact_output.Malformed_base_url -> "malformed base URL"
-  | Exact_output.Base_url_userinfo_not_allowed -> "base URL userinfo is not allowed"
-  | Exact_output.Base_url_query_not_allowed -> "base URL query is not allowed"
-  | Exact_output.Base_url_fragment_not_allowed -> "base URL fragment is not allowed"
-  | Exact_output.Invalid_request_path -> "invalid request path"
-  | Exact_output.Unsupported_gemini_request_path ->
-    "Gemini exact targets require the generated endpoint surface"
-  | Exact_output.Invalid_gemini_model_path -> "invalid Gemini model path"
-;;
-
-let exact_output_snapshot_error_to_string = function
-  | Exact_output.Catalog_read_failed { path; detail } ->
-    Printf.sprintf "catalog read failed (%s): %s" path detail
-  | Exact_output.Catalog_parse_failed { source; detail } ->
-    Printf.sprintf
-      "%s catalog parse failed: %s"
-      (exact_output_catalog_source_to_string source)
-      detail
-  | Exact_output.Target_catalog_invalid { source; detail } ->
-    Printf.sprintf
-      "%s target catalog is invalid: %s"
-      (exact_output_catalog_source_to_string source)
-      detail
-  | Exact_output.Catalog_collision collision ->
-    exact_output_collision_to_string collision
-  | Exact_output.Target_binding_missing { target_ref; component } ->
-    Printf.sprintf
-      "target %S is missing its %s binding"
-      target_ref
-      (exact_output_binding_component_to_string component)
-  | Exact_output.Target_endpoint_invalid { target_ref; cause } ->
-    Printf.sprintf
-      "target %S endpoint is invalid: %s"
-      target_ref
-      (exact_output_endpoint_error_to_string cause)
-  | Exact_output.Environment_read_failed { environment_variable } ->
-    Printf.sprintf "failed to read environment variable %s" environment_variable
-;;
-
 let load_exact_output_lane_declarations ?config_root () =
   let runtime_config_path =
     match config_root with
@@ -382,7 +325,7 @@ let warn_rejected_exact_output_bindings resolver_snapshot =
        Log.Server.warn
          "exact_output: target %S excluded from the frozen resolver because its %s binding is missing; lane admission will decide whether required targets remain"
          binding.target_ref
-         (exact_output_binding_component_to_string binding.component))
+         (Runtime_exact_output_registry.binding_component_to_string binding.component))
     (Exact_output.resolver_rejected_target_bindings resolver_snapshot)
 ;;
 
@@ -402,64 +345,6 @@ let warn_optional_exact_output_lane registry ~(lane : Runtime.exact_lane) ~featu
       "exact_output: %s is degraded until [runtime.exact_output_lanes.%s] is configured with AGENT_CORE target refs"
       feature
       lane_id
-;;
-
-(* An exact-output slot names a runtime binding: the lane configuration and the
-   binding table use the same "<provider>.<model>" id. Restating that binding in
-   a second file is how a slot came to point at a declaration nobody had
-   written, and how a binding's declared connect timeout stopped reaching the
-   slot that runs on it (#37004). The slots are the bindings.
-
-   The binding itself travels, not a list of fields read off it. Handing over a
-   subset left the exact request without the connect deadline (#37004), then
-   without the declared effort (#37326), then on a different wire than the
-   Keeper's own requests (#37674) -- three turns of the same field going
-   missing at this boundary. *)
-let exact_output_targets_of_runtimes () =
-  let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
-  (* An exact-output slot resolves against the AGENT_CORE catalog, which speaks
-     only of endpoints. A subscription CLI has none — it is a local binary named
-     by [command] — so declaring one as a target only to have the binding
-     resolver reject it reports a missing catalog provider where the truth is
-     that this kind of runtime does no exact output. *)
-  List.filter_map
-    (fun (rt : Runtime.t) ->
-       match rt.execution with
-       | Runtime_execution.Agent_core config ->
-         Some
-           ({ target_ref = rt.id
-            ; (* [enable_thinking] is a per-turn control the Keeper path sets as
-                 it builds each request, so the binding config carries none yet.
-                 An exact request has one shape and asks once, here, from the
-                 same row the Keeper reads. *)
-              binding =
-                { config with
-                  Llm_provider.Provider_config.enable_thinking =
-                    rt.model.Runtime_schema.thinking_support
-                }
-            ; (* A slot's credential is the key its binding already resolved --
-                 the one the Keeper's requests carry, whatever source the
-                 binding named. Handing over the environment name instead sent
-                 the resolver back to read it a second time, and a binding fed
-                 from a file or an inline value had no name to hand over, so it
-                 reached the wire with no key at all. An environment name that
-                 resolved to nothing stays named, so the refusal can say which. *)
-              credential =
-                (let key = config.Llm_provider.Provider_config.api_key in
-                 match rt.provider.Runtime_schema.credentials with
-                 | Some (Runtime_schema.Env name) when Llm_provider.Secret.is_empty key ->
-                   Exact_output.Credential_unresolved { environment_variable = name }
-                 | Some (Runtime_schema.Env _ | Runtime_schema.File _ | Runtime_schema.Inline _)
-                   -> Exact_output.Credential_resolved key
-                 | None when Llm_provider.Secret.is_empty key ->
-                   Exact_output.Credential_not_declared
-                 | None -> Exact_output.Credential_resolved key)
-            ; body_timeout_s = rt.provider.Runtime_schema.exact_body_timeout_s
-            } : Exact_output.declared_target)
-       | Runtime_execution.Codex_app_server _
-       | Runtime_execution.Claude_code _
-       | Runtime_execution.Antigravity_cli _ -> None)
-    runtimes
 ;;
 
 (* Rule 3 (#38779) at boot: the server starts, and each exact slot whose HTTP
@@ -482,51 +367,19 @@ let configure_exact_output_registry ?config_root () =
     load_exact_output_lane_declarations ?config_root ()
   in
   require_explicit_mandatory_exact_output_lanes ~config_path lanes;
-  (* The same answer configuration load used to decide whether an exact slot's
-     provider must declare its body deadline, so the rule and the catalog it
-     guards cannot disagree about where the targets come from. *)
+  let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
+  (* Logged before the registry is published: see
+     [warn_exact_slot_body_deadline_gaps]. *)
+  warn_exact_slot_body_deadline_gaps (Runtime.exact_slot_body_deadline_gaps ());
   let catalog, catalog_description =
-    match Runtime.exact_output_target_source () with
-    | Runtime.Replacement_catalog_targets { path } ->
-      Exact_output.Full_replacement_file path, " from full replacement " ^ path
-    | Runtime.Runtime_binding_targets ->
-      let gaps = Runtime.exact_slot_body_deadline_gaps () in
-      warn_exact_slot_body_deadline_gaps gaps;
-      (* A target that is not handed to the resolver is a slot the registry
-         does not admit; the lane keeps its other slots and its cli_slots. *)
-      let targets =
-        exact_output_targets_of_runtimes ()
-        |> List.filter (fun (target : Exact_output.declared_target) ->
-          not
-            (List.exists
-               (fun (gap : Runtime.exact_slot_body_deadline_gap) ->
-                  String.equal gap.slot_id target.target_ref)
-               gaps))
-      in
-      ( Exact_output.Embedded_with_targets targets
-      , Printf.sprintf
-          " from AGENT_CORE embedded catalog with %d runtime binding(s) as targets"
-          (List.length targets) )
+    Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes
   in
-  let io : Exact_output.resolver_io =
-    { getenv =
-        (fun name ->
-          try Ok (Sys.getenv_opt name) with
-          | Sys_error _ | Invalid_argument _ -> Error ())
-    }
-  in
-  match
-    Exact_output.load_resolver_snapshot
-      ~io
-      ~target_binding_policy:Exact_output.Exclude_unbound_targets
-      ~catalog
-      ()
-  with
+  match Runtime.load_exact_output_resolver_snapshot catalog with
   | Error error ->
     raise
       (Env_config_core.Config_error
          ("exact-output resolver snapshot: "
-          ^ exact_output_snapshot_error_to_string error))
+          ^ Runtime_exact_output_registry.resolver_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
     warn_rejected_exact_output_bindings resolver_snapshot;
     (* A mandatory lane rule 3 emptied -- every slot a gap, no cli_slots --
@@ -582,7 +435,8 @@ let install_domain_pool_references domain_pool =
 
 module For_testing = struct
   let configure_exact_output_registry = configure_exact_output_registry
-  let exact_output_targets_of_runtimes = exact_output_targets_of_runtimes
+  let exact_output_targets_of_runtimes () =
+    Runtime.exact_output_targets (fst (Runtime.runtimes_and_media_failover ()))
   let install_domain_pool_references = install_domain_pool_references
 end
 

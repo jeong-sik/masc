@@ -95,7 +95,6 @@ let degraded_keeper_dashboard_row
       ; ("primary_model", `String (Keeper_meta_contract.runtime_id_of_meta m))
       ; ("active_model", `String (Keeper_status_runtime.active_model_of_meta m))
       ; ("active_model_label", `String (Keeper_status_runtime.active_model_label_of_meta m))
-      ; ("last_model_used_label", `String (Keeper_status_runtime.active_model_label_of_meta m))
      ])
 
 let invalid_profile_dashboard_row ~keeper_name error =

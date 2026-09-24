@@ -686,7 +686,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         active_model: undefined,
         active_model_label: null,
         last_model_used: undefined,
-        last_model_used_label: null,
         next_model_hint: null,
         runtime_id: asString(row.runtime_id) ?? null,
         runtime_ref: normalizeRuntimeRef(row.runtime_ref),

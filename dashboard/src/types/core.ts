@@ -1351,7 +1351,6 @@ export interface Keeper {
   active_model?: string
   active_model_label?: string | null
   last_model_used?: string
-  last_model_used_label?: string | null
   next_model_hint?: string | null
   runtime_id?: string | null
   runtime_ref?: RuntimeRef | null
@@ -1537,7 +1536,6 @@ interface KeeperConfigExecution {
   models: string[]
   active_model: string
   active_model_label?: string | null
-  last_model_used_label?: string | null
   verify: boolean
   selected_runtime_id: string
   selected_runtime_canonical: string
@@ -1610,7 +1608,6 @@ interface KeeperConfigRuntime {
   fiber_health: string
   runtime_blocker_class?: KeeperRuntimeBlockerClass | null
   active_model_label?: string | null
-  last_model_used_label?: string | null
   runtime_blocker_summary?: string | null
 }
 

@@ -219,8 +219,8 @@ let handle_keeper_reset ctx args : tool_result =
    keeper meta that cannot be read is not a keeper with nothing to clear. A
    checkpoint whose bytes the decoder rejects fails every turn, so the clear
    deletes it ([Keeper_checkpoint_store.remove_undecodable_canonical]) instead
-   of refusing. A checkpoint a later version wrote is readable by that
-   version, and a judgement that stopped before any bytes were decoded says
+   of refusing. A checkpoint a build that bumped [checkpoint_version] wrote
+   is readable by that build, and a judgement that stopped before any bytes were decoded says
    nothing against them; both clears are refused and nothing changes. *)
 type keeper_clear_report =
   | Clear_meta_unreadable of string
@@ -448,7 +448,26 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             | Ok Keeper_checkpoint_store.Canonical_loadable ->
               not_removed ~class_:Tool_result.Workflow_rejection
                 ~effect_disposition:Tool_result.Proven_post_effect ~code:Tool_args.Conflict
-                "it decoded when read again under the lock, so history was left unchanged"
+                "it decoded, or was written by an earlier version, when read again under the lock, so history was left unchanged"
+            | Error
+                (Keeper_checkpoint_store.Removal_refused
+                   (Keeper_checkpoint_store.Newer_version { expected; got })) ->
+              Log.Keeper.error
+                "%s: operator clear removed the official-client session but left the checkpoint %s (reason=%s): it is version %d, written by a later binary; this one reads %d"
+                name path reason got expected;
+              keeper_clear_failure
+                ~class_:Tool_result.Workflow_rejection
+                ~effect_disposition:Tool_result.Proven_post_effect
+                ~code:Tool_args.Precondition_failed
+                ~message:
+                  (Printf.sprintf
+                     "the official-client session was cleared, but the checkpoint at %s is version %d, written by a later binary than this one (which reads version %d). That binary can still read it, so it was left in place. Run masc_keeper_clear from a binary that reads version %d."
+                     path got expected got)
+                [ "checkpoint_path", `String path
+                ; "official_client_session_cleared", `Bool true
+                ; "checkpoint_version", `Int got
+                ; "readable_version", `Int expected
+                ]
             | Error
                 (( Keeper_checkpoint_store.Removal_refused _
                  | Keeper_checkpoint_store.Removal_failed _ ) as removal_error) ->

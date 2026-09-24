@@ -246,7 +246,8 @@ type checkpoint_load_error =
   | Superseded_version of { expected : int; got : int }
   (** A canonical a *later* [checkpoint_version] wrote: an older binary is
       reading a newer workspace. Nothing here replaces or deletes it, because
-      the newer binary can still read it. *)
+      the newer binary can still read it. Only a writer that bumped the
+      version is told apart this way (#38680). *)
   | Newer_version of { expected : int; got : int }
   | Io_error of string
   | Read_failed of { cause : checkpoint_read_failure; detail : string }
@@ -287,6 +288,9 @@ let classify_core_error (e : Agent_core.Error.t) : checkpoint_load_error =
   | Serialization (JsonParseError r) -> Parse_error r.detail
   | Serialization (VersionMismatch r) when r.got < r.expected ->
       Superseded_version { expected = r.expected; got = r.got }
+  (* Only a writer that bumped [checkpoint_version] reaches this arm; a codec
+     change shipped without a bump fails later in the decode, as a
+     [JsonParseError] or [UnknownVariant] (#38680). *)
   | Serialization (VersionMismatch r) when r.got > r.expected ->
       Newer_version { expected = r.expected; got = r.got }
   | Serialization (VersionMismatch r) ->
@@ -767,8 +771,9 @@ let known_watermark ~canonical_path
    content are removed. A read that returned no bytes (an OS failure, a file
    that changed during the read, a path that is not a regular file inside the
    owned chain, a session id that is not a path segment) says nothing about
-   the content. A canonical a later version wrote is readable by that
-   version. Both stay. The step that stopped decides this, not the
+   the content. A canonical a build that bumped [checkpoint_version] wrote is
+   readable by that build. Both stay. A later build that changed the codec
+   without a bump is not told apart from damage and is removed (#38680). The step that stopped decides this, not the
    [checkpoint_load_error] label: other readers in this module report OS
    failures as [Io_error]. *)
 

@@ -115,7 +115,10 @@ type checkpoint_load_error =
   (** A canonical a later [checkpoint_version] wrote: an older binary is
       reading a newer workspace. Nothing here replaces or deletes it, because
       the newer binary can still read it. The codec checks the version before
-      it decodes anything else, so a later-version file always lands here. *)
+      it decodes anything else, so a later build's file lands here whenever
+      that build bumped [checkpoint_version]. A codec change shipped without
+      a bump reads as [Parse_error] instead, and the clear deletes it
+      (#38680). *)
   | Newer_version of { expected : int; got : int }
   | Io_error of string
       (** From {!load_agent_core}: the path is not a regular file, or lies
@@ -191,7 +194,9 @@ type canonical_judgement =
   | Judged_superseded of { expected : int; got : int }
       (** An earlier version wrote it; a turn replaces it. *)
   | Judged_newer of { expected : int; got : int }
-      (** A later version wrote it; that version can still read it. *)
+      (** A build that bumped [checkpoint_version] wrote it; that build can
+          still read it. A later build that changed the codec without a bump
+          is [Judged_undecodable] instead (#38680). *)
   | Judged_undecodable of checkpoint_load_error
       (** The bytes were read and the decoder rejected their content
           ([Parse_error] or [Store_error]). *)

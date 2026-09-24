@@ -136,6 +136,11 @@ let cases =
       (with_credentials "[providers.p.usage-read]\nshape = \"ollama-usage\"")
       "providers.p.usage-read.url: missing required field 'url'"
   ; provider_case
+      "providers.p.usage-read.url on another host"
+      (with_credentials
+         "[providers.p.usage-read]\nshape = \"ollama-usage\"\nurl = \"https://usage.example.test/usage\"")
+      "providers.p.usage-read.url: url host \"usage.example.test\" must be the provider endpoint host \"example.invalid\""
+  ; provider_case
       "providers.p.usage-read without credentials"
       "[providers.p.usage-read]\nshape = \"ollama-usage\"\nurl = \"https://example.invalid/usage\""
       "providers.p.usage-read: usage-read needs the provider's [credentials]"

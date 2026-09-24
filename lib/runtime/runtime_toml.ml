@@ -620,22 +620,47 @@ let usage_read_shape_field ~path tbl =
                      Runtime_schema.all_usage_read_shapes)))))
 ;;
 
-(* The read sends the provider's key, so only an absolute https URL with a
-   host is accepted. *)
-let usage_read_url_field ~path tbl =
+let non_empty_host uri =
+  match Uri.host uri with
+  | Some host when String.length host > 0 -> Some (String.lowercase_ascii host)
+  | Some _ | None -> None
+;;
+
+(* The read sends the provider's key, so only an absolute https URL is
+   accepted, and only on the host the provider's own [endpoint] names: a typo
+   or another host in [url] would otherwise receive the key on every boot. *)
+let usage_read_url_field ~path ~(transport : Runtime_schema.transport) tbl =
   match typed_find "a string" path tbl "url" Otoml.get_string with
   | Error _ as error -> error
   | Ok None -> Error (error (path ^ ".url") "missing required field 'url'")
   | Ok (Some url) ->
     let uri = Uri.of_string url in
-    let has_host =
-      match Uri.host uri with
-      | Some host -> String.length host > 0
-      | None -> false
-    in
-    (match Uri.scheme uri with
-     | Some scheme when String.equal scheme usage_read_url_scheme && has_host -> Ok url
-     | Some _ | None ->
+    (match Uri.scheme uri, non_empty_host uri with
+     | Some scheme, Some host when String.equal scheme usage_read_url_scheme ->
+       (match transport with
+        | Runtime_schema.Cli _ ->
+          Error
+            (error
+               (path ^ ".url")
+               "usage-read needs a provider with an HTTP endpoint; this one runs a command")
+        | Runtime_schema.Http endpoint ->
+          (match non_empty_host (Uri.of_string endpoint) with
+           | Some endpoint_host when String.equal endpoint_host host -> Ok url
+           | Some endpoint_host ->
+             Error
+               (error
+                  (path ^ ".url")
+                  (Printf.sprintf
+                     "url host %S must be the provider endpoint host %S; the read \
+                      sends the provider's key"
+                     host
+                     endpoint_host))
+           | None ->
+             Error
+               (error
+                  (path ^ ".url")
+                  (Printf.sprintf "the provider endpoint %S has no host" endpoint))))
+     | Some _, (Some _ | None) | None, (Some _ | None) ->
        Error
          (error
             (path ^ ".url")
@@ -671,6 +696,7 @@ let parse_usage_read
     ~(path : string)
     ~(api_format : Runtime_schema.api_format)
     ~(credentials : Runtime_schema.credential option)
+    ~(transport : Runtime_schema.transport)
     (tbl : Otoml.t)
   : (Runtime_schema.usage_read option, parse_error list) result
   =
@@ -702,7 +728,7 @@ let parse_usage_read
     (match
        ( unknown_key_errors @ execution_errors @ credential_errors
        , usage_read_shape_field ~path usage_tbl
-       , usage_read_url_field ~path usage_tbl )
+       , usage_read_url_field ~path ~transport usage_tbl )
      with
      | [], Ok shape, Ok url -> Ok (Some { Runtime_schema.shape; url })
      | errors, shape, url ->
@@ -797,7 +823,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
            Error
              (error (path ^ ".healthcheck") "healthcheck must be a TOML table")
        in
-       let usage_read_result = parse_usage_read ~path ~api_format ~credentials tbl in
+       let usage_read_result = parse_usage_read ~path ~api_format ~credentials ~transport tbl in
        let headers =
          match Otoml.find_opt tbl Fun.id [ "headers" ] with
          | None -> None

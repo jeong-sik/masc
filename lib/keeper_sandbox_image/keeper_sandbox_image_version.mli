@@ -29,8 +29,7 @@ val base_embedded : recipe
 
 type load_error =
   | Invalid_name of string
-      (** Not a directory name this layout uses: empty, or a character other
-          than [a-z], [0-9] and [-], or a leading [-]. *)
+      (** Not words of [a-z] and [0-9] joined by single [-]. *)
   | Recipe_missing of { path : string }
   | Source_file_outside_source of { path : string }
       (** A recipe Dockerfile or its [inputs] manifest resolves outside the
@@ -48,6 +47,10 @@ type load_error =
   | Context_unwritable of { path : string; detail : string }
 
 val load_error_to_string : load_error -> string
+
+val valid_name : string -> bool
+(** The shared recipe and catalog image name rule: lowercase letter and
+    digit words joined by single dashes. *)
 
 val load : source:string -> name:string -> (recipe, load_error) result
 (** Read [<source>/sandbox-images/<name>/Dockerfile] and the files its
@@ -75,11 +78,10 @@ val tag : built_at:float -> recipe -> string
 val version : built_at:float -> recipe -> string
 (** The part of {!tag} after the colon. *)
 
-val labels : version:string -> built_at:float -> recipe -> (string * string) list
+val labels : built_at:float -> recipe -> (string * string) list
 (** The OCI [version] and [created] annotations, plus
-    [masc.sandbox.recipe] and [masc.sandbox.inputs_sha256]. [version] is the
-    tag's own version part: {!version} for a computed tag, the tag as given
-    when the caller named one. *)
+    [masc.sandbox.recipe] and [masc.sandbox.inputs_sha256]. The version is
+    {!version} even when the operator supplies an image tag. *)
 
 val write_context : dir:string -> recipe -> (string, load_error) result
 (** Write the recipe's Dockerfile and inputs under [dir], each input at its

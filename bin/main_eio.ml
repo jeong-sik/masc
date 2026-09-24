@@ -3172,12 +3172,10 @@ let sandbox_image_cmd_exit print_only tag runtime recipe_name source =
       let* runtime = runtime in
       let* builder = sandbox_image_builder runtime in
       let built_at = Unix.gettimeofday () in
-      let tag, version =
+      let tag =
         match tag with
-        | Some tag -> tag, tag
-        | None ->
-          ( Keeper_sandbox_image_version.tag ~built_at recipe
-          , Keeper_sandbox_image_version.version ~built_at recipe )
+        | Some tag -> tag
+        | None -> Keeper_sandbox_image_version.tag ~built_at recipe
       in
       match sandbox_image_tag_presence ~command:builder.build_command ~tag with
       | Store_unanswered detail ->
@@ -3195,7 +3193,7 @@ let sandbox_image_cmd_exit print_only tag runtime recipe_name source =
               image first."
              tag)
       | Tag_absent ->
-        let labels = Keeper_sandbox_image_version.labels ~version ~built_at recipe in
+        let labels = Keeper_sandbox_image_version.labels ~built_at recipe in
         Ok (sandbox_image_build ~builder ~recipe ~tag ~labels)
   in
   match run with
@@ -3314,12 +3312,7 @@ let sandbox_image_change_catalog ~base_path change =
       (fun error -> "sandbox-image: " ^ Keeper_sandbox_image_catalog.load_error_to_string error)
       (Keeper_sandbox_image_catalog.load_for_change ~config_root ~shipped)
   in
-  let* next =
-    Result.map_error
-      (fun error ->
-         "sandbox-image: " ^ Keeper_sandbox_image_catalog.change_error_to_string error)
-      (change catalog)
-  in
+  let* next = change catalog in
   Result.map_error
     (fun error -> "sandbox-image: " ^ Keeper_sandbox_image_catalog.save_error_to_string error)
     (Keeper_sandbox_image_catalog.save ~config_root ~expected next)

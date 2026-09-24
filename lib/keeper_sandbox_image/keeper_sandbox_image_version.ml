@@ -25,8 +25,8 @@ type load_error =
 let load_error_to_string = function
   | Invalid_name name ->
     Printf.sprintf
-      "%S is not a recipe name: use lowercase letters, digits and '-', not \
-       starting with '-'"
+      "%S is not a recipe name: use words of lowercase letters and digits \
+       joined by single '-'"
       name
   | Recipe_missing { path } -> Printf.sprintf "no recipe at %s" path
   | Source_file_outside_source { path } ->
@@ -48,10 +48,11 @@ let load_error_to_string = function
     Printf.sprintf "cannot write the build context at %s: %s" path detail
 
 let valid_name name =
-  let allowed = function 'a' .. 'z' | '0' .. '9' | '-' -> true | _ -> false in
-  String.length name > 0
-  && (not (Char.equal name.[0] '-'))
-  && String.for_all allowed name
+  let word w =
+    String.length w > 0
+    && String.for_all (function 'a' .. 'z' | '0' .. '9' -> true | _ -> false) w
+  in
+  List.for_all word (String.split_on_char '-' name)
 
 (* One path per line; blank lines and '#' comments are for the reader. *)
 let listed_paths text =
@@ -194,8 +195,8 @@ let rfc3339_utc built_at =
     (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
     tm.Unix.tm_sec
 
-let labels ~version ~built_at recipe =
-  [ "org.opencontainers.image.version", version
+let labels ~built_at recipe =
+  [ "org.opencontainers.image.version", version ~built_at recipe
   ; "org.opencontainers.image.created", rfc3339_utc built_at
   ; "masc.sandbox.recipe", recipe.name
   ; "masc.sandbox.inputs_sha256", inputs_sha256 recipe

@@ -6114,6 +6114,7 @@
 (include stanzas/test_browser_webdriver.inc)
 (include stanzas/test_browser_cdp.inc)
 (include stanzas/test_browser_stagehand_session.inc)
+(include stanzas/test_browser_chromium_process.inc)
 (include stanzas/test_browser_controls.inc)
 
 (include stanzas/test_browser_surface.inc)

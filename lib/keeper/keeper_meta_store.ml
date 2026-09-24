@@ -654,6 +654,16 @@ let read_meta_resolved config name : ((string * Keeper_meta_contract.keeper_meta
     |> Result.map (Option.map (fun meta -> requested_name, meta))
 ;;
 
+let read_meta_presence config name : (meta_presence, string) result =
+  let requested_name = String.trim name in
+  if requested_name = ""
+  then Ok Meta_absent
+  else
+    read_meta_file_path_presence
+      ~ownership_root:config.Workspace.base_path
+      (keeper_meta_path config requested_name)
+;;
+
 let read_meta config name : (Keeper_meta_contract.keeper_meta option, string) result =
   let requested_name = String.trim name in
   let path = keeper_meta_path config requested_name in

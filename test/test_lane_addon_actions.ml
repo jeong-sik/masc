@@ -53,6 +53,7 @@ let backend fixture : Runtime.For_testing.backend = {
             Ok {Action.status;result=obj ["calls",`Int !(fixture.calls)];output});
       stop=(fun () -> Ok ())} in
     on_created connection; Ok connection);
+  image_ready=(fun ~package:_ -> Ok ());
   acquire=(fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
   recover_stop=(fun ~instance_id:_ ~container_id:_ ~max_reply_bytes:_ -> Ok ())}
 let dispatch fixture operation fields =

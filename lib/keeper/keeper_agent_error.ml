@@ -136,8 +136,6 @@ let agent_error_terminal_reason_code = function
     Printf.sprintf "agent_error_input_required:request_id=%s" request_id
 ;;
 
-let network_error_kind_to_wire = Keeper_internal_error.network_error_kind_to_string
-
 let provider_timeout_suffix = function
   | None -> ""
   | Some phase ->
@@ -180,7 +178,7 @@ let provider_error_terminal_reason_code = function
   | Llm_provider.Error.NetworkError { kind; timeout_phase; _ } ->
     Printf.sprintf
       "provider_error_network:%s%s"
-      (network_error_kind_to_wire kind)
+      (Llm_provider.Http_client.network_error_kind_to_string kind)
       (provider_timeout_suffix timeout_phase)
   | Llm_provider.Error.Timeout { timeout_phase; _ } ->
     Keeper_terminal_reason.wire_provider_error_timeout

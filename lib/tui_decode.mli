@@ -82,6 +82,12 @@ val preview_line : string -> string
     bytes, this one is for text whose breaks are content: a file's edit, a
     tool call's arguments. *)
 
+val short_timestamp_of_unix_for_terminal :
+  localtime:(float -> Unix.tm) -> float -> string
+(** [YYYY-MM-DD HH:MM:SS] of a Unix time in the zone [localtime] converts to.
+    The same shape {!short_timestamp_for_terminal} draws, for a time the wire
+    carries as a number. *)
+
 val short_timestamp_for_terminal :
   localtime:(float -> Unix.tm) -> string -> string
 (** [YYYY-MM-DD HH:MM:SS] of an RFC 3339 timestamp in the zone [localtime]
@@ -122,6 +128,14 @@ type goal_proof =
           as an unreviewed goal, and showing it as "not reviewed" would
           disguise corruption as quiet. *)
 
+type verifier_unreconciled = {
+  vu_step : Goal_reconcile_step.t;
+  vu_detail : string;
+}
+(** The latest verifier scan could not settle this Verifying goal. It stays
+    Verifying until [request_complete] retries it or a later scan settles it,
+    or the operator takes it back or drops it. *)
+
 type planning_goal = {
   pg_id : string;
   pg_title : string;
@@ -131,6 +145,7 @@ type planning_goal = {
   pg_metric : string option;
   pg_target_value : string option;
   pg_proof : goal_proof;
+  pg_verifier_unreconciled : verifier_unreconciled option;
   pg_last_review_note : string option;
       (** What a keeper or operator wrote at the last transition. Free text,
           unlike {!pg_proof}, which is the judge's. *)
@@ -348,15 +363,27 @@ type inventory_freshness =
       (** The server answered from a built inventory. An empty list here does
           mean no tools. *)
 
-(** One tool the keeper's effective surface carries. [et_skill_source_id]
-    names the configured skill source a composition skill came from, read
-    from [origin.skill_provenance.identity.source_id]; it is [None] for any
-    tool with no skill behind it, and for a composition skill whose
-    provenance the producer could not resolve. *)
+(** Where one tool on the keeper's effective surface came from, as
+    [origin.kind] names it. Only a composition skill carries
+    [origin.skill_provenance], and it always carries the key: [skill_source_id]
+    is read from [skill_provenance.identity.source_id], and is [None] when the
+    producer sent [null] because it could not resolve the provenance. *)
+type effective_tool_origin =
+  | Descriptor_origin
+  | Instruction_skill_origin
+  | Composition_skill_origin of { skill_source_id : string option }
+  | Composition_control_origin
+  | Unrecognised_origin of string
+      (** A kind this build does not know, kept as the server spelled it so
+          the Tools column still draws it and the rest of the surface still
+          loads. Its provenance is not read. *)
+
+val effective_tool_origin_kind : effective_tool_origin -> string
+(** The [origin.kind] word the server sent. *)
+
 type effective_tool = {
   et_name : string;
-  et_origin : string;
-  et_skill_source_id : string option;
+  et_origin : effective_tool_origin;
 }
 
 type effective_tool_delivery =
@@ -476,6 +503,18 @@ type skill_usage_coverage = {
   suc_unavailable : string list;
 }
 
+(** One Skill name two catalog entries declare. The first entry for the name
+    in catalog order wins (Skill_catalog_snapshot.effective_projection):
+    [scsh_winner]. The two can sit in different sources, or in one source
+    whose directory names normalize to the same Skill name. A Keeper turn that
+    lists Skills by name gets the winner, when the winner loads;
+    [scsh_shadowed] is published but reaches a turn only when a Task names its
+    exact reference. Both carry the same name and differ in identity. *)
+type skill_catalog_shadow = {
+  scsh_winner : Skill_reference.identity;
+  scsh_shadowed : Skill_reference.identity;
+}
+
 type skills_catalog = {
   sc_state : skills_catalog_state;
   sc_config : skill_catalog_config option;
@@ -484,6 +523,7 @@ type skills_catalog = {
   sc_sources : skill_catalog_source list;
   sc_surfaces : skills_catalog_surface list;
   sc_rejections : skill_catalog_rejection list;
+  sc_shadows : skill_catalog_shadow list;
   sc_usage_coverage : skill_usage_coverage option;
 }
 
@@ -512,13 +552,11 @@ type effective_skill_profile = {
 
 type configured_skill_name_unavailable = {
   csn_name : string;
-  csn_reason : string option;
+  csn_reason : string;
 }
 (** A Skill name the Keeper profile selected that the turn's catalog does not
     hold. Not a read failure, so it is a different fact from
-    [ets_skills_left_out]. [csn_reason] is the producer's word for why, and it
-    is [None] when the producer sent none rather than a word this reader made
-    up. *)
+    [ets_skills_left_out]. [csn_reason] is the producer's word for why. *)
 
 type effective_tool_surface =
   | Effective_surface_available of {
@@ -995,6 +1033,28 @@ type memory_librarian_failure_kind =
     endings that carry none. *)
 val memory_librarian_pass_end_cause : memory_librarian_pass_end -> string option
 
+(** RFC librarian-lifecycle §4.10: the atoms the Keeper's requests skip
+   because the Librarian stands behind the start the provider last
+   accepted. [mls_gap_end_atom] is that start; the gap ends just before it.
+   [Stalled_unmeasured] is a file the gap is read from that did not read:
+   neither "no gap" nor a gap. *)
+type memory_librarian_stall_cause =
+  | Stall_meta_unreadable
+  | Stall_turn_records_unreadable
+  | Stall_turn_boundary_refused
+  | Stall_snapshot_unreadable
+  | Stall_read_position_unreadable
+
+type memory_librarian_stalled =
+  | Stalled_gap of {
+      mls_gap_start_atom : int;
+      mls_gap_end_atom : int;
+    }
+  | Stalled_unmeasured of {
+      mls_cause : memory_librarian_stall_cause;
+      mls_detail : string;
+    }
+
 (* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
    standing, and what its last pass and its journal say. [None] in a field is
    "not measured", which the header prints as such; it is not zero. *)
@@ -1011,6 +1071,9 @@ type memory_librarian_health = {
           another trace -- and is not the same as caught up. *)
   mlh_last_success_at : float option;
   mlh_last_failure_kind : memory_librarian_failure_kind option;
+  mlh_stalled : memory_librarian_stalled option;
+      (** [None] while the Librarian point is at or past the start the
+          provider last accepted, or when there is no accepted start yet. *)
 }
 
 type memory_context_frontier = {
@@ -1310,6 +1373,9 @@ type verification_snapshot = {
           live backlog: the rows are real and as old as that snapshot, so
           anything submitted after it is absent. *)
 }
+(** The four backlog fields are required in {!Awaiting_queue}, where the
+    server joins the backlog and always sends them. {!Full_history} does not
+    join the backlog and sends none of them, so they read as empty there. *)
 
 type keeper_phase
 (** A validated Keeper lifecycle phase from the live roster. The underlying
@@ -1560,6 +1626,18 @@ val standalone_lane_status_to_string : standalone_lane_status -> string
     the state needs one. The caller writes no noun of its own. *)
 val standalone_lane_configuration_phrase :
   standalone_lane_configuration -> string
+
+(** The lane detail's last two lines: what a retained run's Output holds, and
+    what the run record keeps. *)
+type standalone_lane_answer = {
+  sla_output_meaning : string;
+  sla_evidence : string;
+}
+
+val standalone_lane_answer : standalone_lane -> standalone_lane_answer
+(** Reads [sl_lane_id] as a {!Standalone_lane.t} once, and every lane has its
+    own pair. An id no lane has gets a pair that names the id, escaped for the
+    terminal. *)
 val decode_standalone_lanes_snapshot :
   Yojson.Safe.t -> (standalone_lanes_snapshot, string) result
 
@@ -2246,8 +2324,32 @@ type fleet_safety = {
     alive, its durable demand is not admissible. Collapsing the two reads a
     live fleet as a stopped one. *)
 
+type fleet_reading_freshness =
+  | Fleet_current
+      (** The health snapshot is [ready]: the latest refresh measured it, and
+          within the snapshot's time to live. *)
+  | Fleet_last_good of { measured_at_unix : float; stale_reason : string }
+      (** The snapshot is [stale]: the refreshes since have timed out or
+          raised, or none has run within the time to live, so the server
+          serves the last reading it measured. [measured_at_unix] is when
+          (unix seconds on the server's clock); [stale_reason] is the
+          server's word for why ([last_good_refresh_timeout],
+          [last_good_refresh_error], [ttl_expired]). *)
+  | Unrecognised_snapshot_status of string
+      (** A snapshot status this build has no reading for, beside a fleet
+          reading, kept as the server spelled it. The server's other words
+          ([warming], [timeout], [error]) do not arrive here: it writes them
+          only when it holds no last good snapshot, and then the fleet
+          section is the placeholder, not a reading
+          ([Server_routes_http_runtime.full_health_snapshot_metadata]). *)
+(** How current a fleet reading is. The fleet section does not say: the
+    [full_health_snapshot] beside it in the same body does. *)
+
 type fleet_safety_reading =
-  | Fleet_measured of fleet_safety
+  | Fleet_measured of
+      { fleet : fleet_safety
+      ; freshness : fleet_reading_freshness
+      }
   | Fleet_not_measured of { status : string }
       (** The health snapshot has no fleet reading and nothing failed: it is
           being rebuilt, at boot and again after a change invalidates it.
@@ -2940,10 +3042,13 @@ val decode_fleet_safety :
 
     A section carrying [schema = Keeper_fleet_blocker.reading_schema] is a
     reading, and every field of {!fleet_safety} is required: a missing count
-    is an error, not zero. A section without [schema] is the health
-    snapshot's placeholder: {!Fleet_not_measured} when it carries no
-    [error], and an error with the server's reason when it does (the refresh
-    timed out or the scan raised). *)
+    is an error, not zero. A reading also takes its {!fleet_reading_freshness}
+    from the body's [full_health_snapshot], which is required: a stale
+    snapshot serves a past reading as it was, and without the snapshot's
+    word the TUI would draw it as the present. A section without [schema] is
+    the health snapshot's placeholder: {!Fleet_not_measured} when it carries
+    no [error], and an error with the server's reason when it does (the
+    refresh timed out or the scan raised). *)
 val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :
@@ -3465,15 +3570,65 @@ val keeper_of_declaration : Keeper_declared_roster.t -> keeper
 
 type schedule_runner_hold =
   { srh_occurrence_id : string
-      (** The occurrence the schedule runner held back on its newest tick. *)
+      (** The occurrence the schedule runner held back on its newest
+          successful tick. *)
   ; srh_due_at_iso : string
       (** When that occurrence came due. *)
+  ; srh_observed_at : float
+      (** When that tick decided to hold it: the newest time the hold is known
+          to have stood. *)
   }
 (** A schedule the runner is holding because its target Keeper has not yet
     taken the previous occurrence. The server reads it from the same runner
     status [/health] reports as [schedule_runner.held]. *)
 
+val latest_drawable_unix_seconds : float
+(** 9999-12-31T23:59:59Z, the latest [observed_at] {!decode_schedule_runner_hold}
+    accepts. Far below where [Unix.localtime] fails, so a hold the decoder
+    accepts can always be drawn. *)
+
 val decode_schedule_runner_hold :
   Yojson.Safe.t -> (schedule_runner_hold option, string) result
-(** Reads a schedule row's [runner_hold]. [null] or an absent field is a
-    schedule the runner is not holding; an object must carry both fields. *)
+(** Reads a schedule row's [runner_hold]. The key is required: [null] is a
+    schedule the runner is not holding, and a row without the key is refused
+    rather than read as one. An object must carry all three fields, with
+    [observed_at] a time from 1970 to {!latest_drawable_unix_seconds}. *)
+
+type schedule_runner_status =
+  | Runner_status of Schedule_contract_values.runner_status
+  | Runner_unrecognised of string
+      (** A word outside {!Schedule_contract_values.runner_status}, kept as
+          itself. *)
+(** The schedule list's [schedule_runner.status]. *)
+
+val decode_schedule_runner_status :
+  Yojson.Safe.t -> (schedule_runner_status, string) result
+(** Reads [schedule_runner.status] from the schedule list. The object and its
+    [status] are required; a word this build does not know is
+    [Runner_unrecognised] rather than a failure of the whole list. *)
+
+type schedule_list_freshness =
+  | List_latest
+      (** The newest request for the schedule list succeeded, and this is its
+          answer. *)
+  | List_kept
+      (** The newest request failed; the list on screen is an earlier answer,
+          kept so the screen is not emptied. *)
+
+type schedule_hold_reading =
+  | Hold_current
+      (** The latest list, from a runner whose status is [ok]: the hold is
+          the runner's reading now. *)
+  | Hold_as_of of float
+      (** The hold stood at this time and may not now. *)
+
+val schedule_hold_reading :
+  freshness:schedule_list_freshness ->
+  runner:schedule_runner_status ->
+  schedule_runner_hold ->
+  schedule_hold_reading
+(** How a hold may be drawn. Only [List_latest] with [Runner_status Runner_ok]
+    draws it as the present. The runner re-reads its holds only on a tick that
+    succeeds, and a list kept after a failed reload is an earlier answer, so
+    every other combination draws the hold at the time it was read
+    (#38411). *)

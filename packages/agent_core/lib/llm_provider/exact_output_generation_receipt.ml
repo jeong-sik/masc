@@ -354,6 +354,10 @@ let snapshot receipt =
 
 let snapshot_phase (snapshot : snapshot) = snapshot.phase
 let snapshot_dispatch_count (snapshot : snapshot) = snapshot.dispatch_count
+
+(* [generation_dispatched] read off a copy: the copy's count comes from the
+   same receipt state. *)
+let snapshot_generation_dispatched (snapshot : snapshot) = snapshot.dispatch_count = 1
 let snapshot_http_status (snapshot : snapshot) = snapshot.http_status
 let snapshot_provider_trace (snapshot : snapshot) = snapshot.provider_trace
 let snapshot_call_id (snapshot : snapshot) = snapshot.call_id

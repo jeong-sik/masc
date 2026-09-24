@@ -96,7 +96,7 @@ def receipt():
                 "created_at": 1.0,
                 "execution_digest": operation_digest,
                 "source": {
-                    "schema": "masc.keeper_chat_operation.source.v1",
+                    "schema": "masc.keeper_chat_operation.source.v2",
                     "submitted_by": "proof-operator",
                     "thread_id": "keeper:keeper-one",
                     "continuation_channel": {
@@ -112,6 +112,7 @@ def receipt():
                     "external_message_id": None,
                     "workspace_id": None,
                     "extra_mentions": [],
+                    "sender_keeper": None,
                     "user_row_origin": "needs_append",
                 },
                 "input": None,

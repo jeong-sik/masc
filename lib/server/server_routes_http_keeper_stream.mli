@@ -104,6 +104,11 @@ type keeper_chat_stream_request = {
   channel_user_id : string;
   channel_user_name : string;
   channel_workspace_id : string;
+  sender_keeper : Keeper_identity.Keeper_id.t option;
+      (** The registered Keeper that sent this request, carried from the
+          durable operation source where the submitting tool matched the
+          Keeper registry. The HTTP body cannot set it: the parser always
+          yields [None]. *)
   attachments : Keeper_chat_store.attachment list;
   direct_message : Keeper_invocation_contract.direct_message;
   since_seq : Keeper_chat_event_log.replay_position;
@@ -386,6 +391,7 @@ module For_testing : sig
   val message_for_request : keeper_chat_stream_request -> string
   val chat_surface_of_request : keeper_chat_stream_request -> Surface_ref.t
   val chat_speaker_of_request : keeper_chat_stream_request -> Keeper_chat_store.speaker
+  val input_speaker_of_request : keeper_chat_stream_request -> Keeper_input_speaker.t
   val turn_instructions_for_request : keeper_chat_stream_request -> string option
   val direct_message_of_request :
     keeper_chat_stream_request -> Keeper_invocation_contract.direct_message

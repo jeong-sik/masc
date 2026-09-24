@@ -166,6 +166,10 @@ type stream_event =
       ; mode : elicitation_mode
       ; reason : elicitation_cancel_reason
       }
+  | Usage_windows_reported of Runtime_provider_usage_window.report
+      (** The windows an [account/rateLimits/updated] notification reported,
+          for the operator projection only; nothing that routes or retries
+          reads it. *)
   | Turn_finished of { text : string }
 
 type history_role =

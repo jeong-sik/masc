@@ -88,6 +88,12 @@ type rate_limit =
   ; overage_disabled_reason : string option
   }
 
+type request_input =
+  { input_tokens : int
+  ; cache_creation_input_tokens : int
+  ; cache_read_input_tokens : int
+  }
+
 type turn_usage =
   { input_tokens : int
   ; output_tokens : int
@@ -100,26 +106,28 @@ type turn_usage =
    calls repeat one message id with identical usage, so ids are deduplicated
    (code.claude.com/docs/en/agent-sdk/cost-tracking, read 2026-09-03).
 
-   [last] is the usage of the newest counted call, and it is what the turn
-   reports: a turn issues one API call per tool round, every call carries
-   the whole context again as cache reads, and the sum of those calls is not
-   a size any request had. On 2026-09-15 a Keeper on a 1M-token model
-   recorded 3.75M input tokens for one turn that way, and every reader that
-   compared the figure with the window (the context observation, the TUI)
-   was refused or misled. The CLI's result frame carries the same sum, so
-   [last] outranks it there too; the turn's consumption is the raw trace's
-   to add up, not this record's to state as one request.
+   An assistant frame's usage is a snapshot taken while the response
+   streams: its input side is final (the request was already sent), its
+   output_tokens is not. On Claude Code 2.1.280 a turn of two requests
+   showed output 3 and 2 in its assistant frames and 270 in its result
+   frame. So only the input side of the newest request is kept, as the
+   context that request occupied; the turn's spend comes from the result
+   frame. Neither stands in for the other: the sum of the requests' inputs
+   is not a size any request had (a Keeper on a 1M-token model once
+   recorded 3.75M input tokens for one turn that way), and the newest
+   request's counts are not what the turn spent.
 
    Declared here, before handle_control_request reads the accumulator, so
    the field is in scope at its use site. *)
 type assistant_usage =
   { seen_message_ids : (string, unit) Hashtbl.t
-  ; mutable last : turn_usage option
+  ; mutable newest_input : request_input option
   }
 
 type observed_usage =
-  | Latest_request of turn_usage
-  | Turn_total of turn_usage
+  { latest_request_input : request_input option
+  ; turn_total : turn_usage option
+  }
 
 type turn_result =
   { session_id : string
@@ -130,7 +138,7 @@ type turn_result =
   ; subscription : subscription
   ; rate_limit : rate_limit option
   ; resumed : bool
-  ; usage : observed_usage option
+  ; usage : observed_usage
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -223,9 +231,10 @@ type error =
       }
   | Stopped_by_host of
       { stop : host_stop
-      ; usage : turn_usage option
-        (** Latest assistant request's token counts before the host ended
-            the turn. A result total never arrives after a host stop. *)
+      ; latest_request_input : request_input option
+        (** Input side of the newest assistant request before the host
+            ended the turn. No result frame arrives after a host stop, so
+            the turn's spend is not observed. *)
       }
   | Quota_blocked of
       { api_error_status : int option
@@ -611,7 +620,9 @@ let handle_control_request
       in
       (match !abort_turn with
        | None -> Ok ()
-       | Some stop -> Error (Stopped_by_host { stop; usage = assistant_usage.last }))
+       | Some stop -> Error
+           (Stopped_by_host
+              { stop; latest_request_input = assistant_usage.newest_input }))
   | unsupported ->
     let* () =
       send_control_response
@@ -883,10 +894,24 @@ let turn_usage_of_fields fields =
   | Some _ -> None
 ;;
 
-let new_assistant_usage () = { seen_message_ids = Hashtbl.create 8; last = None }
+(* The input side of an assistant frame's usage. Its output_tokens is a
+   streaming snapshot and is dropped here so no reader can count it. *)
+let request_input_of_fields fields : request_input option =
+  Option.map
+    (fun (usage : turn_usage) : request_input ->
+       { input_tokens = usage.input_tokens
+       ; cache_creation_input_tokens = usage.cache_creation_input_tokens
+       ; cache_read_input_tokens = usage.cache_read_input_tokens
+       })
+    (turn_usage_of_fields fields)
+;;
+
+let new_assistant_usage () =
+  { seen_message_ids = Hashtbl.create 8; newest_input = None }
+;;
 
 let observe_assistant_usage acc ~message_id usage =
-  let count usage = acc.last <- Some usage in
+  let count usage = acc.newest_input <- Some usage in
   match usage with
   | None -> ()
   | Some usage ->
@@ -918,7 +943,7 @@ let parse_assistant ~expected_session_id ~tools fields =
       | Some (`String id) -> Some id
       | Some _ | None -> None
     in
-    let usage = turn_usage_of_fields message_fields in
+    let usage = request_input_of_fields message_fields in
     let* blocks =
       assistant_blocks
         ~stage
@@ -1214,12 +1239,12 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       | None -> protocol_error "result message" "successful turn has no text"
     in
     emit_stream_event on_stream_event (Turn_finished { text });
-    (* Preserve whether the count describes one request or the client turn.
-       A result total cannot stand in for a request's context occupancy. *)
+    (* Both facts travel: the newest request's input is the context it
+       occupied, the result frame's total is what the turn spent. *)
     let usage =
-      match assistant_usage.last with
-      | Some last -> Some (Latest_request last)
-      | None -> Option.map (fun total -> Turn_total total) usage
+      { latest_request_input = assistant_usage.newest_input
+      ; turn_total = usage
+      }
     in
     Ok
       { session_id = expected_session_id

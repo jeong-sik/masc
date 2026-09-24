@@ -1056,7 +1056,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
               (* A host stop ends the turn from inside a tool call, before
                  the app-server's thread/tokenUsage/updated for this turn has
                  arrived, so there is no count to report here. *)
-            ~usage:None
+            ~request_context:None
             stop
         in
         let* () =

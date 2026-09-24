@@ -3421,6 +3421,9 @@ let context_composition_lines ~cols ~turn_back
         ; Option.map
             (fun n -> "output " ^ Inspector.format_tokens n)
             record.usage.output_tokens
+        ; Option.map
+            (fun n -> "turn output " ^ Inspector.format_tokens n)
+            record.turn_output_tokens
         ]
     in
     let label =
@@ -3728,9 +3731,12 @@ let context_composition_lines ~cols ~turn_back
                (match recent.cache_read with
                  | Some tokens -> Inspector.format_tokens tokens
                  | None -> "-")
-               (match recent.output_tokens with
-                 | Some tokens -> Inspector.format_tokens tokens
-                 | None -> "-"))
+               (* The request's own output when reported; otherwise the
+                  client turn's, marked so it is not read as one request's. *)
+               (match recent.output_tokens, recent.turn_output_tokens with
+                 | Some tokens, _ -> Inspector.format_tokens tokens
+                 | None, Some tokens -> "turn " ^ Inspector.format_tokens tokens
+                 | None, None -> "-"))
       | _, None ->
           [ (if index = turn_back then Ansi.bold ^ Masc_tui_theme.Glyph.current_entry else " ")
             ^ Ansi.dim
@@ -4029,6 +4035,9 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
                 [ Option.map
                     (fun tokens -> "output " ^ Inspector.format_tokens tokens)
                     record.usage.output_tokens
+                ; Option.map
+                    (fun tokens -> "turn output " ^ Inspector.format_tokens tokens)
+                    record.turn_output_tokens
                 ; Option.map
                     (fun reason ->
                        "finish "

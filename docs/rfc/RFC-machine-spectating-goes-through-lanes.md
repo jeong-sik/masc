@@ -27,10 +27,11 @@ implementation_prs: []
 
 ### 2.1 보기: `live` 라우트 하나
 
-- `GET /api/v1/lane-addons/live?source_kind=…&since=N`
+- `GET /api/v1/lane-addons/live?source_kind=…&since=N&incarnation=I`
   - 화면이 있는 source 종류(`msx_capture`, `dos_capture`)만 받는다. 화면 없는 종류는 오류다.
-  - 기계가 가진 **변경 카운터**가 `N` 과 같으면 "그대로"만 답한다. 다르면 화면과 카운터,
-    incarnation 을 답한다.
+  - 기계가 가진 **변경 카운터**가 `N` 이고 incarnation 이 `I` 이면 "그대로"만 답한다. 하나라도
+    다르면 화면과 카운터, incarnation 을 답한다. 카운터는 서버가 재시작하면 0 부터 다시 세므로
+    카운터만으로는 두 화면을 가를 수 없다. `since` 와 `incarnation` 은 같이 오거나 같이 빠진다.
   - 화면·카운터·incarnation 은 한 번에 읽는다(`capture_with_identity` 처럼).
   - 기계 lock 은 `Eio_unix.run_in_systhread` 안에서만 잡는다.
   - store 에 아무것도 쓰지 않는다. 관측과 그 화면 evidence 는 지금 그대로다
@@ -40,7 +41,7 @@ implementation_prs: []
   그리고 fault 로 끝난 실행도 포함한다. Lane 관측 seq 를 쓰지 않는다. seq 는 worker 가 관측에
   성공할 때만 오르므로(`commit_output`), worker 가 실패하거나 죽으면 멈춘다.
 - 보는 데 패키지 설치나 worker 는 필요 없다.
-- TUI 는 `live?since=N` 을 되풀이한다. "그대로"는 몇 바이트다.
+- TUI 는 `live?since=N&incarnation=I` 를 되풀이한다. "그대로"는 몇 바이트다.
 
 ### 2.2 사람의 조작도 알림을 낸다
 

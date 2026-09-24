@@ -1288,8 +1288,8 @@ let test_post_effect_transport_enters_recovery () =
                       { effect_disposition; _ }) ->
                  check
                    string
-                   "the fence observed the transport interruption (fail-closed Observation_unavailable)"
-                   "observation_unavailable"
+                   "the fence records the tool the client ran before the transport broke"
+                   "effect_attempted"
                    (Keeper_provider_attempt_effect.to_string effect_disposition);
                  check
                    bool
@@ -1700,7 +1700,15 @@ let test_quota_after_tool_effect_remains_fenced () =
                       { effect_disposition; _ }) ->
                  check bool "post-effect quota remains fenced" false
                    (Keeper_provider_attempt_effect.allows_same_turn_retry
-                      effect_disposition)
+                      effect_disposition);
+                 (* The quota frame arrives after MASC ran the tool. The
+                    fence names that effect instead of an unknown one: the
+                    failure route reads it as a response the model produced. *)
+                 check
+                   string
+                   "a quota after a tool records the effect the tool made"
+                   "effect_attempted"
+                   (Keeper_provider_attempt_effect.to_string effect_disposition)
                | _ -> fail (Agent_core.Error.to_string error))
             | Ok _ -> fail "post-effect quota completed the Keeper turn");
        check int "tool effect is not replayed" 1 !call_count)

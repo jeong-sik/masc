@@ -436,6 +436,7 @@ let network_error_kind_to_string = function
   | Llm_provider.Http_client.Tls_error -> "tls_error"
   | Llm_provider.Http_client.Timeout -> "timeout"
   | Llm_provider.Http_client.Local_resource_exhaustion -> "local_resource_exhaustion"
+  | Llm_provider.Http_client.Connection_reset -> "connection_reset"
   | Llm_provider.Http_client.End_of_file -> "end_of_file"
   | Llm_provider.Http_client.Unknown -> "unknown"
 ;;
@@ -447,6 +448,7 @@ let network_error_kind_of_string = function
   | "timeout" -> Some Llm_provider.Http_client.Timeout
   | "local_resource_exhaustion" ->
     Some Llm_provider.Http_client.Local_resource_exhaustion
+  | "connection_reset" -> Some Llm_provider.Http_client.Connection_reset
   | "end_of_file" -> Some Llm_provider.Http_client.End_of_file
   | "unknown" -> Some Llm_provider.Http_client.Unknown
   | _ -> None

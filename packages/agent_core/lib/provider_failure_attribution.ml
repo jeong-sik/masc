@@ -164,8 +164,11 @@ let ownership_of_http_status ~binding code =
 ;;
 
 let ownership_of_network = function
-  | Http.Connection_refused | Http.Dns_failure | Http.Tls_error | Http.End_of_file ->
-    Endpoint
+  | Http.Connection_refused
+  | Http.Dns_failure
+  | Http.Tls_error
+  | Http.Connection_reset
+  | Http.End_of_file -> Endpoint
   | Http.Local_resource_exhaustion -> Attempt_local
   | Http.Timeout | Http.Unknown -> Unclassified
 ;;
@@ -298,6 +301,7 @@ let network_to_string = function
   | Http.Tls_error -> "tls_error"
   | Http.Timeout -> "timeout"
   | Http.Local_resource_exhaustion -> "local_resource_exhaustion"
+  | Http.Connection_reset -> "connection_reset"
   | Http.End_of_file -> "end_of_file"
   | Http.Unknown -> "unknown"
 ;;

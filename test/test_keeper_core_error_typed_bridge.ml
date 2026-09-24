@@ -121,7 +121,7 @@ let api_cases : (string * CoreError.api_error * string) list =
         }
     , "api_error_input_capacity:measurement_unavailable" )
   ; ( "NetworkError"
-    , Retry.NetworkError { message = "ECONNRESET"; kind = Http.Connection_refused }
+    , Retry.NetworkError { message = "ECONNRESET"; kind = Http.Connection_reset }
     , "api_error_network" )
   ; "Timeout", Retry.Timeout { message = "60s"; phase = None }, "api_error_timeout"
   ; ( "TimeoutWithExecutionBudgetProse"
@@ -381,6 +381,27 @@ let test_user_message_of_network_errors () =
     "a closed connection is named once"
     "Runtime provider 'ollama_cloud' closed the connection"
     (AE.user_message_of_core_error provider_eof);
+  (* #38513: a reset arrives after the request was sent, so it must not read
+     as a refusal, whose message says nothing is listening. *)
+  let provider_reset =
+    CoreError.Provider
+      (Llm_provider.Error.NetworkError
+         { provider = "ollama_cloud"
+         ; kind = Http.Connection_reset
+         ; timeout_phase = None
+         ; detail = "Unix.Unix_error(Unix.ECONNRESET, \"read\", \"\")"
+         })
+  in
+  Alcotest.(check string)
+    "a reset connection is named as a reset, not a refusal"
+    "Runtime provider 'ollama_cloud' reset the connection"
+    (AE.user_message_of_core_error provider_reset);
+  Alcotest.(check (option string))
+    "the reset kind survives the wire spelling"
+    (Some "connection_reset")
+    (Keeper_internal_error.network_error_kind_to_string Http.Connection_reset
+     |> Keeper_internal_error.network_error_kind_of_string
+     |> Option.map Keeper_internal_error.network_error_kind_to_string);
   let guardrail =
     CoreError.Agent
       (CoreError.GuardrailViolation { validator = "policy"; reason = "blocked" })

@@ -451,7 +451,7 @@ let sent_error_shows_size (error : Http_client.http_error) =
   | NetworkError
       { kind =
           ( Connection_refused | Dns_failure | Tls_error | Timeout
-          | Local_resource_exhaustion | End_of_file | Unknown )
+          | Local_resource_exhaustion | Connection_reset | End_of_file | Unknown )
       ; _
       } -> false
   | TimeoutError { phase; _ } ->

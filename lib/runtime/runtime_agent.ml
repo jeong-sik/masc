@@ -14,7 +14,8 @@ type agent_core_tool_projector =
   Agent_core.Tool.t
 
 let network_error_kind_of_unix_error = function
-  | Unix.ECONNREFUSED | Unix.ECONNRESET -> Llm_provider.Http_client.Connection_refused
+  | Unix.ECONNREFUSED -> Llm_provider.Http_client.Connection_refused
+  | Unix.ECONNRESET -> Llm_provider.Http_client.Connection_reset
   | Unix.EPIPE -> Llm_provider.Http_client.End_of_file
   | Unix.ETIMEDOUT -> Llm_provider.Http_client.Timeout
   | Unix.ENETUNREACH | Unix.EHOSTUNREACH -> Llm_provider.Http_client.Dns_failure
@@ -24,6 +25,8 @@ let network_error_kind_of_unix_error = function
 ;;
 
 let network_error_kind_of_eio_error = function
+  | Eio.Net.E (Eio.Net.Connection_reset (Eio_unix.Unix_error (code, _, _))) ->
+    Some (network_error_kind_of_unix_error code)
   | Eio.Net.E (Eio.Net.Connection_reset _) -> Some Llm_provider.Http_client.End_of_file
   | Eio.Net.E (Eio.Net.Connection_failure (Eio.Net.Refused _)) ->
     Some Llm_provider.Http_client.Connection_refused

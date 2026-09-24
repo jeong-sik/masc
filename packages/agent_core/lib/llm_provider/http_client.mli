@@ -22,6 +22,9 @@ type network_error_kind =
   | Timeout (** Connection or read timed out (ETIMEDOUT). *)
   | Local_resource_exhaustion
   (** Local OS resource limits reached (EMFILE, ENFILE, ENOBUFS, EADDRNOTAVAIL). *)
+  | Connection_reset
+  (** Peer reset an established connection (ECONNRESET). Unlike
+      [Connection_refused], the request may already have been sent. *)
   | End_of_file (** Peer closed the connection unexpectedly. *)
   | Unknown (** Unclassified network error. *)
 

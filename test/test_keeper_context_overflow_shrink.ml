@@ -27,7 +27,7 @@ let network_error () =
   Agent_core.Error.Api
     (NetworkError
        { message = "Connection_reset"
-       ; kind = Llm_provider.Http_client.Connection_refused
+       ; kind = Llm_provider.Http_client.Connection_reset
        })
 ;;
 

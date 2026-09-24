@@ -126,6 +126,7 @@ let network_error_kind_to_string = function
   | Http_client.Tls_error -> "tls_error"
   | Http_client.Timeout -> "timeout"
   | Http_client.Local_resource_exhaustion -> "local_resource_exhaustion"
+  | Http_client.Connection_reset -> "connection_reset"
   | Http_client.End_of_file -> "end_of_file"
   | Http_client.Unknown -> "unknown"
 ;;

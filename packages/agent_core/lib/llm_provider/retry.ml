@@ -63,6 +63,7 @@ let network_error_kind_label = function
   | Http_client.Tls_error -> "tls_error"
   | Http_client.Timeout -> "timeout"
   | Http_client.Local_resource_exhaustion -> "local_resource_exhaustion"
+  | Http_client.Connection_reset -> "connection_reset"
   | Http_client.End_of_file -> "end_of_file"
   | Http_client.Unknown -> "unknown"
 ;;
@@ -135,6 +136,7 @@ let is_retryable = function
      | Http_client.Connection_refused
      | Http_client.Dns_failure
      | Http_client.Timeout
+     | Http_client.Connection_reset
      | Http_client.End_of_file
      | Http_client.Unknown -> true)
   | InvalidRequest { reason = Json_parse_error; _ } ->

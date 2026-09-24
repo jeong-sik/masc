@@ -18,6 +18,7 @@ type network_error_kind =
   | Tls_error
   | Timeout
   | Local_resource_exhaustion
+  | Connection_reset
   | End_of_file
   | Unknown
 
@@ -355,7 +356,7 @@ let%test "explicit deadline: timeout without clock is rejected" =
 
 let classify_unix_error = function
   | Unix.ECONNREFUSED -> Connection_refused
-  | Unix.ECONNRESET -> Connection_refused
+  | Unix.ECONNRESET -> Connection_reset
   | Unix.EPIPE -> End_of_file
   | Unix.ETIMEDOUT -> Timeout
   | Unix.ENETUNREACH -> Dns_failure
@@ -969,6 +970,7 @@ let known_network_error_kind = function
     | Tls_error
     | Timeout
     | Local_resource_exhaustion
+    | Connection_reset
     | End_of_file ) as kind -> Some kind
 ;;
 
@@ -977,7 +979,8 @@ let known_network_error_kind = function
    This mirrors the severity ordering rather than the retry policy itself. *)
 let network_error_kind_is_non_retryable = function
   | Local_resource_exhaustion | Tls_error -> true
-  | Connection_refused | Dns_failure | Timeout | End_of_file | Unknown -> false
+  | Connection_refused | Dns_failure | Timeout | Connection_reset | End_of_file | Unknown ->
+    false
 ;;
 
 let classify_eio_backend_error = function
@@ -3537,8 +3540,8 @@ let%test "classify_unix_error: EPIPE is End_of_file" =
   classify_unix_error Unix.EPIPE = End_of_file
 ;;
 
-let%test "classify_unix_error: ECONNRESET is Connection_refused" =
-  classify_unix_error Unix.ECONNRESET = Connection_refused
+let%test "classify_unix_error: ECONNRESET is Connection_reset" =
+  classify_unix_error Unix.ECONNRESET = Connection_reset
 ;;
 
 let%test "classify_unix_error: ENETUNREACH is Dns_failure" =

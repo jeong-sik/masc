@@ -32,7 +32,6 @@ let failure_message = function
   | Session.Connection_gone reason -> "the Stagehand connection ended: " ^ reason
   | Session.Abandoned_call_pending -> "a Stagehand call whose caller left has not answered yet"
   | Session.Not_delivered detail -> "the call did not reach Stagehand: " ^ detail
-  | Session.Answer_unreceived seconds -> Printf.sprintf "Stagehand did not answer within %.0f s" seconds
   | Session.Rejected { code; message } -> Printf.sprintf "Stagehand refused the call (%d): %s" code message
   | Session.Lost detail -> "Stagehand did not answer: " ^ detail
 ;;
@@ -52,7 +51,7 @@ let answer_before_effect failure =
   match failure with
   | Session.Not_attached | Session.Detached | Session.Connection_gone _ | Session.Abandoned_call_pending
   | Session.Not_delivered _ -> Browser_lane.Rejected_before_effect (failure_message failure)
-  | Session.Answer_unreceived _ | Session.Rejected _ | Session.Lost _ -> Browser_lane.Refused (failure_message failure)
+  | Session.Rejected _ | Session.Lost _ -> Browser_lane.Refused (failure_message failure)
 ;;
 
 (* For calls sent up to and including the verb's effect. *)

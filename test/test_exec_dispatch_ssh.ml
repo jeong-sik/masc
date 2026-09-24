@@ -39,6 +39,7 @@ let test_endpoint : Masc_exec.Sandbox_target.ssh_endpoint =
   ; remote_root = "/srv/masc/playground/keeper-a"
   ; connect_timeout_sec = 10
   ; env_allowlist = [ "PATH" ]
+  ; allowed_paths = []
   }
 
 let simple_stage bin args ~sandbox =

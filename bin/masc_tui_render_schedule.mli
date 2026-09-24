@@ -53,6 +53,10 @@ type overview_allocation = {
   team_rows : int;
       (** Keeper rows in the Team block. The block's title and its closing
           divider are two more rows, drawn only when this is positive. *)
+  providers_rows : int;
+      (** Rows of the Providers section. Its title and closing divider are
+          {!overview_providers_chrome_rows} more, drawn only when this is
+          positive. *)
   task_error_rows : int;
   task_rows : int;
   filler_rows : int;
@@ -70,6 +74,10 @@ val overview_goal_chrome_rows : int
 (** The divider under the GOALS block, drawn only when [goal_rows] is
     positive. *)
 
+val overview_providers_chrome_rows : int
+(** The Providers section's title row and the divider under it, drawn only
+    when [providers_rows] is positive. *)
+
 val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allocation
 (** Adds up to [extra] Team rows out of [filler_rows] only: rows nothing else
     on the Overview wanted. A Team block not yet drawn also pays its
@@ -81,9 +89,14 @@ val allocate_overview :
   attention_count:int ->
   goal_count:int ->
   team_count:int ->
+  providers_count:int ->
   task_count:int ->
   has_task_error:bool ->
   overview_allocation
+(** The Providers section is sized after GOALS and before the Team block: it
+    takes up to [providers_count] rows of what is left once the one task row
+    held back is kept. With no room for one row besides its chrome it is not
+    drawn at all. *)
 
 (** {1 Keeper roster columns} *)
 
@@ -277,13 +290,30 @@ type schedule_row_values = {
 
 val schedule_minimum_recurrence_width : int
 
+val schedule_minimum_delivery_width : int
+val schedule_maximum_delivery_width : int
+
+val schedule_delivery_width : string list -> int
+(** Cells the delivery column needs for [words]: the widest of them, never
+    under {!schedule_minimum_delivery_width} -- what the column drew before it
+    was measured -- and never over {!schedule_maximum_delivery_width}, so one
+    long word cannot take the recurrence's room. *)
+
 val schedule_recurrence_width :
-  inner_width:int -> target_width:int -> wake_width:int -> int
+  inner_width:int ->
+  target_width:int ->
+  wake_width:int ->
+  delivery_width:int ->
+  int
 (** Cells the recurrence may occupy: what the named columns leave, never below
     {!schedule_minimum_recurrence_width}. *)
 
 val schedule_header_row :
-  target_width:int -> wake_width:int -> recurrence_width:int -> string
+  target_width:int ->
+  wake_width:int ->
+  delivery_width:int ->
+  recurrence_width:int ->
+  string
 
 val schedule_row :
   ?status_style:string ->
@@ -291,6 +321,7 @@ val schedule_row :
   ?recurrence_style:string ->
   target_width:int ->
   wake_width:int ->
+  delivery_width:int ->
   recurrence_width:int ->
   schedule_row_values ->
   string

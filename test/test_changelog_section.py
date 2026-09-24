@@ -105,5 +105,35 @@ class ChangelogSection(unittest.TestCase):
         self.assertIn("no '- ' entries", result.stderr)
 
 
+    # #37425. The same CHANGELOG, three expected dates: the day the heading
+    # names passes, the day before it (a KST evening is the previous UTC
+    # day, which is how v0.35.7 and v0.35.8 shipped a day off) fails, and a
+    # heading with no date fails. A rule that ignored the date, or refused
+    # every date, cannot pass all three.
+    def test_the_heading_date_must_be_the_tagged_commits_utc_date(self):
+        self.changelog.write_text(changelog_with_body_of(1_000))
+        same = run("9.9.9", self.changelog, self.out,
+                   "--expect-date", "2026-09-23")
+        self.assertEqual(same.returncode, 0, same.stderr)
+        self.assertTrue(self.out.exists())
+        self.out.unlink()
+        previous_day = run("9.9.9", self.changelog, self.out,
+                           "--expect-date", "2026-09-22")
+        self.assertEqual(previous_day.returncode, 1)
+        self.assertIn("names 2026-09-23", previous_day.stderr)
+        self.assertIn("dated 2026-09-22 in UTC", previous_day.stderr)
+        self.assertFalse(self.out.exists(), "a refused body must not be written")
+
+    def test_a_heading_without_a_date_fails_the_date_check(self):
+        self.changelog.write_text(
+            "# Changelog\n\n## [9.9.9]\n\n### Fixed\n\n- One (#1).\n")
+        without = run("9.9.9", self.changelog, self.out,
+                      "--expect-date", "2026-09-23")
+        self.assertEqual(without.returncode, 1)
+        self.assertIn("names no date", without.stderr)
+        # Without --expect-date the same undated heading is still a body.
+        self.assertEqual(run("9.9.9", self.changelog, self.out).returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

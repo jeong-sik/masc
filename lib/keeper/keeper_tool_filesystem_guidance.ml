@@ -23,11 +23,6 @@ type t =
       { offset : int
       ; window_bytes : int
       }
-  | Offset_beyond_scan_budget of
-      { offset : int
-      ; file_bytes : int
-      ; budget : int
-      }
   | Capability_unavailable
   | Publication_failed
   | Directory_publication_failed
@@ -50,8 +45,6 @@ let key = function
   | Checkout_scan_failed _ -> Prompt_names.keeper_tool_filesystem_checkout_scan_failed
   | Cwd_not_directory _ -> Prompt_names.keeper_tool_filesystem_cwd_not_directory
   | Offset_beyond_window _ -> Prompt_names.keeper_tool_filesystem_offset_beyond_window
-  | Offset_beyond_scan_budget _ ->
-    Prompt_names.keeper_tool_filesystem_offset_beyond_scan_budget
   | Capability_unavailable -> Prompt_names.keeper_tool_filesystem_capability_unavailable
   | Publication_failed -> Prompt_names.keeper_tool_filesystem_publication_failed
   | Directory_publication_failed ->
@@ -83,11 +76,6 @@ let vars = function
   | Cwd_not_directory { cwd } -> [ "cwd", cwd ]
   | Offset_beyond_window { offset; window_bytes } ->
     [ "offset", string_of_int offset; "window_bytes", string_of_int window_bytes ]
-  | Offset_beyond_scan_budget { offset; file_bytes; budget } ->
-    [ "offset", string_of_int offset
-    ; "file_bytes", string_of_int file_bytes
-    ; "budget", string_of_int budget
-    ]
   | Capability_unavailable
   | Publication_failed
   | Directory_publication_failed
@@ -116,8 +104,6 @@ let fallback guidance =
   | Cwd_not_directory { cwd } -> "cwd_not_directory: " ^ cwd
   | Offset_beyond_window { offset; window_bytes } ->
     Printf.sprintf "offset=%d window_bytes=%d" offset window_bytes
-  | Offset_beyond_scan_budget { offset; file_bytes; budget } ->
-    Printf.sprintf "offset=%d file_bytes=%d budget=%d" offset file_bytes budget
   | Capability_unavailable
   | Publication_failed
   | Directory_publication_failed

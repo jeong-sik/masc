@@ -517,7 +517,6 @@ describe('SettingsSurface', () => {
     localStorage.clear()
     tweaksDensity.value = 'spacious'
     notifyRules.value = {
-      keeper_handoff: true,
       'approval:pending': true,
       'agent_core:agent_failed': true,
     }
@@ -962,7 +961,7 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="notify-permission-value"]')?.textContent).toBe('unsupported')
     expect(container.querySelector('[data-testid="notify-permission-request"]')).toBeNull()
 
-    for (const kind of ['keeper_handoff', 'approval:pending', 'agent_core:agent_failed']) {
+    for (const kind of ['approval:pending', 'agent_core:agent_failed']) {
       const toggle = container.querySelector(`[data-testid="notify-rule-toggle-${kind}"]`)
       expect(toggle).not.toBeNull()
       expect(toggle?.closest('label')?.classList.contains('v2-mobile-operator-target')).toBe(true)
@@ -975,7 +974,7 @@ describe('SettingsSurface', () => {
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
 
     const toggle = await waitFor(() => {
-      const el = container.querySelector('[data-testid="notify-rule-toggle-keeper_handoff"]') as HTMLInputElement
+      const el = container.querySelector('[data-testid="notify-rule-toggle-approval:pending"]') as HTMLInputElement
       expect(el).not.toBeNull()
       return el
     })
@@ -985,7 +984,7 @@ describe('SettingsSurface', () => {
 
     await waitFor(() => {
       const stored = JSON.parse(localStorage.getItem('dashboard:notify:rules-v1') ?? '{}')
-      expect(stored.keeper_handoff).toBe(false)
+      expect(stored['approval:pending']).toBe(false)
     })
   })
 

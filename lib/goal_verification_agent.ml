@@ -26,14 +26,47 @@
     all slots failed, or a refused commit leaves the pending row durable and
     stops. Nothing re-runs the same review on a clock — the next scan comes
     from a Keeper requesting completion or from another review committing a
-    verdict. No wall-clock expiry and no retry timer anywhere. *)
+    verdict. So a deferral of a Goal still waiting on the same request is
+    posted to the Board through {!Verification_protocol.notify_stalled_verification},
+    the notice a Task review that stops without a verdict already uses, and
+    a Keeper chooses whether to ask again. No wall-clock expiry and no retry
+    timer anywhere. *)
 
 type pending_work = { goal_id : string }
+
+(* Why a review ended without a verdict. *)
+type deferral =
+  | Review_not_bound of { detail : string }
+  | Proof_lookup_unavailable of { detail : string }
+  | Not_reviewed of { gate : string; detail : string }
+  | Verdict_without_reason
+  | Commit_refused of { detail : string }
 
 type process_outcome =
   | Committed
   | Superseded
-  | Deferred of string
+  | Deferred of deferral
+
+(* The Board notice keys its repeat check on [gate], as a Task stall does: a
+   review the evaluator declined keeps the evaluator's gate name, every other
+   stop is keyed by its constructor. *)
+let deferral_gate = function
+  | Review_not_bound _ -> "Review_not_bound"
+  | Proof_lookup_unavailable _ -> "Proof_lookup_unavailable"
+  | Not_reviewed { gate; _ } -> gate
+  | Verdict_without_reason -> "Verdict_without_reason"
+  | Commit_refused _ -> "Commit_refused"
+;;
+
+let deferral_detail = function
+  | Review_not_bound { detail }
+  | Proof_lookup_unavailable { detail }
+  | Not_reviewed { detail; _ }
+  | Commit_refused { detail } -> detail
+  | Verdict_without_reason ->
+    "verdict without a stated reason is not a judgment; the pending row stays \
+     durable"
+;;
 
 let pending_work_same_goal left right = String.equal left.goal_id right.goal_id
 
@@ -68,11 +101,13 @@ let scan_failure_to_string = function
 ;;
 
 (* One Verifying goal whose ledger the scan could read but not reconcile or
-   re-arm. The scan skips that goal and keeps collecting the others; the
-   caller logs each one at ERROR, and its pending row stays durable. *)
+   re-arm. The scan skips that goal and keeps collecting the others; its
+   pending row stays durable, and the Goal rows the operator reads carry the
+   failure until a scan no longer finds it. *)
 type reconcile_failure =
   { failed_goal_id : string
-  ; failure : string
+  ; step : Goal_reconcile_step.t
+  ; failure : Goal_store.write_error
   }
 
 type scan =
@@ -86,12 +121,13 @@ let collect_pending config : (scan, scan_failure) result =
   | Ok goals ->
     let collect_goal (goal : Goal_store.goal) =
       match Workspace_goals.reconcile_committed_proof config ~goal_id:goal.id with
-      | Error failure -> Error failure
+      | Error failure -> Error (Goal_reconcile_step.Reconcile_proof, failure)
       | Ok (Workspace_goals.Reconciled _ | Workspace_goals.Reconciliation_not_needed _) ->
         Ok None
       | Ok Workspace_goals.No_committed_proof ->
         Workspace_goals.recover_current_proof config ~goal_id:goal.id
         |> Result.map (fun rearmed -> if rearmed then Some { goal_id = goal.id } else None)
+        |> Result.map_error (fun failure -> Goal_reconcile_step.Rearm_proof, failure)
     in
     let collected, unreconciled =
       List.fold_left
@@ -99,22 +135,46 @@ let collect_pending config : (scan, scan_failure) result =
            match collect_goal goal with
            | Ok None -> collected, unreconciled
            | Ok (Some work) -> work :: collected, unreconciled
-           | Error failure ->
-             collected, { failed_goal_id = goal.id; failure } :: unreconciled)
+           | Error (step, failure) ->
+             collected, { failed_goal_id = goal.id; step; failure } :: unreconciled)
         ([], [])
         goals
     in
     Ok { collected = List.rev collected; unreconciled = List.rev unreconciled }
 ;;
 
-let log_unreconciled failures =
+(* Derived from the latest completed scan and replaced by the next one; never
+   written to a store. A scan the goal store refused leaves it as it was,
+   because that scan saw no goal to judge either way. *)
+let last_unreconciled : reconcile_failure list Atomic.t = Atomic.make []
+
+let publish_unreconciled failures =
+  Atomic.set last_unreconciled failures;
   List.iter
-    (fun { failed_goal_id; failure } ->
+    (fun { failed_goal_id; step; failure } ->
        Log.Misc.error
-         "goal verifier ledger reconcile failed goal_id=%s; its pending row stays undrained: %s"
+         "goal verifier ledger %s failed goal_id=%s; its pending row stays undrained: %s"
+         (Goal_reconcile_step.to_string step)
          failed_goal_id
-         failure)
+         (Goal_store.write_error_to_string failure))
     failures
+;;
+
+let unreconciled_to_yojson (goal : Goal_store.goal) =
+  match
+    List.find_opt
+      (fun { failed_goal_id; _ } -> String.equal failed_goal_id goal.id)
+      (Atomic.get last_unreconciled)
+  with
+  | None -> `Null
+  (* The operator dropped or reopened it after that scan; the next scan will
+     not list it, and until then the old failure is not this goal's state. *)
+  | Some _ when goal.phase <> Goal_phase.Verifying -> `Null
+  | Some { step; failure; _ } ->
+    `Assoc
+      [ "step", `String (Goal_reconcile_step.to_string step)
+      ; "detail", `String (Goal_store.write_error_to_string failure)
+      ]
 ;;
 
 (* RFC-0444 §2.3 row 7 and criterion 3: one WARN line per skipped scan, and
@@ -250,9 +310,40 @@ let commit_gate_verdict config ~goal_id ~request_id ~criterion ~verification_run
 
 (* {1 Processing} *)
 
-let defer ~goal_id ~reason =
-  Log.Misc.warn "goal verifier deferred goal_id=%s reason=%s" goal_id reason;
-  Deferred reason
+let defer ~goal_id deferral =
+  Log.Misc.warn
+    "goal verifier deferred goal_id=%s gate=%s reason=%s"
+    goal_id
+    (deferral_gate deferral)
+    (deferral_detail deferral);
+  Deferred deferral
+;;
+
+(* A deferral writes no ledger row, so no scan follows it and the Goal waits
+   in Verifying until a Keeper asks again. The Board notice is how a Keeper
+   learns that. The verifier arms no retry, and [Goal_review] carries no
+   disposition, so the post always reads [No_retry_armed]; the notice posts
+   once per (Goal, request, gate). The
+   notice is a projection: an ordinary exception out of the Board is logged
+   and changes neither the outcome nor the pending row. Cancellation is not
+   contained. *)
+let announce_deferral ~goal_id ~request_id deferral =
+  match
+    Verification_protocol.notify_stalled_verification
+      ~authority:Workspace_goals.verifier_authority
+      ~subject:(Verification_protocol.Goal_review { goal_id; request_id })
+      ~gate:(deferral_gate deferral)
+      ~detail:(deferral_detail deferral)
+  with
+  | () -> ()
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    Log.Misc.error
+      "goal verifier stall notice did not reach the Board; the line above \
+       stands goal_id=%s request_id=%s error=%s"
+      goal_id
+      request_id
+      (Printexc.to_string exn)
 ;;
 
 (* Capture the Goal and its durable request under the Goal lock. The callback
@@ -272,12 +363,6 @@ let bind_review config ~goal_id =
           | Some _ | None -> Error "goal has no pending proof for its current criterion"))
 ;;
 
-let newer_request_pending config ~goal_id ~request_id =
-  match bind_review config ~goal_id with
-  | Ok (_, (current_request_id, _, _)) -> not (String.equal request_id current_request_id)
-  | Error _ -> false
-;;
-
 let process_pending_work_inner
       ?(sw : Eio.Switch.t option = None)
       ~observe_tool
@@ -295,7 +380,8 @@ let process_pending_work_inner
         | Error detail ->
           defer
             ~goal_id:work.goal_id
-            ~reason:("goal proof lookup surface unavailable: " ^ detail)
+            (Proof_lookup_unavailable
+               { detail = "goal proof lookup surface unavailable: " ^ detail })
         | Ok (lookup, root_layout) ->
        let on_tool_result ~input result = observe_tool ~input result in
        let result =
@@ -326,12 +412,19 @@ let process_pending_work_inner
                | Some reason -> reason
                | None -> Task.Anti_rationalization.gate_to_string result.gate
              in
-             (* No verdict was committed. The row stays durable and the next
-                real wake rescans it — a Keeper re-requesting completion, or a
-                worker slot coming free with work still queued. *)
+             (* No verdict was committed. The row stays durable and nothing
+                rescans it on its own: the next scan comes from a Keeper
+                requesting completion, from another review committing a
+                verdict, or from a freed worker slot whose Goal received a
+                wake while its review ran ([release_review] reports that
+                held wake). A slot that frees with no held wake starts no
+                scan. *)
              defer
                ~goal_id:work.goal_id
-               ~reason:detail
+               (Not_reviewed
+                  { gate = Task.Anti_rationalization.gate_to_string result.gate
+                  ; detail
+                  })
            | Some review_verdict ->
              let evidence =
                match review_verdict with
@@ -340,11 +433,7 @@ let process_pending_work_inner
              in
              if String.equal (String.trim evidence) ""
              then
-               defer
-                 ~goal_id:work.goal_id
-                 ~reason:
-                   "verdict without a stated reason is not a judgment; the \
-                    pending row stays durable"
+               defer ~goal_id:work.goal_id Verdict_without_reason
              else (
                let decision =
                  match review_verdict with
@@ -376,20 +465,29 @@ let process_pending_work_inner
                  (* A refused commit (stale verifier answer, a phase that moved
                     under the review) consumes nothing: the pending row stays
                     durable and the next pulse re-reads it. *)
-                 defer ~goal_id:work.goal_id ~reason:detail)))
+                 defer ~goal_id:work.goal_id (Commit_refused { detail }))))
     in
     match outcome with
     | Committed | Superseded -> outcome
-    | Deferred _ when newer_request_pending config ~goal_id:work.goal_id ~request_id ->
-      Superseded
-    | Deferred _ -> outcome
+    | Deferred deferral ->
+      (* Re-read the Goal under its lock. A newer request supersedes this
+         review; the same request still standing is a Goal nothing will
+         rescan, so the Board is told why it waits. A Goal that left
+         Verifying has nothing to wait for. *)
+      (match bind_review config ~goal_id:work.goal_id with
+       | Ok (_, (current_request_id, _, _))
+         when not (String.equal request_id current_request_id) -> Superseded
+       | Ok _ ->
+         announce_deferral ~goal_id:work.goal_id ~request_id deferral;
+         outcome
+       | Error _ -> outcome)
 ;;
 
 let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pending_work)
   : process_outcome
   =
   match bind_review config ~goal_id:work.goal_id with
-  | Error detail -> defer ~goal_id:work.goal_id ~reason:detail
+  | Error detail -> defer ~goal_id:work.goal_id (Review_not_bound { detail })
   | Ok ((_goal, (request_id, criterion, _)) as bound_review) ->
   let registry = Goal_verification_run_registry.global () in
   let run_id = Random_id.uuid_v7 () in
@@ -436,7 +534,8 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
       | Committed -> Goal_verification_run_registry.Committed
       | Superseded -> Goal_verification_run_registry.Superseded
           { detail = "review superseded by a newer pending proof request" }
-      | Deferred reason -> Goal_verification_run_registry.Deferred { detail = reason }
+      | Deferred deferral ->
+        Goal_verification_run_registry.Deferred { detail = deferral_detail deferral }
     in
     persist registry_outcome
   in
@@ -484,7 +583,7 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, scan_failure) 
     skip_scan unavailable;
     error
   | Ok { collected; unreconciled } ->
-    log_unreconciled unreconciled;
+    publish_unreconciled unreconciled;
     List.iter
       (fun item ->
          (* RFC-0387: per-row outcomes are logged at the point of decision
@@ -647,7 +746,7 @@ let process_pending (runtime : runtime) =
   match collect_pending runtime.config with
   | Error (Scan_skipped unavailable) -> skip_scan unavailable
   | Ok { collected = work; unreconciled } ->
-    log_unreconciled unreconciled;
+    publish_unreconciled unreconciled;
     let active = Atomic.get runtime.in_flight in
     let available = max 0 (max_concurrent_reviews - List.length active) in
     let eligible =
@@ -747,6 +846,8 @@ let start ~sw ~(config : Workspace_utils_backend_setup.config) =
     Eio.Switch.on_release sw (fun () ->
       if Atomic.compare_and_set active_runtime owner None
       then (
+        (* No scan runs after this, so its last list would read as current. *)
+        Atomic.set last_unreconciled [];
         Atomic.set
           Workspace_hooks.goal_verification_pending_fn
           previous_pending_hook;
@@ -771,16 +872,27 @@ module For_testing = struct
 
   type nonrec pending_work = pending_work = { goal_id : string }
 
+  type nonrec deferral = deferral =
+    | Review_not_bound of { detail : string }
+    | Proof_lookup_unavailable of { detail : string }
+    | Not_reviewed of { gate : string; detail : string }
+    | Verdict_without_reason
+    | Commit_refused of { detail : string }
+
   type nonrec process_outcome = process_outcome =
     | Committed
     | Superseded
-    | Deferred of string
+    | Deferred of deferral
+
+  let deferral_gate = deferral_gate
+  let deferral_detail = deferral_detail
 
   type nonrec scan_failure = scan_failure = Scan_skipped of Goal_store.unavailable
 
   type nonrec reconcile_failure = reconcile_failure =
     { failed_goal_id : string
-    ; failure : string
+    ; step : Goal_reconcile_step.t
+    ; failure : Goal_store.write_error
     }
 
   type nonrec scan = scan =

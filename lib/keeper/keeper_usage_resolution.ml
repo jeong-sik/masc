@@ -416,8 +416,21 @@ let resolve ~cursor ~basis ~observation ~observed_at =
         | Some (delta, status) ->
           { observation; basis; delta = Some delta; status; observed_at }, next_cursor
         | None ->
+          (* The counter went backwards inside the same conversation. The
+             delta is still not guessed -- this turn is reported as
+             [Counter_regressed] with no delta, never as a reset that would
+             charge the whole observation. But the cursor moves to what was
+             observed, the same way [Baseline_missing] re-establishes one:
+             keeping the old peak made every later turn [Counter_regressed]
+             until the counter climbed past it, so one regression stopped
+             the keeper's totals for many turns instead of losing one
+             (#32463). Observations reach [resolve] one settled turn at a
+             time (keeper_unified_turn_success.ml), so we trust a lower value
+             as the counter's new position. If it was a transient frame, the
+             next turn over-counts by at most (old peak - observed), once;
+             keeping the old peak instead under-counted without bound. *)
           ( { observation; basis; delta = None; status = Counter_regressed; observed_at }
-          , cursor ))
+          , next_cursor ))
      | Some _ | None ->
        ( { observation; basis; delta = None; status = Baseline_missing; observed_at }
        , next_cursor ))

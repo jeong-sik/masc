@@ -59,9 +59,11 @@ type t = private {
           gap. *)
 }
 
-val of_tasks : now:float -> Masc_domain.task list -> t
+val of_tasks : now:float -> archived:Masc_domain.task list -> Masc_domain.task list -> t
 (** Counts current states plus creation/terminal timestamps within the preceding
     24 hours. Cancellation stays separate from completion. Invalid timestamps
-    remain a visible count and do not become zero-time events. *)
+    remain a visible count and do not become zero-time events. [archived] are
+    the tasks [masc_gc] moved out of the backlog: they count in [recent] and
+    [daily] only, and one whose id is also live is counted once, as live. *)
 val open_count : counts -> int
 val total_count : counts -> int

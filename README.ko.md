@@ -349,8 +349,10 @@ reviewer = "<provider>.<model>"
 - **이미지.** `docker`와 `microvm` 턴은 이미지 안에서 돌고, 이미지가 없으면
   턴마다 `docker_preflight_failed`에서 멈춥니다. `masc sandbox-image`가
   바이너리에 든 레시피로 `masc-sandbox:general`(Debian 위 bash, ripgrep, git)을
-  만듭니다. 프로젝트를 빌드해야 하는 Keeper는 그 프로젝트 툴체인 이미지를
-  `sandbox_image`에 적습니다. 컨테이너는 읽기 전용 rootfs, `--cap-drop=ALL`,
+  만듭니다. `docker`와 `microvm` Keeper는 모두 `sandbox_image`에 이미지를
+  적어야 하고, 적지 않으면 기본값을 받는 대신 거부됩니다. 범용 이미지로
+  충분한 Keeper는 `sandbox_image = "masc-sandbox:general"`을, 프로젝트를
+  빌드해야 하는 Keeper는 그 프로젝트 툴체인 이미지를 적습니다. 컨테이너는 읽기 전용 rootfs, `--cap-drop=ALL`,
   내 uid로 돌기 때문에 `bash`와 툴체인이 이미지에 미리 있어야 합니다. 턴 도중에
   뭘 설치할 수는 없습니다.
 - **네트워크 모드.** 샌드박스는 `network_mode = "none"`으로 시작합니다. 웹

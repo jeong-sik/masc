@@ -29,6 +29,7 @@ let guest_target () =
       ; remote_root = "/srv/masc/playground/test"
       ; connect_timeout_sec = 10
       ; env_allowlist = [ "PATH" ]
+      ; allowed_paths = []
       }
     ~runner:mock_runner
     ()

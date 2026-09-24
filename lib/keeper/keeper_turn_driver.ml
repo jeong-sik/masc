@@ -1225,6 +1225,7 @@ let project_input_for_attempt
        Keeper_runtime_manifest.event_kind ->
        unit)
     ~goal_blocks
+    ~goal_metadata
     ~initial_messages
     ~agent_core_checkpoint
     ~runtime_id
@@ -1391,7 +1392,9 @@ let project_input_for_attempt
               message after the seed history. Record the boundary now, before
               the provider can append answers, tools or injected context. *)
            let input_message blocks =
-             Agent_core.Types.user_msg_blocks
+             Agent_core.Types.make_message
+               ~metadata:goal_metadata
+               ~role:Agent_core.Types.User
                (List.map
                   (function
                     | Agent_core.Types.Text text ->
@@ -1449,6 +1452,7 @@ let run_named
     ~base_path
     ~goal
     ?goal_blocks
+    ?(goal_metadata = [])
     ?session_id
     (* Required, not defaulted to "". Three of the runtimes this dispatches to
        -- Codex, Claude Code, Antigravity -- refuse a blank composition in
@@ -2006,6 +2010,7 @@ let run_named
           ~keeper_name
           ~emit_runtime_manifest
           ~goal_blocks
+          ~goal_metadata
           ~initial_messages
           ~agent_core_checkpoint
           ~runtime_id:attempt_runtime_id
@@ -2599,6 +2604,7 @@ let run_named
             ; name
             ; goal
             ; goal_blocks
+            ; goal_metadata
             ; session_id
             ; system_prompt
             ; (* Only this lane can widen a running turn, so only this lane

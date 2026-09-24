@@ -540,8 +540,20 @@ export function keeperConfigFailureRequiresAuthoritativeReload(error: unknown): 
       error.errorCode === 'keeper_manifest_reconciliation_required'
       || error.errorCode === 'keeper_config_composite_reconciliation_required'
       || error.authoritativeReloadRequired
-      || (error.configApplied === true && error.runtimeSync === false)
+      || (error.configApplied === true && error.runtimeSync === 'failed')
     )
+}
+
+/** A save that landed while a turn was running applies from the next turn;
+ *  saying so keeps the operator from saving the same change again. */
+export function runtimeSyncToastSuffix(runtimeSync: KeeperConfig['runtime_sync']): string {
+  switch (runtimeSync) {
+    case 'deferred_until_turn_end':
+      return ' (지금 도는 턴이 끝나면 다음 턴부터 적용돼요)'
+    case 'lane_restarted':
+    case undefined:
+      return ''
+  }
 }
 
 export function configDurabilityWarningMessage(
@@ -1949,7 +1961,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       if (durabilityWarning) {
         showToast(durabilityWarning, 'warning')
       } else {
-        showToast('Keeper 설정 저장 완료', 'success')
+        showToast(`Keeper 설정 저장 완료${runtimeSyncToastSuffix(updated.runtime_sync)}`, 'success')
       }
     } catch (err) {
       const activeOwner = activeKeeperConfigOwner.value
@@ -2085,7 +2097,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       if (durabilityWarning) {
         showToast(durabilityWarning, 'warning')
       } else {
-        showToast('프롬프트 저장 완료', 'success')
+        showToast(`프롬프트 저장 완료${runtimeSyncToastSuffix(updated.runtime_sync)}`, 'success')
       }
     } catch (err) {
       const activeOwner = activeKeeperConfigOwner.value

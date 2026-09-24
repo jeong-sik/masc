@@ -7,7 +7,7 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperInputPolicy, KeeperConfig, KeeperSystemPromptPreview, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, SandboxProfile } from '../types'
+import type { KeeperInputPolicy, KeeperConfig, KeeperSystemPromptPreview, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, KeeperConfigRuntimeSync, SandboxProfile } from '../types'
 import { UNKNOWN_NETWORK_MODE, UNKNOWN_SANDBOX_PROFILE } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
@@ -210,6 +210,12 @@ function decodeConfigWrite(value: unknown): KeeperConfig['config_write'] {
   }
 }
 
+function decodeRuntimeSync(value: unknown): KeeperConfig['runtime_sync'] {
+  if (value === undefined) return undefined
+  if (value === 'lane_restarted' || value === 'deferred_until_turn_end') return value
+  throw new Error('Invalid keeper config response: runtime_sync is not a success state')
+}
+
 function normalizeStringList(value: unknown): string[] {
   const array = asStringArray(value)
   if (array.length > 0) return array
@@ -371,6 +377,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     name: asNullableString(data.name) ?? requestedName,
     config_revision: decodeConfigRevision(data.config_revision),
     config_write: decodeConfigWrite(data.config_write),
+    runtime_sync: decodeRuntimeSync(data.runtime_sync),
     config_transaction_warnings:
       decodeConfigWarnings(data.config_transaction_warnings),
     activation_mode: requireKeeperActivationMode(data.activation_mode),
@@ -495,7 +502,7 @@ export async function patchKeeperConfig(
   name: string,
   payload: KeeperConfigUpdatePayload,
   expectedConfigRevision: KeeperConfigRevision,
-): Promise<KeeperConfig> {
+): Promise<KeeperConfig & { runtime_sync: KeeperConfigRuntimeSync }> {
   await ensureDevToken()
   return post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
@@ -503,5 +510,12 @@ export async function patchKeeperConfig(
       ...payload,
       expected_config_revision: expectedConfigRevision,
     },
-  ).then(raw => normalizeKeeperConfig(raw, name))
+  ).then(raw => {
+    const config = normalizeKeeperConfig(raw, name)
+    const runtimeSync = config.runtime_sync
+    if (runtimeSync === undefined) {
+      throw new Error('Invalid keeper config response: runtime_sync is required after a save')
+    }
+    return { ...config, runtime_sync: runtimeSync }
+  })
 }

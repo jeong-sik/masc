@@ -84,6 +84,7 @@ type start_error =
   | Already_started
   | Already_exited
   | Fork_failed of exn
+  | Server_root_switch_unavailable
 
 type cancel_result =
   | Cancel_requested
@@ -97,6 +98,8 @@ let start_error_to_string = function
   | Already_started -> "lane already started"
   | Already_exited -> "lane already exited"
   | Fork_failed exn -> Printf.sprintf "lane fork failed: %s" (Printexc.to_string exn)
+  | Server_root_switch_unavailable ->
+    "lane has no owner: the server root switch is not installed or no longer live"
 ;;
 
 let create () =
@@ -311,6 +314,24 @@ let fork ~sw t ~run ~cleanup =
           (* The child won the exact-once settlement race before fork raised. *)
           ());
        Error (Fork_failed exn))
+;;
+
+exception Server_root_switch_unavailable_at_start
+
+let fork_server_owned t ~run ~cleanup =
+  match Eio_context.get_root_switch_opt () with
+  | Some sw -> fork ~sw t ~run ~cleanup
+  | None ->
+    (match claim_start t with
+     | Error _ as error -> error
+     | Ok () ->
+       (* Nothing was forked, but the lane is settled through [cleanup] exactly
+          as a rejected fork is, so the registry entry's join contract stays
+          total. *)
+       let settled =
+         resolve_exit_once t (Failed Server_root_switch_unavailable_at_start) cleanup
+       in
+       if settled then Error Server_root_switch_unavailable else Error Already_exited)
 ;;
 
 let reject_before_start t ~reason =

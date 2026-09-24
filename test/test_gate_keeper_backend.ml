@@ -3895,6 +3895,58 @@ let test_chat_speaker_of_request_agent_channel_without_sender_is_owner () =
   check bool "agent channel without sender stays owner" true
     (speaker.speaker_authority = Keeper_chat_store.Owner)
 
+(* RFC-0468 §3.2: the speaker the turn stamps on its User message comes from
+   the same typed request as the chat row's speaker, case for case. *)
+let test_input_speaker_of_request_matches_chat_speaker () =
+  let keeper_id =
+    match Keeper_identity.Keeper_id.of_string "masc-the-leader" with
+    | Some keeper_id -> keeper_id
+    | None -> fail "keeper id fixture"
+  in
+  let cases =
+    [ ( "copilot"
+      , stream_payload_exn ~name:"luna" ~message:"hello" ~channel:"copilot"
+          ~channel_workspace_id:"session-7" ()
+      , Keeper_input_speaker.Person Keeper_input_speaker.Owner )
+    ; ( "connector"
+      , stream_payload_exn ~name:"luna" ~message:"hello" ~channel:"discord"
+          ~channel_user_id:"user-42" ~channel_user_name:"Alice"
+          ~channel_workspace_id:"workspace-9" ()
+      , Keeper_input_speaker.Person
+          (Keeper_input_speaker.External
+             { Keeper_input_speaker.channel = "discord"; user_id = Some "user-42"; user_name = Some "Alice" }) )
+    ; ( "sender keeper"
+      , stream_payload_exn ~name:"luna" ~message:"please review" ~channel:"agent"
+          ~sender_keeper:keeper_id ()
+      , Keeper_input_speaker.Person (Keeper_input_speaker.Keeper keeper_id) )
+    ; ( "agent channel without sender"
+      , stream_payload_exn ~name:"luna" ~message:"hello" ~channel:"agent" ()
+      , Keeper_input_speaker.Person Keeper_input_speaker.Owner )
+    ]
+  in
+  List.iter
+    (fun (label, payload, expected) ->
+       let input_speaker =
+         Server_routes_http_keeper_stream.For_testing.input_speaker_of_request payload
+       in
+       check bool (label ^ " input speaker") true
+         (Keeper_input_speaker.equal expected input_speaker);
+       let chat_authority =
+         (Server_routes_http_keeper_stream.For_testing.chat_speaker_of_request payload)
+           .speaker_authority
+       in
+       let input_authority =
+         match input_speaker with
+         | Keeper_input_speaker.Person Keeper_input_speaker.Owner -> Keeper_chat_store.Owner
+         | Keeper_input_speaker.Person (Keeper_input_speaker.Keeper _) -> Keeper_chat_store.Keeper
+         | Keeper_input_speaker.Person (Keeper_input_speaker.External _) ->
+           Keeper_chat_store.External
+         | Keeper_input_speaker.Host_prompt _ -> fail (label ^ ": a request is never host text")
+       in
+       check bool (label ^ " agrees with the chat row authority") true
+         (chat_authority = input_authority))
+    cases
+
 (* ── Filesystem-safe sanitizer ──────────────────────────────────────── *)
 
 let test_filesystem_safe_normal () =
@@ -4202,6 +4254,8 @@ let () =
             test_chat_speaker_of_request_sender_keeper_is_keeper;
           test_case "agent channel without sender Keeper stays owner" `Quick
             test_chat_speaker_of_request_agent_channel_without_sender_is_owner;
+          test_case "turn input speaker matches the chat row speaker" `Quick
+            test_input_speaker_of_request_matches_chat_speaker;
         ] );
       ( "filesystem_safe",
         [

@@ -559,6 +559,11 @@ let declare_fixture_keeper ~base_path ~sandbox_profile name =
    store. An existing catalog is replaced. *)
 let sandbox_image_test_digest = "sha256:" ^ String.make 64 '0'
 
+(* The image the live sandbox suites look for in the host's Docker store and
+   promote as [base] in each run's catalog; build it with
+   [masc sandbox-image --tag masc-sandbox:general]. *)
+let live_sandbox_image_tag = "masc-sandbox:general"
+
 let write_sandbox_image_catalog ~base_path images =
   let module Catalog = Masc.Keeper_sandbox_image_catalog in
   let or_fail to_string = function

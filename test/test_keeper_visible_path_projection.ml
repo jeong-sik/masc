@@ -133,7 +133,7 @@ let docker_sandbox_image_available =
        Sys.command
          (Printf.sprintf
             "docker image inspect %s >/dev/null 2>&1"
-            (Filename.quote Keeper_sandbox_image.default_tag))
+            (Filename.quote Masc_test_deps.live_sandbox_image_tag))
        = 0
      in
      (* A silent skip reads as "ran and passed" in a log someone scans later.
@@ -146,7 +146,7 @@ let docker_sandbox_image_available =
          "SKIPPING every case in this suite: it runs each turn inside the %s \
           sandbox image, which is not on this host. Build it with `masc \
           sandbox-image --tag %s` to run them.\n%!"
-         Keeper_sandbox_image.default_tag Keeper_sandbox_image.default_tag;
+         Masc_test_deps.live_sandbox_image_tag Masc_test_deps.live_sandbox_image_tag;
      available)
 
 (* The image being present is half the premise. Every case here writes the
@@ -178,7 +178,7 @@ let docker_shares_a_temp_workspace =
             "docker run --rm -v %s:/masc-mount-premise:ro %s cat \
              /masc-mount-premise/mount-premise >/dev/null 2>&1"
             (Filename.quote dir)
-            (Filename.quote Keeper_sandbox_image.default_tag))
+            (Filename.quote Masc_test_deps.live_sandbox_image_tag))
        = 0
      in
      (try Sys.remove sentinel with Sys_error _ -> ());
@@ -207,7 +207,7 @@ let setup ?sandbox ?always_allow f =
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
   Masc_test_deps.write_sandbox_image_catalog ~base_path:base
-    [ "base", Keeper_sandbox_image.default_tag ];
+    [ "base", Masc_test_deps.live_sandbox_image_tag ];
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->

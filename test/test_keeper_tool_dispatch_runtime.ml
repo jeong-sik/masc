@@ -205,7 +205,7 @@ let docker_shares_a_temp_workspace =
                    "docker run --rm -v %s:/masc-mount-premise:ro %s cat \
                     /masc-mount-premise/mount-premise >/dev/null 2>&1"
                    (Filename.quote dir)
-                   (Filename.quote Keeper_sandbox_image.default_tag))
+                   (Filename.quote Masc_test_deps.live_sandbox_image_tag))
               = 0)
        with _ -> false
      in
@@ -228,7 +228,7 @@ let is_sandbox_available =
          Sys.command
            (Printf.sprintf
               "docker image inspect %s > /dev/null 2>&1"
-              (Filename.quote Keeper_sandbox_image.default_tag))
+              (Filename.quote Masc_test_deps.live_sandbox_image_tag))
          = 0
          && Lazy.force docker_shares_a_temp_workspace
        with _ -> false)
@@ -271,7 +271,7 @@ let with_exec_fixture
           ~clock:(Eio.Stdenv.clock env);
       let config = Masc.Workspace.default_config dir in
       Masc_test_deps.write_sandbox_image_catalog ~base_path:config.base_path
-        [ "base", Keeper_sandbox_image.default_tag ];
+        [ "base", Masc_test_deps.live_sandbox_image_tag ];
       (match
          Masc.Keeper_approval_queue.install_persistence
            ~base_path:config.base_path

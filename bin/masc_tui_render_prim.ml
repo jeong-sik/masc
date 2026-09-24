@@ -1631,10 +1631,14 @@ let selected_ask_question (state : state) =
           List.nth_opt row.Masc.Tui_decode.ar_questions state.ask_question_cursor)
 
 
-(* Drawn into its own buffer so the pane above can be told how many rows it
-   has to give up. Counting the rows a second way is what let the section draw
-   its header into the one row left over and push every question off-screen. *)
-let ask_section_rows buf =
+(* The rows a block has drawn into its own buffer. A surface that lays a
+   block out against a height declared beside the drawing loses whatever the
+   two disagree by: the ask section drew its header into the one row left
+   over and pushed every question off-screen, and the Approvals surface spent
+   its Gate lane rows twice and left its footer floating two rows above the
+   composer. Reading the height back off the buffer is what the surfaces use
+   instead. *)
+let rows_drawn buf =
   let n = ref 0 in
   String.iter (fun c -> if c = '\n' then incr n) (Buffer.contents buf);
   !n
@@ -1799,7 +1803,7 @@ let draw_ask_context buf cols ~(row : Masc.Tui_decode.ask_row) =
 let ask_block f =
   let b = Buffer.create 256 in
   f b;
-  (Buffer.contents b, ask_section_rows b)
+  (Buffer.contents b, rows_drawn b)
 
 
 let question_hints (state : state) =

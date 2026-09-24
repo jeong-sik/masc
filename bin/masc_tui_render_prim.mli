@@ -278,7 +278,9 @@ val boxed_surface_chrome_rows : int
 val selected_ask_question :
   Masc_tui_types.state -> Masc.Tui_decode.ask_question option
 
-val ask_section_rows : Buffer.t -> int
+val rows_drawn : Buffer.t -> int
+(** The rows a block has drawn into its own buffer, for a surface that lays
+    the rest of its height out around it. *)
 
 val draw_ask_question :
   Buffer.t ->

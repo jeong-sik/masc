@@ -16,11 +16,11 @@ let row id status : Tui_decode.task =
   { id; title = "title of " ^ id; status; priority = 2; goal_ids = [] }
 
 let in_progress started_at =
-  Masc_domain.InProgress { assignee = "rondo"; started_at }
+  Masc_domain.InProgress { assignee = "fixture-runner"; started_at }
 
 let awaiting submitted_at =
   Masc_domain.AwaitingVerification
-    { assignee = "geek-scout"
+    { assignee = "fixture-scout"
     ; started_at = "2026-09-23T08:00:00Z"
     ; submitted_at
     ; intent = Masc_domain.Complete_task
@@ -57,7 +57,7 @@ let tasks =
   ; row "task-1720" (in_progress "2026-09-23T10:00:00Z")
   ; row "task-1730"
       (Masc_domain.Claimed
-         { assignee = "rondo"; claimed_at = "2026-09-23T11:59:00Z" })
+         { assignee = "fixture-runner"; claimed_at = "2026-09-23T11:59:00Z" })
   ]
 
 let backlog =

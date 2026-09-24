@@ -24,6 +24,8 @@ type event =
       (** A CDP event this module decodes, whose params did not decode. *)
   | Unobserved of { method_ : string }
       (** A CDP event this module has no reader for. *)
+  | Connection_ended of { reason : string }
+      (** Sent once, when the connection ends; nothing follows it. *)
 
 type failure =
   | Command_rejected of { code : int; message : string }
@@ -65,8 +67,9 @@ val create :
 
 val receive : t -> string -> unit
 
-(** Ends the connection: every waiting command returns [Connection_lost], and
-    every later one returns it without writing. The first reason is kept. *)
+(** Ends the connection: every waiting command returns [Connection_lost],
+    every later one returns it without writing, and [on_event] receives
+    [Connection_ended]. The first reason is kept. *)
 val lost : t -> string -> unit
 
 (** [None] while the connection is open. *)

@@ -8,6 +8,7 @@ type event =
   | Target_destroyed of { target_id : string }
   | Malformed_event of { method_ : string; detail : string }
   | Unobserved of { method_ : string }
+  | Connection_ended of { reason : string }
 
 type failure =
   | Command_rejected of { code : int; message : string }
@@ -114,7 +115,8 @@ let lost t reason =
     t.lost <- Some reason;
     let waiting = Hashtbl.fold (fun _ resolver acc -> resolver :: acc) t.pending [] in
     Hashtbl.reset t.pending;
-    List.iter (fun resolver -> Eio.Promise.resolve resolver (Error (Connection_lost reason))) waiting
+    List.iter (fun resolver -> Eio.Promise.resolve resolver (Error (Connection_lost reason))) waiting;
+    t.on_event (Connection_ended { reason })
 ;;
 
 let receive t frame =

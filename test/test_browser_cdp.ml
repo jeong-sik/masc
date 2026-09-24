@@ -97,7 +97,9 @@ let test_lost_ends_every_command () =
     (Cdp.command t "Target.getTargets" (`Assoc []));
   check int "a later command writes nothing" written (List.length !sent);
   Cdp.receive t {|{"method":"Target.targetDestroyed","params":{"targetId":"T"}}|};
-  check int "events after the end are not delivered" 0 (List.length !events)
+  match !events with
+  | [ Cdp.Connection_ended { reason = "CDP websocket EOF" } ] -> ()
+  | _ -> fail "the end is announced once and nothing follows it"
 ;;
 
 let test_deadline_ends_the_connection () =

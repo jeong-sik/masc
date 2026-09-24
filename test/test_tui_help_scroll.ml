@@ -97,6 +97,13 @@ let test_holding_j_does_not_bank_presses () =
     else press_down (n - 1) (Masc_tui_scroll.down ~count ~height scroll)
   in
   let bottom = press_down 200 0 in
+  (* Thirty rows leave the frame a body of twenty-five; the sheet overflows
+     it, so the "[lines a-b/n]" row takes one and twenty-four are left for
+     the sheet. Without the reserved row [G] stops one row short. *)
+  check_bool "the sheet overflows the frame's body" true
+    (count > Masc_tui_frame.content_height ~rows:30);
+  check_int "the lines row takes one row off the body" 24 height;
+  check_int "G lands on the last twenty-four rows" (count - 24) bottom;
   check_int "j stops at the last row the frame can show" ceiling bottom;
   check_bool "one k moves the frame straight away" true
     (Masc_tui_scroll.up ~count ~height bottom < ceiling)

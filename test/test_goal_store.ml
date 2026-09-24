@@ -389,13 +389,30 @@ let test_priorityless_row_no_longer_decodes () =
   | Goal_store.Missing_after_init | Goal_store.Unreadable _ | Goal_store.Not_json _ ->
     fail "a priority-less row must be a schema rejection"
 
+(* A goal in [phase], for fixtures. upsert_goal only creates Executing goals;
+   the phase is then moved with the store's compare-and-update, the same
+   primitive the lifecycle handlers write through. *)
+let upsert_goal_in_phase config ~title phase =
+  match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1" () with
+  | Error error -> Error error
+  | Ok (goal, _) when goal.Goal_store.phase = phase -> Ok goal
+  | Ok (goal, _) ->
+    (match
+       Goal_store.update_goal_if_phase config ~goal_id:goal.Goal_store.id
+         ~expected_phase:goal.Goal_store.phase
+         (fun current -> { current with Goal_store.phase })
+     with
+     | Ok (Goal_store.Goal_updated goal) -> Ok goal
+     | Ok (Goal_store.Goal_phase_mismatch actual) ->
+       failwith ("fixture goal moved to " ^ Goal_phase.to_string actual)
+     | Error error -> Error error)
+;;
+
 let test_dropped_phase_serializes_without_status () =
   with_workspace @@ fun config ->
-  let goal, _kind =
-    match Goal_store.upsert_goal config ~title:"Dropped goal"
-            ~metric:"m" ~target_value:"1" ~phase:Goal_phase.Dropped ()
-    with
-    | Ok payload -> payload
+  let goal =
+    match upsert_goal_in_phase config ~title:"Dropped goal" Goal_phase.Dropped with
+    | Ok goal -> goal
     | Error error -> fail (write_error_msg error)
   in
   check string "dropped phase stored" "dropped" (Goal_phase.to_string goal.phase);
@@ -407,8 +424,7 @@ let test_dropped_phase_serializes_without_status () =
 let test_list_goals_filters_by_phase () =
   with_workspace @@ fun config ->
   let make title phase =
-    match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1"
-            ~phase () with
+    match upsert_goal_in_phase config ~title phase with
     | Ok _ -> ()
     | Error error -> fail (write_error_msg error)
   in

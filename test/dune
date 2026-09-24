@@ -4339,6 +4339,8 @@
  (name runtest)
  (deps (alias runtest-test_tui_connectors_entry)))
 
+(include stanzas/test_tui_connector_error_once.inc)
+
 (test
  (name test_tui_render_memory)
  (modules test_tui_render_memory)
@@ -5639,7 +5641,6 @@
 (include stanzas/test_tui_skill_create.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_lane_heading_keeps_its_reading.inc)
-(include stanzas/test_tui_connector_error_once.inc)
 (include stanzas/test_tui_lane_run_paging.inc)
 (include stanzas/test_tui_mermaid.inc)
 (include stanzas/test_tui_keeper_deletions_hints.inc)

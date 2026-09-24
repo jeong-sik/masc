@@ -338,7 +338,26 @@ let apply_runtime_config_jump state =
     (match found with
      | Some index ->
        set_runtime_config_cursor_near state ~direction:1 ~target:index;
-       state.config_scroll <- max 0 (index - 3)
+       let height = Masc_tui_render.config_content_height state in
+       let preferred_scroll = max 0 (index - min 3 (height - 1)) in
+       let cursor = state.runtime_config_cursor in
+       let intervening_table =
+         rows
+         |> List.mapi (fun row_index row ->
+                row_index > index && row_index < cursor
+                && List.exists
+                     (fun (_, kind) ->
+                       String.equal kind Masc_tui_code_lexer.kind_keyword)
+                     row)
+         |> List.exists Fun.id
+       in
+       (* An empty section can leave the cursor on another table's value.
+          Keep the requested heading when no value from this table fits. *)
+       state.config_scroll <-
+         if cursor < index || cursor - index >= height || intervening_table then
+           preferred_scroll
+         else
+           Masc_tui_scroll.ensure_visible ~cursor ~height preferred_scroll
      | None -> ());
     Some (section, Option.is_some found)
   | None, _ | Some _, None -> None

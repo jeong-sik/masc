@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from urllib.parse import unquote
 
 
 PROBE = Path(__file__).resolve().parents[1] / 'scripts/harness/perf/response_latency_probe.py'
@@ -20,7 +21,7 @@ TELEMETRY = '/api/v1/dashboard/telemetry/summary'
 
 
 class ResponseLatencyProbeTest(unittest.TestCase):
-    def run_probe(self, tools_payloads, *, compressed=False, extra_args=(), identity_changes=False, concurrent_gate=False, mcp_session=False):
+    def run_probe(self, tools_payloads, *, compressed=False, extra_args=(), identity_changes=False, concurrent_gate=False, mcp_session=False, credential=None):
         counts = {}
         session_headers = []
         gate = threading.Barrier(2) if concurrent_gate else None
@@ -38,11 +39,11 @@ class ResponseLatencyProbeTest(unittest.TestCase):
             def log_message(self, *_args):
                 pass
 
-            def reply(self, value, *, use_gzip=False, headers=()):
+            def reply(self, value, *, use_gzip=False, headers=(), status=200):
                 body = json.dumps(value).encode()
                 if use_gzip:
                     body = gzip.compress(body)
-                self.send_response(200)
+                self.send_response(status)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(body)))
                 for name, value in headers:
@@ -52,7 +53,19 @@ class ResponseLatencyProbeTest(unittest.TestCase):
                 self.end_headers()
                 self.wfile.write(body)
 
+            def credential_accepted(self):
+                if credential is None:
+                    return True
+                agent, token = credential
+                if (unquote(self.headers.get('X-MASC-Agent', '')) == agent
+                        and self.headers.get('Authorization') == 'Bearer ' + token):
+                    return True
+                self.reply({'error': 'fixture credential refused'}, status=401)
+                return False
+
             def do_GET(self):
+                if not self.credential_accepted():
+                    return
                 if self.path.startswith('/health'):
                     identity_count = counts.get('identity', 0)
                     counts['identity'] = identity_count + 1
@@ -78,6 +91,8 @@ class ResponseLatencyProbeTest(unittest.TestCase):
 
             def do_POST(self):
                 request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                if not self.credential_accepted():
+                    return
                 method = request['method']
                 counts[method] = counts.get(method, 0) + 1
                 headers = ()
@@ -96,6 +111,8 @@ class ResponseLatencyProbeTest(unittest.TestCase):
                            headers=headers)
 
             def do_DELETE(self):
+                if not self.credential_accepted():
+                    return
                 counts['cleanup'] = counts.get('cleanup', 0) + 1
                 session_headers.append(self.headers.get('Mcp-Session-Id'))
                 self.reply({})
@@ -108,6 +125,8 @@ class ResponseLatencyProbeTest(unittest.TestCase):
             try:
                 env = os.environ.copy()
                 env.pop('RESPONSE_PROBE_TEST_TOKEN', None)
+                if credential is not None:
+                    env['RESPONSE_PROBE_TEST_TOKEN'] = credential[1]
                 result = subprocess.run(
                     [sys.executable, str(PROBE), '--base-url',
                      f'http://127.0.0.1:{server.server_port}',
@@ -122,7 +141,10 @@ class ResponseLatencyProbeTest(unittest.TestCase):
                 self.assertEqual(printed['summary'], evidence['summary'])
                 self.assertEqual(evidence['same_runtime'], not identity_changes)
                 self.assertTrue(evidence['mcp_initialize']['valid'])
-                self.assertFalse(evidence['authenticated'])
+                self.assertEqual(evidence['credential_supplied'], credential is not None)
+                if credential is not None:
+                    self.assertNotIn(credential[1], output.read_text())
+                    self.assertNotIn(credential[1], result.stdout + result.stderr)
                 if mcp_session:
                     self.assertEqual(counts.get('initialize'), 1)
                     self.assertEqual(counts.get('notifications/initialized'), 1)
@@ -135,6 +157,14 @@ class ResponseLatencyProbeTest(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 worker.join(timeout=2)
+
+    def test_credential_owner_accompanies_bearer_on_get_mcp_and_cleanup(self):
+        evidence = self.run_probe([{'loaded': True}], mcp_session=True,
+            credential=('probe 한글', 'synthetic-probe-secret'),
+            extra_args=('--agent-name', 'probe 한글', '--path', TOOLS))
+        self.assertEqual(evidence['agent_name'], 'probe 한글')
+        self.assertEqual(evidence['summary'][TOOLS]['valid'], 2)
+        self.assertEqual(evidence['summary']['mcp_ping']['valid'], 2)
 
     def test_concurrent_requests_overlap_and_keep_invalid_samples(self):
         evidence = self.run_probe([{'status': 'warming'}, {'status': 'ready'}],

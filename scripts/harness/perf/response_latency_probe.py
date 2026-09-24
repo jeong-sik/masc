@@ -17,7 +17,7 @@ import math
 import os
 from pathlib import Path
 import time
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 
 def percentile(values, fraction):
@@ -75,6 +75,7 @@ def main():
     parser.add_argument('--concurrent', action='store_true',
                         help='start sampled GETs and MCP ping together on separate persistent connections')
     parser.add_argument('--token-env', default='MCP_TOKEN')
+    parser.add_argument('--agent-name', help='Credential owner sent in X-MASC-Agent, as in the TUI')
     args = parser.parse_args()
     url = urlsplit(args.base_url)
     if url.scheme not in ('http', 'https') or not url.hostname or url.username:
@@ -105,6 +106,8 @@ def main():
     headers = {'Accept-Encoding': args.accept_encoding}
     if token:
         headers['Authorization'] = 'Bearer ' + token
+    if args.agent_name:
+        headers['X-MASC-Agent'] = quote(args.agent_name, safe='')
     rows = []
     observation_start = time.perf_counter_ns()
 
@@ -268,7 +271,8 @@ def main():
     result = {
         'observed_at': datetime.now(timezone.utc).isoformat(),
         'base_url': args.base_url, 'target_ms': args.target_ms,
-        'authenticated': bool(token), 'interval_s': args.interval,
+        'credential_supplied': bool(token), 'agent_name': args.agent_name,
+        'interval_s': args.interval,
         'accept_encoding': args.accept_encoding,
         'concurrent': args.concurrent,
         'scope': ('concurrent request rounds on separate connections; not objective readiness'

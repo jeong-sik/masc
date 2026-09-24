@@ -1,9 +1,14 @@
 ---
-rfc: "0468"
+rfc: "keeper-build-output-returns-to-a-disposable-volume"
+title: "Keeper build output returns to a disposable volume"
 status: Draft
+created: 2026-09-24
+updated: 2026-09-24
+author: vincent
+related: ["0399", "0400", "0122"]
 ---
 
-# RFC-0468 — Keeper build output returns to a disposable volume
+# RFC — Keeper build output returns to a disposable volume
 
 - Status: Draft
 - Decision driver: measured 2026-09-24 on the live fleet (14 running microVM
@@ -232,14 +237,9 @@ argv/script shape rather than a real filesystem.
 No new refusal semantics: a real `_build` directory already found on the
 unified volume is left alone and reported, exactly as RFC-0399's
 `Link_refused_real_directory` already does. It converts to a link once the
-directory is cleared by hand — this RFC never clears one itself, so an
-already-bloated pre-existing checkout stays on the unified volume
-indefinitely unless an operator moves it, the same posture RFC-0399 took
-toward real output from day one. A one-time migration of the fleet's
-existing checkouts (`container exec cp -a` style, the same mechanism
-RFC-0400's own cutover runbook already used once) would clear this, but
-it's a separate, explicit, operator-run action, not something this RFC
-does automatically to a keeper's tree.
+directory is gone — §A never deletes one itself, the same posture
+RFC-0399 took toward real output from day one. The checkouts that exist
+today are all in this state; §B is the one cut that moves them.
 
 `MASC_KEEPER_MICROVM_BUILD_VOLUME_SIZE` (default `128g`, RFC-0399's own
 default) is reintroduced with the same name RFC-0400 deleted, mirroring
@@ -259,9 +259,54 @@ turn would be an exec per call for checkouts that rarely change
 mid-session. Stated gap: a checkout the keeper creates after a guest's
 first adoption keeps writing to the unified volume until the guest
 restarts — bounded by the same restart that already recreates the build
-volume (§B), not indefinite.
+volume (§C), not indefinite.
 
-### B. Recreate on every fresh boot (implemented)
+### B. One hard cut of the existing work volumes (operator-run, once)
+
+§A and §C only keep *new* build output off the work volume. They return no
+host space for what the fleet already holds: every checkout that exists
+today has a real `_build` on its `masc-keeper-work-<name>` volume
+(`polisher` 84 GB, `pr-updater` 69 GB in the measurement above), §A leaves
+those alone as `Link_refused_real_directory`, and deleting them from inside
+the guest frees nothing on the host — that is this RFC's own Problem
+section. The only operation that shrinks a work volume's `volume.img` is
+deleting the volume and creating it again. So the RFC includes one cut,
+done once per keeper by the operator, after §A and §C are deployed:
+
+1. Stop the server, then stop and remove the keeper's guest
+   (`container stop` / `container delete masc-keeper-vm-<keeper>-<hash>`).
+   A stopped container still references its volumes, and a referenced
+   volume cannot be deleted.
+2. Create a staging volume of the work volume's size
+   (`container volume create -s <MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE>
+   masc-keeper-work-<keeper>-cut`). One throwaway container
+   (`container run --rm --user 0:0`, image `masc-keeper-sandbox:local`, the
+   same shape as RFC-0400's cutover in `docs/MICROVM-REMOTE-RUNBOOK.md`)
+   mounts the old work volume read-only and the staging volume, and copies
+   the tree with every `_build` directory excluded at copy time
+   (`tar -C /old --exclude=_build -cpf - . | tar -C /new -xpf -`). Run as
+   root, `-p` keeps each file's owner, so the keeper's uid:gid still owns
+   its tree. Excluding at copy time is the point: copying `_build` and
+   deleting it afterwards would grow the staging `volume.img` and never
+   shrink it.
+3. Delete `masc-keeper-work-<keeper>`, create it again with the same name
+   and size, and copy the staging tree into it the same way (nothing to
+   exclude now). `container volume` has no rename, so the copy runs twice.
+   Delete the staging volume.
+4. Start the server. The guest boots fresh on the new work volume, §C gives
+   it an empty build volume, and §A links every checkout, since none of
+   them has a real `_build` any more. The first `dune build` in each
+   checkout is cold.
+
+Nothing here is code. It follows the hard-cut rule: no migration reader,
+no converter, no "legacy work volume" state in `lib/`.
+
+The step is done when one keeper shows all three, recorded in this RFC:
+host `du -sh .../volumes/masc-keeper-work-<keeper>/volume.img` before and
+after, `git status` and the task files in each checkout unchanged, and a
+`dune build` in the guest that writes under `/masc-build`.
+
+### C. Recreate on every fresh boot (implemented)
 
 `recreate_apple_build_volume` deletes the build volume if present, then
 creates it empty, called from `microvm_build_volume` — which runs only on
@@ -273,7 +318,7 @@ empty build volume coincide by construction, so every guest restart
 is the host-disk reclaim this RFC exists for. No new gate, classification,
 lockfile check, or size threshold; `keeper_disk_pressure.ml` is untouched.
 
-### C. Verification
+### D. Verification
 
 - Unit (landed): `test_keeper_sandbox_microvm` — 8 tests for the guest-exec
   scan/plan/apply (argv and script shape, not a real filesystem — the walk
@@ -287,6 +332,9 @@ lockfile check, or size threshold; `keeper_disk_pressure.ml` is untouched.
   the guest, and confirms both that the volume's host size dropped back
   down and that the checkout (`git status`, task files) survived untouched.
   Nothing in this RFC's acceptance has run against a live guest yet.
+- Missing (open): the §B cut on one keeper, with the before/after
+  `volume.img` size recorded here. It boots the same live guest the test
+  above needs, so the two close together.
 
 ## Alternatives, and why they are not this
 
@@ -325,7 +373,7 @@ attach to; building one would have meant classifying a build-volume
 failure from an exec's stderr text, which is `forbidden#string_matching`.
 Moot regardless: `container volume` has no attach or detach, so recreating
 a volume under a *running* guest was never possible — any recreation was
-always a guest restart. §B ties recreation to the restart boundary that
+always a guest restart. §C ties recreation to the restart boundary that
 already exists instead of inventing a detection mechanism to justify one
 that doesn't.
 
@@ -351,9 +399,10 @@ that doesn't.
   defeats the symlink approach (deletes and replaces it with a real
   directory on install). Out of scope here as there, until a mechanism other
   than a symlink is designed and measured for those tools specifically.
-- **Compacting the unified `masc-keeper-work-<name>` volume itself.** This
-  RFC only gives `_build` a disposable home again. The checkout volume stays
-  RFC-0400's design, unmodified.
+- **Compacting the unified `masc-keeper-work-<name>` volume on an ongoing
+  basis.** This RFC only gives `_build` a disposable home again. §B recreates
+  each work volume once to move today's `_build` out; after that the
+  checkout volume stays RFC-0400's design, unmodified.
 - **A general "any oversized volume" janitor.** Scoped to the one directory
   this RFC has measurements for. A generic disk-pressure sweep across
   arbitrary guest paths is a different, larger RFC — RFC-0122 already flags
@@ -368,9 +417,3 @@ that doesn't.
   is the same kind of object as the work volume to that command, so it is
   swept the same way once its container is gone; no new cleanup path is
   added by this RFC, and none is needed.
-
-## Number allocation note
-
-Allocated as RFC-0468. `docs/rfc/` highest present number was 0467 at
-allocation time (0466 absent — reserved against reuse per README policy,
-same convention RFC-0122 §8 documents).

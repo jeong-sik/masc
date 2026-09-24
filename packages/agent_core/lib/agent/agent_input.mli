@@ -7,8 +7,11 @@ val validate_user_input_blocks
   :  Types.content_block list
   -> (unit, Error.t) result
 
+val validate_user_input_metadata : Types.metadata -> (unit, Error.t) result
+
 val append_user_input
   :  Agent_types.t
+  -> metadata:Types.metadata
   -> Types.content_block list
   -> Types.content_block list
 

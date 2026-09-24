@@ -95,8 +95,8 @@ let test_a_delivered_sigterm_reaches_quit () =
       settle 1000)
 
 (* A message waiting behind a running turn is held by this process, so the
-   first quit key says what the second one drops -- count first, because the
-   events pane cuts a notice short. *)
+   first quit key says what the second one drops -- count first, because a
+   narrow footer cuts a notice short. *)
 let test_quit_notice_names_what_a_second_press_drops () =
   check string "nothing waiting"
     "q: press again to quit, or any other key to stay"

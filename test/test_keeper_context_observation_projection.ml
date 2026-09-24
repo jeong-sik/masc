@@ -70,6 +70,7 @@ let sample_record
       ; cache_read_input_tokens = Some 15_000
       ; scope = usage_scope
       }
+  ; turn_output_tokens = None
   ; ts = 1_781_200_000.5
   }
 ;;

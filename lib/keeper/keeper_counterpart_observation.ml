@@ -5,6 +5,7 @@ type origin =
 type authority =
   | Owner
   | External
+  | Keeper
 
 type t = {
   origin : origin;
@@ -24,6 +25,7 @@ let origin_to_string = function
 let authority_to_string = function
   | Owner -> "owner"
   | External -> "external"
+  | Keeper -> "keeper"
 ;;
 
 let workspace_id_of_surface = function
@@ -39,6 +41,7 @@ let workspace_id_of_surface = function
 let authority_of_speaker = function
   | Keeper_chat_store.Owner -> Owner
   | Keeper_chat_store.External -> External
+  | Keeper_chat_store.Keeper -> Keeper
 ;;
 
 let of_external_attention (item : Keeper_external_attention.item) =

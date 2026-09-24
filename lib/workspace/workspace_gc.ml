@@ -53,7 +53,7 @@ let gc config ~days () =
 
   let results = ref [] in
 
-  (* 1. Archive terminal tasks (Done/Cancelled) older than N days, and
+  (* 1. Archive terminal tasks (Done/Cancelled) that ended more than N days ago, and
         self-heal any non-terminal task a prior buggy GC pass stranded in the
         archive.
 
@@ -92,7 +92,12 @@ let gc config ~days () =
              let is_terminal =
                Masc_domain.task_status_is_terminal task.task_status
              in
-             let is_old = task.created_at < cutoff_iso in
+             (* Age is how long ago the task ended, not when it was made: a
+                task opened ten days ago and finished an hour ago is still
+                one of today's completions, and the Overview counts read the
+                live backlog. For a terminal task the last transition is its
+                Done or Cancelled time. *)
+             let is_old = Masc_domain.task_last_transition_at task < cutoff_iso in
              not (is_old && is_terminal))
           backlog.tasks
       in

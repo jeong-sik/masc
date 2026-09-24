@@ -659,9 +659,14 @@ let fit_continuity ~capacity ~base_path ~keeper_id ~input prepared =
     if memory_fits then pass_fits (Continuity_state_pass continuity) else Ok false)
 ;;
 
+(* Whether the walk sent a generation request, over every slot it visited.
+   Reading the slot that ended the walk only reported "none" for a walk whose
+   earlier slot sent its request, failed and advanced (#38450). A token-count
+   measurement is not a generation request and is not counted. *)
 let exact_execution_error ~semantic_rejections error =
   let outward_effect =
-    match Exact_output.flow_execution_error_generation_dispatch error with
+    let evidence, _ = flow_evidence_and_final_verdict error in
+    match Exact_output.flow_evidence_generation_dispatch evidence with
     | Exact_output.No_generation_dispatch -> No_outward_effect
     | Exact_output.Generation_dispatch_started -> Outward_effect_started
   in

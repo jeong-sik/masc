@@ -762,8 +762,6 @@ let test_freshness_rows_render_in_turn_prompt () =
   in
   let { Masc.Keeper_unified_prompt.world_state; _ } =
     Masc.Keeper_unified_prompt.build_prompt
-      ~meta
-      ~config
       ~turn_decision:
         (Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation)
       ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
@@ -781,8 +779,6 @@ let test_freshness_rows_render_in_turn_prompt () =
     (contains_in world_state "ahead of origin/main by 1");
   let without_rows =
     Masc.Keeper_unified_prompt.build_prompt
-      ~meta
-      ~config
       ~turn_decision:
         (Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation)
       ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
@@ -848,8 +844,6 @@ let test_freshness_layer_sorts_drift_first_and_aggregates_unmeasured () =
   in
   let { Masc.Keeper_unified_prompt.world_state; _ } =
     Masc.Keeper_unified_prompt.build_prompt
-      ~meta
-      ~config
       ~turn_decision:
         (Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation)
       ~current_task:Masc.Keeper_world_observation_inputs.No_current_task

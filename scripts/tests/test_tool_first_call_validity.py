@@ -22,8 +22,8 @@ RUNTIME = {
         'filed': {'protocol': 'openai-compatible-http', 'endpoint': 'https://example.test',
                   'credentials': {'type': 'file', 'path': '/tmp/token'}},
     },
-    'models': {'glm-flash': {'api-name': 'glm-5.3-flash', 'temperature': 1}},
-    'zai': {'glm-flash': {'max-concurrent': 3}},
+    'models': {'glm-flash': {'api-name': 'glm-5.3-flash', 'temperature': 1}, 'uncapped': {'api-name': 'u'}},
+    'zai': {'glm-flash': {'max-concurrent': 3}, 'uncapped': {'max-tokens': 2048}},
     'cli': {'glm-flash': {'max-concurrent': 1}},
     'filed': {'glm-flash': {'max-concurrent': 1}},
 }
@@ -77,6 +77,12 @@ class LaneTest(unittest.TestCase):
         self.assertEqual(lane.credential_env, 'ZAI_KEY')
         self.assertEqual(lane.max_concurrent, 3)
         self.assertEqual(lane.temperature, 1.0)
+        self.assertIsNone(lane.max_tokens)
+
+    def test_a_lane_without_max_concurrent_runs_one_at_a_time_and_sends_its_max_tokens(self):
+        lane = fcv.resolve_lane(RUNTIME, 'zai.uncapped')
+        self.assertEqual(lane.max_concurrent, fcv.DEFAULT_LANE_CONCURRENCY)
+        self.assertEqual(lane.max_tokens, 2048)
 
     def test_lanes_this_harness_cannot_call_are_refused_by_name(self):
         for name, fragment in [('cli.glm-flash', 'not callable'), ('filed.glm-flash', 'only env credentials'),
@@ -105,6 +111,18 @@ class SchemaTest(unittest.TestCase):
         with self.assertRaises(fcv.HarnessError):
             fcv.schema_errors({'type': 'null'}, None)
 
+    def test_a_keyword_the_judge_does_not_check_stops_the_run(self):
+        for schema in [{'anyOf': [{'type': 'string'}]}, {'type': ['string', 'null']},
+                       {'type': 'object', 'additionalProperties': {'type': 'string'}}]:
+            with self.subTest(schema=schema), self.assertRaises(fcv.HarnessError):
+                fcv.schema_errors(schema, 'x')
+
+    def test_bounds_are_checked(self):
+        self.assertEqual(fcv.schema_errors({'type': 'integer', 'minimum': 1, 'maximum': 3}, 4), ['$: 4 is above 3'])
+        self.assertEqual(fcv.schema_errors({'type': 'string', 'minLength': 2}, 'a'), ['$: length 1 is below 2'])
+        self.assertEqual(fcv.schema_errors({'type': 'array', 'maxItems': 1}, [1, 2]), ['$: length 2 is above 1'])
+        self.assertEqual(fcv.schema_errors({'type': 'string', 'description': 'd', 'maxLength': 5}, 'abc'), [])
+
 
 class AskRuleTest(unittest.TestCase):
     def test_a_question_without_choices_needs_free_text(self):
@@ -112,40 +130,78 @@ class AskRuleTest(unittest.TestCase):
                          ['questions[0]: neither choices nor free_text'])
         self.assertEqual(fcv.masc_ask_rule_errors({'questions': [question(choices=[], free_text=True)]}), [])
 
-    def test_omitted_ids_are_numbered_by_position_and_never_collide(self):
-        self.assertEqual(fcv.masc_ask_rule_errors({'questions': [question(), question()]}), [])
+    def test_ids_are_left_to_the_schema(self):
+        args = {'questions': [question(question_id='x'), question(question_id='x'), question()]}
+        self.assertEqual(fcv.masc_ask_rule_errors(args), [])
 
-    def test_supplied_ids_must_be_unique_and_not_blank(self):
-        args = {'questions': [question(question_id='x'), question(question_id='x'), question(question_id=' ')]}
-        errors = fcv.masc_ask_rule_errors(args)
-        self.assertIn('questions: duplicate question_id', errors)
-        self.assertIn('questions[2].question_id: blank', errors)
-
-    def test_a_supplied_id_can_collide_with_a_position_number(self):
-        args = {'questions': [question(question_id='q2'), question()]}
-        self.assertIn('questions: duplicate question_id', fcv.masc_ask_rule_errors(args))
+    def test_blank_means_what_ocaml_trim_removes(self):
+        self.assertEqual(fcv.masc_ask_rule_errors({'questions': [question(header=' \t')]}),
+                         ['questions[0].header: blank'])
+        self.assertEqual(fcv.masc_ask_rule_errors({'questions': [question(header='\u3000')]}), [])
 
 
 class JudgeTest(unittest.TestCase):
+    def call(self, arguments, parsed=True, name='masc_ask'):
+        return fcv.FirstCall(name, arguments, parsed)
+
     def test_outcomes(self):
-        self.assertEqual(fcv.judge(ASK, None, True).outcome, 'no_call')
-        self.assertEqual(fcv.judge(ASK, '{"questions": [', False).outcome, 'unparseable')
-        self.assertEqual(fcv.judge(ASK, {'questions': [question()]}, True), fcv.Verdict('valid', ()))
-        verdict = fcv.judge(ASK, {'questions': [question(choices=[])]}, True)
+        self.assertEqual(fcv.judge(ASK, None).outcome, 'no_call')
+        self.assertEqual(fcv.judge(ASK, self.call('{"questions": [', parsed=False)).outcome, 'unparseable')
+        self.assertEqual(fcv.judge(ASK, self.call(None, parsed=False)).outcome, 'unparseable')
+        self.assertEqual(fcv.judge(ASK, self.call({'questions': [question()]})), fcv.Verdict('valid', ()))
+        self.assertEqual(fcv.judge(ASK, self.call({'questions': [question(choices=[])]})).outcome, 'invalid')
+
+    def test_a_call_to_another_name_is_invalid(self):
+        verdict = fcv.judge(ASK, self.call({'questions': [question()]}, name='masc_ask_status'))
         self.assertEqual(verdict.outcome, 'invalid')
 
     def test_tools_without_rules_are_judged_by_schema_alone(self):
         other = fcv.ToolDefinition('masc_other', 'x', {'type': 'object', 'properties': {}})
-        self.assertEqual(fcv.judge(other, {}, True).outcome, 'valid')
+        self.assertEqual(fcv.judge(other, self.call({}, name='masc_other')).outcome, 'valid')
 
 
 class SummaryTest(unittest.TestCase):
-    def test_transport_errors_stay_out_of_the_rate(self):
+    def test_transport_errors_and_provider_rejections_stay_out_of_the_rate(self):
         rows = [{'variant': 'A', 'lane': 'zai.glm-flash', 'outcome': o}
-                for o in ['valid', 'valid', 'invalid', 'transport_error', 'transport_error']]
+                for o in ['valid', 'valid', 'invalid', 'transport_error', 'provider_rejected']]
         [line] = fcv.summarize(rows)
         self.assertIn('2/3', line)
         self.assertIn('66.7%', line)
+
+    def test_runs_with_a_prior_call_are_summarized_apart(self):
+        rows = [{'variant': 'A', 'lane': 'l', 'outcome': 'valid', 'prior_call': False},
+                {'variant': 'A', 'lane': 'l', 'outcome': 'invalid', 'prior_call': True}]
+        lines = fcv.summarize(rows)
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(any(line.startswith('A+prior') for line in lines))
+
+
+class TrialTest(unittest.TestCase):
+    LANE = fcv.Lane('zai.glm-flash', 'https://example.test', 'm', 'KEY', 1, None, None)
+    SCENARIO = fcv.Scenario('s', 'ask')
+
+    def run_with(self, failure):
+        calls = []
+        def fake(*_args):
+            calls.append(1)
+            raise failure
+        original, sleep = fcv.first_tool_call, fcv.time.sleep
+        fcv.first_tool_call, fcv.time.sleep = fake, (lambda _s: None)
+        try:
+            return fcv.trial(self.LANE, ASK, self.SCENARIO, None, 0), len(calls)
+        finally:
+            fcv.first_tool_call, fcv.time.sleep = original, sleep
+
+    def test_a_malformed_response_is_retried_then_recorded_not_raised(self):
+        row, attempts = self.run_with(IndexError('list index out of range'))
+        self.assertEqual(row['outcome'], 'transport_error')
+        self.assertEqual(attempts, fcv.MAX_ATTEMPTS)
+
+    def test_a_400_is_a_provider_rejection_and_is_not_resampled(self):
+        error = fcv.urllib.error.HTTPError('u', 400, 'bad', {}, None)
+        error.read = lambda *_: b'error parsing tool call'
+        row, attempts = self.run_with(error)
+        self.assertEqual((row['outcome'], attempts), ('provider_rejected', 1))
 
 
 class WireCaptureTest(unittest.TestCase):

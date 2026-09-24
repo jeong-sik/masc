@@ -1,9 +1,15 @@
 # Tool first-call validity
 
 `first_call_validity.py` measures how often a model's first call to one tool
-is a call masc accepts. It sends one tool definition and one situation to a
-model, takes the first tool call, and checks it against the tool's schema and,
-for tools listed in `TOOL_RULES`, the rules the handler checks afterwards.
+follows the tool's schema. It sends one tool definition and one situation to a
+model, takes the first tool call, and checks it against the tool's schema at
+every depth and, for tools listed in `TOOL_RULES`, the rules the handler
+checks afterwards.
+
+Every depth is what masc checks once nested validation (#38391) lands. Until
+then masc checks the top level, and a handler reads the nested fields it
+knows, so a call with an extra or null nested field can still run. Read the
+rate as "follows the declared contract".
 
 Use it before and after changing a tool definition. Changes include a
 parameter, a description, or an example. Compare the rates the two runs
@@ -39,8 +45,11 @@ python3 scripts/harness/tool_calls/first_call_validity.py --summary-only --out /
 - `--prior-call masc_ask.prior_call.json` puts one earlier call of the old
   shape into the conversation. Use it to measure whether models follow a
   changed schema or copy their history.
-- Rate limits and timeouts are recorded as `transport_error` and left out of
-  every rate.
+- Rate limits and timeouts are recorded as `transport_error`, and an HTTP 400
+  as `provider_rejected` (it can be the provider refusing the model's own
+  malformed call). Both are left out of every rate and shown in the summary.
+- A schema keyword the judge does not check (`anyOf`, a list of types, ...)
+  stops the run instead of passing.
 
 ## What it does not show
 

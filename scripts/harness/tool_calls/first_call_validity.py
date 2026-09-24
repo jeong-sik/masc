@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
-"""Measure how often a model's first call to one tool is one masc accepts.
+"""Measure how often a model's first call to one tool follows the tool's schema.
 
 A Keeper that sends a malformed first call spends a turn reading the error and
 calling again, and some models never recover. This harness puts a tool
 definition in front of a model with one situation that calls for the tool,
 takes the model's first tool call, and judges it:
 
-* the JSON-schema subset masc emits (type, properties, required,
-  additionalProperties, items, enum), every error rather than the first;
+* the JSON-schema keywords masc emits (type, properties, required,
+  additionalProperties, items, enum and the numeric and length bounds) at
+  every depth, every error rather than the first. A keyword outside that set
+  stops the run rather than passing silently;
 * the rules a tool's handler checks after the schema, for tools that have them
   (``TOOL_RULES``).
+
+The schema is checked at every depth, which is what masc checks once nested
+validation (#38391) lands. Before it, masc checks the top level and a
+handler reads the nested fields it knows, so an extra or null nested field
+that this harness counts as invalid can still run. Read the rate as "follows
+the declared contract", not "was accepted today".
 
 Lanes are the ``<provider>.<model>`` names in masc's runtime.toml. The
 endpoint, the model's API name and temperature, the credential's environment
@@ -51,6 +59,9 @@ REQUEST_TIMEOUT_S = 240.0
 MAX_ATTEMPTS = 6
 MAX_BACKOFF_S = 60.0
 USER_AGENT = "masc-first-call-validity/1"
+# A lane without max-concurrent has no client-side cap in masc; the harness
+# still sends one request at a time on it rather than guessing a width.
+DEFAULT_LANE_CONCURRENCY = 1
 
 SYSTEM_PROMPT = (
     "You are a masc Keeper. You work through tools. The situation below needs "
@@ -73,6 +84,7 @@ class Lane:
     credential_env: str
     max_concurrent: int
     temperature: float | None
+    max_tokens: int | None
 
 
 def _table(value: object, where: str) -> dict[str, object]:
@@ -112,9 +124,12 @@ def resolve_lane(runtime: dict[str, object], lane_name: str) -> Lane:
     temperature = model.get("temperature")
     if temperature is not None and not isinstance(temperature, (int, float)):
         raise HarnessError(f"lane {lane_name}: [models.{model_key}] temperature is not a number")
-    max_concurrent = lane_table.get("max-concurrent")
+    max_concurrent = lane_table.get("max-concurrent", DEFAULT_LANE_CONCURRENCY)
     if not isinstance(max_concurrent, int) or max_concurrent < 1:
         raise HarnessError(f"lane {lane_name}: max-concurrent must be a positive integer")
+    max_tokens = lane_table.get("max-tokens", model.get("max-tokens"))
+    if max_tokens is not None and (not isinstance(max_tokens, int) or max_tokens < 1):
+        raise HarnessError(f"lane {lane_name}: max-tokens must be a positive integer")
     return Lane(
         name=lane_name,
         endpoint=endpoint.rstrip("/"),
@@ -122,6 +137,7 @@ def resolve_lane(runtime: dict[str, object], lane_name: str) -> Lane:
         credential_env=str(credentials["key"]),
         max_concurrent=max_concurrent,
         temperature=None if temperature is None else float(temperature),
+        max_tokens=max_tokens,
     )
 
 
@@ -191,12 +207,46 @@ def _type_matches(expected: str, value: JsonValue) -> bool:
             raise HarnessError(f"schema type {expected!r} is outside the subset masc emits")
 
 
+# Keywords this judge checks, plus the ones that only annotate.
+CHECKED_KEYWORDS = frozenset(
+    {"type", "properties", "required", "additionalProperties", "items", "enum",
+     "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems"}
+)
+ANNOTATION_KEYWORDS = frozenset({"description", "title", "default", "examples", "$schema"})
+
+
+def _bound_errors(schema: JsonObject, value: JsonValue, path: str) -> list[str]:
+    errors: list[str] = []
+    number = value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    minimum, maximum = schema.get("minimum"), schema.get("maximum")
+    if number is not None and isinstance(minimum, (int, float)) and number < minimum:
+        errors.append(f"{path}: {number} is below {minimum}")
+    if number is not None and isinstance(maximum, (int, float)) and number > maximum:
+        errors.append(f"{path}: {number} is above {maximum}")
+    sized = len(value) if isinstance(value, (str, list)) else None
+    low = schema.get("minLength" if isinstance(value, str) else "minItems")
+    high = schema.get("maxLength" if isinstance(value, str) else "maxItems")
+    if sized is not None and isinstance(low, int) and sized < low:
+        errors.append(f"{path}: length {sized} is below {low}")
+    if sized is not None and isinstance(high, int) and sized > high:
+        errors.append(f"{path}: length {sized} is above {high}")
+    return errors
+
+
 def schema_errors(schema: JsonObject, value: JsonValue, path: str = "$") -> list[str]:
-    """Every violation of the JSON-schema subset masc emits, not only the first."""
+    """Every violation of the keywords masc emits, not only the first."""
+    unknown = set(schema) - CHECKED_KEYWORDS - ANNOTATION_KEYWORDS
+    if unknown:
+        raise HarnessError(f"schema at {path} uses {sorted(unknown)}, which this judge does not check")
+    additional = schema.get("additionalProperties")
+    if additional is not None and not isinstance(additional, bool):
+        raise HarnessError(f"schema at {path}: additionalProperties as a schema is not checked here")
     expected = schema.get("type")
+    if expected is not None and not isinstance(expected, str):
+        raise HarnessError(f"schema at {path}: a list of types is not checked here")
     if isinstance(expected, str) and not _type_matches(expected, value):
         return [f"{path}: expected {expected}, got {type(value).__name__}"]
-    errors: list[str] = []
+    errors: list[str] = _bound_errors(schema, value, path)
     members = schema.get("enum")
     if isinstance(members, list) and value not in members:
         errors.append(f"{path}: {value!r} is not one of {members}")
@@ -220,28 +270,28 @@ def schema_errors(schema: JsonObject, value: JsonValue, path: str = "$") -> list
     return errors
 
 
+# OCaml's String.trim removes these five and nothing else.
+OCAML_TRIM = " \t\n\r\x0c"
+
+
 def _blank(value: JsonValue) -> bool:
-    return not isinstance(value, str) or value.strip() == ""
+    return not isinstance(value, str) or value.strip(OCAML_TRIM) == ""
 
 
 def masc_ask_rule_errors(args: JsonObject) -> list[str]:
-    """The checks Keeper_ask's smart constructors make after the schema
-    (lib/keeper/keeper_ask.ml [choice], [question], [ask]). A question needs
-    choices or free text, and ids are unique within their list. An id the
-    call leaves out is numbered by position the way the handler numbers it,
-    so only a supplied id can be blank or a duplicate."""
+    """The checks lib/keeper/keeper_ask.ml's smart constructors make after the
+    schema: at least one question, a header and a prompt that are not blank,
+    choices or free text on every question, and labels that are not blank.
+    Question and choice ids are the schema's business: the handler numbers
+    them by position (lib/mcp_tool_runtime_ask.ml) and reads none a call
+    sends."""
     questions = args.get("questions")
     if not isinstance(questions, list):
         return []
     errors: list[str] = [] if questions else ["questions: empty"]
-    question_ids: list[str] = []
     for qi, question in enumerate(questions):
         if not isinstance(question, dict):
             continue
-        qid = question.get("question_id", f"q{qi + 1}")
-        if _blank(qid):
-            errors.append(f"questions[{qi}].question_id: blank")
-        question_ids.append(str(qid))
         for field in ("header", "prompt"):
             if field in question and _blank(question[field]):
                 errors.append(f"questions[{qi}].{field}: blank")
@@ -249,20 +299,9 @@ def masc_ask_rule_errors(args: JsonObject) -> list[str]:
         choice_list = choices if isinstance(choices, list) else []
         if not choice_list and question.get("free_text") is not True:
             errors.append(f"questions[{qi}]: neither choices nor free_text")
-        choice_ids: list[str] = []
         for ci, choice in enumerate(choice_list):
-            if not isinstance(choice, dict):
-                continue
-            cid = choice.get("choice_id", f"c{ci + 1}")
-            if _blank(cid):
-                errors.append(f"questions[{qi}].choices[{ci}].choice_id: blank")
-            if "label" in choice and _blank(choice["label"]):
+            if isinstance(choice, dict) and "label" in choice and _blank(choice["label"]):
                 errors.append(f"questions[{qi}].choices[{ci}].label: blank")
-            choice_ids.append(str(cid))
-        if len(set(choice_ids)) != len(choice_ids):
-            errors.append(f"questions[{qi}]: duplicate choice_id")
-    if len(set(question_ids)) != len(question_ids):
-        errors.append("questions: duplicate question_id")
     return errors
 
 
@@ -275,11 +314,24 @@ class Verdict:
     errors: tuple[str, ...]
 
 
-def judge(tool: ToolDefinition, arguments: JsonValue | None, parsed: bool) -> Verdict:
-    if arguments is None:
+@dataclass(frozen=True, slots=True)
+class FirstCall:
+    """The model's first tool call: the name it called, and its arguments as
+    parsed JSON, or the raw text when they did not parse."""
+
+    name: str
+    arguments: JsonValue
+    parsed: bool
+
+
+def judge(tool: ToolDefinition, call: FirstCall | None) -> Verdict:
+    if call is None:
         return Verdict("no_call", ())
-    if not parsed or not isinstance(arguments, dict):
-        return Verdict("unparseable", (repr(arguments)[:200],))
+    if call.name != tool.name:
+        return Verdict("invalid", (f"called {call.name!r} instead of {tool.name!r}",))
+    if not call.parsed or not isinstance(call.arguments, dict):
+        return Verdict("unparseable", (repr(call.arguments)[:200],))
+    arguments = call.arguments
     errors = schema_errors(tool.input_schema, arguments)
     rules = TOOL_RULES.get(tool.name)
     if rules is not None:
@@ -323,8 +375,8 @@ def _messages(scenario: Scenario, prior: PriorCall | None, tool_name: str) -> li
     return messages
 
 
-def first_tool_call(lane: Lane, tool: ToolDefinition, scenario: Scenario, prior: PriorCall | None) -> tuple[JsonValue | None, bool]:
-    """The first tool call's arguments and whether they parsed as JSON; (None, True) when the model made no call."""
+def first_tool_call(lane: Lane, tool: ToolDefinition, scenario: Scenario, prior: PriorCall | None) -> FirstCall | None:
+    """The model's first tool call, or None when it made none."""
     body: JsonObject = {
         "model": lane.api_model,
         "messages": _messages(scenario, prior, tool.name),
@@ -336,6 +388,8 @@ def first_tool_call(lane: Lane, tool: ToolDefinition, scenario: Scenario, prior:
     # temperature measures a different model.
     if lane.temperature is not None:
         body["temperature"] = lane.temperature
+    if lane.max_tokens is not None:
+        body["max_tokens"] = lane.max_tokens
     request = urllib.request.Request(
         f"{lane.endpoint}/chat/completions",
         data=json.dumps(body).encode(),
@@ -351,18 +405,37 @@ def first_tool_call(lane: Lane, tool: ToolDefinition, scenario: Scenario, prior:
     message = payload["choices"][0]["message"]
     calls = message.get("tool_calls") or []
     if not calls:
-        return None, True
-    raw = calls[0]["function"].get("arguments")
+        return None
+    function = calls[0]["function"]
+    name = str(function.get("name"))
+    raw = function.get("arguments")
     if isinstance(raw, dict):
-        return raw, True
+        return FirstCall(name, raw, True)
+    if not isinstance(raw, str):
+        return FirstCall(name, raw, False)
     try:
-        return json.loads(raw), True
-    except (TypeError, json.JSONDecodeError):
-        return raw, False
+        return FirstCall(name, json.loads(raw), True)
+    except json.JSONDecodeError:
+        return FirstCall(name, raw, False)
 
 
 # Rate limits a retry cannot outwait: the account is out of quota or credit.
-TERMINAL_HTTP = frozenset({400, 401, 402, 403, 404})
+TERMINAL_HTTP = frozenset({401, 402, 403, 404})
+# A 400 can be the provider refusing the model's own malformed call, so it is
+# kept apart from transport failures and never re-sampled.
+PROVIDER_REJECTED_HTTP = 400
+
+
+def _row(lane: Lane, scenario: Scenario, rep: int, started: float, outcome: str, errors: list[str], arguments: JsonValue) -> JsonObject:
+    return {
+        "lane": lane.name,
+        "scenario": scenario.scenario_id,
+        "rep": rep,
+        "outcome": outcome,
+        "errors": list(errors),
+        "arguments": arguments,
+        "seconds": round(time.monotonic() - started, 2),
+    }
 
 
 def trial(lane: Lane, tool: ToolDefinition, scenario: Scenario, prior: PriorCall | None, rep: int) -> JsonObject:
@@ -370,49 +443,46 @@ def trial(lane: Lane, tool: ToolDefinition, scenario: Scenario, prior: PriorCall
     failure = ""
     for attempt in range(MAX_ATTEMPTS):
         try:
-            arguments, parsed = first_tool_call(lane, tool, scenario, prior)
-            verdict = judge(tool, arguments, parsed)
-            return {
-                "lane": lane.name,
-                "scenario": scenario.scenario_id,
-                "rep": rep,
-                "outcome": verdict.outcome,
-                "errors": list(verdict.errors),
-                "arguments": arguments,
-                "seconds": round(time.monotonic() - started, 2),
-            }
+            call = first_tool_call(lane, tool, scenario, prior)
         except urllib.error.HTTPError as error:
             failure = f"HTTP {error.code}: {error.read()[:300].decode(errors='replace')}"
+            if error.code == PROVIDER_REJECTED_HTTP:
+                return _row(lane, scenario, rep, started, "provider_rejected", [failure], None)
             if error.code in TERMINAL_HTTP:
                 break
-        except (urllib.error.URLError, TimeoutError, OSError, KeyError, json.JSONDecodeError) as error:
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as error:
             failure = f"{type(error).__name__}: {error}"
-        time.sleep(min(MAX_BACKOFF_S, 8.0 * 2**attempt))
-    return {
-        "lane": lane.name,
-        "scenario": scenario.scenario_id,
-        "rep": rep,
-        "outcome": "transport_error",
-        "errors": [failure],
-        "arguments": None,
-        "seconds": round(time.monotonic() - started, 2),
-    }
+        except (KeyError, IndexError, AttributeError, TypeError) as error:
+            # The response did not have the chat-completions shape.
+            failure = f"malformed response: {type(error).__name__}: {error}"
+        else:
+            verdict = judge(tool, call)
+            arguments = call.arguments if call is not None else None
+            return _row(lane, scenario, rep, started, verdict.outcome, list(verdict.errors), arguments)
+        if attempt < MAX_ATTEMPTS - 1:
+            time.sleep(min(MAX_BACKOFF_S, 8.0 * 2**attempt))
+    return _row(lane, scenario, rep, started, "transport_error", [failure], None)
 
 
 # ------------------------------------------------------------------ report
 
 
+# Outcomes that say nothing about the model's call and stay out of the rate.
+NOT_JUDGED = frozenset({"transport_error", "provider_rejected"})
+
+
 def summarize(rows: list[JsonObject]) -> list[str]:
-    """One line per (variant, lane): valid calls over judged calls."""
+    """One line per (variant, prior call or not, lane): valid calls over judged calls."""
     counts: dict[tuple[str, str], dict[str, int]] = {}
     for row in rows:
-        key = (str(row.get("variant")), str(row.get("lane")))
+        variant = str(row.get("variant")) + ("+prior" if row.get("prior_call") else "")
+        key = (variant, str(row.get("lane")))
         bucket = counts.setdefault(key, {})
         outcome = str(row.get("outcome"))
         bucket[outcome] = bucket.get(outcome, 0) + 1
     lines = []
     for (variant, lane), bucket in sorted(counts.items()):
-        judged = sum(n for outcome, n in bucket.items() if outcome != "transport_error")
+        judged = sum(n for outcome, n in bucket.items() if outcome not in NOT_JUDGED)
         valid = bucket.get("valid", 0)
         rate = f"{valid / judged:6.1%}" if judged else "     -"
         lines.append(f"{variant:<12} {lane:<40} {valid:>3}/{judged:<3} {rate}  {json.dumps(bucket, sort_keys=True)}")
@@ -487,8 +557,14 @@ def main(argv: list[str]) -> int:
     workers = sum(lane.max_concurrent for lane in lanes)
     rows: list[JsonObject] = []
     with cf.ThreadPoolExecutor(max_workers=workers) as pool, args.out.open("a", encoding="utf-8") as out:
-        for future in cf.as_completed([pool.submit(gated, *job) for job in jobs]):
-            row = future.result()
+        futures = [pool.submit(gated, *job) for job in jobs]
+        for future in cf.as_completed(futures):
+            try:
+                row = future.result()
+            except HarnessError:
+                # A harness bug is the same on every job: stop paying for the rest.
+                pool.shutdown(wait=False, cancel_futures=True)
+                raise
             row["variant"] = variant
             row["prior_call"] = prior is not None
             out.write(json.dumps(row, ensure_ascii=False) + "\n")

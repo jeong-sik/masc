@@ -2552,9 +2552,10 @@ let () =
 ;;
 
 (* masc#38417: on every decision row [runtime_id] is the keeper's lane and
-   [executed_runtime_id] the candidate that answered, in [provider_context]
-   and in [telemetry] alike. The keeper is assigned [lane]; its successful
-   turn is answered by the lane's second candidate. *)
+   [executed_runtime_id] the candidate that answered. The pair lives in
+   [provider_context] alone, and model metrics credit a row from there. The
+   keeper is assigned [lane]; its successful turn is answered by the lane's
+   second candidate, and its failed turn names the head runtime it dispatched. *)
 let () =
   with_temp_dir "keeper-decision-row-lane" @@ fun workspace_dir ->
   let keeper_name = "decision-row-lane" in
@@ -2687,10 +2688,9 @@ max-concurrent = 1
   check "an observed success row names the answerer in provider_context.executed_runtime_id"
     (member_at answered "provider_context" "executed_runtime_id"
      = `String answering_runtime);
-  check "an observed success row keeps the lane in telemetry.runtime_id"
-    (member_at answered "telemetry" "runtime_id" = `String lane);
-  check "an observed success row names the answerer in telemetry.executed_runtime_id"
-    (member_at answered "telemetry" "executed_runtime_id" = `String answering_runtime);
+  check "an observed success row does not repeat the pair in telemetry"
+    (member_at answered "telemetry" "runtime_id" = `Null
+     && member_at answered "telemetry" "executed_runtime_id" = `Null);
   let aggregate =
     Model_inference_metrics.compute ~base_path:workspace_dir ~window_minutes:60
   in
@@ -2708,10 +2708,17 @@ max-concurrent = 1
     (member_at failed "provider_context" "runtime_id" = `String lane);
   check "a failed row names the dispatched candidate in provider_context.executed_runtime_id"
     (member_at failed "provider_context" "executed_runtime_id" = `String head_runtime);
-  check "a failed row without a run result keeps the lane in telemetry.runtime_id"
-    (member_at failed "telemetry" "runtime_id" = `String lane);
-  check "a failed row names the dispatched candidate in telemetry.executed_runtime_id"
-    (member_at failed "telemetry" "executed_runtime_id" = `String head_runtime)
+  check "a failed row without a run result does not repeat the pair in telemetry"
+    (member_at failed "telemetry" "runtime_id" = `Null
+     && member_at failed "telemetry" "executed_runtime_id" = `Null);
+  let aggregate =
+    Model_inference_metrics.compute ~base_path:workspace_dir ~window_minutes:60
+  in
+  check "model metrics credit the failed row to the dispatched candidate"
+    (List.exists
+       (fun (stats : Model_inference_metrics.model_stats) ->
+          String.equal stats.model_id (head_runtime ^ " (runtime)"))
+       aggregate.models)
 ;;
 
 let () =

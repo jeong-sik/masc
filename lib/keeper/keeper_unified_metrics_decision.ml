@@ -264,17 +264,7 @@ let append_decision_record
                         ("streaming_inter_chunk_avg_ms", Json_util.float_opt_to_json co.streaming_inter_chunk_avg_ms);
                       ]
                     in
-                    (* Same split as [provider_context]: the keeper's lane,
-                       then the candidate that answered. The answerer is named
-                       here too because model-inference attribution reads
-                       this object before [provider_context] and falls back
-                       to [runtime_id] only when [executed_runtime_id] is
-                       absent; without it the lane would get the credit. *)
-                    [
-                      ("runtime_id", `String (runtime_id_of_meta meta));
-                      ("executed_runtime_id", `String co.runtime_id);
-                      ("selected_model", `Null);
-                    ] @ streaming_fields
+                    ("selected_model", `Null) :: streaming_fields
                 | None -> []
               in
               let tool_surface_fields =
@@ -382,13 +372,6 @@ let append_decision_record
                  what we know without collapsing skipped/cancelled/partial
                  outcomes into telemetry.outcome=error. *)
               `Assoc [
-                (* Same split as [provider_context]: the lane, then whoever
-                   answered on it. Absent a candidate report the answerer is
-                   unknown, and [null] says so rather than naming the head
-                   runtime (masc#35043). *)
-                ("runtime_id", `String (runtime_id_of_meta meta));
-                ("executed_runtime_id",
-                 Json_util.string_opt_to_json executed_runtime_id);
                 (* The terminal reason is the typed failure projection built at
                    the dispatch boundary. Persist its canonical code directly;
                    free-form provider/error prose is diagnostic data, never a

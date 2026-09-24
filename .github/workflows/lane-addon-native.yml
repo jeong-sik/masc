@@ -79,6 +79,12 @@ jobs:
             printf 'Failed qualification test: %s\n' "${failed_tests[@]}"
             exit 1
           fi
+      - name: TUI frame probe (per-surface ceiling)
+        run: |
+          scripts/ci/run-tui-frame-probe.sh \
+            --binary _build/default/bin/masc_tui.exe \
+            --server _build/default/bin/main_eio.exe \
+            --output-dir proof/tui-frame-probe
       - name: Package using the release runtime bundler
         run: |
           set -euo pipefail

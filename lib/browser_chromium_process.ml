@@ -1,3 +1,6 @@
+(* HIGH-RISK-UNREVIEWED: the flags that open Chromium's DevTools socket to
+   extension loading and name the one origin allowed on it
+   (RFC-browser-lane-stagehand §4). *)
 type owner = { pid : int; chrome : string; profile : string }
 type leftover = Stop_recorded_browser of int | Not_the_recorded_browser
 

@@ -1,3 +1,6 @@
+(* HIGH-RISK-UNREVIEWED: starts and stops a browser with a debugging socket
+   and an owner-only profile that may hold an operator's logins
+   (RFC-browser-lane-stagehand §4). *)
 module Process = Browser_chromium_process
 module Session = Browser_stagehand_session
 

@@ -80,6 +80,16 @@ describe('runtime TOML dashboard editing helpers', () => {
     expect(source).toContain('# primary')
   })
 
+  it('still exposes HTTP candidates when only the CLI array has comments', () => {
+    const source = `${sourceText}\n[runtime.exact_output_lanes.librarian_exact]\nslots = ["runpod_mtp.qwen"]\ncli_slots = [\n  "codex_subscription.luna", # quota fallback\n]\n`
+    const lane = parseRuntimeTomlExactLanes(source)[0]
+    expect(lane?.slots).toEqual(['runpod_mtp.qwen'])
+    expect(lane?.cliSlots).toEqual([])
+    expect(lane?.error).toContain('cli_slots contains comments')
+    expect(() => setRuntimeTomlExactLaneSlots(source, 'librarian_exact', 'slots', ['runpod_mtp.qwen']))
+      .toThrow('Cannot edit exact lane')
+  })
+
   it('projects provider, model, and binding fields from runtime.toml source', () => {
     const environment = parseRuntimeTomlEnvironment(sourceText)
 

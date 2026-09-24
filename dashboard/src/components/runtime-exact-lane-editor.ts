@@ -57,7 +57,7 @@ export function RuntimeExactLaneEditor({ sourceText, disabled, onSlotsChange, on
           <h2 class="font-semibold">${lane.id === 'librarian_exact' ? 'Librarian' : lane.id}</h2>
           <code class="text-2xs">runtime.exact_output_lanes.${lane.id}</code>
         </header>
-        ${lane.error ? html`<p role="alert">이 Lane의 배열을 읽지 못했습니다: ${lane.error}. TOML 원문에서 수정하세요.</p>` : null}
+        ${lane.error ? html`<p role="alert">일부 후보 배열을 읽지 못했습니다: ${lane.error}. 후보 변경은 TOML 원문에서 하세요. 읽힌 HTTP 후보의 provider deadline은 아래에서 편집할 수 있습니다.</p>` : null}
         ${groups.map(group => html`<div key=${group.kind} class="space-y-1">
           <h3 class="text-xs font-semibold">${group.label}</h3>
           ${group.slots.length === 0 ? html`<p class="text-xs text-[var(--color-fg-muted)]">후보 없음</p>` : null}
@@ -81,14 +81,15 @@ export function RuntimeExactLaneEditor({ sourceText, disabled, onSlotsChange, on
                 <input type="number" min="0.001" step="any" class="rt-input-sm mono"
                   aria-label=${`${providerId} exact-body-timeout-s`}
                   value=${bodyDeadline ?? ''} placeholder="미설정"
-                  disabled=${disabled || lane.error !== null}
+                  disabled=${disabled}
                   onChange=${(event: Event) => {
                     const raw = (event.currentTarget as HTMLInputElement).value
                     const seconds = raw === '' ? null : Number(raw)
                     if (seconds === null || Number.isFinite(seconds) && seconds > 0) onDeadlineChange(providerId, seconds)
                   }} />
                 ${bodyDeadline === undefined ? html`<span role="alert" class="text-[var(--color-status-error)]">
-                  미설정: wire admission에서 missing_deadline으로 거절됩니다. 값을 저장한 뒤 서버를 재시작하세요.
+                  provider 설정에 없음: 기본 Exact target은 missing_deadline으로 거절됩니다.
+                  catalog 대체 target은 자체 deadline을 확인하세요. 저장한 값은 서버 재시작 후 적용됩니다.
                 </span>` : null}
               </label>` : null}
             </div>`

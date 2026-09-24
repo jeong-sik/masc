@@ -722,8 +722,8 @@ module For_testing = struct
   ;;
 end
 
-let preflight_status ?image ~timeout_sec () =
-  Keeper_sandbox_runtime.docker_preflight ?image ~timeout_sec ()
+let preflight_status ~image ~timeout_sec () =
+  Keeper_sandbox_runtime.docker_preflight ~image ~timeout_sec ()
 
 (* [docker_preflight] already answers [ok] as a bool. Serialising the record
    and reading the field back out of an [`Assoc] meant a typo in the key, or a
@@ -875,14 +875,25 @@ let live_status_json ?(include_preflight = true)
     ~(timeout_sec : float)
     ~(verbose : bool)
     () =
+  (* Read once for the whole status, so the image row and the preflight's
+     image check describe the same build. *)
+  let configured_image =
+    match meta.sandbox_profile with
+    | Docker | Micro_vm ->
+      Some (Keeper_sandbox_image_resolver.for_keeper ~base_path:config.Workspace.base_path meta)
+    | Remote_ssh -> None
+  in
   let preflight =
-    match preflight_override with
-    | Some cached -> cached
-    | None ->
-      if include_preflight && meta.sandbox_profile = Docker then
-        preflight_status ?image:meta.sandbox_image ~timeout_sec ()
-      else
-        None
+    match preflight_override, configured_image with
+    | Some cached, _ -> cached
+    | None, Some image when include_preflight && meta.sandbox_profile = Docker ->
+      preflight_status
+        ~image:
+          (image
+           |> Result.map (fun pinned -> pinned.Keeper_sandbox_image_catalog.reference)
+           |> Result.map_error Keeper_sandbox_image_resolver.error_to_string)
+        ~timeout_sec ()
+    | None, (Some _ | None) -> None
   in
   let containers, container_error =
     match meta.sandbox_profile with
@@ -910,12 +921,6 @@ let live_status_json ?(include_preflight = true)
          | Micro_vm -> "microvm_container_listing_failed"
          | Remote_ssh -> "remote_ssh_container_listing_failed")
     | None -> why_no_container meta ~preflight containers
-  in
-  let configured_image =
-    match meta.sandbox_profile with
-    | Docker | Micro_vm ->
-      Some (Keeper_sandbox_image_resolver.for_keeper ~base_path:config.Workspace.base_path meta)
-    | Remote_ssh -> None
   in
   `Assoc
     [

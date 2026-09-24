@@ -62,7 +62,7 @@ let resolve ~config_root ~store declared =
           Error (Not_built_on_host { name; store })))
 
 let store_of_meta (meta : Keeper_meta_contract.keeper_meta) =
-  match meta.sandbox_profile, meta.microvm_backend with
+  match meta.Keeper_meta_contract.sandbox_profile, meta.Keeper_meta_contract.microvm_backend with
   | Keeper_types_profile_sandbox.Docker, _ -> Some Catalog.Docker_daemon
   | Keeper_types_profile_sandbox.Micro_vm, Some backend -> Some (Catalog.Microvm backend)
   | Keeper_types_profile_sandbox.Micro_vm, None | Keeper_types_profile_sandbox.Remote_ssh, _ -> None
@@ -75,5 +75,10 @@ let resolve_in_workspace ~base_path ~store declared =
 
 let for_keeper ~base_path (meta : Keeper_meta_contract.keeper_meta) =
   match store_of_meta meta with
-  | None -> Error (No_image_store { keeper = meta.name; sandbox_profile = meta.sandbox_profile })
-  | Some store -> resolve_in_workspace ~base_path ~store meta.sandbox_image
+  | None ->
+    Error
+      (No_image_store
+         { keeper = meta.Keeper_meta_contract.name
+         ; sandbox_profile = meta.Keeper_meta_contract.sandbox_profile
+         })
+  | Some store -> resolve_in_workspace ~base_path ~store meta.Keeper_meta_contract.sandbox_image

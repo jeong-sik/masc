@@ -473,9 +473,9 @@ type input_reader = {
           whenever no character is in flight. *)
   mutable paste_decoder : Masc_tui_paste.decoder option;
   mutable paste_recovery_guard : Masc_tui_paste.decoder option;
-  mutable paste_guard_idle_observed : bool;
+  mutable paste_guard_last_byte_ns : int64;
   mutable paste_cancel_armed : bool;
-  mutable paste_idle_observed : bool;
+  mutable paste_last_byte_ns : int64;
   mutable csi_parameters : Buffer.t option;
 }
 
@@ -495,9 +495,9 @@ let create_input_reader () =
     partial_scalar = "";
     paste_decoder = None;
     paste_recovery_guard = None;
-    paste_guard_idle_observed = false;
+    paste_guard_last_byte_ns = Mtime_clock.elapsed_ns ();
     paste_cancel_armed = false;
-    paste_idle_observed = false;
+    paste_last_byte_ns = Mtime_clock.elapsed_ns ();
     csi_parameters = None;
   }
 
@@ -687,6 +687,31 @@ let return_input_byte reader =
   reader.last_source <- None
 ;;
 
+(* Ctrl-C recovery only snapshots a paste after this much quiet since its
+   last byte. Reading itself uses the caller's short render-loop deadline;
+   this is a recovery observation, not a blocking terminal read. *)
+let paste_quiet_seconds = 0.5
+let paste_quiet_ns =
+  Int64.of_float (paste_quiet_seconds *. nanoseconds_per_second)
+
+let paste_is_quiet last_byte_ns =
+  Int64.compare
+    (Int64.sub (Mtime_clock.elapsed_ns ()) last_byte_ns)
+    paste_quiet_ns >= 0
+
+(* Check every input source without consuming its next byte. A terminal read
+   can already be buffered, and the startup probe can still have replay; a
+   clock alone cannot prove that a paused paste has no unread tail. *)
+let input_byte_ready reader =
+  match take_input_byte reader ~timeout:0.0 with
+  | None -> false
+  | Some _ ->
+      return_input_byte reader;
+      true
+
+let paste_can_recover reader last_byte_ns =
+  paste_is_quiet last_byte_ns && not (input_byte_ready reader)
+
 let is_utf8_continuation = Masc_tui_utf8_input.is_continuation
 
 (* [prefix] is what has already been read of this character: one leading byte
@@ -744,10 +769,6 @@ type input_event =
           other one into the [wheel-up] / [wheel-down] key the surfaces bind,
           so no surface learned a new key when the pane appeared. *)
 
-(* The per-read wait while a paste is in progress. A pause yields to the main
-   loop without ending the paste: only ESC[201~ makes its contents a draft. *)
-let paste_byte_timeout_seconds = 0.5
-
 (* Read an APC body to its terminator. Bounded: a terminal that opens one and
    never closes it would otherwise hold the reader until the stream stalled,
    and every reply the protocol defines is short. *)
@@ -781,12 +802,10 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
   Eio_guard.run_in_systhread ~label:"tui-read-key" (fun () ->
       let key name = Some (Key name) in
       let rec continue_paste decoder =
-        match take_input_byte reader ~timeout:paste_byte_timeout_seconds with
-        | None ->
-            reader.paste_idle_observed <- true;
-            None
+        match take_input_byte reader ~timeout with
+        | None -> None
         | Some byte ->
-            reader.paste_idle_observed <- false;
+            reader.paste_last_byte_ns <- Mtime_clock.elapsed_ns ();
             (match Masc_tui_paste.feed decoder byte with
              | None ->
                  (* Return to the main loop after each terminal read buffer.
@@ -797,16 +816,13 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
              | Some paste ->
                  reader.paste_decoder <- None;
                  reader.paste_cancel_armed <- false;
-                 reader.paste_idle_observed <- false;
                  Some (Pasted paste))
       in
       let rec drain_recovered_paste decoder =
-        match take_input_byte reader ~timeout:paste_byte_timeout_seconds with
-        | None ->
-            reader.paste_guard_idle_observed <- true;
-            None
+        match take_input_byte reader ~timeout with
+        | None -> None
         | Some byte ->
-            reader.paste_guard_idle_observed <- false;
+            reader.paste_guard_last_byte_ns <- Mtime_clock.elapsed_ns ();
             (match Masc_tui_paste.feed decoder byte with
              | Some _ ->
                  reader.paste_recovery_guard <- None;
@@ -821,7 +837,7 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
             let decoder = Masc_tui_paste.create () in
             reader.paste_decoder <- Some decoder;
             reader.paste_cancel_armed <- false;
-            reader.paste_idle_observed <- false;
+            reader.paste_last_byte_ns <- Mtime_clock.elapsed_ns ();
             continue_paste decoder
         | params, final when String.length params > 0 && params.[0] = '<' -> (
             match Masc.Tui_decode.sgr_wheel_report params final with
@@ -850,7 +866,7 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
             | None -> key "unknown-esc")
       in
       let rec continue_csi parameters =
-        match take_input_byte reader ~timeout:paste_byte_timeout_seconds with
+        match take_input_byte reader ~timeout with
         | None -> None
         | Some byte when Char.code byte >= 0x40 && Char.code byte <= 0x7E ->
             reader.csi_parameters <- None;
@@ -16862,6 +16878,7 @@ let main
   in
   let input_reader = create_input_reader () in
   let paste_pause_notified = ref false in
+  let paste_quiet_notified = ref false in
   let csi_pause_notified = ref false in
   let paste_guard_idle_notified = ref false in
   (* Palette and graphics share one bounded startup probe because both replies
@@ -18180,7 +18197,9 @@ and is loaded on demand through keeper_skill.
            state.quit_armed <- false;
            (match input_reader.paste_recovery_guard,
                   input_reader.paste_decoder, input_reader.csi_parameters with
-            | Some _, _, _ when not input_reader.paste_guard_idle_observed ->
+            | Some _, _, _
+              when not (paste_can_recover input_reader
+                          input_reader.paste_guard_last_byte_ns) ->
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 report_action state "system" "Paste tail still arriving; waiting for end marker";
                 Render_schedule.request render_schedule Render_schedule.Background;
@@ -18192,7 +18211,6 @@ and is loaded on demand through keeper_skill.
                    stream the operator has observed stop, not an automatic
                    declaration that all paste bytes have arrived. *)
                 input_reader.paste_recovery_guard <- None;
-                input_reader.paste_guard_idle_observed <- false;
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 skip_input_after_interrupt := true;
                 report_action state "system"
@@ -18206,7 +18224,9 @@ and is loaded on demand through keeper_skill.
                   "Paste end awaited; press Ctrl-C again after bytes stop if the marker is missing";
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
-            | None, Some _, _ when not input_reader.paste_idle_observed ->
+            | None, Some _, _
+              when not (paste_can_recover input_reader
+                          input_reader.paste_last_byte_ns) ->
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 report_action state "system"
                   "Paste still arriving; waiting for end marker";
@@ -18215,9 +18235,8 @@ and is loaded on demand through keeper_skill.
             | None, Some decoder, _ ->
                 input_reader.paste_decoder <- None;
                 input_reader.paste_recovery_guard <- Some decoder;
-                input_reader.paste_guard_idle_observed <- false;
+                input_reader.paste_guard_last_byte_ns <- Mtime_clock.elapsed_ns ();
                 input_reader.paste_cancel_armed <- false;
-                input_reader.paste_idle_observed <- false;
                 Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 Some (Masc_tui_paste.snapshot_payload decoder)
             | None, None, Some _ ->
@@ -18331,6 +18350,18 @@ and is loaded on demand through keeper_skill.
            Render_schedule.request render_schedule Render_schedule.Background
        | Some _ -> ()
        | None -> paste_pause_notified := false);
+      (match input_reader.paste_decoder with
+       | Some _ when input_reader.paste_cancel_armed
+                     && paste_can_recover input_reader input_reader.paste_last_byte_ns
+                     && not !paste_quiet_notified ->
+           paste_quiet_notified := true;
+           report_action state "system"
+             "Paste quiet; Ctrl-C again restores the draft if the end marker was lost";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Some _ when not (paste_can_recover input_reader input_reader.paste_last_byte_ns) ->
+           paste_quiet_notified := false
+       | Some _ -> ()
+       | None -> paste_quiet_notified := false);
       (match input_reader.csi_parameters with
        | Some _ when not !csi_pause_notified ->
            csi_pause_notified := true;
@@ -18340,13 +18371,13 @@ and is loaded on demand through keeper_skill.
        | Some _ -> ()
        | None -> csi_pause_notified := false);
       (match input_reader.paste_recovery_guard with
-       | Some _ when input_reader.paste_guard_idle_observed
+       | Some _ when paste_can_recover input_reader input_reader.paste_guard_last_byte_ns
                      && not !paste_guard_idle_notified ->
            paste_guard_idle_notified := true;
            report_action state "system"
              "Paste tail quiet; Ctrl-C unlocks input if the end marker was lost";
            Render_schedule.request render_schedule Render_schedule.Background
-       | Some _ when not input_reader.paste_guard_idle_observed ->
+       | Some _ when not (paste_can_recover input_reader input_reader.paste_guard_last_byte_ns) ->
            paste_guard_idle_notified := false
        | Some _ -> ()
        | None -> paste_guard_idle_notified := false);

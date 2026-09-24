@@ -31,7 +31,7 @@ def run(executable: str) -> None:
         # The old reader treated an idle half-second as the end marker. The
         # next pasted CR then became Return and submitted a fragment.
         h.wait_for_output(process, master_fd, output, b"Paste in progress",
-                          timeout=5.0)
+                          start=0, timeout=5.0)
         h.send_and_wait(
             process, master_fd, output,
             b"\rsecond line" + h.PASTE_END,
@@ -76,7 +76,7 @@ def run(executable: str) -> None:
         os.write(master_fd, b"\x1b[2")
         time.sleep(0.8)
         os.write(master_fd, b"00~first\rsecond" + h.PASTE_END)
-        h.wait_for_output(process, master_fd, output, b"second", timeout=5.0)
+        h.wait_for_output(process, master_fd, output, b"second", start=0, timeout=5.0)
         if any(path.endswith("/chat/stream") for path, _ in split_requests):
             raise AssertionError("split start marker sent a paste fragment")
         os.write(master_fd, b"\r")
@@ -114,7 +114,7 @@ def run(executable: str) -> None:
 
         os.write(master_fd, b"\x1b[200")
         h.wait_for_output(process, master_fd, output,
-                          b"Terminal sequence incomplete", timeout=5.0)
+                          b"Terminal sequence incomplete", start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
                         b"Incomplete terminal sequence cancelled")
         h.send_and_wait(process, master_fd, output, b"recovered",
@@ -156,16 +156,18 @@ def run(executable: str) -> None:
         # The first Ctrl-C waits for a closing marker. The second restores the
         # draft after a quiet read; the third unlocks input when no marker came.
         h.wait_for_output(process, master_fd, output, b"Paste in progress",
-                          timeout=5.0)
+                          start=0, timeout=5.0)
         h.send_and_wait(
             process, master_fd, output, b"\x03", b"Paste end awaited",
         )
+        h.wait_for_output(process, master_fd, output, b"Paste quiet",
+                          start=0, timeout=5.0)
         h.send_and_wait(
             process, master_fd, output, b"\x03",
             b"Incomplete paste restored as draft",
         )
         h.wait_for_output(process, master_fd, output, b"Paste tail quiet",
-                          timeout=5.0)
+                          start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
                         b"Paste input unlocked")
         h.send_and_wait(process, master_fd, output, b"\r",
@@ -211,12 +213,14 @@ def run(executable: str) -> None:
                         h.composer_showing(b"prior draft"))
         os.write(master_fd, h.PASTE_START)
         h.wait_for_output(process, master_fd, output, b"Paste in progress",
-                          timeout=5.0)
+                          start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03", b"Paste end awaited")
+        h.wait_for_output(process, master_fd, output, b"Paste quiet",
+                          start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
                         b"Incomplete paste restored as draft")
         h.wait_for_output(process, master_fd, output, b"Paste tail quiet",
-                          timeout=5.0)
+                          start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
                         b"Paste input unlocked")
         h.send_and_wait(process, master_fd, output, b"\r",
@@ -264,15 +268,17 @@ def run(executable: str) -> None:
         image_path = str(Path(base_path, h.IMAGE_NAME)).encode()
         os.write(master_fd, h.PASTE_START + image_path)
         h.wait_for_output(process, master_fd, output, b"Paste in progress",
-                          timeout=5.0)
+                          start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03", b"Paste end awaited")
+        h.wait_for_output(process, master_fd, output, b"Paste quiet",
+                          start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
                         b"Incomplete paste restored as draft")
         h.wait_for_output(process, master_fd, output, b"Attached shot.png",
-                          timeout=5.0)
+                          start=0, timeout=5.0)
         os.write(master_fd, h.PASTE_END)
         h.wait_for_output(process, master_fd, output, b"Paste tail ended",
-                          timeout=5.0)
+                          start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\r",
                         b"Recovered draft protected")
         h.send_and_wait(process, master_fd, output, b"\x15",
@@ -314,13 +320,15 @@ def run(executable: str) -> None:
 
         os.write(master_fd, h.PASTE_START + b"alpha protected")
         h.wait_for_output(process, master_fd, output, b"Paste in progress",
-                          timeout=5.0)
+                          start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03", b"Paste end awaited")
+        h.wait_for_output(process, master_fd, output, b"Paste quiet",
+                          start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
                         b"Incomplete paste restored as draft")
         os.write(master_fd, h.PASTE_END)
         h.wait_for_output(process, master_fd, output, b"Paste tail ended",
-                          timeout=5.0)
+                          start=0, timeout=5.0)
 
         h.send_and_wait(process, master_fd, output, b"\x11",
                         b"Keepers \xe2\x96\xb8 \x1b[1malpha")
@@ -396,13 +404,15 @@ def run(executable: str) -> None:
         h.send_and_wait(process, master_fd, output, b"w", b"type to write")
         os.write(master_fd, h.PASTE_START + b"board only")
         h.wait_for_output(process, master_fd, output, b"Paste in progress",
-                          timeout=5.0)
+                          start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03", b"Paste end awaited")
+        h.wait_for_output(process, master_fd, output, b"Paste quiet",
+                          start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
                         b"Incomplete paste restored as draft")
         os.write(master_fd, h.PASTE_END)
         h.wait_for_output(process, master_fd, output, b"Paste tail ended",
-                          timeout=5.0)
+                          start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x1b", b"d:discard")
         h.send_and_wait(process, master_fd, output, b"d", b"MASC Board")
         h.send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
@@ -445,8 +455,10 @@ def run(executable: str) -> None:
 
         os.write(master_fd, h.PASTE_START + b"first\x1b[20")
         h.wait_for_output(process, master_fd, output, b"Paste in progress",
-                          timeout=5.0)
+                          start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03", b"Paste end awaited")
+        h.wait_for_output(process, master_fd, output, b"Paste quiet",
+                          start=0, timeout=5.0)
         h.send_and_wait(process, master_fd, output, b"\x03",
                         b"Incomplete paste restored as draft")
         start = len(output)
@@ -493,7 +505,7 @@ def run(executable: str) -> None:
         h.send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         os.write(master_fd, h.PASTE_START + b"continuous")
         h.wait_for_output(process, master_fd, output, b"Paste in progress",
-                          timeout=5.0)
+                          start=0, timeout=5.0)
         stop = threading.Event()
 
         def feed():

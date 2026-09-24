@@ -28,6 +28,7 @@ import {
 } from '../lib/runtime-toml-config'
 import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 import { runtimeConfigCommitReceiptNotice } from '../lib/runtime-config-receipt'
+import { runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
 import { copyToClipboard } from './common/copyable-code'
@@ -237,6 +238,20 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  // Another surface wrote runtime.toml. Re-read it unless the operator holds
+  // an unsaved draft, which a reload would discard; say so instead.
+  const sourceGeneration = runtimeTomlSourceGeneration.value
+  const seenSourceGeneration = useRef(sourceGeneration)
+  useEffect(() => {
+    if (seenSourceGeneration.current === sourceGeneration) return
+    seenSourceGeneration.current = sourceGeneration
+    if (dirty) {
+      setError('runtime.toml 이 다른 화면에서 저장되었습니다. 적용하지 않은 변경을 버리고 다시 불러와야 최신 파일을 봅니다.')
+      return
+    }
+    void refresh()
+  }, [sourceGeneration])
 
   useEffect(() => {
     if (!dirty || typeof window === 'undefined') return undefined

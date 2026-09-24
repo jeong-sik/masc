@@ -276,18 +276,103 @@ function modelIds(document: TomlDocument): string[] {
 }
 
 // One table per lane, written bare or quoted (runtime.ml lane_table_path).
-// A header deeper than the lane key is not a lane declaration.
+// A header deeper than the lane key is not a lane declaration. This is not a
+// TOML parser: a key with escapes, or a lane declared inline or with dotted
+// keys, is not read here, and callers treat that lane as unreadable.
+function laneIdOfHeader(name: string): string | null {
+  const rest = name.match(/^runtime\s*\.\s*lanes\s*\.\s*(.+)$/)?.[1]?.trim()
+  if (!rest) return null
+  if (/^"[^"\\]*"$|^'[^']*'$/.test(rest)) return dequoteTomlKey(rest)
+  if (BARE_TOML_KEY.test(rest)) return rest
+  return null
+}
+
 function laneIdsFromDocument(document: TomlDocument): string[] {
   const ids: string[] = []
   for (const section of document.sections) {
-    const rest = section.name.match(/^runtime\s*\.\s*lanes\s*\.\s*(.+)$/)?.[1]?.trim()
-    if (!rest) continue
-    const id = /^"[^"]*"$|^'[^']*'$/.test(rest)
-      ? dequoteTomlKey(rest)
-      : BARE_TOML_KEY.test(rest) ? rest : null
+    const id = laneIdOfHeader(section.name)
     if (id && !ids.includes(id)) ids.push(id)
   }
   return ids
+}
+
+// A TOML array of plain strings, e.g. ["a", 'b',]. Anything else (numbers,
+// nested arrays, inline tables) is null rather than a partial list.
+function parseTomlStringArray(raw: string): string[] | null {
+  const text = raw.trim()
+  if (!text.startsWith('[') || !text.endsWith(']')) return null
+  const body = text.slice(1, -1)
+  const values: string[] = []
+  let expectValue = true
+  let index = 0
+  while (index < body.length) {
+    const char = body[index] ?? ''
+    if (/\s/.test(char)) {
+      index += 1
+      continue
+    }
+    if (char === ',') {
+      if (expectValue) return null
+      expectValue = true
+      index += 1
+      continue
+    }
+    if (!expectValue) return null
+    let end: number
+    if (char === '"') {
+      end = index + 1
+      while (end < body.length && body[end] !== '"') end += body[end] === '\\' ? 2 : 1
+      if (end >= body.length) return null
+      try {
+        values.push(JSON.parse(body.slice(index, end + 1)) as string)
+      } catch {
+        return null
+      }
+    } else if (char === "'") {
+      end = body.indexOf("'", index + 1)
+      if (end < 0) return null
+      values.push(body.slice(index + 1, end))
+    } else {
+      return null
+    }
+    index = end + 1
+    expectValue = false
+  }
+  return values
+}
+
+// The candidates [runtime.lanes.<id>] declares in the file, in file order,
+// including ids the runtime catalog did not admit. /api/v1/runtime/resolved
+// reports a lane without those ids, so a whole-order `set` must start from
+// this list or it deletes them. null when the lane is not written as exactly
+// one table of its own with a readable `candidates` string array.
+export function declaredRuntimeLaneCandidates(sourceText: string, laneId: string): string[] | null {
+  const document = parseDocument(sourceText)
+  const sections = document.sections.filter(section => laneIdOfHeader(section.name) === laneId)
+  if (sections.length !== 1) return null
+  const section = sections[0]!
+  let candidates: string[] | null = null
+  let found = false
+  for (let index = section.start + 1; index < section.end; index += 1) {
+    const match = keyLineMatch(document.lines[index] ?? '')
+    if (!match?.[2] || dequoteTomlKey(match[2]) !== 'candidates') continue
+    if (found) return null
+    found = true
+    let value = stripInlineComment(match[4] ?? '')
+    let next = index + 1
+    while (!value.endsWith(']') && next < section.end) {
+      value = `${value} ${stripInlineComment(document.lines[next] ?? '')}`.trim()
+      next += 1
+    }
+    candidates = parseTomlStringArray(value)
+    if (candidates === null) return null
+    index = next - 1
+  }
+  return candidates
+}
+
+export function declaredRuntimeLaneIds(sourceText: string): string[] {
+  return laneIdsFromDocument(parseDocument(sourceText))
 }
 
 function bindingSections(document: TomlDocument): Array<{ providerId: string; modelId: string; section: string }> {

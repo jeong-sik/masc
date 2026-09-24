@@ -7,6 +7,7 @@ import {
   isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
   parseRuntimeTomlEnvironment,
+  declaredRuntimeLaneCandidates,
   runtimeTomlImpactSummary,
   setRuntimeTomlBindingField,
   setRuntimeTomlDefault,
@@ -171,6 +172,40 @@ note = "not a lane header"
 
     expect(environment.laneIds).toEqual(['coding', 'ollama_cloud.minimax-m3'])
     expect(parseRuntimeTomlEnvironment(sourceText).laneIds).toEqual([])
+  })
+
+  it('reads a lane\'s declared candidates only from its own table', () => {
+    const withLanes = `${sourceText}
+
+[runtime.lanes.coding]
+# head first
+candidates = [
+  "rt-a", # primary
+  'rt-x',
+  "rt-b",
+]
+
+[runtime.lanes."vision.fast"]
+candidates = ["rt-c"]
+
+[runtime.lanes.mixed]
+candidates = ["rt-a", 3]
+
+[runtime.lanes.twice]
+candidates = ["rt-a"]
+candidates = ["rt-b"]
+`
+
+    expect(declaredRuntimeLaneCandidates(withLanes, 'coding')).toEqual(['rt-a', 'rt-x', 'rt-b'])
+    expect(declaredRuntimeLaneCandidates(withLanes, 'vision.fast')).toEqual(['rt-c'])
+    expect(declaredRuntimeLaneCandidates(withLanes, 'mixed')).toBeNull()
+    expect(declaredRuntimeLaneCandidates(withLanes, 'twice')).toBeNull()
+    expect(declaredRuntimeLaneCandidates(withLanes, 'missing')).toBeNull()
+    expect(declaredRuntimeLaneCandidates(
+      '[runtime]\nlanes = { coding = { candidates = ["rt-a"] } }\n',
+      'coding',
+    )).toBeNull()
+    expect(declaredRuntimeLaneCandidates('[runtime.lanes."a\\"b"]\ncandidates = ["rt-a"]\n', 'a"b')).toBeNull()
   })
 
   it('updates an existing quoted-key assignment line in place instead of appending a duplicate', () => {

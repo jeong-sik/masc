@@ -49,6 +49,8 @@ import { dashboardLoading, shellAuthSummary, shellConfigResolution, shellRuntime
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { resetDevTokenBootstrap } from '../api/dev-token'
 import { setStoredToken } from '../api/core'
+import type { RuntimeLaneEdit } from '../api/dashboard'
+import { runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
 
 const apiMock = vi.hoisted(() => ({
   fetchDashboardConfig: vi.fn(),
@@ -1429,137 +1431,255 @@ describe('SettingsSurface', () => {
     })
   })
 
-  it('routing section renders declared runtime lanes as [runtime.lanes.<id>] candidate chains', async () => {
+  // A tiny runtime.toml the lane tests read and write: fetchRuntimeTomlConfig
+  // serves it, and patchRuntimeLane applies the body to it and answers with
+  // the file as written, as the server's commit receipt does.
+  function useLaneFile(initial: Array<[string, string[]]>) {
+    const lanes = new Map(initial)
+    const text = () => ['[runtime]', 'default = "rt-a"', '']
+      .concat([...lanes].flatMap(([id, candidates]) => [
+        `[runtime.lanes.${/^[A-Za-z0-9_-]+$/.test(id) ? id : JSON.stringify(id)}]`,
+        `candidates = ${JSON.stringify(candidates)}`,
+        '',
+      ]))
+      .join('\n')
+    const committed = () => committedRuntimeTomlConfigFixture({
+      ok: true,
+      path: MOCK_RUNTIME_PATH,
+      file_name: 'runtime.toml',
+      source_text: text(),
+      provider_protocols: runtimeProviderProtocols,
+    })
+    apiMock.fetchRuntimeTomlConfig.mockImplementation(async () => committed())
+    apiMock.patchRuntimeLane.mockImplementation(async (lane: string, edit: RuntimeLaneEdit) => {
+      if (edit.action === 'set' || edit.action === 'create') lanes.set(lane, [...edit.runtimeIds])
+      if (edit.action === 'remove') lanes.delete(lane)
+      if (edit.action === 'rename') {
+        const candidates = lanes.get(lane) ?? []
+        lanes.delete(lane)
+        lanes.set(edit.to, candidates)
+      }
+      return committed()
+    })
+    return lanes
+  }
+
+  async function openRouting() {
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
+  }
+
+  const q = (testId: string) => container.querySelector(`[data-testid="${testId}"]`) as HTMLElement | null
+
+  it('routing section renders declared lanes as [runtime.lanes.<id>] chains, including catalog-dropped candidates', async () => {
+    useLaneFile([
+      ['coding', ['rt-a', 'rt-x', 'rt-b']],
+      ['vision.fast', ['rt-c']],
+      ['ghost', ['rt-z']],
+    ])
     stubRuntimeResolved(makeRuntimeResolved({
       lanes: [
-        {
-          id: 'coding',
-          declared: true,
-          runtime_ids: ['rt-a', 'rt-b'],
-        },
-        {
-          id: 'vision.fast',
-          declared: true,
-          runtime_ids: ['rt-c'],
-        },
-        {
-          id: 'assignment-only',
-          declared: false,
-          runtime_ids: ['rt-b'],
-        },
+        // rt-x has no catalog entry: the resolved lane omits it.
+        { id: 'coding', declared: true, runtime_ids: ['rt-a', 'rt-b'] },
+        { id: 'vision.fast', declared: true, runtime_ids: ['rt-c'] },
+        // Declared some other way (inline/dotted): not its own table here.
+        { id: 'inline-lane', declared: true, runtime_ids: ['rt-b'] },
+        { id: 'assignment-only', declared: false, runtime_ids: ['rt-b'] },
       ],
     }))
     render(html`<${SettingsSurface} />`, container)
-
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
+    await openRouting()
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="runtime-lanes-section"]')).not.toBeNull()
+      expect(q('runtime-lane-coding-unavailable-rt-x')).not.toBeNull()
     })
-    const hint = container.querySelector('[data-testid="runtime-lanes-hint"]')?.textContent ?? ''
+    const hint = q('runtime-lanes-hint')?.textContent ?? ''
     expect(hint).not.toContain('writer는 아직 없')
     expect(hint).toContain('[runtime.lanes.<id>]')
-    const laneCoding = container.querySelector('[data-testid="runtime-lane-coding"]') as HTMLElement
+    const laneCoding = q('runtime-lane-coding')!
     expect(laneCoding.classList.contains('rt-fo')).toBe(true)
-    expect(laneCoding.querySelector('.rt-fo-lane')?.textContent).toBe('coding')
     expect(laneCoding.querySelector('.rt-fo-lane-id')?.textContent).toBe('[runtime.lanes.coding]')
     const cands = [...laneCoding.querySelectorAll('.rt-fo-chain .rt-fo-cand')]
-    expect(cands.map(c => c.querySelector('.rt-fo-id')?.textContent)).toEqual(['rt-a', 'rt-b'])
-    expect(cands.map(c => c.classList.contains('head'))).toEqual([true, false])
+    expect(cands.map(c => c.querySelector('.rt-fo-id')?.textContent)).toEqual(['rt-a', 'rt-x', 'rt-b'])
+    expect(cands.map(c => c.getAttribute('data-unavailable'))).toEqual([null, 'true', null])
     expect(cands[0]!.querySelector('.rt-fo-rank')?.textContent).toBe('1차')
-    // A key TOML cannot write bare is labelled the way the writer quotes it.
-    expect(container.querySelector('[data-testid="runtime-lane-vision.fast"] .rt-fo-lane-id')?.textContent)
+    expect(q('runtime-lane-vision.fast')?.querySelector('.rt-fo-lane-id')?.textContent)
       .toBe('[runtime.lanes."vision.fast"]')
-    expect(container.querySelector('[data-testid="runtime-lane-assignment-only"]')).toBeNull()
-    // The last candidate cannot be removed: the server refuses an empty order.
-    expect((container.querySelector('[data-testid="runtime-lane-vision.fast-remove-rt-c"]') as HTMLButtonElement).disabled)
-      .toBe(true)
+    // Every candidate dropped: absent from the projection, still in the file.
+    expect(q('runtime-lane-ghost-unavailable-rt-z')).not.toBeNull()
+    // Not its own table: shown, read-only, with the reason.
+    expect(q('runtime-lane-inline-lane-read-only')?.textContent).toContain('읽기 전용')
+    expect(q('runtime-lane-inline-lane')?.querySelector('button, select, input')).toBeNull()
+    expect(q('runtime-lane-assignment-only')).toBeNull()
+    expect((q('runtime-lane-vision.fast-remove-rt-c') as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('routing section sends lane set bodies for reorder, removal, and add', async () => {
+  it('routing section applies candidate edits to the declared order so catalog-dropped candidates stay', async () => {
+    const lanes = useLaneFile([['coding', ['rt-a', 'rt-x', 'rt-b']]])
+    stubRuntimeResolved(makeRuntimeResolved({
+      lanes: [{ id: 'coding', declared: true, runtime_ids: ['rt-a', 'rt-b'] }],
+    }))
+    const generationBefore = runtimeTomlSourceGeneration.value
+    render(html`<${SettingsSurface} />`, container)
+    await openRouting()
+    await waitFor(() => {
+      expect((q('runtime-lane-coding-down-rt-a') as HTMLButtonElement | null)?.disabled).toBe(false)
+    })
+
+    await fireEvent.click(q('runtime-lane-coding-down-rt-a')!)
+    await waitFor(() => {
+      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-x', 'rt-a', 'rt-b'] })
+      expect(q('runtime-lane-message')?.textContent).toContain('runtime.toml lane set (coding) 저장됨')
+    })
+    // Success refreshes the resolved projection like the default routing patch,
+    // and tells a mounted RuntimeTomlEditor to re-read the file.
+    expect(apiMock.fetchRuntimeResolved.mock.calls.length).toBeGreaterThan(1)
+    expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalled()
+    expect(runtimeTomlSourceGeneration.value).toBe(generationBefore + 1)
+
+    await fireEvent.click(q('runtime-lane-coding-remove-rt-b')!)
+    await waitFor(() => {
+      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-x', 'rt-a'] })
+      expect(q('runtime-lane-saving')).toBeNull()
+    })
+
+    const add = q('runtime-lane-coding-add') as HTMLSelectElement
+    await waitFor(() => {
+      expect(add.disabled).toBe(false)
+    })
+    expect(add.getAttribute('aria-label')).toBe('coding 레인 후보 추가')
+    expect(Array.from(add.options).map(option => option.value)).toEqual(['', 'rt-b', 'rt-c'])
+    await fireEvent.input(add, { target: { value: 'rt-c' } })
+    await waitFor(() => {
+      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-x', 'rt-a', 'rt-c'] })
+    })
+    expect(lanes.get('coding')).toEqual(['rt-x', 'rt-a', 'rt-c'])
+  })
+
+  it('routing section refuses a candidate edit when the declared order cannot be read', async () => {
+    useLaneFile([['coding', ['rt-a', 'rt-b']]])
     stubRuntimeResolved(makeRuntimeResolved({
       lanes: [{ id: 'coding', declared: true, runtime_ids: ['rt-a', 'rt-b'] }],
     }))
     render(html`<${SettingsSurface} />`, container)
-
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
+    await openRouting()
     await waitFor(() => {
-      const down = container.querySelector('[data-testid="runtime-lane-coding-down-rt-a"]') as HTMLButtonElement | null
-      expect(down?.disabled).toBe(false)
+      expect((q('runtime-lane-coding-down-rt-a') as HTMLButtonElement | null)?.disabled).toBe(false)
     })
 
-    await fireEvent.click(container.querySelector('[data-testid="runtime-lane-coding-down-rt-a"]') as HTMLElement)
+    // Someone rewrote the lane inline after the card rendered.
+    apiMock.fetchRuntimeTomlConfig.mockResolvedValueOnce(committedRuntimeTomlConfigFixture({
+      ok: true,
+      path: MOCK_RUNTIME_PATH,
+      file_name: 'runtime.toml',
+      source_text: '[runtime]\nlanes = { coding = { candidates = ["rt-a", "rt-b"] } }\n',
+      provider_protocols: runtimeProviderProtocols,
+    }))
+    await fireEvent.click(q('runtime-lane-coding-down-rt-a')!)
     await waitFor(() => {
-      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-b', 'rt-a'] })
-      expect(container.querySelector('[data-testid="runtime-lane-message"]')?.textContent)
-        .toContain('runtime.toml lane set (coding) 저장됨')
+      const message = q('runtime-lane-message')
+      expect(message?.className).toBe('set-err')
+      expect(message?.textContent).toContain('후보 편집을 보내지 않았습니다')
     })
-    // Success refreshes the resolved projection like the default routing patch.
-    expect(apiMock.fetchRuntimeResolved.mock.calls.length).toBeGreaterThan(1)
-    expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalled()
-
-    await fireEvent.click(container.querySelector('[data-testid="runtime-lane-coding-remove-rt-b"]') as HTMLElement)
-    await waitFor(() => {
-      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-a'] })
-      expect(container.querySelector('[data-testid="runtime-lane-saving"]')).toBeNull()
-    })
-
-    const add = container.querySelector('[data-testid="runtime-lane-coding-add"]') as HTMLSelectElement
-    await waitFor(() => {
-      expect(add.disabled).toBe(false)
-    })
-    expect(Array.from(add.options).map(option => option.value)).toEqual(['', 'rt-c'])
-    await fireEvent.input(add, { target: { value: 'rt-c' } })
-    await waitFor(() => {
-      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'set', runtimeIds: ['rt-a', 'rt-b', 'rt-c'] })
-    })
+    expect(apiMock.patchRuntimeLane).not.toHaveBeenCalled()
+    expect(q('runtime-lane-coding-read-only')).not.toBeNull()
   })
 
-  it('routing section renames, deletes, and creates lanes and shows the server refusal', async () => {
+  it('routing section sends one lane write for a double click', async () => {
+    useLaneFile([['coding', ['rt-a', 'rt-b']]])
+    stubRuntimeResolved(makeRuntimeResolved({
+      lanes: [{ id: 'coding', declared: true, runtime_ids: ['rt-a', 'rt-b'] }],
+    }))
+    render(html`<${SettingsSurface} />`, container)
+    await openRouting()
+    await waitFor(() => {
+      expect((q('runtime-lane-coding-down-rt-a') as HTMLButtonElement | null)?.disabled).toBe(false)
+    })
+
+    const down = q('runtime-lane-coding-down-rt-a')!
+    down.click()
+    down.click()
+    await waitFor(() => {
+      expect(q('runtime-lane-message')?.textContent).toContain('저장됨')
+    })
+    expect(apiMock.patchRuntimeLane).toHaveBeenCalledTimes(1)
+  })
+
+  it('routing section keeps the saved-but-refresh-failed lane message when the resolved refresh fails', async () => {
+    useLaneFile([['coding', ['rt-a', 'rt-b']]])
+    stubRuntimeResolved(makeRuntimeResolved({
+      lanes: [{ id: 'coding', declared: true, runtime_ids: ['rt-a', 'rt-b'] }],
+    }))
+    render(html`<${SettingsSurface} />`, container)
+    await openRouting()
+    await waitFor(() => {
+      expect((q('runtime-lane-coding-down-rt-a') as HTMLButtonElement | null)?.disabled).toBe(false)
+    })
+
+    apiMock.fetchRuntimeResolved.mockRejectedValue(new Error('resolved runtime unavailable'))
+    await fireEvent.click(q('runtime-lane-coding-down-rt-a')!)
+    await waitFor(() => {
+      const message = q('runtime-lane-message')
+      expect(message?.className).toBe('set-err')
+      expect(message?.textContent).toContain('저장됨')
+      expect(message?.textContent).toContain('대시보드 런타임 갱신 실패: resolved runtime unavailable')
+    })
+    expect(apiMock.patchRuntimeLane).toHaveBeenCalledWith('coding', { action: 'set', runtimeIds: ['rt-b', 'rt-a'] })
+  })
+
+  it('routing section renames with Enter, cancels with Escape, deletes, and creates lanes', async () => {
+    useLaneFile([['coding', ['rt-a', 'rt-b']]])
     stubRuntimeResolved(makeRuntimeResolved({
       lanes: [{ id: 'coding', declared: true, runtime_ids: ['rt-a', 'rt-b'] }],
     }))
     const confirmSpy = vi.fn(() => true)
     setConfirm(confirmSpy)
     render(html`<${SettingsSurface} />`, container)
-
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
+    await openRouting()
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="runtime-lane-coding-rename"]')).not.toBeNull()
+      expect((q('runtime-lane-coding-rename') as HTMLButtonElement | null)?.disabled).toBe(false)
     })
 
-    await fireEvent.click(container.querySelector('[data-testid="runtime-lane-coding-rename"]') as HTMLElement)
-    const renameInput = container.querySelector('[data-testid="runtime-lane-coding-rename-input"]') as HTMLInputElement
+    await fireEvent.click(q('runtime-lane-coding-rename')!)
+    await fireEvent.keyDown(q('runtime-lane-coding-rename-input')!, { key: 'Escape' })
+    expect(q('runtime-lane-coding-rename-input')).toBeNull()
+
+    await fireEvent.click(q('runtime-lane-coding-rename')!)
+    const renameInput = q('runtime-lane-coding-rename-input') as HTMLInputElement
     await fireEvent.input(renameInput, { target: { value: ' builder ' } })
-    await fireEvent.click(container.querySelector('[data-testid="runtime-lane-coding-rename-submit"]') as HTMLElement)
+    await fireEvent.keyDown(renameInput, { key: 'Enter' })
     await waitFor(() => {
       expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'rename', to: 'builder' })
-      expect(container.querySelector('[data-testid="runtime-lane-coding-rename-input"]')).toBeNull()
-      expect((container.querySelector('[data-testid="runtime-lane-coding-delete"]') as HTMLButtonElement).disabled).toBe(false)
+      expect(q('runtime-lane-message')?.textContent).toContain('coding → builder')
     })
 
-    apiMock.patchRuntimeLane.mockRejectedValueOnce(new Error('lane "coding" is still assigned to keeper analyst'))
-    await fireEvent.click(container.querySelector('[data-testid="runtime-lane-coding-delete"]') as HTMLElement)
+    // The resolved stub still reports "coding"; the server refuses the delete.
+    await waitFor(() => {
+      expect((q('runtime-lane-builder-delete') as HTMLButtonElement | null)?.disabled).toBe(false)
+    })
+    expect(q('runtime-lane-builder-delete')?.getAttribute('aria-label')).toBe('builder 레인 삭제')
+    apiMock.patchRuntimeLane.mockRejectedValueOnce(new Error('lane "builder" is still assigned to keeper analyst'))
+    await fireEvent.click(q('runtime-lane-builder-delete')!)
     expect(confirmSpy).toHaveBeenCalledTimes(1)
     await waitFor(() => {
-      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('coding', { action: 'remove' })
-      const message = container.querySelector('[data-testid="runtime-lane-message"]')
+      expect(apiMock.patchRuntimeLane).toHaveBeenLastCalledWith('builder', { action: 'remove' })
+      const message = q('runtime-lane-message')
       expect(message?.className).toBe('set-err')
       expect(message?.textContent).toContain('still assigned to keeper analyst')
     })
 
-    const nameInput = container.querySelector('[data-testid="runtime-lane-create-name"]') as HTMLInputElement
-    const submit = container.querySelector('[data-testid="runtime-lane-create-submit"]') as HTMLButtonElement
+    const nameInput = q('runtime-lane-create-name') as HTMLInputElement
+    const submit = q('runtime-lane-create-submit') as HTMLButtonElement
     await fireEvent.input(nameInput, { target: { value: 'default' } })
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="runtime-lane-create-error"]')?.textContent)
-        .toContain('다른 routing 경로 이름')
+      expect(q('runtime-lane-create-error')?.textContent).toContain('다른 routing 경로 이름')
+    })
+    await fireEvent.input(nameInput, { target: { value: 'rt-b' } })
+    await waitFor(() => {
+      expect(q('runtime-lane-create-shadow')?.textContent).toContain('같은 id 의 런타임')
     })
     await fireEvent.input(nameInput, { target: { value: 'review' } })
-    await fireEvent.input(
-      container.querySelector('[data-testid="runtime-lane-create-runtime"]') as HTMLSelectElement,
-      { target: { value: 'rt-c' } },
-    )
+    expect(q('runtime-lane-create-shadow')).toBeNull()
+    await fireEvent.input(q('runtime-lane-create-runtime') as HTMLSelectElement, { target: { value: 'rt-c' } })
     await waitFor(() => {
       expect(submit.disabled).toBe(false)
     })
@@ -1571,18 +1691,18 @@ describe('SettingsSurface', () => {
   })
 
   it('routing section does not send a delete the operator did not confirm', async () => {
+    useLaneFile([['coding', ['rt-a']]])
     stubRuntimeResolved(makeRuntimeResolved({
       lanes: [{ id: 'coding', declared: true, runtime_ids: ['rt-a'] }],
     }))
     const confirmSpy = vi.fn(() => false)
     setConfirm(confirmSpy)
     render(html`<${SettingsSurface} />`, container)
-
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
+    await openRouting()
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="runtime-lane-coding-delete"]')).not.toBeNull()
+      expect(q('runtime-lane-coding-delete')).not.toBeNull()
     })
-    await fireEvent.click(container.querySelector('[data-testid="runtime-lane-coding-delete"]') as HTMLElement)
+    await fireEvent.click(q('runtime-lane-coding-delete')!)
     expect(confirmSpy).toHaveBeenCalledTimes(1)
     expect(apiMock.patchRuntimeLane).not.toHaveBeenCalled()
     setConfirm(realConfirm)

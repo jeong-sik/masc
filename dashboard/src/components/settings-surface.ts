@@ -4,14 +4,14 @@ import { resumeSavedModelSetup } from '../lib/model-setup-resume'
 // health/inventory, notification thresholds, prompt/fusion/log/display controls.
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { Effect, Option } from 'effect'
 import {
   SETTINGS_ROUTE_SECTION_IDS,
   type SettingsRouteSectionId,
 } from '../config/navigation'
 import { navigate, route } from '../router'
-import { fetchDashboardTools, fetchRuntimeDefaults, fetchRuntimeProviders, fetchRuntimeResolved } from '../api/dashboard.js'
+import { fetchDashboardTools, fetchRuntimeDefaults, fetchRuntimeProviders, fetchRuntimeResolved, fetchRuntimeTomlConfig } from '../api/dashboard.js'
 import type {
   DashboardRuntimeProviderSnapshot,
   DashboardRuntimeProvidersResponse,
@@ -59,6 +59,8 @@ import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { SettingsRepositoriesSection } from './settings-repositories'
 import { FusionSettingsPanel } from './fusion-settings-panel'
 import { runtimeConfigCommitReceiptNotice } from '../lib/runtime-config-receipt'
+import { declaredRuntimeLaneCandidates, declaredRuntimeLaneIds } from '../lib/runtime-toml-config'
+import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
 import { StatusChip } from './common/status-chip'
@@ -832,45 +834,98 @@ function runtimeLaneTableLabel(laneId: string): string {
   return `[runtime.lanes.${key}]`
 }
 
+// One candidate change, applied to the order runtime.toml declares when the
+// write is sent — never to the resolved order, which omits candidates the
+// catalog did not admit.
+type RuntimeLaneCandidateEdit =
+  | { kind: 'move'; runtimeId: string; delta: -1 | 1 }
+  | { kind: 'remove'; runtimeId: string }
+  | { kind: 'add'; runtimeId: string }
+
+type RuntimeLaneWrite =
+  | { kind: 'candidates'; edit: RuntimeLaneCandidateEdit }
+  | { kind: 'lane'; edit: RuntimeLaneEdit }
+
+// The declared order after [edit], or the reason the edit no longer applies
+// (the file changed since the card rendered).
+function applyRuntimeLaneCandidateEdit(
+  declared: readonly string[],
+  edit: RuntimeLaneCandidateEdit,
+): string[] | string {
+  const index = declared.indexOf(edit.runtimeId)
+  if (edit.kind === 'add') {
+    return index >= 0 ? `${edit.runtimeId} 는 이미 이 레인의 후보입니다` : [...declared, edit.runtimeId]
+  }
+  if (index < 0) return `${edit.runtimeId} 는 runtime.toml 의 이 레인 후보에 없습니다`
+  if (edit.kind === 'remove') {
+    const next = declared.filter(id => id !== edit.runtimeId)
+    return next.length === 0 ? '마지막 후보는 뺄 수 없습니다 — 레인 삭제를 쓰세요' : next
+  }
+  const target = index + edit.delta
+  if (target < 0 || target >= declared.length) return `${edit.runtimeId} 는 더 옮길 수 없습니다`
+  const next = [...declared]
+  next[index] = declared[target]!
+  next[target] = edit.runtimeId
+  return next
+}
+
+type RuntimeLaneCard = {
+  id: string
+  // What /api/v1/runtime/resolved walks: declared candidates the catalog admitted.
+  resolvedRuntimeIds: readonly string[]
+  // What runtime.toml declares, or null when the file was not read or the lane
+  // is not written as its own table with a readable candidates array.
+  declared: readonly string[] | null
+}
+
+type RuntimeTomlSourceState =
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; sourceText: string }
+
+function runtimeLaneReadOnlyReason(
+  lane: RuntimeLaneCard,
+  source: RuntimeTomlSourceState,
+): string | null {
+  if (runtimeLaneNameReserved(lane.id)) {
+    return 'routing API 가 이 이름을 다른 경로로 읽어 레인 편집을 보낼 수 없습니다. runtime.toml 섹션에서 직접 고치세요.'
+  }
+  if (lane.declared !== null) return null
+  if (source.status === 'loading') return 'runtime.toml 을 읽는 중입니다. 선언된 후보를 확인한 뒤 편집할 수 있습니다.'
+  if (source.status === 'error') return `runtime.toml 을 읽지 못해 편집하지 않습니다: ${source.message}`
+  return `runtime.toml 에 ${runtimeLaneTableLabel(lane.id)} 테이블과 candidates 배열로 적혀 있지 않아(inline·dotted 선언 등) 여기서는 읽기 전용입니다. runtime.toml 섹션에서 직접 고치세요.`
+}
+
 function RuntimeLaneEditor({
   lane,
+  readOnlyReason,
   options,
   disabled,
-  onEdit,
+  onWrite,
 }: {
-  lane: { id: string; runtime_ids: readonly string[] }
+  lane: RuntimeLaneCard
+  readOnlyReason: string | null
   options: readonly RuntimeSelectOption[]
   disabled: boolean
-  onEdit: (lane: string, edit: RuntimeLaneEdit) => Promise<boolean>
+  onWrite: (lane: string, write: RuntimeLaneWrite) => Promise<boolean>
 }) {
   const [renameDraft, setRenameDraft] = useState<string | null>(null)
-  const value = lane.runtime_ids
-  const editable = !runtimeLaneNameReserved(lane.id)
-  const selected = new Set(value)
+  const editable = readOnlyReason === null && lane.declared !== null
+  const chain = lane.declared ?? lane.resolvedRuntimeIds
+  const resolved = new Set(lane.resolvedRuntimeIds)
+  const selected = new Set(chain)
   const addOptions = options.filter(option => !selected.has(option.id))
-  // `set` sends the whole order: the endpoint's contract is the lane's order,
-  // not a delta.
-  const setOrder = (runtimeIds: string[]) => void onEdit(lane.id, { action: 'set', runtimeIds })
-  const move = (index: number, delta: number) => {
-    const target = index + delta
-    if (target < 0 || target >= value.length) return
-    const next = [...value]
-    const current = next[index]
-    if (current === undefined) return
-    next[index] = next[target] ?? current
-    next[target] = current
-    setOrder(next)
-  }
+  const editCandidates = (edit: RuntimeLaneCandidateEdit) => void onWrite(lane.id, { kind: 'candidates', edit })
   const renameTarget = renameDraft?.trim() ?? ''
   const renameInvalid =
     renameTarget === '' || renameTarget === lane.id || runtimeLaneNameReserved(renameTarget)
   const submitRename = async () => {
-    if (renameInvalid) return
-    if (await onEdit(lane.id, { action: 'rename', to: renameTarget })) setRenameDraft(null)
+    if (disabled || renameInvalid) return
+    if (await onWrite(lane.id, { kind: 'lane', edit: { action: 'rename', to: renameTarget } })) setRenameDraft(null)
   }
   const removeLane = () => {
     if (window.confirm(`${runtimeLaneTableLabel(lane.id)} 레인을 runtime.toml 에서 지울까요? 이 레인을 가리키는 배정이 남아 있으면 서버가 거절합니다.`)) {
-      void onEdit(lane.id, { action: 'remove' })
+      void onWrite(lane.id, { kind: 'lane', edit: { action: 'remove' } })
     }
   }
 
@@ -880,16 +935,19 @@ function RuntimeLaneEditor({
         <span class="rt-fo-lane">${lane.id}</span>
         <span class="rt-fo-lane-id mono">${runtimeLaneTableLabel(lane.id)}</span>
       </div>
-      ${editable
+      ${readOnlyReason === null
         ? null
-        : html`<div class="rt-fo-note" data-testid=${`runtime-lane-${lane.id}-reserved`}>
-            routing API 가 이 이름을 다른 경로로 읽어 레인 편집을 보낼 수 없습니다. runtime.toml 섹션에서 직접 고치세요.
-          </div>`}
+        : html`<div class="rt-fo-note" data-testid=${`runtime-lane-${lane.id}-read-only`}>${readOnlyReason}</div>`}
       <div class="rt-fo-chain">
-        ${value.map((runtimeId, index) => html`
-          <div key=${runtimeId} class=${`rt-fo-cand ${index === 0 ? 'head' : ''}`}>
+        ${chain.map((runtimeId, index) => {
+          const unavailable = lane.declared !== null && !resolved.has(runtimeId)
+          return html`
+          <div key=${runtimeId} class=${`rt-fo-cand ${index === 0 ? 'head' : ''}`} data-unavailable=${unavailable ? 'true' : undefined}>
             <span class="rt-fo-rank mono">${index === 0 ? '1차' : `${index + 1}`}</span>
             <span class="rt-fo-id mono">${runtimeId}</span>
+            ${unavailable
+              ? html`<span class="rt-fo-cap" data-testid=${`runtime-lane-${lane.id}-unavailable-${runtimeId}`} title="runtime.toml 에 선언됐지만 catalog 에 없어 이 레인이 건너뜁니다">catalog 없음</span>`
+              : null}
             ${editable
               ? html`
                 <span class="rt-fo-cand-acts">
@@ -899,30 +957,31 @@ function RuntimeLaneEditor({
                     disabled=${disabled || index === 0}
                     aria-label=${`${lane.id} 레인 ${runtimeId} 위로 이동`}
                     data-testid=${`runtime-lane-${lane.id}-up-${runtimeId}`}
-                    onClick=${() => move(index, -1)}
+                    onClick=${() => editCandidates({ kind: 'move', runtimeId, delta: -1 })}
                   >↑</button>
                   <button
                     type="button"
                     class="rt-fo-mv"
-                    disabled=${disabled || index === value.length - 1}
+                    disabled=${disabled || index === chain.length - 1}
                     aria-label=${`${lane.id} 레인 ${runtimeId} 아래로 이동`}
                     data-testid=${`runtime-lane-${lane.id}-down-${runtimeId}`}
-                    onClick=${() => move(index, 1)}
+                    onClick=${() => editCandidates({ kind: 'move', runtimeId, delta: 1 })}
                   >↓</button>
                   <button
                     type="button"
                     class="rt-fo-mv del"
-                    disabled=${disabled || value.length <= 1}
+                    disabled=${disabled || chain.length <= 1}
                     aria-label=${`${lane.id} 레인에서 ${runtimeId} 제거`}
-                    title=${value.length <= 1 ? '마지막 후보는 뺄 수 없습니다 — 레인 삭제를 쓰세요' : undefined}
+                    title=${chain.length <= 1 ? '마지막 후보는 뺄 수 없습니다 — 레인 삭제를 쓰세요' : undefined}
                     data-testid=${`runtime-lane-${lane.id}-remove-${runtimeId}`}
-                    onClick=${() => setOrder(value.filter(id => id !== runtimeId))}
+                    onClick=${() => editCandidates({ kind: 'remove', runtimeId })}
                   >×</button>
                 </span>
               `
               : null}
           </div>
-        `)}
+        `
+        })}
       </div>
       ${editable
         ? html`
@@ -930,13 +989,14 @@ function RuntimeLaneEditor({
             <select
               class="set-input mono rt-fo-add"
               data-testid=${`runtime-lane-${lane.id}-add`}
+              aria-label=${`${lane.id} 레인 후보 추가`}
               value=""
               disabled=${disabled || addOptions.length === 0}
               onInput=${(event: Event) => {
                 const select = event.currentTarget as HTMLSelectElement
                 const next = select.value.trim()
                 select.value = ''
-                if (next !== '') setOrder([...value, next])
+                if (next !== '') editCandidates({ kind: 'add', runtimeId: next })
               }}
             >
               <option value="">후보 추가</option>
@@ -950,6 +1010,7 @@ function RuntimeLaneEditor({
                   type="button"
                   class="set-route-clear"
                   disabled=${disabled}
+                  aria-label=${`${lane.id} 레인 이름 변경`}
                   data-testid=${`runtime-lane-${lane.id}-rename`}
                   onClick=${() => setRenameDraft(lane.id)}
                 >이름 변경</button>
@@ -962,11 +1023,21 @@ function RuntimeLaneEditor({
                   aria-label=${`${lane.id} 레인 새 이름`}
                   data-testid=${`runtime-lane-${lane.id}-rename-input`}
                   onInput=${(event: Event) => setRenameDraft((event.currentTarget as HTMLInputElement).value)}
+                  onKeyDown=${(event: KeyboardEvent) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      void submitRename()
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault()
+                      setRenameDraft(null)
+                    }
+                  }}
                 />
                 <button
                   type="button"
                   class="set-route-clear"
                   disabled=${disabled || renameInvalid}
+                  aria-label=${`${lane.id} 레인 새 이름 저장`}
                   data-testid=${`runtime-lane-${lane.id}-rename-submit`}
                   onClick=${() => void submitRename()}
                 >이름 저장</button>
@@ -974,6 +1045,7 @@ function RuntimeLaneEditor({
                   type="button"
                   class="set-route-clear"
                   disabled=${disabled}
+                  aria-label=${`${lane.id} 레인 이름 변경 취소`}
                   onClick=${() => setRenameDraft(null)}
                 >취소</button>
               `}
@@ -981,6 +1053,7 @@ function RuntimeLaneEditor({
               type="button"
               class="set-route-clear"
               disabled=${disabled}
+              aria-label=${`${lane.id} 레인 삭제`}
               data-testid=${`runtime-lane-${lane.id}-delete`}
               onClick=${removeLane}
             >레인 삭제</button>
@@ -991,6 +1064,13 @@ function RuntimeLaneEditor({
   `
 }
 
+function runtimeLaneCreateNameError(name: string, existingLaneIds: readonly string[]): string | null {
+  if (name === '') return null
+  if (runtimeLaneNameReserved(name)) return `"${name}" 는 다른 routing 경로 이름이라 레인 이름으로 쓸 수 없습니다`
+  if (existingLaneIds.includes(name)) return `이미 선언된 레인입니다: ${name}`
+  return null
+}
+
 // A new lane starts with one candidate; the rest are added on its lane card.
 // `create` refuses a name the file already declares, so a typo cannot land on
 // an existing lane's candidates.
@@ -998,28 +1078,24 @@ function RuntimeLaneCreateForm({
   existingLaneIds,
   options,
   disabled,
-  onCreate,
+  onWrite,
 }: {
   existingLaneIds: readonly string[]
   options: readonly RuntimeSelectOption[]
   disabled: boolean
-  onCreate: (lane: string, edit: RuntimeLaneEdit) => Promise<boolean>
+  onWrite: (lane: string, write: RuntimeLaneWrite) => Promise<boolean>
 }) {
   const [name, setName] = useState('')
   const [firstRuntimeId, setFirstRuntimeId] = useState('')
   const trimmed = name.trim()
-  const nameError =
-    trimmed === ''
-      ? null
-      : runtimeLaneNameReserved(trimmed)
-        ? `"${trimmed}" 는 다른 routing 경로 이름이라 레인 이름으로 쓸 수 없습니다`
-        : existingLaneIds.includes(trimmed)
-          ? `이미 선언된 레인입니다: ${trimmed}`
-          : null
+  const nameError = runtimeLaneCreateNameError(trimmed, existingLaneIds)
+  // A lane named like a runtime id shadows it: the resolver reads the lane
+  // first (runtime.mli create_runtime_lane), so it is allowed but noted.
+  const shadowsRuntime = nameError === null && options.some(option => option.id === trimmed)
   const canSubmit = !disabled && trimmed !== '' && nameError === null && firstRuntimeId !== ''
   const submit = async () => {
     if (!canSubmit) return
-    if (await onCreate(trimmed, { action: 'create', runtimeIds: [firstRuntimeId] })) {
+    if (await onWrite(trimmed, { kind: 'lane', edit: { action: 'create', runtimeIds: [firstRuntimeId] } })) {
       setName('')
       setFirstRuntimeId('')
     }
@@ -1063,6 +1139,11 @@ function RuntimeLaneCreateForm({
         >레인 추가</button>
       </div>
       ${nameError ? html`<div class="set-err" data-testid="runtime-lane-create-error">${nameError}</div>` : null}
+      ${shadowsRuntime
+        ? html`<div class="set-hint" data-testid="runtime-lane-create-shadow">
+            같은 id 의 런타임이 있습니다. 이 레인을 만들면 그 런타임을 배정한 keeper(그리고 default 가 그 id 이면 미배정 keeper)는 런타임 대신 이 레인의 후보를 순서대로 탑니다.
+          </div>`
+        : null}
     </div>
   `
 }
@@ -1507,6 +1588,13 @@ export function SettingsSurface() {
   // gate, but report next to the lane cards they changed.
   const [runtimeLaneStatus, setRuntimeLaneStatus] = useState<RuntimeRoutingSaveState>('idle')
   const [runtimeLaneMessage, setRuntimeLaneMessage] = useState('')
+  // The runtime.toml text the lane cards read declared candidates from. The
+  // resolved projection drops candidates the catalog did not admit, so it
+  // cannot be the base of a whole-order `set`.
+  const [runtimeTomlSource, setRuntimeTomlSource] = useState<RuntimeTomlSourceState>({ status: 'loading' })
+  // Set synchronously so a second click before the saving state renders
+  // cannot send a second write.
+  const runtimeWriteInFlight = useRef(false)
 
   useEffect(() => {
     let active = true
@@ -1559,6 +1647,22 @@ export function SettingsSurface() {
     return () => { active = false }
   }, [])
 
+  async function reloadRuntimeTomlSourceSnapshot(): Promise<string | null> {
+    try {
+      const config = await fetchRuntimeTomlConfig()
+      setRuntimeTomlSource({ status: 'ready', sourceText: config.source_text })
+      return config.source_text
+    } catch (err) {
+      setRuntimeTomlSource({ status: 'error', message: errorToString(err) })
+      return null
+    }
+  }
+
+  useEffect(() => {
+    if (sec !== 'routing') return
+    void reloadRuntimeTomlSourceSnapshot()
+  }, [sec])
+
   async function reloadRuntimeDefaultsSnapshot(): Promise<void> {
     try {
       const resp = await fetchRuntimeDefaults()
@@ -1603,7 +1707,12 @@ export function SettingsSurface() {
     ])
   }
 
-  async function finishRuntimeRoutingWrite(): Promise<void> {
+  // Every Settings routing write lands here after the server committed it.
+  // The receipt carries the file as written, which the lane cards read, and a
+  // mounted RuntimeTomlEditor is told to re-read it.
+  async function finishRuntimeRoutingWrite(receipt: CommittedRuntimeTomlConfig): Promise<void> {
+    setRuntimeTomlSource({ status: 'ready', sourceText: receipt.source_text })
+    announceRuntimeTomlWritten()
     await resumeSavedModelSetup()
     await refreshRuntimeSettingsSnapshot()
     await refreshRuntimeConfigConsumers()
@@ -1611,14 +1720,15 @@ export function SettingsSurface() {
 
   async function handleRuntimeTomlSaved(): Promise<void> {
     try {
-      await refreshRuntimeSettingsSnapshot()
+      await Promise.all([refreshRuntimeSettingsSnapshot(), reloadRuntimeTomlSourceSnapshot()])
     } catch (err) {
       console.warn('[Settings] runtime settings refresh failed after editor save:', err)
     }
   }
 
   async function applyRuntimeRoutingPatch(lane: RuntimeRoutingLane, runtimeId: string | null): Promise<void> {
-    if (runtimeRoutingStatus === 'saving' || runtimeLaneStatus === 'saving') return
+    if (runtimeWriteInFlight.current) return
+    runtimeWriteInFlight.current = true
     setRuntimeRoutingStatus('saving')
     setRuntimeRoutingMessage('')
     let receipt: CommittedRuntimeTomlConfig
@@ -1627,20 +1737,24 @@ export function SettingsSurface() {
     } catch (err) {
       setRuntimeRoutingStatus('error')
       setRuntimeRoutingMessage(errorToString(err))
+      runtimeWriteInFlight.current = false
       return
     }
     try {
-      await finishRuntimeRoutingWrite()
+      await finishRuntimeRoutingWrite(receipt)
       setRuntimeRoutingStatus('saved')
       setRuntimeRoutingMessage(`runtime.toml routing 저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)}`)
     } catch (err) {
       setRuntimeRoutingStatus('error')
       setRuntimeRoutingMessage(`저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)} · 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
+    } finally {
+      runtimeWriteInFlight.current = false
     }
   }
 
   async function applyMediaFailoverPatch(runtimeIds: string[]): Promise<void> {
-    if (runtimeRoutingStatus === 'saving' || runtimeLaneStatus === 'saving') return
+    if (runtimeWriteInFlight.current) return
+    runtimeWriteInFlight.current = true
     setRuntimeRoutingStatus('saving')
     setRuntimeRoutingMessage('')
     let receipt: CommittedRuntimeTomlConfig
@@ -1649,40 +1763,71 @@ export function SettingsSurface() {
     } catch (err) {
       setRuntimeRoutingStatus('error')
       setRuntimeRoutingMessage(errorToString(err))
+      runtimeWriteInFlight.current = false
       return
     }
     try {
-      await finishRuntimeRoutingWrite()
+      await finishRuntimeRoutingWrite(receipt)
       setRuntimeRoutingStatus('saved')
       setRuntimeRoutingMessage(`runtime.toml media_failover 저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)}`)
     } catch (err) {
       setRuntimeRoutingStatus('error')
       setRuntimeRoutingMessage(`저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)} · 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
+    } finally {
+      runtimeWriteInFlight.current = false
     }
   }
 
-  async function applyRuntimeLaneEdit(lane: string, edit: RuntimeLaneEdit): Promise<boolean> {
-    if (runtimeRoutingStatus === 'saving' || runtimeLaneStatus === 'saving') return false
+  // A candidate edit is applied to the order runtime.toml declares, read
+  // fresh just before the write: the card's order may be stale, and the
+  // resolved order omits candidates the catalog did not admit, which a `set`
+  // built from it would delete from the file. When the declared order cannot
+  // be read, the edit is refused rather than sent from the resolved order.
+  async function runtimeLaneEditOf(lane: string, write: RuntimeLaneWrite): Promise<RuntimeLaneEdit | string> {
+    if (write.kind === 'lane') return write.edit
+    const sourceText = await reloadRuntimeTomlSourceSnapshot()
+    if (sourceText === null) return 'runtime.toml 을 읽지 못해 후보 편집을 보내지 않았습니다'
+    const declared = declaredRuntimeLaneCandidates(sourceText, lane)
+    if (declared === null) {
+      return `runtime.toml 에서 ${runtimeLaneTableLabel(lane)} 의 candidates 를 읽지 못해 후보 편집을 보내지 않았습니다`
+    }
+    const next = applyRuntimeLaneCandidateEdit(declared, write.edit)
+    return typeof next === 'string' ? next : { action: 'set', runtimeIds: next }
+  }
+
+  async function applyRuntimeLaneWrite(lane: string, write: RuntimeLaneWrite): Promise<boolean> {
+    if (runtimeWriteInFlight.current) return false
+    runtimeWriteInFlight.current = true
     setRuntimeLaneStatus('saving')
     setRuntimeLaneMessage('')
-    let receipt: CommittedRuntimeTomlConfig
     try {
-      receipt = await patchRuntimeLane(lane, edit)
-    } catch (err) {
-      setRuntimeLaneStatus('error')
-      setRuntimeLaneMessage(errorToString(err))
-      return false
+      const edit = await runtimeLaneEditOf(lane, write)
+      if (typeof edit === 'string') {
+        setRuntimeLaneStatus('error')
+        setRuntimeLaneMessage(edit)
+        return false
+      }
+      let receipt: CommittedRuntimeTomlConfig
+      try {
+        receipt = await patchRuntimeLane(lane, edit)
+      } catch (err) {
+        setRuntimeLaneStatus('error')
+        setRuntimeLaneMessage(errorToString(err))
+        return false
+      }
+      const target = edit.action === 'rename' ? `${lane} → ${edit.to}` : lane
+      try {
+        await finishRuntimeRoutingWrite(receipt)
+        setRuntimeLaneStatus('saved')
+        setRuntimeLaneMessage(`runtime.toml lane ${edit.action} (${target}) 저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)}`)
+      } catch (err) {
+        setRuntimeLaneStatus('error')
+        setRuntimeLaneMessage(`저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)} · 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
+      }
+      return true
+    } finally {
+      runtimeWriteInFlight.current = false
     }
-    const target = edit.action === 'rename' ? `${lane} → ${edit.to}` : lane
-    try {
-      await finishRuntimeRoutingWrite()
-      setRuntimeLaneStatus('saved')
-      setRuntimeLaneMessage(`runtime.toml lane ${edit.action} (${target}) 저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)}`)
-    } catch (err) {
-      setRuntimeLaneStatus('error')
-      setRuntimeLaneMessage(`저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)} · 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
-    }
-    return true
   }
 
   // display
@@ -1710,6 +1855,20 @@ export function SettingsSurface() {
   // Assignment-only routes belong to Keeper assignment truth and must not be
   // mislabeled as [runtime.lanes] declarations on this configuration surface.
   const runtimeLanes = runtimeResolved?.lanes.filter(lane => lane.declared) ?? []
+  // Declared lanes from the resolved projection, joined with what the file
+  // declares. A lane whose every candidate the catalog rejected is absent from
+  // the projection, so it is added from the file with no resolved candidate.
+  const runtimeTomlSourceText = runtimeTomlSource.status === 'ready' ? runtimeTomlSource.sourceText : null
+  const runtimeLaneCards: RuntimeLaneCard[] = [
+    ...runtimeLanes.map(lane => ({
+      id: lane.id,
+      resolvedRuntimeIds: lane.runtime_ids,
+      declared: runtimeTomlSourceText === null ? null : declaredRuntimeLaneCandidates(runtimeTomlSourceText, lane.id),
+    })),
+    ...(runtimeTomlSourceText === null ? [] : declaredRuntimeLaneIds(runtimeTomlSourceText))
+      .filter(id => !runtimeLanes.some(lane => lane.id === id))
+      .map(id => ({ id, resolvedRuntimeIds: [], declared: declaredRuntimeLaneCandidates(runtimeTomlSourceText!, id) })),
+  ]
   const runtimeSelectOptions = runtimeSelectOptionsFromResolved(runtimeResolved?.runtimes ?? [])
   const runtimeRoutingDisabled =
     runtimeRoutingStatus === 'saving' || runtimeLaneStatus === 'saving' || runtimeResolvedStatus !== 'ready'
@@ -1988,36 +2147,37 @@ export function SettingsSurface() {
                   </div>
                 </div>
 
-                ${runtimeResolvedStatus === 'ready'
+                ${runtimeResolved !== null
                   ? html`
                     <div class="settings-runtime-section" data-testid="runtime-lanes-section">
-                      <div class="set-sub-h">Runtime lanes (${runtimeLanes.length})</div>
+                      <div class="set-sub-h">Runtime lanes (${runtimeLaneCards.length})</div>
                       <div class="set-hint" data-testid="runtime-lanes-hint" style=${{ marginBottom: '8px' }}>
-                        lane 별 후보 체인 — 위에서부터 순서대로 시도합니다. 편집은 runtime.toml 의 <span class="mono">${'[runtime.lanes.<id>]'}</span> 에 바로 저장되고, 이름 변경은 이 레인을 가리키는 배정·default·Fusion seat 도 함께 고칩니다.
+                        lane 별 후보 체인 — 위에서부터 순서대로 시도합니다. 편집은 runtime.toml 의 <span class="mono">${'[runtime.lanes.<id>]'}</span> 에 바로 저장되고, 이름 변경은 이 레인을 가리키는 배정·default·Fusion seat 도 함께 고칩니다. catalog 없음 후보는 파일에 남아 있지만 이 레인이 건너뜁니다.
                       </div>
-                      ${runtimeLanes.map(lane => html`
+                      ${runtimeLaneCards.map(lane => html`
                         <${RuntimeLaneEditor}
                           key=${lane.id}
                           lane=${lane}
+                          readOnlyReason=${runtimeLaneReadOnlyReason(lane, runtimeTomlSource)}
                           options=${runtimeSelectOptions}
                           disabled=${runtimeRoutingDisabled}
-                          onEdit=${applyRuntimeLaneEdit}
+                          onWrite=${applyRuntimeLaneWrite}
                         />
                       `)}
                       <${RuntimeLaneCreateForm}
-                        existingLaneIds=${runtimeLanes.map(lane => lane.id)}
+                        existingLaneIds=${runtimeLaneCards.map(lane => lane.id)}
                         options=${runtimeSelectOptions}
                         disabled=${runtimeRoutingDisabled}
-                        onCreate=${applyRuntimeLaneEdit}
+                        onWrite=${applyRuntimeLaneWrite}
                       />
-                      ${runtimeLaneStatus === 'saving'
-                        ? html`<div class="set-hint" data-testid="runtime-lane-saving">runtime.toml 저장 중...</div>`
-                        : runtimeLaneMessage
-                          ? html`<div class=${runtimeLaneStatus === 'error' ? 'set-err' : 'set-ok'} data-testid="runtime-lane-message">${runtimeLaneMessage}</div>`
-                          : null}
                     </div>
                   `
                   : null}
+                ${runtimeLaneStatus === 'saving'
+                  ? html`<div class="set-hint" data-testid="runtime-lane-saving">runtime.toml 저장 중...</div>`
+                  : runtimeLaneMessage
+                    ? html`<div class=${runtimeLaneStatus === 'error' ? 'set-err' : 'set-ok'} data-testid="runtime-lane-message">${runtimeLaneMessage}</div>`
+                    : null}
               </div>
             `}
 

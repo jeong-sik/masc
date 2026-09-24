@@ -202,7 +202,8 @@ let test_reads_run_the_page_scripts () =
     | _ -> fail "no page.evaluate was sent"
   in
   fake.sent <- [];
-  ignore (served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_read { tab_id = Some 1; max_chars = None })));
+  let text = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_read { tab_id = None; max_chars = None })) in
+  check int "text of the active tab names it" 1 Yojson.Safe.Util.(member "tabId" text |> to_int);
   check string "text read with the default cap"
     (Executor.evaluate_expression ~runtime:Executor.No_runtime ~body:Masc.Browser_page_script.text ~args:(`Int Masc.Browser_page_script.default_text_chars))
     (sent_expression ());

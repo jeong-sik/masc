@@ -99,8 +99,9 @@ bash /tmp/masc-install.sh --version "$TAG"
 키를 읽습니다. `--provider <id>`로 기존 프로바이더를 선택할 수 있습니다.
 기본 `imp`는 Docker를 설치·시작한 뒤 `masc setup`으로 이미지를 준비하고 실행합니다.
 
-각 릴리스는 Intel Mac, `masc-browser-host`, 바이너리와 일치하는
-대시보드 번들을 포함하고 `--force` 재설치에서 기존 설정을 보존합니다.
+각 릴리스는 macOS(Apple Silicon, Intel)와 Linux(x64, arm64) 바이너리,
+`masc-browser-host`, 바이너리와 일치하는 대시보드 번들을 만듭니다. 설치기는
+호스트에 맞는 파일을 고르고 `--force` 재설치에서 기존 설정을 보존합니다.
 macOS 설치기는 Python과 실행 라이브러리를 함께 제공하므로 MASC 설치에 Homebrew가 필요하지 않습니다. Apple Silicon은 macOS 14 이상, Intel은 macOS 15 이상이 필요합니다. 플랫폼별 준비물, 설치 파일,
 첫 실행과 업그레이드는 [설치 가이드](docs/INSTALL.ko.md)에 정리했습니다.
 
@@ -164,8 +165,9 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 나머지 하위 명령: bearer 관련 `login`, `mcp-config`, `token`. Keeper 관련
 `keeper-create`, `keeper-github`. 기본 샌드박스 이미지 `sandbox-image`. 모델
 런타임 관련 `runtime-default-set`, `runtime-probe`, `runtime-wizard-catalog`.
-그리고 `schedule-prune`, `build-commit`. 각각 `masc <command> --help`에
-설명이 있습니다.
+모델도 띄우지 않고 파일도 바꾸지 않은 채 작업 공간과 `imp` 준비 상태를 보는
+`doctor`. 그리고 `schedule-prune`, `build-commit`. 전체 명령은 `masc --help`에,
+각각의 설명은 `masc <command> --help`에 있습니다.
 
 서버가 떠 있으면 `curl http://127.0.0.1:8935/health`가 답합니다. 상태 파일을
 손으로 만지기 전에 서버가 실제로 어느 루트를 쓰는지 확인합니다.
@@ -185,7 +187,8 @@ TUI는 입력 가능한 TTY와 `dumb`이 아닌 터미널이 필요합니다. �
 없으면 옆에 있는 `masc` 바이너리를 자식 프로세스로 띄우고 `/health`를 기다린
 뒤, 자기가 끝날 때 그 자식도 끝냅니다. 이미 떠 있던 서버는 건드리지 않습니다.
 
-`Tab`과 `Shift-Tab`으로 화면 열 개를 돌아다닙니다. 맨 윗줄에 띠로 그려집니다.
+`Tab`과 `Shift-Tab`으로 화면 열한 개를 돌아다닙니다. 맨 윗줄에 띠로 그려집니다.
+Approvals는 기다리는 것이 있을 때(또는 그 화면에 있을 때)만 자리를 차지합니다.
 자식 화면은 전부 `:` 팔레트의 `go <name>` 항목이기도 합니다.
 
 | 화면 | 보여 주는 것 |
@@ -193,6 +196,7 @@ TUI는 입력 가능한 TTY와 `dumb`이 아닌 터미널이 필요합니다. �
 | Overview | 작업 공간 요약, 작업 백로그, 지금 봐야 할 것 |
 | Activity | 모든 Keeper의 도구 호출, 턴 경계, 정산이 도착하는 대로. `l`로 서버 자체 로그를 엽니다 |
 | Keepers | Keeper 목록. Keeper마다 대화, 로그, 도구 호출, 런타임, 샌드박스 상태, 기록된 파일 쓰기, 채널, 스케줄, 상세 탭 |
+| Lanes | 독립 exact-output 실행 레인, 그 실행 목록과 상세. `/addons`로 Lane Add-on을 엽니다 |
 | Memory | Keeper별 메모리 상태와 두 저장소를 아우르는 사실 탐색기 |
 | Approvals | Gate 대기열, 항상 허용 규칙, Keeper가 답을 기다리는 질문 |
 | Board | 사람, 에이전트, 자동화, 시스템이 올린 글 |
@@ -448,7 +452,8 @@ CLI가 없는 백엔드는 공유 커널로 바꿔치기하지 않고 부팅에�
 - 인증 기본값은 루프백용입니다. 원격에서 안전하게 쓰기, 클러스터 배포, 서비스
   수준 보장은 약속하지 않습니다.
 - 프로세스 하나가 작업 공간을 들고 있습니다. 대체 인스턴스는 없습니다.
-- microVM Keeper는 `apple_container`에서만 부팅이 확인됐습니다. `auto_judge`는
+- macOS에서 잰 microVM 백엔드는 `apple_container`뿐입니다. `nerdctl_kata`는
+  Linux x64에서 한 번 확인했고(위 표), `microsandbox`는 부팅하지 못합니다. `auto_judge`는
   자기 레인에 모델이 있어야 하는데, 프로바이더 키 하나로 설치한 환경에는 대개
   없습니다. 그 호출은 사람을 기다립니다.
 - TUI 화면과 키는 `main`에서 바뀝니다. 설치한 태그의 문서를 사용하세요.

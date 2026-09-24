@@ -105,8 +105,9 @@ reads those variables from its startup environment. `--provider <id>` selects
 an existing provider without prompting. For the default `imp`, `masc setup`
 prepares the Docker image after you install and start Docker.
 
-Each release includes Intel macOS, `masc-browser-host`, and the matched
-dashboard, and preserves configuration during `--force` reinstalls.
+Each release builds macOS (Apple Silicon and Intel) and Linux (x64 and arm64)
+binaries, `masc-browser-host`, and the matched dashboard; the installer picks
+the asset for the host and preserves configuration during `--force` reinstalls.
 The macOS installer includes its Python and shared libraries, so MASC does not require Homebrew. Apple Silicon requires macOS 14 or later; Intel requires macOS 15 or later.
 
 
@@ -172,8 +173,10 @@ lives under `<base-path>/.masc`; authored configuration under
 Other subcommands: `login`, `mcp-config`, and `token` for bearers;
 `keeper-create` and `keeper-github` for Keepers; `sandbox-image` for the
 default sandbox image; `runtime-default-set`, `runtime-probe`, and
-`runtime-wizard-catalog` for the model runtime; `schedule-prune`;
-`build-commit`. `masc <command> --help` documents each one.
+`runtime-wizard-catalog` for the model runtime; `doctor` to check workspace
+and `imp` readiness without starting anything; `schedule-prune`;
+`build-commit`. `masc --help` lists every command and
+`masc <command> --help` documents each one.
 
 A running server answers `curl http://127.0.0.1:8935/health`. Before touching
 state by hand, check which root the server actually uses:
@@ -194,14 +197,16 @@ nothing answers the port it launches the sibling `masc` binary as a child,
 waits for `/health`, and stops that child when it exits. A server that was
 already running is left alone.
 
-`Tab` and `Shift-Tab` rotate through ten surfaces, drawn as a strip on the
-top row. Every child view is also a `go <name>` entry in the `:` palette.
+`Tab` and `Shift-Tab` rotate through eleven surfaces, drawn as a strip on the
+top row. Approvals holds a stop only while something waits in it (or while
+you are on it). Every child view is also a `go <name>` entry in the `:` palette.
 
 | Surface | Shows |
 |---|---|
 | Overview | Workspace summary, the task backlog, what needs attention |
 | Activity | Every Keeper's tool calls, turn boundaries, and settlements as they land; `l` opens the server's own log ring |
 | Keepers | The roster; per Keeper its chat, logs, tool calls, runtime, sandbox status, recorded file writes, channels, schedules, and detail tabs |
+| Lanes | Standalone exact-output execution lanes, their runs and run detail; `/addons` opens Lane Add-ons |
 | Memory | Memory health per Keeper and a fact browser over both stores |
 | Approvals | The Gate queue, the standing always-allow rules, and the questions Keepers are waiting on |
 | Board | Posts from people, agents, automation, and the system |
@@ -471,7 +476,9 @@ it. Admin operations and write access are in
 - Auth defaults are for the loopback. Remote-safe operation, cluster
   deployment, and service guarantees are not promised.
 - One process holds the workspace. There is no failover.
-- Only `apple_container` is known to boot a microVM Keeper. `auto_judge` needs
+- `apple_container` is the only microVM backend measured on macOS;
+  `nerdctl_kata` was verified once on Linux x64 (see the table above) and
+  `microsandbox` does not boot. `auto_judge` needs
   a model on its own lane, which an install with one provider key usually
   lacks; those calls wait for a person.
 - TUI surfaces and keys change on `main`; use documentation from the installed tag.
@@ -521,7 +528,7 @@ source of truth for binaries. APIs and configuration may change before 1.0.
 Milestones (the live rules are `ROADMAP.md` → "Release lane rules"):
 
 - `0.y.0` opens a user-visible train and `0.y.z` stabilizes it — the current
-  line is `0.35.0`.
+  line is `0.38.0`.
 - `1.0.0` opens only when the TUI, the MCP workspace, and release truth hold
   without caveats.
 - `v2.*` tags are history; they do not define the active line.

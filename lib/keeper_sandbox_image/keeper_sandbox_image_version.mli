@@ -78,11 +78,10 @@ val tag : built_at:float -> recipe -> string
 val version : built_at:float -> recipe -> string
 (** The part of {!tag} after the colon. *)
 
-val labels : version:string -> built_at:float -> recipe -> (string * string) list
+val labels : built_at:float -> recipe -> (string * string) list
 (** The OCI [version] and [created] annotations, plus
-    [masc.sandbox.recipe] and [masc.sandbox.inputs_sha256]. [version] is the
-    tag's own version part: {!version} for a computed tag, the tag as given
-    when the caller named one. *)
+    [masc.sandbox.recipe] and [masc.sandbox.inputs_sha256]. The version is
+    {!version} even when the operator supplies an image tag. *)
 
 val write_context : dir:string -> recipe -> (string, load_error) result
 (** Write the recipe's Dockerfile and inputs under [dir], each input at its

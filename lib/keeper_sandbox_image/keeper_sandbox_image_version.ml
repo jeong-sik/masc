@@ -195,8 +195,8 @@ let rfc3339_utc built_at =
     (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
     tm.Unix.tm_sec
 
-let labels ~version ~built_at recipe =
-  [ "org.opencontainers.image.version", version
+let labels ~built_at recipe =
+  [ "org.opencontainers.image.version", version ~built_at recipe
   ; "org.opencontainers.image.created", rfc3339_utc built_at
   ; "masc.sandbox.recipe", recipe.name
   ; "masc.sandbox.inputs_sha256", inputs_sha256 recipe

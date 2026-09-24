@@ -3171,12 +3171,10 @@ let sandbox_image_cmd_exit print_only tag runtime recipe_name source =
       let* runtime = runtime in
       let* builder = sandbox_image_builder runtime in
       let built_at = Unix.gettimeofday () in
-      let tag, version =
+      let tag =
         match tag with
-        | Some tag -> tag, tag
-        | None ->
-          ( Keeper_sandbox_image_version.tag ~built_at recipe
-          , Keeper_sandbox_image_version.version ~built_at recipe )
+        | Some tag -> tag
+        | None -> Keeper_sandbox_image_version.tag ~built_at recipe
       in
       match sandbox_image_tag_presence ~command:builder.build_command ~tag with
       | Store_unanswered detail ->
@@ -3194,7 +3192,7 @@ let sandbox_image_cmd_exit print_only tag runtime recipe_name source =
               image first."
              tag)
       | Tag_absent ->
-        let labels = Keeper_sandbox_image_version.labels ~version ~built_at recipe in
+        let labels = Keeper_sandbox_image_version.labels ~built_at recipe in
         Ok (sandbox_image_build ~builder ~recipe ~tag ~labels)
   in
   match run with
@@ -3226,7 +3224,7 @@ let sandbox_image_ensure_exit runtime =
      | Tag_absent ->
        let recipe = Keeper_sandbox_image_version.base_embedded in
        let built_at = Unix.gettimeofday () in
-       let labels = Keeper_sandbox_image_version.labels ~version:tag ~built_at recipe in
+       let labels = Keeper_sandbox_image_version.labels ~built_at recipe in
        sandbox_image_build ~builder ~recipe ~tag ~labels)
 
 (* Which image store --runtime names: Docker's when it is omitted, otherwise

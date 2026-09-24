@@ -63,12 +63,9 @@ let test_labels_carry_version_and_full_hash () =
   let tag = V.tag ~built_at r in
   let version = V.version ~built_at r in
   check string "version is the tag's own part" tag (V.repository r ^ ":" ^ version);
-  let labels = V.labels ~version ~built_at r in
+  let labels = V.labels ~built_at r in
   check (option string) "version" (Some version)
     (List.assoc_opt "org.opencontainers.image.version" labels);
-  check (option string) "a named tag labels itself" (Some "fixture:requested")
-    (List.assoc_opt "org.opencontainers.image.version"
-       (V.labels ~version:"fixture:requested" ~built_at r));
   check (option string) "created" (Some "2026-09-24T11:30:45Z")
     (List.assoc_opt "org.opencontainers.image.created" labels);
   check (option string) "recipe" (Some "base") (List.assoc_opt "masc.sandbox.recipe" labels);

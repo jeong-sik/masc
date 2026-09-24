@@ -55,7 +55,10 @@ sys.exit(int(os.environ['TEST_EXIT']))
             self.assertEqual(data['command'], expected_command)
             self.assertEqual(data['args'][:3], ['build', '-t', 'fixture:requested'])
             labels = [data['args'][i + 1] for i, arg in enumerate(data['args']) if arg == '--label']
-            self.assertIn('org.opencontainers.image.version=fixture:requested', labels)
+            self.assertTrue(any(label.startswith('org.opencontainers.image.version=')
+                                and ':' not in label for label in labels), labels)
+            self.assertRegex('\n'.join(labels),
+                             r'org\.opencontainers\.image\.version=\d{8}T\d{4}Z-[0-9a-f]{8}')
             self.assertIn('masc.sandbox.recipe=base', labels)
             if runtime == 'apple_container':
                 self.assertIn('-f', data['args'])

@@ -2927,9 +2927,9 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
         | Board_detail.Loading ->
             [Ansi.dim ^ "  Loading Board detail..." ^ Ansi.reset]
         | Board_detail.Failed error ->
-            [ (Theme.bad ()) ^ "  Board detail unavailable: "
+            [ (Theme.bad ()) ^ "  "
               ^ fit_width (Terminal_text.single_line error)
-                  (max 1 (comment_wrap_cols - 32))
+                  (max 1 (framed_inner_width comment_wrap_cols - 2))
               ^ Ansi.reset
             ]
         | Board_detail.Ready (_, comments) ->
@@ -15839,7 +15839,7 @@ let render_surface (state : state) =
                         match Board_detail.view_for state.board_detail ~post_id with
                         | Board_detail.Failed detail ->
                             c.push_styled ~style:(Theme.bad ())
-                              ("  Board post load failed: " ^ Terminal_text.single_line detail)
+                              ("  " ^ Terminal_text.single_line detail)
                         | Board_detail.Absent -> c.push "  Board post has not been loaded. Press r to retry."
                         | Board_detail.Loading -> c.push "  Loading Board post..."
                         | Board_detail.Ready _ -> ())))

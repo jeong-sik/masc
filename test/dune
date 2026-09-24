@@ -5625,6 +5625,7 @@
 (include stanzas/test_tui_sheet_names_every_palette_destination.inc)
 (include stanzas/test_tui_keeper_detail_key_help_names_the_tabs.inc)
 (include stanzas/test_tui_board_read_title.inc)
+(include stanzas/test_tui_board_detail_error_once.inc)
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_code_lexer.inc)
 (include stanzas/test_tui_overview_pulse.inc)

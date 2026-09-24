@@ -12069,3 +12069,13 @@ let schedule_hold_reading
         | Schedule_contract_values.Runner_degraded ) )
   | List_kept, Runner_unrecognised _ -> Hold_as_of hold.srh_observed_at
 ;;
+
+let decode_oauth_client_saved json =
+  match json with
+  | `Assoc _ ->
+      let* scopes = decode_string_list json "scopes" in
+      Ok (List.length scopes)
+  | other ->
+      Error
+        (Printf.sprintf "the reply must be an object (received %s)"
+           (Json_util.kind_name other))

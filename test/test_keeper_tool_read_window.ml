@@ -401,6 +401,49 @@ let test_offset_past_eof_returns_empty () =
   Alcotest.(check (option int)) "no next_offset" None (parse_int "next_offset" raw)
 ;;
 
+(* A refused Read names whose it is to fix. A limit, path or file the caller
+   named is a policy rejection, whose guidance tells the model the corrected
+   call can succeed; before, these took the runtime-failure default and told
+   the model its arguments were not the cause. *)
+let read_failure_class ~config ~meta args =
+  match
+    (Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
+       ~turn_sandbox_factory:None
+       ~config
+       ~meta
+       ~args)
+      .disposition
+  with
+  | Tool_result.Failed failure_class ->
+    Some (Tool_result.tool_failure_class_to_string failure_class)
+  | Tool_result.Completed () | Tool_result.Deferred () -> None
+;;
+
+let test_refusals_of_what_the_caller_named_are_policy () =
+  setup
+  @@ fun ~config ~meta ~playground ->
+  write_file (Filename.concat playground "repos/masc/sample.ml") (numbered_lines 10);
+  let class_of fields = read_failure_class ~config ~meta (`Assoc fields) in
+  let policy = Some "policy_rejection" in
+  Alcotest.(check (option string))
+    "zero limit"
+    policy
+    (class_of [ "path", `String "repos/masc/sample.ml"; "limit", `Int 0 ]);
+  Alcotest.(check (option string))
+    "missing file"
+    policy
+    (class_of [ "path", `String "repos/masc/absent.ml" ]);
+  Alcotest.(check (option string))
+    "path outside the sandbox"
+    policy
+    (class_of [ "path", `String "/etc/passwd" ]);
+  Alcotest.(check (option string)) "empty path" policy (class_of [ "path", `String "" ]);
+  Alcotest.(check (option string))
+    "a readable file is not refused"
+    None
+    (class_of [ "path", `String "repos/masc/sample.ml" ])
+;;
+
 let test_legacy_max_bytes_args_unchanged () =
   setup
   @@ fun ~config ~meta ~playground ->
@@ -528,6 +571,10 @@ let () =
             "window offsets follow the body's first line"
             `Quick
             test_window_offsets_follow_the_body_first_line
+        ; Alcotest.test_case
+            "refusals of what the caller named are policy"
+            `Quick
+            test_refusals_of_what_the_caller_named_are_policy
         ] )
     ]
 ;;

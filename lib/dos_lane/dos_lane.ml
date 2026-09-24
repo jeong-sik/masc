@@ -245,11 +245,31 @@ let clamp_steps steps =
   else Ok steps
 ;;
 
+(* [run_until] calls [stop] once per completed instruction, but an exception
+   escapes before it can return that count. Keep [st.steps] aligned with the
+   instructions that actually ran so tool responses and ledger positions are
+   accurate even when the guest faults. Preserve the original exception and
+   backtrace for the caller. *)
+let run_counted st ~max_steps =
+  let completed = ref 0 in
+  match
+    Dos_machine.run_until st.m ~max_steps ~stop:(fun _ ->
+      incr completed;
+      false)
+  with
+  | n ->
+    st.steps <- st.steps + n;
+    n
+  | exception fault ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    st.steps <- st.steps + !completed;
+    Printexc.raise_with_backtrace fault backtrace
+;;
+
 (* Runs the budget straight through, with nothing watching. *)
 let advance_blind st ~budget =
   let before = Dos_machine.input_requests st.m in
-  let n = Dos_machine.run_until st.m ~max_steps:budget ~stop:(fun _ -> false) in
-  st.steps <- st.steps + n;
+  let n = run_counted st ~max_steps:budget in
   { steps_run = n
   ; settled = false
   ; input_requests = Dos_machine.input_requests st.m - before
@@ -278,17 +298,13 @@ let advance_until_ready st ~budget =
   let ran = ref 0 and settled = ref false in
   while (not !settled) && !ran < budget && not (Dos_machine.exited m) do
     let asked_before = Dos_machine.input_requests m in
-    let n =
-      Dos_machine.run_until m ~max_steps:(min settle_chunk (budget - !ran))
-        ~stop:(fun _ -> false)
-    in
+    let n = run_counted st ~max_steps:(min settle_chunk (budget - !ran)) in
     ran := !ran + n;
     let asked = Dos_machine.input_requests m > asked_before in
     let now = Dos_machine.screen_digest m in
     if asked && now = !previous then settled := true;
     previous := now
   done;
-  st.steps <- st.steps + !ran;
   { steps_run = !ran
   ; settled = !settled
   ; input_requests = Dos_machine.input_requests m - requests_before

@@ -4,7 +4,7 @@ val resolve_tool_read_cwd :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
-  (string, string) result
+  (string, Keeper_alerting_path.path_refusal) result
 
 val resolve_tool_execute_cwd :
   config:Workspace.config ->
@@ -50,7 +50,7 @@ val resolve_tool_read_path :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
-  (string, string) result
+  (string, Keeper_alerting_path.path_refusal) result
 (** Resolve the [path] arg exactly against the selected cwd and objective
     allowed-root containment. No path correction or rewriting is applied. *)
 

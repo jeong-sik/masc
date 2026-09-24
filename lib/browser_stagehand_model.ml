@@ -220,6 +220,9 @@ let slot_takes_system_prompt (slot : Registry.selected_slot) =
 ;;
 
 let admit_lane (resolved : Registry.resolved_lane) =
+  (* This bridge executes only AGENT_CORE HTTP candidates. Stagehand's usage
+     field is optional; the CLI tail is refused because this bridge has no
+     official-client executor yet, rather than silently skipping its slots. *)
   match resolved.cli_slots with
   | _ :: _ as cli_slots -> Error (Cli_slots_declared cli_slots)
   | [] ->
@@ -244,7 +247,7 @@ let published_lane () =
   match Registry.current () with
   | Error error -> Error (Registry_unavailable error)
   | Ok registry ->
-    Registry.resolve_lane registry ~lane_id:(Runtime.exact_lane_id Runtime.Browser_stagehand)
+    Registry.resolve_lane registry ~lane_id:(Standalone_lane.to_id Standalone_lane.Browser_stagehand)
     |> Result.map_error (fun error -> Lane_unresolved error)
 ;;
 
@@ -335,6 +338,10 @@ let answer_of_success (success : Exact.success) =
   let usage =
     match success.usage with
     | None -> []
+    (* Some wire parsers fill an unreported token count with zero (#38669).
+       This request has input text and a structured output, so either zero
+       makes the report unsuitable for Stagehand's usage field. *)
+    | Some usage when usage.input_tokens <= 0 || usage.output_tokens <= 0 -> []
     | Some usage -> [ "usage", usage_json usage ]
   in
   `Assoc

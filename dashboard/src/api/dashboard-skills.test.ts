@@ -19,13 +19,23 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-// Server_skill_editor.create_outcome_to_yojson sends exactly these two
+// Server_skill_editor.create_outcome_to_yojson sends exactly these three
 // statuses; the old client defaulted anything else to 'created', a status
 // the server never sends, and dropped the not-published reason.
 describe('skill create receipt contract', () => {
   it('accepts the published receipt', () => {
     expect(decodeSkillCreateReceipt({ status: 'created_and_published', preview: {} }))
       .toEqual({ status: 'created_and_published' })
+  })
+
+  it('carries the package that shadows a created one', () => {
+    const winner = { source_id: 'project-masc', package_id: 'shared', name: 'shared' }
+    expect(decodeSkillCreateReceipt({
+      status: 'created_but_shadowed',
+      preview: {},
+      snapshot_revision: 'snapshot-revision',
+      winner,
+    })).toEqual({ status: 'created_but_shadowed', winner })
   })
 
   it('carries the not-published reason', () => {
@@ -42,6 +52,11 @@ describe('skill create receipt contract', () => {
   it.each([
     ['a fabricated status', { status: 'created' }],
     ['a missing reason', { status: 'created_but_unpublished' }],
+    ['a shadowed receipt without its winner', { status: 'created_but_shadowed' }],
+    ['a winner missing its package', {
+      status: 'created_but_shadowed',
+      winner: { source_id: 'project-masc', name: 'shared' },
+    }],
     ['no status at all', {}],
     ['a non-object payload', null],
   ])('rejects %s instead of inventing a label', (_label, raw) => {

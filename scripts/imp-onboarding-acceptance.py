@@ -123,16 +123,16 @@ def directory_execution(traces):
         tool_input = started.get('tool_input')
         if not isinstance(tool_input, dict):
             continue
-        script = tool_input.get('script')
-        if script is None:
+        line = tool_input.get('command')
+        if line is None:
             # Execute can encode the same shell program as an exact argv
             # wrapper. Never search arbitrary argv for text resembling ls.
             argv = tool_input.get('argv')
             if (isinstance(argv, list) and len(argv) == 3
                     and argv[0] in ('sh', 'bash', '/bin/sh', '/bin/bash')
                     and argv[1] in ('-c', '-lc')):
-                script = argv[2]
-        commands = directory_commands(script) if script is not None else [tool_input.get('argv')]
+                line = argv[2]
+        commands = directory_commands(line) if line is not None else [tool_input.get('argv')]
         if any(not isinstance(c, list) or not all(isinstance(arg, str) for arg in c)
                for c in commands):
             continue

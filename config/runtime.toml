@@ -130,7 +130,8 @@ max_output_tokens = 8192
 # Answers the Stagehand browser extension's llm.generate
 # (RFC-browser-lane-stagehand §3.7). Stagehand's system_prompt goes to the
 # system slot, so a slot whose model takes no system prompt is refused when
-# the lane is resolved. The lane walks no cli_slots.
+# the lane is resolved. This bridge currently executes HTTP exact slots only;
+# Stagehand's usage field is optional, but the CLI tail is not wired here yet.
 [runtime.exact_output_lanes.browser_stagehand_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
 max_output_tokens = 8192
@@ -188,23 +189,25 @@ endpoint = "https://ollama.com/v1"
 # default: omit it and no connect budget applies. Key spelling is mirrored by
 # `Runtime_schema.connect_timeout_s_key`.
 connect-timeout-s = 600.0
-# Providers may separately declare `exact-body-timeout-s` as a positive finite
-# float in seconds. This is the caller-owned total HTTP request deadline for
-# Exact-output lanes: connection, response headers and the full response body.
-# It does not change connect-timeout-s or ordinary Keeper per-call deadlines.
-# Omission remains None; no value is inferred from the connect deadline. A
-# connect-only declaration still leaves an Exact response body unbounded.
+# `exact-body-timeout-s` is a positive finite float in seconds: the total
+# HTTP request deadline for Exact-output lanes -- connection, response
+# headers and the full response body. It does not change connect-timeout-s
+# or ordinary Keeper per-call deadlines, and no value is inferred from the
+# connect deadline. Every HTTP provider an Exact-output lane names must
+# declare it: connect-timeout-s ends at the response headers, so a plan
+# without a body deadline is refused at admission (Missing_deadline, #36979).
 # Bootstrap applies it to AGENT_CORE targets derived from these bindings.
 # The deployment operator owns the value in the resolved runtime.toml's
 # [providers.<id>] table. Saving that file does not rebuild existing Exact
 # targets: the value takes effect when server bootstrap rebuilds the registry.
-# This seed intentionally supplies no numeric body deadline.
 # Each visited Exact candidate retains its own deadline. Their HTTP wait can
 # accumulate across sequential candidates; this is not a deadline for the
 # whole Librarian pass, its CLI tail, or Memory processing.
 # AGENT_CORE_MODEL_CATALOG replacements keep their own target body_timeout_s;
 # this key does not set an official-client CLI timeout.
-
+# 1200 s is the operator's chosen value; it matches the glm-coding
+# connect-timeout-s below, which was sized from measured exact-output calls.
+exact-body-timeout-s = 1200.0
 [providers.ollama_cloud.healthcheck]
 path = "/models"
 
@@ -228,14 +231,18 @@ key = "DEEPSEEK_API_KEY"
 display-name = "GLM Coding Plan"
 protocol = "openai-compatible-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
-# Exact-output lanes lead with this provider, and a plan whose wire carries
-# no connect and no body budget is now rejected at admission (Missing_deadline,
-# #36979): with both absent the measurement transport arms no deadline and a
-# provider that holds the connection open hangs the request for the life of
-# the connection — measured at up to 13.3h on wkbl's curator lane. The value
-# keeps headroom over the slowest healthy exact-output call observed on this
-# endpoint (973s, wkbl 2026-09-13~16); narrow it per deployment.
+# Exact-output lanes lead with this provider. connect-timeout-s bounds only
+# the phase before the response headers; a provider that sends headers and
+# then holds the body open is bounded by exact-body-timeout-s below, not by
+# this key -- measured at up to 13.3h on wkbl's curator lane without it
+# (#36979). The value keeps headroom over the slowest healthy exact-output
+# call observed on this endpoint (973s, wkbl 2026-09-13~16); narrow it per
+# deployment.
 connect-timeout-s = 1200.0
+# 1200 s is the operator's chosen value for the whole Exact-output request;
+# it matches the measured connect-timeout-s above. See the ollama_cloud
+# comment for what the key bounds.
+exact-body-timeout-s = 1200.0
 
 [providers.glm-coding.healthcheck]
 path = "/models"
@@ -777,6 +784,14 @@ supports-image-input = true
 
 # Codex reads images from its turn/start input list, so the image capability
 # key means the same thing here as it does above.
+#
+# max-prompt-bytes on every Codex model is the vendor's own limit, not a MASC
+# estimate: the app-server refuses one string above it with
+# "Expected a string with maximum length 10485760 ... string_above_max_length"
+# (#37353), and a Resume carries the whole history in one such string
+# (developerInstructions). Declared, it windows Start and Resume from the first
+# attempt. The limit counts characters and the window counts bytes, which are
+# never fewer, so the window can only cut short of it.
 [providers.codex_subscription]
 display-name = "Codex ChatGPT Subscription"
 protocol = "codex-app-server"
@@ -786,6 +801,7 @@ is-non-interactive = true
 [models.codex-gpt-5-6]
 api-name = "gpt-5.6-sol"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -807,6 +823,7 @@ wizard-default = true
 [models.codex-gpt-5-6-sol-medium]
 api-name = "gpt-5.6-sol"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -819,6 +836,7 @@ supports-image-input = true
 [models.codex-gpt-5-6-sol-high]
 api-name = "gpt-5.6-sol"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -831,6 +849,7 @@ supports-image-input = true
 [models.codex-gpt-5-6-sol-xhigh]
 api-name = "gpt-5.6-sol"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -843,6 +862,7 @@ supports-image-input = true
 [models.codex-gpt-5-6-sol-max]
 api-name = "gpt-5.6-sol"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -855,6 +875,7 @@ supports-image-input = true
 [models.codex-gpt-5-6-terra-low]
 api-name = "gpt-5.6-terra"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -867,6 +888,7 @@ supports-image-input = true
 [models.codex-gpt-5-6-terra-medium]
 api-name = "gpt-5.6-terra"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -879,6 +901,7 @@ supports-image-input = true
 [models.codex-gpt-5-6-terra-high]
 api-name = "gpt-5.6-terra"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -891,6 +914,7 @@ supports-image-input = true
 [models.codex-gpt-5-6-terra-xhigh]
 api-name = "gpt-5.6-terra"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -903,6 +927,7 @@ supports-image-input = true
 [models.codex-gpt-5-6-terra-max]
 api-name = "gpt-5.6-terra"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -915,6 +940,7 @@ supports-image-input = true
 [models.codex-gpt-6-astra-low]
 api-name = "gpt-6-astra"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -927,6 +953,7 @@ supports-image-input = true
 [models.codex-gpt-6-astra-medium]
 api-name = "gpt-6-astra"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -939,6 +966,7 @@ supports-image-input = true
 [models.codex-gpt-6-astra-high]
 api-name = "gpt-6-astra"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -951,6 +979,7 @@ supports-image-input = true
 [models.codex-gpt-6-astra-xhigh]
 api-name = "gpt-6-astra"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -963,6 +992,7 @@ supports-image-input = true
 [models.codex-gpt-6-astra-max]
 api-name = "gpt-6-astra"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -975,6 +1005,7 @@ supports-image-input = true
 [models.codex-gpt-6-sol-low]
 api-name = "gpt-6-sol"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -987,6 +1018,7 @@ supports-image-input = true
 [models.codex-gpt-6-sol-medium]
 api-name = "gpt-6-sol"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -999,6 +1031,7 @@ supports-image-input = true
 [models.codex-gpt-6-sol-high]
 api-name = "gpt-6-sol"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -1011,6 +1044,7 @@ supports-image-input = true
 [models.codex-gpt-6-sol-xhigh]
 api-name = "gpt-6-sol"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -1023,6 +1057,7 @@ supports-image-input = true
 [models.codex-gpt-6-sol-max]
 api-name = "gpt-6-sol"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -1035,6 +1070,7 @@ supports-image-input = true
 [models.codex-gpt-6-luna-low]
 api-name = "gpt-6-luna"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -1047,6 +1083,7 @@ supports-image-input = true
 [models.codex-gpt-6-luna-medium]
 api-name = "gpt-6-luna"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -1059,6 +1096,7 @@ supports-image-input = true
 [models.codex-gpt-6-luna-high]
 api-name = "gpt-6-luna"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -1071,6 +1109,7 @@ supports-image-input = true
 [models.codex-gpt-6-luna-xhigh]
 api-name = "gpt-6-luna"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -1083,6 +1122,7 @@ supports-image-input = true
 [models.codex-gpt-6-luna-max]
 api-name = "gpt-6-luna"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -1095,6 +1135,7 @@ supports-image-input = true
 [models.codex-gpt-5-6-luna-low]
 api-name = "gpt-5.6-luna"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -1107,6 +1148,7 @@ supports-image-input = true
 [models.codex-gpt-5-6-luna-medium]
 api-name = "gpt-5.6-luna"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -1119,6 +1161,7 @@ supports-image-input = true
 [models.codex-gpt-5-6-luna-high]
 api-name = "gpt-5.6-luna"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -1131,6 +1174,7 @@ supports-image-input = true
 [models.codex-gpt-5-6-luna-xhigh]
 api-name = "gpt-5.6-luna"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -1143,6 +1187,7 @@ supports-image-input = true
 [models.codex-gpt-5-6-luna-max]
 api-name = "gpt-5.6-luna"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "max"
@@ -1155,6 +1200,7 @@ supports-image-input = true
 [models.codex-gpt-5-5-low]
 api-name = "gpt-5.5"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "low"
@@ -1167,6 +1213,7 @@ supports-image-input = true
 [models.codex-gpt-5-5-medium]
 api-name = "gpt-5.5"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "medium"
@@ -1179,6 +1226,7 @@ supports-image-input = true
 [models.codex-gpt-5-5-high]
 api-name = "gpt-5.5"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "high"
@@ -1191,6 +1239,7 @@ supports-image-input = true
 [models.codex-gpt-5-5-xhigh]
 api-name = "gpt-5.5"
 max-context = 272000
+max-prompt-bytes = 10485760
 tools-support = true
 streaming = true
 reasoning-effort = "xhigh"
@@ -1601,7 +1650,6 @@ max-concurrent = 4
 [models.kimi-for-coding]
 api-name = "kimi-for-coding"
 max-context = 262144
-max-prompt-bytes = 262144
 tools-support = true
 streaming = true
 

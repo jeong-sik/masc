@@ -31,9 +31,13 @@ val classify_read_outcome :
 
 (** [container_path_of_host ~config ~meta ~host_path] maps a host-side
     absolute playground path to its selected backend counterpart (container or
-    SSH endpoint). Returns [Error _] when [host_path] is not inside the
-    keeper's playground bundle (programmer error — caller should have
-    run the containment check first). *)
+    SSH endpoint). On an OpenSSH endpoint, a path outside the keeper's tree
+    that lies under the endpoint's declared roots
+    ({!Keeper_sandbox_remote_lane.declared_endpoint_path}) is the endpoint's
+    own path and returns as itself. Returns [Error _] when [host_path] is
+    neither inside the keeper's playground bundle nor such a declared path
+    (programmer error — caller should have run the containment check
+    first). *)
 val container_path_of_host :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
@@ -47,15 +51,24 @@ type read_error =
 
 val read_error_to_string : read_error -> string
 
+(** The program and arguments [read_file] runs inside the backend for a window
+    starting at [start_line] of [path], producing at most [max_bytes]. Line 1
+    is [head -c]; a later line streams from that line through [sh]. *)
+val read_window_argv : start_line:int -> max_bytes:int -> path:string -> string list
+
 (** [read_file ~config ~meta ~host_path ~max_bytes ~timeout_sec ()] reads
     [host_path] through the selected sandbox backend and returns the captured
     bytes (clamped to [max_bytes]). Docker mounts the playground read-only;
     SSH invokes the fixed remote shim and never probes the host path first.
 
+    [start_line] (default 1) is the file's line the returned bytes begin at;
+    [max_bytes] bounds the bytes from that line, not the file's prefix.
+
     Errors include backend image misconfiguration, backend command failure, or
     the input not being inside the playground. *)
 val read_file :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  ?start_line:int ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   host_path:string ->
@@ -116,6 +129,21 @@ val run_command_with_status :
   meta:Keeper_meta_contract.keeper_meta ->
   command_argv:string list ->
   max_bytes:int ->
+  timeout_sec:float ->
+  unit ->
+  (Unix.process_status * string, string) result
+
+(** [run_command_with_status] with the capture mode chosen by [max_bytes]:
+    [Some n] captures text, rewriting the endpoint's root to the host path,
+    and keeps at most [n] bytes; [None] keeps the stdout bytes exactly as the
+    command wrote them, so the command itself must bound what it prints. *)
+val run_command_with_capture :
+  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  ?ok_exit_codes:int list ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  command_argv:string list ->
+  max_bytes:int option ->
   timeout_sec:float ->
   unit ->
   (Unix.process_status * string, string) result

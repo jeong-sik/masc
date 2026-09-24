@@ -2246,8 +2246,28 @@ type fleet_safety = {
     alive, its durable demand is not admissible. Collapsing the two reads a
     live fleet as a stopped one. *)
 
+type fleet_reading_freshness =
+  | Fleet_current
+      (** The health snapshot is [ready]: the latest refresh measured it, and
+          within the snapshot's time to live. *)
+  | Fleet_last_good of { measured_at_unix : float; stale_reason : string }
+      (** The snapshot is [stale]: the refreshes since have timed out or
+          raised, or none has run within the time to live, so the server
+          serves the last reading it measured. [measured_at_unix] is when
+          (unix seconds on the server's clock); [stale_reason] is the
+          server's word for why ([last_good_refresh_timeout],
+          [last_good_refresh_error], [ttl_expired]). *)
+  | Unrecognised_snapshot_status of string
+      (** A snapshot status this build has no reading for, beside a fleet
+          reading, kept as the server spelled it. *)
+(** How current a fleet reading is. The fleet section does not say: the
+    [full_health_snapshot] beside it in the same body does. *)
+
 type fleet_safety_reading =
-  | Fleet_measured of fleet_safety
+  | Fleet_measured of
+      { fleet : fleet_safety
+      ; freshness : fleet_reading_freshness
+      }
   | Fleet_not_measured of { status : string }
       (** The health snapshot has no fleet reading and nothing failed: it is
           being rebuilt, at boot and again after a change invalidates it.
@@ -2892,10 +2912,13 @@ val decode_fleet_safety :
 
     A section carrying [schema = Keeper_fleet_blocker.reading_schema] is a
     reading, and every field of {!fleet_safety} is required: a missing count
-    is an error, not zero. A section without [schema] is the health
-    snapshot's placeholder: {!Fleet_not_measured} when it carries no
-    [error], and an error with the server's reason when it does (the refresh
-    timed out or the scan raised). *)
+    is an error, not zero. A reading also takes its {!fleet_reading_freshness}
+    from the body's [full_health_snapshot], which is required: a stale
+    snapshot serves a past reading as it was, and without the snapshot's
+    word the TUI would draw it as the present. A section without [schema] is
+    the health snapshot's placeholder: {!Fleet_not_measured} when it carries
+    no [error], and an error with the server's reason when it does (the
+    refresh timed out or the scan raised). *)
 val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :

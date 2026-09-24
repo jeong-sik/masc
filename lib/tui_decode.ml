@@ -619,8 +619,16 @@ type fleet_safety = {
   fs_active_task_owner_scan_error_count : int;
 }
 
+type fleet_reading_freshness =
+  | Fleet_current
+  | Fleet_last_good of { measured_at_unix : float; stale_reason : string }
+  | Unrecognised_snapshot_status of string
+
 type fleet_safety_reading =
-  | Fleet_measured of fleet_safety
+  | Fleet_measured of
+      { fleet : fleet_safety
+      ; freshness : fleet_reading_freshness
+      }
   | Fleet_not_measured of { status : string }
 
 type log_kind =
@@ -9896,11 +9904,41 @@ let decode_fleet_placeholder section =
          (if timed_out then ", refresh timed out" else "")
          error)
 
+(* Server_routes_http_runtime.full_health_snapshot_metadata: every full body
+   carries it beside the sections, and its [status] says whether they are the
+   latest refresh. A [stale] snapshot keeps serving the last reading it
+   measured -- after a refresh timed out or raised, or when none has run
+   within the time to live -- so the fleet it carries is a past one (#38499).
+   The server always writes [computed_at_unix] and [stale_reason], null only
+   when there is no snapshot at all, which a stale one never is. *)
+let decode_fleet_reading_freshness json =
+  let* snapshot = required_object_field json "full_health_snapshot" in
+  let* status = required_string_field snapshot "status" in
+  match status with
+  | "ready" -> Ok Fleet_current
+  | "stale" -> (
+    let* computed_at = required_nullable_float_field snapshot "computed_at_unix" in
+    let* stale_reason = required_nullable_string_field snapshot "stale_reason" in
+    match computed_at, stale_reason with
+    | Some measured_at_unix, Some stale_reason when Float.is_finite measured_at_unix ->
+      Ok (Fleet_last_good { measured_at_unix; stale_reason })
+    | Some measured_at_unix, Some _ ->
+      Error
+        (Printf.sprintf "full_health_snapshot computed_at_unix %g is not a time"
+           measured_at_unix)
+    | None, _ | _, None ->
+      Error
+        "a stale full_health_snapshot must say when its reading was measured \
+         (computed_at_unix) and why it is stale (stale_reason)")
+  | other -> Ok (Unrecognised_snapshot_status other)
+
 let decode_fleet_safety json =
   let* section = required_object_field json "keeper_fleet_safety" in
   match Json_util.assoc_member_opt "schema" section with
   | Some (`String schema) when String.equal schema Keeper_fleet_blocker.reading_schema ->
-    Result.map (fun fleet -> Fleet_measured fleet) (decode_fleet_safety_reading section)
+    let* fleet = decode_fleet_safety_reading section in
+    let* freshness = decode_fleet_reading_freshness json in
+    Ok (Fleet_measured { fleet; freshness })
   | Some (`String schema) ->
     Error
       (Printf.sprintf "keeper_fleet_safety schema %S is not %S" schema

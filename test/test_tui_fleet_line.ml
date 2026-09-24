@@ -171,6 +171,47 @@ let test_an_unmeasured_fleet_says_why () =
   check string "a warming snapshot" "not measured yet (warming)"
     (Masc_tui_fleet_line.not_measured_text ~status:"warming")
 
+(* A stale health snapshot serves the last fleet it measured (#38499). The tag
+   says so with the age on the frame's clock and the server's reason; a
+   reading the latest refresh measured draws no tag. *)
+let test_a_current_reading_draws_no_tag () =
+  check (option string) "no tag" None
+    (Masc_tui_fleet_line.freshness_text ~now:1_000.0 Tui_decode.Fleet_current)
+
+let test_a_last_good_reading_says_how_old_and_why () =
+  check (option string) "age and reason"
+    (Some "stale \xc2\xb7 measured 4m12s ago (last_good_refresh_timeout)")
+    (Masc_tui_fleet_line.freshness_text ~now:1_252.0
+       (Tui_decode.Fleet_last_good
+          { measured_at_unix = 1_000.0
+          ; stale_reason = "last_good_refresh_timeout"
+          }))
+
+let test_a_server_clock_ahead_still_says_stale () =
+  check (option string) "no age, still stale"
+    (Some "stale (last_good_refresh_error)")
+    (Masc_tui_fleet_line.freshness_text ~now:900.0
+       (Tui_decode.Fleet_last_good
+          { measured_at_unix = 1_000.0
+          ; stale_reason = "last_good_refresh_error"
+          }))
+
+let test_an_unknown_snapshot_word_is_drawn_by_name () =
+  check (option string) "the word" (Some "health snapshot rebuilding")
+    (Masc_tui_fleet_line.freshness_text ~now:0.0
+       (Tui_decode.Unrecognised_snapshot_status "rebuilding"))
+
+(* The reason is the server's text. An escape in it is data to show, not a
+   control to replay into the frame. *)
+let test_the_servers_reason_is_drawn_as_text () =
+  match
+    Masc_tui_fleet_line.freshness_text ~now:1_000.0
+      (Tui_decode.Fleet_last_good
+         { measured_at_unix = 1_000.0; stale_reason = "x\027[2Jy" })
+  with
+  | None -> fail "a stale reading drew no tag"
+  | Some text -> check bool "no raw escape" false (String.contains text '\027')
+
 let () =
   run "tui fleet line"
     [ ( "blocker names"
@@ -204,6 +245,18 @@ let () =
     ; ( "not measured"
       , [ test_case "an unmeasured fleet says why" `Quick
             test_an_unmeasured_fleet_says_why
+        ] )
+    ; ( "freshness"
+      , [ test_case "a current reading draws no tag" `Quick
+            test_a_current_reading_draws_no_tag
+        ; test_case "a last good reading says how old and why" `Quick
+            test_a_last_good_reading_says_how_old_and_why
+        ; test_case "a server clock ahead still says stale" `Quick
+            test_a_server_clock_ahead_still_says_stale
+        ; test_case "an unknown snapshot word is drawn by name" `Quick
+            test_an_unknown_snapshot_word_is_drawn_by_name
+        ; test_case "the server's reason is drawn as text" `Quick
+            test_the_servers_reason_is_drawn_as_text
         ] )
     ; ( "failing"
       , [ test_case "names only the classes that hold a keeper" `Quick

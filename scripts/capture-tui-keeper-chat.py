@@ -543,6 +543,9 @@ def fixture_static_response(state: Fixture, path: str) -> object | None:
         "/health": {"paths": paths},
         "/health?full=1": {
             "paths": paths,
+            # The TUI takes how current the fleet reading is from here: a
+            # stale snapshot serves the last reading it measured.
+            "full_health_snapshot": {"status": "ready"},
             # A fleet reading: the TUI requires the schema and every count
             # and name list it draws, the way the fleet scan writes them.
             "keeper_fleet_safety": {

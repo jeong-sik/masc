@@ -2925,6 +2925,16 @@ let test_health_json_distinguishes_failing_executable_keepers () =
           Alcotest.(check bool) "health still asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool))))
 
+(* The scan's own section as the health route serves it right after a
+   refresh: the TUI takes how current a reading is from the snapshot beside
+   the section, and these tests are about the counts the scan wrote. *)
+let tui_reading_of_scan section =
+  Tui_decode.decode_fleet_safety
+    (`Assoc
+       [ "keeper_fleet_safety", section
+       ; "full_health_snapshot", `Assoc [ "status", `String "ready" ]
+       ])
+
 let test_fleet_official_client_recovery ~paused ~autoboot () =
   with_temp_dir "fleet-official-recovery" (fun dir ->
     let config = Workspace.default_config dir in
@@ -3007,11 +3017,11 @@ let test_fleet_official_client_recovery ~paused ~autoboot () =
         (json |> member "operator_action_required" |> to_bool);
       Alcotest.(check string) "configuration keeps its existing blocker priority"
         "turn_configuration_error" (json |> member "blocker" |> to_string);
-      match Tui_decode.decode_fleet_safety (`Assoc [ "keeper_fleet_safety", json ]) with
+      match tui_reading_of_scan json with
       | Error error -> Alcotest.fail error
       | Ok (Tui_decode.Fleet_not_measured _) ->
         Alcotest.fail "the scan's own section decoded as not measured"
-      | Ok (Tui_decode.Fleet_measured fleet) ->
+      | Ok (Tui_decode.Fleet_measured { fleet; freshness = _ }) ->
         Alcotest.(check int) "TUI retains the recovering count" 1 fleet.fs_recovering_count;
         Alcotest.(check int) "TUI retains session recovery count" (List.length required_names)
           fleet.fs_official_client_recovery_required_count;
@@ -3111,11 +3121,11 @@ let test_fleet_official_client_recovery_clears_after_success reason () =
         (after |> member "operator_action_required" |> to_bool);
       Alcotest.(check bool) "successful keeper leaves no fleet blocker" true
         ((after |> member "blocker") = `Null);
-      match Tui_decode.decode_fleet_safety (`Assoc [ "keeper_fleet_safety", after ]) with
+      match tui_reading_of_scan after with
       | Error error -> Alcotest.fail error
       | Ok (Tui_decode.Fleet_not_measured _) ->
         Alcotest.fail "the scan's own section decoded as not measured"
-      | Ok (Tui_decode.Fleet_measured fleet) ->
+      | Ok (Tui_decode.Fleet_measured { fleet; freshness = _ }) ->
         Alcotest.(check int) "TUI clears session recovery count" 0
           fleet.fs_official_client_recovery_required_count;
         Alcotest.(check (list string)) "TUI clears session recovery names" []
@@ -3956,6 +3966,59 @@ let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
    "warming" placeholder. The TUI reads that exact body as not measured, so a
    renamed placeholder key fails here rather than turning every rebuild into
    a decode error on the operator's screen. *)
+(* The TUI reads the fleet out of this same body. After a refresh that timed
+   out, the section is still the last good scan, and only the snapshot beside
+   it says so: the reading must decode as stale, measured when the last good
+   refresh ran, with the server's reason -- not as the present (#38499). *)
+let test_the_tui_reads_a_last_good_snapshot_as_stale () =
+  Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
+  let request = Httpun.Request.create `GET "/health?full=1" in
+  Server_routes_http_runtime.For_testing.refresh_full_health_snapshot_now request;
+  let before = Server_routes_http_runtime.make_health_response_json request in
+  (match Tui_decode.decode_fleet_safety before with
+   | Ok (Tui_decode.Fleet_measured { freshness = Tui_decode.Fleet_current; _ }) -> ()
+   | Ok (Tui_decode.Fleet_measured
+           { freshness =
+               Tui_decode.(Fleet_last_good _ | Unrecognised_snapshot_status _)
+           ; _
+           }) ->
+     Alcotest.fail "a just-refreshed snapshot's reading decoded as not current"
+   | Ok (Tui_decode.Fleet_not_measured _) ->
+     Alcotest.fail "a refreshed snapshot decoded as not measured"
+   | Error err -> Alcotest.fail err);
+  let open Yojson.Safe.Util in
+  let measured_at =
+    before |> member "full_health_snapshot" |> member "computed_at_unix"
+    |> to_number
+  in
+  Server_routes_http_runtime.For_testing.mark_full_health_snapshot_failure
+    (Proactive_refresh.Timed_out
+       { label = "full_health_snapshot"
+       ; phase = Proactive_refresh.Refresh
+       ; timeout_s = 16.0
+       ; elapsed_s = 17.0
+       });
+  let after = Server_routes_http_runtime.make_health_response_json request in
+  match Tui_decode.decode_fleet_safety after with
+  | Ok
+      (Tui_decode.Fleet_measured
+         { freshness = Tui_decode.Fleet_last_good { measured_at_unix; stale_reason }
+         ; _
+         }) ->
+    Alcotest.(check (float 0.)) "measured when the last good refresh ran"
+      measured_at measured_at_unix;
+    Alcotest.(check string) "the server's reason" "last_good_refresh_timeout"
+      stale_reason
+  | Ok
+      (Tui_decode.Fleet_measured
+         { freshness = Tui_decode.(Fleet_current | Unrecognised_snapshot_status _)
+         ; _
+         }) ->
+    Alcotest.fail "the last good reading decoded as the present"
+  | Ok (Tui_decode.Fleet_not_measured _) ->
+    Alcotest.fail "the last good reading decoded as not measured"
+  | Error err -> Alcotest.fail err
+
 let test_the_tui_reads_a_rebuilding_snapshot_as_not_measured () =
   Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
   let request = Httpun.Request.create `GET "/health?full=1" in
@@ -6083,6 +6146,8 @@ let () =
             test_full_health_cold_refresh_timeout_is_timeout_not_error;
           Alcotest.test_case "the TUI reads a rebuilding snapshot as not measured" `Quick
             test_the_tui_reads_a_rebuilding_snapshot_as_not_measured;
+          Alcotest.test_case "the TUI reads a last good snapshot as stale" `Quick
+            test_the_tui_reads_a_last_good_snapshot_as_stale;
           Alcotest.test_case "health response survives deleted cwd" `Quick
             test_health_response_survives_deleted_cwd;
           Alcotest.test_case "readiness false before init" `Quick

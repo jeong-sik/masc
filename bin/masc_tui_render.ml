@@ -4952,7 +4952,10 @@ let render_keeper_list (state : state) =
 
   Buffer.add_char buf '\n';
 
-  let now = Unix.localtime (Unix.gettimeofday ()) in
+  (* One clock read for the frame: the header clock and the age of a stale
+     fleet reading below are the same instant. *)
+  let now_unix = Unix.gettimeofday () in
+  let now = Unix.localtime now_unix in
   let timestamp =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
       now.Unix.tm_sec
@@ -5007,7 +5010,7 @@ let render_keeper_list (state : state) =
          ((Theme.warn ()) ^ "  fleet "
           ^ Masc_tui_fleet_line.not_measured_text ~status
           ^ Ansi.reset)
-   | Some (Fleet_measured fleet), None ->
+   | Some (Fleet_measured { fleet; freshness }), None ->
        let tone =
          if fleet.fs_operator_action_required then (Theme.bad ())
          else if String.equal fleet.fs_status "ok" then (Theme.ok ())
@@ -5026,6 +5029,14 @@ let render_keeper_list (state : state) =
             (fleet.fs_target_reaction_capacity
             - fleet.fs_reaction_capacity_shortfall)
             fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
+       (* Its own row under the fleet line rather than a tail on it: the
+          frame cuts a row from the right, and the counts are what a narrow
+          screen keeps. *)
+       Option.iter
+         (fun text ->
+            box_line buf cols
+              ((Theme.warn ()) ^ "  fleet reading: " ^ text ^ Ansi.reset))
+         (Masc_tui_fleet_line.freshness_text ~now:now_unix freshness);
        let failing_entry =
          Option.to_list (Masc_tui_fleet_line.failing_text fleet)
        in

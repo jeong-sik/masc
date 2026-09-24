@@ -12,7 +12,10 @@ type t
 
 val create : min_interval_ns:int64 -> unit -> t
 val request : t -> request -> unit
-val take : t -> now_ns:int64 -> decision
+val take : ?input_pending:bool -> t -> now_ns:int64 -> decision
+(** Input renders as soon as its already-buffered bytes have been handled.
+    [input_pending] coalesces a buffered burst until it drains or the frame
+    deadline arrives. Background updates keep the minimum frame interval. *)
 val input_timeout_seconds : t -> now_ns:int64 -> maximum:float -> float
 val normalize_keeper_detail_scroll :
   line_count:int -> content_height:int -> int -> int

@@ -11,7 +11,6 @@ type request =
 type t = {
   min_interval_ns : int64;
   mutable pending : request option;
-  mutable preempt_deadline : bool;
   mutable last_rendered_at_ns : int64 option;
 }
 
@@ -20,23 +19,14 @@ let create ~min_interval_ns () =
     invalid_arg "render interval must be non-negative";
   { min_interval_ns;
     pending = Some Force;
-    preempt_deadline = true;
     last_rendered_at_ns = None;
   }
 
 let request schedule request =
   match request, schedule.pending with
-  | Force, _ ->
-      schedule.pending <- Some Force;
-      schedule.preempt_deadline <- true
-  | Input, Some Background ->
-      (* User input supersedes a scheduled background paint, matching pi's
-         immediate-render path without turning a byte burst into one write per
-         byte. Subsequent input inside the same frame window still coalesces. *)
-      schedule.pending <- Some Input;
-      schedule.preempt_deadline <- true
+  | Force, _ -> schedule.pending <- Some Force
   | Input, Some Force -> ()
-  | Input, Some Input | Input, None -> schedule.pending <- Some Input
+  | Input, Some (Input | Background) | Input, None -> schedule.pending <- Some Input
   | Background, None -> schedule.pending <- Some Background
   | Background, Some (Input | Background | Force) -> ()
 
@@ -45,26 +35,31 @@ let deadline schedule =
     (fun rendered_at -> Int64.add rendered_at schedule.min_interval_ns)
     schedule.last_rendered_at_ns
 
-let take schedule ~now_ns =
+let take ?(input_pending = false) schedule ~now_ns =
+  let render () =
+    schedule.pending <- None;
+    schedule.last_rendered_at_ns <- Some now_ns;
+    Render
+  in
   match schedule.pending with
   | None -> Idle
-  | Some _ ->
+  | Some Force -> render ()
+  | Some Input when not input_pending -> render ()
+  | Some (Input | Background) ->
+    (* Drain the bytes from one terminal read before painting their result.
+       The deadline still paints a continuously arriving burst, but a lone
+       key or the last key in a burst never waits out a background interval. *)
     match deadline schedule with
-    | Some due
-      when (not schedule.preempt_deadline) && Int64.compare now_ns due < 0 ->
+    | Some due when Int64.compare now_ns due < 0 ->
         Wait_until due
-    | None | Some _ ->
-        schedule.pending <- None;
-        schedule.preempt_deadline <- false;
-        schedule.last_rendered_at_ns <- Some now_ns;
-        Render
+    | None | Some _ -> render ()
 
 let input_timeout_seconds schedule ~now_ns ~maximum =
   let maximum = max 0.0 maximum in
   match schedule.pending with
   | None -> maximum
-  | Some _ when schedule.preempt_deadline -> 0.0
-  | Some _ ->
+  | Some (Input | Force) -> 0.0
+  | Some Background ->
     match deadline schedule with
     | None -> 0.0
     | Some due ->

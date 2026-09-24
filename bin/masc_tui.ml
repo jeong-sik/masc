@@ -489,6 +489,14 @@ let create_input_reader () =
     partial_scalar = "";
   }
 
+(* Both sources can hold bytes already read from the terminal. A partial
+   scalar alone is awaiting more input, so it must not defer a pending frame. *)
+let input_reader_has_pending_bytes reader =
+  reader.position < reader.filled
+  || match reader.terminal_probe with
+     | None -> false
+     | Some decoder -> Masc_tui_terminal_probe.has_replay decoder
+
 (* Whether the terminal has bytes for us, waited for inside Eio rather than
    in the kernel.
 
@@ -25497,7 +25505,9 @@ and is loaded on demand through keeper_skill.
       end;
 
       (match
-         Render_schedule.take render_schedule
+         Render_schedule.take
+           ~input_pending:(input_reader_has_pending_bytes input_reader)
+           render_schedule
            ~now_ns:(Mtime_clock.elapsed_ns ())
        with
        (* The terminal belongs to the picture until it is dismissed. A frame

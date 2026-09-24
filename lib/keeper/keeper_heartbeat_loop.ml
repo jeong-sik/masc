@@ -230,6 +230,7 @@ module Deferred_lane_slot = struct
 
   type t =
     { base_path : string
+    ; keepers_dir : string
     ; keeper_name : string
     ; hint : Keeper_turn_driver.deferred_runtime_lane option ref
     }
@@ -239,19 +240,24 @@ module Deferred_lane_slot = struct
       ~keeper_name:slot.keeper_name
       "deferred runtime lane %s failed at %s: %s"
       action
-      (Store.path_for ~base_path:slot.base_path ~keeper_name:slot.keeper_name)
+      (Store.path_for ~keepers_dir:slot.keepers_dir ~keeper_name:slot.keeper_name)
       (Store.error_to_string error)
   ;;
 
   let clear_durable slot =
-    match Store.clear ~base_path:slot.base_path ~keeper_name:slot.keeper_name with
+    match
+      Store.clear
+        ~base_path:slot.base_path
+        ~keepers_dir:slot.keepers_dir
+        ~keeper_name:slot.keeper_name
+    with
     | Ok () -> ()
     | Error error -> log_store_error slot ~action:"clear" error
   ;;
 
-  let restore ~base_path ~keeper_name =
-    let slot = { base_path; keeper_name; hint = ref None } in
-    (match Store.load ~base_path ~keeper_name with
+  let restore ~base_path ~keepers_dir ~keeper_name =
+    let slot = { base_path; keepers_dir; keeper_name; hint = ref None } in
+    (match Store.load ~keepers_dir ~keeper_name with
      | Ok None -> ()
      | Ok (Some (restored : Keeper_turn_driver.deferred_runtime_lane)) ->
        Log.Keeper.info
@@ -267,7 +273,11 @@ module Deferred_lane_slot = struct
 
   let record slot hint =
     (match
-       Store.save ~base_path:slot.base_path ~keeper_name:slot.keeper_name hint
+       Store.save
+         ~base_path:slot.base_path
+         ~keepers_dir:slot.keepers_dir
+         ~keeper_name:slot.keeper_name
+         hint
      with
      | Ok () -> ()
      | Error error -> log_store_error slot ~action:"save" error);
@@ -1346,7 +1356,10 @@ let run_heartbeat_loop
      do not accumulate for the full keeper lifecycle. *)
   let shared_context = Agent_core.Context.create () in
   let deferred_runtime_lane_slot =
-    Deferred_lane_slot.restore ~base_path:ctx.config.base_path ~keeper_name:m.name
+    Deferred_lane_slot.restore
+      ~base_path:ctx.config.base_path
+      ~keepers_dir:(Workspace.keepers_runtime_dir ctx.config)
+      ~keeper_name:m.name
   in
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when

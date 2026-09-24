@@ -376,11 +376,12 @@ module For_testing : sig
       through the functions below, so a restart resumes the frozen suffix. *)
   type deferred_lane_slot
 
-  (** Load the durable hint for [keeper_name]. A missing file is no hint; a
+  (** Load the durable hint for [keeper_name] under the cluster-aware
+      [keepers_dir]. A missing file is no hint; a
       store error is logged with its path and also yields no hint, leaving the
       file in place as evidence. *)
   val restore_deferred_lane_slot :
-    base_path:string -> keeper_name:string -> deferred_lane_slot
+    base_path:string -> keepers_dir:string -> keeper_name:string -> deferred_lane_slot
 
   (** Persist, then hold, the suffix a failed cycle left behind. *)
   val record_deferred_lane :

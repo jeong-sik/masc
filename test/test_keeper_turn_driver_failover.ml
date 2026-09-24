@@ -5025,6 +5025,12 @@ let with_deferred_store f =
   Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f base_path)
 ;;
 
+(* Named clusters keep their keeper runtime state under separate directories
+   of one base path ([Workspace.keepers_runtime_dir]). *)
+let cluster_keepers_dir base_path cluster =
+  Filename.concat (Filename.concat base_path cluster) "keepers"
+;;
+
 let test_deferred_hint_survives_store_restart_and_clears_after_settlement () =
   with_deferred_store (fun base_path ->
     let original =
@@ -5035,12 +5041,12 @@ let test_deferred_hint_survives_store_restart_and_clears_after_settlement () =
         ~later_runtime_ids:[ "runtime.c" ]
         ~failure:(accept_empty_no_progress_error "runtime.a")
     in
-    (match Deferred_store.save ~base_path ~keeper_name:"backend" original with
+    (match Deferred_store.save ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" original with
      | Ok () -> ()
      | Error error ->
        Alcotest.failf "save failed: %s" (Deferred_store.error_to_string error));
     let restored =
-      match Deferred_store.load ~base_path ~keeper_name:"backend" with
+      match Deferred_store.load ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" with
       | Ok (Some hint) -> hint
       | Ok None -> Alcotest.fail "restart lost the durable deferred suffix"
       | Error error ->
@@ -5057,11 +5063,11 @@ let test_deferred_hint_survives_store_restart_and_clears_after_settlement () =
        | Some (Driver.Accept_rejected { reason_kind; _ }) ->
          reason_kind = Some Driver.Accept_no_usable_progress
        | _ -> false);
-    (match Deferred_store.clear ~base_path ~keeper_name:"backend" with
+    (match Deferred_store.clear ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" with
      | Ok () -> ()
      | Error error ->
        Alcotest.failf "clear failed: %s" (Deferred_store.error_to_string error));
-    match Deferred_store.load ~base_path ~keeper_name:"backend" with
+    match Deferred_store.load ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" with
     | Ok None -> ()
     | Ok (Some _) -> Alcotest.fail "settled suffix remained replayable"
     | Error error ->
@@ -5082,9 +5088,9 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
         ~later_runtime_ids:[ "runtime.c" ]
         ~failure:(accept_empty_no_progress_error "runtime.a")
     in
-    let before = Loop.restore_deferred_lane_slot ~base_path ~keeper_name:"backend" in
+    let before = Loop.restore_deferred_lane_slot ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
     Loop.record_deferred_lane before hint;
-    let after = Loop.restore_deferred_lane_slot ~base_path ~keeper_name:"backend" in
+    let after = Loop.restore_deferred_lane_slot ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
     (match Loop.deferred_lane_for_assignment after ~assignment_id:"lane.restart" with
      | Some restored ->
        Alcotest.(check (list string))
@@ -5098,9 +5104,9 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
       true
       (Option.is_none
          (Loop.deferred_lane_hint
-            (Loop.restore_deferred_lane_slot ~base_path ~keeper_name:"backend")));
+            (Loop.restore_deferred_lane_slot ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend")));
     Loop.record_deferred_lane after hint;
-    let reassigned = Loop.restore_deferred_lane_slot ~base_path ~keeper_name:"backend" in
+    let reassigned = Loop.restore_deferred_lane_slot ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
     Alcotest.(check bool)
       "changed assignment gets no suffix"
       true
@@ -5111,16 +5117,62 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
       true
       (Option.is_none
          (Loop.deferred_lane_hint
-            (Loop.restore_deferred_lane_slot ~base_path ~keeper_name:"backend"))))
+            (Loop.restore_deferred_lane_slot ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend"))))
+;;
+
+(* Two named clusters with the same keeper name and assignment: recording or
+   clearing a suffix in one leaves the other's untouched. *)
+let test_deferred_suffix_is_isolated_between_clusters () =
+  with_deferred_store (fun base_path ->
+    let module Loop = Masc.Keeper_heartbeat_loop.For_testing in
+    let hint next =
+      Driver.For_testing.make_deferred_runtime_lane
+        ~assignment_id:"lane.shared"
+        ~failed_runtime_id:"runtime.a"
+        ~next_runtime_id:next
+        ~later_runtime_ids:[]
+        ~failure:(accept_empty_no_progress_error "runtime.a")
+    in
+    let slot cluster =
+      Loop.restore_deferred_lane_slot
+        ~base_path
+        ~keepers_dir:(cluster_keepers_dir base_path cluster)
+        ~keeper_name:"backend"
+    in
+    let next_of cluster =
+      Option.map
+        (fun (h : Driver.deferred_runtime_lane) -> h.next_runtime_id)
+        (Loop.deferred_lane_hint (slot cluster))
+    in
+    let alpha = slot "alpha" in
+    Loop.record_deferred_lane alpha (hint "runtime.b");
+    Alcotest.(check (option string))
+      "recording in alpha leaves beta without a suffix"
+      None
+      (next_of "beta");
+    let beta = slot "beta" in
+    Loop.record_deferred_lane beta (hint "runtime.c");
+    Alcotest.(check (option string))
+      "alpha keeps its own successor"
+      (Some "runtime.b")
+      (next_of "alpha");
+    Alcotest.(check bool)
+      "beta drops its suffix for a changed assignment"
+      true
+      (Option.is_none (Loop.deferred_lane_for_assignment beta ~assignment_id:"lane.other"));
+    Alcotest.(check (option string))
+      "clearing beta leaves alpha's suffix"
+      (Some "runtime.b")
+      (next_of "alpha"))
 ;;
 
 let test_deferred_store_rejects_unknown_schema_without_fallback () =
   with_deferred_store (fun base_path ->
-    let path = Deferred_store.path_for ~base_path ~keeper_name:"backend" in
+    let path = Deferred_store.path_for ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
     let dir = Filename.dirname path in
     Fs_compat.mkdir_p dir;
     write_file path {|{"schema":"keeper.deferred_runtime_lane.v0"}|};
-    match Deferred_store.load ~base_path ~keeper_name:"backend" with
+    match Deferred_store.load ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" with
     | Error (Deferred_store.Malformed _) -> ()
     | Error error ->
       Alcotest.failf
@@ -5722,6 +5774,10 @@ let () =
             "heartbeat restart resumes the deferred suffix"
             `Quick
             test_heartbeat_restart_resumes_deferred_suffix;
+          Alcotest.test_case
+            "deferred suffix is isolated between clusters"
+            `Quick
+            test_deferred_suffix_is_isolated_between_clusters;
           Alcotest.test_case
             "deferred store rejects unknown schema"
             `Quick

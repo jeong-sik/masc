@@ -26,7 +26,15 @@ let error_to_string = function
   | Unknown_image { name; known } ->
     Printf.sprintf "sandbox_image %S is not in the image catalog (it has: %s)." name
       (match known with [] -> "no names" | names -> String.concat ", " names)
-  | Not_built_on_host { name; store } ->
+  | Not_built_on_host { name; store = Catalog.Microvm Keeper_microvm_backend.Microsandbox } ->
+    Printf.sprintf
+      "nothing is promoted for %S in the microsandbox image store. The msb CLI has no image build command, and `masc sandbox-image promote --runtime microsandbox` cannot read an image digest for the catalog. This backend has no supported build-and-promote path yet."
+      name
+  | Not_built_on_host { name; store = Catalog.Microvm Keeper_microvm_backend.Nerdctl_kata } ->
+    Printf.sprintf
+      "nothing is promoted for %S in the nerdctl_kata image store. `masc sandbox-image --runtime nerdctl_kata` can build an image, but `masc sandbox-image promote --runtime nerdctl_kata` cannot read its digest for the catalog. This backend has no supported promote path yet."
+      name
+  | Not_built_on_host { name; store = (Catalog.Docker_daemon | Catalog.Microvm Keeper_microvm_backend.Apple_container) as store } ->
     Printf.sprintf
       "nothing is promoted for %S in the %s image store. Build it with \
        `masc sandbox-image --recipe %s%s%s` and record the tag it prints with \

@@ -11,6 +11,7 @@ let digest c = "sha256:" ^ String.make 64 c
 let apple = Microvm Keeper_microvm_backend.Apple_container
 let ocaml_now = "masc-sandbox-ocaml:20260924T1130Z-3f9a1c07"
 let ocaml_before = "masc-sandbox-ocaml:20260921T0517Z-9b04e6d1"
+let shipped_names = "[images.base]\n[images.ocaml]\n"
 
 let parsed text =
   match parse text with
@@ -27,6 +28,15 @@ let promoted_ocaml =
     {|[images.base]
 
 [images.ocaml.apple_container]
+reference = "%s"
+digest = "%s"
+previous = { reference = "%s", digest = "%s" }
+|}
+    ocaml_now (digest 'a') ocaml_before (digest 'b')
+
+let host_promoted_ocaml =
+  Printf.sprintf
+    {|[images.ocaml.apple_container]
 reference = "%s"
 digest = "%s"
 previous = { reference = "%s", digest = "%s" }
@@ -130,6 +140,9 @@ let test_references_are_repository_and_tag () =
     ; "masc-sandbox-ocaml"
     ; "Masc:tag"
     ; "localhost:5000/foo"
+    ; "repo//child:v1"
+    ; "repo/../child:v1"
+    ; "localhost:abc/team/img:v1"
     ; "x@sha256:" ^ String.make 64 'a'
     ; "x:-tag"
     ; "x:" ^ String.make 129 't'
@@ -149,10 +162,13 @@ let current catalog name store =
   | Resolved p -> Some p.reference
   | Unknown_image _ | Not_built_on_host _ -> None
 
-let test_to_toml_round_trips () =
+let test_to_toml_writes_only_host_builds () =
   let catalog = parsed promoted_ocaml in
-  check string "parse (to_toml c) = c" (to_toml catalog) (to_toml (parsed (to_toml catalog)));
-  check bool "same entries" true (entries (parsed (to_toml catalog)) = entries catalog)
+  let host = parsed (to_toml catalog) in
+  check (list string) "host file lists only built names" [ "ocaml" ]
+    (List.map (fun entry -> entry.name) (entries host));
+  check bool "host builds round-trip" true
+    (entries host = List.filter (fun entry -> entry.promoted <> []) (entries catalog))
 
 let test_promote_keeps_what_it_replaced () =
   let next_ref = "masc-sandbox-ocaml:20260925T0900Z-11112222" in
@@ -224,38 +240,66 @@ let saved label = function
 
 let test_load_reads_the_config_root () =
   with_dir (fun config_root ->
-    (match load ~config_root with
-     | Error (Missing { path }) -> check string "path" (Filename.concat config_root file_name) path
-     | Error e -> fail (load_error_to_string e)
-     | Ok _ -> fail "loaded a catalog that is not there");
-    write_catalog config_root promoted_ocaml;
-    match load ~config_root with
-    | Ok catalog -> check int "entries" 2 (List.length (entries catalog))
+    (match load ~config_root ~shipped:shipped_names with
+     | Ok catalog ->
+       check (list string) "shipped names without a host file" [ "base"; "ocaml" ]
+         (List.map (fun entry -> entry.name) (entries catalog))
+     | Error error -> fail (load_error_to_string error));
+    write_catalog config_root host_promoted_ocaml;
+    match load ~config_root ~shipped:shipped_names with
+    | Ok catalog ->
+      check int "entries" 2 (List.length (entries catalog));
+      check (option string) "host build" (Some ocaml_now) (current catalog "ocaml" apple)
     | Error e -> fail (load_error_to_string e))
 
-let test_a_host_without_a_catalog_starts_from_the_shipped_one () =
+let test_new_shipped_names_reach_an_existing_host () =
   with_dir (fun config_root ->
-    let shipped = Some "[images.base]\n" in
+    let shipped = "[images.base]\n" in
     let catalog, snapshot = for_change "shipped" ~config_root ~shipped in
     check (list string) "names" [ "base" ] (List.map (fun e -> e.name) (entries catalog));
-    (match load_for_change ~config_root ~shipped:None with
-     | Error (Missing _) -> ()
-     | _ -> fail "no host file and nothing shipped should be Missing");
     let next =
       changed "promote"
         (promote catalog ~name:"base" ~store:apple ~reference:"masc-sandbox:general"
            ~digest:(digest 'e'))
     in
     saved "first save" (save ~config_root ~expected:snapshot next);
-    match load ~config_root with
-    | Ok loaded -> check (option string) "written" (Some "masc-sandbox:general") (current loaded "base" apple)
+    let expanded = shipped_names in
+    match load ~config_root ~shipped:expanded with
+    | Ok loaded ->
+      check (option string) "written" (Some "masc-sandbox:general") (current loaded "base" apple);
+      resolves "newly shipped name" "Not_built_on_host ocaml apple_container" loaded
+        ~name:"ocaml" ~store:apple;
+      let new_build =
+        changed "promote newly shipped name"
+          (promote loaded ~name:"ocaml" ~store:apple ~reference:ocaml_now ~digest:(digest 'a'))
+      in
+      let _, latest_snapshot = for_change "new name" ~config_root ~shipped:expanded in
+      saved "save new name" (save ~config_root ~expected:latest_snapshot new_build)
     | Error e -> fail (load_error_to_string e))
+
+let test_host_and_shipped_catalogs_keep_their_own_roles () =
+  with_dir (fun config_root ->
+    write_catalog config_root
+      (Printf.sprintf "[images.rogue.docker]\nreference = \"r:1\"\ndigest = \"%s\"\n" (digest 'a'));
+    (match load ~config_root ~shipped:shipped_names with
+     | Error (Invalid { error = Host_name_not_shipped { name = "rogue" }; _ }) -> ()
+     | Ok _ -> fail "host added an unshipped image name"
+     | Error error -> fail (load_error_to_string error));
+    write_catalog config_root "[images.base]\n";
+    (match load ~config_root ~shipped:shipped_names with
+     | Error (Invalid { error = Host_name_without_build { name = "base" }; _ }) -> ()
+     | Ok _ -> fail "host stored a name with no build"
+     | Error error -> fail (load_error_to_string error));
+    match load ~config_root ~shipped:host_promoted_ocaml with
+    | Error (Invalid { error = Shipped_build { name = "ocaml" }; _ }) -> ()
+    | Ok _ -> fail "shipped names included a host build"
+    | Error error -> fail (load_error_to_string error))
 
 let test_a_stale_writer_writes_nothing () =
   with_dir (fun config_root ->
-    write_catalog config_root promoted_ocaml;
-    let first, first_seen = for_change "first" ~config_root ~shipped:None in
-    let second, second_seen = for_change "second" ~config_root ~shipped:None in
+    write_catalog config_root host_promoted_ocaml;
+    let first, first_seen = for_change "first" ~config_root ~shipped:shipped_names in
+    let second, second_seen = for_change "second" ~config_root ~shipped:shipped_names in
     saved "first writer"
       (save ~config_root ~expected:first_seen
          (changed "a" (rollback first ~name:"ocaml" ~store:apple)));
@@ -268,17 +312,38 @@ let test_a_stale_writer_writes_nothing () =
      | Error (Changed_since_read _) -> ()
      | Ok () -> fail "the stale writer overwrote the first change"
      | Error e -> fail (save_error_to_string e));
-    match load ~config_root with
+    match load ~config_root ~shipped:shipped_names with
     | Ok loaded ->
       check (option string) "the first change stands" (Some ocaml_before) (current loaded "ocaml" apple);
       check (option string) "the stale change is absent" None (current loaded "base" apple)
     | Error e -> fail (load_error_to_string e))
 
+let test_parent_sync_failure_reports_written_file () =
+  with_dir (fun config_root ->
+    write_catalog config_root host_promoted_ocaml;
+    let before, snapshot = for_change "before sync failure" ~config_root ~shipped:shipped_names in
+    let after = changed "rollback" (rollback before ~name:"ocaml" ~store:apple) in
+    let write path content =
+      Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+        ~sync_parent:(fun parent -> raise (Unix.Unix_error (Unix.EIO, "fsync", parent)))
+        path content
+    in
+    (match For_testing.save_with ~write ~config_root ~expected:snapshot after with
+     | Error (Written_but_durability_unconfirmed _) -> ()
+     | Ok () -> fail "parent sync failure was reported as a successful save"
+     | Error error -> fail (save_error_to_string error));
+    let path = Filename.concat config_root file_name in
+    check string "renamed catalog bytes" (to_toml after) (In_channel.with_open_bin path In_channel.input_all);
+    (match save ~config_root ~expected:snapshot after with
+     | Error (Changed_since_read _) -> ()
+     | Ok () -> fail "a retry with the stale snapshot wrote again"
+     | Error error -> fail (save_error_to_string error)))
+
 let test_concurrent_saves_do_not_both_accept_the_same_snapshot () =
   with_dir (fun config_root ->
-    write_catalog config_root promoted_ocaml;
-    let first, _ = for_change "first" ~config_root ~shipped:None in
-    let second, stale_expected = for_change "second" ~config_root ~shipped:None in
+    write_catalog config_root host_promoted_ocaml;
+    let first, _ = for_change "first" ~config_root ~shipped:shipped_names in
+    let second, stale_expected = for_change "second" ~config_root ~shipped:shipped_names in
     let first_next = changed "rollback" (rollback first ~name:"ocaml" ~store:apple) in
     let second_next =
       changed "promote"
@@ -322,7 +387,7 @@ let test_concurrent_saves_do_not_both_accept_the_same_snapshot () =
      | Error (Changed_since_read _) -> ()
      | Ok () -> fail "both writers accepted the same snapshot"
      | Error e -> fail (save_error_to_string e));
-    match load ~config_root with
+    match load ~config_root ~shipped:shipped_names with
     | Ok loaded ->
       check (option string) "first writer remains current" (Some ocaml_before)
         (current loaded "ocaml" apple);
@@ -373,16 +438,20 @@ let () =
             test_the_shipped_catalog_promotes_nothing
         ] )
     ; ( "change"
-      , [ test_case "to_toml round-trips" `Quick test_to_toml_round_trips
+      , [ test_case "to_toml writes only host builds" `Quick test_to_toml_writes_only_host_builds
         ; test_case "promote keeps what it replaced" `Quick test_promote_keeps_what_it_replaced
         ; test_case "first promotion and other stores" `Quick test_first_promotion_and_other_stores
         ; test_case "changes are refused with reasons" `Quick test_changes_are_refused_with_reasons
         ] )
     ; ( "load and save"
       , [ test_case "load reads the config root" `Quick test_load_reads_the_config_root
-        ; test_case "a host without a catalog starts from the shipped one" `Quick
-            test_a_host_without_a_catalog_starts_from_the_shipped_one
+        ; test_case "new shipped names reach an existing host" `Quick
+            test_new_shipped_names_reach_an_existing_host
+        ; test_case "host and shipped catalogs keep their own roles" `Quick
+            test_host_and_shipped_catalogs_keep_their_own_roles
         ; test_case "a stale writer writes nothing" `Quick test_a_stale_writer_writes_nothing
+        ; test_case "parent sync failure reports renamed bytes" `Quick
+            test_parent_sync_failure_reports_written_file
         ; test_case "concurrent saves serialize compare and replace" `Quick
             test_concurrent_saves_do_not_both_accept_the_same_snapshot
         ] )

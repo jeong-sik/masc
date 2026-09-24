@@ -43,6 +43,9 @@ type parse_error =
   | Expected_string of { path : string list; field : string }
   | Invalid_digest of { path : string list; value : string }
   | Invalid_reference of { path : string list; value : string }
+  | Shipped_build of { name : string }
+  | Host_name_not_shipped of { name : string }
+  | Host_name_without_build of { name : string }
 
 let dotted = function [] -> "the catalog" | path -> String.concat "." path
 
@@ -73,6 +76,12 @@ let parse_error_to_string = function
       "%s.reference %S is not repository:tag (a lowercase repository, a tag of \
        letters, digits, '_', '.', '-', no digest)"
       (dotted path) value
+  | Shipped_build { name } ->
+    Printf.sprintf "shipped image %S contains a host build" name
+  | Host_name_not_shipped { name } ->
+    Printf.sprintf "host image %S is not in the shipped name list" name
+  | Host_name_without_build { name } ->
+    Printf.sprintf "host image %S has no build; names belong in the shipped catalog" name
 
 let ( let* ) = Result.bind
 
@@ -95,25 +104,78 @@ let valid_digest value =
 (* OCI's limit on a tag's length. *)
 let max_tag_length = 128
 
-(* [repository:tag]. The repository is lowercase path components, possibly
-   behind a registry host with a port; the tag is the part after the last
-   ':' and cannot hold '/', which is what tells a tag from a port. A digest
-   reference is refused because the digest has its own field. Neither part
-   may start with '-', so a reference placed in an argv cannot read as a
-   flag, and none of these characters needs escaping in {!to_toml}. *)
+(* Docker's path component is an alphanumeric word followed by zero or more
+   separator + word pairs. A separator is '.', '_', '__', or one or more '-'.
+   Checking components separately also rejects empty components and '..'. *)
+let lower_alnum = function 'a' .. 'z' | '0' .. '9' -> true | _ -> false
+
+let valid_path_component component =
+  let length = String.length component in
+  let rec word i =
+    if i < length && lower_alnum component.[i] then word (i + 1)
+    else if i = length then true
+    else separator i
+  and separator i =
+    let next =
+      match component.[i] with
+      | '.' -> i + 1
+      | '_' when i + 1 < length && component.[i + 1] = '_' -> i + 2
+      | '_' -> i + 1
+      | '-' ->
+        let rec dashes j =
+          if j < length && component.[j] = '-' then dashes (j + 1) else j
+        in
+        dashes i
+      | _ -> length
+    in
+    next < length && lower_alnum component.[next] && word next
+  in
+  length > 0 && lower_alnum component.[0] && word 0
+
+let valid_registry_host host =
+  let labels = String.split_on_char '.' host in
+  let valid_label label =
+    let length = String.length label in
+    length > 0
+    && lower_alnum label.[0]
+    && lower_alnum label.[length - 1]
+    && String.for_all (fun c -> lower_alnum c || c = '-') label
+  in
+  List.for_all valid_label labels
+
+let valid_registry_component component =
+  match String.split_on_char ':' component with
+  | [ host ] -> valid_registry_host host
+  | [ host; port ] ->
+    valid_registry_host host
+    && String.length port > 0
+    && String.for_all (function '0' .. '9' -> true | _ -> false) port
+  | _ -> false
+
+let valid_repository repository =
+  match String.split_on_char '/' repository with
+  | [] -> false
+  | [ component ] -> valid_path_component component
+  | first :: rest ->
+    let registry =
+      String.contains first ':' || String.contains first '.' || String.equal first "localhost"
+    in
+    (if registry then valid_registry_component first else valid_path_component first)
+    && List.for_all valid_path_component rest
+
+(* [repository:tag]. The tag is the part after the last ':', and cannot hold
+   '/', which distinguishes it from a registry port. The repository follows
+   Docker's component and optional registry grammar. A digest reference is
+   refused because the digest has its own field. *)
 let valid_reference value =
   match String.rindex_opt value ':' with
   | None -> false
   | Some colon ->
     let repository = String.sub value 0 colon in
     let tag = String.sub value (colon + 1) (String.length value - colon - 1) in
-    let lower_alnum = function 'a' .. 'z' | '0' .. '9' -> true | _ -> false in
-    let repository_char c = lower_alnum c || (match c with '.' | '_' | '/' | '-' | ':' -> true | _ -> false) in
     let tag_start = function 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true | _ -> false in
     let tag_char c = tag_start c || (match c with '.' | '-' -> true | _ -> false) in
-    String.length repository > 0
-    && lower_alnum repository.[0]
-    && String.for_all repository_char repository
+    valid_repository repository
     && String.length tag > 0
     && String.length tag <= max_tag_length
     && tag_start tag.[0]
@@ -222,12 +284,10 @@ let resolve t ~name ~store =
 let file_name = "sandbox-images.toml"
 
 type load_error =
-  | Missing of { path : string }
   | Unreadable of { path : string; detail : string }
   | Invalid of { path : string; error : parse_error }
 
 let load_error_to_string = function
-  | Missing { path } -> Printf.sprintf "no image catalog at %s" path
   | Unreadable { path; detail } -> Printf.sprintf "cannot read %s: %s" path detail
   | Invalid { path; error } -> Printf.sprintf "%s: %s" path (parse_error_to_string error)
 
@@ -258,24 +318,48 @@ let catalog_path ~config_root = Filename.concat config_root file_name
 
 let parse_at ~path text = Result.map_error (fun error -> Invalid { path; error }) (parse text)
 
-let load ~config_root =
+let from_shipped_and_snapshot ~path ~shipped snapshot =
+  let shipped_path = "config/sandbox-images.toml (shipped)" in
+  let* names = parse_at ~path:shipped_path shipped in
+  let* () =
+    match List.find_opt (fun entry -> entry.promoted <> []) names with
+    | None -> Ok ()
+    | Some entry -> Error (Invalid { path = shipped_path; error = Shipped_build { name = entry.name } })
+  in
+  let* host =
+    match snapshot with
+    | Absent -> Ok []
+    | Read text -> parse_at ~path text
+  in
+  let* () =
+    List.fold_left
+      (fun checked entry ->
+         let* () = checked in
+         if not (List.exists (fun named -> String.equal named.name entry.name) names)
+         then Error (Invalid { path; error = Host_name_not_shipped { name = entry.name } })
+         else if entry.promoted = []
+         then Error (Invalid { path; error = Host_name_without_build { name = entry.name } })
+         else Ok ())
+      (Ok ()) host
+  in
+  Ok
+    (List.map
+       (fun named ->
+          match List.find_opt (fun entry -> String.equal entry.name named.name) host with
+          | None -> named
+          | Some entry -> { named with promoted = entry.promoted })
+       names)
+
+let load ~config_root ~shipped =
   let path = catalog_path ~config_root in
   let* snapshot = read_snapshot_for_load path in
-  match snapshot with
-  | Absent -> Error (Missing { path })
-  | Read text -> parse_at ~path text
+  from_shipped_and_snapshot ~path ~shipped snapshot
 
 let load_for_change ~config_root ~shipped =
   let path = catalog_path ~config_root in
   let* snapshot = read_snapshot_for_load path in
-  match snapshot, shipped with
-  | Read text, (Some _ | None) ->
-    let* catalog = parse_at ~path text in
-    Ok (catalog, snapshot)
-  | Absent, Some text ->
-    let* catalog = parse_at ~path:(path ^ " (shipped copy)") text in
-    Ok (catalog, snapshot)
-  | Absent, None -> Error (Missing { path })
+  let* catalog = from_shipped_and_snapshot ~path ~shipped snapshot in
+  Ok (catalog, snapshot)
 
 type change_error =
   | No_such_image of { name : string; known : string list }
@@ -333,8 +417,8 @@ let rollback t ~name ~store =
     | Some { previous = None; _ } | None -> Error (Nothing_to_roll_back { name; store }))
 
 let header =
-  "# Sandbox images a Keeper can name in `sandbox_image`, and the build this\n\
-   # host promoted for each image store. `masc sandbox-image promote` and\n\
+  "# Builds this host promoted for each image store. The binary's shipped\n\
+   # sandbox-images.toml supplies the image names. `masc sandbox-image promote` and\n\
    # `rollback` rewrite this file. RFC keeper-sandbox-images-have-versions.\n"
 
 let to_toml t =
@@ -342,7 +426,6 @@ let to_toml t =
   Buffer.add_string buf header;
   List.iter
     (fun entry ->
-       Printf.bprintf buf "\n[%s.%s]\n" images_key entry.name;
        List.iter
          (fun (store, promotion) ->
             Printf.bprintf buf "\n[%s.%s.%s]\n%s = \"%s\"\n%s = \"%s\"\n" images_key
@@ -360,6 +443,7 @@ let to_toml t =
 type save_error =
   | Changed_since_read of { path : string }
   | Unwritable of { path : string; detail : string }
+  | Written_but_durability_unconfirmed of { path : string; detail : string }
   | Saved_but_unlock_failed of { path : string; detail : string }
 
 let save_error_to_string = function
@@ -368,6 +452,10 @@ let save_error_to_string = function
       "%s changed after it was read; nothing was written, run the command again"
       path
   | Unwritable { path; detail } -> Printf.sprintf "cannot write %s: %s" path detail
+  | Written_but_durability_unconfirmed { path; detail } ->
+    Printf.sprintf
+      "%s was renamed, but directory sync failed: %s; inspect the catalog before retrying"
+      path detail
   | Saved_but_unlock_failed { path; detail } ->
     Printf.sprintf
       "%s was written, but its transaction lock could not be released: %s; inspect the catalog before retrying"
@@ -376,7 +464,7 @@ let save_error_to_string = function
 (* The lock serializes the compare and atomic replacement across processes.
    A writer may calculate a change from an older snapshot outside the lock;
    once it acquires the lock, the byte comparison rejects that stale change. *)
-let save ~config_root ~expected t =
+let save_with ~write ~config_root ~expected t =
   let path = catalog_path ~config_root in
   let lock_path = path ^ ".lock" in
   let save_under_lock () =
@@ -384,9 +472,14 @@ let save ~config_root ~expected t =
     | Error detail -> Error (Unwritable { path; detail })
     | Ok current when current <> expected -> Error (Changed_since_read { path })
     | Ok _ ->
-      Result.map_error
-        (fun detail -> Unwritable { path; detail })
-        (Fs_compat.save_file_atomic_strict path (to_toml t))
+      (match write path (to_toml t) with
+       | Ok () -> Ok ()
+       | Error failure ->
+         let detail = Fs_compat.atomic_replace_failure_to_string failure in
+         (match failure.stage with
+          | Fs_compat.Before_rename -> Error (Unwritable { path; detail })
+          | Fs_compat.After_rename ->
+            Error (Written_but_durability_unconfirmed { path; detail })))
   in
   match File_lock_eio.with_durable_lock_observed ~lock_path save_under_lock with
   | File_lock_eio.Lock_not_acquired error ->
@@ -397,6 +490,12 @@ let save ~config_root ~expected t =
              { path; detail = File_lock_eio.durable_lock_error_to_string error })
   | File_lock_eio.Body_completed { value = Error primary; release_error = Some error } ->
     Log.Misc.error
-      "sandbox image catalog lock release failed after save refusal: %s"
+      "sandbox image catalog lock release failed after catalog operation: %s"
       (File_lock_eio.durable_lock_error_to_string error);
     Error primary
+
+let save = save_with ~write:Fs_compat.save_file_atomic_strict_staged
+
+module For_testing = struct
+  let save_with = save_with
+end

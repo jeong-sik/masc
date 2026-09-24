@@ -13,6 +13,17 @@ val rows : Masc.Tui_decode.task list -> Masc.Tui_decode.task list
     The Overview selection is a task id, looked up in this list at every
     use: a poll that drops a finished task shifts every index below it. *)
 
+val work_rows : Masc.Tui_decode.task list -> Masc.Tui_decode.task list
+(** Active held tasks followed by Todo rows, so Work can inspect the whole
+    open backlog. Terminal tasks remain available through direct references. *)
+
+val work_selected_index :
+  Masc.Tui_decode.task list -> selected:string option -> int option
+
+val work_selected_task :
+  Masc.Tui_decode.task list -> selected:string option -> Masc.Tui_decode.task option
+
+
 val held_since : Masc.Tui_decode.task -> float option
 (** When the row's current hold began: [started_at] for [InProgress],
     [submitted_at] for [AwaitingVerification], [claimed_at] for [Claimed].
@@ -77,6 +88,9 @@ val id_at : Masc.Tui_decode.task list -> int -> string option
 (** The id on a row of {!rows}, for keys that name a row by position. *)
 
 type step = Next | Previous
+
+val work_step :
+  Masc.Tui_decode.task list -> selected:string option -> step -> string option
 
 val step :
   Masc.Tui_decode.task list -> selected:string option -> step -> string option

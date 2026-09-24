@@ -224,6 +224,24 @@ let test_durable_sink_receives_only_accepted_report () =
           [1790400000.0, 2] !received))
 ;;
 
+let test_sink_failure_marks_history_gap () =
+  with_runtimes (fun () ->
+    let scope = scope_of "usage_codex.sol" in
+    let report =
+      decode_ok (Usage.decode_codex_rate_limits_updated
+                   (Yojson.Safe.from_string codex_exhausted_params))
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        Usage.set_record_observer (fun ~scope:_ ~observed_at:_ _ -> ()))
+      (fun () ->
+        Usage.set_record_observer (fun ~scope:_ ~observed_at:_ _ ->
+          failwith "synthetic sink failure");
+        Usage.record ~scope ~observed_at:1790500000.0 report;
+        check (option (float 0.0)) "failed report time is retained"
+          (Some 1790500000.0) (Usage.record_observer_failure_at ())))
+;;
+
 let () =
   run
     "provider_usage_windows"
@@ -236,6 +254,8 @@ let () =
             test_codex_read_falls_back_and_refuses_a_bad_map
         ; test_case "sink receives accepted reports once" `Quick
             test_durable_sink_receives_only_accepted_report
+        ; test_case "sink failure marks history gap" `Quick
+            test_sink_failure_marks_history_gap
         ] )
     ]
 ;;

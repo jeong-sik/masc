@@ -153,6 +153,43 @@ let step tasks ~selected direction =
       in
       id_at tasks target
 
+let work_rows tasks =
+  rows tasks
+  @ List.filter
+      (fun (task : Tui_decode.task) ->
+        match task.status with
+        | Masc_domain.Todo -> true
+        | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
+        | Masc_domain.Claimed _ | Masc_domain.Done _
+        | Masc_domain.Cancelled _ -> false)
+      tasks
+
+let work_selected_index tasks ~selected =
+  let rec find index = function
+    | [] -> None
+    | (task : Tui_decode.task) :: rest ->
+        if Some task.id = selected then Some index
+        else find (index + 1) rest
+  in
+  find 0 (work_rows tasks)
+
+let work_selected_task tasks ~selected =
+  Option.bind (work_selected_index tasks ~selected)
+    (List.nth_opt (work_rows tasks))
+
+let work_step tasks ~selected direction =
+  let rows = work_rows tasks in
+  let last = List.length rows - 1 in
+  match work_selected_index tasks ~selected with
+  | None -> Option.map (fun (task : Tui_decode.task) -> task.id) (List.nth_opt rows 0)
+  | Some index ->
+      let next = match direction with
+        | Next -> min last (index + 1)
+        | Previous -> max 0 (index - 1)
+      in
+      Option.map (fun (task : Tui_decode.task) -> task.id)
+        (List.nth_opt rows next)
+
 let age_text ~age_text ~now since =
   match since with
   | None -> "?"

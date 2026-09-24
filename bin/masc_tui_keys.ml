@@ -40,6 +40,10 @@ let config_bindings =
       ; Config_presets; Config_themes; Config_voice ]
   ; b Navigate "p" "next pane"
       ~help:"runtime.toml / models / params / prompts / presets / themes / voice", None
+  ; b Navigate "A" "activity"
+      ~help:"event history under System", None
+  ; b Navigate "L" "logs"
+      ~help:"server logs under System", None
   ; b Navigate "PgUp/PgDn" "page"
       ~help:"pages runtime.toml, the voice reading and the detail of prompts \
              and presets, and moves the selection a page on models and themes",
@@ -352,6 +356,8 @@ let for_surface = function
       ]
   | Metrics ->
       [ b Navigate "j/k" "scroll"
+      ; b Navigate "w" "1d / 7d / 14d"
+          ~help:"cycle the exact UTC day window for provider report history"
       ; b Act "Esc" "Dashboard"
       ; b Meta "r" "refresh"
       ; b Meta "Tab" "next"
@@ -644,7 +650,7 @@ let for_surface = function
       ; b Act "y / x" "agree / overrule"
           ~help:"y records the machine's verdict as yours; x records the \
                  opposite, with $EDITOR taking the reason"
-      ; b Act "Y" "copy task" ~help:"copy a link to the task on Overview"
+      ; b Act "Y" "copy task" ~help:"copy a link to the task in Work"
       ; b Search "/" "find" ~help:"jump the cursor to a matching task id or title"
       ; b Search "n / N" "next / previous match"
       ]

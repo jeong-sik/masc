@@ -20,8 +20,8 @@ type section = {
           bottom. *)
 }
 
-val account_id : Masc.Tui_decode.provider_usage_account -> string
-val account_name : Masc.Tui_decode.provider_usage_account -> string
+val scope_id : Masc.Tui_decode.provider_usage_account -> string
+val scope_name : Masc.Tui_decode.provider_usage_account -> string
 
 val section :
   providers:Masc_tui_types.overview_providers_reading ->

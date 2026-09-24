@@ -1845,7 +1845,7 @@ type http_scoped_surface_results = {
     option;
   http_keeper_usage: (Tui_decode.keeper_usage_window, string) result option;
   http_provider_history:
-    (Tui_decode.provider_usage_history, string) result option;
+    (int * (Tui_decode.provider_usage_history, string) result) option;
   http_repository_pulls:
     (overview_pulls_reading, string) result
     option;
@@ -6629,6 +6629,19 @@ let row_list (state : state) : row_list option =
   | Planning ->
       (match state.planning_mode with
        | Planning_detail _ -> None
+       | Planning_list when state.task_focus = Right_pane ->
+           if Option.is_some state.task_detail_id then None
+           else
+             let rows = Masc_tui_overview_tasks.work_rows state.tasks in
+             let cursor =
+               Option.value ~default:0
+                 (Masc_tui_overview_tasks.work_selected_index state.tasks
+                    ~selected:state.task_selected_id)
+             in
+             windowed ~count:(List.length rows) ~cursor (fun index ->
+               state.task_selected_id <-
+                 Option.map (fun (task : Tui_decode.task) -> task.id)
+                   (List.nth_opt rows index))
        | Planning_list ->
            let count =
              match state.planning with
@@ -8863,12 +8876,10 @@ let open_msx_screen (state : Masc_tui_types.state) =
    back is the other half: without it the screen knows where the answer is and
    the operator still walks over by hand.
 
-   Tasks have no surface of their own -- they are listed on Overview -- so a
-   task reference lands there with its detail open, which is what "go to this
-   task" means on this screen. *)
+   Tasks and Goals live under Work. A Task reference opens Work's Tasks detail. *)
 let follow_target (kind : Link.kind) (id : string) =
   match kind with
-  | Link.Task -> Some (Overview, Some id)
+  | Link.Task -> Some (Planning, Some id)
   | Link.Goal -> Some (Planning, Some id)
   | Link.Board_post -> Some (Board, Some id)
   | Link.Schedule -> Some (Schedules, Some id)
@@ -8903,6 +8914,14 @@ let selected_surface_reference state =
   let planning () =
     match state.planning_mode with
     | Planning_detail goal_id -> Some (Link.reference Goal goal_id)
+    | Planning_list when state.task_focus = Right_pane ->
+        (match state.task_detail_id with
+         | Some task_id -> Some (Link.reference Task task_id)
+         | None ->
+             Option.map
+               (fun (task : Tui_decode.task) -> Link.reference Task task.id)
+               (Masc_tui_overview_tasks.work_selected_task state.tasks
+                  ~selected:state.task_selected_id))
     | Planning_list ->
         Option.bind state.planning (fun snapshot ->
             planning_visible_goals ~filter:state.planning_filter
@@ -8943,19 +8962,8 @@ let selected_surface_reference state =
                    Link.reference Board_post evidence.fhe_post_id)
              (selected_fusion_entry state)
        | Fusion_list, None -> None)
-  (* These four hold an id already and were answering None, so Ctrl-] did
-     nothing on them: a lane names its keeper, a verification request names the
-     task it is waiting on, the roster names the keeper under the cursor, and
-     Overview names the task. Following was built and left switched off for
-     most of the screens that could use it. *)
-  | Overview ->
-      (match state.task_detail_id with
-       | Some task_id -> Some (Link.reference Task task_id)
-       | None ->
-           Option.map
-             (fun (row : Tui_decode.task) -> Link.reference Task row.id)
-             (Masc_tui_overview_tasks.selected_task state.tasks
-                ~selected:state.task_selected_id))
+  (* Dashboard has no row cursor. Task references belong to Work. *)
+  | Overview -> None
   | Keepers _ ->
       Option.map
         (fun (keeper : Tui_decode.keeper) -> Link.reference Keeper keeper.k_name)
@@ -10586,9 +10594,15 @@ let apply_keeper_usage_load state = function
   | Ok usage -> state.keeper_usage <- Keeper_usage_read usage
   | Error reason -> state.keeper_usage <- Keeper_usage_error reason
 
-let apply_provider_history_load state = function
-  | Ok history -> state.provider_history <- Provider_history_read history
-  | Error reason -> state.provider_history <- Provider_history_error reason
+let apply_provider_history_load state (days, result) =
+  if days = state.provider_history_days then
+    match result with
+    | Ok history when history.puh_days = days ->
+        state.provider_history <- Provider_history_read history
+    | Ok _ ->
+        state.provider_history <- Provider_history_error
+            "history response window differs from request"
+    | Error reason -> state.provider_history <- Provider_history_error reason
 
 let apply_repository_pulls_load state = function
   | Ok reading -> state.overview_pulls <- reading
@@ -10787,7 +10801,8 @@ let refresh_status results =
   | _ -> Masc_tui_types.Degraded
 
 let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
-    ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~system_log_level ~provider_history_days
+    ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   (* Metrics draws the transport and the Overview reads its queue pressure,
      so a refresh on another surface does not spend a request on it. [None]
@@ -10850,10 +10865,12 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   in
   let http_provider_history =
     when_needed needs.needs_provider_history (fun () ->
-      match Masc_tui_loader.load_provider_usage_history ~host ~port with
-      | result -> result
+      match Masc_tui_loader.load_provider_usage_history ~host ~port
+              ~days:provider_history_days with
+      | result -> provider_history_days, result
       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-      | exception exn -> Error (Printexc.to_string exn))
+      | exception exn ->
+          provider_history_days, Error (Printexc.to_string exn))
   in
   let http_repository_pulls =
     when_needed needs.needs_repository_pulls (fun () ->
@@ -10886,7 +10903,8 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   }
 
 let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
-    ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
+    ~board_hearth ~system_log_level ~provider_history_days
+    ~(needs : Masc_tui_types.surface_needs) =
   (* A process can disappear and another bind the same endpoint between two
      successful ticks. The compact /health identity is therefore revalidated
      on every refresh rather than inferred from connection failure. It goes
@@ -10910,7 +10928,7 @@ let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
          still decides whether the panel renders, only the fetch is
          unconditional. Targeted scoped refreshes keep their own needs. *)
       load_http_scoped_surfaces ~host ~port ~approval_ticket:None
-        ~board_sort ~board_hearth ~system_log_level
+        ~board_sort ~board_hearth ~system_log_level ~provider_history_days
         ~needs:{ needs with needs_asks = true }
     in
     Refresh_surfaces
@@ -11313,6 +11331,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
              (load_http_surfaces ~host ~port ~approval_ticket
                 ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
+                ~provider_history_days:state.provider_history_days
                 ~system_log_level:
                   (Option.map Masc.Tui_decode.system_log_level_query
                      state.system_logs_min_level)
@@ -11336,6 +11355,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
                (load_http_surfaces ~host ~port ~approval_ticket
                   ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
+                ~provider_history_days:state.provider_history_days
                 ~system_log_level:
                   (Option.map Masc.Tui_decode.system_log_level_query
                      state.system_logs_min_level)
@@ -11365,6 +11385,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
              (load_http_scoped_surfaces ~host ~port
                 ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
+                ~provider_history_days:state.provider_history_days
                 ~system_log_level:
                   (Option.map Masc.Tui_decode.system_log_level_query
                      state.system_logs_min_level)
@@ -11388,6 +11409,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
                (load_http_scoped_surfaces ~host ~port
                   ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
+                ~provider_history_days:state.provider_history_days
                 ~system_log_level:
                   (Option.map Masc.Tui_decode.system_log_level_query
                      state.system_logs_min_level)
@@ -21464,6 +21486,10 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages Runtime
        | Some ("t" | "T") when state.view = Config ->
            goto_surface state ~mailbox:async_messages Tools
+       | Some "A" when state.view = Config ->
+           goto_surface state ~mailbox:async_messages Acting
+       | Some "L" when state.view = Config ->
+           goto_surface state ~mailbox:async_messages System_logs
        (* System logs hang off Activity the same way: one key from the
           parent, off the Tab ring. *)
        | Some ("esc" | "left") when state.view = Memory && state.memory_fact_detail_open ->
@@ -21541,6 +21567,14 @@ and is loaded on demand through keeper_skill.
            goto_surface state ~mailbox:async_messages System_logs
         | Some ("m" | "M") when state.view = Overview ->
             goto_surface state ~mailbox:async_messages Metrics
+        | Some ("w" | "W") when state.view = Metrics ->
+            state.provider_history_days <-
+              (match state.provider_history_days with
+               | 1 -> 7
+               | 7 -> 14
+               | 14 | _ -> 1);
+            state.provider_history <- Provider_history_unread;
+            state.metrics_scroll <- 0
        (* In chat, printable keys normally belong to the draft. Keep [?] as
           the documented global Help key when the draft is empty; once a
           sentence has started it remains an ordinary question mark. This
@@ -22102,11 +22136,11 @@ and is loaded on demand through keeper_skill.
            (match
               Option.bind (presented_surface_reference ()) (fun reference ->
                 Option.bind (Link.parse reference) (fun (kind, id) ->
-                  Option.map (fun target -> (reference, target))
+                  Option.map (fun target -> (reference, kind, target))
                     (follow_target kind id)))
             with
             | None -> ()
-            | Some (reference, (destination, opened)) ->
+            | Some (reference, kind, (destination, opened)) ->
                 (* Recorded before the move, so the way back is where the
                    operator actually was rather than where they land. *)
                 state.followed_from <- Some (state.view, None);
@@ -22115,27 +22149,30 @@ and is loaded on demand through keeper_skill.
                    these already has a "this one is open" state, and without
                    setting it the operator arrives at the top of a list and
                    goes looking for the row they just followed. *)
-                (match destination, opened with
-                 | Overview, Some task_id ->
+                (match kind, destination, opened with
+                 | Link.Task, Planning, Some task_id ->
+                     state.planning_mode <- Planning_list;
+                     state.task_focus <- Right_pane;
                      state.task_detail_id <- Some task_id;
                      state.task_history <- None;
                      state.task_selected_id <- Some task_id;
                      launch_task_history_load state ~mailbox:async_messages
                        task_id
-                 | Planning, Some goal_id ->
+                 | Link.Goal, Planning, Some goal_id ->
+                     state.task_focus <- Left_pane;
                      state.planning_mode <- Planning_detail goal_id;
                      state.goal_timeline <- None;
                      launch_goal_timeline_load state ~mailbox:async_messages
                        goal_id
-                 | Board, Some post_id -> state.board_mode <- Board_read post_id
-                 | Schedules, Some schedule_id ->
+                 | Link.Board_post, Board, Some post_id -> state.board_mode <- Board_read post_id
+                 | Link.Schedule, Schedules, Some schedule_id ->
                      state.schedule_detail_id <- Some schedule_id;
                      state.schedule_wake_history <- None;
                      state.schedule_wake_history_error <- None;
                      launch_schedule_wake_history_load state
                        ~mailbox:async_messages ~schedule_id
-                 | Fusion, Some run_id -> state.fusion_mode <- Fusion_detail run_id
-                 | Keepers _, Some keeper_name ->
+                 | Link.Fusion_run, Fusion, Some run_id -> state.fusion_mode <- Fusion_detail run_id
+                 | Link.Keeper, Keepers _, Some keeper_name ->
                      (* The roster is a cursor, not an id, so this puts the
                         cursor on the named keeper and leaves it there. A name
                         the roster does not carry leaves the cursor alone
@@ -22148,7 +22185,7 @@ and is loaded on demand through keeper_skill.
                       with
                       | Some index -> state.keeper_cursor <- index
                       | None -> ())
-                 | _, _ -> ());
+                 | _, _, _ -> ());
                 report_action state "system" ("followed " ^ reference))
        | Some "Y" ->
            (match presented_surface_reference () with
@@ -23208,7 +23245,7 @@ and is loaded on demand through keeper_skill.
                          Masc_tui_types.scroll_down_from state.task_detail_scroll ~by:1
                      else
                        state.task_selected_id <-
-                         Masc_tui_overview_tasks.step state.tasks
+                         Masc_tui_overview_tasks.work_step state.tasks
                            ~selected:state.task_selected_id
                            Masc_tui_overview_tasks.Next
                  | Planning_list ->
@@ -23581,7 +23618,7 @@ and is loaded on demand through keeper_skill.
                        state.task_detail_scroll <- max 0 (state.task_detail_scroll - 1)
                      else
                        state.task_selected_id <-
-                         Masc_tui_overview_tasks.step state.tasks
+                         Masc_tui_overview_tasks.work_step state.tasks
                            ~selected:state.task_selected_id
                            Masc_tui_overview_tasks.Previous
                  | Planning_list ->
@@ -24018,7 +24055,7 @@ and is loaded on demand through keeper_skill.
             | Planning ->
                 (match state.planning_mode with
                  | Planning_list when state.task_focus = Right_pane ->
-                     (match Masc_tui_overview_tasks.selected_task state.tasks
+                     (match Masc_tui_overview_tasks.work_selected_task state.tasks
                               ~selected:state.task_selected_id with
                       | None -> ()
                       | Some task ->
@@ -24643,7 +24680,7 @@ and is loaded on demand through keeper_skill.
            state.system_logs_scroll <- 0;
            state.system_logs_cursor <- 0
        | Some "x" | Some "X"
-         when state.view = Overview && state.task_detail_id <> None ->
+         when state.view = Planning && state.task_detail_id <> None ->
            (* Cancel wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
            handle_task_cancel ()

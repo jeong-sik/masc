@@ -27,7 +27,6 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
-module Overview_team = Masc_tui_overview_team
 module Overview_goals = Masc_tui_overview_goals
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
@@ -50,7 +49,6 @@ module Render_tools = Masc_tui_render_tools
 module Span = Masc_tui_span
 module Diff = Masc_tui_diff
 module Chart = Masc_tui_chart
-module Render_metrics = Masc_tui_render_metrics
 module Render_memory = Masc_tui_render_memory
 
 type memory_state = Render_memory.memory_state =
@@ -194,16 +192,6 @@ let workspace_health_label = function
   | Workspace_health_ok -> "ok"
   | Workspace_health_unknown -> "unknown"
 
-let workspace_health_color = function
-  | Workspace_health_critical
-  | Workspace_health_bad
-  | Workspace_health_risk -> (Theme.bad ())
-  | Workspace_health_warning
-  | Workspace_health_degraded
-  | Workspace_health_initializing
-  | Workspace_health_unknown -> (Theme.warn ())
-  | Workspace_health_ok -> (Theme.ok ())
-
 (* Syslog's own names for these levels, which is why "crit" is the word and
    not a short spelling of one. The level used to read "critical" and the
    badge fitted it to five cells, so the row that most needed reading was the
@@ -284,16 +272,8 @@ let dashboard_keeper_line (state : state) =
   match state.overview with
   | None -> "Keepers: not observed"
   | Some overview ->
-      let team =
-        Overview_team.project ~keepers:overview.ov_keeper_rows
-          ~tasks:state.tasks ~attention:overview.ov_attention_items
-      in
-      Printf.sprintf "Keepers: %d working · %d need you · %d idle · %d paused/stopped"
-        (Overview_team.count team Overview_team.Working)
-        (Overview_team.count team Overview_team.Needs_you)
-        (Overview_team.count team Overview_team.Idle)
-        (Overview_team.count team Overview_team.Paused
-         + Overview_team.count team Overview_team.Stopped)
+      Printf.sprintf "Keepers: %d reported · individual state in Keepers"
+        (List.length overview.ov_keeper_rows)
 
 let dashboard_work_lines (state : state) =
   match state.task_flow with
@@ -317,6 +297,10 @@ let dashboard_work_lines (state : state) =
           current.todo
       ; Printf.sprintf "   Done by UTC day (%d days): %s"
           (List.length flow.daily) (braille_sparkline completed) ]
+      @ (match state.tasks_error with
+         | None -> []
+         | Some reason ->
+             [ "   Coverage: " ^ Terminal_text.single_line reason ])
 
 let dashboard_goal_lines (state : state) =
   match state.overview_goals with
@@ -365,9 +349,9 @@ let dashboard_goal_lines (state : state) =
 let dashboard_usage_lines (state : state) =
   let accounts =
     match state.overview_providers with
-    | Providers_unread -> "account reports not observed"
+    | Providers_unread -> "quota scope reports not observed"
     | Providers_failed reason ->
-        "account reports unavailable: " ^ Terminal_text.single_line reason
+        "quota scope reports unavailable: " ^ Terminal_text.single_line reason
     | Providers_read reading ->
         let total = List.length reading.puws_accounts in
         let reported =
@@ -378,7 +362,7 @@ let dashboard_usage_lines (state : state) =
               | Account_not_reported_since_start -> count)
             0 reading.puws_accounts
         in
-        Printf.sprintf "%d/%d accounts reported since server start"
+        Printf.sprintf "%d/%d quota scopes reported since server start"
           reported total
   in
   let quota =
@@ -395,7 +379,7 @@ let dashboard_usage_lines (state : state) =
         in
         Printf.sprintf "%d runtime quota blocks observed" blocked
   in
-  [ " Usage · " ^ accounts; "   " ^ quota ^ " · account windows in Usage" ]
+  [ " Usage · " ^ accounts; "   " ^ quota ^ " · scope windows in Usage" ]
 
 let render_overview (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -693,8 +677,9 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
         ~holding:None
         ~labels:
           (List.map (fun (row : Tui_decode.task) -> row.title)
-             (Overview_tasks.rows state.tasks))
-        ~selection:(Overview_tasks.row_of state.tasks ~task_id:task.id);
+             (Overview_tasks.work_rows state.tasks))
+        ~selection:(Overview_tasks.work_selected_index state.tasks
+                      ~selected:(Some task.id));
       let answer =
         task_detail_pane state ~rows ~cols:(cols - left_cols) task right_buf
       in
@@ -711,15 +696,22 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
 
 let render_work_tasks (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Overview_tasks.rows state.tasks in
-  let selected = Overview_tasks.selected_index state.tasks
+  let rows = Overview_tasks.work_rows state.tasks in
+  let selected = Overview_tasks.work_selected_index state.tasks
       ~selected:state.task_selected_id in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"work-tasks"
     ~title:(screen_title " MASC Work / Tasks")
     ~hints:"t:Goals  j/k:select  Enter:detail  Esc:Goals"
     ~body:(fun ~budget c ->
-      c.push (Printf.sprintf " Active tasks · %d in progress, awaiting verification, or claimed"
-                (List.length rows));
+      (match state.local_workspace, state.task_flow with
+       | Local_workspace_unread, _ ->
+           c.push " Active tasks · not observed"
+       | Local_workspace_read, None ->
+           c.push " Active tasks · unavailable"
+       | Local_workspace_read, Some _ ->
+           c.push (Printf.sprintf
+             " Open tasks · %d in progress, awaiting verification, claimed, or todo"
+             (List.length rows)));
       (match state.task_flow with
        | None -> c.push " Task history · not observed"
        | Some flow ->
@@ -728,9 +720,14 @@ let render_work_tasks (state : state) =
                float_of_int day.d_completed) flow.daily in
            c.push (Printf.sprintf " Done by UTC day (%d days): %s"
                      (List.length flow.daily) (braille_sparkline completed)));
+      (match state.tasks_error with
+       | None -> ()
+       | Some reason ->
+           c.push (" Coverage: " ^ Terminal_text.single_line reason));
       c.push "";
-      let room = max 0 (budget - 3) in
-      if rows = [] then c.push " No active tasks";
+      let room = max 0 (budget - 4) in
+      if rows = [] && Option.is_some state.task_flow then
+        c.push " No open tasks";
       let first =
         match selected with
         | None -> 0
@@ -12652,37 +12649,42 @@ let render_acting (state : state) =
 
 let provider_history_lines (state : state) =
   match state.provider_history with
-  | Provider_history_unread -> [ " Account trend · not observed" ]
+  | Provider_history_unread ->
+      [ Printf.sprintf " Quota scope trend (%d UTC days) · not observed"
+          state.provider_history_days ]
   | Provider_history_error reason ->
-      [ " Account trend · unavailable: " ^ Terminal_text.single_line reason ]
+      [ Printf.sprintf " Quota scope trend (%d UTC days) · unavailable: %s"
+          state.provider_history_days (Terminal_text.single_line reason) ]
   | Provider_history_read history ->
       let days = history.puh_days in
+      let as_of = Unix.localtime history.puh_generated_at in
       let last_day = int_of_float (floor (history.puh_generated_at /. 86400.0)) in
       let first_day = last_day - days + 1 in
       let key (point : Tui_decode.provider_usage_history_point) =
-        point.puhp_account_id, point.puhp_kind, point.puhp_limit_id
+        point.puhp_scope_id, point.puhp_kind, point.puhp_limit_id
       in
       let keys =
         List.map key history.puh_points |> List.sort_uniq compare
       in
-      let accounts =
+      let scopes =
         match state.overview_providers with
         | Providers_read reading -> reading.puws_accounts
         | Providers_unread | Providers_failed _ -> []
       in
-      let label account_id =
+      let label scope_id =
         match List.find_opt
                 (fun account ->
-                  String.equal (Overview_providers.account_id account) account_id)
-                accounts with
-        | None -> "account " ^ account_id
-        | Some account -> Overview_providers.account_name account
+                  String.equal (Overview_providers.scope_id account) scope_id)
+                scopes with
+        | None ->
+            "scope " ^ String.sub scope_id 0 (min 8 (String.length scope_id))
+        | Some account -> Overview_providers.scope_name account
       in
-      let chart (account_id, kind, limit_id) =
+      let chart (scope_id, kind, limit_id) =
         let slots = Array.make days None in
         List.iter
           (fun (point : Tui_decode.provider_usage_history_point) ->
-            if key point = (account_id, kind, limit_id) then
+            if key point = (scope_id, kind, limit_id) then
               let day = int_of_float (floor (point.puhp_observed_at /. 86400.0)) in
               let index = day - first_day in
               if index >= 0 && index < days then
@@ -12705,25 +12707,29 @@ let provider_history_lines (state : state) =
         in
         let limit = Option.fold ~none:"" ~some:(fun id -> id ^ " ") limit_id in
         Printf.sprintf "   %s · %s%s  %s  %d/%d UTC days reported"
-          (label account_id) (Terminal_text.single_line limit)
+          (label scope_id) (Terminal_text.single_line limit)
           (Terminal_text.single_line kind) marks !observed days
       in
-      " Account trend · latest provider report per UTC day · · means no report"
+      (Printf.sprintf
+         " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d · · means no report"
+         days
+         (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday
+         as_of.Unix.tm_hour as_of.Unix.tm_min)
       :: (if keys = [] then [ "   No reports recorded in this window" ]
           else List.map chart keys)
 
 let usage_lines ~cols (state : state) =
-  let accounts =
+  let scopes =
     match Overview_providers.section
             ~providers:state.overview_providers ~runtimes:state.overview_quota
             ~now:(Unix.gettimeofday ()) ~width:(max 20 (cols - 4)) with
     | Some section -> section.title :: section.lines
     | None ->
         [ (match state.overview_providers with
-           | Providers_unread -> " Accounts · not observed"
+           | Providers_unread -> " Quota scopes · not observed"
            | Providers_failed reason ->
-               " Accounts · unavailable: " ^ Terminal_text.single_line reason
-           | Providers_read _ -> " Accounts · no provider accounts reported") ]
+               " Quota scopes · unavailable: " ^ Terminal_text.single_line reason
+           | Providers_read _ -> " Quota scopes · no provider reports") ]
   in
   let keepers =
     match state.keeper_usage with
@@ -12758,7 +12764,16 @@ let usage_lines ~cols (state : state) =
                   row.kur_cost_missing coverage)
               kuw_rows)
   in
-  accounts @ [ "" ] @ provider_history_lines state @ [ "" ] @ keepers
+  let transport =
+    match state.transport with
+    | None -> [ " Transport · not observed" ]
+    | Some reading ->
+        [ " Transport · queue pressure "
+          ^ Masc.Transport_metrics.queue_pressure_kind_to_string
+              reading.th_queue_pressure ]
+  in
+  scopes @ [ "" ] @ provider_history_lines state
+  @ [ "" ] @ keepers @ [ "" ] @ transport
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -13910,7 +13925,7 @@ let render_runtime_params (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
-  let before = screen_title " MASC Config" ^ tab_strip_gap in
+  let before = screen_title " MASC System" ^ tab_strip_gap in
   box_line buf cols
     (config_pane_title ~cols ~before state);
   (* Where the overrides live leads, because it is the only thing on this row
@@ -15280,7 +15295,7 @@ let render_config (state : state) =
   if state.runtime_config_status_open then render_runtime_config_status state else
   let terminal_rows, cols = get_terminal_size () in
   let path_note = config_path_note state in
-  let before = screen_title " MASC Config" ^ tab_strip_gap in
+  let before = screen_title " MASC System" ^ tab_strip_gap in
   let title =
     config_pane_title ~cols ~before ~note:path_note
       ~clock:
@@ -15395,19 +15410,7 @@ let render_config (state : state) =
 
 let render_surface (state : state) =
   match state.view with
-  | Overview ->
-      (* Same fallback shape as Board/Planning detail: a detail id whose row
-         left the backlog renders the list, not a frame for a missing task. *)
-      (match state.task_detail_id with
-       | Some _ -> (
-           match
-             Task_selection.detail_row
-               ~detail_id:state.task_detail_id
-               ~tasks:state.tasks_domain
-           with
-           | Some task -> render_task_detail state task
-           | None -> render_overview state )
-       | None -> render_overview state)
+  | Overview -> render_overview state
   | Keepers Keeper_list ->
       if state.repository_changes_open then render_repository_changes state
       else render_keeper_list state

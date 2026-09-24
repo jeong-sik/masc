@@ -2899,7 +2899,7 @@ type provider_usage_windows = {
 }
 
 type provider_usage_history_point = {
-  puhp_account_id : string;
+  puhp_scope_id : string;
   puhp_kind : string;
   puhp_limit_id : string option;
   puhp_unit : provider_usage_utilization;

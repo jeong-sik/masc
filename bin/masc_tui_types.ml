@@ -2847,12 +2847,11 @@ let shows_selected_keeper = function
   | System_logs ->
       false
 
-(** The Activity screen is two surfaces under one tab strip: the event
-    feed and the system logs, reached from each other with 1 and 2. A
+(** The Activity screen is two related surfaces: the event
+    feed and the system logs, reached from System with A and L. A
     rule about "the Activity screen" reads this rather than [Acting]
     alone -- the pane that stays off that screen was keyed to the one
-    constructor, so pressing 2 opened it and narrowed the table by 56
-    cells, and 1 closed it again. *)
+    constructor, so opening logs narrowed the table by 56 cells. *)
 let on_activity_screen = function
   | Acting | System_logs -> true
   | Overview | Metrics | Keepers _ | Memory | Lanes | Clients | Board
@@ -2869,18 +2868,9 @@ type browser_lane_visibility =
       return_composer_focused : bool;
     }
 
-(* The Tab cycle and the strip drawn above every surface share this order,
-   so the strip cannot disagree with where Tab actually goes. Labels are the
-   strip's spelling. Keepers stands for every keeper sub-mode; Planning owns
-   its Goal view, the Task Review queue, and the Verdicts the judge recorded.
-   Those two remain distinct internal surfaces because each has a different
-   API and permission boundary, but neither is a second top-level
-   destination. Verdicts is the far half of Task Review -- one lists what is
-   waiting for a ruling and the other what was ruled -- and a top-level tab
-   called "Harness" said neither. Fusion is a ring stop because a
-   deliberation is a destination of its own: the run list is where fusion
-   results are read, and before this stop it was reachable only through the
-   palette or a deep link, so the surface existed but could not be found. *)
+(* The Tab cycle and strip share seven destinations. Detail surfaces map to
+   their parent below; Activity and logs live under System, and Goals, Tasks,
+   approvals, review, and verdicts live under Work. *)
 let surface_ring : (surface * string) list =
   [ (Overview, "Dashboard");
     (Planning, "Work");
@@ -5696,6 +5686,7 @@ type state = {
   mutable overview_providers: overview_providers_reading;
   mutable keeper_usage: keeper_usage_reading;
   mutable provider_history: provider_history_reading;
+  mutable provider_history_days: int;
   mutable overview_pulls: overview_pulls_reading;
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
@@ -7834,6 +7825,7 @@ let create_state
   overview_providers = Providers_unread;
   keeper_usage = Keeper_usage_unread;
   provider_history = Provider_history_unread;
+  provider_history_days = 14;
   overview_pulls = Overview_pulls_unread;
   overview_goals = Goals_unread;
   runtime_lanes = [];
@@ -10332,26 +10324,8 @@ let visible_surface_ring (state : state) : (surface * string) list =
   List.filter (fun (s, _) -> is_surface_active state s) surface_ring
 ;;
 
-(* The ring stop a view belongs to. Keeper sub-modes collapse onto Keepers,
-   Task Review and Verdicts collapse onto Planning, Changes collapses onto
-   Keepers -- its rows are one keeper's file writes, chosen by the roster
-   cursor, so it was never a destination of its own. Channels, Automation, and
-   Runs are selected-Keeper detail tabs; standalone Lanes is a top-level
-   observation workspace, and Code remains a Workspace child. Resources and Tools
-   collapse onto Config: an MCP resource catalog and the tool catalog with its
-   receipts and usage are both answers to "what is registered here", read
-   rarely and never raced against. System logs collapse onto Activity (the
-   Acting surface): tool calls settling and the server's own log lines are two
-   readings of the same fleet timeline, and the ring stop that answers "what
-   happened" is one. Metrics is a deep-dive telemetry surface that collapses
-   onto Overview, off the Tab ring. Connectors is under Config while the
-   Browser Lane reader is on screen, and under Keepers otherwise. Lanes is a
-   top-level observation workspace; Runtime remains the substrate/config view.
-
-   One mapping. There were two, one per ring index, and only the tests read
-   the one without the Browser Lane arm, so they checked a mapping the strip
-   never drew with. Every surface is named, so a new one has to be given a
-   stop here rather than falling through to itself. *)
+(* One mapping for the strip highlight and Tab family. Every surface is named
+   so a new surface must choose its destination explicitly. *)
 let surface_ring_family (state : state) (view : surface) =
   match view with
   | Keepers _ -> Keepers Keeper_list
@@ -10634,6 +10608,14 @@ let surface_row_texts (state : state) : surface -> string list option =
   | Planning ->
       (match state.planning_mode with
        | Planning_detail _ -> None
+       | Planning_list when state.task_focus = Right_pane ->
+           (match Masc_tui_overview_tasks.work_rows state.tasks with
+            | [] -> None
+            | rows ->
+                Some
+                  (List.map
+                     (fun (task : Tui_decode.task) -> task.id ^ " " ^ task.title)
+                     rows))
        | Planning_list ->
            Option.bind state.planning (fun snapshot ->
                match

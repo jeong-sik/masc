@@ -24,6 +24,7 @@ let dashboard_metrics_cache_mu = Stdlib.Mutex.create ()
 let dashboard_model_metrics_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_cost_latency_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_keeper_costs_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
+let dashboard_provider_history_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_keeper_decisions_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_keeper_decisions_log_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 
@@ -50,6 +51,23 @@ let json_with_cache_metadata json metadata =
   match json with
   | `Assoc fields -> `Assoc (fields @ [ "cache", metadata ])
   | other -> `Assoc [ "payload", other; "cache", metadata ]
+
+let redact_provider_history_cache_error = function
+  | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "cache", `Assoc metadata ->
+                 "cache", `Assoc
+                   (List.map
+                      (function
+                        | "last_error", _ ->
+                            "last_error", `String "history refresh failed"
+                        | field -> field)
+                      metadata)
+             | field -> field)
+           fields)
+  | json -> json
 
 let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
   let now = Unix.gettimeofday () in
@@ -250,13 +268,37 @@ let add_routes ~sw router =
            match days with
            | Some (1 | 7 | 14 as days) ->
                let config = Mcp_server.workspace_config state in
-               (match Domain_pool_ref.submit_io_or_inline (fun () ->
-                  Server_provider_usage_history.read config
-                    ~now:(Unix.gettimeofday ()) ~days) with
-                | Ok json -> `OK, json
-                | Error detail ->
-                    `Service_unavailable,
-                    `Assoc [ "ok", `Bool false; "error", `String detail ])
+               (* NDT-OK: the request clock bounds a read-only UTC day window;
+                  no missing provider report is synthesized. *)
+               if Server_provider_usage_history.failure_in_window
+                    ~now:(Unix.gettimeofday ()) ~days then
+                 `OK, `Assoc [ "state", `String "unavailable"
+                             ; "reason", `String "provider usage history incomplete: a report could not be stored" ]
+               else
+                 let key = cache_key [ config.base_path; string_of_int days ] in
+                 let json =
+                   cached_dashboard_json ~sw ~sync_first:false
+                     ~cache:dashboard_provider_history_cache ~key
+                     ~placeholder:(`Assoc [ "state", `String "loading" ])
+                     ~compute:(fun () ->
+                       let result =
+                         (* NDT-OK: compute time bounds this read-only history
+                            after an asynchronous cache refresh starts. *)
+                         try Server_provider_usage_history.read config
+                               ~now:(Unix.gettimeofday ()) ~days
+                         with Eio.Cancel.Cancelled _ as exn -> raise exn
+                            | exn ->
+                                Log.Server.warn "provider usage history crashed: %s"
+                                  (Printexc.to_string exn);
+                                Error "provider usage history store unavailable"
+                       in
+                       match result with
+                       | Ok json -> json
+                       | Error detail ->
+                           `Assoc [ "state", `String "unavailable"
+                                  ; "reason", `String detail ])
+                 in
+                 `OK, redact_provider_history_cache_error json
            | Some _ | None ->
                `Bad_request,
                `Assoc [ "ok", `Bool false

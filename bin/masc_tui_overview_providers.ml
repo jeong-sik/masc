@@ -177,14 +177,13 @@ let heard_text ~now observed_at =
 
 (* ---- accounts ----------------------------------------------------------- *)
 
-let account_id (account : Tui_decode.provider_usage_account) =
+let scope_id (account : Tui_decode.provider_usage_account) =
   Digest.to_hex (Digest.string account.pua_scope)
-  |> fun hex -> String.sub hex 0 8
 
-let account_name (account : Tui_decode.provider_usage_account) =
-  let id = account_id account in
+let scope_name (account : Tui_decode.provider_usage_account) =
+  let id = String.sub (scope_id account) 0 8 in
   match account.pua_providers with
-  | [] -> "account " ^ id
+  | [] -> "scope " ^ id
   | providers -> Terminal_text.single_line (String.concat "," providers) ^ " · " ^ id
 
 (* The runtime catalogue's own [quota_exhausted], joined by quota scope,
@@ -249,7 +248,7 @@ let account_rank observed (account : Tui_decode.provider_usage_account) =
   | Not_observed_exhausted, Tui_decode.Account_not_reported_since_start -> 2
 
 let account_rows ~now (observed, (account : Tui_decode.provider_usage_account)) =
-  let name = account_name account in
+  let name = scope_name account in
   let tag = exhausted_tag ~now observed in
   match account.pua_state with
   | Tui_decode.Account_not_reported_since_start -> [ Silent_row { name; tag } ]
@@ -361,7 +360,7 @@ let draw_rows ~now ~width rows =
     rows
 
 let title_text ?note () =
-  let head = Printf.sprintf " %sProviders%s" Ansi.bold Ansi.reset in
+  let head = Printf.sprintf " %sProvider quota scopes%s" Ansi.bold Ansi.reset in
   match note with
   | None -> head
   | Some note -> Printf.sprintf "%s  %s%s%s" head Ansi.dim note Ansi.reset
@@ -385,7 +384,7 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~now ~widt
           puws_accounts
         |> List.stable_sort (fun (oa, a) (ob, b) ->
                match Int.compare (account_rank oa a) (account_rank ob b) with
-               | 0 -> String.compare (account_name a) (account_name b)
+               | 0 -> String.compare (scope_name a) (scope_name b)
                | order -> order)
       in
       let rows = List.concat_map (account_rows ~now) ordered in

@@ -199,6 +199,15 @@ let test_a_finished_selection_selects_nothing () =
   check (option string) "Enter and Ctrl-] name nothing" None
     (selected_id polled ~selected)
 
+let test_work_includes_todo_backlog () =
+  let rows = Tasks.work_rows tasks in
+  check int "all open tasks have a Work row" 7 (List.length rows);
+  check (option int) "todo is selectable" (Some 4)
+    (Tasks.work_selected_index tasks ~selected:(Some "task-1501"));
+  check (option string) "Enter can open todo" (Some "task-1501")
+    (Option.map (fun (task : Tui_decode.task) -> task.id)
+       (Tasks.work_selected_task tasks ~selected:(Some "task-1501")))
+
 let () =
   run "tui_overview_tasks"
     [ ( "overview tasks",
@@ -216,5 +225,7 @@ let () =
             test_a_poll_does_not_move_the_selection
         ; test_case "a finished selection selects nothing" `Quick
             test_a_finished_selection_selects_nothing
+        ; test_case "Work includes todo backlog" `Quick
+            test_work_includes_todo_backlog
         ] )
     ]

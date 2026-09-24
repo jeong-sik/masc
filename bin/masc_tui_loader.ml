@@ -1136,10 +1136,29 @@ let load_keeper_usage ~(host : string) ~(port : int) =
   | Error reason -> Error ("keeper usage load failed: " ^ reason)
   | Ok json -> Tui_decode.decode_keeper_usage_window json
 
-let load_provider_usage_history ~(host : string) ~(port : int) =
-  match fetch_provider_usage_history ~host ~port with
+let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
+  match fetch_provider_usage_history ~host ~port ~days with
   | Error reason -> Error ("provider usage history load failed: " ^ reason)
-  | Ok json -> Tui_decode.decode_provider_usage_history json
+  | Ok json ->
+      let cache_error =
+        match Json_util.assoc_member_opt "cache" json with
+        | Some cache ->
+            (match Json_util.assoc_member_opt "last_error" cache with
+             | Some (`String reason) -> Some reason
+             | _ -> None)
+        | None -> None
+      in
+      (match cache_error with
+       | Some reason -> Error ("history read failed: " ^ reason)
+       | None ->
+      match Json_util.assoc_member_opt "state" json with
+       | Some (`String "loading") ->
+           Error "history is loading"
+       | Some (`String "unavailable") ->
+           (match Json_util.assoc_member_opt "reason" json with
+            | Some (`String reason) -> Error reason
+            | _ -> Error "history unavailable without a reason")
+       | Some _ | None -> Tui_decode.decode_provider_usage_history json)
 
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;

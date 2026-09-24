@@ -8,9 +8,8 @@ let store config =
   in
   Dated_jsonl.create ~base_dir ~retention_days:16 ()
 
-let account_id scope =
+let scope_id scope =
   Digest.to_hex (Digest.string (Runtime_quota_window.scope_to_string scope))
-  |> fun hex -> String.sub hex 0 8
 
 let kind_json = function
   | Usage.Five_hour -> `String "five_hour"
@@ -24,13 +23,13 @@ let utilization_json = function
   | Usage.Percent value -> "percent", `Int value
 
 let record_json ~scope ~observed_at (report : Usage.report) =
-  let account_id = account_id scope in
+  let scope_id = scope_id scope in
   let source = Usage.source_to_string report.source in
   List.map
     (fun (window : Usage.window) ->
       let unit, value = utilization_json window.utilization in
       `Assoc
-        [ "account_id", `String account_id
+        [ "scope_id", `String scope_id
         ; "source", `String source
         ; "kind", kind_json window.kind
         ; "limit_id", Option.fold ~none:`Null ~some:(fun id -> `String id) window.limit_id
@@ -48,7 +47,7 @@ let install config =
       (`List (record_json ~scope ~observed_at report)))
 
 type point = {
-  account_id : string;
+  scope_id : string;
   source : string;
   kind : string;
   limit_id : string option;
@@ -84,7 +83,7 @@ let number key json =
   | _ -> Error ("provider usage history: invalid " ^ key)
 
 let decode json =
-  let* account_id = string "account_id" json in
+  let* scope_id = string "scope_id" json in
   let* source = string "source" json in
   let* kind = string "kind" json in
   let* limit_id = optional_string "limit_id" json in
@@ -99,11 +98,11 @@ let decode json =
   let* resets_at = optional_int "resets_at" json in
   if unit <> "fraction" && unit <> "percent" then
     Error "provider usage history: unknown unit"
-  else Ok { account_id; source; kind; limit_id; unit; value; observed_at; resets_at }
+  else Ok { scope_id; source; kind; limit_id; unit; value; observed_at; resets_at }
 
 let point_json point =
   `Assoc
-    [ "account_id", `String point.account_id
+    [ "scope_id", `String point.scope_id
     ; "source", `String point.source
     ; "kind", `String point.kind
     ; "limit_id", Option.fold ~none:`Null ~some:(fun id -> `String id) point.limit_id
@@ -113,13 +112,21 @@ let point_json point =
     ; "resets_at", Option.fold ~none:`Null ~some:(fun ts -> `Int ts) point.resets_at
     ]
 
+let window_start ~now ~days =
+  (floor (now /. 86400.0) -. float_of_int (days - 1)) *. 86400.0
+
+let failure_in_window ~now ~days =
+  match Usage.record_observer_failure_at () with
+  | Some at -> at >= window_start ~now ~days && at <= now
+  | None -> false
+
 let read config ~now ~days =
   if not (List.mem days [ 1; 7; 14 ]) then
     Error "provider usage history: days must be 1, 7, or 14"
+  else if failure_in_window ~now ~days then
+    Error "provider usage history incomplete: a report could not be stored"
   else
-    let since_at =
-      (floor (now /. 86400.0) -. float_of_int (days - 1)) *. 86400.0
-    in
+    let since_at = window_start ~now ~days in
     let journal = store config in
     let latest = Hashtbl.create 128 in
     let error = ref None in
@@ -140,7 +147,7 @@ let read config ~now ~days =
               | Error detail -> error := Some detail
               | Ok point when point.observed_at >= since_at && point.observed_at <= now ->
                   let day = Log.format_utc_date_of point.observed_at in
-                  let key = point.account_id, point.kind, point.limit_id, day in
+                  let key = point.scope_id, point.kind, point.limit_id, day in
                   (match Hashtbl.find_opt latest key with
                    | Some held when held.observed_at >= point.observed_at -> ()
                    | Some _ | None -> Hashtbl.replace latest key point)
@@ -154,14 +161,16 @@ let read config ~now ~days =
     in
     match result, !error with
     | Error read_error, _ ->
-        Error (Dated_jsonl.read_error_to_string read_error)
+        Log.Server.warn "provider usage history read failed: %s"
+          (Dated_jsonl.read_error_to_string read_error);
+        Error "provider usage history store unavailable"
     | Ok (), Some detail -> Error detail
     | Ok (), None ->
         let points = Hashtbl.fold (fun _ point acc -> point :: acc) latest [] in
         let points =
           List.sort
             (fun a b ->
-              let key p = p.account_id, p.kind, p.limit_id, p.observed_at in
+              let key p = p.scope_id, p.kind, p.limit_id, p.observed_at in
               compare (key a) (key b))
             points
         in

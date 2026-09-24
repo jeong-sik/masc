@@ -5196,7 +5196,7 @@ let decode_provider_usage_windows json =
   Ok { puws_since; puws_accounts }
 
 type provider_usage_history_point = {
-  puhp_account_id : string;
+  puhp_scope_id : string;
   puhp_kind : string;
   puhp_limit_id : string option;
   puhp_unit : provider_usage_utilization;
@@ -5210,7 +5210,7 @@ type provider_usage_history = {
 }
 
 let decode_provider_usage_history_point json =
-  let* puhp_account_id = required_string_field json "account_id" in
+  let* puhp_scope_id = required_string_field json "scope_id" in
   let* puhp_kind = required_string_field json "kind" in
   let* puhp_limit_id = required_nullable_string_field json "limit_id" in
   let* puhp_observed_at = required_number_field json "observed_at" in
@@ -5226,7 +5226,7 @@ let decode_provider_usage_history_point json =
         Ok (Utilization_percent value)
     | _ -> Error ("provider usage history: unknown unit " ^ unit)
   in
-  Ok { puhp_account_id; puhp_kind; puhp_limit_id; puhp_unit; puhp_observed_at }
+  Ok { puhp_scope_id; puhp_kind; puhp_limit_id; puhp_unit; puhp_observed_at }
 
 let decode_provider_usage_history json =
   let* puh_days = required_int_field json "days" in

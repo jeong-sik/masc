@@ -301,7 +301,11 @@ open Alcotest
    Keeper tells the Stagehand browser in one sentence what to act on, observe
    or extract, instead of choosing selectors (RFC-browser-lane-stagehand
    §3.8). No headroom. *)
-let ceiling_bytes = 123_086
+(* 2026-09-24: +12 rendered bytes (the renderer replay, not a CI reading):
+   BrowserRead's lane enum names stagehand, whose backend now serves text,
+   element and scene reads with the automation lane's page scripts. No
+   headroom. *)
+let ceiling_bytes = 123_098
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

@@ -356,11 +356,10 @@ let execute_unlocked t = function
   | Browser_lane.Page_read { tab_id; max_chars } ->
     let* session = session t in
     with_tab t session tab_id (fun () ->
-      let cap = Option.value ~default:50_000 max_chars in
-      if cap < 1 || cap > 100_000 then Error (Protocol "maxChars must be between 1 and 100000")
-      else script t session
-        "const text=document.body?.innerText ?? ''; const chars=Array.from(text); return {url:location.href,title:document.title,text:chars.slice(0,arguments[0]).join(''),chars:chars.length,truncated:chars.length>arguments[0]};"
-        [`Int cap])
+      let cap = match max_chars with Some cap -> cap | None -> Browser_page_script.default_text_chars in
+      if cap < 1 || cap > Browser_page_script.max_text_chars then
+        Error (Protocol (Printf.sprintf "maxChars must be between 1 and %d" Browser_page_script.max_text_chars))
+      else script t session Browser_page_script.text [`Int cap])
   | Browser_lane.Page_document {tab_id=id} ->
     (* This optional reader must not run [session] recovery, select another
        window, or reset a frame merely to acquire its observation. *)

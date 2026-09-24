@@ -181,6 +181,20 @@ let () =
   (match tab with
    | Error _ -> ()
    | Ok (tab_id, _) ->
+     let read mode =
+       tool "BrowserRead"
+         (Tools.handle_read ~base_path:out ~tool_name:"masc_browser_read" ~start_time:0.0
+            (args [ lane; "tabId", `Int tab_id; "mode", `String mode ]))
+     in
+     record "BrowserRead text reads the page"
+       (let* data = read "text" in
+        match string_at [ "text" ] data with
+        | Some text when contains ~sub:"Order form" text -> Ok data
+        | Some _ | None -> Error ("the text read answered " ^ Yojson.Safe.to_string data));
+     record "BrowserRead scene reads the page"
+       (let* data = read "scene" in
+        if contains ~sub:"Order form" (Yojson.Safe.to_string data) then Ok data
+        else Error ("the scene read answered " ^ Yojson.Safe.to_string data));
      record "extract reads the page through the model"
        (let* data =
           instruct

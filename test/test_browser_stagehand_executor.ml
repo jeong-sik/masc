@@ -182,12 +182,48 @@ let test_sentence_verbs () =
     (rejected_before_effect (Executor.execute ~tabs ~call:(call fake) (Lane.Page_instruct { tab_id = 1; instruction = "click Buy" })))
 ;;
 
+(* Reads run the automation lane's page scripts: the expression sent is
+   that script with its arguments, and the answer keeps the tab. *)
+let test_reads_run_the_page_scripts () =
+  let tabs = Executor.Tabs.create () and fake = fake [ blank; shop () ] ~active:(Some "P2") in
+  ignore (listed tabs fake);
+  let sent_expression () =
+    match fake.sent with
+    | Wire.Page_evaluate { expression; _ } :: _ -> expression
+    | _ -> fail "no page.evaluate was sent"
+  in
+  fake.sent <- [];
+  ignore (served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_read { tab_id = Some 1; max_chars = None })));
+  check string "text read with the default cap"
+    (Executor.evaluate_expression ~body:Masc.Browser_page_script.text ~args:(`Int Masc.Browser_page_script.default_text_chars))
+    (sent_expression ());
+  let elements = served (Executor.execute ~tabs ~call:(call fake) (Lane.Page_elements { tab_id = None })) in
+  check string "elements script" (Executor.evaluate_expression ~body:Masc.Browser_page_script.elements ~args:`Null) (sent_expression ());
+  check int "elements of the active tab name it" 1 Yojson.Safe.Util.(member "tabId" elements |> to_int);
+  let scene =
+    served (Executor.execute ~tabs ~call:(call fake)
+      (Lane.Page_scene { tab_id = 0; max_chars = 2000; view = Lane.Content; scope = None }))
+  in
+  check string "scene call with the read arguments"
+    (Executor.evaluate_expression ~body:Masc.Browser_scene_script.read_call
+       ~args:(match Lane.scene_args ~tab_id:0 ~max_chars:2000 ~view:Lane.Content ~scope:None with
+              | `Assoc fields -> `Assoc (("mode", `String "read") :: fields)
+              | json -> json))
+    (sent_expression ());
+  check int "scene names its tab" 0 Yojson.Safe.Util.(member "tabId" scene |> to_int);
+  fake.sent <- [];
+  check bool "a cap past the most is refused" true
+    (rejected_before_effect
+       (Executor.execute ~tabs ~call:(call fake) (Lane.Page_read { tab_id = Some 1; max_chars = Some (Masc.Browser_page_script.max_text_chars + 1) })));
+  check int "and sends nothing" 0 (List.length fake.sent)
+;;
+
 let test_unserved_verbs () =
   let tabs = Executor.Tabs.create () and fake = fake [ blank ] ~active:None in
   List.iter
     (fun verb ->
       check bool (Lane.verb_to_string verb) true (rejected_before_effect (Executor.execute ~tabs ~call:(call fake) verb)))
-    [ Lane.Page_read { tab_id = None; max_chars = None }; Lane.Session_status; Lane.Page_elements { tab_id = None } ];
+    [ Lane.Session_status; Lane.Page_downloads { tab_id = 0 }; Lane.Page_document { tab_id = 0 } ];
   check int "nothing was sent" 0 (List.length fake.sent)
 ;;
 
@@ -210,6 +246,7 @@ let () =
       test_case "a page that moved during capture is refused" `Quick test_capture_refuses_a_moving_page;
     ];
     "sentences", [ test_case "each sentence verb sends one Stagehand call" `Quick test_sentence_verbs ];
+    "reads", [ test_case "reads run the page scripts" `Quick test_reads_run_the_page_scripts ];
     "refusals", [ test_case "an unserved verb sends nothing" `Quick test_unserved_verbs ];
     "evaluate", [ test_case "the expression calls its body" `Quick test_evaluate_expression ];
   ]

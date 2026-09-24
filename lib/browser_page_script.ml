@@ -1,5 +1,14 @@
 (* Fixed observation script shared by the native Firefox reader's callers.
    Selectors are generated from the observed DOM, never inferred from text. *)
+
+(* A text read: the page's visible text up to [arguments[0]] Unicode code
+   points, with its full length so a reader knows what was cut. *)
+let text =
+  "const text=document.body?.innerText ?? ''; const chars=Array.from(text); return {url:location.href,title:document.title,text:chars.slice(0,arguments[0]).join(''),chars:chars.length,truncated:chars.length>arguments[0]};"
+
+(* What a text read returns when it names no cap, and the most it returns. *)
+let default_text_chars = 50_000
+let max_text_chars = 100_000
 let elements = {|
 const nodes = Array.from(document.querySelectorAll('a[href],button,input:not([type=hidden]),textarea,select,[contenteditable=true],[role=button],[role=link]'));
 function selector(el) {

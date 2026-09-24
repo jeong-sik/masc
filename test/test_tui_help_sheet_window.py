@@ -1,0 +1,82 @@
+"""The cheat sheet says which of its lines these are.
+
+The sheet is longer than any terminal -- at 150x78 the later sections are
+still off screen -- and it drew no reading of where the viewport stood, so a
+reader pressing [j] could not tell a page from a hundred. Measured on the
+live server: 670 lines at 24x80, 568 at 46x120.
+
+It also pins the pair the keypress and the drawing share. [G] bounds the
+scroll through Masc_tui_render.help_viewport; a drawing that used a
+different height would leave the last line off screen after [G].
+"""
+import os
+import re
+import sys
+
+import test_tui_keyboard_input as h
+
+# The sources this scenario stands over. scripts/ci/run-edited-tests.sh runs a
+# suite when a pull request changes a path the suite names.
+SOURCE_MODULES = (
+    "bin/masc_tui_render.ml",
+)
+
+SHEET = b"MASC Cheat Sheet"
+WINDOW = re.compile(rb"\[lines (\d+)-(\d+)/(\d+)\]")
+
+
+def window_of(drawn: bytes, where: str) -> tuple[int, int, int]:
+    screen = b"\n".join(h.screen_rows(drawn).values())
+    found = WINDOW.search(screen)
+    if not found:
+        raise AssertionError(f"{where}: the sheet drew no window: {screen!r}")
+    return tuple(int(group) for group in found.groups())
+
+
+def run(executable: str) -> None:
+    def interact(process, fd, _slave, output, _base_path):
+        h.wait_for_output(process, fd, output, b"MASC Overview", start=0,
+                          timeout=15)
+        drawn = h.resize_and_wait(process, fd, output, rows=24, columns=80,
+                                  needle=b"MASC Overview",
+                                  controls=(h.FULL_REDRAW,))
+        drawn = h.send_and_wait(process, fd, output, b"?", SHEET)
+        first, last, total = window_of(drawn, "at the top of the sheet")
+        if first != 1:
+            raise AssertionError(f"the sheet opened at line {first}, not 1")
+        if total <= last:
+            raise AssertionError(
+                f"the sheet says it holds {total} lines and shows up to "
+                f"{last}, so it is not a window")
+        height = last - first + 1
+
+        # [G] bounds the scroll through the same viewport the frame draws
+        # with, so the last line of the sheet is the last line on screen.
+        # Waited on the reading rather than on the title: [G] redraws the
+        # rows it moved, and the title above them is not one of them.
+        drawn = h.send_and_wait(process, fd, output, b"G", b"[lines ")
+        g_first, g_last, g_total = window_of(drawn, "after G")
+        if g_total != total:
+            raise AssertionError(
+                f"the sheet held {total} lines and now holds {g_total}")
+        if g_last != total:
+            raise AssertionError(
+                f"G left the sheet at {g_first}-{g_last} of {total}, so its "
+                "last line is off screen")
+        if g_last - g_first + 1 != height:
+            raise AssertionError(
+                f"the viewport was {height} rows at the top and "
+                f"{g_last - g_first + 1} after G")
+
+        h.send_and_wait(process, fd, output, b"\x1b", b"MASC Overview")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(executable,
+                            description="cheat sheet window reading",
+                            interact=interact,
+                            http_fixtures=h.keeper_runtime_http_fixtures())
+
+
+if __name__ == "__main__":
+    run(os.path.abspath(sys.argv[1]))
+    print("the cheat sheet says which lines these are: PASS")

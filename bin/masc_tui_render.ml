@@ -15844,14 +15844,23 @@ let render_context_inspector state =
 (* What the help overlay can show right now: the rows its sheet folds to at
    this width, and the height it draws them in. The key handler bounds its
    step against this, so a press that the frame cannot spend is not taken. *)
+(* The sheet's rows and the viewport that shows them. One answer for the two
+   readers -- the keypress that bounds the scroll and the frame that draws it
+   -- so [G] cannot land the scroll a row past what the frame is showing.
+
+   A sheet longer than its viewport spends one of its rows saying which lines
+   these are, so that row comes off the height both readers use. *)
 let help_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let header = help_masthead state in
-  ( List.length
+  let count =
+    List.length
       (Masc_tui_help.sheet ~header ~cols
          (help_lines ~width:(Masc_tui_help.line_cells ~cols) state))
-  , framed_content_height ~rows )
+  in
+  let height = framed_content_height ~rows in
+  (count, if count > height then max 1 (height - 1) else height)
 
 (* The [:] palette: a typed filter over every jump the strip and roster
    offer. The list is the same [palette_matches] the Enter key resolves, so
@@ -16130,15 +16139,27 @@ let render_help (state : state) =
        pressing [j] forty times, and nothing said [G] exists. The keys are
        handled at masc_tui.ml: "pageup" | "pagedown", "g", "G". *)
     ~hints:"j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close"
-    ~body:(fun ~budget c ->
+    (* [help_viewport] rather than the budget it is derived from: the
+       keypress bounds the scroll against that pair, and a sheet whose
+       drawing used a different height would leave [G] one row short. *)
+    ~body:(fun ~budget:_ c ->
+      let count, height = help_viewport state in
       let scroll =
-        Masc_tui_scroll.normalize
-          ~count:(List.length rendered_rows) ~height:budget state.help_scroll
+        Masc_tui_scroll.normalize ~count ~height state.help_scroll
       in
       List.iteri
         (fun index line ->
-          if index >= scroll && index < scroll + budget then c.push line)
-        rendered_rows)
+          if index >= scroll && index < scroll + height then c.push line)
+        rendered_rows;
+      (* Which of them these are. The sheet is longer than any terminal --
+         at 150x78 the later sections are still off screen -- so a reader
+         pressing [j] had no way of telling a page from a hundred. *)
+      if count > height then
+        c.push
+          (Theme.recede ()
+          ^ Printf.sprintf "  [lines %s]"
+              (Masc_tui_scroll.window_text ~scroll ~height count)
+          ^ Ansi.reset))
 
 (* Rows the agenda panel can show, and how many it has. The keypress bounds
    the scroll from the same pair the frame draws with -- the shape

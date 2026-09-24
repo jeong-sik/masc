@@ -988,7 +988,12 @@ let microvm_work_volume ~backend ~keeper_name ~timeout_sec =
     is a refusal like {!microvm_work_volume}'s: a guest that cannot get the
     volume this RFC's disk-reclaim path depends on does not start rather
     than fall back to writing `_build` onto the unified work volume, which
-    is exactly the unbounded growth this exists to bound. *)
+    is exactly the unbounded growth this exists to bound. Recreated, not
+    merely ensured: this runs only on a fresh [container run] (never on
+    adoption of an already-running guest, the same boundary
+    {!microvm_work_volume} keeps its own volume across), so "fresh boot"
+    and "empty build volume" coincide by construction, and every guest
+    restart is the host-disk reclaim this RFC exists for. *)
 let microvm_build_volume ~backend ~keeper_name ~timeout_sec =
   match (backend : Keeper_microvm_backend.t) with
   | Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata -> Ok None
@@ -997,7 +1002,7 @@ let microvm_build_volume ~backend ~keeper_name ~timeout_sec =
      | Error message -> Error ("microvm_build_volume_unnamed: " ^ message)
      | Ok volume_name ->
        (match
-          Keeper_sandbox_microvm.ensure_apple_build_volume
+          Keeper_sandbox_microvm.recreate_apple_build_volume
             ~volume_name
             ~size:(Env_config_sandbox.Runtime.microvm_build_volume_size ())
             ~timeout_sec

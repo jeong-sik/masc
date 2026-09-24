@@ -443,6 +443,22 @@ val ensure_apple_build_volume
     measurement set the default at 128 GiB against one keeper's real 87 GB
     across three checkouts; the image itself is sparse. *)
 
+val apple_build_volume_delete_argv : volume_name:string -> string list
+
+val recreate_apple_build_volume
+  :  volume_name:string
+  -> size:string
+  -> timeout_sec:float
+  -> ([ `Created | `Already_present ], string) result
+(** Delete the volume if present, then {!ensure_apple_build_volume}. Called
+    once per fresh guest boot (RFC-0468): [_build] is entirely derived, so
+    starting the volume empty every time costs one cold build and is the
+    only host-disk reclaim path that exists -- Apple's virtio-blk exposes
+    no discard, and `container volume` has no attach/detach to swap the
+    volume under a running guest. A probe failure refuses rather than
+    guesses; deleting on an ambiguous answer risks a volume this call did
+    not create the record for. *)
+
 (** {3 Finding checkouts and their [_build] state inside the guest}
 
     A [Micro_vm] keeper's tree is [Endpoint_owned]

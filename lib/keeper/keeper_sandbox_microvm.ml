@@ -1509,6 +1509,41 @@ let ensure_apple_build_volume ~volume_name ~size ~timeout_sec =
             (output_for_log ~stdout ~stderr)))
 ;;
 
+let apple_build_volume_delete_argv ~volume_name =
+  command_argv_for Backend.Apple_container @ [ "volume"; "delete"; volume_name ]
+;;
+
+(** Recreate the build volume fresh on every boot rather than reusing one
+    across a guest's restarts: [_build] is entirely derived, so starting
+    empty costs one cold build and reclaims whatever host disk the previous
+    life's volume had grown to -- the only reclaim path that exists, since
+    Apple's virtio-blk exposes no discard the guest could use to shrink it
+    in place (measured), and `container volume` has no attach/detach to
+    swap it mid-session (checked: `create, delete/rm, list/ls, inspect,
+    prune` only). A probe failure refuses the boot rather than guess --
+    deleting on an ambiguous answer risks a volume this call did not create
+    the record for. *)
+let recreate_apple_build_volume ~volume_name ~size ~timeout_sec =
+  match apple_build_volume_probe ~volume_name ~timeout_sec with
+  | Volume_probe_failed message ->
+    Error (Printf.sprintf "microvm_build_volume_probe_failed: %s" message)
+  | Volume_absent -> ensure_apple_build_volume ~volume_name ~size ~timeout_sec
+  | Volume_present ->
+    let argv = apple_build_volume_delete_argv ~volume_name in
+    (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
+     | Unix.WEXITED 0, _, _ -> ensure_apple_build_volume ~volume_name ~size ~timeout_sec
+     | status, stdout, stderr ->
+       Error
+         (Printf.sprintf
+            "microvm_build_volume_delete_failed: %s (%s; %s)"
+            volume_name
+            (match status with
+             | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+             | Unix.WSIGNALED n -> Printf.sprintf "signalled %d" n
+             | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n)
+            (output_for_log ~stdout ~stderr)))
+;;
+
 (* ── Finding checkouts and their _build state inside the guest ────────
    RFC-0399's original walk and link used Unix.lstat/Sys.readdir/Unix.symlink
    directly on a host-visible playground. That assumed the tree was on the

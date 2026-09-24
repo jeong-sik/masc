@@ -1385,6 +1385,13 @@ let test_apple_build_volume_create_argv_carries_a_size () =
   Alcotest.(check bool) "size is passed" true (adjacent ~flag:"-s" ~value:"64g" argv)
 ;;
 
+let test_apple_build_volume_delete_argv_names_the_volume () =
+  let argv = M.apple_build_volume_delete_argv ~volume_name:"masc-keeper-build-x" in
+  Alcotest.(check bool) "goes through container" true (contains "container" argv);
+  Alcotest.(check bool) "deletes a volume" true (adjacent ~flag:"volume" ~value:"delete" argv);
+  Alcotest.(check bool) "names it" true (contains "masc-keeper-build-x" argv)
+;;
+
 let test_plan_build_link_never_deletes_real_build_output () =
   let target = "/masc-build/masc-t362" in
   Alcotest.(check bool)
@@ -2612,6 +2619,8 @@ let () =
             test_build_volume_mount_targets_the_guest_root
         ; Alcotest.test_case "apple build volume create argv carries a size" `Quick
             test_apple_build_volume_create_argv_carries_a_size
+        ; Alcotest.test_case "apple build volume delete argv names the volume" `Quick
+            test_apple_build_volume_delete_argv_names_the_volume
         ; Alcotest.test_case "plan never deletes real build output" `Quick
             test_plan_build_link_never_deletes_real_build_output
         ; Alcotest.test_case "build link target is flat and unique per checkout" `Quick

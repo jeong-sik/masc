@@ -25,6 +25,9 @@ let class_of (err : Agent_core.Error.t) =
     "provider:network:unknown"
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) ->
     "provider:unavailable"
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.CapacityExhausted { scope = Llm_provider.Error.CapacityProvider; _ }) ->
+    "provider:capacity"
   | Agent_core.Error.Provider (Llm_provider.Error.ParseError _) ->
     "provider:parse_error"
   | Agent_core.Error.Provider
@@ -119,7 +122,7 @@ let test_codex_error_info_lands_in_its_class () =
       [ "usage limit", Usage_limit_exceeded, "provider:hard_quota"
       ; "session budget", Session_budget_exceeded, "provider:hard_quota"
       ; "rate limit", Rate_limit_exceeded, "provider:rate_limit"
-      ; "server overloaded", Server_overloaded, "provider:unavailable"
+      ; "server overloaded", Server_overloaded, "provider:capacity"
       ; "internal server error", Internal_server_error, "provider:unavailable"
       ; ( "too many failed attempts"
         , Response_too_many_failed_attempts { http_status_code = None }

@@ -343,9 +343,18 @@ let turn_failure_to_provider_error ~detail codex_error_info =
     Llm_provider.Error.HardQuota { provider; retry_after = None; detail }
   | Some Runtime_codex_app_server.Codex_error_info.Rate_limit_exceeded ->
     Llm_provider.Error.RateLimit { provider; retry_after = None; detail }
+  (* An overloaded server is the provider's capacity, the class a 529 and a
+     capacity refusal read as (#38290), not an outage. Both walk to the next
+     candidate; the class names why in the candidate evidence. *)
+  | Some Runtime_codex_app_server.Codex_error_info.Server_overloaded ->
+    Llm_provider.Error.CapacityExhausted
+      { scope = Llm_provider.Error.CapacityProvider
+      ; affected = [ provider ]
+      ; retry_after = None
+      ; detail
+      }
   | Some
-      ( Runtime_codex_app_server.Codex_error_info.Server_overloaded
-      | Runtime_codex_app_server.Codex_error_info.Internal_server_error
+      ( Runtime_codex_app_server.Codex_error_info.Internal_server_error
       | Runtime_codex_app_server.Codex_error_info.Response_too_many_failed_attempts _ )
     ->
     Llm_provider.Error.ProviderUnavailable { provider; detail }

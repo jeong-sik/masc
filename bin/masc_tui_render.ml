@@ -3003,8 +3003,8 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
       in
       (body_lines, detail_lines))
   in
-  let total_lines = Board_read_layout.body_count document in
-  let detail_line_count = Board_read_layout.comment_count document in
+  let total_lines = Board_read_layout.body_line_count document in
+  let detail_line_count = Board_read_layout.comment_line_count document in
   let detail_comment_count =
     match detail with
     | Board_detail.Ready (_, comments) -> List.length comments
@@ -3049,16 +3049,22 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   in
   (* Reading without a position is guessing: the post body and the comment
      thread each name where they stand, in the window the other reading
-     surfaces draw. *)
+     surfaces draw.
+
+     Both halves count wrapped rows, and the row says so. The comment half
+     read "comments 1-10/6085" beside a header drawing the thread's own
+     "157", because a comment becomes an identity row, a timestamp row and
+     one row per wrapped line. Two numbers under one word on one screen, and
+     the larger one is the one a reader has no way to place. *)
   if
     total_lines > body_lines_drawn || detail_line_count > comment_lines_drawn
   then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "post %s%s"
+      (Printf.sprintf "post lines %s%s"
          (Masc_tui_scroll.window_text ~scroll:scroll.body_offset
             ~height:body_lines_drawn total_lines)
          (if detail_line_count > comment_lines_drawn then
-            "  \xc2\xb7  comments "
+            "  \xc2\xb7  comment lines "
             ^ Masc_tui_scroll.window_text ~scroll:scroll.comment_offset
                 ~height:comment_lines_drawn detail_line_count
           else ""));

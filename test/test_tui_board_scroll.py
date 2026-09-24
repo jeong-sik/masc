@@ -1,5 +1,6 @@
 """A long Board thread stays navigable across wheel bursts and live edits."""
 import os
+import re
 import sys
 import time
 import test_tui_keyboard_input as h
@@ -130,8 +131,79 @@ def run_side_by_side(executable: str) -> None:
                             interact=interact, http_fixtures=fixtures)
 
 
+# The window row at the foot of the read pane. Both halves count wrapped
+# rows, so both say so: the comment half read "comments 1-10/6085" beside a
+# header drawing the thread's own 157, and a reader meeting both numbers had
+# no way to tell which one counted comments.
+POST_WINDOW = re.compile(rb"post lines \d+-\d+/(\d+)")
+COMMENT_WINDOW = re.compile(rb"comment lines \d+-\d+/(\d+)")
+
+
+def run_window_names_what_it_counts(executable: str) -> None:
+    """The comment window counts rows, and a thread whose rows outnumber its
+    comments proves the row says which of the two it is showing."""
+    fixtures = h.overview_event_http_fixtures()
+    post = h.board_selection_post("rows", "Rows and comments", "One body line")
+    # Six comments, each wrapping to far more than one row, so the two counts
+    # cannot be read as the same number by accident.
+    comments = [
+        h.board_detail_comment(
+            f"rows-comment-{i}", f"Comment {i:03d}\n" + ("a paragraph row\n" * 20)
+        )
+        for i in range(6)
+    ]
+    post["comment_count"] = len(comments)
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": [post]})
+    fixtures["/api/v1/board/post-rows?format=flat"] = (
+        200, {"post": post, "comments": comments})
+
+    def interact(process, fd, _slave, output, _base):
+        h.wait_for_output(process, fd, output, b"Health: ", start=0, timeout=10)
+        h.palette_go(process, fd, output, b"go board", b"MASC Board")
+        h.send_and_wait(process, fd, output, b"\r", b"Comment 000")
+        h.wait_for_output(process, fd, output, b"comment lines ", start=0, timeout=5)
+        h.read_available(fd, output)
+        rows = h.screen_rows(bytes(output))
+        screen = h.screen_text(bytes(output))
+        carrying = [text for _, text in sorted(rows.items())
+                    if COMMENT_WINDOW.search(text)]
+        if not carrying:
+            raise AssertionError(
+                "no row names the comment window: "
+                + screen.decode("utf-8", "replace"))
+        window = carrying[-1]
+        if not POST_WINDOW.search(window):
+            raise AssertionError(
+                "the post half does not name what it counts: " + repr(window))
+        counted = int(COMMENT_WINDOW.search(window).group(1))
+        if counted <= len(comments):
+            raise AssertionError(
+                f"the comment window counted {counted} for {len(comments)} "
+                "comments, so this thread cannot tell rows from comments: "
+                + repr(window))
+        # The header draws the thread's own count. The two numbers are both on
+        # this screen, which is the reason each one says what it is.
+        header = [text for _, text in sorted(rows.items())
+                  if b"MASC Board" in text]
+        if not header:
+            raise AssertionError("no Board header on screen")
+        if str(len(comments)).encode() not in header[0]:
+            raise AssertionError(
+                f"the header does not draw the thread's {len(comments)} "
+                "comments: " + repr(header[0]))
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="The Board read window says it counts rows",
+        interact=interact,
+        http_fixtures=fixtures)
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
     print("Long Board thread scrolling: PASS")
     run_side_by_side(os.path.abspath(sys.argv[1]))
     print("Board read comments beside the post: PASS")
+    run_window_names_what_it_counts(os.path.abspath(sys.argv[1]))
+    print("Board read window names what it counts: PASS")

@@ -147,44 +147,53 @@ let curl_get_argv_for_test = curl_get_argv
 
 type transport_failure =
   | Curl_exited of int
+  | Timed_out
   | Curl_signaled of int
   | Curl_stopped of int
 
-let transport_failure_of_status = function
-  | Unix.WEXITED 0 -> None
-  | Unix.WEXITED code -> Some (Curl_exited code)
-  | Unix.WSIGNALED signal -> Some (Curl_signaled signal)
-  | Unix.WSTOPPED signal -> Some (Curl_stopped signal)
+(* Classified by the runner that produced the status: its own budget usually
+   stops curl before curl's [--max-time] does, and it reports that as a
+   synthesized exit, not as curl's. *)
+let transport_failure_of_status status =
+  match Process_eio.exit_reason_of_status status with
+  | Process_eio.Completed 0 -> None
+  | Process_eio.Completed code -> Some (Curl_exited code)
+  | Process_eio.Timed_out -> Some Timed_out
+  | Process_eio.Signaled signal -> Some (Curl_signaled signal)
+  | Process_eio.Stopped signal -> Some (Curl_stopped signal)
 ;;
 
 let transport_failure_to_string ~url = function
   | Curl_exited code -> Printf.sprintf "curl exit code %d for %s" code url
+  | Timed_out -> Printf.sprintf "curl timed out for %s" url
   | Curl_signaled signal -> Printf.sprintf "curl signal %d for %s" signal url
   | Curl_stopped signal -> Printf.sprintf "curl stopped %d for %s" signal url
 ;;
 
-(* The causes a fetch meets, from curl(1) EXIT CODES. Any other code is
-   still reported by number. *)
+(* The causes a fetch meets, in curl(1) EXIT CODES wording. Any other code
+   is reported by number. *)
 let curl_exit_cause = function
   | 6 -> Some "could not resolve host"
   | 7 -> Some "could not connect"
   | 28 -> Some "timed out"
   | 35 -> Some "TLS handshake failed"
-  | 47 -> Some "too many redirects"
   | 52 -> Some "empty reply from server"
-  | 56 -> Some "connection reset while receiving"
-  | 60 -> Some "server certificate not trusted"
+  | 56 -> Some "failure receiving network data"
+  | 60 -> Some "peer certificate verification failed"
   | 63 -> Some "response larger than the size limit"
   | _ -> None
 ;;
 
+(* Signal numbers from [Unix.WSIGNALED] are OCaml's own ([Sys.sigkill] is -7),
+   so the model is told only that a signal ended curl. *)
 let transport_failure_cause = function
   | Curl_exited code ->
     (match curl_exit_cause code with
      | Some cause -> Printf.sprintf "curl exit %d (%s)" code cause
      | None -> Printf.sprintf "curl exit %d" code)
-  | Curl_signaled signal -> Printf.sprintf "curl killed by signal %d" signal
-  | Curl_stopped signal -> Printf.sprintf "curl stopped by signal %d" signal
+  | Timed_out -> "timed out before curl answered"
+  | Curl_signaled _ -> "curl was killed by a signal"
+  | Curl_stopped _ -> "curl was stopped by a signal"
 ;;
 
 let http_get_text_response_with_headers ?(timeout_sec = default_timeout_sec)

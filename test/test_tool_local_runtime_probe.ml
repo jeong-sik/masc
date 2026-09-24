@@ -284,8 +284,19 @@ let test_transport_failure_names_its_cause () =
     (H.transport_failure_cause (H.Curl_exited 28));
   check string "unnamed code keeps its number" "curl exit 99"
     (H.transport_failure_cause (H.Curl_exited 99));
-  check string "signal" "curl killed by signal 9"
-    (H.transport_failure_cause (H.Curl_signaled 9));
+  check string "a signal is named without OCaml's number"
+    "curl was killed by a signal"
+    (H.transport_failure_cause (H.Curl_signaled Sys.sigkill));
+  (* The runner's own budget usually stops curl first and reports a
+     synthesized exit; that is a timeout, not curl's code 124. *)
+  check bool "the runner's timeout is a timeout" true
+    (H.transport_failure_of_status Process_eio.timed_out_status = Some H.Timed_out);
+  check string "timeout cause" "timed out before curl answered"
+    (H.transport_failure_cause H.Timed_out);
+  check bool "curl's own exit keeps its code" true
+    (H.transport_failure_of_status (Unix.WEXITED 6) = Some (H.Curl_exited 6));
+  check bool "success is no failure" true
+    (H.transport_failure_of_status (Unix.WEXITED 0) = None);
   check string "operator text keeps the url" "curl exit code 6 for https://example.invalid/"
     (H.transport_failure_to_string ~url:"https://example.invalid/" (H.Curl_exited 6))
 

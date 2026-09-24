@@ -122,7 +122,7 @@ val with_http_get_for_test :
    headers:(string * string) list ->
    max_response_bytes:int ->
    string ->
-   (int option * string, string) result) ->
+   (int option * string, Tool_local_runtime_http.transport_failure) result) ->
   (unit -> 'a) ->
   'a
 (** [with_http_get_for_test http_get f] temporarily replaces the HTTP

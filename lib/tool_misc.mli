@@ -43,7 +43,7 @@ val with_web_fetch_http_get_for_test :
    headers:(string * string) list ->
    max_response_bytes:int ->
    string ->
-   (int option * string, string) result) ->
+   (int option * string, Tool_local_runtime_http.transport_failure) result) ->
   (unit -> 'a) ->
   'a
 

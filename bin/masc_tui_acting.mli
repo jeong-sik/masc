@@ -99,6 +99,14 @@ val row_of_entry : duration_ms:float option -> entry -> row
     this rather than [row_of_event] so there is no clock argument at the call
     site to hand in the wrong value. *)
 
+val keeper_row_of_entry :
+  traces:(string * string) list -> duration_ms:float option -> entry -> row
+(** The row the Actions and Everything scopes draw: {!row_of_entry} under
+    {!keeper_of_event} instead of the agent name the feed gave, so an
+    agent_core lane row is drawn under the keeper whose trace it carries.
+    {!measured_of_event} of the entry's event is {!measured_of_row} of this
+    row. *)
+
 val row_of_event :
   at:float -> duration_ms:float option -> Observer.event -> row
 (** [at] is the row's clock, given by the caller. The screen is a feed: rows
@@ -275,7 +283,8 @@ val measured_of_event :
     shows, once per frame, for every entry the feed still holds. *)
 
 val columns : inner_width:int -> measured list -> columns
-(** How wide the keeper and event columns have to be for [rows].
+(** How wide the keeper and event columns have to be for [measures], counted
+    as the renderer draws each text: control bytes as their escapes.
 
     Both were literals of 16. The agent_core family names its runtime lane as
     the agent -- [agent_core-glm-coding.glm-5-turbo] is thirty cells -- so

@@ -1354,13 +1354,14 @@ let test_no_column_goes_under_what_it_drew_before () =
       (columns.Acting.label_cells >= 16)
   done
 
-(* And the detail column keeps half the row: it is the one that carries
-   sentences. *)
 (* Measuring asks the event for its keeper and its label. The row the screen
    draws has to say the same two words: if the two readings drifted, the
-   columns would be sized for a table that is not on the screen. The keeper
-   is the reading that already differed -- a correlated agent_core row is
-   drawn under the keeper whose trace it carries, not under its lane. *)
+   columns would be sized for a table that is not on the screen. The row
+   compared here is the one the flat scopes draw, [keeper_row_of_entry], not a
+   copy of its rule. The label lines hold by construction -- both readings
+   take [label_of_event] -- so the keeper is what this test divides on: a
+   correlated agent_core row is drawn under the keeper whose trace it carries,
+   not under its lane. *)
 let test_measuring_reads_what_the_row_draws () =
   let traces = [ ("keeper-one", "trace-1") ] in
   let correlated =
@@ -1369,15 +1370,19 @@ let test_measuring_reads_what_the_row_draws () =
         Observer.Agent_core { e with Observer.correlation = Some "trace-1" }
     | other -> other
   in
+  let drawn event =
+    Acting.measured_of_row
+      (Acting.keeper_row_of_entry ~traces ~duration_ms:None
+         { Acting.ae_at = 100.; ae_event = event })
+  in
   List.iter
     (fun (what, event) ->
-      let row = Acting.row_of_event ~at:100. ~duration_ms:None event in
+      let on_screen = drawn event in
       let measured = Acting.measured_of_event ~traces event in
-      check string (what ^ ": the same event word") row.Acting.label
-        measured.Acting.measured_label;
+      check string (what ^ ": the same event word")
+        on_screen.Acting.measured_label measured.Acting.measured_label;
       check string (what ^ ": the keeper the row is drawn under")
-        (Acting.keeper_of_event ~traces event)
-        measured.Acting.measured_keeper)
+        on_screen.Acting.measured_keeper measured.Acting.measured_keeper)
     [ ("a plain tool call", agent_core ~tool:"masc_board_stats" "alpha")
     ; ("a skill call", agent_core ~tool:"keeper_skill" "alpha")
     ; ("a correlated call", correlated)
@@ -1387,15 +1392,38 @@ let test_measuring_reads_what_the_row_draws () =
     ; ("a heartbeat", heartbeat "keeper-one")
     ; ("a registry push", Observer.Internal_agent_runs_changed)
     ];
-  (* The dividing case: the correlated call is measured under the keeper, and
-     that is not the name its own row field carries. Without this, measuring
-     off [row.keeper] would pass every line above. *)
-  let row = Acting.row_of_event ~at:100. ~duration_ms:None correlated in
-  check string "the row's own field still names the lane"
-    "agent_core-glm-coding.glm-5-turbo" row.Acting.keeper;
-  check string "and measuring names the keeper" "keeper-one"
-    (Acting.measured_of_event ~traces correlated).Acting.measured_keeper
+  (* The dividing case: the drawn row names the keeper, and that is not the
+     name [row_of_entry] gives it. Drawing without the rename would leave the
+     lane here while measuring names the keeper, and the check above fails. *)
+  check string "the drawn row names the keeper" "keeper-one"
+    (drawn correlated).Acting.measured_keeper;
+  let unrenamed =
+    Acting.row_of_entry ~duration_ms:None
+      { Acting.ae_at = 100.; ae_event = correlated }
+  in
+  check string "which is not the lane the feed named"
+    "agent_core-glm-coding.glm-5-turbo" unrenamed.Acting.keeper
 
+(* The renderer draws a name through [Terminal_text.single_line], which spells
+   a control byte as a four-cell escape. Measured raw, a tab and a whole ESC
+   colour sequence took no cells, so the column came out narrower than the
+   name drawn in it: [keeper-\x1B[31mred\x1B[0m] is 25 cells on screen and
+   was measured as 10, the tab name 23 and 19. *)
+let test_a_control_byte_is_measured_as_it_is_drawn () =
+  List.iter
+    (fun name ->
+      let on_screen = Masc.Tui_decode.sanitize_terminal_text name in
+      let columns =
+        Acting.columns ~inner_width:160
+          [ Acting.measured_of_event ~traces:[] (heartbeat name) ]
+      in
+      check int
+        (String.escaped name ^ ": the column holds the drawn name whole")
+        (String.length on_screen) columns.Acting.keeper_cells)
+    [ "keeper\tone-two-three"; "keeper-\x1b[31mred\x1b[0m" ]
+
+(* And the detail column keeps half the row: it is the one that carries
+   sentences. *)
 let test_the_named_columns_leave_detail_its_half () =
   let long = String.make 80 'x' in
   for inner_width = 80 to 200 do
@@ -1516,5 +1544,7 @@ let () =
             test_the_named_columns_leave_detail_its_half
         ; test_case "measuring reads what the row draws" `Quick
             test_measuring_reads_what_the_row_draws
+        ; test_case "a control byte is measured as it is drawn" `Quick
+            test_a_control_byte_is_measured_as_it_is_drawn
         ] )
     ]

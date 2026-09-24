@@ -502,6 +502,15 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
 let row_of_entry ~duration_ms entry =
   row_of_event ~at:entry.ae_at ~duration_ms entry.ae_event
 
+(* The row the flat scopes draw, under the keeper who acted rather than the
+   agent name the feed gave. [measured_of_event] reads the same keeper, so
+   the one rule that renames an agent_core lane lives here beside it instead
+   of in the renderer. *)
+let keeper_row_of_entry ~traces ~duration_ms entry =
+  { (row_of_entry ~duration_ms entry) with
+    keeper = keeper_of_event ~traces entry.ae_event
+  }
+
 (* ── Turn chunks ────────────────────────────────────────────────────────
    [Turns] draws one row per keeper turn instead of the up-to-seven
    lifecycle rows a single tool call produces across the two reporting
@@ -1254,11 +1263,28 @@ let measured_of_event ~traces event =
   ; measured_label = label_of_event event
   }
 
+(* The cells a name takes once drawn. The table draws the keeper and the
+   label through the renderer's [Terminal_text.single_line], which is
+   [Masc.Tui_decode.sanitize_terminal_text]: a control byte reaches the
+   screen as its four-cell escape ([\x09], [\x1B]). Measuring the raw text
+   sized the column narrower than the name it then drew. *)
+let drawn_cells text =
+  Masc_tui_message_layout.display_width
+    (Masc.Tui_decode.sanitize_terminal_text text)
+
 let columns ~inner_width measures =
+  (* The kept entries repeat a handful of keeper names and event words, and
+     the widest of a text measured twice is the widest of it measured once,
+     so each distinct text is measured once. *)
   let widest pick =
+    let seen = Hashtbl.create 32 in
     List.fold_left
       (fun widest measure ->
-        max widest (Masc_tui_message_layout.display_width (pick measure)))
+        let text = pick measure in
+        if Hashtbl.mem seen text then widest
+        else (
+          Hashtbl.add seen text ();
+          max widest (drawn_cells text)))
       0 measures
   in
   let keeper_needed =

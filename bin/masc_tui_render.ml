@@ -12792,8 +12792,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Other _ ->
           None
     in
-    let row = Acting.row_of_entry ~duration_ms entry in
-    { row with Acting.keeper = Acting.keeper_of_event ~traces event }
+    Acting.keeper_row_of_entry ~traces ~duration_ms entry
   in
   (* [Turns] folds the whole ring into per-turn rows; the flat filters keep
      the page-lazy pairing above. *)

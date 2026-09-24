@@ -974,21 +974,18 @@ describe('normalizeBoardAttachments', () => {
     ])
   })
 
-  it('keeps a safe old entry and exposes unsafe or malformed old entries', () => {
+  it('shows a failure card for old untyped entries, including HTTPS ones', () => {
     const old = {
       id: 'a-old', kind: 'image', origin_url: 'https://cdn.example.com/old.png',
       origin_name: 'old.png', origin_size_bytes: 12, created_at: 1,
     }
-    const decoded = normalizeBoardAttachments([
+    expect(normalizeBoardAttachments([
       old,
       { ...old, origin_url: 'http://example.com/old.png' },
-      { ...old, id: '' },
+    ])).toEqual([
+      { ok: false, raw: old },
+      { ok: false, raw: { ...old, origin_url: 'http://example.com/old.png' } },
     ])
-    expect(decoded?.[0]).toMatchObject({ ok: true, attachment: {
-      source: { kind: 'url', url: old.origin_url, name: 'old.png' },
-    } })
-    expect(decoded?.[1]).toMatchObject({ ok: false })
-    expect(decoded?.[2]).toMatchObject({ ok: false })
   })
 })
 
@@ -1400,27 +1397,16 @@ describe('board attachments decode', () => {
   }
 
   function attachmentEntry(kind: string, overrides: Record<string, unknown> = {}) {
-    return {
-      id: `a-${kind}`,
-      kind,
-      origin_url: 'https://cdn.example.com/a.png',
-      origin_name: 'a.png',
-      origin_size_bytes: 128,
-      mime_type: 'image/png',
-      width: 640,
-      height: null,
-      created_at: 1_714_989_600,
-      ...overrides,
-    }
+    return { kind, url: 'https://cdn.example.com/a.png', ...overrides }
   }
 
   it('decodes all four attachment kinds into typed entries', async () => {
     stubBoardResponse({
       attachments: [
         attachmentEntry('image'),
-        attachmentEntry('video', { origin_url: 'https://cdn.example.com/b.mp4', mime_type: 'video/mp4' }),
-        attachmentEntry('youtube', { origin_url: 'https://youtu.be/abc123def45', width: null }),
-        attachmentEntry('external_link', { origin_url: 'https://example.com/spec' }),
+        attachmentEntry('video', { url: 'https://cdn.example.com/b.mp4' }),
+        attachmentEntry('youtube', { url: 'https://youtu.be/abc123def45' }),
+        attachmentEntry('external_link', { url: 'https://example.com/spec' }),
       ],
     })
 
@@ -1433,14 +1419,7 @@ describe('board attachments decode', () => {
       ok: true,
       attachment: {
         kind: 'image',
-        source: {
-          kind: 'url',
-          url: 'https://cdn.example.com/a.png',
-          name: 'a.png',
-          sizeBytes: 128,
-          width: 640,
-          height: null,
-        },
+        source: { kind: 'url', url: 'https://cdn.example.com/a.png' },
       },
     })
     expect(attachments?.[3]).toMatchObject({

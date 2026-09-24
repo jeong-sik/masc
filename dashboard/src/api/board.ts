@@ -480,9 +480,8 @@ function normalizeBoardMeta(raw: unknown): BoardPost['meta'] {
   return Object.keys(next).length > 0 ? next : null
 }
 
-// New entries use the Board post handler's closed {kind,url|artifact} carrier.
-// Older {origin_url,...} entries are read only when the complete legacy shape
-// and an HTTPS URL are valid. Every other stored value becomes a failure card.
+// Board post entries use the handler's closed {kind,url|artifact} carrier.
+// Every other stored value becomes a failure card.
 const BOARD_ATTACHMENT_KINDS: ReadonlySet<string> = new Set([
   'image',
   'video',
@@ -540,33 +539,6 @@ function normalizeBoardAttachment(raw: unknown): BoardAttachmentDecode {
     }
   }
 
-  // Read old metadata deliberately: complete HTTPS entries still display;
-  // malformed or unsafe entries keep the explicit failure card.
-  if (
-    typeof raw.id === 'string'
-    && !!raw.id.trim()
-    && isHttpsAttachmentUrl(raw.origin_url)
-    && typeof raw.origin_size_bytes === 'number'
-    && Number.isFinite(raw.origin_size_bytes)
-    && raw.origin_size_bytes >= 0
-    && typeof raw.created_at === 'number'
-    && Number.isFinite(raw.created_at)
-  ) {
-    return {
-      ok: true,
-      attachment: {
-        kind,
-        source: {
-          kind: 'url',
-          url: raw.origin_url,
-          name: asString(raw.origin_name, ''),
-          sizeBytes: raw.origin_size_bytes,
-          width: asNumber(raw.width) ?? null,
-          height: asNumber(raw.height) ?? null,
-        },
-      },
-    }
-  }
   return { ok: false, raw }
 }
 

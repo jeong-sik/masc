@@ -524,14 +524,22 @@ let render_section_resources ~cols (state : state) =
                 (age_text (now -. started_at_unix)) lane)
           running
   in
-  let safety_lines = match state.fleet_safety with
-    | None -> [ "    Execution readiness not observed" ]
-    | Some (Decode.Fleet_not_measured { status }) ->
+  (* A failed read is the loader's own sentence, as the Keepers header draws
+     it. It read "not observed", which is what the section says before the
+     first read, so a fleet the TUI could not read looked like one it had not
+     asked for yet (#38499). *)
+  let safety_lines = match state.fleet_safety, state.fleet_safety_error with
+    | _, Some error -> [ "    Execution readiness: " ^ Terminal_text.single_line error ]
+    | None, None -> [ "    Execution readiness not observed" ]
+    | Some (Decode.Fleet_not_measured { status }), None ->
       [ "    Execution readiness " ^ Masc_tui_fleet_line.not_measured_text ~status ]
-    | Some (Decode.Fleet_measured safety) ->
-      [ Printf.sprintf "    Executable %d / target %d · shortfall %d · failing %d · paused %d"
-          safety.fs_executable_count safety.fs_target_reaction_capacity
-          safety.fs_reaction_capacity_shortfall safety.fs_failing_count safety.fs_paused_count ]
+    | Some (Decode.Fleet_measured { fleet = safety; freshness }), None ->
+      Printf.sprintf "    Executable %d / target %d · shortfall %d · failing %d · paused %d"
+        safety.fs_executable_count safety.fs_target_reaction_capacity
+        safety.fs_reaction_capacity_shortfall safety.fs_failing_count safety.fs_paused_count
+      :: (Masc_tui_fleet_line.freshness_text ~now freshness
+          |> Option.map (fun text -> "    " ^ text)
+          |> Option.to_list)
   in
   List.map clip
     ([ title "Retained task outcomes · 24-hour snapshot window" ] @ task_lines

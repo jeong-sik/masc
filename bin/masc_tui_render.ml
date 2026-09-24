@@ -3510,13 +3510,24 @@ let render_planning_list (state : state) =
          let content_height =
            rows - count_frame_lines buf - selection_rows - tail_rows
          in
+         (* Where the list stands, when it does not hold every goal. At
+            sixty columns and twenty-four rows the active filter held eight
+            and the frame drew seven, and nothing on the screen said an
+            eighth existed -- the rollup above counts every goal in the
+            store, not the ones this filter and this frame leave off. The
+            reading costs one of the rows it describes, the way it does on
+            the roster and the reading panes. *)
+         let overflowing = count > content_height in
+         let list_rows =
+           if overflowing then max 1 (content_height - 1) else content_height
+         in
          let scroll_offset =
-           if state.planning_cursor >= content_height then
-             state.planning_cursor - content_height + 1
+           if state.planning_cursor >= list_rows then
+             state.planning_cursor - list_rows + 1
            else 0
          in
-         let goals_window = Rows.of_list ~first:scroll_offset ~height:content_height goals in
-         for i = 0 to content_height - 1 do
+         let goals_window = Rows.of_list ~first:scroll_offset ~height:list_rows goals in
+         for i = 0 to list_rows - 1 do
            let idx = i + scroll_offset in
            match Rows.at goals_window idx with
            | None -> box_empty buf cols
@@ -3609,6 +3620,11 @@ let render_planning_list (state : state) =
                box_line buf cols line
            end
          done;
+         if overflowing then
+           box_line_styled buf cols ~style:(Theme.recede ())
+             (Printf.sprintf "  [goals %s]"
+                (Masc_tui_scroll.window_text ~scroll:scroll_offset
+                   ~height:list_rows count));
          match List.nth_opt goals state.planning_cursor with
          | None -> box_empty buf cols
          | Some selected ->

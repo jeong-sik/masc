@@ -5604,6 +5604,7 @@
 (include stanzas/test_tui_coordinator_status_row.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_planning_summary_rows.inc)
+(include stanzas/test_tui_planning_goal_window.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
 (include stanzas/test_tui_approvals_footer_matches_the_sheet.inc)

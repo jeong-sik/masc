@@ -62,12 +62,20 @@ let test_recipe_needs_no_build_context () =
    rule in lib/keeper_sandbox_image copies it into the binary. CI builds the
    image from the file while the binary and test.yml use the embedded string,
    so the two have to be the same bytes. Dune passes the declared dependency's
-   path directly; the test does not infer it from its build directory. *)
+   path directly; the direct CI runners provide DUNE_SOURCEROOT. Neither path
+   depends on the test's build directory. *)
 
 let test_binary_embeds_the_recipe_file () =
-  if Array.length Sys.argv <> 2 then
-    fail "Dune must pass the declared recipe file as the sole argument";
-  let on_disk = In_channel.with_open_bin Sys.argv.(1) In_channel.input_all in
+  let recipe_path =
+    match Sys.argv with
+    | [| _; path |] -> path
+    | [| _ |] ->
+      (match Sys.getenv_opt "DUNE_SOURCEROOT" with
+      | Some root -> Filename.concat root "sandbox-images/base/Dockerfile"
+      | None -> fail "recipe path argument or DUNE_SOURCEROOT is required")
+    | _ -> fail "expected a single recipe path argument"
+  in
+  let on_disk = In_channel.with_open_bin recipe_path In_channel.input_all in
   check string "embedded recipe = file" on_disk Keeper_sandbox_image.dockerfile
 
 let test_build_argv_reads_the_recipe_from_stdin () =

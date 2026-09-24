@@ -564,13 +564,13 @@ let rec physical_path_allow_missing path =
   try Some (Fs_compat.realpath path) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Unix.Unix_error (Unix.ENOENT, _, _) ->
+    (* lstat raises only Unix_error: a path it can stat, or any error other
+       than ENOENT, is not an absent buffer. *)
     let absent =
-      try
-        ignore (Unix.lstat path);
-        false
-      with
-      | Unix.Unix_error (Unix.ENOENT, _, _) -> true
-      | _ -> false
+      match Unix.lstat path with
+      | (_ : Unix.stats) -> false
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true
+      | exception Unix.Unix_error _ -> false
     in
     if not absent
     then None

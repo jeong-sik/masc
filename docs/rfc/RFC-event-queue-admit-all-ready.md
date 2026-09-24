@@ -1,23 +1,24 @@
 ---
 rfc: "event-queue-admit-all-ready"
-title: "이벤트 큐 — 준비된 자극은 한 턴이 전부 본다, 턴 실패는 자극을 버리지 않는다"
+title: "이벤트 큐 — 준비된 자극은 어드미션 경계 안에서 본다, 턴 실패는 자극을 버리지 않는다"
 status: Draft
 created: 2026-08-22
-updated: 2026-08-22
+updated: 2026-09-25
 author: claude
 supersedes: []
 superseded_by: null
 related: ["0377"]
 ---
 
-# RFC: 이벤트 큐 — 준비된 자극은 한 턴이 전부 본다, 턴 실패는 자극을 버리지 않는다 (event-queue-admit-all-ready)
+# RFC: 이벤트 큐 — 준비된 자극은 어드미션 경계 안에서 본다, 턴 실패는 자극을 버리지 않는다 (event-queue-admit-all-ready)
 
 ## 0. 요약
 
 Keeper 턴은 지금 Event Layer 자극을 **사이클당 1건**만 받는다 (`keeper_heartbeat_stimulus_intake.mli` 머리 주석,
 RFC-0020 §3 Rule 4). RFC-0377 이 `Connector_attention` 한 종류만 "같은 대화는 함께" 로 풀었다. 이 RFC 는 그 규칙을
-모든 자극 종류로 넓힌다: **claim 시각에 준비된 pending 자극 전부가 그 턴에 들어간다.** 개수·바이트·시간 창 같은
-숫자 장치는 두지 않는다.
+모든 자극 종류로 넓힌다: **claim 시각에 준비된 pending 자극을 턴에 넣는다.** 개수·시간 창은 두지 않는다.
+2026-09-24 변경(§7)은 렌더된 관찰의 바이트를 admission 시점에 제한한다. 맞지 않는 한 행은 운영자에게
+드러나는 차단 상태로 보존하고 다른 준비된 자극이 진행되게 한다.
 
 둘째, 턴이 실패하면 지금은 그 턴에 들어간 자극을 **영구 폐기**한다 (`Batch_quarantine` → `Turn_attempt_terminal`).
 라이브 처분 4,205건 중 379건(9.0%)이 이 경로로 사라졌고, 원인은 전부 provider/설정/컨텍스트 쪽이지 자극 내용이
@@ -92,10 +93,10 @@ Checkpointed 사이클은 ack 없이 같은 head 를 다시 읽는다 (128 사�
 
 ## 2. 설계
 
-### 2.1 admission — claim 시각의 준비된 pending 전부
+### 2.1 admission — claim 시각의 준비된 pending 을 바이트 경계 안에서
 
-`heartbeat_event_intake` 는 urgency → 도착순으로 정렬된 pending(#29448) 을 head 부터 **끝까지** 읽어 준비된
-것을 전부 이 턴에 admit 한다. 종류별 예외는 지금 있는 것만 유지한다:
+`heartbeat_event_intake` 는 urgency → 도착순으로 정렬된 pending(#29448) 을 head 부터 읽어 준비된
+것을 admit 한다. §7 의 바이트 경계와 아래 종류별 예외를 적용한다:
 
 | 종류 | 규칙 |
 |---|---|
@@ -105,8 +106,8 @@ Checkpointed 사이클은 ack 없이 같은 head 를 다시 읽는다 (128 사�
 
 - Board 읽기가 일시 실패한 항목(`Stimulus_retry_later`)은 지금처럼 그 항목만 이번 사이클에서 빼고 나머지는
   admit 한다. 첫 실패 항목이 `event_queue_intake_error` 에 남는 것도 그대로.
-- 배치 크기·바이트·대기 창·"너무 오래된 것 버리기" 는 두지 않는다. 배치 크기는 유입/드레인 속도의 사실이지 제어
-  대상이 아니다 (RFC-0377 §3 과 같은 입장).
+- 배치 건수·대기 창·"너무 오래된 것 버리기" 는 두지 않는다. 배치 건수는 유입/드레인 속도의 사실이지 제어
+  대상이 아니다 (RFC-0377 §3 과 같은 입장). §7 의 바이트 경계는 예외다.
 - 턴 컨텍스트 투영 순서는 큐 순서(urgency → 도착)와 같다.
 
 ### 2.2 disposition — 턴 결과는 턴의 속성, 큐는 사실만 든다
@@ -131,9 +132,9 @@ Checkpointed 사이클은 ack 없이 같은 head 를 다시 읽는다 (128 사�
 다룬다: 다음 턴의 `### Your Recent Actions` 에 실패한 턴의 행동이 그대로 보이고, 무엇을 다시 할지는 keeper 판단이다.
 큐가 자극을 숨겨서 막는 방식은 "거부된 완료" 42건처럼 keeper 가 알아야 할 사실까지 함께 숨긴다.
 
-결정론적으로 매 사이클 실패하는 경우(설정 오류, 컨텍스트 초과)는 cadence 속도로 같은 실패가 반복되며 로그·metric
-에 그대로 보인다. 지금도 그 keeper 는 다른 이유로 깨어나 같은 실패를 반복하므로 새 비용이 아니다. 고치는 자리는
-설정/컨텍스트이지 큐가 아니다.
+설정 오류처럼 자극과 무관한 실패는 keeper 운영 상태에서 다룬다. 입력 크기가 확정적으로 맞지 않으면 §7.2 의
+admission 차단 또는 keeper 일시 정지로 전환한다. `Batch_no_action` 만 반복하면서 같은 입력을 cadence 마다
+제출하지 않는다.
 
 ### 2.3 `Schedule_due` 투영 — 같은 schedule 은 한 행
 
@@ -203,38 +204,66 @@ taskmaster 의 18건은 한 턴에서 한 행이 되고 한 번에 사라진다.
 
 ### 7.2 설계
 
-1. **단위**: 턴에 admit 되는 자극이 턴 문맥에 렌더하는 관찰 행의 UTF-8 바이트. 측정은 문맥 조립이 쓰는 것과 같은
-   렌더러로 한다 — 측정용 두 번째 인코딩을 만들지 않는다.
-2. **선언**: 런타임 TOML 키 `admission_budget_bytes`(keeper 공통). 기본 65,536, 범위 [8,192, 1,048,576],
-   범위 밖 값은 로드 오류(잘라내지 않는다). `MASC_KEEPER_ADMISSION_MAX_EVENTS`, `KeeperAdmissionBounds`,
-   설정 레지스트리 항목, 런타임 설정 표시줄은 삭제된다(#38176 의 선택 상한 절반).
-3. **시행 지점**: `consume_batch` 의 순차 admit 루프. 후보 selection 의 관찰 행을 먼저 재고, 예산 안이면 admit,
-   아니면 그 자리에서 중단한다. 중단 뒤의 selection 은 pending 에 남는다 — 오늘의 개수 상한과 같은 의미로,
-   버리지 않고 다음 턴에 간다. 이미 admit 한 행을 자르지 않는다.
-4. **바닥 규칙**: 첫 ready selection 은 행 하나가 예산을 넘어도 admit 한다. 깨움은 턴을 열어야 하고, 거부하면
-   깨움 자체가 사라진다. 이때 남는 예산과 함께 INFO 로 기록한다.
-5. **가시성**: 중단 시 INFO 로 withheld 건수와 바이트. 카운터는 이 하나만 둔다.
-6. **connector_attention**: recorded items 조회는 admit 된 접두사의 event id 로만 한다(현행
-   `Seq.take max_events` 대체).
-7. **경계는 바이트 하나뿐**: 32, 256, clamp 같은 개수 장치는 유지하지 않는다.
+1. **단위**: 턴에 admit 되는 자극이 실제 턴 문맥에 더하는 UTF-8 바이트. 문맥 조립과 같은 렌더러로 후보를
+   투영한 뒤, 섹션 제목·건수·접기(`Schedule_due`)·프레이밍 변화까지 포함한 전체 요청의 길이 차이를 잰다.
+   행 길이를 더하는 별도 근사식은 쓰지 않는다.
+2. **선언**: 런타임 TOML 키 `admission_budget_bytes`(keeper 공통)는 **필수 양의 정수**다. 누락·0·음수·정수
+   범위 밖은 로드 오류다. 측정되지 않은 고정 기본값과 임의의 허용 구간은 두지 않는다. 운영자는 배포 전에
+   §7.4 의 실제 고정 문맥과 관찰 행 크기를 재고, 사용하는 레인에서 남는 요청 용량 이하로 값을 선언한다.
+   라이브 설정을 먼저 채운 뒤 개수 상한을 제거하는 배포 순서도 구현 PR 에 기록한다.
+   `MASC_KEEPER_ADMISSION_MAX_EVENTS`, `KeeperAdmissionBounds`, 설정 레지스트리 항목, 런타임 설정 표시줄은
+   삭제된다(#38176 의 선택 상한 절반).
+3. **합산 경계**: `D` 는 선언한 자극 바이트 예산이다. 같은 불변 입력 스냅샷에서 자극이 없는 최종 요청을
+   `Fᵢ`, admit 후보를 넣어 렌더한 최종 요청과의 바이트 차이를 `Aᵢ` 로 잰다(후보 런타임 `i` 별).
+   `Aᵢ ≤ D` 를 지키고, 검증 가능한 **전체 요청** 상한 `Cᵢ` 가 있는 후보는 `Fᵢ + Aᵢ ≤ Cᵢ` 도
+   지킨다. 이번 턴에서 선택될 수 있는 모든 후보에 이 조건을 적용한다. #38500 의 브리핑 예산도 그 후보
+   집합을 쓰지만, `max-prompt-bytes` 가 Claude Code 의 이력 씨앗만 제한하는 경우에는 그 값을 전체 요청
+   상한인 양 재사용하지 않는다. `Cᵢ` 를 확인할 수 없는 후보에서는 `D` 만 성장 경계이며 provider
+   문맥 적합성 보장은 하지 않는다.
+4. **시행 지점**: `consume_batch` 의 순차 admit 루프에서 각 후보를 같은 렌더러로 다시 투영한다. 어떤 후보에서든
+   `Aᵢ > D` 또는 알려진 `Fᵢ + Aᵢ > Cᵢ` 이면 그 자리에서 중단하고 잔여 selection 을 pending 에 둔다.
+   단, 현재 admitted 가 비었는데 이 selection **혼자도** 전체 예산에 못 맞으면 5번으로 간다. 이미 admit 한 행은
+   자르지 않는다.
+5. **한 selection 이 맞지 않을 때**: 예산을 무시하고 첫 행을 admit 하지 않는다. source id, 렌더 바이트,
+   적용된 `D`·해당 후보의 `Cᵢ`, 이유를 가진 durable `Admission_blocked` 상태로 해당 selection 을 보존한다. 이 상태는
+   ready 조회에서 제외하므로 다음 ready selection 이 진행한다. ack·terminal 처분은 하지 않는다. 운영자가
+   예산/원본을 고친 뒤 명시적으로 재평가를 요청해야 ready 로 돌아간다. 표시·로그에 차단 이유와 복구 동작을
+   노출한다. 자극 없는 `Fᵢ` 자체가 `Cᵢ` 를 넘으면 특정 selection 을 탓하지 않고 keeper 를 입력 부적합으로
+   일시 정지하며 pending 을 그대로 둔다.
+6. **알려지지 않은 상한의 실패**: `Cᵢ` 가 없어 provider 가 typed 입력 크기 거절을 돌려주면, 효과 실행 전임이
+   증명된 경우에도 같은 batch 를 그대로 자동 재제출하지 않는다. keeper 를 입력 부적합으로 일시 정지하고
+   실패한 전체 요청 크기와 batch id 를 남긴다. 원인을 한 행으로 특정할 수 없으므로 source 를 자동 격리하지
+   않는다. 효과 여부를 증명할 수 없는 실패는 기존 안전 판정을 따른다. 운영자가 원인을 고치고 재개하면
+   pending 을 다시 평가한다.
+7. **가시성**: 예산 때문에 중단하면 withheld 건수와 바이트를 INFO 로 남긴다. 한 행 차단과 keeper 정지는
+   각각 durable 이유를 표시한다. 계측이 차단 자체를 자동 해제하지 않는다.
+8. **connector_attention**: recorded items 조회는 실제 admit 된 event id 로만 한다(현행
+   `Seq.take max_events` 대체). 앞의 selection 이 차단된 경우도 건너뛴 정확한 id 집합을 사용한다.
+9. **경계는 바이트 하나뿐**: 32, 256, clamp 같은 개수 장치는 유지하지 않는다.
 
 ### 7.3 이 변경 안에서 하지 않을 것
 
 - 렌더된 문맥을 자르는 사후 예산(`assemble` trim). Required 는 자를 수 없고, 문맥이 이미 커진 뒤라 늦다.
-- `max-prompt-bytes` 에서 예산을 파생하는 것. 그 키를 선언하지 않은 라이브에서 경계가 사라진다. briefing budget
-  선언은 별도 후속 이슈로만 남긴다.
-- 백로그의 우선순위 재정렬·재처리.
+- `max-prompt-bytes` 에서 선언 예산 `D` 를 파생하는 것. 그 키를 선언하지 않은 라이브에서 경계가 사라진다.
+   §7.2-3 의 실제 **전체 요청** 상한이 있는 후보에만 추가 적합성 검사를 한다.
+- ready 백로그의 우선순위 재정렬·재처리. 명시적으로 차단된 selection 만 ready 조회에서 빠진다.
 
 ### 7.4 검증
 
-1. 예산 초과 시 그 자리 중단, 잔여 pending 유지, INFO 1건(단위).
-2. 단일 초대형 행의 바닥 규칙 — 첫 selection admit + INFO(단위).
-3. connector items 조회가 admit 접두사만 본다(단위).
-4. `admission_budget_bytes` 범위 밖 값의 로드 오류(설정 suite).
-5. 환경변수·레지스트리 항목 삭제의 회귀(`test_env_config_keeper_admission_bounds` 재작성, 설정 레지스트리
+1. 여러 selection 의 합이 예산을 넘을 때 그 자리에서 중단, 잔여 pending 유지, INFO 1건. 전체 렌더 결과의
+   섹션 제목·건수 변화와 schedule 접기까지 계산한다.
+2. 단일 초대형 selection 은 `Admission_blocked` 로 남고 다음 ready selection 이 진행한다. 명시적 재평가 전에는
+   다음 tick 에도 admit 되지 않는다. 자극 없는 `Fᵢ > Cᵢ` 는 keeper 정지이지 source 차단이 아니다.
+3. 전체 요청 상한이 있는 레인에서 `Aᵢ ≤ D` 여도 `Fᵢ + Aᵢ > Cᵢ` 면 admit 을 막는다. 상한 미선언 레인의 typed
+   입력 크기 거절은 같은 batch 를 재시도하지 않고 정지하며, 효과 여부가 불명확하면 자동 처분하지 않는다.
+4. connector items 조회가 실제 admit 된 id 만 본다(차단된 선두 selection 포함).
+5. `admission_budget_bytes` 누락·0·음수·정수 범위 밖 값의 로드 오류(설정 suite).
+6. 환경변수·레지스트리 항목 삭제의 회귀(`test_env_config_keeper_admission_bounds` 재작성, 설정 레지스트리
    스냅샷). 기존 4 suite(`test_keeper_board_unavailable`, `test_keeper_connector_attention_batch`,
    `test_keeper_board_turn_ack`, `test_env_config_keeper_admission_bounds`)를 새 계약으로 다시 쓴다.
-6. 라이브 재측정(구현 PR 본문): 턴별 admit 바이트 분포, withheld 빈도(기대: 0에 가까움), 백로그 상한 변화.
+7. 라이브 재측정(구현 PR 본문): 레인별 자극 없는 최종 요청 `F`, 전체 요청 상한 `C` 의 근거, 관찰 행 바이트
+   분포, 선언값 `D` 의 선택 근거, 턴별 admit 바이트, withheld·차단 빈도, 백로그 변화. `C` 없는 레인의
+   provider 거절도 기록한다. 계측 전에는 특정 기본값이 안전하다고 주장하지 않는다.
 
 ### 7.5 관계
 

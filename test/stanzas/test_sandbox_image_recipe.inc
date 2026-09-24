@@ -5,6 +5,6 @@
 (test
  (name test_sandbox_image_recipe)
  (modules test_sandbox_image_recipe)
- (deps %{workspace_root}/sandbox-images/base/Dockerfile)
- (action (run %{test}))
+ (deps (:recipe %{workspace_root}/sandbox-images/base/Dockerfile))
+ (action (run %{test} %{recipe}))
  (libraries alcotest masc.keeper_sandbox_image masc.config masc))

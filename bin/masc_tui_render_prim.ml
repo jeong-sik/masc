@@ -4319,15 +4319,15 @@ let context_input_map_detail_lines ~width ~scale
 let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
     (provider_input : (Masc_tui_context_inspector.provider_input, string) result) =
   let module Inspector = Masc_tui_context_inspector in
-  let exact_input = Result.to_option provider_input in
-  let error_rows =
+  let rows, exact_input, error_rows =
     match provider_input with
-    | Ok _ -> []
+    | Ok input -> Inspector.input_map_rows record (Some input), Some input, []
     | Error detail ->
-        [ (Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail
-          ^ Ansi.reset ]
+        ( Inspector.input_map_rows record None
+        , None
+        , [ (Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail
+            ^ Ansi.reset ] )
   in
-  let rows = Inspector.input_map_rows record exact_input in
   match state.context_inspector_exact with
   | Some index ->
       (match List.nth_opt rows index with

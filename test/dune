@@ -1271,8 +1271,8 @@
 (test
  (name test_tui_config_pane_title_head)
  (modules test_tui_config_pane_title_head)
- (libraries alcotest masc_tui_message_layout masc_tui_render_prim
-  masc_tui_theme))
+ (libraries alcotest masc_tui_ansi masc_tui_message_layout
+  masc_tui_render_prim masc_tui_theme))
 
 (test
  (name test_tui_voice_wizard_wiring)

@@ -7,10 +7,13 @@
    tab strip a row above does not already say with the marked Config entry,
    and it still spends the cells the rest of the row needs. *)
 
-let gap_cells = 2
-
 let cells text =
   Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
+
+(* Measured off the gap the row actually draws, not written down beside it:
+   a two spelled here and a three drawn there is how a test stops asking the
+   question it was written for. *)
+let gap_cells = cells Masc_tui_ansi.tab_strip_gap
 
 let head ~room ~name ~reading =
   Masc_tui_render_prim.config_pane_title_head ~room ~name ~reading
@@ -24,10 +27,12 @@ let test_both_parts_fit () =
   let drawn = head ~room:40 ~name:" MASC Config" ~reading:"3 panes" in
   Alcotest.(check bool) "the name is there" true (holds drawn "MASC Config");
   Alcotest.(check bool) "and so is the reading" true (holds drawn "3 panes");
+  let gap = Masc_tui_ansi.tab_strip_gap in
+  let gap_bytes = String.length gap in
   Alcotest.(check bool) "and the head ends on the gap that holds the keys off"
     true
-    (String.length drawn >= gap_cells
-     && String.sub drawn (String.length drawn - gap_cells) gap_cells = "  ")
+    (String.length drawn >= gap_bytes
+     && String.equal (String.sub drawn (String.length drawn - gap_bytes) gap_bytes) gap)
 
 let test_the_reading_gives_way_first () =
   let name = " MASC Config" in

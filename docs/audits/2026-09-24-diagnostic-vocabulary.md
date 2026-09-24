@@ -24,6 +24,8 @@ merged or deployed behavior claim.
 | --- | --- | --- |
 | Fusion failed-panel Board evidence | `reason_detail` and `reason` stored the same `panel_failure_text`. | #38825 keeps `reason_detail` and updates Board, Fusion, and chat readers. TUI already requires that field. |
 | TUI continuity measurement | The sample header and its cause line both said `QUESTION/ANSWER/JUDGE FAILED`. | #38829 keeps `FAILED` in the status and names the stage on its `CAUSE` line, including when the header scrolls away. |
+| TUI Metrics loading | The Keeper turns loader already said `keeper turns load failed`, and Metrics added `Current turn observation failed`; a stale memory reading likewise repeated `refresh failed` before the loader's failure label. | #38845 keeps the loader's single source label and renders its cause once. |
+| TUI Keeper chat progress | The row heading said `REQUEST ERROR`, while its detail began `stream reported an error` before the provider cause. | #38846 renders the reported cause directly. A missing cause is named before any runtime attribution is added. |
 | Board reaction summary | `reacted` and `has_reacted` carried the same viewer boolean through the server, Dashboard normalizer, and UI type. | #38842 keeps `reacted`; the producer test requires the alias key to be absent. |
 | Keeper status and Dashboard | `trace_history_count` and `handoff_count_total` were both `List.length m.runtime.trace_history`. | #38843 keeps `handoff_count_total` for KPI and briefing readers. |
 | Keeper model label | `last_model_used_label` and `active_model_label` were populated from the same last runtime attempt, or both null. | #38844 keeps `active_model_label` and removes the duplicate producer and Dashboard fallback. |

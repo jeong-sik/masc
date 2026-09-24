@@ -182,7 +182,9 @@ max-concurrent = 1
 
 (* The head declares a large prompt ceiling, the fallback a small one, and a
    third binding declares none. [roomy] and [tight] are the declared
-   ceilings the briefing-budget tests read back. *)
+   ceilings the briefing-budget tests read back. Both declare through a
+   Claude Code provider: loading refuses [max-prompt-bytes] on a runtime that
+   does not read it. *)
 let roomy_max_prompt_bytes = 1_048_576
 let tight_max_prompt_bytes = 131_072
 
@@ -206,13 +208,15 @@ candidates = [ "open.open_model", "primary.roomy_model", "fallback.tight_model" 
 
 [providers.primary]
 display-name = "Primary Provider"
-protocol = "openai-compatible-http"
-endpoint = "http://127.0.0.1:1"
+protocol = "claude-code"
+command = "/fixture-must-not-run-a-model"
+is-non-interactive = true
 
 [providers.fallback]
 display-name = "Fallback Provider"
-protocol = "openai-compatible-http"
-endpoint = "http://127.0.0.1:2"
+protocol = "claude-code"
+command = "/fixture-must-not-run-a-model"
+is-non-interactive = true
 
 [providers.open]
 display-name = "Open Provider"
@@ -714,11 +718,7 @@ let test_briefing_budget_fits_the_smallest_lane_ceiling () =
       Alcotest.(check int)
         "the briefing is a share of the fallback's ceiling"
         (briefing_share_of tight_max_prompt_bytes)
-        budget;
-      Alcotest.(check bool)
-        "the briefing fits the fallback's ceiling"
-        true
-        (budget <= tight_max_prompt_bytes))
+        budget)
 
 (* A candidate that declares no ceiling has none in any admission path. It
    adds no bound, and it must not erase the bound a sibling declares. *)

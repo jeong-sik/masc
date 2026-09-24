@@ -305,6 +305,10 @@ type model_spec =
         bytes-per-token constant with nothing to justify it, and a wrong
         constant either truncates silently or overflows silently.
 
+        Only Claude Code and Antigravity runtimes read it. Loading refuses it
+        on a model bound through any other provider
+        ([Runtime_toml.validate_max_prompt_bytes_readers]).
+
         [None] applies no ceiling, which is the behaviour every deployment has
         today. Resolved via {!Runtime.max_prompt_bytes_of_runtime_id} →
         {!Runtime_inference.resolve_max_prompt_bytes}. *)

@@ -1370,9 +1370,9 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
        The ceiling is this runtime's own max-prompt-bytes. The pinned
        briefing was sized earlier from the smallest max-prompt-bytes among
        the candidates the turn's walk holds
-       ([Keeper_turn_runtime_budget.world_state_briefing_budget_bytes]), so
-       it fits under this ceiling; the shrink below cuts only the
-       conversation window. *)
+       ([Keeper_turn_runtime_budget.world_state_briefing_budget_bytes]). That
+       budget can only withhold [Own_recent_actions] rows, so it does not
+       promise a fit; the shrink below cuts only the conversation window. *)
     Option.value
       (Runtime.max_prompt_bytes_of_runtime_id runtime_id)
       ~default:unbounded_model_input_capacity_bytes

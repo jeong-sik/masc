@@ -6,16 +6,18 @@ import { describe, expect, it } from 'vitest'
 import {
   decodeTurnInputComponentId,
   decodeTurnPromptBlockId,
+  TURN_INPUT_COMPONENT_LITERALS,
   TURN_PROMPT_BLOCK_IDS,
 } from './api/dashboard-turn-records'
 
 // Backend -> frontend parity for the prompt block ids a TurnRecord carries.
 //
-// The decoder rejects a record whose `blocks` or `input_components` name an id
-// outside TURN_PROMPT_BLOCK_IDS, and the whole record then decodes to null.
-// Prompt_block_id gained Skill_compositions in #34284 and every Keeper turn
-// has carried that block since; the dashboard list did not, so the turn
-// record view and the last-prompt view dropped every live row.
+// One `blocks` or `input_components` entry outside TURN_PROMPT_BLOCK_IDS fails
+// the whole turn-records response, so every row of that Keeper disappears.
+// Prompt_block_id gained Skill_compositions in #34284, and every turn of a
+// Keeper with composition tools carries it (all 24 live Keepers on
+// 2026-09-25); the dashboard list did not, so the turn-record view and the
+// last-prompt view showed none of their rows.
 //
 // Two independent reads of the OCaml source must agree before the comparison
 // counts: the constructors of `type t` and the arms of `to_string`. to_string
@@ -129,6 +131,10 @@ describe('Turn_record input_component_id parity', () => {
 
   it('spells the prompt component as the prefix the dashboard parses', () => {
     expect(emitter).toMatch(/\|\s*Prompt_block\s+block\s*->\s*"prompt\."\s*\^\s*Prompt_block_id\.to_string\s+block/)
+  })
+
+  it('lists exactly the literal components the backend emits', () => {
+    expect([...TURN_INPUT_COMPONENT_LITERALS].sort()).toEqual(arms.map(arm => arm.wire).sort())
   })
 
   it('decodes every literal component the backend emits', () => {

@@ -171,7 +171,7 @@ docker run -d --name "$container" \
 # link. conf-ncurses runs `pkg-config ncurses`, which needs the .pc file that
 # only libncurses-dev carries, and its depext name for Ubuntu is
 # "lib64ncurses-dev" -- not a package here, so opam cannot repair the miss on
-# its own. Dockerfile.keeper-sandbox records the same solve failing that way
+# its own. sandbox-images/ocaml/Dockerfile records the same solve failing that way
 # (exit 20 out of the opam stage, measured 2026-08-26). conf-protoc lists
 # libprotobuf-dev and protobuf-compiler as its depexts; naming them keeps the
 # apt run here instead of somewhere inside `opam install`.

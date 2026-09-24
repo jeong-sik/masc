@@ -379,17 +379,11 @@ jobs:
         # cases that used to fail on the missing image fail on the guard
         # instead, so the image alone would move the error, not remove it.
         #
-        # The recipe is compiled from its own module rather than linked out of
-        # bin/main_eio.exe, which is a minute of linking to print a string.
-        # Measured in the sandbox-image lane on 2026-09-09: 3s for the printer
-        # (14s there, including an apt-get this lane does not need) and 49s for
-        # the docker build.
+        # The recipe is read from its file, the same file the binary embeds at
+        # build time, so nothing has to be compiled or linked to print it.
         run: |
           set -euo pipefail
-          cp lib/keeper_sandbox_image/keeper_sandbox_image.ml "$RUNNER_TEMP/recipe.ml"
-          printf '\nlet () = print_string dockerfile\n' >> "$RUNNER_TEMP/recipe.ml"
-          opam exec -- ocamlc -o "$RUNNER_TEMP/print-recipe" "$RUNNER_TEMP/recipe.ml"
-          "$RUNNER_TEMP/print-recipe" | docker build -t masc-sandbox:general -
+          docker build -t masc-sandbox:general - < sandbox-images/base/Dockerfile
           docker image inspect masc-sandbox:general --format '{{.Id}}'
 
       - name: Run the tests this pull request edits

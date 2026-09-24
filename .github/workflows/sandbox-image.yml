@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/sandbox-image.yml'
       - 'lib/keeper_sandbox_image/**'
+      - 'sandbox-images/**'
       - 'scripts/verify-sandbox-creative-tools.py'
       - 'scripts/verify-sandbox-image-archive.py'
       - 'scripts/tests/test_sandbox_image_archive.py'
@@ -31,15 +32,10 @@ jobs:
           persist-credentials: false
       - name: Verify archive identity contract
         run: python3 -m unittest discover -s scripts/tests -p test_sandbox_image_archive.py
-      - name: Compile the embedded recipe printer
+      - name: Stage the recipe
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ocaml-nox
-          cp lib/keeper_sandbox_image/keeper_sandbox_image.ml "$RUNNER_TEMP/recipe.ml"
-          printf '\nlet () = print_string dockerfile\n' >> "$RUNNER_TEMP/recipe.ml"
-          ocamlc -o "$RUNNER_TEMP/print-recipe" "$RUNNER_TEMP/recipe.ml"
           mkdir -p "$RUNNER_TEMP/sandbox-image"
-          "$RUNNER_TEMP/print-recipe" > "$RUNNER_TEMP/sandbox-image/Dockerfile"
+          cp sandbox-images/base/Dockerfile "$RUNNER_TEMP/sandbox-image/Dockerfile"
       - name: Build the native image
         run: |
           source_commit=$(git rev-parse HEAD)

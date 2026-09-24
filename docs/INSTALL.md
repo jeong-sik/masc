@@ -482,7 +482,7 @@ and is not offered as a verified alternative.
 git, less, procps, Python 3, and ripgrep. **Node, pnpm, OCaml, compilers, an
 SSH client, and model CLIs are not included.** To build and test a project,
 prepare an image with the toolchain it needs and name it in the Keeper's
-`sandbox_image`. The repository's `Dockerfile.keeper-sandbox` is a separate
+`sandbox_image`. The repository's `sandbox-images/ocaml/Dockerfile` is a separate
 image for MASC development, not part of a regular install.
 
 ## Initial prompts, skills, and Keepers

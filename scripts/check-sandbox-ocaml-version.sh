@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check-sandbox-ocaml-version.sh
 #
-# CI gate: verify that the OCaml compiler Dockerfile.keeper-sandbox installs is
+# CI gate: verify that the OCaml compiler sandbox-images/ocaml/Dockerfile installs is
 # the one masc.opam requires.
 #
 # Rationale: the image starts from `ocaml/opam:ubuntu-24.04-ocaml-5.5`, whose
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-dockerfile="$repo_root/Dockerfile.keeper-sandbox"
+dockerfile="$repo_root/sandbox-images/ocaml/Dockerfile"
 
 # --- What masc.opam requires: "ocaml" {= "X.Y.Z"} ----------------------------
 req_ver="$(grep -oE '"ocaml" \{= "[0-9]+\.[0-9]+\.[0-9]+"\}' "$repo_root/masc.opam" \
@@ -41,7 +41,7 @@ if [[ -z "$img_ver" ]]; then
          "$req_ver" >&2
   printf '  Base image: %s\n' "${from_tag:-<no ocaml/opam FROM line>}" >&2
   printf '  A base tag names a minor version, so it cannot satisfy an exact pin\n' >&2
-  printf '  on its own. Fix: install ocaml-base-compiler.%s in Dockerfile.keeper-sandbox.\n' \
+  printf '  on its own. Fix: install ocaml-base-compiler.%s in sandbox-images/ocaml/Dockerfile.\n' \
          "$req_ver" >&2
   exit 1
 fi
@@ -56,7 +56,7 @@ if [[ "$img_ver" == "$req_ver" ]]; then
 else
   printf 'FAIL: sandbox compiler %s does not match the masc.opam pin %s\n' \
          "$img_ver" "$req_ver" >&2
-  printf '  Fix: update Dockerfile.keeper-sandbox to install ocaml-base-compiler.%s\n' \
+  printf '  Fix: update sandbox-images/ocaml/Dockerfile to install ocaml-base-compiler.%s\n' \
          "$req_ver" >&2
   exit 1
 fi

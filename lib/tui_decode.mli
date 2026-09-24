@@ -42,11 +42,20 @@ type keeper = {
   k_updated_at : string;
 }
 
+val escape_invisible : string -> string
+(** Draw bidi controls and zero-width characters (U+061C, U+200B-U+200F,
+    U+202A-U+202E, U+2066-U+2069, U+FEFF) as their own [\uXXXX] escape text.
+    A terminal draws them as nothing, so without this the glyphs an operator
+    reads can differ from the bytes an approval hash covers (Trojan Source,
+    CVE-2021-42574). {!sanitize_terminal_text} and the Keeper chat boundary
+    both route through here, so the rule lives in one place. *)
+
 val sanitize_terminal_text : string -> string
-(** Escape C0, DEL, raw C1 bytes, UTF-8 encoded C1 code points, and malformed
-    UTF-8 bytes so external values form one printable terminal row. Call at the
-    terminal rendering boundary; decoded records intentionally retain their raw
-    typed value for non-terminal consumers. *)
+(** Escape C0, DEL, raw C1 bytes, UTF-8 encoded C1 code points, malformed
+    UTF-8 bytes, and the invisible code points {!escape_invisible} names, so
+    external values form one printable terminal row. Call at the terminal
+    rendering boundary; decoded records intentionally retain their raw typed
+    value for non-terminal consumers. *)
 
 val preview_line : string -> string
 (** One row of a multi-line text for a list cell: each line break (LF, CR LF,

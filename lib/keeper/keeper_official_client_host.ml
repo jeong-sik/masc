@@ -1455,7 +1455,6 @@ let masc_observation_sentence masc =
          (if turn_accepted then "after" else "before")
          detail
      | Keeper_internal_error.Runtime_exhausted _
-     | Keeper_internal_error.Capacity_backpressure _
      | Keeper_internal_error.Resumable_cli_session _
      | Keeper_internal_error.Accept_rejected _
      | Keeper_internal_error.Internal_unhandled_exception _

@@ -1656,8 +1656,8 @@ let bounded_model_input_projection
            refuses the request with its typed error, which the turn's failure
            route reads; the carried range is handed over for that refusal,
            and nothing is observed for a body that does not go out. A
-           malformed tag outside the carried range no longer reaches the
-           projection at all. *)
+           malformed tag outside the carried range never reaches the
+           projection. *)
         if not !decline_reported
         then (
           decline_reported := true;
@@ -2227,11 +2227,9 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
          with
          | `Attempt_finished attempt_result -> attempt_result
          | `Attempt_preempted ->
-           (* Nothing was produced and nothing failed. This used to be a
-              synthesized zero-turn run result, which the keeper could only
-              read as a run that succeeded without an AfterTurn ordinal, so
-              every preemption became a failed cycle (#38094). It is its own
-              typed value now: the lane walk ends on it (Keeper_turn_driver),
+           (* Nothing was produced and nothing failed, so this is its own
+              typed value rather than a run result (#38094): the lane walk
+              ends on it (Keeper_turn_driver),
               the failure route notes no rest against the candidate, and the
               unified turn settles it as skipped, leaving the source
               pending. *)
@@ -2970,7 +2968,6 @@ let max_tokens_truncation_error error =
   | Some
       ( Keeper_internal_error.Accept_rejected _
       | Keeper_internal_error.Runtime_exhausted _
-      | Keeper_internal_error.Capacity_backpressure _
       | Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Internal_unhandled_exception _
       | Keeper_internal_error.Internal_bridge_exception _

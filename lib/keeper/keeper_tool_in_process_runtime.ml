@@ -516,6 +516,11 @@ let handle_browser_act_with_outcome ~turn_sandbox_factory ~(config : Workspace.c
          ~class_:refusal.Keeper_alerting_path.failure_class
          ~effect_disposition:Tool_result.Proven_pre_effect
          (Keeper_tool_shared_runtime.error_json refusal.message)
+     | Error (Keeper_browser_upload.File_too_large message) ->
+       Keeper_tool_execution.failure
+         ~class_:Tool_result.Policy_rejection
+         ~effect_disposition:Tool_result.Proven_pre_effect
+         (Keeper_tool_shared_runtime.error_json message)
      | Error (Keeper_browser_upload.Staging_failed message) ->
        Keeper_tool_execution.failure
          ~class_:Tool_result.Runtime_failure

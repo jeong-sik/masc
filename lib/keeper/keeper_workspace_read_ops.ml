@@ -36,6 +36,31 @@ let validate_rg_inputs ~pattern:_ ~file_type =
   | Ok () -> Ok ()
 ;;
 
+let rg_type_list_max_bytes = 1_000_000
+
+let rg_type_names listing =
+  String.split_on_char '\n' listing
+  |> List.filter_map (fun line ->
+    match String.index_opt line ':' with
+    | Some index when index > 0 -> Some (String.sub line 0 index)
+    | Some _ | None -> None)
+;;
+
+(* The failed rg and this inventory run on the same backend, so custom types
+   from that backend's config are included. An incomplete or unavailable
+   inventory cannot prove that the caller's type is invalid. *)
+let rg_error_class ~status ~file_type ~read_type_list =
+  match status with
+  | Unix.WEXITED 2 when not (String.equal file_type "") ->
+    (match read_type_list () with
+     | Some listing when String.length listing < rg_type_list_max_bytes ->
+       (match rg_type_names listing with
+        | _ :: _ as names when not (List.mem file_type names) -> Tool_result.Policy_rejection
+        | [] | _ :: _ -> Tool_result.Runtime_failure)
+     | Some _ | None -> Tool_result.Runtime_failure)
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Tool_result.Runtime_failure
+;;
+
 type read_target_result =
   | Read_target of string
   | Declared_read_target of string
@@ -254,12 +279,21 @@ let try_handle_with_outcome
                   if is_ok
                   then Keeper_tool_execution.success_data payload
                   else
-                    (* rg's error exit (2) is either the caller's --type,
-                       --glob or path, or an I/O error. Only its stderr, passed
-                       on as [error_detail] and not parsed here, tells them
-                       apart, so it is not claimed as the caller's. *)
+                    (* Preserve rg's own error payload. A missing --type can
+                       be established from this backend's type inventory;
+                       other exit-2 causes stay unclassified as caller errors. *)
                     Keeper_tool_execution.failure
-                      ~class_:Tool_result.Runtime_failure
+                      ~class_:(rg_error_class ~status:st ~file_type ~read_type_list:(fun () ->
+                        match
+                          Keeper_sandbox_read_runner.run_command_with_status
+                            ?turn_sandbox_factory
+                            ~config ~meta ~command_argv:[ "rg"; "--type-list" ]
+                            ~max_bytes:rg_type_list_max_bytes
+                            ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
+                            ()
+                        with
+                        | Ok (Unix.WEXITED 0, listing) -> Some listing
+                        | Ok _ | Error _ -> None))
                       (Yojson.Safe.to_string payload))
            in
            match read_target () with
@@ -338,7 +372,17 @@ let try_handle_with_outcome
                    then Keeper_tool_execution.success_data payload
                    else
                      Keeper_tool_execution.failure
-                       ~class_:Tool_result.Runtime_failure
+                       ~class_:(rg_error_class ~status:result.status ~file_type ~read_type_list:(fun () ->
+                         let type_list_ir =
+                           Keeper_tooling.Execute_shell_ir.simple_bin bin [ "--type-list" ]
+                         in
+                         match
+                           dispatch_host_shell_ir
+                             ~workdir:(host_search_workdir target)
+                             type_list_ir
+                         with
+                         | Ok result when result.status = Unix.WEXITED 0 -> Some result.stdout
+                         | Ok _ | Error _ -> None))
                        (Yojson.Safe.to_string payload))))))
   | _ -> None
 ;;

@@ -45,6 +45,16 @@ on:
       - 'lib/browser_interaction.ml'
       - 'connectors/browser/extension/background.js'
       - 'connectors/browser/extension/manifest.json'
+      # The Stagehand lane: its connection, session, launcher, backend, the
+      # tool handlers it is driven through, and the probe that runs them.
+      - 'lib/browser_cdp.*'
+      - 'lib/browser_stagehand_*'
+      - 'lib/browser_chromium_process.*'
+      - 'lib/server/server_browser_stagehand.*'
+      - 'lib/tool_misc_browser_lane.ml'
+      - 'connectors/browser/install-stagehand-extension.sh'
+      - 'scripts/probe-stagehand.py'
+      - 'test/stagehand_browser_probe.ml'
       - '.github/workflows/browser-host-proof.yml'
   workflow_dispatch:
   # Weekly on main so main holds a macOS opam switch in the cache store.
@@ -157,6 +167,25 @@ jobs:
             --driver "$(command -v geckodriver)" \
             --browser /Applications/Firefox.app/Contents/MacOS/firefox \
             --out proof/scene
+
+      - name: Build the Stagehand lane probe
+        run: opam exec -- dune build --release test/stagehand_browser_probe.exe
+
+      # Chrome for Testing, not branded Chrome: branded builds refuse
+      # --load-extension from 137, and 154 is the build the CDP extension load
+      # was checked on (docs/evidence/browser-stagehand-cdp-20260924).
+      - name: Install Chrome for Testing
+        run: |
+          npx --yes @puppeteer/browsers@3.2.3 install chrome@154.0.8037.57 --path "$RUNNER_TEMP/chrome-for-testing" > "$RUNNER_TEMP/chrome-for-testing.txt"
+          echo "CHROME_FOR_TESTING=$(tail -1 "$RUNNER_TEMP/chrome-for-testing.txt" | sed 's/^[^ ]* //')" >> "$GITHUB_ENV"
+
+      - name: Exercise the Stagehand lane in a real Chromium
+        run: |
+          python3 scripts/probe-stagehand.py \
+            --chrome "$CHROME_FOR_TESTING" \
+            --probe _build/default/test/stagehand_browser_probe.exe \
+            --base-path "$RUNNER_TEMP/stagehand-workspace" \
+            --out proof/stagehand
 
       - name: Package verified executable and identity
         working-directory: proof

@@ -6118,6 +6118,7 @@
 (include stanzas/test_browser_stagehand_executor.inc)
 (include stanzas/test_browser_stagehand_backend.inc)
 (include stanzas/test_browser_instruct.inc)
+(include stanzas/stagehand_browser_probe.inc)
 (include stanzas/test_browser_chromium_process.inc)
 (include stanzas/test_browser_controls.inc)
 

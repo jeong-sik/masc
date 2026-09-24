@@ -189,6 +189,7 @@ let open_ ~sw ~env ~masc_root ~(config : Browser_configuration.stagehand) ~headl
   let stop_failed () =
     Eio.Cancel.protect (fun () ->
       Eio.Process.signal process Sys.sigterm;
+      (* See Posix_spawn_process_mgr: await completes group cleanup; its status is unused here. *)
       ignore (Eio.Process.await process);
       remove_record_if_owned ~record_path ~pid;
       started_pid := None)

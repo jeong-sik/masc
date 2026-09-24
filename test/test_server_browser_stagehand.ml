@@ -57,7 +57,10 @@ let test_failure_stops_child_before_same_switch_retry () =
   let record = Process.owner_record_path ~masc_root in
   let started_pid = Filename.concat (Filename.dirname profile) "started-pid" in
   let attempt () =
-    Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+    (* The foreground process manager grants the group its full 5 s TERM
+       grace even when the fake Chromium leader exits immediately. Allow
+       time for CDP refusal and scheduling before that cleanup completes. *)
+    Eio.Time.with_timeout_exn clock 10.0 (fun () ->
       Stagehand.open_ ~sw ~env ~masc_root ~config ~headless:true
         ~model:(fun _ -> fail "the model is not called before attach") ~log:(fun _ -> ()))
   in

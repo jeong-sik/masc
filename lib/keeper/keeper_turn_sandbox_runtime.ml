@@ -296,6 +296,9 @@ let microvm_replacement_reason_to_string reason =
 type t =
   { config : Workspace.config
   ; meta : keeper_meta
+  ; image : (string, Keeper_sandbox_image_resolver.error) result
+      (** Resolved once for the turn that made this runtime, so every start in
+          the turn uses the same build even if a promote lands meanwhile. *)
   ; raw_host_root : string
   ; host_root : string
   ; container_root : string
@@ -347,6 +350,7 @@ let normalize_path path = Keeper_alerting_path.normalize_path_for_check_stripped
 let create
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~image
       ?(network_mode = Network_none)
       ()
   =
@@ -356,6 +360,7 @@ let create
   in
   { config
   ; meta
+  ; image
   ; raw_host_root
   ; host_root = raw_host_root |> normalize_path
   ; container_root =
@@ -369,9 +374,6 @@ let create
   }
 ;;
 
-let resolve_image (t : t) =
-  (Env_config_sandbox.Runtime.resolve_image t.meta.sandbox_image).tag
-;;
 
 (* One container per keeper configuration, not per turn: the name is stable, an already
    running container is adopted instead of created (amortising the container
@@ -389,6 +391,12 @@ let resolve_image (t : t) =
    part of the coordinate: a newly configured tag must not adopt the old
    image. This distinguishes references, not mutations behind the same tag.
    Existing turn runtimes keep their cached container until that turn ends. *)
+(* A Keeper whose image cannot be resolved starts no container. The catalog's
+   reason carries the commands that fix it. *)
+let image_unresolved_message error =
+  "sandbox_image_unresolved: " ^ Keeper_sandbox_image_resolver.error_to_string error
+;;
+
 let docker_container_name_for_image (t : t) ~image =
   Keeper_sandbox_container_name.make
     (Keeper_sandbox_container_name.Docker_persistent
@@ -400,14 +408,14 @@ let docker_container_name_for_image (t : t) ~image =
   |> Keeper_sandbox_container_name.to_string
 ;;
 
-let keeper_docker_container_name t =
-  docker_container_name_for_image t ~image:(resolve_image t)
-;;
 
 module For_testing = struct
+  let minimal_image = "masc-test-minimal:image"
+
   let create_minimal ~config ~meta ~state =
     { config
     ; meta
+    ; image = Ok minimal_image
     ; raw_host_root = ""
     ; host_root = ""
     ; container_root = ""
@@ -422,7 +430,10 @@ module For_testing = struct
   let get_state = get_state
   let set_state = set_state
 
-  let keeper_docker_container_name = keeper_docker_container_name
+  let keeper_docker_container_name t =
+    match t.image with
+    | Ok image -> docker_container_name_for_image t ~image
+    | Error error -> invalid_arg (image_unresolved_message error)
   let policy_route_holds = policy_route_holds
   let microvm_adoption = microvm_adoption
 end
@@ -1143,7 +1154,7 @@ type microvm_post_boot_check =
 
 type microvm_start_failure =
   | Backend_unresolved of string
-  | Image_not_configured
+  | Image_unresolved of Keeper_sandbox_image_resolver.error
   | Guest_state_unreadable of string
   | Guest_size_invalid of string
       (** Neither the keeper nor the workspace names a size that parses, so
@@ -1189,7 +1200,7 @@ let microvm_start_failure_message failure =
   | Guest_provisions_unavailable detail
   | Policy_network_unavailable detail
   | Network_unexpressible detail -> failed detail
-  | Image_not_configured -> failed "keeper sandbox docker image is not configured"
+  | Image_unresolved error -> failed (image_unresolved_message error)
   | Guest_size_invalid detail -> failed ("microvm_guest_size_invalid: " ^ detail)
   | Unadoptable_guest_not_removed detail ->
     failed ("a running guest that cannot be adopted was not removed: " ^ detail)
@@ -1218,10 +1229,9 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
   match microvm_backend_of t with
   | Error detail -> Error (Backend_unresolved detail)
   | Ok backend ->
-  let image = resolve_image t in
-  if String.trim image = ""
-  then Error Image_not_configured
-  else (
+  match t.image with
+  | Error error -> Error (Image_unresolved error)
+  | Ok image -> (
     (* Resolved before anything is probed or removed: a running guest is
        compared against this size, and a fresh one boots with it. *)
     match
@@ -1728,7 +1738,9 @@ let start_container ?timeout_sec (t : t) =
   if is_microvm t
   then start_microvm_container ?timeout_sec t
   else
-  let image = resolve_image t in
+  match t.image with
+  | Error error -> Error (image_unresolved_message error)
+  | Ok image ->
   let container_name = docker_container_name_for_image t ~image in
   let probe_state () =
     Keeper_sandbox_runtime.probe_container_state_optional
@@ -1756,9 +1768,7 @@ let start_container ?timeout_sec (t : t) =
   (* Creation is the only path that needs the image, the runtime hardening
      args, and the projections; adoption amortises all of it. *)
   let create () =
-    if String.trim image = ""
-    then Error "keeper sandbox docker image is not configured"
-    else (
+    (
       match
         Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class_optional
           ~image

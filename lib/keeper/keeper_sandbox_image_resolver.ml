@@ -5,6 +5,7 @@ type error =
   | Catalog_unreadable of Catalog.load_error
   | Unknown_image of { name : string; known : string list }
   | Not_built_on_host of { name : string; store : Catalog.store }
+  | No_image_store of { keeper : string; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile }
 
 (* A microVM runtime's store is chosen on the command line; Docker's is the
    default and takes no flag. *)
@@ -37,6 +38,14 @@ let error_to_string = function
        `masc sandbox-image promote %s <tag>%s`."
       name (Catalog.store_to_string store) name (source_flag name)
       (runtime_flag store) name (runtime_flag store)
+  | No_image_store { keeper; sandbox_profile = Keeper_types_profile_sandbox.Micro_vm } ->
+    Printf.sprintf
+      "keeper %s declares sandbox_profile=microvm and no microvm_backend, so there \
+       is no image store to start it from. Set microvm_backend to one of: %s."
+      keeper (String.concat ", " Keeper_microvm_backend.valid_strings)
+  | No_image_store { keeper; sandbox_profile = (Keeper_types_profile_sandbox.Docker | Keeper_types_profile_sandbox.Remote_ssh) as profile } ->
+    Printf.sprintf "keeper %s runs on sandbox_profile=%s, which starts no container image."
+      keeper (Keeper_types_profile_sandbox.sandbox_profile_to_string profile)
 
 let resolve ~config_root ~store declared =
   match declared with
@@ -51,3 +60,18 @@ let resolve ~config_root ~store declared =
         | Catalog.Unknown_image { name; known } -> Error (Unknown_image { name; known })
         | Catalog.Not_built_on_host { name; store } ->
           Error (Not_built_on_host { name; store })))
+
+let store_of_meta (meta : Keeper_meta_contract.keeper_meta) =
+  match meta.sandbox_profile, meta.microvm_backend with
+  | Keeper_types_profile_sandbox.Docker, _ -> Some Catalog.Docker_daemon
+  | Keeper_types_profile_sandbox.Micro_vm, Some backend -> Some (Catalog.Microvm backend)
+  | Keeper_types_profile_sandbox.Micro_vm, None | Keeper_types_profile_sandbox.Remote_ssh, _ -> None
+
+let for_keeper ~base_path (meta : Keeper_meta_contract.keeper_meta) =
+  match store_of_meta meta with
+  | None -> Error (No_image_store { keeper = meta.name; sandbox_profile = meta.sandbox_profile })
+  | Some store ->
+    let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+    resolve
+      ~config_root:resolution.Config_dir_resolver.config_root.Config_dir_resolver.path
+      ~store meta.sandbox_image

@@ -40,7 +40,9 @@ val docker_info_security_options_optional :
   ?timeout_sec:float -> unit -> (string list, string) result
 type docker_preflight = {
   ok : bool;
-  image : string;
+  image : string option;
+      (** The tag checked, or [None] when the Keeper's image name did not
+          resolve through the host catalog. *)
   docker_runtime_ok : bool;
   docker_runtime_error : string option;
   hardening_ok : bool;

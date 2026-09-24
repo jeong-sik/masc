@@ -17,6 +17,9 @@ type error =
   | Not_built_on_host of { name : string; store : Keeper_sandbox_image_catalog.store }
       (** The name is in the catalog, and nothing is promoted for it in the
           store this Keeper's containers start from. *)
+  | No_image_store of { keeper : string; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile }
+      (** The profile starts no container ([remote_ssh]), or it is [microvm]
+          with no [microvm_backend], so there is no store to look in. *)
 
 val error_to_string : error -> string
 (** What is wrong and, where the operator can fix it, the commands to run. *)
@@ -29,3 +32,12 @@ val resolve :
 (** [resolve ~config_root ~store declared] reads
     [<config_root>/sandbox-images.toml] and returns the build promoted for
     [declared] on [store]. *)
+
+val for_keeper :
+  base_path:string ->
+  Keeper_meta_contract.keeper_meta ->
+  (Keeper_sandbox_image_catalog.pinned, error) result
+(** {!resolve} for a Keeper: the config root is the one the server resolves
+    for [base_path] (so [MASC_CONFIG_DIR] counts), and the store is Docker's
+    for [sandbox_profile = "docker"] and the Keeper's [microvm_backend] for
+    [microvm]. *)

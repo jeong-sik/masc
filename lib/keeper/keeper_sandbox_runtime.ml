@@ -705,7 +705,7 @@ let docker_preflight_to_yojson (preflight : docker_preflight) =
     [ "backend", `String "docker"
     ; "status", `String (if preflight.ok then "ok" else "error")
     ; "ok", `Bool preflight.ok
-    ; "image", `String preflight.image
+    ; "image", Json_util.string_opt_to_json preflight.image
     ; "docker_runtime_ok", `Bool preflight.docker_runtime_ok
     ; Json_util.string_opt_field "docker_runtime_error" preflight.docker_runtime_error
     ; "hardening_ok", `Bool preflight.hardening_ok
@@ -768,11 +768,10 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
   ensure_keeper_sandbox_runtime_optional ~timeout_sec ()
 ;;
 
-let docker_preflight ?image ~timeout_sec () =
+let docker_preflight ~image ~timeout_sec () =
   if not (Env_config_sandbox.Preflight.enabled ())
   then None
   else (
-    let image = (Env_config_sandbox.Runtime.resolve_image image).tag in
     let docker_runtime_ok, docker_runtime_error, docker_runtime_failure_class =
       match docker_info_security_options_with_class ~timeout_sec with
       | Ok _ -> true, None, None
@@ -784,18 +783,24 @@ let docker_preflight ?image ~timeout_sec () =
       | Ok _ -> true, None
       | Error message -> false, Some message
     in
-    let image_present, image_error, image_failure_class =
-      match docker_image_present_with_class ~image ~timeout_sec with
-      | Ok () -> true, None, None
-      | Error classified ->
-        false, Some classified.message, Some classified.failure_class
+    (* A name the host catalog cannot resolve has no tag to look for; the
+       catalog's reason, which names the commands that fix it, is the image
+       failure. *)
+    let image_present, image_error, image_failure_class, image_inspect_failed =
+      match image with
+      | Error reason -> false, Some reason, None, false
+      | Ok tag ->
+        (match docker_image_present_with_class ~image:tag ~timeout_sec with
+         | Ok () -> true, None, None, false
+         | Error classified ->
+           false, Some classified.message, Some classified.failure_class, true)
     in
     let next_actions =
       [ (if not docker_runtime_ok
          then
            Some "Ensure Docker is installed and the daemon is reachable from this shell."
          else None)
-      ; (if not image_present
+      ; (if image_inspect_failed
          then Some docker_image_inspect_next_action
          else None)
       ; (if not hardening_ok
@@ -824,7 +829,7 @@ let docker_preflight ?image ~timeout_sec () =
           docker_runtime_ok
           && hardening_ok
           && image_present
-      ; image
+      ; image = Result.to_option image
       ; docker_runtime_ok
       ; docker_runtime_error
       ; hardening_ok

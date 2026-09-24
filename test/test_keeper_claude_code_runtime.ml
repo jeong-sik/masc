@@ -2225,7 +2225,7 @@ let seed_read_of records =
 let agent_core_range ?(turn_start = 0) ~front messages =
   (Keeper_turn_driver_try_provider.For_testing.compose_carried_model_input
      ~measure_message_bytes:(Keeper_context_core.message_measurer ())
-     ~front
+     ~accepted:None ~front
      ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
      ~current_turn_results:Keeper_turn_driver_try_provider.Current_turn_verbatim
      ~base_path:""

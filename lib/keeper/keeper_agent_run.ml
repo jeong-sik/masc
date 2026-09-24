@@ -915,17 +915,25 @@ let run_turn
       ?shared_context
       ?checkpoint:direct_resume_checkpoint
       ()
-    |> Result.map_error (fun error ->
-      Agent_core.Error.Io
-        (FileOpFailed
-          { op = "load checkpoint"
-          ; path =
-              Keeper_checkpoint_store.agent_core_checkpoint_path
-                ~session_dir:(Filename.concat base_dir
-                  (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-                ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-          ; detail = Keeper_checkpoint_store.checkpoint_load_error_to_string error
-          }))
+    |> Result.map_error (function
+      | Keeper_run_context.Checkpoint_unread error ->
+        Agent_core.Error.Io
+          (FileOpFailed
+            { op = "load checkpoint"
+            ; path =
+                Keeper_checkpoint_store.agent_core_checkpoint_path
+                  ~session_dir:(Filename.concat base_dir
+                    (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+                  ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+            ; detail = Keeper_checkpoint_store.checkpoint_load_error_to_string error
+            })
+      (* #38354: the turn is not sent without the world's articles. Nothing is
+         recorded against the ledger, so the next turn reads it again and
+         runs as soon as it is readable. *)
+      | Keeper_run_context.Constitution_unreadable
+          (World_constitution_store.Unreadable { path; detail }) ->
+        Agent_core.Error.Io
+          (FileOpFailed { op = "load constitution ledger"; path; detail }))
   with
   | Error e ->
     Keeper_agent_result.not_dispatched e

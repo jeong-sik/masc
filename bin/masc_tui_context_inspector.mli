@@ -136,6 +136,10 @@ type forecast_carried_origin =
   | Carried_turn_start_after_seed_refusal
       (** No Librarian point, and the range a seed opened was refused as too
           large: the turn's front moved to the turn boundary. *)
+  | Carried_turn_start_after_librarian_refusal
+      (** A Librarian point, and the range it opened -- at the point or past
+          it -- was refused as too large: the turn's front moved to the turn
+          boundary. *)
   | Carried_turn_start of { end_atom : int }
       (** No front to start from: this turn's own atoms, from the end of the
           last completed turn. *)
@@ -148,6 +152,14 @@ type forecast_carried_origin =
   | Carried_librarian_progress of { end_atom : int }
       (** No snapshot fits and the Librarian's read position does: the atoms
           before [end_atom] are in memory and nothing stands in for them. *)
+  | Carried_past_librarian_point of
+      { librarian_end_atom : int
+      ; front : forecast_carried_origin
+            (** One of the carried constructors above: where the start the
+                provider accepted came from. *)
+      }
+      (** The Librarian point is [librarian_end_atom] and the range opens at
+          a later start the provider accepted. *)
 
 type forecast_carried =
   { first_atom : int

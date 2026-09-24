@@ -1051,7 +1051,7 @@ let test_operator_approvals_use_current_contract () =
   check bool "the approvals meta row draws both its times in one zone" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_approvals"
+       ~binding_name:"approval_metadata_lines"
        ~callee:"Terminal_text.short_timestamp"
      >= 2);
   check bool "approval renderer measures its name column" true
@@ -1074,7 +1074,7 @@ let test_operator_approvals_use_current_contract () =
   check int "approval payload uses its terminal projection" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_approvals"
+       ~binding_name:"approval_metadata_lines"
        ~callee:
          "Masc_tui_operator_projection.approval_payload_for_terminal");
   check int "approval payload projection serializes once" 1
@@ -2521,6 +2521,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      summary both moved into [approval_detail_line], and the guard follows
      the field rather than the surface's name. *)
   check_fields "approval_detail_line" [ "ap_summary" ];
+  (* The same move again, for the same reason: the two rows under the queue
+     became [approval_metadata_lines] so the row could be measured against the
+     frame and could say how tall it is (#36333). The four fields it draws
+     followed it, and the guard follows the field. *)
+  check_fields "approval_metadata_lines"
+    [ "ap_expires_at"; "ap_payload"; "ap_trace_id"; "ap_created_at" ];
   check_fields "render_approvals"
     [ "aps_actor_filter"
     ; "approvals_error"
@@ -2528,10 +2534,6 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "ap_actor"
     ; "ap_action_type"
     ; "ap_target_type"
-    ; "ap_expires_at"
-    ; "ap_payload"
-    ; "ap_trace_id"
-    ; "ap_created_at"
     ];
   check_fields "render_board_list"
     [ "board_list_error"; "bp_id"; "bp_author"; "bp_title" ];

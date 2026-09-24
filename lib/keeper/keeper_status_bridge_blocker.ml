@@ -23,7 +23,6 @@ let blocker_reason_of_turn_driver_reason
   | Keeper_turn_driver.Candidates_filtered_after_cycles ->
     Candidates_filtered_after_cycles
   | Keeper_turn_driver.Session_conflict -> Session_conflict
-  | Keeper_turn_driver.Capacity_exhausted -> Capacity_exhausted
   | Keeper_turn_driver.Other_detail detail -> Other_detail detail
 ;;
 

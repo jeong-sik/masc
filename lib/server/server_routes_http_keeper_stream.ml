@@ -169,6 +169,7 @@ type keeper_chat_stream_request = {
   channel_user_id : string;
   channel_user_name : string;
   channel_workspace_id : string;
+  sender_keeper : Keeper_identity.Keeper_id.t option;
   attachments : Keeper_chat_store.attachment list;
   direct_message : Keeper_invocation_contract.direct_message;
   since_seq : Keeper_chat_event_log.replay_position;
@@ -232,17 +233,25 @@ let chat_surface_of_request payload =
       { label = payload.channel; address = gate_address_of_request payload }
   else Surface_ref.Dashboard { session_id = None }
 
+(* [Owner] is what is left once the request names neither a sender Keeper
+   nor a connector speaker. It is not an authentication fact (RFC-0468
+   §3.2). A Keeper's masc_keeper_msg / delegate arrives on the agent channel
+   with no connector speaker, so without [sender_keeper] it would land here
+   as the operator. *)
 let chat_speaker_of_request payload =
-  if has_external_speaker payload then
-    { Keeper_chat_store.speaker_id = Some payload.channel_user_id;
-      speaker_name =
-        (let name = String.trim payload.channel_user_name in
-         if name = "" then None else Some name);
-      speaker_authority = Keeper_chat_store.External }
-  else
-    { Keeper_chat_store.speaker_id = None;
-      speaker_name = None;
-      speaker_authority = Keeper_chat_store.Owner }
+  match payload.sender_keeper with
+  | Some keeper_id -> Keeper_chat_store.keeper_speaker keeper_id
+  | None ->
+    if has_external_speaker payload then
+      { Keeper_chat_store.speaker_id = Some payload.channel_user_id;
+        speaker_name =
+          (let name = String.trim payload.channel_user_name in
+           if name = "" then None else Some name);
+        speaker_authority = Keeper_chat_store.External }
+    else
+      { Keeper_chat_store.speaker_id = None;
+        speaker_name = None;
+        speaker_authority = Keeper_chat_store.Owner }
 
 let combined_turn_instructions ~turn_instructions ~surface_context =
   let ctx_text =
@@ -948,6 +957,9 @@ let parse_keeper_chat_stream_request body_str =
         ; channel_user_id
         ; channel_user_name
         ; channel_workspace_id
+          (* Only a durable operation source names a sender Keeper; see
+             [operation_payload_of_json]. *)
+        ; sender_keeper = None
         ; attachments
         ; direct_message
         ; since_seq
@@ -994,6 +1006,7 @@ let operation_source_of_payload
     ~external_message_id:None
     ~workspace_id:None
     ~extra_mentions:[]
+    ~sender_keeper:payload.sender_keeper
     ~user_row_origin
 ;;
 
@@ -1050,6 +1063,7 @@ let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
     ; channel_user_id = source.channel_user_id
     ; channel_user_name = source.channel_user_name
     ; channel_workspace_id = source.channel_workspace_id
+    ; sender_keeper = source.sender_keeper
     ; attachments = input.attachments
     ; direct_message
       (* Rebuilt from the durable operation for execution, not received from

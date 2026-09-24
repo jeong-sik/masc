@@ -72,21 +72,9 @@ static void free_strings(char **strings)
   caml_stat_free(strings);
 }
 
-/* masc_posix_spawn executable argv env cwd_opt fds
+/* masc_posix_spawn executable argv env (cwd_opt, own_group) fds
    fds: (child_fd, parent_fd) list. Equal fds are inherited in place;
    others are dup2'd. Every other descriptor is closed in the child.
-
-   Every child starts in a session of its own (POSIX_SPAWN_SETSID), so it has
-   no controlling terminal: opening /dev/tty fails with ENXIO, and SIGTTIN and
-   SIGTTOU, which POSIX raises only for a process's controlling terminal, can
-   no longer stop it. A child left in the parent's session reached the
-   terminal the parent was started from, and the kernel stops the whole
-   process group of a background job that reads or reconfigures it. On
-   2026-09-24 `masc start` ran as a background job of a terminal; agy, unable
-   to refresh its login token, opened /dev/tty for an interactive login, and
-   the server stopped with all nine of its official-client children for
-   fourteen minutes. The session leader is also the leader of a new process
-   group, so the child's pid is the pgid a group owner signals.
 
    exec closes only what is marked close-on-exec, so neither fork+exec nor
    posix_spawn closes a stray descriptor on its own -- measured 2026-09-07,
@@ -119,9 +107,11 @@ static void free_strings(char **strings)
    Returns the child's pid or raises Unix.Unix_error with the errno
    posix_spawn reported. */
 static value spawn_process(value v_executable, value v_argv, value v_env,
-                           value v_cwd, value v_fds, int search_path)
+                           value v_options, value v_fds, int search_path)
 {
-  CAMLparam5(v_executable, v_argv, v_env, v_cwd, v_fds);
+  CAMLparam5(v_executable, v_argv, v_env, v_options, v_fds);
+  value v_cwd = Field(v_options, 0);
+  int own_group = Bool_val(Field(v_options, 1));
   char *executable = caml_stat_strdup(String_val(v_executable));
   char **argv = strings_of_array(v_argv);
   char **env = strings_of_array(v_env);
@@ -143,29 +133,37 @@ static value spawn_process(value v_executable, value v_argv, value v_env,
   int rc = posix_spawn_file_actions_init(&actions);
   if (rc == 0) rc = posix_spawnattr_init(&attr);
   if (rc == 0) {
-    /* No POSIX_SPAWN_SETPGROUP: setsid already makes the child the leader of
-       a new process group. */
-    short flags = POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSID;
+    short flags = POSIX_SPAWN_SETSIGMASK;
 #ifdef POSIX_SPAWN_CLOEXEC_DEFAULT
     flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
 #endif
     sigset_t empty;
     sigemptyset(&empty);
     rc = posix_spawnattr_setsigmask(&attr, &empty);
+    if (rc == 0 && own_group) {
+      flags |= POSIX_SPAWN_SETPGROUP;
+      rc = posix_spawnattr_setpgroup(&attr, 0);
+    }
     if (rc == 0) rc = posix_spawnattr_setflags(&attr, flags);
   }
   if (rc == 0 && cwd != NULL) rc = posix_spawn_file_actions_addchdir_np(&actions, cwd);
   for (int j = 0; rc == 0 && j < fd_count; j++) {
     if (child_fds[j] == STDIN_FILENO && isatty(parent_fds[j])) {
-      /* The child belongs to no terminal's session, so nothing would stop it
-         reading input typed for the terminal's foreground job: it reads
-         /dev/null instead. A pipe or file passed as stdin is not a terminal
-         and is kept. `masc setup` run in a terminal once handed that
-         terminal to a verification child in a background process group; its
-         first read stopped it with SIGTTIN and the group owner killed it
-         before it wrote its report (2026-09-15). A child that must read the
-         terminal is started with Unix.create_process in the foreground
-         group, as the installer's prerequisite runner does. */
+      /* No child of this stub reads a terminal it is handed as stdin: it
+         reads /dev/null. A pipe or file passed as stdin is not a terminal
+         and is kept.
+         - A child in its own process group is a background job of that
+           terminal, and its first read stops it with SIGTTIN. `masc setup`
+           run in a terminal lost every Claude Code verification this way;
+           the group owner SIGKILLed the stopped leader before it wrote its
+           report (2026-09-15).
+         - A child left in the parent's group takes input typed for the
+           terminal's foreground job when the parent is that job. When the
+           parent is a background job, the read stops the parent's whole
+           group unless SIGTTIN is ignored (Terminal_stop).
+         A child that must read the terminal is started with
+         Unix.create_process in the foreground group, as the installer's
+         prerequisite runner does. */
       rc = posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
     } else if (child_fds[j] == parent_fds[j]) {
 #ifdef POSIX_SPAWN_CLOEXEC_DEFAULT
@@ -242,7 +240,7 @@ CAMLprim value masc_posix_spawn(value executable, value argv, value env,
 }
 
 /* Unix fallback retains libc's PATH lookup semantics without duplicating
-   descriptor setup or session creation. */
+   descriptor setup or group creation. */
 CAMLprim value masc_posix_spawnp(value executable, value argv, value env,
                                  value cwd, value fds)
 {

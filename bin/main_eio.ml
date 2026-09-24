@@ -598,6 +598,8 @@ let acquire_base_path_lock ~run_dir base_path =
 
 let run_cmd ?(record_default = false) host port cli_base_path accept_store_quarantine =
   Printexc.record_backtrace true;
+  (* Before anything can start a child, so that every child inherits it. *)
+  Terminal_stop.ignore_signals ();
   let workspace =
     Server_base_path_guard.exit_on_no_workspace
       (Server_base_path_guard.startup_root ~cli_base_path)

@@ -336,7 +336,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ; agent_name = "keeper-maintenance-recovery"
     ; sw
     ; clock
-    ; proc_mgr = Some Posix_spawn_process_mgr.mgr
+    ; proc_mgr = Some env#process_mgr
     ; net = state.net
     ; publication_recovery_provider =
         Mcp_server.publication_recovery_availability_provider state

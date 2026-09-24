@@ -17,6 +17,7 @@
   file_lock_eio
   exec_tap
   with_process
+  terminal_stop
   timeout_origin)
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on. + unused-value ratchet (warning 32)
  (flags

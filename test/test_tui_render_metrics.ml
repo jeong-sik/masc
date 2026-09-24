@@ -47,6 +47,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
       ; mlh_continuity_unread_atoms = Some 0
       ; mlh_last_success_at = None
       ; mlh_last_failure_kind = None
+      ; mlh_stalled = None
       }
   ; mkh_librarian_failures = 0
   ; mkh_vision_ingest_errors = 0
@@ -230,7 +231,7 @@ let test_retained_task_outcomes () =
       task "invalid" "invalid timestamp" Todo;
       task "future" "2026-09-08T10:00:00Z" Todo ]
   in
-  let flow = Masc_tui_task_flow.of_tasks ~now tasks in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
   check int "new registrations in the window" 3 flow.recent.created;
   check int "completion is independent of creation time" 1 flow.recent.completed;
   check int "cancellation is separate" 1 flow.recent.cancelled;
@@ -265,7 +266,7 @@ let test_a_span_reads_the_one_ladder () =
      either minute boundary, so the clock moving while the test runs cannot
      change the figure. *)
   let observed_at = Unix.gettimeofday () -. 3700. in
-  let flow = Masc_tui_task_flow.of_tasks ~now:observed_at [] in
+  let flow = Masc_tui_task_flow.of_tasks ~now:observed_at ~archived:[] [] in
   let state = make_state () in
   state.task_flow <- Some flow;
   let output =
@@ -297,7 +298,7 @@ let test_assignee_work_and_daily_flow () =
         (Cancelled { cancelled_by = "polisher"; cancelled_at = "2026-09-11T05:00:00Z";
           reason = None }) ]
   in
-  let flow = Masc_tui_task_flow.of_tasks ~now tasks in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
   let rows = flow.by_assignee in
   check int "only states that carry an assignee open a row" 2 (List.length rows);
   let row name =
@@ -344,6 +345,31 @@ let test_assignee_work_and_daily_flow () =
   check bool "lead time is not presented as work time" false (contains output "work time")
 ;;
 
+(* [masc_gc] moves finished tasks into the archive. Their days still
+   happened, so the day bars count them; the board counts and the assignee
+   rows describe what is live, so they do not. A task restored to the
+   backlog but still in the archive is counted once (#38542). *)
+let test_archived_tasks_count_in_the_day_bars_only () =
+  let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-12T00:00:00Z") in
+  let task id created_at status = domain_task ~id ~created_at ~status in
+  let done_by who at = Masc_domain.Done { assignee = who; completed_at = at; notes = None } in
+  let live = [ task "live" "2026-09-11T00:00:00Z" (done_by "matrix-reader" "2026-09-11T02:00:00Z") ] in
+  let archived =
+    [ task "gone" "2026-09-02T00:00:00Z" (done_by "matrix-reader" "2026-09-03T00:00:00Z");
+      (* Restored to the backlog, still in the archive: counted once. *)
+      task "live" "2026-09-11T00:00:00Z" (done_by "matrix-reader" "2026-09-11T02:00:00Z") ]
+  in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived live in
+  let completed_in_span =
+    List.fold_left (fun n (d : Masc_tui_task_flow.day) -> n + d.d_completed) 0 flow.daily
+  in
+  check int "the archived completion lands on its day, the restored one once" 2
+    completed_in_span;
+  check int "the board count is the backlog's" 1 flow.current.completed;
+  check int "the assignee row is the backlog's" 1
+    (List.hd flow.by_assignee).af_done
+;;
+
 let test_assignee_rows_capped () =
   let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-12T00:00:00Z") in
   let task id created_at status = domain_task ~id ~created_at ~status in
@@ -353,7 +379,7 @@ let test_assignee_rows_capped () =
       task (Printf.sprintf "t%02d" index) "2026-09-11T00:00:00Z"
         (Masc_domain.Claimed { assignee = who; claimed_at = "2026-09-11T01:00:00Z" }))
   in
-  let flow = Masc_tui_task_flow.of_tasks ~now tasks in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
   check int "every assignee is retained in the snapshot" 13 (List.length flow.by_assignee);
   let state = make_state () in
   state.task_flow <- Some flow;
@@ -836,6 +862,73 @@ let test_render_metrics_body_all_sections () =
     sections
 ;;
 
+(* What the wire sends becomes one printable row before this pane styles it.
+   Four values here did not: the scheduler's probe word, a Keeper id fitted to
+   sixteen cells -- fitting is not escaping -- and the tool name each pending
+   gate call and each held approval is counted under, which the bar chart
+   draws as its label. The pane escapes the YOLO Keeper names beside them, so
+   the rule was understood here and these were missed. *)
+let escape = "\027[31m"
+
+let drawn lines = String.concat "\n" lines
+
+let test_the_tools_section_escapes_the_word_it_counts_by () =
+  let state = make_state () in
+  let gp =
+    { (make_gate_pending ~id:"gp1" ~keeper:"alpha") with
+      Decode.gp_display_tool = "bash" ^ escape ^ "red"
+    }
+  in
+  state.gate_pending <- [ gp ];
+  state.gate_snapshot_observed <- true;
+  let output = drawn (Render_metrics.render_section_tools ~cols:90 state) in
+  check bool "the chart's label carries no escape" false (contains output escape)
+
+(* The Keeper id is drawn by the same section, fitted to sixteen cells.
+   Fitting is not escaping. *)
+let test_the_tools_section_escapes_a_keeper_id () =
+  let state = make_state () in
+  let kh =
+    make_keeper_health ~keeper_id:("alpha" ^ escape) ~facts:25
+      ~snapshot_bytes:4096
+  in
+  state.memory_health <-
+    Some (make_memory_health ~total_facts:25 ~source_facts:0 ~keepers:[ kh ]);
+  let output = drawn (Render_metrics.render_section_tools ~cols:90 state) in
+  check bool "the fitted id carries none either" false (contains output escape)
+
+(* The probe word reaches three rows through one reader, so it is escaped
+   there rather than at each row. *)
+let test_the_fleet_section_escapes_the_probe_word () =
+  let state = make_state () in
+  state.server_identity <-
+    Some
+      { Decode.sid_version = "0.0.0"
+      ; sid_binary_commit = "deadbeef"
+      ; sid_binary_commit_age_s = None
+      ; sid_base_path = "/tmp"
+      ; sid_masc_root = "/tmp"
+      ; sid_executable_in_worktree = None
+      ; sid_state_ready = None
+      ; sid_uptime = None
+      ; sid_sse_clients = None
+      ; sid_gc = None
+      ; sid_scheduler =
+          Some
+            { Decode.ssch_probe = "running" ^ escape
+            ; ssch_samples = 0
+            ; ssch_p50_ms = 0.
+            ; ssch_p95_ms = 0.
+            ; ssch_p99_ms = 0.
+            ; ssch_max_ms = 0.
+            ; ssch_mean_ms = 0.
+            ; ssch_stalls = 0
+            ; ssch_pool_domains = None
+            }
+      };
+  let output = drawn (Render_metrics.render_section_fleet ~cols:90 state) in
+  check bool "the probe row carries no escape" false (contains output escape)
+
 let () =
   run "tui_render_metrics"
     [ ( "kpis"
@@ -844,6 +937,8 @@ let () =
         ; test_case "retained task outcomes and observation scope" `Quick test_retained_task_outcomes
         ; test_case "assignee work and daily flow" `Quick test_assignee_work_and_daily_flow
         ; test_case "assignee rows capped" `Quick test_assignee_rows_capped
+        ; test_case "archived tasks count in the day bars only" `Quick
+            test_archived_tasks_count_in_the_day_bars_only
         ] )
     ; ( "overview_pulse"
       , [ test_case "overview_pulse_line" `Quick test_overview_pulse_line
@@ -868,6 +963,12 @@ let () =
         ; test_case "fleet_populated" `Quick test_section_fleet_populated
         ; test_case "resources_populated" `Quick test_section_resources_populated
         ; test_case "tools_populated" `Quick test_section_tools_populated
+        ; test_case "the tools section escapes the word it counts by" `Quick
+            test_the_tools_section_escapes_the_word_it_counts_by
+        ; test_case "the tools section escapes a Keeper id" `Quick
+            test_the_tools_section_escapes_a_keeper_id
+        ; test_case "the fleet section escapes the probe word" `Quick
+            test_the_fleet_section_escapes_the_probe_word
         ; test_case "approval source observations" `Quick test_approval_source_observations
         ; test_case "memory block names its reading" `Quick test_memory_block_names_its_reading
         ] )

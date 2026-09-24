@@ -1,0 +1,84 @@
+{
+  "schema": "masc.dashboard.scheduled_automation.lookup.v1",
+  "source": "schedule_store",
+  "generated_at": "1970-01-01T00:06:40Z",
+  "status": "found",
+  "schedule_id": "sched-dashboard-fixture",
+  "request": {
+    "schedule_instance_id": "01a0d0e7-dd7a-7000-a714-b85ba455ddcd",
+    "schedule_id": "sched-dashboard-fixture",
+    "status": "scheduled",
+    "source": "operator_request",
+    "requested_by": {
+      "id": "requester",
+      "kind": "human_operator",
+      "display_name": null
+    },
+    "scheduled_by": {
+      "id": "scheduler",
+      "kind": "human_operator",
+      "display_name": null
+    },
+    "requested_at": 100.0,
+    "requested_at_iso": "1970-01-01T00:01:40Z",
+    "due_at": 260.0,
+    "due_at_iso": "1970-01-01T00:04:20Z",
+    "next_due_at": 260.0,
+    "next_due_at_iso": "1970-01-01T00:04:20Z",
+    "expires_at": null,
+    "expires_at_iso": null,
+    "recurrence": {
+      "kind": "interval",
+      "interval_sec": 60
+    },
+    "recurrence_kind": "interval",
+    "recurrence_summary": "every 60s",
+    "payload_digest": "a9b9f249bc0b9268a0f5920feffe5acf08a63fc9a44c8dc0276777f8af30c4ac",
+    "payload": {
+      "kind": "consumer.note",
+      "body": {
+        "text": "dashboard fixture"
+      }
+    },
+    "payload_kind": "consumer.note",
+    "payload_support": "unsupported",
+    "payload_dispatch_tool": null,
+    "payload_target": null,
+    "payload_keeper_name": null,
+    "payload_summary": null,
+    "last_wake": {
+      "schedule_instance_id": "01a0d0e7-dd7a-7000-a714-b85ba455ddcd",
+      "schedule_id": "sched-dashboard-fixture",
+      "started_at": 202.0,
+      "finished_at": 203.0,
+      "due_at": 200.0,
+      "payload_digest": "a9b9f249bc0b9268a0f5920feffe5acf08a63fc9a44c8dc0276777f8af30c4ac",
+      "status": "succeeded",
+      "detail": null,
+      "error": null,
+      "started_at_iso": "1970-01-01T00:03:22Z",
+      "finished_at_iso": "1970-01-01T00:03:23Z"
+    },
+    "dispatch_receipt": null,
+    "keeper_queue_evidence": null,
+    "keeper_reaction_evidence": null,
+    "runner_hold": null
+  },
+  "wakes": [
+    {
+      "schedule_instance_id": "01a0d0e7-dd7a-7000-a714-b85ba455ddcd",
+      "schedule_id": "sched-dashboard-fixture",
+      "started_at": 202.0,
+      "finished_at": 203.0,
+      "due_at": 200.0,
+      "payload_digest": "a9b9f249bc0b9268a0f5920feffe5acf08a63fc9a44c8dc0276777f8af30c4ac",
+      "status": "succeeded",
+      "detail": null,
+      "error": null,
+      "started_at_iso": "1970-01-01T00:03:22Z",
+      "finished_at_iso": "1970-01-01T00:03:23Z"
+    }
+  ],
+  "wake_count": 1,
+  "wake_retention_per_schedule": 32
+}

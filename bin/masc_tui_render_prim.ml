@@ -1399,15 +1399,36 @@ let listing_rows_below_the_body = 3
    [None] draws no row as selected.
    [focused] says whether the arrow keys are pointed here, which is a
    different question from which row is open. *)
-let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~labels
-    ~selection =
+(* How many rows an index is holding, and how many the surface holds. Three
+   surfaces draw a server page beside a detail -- the Board's fifty posts,
+   the Schedules page, the Task Review page -- and each one's index said the
+   page size alone: a board of a hundred and seven posts drew "(50)" with no
+   second number anywhere near it, so the fifty-seven the page does not carry
+   were invisible. Equal counts say it once: a page that carries everything
+   has no difference to report. *)
+let list_count_text ~loaded ~holding =
+  match holding with
+  | Some holding when holding > loaded -> Printf.sprintf "(%d of %d)" loaded holding
+  | Some _ | None -> Printf.sprintf "(%d)" loaded
+
+(* [holding] is what the surface holds when that is more than this index was
+   given: the Board's own header reads "(50 of 198)" one keypress away, and
+   this row read "(50)", which is a count of the whole board to anyone who
+   did not just come from that header. Both spell it through
+   [list_count_text], so the two cannot disagree.
+
+   Asked of every caller rather than defaulted: a list that is filtered
+   rather than paged has nothing more to hold, and passing [None] says so
+   where leaving it out could not be told from forgetting. *)
+let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
+    ~labels ~selection =
   framed_top buf cols;
   (* Focus wears a caret, not a key list: which keys work is the footer's
      sentence; which pane hears them is this one glyph. *)
   framed_line buf cols
     ((if focused then Ansi.bold else Ansi.dim)
-     ^ Printf.sprintf " %s%s (%d)" (if focused then "\xe2\x96\xb8 " else "") title
-         (List.length labels)
+     ^ Printf.sprintf " %s%s %s" (if focused then "\xe2\x96\xb8 " else "") title
+         (list_count_text ~loaded:(List.length labels) ~holding)
      ^ Ansi.reset);
   framed_divider buf cols;
   let content_height = max 0 (rows - framed_chrome_rows) in
@@ -1439,8 +1460,10 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~labels
   done;
   framed_bottom buf cols
 
-let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
-  write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~labels
+(* The same index for a list whose open row is always in it. *)
+let write_list_sidebar buf ~rows ~cols ~title ~focused ~holding ~labels
+    ~selected =
+  write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding ~labels
     ~selection:(Some selected)
 
 
@@ -1856,20 +1879,6 @@ let bracketed ~max_cells text =
     else Message_layout.fit_middle max_cells text
   in
   "[" ^ text ^ "]"
-
-(* How many posts the Board list is holding, and how many the board holds.
-
-   The listing is one server page of fifty. A board with a hundred and seven
-   posts drew "(50)" beside its name with no second number anywhere near it,
-   so the page size read as the board's size and the fifty-seven posts the
-   page does not carry were invisible. The census counts the whole board, or
-   the narrowed hearth when one is being read, so the difference is a fact
-   this row can state. Equal counts say it once: a page that carries
-   everything has no difference to report. *)
-let board_list_count_text ~loaded ~holding =
-  match holding with
-  | Some holding when holding > loaded -> Printf.sprintf "(%d of %d)" loaded holding
-  | Some _ | None -> Printf.sprintf "(%d)" loaded
 
 (* The Board reader's title row: the screen, which post, its hearth, its score
    and its replies. The id is folded at the list's ID column. Replies read "💬3"

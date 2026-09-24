@@ -132,7 +132,7 @@ let uncommitted_pass () =
   match Runtime_exact_output_registry.current () with
   | Error _ -> Lane_unconfigured
   | Ok registry ->
-    let lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Librarian in
+    let lane_id = Standalone_lane.to_id Standalone_lane.Librarian in
     match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
     | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) -> Lane_unconfigured
     | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> Not_committed

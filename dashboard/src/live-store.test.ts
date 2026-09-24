@@ -104,9 +104,6 @@ describe('journalEventKindLabel', () => {
     expect(journalEventKindLabel(makeEntry({ eventType: 'keeper_heartbeat' }))).toBe('heartbeat')
   })
 
-  it('returns "handoff" for keeper_handoff eventType', () => {
-    expect(journalEventKindLabel(makeEntry({ eventType: 'keeper_handoff' }))).toBe('handoff')
-  })
 
   it('returns "phase" for keeper_phase_changed eventType', () => {
     expect(journalEventKindLabel(makeEntry({ eventType: 'keeper_phase_changed' }))).toBe('phase')

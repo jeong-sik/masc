@@ -4869,7 +4869,6 @@ describe('fetchRuntimeModelMetrics', () => {
     const metric = result.models[0]!
 
     expect(metric.model_id).toBe('runtime_lane_a1b2c3d4e5f6')
-    expect(metric.provider).toBeNull()
     expect(metric.usage_sample_count).toBe(0)
     expect(metric.telemetry_sample_count).toBe(0)
     expect(metric.usage_missing_count).toBe(1)

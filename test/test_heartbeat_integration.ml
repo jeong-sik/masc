@@ -2707,7 +2707,7 @@ let test_update_keeper_defers_lane_swap_while_turn_in_flight () =
         ; max_context_override_opt = None
         ; max_context_override_present = false
         ; sandbox_profile_opt = None
-        ; sandbox_image_patch = Some (Some "next-turn-image:v2")
+        ; sandbox_image_patch = Some (Some "ocaml")
         ; network_mode_opt = None
         ; egress_allow_opt = None
         ; remote_endpoint_opt = None
@@ -2783,7 +2783,7 @@ let test_update_keeper_defers_lane_swap_while_turn_in_flight () =
       (match Keeper_meta_store.read_effective_meta config name with
        | Ok (Some effective) ->
          check (option string) "new image is materialized for the next turn"
-           (Some "next-turn-image:v2") effective.sandbox_image
+           (Some "ocaml") effective.sandbox_image
        | _ -> fail "effective image config disappeared");
       check (option string) "admitted turn retains original immutable metadata" None meta.sandbox_image;
       check bool "no shutdown fence remains after the turn" true

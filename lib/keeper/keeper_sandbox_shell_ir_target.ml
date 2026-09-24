@@ -256,9 +256,7 @@ let guest_target
   else
     match binding.image with
     | Error error ->
-      Error
-        (target_error
-           (Keeper_sandbox_image_resolver.error_to_string error))
+      Error (target_error (Keeper_turn_sandbox_runtime.image_unresolved_message error))
     | Ok image ->
     let runtime = binding.runtime in
     let target, observe_route =

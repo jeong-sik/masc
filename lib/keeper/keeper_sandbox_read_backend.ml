@@ -329,7 +329,7 @@ let run_command_with_capture ?turn_sandbox_factory
       match
         Keeper_sandbox_image_resolver.for_keeper ~base_path:config.Workspace.base_path meta
       with
-      | Error error -> Error (Keeper_sandbox_image_resolver.error_to_string error)
+      | Error error -> Error (Keeper_turn_sandbox_runtime.image_unresolved_message error)
       | Ok pinned ->
         let image = pinned.Keeper_sandbox_image_catalog.reference in
         let head_program =

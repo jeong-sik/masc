@@ -86,7 +86,12 @@ let setup ~keeper_name ~sandbox f =
   let base, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.For_testing.clear ();
-  let meta = make_meta ~name:keeper_name ~sandbox in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base
+    [ "base", Keeper_sandbox_image.default_tag ];
+  let meta =
+    { (make_meta ~name:keeper_name ~sandbox) with
+      Masc.Keeper_meta_contract.sandbox_image = Some "base" }
+  in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   f ~base ~config ~meta ~playground

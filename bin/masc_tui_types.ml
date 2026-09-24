@@ -5557,7 +5557,9 @@ type state = {
      until it is sent, and cleared with the form -- a field left filled is a
      credential sitting in the process for as long as the pane is up. *)
   mutable identity_app_form: identity_app_form option;
-  mutable task_cursor: int;
+  mutable task_selected_id: string option;
+      (* The Overview task row the operator chose, by id. An index into the
+         rows would name another task after a poll drops a finished one. *)
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
   mutable tasks_error: string option;
@@ -5620,8 +5622,9 @@ type state = {
   mutable last_action: (string * float) option;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
-     fleet's own reading of what is missing. *)
-  mutable fleet_safety: fleet_safety option;
+     fleet's own reading of what is missing, or the server's word that its
+     health snapshot is being rebuilt. *)
+  mutable fleet_safety: Tui_decode.fleet_safety_reading option;
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
   mutable local_workspace: local_workspace_reading;
@@ -7751,7 +7754,7 @@ let create_state
   identity_filter = None;
   identity_app_form = None;
   github_identity_view_error = None;
-  task_cursor = 0;
+  task_selected_id = None;
   task_detail_id = None;
   task_detail_scroll = 0;
   tasks_error = None;

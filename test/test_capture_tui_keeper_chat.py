@@ -68,6 +68,12 @@ class CaptureTuiKeeperChatTest(unittest.TestCase):
             state.workspace_base_path,
         )
         self.assertEqual(health["keeper_fleet_safety"]["status"], "ok")
+        # Without the schema the TUI reads the section as the health
+        # placeholder, and a placeholder without its keys is a decode error.
+        self.assertEqual(
+            health["keeper_fleet_safety"]["schema"],
+            "masc.keeper_fleet_operator.v1",
+        )
         self.assertEqual(roster["total"], 1)
         self.assertEqual(roster["keepers"][0]["name"], "alpha")
         self.assertEqual(roster["keepers"][0]["meta"]["sandbox_profile"], "docker")

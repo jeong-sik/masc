@@ -620,6 +620,12 @@
     --allow-callback-in
     http_client.mli
     "read_ndjson|~on_line|arrow(_,constr(string),constr(stream_continuation))"
+    --allow-callback-in
+    http_client.mli
+    "classify_unix_error|_|constr(Unix.error)"
+    --allow-callback-in
+    http_client.mli
+    "classify_eio_error|_|constr(Eio.Exn.err)"
     %{dep:../lib/llm_provider/count_tokens_sync.mli}
     %{dep:../lib/llm_provider/http_client.mli})
    (run

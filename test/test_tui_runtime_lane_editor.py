@@ -527,6 +527,7 @@ def run_exact_slot_editor(executable: str) -> None:
         os.write(fd, b"jj")
         h.send_and_wait(process, fd, output, b"s", b"slots of librarian_exact")
         h.wait_for_output(process, fd, output, b"CLI  codex_subscription.gpt-6-luna-xhigh", start=0, timeout=5)
+        h.wait_for_output(process, fd, output, b"CLI  claude_code.claude-sonnet-5", start=0, timeout=5)
         # Two HTTP rows precede the CLI row. Crossing that boundary is a
         # refusal with the execution reason, and must send no routing write.
         os.write(fd, b"jj")

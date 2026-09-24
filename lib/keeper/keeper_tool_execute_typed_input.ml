@@ -153,6 +153,8 @@ let source_of_fields ~path fields =
        then result_errorf "%s.command is empty" path
        else
          let* shell = optional_string ~path fields "shell" in
+         (* DET-OK: an omitted shell is the schema's declared default
+            ([shell] in config/tools/tool_execute.toml), not a guess. *)
          let shell = Option.value shell ~default:default_command_shell in
          (* A closed list, and the same one [Shell_costume.of_argv] recognises,
             because an argv-shaped shell normalises into this field and the two

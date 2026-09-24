@@ -42,6 +42,12 @@ let write_heartbeat_snapshot
        is deliberate, so it is the same answer as no checkpoint at all rather
        than a warning the operator is asked to look at. *)
     | Error (Keeper_checkpoint_store.Superseded_version _) -> None
+    | Error (Keeper_checkpoint_store.Newer_version _ as error) ->
+      Log.Keeper.warn
+        "keeper:%s heartbeat message count unavailable: %s"
+        session_id
+        (Keeper_checkpoint_store.checkpoint_load_error_to_string error);
+      None
     | Error
         Keeper_checkpoint_store.(
           Store_error detail | Parse_error detail | Io_error detail

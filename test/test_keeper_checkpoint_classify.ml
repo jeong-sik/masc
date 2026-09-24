@@ -32,6 +32,8 @@ let pp_err fmt = function
   | Store.Not_found -> Format.fprintf fmt "Not_found"
   | Store.Superseded_version { expected; got } ->
     Format.fprintf fmt "Superseded_version(expected=%d,got=%d)" expected got
+  | Store.Newer_version { expected; got } ->
+    Format.fprintf fmt "Newer_version(expected=%d,got=%d)" expected got
   | Store.Store_error s -> Format.fprintf fmt "Store_error(%s)" s
   | Store.Parse_error s -> Format.fprintf fmt "Parse_error(%s)" s
   | Store.Io_error s -> Format.fprintf fmt "Io_error(%s)" s
@@ -102,8 +104,9 @@ let test_serialization_json_routes_parse_error () =
 (* The two directions of a version mismatch need opposite answers, so they are
    not one classification. An earlier canonical is replaceable: the load already
    refused it and the keeper started fresh. A later one is not: an older binary
-   is reading a newer workspace, and overwriting it would destroy history that
-   binary can still read, so it stays with the corrupt payloads. *)
+   is reading a newer workspace, and overwriting or deleting it would destroy
+   history that binary can still read, so it is its own class, apart from the
+   corrupt payloads. *)
 let test_serialization_version_routes_by_direction () =
   let mismatch ~got =
     Store.classify_core_error
@@ -118,8 +121,14 @@ let test_serialization_version_routes_by_direction () =
    | other ->
      Alcotest.failf "an earlier version did not route to Superseded_version: %s"
        (Store.checkpoint_load_error_to_string other));
-  Alcotest.(check bool) "a later version stays a parse failure" true
-    (is_parse_error (mismatch ~got:3));
+  (match mismatch ~got:3 with
+   | Store.Newer_version { expected; got } ->
+     Alcotest.(check (pair int int))
+       "a later version routes to Newer_version, both numbers carried"
+       (2, 3) (expected, got)
+   | other ->
+     Alcotest.failf "a later version did not route to Newer_version: %s"
+       (Store.checkpoint_load_error_to_string other));
   Alcotest.(check bool) "an equal version cannot reach the classifier as a mismatch"
     true
     (is_parse_error (mismatch ~got:2))

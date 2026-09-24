@@ -498,6 +498,10 @@ let test_checkpoint_write_rejects_orphan_tool_result () =
         Alcotest.failf
           "an invalid checkpoint was read as version %d superseded by %d"
           got expected
+      | Error (Masc.Keeper_checkpoint_store.Newer_version { expected; got }) ->
+        Alcotest.failf
+          "an invalid checkpoint was read as version %d written by a later binary (this one reads %d)"
+          got expected
       | Error
           (Masc.Keeper_checkpoint_store.Store_error detail
           | Parse_error detail

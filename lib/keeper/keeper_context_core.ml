@@ -163,6 +163,15 @@ let load_context_from_checkpoint_classified ~trace_id ~base_dir =
          "keeper:%s AGENT_CORE checkpoint is version %d, superseded by %d; \
           starting fresh and replacing it on the next save"
          trace_id got expected
+   | Error (Newer_version { expected; got }) ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string CheckpointFailures)
+         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_parse))]
+         ();
+       Log.Keeper.error
+         "keeper:%s AGENT_CORE checkpoint is version %d, written by a later binary; \
+          this one reads %d and leaves it in place"
+         trace_id got expected
    | Error (Parse_error detail) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
@@ -195,6 +204,7 @@ let load_context_from_checkpoint_classified ~trace_id ~base_dir =
   | Error Not_found -> session, Checkpoint_absent
   | Error
       ( Superseded_version _
+      | Newer_version _
       | Parse_error _
       | Store_error _
       | Io_error _

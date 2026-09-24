@@ -94,6 +94,7 @@ let load_error_text = function
   | Store.Not_found -> "canonical checkpoint file not found"
   | Store.Superseded_version { expected; got } ->
     Printf.sprintf "checkpoint version %d superseded by %d" got expected
+  | Store.Newer_version _ as newer -> Store.checkpoint_load_error_to_string newer
   | Store.Store_error detail -> "store error: " ^ detail
   | Store.Parse_error detail -> "parse error: " ^ detail
   | Store.Io_error detail -> "io error: " ^ detail

@@ -469,6 +469,20 @@ let move_lane view delta =
            | None -> view
            | Some (row_cursor, _) -> {view with row_cursor;scroll=0;document_key=None})
   | _ -> view
+(* Nothing asked for yet, so the operator's next step is to ask. The status
+   row and the body under it both say this. *)
+let no_reading_yet_text = "No reading yet · r:refresh"
+
+(* What the body says while the view holds no reading. It used to say
+   [no_reading_yet_text] under a status row reading "Reading · nothing held
+   yet", telling the operator to press [r] for a read already on its way; the
+   list screens said "Refreshing…" over a first read that refreshes nothing. *)
+let unread_body_text ~failed_note (view : t) =
+  match view.error, view.loading with
+  | Some _, (true | false) -> failed_note
+  | None, true -> "Reading…"
+  | None, false -> no_reading_yet_text
+
 (* What the status row says about the reading. Kept whole here rather than
    inside the row it draws, so a view can be asked what the row would say.
 
@@ -484,7 +498,7 @@ let status_text (view : t) =
   | true, None, Some error -> "Load failed: " ^ error ^ " · reading again"
   | true, None, None -> "Reading · nothing held yet"
   | false, None, Some error -> "Load failed: " ^ error
-  | false, None, None -> "No reading yet · r:refresh"
+  | false, None, None -> no_reading_yet_text
   | false, Some _, _ -> "Recorded observations · r:refresh"
 
 let visual_lines ?(failed_note = "") ~height ~width view =
@@ -519,9 +533,7 @@ let visual_lines ?(failed_note = "") ~height ~width view =
       let content = match view.snapshot with
       | None ->
           [line ~tone:(if Option.is_some view.error then Attention else Dim)
-             (if Option.is_some view.error then
-                failed_note
-              else "No reading yet · r:refresh")]
+             (unread_body_text ~failed_note view)]
       | Some snapshot ->
         match view.focus with
         | Timeline ->
@@ -718,9 +730,7 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
     (* Nothing has been read yet, which is not the same as nothing installed:
        both of these lines said "No Add-ons installed." while the read was
        still on its way or had never been asked for. *)
-    | None -> [if view.loading then "Refreshing…"
-        else if Option.is_some view.error then failed_note
-        else "No reading yet · r:refresh"]
+    | None -> [unread_body_text ~failed_note view]
     | Some snapshot ->
         let summary = [Printf.sprintf "%d instances · %d lanes · %d observations · %d evidence selected"
           (List.length snapshot.instances)

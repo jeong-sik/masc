@@ -95,9 +95,9 @@ agent_core 에 닫힌 판정 하나를 둔다. 오류가 **누구의 사정**인
 (** 이 후보(provider·모델·자격 증명·계정의 묶음)에만 있는 사정 *)
 type binding_fact =
   | Credential      (** 401, 403 *)
-  | Account         (** 402 *)
+  | Account         (** 402. 계정이 결제하지 못한다. 같은 quota scope 의 후보가 함께 본다 *)
   | Model_absent    (** 404 *)
-  | Quota           (** 429 *)
+  | Rate_limit      (** 429. 이 후보에게 늦추라는 답이다. 무엇이 바닥났는지는 말하지 않는다 *)
   | Capacity        (** 529, provider capacity pool *)
   | Server          (** 5xx *)
   | Window          (** context overflow, 창에서 멈춘 빈 답 *)
@@ -134,6 +134,14 @@ val of_transport_error : Http_client.http_error -> dispatch:dispatch -> t
 - `Unknown_invalid_request` → `Unattributed`
 
 지금 어떤 응답도 "입력 탓"을 증명하지 않는다. 그런 응답이 생기면 그때 판정을 더한다.
+
+판정이 읽는 오류는 두 계열이다. provider 응답(`Retry.api_error`)과 전송 오류(`Http_client.http_error`)다.
+공식 클라이언트가 만드는 provider 오류(`Llm_provider.Error.provider_error`)는 이 판정 밖이다 (#38776).
+
+- `keeper_runtime_attempt.ml` 의 `provider_error_to_http_error` 는 `RateLimit` 과 `HardQuota` 를 같은
+  `Capacity_exhausted` 전송 값으로 접는다. 접힌 값으로는 계정 quota 와 후보 하나의 속도 제한을 가를 수 없다.
+- 그래서 provider 오류는 접기 전의 값으로 읽는다. 걸음 판정은 지금 길 그대로 두고(§4 의 3단계), route 도 지금처럼
+  provider 오류를 직접 읽는다(§4 의 4단계).
 
 ### 2.2 두 걸음이 읽는 법
 
@@ -174,10 +182,17 @@ val of_transport_error : Http_client.http_error -> dispatch:dispatch -> t
    - 표 테스트는 기대 판정을 자기 `match` 로 따로 적는다 (`_` 없음). 그래서 생성자가 늘면 테스트도 컴파일에서 멈추고, 새 생성자의 기대값을 테스트 쪽에서 정하고 리뷰한다.
 2. exact `execution_failure_may_advance` 가 이 판정을 읽는다. 지금 테스트는 그대로 통과해야 한다.
    기대값이 바뀌는 칸: 401·403·404 (§3.3), `Unknown_invalid_request` (§3.4), `Refusal_body_not_received` (§2.1 `Refusal_unread`).
-3. Keeper `lane_should_retry` 의 접근·창·거절 predicate 를 이 판정으로 바꾼다.
-   `Runtime_attempt_fsm.should_try_next` 의 상태 코드 표도 같은 판정에서 나오게 한다.
+3. Keeper `lane_should_retry` 의 접근·창·거절 predicate 를 이 판정으로 바꾼다. `Agent_core.Error.Api` 만 이 판정을 읽는다.
+   provider 오류(`Agent_core.Error.Provider`)는 지금 길 그대로다. `candidate_access_should_try_next` 가 먼저 읽고,
+   나머지는 `keeper_runtime_attempt.ml` 이 접은 값을 `Runtime_attempt_fsm.should_try_next` 가 읽는다 (#38776).
    기대값이 바뀌는 칸: `InputCapacity`·`Json_parse_error` (§3.2).
 4. `Keeper_runtime_failure_route` 의 rotate·retry 분류를 `binding_fact` 에서 만든다.
+   - `Account` 는 `Hard_quota`(scope 전체의 quota 창, `note_quota`), `Rate_limit` 은 `Rate_limited`(그 후보 하나의
+     backpressure, `note_rate_limit`)가 된다.
+   - provider 오류는 route 가 지금처럼 접기 전에 직접 읽는다.
+   - `test/test_keeper_runtime_failure_route.ml` 의 `test_provider_quota_family_threads_hint`(provider `HardQuota` →
+     `Hard_quota`, provider `RateLimit` → `Rate_limited`)와 `test_api_quota_message_does_not_override_rate_limit`
+     (429 → `Rate_limited`, 402 → `Hard_quota`)가 바뀌지 않고 통과해야 한다.
 
 관련 PR·이슈:
 
@@ -189,3 +204,5 @@ val of_transport_error : Http_client.http_error -> dispatch:dispatch -> t
 - 재시도 지연, 쿼터 창, 후보 순서 선호는 다루지 않는다 (RFC-0440, RFC-0458).
 - 새 Gate 를 만들지 않는다. 판정은 관찰이고, 넘길지는 지금처럼 각 걸음이 정한다.
 - 응답 문장에서 이유를 읽지 않는다. 이유는 응답의 상태 코드와 문서화된 코드 칸에서만 읽는다.
+- 공식 클라이언트의 provider 오류를 이 판정에 넣지 않는다. 그 계열에도 어긋난 칸이 있다
+  (`MissingApiKey` 는 멈추고 `AuthError` 는 넘긴다). #38776 에서 다룬다.

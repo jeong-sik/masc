@@ -185,6 +185,11 @@ val capture : unit -> (observation * frame, error) result
 type identified_capture = {
   incarnation : string;
       (** Fresh on every load. Reads and time leave it alone. *)
+  changes : int;
+      (** Runs of the guest in this process: every load and every call that
+          ran, including one that ended in a fault. One counter per process,
+          never reset, so an equal count is the same picture. Reads and
+          refused calls leave it alone. *)
   observation : observation;
   frame : frame;
   input_count : int;
@@ -196,6 +201,10 @@ type identified_capture = {
 val capture_with_identity : unit -> (identified_capture, error) result
 (** {!capture} with the machine's identity and input history, for a Lane
     Add-on source ([dos_capture]). Never advances the machine. *)
+
+val loaded_changes : unit -> int option
+(** {!identified_capture.changes} alone, without copying the frame; [None]
+    when no machine is loaded. Never advances the machine. *)
 
 val entry_json : entry -> Yojson.Safe.t
 (** One ledger line: [{"step", "who", "key"}], the shape written to

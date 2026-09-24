@@ -118,6 +118,17 @@ type machine = {
 let state : machine option ref = ref None
 let lock = Mutex.create ()
 let locked f = Mutex.protect lock f
+
+(* Every change to the machine in this process, under [lock]: each run of
+   frames ([advance]) and each machine put in place ([install]). One counter
+   for the process, never reset, so equal counts always name the same machine
+   at the same moment. *)
+let changes = ref 0
+
+(* Load, restore and a disk change each put a new machine in place. *)
+let install st =
+  incr changes;
+  state := Some st
 (* Used only while holding [lock]. An incarnation names a newly installed
    history, including a restore of the exact same checkpoint. *)
 let fresh_incarnation () = Random_id.uuid_v7 ()
@@ -400,7 +411,7 @@ let load ~ledger_dir ~(roms_dir : string option) ~cart_path ~disk_path =
           ; input_count = 0
           }
         in
-        state := Some st;
+        install st;
         Ok { observation = observe st
            ; transition = { before; after = medium_of (Some st) } })
 ;;
@@ -425,8 +436,10 @@ let check_frames ~what n =
 ;;
 
 let advance st n =
-  (* Invalidate before mutating even if stepping raises after partial progress. *)
+  (* Invalidate and count before mutating even if stepping raises after
+     partial progress. *)
   st.pixels <- None;
+  incr changes;
   Msx.step st.m ~frames:n;
   st.frame <- st.frame + n
 ;;
@@ -615,15 +628,18 @@ let capture () = with_machine (fun st -> Ok (observe st, frame_of st))
 
 type identified_capture = {
   incarnation : string;
+  changes : int;
   observation : observation;
   frame : frame;
   input_count : int;
   input_ledger : entry list;
 }
 
+let loaded_changes () = locked (fun () -> Option.map (fun _ -> !changes) !state)
+
 let capture_with_identity () =
   with_machine (fun st ->
-    Ok { incarnation = st.incarnation; observation = observe st;
+    Ok { incarnation = st.incarnation; changes = !changes; observation = observe st;
          frame = frame_of st; input_count = st.input_count;
          input_ledger = st.entries })
 ;;
@@ -812,7 +828,7 @@ let restore ~path ~ledger_dir =
         let st = {m; incarnation = fresh_incarnation (); pixels = None; frame;
                   cart; disk; disk_id; media; ledger_path; entries = List.rev entries;
                   input_count = List.length entries} in
-        state := Some st;
+        install st;
         Ok (observe st)
       with Sys_error message -> Error (Unreadable message))
 ;;
@@ -835,7 +851,7 @@ let change_disk ~path ~backup_path =
           | Ok () ->
             atomic_write backup_path (Yojson.Safe.to_string (checkpoint_json st));
             let next = {st with m; pixels = None; disk = Some (Filename.basename path); disk_id = Some target_id; media = List.remove_assoc target_id media} in
-            state := Some next;
+            install next;
             Ok (observe next)))
       | _ -> Error (Invalid_request "load a disk game before changing disks"))
   with Sys_error message -> Error (Unreadable message)

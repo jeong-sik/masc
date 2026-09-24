@@ -99,6 +99,11 @@ let state : machine option ref = ref None
 let lock = Mutex.create ()
 let locked f = Mutex.protect lock f
 
+(* Every run of the guest in this process, under [lock]. One counter for the
+   process, never reset: a new load runs the guest, so it moves the counter
+   too, and equal counts always name the same machine at the same moment. *)
+let changes = ref 0
+
 let with_machine f =
   locked (fun () ->
     match !state with
@@ -119,11 +124,24 @@ let with_machine f =
    arguments: the core meets an instruction it does not implement (ocaml-dos
    raises rather than misbehave quietly), or the ledger file will not take a
    line. Both come back as errors, not exceptions out of the tool. *)
+(* Every call that runs the guest (load and every controlled call) passes
+   here, so this is where [changes] rises. A refusal ran nothing and leaves
+   it; a fault, a ledger failure or any other exception ran something. *)
 let running f =
-  match f () with
-  | result -> result
-  | exception Cpu86.Unsupported message -> Error (Guest_fault message)
-  | exception Sys_error message -> Error (Unreadable message)
+  let result =
+    match f () with
+    | result -> result
+    | exception Cpu86.Unsupported message -> Error (Guest_fault message)
+    | exception Sys_error message -> Error (Unreadable message)
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      incr changes;
+      Printexc.raise_with_backtrace exn backtrace
+  in
+  (match result with
+   | Ok _ | Error (Unreadable _ | Guest_fault _) -> incr changes
+   | Error (No_machine | Invalid_request _ | Held_by _) -> ());
+  result
 ;;
 
 let refuse_other st ~who =
@@ -522,17 +540,21 @@ let capture () =
 
 type identified_capture = {
   incarnation : string;
+  changes : int;
   observation : observation;
   frame : frame;
   input_count : int;
   input_ledger : entry list;
 }
 
+let loaded_changes () = locked (fun () -> Option.map (fun _ -> !changes) !state)
+
 let capture_with_identity () =
   with_machine (fun st ->
     let width, height = Dos_machine.frame_dims st.m in
     Ok
       { incarnation = st.incarnation
+      ; changes = !changes
       ; observation = observe st
       ; frame = { width; height; rgb = Dos_machine.frame_rgb st.m }
       ; input_count = List.length st.entries

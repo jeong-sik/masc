@@ -222,6 +222,11 @@ type identified_capture = {
   incarnation : string;
       (** Fresh identity on successful load/restore. Reads and time progression
           preserve it, including frame counters restored to an earlier value. *)
+  changes : int;
+      (** Changes to the machine in this process: every run of frames (tool,
+          HTTP press or tick) and every load, restore or disk change. One
+          counter per process, never reset, so an equal count is the same
+          picture. Reads leave it alone. *)
   observation : observation;
   frame : frame;
   input_count : int;
@@ -235,6 +240,10 @@ val capture_with_identity : unit -> (identified_capture, error) result
 (** Atomically reads the same machine as {!capture}, with its explicit history
     identity, input cursor and ledger. Never steps, peeks, or changes a RAM
     baseline. The immutable list is shared without traversal or copying. *)
+
+val loaded_changes : unit -> int option
+(** {!identified_capture.changes} alone, without rendering or copying the
+    frame; [None] when no machine is loaded. Never advances the machine. *)
 
 (** {b RAM introspection} — the state sensor. The screen is the expensive
     detour a human eye needs; the game's truth is in memory, and the core

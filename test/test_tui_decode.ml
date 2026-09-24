@@ -546,9 +546,9 @@ let test_terminal_text_keeps_the_tags_that_spell_a_flag () =
 
 (* The hand-kept list stopped at the tag block. Default_Ignorable_Code_Point
    also holds the word joiner family, the Hangul fillers and the variation
-   selectors, and a run of variation selectors behind one letter carries any
-   bytes at all under a single glyph. One selector after a base is how an
-   emoji or a CJK variant is spelled, and stays. *)
+   selectors. A selector is kept only where it picks a visible form: VS16
+   after an emoji, an ideographic selector after an ideograph. After a plain
+   letter, or behind another selector, it hides bytes under one glyph. *)
 let test_terminal_text_escapes_every_default_ignorable () =
   let word_joiner = "\xe2\x81\xa0" (* U+2060 *) in
   let invisible_plus = "\xe2\x81\xa4" (* U+2064 *) in
@@ -572,9 +572,21 @@ let test_terminal_text_escapes_every_default_ignorable () =
   Alcotest.(check string) "one selector keeps an ideographic variant"
     (ideograph ^ vs17)
     (Tui_decode.escape_invisible (ideograph ^ vs17));
+  Alcotest.(check string) "one ideographic selector after a letter is drawn"
+    "a\\U000E0100"
+    (Tui_decode.escape_invisible ("a" ^ vs17));
+  Alcotest.(check string) "an emoji selector after a letter is drawn"
+    "a\\uFE0F"
+    (Tui_decode.escape_invisible ("a" ^ vs16));
+  Alcotest.(check string) "a keycap keeps its emoji selector"
+    ("1" ^ vs16)
+    (Tui_decode.escape_invisible ("1" ^ vs16));
   Alcotest.(check string) "a run of selectors behind one letter is drawn"
-    ("a" ^ vs17 ^ "\\U000E0101\\U000E0100")
+    "a\\U000E0100\\U000E0101\\U000E0100"
     (Tui_decode.escape_invisible ("a" ^ vs17 ^ vs18 ^ vs17));
+  Alcotest.(check string) "a second selector behind an ideograph is drawn"
+    (ideograph ^ vs17 ^ "\\U000E0101")
+    (Tui_decode.escape_invisible (ideograph ^ vs17 ^ vs18));
   Alcotest.(check string) "a selector with no base is drawn" "\\U000E0100"
     (Tui_decode.escape_invisible vs17)
 

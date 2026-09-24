@@ -1017,12 +1017,21 @@ let escape_text code =
 let escape_invisible text =
   let output = Buffer.create (String.length text) in
   let length = String.length text in
-  (* [after_base]: the scalar before this one was drawn and is not itself
-     ignorable. A variation selector picks the form of that one base (the
-     emoji form of U+2764, a CJK ideograph's variant), so exactly one is kept
-     after a base. A second one in a row selects nothing a reader can see: it
-     is how bytes are hidden behind a single glyph, so it is drawn. *)
-  let rec walk index ~after_pictograph ~after_base =
+  (* [base]: the scalar before this one, when it was drawn and is not itself
+     ignorable. A variation selector is kept only where it picks a form a
+     reader can see: VS15/VS16 right after an emoji (the emoji form of
+     U+2764, a keycap), or an ideographic variation selector (UTS #37) right
+     after an ideograph. Any other pairing -- a selector after [a], a second
+     selector in a row, a selector with no base -- displays as the plain
+     base with nothing to show for the selector (Unicode FAQ, unsupported
+     characters), so it is drawn as its escape. *)
+  let keeps_selector ~base scalar =
+    match Uchar.to_int scalar with
+    | code when code = variation_selector_15 || code = variation_selector_16 ->
+      Uucp.Emoji.is_emoji base
+    | _ -> Uucp.Id.is_ideographic base
+  in
+  let rec walk index ~after_pictograph ~base =
     if index < length
     then (
       let decoded = String.get_utf_8_uchar text index in
@@ -1038,7 +1047,7 @@ let escape_invisible text =
       match flag_tags with
       | Some tail ->
         Buffer.add_substring output text index (step + tail);
-        walk (index + step + tail) ~after_pictograph:true ~after_base:false
+        walk (index + step + tail) ~after_pictograph:true ~base:None
       | None ->
         let joins_two_pictographs =
           valid
@@ -1047,7 +1056,11 @@ let escape_invisible text =
           && opens_pictograph text (index + step)
         in
         let selects_its_base =
-          valid && after_base && Uucp.Gen.is_variation_selector scalar
+          valid
+          && Uucp.Gen.is_variation_selector scalar
+          && (match base with
+              | Some base -> keeps_selector ~base scalar
+              | None -> false)
         in
         let escaped =
           valid
@@ -1057,8 +1070,10 @@ let escape_invisible text =
         if escaped
         then Buffer.add_string output (escape_text code)
         else Buffer.add_substring output text index step;
-        let after_base =
-          valid && (not escaped) && not (is_invisible_codepoint code)
+        let base =
+          if valid && (not escaped) && not (is_invisible_codepoint code)
+          then Some scalar
+          else None
         in
         let after_pictograph =
           if not valid
@@ -1073,9 +1088,9 @@ let escape_invisible text =
           then after_pictograph
           else false
         in
-        walk (index + step) ~after_pictograph ~after_base)
+        walk (index + step) ~after_pictograph ~base)
   in
-  walk 0 ~after_pictograph:false ~after_base:false;
+  walk 0 ~after_pictograph:false ~base:None;
   Buffer.contents output
 ;;
 

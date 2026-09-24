@@ -1349,6 +1349,32 @@ status: reference
   Keeper를 등록한다. 배제된 Keeper는 이 이유와 함께 excluded list에 찍는다.
   → [keeper_runtime.mli](../../lib/keeper/keeper_runtime.mli)
 
+**Shutdown Admission Fence (종료 진입 차단막)**
+: 종료 작업 진행 중인 Keeper의 재부팅을 막아 원장 정합성을 지키는 진입 차단 술어(`Keeper_shutdown_types.requires_admission_fence`).
+  - **단계별 차단막 해제 규칙 (#31738·#38569)**: 과거에는 `Blocked` 상태의 종료 작업에 대해 실패 단계와
+    무관하게 차단막을 영구 유지하여, 영속 상태가 전혀 파괴되지 않은 Keeper도 수동 교체(`Superseded`) 없이는
+    영구히 재부팅할 수 없는 결함이 있었다. 현재는 실패 단계(`failure_stage`)를 검사하여 영속 상태 변경 전에
+    실패한 단계는 차단막을 해제하고 즉시 재시도(`retryable`)를 허용한다:
+    1. **해제 대상 (`retryable`, 차단막 없음)**: 영속 상태를 변경하기 전의 읽기·초기화·멱등 정리 단계
+       (`Task_discovery`·`Record_persist`·`Meta_update`·`Pending_confirm_cleanup`).
+    2. **유지 대상 (`fenced`, 차단막 유지)**: 키퍼의 영속 상태(태스크 소유권, 레인, 메타데이터, 세션, 레지스트리)가
+       반쯤 철거된 단계(`Turn_cancel`·`Lane_cancel`·`Turn_join`·`Lane_join`·`Record_update`·`Unhandled_worker`·
+       `Task_settlement`·`Approval_summary_retirement`·`Meta_remove`·`Session_remove`·`Registry_unregister`).
+  - **영속 복구**: 재시작 시 디스크에 이미 기록된 `Blocked` 레코드라도 해제 대상 단계에 머물러 있다면 차단막을
+    세우지 않고 다음 부팅에서 종료 작업을 안전하게 재실행한다.
+  → [Keeper_shutdown_types](../../lib/keeper/keeper_shutdown_types.mli)
+
+**Boot Meta Failure Cause (부팅 메타 실패 사유)**
+: Keeper 기동 및 구체화(materialization) 시점에 메타데이터 검증 실패를 표현하는 닫힌 구조화 사유(`Keeper_runtime.boot_meta_failure_cause`).
+  - 닫힌 다섯 가지 variant:
+    1. `Meta_read_error`: 메타데이터 파일 읽기 또는 디코딩 실패.
+    2. `Config_invalid`: TOML 파싱 또는 유효성 검사 실패.
+    3. `Sandbox_profile_required`: 선언형 키퍼 프로필에 필수 `sandbox_profile` 누락.
+    4. `Sandbox_image_required`: 컨테이너 실행 프로필(`docker`·`microvm`)에 `sandbox_image` 누락 또는 공백(#37523·#38572). `remote_ssh`는 이미지를 쓰지 않으므로 요구되지 않음. 부팅 조정(`reconcile`)과 `keeper_up` 생성 파싱 양쪽에서 `Keeper_meta_contract.missing_required_sandbox_image_error` 공통 규칙으로 즉시 거절.
+    5. `Materialization_failed`: 파일시스템 또는 디렉터리 구조 구체화 실패.
+  → [keeper_runtime](../../lib/keeper/keeper_runtime.mli),
+  [Keeper_meta_contract](../../lib/keeper/keeper_meta_contract.mli)
+
 **Checkpoint**
 : History와 설정을 담은 Agent Core의 durable 저장점. trace당 파일 하나
   (`<trace 디렉터리>/<trace id>.json`)다. 실행 중에는

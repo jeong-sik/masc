@@ -244,7 +244,7 @@ let dos_mark () =
 let dos_count () =
   let m = dos_mark () in
   check bool "the published DOS mark is the locked one" true
-    (Dos_lane.current_mark () = Some m);
+    (Dos_lane.current_publication () = Dos_lane.Stable m);
   m.Dos_lane.count
 
 let dos_steps () =
@@ -265,7 +265,8 @@ let dos_stays what before =
    shape. [click] marks through the same call as [step]. *)
 let test_dos_counter_moves_on_every_run () =
   dos_eject_if_loaded ();
-  check bool "no DOS machine publishes no mark" true (Dos_lane.current_mark () = None);
+  check bool "no DOS machine publishes no mark" true
+    (Dos_lane.current_publication () = Dos_lane.No_screen);
   check bool "no DOS machine reads as nothing loaded" true
     (match Dos_lane.live ~since:None with
      | Dos_lane.Nothing_loaded -> true
@@ -295,7 +296,7 @@ let test_dos_counter_moves_on_every_run () =
     let c = dos_rises "type_text" c in
     dos_ok "eject" (Dos_lane.eject ~who ~announce:ignore ());
     check bool "an ejected DOS machine publishes no mark" true
-      (Dos_lane.current_mark () = None);
+      (Dos_lane.current_publication () = Dos_lane.No_screen);
     (* A program that faults at its first instruction: the boot and every
        step after it run zero instructions, so [steps] stays at 0, and the
        count still rises on each attempt. *)
@@ -349,8 +350,10 @@ let test_dos_mark_reads_while_the_lock_is_held () =
     let before = dos_mark () in
     let seen = ref None in
     dos_ok "pass"
-      (Dos_lane.pass ~who ~to_:(Some who) ~announce:(fun () -> seen := Dos_lane.current_mark ()));
-    check bool "the mark read under a held lock is the current one" true (!seen = Some before))
+      (Dos_lane.pass ~who ~to_:(Some who)
+         ~announce:(fun () -> seen := Some (Dos_lane.current_publication ())));
+    check bool "the stable mark is readable under a held lock" true
+      (!seen = Some (Dos_lane.Stable before)))
 
 (* ---- the route, through the real router and auth -------------------------- *)
 
@@ -522,6 +525,14 @@ let test_live_route () =
             Some
               { Routes.count = int_member "change_count" json
               ; incarnation = string_member "incarnation" json } in
+          let running_mark : Dos_lane.change_mark =
+            { count = int_member "change_count" json
+            ; incarnation = string_member "incarnation" json } in
+          check bool "a running machine never answers unchanged from its old mark" true
+            (match Routes.dos_answer_from_publication ~since:dos_since
+                     (Dos_lane.Running running_mark) with
+             | Routes.Needs_locked_read -> true
+             | Routes.Answered _ -> false);
           (* Decided while [pass] holds the machine lock: an unchanged answer
              must come from the published mark. Taking the lock on this
              thread raises (the stdlib mutex checks its owner). The request

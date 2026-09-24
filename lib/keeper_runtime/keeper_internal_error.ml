@@ -408,24 +408,12 @@ let string_list_of_assoc key json =
          | _ -> None)
 ;;
 
-let network_error_kind_to_string = Llm_provider.Http_client.network_error_kind_to_string
-
-let network_error_kind_of_string = function
-  | "connection_refused" -> Some Llm_provider.Http_client.Connection_refused
-  | "dns_failure" -> Some Llm_provider.Http_client.Dns_failure
-  | "tls_error" -> Some Llm_provider.Http_client.Tls_error
-  | "timeout" -> Some Llm_provider.Http_client.Timeout
-  | "local_resource_exhaustion" ->
-    Some Llm_provider.Http_client.Local_resource_exhaustion
-  | "connection_reset" -> Some Llm_provider.Http_client.Connection_reset
-  | "end_of_file" -> Some Llm_provider.Http_client.End_of_file
-  | "unknown" -> Some Llm_provider.Http_client.Unknown
-  | _ -> None
-;;
-
 let transport_error_kind_json_fields = function
   | None -> []
-  | Some kind -> [ "transport_error_kind", `String (network_error_kind_to_string kind) ]
+  | Some kind ->
+    [ ( "transport_error_kind"
+      , `String (Llm_provider.Http_client.network_error_kind_to_string kind) )
+    ]
 ;;
 
 let rec fenced_cause_to_json = function
@@ -1019,7 +1007,7 @@ and parse_masc_internal_error_json (json : Yojson.Safe.t) :
                  (Internal_unhandled_exception
                     { site; exn_repr; transport_error_kind = None })
              | Some raw_kind ->
-               (match network_error_kind_of_string raw_kind with
+               (match Llm_provider.Http_client.network_error_kind_of_string raw_kind with
                 | Some transport_error_kind ->
                   Some
                     (Internal_unhandled_exception

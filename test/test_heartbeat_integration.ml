@@ -1315,6 +1315,190 @@ let test_direct_stop_ignores_a_dead_librarian_executor () =
       | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
         fail ("a dead Librarian executor changed explicit stop into crash: " ^ reason))
 
+(* A schedule wake to a Keeper whose fiber is not running is accepted into its
+   durable queue and nothing on the schedule side wakes the fiber (#38523).
+   Property: a launched lane serves an already-queued Schedule_due in its
+   first cycle after warmup, without any wakeup. While warmup has not elapsed
+   a cycle reads nothing ([run_keepalive_unified_turn] returns before intake),
+   and the lane sleeps until the initial cadence boundary, which is the
+   warmup itself ([Initial_due warmup]).
+
+   The launch clears the wakeup flag ([Keeper_registry.prepare_fiber_launch])
+   and this test never sets it. The lane runs with a nonzero warmup, and the
+   test requires that no turn has started at [fresh_lane_warmup_check_sec]
+   (a third of the warmup) and that one has started before
+   [first_cycle_deadline_sec]. That fails for:
+   - a lane that ignores warmup and dispatches at once;
+   - a lane that serves the queue only after a wakeup;
+   - a lane that waits a full keepalive interval before the first cycle that
+     reads the queue (for example one that consumes the initial cadence
+     boundary during a warmup cycle).
+   It does not tell "cycle, then sleep" from "sleep [periodic_remaining], then
+   cycle": with [Initial_due warmup] both serve the wake at the warmup
+   boundary, so the two orders are the same at this boundary.
+
+   The warmup check compares the wall clock ([Time_compat.now]) with the
+   monotonic cadence clock; a wall clock step backwards during the test could
+   defer the first reading cycle by an interval. *)
+let fresh_lane_warmup_sec = 6
+(* A third of the warmup: the early check fails as too late only after a
+   scheduler stall of the remaining two thirds (4 s). *)
+let fresh_lane_warmup_check_sec = 2.0
+(* Must stay below one keepalive interval (checked) so a lane that sleeps a
+   full cadence fails, and far above the warmup so a cycle's own work on a
+   slow runner does not fail the test. *)
+let first_cycle_deadline_sec = 30.0
+let first_cycle_poll_interval_sec = 0.05
+
+let test_fresh_lane_serves_queued_schedule_wake_after_warmup () =
+  Eio_main.run @@ fun env ->
+  install_test_env env;
+  R.For_testing.clear ();
+  let base_dir = temp_dir "fresh-lane-schedule-wake" in
+  let keeper_name = "fresh-lane-schedule-wake" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      check bool "the deadline is shorter than one keepalive interval" true
+        (first_cycle_deadline_sec
+         < Float.of_int (Masc.Keeper_heartbeat_snapshot.keepalive_interval_sec ()));
+      ensure_default_runtime ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      Eio.Switch.run @@ fun keeper_sw ->
+      Masc_test_deps.with_server_root_switch ~sw:keeper_sw @@ fun () ->
+      Masc.Keeper_process_switch.set keeper_sw;
+      install_owner_inventory_exn ~sw:keeper_sw config;
+      ensure_owner_meta_exn config meta;
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "tester"
+        ; sw = keeper_sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env keeper_sw config)
+        }
+      in
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
+      let stimulus : Keeper_event_queue.stimulus =
+        { post_id = "schedule-due:fresh-lane-occurrence"
+        ; urgency = Keeper_event_queue.Normal
+        ; arrived_at = 1234.5
+        ; payload =
+            Keeper_event_queue.Schedule_due
+              { occurrence_id = "schedule-due:fresh-lane-occurrence"
+              ; schedule_instance_id = "fresh-lane-instance"
+              ; schedule_id = "fresh-lane-schedule"
+              ; due_at = 1200.0
+              ; payload_digest = "fresh-lane-digest"
+              ; title = None
+              ; message = "wake queued while the fiber was not running"
+              ; result_delivery = None
+              }
+        }
+      in
+      (* The same two writes [accept_keeper_wake_occurrence] makes for an
+         owner whose fiber is not running: the durable queue entry and its
+         reaction-ledger stimulus row. No wakeup is signaled. *)
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
+           ~base_path:config.base_path
+           keeper_name
+           stimulus
+       with
+       | Masc.Keeper_registry_event_queue.Stimulus_enqueued -> ()
+       | Masc.Keeper_registry_event_queue.Stimulus_already_present ->
+         fail "the schedule wake was already queued in a fresh workspace"
+       | Masc.Keeper_registry_event_queue.Stimulus_storage_error detail ->
+         fail ("the schedule wake could not be queued: " ^ detail));
+      Masc.Keeper_reaction_ledger.record_event_queue_stimulus
+        ~base_path:config.base_path
+        ~keeper_name
+        stimulus;
+      let stimulus_id =
+        Masc.Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus
+      in
+      let turn_started () =
+        match
+          Masc.Keeper_reaction_ledger.event_queue_reaction_evidence_result
+            ~base_path:config.base_path
+            ~keeper_name
+            ~stimulus_id
+        with
+        | Ok (Masc.Keeper_reaction_ledger.Evidence_complete evidence) ->
+          evidence.Masc.Keeper_reaction_ledger.turn_started_seen
+        | Ok (Masc.Keeper_reaction_ledger.Evidence_quarantined _) ->
+          fail "the schedule wake's reaction evidence was quarantined"
+        | Error error ->
+          fail
+            (Masc.Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+               error)
+      in
+      check bool "no turn has started before the lane launches" false
+        (turn_started ());
+      let warmup = Float.of_int fresh_lane_warmup_sec in
+      (* Taken before the launch: the lane's own warmup starts no earlier, so
+         its warmup ends no earlier than [launched_at +. warmup]. *)
+      let launched_at = Eio.Time.now ctx.clock in
+      (match
+         Masc.Keeper_keepalive.start_keepalive
+           ~proactive_warmup_sec:fresh_lane_warmup_sec
+           ctx
+           meta
+       with
+       | Masc.Keeper_keepalive.Keepalive_started _ -> ()
+       | outcome ->
+         failf
+           "fresh lane failed to start: %s"
+           (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
+      let mid_warmup = launched_at +. fresh_lane_warmup_check_sec in
+      Eio.Time.sleep ctx.clock
+        (Float.max 0.0 (mid_warmup -. Eio.Time.now ctx.clock));
+      let observed_at = Eio.Time.now ctx.clock in
+      let started_mid_warmup = turn_started () in
+      if observed_at -. launched_at >= warmup
+      then
+        failf
+          "the mid-warmup observation came %.2fs after launch, past the %ds \
+           warmup; it cannot show the warmup was respected"
+          (observed_at -. launched_at)
+          fresh_lane_warmup_sec;
+      check bool "no turn starts while the warmup has not elapsed" false
+        started_mid_warmup;
+      let rec await_first_turn () =
+        if turn_started ()
+        then ()
+        else if Eio.Time.now ctx.clock -. launched_at >= first_cycle_deadline_sec
+        then
+          failf
+            "the queued schedule wake started no turn within %.0fs of launch \
+             (warmup %ds, no wakeup); the lane did not read its queue in its \
+             first cycle after warmup"
+            first_cycle_deadline_sec
+            fresh_lane_warmup_sec
+        else (
+          Eio.Time.sleep ctx.clock first_cycle_poll_interval_sec;
+          await_first_turn ())
+      in
+      await_first_turn ();
+      match
+        Masc.Keeper_keepalive.stop_keepalive_and_await
+          ~base_path:config.base_path
+          keeper_name
+      with
+      | Masc.Keeper_keepalive.Keeper_not_registered ->
+        fail "fresh lane disappeared before joined stop"
+      | Masc.Keeper_keepalive.Keeper_joined { terminal = `Stopped; _ } -> ()
+      | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
+        fail ("fresh lane crashed instead of stopping: " ^ reason))
+
 let test_keeper_lane_join_waits_for_children_and_cleanup () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun parent_sw ->
@@ -5591,6 +5775,8 @@ let () =
         test_direct_start_rolls_back_when_the_launch_owner_is_already_cancelled;
       test_case "stop ignores a dead Librarian executor" `Quick
         test_direct_stop_ignores_a_dead_librarian_executor;
+      test_case "fresh lane serves a queued schedule wake right after warmup" `Quick
+        test_fresh_lane_serves_queued_schedule_wake_after_warmup;
       test_case "lane join waits for children and cleanup" `Quick
         test_keeper_lane_join_waits_for_children_and_cleanup;
       test_case "lane join surfaces cleanup failure" `Quick

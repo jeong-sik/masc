@@ -22,8 +22,10 @@ let border_bytes = String.length Masc_tui_theme.Box.v + 1
 
 let content_rows ~cols ~focused ~labels ~selected =
   let buf = Buffer.create 1024 in
+  (* This fold is about the label column, not the count in the title, so the
+     index holds exactly what it was given. *)
   Masc_tui_render_prim.write_list_sidebar buf ~rows:12 ~cols ~title:"Board"
-    ~focused ~labels ~selected;
+    ~focused ~holding:None ~labels ~selected;
   match String.split_on_char '\n' (strip_sgr (Buffer.contents buf)) with
   | _top :: _title :: _divider :: rest ->
     List.filter_map
